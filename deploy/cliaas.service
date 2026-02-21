@@ -1,0 +1,21 @@
+[Unit]
+Description=CLIaaS Next.js Application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP_USER__
+Group=__APP_GROUP__
+WorkingDirectory=__APP_DIR__
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=__APP_PORT__
+EnvironmentFile=__ENV_FILE__
+ExecStart=__APP_DIR__/scripts/run_production.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

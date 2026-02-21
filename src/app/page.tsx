@@ -1,65 +1,98 @@
-import Image from "next/image";
+import Link from "next/link";
+
+const coreFeatures = [
+  {
+    title: "Command-Line First",
+    text: "Everything in the product is exposed by a CLI before UI polish. No hidden-only workflows.",
+  },
+  {
+    title: "Interoperable Data",
+    text: "Import from existing SaaS, normalize to a schema, and export back to compatible formats.",
+  },
+  {
+    title: "Migration Ready",
+    text: "Use repeatable commands so users can script moves between vendors without manual copy/paste.",
+  },
+];
+
+const launchRoutes = [
+  { path: "/sign-up", note: "onboarding" },
+  { path: "/dashboard", note: "workspace overview" },
+  { path: "/settings", note: "connector + profile config" },
+  { path: "/api/health", note: "deploy healthcheck" },
+  { path: "/api/connectors", note: "available import/export providers" },
+];
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-10 text-slate-900 sm:px-10">
+      <header className="rounded-3xl border border-slate-200/80 bg-panel/90 p-8 shadow-sm">
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">
+          CLIAAS.COM
+        </p>
+        <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight sm:text-6xl">
+          CLIaaS builds SaaS products that work natively from the command line.
+        </h1>
+        <p className="mt-5 max-w-2xl text-lg text-muted">
+          Hackathon skeleton ready: landing, auth, dashboard, settings, health API,
+          and interoperability API stubs for import/export flows.
+        </p>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            href="/sign-up"
+            className="rounded-full bg-accent px-6 py-3 font-semibold text-white transition hover:brightness-95"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            Get Started
+          </Link>
+          <Link
+            href="/dashboard"
+            className="rounded-full border border-slate-300 bg-white px-6 py-3 font-semibold transition hover:bg-slate-50"
           >
-            Documentation
-          </a>
+            Open Dashboard
+          </Link>
         </div>
-      </main>
-    </div>
+      </header>
+
+      <section className="mt-8 grid gap-4 sm:grid-cols-3">
+        {coreFeatures.map((feature) => (
+          <article
+            key={feature.title}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <h2 className="text-xl font-semibold">{feature.title}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted">{feature.text}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="mt-8 rounded-2xl border border-slate-200 bg-slate-950 p-6 text-slate-100 shadow-sm">
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-cyan-300">
+          Example CLI Flow
+        </p>
+        <pre className="mt-3 overflow-x-auto font-mono text-sm leading-7 text-cyan-100">
+{`$ cliaas auth login
+$ cliaas import --from notion --workspace acme --out ./exports/notion.json
+$ cliaas sync --target cliaas --input ./exports/notion.json
+$ cliaas export --to csv --workspace acme --out ./exports/acme.csv`}
+        </pre>
+      </section>
+
+      <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-2xl font-semibold">Launch Route Map</h2>
+        <div className="mt-4 grid gap-2 font-mono text-sm">
+          {launchRoutes.map((route) => (
+            <div
+              key={route.path}
+              className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3"
+            >
+              <Link href={route.path} className="text-accent underline-offset-2 hover:underline">
+                {route.path}
+              </Link>
+              <span className="text-muted">{route.note}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </main>
   );
 }
