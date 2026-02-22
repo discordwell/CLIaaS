@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-02-22T20:00Z — Session 9: Bug Fixes & Visual Fidelity
+- Fixed 3 critical bugs found during browser testing:
+  1. RAF throttling: switched game loop to setTimeout (immune to Chrome background tab throttling)
+  2. Edge scroll drift: added mouseActive guard (camera no longer scrolls when mouse at 0,0)
+  3. Input event ordering: moved clearEvents() AFTER processInput() (selection/commands now work)
+- Added full visual fidelity to renderer:
+  - Fog of war system (shroud=black, fog=semi-transparent, visible=clear)
+  - Procedural terrain variation via cellHash
+  - Explosion, muzzle flash, blood splatter, tesla arc particle effects
+  - Death fade animation, damage flash overlay
+  - Selection circles (green ellipses under selected units)
+  - Improved health bars with pip segments, color coding (green/yellow/red)
+  - Unit info panel for selected units
+  - Fog-aware minimap with camera viewport indicator
+- Entity system: added deathTick, damageFlash, lastGuardScan, lastAIScan fields
+- Rate-limited AI scanning (guard every 15 ticks, ant AI every 8 ticks)
+- Pathfinding: swap-and-pop optimization for O(1) open list removal
+- Committed 88b515a, pushed to main
+- Note: Chrome extension clicks don't reach canvas mousedown/mouseup handlers (testing artifact only)
+
 ## 2026-02-22T18:30Z — Session 8: Native TS Ant Mission Engine
 - Replaced WASM/Emscripten Easter egg with pure TypeScript/Canvas 2D game engine
 - Built 10 engine modules: types, assets, camera, input, entity, map, pathfinding, renderer, scenario, index

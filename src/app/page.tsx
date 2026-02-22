@@ -4,6 +4,9 @@ const connectors = [
   { name: "Zendesk", status: "Live", desc: "Cursor-based incremental sync via REST API" },
   { name: "Kayako Cloud", status: "Live", desc: "Full export via HTTP client + offset pagination" },
   { name: "Kayako Classic", status: "Live", desc: "HMAC-SHA256 authenticated REST connector" },
+  { name: "HelpCrunch", status: "Live", desc: "Bearer token auth, offset-paginated chat export" },
+  { name: "Freshdesk", status: "Live", desc: "Basic auth, page-based pagination, KB hierarchy" },
+  { name: "Groove", status: "Live", desc: "Bearer token, hypermedia-linked REST v1 API" },
 ];
 
 const workflows = [
@@ -141,10 +144,10 @@ export default function Home() {
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Connectors</h2>
           <p className="font-mono text-xs font-bold uppercase tracking-widest text-zinc-400">
-            3 live integrations
+            6 live integrations
           </p>
         </div>
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {connectors.map((c) => (
             <div
               key={c.name}

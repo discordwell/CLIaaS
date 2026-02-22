@@ -17,11 +17,17 @@ import { registerDuplicatesCommand } from './duplicates.js';
 import { registerSLACommand } from './sla.js';
 import { registerSentimentCommand } from './sentiment.js';
 import { registerKayakoClassicCommands } from './kayako-classic.js';
+import { registerHelpcrunchCommands } from './helpcrunch.js';
+import { registerFreshdeskCommands } from './freshdesk.js';
+import { registerGrooveCommands } from './groove.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
   registerKayakoCommands(program);
   registerKayakoClassicCommands(program);
+  registerHelpcrunchCommands(program);
+  registerFreshdeskCommands(program);
+  registerGrooveCommands(program);
   registerTicketCommands(program);
   registerTriageCommand(program);
   registerDraftCommand(program);

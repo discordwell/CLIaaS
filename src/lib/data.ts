@@ -5,7 +5,7 @@ import { join } from 'path';
 export interface Ticket {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
   subject: string;
   status: string;
   priority: string;
@@ -60,6 +60,9 @@ const EXPORT_DIRS = [
   './exports/zendesk',
   './exports/kayako',
   './exports/kayako-classic',
+  './exports/helpcrunch',
+  './exports/freshdesk',
+  './exports/groove',
   './exports',
 ];
 

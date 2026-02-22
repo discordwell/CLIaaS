@@ -15,7 +15,8 @@
     "check": "pnpm lint && pnpm typecheck && pnpm build",
     "cliaas": "tsx cli/index.ts",
     "export:routes": "bash scripts/export_routes.sh",
-    "bundle:submission": "bash scripts/make_submission_zip.sh"
+    "bundle:submission": "bash scripts/make_submission_zip.sh",
+    "extract-assets": "tsx scripts/extract-ra-assets.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
