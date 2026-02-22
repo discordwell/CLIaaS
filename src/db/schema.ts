@@ -134,6 +134,7 @@ export const users = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     email: varchar('email', { length: 320 }),
+    passwordHash: text('password_hash'),
     name: text('name').notNull(),
     role: userRoleEnum('role').notNull().default('agent'),
     status: userStatusEnum('status').notNull().default('active'),
