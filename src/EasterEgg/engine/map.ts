@@ -142,6 +142,11 @@ export class GameMap {
     }
   }
 
+  /** Reveal the entire map (all cells set to visible) */
+  revealAll(): void {
+    this.visibility.fill(2);
+  }
+
   /** Update fog of war: downgrade visible to fog, then reveal around units */
   updateFogOfWar(units: Array<{ x: number; y: number; sight: number }>): void {
     // Downgrade only previously visible cells to fog (O(visible) instead of O(16384))
@@ -196,6 +201,38 @@ export class GameMap {
       if (t === Terrain.ROCK || t === Terrain.WALL) return false;
     }
     return true;
+  }
+
+  /** Count bridge template cells (templates 235-252 are bridge structures) */
+  countBridgeCells(): number {
+    let count = 0;
+    for (let cy = this.boundsY; cy < this.boundsY + this.boundsH; cy++) {
+      for (let cx = this.boundsX; cx < this.boundsX + this.boundsW; cx++) {
+        const tmpl = this.templateType[cy * MAP_CELLS + cx];
+        if (tmpl >= 235 && tmpl <= 252) count++;
+      }
+    }
+    return count;
+  }
+
+  /** Destroy bridge cells in a radius (set to WATER) — returns number destroyed */
+  destroyBridge(cx: number, cy: number, radius: number): number {
+    let count = 0;
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const rx = cx + dx;
+        const ry = cy + dy;
+        if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
+        const idx = ry * MAP_CELLS + rx;
+        const tmpl = this.templateType[idx];
+        if (tmpl >= 235 && tmpl <= 252) {
+          this.templateType[idx] = 1; // water template
+          this.setTerrain(rx, ry, Terrain.WATER);
+          count++;
+        }
+      }
+    }
+    return count;
   }
 
   /** Find nearest ore/gem cell to a given position (returns null if none) */

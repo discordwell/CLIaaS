@@ -20,8 +20,9 @@ import { findPath } from './pathfinding';
 import {
   loadScenario,
   type TeamType, type ScenarioTrigger, type MapStructure,
+  type TriggerGameState, type TriggerActionResult,
   checkTriggerEvent, executeTriggerAction, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
-  saveCarryover,
+  saveCarryover, TIME_UNIT_TICKS,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
 export type { MissionInfo } from './scenario';
@@ -115,6 +116,15 @@ export class Game {
   private globals = new Set<number>();
   private waypoints = new Map<number, { cx: number; cy: number }>();
   private toCarryOver = false; // save surviving units for next mission
+  private allowWin = false; // set by ALLOWWIN action — required before win condition fires
+  private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
+  private missionTimerExpired = false;
+  /** EVA text message queue — displayed briefly on screen */
+  private evaMessages: { text: string; tick: number }[] = [];
+  /** Count of units that have left the map (for TEVENT_LEAVES_MAP) */
+  private unitsLeftMap = 0;
+  /** Cached bridge cell count (recalculated periodically) */
+  private bridgeCellCount = 0;
 
   // Turbo mode (for E2E test runner)
   turboMultiplier = 1;
@@ -184,6 +194,14 @@ export class Game {
     // First crate spawns after 60 seconds
     this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
     this.crates = [];
+    this.allowWin = false;
+    this.missionTimer = 0;
+    this.missionTimerExpired = false;
+    this.evaMessages = [];
+    this.unitsLeftMap = 0;
+    this.bridgeCellCount = this.map.countBridgeCells();
+    // Initialize trigger timers to game tick 0 (start of mission)
+    for (const t of this.triggers) t.timerTick = 0;
 
     // Initial fog of war reveal
     this.updateFogOfWar();
@@ -284,6 +302,11 @@ export class Game {
   private update(): void {
     this.tick++;
 
+    // Prune expired EVA messages (older than 5 seconds)
+    if (this.tick % 75 === 0) {
+      this.evaMessages = this.evaMessages.filter(m => this.tick - m.tick < 75);
+    }
+
     // Cache available items once per tick (not every render frame)
     this.cachedAvailableItems = this.getAvailableItems();
 
@@ -334,6 +357,24 @@ export class Game {
         continue;
       }
       this.updateEntity(entity);
+    }
+
+    // Check for units leaving the map edge (civilian evacuation)
+    for (const entity of this.entities) {
+      if (!entity.alive) continue;
+      const c = entity.cell;
+      if (c.cx <= this.map.boundsX || c.cx >= this.map.boundsX + this.map.boundsW - 1 ||
+          c.cy <= this.map.boundsY || c.cy >= this.map.boundsY + this.map.boundsH - 1) {
+        // Check if unit has a move target outside the map (intentionally leaving)
+        if (entity.moveTarget) {
+          const tc = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+          if (!this.map.inBounds(tc.cx, tc.cy)) {
+            entity.alive = false;
+            entity.mission = Mission.DIE;
+            this.unitsLeftMap++;
+          }
+        }
+      }
     }
 
     // Update effects
@@ -423,6 +464,11 @@ export class Game {
     // Defensive structure auto-fire
     this.updateStructureCombat();
 
+    // Queen Ant spawning — QUEE periodically spawns ants when not under heavy attack
+    if (this.tick % (GAME_TICKS_PER_SEC * 30) === 0) { // every 30 seconds
+      this.updateQueenSpawning();
+    }
+
     // Tick production queue — advance build progress
     this.tickProduction();
 
@@ -510,7 +556,7 @@ export class Game {
       const { mouseX, mouseY } = this.input.state;
       const world = this.camera.screenToWorld(mouseX, mouseY);
       const s = this.findStructureAt(world);
-      if (s && (s.house === 'Spain' || s.house === 'Greece')) {
+      if (s && (s.house === House.Spain || s.house === House.Greece)) {
         this.canvas.style.cursor = 'pointer';
       }
       return;
@@ -520,7 +566,7 @@ export class Game {
       const { mouseX, mouseY } = this.input.state;
       const world = this.camera.screenToWorld(mouseX, mouseY);
       const s = this.findStructureAt(world);
-      if (s && s.alive && (s.house === 'Spain' || s.house === 'Greece') && s.hp < s.maxHp) {
+      if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) && s.hp < s.maxHp) {
         this.canvas.style.cursor = 'pointer';
       }
       return;
@@ -862,7 +908,7 @@ export class Game {
       if (this.sellMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
-        if (s && s.alive && (s.house === 'Spain' || s.house === 'Greece')) {
+        if (s && s.alive && (s.house === House.Spain || s.house === House.Greece)) {
           s.alive = false;
           // Refund 50% of building cost
           const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
@@ -889,7 +935,7 @@ export class Game {
       if (this.repairMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
-        if (s && s.alive && (s.house === 'Spain' || s.house === 'Greece') && s.hp < s.maxHp) {
+        if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) && s.hp < s.maxHp) {
           const idx = this.structures.indexOf(s);
           if (this.repairingStructures.has(idx)) {
             this.repairingStructures.delete(idx);
@@ -1237,6 +1283,12 @@ export class Game {
       this.audio.play('building_explode');
       // Leave large scorch mark
       this.map.addDecal(s.cx, s.cy, 14, 0.6);
+      // Bridge destruction: convert nearby bridge template cells to water
+      if (s.type === 'BARL' || s.type === 'BRL3') {
+        this.map.destroyBridge(s.cx, s.cy, 3);
+        this.bridgeCellCount = this.map.countBridgeCells();
+        this.showEvaMessage(7); // "Bridge destroyed."
+      }
       return true;
     }
     return false;
@@ -1246,12 +1298,12 @@ export class Game {
   private updateEntity(entity: Entity): void {
     // Team mission script execution (rate-limited to every 8 ticks)
     // Area Guard ants use their own patrol logic, not global hunt AI
-    if (entity.isAnt && entity.mission !== Mission.DIE && entity.mission !== Mission.AREA_GUARD) {
+    if (entity.mission !== Mission.DIE && entity.mission !== Mission.AREA_GUARD) {
       if (this.tick - entity.lastAIScan >= 8) {
         entity.lastAIScan = this.tick;
         if (entity.teamMissions.length > 0) {
           this.updateTeamMission(entity);
-        } else {
+        } else if (entity.isAnt) {
           this.updateAntAI(entity);
         }
       }
@@ -1273,6 +1325,48 @@ export class Game {
       case Mission.AREA_GUARD:
         this.updateAreaGuard(entity);
         break;
+      case Mission.SLEEP:
+        // Dormant — do nothing until explicitly given a new mission
+        entity.animState = AnimState.IDLE;
+        break;
+    }
+
+    // Civilian panic: flee from nearby ants (cooldown prevents oscillation)
+    if (entity.alive && entity.isCivilian && entity.mission === Mission.GUARD &&
+        this.tick - entity.lastGuardScan >= 45) {
+      entity.lastGuardScan = this.tick;
+      let closestThreat: Entity | null = null;
+      let closestDist = CELL_SIZE * 6; // flee range: 6 cells
+      for (const other of this.entities) {
+        if (!other.alive || !other.isAnt) continue;
+        const d = worldDist(entity.pos, other.pos);
+        if (d < closestDist) {
+          closestDist = d;
+          closestThreat = other;
+        }
+      }
+      if (closestThreat) {
+        // Run away from the ant
+        const dx = entity.pos.x - closestThreat.pos.x;
+        const dy = entity.pos.y - closestThreat.pos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        let fleeX = entity.pos.x + (dx / dist) * CELL_SIZE * 4;
+        let fleeY = entity.pos.y + (dy / dist) * CELL_SIZE * 4;
+        // Clamp flee target to map bounds
+        const minX = (this.map.boundsX + 1) * CELL_SIZE;
+        const minY = (this.map.boundsY + 1) * CELL_SIZE;
+        const maxX = (this.map.boundsX + this.map.boundsW - 2) * CELL_SIZE;
+        const maxY = (this.map.boundsY + this.map.boundsH - 2) * CELL_SIZE;
+        fleeX = Math.max(minX, Math.min(maxX, fleeX));
+        fleeY = Math.max(minY, Math.min(maxY, fleeY));
+        entity.mission = Mission.MOVE;
+        entity.moveTarget = { x: fleeX, y: fleeY };
+        const tc = worldToCell(fleeX, fleeY);
+        if (this.map.isPassable(tc.cx, tc.cy)) {
+          entity.path = findPath(this.map, entity.cell, tc, true);
+          entity.pathIndex = 0;
+        }
+      }
     }
 
     // Harvester AI — automatic ore gathering
@@ -1290,14 +1384,17 @@ export class Game {
     entity.tickAnimation();
   }
 
-  // Team mission type constants (from RA TEAMTYPE.CPP)
+  // Team mission type constants (from RA TEAMTYPE.H TeamMissionType enum)
   private static readonly TMISSION_ATTACK = 0;
   private static readonly TMISSION_ATT_WAYPT = 1;
   private static readonly TMISSION_MOVE = 3;
   private static readonly TMISSION_GUARD = 5;
   private static readonly TMISSION_LOOP = 6;
+  private static readonly TMISSION_UNLOAD = 8;
+  private static readonly TMISSION_PATROL = 10;
   private static readonly TMISSION_SET_GLOBAL = 11;
-  private static readonly TMISSION_UNLOAD = 16;
+  private static readonly TMISSION_LOAD = 13;
+  private static readonly TMISSION_WAIT = 16;
 
   /** Execute team mission scripts — units follow waypoint patrol routes */
   private updateTeamMission(entity: Entity): void {
@@ -1380,7 +1477,7 @@ export class Game {
         // Guard area for a duration — data is in 1/10th minute units
         // This runs every 8 ticks (AI scan rate), so decrement by 8
         if (entity.teamMissionWaiting === 0) {
-          entity.teamMissionWaiting = tm.data * 6 * GAME_TICKS_PER_SEC;
+          entity.teamMissionWaiting = tm.data * TIME_UNIT_TICKS;
           entity.mission = Mission.GUARD;
         }
         entity.teamMissionWaiting -= 8;
@@ -1406,9 +1503,56 @@ export class Game {
         break;
       }
 
-      case Game.TMISSION_UNLOAD: {
-        // Unload — not relevant for ant units, skip
+      case Game.TMISSION_UNLOAD:
+      case Game.TMISSION_LOAD: {
+        // Load/Unload — transport mechanics stub, advance
         entity.teamMissionIndex++;
+        break;
+      }
+
+      case Game.TMISSION_WAIT: {
+        // Wait at current position — data is in 1/10th minute units
+        if (entity.teamMissionWaiting === 0) {
+          entity.teamMissionWaiting = tm.data * TIME_UNIT_TICKS;
+          entity.animState = AnimState.IDLE;
+        }
+        entity.teamMissionWaiting -= 8;
+        if (entity.teamMissionWaiting <= 0) {
+          entity.teamMissionWaiting = 0;
+          entity.teamMissionIndex++;
+        }
+        break;
+      }
+
+      case Game.TMISSION_PATROL: {
+        // Patrol to waypoint — same as move but attack enemies en route
+        const wp = this.waypoints.get(tm.data);
+        if (!wp) { entity.teamMissionIndex++; return; }
+        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+        // Check for enemies nearby while patrolling
+        if (entity.mission !== Mission.ATTACK) {
+          let nearest: Entity | null = null;
+          let nearDist = entity.stats.sight;
+          for (const other of this.entities) {
+            if (!other.alive || other.isAnt === entity.isAnt) continue;
+            if (other.isPlayerUnit === entity.isPlayerUnit) continue;
+            const d = worldDist(entity.pos, other.pos);
+            if (d < nearDist) { nearDist = d; nearest = other; }
+          }
+          if (nearest) {
+            entity.mission = Mission.ATTACK;
+            entity.target = nearest;
+            return;
+          }
+        }
+        if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          entity.mission = Mission.MOVE;
+          entity.moveTarget = target;
+          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true);
+          entity.pathIndex = 0;
+        } else if (worldDist(entity.pos, target) < 2) {
+          entity.teamMissionIndex++;
+        }
         break;
       }
 
@@ -1632,7 +1776,7 @@ export class Game {
     let bestIsDefense = false;
     for (const s of this.structures) {
       if (!s.alive) continue;
-      if (s.house !== 'Spain' && s.house !== 'Greece') continue;
+      if (s.house !== House.Spain && s.house !== House.Greece) continue;
       const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
       const dist = worldDist(entity.pos, sPos);
       if (dist > entity.stats.sight * 2) continue;
@@ -2035,7 +2179,7 @@ export class Game {
       for (const other of this.entities) {
         if (!other.alive || other.isPlayerUnit === isPlayer) continue;
         const dist = worldDist(entity.pos, other.pos);
-        if (dist > entity.stats.sight * CELL_SIZE) continue;
+        if (dist > entity.stats.sight) continue;
         const oc2 = other.cell;
         if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc2.cx, oc2.cy)) continue;
         // Found an enemy — attack it
@@ -2292,6 +2436,40 @@ export class Game {
     }
   }
 
+  /** Queen Ant spawns ants periodically — 1-2 ants per alive QUEE every 30 seconds */
+  private updateQueenSpawning(): void {
+    for (const s of this.structures) {
+      if (!s.alive || s.type !== 'QUEE') continue;
+      if (s.house === House.Spain || s.house === House.Greece) continue; // player queens don't spawn
+      // Don't spawn if too many ants already alive (max 20 per queen)
+      const nearbyAnts = this.entities.filter(e =>
+        e.alive && e.isAnt && worldDist(e.pos, {
+          x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE,
+        }) < CELL_SIZE * 15
+      ).length;
+      if (nearbyAnts >= 20) continue;
+      // Spawn 1-2 ants near the queen
+      const count = 1 + (Math.random() < 0.4 ? 1 : 0);
+      const antTypes = [UnitType.ANT1, UnitType.ANT2, UnitType.ANT3];
+      for (let i = 0; i < count; i++) {
+        const aType = antTypes[Math.floor(Math.random() * antTypes.length)];
+        const ox = (Math.random() - 0.5) * CELL_SIZE * 3;
+        const oy = (Math.random() - 0.5) * CELL_SIZE * 3;
+        const spawnX = s.cx * CELL_SIZE + CELL_SIZE + ox;
+        const spawnY = s.cy * CELL_SIZE + CELL_SIZE + oy;
+        // Only spawn on passable terrain
+        const sc = worldToCell(spawnX, spawnY);
+        if (!this.map.isPassable(sc.cx, sc.cy)) continue;
+        const house = s.house;
+        const ant = new Entity(aType, house, spawnX, spawnY);
+        ant.mission = Mission.AREA_GUARD;
+        ant.guardOrigin = { x: spawnX, y: spawnY };
+        this.entities.push(ant);
+        this.entityById.set(ant.id, ant);
+      }
+    }
+  }
+
   /** Apply AOE splash damage to entities near an impact point */
   private applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
@@ -2368,28 +2546,69 @@ export class Game {
       if (!entity.alive || !entity.isPlayerUnit) continue;
       const cellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
       const trigName = this.map.cellTriggers.get(cellIdx);
-      if (trigName && !this.map.activatedCellTriggers.has(`${cellIdx}:${trigName}`)) {
-        this.map.activatedCellTriggers.add(`${cellIdx}:${trigName}`);
-        // Find matching trigger by name and mark its PLAYER_ENTERED condition as met
-        for (const trigger of this.triggers) {
-          if (trigger.name === trigName) {
-            trigger.playerEntered = true;
+      if (!trigName) continue;
+      const key = `${cellIdx}:${trigName}:${entity.id}`;
+      if (this.map.activatedCellTriggers.has(key)) continue;
+      this.map.activatedCellTriggers.add(key);
+      // Find matching trigger by name and mark its PLAYER_ENTERED condition as met
+      for (const trigger of this.triggers) {
+        if (trigger.name === trigName) {
+          trigger.playerEntered = true;
+          // For persistent triggers that have fired, reset so they can re-evaluate
+          if (trigger.persistence === 2 && trigger.fired) {
+            trigger.fired = false;
           }
         }
       }
     }
   }
 
+  /** Build trigger game state snapshot for event checks */
+  private buildTriggerState(trigger: ScenarioTrigger): TriggerGameState {
+    const structureTypes = new Set<string>();
+    const destroyedTriggerNames = new Set<string>();
+    for (const s of this.structures) {
+      if (s.alive) structureTypes.add(s.type);
+      else if (s.triggerName) destroyedTriggerNames.add(s.triggerName);
+    }
+    return {
+      gameTick: this.tick,
+      globals: this.globals,
+      triggerStartTick: trigger.timerTick,
+      triggerName: trigger.name,
+      playerEntered: trigger.playerEntered,
+      enemyUnitsAlive: this.entities.filter(e => e.alive && !e.isPlayerUnit && !e.isCivilian).length,
+      enemyKillCount: this.killCount,
+      playerFactories: this.structures.filter(s => s.alive &&
+        (s.house === House.Spain || s.house === House.Greece) &&
+        (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'TENT')).length,
+      missionTimerExpired: this.missionTimerExpired,
+      bridgesAlive: this.bridgeCellCount,
+      unitsLeftMap: this.unitsLeftMap,
+      structureTypes,
+      destroyedTriggerNames,
+    };
+  }
+
   /** Process trigger system — check conditions and fire actions */
   private processTriggers(): void {
+    // Tick mission timer (processTriggers runs every 15 ticks, so decrement by 15)
+    if (this.missionTimer > 0) {
+      this.missionTimer -= 15;
+      if (this.missionTimer <= 0) {
+        this.missionTimerExpired = true;
+      }
+    }
+
     for (const trigger of this.triggers) {
       // Volatile (0) and semi-persistent (1): skip once fired
       // Persistent (2): allowed to re-fire after timer reset
       if (trigger.fired && trigger.persistence <= 1) continue;
 
       // Check event conditions
-      const e1Met = checkTriggerEvent(trigger.event1, this.tick, this.globals, trigger.timerTick, trigger.playerEntered);
-      const e2Met = checkTriggerEvent(trigger.event2, this.tick, this.globals, trigger.timerTick, trigger.playerEntered);
+      const state = this.buildTriggerState(trigger);
+      const e1Met = checkTriggerEvent(trigger.event1, state);
+      const e2Met = checkTriggerEvent(trigger.event2, state);
 
       let shouldFire = false;
       switch (trigger.eventControl) {
@@ -2409,11 +2628,41 @@ export class Game {
 
       // Execute actions
       const executeAction = (action: typeof trigger.action1) => {
-        const spawned = executeTriggerAction(
+        const result = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers
         );
+        // Handle side effects
+        if (result.win && this.state === 'playing') {
+          if (this.toCarryOver) saveCarryover(this.entities);
+          this.state = 'won';
+          this.onStateChange?.('won');
+        }
+        if (result.lose && this.state === 'playing') {
+          this.state = 'lost';
+          this.onStateChange?.('lost');
+        }
+        if (result.allowWin) this.allowWin = true;
+        if (result.allHunt) {
+          // Set all enemy units to HUNT mission
+          for (const e of this.entities) {
+            if (e.alive && !e.isPlayerUnit) {
+              e.mission = Mission.HUNT;
+            }
+          }
+        }
+        if (result.revealAll) {
+          // Reveal entire map
+          this.map.revealAll();
+        }
+        if (result.textMessage !== undefined) {
+          this.showEvaMessage(result.textMessage);
+        }
+        if (result.setTimer !== undefined) {
+          this.missionTimer = result.setTimer * TIME_UNIT_TICKS;
+          this.missionTimerExpired = false;
+        }
         // Tag ant spawns with wave coordination
-        const ants = spawned.filter(e => e.isAnt);
+        const ants = result.spawned.filter(e => e.isAnt);
         if (ants.length > 1) {
           const wid = this.nextWaveId++;
           const rallyDelay = this.tick + GAME_TICKS_PER_SEC * 2; // 2-second rally
@@ -2422,9 +2671,25 @@ export class Game {
             ant.waveRallyTick = rallyDelay;
           }
         }
-        for (const entity of spawned) {
+        for (const entity of result.spawned) {
           this.entities.push(entity);
           this.entityById.set(entity.id, entity);
+        }
+        // Destroy the unit that triggered this (e.g. hazard zone kill)
+        if (result.destroyTriggeringUnit) {
+          for (const e of this.entities) {
+            if (!e.alive || !e.isPlayerUnit) continue;
+            const cellIdx = e.cell.cy * MAP_CELLS + e.cell.cx;
+            const trigName = this.map.cellTriggers.get(cellIdx);
+            if (trigName === trigger.name) {
+              e.takeDamage(9999);
+              this.effects.push({
+                type: 'explosion', x: e.pos.x, y: e.pos.y,
+                frame: 0, maxFrames: 18, size: 12,
+                sprite: 'fball1', spriteStart: 0,
+              });
+            }
+          }
         }
       };
 
@@ -2433,6 +2698,25 @@ export class Game {
         executeAction(trigger.action2);
       }
     }
+  }
+
+  /** Display an EVA text message (by trigger data ID) */
+  private showEvaMessage(id: number): void {
+    // Map message IDs to text — from the original RA ant mission briefing strings
+    const messages: Record<number, string> = {
+      0: 'Scouts report movement in the area.',
+      1: 'Reinforcements have arrived.',
+      2: 'Mission objective complete.',
+      3: 'Warning: enemy forces detected.',
+      4: 'New objective received.',
+      5: 'Base is under attack!',
+      6: 'Civilians have been evacuated.',
+      7: 'Bridge destroyed.',
+      8: 'Power restored.',
+    };
+    const text = messages[id] ?? `EVA: Message ${id}`;
+    this.evaMessages.push({ text, tick: this.tick });
+    this.audio.play('eva_acknowledged');
   }
 
   /** Check win/lose conditions */
@@ -2761,6 +3045,8 @@ export class Game {
     this.renderer.sidebarW = Game.SIDEBAR_W;
     this.renderer.hasRadar = this.hasBuilding('DOME');
     this.renderer.crates = this.crates;
+    this.renderer.evaMessages = this.evaMessages;
+    this.renderer.missionTimer = this.missionTimer;
     // Placement ghost
     if (this.pendingPlacement) {
       const { mouseX, mouseY } = this.input.state;
@@ -2799,6 +3085,9 @@ export class Game {
       this.effects,
       this.tick,
     );
+
+    // Render EVA messages and mission timer
+    this.renderer.renderEvaMessages(this.tick);
 
     // Render pause overlay
     if (this.state === 'paused') {

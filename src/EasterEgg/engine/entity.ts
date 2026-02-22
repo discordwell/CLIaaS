@@ -150,7 +150,8 @@ export class Entity {
     return !this.stats.isInfantry && !this.isAnt &&
       this.type !== UnitType.V_APC && this.type !== UnitType.V_HARV &&
       this.type !== UnitType.V_MCV && this.type !== UnitType.V_ARTY &&
-      this.type !== UnitType.V_JEEP && this.type !== UnitType.V_TRUK;
+      this.type !== UnitType.V_JEEP && this.type !== UnitType.V_TRUK &&
+      this.type !== UnitType.V_TRAN && this.type !== UnitType.V_LST;
   }
 
   /** Turret sprite frame (frames 32-63 in the vehicle SHP) */
@@ -163,6 +164,14 @@ export class Entity {
     return this.type === UnitType.ANT1 ||
            this.type === UnitType.ANT2 ||
            this.type === UnitType.ANT3;
+  }
+
+  get isCivilian(): boolean {
+    const t = this.type;
+    return t === UnitType.I_C1 || t === UnitType.I_C2 || t === UnitType.I_C3 ||
+           t === UnitType.I_C4 || t === UnitType.I_C5 || t === UnitType.I_C6 ||
+           t === UnitType.I_C7 || t === UnitType.I_C8 || t === UnitType.I_C9 ||
+           t === UnitType.I_C10;
   }
 
   /** Calculate the sprite frame index for the current state */

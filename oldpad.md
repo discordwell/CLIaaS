@@ -1,5 +1,23 @@
 # Archived Session Summaries
 
+## 2026-02-23T11:00Z — Session 16: Veterancy, Friendly Fire, Stances, Wave AI
+- Added unit veterancy system: kills tracking, promotion at 3/6 kills, damage/HP bonuses (+25%/+50%)
+- Veterancy stars rendered above health bars (silver=veteran, gold=elite)
+- Veterancy + kills + stance shown in unit info panel
+- Enabled friendly fire on splash damage (50% reduced), tracks as player losses
+- Added stance system: Aggressive/Defensive/Hold Fire (Z key to cycle)
+  - Hold fire: never auto-engage; Defensive: weapon range scan only, no pursuit
+- Added gradual turret rotation (2 steps/tick via tickTurretRotation)
+- Added ant wave coordination: waveId + rally delay, wave-mates cluster then attack together
+- Added ant building targeting priority: ants target defensive structures when no units visible
+- Added vehicle crush mechanic: non-infantry vehicles kill enemy infantry in same cell
+- Added waypoint markers: dashed green lines + dots showing shift+click queue
+- Added destroyed structure rubble: persistent debris tiles at destruction site
+- Added unit-type selection sounds: select_infantry, select_vehicle, select_dog
+- Improved pathfinding: soft occupancy costs (+20 penalty) instead of hard blocking
+- Code review fixed 6 issues: S key not consumed, turret fires while rotating, EVA skipped on enemy splash kill, defensive stance stale forceFirePos, DEFENSE_TYPES allocation, orphaned JSDoc
+- All changes type check clean (npx tsc --noEmit)
+
 ## 2026-02-23T09:00Z — Session 15: Base Defense, Sell/Repair, EVA, Polish
 - Added artillery scatter/inaccuracy — weapons with inaccuracy field scatter impact point randomly
 - Inaccuracy set on Grenade (0.5) and ArtilleryShell (1.5); projectiles travel to scattered point

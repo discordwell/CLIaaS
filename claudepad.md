@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-02-22T18:00Z — Session 21: Trigger System, Civilians, Bridges, Evacuation
+- Expanded trigger event/action system: 11 new events, 13 new actions (from EA open-source RA enums)
+- Added TriggerGameState + TriggerActionResult interfaces for clean event/action separation
+- Added SLEEP mission handler, Queen Ant periodic spawning (every 30s, max 20 nearby ants)
+- Added EVA text message system with mission timer display (countdown + fading messages)
+- Fixed code review issues: trigger bounds checks, TIME_UNIT_TICKS constant dedup, House enum consistency
+- Added BUILDING_EXISTS event that checks specific building type via event.data index mapping
+- Added civilian unit types C1-C10 (infantry, no weapon, use E1 sprite)
+- Added transport types: TRAN (Chinook), LST (landing ship), CHAN alias
+- Implemented TEVENT_LEAVES_MAP — tracks units leaving map boundaries for civilian evacuation
+- Added bridge structure support: BARL/BRL3 types, destroyBridge() converts bridge terrain to water
+- Added bridge cell counting: map.countBridgeCells(), tracked in index.ts bridgeCellCount
+- Added trigger attachment system: structures carry triggerName from INI, TEVENT_DESTROYED fires when attached structure destroyed
+- Added TACTION_DESTROY_OBJECT: kills triggering unit (hazard zones in SCA02EA)
+- Added civilian panic AI: flee from nearby ants (6-cell detect range, 4-cell flee distance)
+- Fixed team mission constants: corrected TMISSION enum numbering from RA TEAMTYPE.H
+- Added new team missions: TMISSION_PATROL (move + attack en route), TMISSION_WAIT (idle timer)
+- Fixed cell trigger persistence: per-entity tracking, persistent triggers reset on re-entry
+- All changes type check clean (npx tsc --noEmit)
+
 ## 2026-02-23T17:15Z — Session 20: Area Guard, Service Depot, Production Queue, Radar, Crates
 - Implemented Area Guard mission: patrol/defend spawn area, attack nearby enemies, return if >8 cells from origin
 - Added `applyMission()` INI mission string parser (Guard/Area Guard/Hunt/Sleep)
@@ -55,24 +75,6 @@
 - Added Tab key cycling through unit types in mixed selection (pool-based)
 - Code review fixed 6 bugs: Tab cycling one-shot, Tab focus steal, corner double-count, ambient crossfade silence, ambient stop throw, idle count per-render-frame
 - Commit: a5c8b77 — pushed to origin/main
-
-## 2026-02-23T11:00Z — Session 16: Veterancy, Friendly Fire, Stances, Wave AI
-- Added unit veterancy system: kills tracking, promotion at 3/6 kills, damage/HP bonuses (+25%/+50%)
-- Veterancy stars rendered above health bars (silver=veteran, gold=elite)
-- Veterancy + kills + stance shown in unit info panel
-- Enabled friendly fire on splash damage (50% reduced), tracks as player losses
-- Added stance system: Aggressive/Defensive/Hold Fire (Z key to cycle)
-  - Hold fire: never auto-engage; Defensive: weapon range scan only, no pursuit
-- Added gradual turret rotation (2 steps/tick via tickTurretRotation)
-- Added ant wave coordination: waveId + rally delay, wave-mates cluster then attack together
-- Added ant building targeting priority: ants target defensive structures when no units visible
-- Added vehicle crush mechanic: non-infantry vehicles kill enemy infantry in same cell
-- Added waypoint markers: dashed green lines + dots showing shift+click queue
-- Added destroyed structure rubble: persistent debris tiles at destruction site
-- Added unit-type selection sounds: select_infantry, select_vehicle, select_dog
-- Improved pathfinding: soft occupancy costs (+20 penalty) instead of hard blocking
-- Code review fixed 6 issues: S key not consumed, turret fires while rotating, EVA skipped on enemy splash kill, defensive stance stale forceFirePos, DEFENSE_TYPES allocation, orphaned JSDoc
-- All changes type check clean (npx tsc --noEmit)
 
 
 # Key Findings

@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, House, Stance, SUB_CELL_OFFSETS, type ProductionItem } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, type ProductionItem } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
 import { type Entity } from './entity';
@@ -88,6 +88,8 @@ export class Renderer {
   radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
   radarStaticCounter = 0;
   crates: Array<{ x: number; y: number; type: string }> = [];
+  evaMessages: Array<{ text: string; tick: number }> = [];
+  missionTimer = 0; // 0 = hidden
   // Placement ghost
   placementItem: ProductionItem | null = null;
   placementCx = 0;
@@ -1136,6 +1138,42 @@ export class Renderer {
     ctx.font = 'bold 10px monospace';
     ctx.fillStyle = color;
     ctx.fillText(label, input.mouseX + 12, input.mouseY - 4);
+  }
+
+  // ─── EVA Messages & Mission Timer ──────────────────────
+
+  renderEvaMessages(tick: number): void {
+    const ctx = this.ctx;
+    // Show messages that are less than 4 seconds old (60 ticks)
+    const active = this.evaMessages.filter(m => tick - m.tick < 60);
+    if (active.length === 0 && this.missionTimer <= 0) return;
+
+    // Mission timer display (top center)
+    if (this.missionTimer > 0) {
+      const totalSecs = Math.ceil(this.missionTimer / GAME_TICKS_PER_SEC);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      const timerText = `${mins}:${secs.toString().padStart(2, '0')}`;
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = totalSecs < 30 ? '#f44' : '#ff0';
+      ctx.fillText(timerText, (this.width - this.sidebarW) / 2, 20);
+    }
+
+    // EVA text messages (top-center, stacked)
+    if (active.length > 0) {
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      const centerX = (this.width - this.sidebarW) / 2;
+      for (let i = 0; i < active.length; i++) {
+        const msg = active[i];
+        const age = tick - msg.tick;
+        const alpha = age < 45 ? 1.0 : 1.0 - (age - 45) / 15; // fade out last 1s
+        ctx.fillStyle = `rgba(0,255,0,${alpha.toFixed(2)})`;
+        ctx.fillText(msg.text, centerX, 36 + i * 14);
+      }
+    }
+    ctx.textAlign = 'left';
   }
 
   // ─── Pause Overlay ──────────────────────────────────────

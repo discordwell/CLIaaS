@@ -9,31 +9,62 @@ import { GameMap, Terrain } from './map';
 
 // === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===
 
-// Trigger event types (TEventType)
+// Trigger event types (TEventType — from TEVENT.H)
 const TEVENT_NONE = 0;
 const TEVENT_PLAYER_ENTERED = 1;
+const TEVENT_DISCOVERED = 4;
+const TEVENT_ATTACKED = 6;
+const TEVENT_DESTROYED = 7;
+const TEVENT_ANY = 8;
+const TEVENT_ALL_DESTROYED = 11;
 const TEVENT_TIME = 13;
+const TEVENT_MISSION_TIMER_EXPIRED = 14;
+const TEVENT_NUNITS_DESTROYED = 16;
+const TEVENT_BUILD = 19;
+const TEVENT_LEAVES_MAP = 23;
+const TEVENT_ENTERS_ZONE = 24;
 const TEVENT_GLOBAL_SET = 27;
+const TEVENT_GLOBAL_CLEAR = 28;
+const TEVENT_ALL_BRIDGES_DESTROYED = 31;
+const TEVENT_BUILDING_EXISTS = 32;
 
-// Trigger action types (TActionType)
+// Trigger action types (TActionType — from TACTION.H)
 const TACTION_NONE = 0;
 const TACTION_WIN = 1;
 const TACTION_LOSE = 2;
+const TACTION_BEGIN_PRODUCTION = 3;
 const TACTION_CREATE_TEAM = 4;
+const TACTION_ALL_HUNT = 6;
 const TACTION_REINFORCEMENTS = 7;
-const TACTION_SET_GLOBAL = 28;
+const TACTION_DZ = 8;
+const TACTION_TEXT_TRIGGER = 11;
+const TACTION_DESTROY_TRIGGER = 12;
+const TACTION_ALLOWWIN = 15;
+const TACTION_REVEAL_SOME = 17;
+const TACTION_PLAY_SOUND = 19;
+const TACTION_PLAY_SPEECH = 21;
 const TACTION_FORCE_TRIGGER = 22;
+const TACTION_SET_TIMER = 27;
+const TACTION_SET_GLOBAL = 28;
+const TACTION_CLEAR_GLOBAL = 29;
+const TACTION_CREEP_SHADOW = 31;
+const TACTION_DESTROY_OBJECT = 32;
 
-// Team mission types (TeamMissionType)
+// Team mission types (TeamMissionType — from TEAMTYPE.H)
 const TMISSION_ATTACK = 0;
 const TMISSION_ATT_WAYPT = 1;
 const TMISSION_MOVE = 3;
 const TMISSION_GUARD = 5;
 const TMISSION_LOOP = 6;
+const TMISSION_UNLOAD = 8;
+const TMISSION_PATROL = 10;
+const TMISSION_SET_GLOBAL = 11;
+const TMISSION_LOAD = 13;
+const TMISSION_WAIT = 16;
 
 // Time unit: Data.Value is in 1/10th minute increments (6 seconds each)
 // Convert to game ticks: value * 6 * GAME_TICKS_PER_SEC
-const TIME_UNIT_TICKS = 6 * GAME_TICKS_PER_SEC; // 90 ticks per time unit
+export const TIME_UNIT_TICKS = 6 * GAME_TICKS_PER_SEC; // 90 ticks per time unit
 
 export interface TeamMember {
   type: string;   // unit type name (e.g. 'ANT3')
@@ -501,6 +532,11 @@ function toUnitType(name: string): UnitType | null {
     ARTY: UnitType.V_ARTY, HARV: UnitType.V_HARV, MCV: UnitType.V_MCV, TRUK: UnitType.V_TRUK,
     E1: UnitType.I_E1, E2: UnitType.I_E2, E3: UnitType.I_E3, E4: UnitType.I_E4,
     E6: UnitType.I_E6, DOG: UnitType.I_DOG, SPY: UnitType.I_SPY, MEDI: UnitType.I_MEDI, GNRL: UnitType.I_GNRL,
+    // Civilians
+    C1: UnitType.I_C1, C2: UnitType.I_C2, C3: UnitType.I_C3, C4: UnitType.I_C4, C5: UnitType.I_C5,
+    C6: UnitType.I_C6, C7: UnitType.I_C7, C8: UnitType.I_C8, C9: UnitType.I_C9, C10: UnitType.I_C10,
+    // Transports (CHAN is alternate name for TRAN/Chinook)
+    TRAN: UnitType.V_TRAN, CHAN: UnitType.V_TRAN, LST: UnitType.V_LST,
   };
   return map[name] ?? null;
 }
@@ -545,6 +581,7 @@ export interface MapStructure {
   rubble: boolean;    // destroyed structure leaves rubble
   weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
   attackCooldown: number;    // ticks until next shot
+  triggerName?: string;      // attached trigger name (from INI)
 }
 
 /** Weapon stats for defensive structures */
@@ -571,11 +608,14 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
   GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1],
   QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
+  // Bridge structures (destroyable)
+  BARL: [1, 1], BRL3: [1, 1],
 };
 
 // Structure max HP overrides (default is 256)
 export const STRUCTURE_MAX_HP: Record<string, number> = {
   QUEE: 800, LAR1: 25, LAR2: 50, TSLA: 500,
+  BARL: 150, BRL3: 150,
 };
 
 export interface ScenarioResult {
@@ -682,6 +722,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     const pos = cellIndexToPos(s.cell);
     const image = STRUCTURE_IMAGES[s.type] ?? s.type.toLowerCase();
     const maxHp = STRUCTURE_MAX_HP[s.type] ?? 256;
+    const trigName = s.trigger && s.trigger !== 'None' ? s.trigger : undefined;
     structures.push({
       type: s.type,
       image,
@@ -694,6 +735,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       rubble: false,
       weapon: STRUCTURE_WEAPONS[s.type],
       attackCooldown: 0,
+      triggerName: trigName,
     });
     // Mark structure footprint cells as impassable (WALL terrain)
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
@@ -923,40 +965,106 @@ function lcwDecompressMapPack(
 // === Trigger System ===
 
 /** Check if a trigger event condition is met */
+/** Game state snapshot passed to trigger event checks */
+export interface TriggerGameState {
+  gameTick: number;
+  globals: Set<number>;
+  triggerStartTick: number;
+  triggerName: string;
+  playerEntered: boolean;
+  // Aggregate counts for event checks
+  enemyUnitsAlive: number;    // non-player living units
+  enemyKillCount: number;     // total enemy units killed
+  playerFactories: number;    // player FACT/WEAP/TENT count
+  missionTimerExpired: boolean;
+  bridgesAlive: number;       // number of bridge cells remaining
+  unitsLeftMap: number;        // count of units that have left the map
+  // Building existence check (for BUILDING_EXISTS)
+  structureTypes: Set<string>; // set of alive structure type names
+  // Trigger attachment: names of triggers whose attached object was destroyed
+  destroyedTriggerNames: Set<string>;
+}
+
 export function checkTriggerEvent(
   event: TriggerEvent,
-  gameTick: number,
-  globals: Set<number>,
-  triggerStartTick: number,
-  playerEntered: boolean,
+  state: TriggerGameState,
 ): boolean {
   switch (event.type) {
     case TEVENT_NONE:
+    case TEVENT_ANY:
       return true;
     case TEVENT_TIME: {
-      // Data.Value is in 1/10th minute increments (6 seconds each)
       const requiredTicks = event.data * TIME_UNIT_TICKS;
-      return (gameTick - triggerStartTick) >= requiredTicks;
+      return (state.gameTick - state.triggerStartTick) >= requiredTicks;
     }
     case TEVENT_GLOBAL_SET:
-      return globals.has(event.data);
+      return state.globals.has(event.data);
+    case TEVENT_GLOBAL_CLEAR:
+      return !state.globals.has(event.data);
     case TEVENT_PLAYER_ENTERED:
-      // True when a player unit has entered a cell associated with this trigger
-      return playerEntered;
+      return state.playerEntered;
+    case TEVENT_ALL_DESTROYED:
+      // All enemy (non-player) units destroyed
+      return state.enemyUnitsAlive === 0;
+    case TEVENT_NUNITS_DESTROYED:
+      // N enemy units have been killed (event.data = threshold)
+      return state.enemyKillCount >= event.data;
+    case TEVENT_DESTROYED:
+      // Specific object destroyed — fires when the attached structure/unit is destroyed
+      return state.destroyedTriggerNames.has(state.triggerName);
+    case TEVENT_MISSION_TIMER_EXPIRED:
+      return state.missionTimerExpired;
+    case TEVENT_BUILDING_EXISTS: {
+      // Check if a specific building type exists (event.data is building type index)
+      // Map RA building type indices to type codes used in ant missions
+      const BUILDING_TYPES = ['FACT', 'POWR', 'BARR', 'TENT', 'PROC', 'WEAP', 'FIX', 'SILO',
+        'DOME', 'GUN', 'SAM', 'HBOX', 'PBOX', 'TSLA', 'AGUN', 'FTUR', 'QUEE', 'LAR1', 'LAR2'];
+      const btype = BUILDING_TYPES[event.data];
+      if (btype) return state.structureTypes.has(btype);
+      return state.structureTypes.size > 0; // fallback: any building
+    }
+    case TEVENT_ALL_BRIDGES_DESTROYED:
+      return state.bridgesAlive === 0;
+    case TEVENT_DISCOVERED:
+    case TEVENT_ENTERS_ZONE:
+      // Area discovered / zone entered — use playerEntered flag (set via cell triggers)
+      return state.playerEntered;
+    case TEVENT_ATTACKED:
+      // Something was attacked — simplified: always true after first combat
+      return state.enemyKillCount > 0;
+    case TEVENT_BUILD:
+      // Something was built — in ant missions, not typically player-triggered
+      return false;
+    case TEVENT_LEAVES_MAP:
+      // Units have left the map edge (civilian evacuation)
+      return state.unitsLeftMap > 0;
     default:
       return false;
   }
 }
 
-/** Execute a trigger action — returns entities to spawn */
+/** Result from executing a trigger action */
+export interface TriggerActionResult {
+  spawned: Entity[];
+  win?: boolean;
+  lose?: boolean;
+  allowWin?: boolean;
+  allHunt?: boolean;
+  revealAll?: boolean;
+  textMessage?: number;  // text trigger ID to display
+  setTimer?: number;     // mission timer value to set (in 1/10th minute units)
+  destroyTriggeringUnit?: boolean; // kill the unit that triggered this
+}
+
+/** Execute a trigger action — returns result with entities and side effects */
 export function executeTriggerAction(
   action: TriggerAction,
   teamTypes: TeamType[],
   waypoints: Map<number, CellPos>,
   globals: Set<number>,
   triggers: ScenarioTrigger[],
-): Entity[] {
-  const spawned: Entity[] = [];
+): TriggerActionResult {
+  const result: TriggerActionResult = { spawned: [] };
 
   switch (action.action) {
     case TACTION_NONE:
@@ -991,7 +1099,7 @@ export function executeTriggerAction(
             }));
             entity.teamMissionIndex = 0;
           }
-          spawned.push(entity);
+          result.spawned.push(entity);
         }
       }
       break;
@@ -1001,20 +1109,76 @@ export function executeTriggerAction(
       globals.add(action.data);
       break;
 
+    case TACTION_CLEAR_GLOBAL:
+      globals.delete(action.data);
+      break;
+
     case TACTION_FORCE_TRIGGER: {
       // Force another trigger to re-evaluate by resetting its fired state
-      const target = triggers[action.trigger];
-      if (target) {
-        target.fired = false;
+      if (action.trigger >= 0 && action.trigger < triggers.length) {
+        triggers[action.trigger].fired = false;
+      }
+      break;
+    }
+
+    case TACTION_DESTROY_TRIGGER: {
+      // Permanently disable a trigger
+      if (action.trigger >= 0 && action.trigger < triggers.length) {
+        const target = triggers[action.trigger];
+        target.fired = true;
+        target.persistence = 0; // make it volatile so it can't re-fire
       }
       break;
     }
 
     case TACTION_WIN:
+      result.win = true;
+      break;
+
     case TACTION_LOSE:
-      // Handled by the game loop via state changes
+      result.lose = true;
+      break;
+
+    case TACTION_ALLOWWIN:
+      result.allowWin = true;
+      break;
+
+    case TACTION_ALL_HUNT:
+      result.allHunt = true;
+      break;
+
+    case TACTION_TEXT_TRIGGER:
+      result.textMessage = action.data;
+      break;
+
+    case TACTION_SET_TIMER:
+      result.setTimer = action.data;
+      break;
+
+    case TACTION_DZ:
+      // Drop zone flare — cosmetic, play EVA sound
+      break;
+
+    case TACTION_REVEAL_SOME:
+      // Reveal area around a waypoint — simplified to reveal all
+      result.revealAll = true;
+      break;
+
+    case TACTION_PLAY_SOUND:
+    case TACTION_PLAY_SPEECH:
+      // Sound/speech — would need audio mapping, stub for now
+      break;
+
+    case TACTION_DESTROY_OBJECT:
+      // Destroy the object/unit that triggered this event (e.g. hazard zones)
+      result.destroyTriggeringUnit = true;
+      break;
+
+    case TACTION_BEGIN_PRODUCTION:
+    case TACTION_CREEP_SHADOW:
+      // Advanced actions — stub for ant missions
       break;
   }
 
-  return spawned;
+  return result;
 }

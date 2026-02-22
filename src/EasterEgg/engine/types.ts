@@ -71,6 +71,12 @@ export enum UnitType {
   I_SPY = 'SPY',  // Spy
   I_MEDI = 'MEDI', // Medic
   I_GNRL = 'GNRL', // General Stavros (sniper)
+  // Civilian infantry (for evacuation missions)
+  I_C1 = 'C1', I_C2 = 'C2', I_C3 = 'C3', I_C4 = 'C4', I_C5 = 'C5',
+  I_C6 = 'C6', I_C7 = 'C7', I_C8 = 'C8', I_C9 = 'C9', I_C10 = 'C10',
+  // Transport vehicles
+  V_TRAN = 'TRAN', // Chinook transport helicopter
+  V_LST = 'LST',   // Landing ship transport
 }
 
 // === Animation metadata (DoInfoStruct from RA source) ===
@@ -226,6 +232,20 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   SPY: { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null },
   MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null },
   GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 100, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Sniper' },
+  // Civilians (use E1 sprite, no weapon, slow)
+  C1: { type: UnitType.I_C1, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C2: { type: UnitType.I_C2, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C3: { type: UnitType.I_C3, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C4: { type: UnitType.I_C4, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C5: { type: UnitType.I_C5, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C6: { type: UnitType.I_C6, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C7: { type: UnitType.I_C7, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C8: { type: UnitType.I_C8, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C9: { type: UnitType.I_C9, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  C10: { type: UnitType.I_C10, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  // Transport vehicles
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'light', speed: 12, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null },
+  LST: { type: UnitType.V_LST, name: 'Transport', image: 'truk', strength: 400, armor: 'heavy', speed: 6, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null },
 };
 
 export const WEAPON_STATS: Record<string, WeaponStats> = {
