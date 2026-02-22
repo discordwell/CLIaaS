@@ -173,27 +173,41 @@ export interface UnitStats {
   rot: number;          // rotation speed
   isInfantry: boolean;
   primaryWeapon: string | null;
+  noMovingFire?: boolean; // must stop to fire (ants, artillery)
 }
+
+// Warhead types from RA (determines damage vs armor class)
+export type WarheadType = 'SA' | 'HE' | 'AP' | 'Fire' | 'Super';
+
+// Damage multipliers: warhead vs armor class [none, light, heavy]
+export const WARHEAD_VS_ARMOR: Record<WarheadType, [number, number, number]> = {
+  SA:    [1.0, 0.7, 0.4],  // Small Arms — good vs infantry, poor vs heavy
+  HE:    [1.0, 0.8, 0.6],  // High Explosive — decent vs all
+  AP:    [0.6, 0.7, 1.0],  // Armor Piercing — best vs heavy armor
+  Fire:  [1.0, 1.0, 0.5],  // Fire — good vs infantry/light, poor vs heavy
+  Super: [1.0, 1.0, 1.0],  // Super — equal damage to all (ant mandibles)
+};
 
 export interface WeaponStats {
   name: string;
   damage: number;
   rof: number;    // rate of fire (ticks between shots)
   range: number;  // range in cells
+  warhead: WarheadType;
 }
 
 // Unit stat definitions from scenario INI
 export const UNIT_STATS: Record<string, UnitStats> = {
-  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible' },
-  ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 8, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher' },
-  ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 7, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap' },
+  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true },
+  ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 8, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher', noMovingFire: true },
+  ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 7, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap', noMovingFire: true },
   '1TNK': { type: UnitType.V_1TNK, name: 'Light Tank', image: '1tnk', strength: 300, armor: 'heavy', speed: 7, sight: 4, rot: 5, isInfantry: false, primaryWeapon: 'TankGun' },
   '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'heavy', speed: 6, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'TankGun' },
   '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 4, isInfantry: false, primaryWeapon: 'MammothTusk' },
   JEEP: { type: UnitType.V_JEEP, name: 'Ranger', image: 'jeep', strength: 150, armor: 'light', speed: 10, sight: 4, rot: 8, isInfantry: false, primaryWeapon: 'MachineGun' },
   '4TNK': { type: UnitType.V_4TNK, name: 'Tesla Tank', image: '4tnk', strength: 400, armor: 'heavy', speed: 5, sight: 5, rot: 4, isInfantry: false, primaryWeapon: 'TeslaCannon' },
   APC: { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 8, sight: 4, rot: 6, isInfantry: false, primaryWeapon: 'MachineGun' },
-  ARTY: { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 4, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'ArtilleryShell' },
+  ARTY: { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 4, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'ArtilleryShell', noMovingFire: true },
   HARV: { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 5, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null },
   MCV: { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 3, isInfantry: false, primaryWeapon: null },
   E1: { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Rifle' },
@@ -207,20 +221,30 @@ export const UNIT_STATS: Record<string, UnitStats> = {
 };
 
 export const WEAPON_STATS: Record<string, WeaponStats> = {
-  Mandible: { name: 'Mandible', damage: 50, rof: 15, range: 1.5 },
-  TeslaZap: { name: 'TeslaZap', damage: 60, rof: 25, range: 1.75 },
-  FireballLauncher: { name: 'FireballLauncher', damage: 40, rof: 20, range: 3 },
-  TankGun: { name: 'TankGun', damage: 25, rof: 50, range: 5 },
-  MammothTusk: { name: 'MammothTusk', damage: 75, rof: 80, range: 5.5 },
-  MachineGun: { name: 'MachineGun', damage: 10, rof: 15, range: 4 },
-  Rifle: { name: 'Rifle', damage: 15, rof: 20, range: 3 },
-  Bazooka: { name: 'Bazooka', damage: 40, rof: 60, range: 5 },
-  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5 },
-  Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3 },
-  DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5 },
-  TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5 },
-  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8 },
+  Mandible: { name: 'Mandible', damage: 50, rof: 15, range: 1.5, warhead: 'Super' },
+  TeslaZap: { name: 'TeslaZap', damage: 60, rof: 25, range: 1.75, warhead: 'Super' },
+  FireballLauncher: { name: 'FireballLauncher', damage: 40, rof: 20, range: 3, warhead: 'Fire' },
+  TankGun: { name: 'TankGun', damage: 25, rof: 50, range: 5, warhead: 'AP' },
+  MammothTusk: { name: 'MammothTusk', damage: 75, rof: 80, range: 5.5, warhead: 'AP' },
+  MachineGun: { name: 'MachineGun', damage: 10, rof: 15, range: 4, warhead: 'SA' },
+  Rifle: { name: 'Rifle', damage: 15, rof: 20, range: 3, warhead: 'SA' },
+  Bazooka: { name: 'Bazooka', damage: 40, rof: 60, range: 5, warhead: 'AP' },
+  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5, warhead: 'HE' },
+  Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3, warhead: 'Fire' },
+  DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5, warhead: 'Super' },
+  TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super' },
+  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE' },
 };
+
+// Infantry sub-cell positions within a cell (0=center, 1-4=corners)
+// Pixel offsets from cell center for each sub-position
+export const SUB_CELL_OFFSETS: { x: number; y: number }[] = [
+  { x: 0, y: 0 },     // 0: center
+  { x: -7, y: -7 },   // 1: top-left
+  { x: 7, y: -7 },    // 2: top-right
+  { x: -7, y: 7 },    // 3: bottom-left
+  { x: 7, y: 7 },     // 4: bottom-right
+];
 
 // === Entity Mission States ===
 export enum Mission {

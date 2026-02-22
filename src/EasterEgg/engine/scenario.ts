@@ -192,7 +192,8 @@ interface ScenarioData {
   teamTypes: TeamType[];
   triggers: ScenarioTrigger[];
   cellTriggers: Map<number, string>;
-  mapPack: string;  // raw Base64 MapPack data
+  mapPack: string;      // raw Base64 MapPack data
+  overlayPack: string;  // raw Base64 OverlayPack data
 }
 
 /** Parse an INI-format scenario file */
@@ -386,6 +387,16 @@ export function parseScenarioINI(text: string): ScenarioData {
     }
   }
 
+  // Collect OverlayPack data (Base64 across numbered lines)
+  let overlayPack = '';
+  const overlayPackSection = sections.get('OverlayPack');
+  if (overlayPackSection) {
+    const sortedKeys = [...overlayPackSection.keys()].sort((a, b) => parseInt(a) - parseInt(b));
+    for (const key of sortedKeys) {
+      overlayPack += overlayPackSection.get(key)!;
+    }
+  }
+
   // Parse [Briefing] section — numbered lines concatenated, @@ = paragraph break
   let briefing = '';
   const briefSection = sections.get('Briefing');
@@ -421,6 +432,7 @@ export function parseScenarioINI(text: string): ScenarioData {
     triggers,
     cellTriggers,
     mapPack,
+    overlayPack,
   };
 }
 
@@ -521,6 +533,11 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     decodeMapPack(data.mapPack, map);
   }
 
+  // Decode OverlayPack for ore/gem/wall overlays
+  if (data.overlayPack) {
+    decodeOverlayPack(data.overlayPack, map);
+  }
+
   // Apply terrain features from [TERRAIN] section
   for (const t of data.terrain) {
     const pos = cellIndexToPos(t.cell);
@@ -545,6 +562,8 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     const world = cellToWorld(pos.cx, pos.cy);
     const entity = new Entity(unitType, toHouse(u.house), world.x, world.y);
     entity.facing = Math.floor(u.facing / 32) % 8;
+    entity.desiredFacing = entity.facing;
+    entity.turretFacing = entity.facing;
     entity.hp = Math.floor((u.hp / 256) * entity.maxHp);
     entities.push(entity);
   }
@@ -556,6 +575,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     const world = cellToWorld(pos.cx, pos.cy);
     const entity = new Entity(unitType, toHouse(inf.house), world.x, world.y);
     entity.facing = Math.floor(inf.facing / 32) % 8;
+    entity.desiredFacing = entity.facing;
     entity.hp = Math.floor((inf.hp / 256) * entity.maxHp);
     entity.subCell = inf.subCell;
     entities.push(entity);
@@ -597,6 +617,28 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     triggers: data.triggers,
     cellTriggers: data.cellTriggers,
   };
+}
+
+// === OverlayPack Decoder ===
+// OverlayPack contains Base64-encoded, LCW-compressed overlay type data.
+// Single layer: overlay type ID per cell (0xFF = no overlay).
+// RA overlay IDs: 0x03-0x0E = Gold ore (GOLD01-GOLD12), 0x0F-0x12 = Gems (GEM01-GEM04)
+// 0x15-0x1F = Walls (BRIK, SBAG, CYCL, WOOD, FENC)
+
+function decodeOverlayPack(base64Data: string, map: GameMap): void {
+  try {
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const MAP_SIZE = 128 * 128;
+    const overlay = new Uint8Array(MAP_SIZE).fill(0xFF);
+    lcwDecompressMapPack(bytes, 0, overlay, MAP_SIZE);
+    map.overlay = overlay;
+  } catch {
+    // OverlayPack decode failed — overlays stay empty
+  }
 }
 
 // === MapPack Decoder ===
@@ -791,6 +833,14 @@ export function executeTriggerAction(
           const offsetY = (Math.random() - 0.5) * 48;
           const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
           entity.facing = Math.floor(Math.random() * 8);
+          // Assign team mission script to each member
+          if (team.missions.length > 0) {
+            entity.teamMissions = team.missions.map(m => ({
+              mission: m.mission,
+              data: m.data,
+            }));
+            entity.teamMissionIndex = 0;
+          }
           spawned.push(entity);
         }
       }

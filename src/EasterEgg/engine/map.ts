@@ -35,6 +35,9 @@ export class GameMap {
   templateType: Uint8Array;
   templateIcon: Uint8Array;
 
+  /** Overlay types from OverlayPack (0xFF = no overlay) */
+  overlay: Uint8Array;
+
   /** Cell triggers: maps cell index to trigger name (set by scenario loader) */
   cellTriggers = new Map<number, string>();
 
@@ -50,6 +53,7 @@ export class GameMap {
     this.visibility = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.templateType = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    this.overlay = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
     this.boundsX = 0;
     this.boundsY = 0;
     this.boundsW = MAP_CELLS;

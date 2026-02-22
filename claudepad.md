@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-02-23T01:30Z — Session 13: 1:1 Fidelity Features + Critical Bug Fixes
+- Continued implementing 1:1 RA ant mission features (Tasks #17-32)
+- Fixed screen shake save/restore mismatch bug in renderer
+- Added NoMovingFire flag (ants, artillery must face target before firing)
+- Added gradual rotation via tickRotation() with per-unit rot speed stat
+- Added infantry sub-cell rendering (5 positions per cell: center + 4 corners)
+- Added vehicle turret rendering (separate body/turret sprite layers, turret tracks target)
+- Added victory/defeat screen with stats (time, kills, losses)
+- Added custom cursor states (crosshair for attack, pointer for move, not-allowed for impassable)
+- Added building damage states and idle animations
+- Added command markers (green/red/yellow rings at move/attack destinations)
+- Added OverlayPack decoding for ore/gem/wall rendering on map
+- Added pause toggle (P/Escape) with pause overlay
+- Added shroud edge blending (soft transitions between shroud and revealed)
+- Fixed Escape key conflict between React UI and game engine pause
+- Added attack-move visual indicator ("A" crosshair near cursor)
+- Added path recalculation when blocked (with cooldown to prevent A* spam)
+- Added idle animation variety (per-unit random fidget delay)
+- Added voice acknowledgment pitch variety (randomized blip frequencies)
+- Code review found 6 critical bugs, all fixed:
+  1. Turret/desired facing not initialized from scenario data
+  2. TMISSION_GUARD duration 8x too long (scan rate vs tick rate)
+  3. HUNT mode walked through walls (now uses pathfinding)
+  4. noMovingFire was dead code (now enforces facing before attack)
+  5. Attack-move units didn't resume move after killing target
+  6. Path recalc hammered A* every tick (added 5-tick cooldown)
+- Also fixed: cellInfCount Map allocation GC pressure (reused class field)
+
 ## 2026-02-22T23:00Z — Session 11: RA Visual Fidelity — Sprites, Effects, Triggers, Terrain
 - Implemented 7-part plan to make ant missions look/play like real Red Alert
 - Fixed sprite frame mapping: ants (104 frames: stand/walk/attack), infantry (DoControls formula), vehicles (BodyShape[32])

@@ -154,9 +154,10 @@ export default function AntGame({ onExit }: AntGameProps) {
         e.preventDefault();
         if (screen === 'briefing') {
           setScreen('select');
-        } else {
+        } else if (screen === 'select') {
           onExit();
         }
+        // During gameplay, Escape is handled by the game engine (pause toggle)
       }
       if (screen === 'select' && e.key >= '1' && e.key <= String(MISSIONS.length)) {
         const idx = parseInt(e.key) - 1;

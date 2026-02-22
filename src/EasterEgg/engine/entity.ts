@@ -10,6 +10,12 @@ import {
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
 } from './types';
 
+export interface TeamMissionEntry {
+  mission: number;  // TMISSION_* type
+  data: number;     // waypoint index or other param
+}
+
+
 let nextId = 1;
 
 export function resetEntityIds(): void {
@@ -25,6 +31,8 @@ export class Entity {
   // Position
   pos: WorldPos;
   facing: Dir = Dir.N;
+  desiredFacing: Dir = Dir.N; // target facing for gradual rotation
+  turretFacing: Dir = Dir.N;  // turret direction (for turreted vehicles)
 
   // Health
   hp: number;
@@ -50,6 +58,7 @@ export class Entity {
   // AI rate-limiting
   lastGuardScan = 0;   // tick when guard last scanned
   lastAIScan = 0;      // tick when ant AI last scanned
+  lastPathRecalc = 0;  // tick when path was last recalculated (for blocked paths)
 
   // Combat
   attackCooldown = 0;
@@ -60,6 +69,11 @@ export class Entity {
 
   // Infantry sub-cell position (0-4 for the 5 sub-positions within a cell)
   subCell = 0;
+
+  // Team mission script: ordered list of missions the unit executes sequentially
+  teamMissions: TeamMissionEntry[] = [];
+  teamMissionIndex = 0;
+  teamMissionWaiting = 0;  // ticks to wait at current mission (for GUARD duration)
 
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
@@ -79,6 +93,19 @@ export class Entity {
 
   get isPlayerUnit(): boolean {
     return this.house === House.Spain || this.house === House.Greece;
+  }
+
+  get hasTurret(): boolean {
+    return !this.stats.isInfantry && !this.isAnt &&
+      this.type !== UnitType.V_APC && this.type !== UnitType.V_HARV &&
+      this.type !== UnitType.V_MCV && this.type !== UnitType.V_ARTY &&
+      this.type !== UnitType.V_JEEP;
+  }
+
+  /** Turret sprite frame (frames 32-63 in the vehicle SHP) */
+  get turretFrame(): number {
+    const facingIndex = this.turretFacing * 4; // 8 directions → 32-step index
+    return 32 + BODY_SHAPE[facingIndex];
   }
 
   get isAnt(): boolean {
@@ -123,8 +150,9 @@ export class Entity {
           return d.frame + Math.min(this.animFrame, d.count - 1);
         }
         default: {
-          // Idle: use idle fidget if available and enough time has passed
-          if (anim.idle && this.animFrame > 15) {
+          // Idle: use idle fidget if available after a variable delay (per-unit)
+          const fidgetDelay = 12 + (this.id * 7) % 20; // 12-31 frames
+          if (anim.idle && this.animFrame > fidgetDelay) {
             const d = anim.idle;
             return d.frame + (this.animFrame % d.count);
           }
@@ -187,6 +215,26 @@ export class Entity {
     if (this.damageFlash > 0) this.damageFlash--;
   }
 
+  /** Gradually rotate facing toward desiredFacing based on rot speed.
+   *  Returns true if facing matches desiredFacing. */
+  tickRotation(): boolean {
+    if (this.facing === this.desiredFacing) return true;
+    // rot determines how fast we turn: 8=instant (infantry), lower=slower
+    // rot 8 = snap, rot 4 = 2 ticks per step, rot 1 = 8 ticks per step
+    if (this.stats.rot >= 8) {
+      this.facing = this.desiredFacing;
+      return true;
+    }
+    // Calculate shortest rotation direction (clockwise or counter-clockwise)
+    const diff = (this.desiredFacing - this.facing + 8) % 8;
+    if (diff <= 4) {
+      this.facing = ((this.facing + 1) % 8) as Dir;
+    } else {
+      this.facing = ((this.facing + 7) % 8) as Dir; // -1 mod 8
+    }
+    return this.facing === this.desiredFacing;
+  }
+
   /** Move toward a world position at the unit's speed */
   moveToward(target: WorldPos, speed: number): boolean {
     const dx = target.x - this.pos.x;
@@ -199,7 +247,8 @@ export class Entity {
       return true; // arrived
     }
 
-    this.facing = directionTo(this.pos, target);
+    this.desiredFacing = directionTo(this.pos, target);
+    this.tickRotation();
     this.pos.x += (dx / dist) * speed;
     this.pos.y += (dy / dist) * speed;
     return false;

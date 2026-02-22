@@ -12,9 +12,11 @@ export interface InputState {
   dragStartY: number;
   isDragging: boolean;
   keys: Set<string>;   // currently held keys
+  ctrlHeld: boolean;   // ctrl/meta key held
   // Events consumed per tick
   leftClick: { x: number; y: number } | null;
   rightClick: { x: number; y: number } | null;
+  doubleClick: { x: number; y: number } | null;
   dragBox: { x1: number; y1: number; x2: number; y2: number } | null;
 }
 
@@ -31,14 +33,21 @@ export class InputManager {
     dragStartY: 0,
     isDragging: false,
     keys: new Set(),
+    ctrlHeld: false,
     leftClick: null,
     rightClick: null,
+    doubleClick: null,
     dragBox: null,
   };
 
   private canvas: HTMLCanvasElement;
   private scaleX = 1;
   private scaleY = 1;
+  private lastClickTime = 0;
+  private lastClickX = 0;
+  private lastClickY = 0;
+  private readonly DOUBLE_CLICK_TIME = 300; // ms
+  private readonly DOUBLE_CLICK_DIST = 8; // px
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -56,6 +65,7 @@ export class InputManager {
   clearEvents(): void {
     this.state.leftClick = null;
     this.state.rightClick = null;
+    this.state.doubleClick = null;
     this.state.dragBox = null;
   }
 
@@ -117,7 +127,20 @@ export class InputManager {
           y2: Math.max(this.state.dragStartY, pos.y),
         };
       } else {
-        this.state.leftClick = { x: pos.x, y: pos.y };
+        // Check for double-click
+        const now = performance.now();
+        const dx = pos.x - this.lastClickX;
+        const dy = pos.y - this.lastClickY;
+        if (now - this.lastClickTime < this.DOUBLE_CLICK_TIME &&
+            Math.abs(dx) < this.DOUBLE_CLICK_DIST && Math.abs(dy) < this.DOUBLE_CLICK_DIST) {
+          this.state.doubleClick = { x: pos.x, y: pos.y };
+          this.lastClickTime = 0; // reset to prevent triple-trigger
+        } else {
+          this.state.leftClick = { x: pos.x, y: pos.y };
+          this.lastClickTime = now;
+          this.lastClickX = pos.x;
+          this.lastClickY = pos.y;
+        }
       }
       this.state.mouseDown = false;
       this.state.isDragging = false;
@@ -133,10 +156,12 @@ export class InputManager {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     this.state.keys.add(e.key);
+    if (e.key === 'Control' || e.key === 'Meta') this.state.ctrlHeld = true;
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
     this.state.keys.delete(e.key);
+    if (e.key === 'Control' || e.key === 'Meta') this.state.ctrlHeld = false;
   };
 
   destroy(): void {

@@ -4,13 +4,23 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE } from './types';
+import { CELL_SIZE, House, SUB_CELL_OFFSETS } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
 import { type Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
 import { type MapStructure } from './scenario';
+
+// House color tints (used for unit sprite remapping)
+const HOUSE_TINT: Record<string, string> = {
+  [House.Spain]:   'rgba(255,255,80,0.25)',   // yellow/gold — player allied
+  [House.Greece]:  'rgba(80,180,255,0.25)',    // blue — allied
+  [House.USSR]:    'rgba(255,60,60,0.30)',     // red — ant faction
+  [House.Ukraine]: 'rgba(200,80,200,0.25)',    // purple — ant faction
+  [House.Germany]: 'rgba(160,160,160,0.25)',   // gray — ant faction
+  [House.Neutral]: 'rgba(0,0,0,0)',            // no tint
+};
 
 // TEMPERATE.PAL palette index ranges for terrain rendering
 // These are the actual palette indices from the extracted TEMPERAT.PAL
@@ -26,7 +36,7 @@ const PAL_GREEN_HP = 120;     // bright green [0,255,0]
 const PAL_RED_HP = 104;       // red [190,0,0]
 
 export interface Effect {
-  type: 'explosion' | 'muzzle' | 'blood' | 'tesla';
+  type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker';
   x: number;
   y: number;
   frame: number;
@@ -35,6 +45,14 @@ export interface Effect {
   // Sprite-based effect rendering
   sprite?: string;       // sprite sheet name (e.g. 'fball1', 'piff')
   spriteStart?: number;  // first frame index in the sheet
+  // Projectile travel
+  startX?: number;       // projectile origin
+  startY?: number;
+  endX?: number;         // projectile destination
+  endY?: number;
+  projStyle?: 'bullet' | 'fireball' | 'shell' | 'rocket';
+  // Marker color (for move/attack command feedback)
+  markerColor?: string;
 }
 
 // Pseudo-random hash for terrain variation
@@ -50,6 +68,8 @@ export class Renderer {
   private width: number;
   private height: number;
   private pal: number[][] | null = null;
+  screenShake = 0;      // remaining shake ticks
+  attackMoveMode = false; // show attack-move cursor indicator
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -86,12 +106,31 @@ export class Renderer {
     // Cache palette reference from assets
     if (!this.pal) this.pal = assets.getPalette();
 
+    // Apply screen shake
+    let shaking = false;
+    if (this.screenShake > 0) {
+      shaking = true;
+      const intensity = Math.min(this.screenShake, 6);
+      const sx = (Math.random() - 0.5) * intensity * 2;
+      const sy = (Math.random() - 0.5) * intensity * 2;
+      ctx.save();
+      ctx.translate(sx, sy);
+      this.screenShake--;
+    }
+
     this.renderTerrain(camera, map, tick);
-    this.renderStructures(camera, map, structures, assets);
+    this.renderOverlays(camera, map);
+    this.renderStructures(camera, map, structures, assets, tick);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
     this.renderEffects(camera, effects, assets);
     this.renderFogOfWar(camera, map);
+
+    if (shaking) {
+      ctx.restore();
+    }
+
     this.renderSelectionBox(input);
+    if (this.attackMoveMode) this.renderAttackMoveIndicator(input);
     this.renderMinimap(map, entities, camera);
     this.renderUnitInfo(entities, selectedIds);
   }
@@ -248,10 +287,61 @@ export class Renderer {
     }
   }
 
+  // ─── Overlays (ore, gems, walls) ────────────────────────
+
+  private renderOverlays(camera: Camera, map: GameMap): void {
+    const ctx = this.ctx;
+    const startCX = Math.floor(camera.x / CELL_SIZE);
+    const startCY = Math.floor(camera.y / CELL_SIZE);
+    const endCX = Math.ceil((camera.x + this.width) / CELL_SIZE);
+    const endCY = Math.ceil((camera.y + this.height) / CELL_SIZE);
+
+    for (let cy = startCY; cy <= endCY; cy++) {
+      for (let cx = startCX; cx <= endCX; cx++) {
+        if (cx < 0 || cx >= 128 || cy < 0 || cy >= 128) continue;
+        const ovl = map.overlay[cy * 128 + cx];
+        if (ovl === 0xFF) continue;
+
+        const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
+        const h = cellHash(cx, cy);
+
+        if (ovl >= 0x03 && ovl <= 0x0E) {
+          // Gold ore (GOLD01-GOLD12) — palette gold/yellow tones
+          const density = ovl - 0x03; // 0-11
+          ctx.fillStyle = this.palColor(PAL_DIRT_START + 2 + (density % 4), 20);
+          ctx.fillRect(screen.x + 2, screen.y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+          // Ore scatter dots
+          const dots = 2 + Math.floor(density / 3);
+          ctx.fillStyle = this.palColor(PAL_DIRT_START, 40);
+          for (let d = 0; d < dots; d++) {
+            const dx = ((h + d * 37) % 16) + 3;
+            const dy = (((h >> 3) + d * 53) % 16) + 3;
+            ctx.fillRect(screen.x + dx, screen.y + dy, 3, 2);
+          }
+        } else if (ovl >= 0x0F && ovl <= 0x12) {
+          // Gems (GEM01-GEM04) — purple/magenta tones
+          ctx.fillStyle = 'rgba(160,60,200,0.35)';
+          ctx.fillRect(screen.x + 2, screen.y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+          // Gem facets
+          ctx.fillStyle = 'rgba(200,100,255,0.6)';
+          ctx.fillRect(screen.x + 5 + (h % 6), screen.y + 5, 4, 4);
+          ctx.fillRect(screen.x + 12 + (h % 4), screen.y + 12, 3, 3);
+        } else if (ovl >= 0x15 && ovl <= 0x1F) {
+          // Walls — dark gray blocks
+          ctx.fillStyle = this.palColor(PAL_ROCK_START + 6);
+          ctx.fillRect(screen.x + 1, screen.y + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(screen.x + 1.5, screen.y + 1.5, CELL_SIZE - 3, CELL_SIZE - 3);
+        }
+      }
+    }
+  }
+
   // ─── Structures ─────────────────────────────────────────
 
   private renderStructures(
-    camera: Camera, map: GameMap, structures: MapStructure[], assets: AssetManager,
+    camera: Camera, map: GameMap, structures: MapStructure[], assets: AssetManager, tick: number,
   ): void {
     const ctx = this.ctx;
     for (const s of structures) {
@@ -263,9 +353,21 @@ export class Renderer {
 
       const sheet = assets.getSheet(s.image);
       if (sheet) {
-        // Draw first frame of the sprite sheet
+        // Determine frame: damaged buildings use second half of frames
+        const totalFrames = sheet.meta.frameCount;
+        const damaged = s.hp < 128; // less than 50% health
+        let frame = 0;
+        if (totalFrames > 2) {
+          const halfFrames = Math.floor(totalFrames / 2);
+          const baseFrame = damaged ? halfFrames : 0;
+          // Animate idle loop (every 8 ticks = ~0.5s per frame)
+          const animFrames = damaged ? totalFrames - halfFrames : halfFrames;
+          frame = baseFrame + (Math.floor(tick / 8) % Math.max(1, animFrames));
+        } else if (totalFrames === 2) {
+          frame = damaged ? 1 : 0;
+        }
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
-        assets.drawFrame(ctx, s.image, 0, screenX + sheet.meta.frameWidth / 2, screenY + sheet.meta.frameHeight / 2, {
+        assets.drawFrame(ctx, s.image, frame % totalFrames, screenX + sheet.meta.frameWidth / 2, screenY + sheet.meta.frameHeight / 2, {
           centerX: true,
           centerY: true,
         });
@@ -314,7 +416,9 @@ export class Renderer {
       // Don't render enemy entities in fog (only player units visible in fog)
       if (map.getVisibility(ecx, ecy) === 1 && !entity.isPlayerUnit) continue;
 
-      const screen = camera.worldToScreen(entity.pos.x, entity.pos.y);
+      // Apply infantry sub-cell offset
+      const subOff = entity.stats.isInfantry ? (SUB_CELL_OFFSETS[entity.subCell] ?? SUB_CELL_OFFSETS[0]) : SUB_CELL_OFFSETS[0];
+      const screen = camera.worldToScreen(entity.pos.x + subOff.x, entity.pos.y + subOff.y);
       const sheet = assets.getSheet(entity.stats.image);
       const spriteW = sheet ? sheet.meta.frameWidth : (entity.stats.isInfantry ? 50 : 24);
       const spriteH = sheet ? sheet.meta.frameHeight : (entity.stats.isInfantry ? 39 : 24);
@@ -343,13 +447,32 @@ export class Renderer {
         ctx.stroke();
       }
 
-      // Draw sprite
+      // Draw sprite with house-color tint
       if (sheet) {
         const frame = entity.spriteFrame % sheet.meta.frameCount;
         assets.drawFrame(ctx, entity.stats.image, frame, screen.x, screen.y, {
           centerX: true,
           centerY: true,
         });
+        // Draw turret layer for turreted vehicles (frames 32-63)
+        if (entity.hasTurret && sheet.meta.frameCount >= 64) {
+          const turretFrame = entity.turretFrame % sheet.meta.frameCount;
+          assets.drawFrame(ctx, entity.stats.image, turretFrame, screen.x, screen.y, {
+            centerX: true,
+            centerY: true,
+          });
+        }
+        // Apply house-color tint as a colored overlay on the sprite area
+        const tint = HOUSE_TINT[entity.house];
+        if (tint && tint !== 'rgba(0,0,0,0)') {
+          ctx.fillStyle = tint;
+          ctx.fillRect(
+            screen.x - spriteW / 2,
+            screen.y - spriteH / 2,
+            spriteW,
+            spriteH,
+          );
+        }
       } else {
         // Fallback
         const size = entity.stats.isInfantry ? 8 : 16;
@@ -446,6 +569,73 @@ export class Renderer {
         // Fall through to procedural if sprite not loaded
       }
 
+      // Projectile rendering
+      if (fx.type === 'projectile' && fx.startX != null && fx.startY != null &&
+          fx.endX != null && fx.endY != null) {
+        const t = fx.frame / fx.maxFrames;
+        const px = fx.startX + (fx.endX - fx.startX) * t;
+        const py = fx.startY + (fx.endY - fx.startY) * t;
+        // Arc for shells/rockets
+        const arcY = fx.projStyle === 'shell' || fx.projStyle === 'rocket'
+          ? -Math.sin(t * Math.PI) * 30 : 0;
+        const screenP = camera.worldToScreen(px, py + arcY);
+
+        switch (fx.projStyle) {
+          case 'bullet': {
+            ctx.fillStyle = '#ff0';
+            ctx.fillRect(screenP.x - 1, screenP.y - 1, 2, 2);
+            break;
+          }
+          case 'fireball': {
+            ctx.fillStyle = `rgba(255,${100 + Math.floor(t * 100)},30,${1 - t * 0.3})`;
+            ctx.beginPath();
+            ctx.arc(screenP.x, screenP.y, 3 + t * 2, 0, Math.PI * 2);
+            ctx.fill();
+            break;
+          }
+          case 'shell': {
+            ctx.fillStyle = '#ccc';
+            ctx.fillRect(screenP.x - 1, screenP.y - 1, 3, 3);
+            // Shadow on ground
+            const groundScreen = camera.worldToScreen(px, py);
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(groundScreen.x - 1, groundScreen.y, 2, 1);
+            break;
+          }
+          case 'rocket': {
+            ctx.fillStyle = '#fa0';
+            ctx.fillRect(screenP.x - 1, screenP.y - 1, 3, 3);
+            // Smoke trail
+            ctx.fillStyle = 'rgba(180,180,180,0.4)';
+            const trailT = Math.max(0, t - 0.1);
+            const tx = fx.startX + (fx.endX - fx.startX) * trailT;
+            const ty = fx.startY + (fx.endY - fx.startY) * trailT - Math.sin(trailT * Math.PI) * 30;
+            const trailScreen = camera.worldToScreen(tx, ty);
+            ctx.fillRect(trailScreen.x - 1, trailScreen.y - 1, 2, 2);
+            break;
+          }
+        }
+        continue;
+      }
+
+      // Command marker (move/attack feedback)
+      if (fx.type === 'marker' && fx.markerColor) {
+        const alpha = 1 - progress;
+        const r = fx.size * (1 - progress * 0.5);
+        ctx.strokeStyle = fx.markerColor.replace('1)', `${alpha})`);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        // Inner shrinking ring
+        if (progress < 0.5) {
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y, r * 0.4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        continue;
+      }
+
       // Procedural fallback for effects without sprite sheets
       switch (fx.type) {
         case 'explosion': {
@@ -527,6 +717,7 @@ export class Renderer {
     const startCY = Math.floor(camera.y / CELL_SIZE);
     const endCX = Math.ceil((camera.x + this.width) / CELL_SIZE);
     const endCY = Math.ceil((camera.y + this.height) / CELL_SIZE);
+    const half = CELL_SIZE / 2;
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
@@ -536,9 +727,22 @@ export class Renderer {
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
 
         if (vis === 0) {
-          // Shroud — solid black
+          // Shroud — solid black with edge blending
           ctx.fillStyle = '#000';
           ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+
+          // Soften edges where shroud meets revealed terrain
+          // Check 4 cardinal neighbors for visibility transitions
+          const vN = map.getVisibility(cx, cy - 1);
+          const vS = map.getVisibility(cx, cy + 1);
+          const vW = map.getVisibility(cx - 1, cy);
+          const vE = map.getVisibility(cx + 1, cy);
+
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          if (vN > 0) ctx.fillRect(screen.x, screen.y - half, CELL_SIZE, half);
+          if (vS > 0) ctx.fillRect(screen.x, screen.y + CELL_SIZE, CELL_SIZE, half);
+          if (vW > 0) ctx.fillRect(screen.x - half, screen.y, half, CELL_SIZE);
+          if (vE > 0) ctx.fillRect(screen.x + CELL_SIZE, screen.y, half, CELL_SIZE);
         } else {
           // Fog — semi-transparent dark overlay
           ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -638,6 +842,81 @@ export class Renderer {
       (camera.viewWidth / CELL_SIZE) * scale,
       (camera.viewHeight / CELL_SIZE) * scale,
     );
+  }
+
+  // ─── Attack-Move Indicator ──────────────────────────────
+
+  private renderAttackMoveIndicator(input: InputState): void {
+    const ctx = this.ctx;
+    const mx = input.mouseX;
+    const my = input.mouseY;
+    const s = 8;
+    // Red crosshair near cursor
+    ctx.strokeStyle = 'rgba(255,80,80,0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(mx - s, my); ctx.lineTo(mx + s, my);
+    ctx.moveTo(mx, my - s); ctx.lineTo(mx, my + s);
+    ctx.stroke();
+    // "A" label
+    ctx.font = 'bold 10px monospace';
+    ctx.fillStyle = 'rgba(255,80,80,0.9)';
+    ctx.fillText('A', mx + s + 2, my - 2);
+  }
+
+  // ─── Pause Overlay ──────────────────────────────────────
+
+  renderPauseOverlay(): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+    ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 10);
+    ctx.font = '12px monospace';
+    ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
+    ctx.fillText('Press P to resume', this.width / 2, this.height / 2 + 15);
+    ctx.textAlign = 'left';
+  }
+
+  // ─── End Screen ─────────────────────────────────────────
+
+  renderEndScreen(
+    won: boolean,
+    killCount: number,
+    lossCount: number,
+    tick: number,
+  ): void {
+    const ctx = this.ctx;
+    const w = this.width;
+    const h = this.height;
+
+    // Semi-transparent overlay
+    ctx.fillStyle = won ? 'rgba(0,40,0,0.75)' : 'rgba(60,0,0,0.75)';
+    ctx.fillRect(0, 0, w, h);
+
+    // Title
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 24px monospace';
+    ctx.fillStyle = won ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
+    ctx.fillText(won ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED', w / 2, h / 2 - 60);
+
+    // Stats
+    ctx.font = '14px monospace';
+    ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+    const minutes = Math.floor(tick / (15 * 60));
+    const seconds = Math.floor((tick / 15) % 60);
+    const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    ctx.fillText(`Time: ${timeStr}`, w / 2, h / 2 - 20);
+    ctx.fillText(`Enemies Killed: ${killCount}`, w / 2, h / 2 + 5);
+    ctx.fillText(`Units Lost: ${lossCount}`, w / 2, h / 2 + 30);
+
+    // Prompt
+    ctx.font = '12px monospace';
+    ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
+    ctx.fillText('Press any key to continue', w / 2, h / 2 + 70);
+    ctx.textAlign = 'left';
   }
 
   // ─── Unit Info Panel ─────────────────────────────────────

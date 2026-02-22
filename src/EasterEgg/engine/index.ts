@@ -6,8 +6,10 @@
 import {
   type WorldPos, CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, worldDist, directionTo, worldToCell,
+  WARHEAD_VS_ARMOR,
 } from './types';
 import { AssetManager } from './assets';
+import { AudioManager } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
 import { Entity, resetEntityIds } from './entity';
@@ -21,12 +23,14 @@ import {
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
 export type { MissionInfo } from './scenario';
+export { AudioManager } from './audio';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
 
 export class Game {
   // Core systems
   assets: AssetManager;
+  audio: AudioManager;
   camera: Camera;
   input: InputManager;
   map: GameMap;
@@ -37,6 +41,12 @@ export class Game {
   entityById = new Map<number, Entity>();
   structures: MapStructure[] = [];
   selectedIds = new Set<number>();
+  controlGroups: Map<number, Set<number>> = new Map(); // 1-9 → entity IDs
+  attackMoveMode = false;
+  private cellInfCount = new Map<number, number>(); // reused each tick for sub-cell assignment
+  // Stats tracking
+  killCount = 0;
+  lossCount = 0;
   effects: Effect[] = [];
   state: GameState = 'loading';
   tick = 0;
@@ -69,6 +79,7 @@ export class Game {
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.assets = new AssetManager();
+    this.audio = new AudioManager();
     this.camera = new Camera(canvas.width, canvas.height);
     this.input = new InputManager(canvas);
     this.map = new GameMap();
@@ -82,6 +93,10 @@ export class Game {
     this.scenarioId = scenarioId;
     this.onStateChange?.('loading');
     resetEntityIds();
+
+    // Initialize audio (needs user gesture context — start() is called from click)
+    this.audio.init();
+    this.audio.resume();
 
     // Load sprite sheets
     await this.assets.loadAll((loaded, total) => {
@@ -138,10 +153,38 @@ export class Game {
     if (this.timerId) clearTimeout(this.timerId);
     this.timerId = 0;
     this.input.destroy();
+    this.audio.destroy();
+  }
+
+  /** Toggle pause/unpause */
+  togglePause(): void {
+    if (this.state === 'playing') {
+      this.state = 'paused';
+      this.onStateChange?.('paused');
+    } else if (this.state === 'paused') {
+      this.state = 'playing';
+      this.onStateChange?.('playing');
+      this.lastTime = performance.now();
+      this.scheduleNext();
+    }
   }
 
   /** Main game loop — uses setTimeout fallback when RAF is throttled */
   private gameLoop = (): void => {
+    if (this.state === 'paused') {
+      // Check for unpause key
+      const { keys } = this.input.state;
+      if (keys.has('p') || keys.has('Escape')) {
+        keys.delete('p');
+        keys.delete('Escape');
+        this.togglePause();
+        return;
+      }
+      // Render but don't tick — still show pause overlay
+      this.render();
+      this.timerId = window.setTimeout(this.gameLoop, 100); // slow render rate while paused
+      return;
+    }
     if (this.state !== 'playing') {
       // Still render final frame but stop ticking
       this.render();
@@ -185,12 +228,36 @@ export class Game {
     // Clear one-shot events after consumption
     this.input.clearEvents();
 
+    // Update cursor based on context
+    this.updateCursor();
+
+    // Minimap drag — if mouse is held down on minimap, continuously scroll
+    if (this.input.state.mouseDown) {
+      this.handleMinimapClick(this.input.state.mouseX, this.input.state.mouseY);
+    }
+
     // Update camera scrolling
     this.camera.keyScroll(this.input.state.keys);
     this.camera.edgeScroll(this.input.state.mouseX, this.input.state.mouseY, this.input.state.mouseActive);
 
     // Update fog of war
     this.updateFogOfWar();
+
+    // Update occupancy grid and assign infantry sub-cell positions
+    this.map.occupancy.fill(0);
+    this.cellInfCount.clear();
+    for (const entity of this.entities) {
+      if (entity.alive) {
+        this.map.setOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
+        // Assign sub-cell positions for infantry so they spread within the cell
+        if (entity.stats.isInfantry) {
+          const ci = entity.cell.cy * 128 + entity.cell.cx;
+          const cnt = this.cellInfCount.get(ci) ?? 0;
+          entity.subCell = cnt % 5;
+          this.cellInfCount.set(ci, cnt + 1);
+        }
+      }
+    }
 
     // Update all entities
     for (const entity of this.entities) {
@@ -238,29 +305,199 @@ export class Game {
     this.map.updateFogOfWar(units);
   }
 
+  // Minimap dimensions (must match renderer)
+  private static readonly MM_SIZE = 90;
+  private static readonly MM_MARGIN = 6;
+
+  /** Check if a screen click is on the minimap; if so, scroll camera there */
+  private handleMinimapClick(sx: number, sy: number): boolean {
+    const mmX = this.canvas.width - Game.MM_SIZE - Game.MM_MARGIN;
+    const mmY = Game.MM_MARGIN;
+    if (sx < mmX || sx > mmX + Game.MM_SIZE || sy < mmY || sy > mmY + Game.MM_SIZE) {
+      return false;
+    }
+    // Convert minimap click to world coordinates
+    const scale = Game.MM_SIZE / Math.max(this.map.boundsW, this.map.boundsH);
+    const worldCX = this.map.boundsX + (sx - mmX) / scale;
+    const worldCY = this.map.boundsY + (sy - mmY) / scale;
+    this.camera.centerOn(worldCX * CELL_SIZE, worldCY * CELL_SIZE);
+    return true;
+  }
+
+  /** Update cursor based on mouse position and selection state */
+  private updateCursor(): void {
+    if (this.selectedIds.size === 0) {
+      this.canvas.style.cursor = 'default';
+      return;
+    }
+    if (this.attackMoveMode) {
+      this.canvas.style.cursor = 'crosshair';
+      return;
+    }
+    const { mouseX, mouseY } = this.input.state;
+    const world = this.camera.screenToWorld(mouseX, mouseY);
+    const hovered = this.findEntityAt(world);
+    if (hovered && !hovered.isPlayerUnit && hovered.alive) {
+      this.canvas.style.cursor = 'crosshair'; // attack cursor
+    } else {
+      // Check if terrain is passable
+      const cell = worldToCell(world.x, world.y);
+      const passable = this.map.isPassable(cell.cx, cell.cy);
+      this.canvas.style.cursor = passable ? 'pointer' : 'not-allowed';
+    }
+  }
+
   /** Process player input — selection and commands */
   private processInput(): void {
-    const { leftClick, rightClick, dragBox } = this.input.state;
+    const { leftClick, rightClick, doubleClick, dragBox, ctrlHeld, keys } = this.input.state;
 
+    // --- Pause toggle (P or Escape) ---
+    if (keys.has('p') || keys.has('Escape')) {
+      keys.delete('p');
+      keys.delete('Escape');
+      this.togglePause();
+      return;
+    }
+
+    // --- Keyboard shortcuts ---
+    // S = stop all selected units
+    if (keys.has('s') && !keys.has('ArrowDown')) {
+      for (const id of this.selectedIds) {
+        const unit = this.entityById.get(id);
+        if (!unit || !unit.alive) continue;
+        unit.mission = Mission.GUARD;
+        unit.target = null;
+        unit.moveTarget = null;
+        unit.path = [];
+        unit.animState = AnimState.IDLE;
+      }
+    }
+
+    // Ctrl+1-9: assign control group
+    if (ctrlHeld) {
+      for (let g = 1; g <= 9; g++) {
+        if (keys.has(String(g)) && this.selectedIds.size > 0) {
+          this.controlGroups.set(g, new Set(this.selectedIds));
+          keys.delete(String(g)); // consume
+        }
+      }
+    } else {
+      // 1-9 without ctrl: recall control group (but not while typing other stuff)
+      for (let g = 1; g <= 9; g++) {
+        if (keys.has(String(g))) {
+          const group = this.controlGroups.get(g);
+          if (group && group.size > 0) {
+            for (const e of this.entities) e.selected = false;
+            this.selectedIds.clear();
+            for (const id of group) {
+              const unit = this.entityById.get(id);
+              if (unit?.alive) {
+                this.selectedIds.add(id);
+                unit.selected = true;
+              }
+            }
+            if (this.selectedIds.size > 0) this.audio.play('select');
+          }
+          keys.delete(String(g)); // consume
+        }
+      }
+    }
+
+    // A key: toggle attack-move mode
+    if (keys.has('a') && !keys.has('ArrowLeft')) {
+      this.attackMoveMode = true;
+      keys.delete('a');
+    }
+
+    // --- Double-click: select all same type on screen ---
+    if (doubleClick) {
+      const world = this.camera.screenToWorld(doubleClick.x, doubleClick.y);
+      const clicked = this.findEntityAt(world);
+      if (clicked && clicked.isPlayerUnit) {
+        for (const e of this.entities) e.selected = false;
+        this.selectedIds.clear();
+        // Select all alive player units of same type visible on screen
+        for (const e of this.entities) {
+          if (!e.alive || !e.isPlayerUnit || e.type !== clicked.type) continue;
+          const screen = this.camera.worldToScreen(e.pos.x, e.pos.y);
+          if (screen.x >= 0 && screen.x <= this.canvas.width &&
+              screen.y >= 0 && screen.y <= this.canvas.height) {
+            this.selectedIds.add(e.id);
+            e.selected = true;
+          }
+        }
+        this.audio.play('select');
+      }
+    }
+
+    // --- Left click ---
     if (leftClick) {
+      // Check minimap click first
+      if (this.handleMinimapClick(leftClick.x, leftClick.y)) return;
+
+      // Attack-move: A+click = move to point but attack enemies along the way
+      if (this.attackMoveMode) {
+        this.attackMoveMode = false;
+        const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
+        const units: Entity[] = [];
+        for (const id of this.selectedIds) {
+          const unit = this.entityById.get(id);
+          if (unit?.alive) units.push(unit);
+        }
+        let spreadIdx = 0;
+        for (const unit of units) {
+          const spread = units.length > 1 ? this.spreadOffset(spreadIdx, units.length) : { x: 0, y: 0 };
+          spreadIdx++;
+          unit.mission = Mission.HUNT;
+          unit.moveTarget = { x: world.x + spread.x, y: world.y + spread.y };
+          unit.target = null;
+          unit.path = findPath(this.map, unit.cell, worldToCell(world.x + spread.x, world.y + spread.y), true);
+          unit.pathIndex = 0;
+        }
+        if (units.length > 0) {
+          this.audio.play('attack_ack');
+          this.effects.push({
+            type: 'marker', x: world.x, y: world.y, frame: 0, maxFrames: 15, size: 10,
+            markerColor: 'rgba(255,200,60,1)',
+          });
+        }
+        return;
+      }
+
       const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
       const clicked = this.findEntityAt(world);
 
       if (clicked && clicked.isPlayerUnit) {
-        this.selectedIds.clear();
-        for (const e of this.entities) e.selected = false;
-        this.selectedIds.add(clicked.id);
-        clicked.selected = true;
+        if (ctrlHeld) {
+          // Ctrl+click: toggle selection
+          if (this.selectedIds.has(clicked.id)) {
+            this.selectedIds.delete(clicked.id);
+            clicked.selected = false;
+          } else {
+            this.selectedIds.add(clicked.id);
+            clicked.selected = true;
+          }
+        } else {
+          this.selectedIds.clear();
+          for (const e of this.entities) e.selected = false;
+          this.selectedIds.add(clicked.id);
+          clicked.selected = true;
+        }
+        this.audio.play('select');
       } else {
-        for (const e of this.entities) e.selected = false;
-        this.selectedIds.clear();
+        if (!ctrlHeld) {
+          for (const e of this.entities) e.selected = false;
+          this.selectedIds.clear();
+        }
       }
     }
 
     if (dragBox) {
-      this.selectedIds.clear();
+      if (!ctrlHeld) {
+        this.selectedIds.clear();
+        for (const e of this.entities) e.selected = false;
+      }
       for (const e of this.entities) {
-        e.selected = false;
         if (!e.isPlayerUnit || !e.alive) continue;
         const screen = this.camera.worldToScreen(e.pos.x, e.pos.y);
         if (screen.x >= dragBox.x1 && screen.x <= dragBox.x2 &&
@@ -275,28 +512,74 @@ export class Game {
       const world = this.camera.screenToWorld(rightClick.x, rightClick.y);
       const target = this.findEntityAt(world);
 
+      let commandIssued = false;
+      // Spread group move targets so units don't all converge to one cell
+      const units: Entity[] = [];
       for (const id of this.selectedIds) {
         const unit = this.entityById.get(id);
-        if (!unit || !unit.alive) continue;
+        if (unit && unit.alive) units.push(unit);
+      }
+      let spreadIdx = 0;
+      for (const unit of units) {
+        commandIssued = true;
 
         if (target && !target.isPlayerUnit && target.alive) {
           unit.mission = Mission.ATTACK;
           unit.target = target;
           unit.moveTarget = null;
         } else {
+          // Spread units in a grid around the target point
+          const spread = units.length > 1 ? this.spreadOffset(spreadIdx, units.length) : { x: 0, y: 0 };
+          spreadIdx++;
+          const goalX = world.x + spread.x;
+          const goalY = world.y + spread.y;
           unit.mission = Mission.MOVE;
-          unit.moveTarget = { x: world.x, y: world.y };
+          unit.moveTarget = { x: goalX, y: goalY };
           unit.target = null;
+          // Clear team mission scripts when player gives direct orders
+          unit.teamMissions = [];
+          unit.teamMissionIndex = 0;
           unit.path = findPath(
             this.map,
             unit.cell,
-            worldToCell(world.x, world.y),
+            worldToCell(goalX, goalY),
             true
           );
           unit.pathIndex = 0;
         }
       }
+      if (commandIssued) {
+        const isAttack = target && !target.isPlayerUnit;
+        this.audio.play(isAttack ? 'attack_ack' : 'move_ack');
+        // Spawn command marker at destination
+        this.effects.push({
+          type: 'marker', x: world.x, y: world.y, frame: 0, maxFrames: 15, size: 10,
+          markerColor: isAttack ? 'rgba(255,60,60,1)' : 'rgba(80,255,80,1)',
+        });
+      }
     }
+  }
+
+  /** Map weapon name to projectile visual style */
+  private weaponProjectileStyle(name: string): 'bullet' | 'fireball' | 'shell' | 'rocket' {
+    switch (name) {
+      case 'FireballLauncher': case 'Flamethrower': return 'fireball';
+      case 'TankGun': case 'ArtilleryShell': return 'shell';
+      case 'Bazooka': case 'MammothTusk': return 'rocket';
+      default: return 'bullet';
+    }
+  }
+
+  /** Calculate spread offset for group move — arranges units in a grid */
+  private spreadOffset(idx: number, total: number): { x: number; y: number } {
+    if (total <= 1) return { x: 0, y: 0 };
+    const cols = Math.ceil(Math.sqrt(total));
+    const row = Math.floor(idx / cols);
+    const col = idx % cols;
+    const spacing = CELL_SIZE;
+    const offsetX = (col - (cols - 1) / 2) * spacing;
+    const offsetY = (row - (Math.ceil(total / cols) - 1) / 2) * spacing;
+    return { x: offsetX, y: offsetY };
   }
 
   /** Find an entity near a world position */
@@ -319,11 +602,15 @@ export class Game {
 
   /** Update a single entity's AI and movement */
   private updateEntity(entity: Entity): void {
-    // Ant AI: HUNT behavior (rate-limited to every 8 ticks)
+    // Team mission script execution (rate-limited to every 8 ticks)
     if (entity.isAnt && entity.mission !== Mission.DIE) {
       if (this.tick - entity.lastAIScan >= 8) {
         entity.lastAIScan = this.tick;
-        this.updateAntAI(entity);
+        if (entity.teamMissions.length > 0) {
+          this.updateTeamMission(entity);
+        } else {
+          this.updateAntAI(entity);
+        }
       }
     }
 
@@ -345,7 +632,136 @@ export class Game {
     entity.tickAnimation();
   }
 
-  /** Ant AI — continuously hunt nearest player unit */
+  // Team mission type constants (from RA TEAMTYPE.CPP)
+  private static readonly TMISSION_ATTACK = 0;
+  private static readonly TMISSION_ATT_WAYPT = 1;
+  private static readonly TMISSION_MOVE = 3;
+  private static readonly TMISSION_GUARD = 5;
+  private static readonly TMISSION_LOOP = 6;
+  private static readonly TMISSION_SET_GLOBAL = 11;
+  private static readonly TMISSION_UNLOAD = 16;
+
+  /** Execute team mission scripts — units follow waypoint patrol routes */
+  private updateTeamMission(entity: Entity): void {
+    if (entity.teamMissionIndex >= entity.teamMissions.length) {
+      // Script complete — fall back to hunt AI
+      this.updateAntAI(entity);
+      return;
+    }
+
+    const tm = entity.teamMissions[entity.teamMissionIndex];
+
+    switch (tm.mission) {
+      case Game.TMISSION_MOVE: {
+        // Move to waypoint — issue path command if not already moving there
+        const wp = this.waypoints.get(tm.data);
+        if (!wp) { entity.teamMissionIndex++; return; }
+        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+
+        if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          entity.mission = Mission.MOVE;
+          entity.moveTarget = target;
+          entity.target = null;
+          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true);
+          entity.pathIndex = 0;
+        } else if (worldDist(entity.pos, target) < 2) {
+          // Arrived at waypoint — advance to next mission
+          entity.teamMissionIndex++;
+        }
+        break;
+      }
+
+      case Game.TMISSION_ATTACK:
+      case Game.TMISSION_ATT_WAYPT: {
+        // Attack: hunt nearest visible player unit near waypoint
+        if (entity.mission === Mission.ATTACK && entity.target?.alive) return;
+
+        const wp = this.waypoints.get(tm.data);
+        let nearest: Entity | null = null;
+        let nearestDist = Infinity;
+
+        for (const other of this.entities) {
+          if (!other.alive || !other.isPlayerUnit) continue;
+          const dist = worldDist(entity.pos, other.pos);
+          // Fog-aware: only target units within sight range or near waypoint
+          if (wp) {
+            const wpWorld = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+            const distToWp = worldDist(other.pos, wpWorld);
+            if (distToWp > 15 && dist > entity.stats.sight * 2) continue;
+          } else {
+            if (dist > entity.stats.sight * 1.5) continue;
+          }
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearest = other;
+          }
+        }
+
+        if (nearest) {
+          entity.mission = Mission.ATTACK;
+          entity.target = nearest;
+        } else if (wp) {
+          // No targets — move toward the waypoint
+          const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+          if (worldDist(entity.pos, target) > 3) {
+            entity.mission = Mission.MOVE;
+            entity.moveTarget = target;
+            entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true);
+            entity.pathIndex = 0;
+          } else {
+            // At waypoint with no targets — advance
+            entity.teamMissionIndex++;
+          }
+        } else {
+          entity.teamMissionIndex++;
+        }
+        break;
+      }
+
+      case Game.TMISSION_GUARD: {
+        // Guard area for a duration — data is in 1/10th minute units
+        // This runs every 8 ticks (AI scan rate), so decrement by 8
+        if (entity.teamMissionWaiting === 0) {
+          entity.teamMissionWaiting = tm.data * 6 * GAME_TICKS_PER_SEC;
+          entity.mission = Mission.GUARD;
+        }
+        entity.teamMissionWaiting -= 8;
+        // While guarding, still auto-attack nearby enemies
+        if (entity.teamMissionWaiting <= 0) {
+          entity.teamMissionWaiting = 0;
+          entity.teamMissionIndex++;
+        }
+        break;
+      }
+
+      case Game.TMISSION_LOOP: {
+        // Loop back to first mission
+        entity.teamMissionIndex = 0;
+        entity.teamMissionWaiting = 0;
+        break;
+      }
+
+      case Game.TMISSION_SET_GLOBAL: {
+        // Set a global variable
+        this.globals.add(tm.data);
+        entity.teamMissionIndex++;
+        break;
+      }
+
+      case Game.TMISSION_UNLOAD: {
+        // Unload — not relevant for ant units, skip
+        entity.teamMissionIndex++;
+        break;
+      }
+
+      default:
+        // Unknown mission type — skip
+        entity.teamMissionIndex++;
+        break;
+    }
+  }
+
+  /** Ant AI — hunt nearest visible player unit (fog-aware) */
   private updateAntAI(entity: Entity): void {
     if (entity.mission === Mission.ATTACK && entity.target?.alive) return;
 
@@ -355,6 +771,8 @@ export class Game {
     for (const other of this.entities) {
       if (!other.alive || !other.isPlayerUnit) continue;
       const dist = worldDist(entity.pos, other.pos);
+      // Fog-aware: ants can only see units within their sight range
+      if (dist > entity.stats.sight * 1.5) continue;
       if (dist < nearestDist) {
         nearestDist = dist;
         nearest = other;
@@ -379,6 +797,21 @@ export class Game {
 
     if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
       const nextCell = entity.path[entity.pathIndex];
+      // Check if next cell is blocked by another unit — recalculate path (with cooldown)
+      const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
+      if (occ > 0 && occ !== entity.id && entity.moveTarget &&
+          this.tick - entity.lastPathRecalc > 5) {
+        entity.lastPathRecalc = this.tick;
+        entity.path = findPath(
+          this.map, entity.cell,
+          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true
+        );
+        entity.pathIndex = 0;
+        if (entity.path.length === 0) {
+          // Can't find alternate route — wait a moment
+          return;
+        }
+      }
       const target: WorldPos = {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
         y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
@@ -408,16 +841,38 @@ export class Game {
     }
 
     if (entity.inRange(entity.target)) {
-      entity.facing = directionTo(entity.pos, entity.target.pos);
+      // Turreted vehicles: turret tracks target, body may stay still
+      if (entity.hasTurret) {
+        entity.turretFacing = directionTo(entity.pos, entity.target.pos);
+      } else {
+        entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
+        const facingReady = entity.tickRotation();
+        // NoMovingFire units must face target before attacking
+        if (entity.stats.noMovingFire && !facingReady) {
+          entity.animState = AnimState.IDLE;
+          return;
+        }
+      }
       entity.animState = AnimState.ATTACK;
 
       if (entity.attackCooldown <= 0 && entity.weapon) {
-        const killed = entity.target.takeDamage(entity.weapon.damage);
+        // Apply warhead-vs-armor damage multiplier
+        const armorIdx = entity.target.stats.armor === 'none' ? 0
+          : entity.target.stats.armor === 'light' ? 1 : 2;
+        const mult = WARHEAD_VS_ARMOR[entity.weapon.warhead]?.[armorIdx] ?? 1;
+        const damage = Math.max(1, Math.round(entity.weapon.damage * mult));
+        const killed = entity.target.takeDamage(damage);
         entity.attackCooldown = entity.weapon.rof;
 
-        // Spawn attack effect at target using sprite sheets
+        // Play weapon sound
+        this.audio.play(this.audio.weaponSound(entity.weapon.name));
+
+        // Spawn attack effects + projectiles
         const tx = entity.target.pos.x;
         const ty = entity.target.pos.y;
+        const sx = entity.pos.x;
+        const sy = entity.pos.y;
+
         if (entity.isAnt && entity.type === 'ANT3') {
           this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
             sprite: 'piffpiff', spriteStart: 0 });
@@ -425,8 +880,22 @@ export class Game {
           this.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 8, size: 6,
             sprite: 'piffpiff', spriteStart: 0 });
         } else {
-          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 4, size: 5,
+          // Muzzle flash at attacker
+          this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
             sprite: 'piff', spriteStart: 0 });
+
+          // Projectile travel from attacker to target
+          const projStyle = this.weaponProjectileStyle(entity.weapon.name);
+          if (projStyle !== 'bullet' || worldDist(entity.pos, entity.target.pos) > 2) {
+            const travelFrames = projStyle === 'bullet' ? 3
+              : projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
+            this.effects.push({
+              type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
+              startX: sx, startY: sy, endX: tx, endY: ty, projStyle,
+            });
+          }
+
+          // Impact at target
           this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 17, size: 8,
             sprite: 'veh-hit1', spriteStart: 0 });
         }
@@ -434,6 +903,23 @@ export class Game {
         if (killed) {
           this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 18, size: 16,
             sprite: 'fball1', spriteStart: 0 });
+          // Screen shake on large explosion
+          this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
+          // Death sound
+          if (entity.target.isAnt) {
+            this.audio.play('die_ant');
+          } else if (entity.target.stats.isInfantry) {
+            this.audio.play('die_infantry');
+          } else {
+            this.audio.play('die_vehicle');
+          }
+          this.audio.play('explode_lg');
+          // Track kills/losses
+          if (entity.isPlayerUnit) {
+            this.killCount++;
+          } else {
+            this.lossCount++;
+          }
         }
       }
     } else {
@@ -448,16 +934,42 @@ export class Game {
   private updateHunt(entity: Entity): void {
     if (!entity.target?.alive) {
       entity.target = null;
-      entity.mission = Mission.GUARD;
+      // If we have a pending moveTarget from attack-move, resume moving
+      if (entity.moveTarget) {
+        entity.mission = Mission.MOVE;
+        entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true);
+        entity.pathIndex = 0;
+      } else {
+        entity.mission = Mission.GUARD;
+      }
       return;
     }
 
     if (entity.inRange(entity.target)) {
       entity.mission = Mission.ATTACK;
-      this.updateAttack(entity);
+      entity.animState = AnimState.ATTACK;
     } else {
       entity.animState = AnimState.WALK;
-      entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+      // Use pathfinding to reach target (recalc periodically)
+      const targetCell = worldToCell(entity.target.pos.x, entity.target.pos.y);
+      if (entity.path.length === 0 || entity.pathIndex >= entity.path.length ||
+          (this.tick % 15 === 0)) {
+        entity.path = findPath(this.map, entity.cell, targetCell, true);
+        entity.pathIndex = 0;
+      }
+      if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+        const nextCell = entity.path[entity.pathIndex];
+        const wp: WorldPos = {
+          x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
+          y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
+        };
+        if (entity.moveToward(wp, entity.stats.speed * 0.5)) {
+          entity.pathIndex++;
+        }
+      } else {
+        // No path found — move directly
+        entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+      }
     }
   }
 
@@ -581,6 +1093,7 @@ export class Game {
 
   /** Render the current frame */
   private render(): void {
+    this.renderer.attackMoveMode = this.attackMoveMode;
     this.renderer.render(
       this.camera,
       this.map,
@@ -592,5 +1105,20 @@ export class Game {
       this.effects,
       this.tick,
     );
+
+    // Render pause overlay
+    if (this.state === 'paused') {
+      this.renderer.renderPauseOverlay();
+    }
+
+    // Render end screen overlay when game is over
+    if (this.state === 'won' || this.state === 'lost') {
+      this.renderer.renderEndScreen(
+        this.state === 'won',
+        this.killCount,
+        this.lossCount,
+        this.tick,
+      );
+    }
   }
 }
