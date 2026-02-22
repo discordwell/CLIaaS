@@ -23,6 +23,10 @@ export class AudioManager {
   private muted = false;
   private lastPlayed = new Map<string, number>();
   private readonly MIN_INTERVAL = 40; // ms between same sound
+  // Ambient sound system
+  private ambientNode: AudioBufferSourceNode | null = null;
+  private ambientGain: GainNode | null = null;
+  private ambientRunning = false;
 
   /** Initialize audio context (must be called from user gesture) */
   init(): void {
@@ -124,7 +128,59 @@ export class AudioManager {
     }
   }
 
+  /** Start looping ambient background sound (wind + nature) */
+  startAmbient(): void {
+    if (!this.ctx || !this.masterGain || this.ambientRunning) return;
+    this.ambientRunning = true;
+    const ctx = this.ctx;
+    // Generate a looping ambient buffer: filtered pink-ish noise (wind)
+    const duration = 4; // 4-second loop
+    const len = Math.ceil(ctx.sampleRate * duration);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    // Simple 1/f approximation for wind-like noise
+    let b0 = 0, b1 = 0, b2 = 0;
+    for (let i = 0; i < len; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      data[i] = (b0 + b1 + b2 + white * 0.5362) * 0.11;
+    }
+    // Crossfade seam: blend tail into head for seamless looping
+    const fade = Math.ceil(ctx.sampleRate * 0.05);
+    for (let i = 0; i < fade; i++) {
+      const t = i / fade;
+      data[i] = data[i] * t + data[len - fade + i] * (1 - t);
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const g = ctx.createGain();
+    g.gain.value = 0.06; // very subtle background
+    src.connect(g).connect(this.masterGain);
+    src.start();
+    this.ambientNode = src;
+    this.ambientGain = g;
+  }
+
+  /** Stop ambient background sound */
+  stopAmbient(): void {
+    if (this.ambientNode) {
+      try { this.ambientNode.stop(); } catch { /* already stopped */ }
+      this.ambientNode.disconnect();
+      this.ambientNode = null;
+    }
+    if (this.ambientGain) {
+      this.ambientGain.disconnect();
+      this.ambientGain = null;
+    }
+    this.ambientRunning = false;
+  }
+
   destroy(): void {
+    this.stopAmbient();
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;

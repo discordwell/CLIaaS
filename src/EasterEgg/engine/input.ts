@@ -160,6 +160,10 @@ export class InputManager {
     this.state.keys.add(e.key);
     if (e.key === 'Control' || e.key === 'Meta') this.state.ctrlHeld = true;
     if (e.key === 'Shift') this.state.shiftHeld = true;
+    // Prevent browser defaults for game-consumed keys
+    if (e.key === 'Tab' || e.key === 'F1' || e.key === ' ') {
+      e.preventDefault();
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {

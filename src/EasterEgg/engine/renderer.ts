@@ -126,7 +126,7 @@ export class Renderer {
 
     this.renderTerrain(camera, map, tick);
     this.renderDecals(camera, map);
-    this.renderOverlays(camera, map);
+    this.renderOverlays(camera, map, tick);
     this.renderStructures(camera, map, structures, assets, tick);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
     this.renderWaypoints(camera, entities, selectedIds);
@@ -142,6 +142,7 @@ export class Renderer {
     if (this.sellMode) this.renderModeLabel(input, 'SELL', 'rgba(255,200,60,0.9)');
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
     this.renderMinimap(map, entities, structures, camera);
+    this.renderOffscreenIndicators(camera, entities, selectedIds);
     this.renderUnitInfo(entities, selectedIds);
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
@@ -321,7 +322,7 @@ export class Renderer {
 
   // ─── Overlays (ore, gems, walls) ────────────────────────
 
-  private renderOverlays(camera: Camera, map: GameMap): void {
+  private renderOverlays(camera: Camera, map: GameMap, tick: number): void {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
@@ -350,6 +351,17 @@ export class Renderer {
             const dy = (((h >> 3) + d * 53) % 16) + 3;
             ctx.fillRect(screen.x + dx, screen.y + dy, 3, 2);
           }
+          // Animated sparkle — one glint cycles per cell at staggered intervals
+          const sparklePhase = (tick + h * 3) % 40;
+          if (sparklePhase < 6) {
+            const sparkAlpha = sparklePhase < 3 ? sparklePhase / 3 : (6 - sparklePhase) / 3;
+            const sx = screen.x + 4 + ((h * 7) % 14);
+            const sy = screen.y + 4 + ((h * 11) % 14);
+            ctx.fillStyle = `rgba(255,255,200,${sparkAlpha * 0.8})`;
+            ctx.fillRect(sx, sy, 2, 2);
+            ctx.fillRect(sx - 1, sy + 1, 4, 1); // horizontal glint arm
+            ctx.fillRect(sx + 1, sy - 1, 1, 4); // vertical glint arm
+          }
         } else if (ovl >= 0x0F && ovl <= 0x12) {
           // Gems (GEM01-GEM04) — purple/magenta tones
           ctx.fillStyle = 'rgba(160,60,200,0.35)';
@@ -358,6 +370,17 @@ export class Renderer {
           ctx.fillStyle = 'rgba(200,100,255,0.6)';
           ctx.fillRect(screen.x + 5 + (h % 6), screen.y + 5, 4, 4);
           ctx.fillRect(screen.x + 12 + (h % 4), screen.y + 12, 3, 3);
+          // Animated gem sparkle — brighter and more frequent than ore
+          const gemPhase = (tick + h * 5) % 24;
+          if (gemPhase < 6) {
+            const sparkAlpha = gemPhase < 3 ? gemPhase / 3 : (6 - gemPhase) / 3;
+            const gx = screen.x + 6 + ((h * 13) % 12);
+            const gy = screen.y + 6 + ((h * 9) % 12);
+            ctx.fillStyle = `rgba(220,180,255,${sparkAlpha * 0.9})`;
+            ctx.fillRect(gx, gy, 2, 2);
+            ctx.fillRect(gx - 1, gy + 1, 4, 1);
+            ctx.fillRect(gx + 1, gy - 1, 1, 4);
+          }
         } else if (ovl >= 0x15 && ovl <= 0x1F) {
           // Walls — dark gray blocks
           ctx.fillStyle = this.palColor(PAL_ROCK_START + 6);
@@ -1077,6 +1100,7 @@ export class Renderer {
       '1-9       Select group',
       'Ctrl+1-9  Assign group',
       '.         Cycle idle units',
+      'Tab       Cycle unit types',
       'P / Esc   Pause',
       'F1        Toggle this help',
     ];
@@ -1138,6 +1162,55 @@ export class Renderer {
     ctx.font = '12px monospace';
     ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
     ctx.fillText('Press any key to continue', w / 2, h / 2 + 70);
+    ctx.textAlign = 'left';
+  }
+
+  // ─── Off-screen Unit Indicators ─────────────────────────
+
+  private renderOffscreenIndicators(
+    camera: Camera, entities: Entity[], selectedIds: Set<number>,
+  ): void {
+    if (selectedIds.size === 0) return;
+    const ctx = this.ctx;
+    const margin = 16;
+    // Accumulate counts per edge
+    let top = 0, bot = 0, left = 0, right = 0;
+    let topX = 0, botX = 0, leftY = 0, rightY = 0;
+    for (const e of entities) {
+      if (!e.alive || !selectedIds.has(e.id)) continue;
+      const s = camera.worldToScreen(e.pos.x, e.pos.y);
+      if (s.x >= 0 && s.x <= this.width && s.y >= 0 && s.y <= this.height) continue;
+      if (s.y < 0) { top++; topX += Math.max(margin, Math.min(this.width - margin, s.x)); }
+      else if (s.y > this.height) { bot++; botX += Math.max(margin, Math.min(this.width - margin, s.x)); }
+      else if (s.x < 0) { left++; leftY += Math.max(margin, Math.min(this.height - margin, s.y)); }
+      else if (s.x > this.width) { right++; rightY += Math.max(margin, Math.min(this.height - margin, s.y)); }
+    }
+
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    const drawBadge = (x: number, y: number, count: number, arrowDx: number, arrowDy: number) => {
+      // Arrow triangle
+      const s = 5;
+      ctx.fillStyle = 'rgba(100,255,100,0.7)';
+      ctx.beginPath();
+      ctx.moveTo(x + arrowDx * s * 2, y + arrowDy * s * 2);
+      ctx.lineTo(x + arrowDy * s, y - arrowDx * s);
+      ctx.lineTo(x - arrowDy * s, y + arrowDx * s);
+      ctx.closePath();
+      ctx.fill();
+      // Count badge
+      const tx = x - arrowDx * 8;
+      const ty = y - arrowDy * 8 + 3;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(tx - 8, ty - 8, 16, 11);
+      ctx.fillStyle = '#8f8';
+      ctx.fillText(String(count), tx, ty);
+    };
+
+    if (top > 0) drawBadge(topX / top, margin, top, 0, -1);
+    if (bot > 0) drawBadge(botX / bot, this.height - margin, bot, 0, 1);
+    if (left > 0) drawBadge(margin, leftY / left, left, -1, 0);
+    if (right > 0) drawBadge(this.width - margin, rightY / right, right, 1, 0);
     ctx.textAlign = 'left';
   }
 

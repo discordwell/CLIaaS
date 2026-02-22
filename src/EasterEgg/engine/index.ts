@@ -60,6 +60,10 @@ export class Game {
   /** Double-tap detection for control group camera centering */
   private lastGroupKey = 0;
   private lastGroupTime = 0;
+  /** Tab key: cycle through unit types in mixed selection */
+  private tabCyclePool: number[] = [];
+  private tabCycleTypes: string[] = [];
+  private tabCycleTypeIndex = 0;
   // Stats tracking
   killCount = 0;
   lossCount = 0;
@@ -158,6 +162,7 @@ export class Game {
 
     this.state = 'playing';
     this.onStateChange?.('playing');
+    this.audio.startAmbient();
     this.lastTime = performance.now();
     this.gameLoop();
   }
@@ -328,6 +333,13 @@ export class Game {
       }
     }
 
+    // Update idle count for HUD (once per tick, not per render frame)
+    let idleCount = 0;
+    for (const e of this.entities) {
+      if (e.alive && e.isPlayerUnit && e.mission === Mission.GUARD && !e.target) idleCount++;
+    }
+    this.renderer.idleCount = idleCount;
+
     // Check win/lose — but only if triggers have had time to spawn ants
     // The trigger system spawns ants over time, so we need a grace period
     this.checkVictoryConditions();
@@ -459,6 +471,7 @@ export class Game {
         if (keys.has(String(g))) {
           const group = this.controlGroups.get(g);
           if (group && group.size > 0) {
+            this.tabCyclePool = [];
             for (const e of this.entities) e.selected = false;
             this.selectedIds.clear();
             for (const id of group) {
@@ -540,6 +553,37 @@ export class Game {
       keys.delete('.');
     }
 
+    // Tab: cycle through unit types in mixed selection (uses stored pool)
+    if (keys.has('Tab')) {
+      // If no active cycle pool, initialize from current mixed selection
+      if (this.tabCyclePool.length === 0) {
+        const selected = this.entities.filter(e => e.alive && this.selectedIds.has(e.id));
+        if (selected.length > 1) {
+          const types = [...new Set(selected.map(e => e.type))].sort();
+          if (types.length > 1) {
+            this.tabCyclePool = selected.map(e => e.id);
+            this.tabCycleTypes = types;
+            this.tabCycleTypeIndex = 0;
+          }
+        }
+      }
+      if (this.tabCyclePool.length > 0 && this.tabCycleTypes.length > 1) {
+        this.tabCycleTypeIndex = (this.tabCycleTypeIndex + 1) % this.tabCycleTypes.length;
+        const nextType = this.tabCycleTypes[this.tabCycleTypeIndex];
+        for (const e of this.entities) e.selected = false;
+        this.selectedIds.clear();
+        for (const id of this.tabCyclePool) {
+          const e = this.entityById.get(id);
+          if (e?.alive && e.type === nextType) {
+            this.selectedIds.add(e.id);
+            e.selected = true;
+          }
+        }
+        if (this.selectedIds.size > 0) this.audio.play(this.selectionSound());
+      }
+      keys.delete('Tab');
+    }
+
     // A key: toggle attack-move mode
     if (keys.has('a') && !keys.has('ArrowLeft')) {
       this.attackMoveMode = true;
@@ -585,6 +629,7 @@ export class Game {
 
     // --- Double-click: select all same type on screen ---
     if (doubleClick) {
+      this.tabCyclePool = [];
       const world = this.camera.screenToWorld(doubleClick.x, doubleClick.y);
       const clicked = this.findEntityAt(world);
       if (clicked && clicked.isPlayerUnit) {
@@ -604,8 +649,9 @@ export class Game {
       }
     }
 
-    // --- Left click ---
+    // --- Left click --- (clears Tab cycle pool)
     if (leftClick) {
+      this.tabCyclePool = [];
       // Check minimap click first
       if (this.handleMinimapClick(leftClick.x, leftClick.y)) return;
 
@@ -706,6 +752,7 @@ export class Game {
     }
 
     if (dragBox) {
+      this.tabCyclePool = [];
       if (!ctrlHeld) {
         this.selectedIds.clear();
         for (const e of this.entities) e.selected = false;
@@ -1972,9 +2019,6 @@ export class Game {
     this.renderer.sellMode = this.sellMode;
     this.renderer.repairMode = this.repairMode;
     this.renderer.repairingStructures = this.repairingStructures;
-    this.renderer.idleCount = this.entities.filter(e =>
-      e.alive && e.isPlayerUnit && e.mission === Mission.GUARD && !e.target
-    ).length;
     this.renderer.render(
       this.camera,
       this.map,
