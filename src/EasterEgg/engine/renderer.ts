@@ -1374,26 +1374,67 @@ export class Renderer {
           break;
         }
         case 'tesla': {
-          const alpha = 1 - progress;
-          ctx.strokeStyle = `rgba(100,200,255,${alpha})`;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
+          const alpha = 1 - progress * 0.6;
           const seed = (fx.x * 11 + fx.y * 17 + fx.frame * 31) | 0;
-          const segments = 6;
-          ctx.moveTo(screen.x - fx.size, screen.y);
-          for (let i = 1; i <= segments; i++) {
+          // Lightning bolt from source to target (or local effect if no source)
+          const hasTravel = fx.startX !== undefined && fx.startY !== undefined;
+          const sStart = hasTravel
+            ? camera.worldToScreen(fx.startX!, fx.startY!)
+            : { x: screen.x - fx.size, y: screen.y };
+          const sEnd = screen;
+          const dx = sEnd.x - sStart.x;
+          const dy = sEnd.y - sStart.y;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const jitter = Math.max(Math.min(len * 0.15, 12), 2);
+          const segments = 8;
+          // Build jagged bolt path with perpendicular offsets
+          const pts: Array<{ x: number; y: number }> = [sStart];
+          const nx = -dy / len, ny = dx / len;
+          for (let i = 1; i < segments; i++) {
             const t = i / segments;
-            const jx = ((seed + i * 47) % 11 - 5) * (1 - t);
-            const jy = ((seed + i * 89) % 11 - 5) * (1 - t);
-            ctx.lineTo(
-              screen.x - fx.size + t * fx.size * 2 + jx,
-              screen.y + jy,
-            );
+            const perp = ((seed + i * 47 + fx.frame * 13) % (Math.floor(jitter * 2) + 1)) - jitter;
+            pts.push({ x: sStart.x + dx * t + nx * perp, y: sStart.y + dy * t + ny * perp });
           }
-          ctx.stroke();
-          ctx.strokeStyle = `rgba(150,220,255,${alpha * 0.3})`;
-          ctx.lineWidth = 4;
-          ctx.stroke();
+          pts.push(sEnd);
+          // Helper to draw the bolt path
+          const drawBolt = () => {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.stroke();
+          };
+          // Outer glow
+          ctx.strokeStyle = `rgba(80,150,255,${alpha * 0.3})`;
+          ctx.lineWidth = 6;
+          drawBolt();
+          // Main bright bolt
+          ctx.strokeStyle = `rgba(130,210,255,${alpha})`;
+          ctx.lineWidth = 2;
+          drawBolt();
+          // Inner white core (brief)
+          if (progress < 0.3) {
+            ctx.strokeStyle = `rgba(220,240,255,${(0.3 - progress) * 2})`;
+            ctx.lineWidth = 1;
+            drawBolt();
+          }
+          // Branch sparks from 2 random segments
+          ctx.lineWidth = 1;
+          for (let b = 0; b < 2; b++) {
+            const bi = 1 + ((seed + b * 3 + fx.frame) % (segments - 1));
+            const bp = pts[bi];
+            const bAngle = ((seed + b * 43 + fx.frame * 17) % 360) * Math.PI / 180;
+            const bLen = jitter * 1.5 + 4;
+            ctx.strokeStyle = `rgba(100,180,255,${alpha * 0.5})`;
+            ctx.beginPath();
+            ctx.moveTo(bp.x, bp.y);
+            ctx.lineTo(bp.x + Math.cos(bAngle) * bLen, bp.y + Math.sin(bAngle) * bLen);
+            ctx.stroke();
+          }
+          // Impact spark at target
+          ctx.fillStyle = `rgba(200,230,255,${alpha * (1 - progress * 0.5)})`;
+          ctx.beginPath();
+          ctx.arc(sEnd.x, sEnd.y, 3 + (1 - progress) * 3, 0, Math.PI * 2);
+          ctx.fill();
           break;
         }
         case 'debris': {

@@ -2469,7 +2469,7 @@ export class Game {
 
         if (entity.isAnt && (entity.weapon.name === 'TeslaZap' || entity.weapon.name === 'TeslaCannon')) {
           this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
-            sprite: 'piffpiff', spriteStart: 0 });
+            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty });
         } else if (entity.isAnt && entity.weapon.name === 'Napalm') {
           // Napalm ant: fire burst at target
           this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 10, size: 10,
@@ -2477,6 +2477,12 @@ export class Game {
         } else if (entity.isAnt) {
           this.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 8, size: 6,
             sprite: 'piffpiff', spriteStart: 0 });
+        } else if (entity.weapon.name === 'TeslaCannon' || entity.weapon.name === 'TeslaZap') {
+          // Tesla weapons: lightning bolt arc from source to target
+          this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
+            sprite: 'piff', spriteStart: 0, muzzleColor: '120,180,255' });
+          this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
+            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty });
         } else {
           // Muzzle flash at attacker
           this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
@@ -2980,6 +2986,7 @@ export class Game {
           this.effects.push({
             type: 'tesla', x: bestTarget.pos.x, y: bestTarget.pos.y,
             frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
+            startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
           });
           this.audio.play('teslazap');
         } else {
@@ -3464,6 +3471,13 @@ export class Game {
         for (const entity of result.spawned) {
           this.entities.push(entity);
           this.entityById.set(entity.id, entity);
+          // Spawn flash effect for player reinforcements
+          if (entity.isPlayerUnit) {
+            this.effects.push({
+              type: 'marker', x: entity.pos.x, y: entity.pos.y,
+              frame: 0, maxFrames: 15, size: 14, markerColor: 'rgba(100,200,255,1)',
+            });
+          }
         }
         // Destroy the unit that triggered this (e.g. hazard zone kill)
         if (result.destroyTriggeringUnit) {
