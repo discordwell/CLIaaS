@@ -45,6 +45,5 @@ next-env.d.ts
 /exports
 /submission
 
-# Easter Egg - Red Alert WASM build artifacts
+# Easter Egg - Red Alert C++ source (cloned at build time)
 /src/EasterEgg/CnC_and_Red_Alert
-/public/ra
