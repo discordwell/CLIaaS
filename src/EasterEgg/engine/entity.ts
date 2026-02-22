@@ -259,8 +259,8 @@ export class Entity {
     }
   }
 
-  /** Take damage, return true if killed */
-  takeDamage(amount: number): boolean {
+  /** Take damage, return true if killed. warhead affects death animation. */
+  takeDamage(amount: number, warhead?: string): boolean {
     if (!this.alive) return false;
     this.hp -= amount;
     this.damageFlash = 4;
@@ -272,8 +272,12 @@ export class Entity {
       this.animFrame = 0;
       this.animTick = 0;
       this.deathTick = 0;
-      // Select death animation variant randomly
-      this.deathVariant = Math.random() < 0.4 ? 1 : 0;
+      // Fire/Tesla/Super warheads always use die2 (explosive death); others random
+      if (warhead === 'Fire' || warhead === 'Super') {
+        this.deathVariant = 1;
+      } else {
+        this.deathVariant = Math.random() < 0.4 ? 1 : 0;
+      }
       // Kill all passengers when transport is destroyed
       for (const p of this.passengers) {
         p.alive = false;

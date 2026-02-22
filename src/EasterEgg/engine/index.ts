@@ -520,7 +520,7 @@ export class Game {
     this.updateStructureCombat();
 
     // Queen Ant spawning — QUEE periodically spawns ants (rate varies by difficulty)
-    const spawnSec = DIFFICULTY_MODS[this.difficulty].spawnInterval;
+    const spawnSec = (DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal).spawnInterval;
     if (this.tick % (GAME_TICKS_PER_SEC * spawnSec) === 0) {
       this.updateQueenSpawning();
     }
@@ -1439,11 +1439,12 @@ export class Game {
   }
 
   /** Map weapon name to projectile visual style */
-  private weaponProjectileStyle(name: string): 'bullet' | 'fireball' | 'shell' | 'rocket' {
+  private weaponProjectileStyle(name: string): 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade' {
     switch (name) {
       case 'FireballLauncher': case 'Flamethrower': return 'fireball';
       case 'TankGun': case 'ArtilleryShell': return 'shell';
       case 'Bazooka': case 'MammothTusk': return 'rocket';
+      case 'Grenade': return 'grenade';
       default: return 'bullet';
     }
   }
@@ -1556,13 +1557,30 @@ export class Game {
       s.rubble = true;
       // Clear terrain footprint so units can walk through rubble
       this.clearStructureFootprint(s);
-      // Spawn destruction explosion
+      // Spawn destruction explosion chain — small pops then big blast (like original RA)
       const wx = s.cx * CELL_SIZE + CELL_SIZE;
       const wy = s.cy * CELL_SIZE + CELL_SIZE;
+      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      // Small pre-explosions scattered across the building footprint
+      for (let i = 0; i < 4; i++) {
+        const ox = (Math.random() - 0.5) * fw * CELL_SIZE;
+        const oy = (Math.random() - 0.5) * fh * CELL_SIZE;
+        this.effects.push({
+          type: 'explosion', x: wx + ox, y: wy + oy,
+          frame: -i * 3, maxFrames: 12, size: 8, // staggered start via negative frame
+          sprite: 'veh-hit1', spriteStart: 0,
+        });
+      }
+      // Final large explosion
       this.effects.push({
         type: 'explosion', x: wx, y: wy,
         frame: 0, maxFrames: 22, size: 20,
         sprite: 'fball1', spriteStart: 0,
+      });
+      // Flying debris
+      this.effects.push({
+        type: 'debris', x: wx, y: wy,
+        frame: 0, maxFrames: 20, size: fw * CELL_SIZE * 0.8,
       });
       this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
       this.renderer.screenFlash = Math.max(this.renderer.screenFlash, 5);
@@ -1701,17 +1719,17 @@ export class Game {
     entity.tickAnimation();
   }
 
-  // Team mission type constants (from RA TEAMTYPE.H TeamMissionType enum)
+  // Team mission type constants (exact values from RA TEAMTYPE.H TeamMissionType enum)
   private static readonly TMISSION_ATTACK = 0;
   private static readonly TMISSION_ATT_WAYPT = 1;
   private static readonly TMISSION_MOVE = 3;
   private static readonly TMISSION_GUARD = 5;
   private static readonly TMISSION_LOOP = 6;
   private static readonly TMISSION_UNLOAD = 8;
-  private static readonly TMISSION_PATROL = 10;
-  private static readonly TMISSION_SET_GLOBAL = 11;
-  private static readonly TMISSION_LOAD = 13;
-  private static readonly TMISSION_WAIT = 16;
+  private static readonly TMISSION_DO = 11;         // set global variable
+  private static readonly TMISSION_IDLE = 13;        // idle at position
+  private static readonly TMISSION_LOAD = 14;
+  private static readonly TMISSION_PATROL = 16;
 
   /** Execute team mission scripts — units follow waypoint patrol routes */
   private updateTeamMission(entity: Entity): void {
@@ -1813,8 +1831,8 @@ export class Game {
         break;
       }
 
-      case Game.TMISSION_SET_GLOBAL: {
-        // Set a global variable
+      case Game.TMISSION_DO: {
+        // Set a global variable (DO in RA source)
         this.globals.add(tm.data);
         entity.teamMissionIndex++;
         break;
@@ -1863,8 +1881,9 @@ export class Game {
         break;
       }
 
-      case Game.TMISSION_WAIT: {
-        // Wait at current position — data is in 1/10th minute units
+      case Game.TMISSION_IDLE: {
+        // Idle at current position — data is in 1/10th minute units (0 = skip immediately)
+        if (tm.data === 0) { entity.teamMissionIndex++; break; }
         if (entity.teamMissionWaiting === 0) {
           entity.teamMissionWaiting = tm.data * TIME_UNIT_TICKS;
           entity.animState = AnimState.IDLE;
@@ -1930,13 +1949,14 @@ export class Game {
       if (other.isPlayerUnit === vehicle.isPlayerUnit) continue; // no friendly crush
       const oc = other.cell;
       if (oc.cx === vc.cx && oc.cy === vc.cy) {
-        other.takeDamage(other.hp + 10); // instant kill
+        other.takeDamage(other.hp + 10, 'Super'); // instant kill, always die2
         vehicle.creditKill();
         this.effects.push({
           type: 'blood', x: other.pos.x, y: other.pos.y,
           frame: 0, maxFrames: 6, size: 4, sprite: 'piffpiff', spriteStart: 0,
         });
         this.audio.play('die_infantry');
+        this.map.addDecal(oc.cx, oc.cy, 3, 0.3);
         if (vehicle.isPlayerUnit) this.killCount++;
         else {
           this.lossCount++;
@@ -2050,6 +2070,12 @@ export class Game {
         if (entity.harvestTick >= 30) {
           this.credits += entity.oreLoad;
           this.audio.play('heal'); // credit received sound
+          // Floating "+N" credits text
+          this.effects.push({
+            type: 'text', x: entity.pos.x, y: entity.pos.y - 8,
+            frame: 0, maxFrames: 30, size: 0,
+            text: `+${entity.oreLoad}`, textColor: 'rgba(80,255,80,1)',
+          });
           entity.oreLoad = 0;
           entity.harvesterState = 'idle';
         }
@@ -2318,7 +2344,7 @@ export class Game {
           : entity.target.stats.armor === 'light' ? 1 : 2;
         const mult = WARHEAD_VS_ARMOR[entity.weapon.warhead]?.[armorIdx] ?? 1;
         const damage = Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
-        const killed = directHit ? entity.target.takeDamage(damage) : false;
+        const killed = directHit ? entity.target.takeDamage(damage, entity.weapon.warhead) : false;
 
         // AOE splash damage to nearby units (at impact point, not target)
         if (entity.weapon.splash && entity.weapon.splash > 0) {
@@ -2368,6 +2394,7 @@ export class Game {
           const projStyle = this.weaponProjectileStyle(entity.weapon.name);
           if (projStyle !== 'bullet' || worldDist(entity.pos, entity.target.pos) > 2) {
             const travelFrames = projStyle === 'bullet' ? 3
+              : projStyle === 'grenade' ? 10
               : projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
             this.effects.push({
               type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
@@ -2766,7 +2793,12 @@ export class Game {
   private updateStructureCombat(): void {
     for (const s of this.structures) {
       if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
-      if (s.attackCooldown > 0) { s.attackCooldown--; continue; }
+      // Low power: defensive structures fire at half speed (skip every other cooldown tick)
+      const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
+      if (s.attackCooldown > 0) {
+        if (!isLowPower || this.tick % 2 === 0) s.attackCooldown--;
+        continue;
+      }
 
       const isPlayerStruct = s.house === House.Spain || s.house === House.Greece;
       const sx = s.cx * CELL_SIZE + CELL_SIZE;
@@ -2798,7 +2830,7 @@ export class Game {
           : bestTarget.stats.armor === 'light' ? 1 : 2;
         const mult = WARHEAD_VS_ARMOR[wh]?.[armorIdx] ?? 1;
         const damage = Math.max(1, Math.round(s.weapon.damage * mult));
-        const killed = bestTarget.takeDamage(damage);
+        const killed = bestTarget.takeDamage(damage, wh);
 
         // Fire effects — color based on structure type
         const structMuzzleColor = (s.type === 'TSLA' || s.type === 'QUEE') ? '120,180,255'
@@ -2862,7 +2894,7 @@ export class Game {
 
   /** Queen Ant spawns ants periodically (rate/composition affected by difficulty) */
   private updateQueenSpawning(): void {
-    const mods = DIFFICULTY_MODS[this.difficulty];
+    const mods = DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal;
     for (const s of this.structures) {
       if (!s.alive || s.type !== 'QUEE') continue;
       if (s.house === House.Spain || s.house === House.Greece) continue; // player queens don't spawn
@@ -2879,12 +2911,13 @@ export class Game {
       for (let i = 0; i < count; i++) {
         let aType: UnitType;
         const roll = Math.random();
+        const remaining = 1 - mods.fireAntChance;
         if (roll < mods.fireAntChance) {
           aType = UnitType.ANT3; // fire ant (strongest)
-        } else if (roll < mods.fireAntChance + 0.33) {
-          aType = UnitType.ANT2; // warrior ant
+        } else if (roll < mods.fireAntChance + remaining * 0.5) {
+          aType = UnitType.ANT2; // warrior ant (50% of remaining)
         } else {
-          aType = UnitType.ANT1; // soldier ant (weakest)
+          aType = UnitType.ANT1; // soldier ant (50% of remaining)
         }
         const ox = (Math.random() - 0.5) * CELL_SIZE * 3;
         const oy = (Math.random() - 0.5) * CELL_SIZE * 3;
@@ -2962,7 +2995,7 @@ export class Game {
         : other.stats.armor === 'light' ? 1 : 2;
       const mult = WARHEAD_VS_ARMOR[weapon.warhead]?.[armorIdx] ?? 1;
       const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5 * friendlyMod));
-      const killed = other.takeDamage(splashDmg);
+      const killed = other.takeDamage(splashDmg, weapon.warhead);
 
       // Infantry scatter: push nearby infantry away from explosion
       if (other.alive && other.stats.isInfantry && dist < splashRange * 0.8) {

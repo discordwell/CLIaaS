@@ -50,17 +50,24 @@ const TACTION_CLEAR_GLOBAL = 29;
 const TACTION_CREEP_SHADOW = 31;
 const TACTION_DESTROY_OBJECT = 32;
 
-// Team mission types (TeamMissionType — from TEAMTYPE.H)
-const TMISSION_ATTACK = 0;
-const TMISSION_ATT_WAYPT = 1;
-const TMISSION_MOVE = 3;
-const TMISSION_GUARD = 5;
-const TMISSION_LOOP = 6;
-const TMISSION_UNLOAD = 8;
-const TMISSION_PATROL = 10;
-const TMISSION_SET_GLOBAL = 11;
-const TMISSION_LOAD = 13;
-const TMISSION_WAIT = 16;
+// Team mission types (TeamMissionType — from TEAMTYPE.H, exact numbering from RA source)
+const TMISSION_ATTACK = 0;       // Attack nearest enemy near waypoint
+const TMISSION_ATT_WAYPT = 1;    // Attack waypoint
+// 2 = CHANGE_FORMATION (unused)
+const TMISSION_MOVE = 3;         // Move to waypoint
+// 4 = MOVECELL (unused)
+const TMISSION_GUARD = 5;        // Guard area for duration
+const TMISSION_LOOP = 6;         // Loop back to first mission
+// 7 = ATTACKTARCOM (unused)
+const TMISSION_UNLOAD = 8;       // Unload transport passengers
+// 9 = DEPLOY (unused)
+// 10 = HOUND_DOG (unused)
+const TMISSION_DO = 11;          // Set a global variable (DO in RA source)
+// 12 = SET_GLOBAL / check global (unused)
+const TMISSION_IDLE = 13;        // Idle (wait at current position)
+const TMISSION_LOAD = 14;        // Load infantry into transport
+// 15 = SPY (unused)
+const TMISSION_PATROL = 16;      // Patrol to waypoint (move + attack en route)
 
 // Time unit: Data.Value is in 1/10th minute increments (6 seconds each)
 // Convert to game ticks: value * 6 * GAME_TICKS_PER_SEC

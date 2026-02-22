@@ -37,7 +37,7 @@ const PAL_GREEN_HP = 120;     // bright green [0,255,0]
 const PAL_RED_HP = 104;       // red [190,0,0]
 
 export interface Effect {
-  type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker' | 'debris';
+  type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker' | 'debris' | 'text';
   x: number;
   y: number;
   frame: number;
@@ -53,9 +53,12 @@ export interface Effect {
   startY?: number;
   endX?: number;         // projectile destination
   endY?: number;
-  projStyle?: 'bullet' | 'fireball' | 'shell' | 'rocket';
+  projStyle?: 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade';
   // Marker color (for move/attack command feedback)
   markerColor?: string;
+  // Floating text (e.g. "+100" credits)
+  text?: string;
+  textColor?: string;
 }
 
 // Pseudo-random hash for terrain variation
@@ -1205,9 +1208,10 @@ export class Renderer {
         const t = fx.frame / fx.maxFrames;
         const px = fx.startX + (fx.endX - fx.startX) * t;
         const py = fx.startY + (fx.endY - fx.startY) * t;
-        // Arc for shells/rockets
-        const arcY = fx.projStyle === 'shell' || fx.projStyle === 'rocket'
-          ? -Math.sin(t * Math.PI) * 30 : 0;
+        // Arc for shells/rockets/grenades (grenades arc higher)
+        const arcY = fx.projStyle === 'grenade' ? -Math.sin(t * Math.PI) * 45
+          : (fx.projStyle === 'shell' || fx.projStyle === 'rocket')
+            ? -Math.sin(t * Math.PI) * 30 : 0;
         const screenP = camera.worldToScreen(px, py + arcY);
 
         switch (fx.projStyle) {
@@ -1235,13 +1239,33 @@ export class Renderer {
           case 'rocket': {
             ctx.fillStyle = '#fa0';
             ctx.fillRect(screenP.x - 1, screenP.y - 1, 3, 3);
-            // Smoke trail
-            ctx.fillStyle = 'rgba(180,180,180,0.4)';
-            const trailT = Math.max(0, t - 0.1);
-            const tx = fx.startX + (fx.endX - fx.startX) * trailT;
-            const ty = fx.startY + (fx.endY - fx.startY) * trailT - Math.sin(trailT * Math.PI) * 30;
-            const trailScreen = camera.worldToScreen(tx, ty);
-            ctx.fillRect(trailScreen.x - 1, trailScreen.y - 1, 2, 2);
+            // Multi-puff smoke trail
+            for (let si = 1; si <= 4; si++) {
+              const trailT = Math.max(0, t - si * 0.06);
+              if (trailT <= 0) break;
+              const stx = fx.startX! + (fx.endX! - fx.startX!) * trailT;
+              const sty = fx.startY! + (fx.endY! - fx.startY!) * trailT - Math.sin(trailT * Math.PI) * 30;
+              const sScreen = camera.worldToScreen(stx, sty);
+              const sAlpha = 0.4 - si * 0.08;
+              const sSize = 1 + si * 0.5;
+              ctx.fillStyle = `rgba(180,180,180,${sAlpha})`;
+              ctx.beginPath();
+              ctx.arc(sScreen.x, sScreen.y, sSize, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            break;
+          }
+          case 'grenade': {
+            // Tumbling grenade with shadow
+            ctx.fillStyle = '#555';
+            const gSize = 2 + Math.sin(t * Math.PI * 4) * 0.5;
+            ctx.beginPath();
+            ctx.arc(screenP.x, screenP.y, gSize, 0, Math.PI * 2);
+            ctx.fill();
+            // Shadow on ground
+            const gGround = camera.worldToScreen(px, py);
+            ctx.fillStyle = 'rgba(0,0,0,0.25)';
+            ctx.fillRect(gGround.x - 1, gGround.y, 3, 1);
             break;
           }
         }
@@ -1354,6 +1378,19 @@ export class Renderer {
             ctx.fillStyle = `rgba(60,55,50,${alpha * 0.8})`;
             ctx.fillRect(px - 2, py - 1, 3 + (i % 2), 2);
           }
+          break;
+        }
+        case 'text': {
+          // Floating text (credits gained, etc.) — rises and fades
+          const alpha = 1 - progress;
+          const riseY = progress * 20; // float upward 20px
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = `rgba(0,0,0,${alpha * 0.6})`;
+          ctx.fillText(fx.text ?? '', screen.x + 1, screen.y - riseY + 1);
+          ctx.fillStyle = (fx.textColor ?? 'rgba(80,255,80,1)').replace(/[\d.]+\)$/, `${alpha})`);
+          ctx.fillText(fx.text ?? '', screen.x, screen.y - riseY);
+          ctx.textAlign = 'left';
           break;
         }
       }
@@ -1596,7 +1633,7 @@ export class Renderer {
       // Wrench icon (unicode)
       ctx.font = '12px monospace';
       ctx.fillStyle = 'rgba(80,255,80,0.9)';
-      ctx.fillText('\u{1F527}', mx + 8, my + 4);
+      ctx.fillText('W', mx + 10, my + 4);
       ctx.font = 'bold 8px monospace';
       ctx.fillStyle = 'rgba(80,255,80,0.6)';
       ctx.fillText('FIX', mx + 10, my + 14);
@@ -1911,7 +1948,9 @@ export class Renderer {
     // Per-cell passability coloring
     for (let dy = 0; dy < fh; dy++) {
       for (let dx = 0; dx < fw; dx++) {
-        const cellPassable = this.placementCells?.[dy * fw + dx] ?? this.placementValid;
+        const idx = dy * fw + dx;
+        const cellPassable = (this.placementCells && idx < this.placementCells.length)
+          ? this.placementCells[idx] : this.placementValid;
         ctx.globalAlpha = 0.45;
         ctx.fillStyle = cellPassable ? 'rgba(80,255,80,0.5)' : 'rgba(255,80,80,0.5)';
         ctx.fillRect(screen.x + dx * CELL_SIZE, screen.y + dy * CELL_SIZE, CELL_SIZE, CELL_SIZE);
