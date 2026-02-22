@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray } from 'drizzle-orm';
-import { db } from '../../db/index.js';
-import { externalObjects, syncCursors, tickets, tags, ticketTags } from '../../db/schema.js';
+import { db } from '@/db';
+import { externalObjects, syncCursors, tickets, tags, ticketTags } from '@/db/schema';
 import { zendeskFetch, type ZendeskAuth } from './api';
 import { ensureZendeskContext } from './ingest';
 
@@ -91,7 +91,7 @@ export async function pushZendeskOutboundTickets(opts: {
     .where(and(...where));
 
   if (rows.length === 0) {
-    return { updated: 0, skipped: 0, lastCursor };
+    return { updated: 0, skipped: 0, lastCursor: lastCursor ?? undefined };
   }
 
   const ticketIds = rows.map(row => row.id);

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadTickets, loadMessages } from "@/lib/data";
+import TicketActions from "@/components/TicketActions";
 
 const priorityColor: Record<string, string> = {
   urgent: "bg-red-500 text-white",
@@ -167,6 +168,13 @@ export default async function TicketDetailPage({
           </div>
         )}
       </section>
+
+      {/* TICKET ACTIONS (reply, update) */}
+      <TicketActions
+        ticketId={ticket.id}
+        currentStatus={ticket.status}
+        currentPriority={ticket.priority}
+      />
 
       {/* CLI ACTIONS */}
       <section className="mt-8 border-2 border-zinc-950 bg-zinc-950 p-6 text-zinc-100">

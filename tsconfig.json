@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@cli/*": ["./cli/*"]
     }
   },
   "include": [
@@ -30,5 +31,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "src/EasterEgg/CnC_and_Red_Alert", "scripts", "cli/db"]
+  "exclude": ["node_modules", "src/EasterEgg/CnC_and_Red_Alert", "scripts", "cli/db", "exports/routes"]
 }

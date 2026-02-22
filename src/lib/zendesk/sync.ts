@@ -39,9 +39,9 @@ async function fetchComments(auth: ZendeskAuth, ticketId: string): Promise<Zende
   const comments: ZendeskComment[] = [];
   let url: string | null = `/api/v2/tickets/${ticketId}/comments.json`;
   while (url) {
-    const data = await zendeskFetch<{ comments: ZendeskComment[]; next_page: string | null }>(auth, url);
-    comments.push(...data.comments);
-    url = data.next_page;
+    const page: { comments: ZendeskComment[]; next_page: string | null } = await zendeskFetch(auth, url);
+    comments.push(...page.comments);
+    url = page.next_page;
   }
   return comments;
 }
@@ -236,6 +236,9 @@ export async function syncZendeskTicketById(options: ZendeskSyncOptions): Promis
     brands: canonicalBrands,
     kbArticles: [] as KBArticle[],
     rules: [] as Rule[],
+    auditEvents: [],
+    csatRatings: [],
+    timeEntries: [],
   };
 
   await ingestZendeskData({ tenant: options.tenant, workspace: options.workspace, data });

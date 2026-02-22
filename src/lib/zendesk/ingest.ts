@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { and, eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { db } from '@/db';
 import {
   tenants,
   workspaces,
@@ -28,7 +28,7 @@ import {
   csatRatings,
   timeEntries,
   rules,
-} from '../../db/schema.js';
+} from '@/db/schema';
 import type {
   Ticket,
   Message,

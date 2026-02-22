@@ -1,21 +1,7 @@
 import Link from "next/link";
 import { loadTickets, computeStats } from "@/lib/data";
+import { getAllConnectorStatuses } from "@/lib/connector-service";
 import ZendeskSyncButton from "@/components/ZendeskSyncButton";
-
-const connectors = [
-  {
-    name: "Zendesk",
-    direction: "bidirectional",
-    state: "ready",
-    cli: "cliaas zendesk export --subdomain <x> --email <e> --token <t> --out ./exports/zendesk",
-  },
-  {
-    name: "Kayako",
-    direction: "bidirectional",
-    state: "ready",
-    cli: "cliaas kayako export --domain <x> --email <e> --password <p> --out ./exports/kayako",
-  },
-];
 
 const workflows = [
   { cmd: "cliaas triage --limit 10", desc: "LLM-powered ticket triage" },
@@ -44,6 +30,7 @@ export default async function DashboardPage() {
   const tickets = await loadTickets();
   const stats = computeStats(tickets);
   const hasData = tickets.length > 0;
+  const connectorStatuses = getAllConnectorStatuses();
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
@@ -54,8 +41,8 @@ export default async function DashboardPage() {
         </p>
         <h1 className="mt-4 text-4xl font-bold">CLIaaS Control Plane</h1>
         <p className="mt-4 text-lg font-medium text-zinc-600">
-          Export data from Zendesk and Kayako, then run LLM-powered workflows
-          from the CLI.
+          Export data from Zendesk, HelpCrunch, Freshdesk, and Groove, then run
+          LLM-powered workflows from the CLI.
         </p>
         <div className="mt-8 flex flex-wrap gap-4">
           <Link
@@ -63,6 +50,12 @@ export default async function DashboardPage() {
             className="border-2 border-zinc-950 bg-zinc-950 px-6 py-3 font-mono text-sm font-bold uppercase text-white transition-colors hover:bg-zinc-800"
           >
             Settings
+          </Link>
+          <Link
+            href="/customers"
+            className="border-2 border-zinc-950 bg-white px-6 py-3 font-mono text-sm font-bold uppercase text-zinc-950 transition-colors hover:bg-zinc-100"
+          >
+            Customers
           </Link>
           <Link
             href="/demo"
@@ -306,24 +299,46 @@ export default async function DashboardPage() {
 
       {/* CONNECTORS */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-8">
-        <h2 className="text-2xl font-bold">Connectors</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold">Connectors</h2>
+          <Link
+            href="/settings"
+            className="font-mono text-xs font-bold uppercase text-blue-600 hover:underline"
+          >
+            Manage
+          </Link>
+        </div>
         <div className="mt-6 space-y-4">
-          {connectors.map((c) => (
-            <div key={c.name} className="border-2 border-zinc-200 p-5">
+          {connectorStatuses.map((c) => (
+            <div key={c.id} className="border-2 border-zinc-200 p-5">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                   <p className="text-lg font-bold">{c.name}</p>
                   <span className="bg-zinc-950 px-2 py-1 font-mono text-xs font-bold uppercase text-white">
-                    {c.direction}
+                    bidirectional
                   </span>
                 </div>
-                <span className="border-2 border-zinc-950 bg-emerald-400 px-3 py-1 font-mono text-xs font-bold uppercase text-black">
-                  {c.state}
+                <span
+                  className={`border-2 border-zinc-950 px-3 py-1 font-mono text-xs font-bold uppercase ${
+                    c.configured
+                      ? "bg-emerald-400 text-black"
+                      : "bg-amber-300 text-black"
+                  }`}
+                >
+                  {c.configured ? "configured" : "not configured"}
                 </span>
               </div>
-              <code className="mt-4 block border-t-2 border-zinc-200 bg-zinc-950 p-4 font-mono text-sm text-zinc-300">
-                {c.cli}
-              </code>
+              {c.hasExport && (
+                <div className="mt-3 flex flex-wrap gap-4 font-mono text-xs text-zinc-500">
+                  <span>{c.ticketCount} tickets</span>
+                  <span>{c.messageCount} messages</span>
+                  <span>{c.customerCount} customers</span>
+                  {c.kbArticleCount > 0 && <span>{c.kbArticleCount} KB articles</span>}
+                  {c.lastExport && (
+                    <span>exported {new Date(c.lastExport).toLocaleDateString()}</span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

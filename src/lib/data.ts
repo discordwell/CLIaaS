@@ -43,6 +43,7 @@ export interface TicketStats {
 }
 
 type DbContext = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   db: any;
   schema: typeof import('@/db/schema');
 };
@@ -138,7 +139,12 @@ async function loadTicketsFromDb(): Promise<Ticket[]> {
   const workspaceId = await getWorkspaceId(db, schema);
   if (!workspaceId) return [];
 
-  const rows = await db
+  const rows: Array<{
+    id: string; subject: string; status: string; priority: string;
+    source: string | null; createdAt: Date; updatedAt: Date;
+    assigneeName: string | null; assigneeEmail: string | null;
+    requesterName: string | null; requesterEmail: string | null;
+  }> = await db
     .select({
       id: schema.tickets.id,
       subject: schema.tickets.subject,
@@ -198,7 +204,7 @@ async function loadTicketsFromDb(): Promise<Ticket[]> {
     return {
       id: row.id,
       externalId: externalById.get(row.id) ?? row.id.slice(0, 8),
-      source: row.source ?? 'zendesk',
+      source: (row.source ?? 'zendesk') as Ticket['source'],
       subject: row.subject,
       status: row.status,
       priority: row.priority,
@@ -221,7 +227,10 @@ async function loadMessagesFromDb(ticketId?: string): Promise<Message[]> {
   const conditions = [eq(schema.tickets.workspaceId, workspaceId)];
   if (ticketId) conditions.push(eq(schema.tickets.id, ticketId));
 
-  const rows = await db
+  const rows: Array<{
+    id: string; ticketId: string; authorType: string; authorId: string | null;
+    body: string; visibility: string | null; createdAt: Date;
+  }> = await db
     .select({
       id: schema.messages.id,
       ticketId: schema.tickets.id,
@@ -248,7 +257,7 @@ async function loadMessagesFromDb(ticketId?: string): Promise<Message[]> {
 
   const userMap = new Map<string, string>();
   if (userIds.size > 0) {
-    const userRows = await db
+    const userRows: Array<{ id: string; name: string | null; email: string | null }> = await db
       .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
       .from(schema.users)
       .where(inArray(schema.users.id, Array.from(userIds)));
@@ -259,7 +268,7 @@ async function loadMessagesFromDb(ticketId?: string): Promise<Message[]> {
 
   const customerMap = new Map<string, string>();
   if (customerIds.size > 0) {
-    const customerRows = await db
+    const customerRows: Array<{ id: string; name: string | null; email: string | null }> = await db
       .select({ id: schema.customers.id, name: schema.customers.name, email: schema.customers.email })
       .from(schema.customers)
       .where(inArray(schema.customers.id, Array.from(customerIds)));
@@ -301,7 +310,9 @@ async function loadKBArticlesFromDb(): Promise<KBArticle[]> {
   const workspaceId = await getWorkspaceId(db, schema);
   if (!workspaceId) return [];
 
-  const rows = await db
+  const rows: Array<{
+    id: string; title: string; body: string; categoryPath: string[] | null;
+  }> = await db
     .select({
       id: schema.kbArticles.id,
       title: schema.kbArticles.title,
@@ -321,14 +332,22 @@ async function loadKBArticlesFromDb(): Promise<KBArticle[]> {
 
 export async function loadTickets(): Promise<Ticket[]> {
   if (process.env.DATABASE_URL) {
-    return loadTicketsFromDb();
+    try {
+      return await loadTicketsFromDb();
+    } catch {
+      // DB unavailable, fall back to JSONL
+    }
   }
   return loadAllFromDirs<Ticket>('tickets.jsonl');
 }
 
 export async function loadMessages(ticketId?: string): Promise<Message[]> {
   if (process.env.DATABASE_URL) {
-    return loadMessagesFromDb(ticketId);
+    try {
+      return await loadMessagesFromDb(ticketId);
+    } catch {
+      // DB unavailable, fall back to JSONL
+    }
   }
   const messages = loadAllFromDirs<Message>('messages.jsonl');
   return ticketId ? messages.filter(m => m.ticketId === ticketId) : messages;
@@ -336,9 +355,37 @@ export async function loadMessages(ticketId?: string): Promise<Message[]> {
 
 export async function loadKBArticles(): Promise<KBArticle[]> {
   if (process.env.DATABASE_URL) {
-    return loadKBArticlesFromDb();
+    try {
+      return await loadKBArticlesFromDb();
+    } catch {
+      // DB unavailable, fall back to JSONL
+    }
   }
   return loadAllFromDirs<KBArticle>('kb_articles.jsonl');
+}
+
+// ---- Customer & Organization loading ----
+
+export interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  source: string;
+  createdAt?: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  source: string;
+}
+
+export async function loadCustomers(): Promise<Customer[]> {
+  return loadAllFromDirs<Customer>('customers.jsonl');
+}
+
+export async function loadOrganizations(): Promise<Organization[]> {
+  return loadAllFromDirs<Organization>('organizations.jsonl');
 }
 
 export function computeStats(tickets: Ticket[]): TicketStats {

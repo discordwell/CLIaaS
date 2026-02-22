@@ -1,24 +1,6 @@
 import Link from "next/link";
-
-const connectors = [
-  {
-    name: "Zendesk",
-    direction: "bidirectional",
-    status: "ready",
-    fields: ["Subdomain", "Agent Email", "API Token"],
-    envVars: ["ZENDESK_SUBDOMAIN", "ZENDESK_EMAIL", "ZENDESK_TOKEN"],
-    configCmd:
-      "cliaas zendesk export --subdomain <x> --email <e> --token <t>",
-  },
-  {
-    name: "Kayako",
-    direction: "bidirectional",
-    status: "ready",
-    fields: ["Domain", "Agent Email", "Password"],
-    envVars: ["KAYAKO_DOMAIN", "KAYAKO_EMAIL", "KAYAKO_PASSWORD"],
-    configCmd: "cliaas kayako export --domain <x> --email <e> --password <p>",
-  },
-];
+import { getAllConnectorStatuses } from "@/lib/connector-service";
+import ConnectorCard from "@/components/ConnectorCard";
 
 const llmProviders = [
   {
@@ -48,7 +30,11 @@ const llmProviders = [
   },
 ];
 
+export const dynamic = "force-dynamic";
+
 export default function SettingsPage() {
+  const connectors = getAllConnectorStatuses();
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-6 py-12 text-zinc-950">
       {/* HEADER */}
@@ -65,68 +51,20 @@ export default function SettingsPage() {
         </p>
         <h1 className="mt-4 text-4xl font-bold">Configuration</h1>
         <p className="mt-4 text-lg font-medium text-zinc-600">
-          CLIaaS is configured via CLI commands or environment variables. All
-          credentials are stored locally in{" "}
-          <code className="bg-zinc-100 px-2 py-1 font-mono text-sm">
-            ~/.cliaas/config.json
-          </code>{" "}
-          with 0600 permissions.
+          Manage helpdesk connectors, verify credentials, and pull data from
+          each platform. All credentials are stored in environment variables.
         </p>
       </header>
 
       {/* CONNECTORS */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-8">
         <h2 className="text-2xl font-bold">Helpdesk Connectors</h2>
+        <p className="mt-2 text-sm font-medium text-zinc-600">
+          {connectors.filter(c => c.configured).length} of {connectors.length} connectors configured
+        </p>
         <div className="mt-6 space-y-6">
           {connectors.map((c) => (
-            <div key={c.name} className="border-2 border-zinc-200 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-lg font-bold">{c.name}</p>
-                  <p className="font-mono text-xs font-bold uppercase text-zinc-500">
-                    {c.direction}
-                  </p>
-                </div>
-                <span className="border-2 border-zinc-950 bg-emerald-400 px-3 py-1 font-mono text-xs font-bold uppercase text-black">
-                  {c.status}
-                </span>
-              </div>
-              <div className="mt-5 space-y-3">
-                <div>
-                  <p className="font-mono text-xs font-bold uppercase text-zinc-500">
-                    Required credentials:
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {c.fields.map((f) => (
-                      <span
-                        key={f}
-                        className="border border-zinc-300 bg-zinc-100 px-2 py-1 font-mono text-xs font-bold"
-                      >
-                        {f}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="font-mono text-xs font-bold uppercase text-zinc-500">
-                    Environment variables:
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {c.envVars.map((v) => (
-                      <code
-                        key={v}
-                        className="bg-zinc-950 px-2 py-1 font-mono text-xs text-emerald-400"
-                      >
-                        {v}
-                      </code>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <code className="mt-5 block border-t-2 border-zinc-200 bg-zinc-950 p-4 font-mono text-sm text-emerald-400">
-                {c.configCmd}
-              </code>
-            </div>
+            <ConnectorCard key={c.id} connector={c} />
           ))}
         </div>
       </section>
@@ -161,41 +99,6 @@ export default function SettingsPage() {
             </div>
           ))}
         </div>
-        <div className="mt-6 border-2 border-zinc-950 bg-zinc-100 p-5">
-          <p className="font-mono text-xs font-bold uppercase text-zinc-950">
-            Switch active provider:
-          </p>
-          <code className="mt-2 block font-mono text-sm font-bold text-zinc-950">
-            cliaas config set-provider claude|openai|openclaw
-          </code>
-        </div>
-      </section>
-
-      {/* CONFIG REFERENCE */}
-      <section className="mt-8 border-2 border-zinc-950 bg-zinc-950 p-8 text-zinc-100">
-        <h2 className="text-2xl font-bold text-white">Config File Reference</h2>
-        <pre className="mt-6 overflow-x-auto font-mono text-sm leading-relaxed text-zinc-300">
-          <span className="text-zinc-500">
-            {"// ~/.cliaas/config.json (0600 permissions)"}
-          </span>
-          {"\n"}
-          {"{\n"}
-          {'  "provider": "claude",\n'}
-          {'  "claude": {\n'}
-          {'    "apiKey": "sk-ant-...",\n'}
-          {'    "model": "claude-sonnet-4-5-20250929"\n'}
-          {"  },\n"}
-          {'  "openai": {\n'}
-          {'    "apiKey": "sk-...",\n'}
-          {'    "model": "gpt-4o"\n'}
-          {"  },\n"}
-          {'  "openclaw": {\n'}
-          {'    "baseUrl": "http://localhost:18789/v1",\n'}
-          {'    "apiKey": "optional",\n'}
-          {'    "model": "gpt-4o"\n'}
-          {"  }\n"}
-          {"}"}
-        </pre>
       </section>
 
       {/* QUICK COMMANDS */}

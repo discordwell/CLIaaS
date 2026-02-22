@@ -20,12 +20,18 @@ export const dynamic = "force-dynamic";
 export default async function TicketsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; priority?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; priority?: string; q?: string; source?: string }>;
 }) {
   const params = await searchParams;
   let tickets = await loadTickets();
   const stats = computeStats(tickets);
 
+  // Collect unique sources for filter chips
+  const allSources = [...new Set(tickets.map(t => t.source))];
+
+  if (params.source) {
+    tickets = tickets.filter((t) => t.source === params.source);
+  }
   if (params.status) {
     tickets = tickets.filter((t) => t.status === params.status);
   }
@@ -96,6 +102,20 @@ export default async function TicketsPage({
             </Link>
           ))}
           <span className="mx-2 self-center text-zinc-300">|</span>
+          {allSources.map((src) => (
+            <Link
+              key={src}
+              href={`/tickets?source=${src}`}
+              className={`border px-3 py-1 font-mono text-xs font-bold uppercase transition-colors ${
+                params.source === src
+                  ? "border-zinc-950 bg-zinc-950 text-white"
+                  : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950"
+              }`}
+            >
+              {src}
+            </Link>
+          ))}
+          <span className="mx-2 self-center text-zinc-300">|</span>
           {["urgent", "high", "normal", "low"].map((p) => (
             <Link
               key={p}
@@ -124,6 +144,9 @@ export default async function TicketsPage({
                   </th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">
                     Subject
+                  </th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">
+                    Source
                   </th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">
                     Status
@@ -163,6 +186,11 @@ export default async function TicketsPage({
                       >
                         {t.subject}
                       </Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-block px-2 py-0.5 font-mono text-xs font-bold uppercase bg-zinc-200 text-zinc-700">
+                        {t.source}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <span

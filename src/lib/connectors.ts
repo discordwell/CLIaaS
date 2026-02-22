@@ -21,13 +21,31 @@ export const CONNECTORS: ConnectorSpec[] = [
       "cliaas zendesk export --subdomain acme --email agent@acme.com --token <key> --out ./exports/zendesk",
   },
   {
-    id: "kayako",
-    name: "Kayako",
+    id: "helpcrunch",
+    name: "HelpCrunch",
     direction: "bidirectional",
     status: "ready",
     formats: ["jsonl", "json"],
     cliExample:
-      "cliaas kayako export --domain support.acme.com --email agent@acme.com --password <pw> --out ./exports/kayako",
+      "cliaas helpcrunch export --api-key <key> --out ./exports/helpcrunch",
+  },
+  {
+    id: "freshdesk",
+    name: "Freshdesk",
+    direction: "bidirectional",
+    status: "ready",
+    formats: ["jsonl", "json"],
+    cliExample:
+      "cliaas freshdesk export --subdomain acme --api-key <key> --out ./exports/freshdesk",
+  },
+  {
+    id: "groove",
+    name: "Groove",
+    direction: "bidirectional",
+    status: "ready",
+    formats: ["jsonl", "json"],
+    cliExample:
+      "cliaas groove export --api-token <token> --out ./exports/groove",
   },
 ];
 
