@@ -1,9 +1,25 @@
 import Link from "next/link";
 
-const statuses = [
-  { job: "notion -> cliaas import", state: "ready", lastRun: "never" },
-  { job: "cliaas -> csv export", state: "ready", lastRun: "never" },
-  { job: "trello -> cliaas import", state: "building", lastRun: "never" },
+const connectors = [
+  {
+    name: "Zendesk",
+    direction: "bidirectional",
+    state: "ready",
+    cli: "cliaas zendesk export --subdomain <x> --email <e> --token <t> --out ./exports/zendesk",
+  },
+  {
+    name: "Kayako",
+    direction: "bidirectional",
+    state: "ready",
+    cli: "cliaas kayako export --domain <x> --email <e> --password <p> --out ./exports/kayako",
+  },
+];
+
+const workflows = [
+  { cmd: "cliaas triage --limit 10", desc: "LLM-powered ticket triage" },
+  { cmd: "cliaas draft reply --ticket <id>", desc: "Generate context-aware reply" },
+  { cmd: "cliaas kb suggest --ticket <id>", desc: "Surface relevant KB articles" },
+  { cmd: "cliaas summarize --period today", desc: "Shift/queue summary" },
 ];
 
 export default function DashboardPage() {
@@ -13,10 +29,10 @@ export default function DashboardPage() {
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">
           Dashboard
         </p>
-        <h1 className="mt-3 text-3xl font-semibold">Workspace: hackathon-alpha</h1>
+        <h1 className="mt-3 text-3xl font-semibold">CLIaaS Control Plane</h1>
         <p className="mt-2 text-muted">
-          Start with API stubs now, then replace with live provider adapters as the
-          target SaaS is chosen.
+          Export data from Zendesk and Kayako, then run LLM-powered workflows
+          from the CLI.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Link
@@ -35,38 +51,58 @@ export default function DashboardPage() {
       </header>
 
       <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-semibold">Interop Jobs</h2>
+        <h2 className="text-xl font-semibold">Connectors</h2>
         <div className="mt-4 space-y-3">
-          {statuses.map((item) => (
+          {connectors.map((c) => (
             <div
-              key={item.job}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-4 py-3"
+              key={c.name}
+              className="rounded-lg border border-slate-200 px-4 py-3"
             >
-              <p className="font-mono text-sm">{item.job}</p>
-              <div className="flex items-center gap-3 text-sm">
-                <span
-                  className={`rounded-full px-2 py-1 font-semibold ${
-                    item.state === "ready"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-amber-100 text-amber-700"
-                  }`}
-                >
-                  {item.state}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <p className="font-semibold">{c.name}</p>
+                  <span className="font-mono text-xs text-muted">{c.direction}</span>
+                </div>
+                <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">
+                  {c.state}
                 </span>
-                <span className="text-muted">last run: {item.lastRun}</span>
               </div>
+              <code className="mt-2 block rounded bg-slate-100 px-3 py-1.5 font-mono text-xs text-slate-700">
+                {c.cli}
+              </code>
             </div>
           ))}
         </div>
       </section>
 
       <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-950 p-6 text-slate-100 shadow-sm">
-        <h2 className="text-xl font-semibold">CLI Quickstart</h2>
+        <h2 className="text-xl font-semibold">LLM Workflows</h2>
+        <div className="mt-4 space-y-3">
+          {workflows.map((w) => (
+            <div key={w.cmd} className="flex flex-wrap items-center justify-between gap-2">
+              <code className="font-mono text-sm text-cyan-100">{w.cmd}</code>
+              <span className="text-sm text-slate-400">{w.desc}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-950 p-6 text-slate-100 shadow-sm">
+        <h2 className="text-xl font-semibold">Quick Start</h2>
         <pre className="mt-3 overflow-x-auto font-mono text-sm leading-7 text-cyan-100">
-{`cliaas auth login
-cliaas connectors list
-cliaas import --from notion --workspace hackathon-alpha --out ./tmp/notion.json
-cliaas export --to csv --workspace hackathon-alpha --out ./tmp/export.csv`}
+{`# 1. Configure your LLM provider
+cliaas config set-provider claude
+cliaas config set-key claude sk-ant-...
+
+# 2. Export your helpdesk data
+cliaas zendesk export --subdomain acme --email you@acme.com --token <key> --out ./exports/zendesk
+
+# 3. Work your queue
+cliaas tickets list --status open
+cliaas triage --limit 10
+cliaas draft reply --ticket zd-4521 --tone professional
+cliaas kb suggest --ticket zd-4521
+cliaas summarize --period today`}
         </pre>
       </section>
     </main>

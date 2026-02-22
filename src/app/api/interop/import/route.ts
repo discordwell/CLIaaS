@@ -3,7 +3,7 @@ import { getConnector } from "@/lib/connectors";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({} as Record<string, unknown>));
-  const provider = typeof body.provider === "string" ? body.provider : "notion";
+  const provider = typeof body.provider === "string" ? body.provider : "zendesk";
   const filePath =
     typeof body.filePath === "string" && body.filePath.trim().length > 0
       ? body.filePath

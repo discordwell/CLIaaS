@@ -12,28 +12,22 @@ export type ConnectorSpec = {
 
 export const CONNECTORS: ConnectorSpec[] = [
   {
-    id: "notion",
-    name: "Notion",
+    id: "zendesk",
+    name: "Zendesk",
     direction: "bidirectional",
     status: "ready",
-    formats: ["json", "csv", "markdown"],
-    cliExample: "cliaas import --from notion --out ./exports/notion.json",
+    formats: ["jsonl", "json"],
+    cliExample:
+      "cliaas zendesk export --subdomain acme --email agent@acme.com --token <key> --out ./exports/zendesk",
   },
   {
-    id: "trello",
-    name: "Trello",
-    direction: "import",
-    status: "building",
-    formats: ["json", "csv"],
-    cliExample: "cliaas import --from trello --out ./exports/trello.json",
-  },
-  {
-    id: "airtable",
-    name: "Airtable",
-    direction: "export",
-    status: "planned",
-    formats: ["json", "csv"],
-    cliExample: "cliaas export --to airtable --input ./exports/cliaas.json",
+    id: "kayako",
+    name: "Kayako",
+    direction: "bidirectional",
+    status: "ready",
+    formats: ["jsonl", "json"],
+    cliExample:
+      "cliaas kayako export --domain support.acme.com --email agent@acme.com --password <pw> --out ./exports/kayako",
   },
 ];
 
