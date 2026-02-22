@@ -3,7 +3,22 @@ import { join } from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import type {
-  Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
+  Ticket,
+  Message,
+  Attachment,
+  Customer,
+  Organization,
+  KBArticle,
+  Rule,
+  Group,
+  CustomField,
+  View,
+  SLAPolicy,
+  TicketForm,
+  Brand,
+  ExportManifest,
+  TicketStatus,
+  TicketPriority,
 } from '../schema/types.js';
 
 export interface ZendeskAuth {
@@ -33,6 +48,7 @@ interface ZendeskTicket {
   status: string;
   priority: string | null;
   assignee_id: number | null;
+  group_id?: number | null;
   requester_id: number;
   tags: string[];
   created_at: string;
@@ -61,6 +77,7 @@ interface ZendeskComment {
   html_body: string;
   public: boolean;
   created_at: string;
+  attachments?: ZendeskAttachment[];
 }
 
 interface ZendeskCommentsResponse {
@@ -86,6 +103,49 @@ interface ZendeskMacro {
   active: boolean;
   restriction: unknown;
   actions: unknown[];
+}
+
+interface ZendeskGroup {
+  id: number;
+  name: string;
+}
+
+interface ZendeskView {
+  id: number;
+  title: string;
+  active: boolean;
+  conditions: unknown;
+  execution?: unknown;
+}
+
+interface ZendeskTicketField {
+  id: number;
+  title: string;
+  type: string;
+  required: boolean;
+  custom_field_options?: Array<{ name: string; value: string }>;
+}
+
+interface ZendeskTicketForm {
+  id: number;
+  name: string;
+  active: boolean;
+  position?: number;
+  ticket_field_ids?: number[];
+}
+
+interface ZendeskBrand {
+  id: number;
+  name: string;
+  subdomain?: string;
+}
+
+interface ZendeskAttachment {
+  id: number;
+  file_name: string;
+  content_type: string;
+  size: number;
+  content_url: string;
 }
 
 interface ZendeskTrigger {
@@ -178,6 +238,12 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
 
   const ticketsFile = join(outDir, 'tickets.jsonl');
   const messagesFile = join(outDir, 'messages.jsonl');
+  const groupsFile = join(outDir, 'groups.jsonl');
+  const fieldsFile = join(outDir, 'custom_fields.jsonl');
+  const viewsFile = join(outDir, 'views.jsonl');
+  const slaPoliciesFile = join(outDir, 'sla_policies.jsonl');
+  const formsFile = join(outDir, 'ticket_forms.jsonl');
+  const brandsFile = join(outDir, 'brands.jsonl');
   const customersFile = join(outDir, 'customers.jsonl');
   const orgsFile = join(outDir, 'organizations.jsonl');
   const kbFile = join(outDir, 'kb_articles.jsonl');
@@ -185,12 +251,26 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
 
   // Clear existing files if no cursor state (full export)
   if (!cursorState) {
-    for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
+    for (const f of [ticketsFile, messagesFile, groupsFile, fieldsFile, viewsFile, slaPoliciesFile, formsFile, brandsFile, customersFile, orgsFile, kbFile, rulesFile]) {
       writeFileSync(f, '');
     }
   }
 
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = {
+    tickets: 0,
+    messages: 0,
+    attachments: 0,
+    customers: 0,
+    organizations: 0,
+    kbArticles: 0,
+    rules: 0,
+    groups: 0,
+    customFields: 0,
+    views: 0,
+    slaPolicies: 0,
+    ticketForms: 0,
+    brands: 0,
+  };
   const newCursorState: Record<string, string> = { ...cursorState };
 
   // Export tickets with cursor-based pagination
@@ -212,6 +292,7 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
         status: mapStatus(t.status),
         priority: mapPriority(t.priority),
         assignee: t.assignee_id ? String(t.assignee_id) : undefined,
+        groupId: t.group_id ? String(t.group_id) : undefined,
         requester: String(t.requester_id),
         tags: t.tags,
         createdAt: t.created_at,
@@ -227,6 +308,19 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
         while (commentsUrl) {
           const commentsData: ZendeskCommentsResponse = await zendeskFetch<ZendeskCommentsResponse>(auth, commentsUrl);
           for (const c of commentsData.comments) {
+            let attachments: Attachment[] | undefined;
+            if (c.attachments && c.attachments.length > 0) {
+              attachments = c.attachments.map((a) => ({
+                id: `zd-att-${a.id}`,
+                externalId: String(a.id),
+                messageId: `zd-msg-${c.id}`,
+                filename: a.file_name,
+                size: a.size,
+                contentType: a.content_type,
+                contentUrl: a.content_url,
+              }));
+              counts.attachments += attachments.length;
+            }
             const message: Message = {
               id: `zd-msg-${c.id}`,
               ticketId: `zd-${t.id}`,
@@ -235,6 +329,7 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
               bodyHtml: c.html_body,
               type: c.public ? 'reply' : 'note',
               createdAt: c.created_at,
+              attachments,
             };
             appendJsonl(messagesFile, message);
             counts.messages++;
@@ -318,6 +413,137 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
   if (counts.organizations > 0) orgSpinner.succeed(`${counts.organizations} organizations exported`);
   else orgSpinner.info('0 organizations exported (endpoint may not be available)');
 
+  // Export groups
+  const groupSpinner = ora('Exporting groups...').start();
+  try {
+    let groupUrl: string | null = '/api/v2/groups.json?page[size]=100';
+    while (groupUrl) {
+      const data: { groups: ZendeskGroup[]; next_page: string | null } = await zendeskFetch(auth, groupUrl);
+      for (const g of data.groups) {
+        const group: Group = {
+          id: `zd-group-${g.id}`,
+          externalId: String(g.id),
+          source: 'zendesk',
+          name: g.name,
+        };
+        appendJsonl(groupsFile, group);
+        counts.groups++;
+      }
+      groupUrl = data.next_page;
+    }
+  } catch (err) {
+    groupSpinner.warn(`Groups: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.groups > 0) groupSpinner.succeed(`${counts.groups} groups exported`);
+  else groupSpinner.info('0 groups exported (endpoint may not be available)');
+
+  // Export ticket fields
+  const fieldSpinner = ora('Exporting ticket fields...').start();
+  try {
+    let fieldsUrl: string | null = '/api/v2/ticket_fields.json?page[size]=100';
+    while (fieldsUrl) {
+      const data: { ticket_fields: ZendeskTicketField[]; next_page: string | null } = await zendeskFetch(auth, fieldsUrl);
+      for (const f of data.ticket_fields) {
+        const field: CustomField = {
+          id: `zd-field-${f.id}`,
+          externalId: String(f.id),
+          source: 'zendesk',
+          objectType: 'ticket',
+          name: f.title,
+          fieldType: f.type,
+          required: f.required,
+          options: f.custom_field_options?.map((o) => ({ value: o.value, label: o.name })) ?? undefined,
+        };
+        appendJsonl(fieldsFile, field);
+        counts.customFields++;
+      }
+      fieldsUrl = data.next_page;
+    }
+  } catch (err) {
+    fieldSpinner.warn(`Ticket fields: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.customFields > 0) fieldSpinner.succeed(`${counts.customFields} ticket fields exported`);
+  else fieldSpinner.info('0 ticket fields exported (endpoint may not be available)');
+
+  // Export views
+  const viewSpinner = ora('Exporting views...').start();
+  try {
+    let viewsUrl: string | null = '/api/v2/views.json?page[size]=100';
+    while (viewsUrl) {
+      const data: { views: ZendeskView[]; next_page: string | null } = await zendeskFetch(auth, viewsUrl);
+      for (const v of data.views) {
+        const view: View = {
+          id: `zd-view-${v.id}`,
+          externalId: String(v.id),
+          source: 'zendesk',
+          name: v.title,
+          query: v.conditions ?? v.execution ?? null,
+          active: v.active,
+        };
+        appendJsonl(viewsFile, view);
+        counts.views++;
+      }
+      viewsUrl = data.next_page;
+    }
+  } catch (err) {
+    viewSpinner.warn(`Views: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.views > 0) viewSpinner.succeed(`${counts.views} views exported`);
+  else viewSpinner.info('0 views exported (endpoint may not be available)');
+
+  // Export ticket forms
+  const formSpinner = ora('Exporting ticket forms...').start();
+  try {
+    let formsUrl: string | null = '/api/v2/ticket_forms.json?page[size]=100';
+    while (formsUrl) {
+      const data: { ticket_forms: ZendeskTicketForm[]; next_page: string | null } = await zendeskFetch(auth, formsUrl);
+      for (const f of data.ticket_forms) {
+        const form: TicketForm = {
+          id: `zd-form-${f.id}`,
+          externalId: String(f.id),
+          source: 'zendesk',
+          name: f.name,
+          active: f.active,
+          position: f.position,
+          fieldIds: f.ticket_field_ids,
+          raw: f,
+        };
+        appendJsonl(formsFile, form);
+        counts.ticketForms++;
+      }
+      formsUrl = data.next_page;
+    }
+  } catch (err) {
+    formSpinner.warn(`Ticket forms: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.ticketForms > 0) formSpinner.succeed(`${counts.ticketForms} ticket forms exported`);
+  else formSpinner.info('0 ticket forms exported (endpoint may not be available)');
+
+  // Export brands
+  const brandSpinner = ora('Exporting brands...').start();
+  try {
+    let brandsUrl: string | null = '/api/v2/brands.json?page[size]=100';
+    while (brandsUrl) {
+      const data: { brands: ZendeskBrand[]; next_page: string | null } = await zendeskFetch(auth, brandsUrl);
+      for (const b of data.brands) {
+        const brand: Brand = {
+          id: `zd-brand-${b.id}`,
+          externalId: String(b.id),
+          source: 'zendesk',
+          name: b.name,
+          raw: b,
+        };
+        appendJsonl(brandsFile, brand);
+        counts.brands++;
+      }
+      brandsUrl = data.next_page;
+    }
+  } catch (err) {
+    brandSpinner.warn(`Brands: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.brands > 0) brandSpinner.succeed(`${counts.brands} brands exported`);
+  else brandSpinner.info('0 brands exported (endpoint may not be available)');
+
   // Export KB articles
   const kbSpinner = ora('Exporting KB articles...').start();
   try {
@@ -392,6 +618,18 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
       };
       appendJsonl(rulesFile, rule);
       counts.rules++;
+
+      const policy: SLAPolicy = {
+        id: `zd-sla-${s.id}`,
+        externalId: String(s.id),
+        source: 'zendesk',
+        name: s.title,
+        enabled: true,
+        targets: s.policy_metrics,
+        schedules: s.filter,
+      };
+      appendJsonl(slaPoliciesFile, policy);
+      counts.slaPolicies++;
     }
   } catch { /* endpoint may require admin access */ }
   rulesSpinner.succeed(`${counts.rules} business rules exported`);

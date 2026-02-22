@@ -1,6 +1,3 @@
-// Canonical schema types for CLIaaS
-// All connectors normalize into these types
-
 export type TicketStatus = 'open' | 'pending' | 'on_hold' | 'solved' | 'closed';
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type MessageType = 'reply' | 'note' | 'system';
@@ -138,40 +135,4 @@ export interface Rule {
   conditions: unknown;
   actions: unknown;
   active: boolean;
-}
-
-export interface ExportManifest {
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
-  exportedAt: string;
-  counts: {
-    tickets: number;
-    messages: number;
-    attachments?: number;
-    customers: number;
-    organizations: number;
-    kbArticles: number;
-    rules: number;
-    groups?: number;
-    customFields?: number;
-    views?: number;
-    slaPolicies?: number;
-    ticketForms?: number;
-    brands?: number;
-  };
-  cursorState?: Record<string, string>;
-}
-
-export interface TriageResult {
-  ticketId: string;
-  suggestedPriority: TicketPriority;
-  suggestedAssignee?: string;
-  suggestedCategory: string;
-  reasoning: string;
-}
-
-export interface KBSuggestion {
-  articleId: string;
-  title: string;
-  relevanceScore: number;
-  reasoning: string;
 }

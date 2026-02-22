@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { loadTickets, computeStats } from "@/lib/data";
+import ZendeskSyncButton from "@/components/ZendeskSyncButton";
 
 const connectors = [
   {
@@ -75,6 +76,9 @@ export default async function DashboardPage() {
           >
             Home
           </Link>
+        </div>
+        <div className="mt-6">
+          <ZendeskSyncButton />
         </div>
       </header>
 

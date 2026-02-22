@@ -422,6 +422,11 @@ export const syncCursors = pgTable('sync_cursors', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const syncCursorsUniqueIdx = uniqueIndex('sync_cursors_unique_idx').on(
+  syncCursors.integrationId,
+  syncCursors.objectType,
+);
+
 export const importJobs = pgTable('import_jobs', {
   id: uuid('id').defaultRandom().primaryKey(),
   integrationId: uuid('integration_id').notNull().references(() => integrations.id),

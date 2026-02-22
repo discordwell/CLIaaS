@@ -57,10 +57,31 @@ export function registerZendeskCommands(program: Command): void {
         console.log(chalk.green('\nExport summary:'));
         console.log(`  Tickets:       ${manifest.counts.tickets}`);
         console.log(`  Messages:      ${manifest.counts.messages}`);
+        if (manifest.counts.attachments !== undefined) {
+          console.log(`  Attachments:   ${manifest.counts.attachments}`);
+        }
         console.log(`  Users:         ${manifest.counts.customers}`);
         console.log(`  Organizations: ${manifest.counts.organizations}`);
         console.log(`  KB Articles:   ${manifest.counts.kbArticles}`);
         console.log(`  Rules:         ${manifest.counts.rules}`);
+        if (manifest.counts.groups !== undefined) {
+          console.log(`  Groups:        ${manifest.counts.groups}`);
+        }
+        if (manifest.counts.customFields !== undefined) {
+          console.log(`  Fields:        ${manifest.counts.customFields}`);
+        }
+        if (manifest.counts.views !== undefined) {
+          console.log(`  Views:         ${manifest.counts.views}`);
+        }
+        if (manifest.counts.slaPolicies !== undefined) {
+          console.log(`  SLA Policies:  ${manifest.counts.slaPolicies}`);
+        }
+        if (manifest.counts.ticketForms !== undefined) {
+          console.log(`  Ticket Forms:  ${manifest.counts.ticketForms}`);
+        }
+        if (manifest.counts.brands !== undefined) {
+          console.log(`  Brands:        ${manifest.counts.brands}`);
+        }
       } catch (err) {
         console.error(chalk.red(`Export failed: ${err instanceof Error ? err.message : err}`));
         process.exit(1);
