@@ -1598,6 +1598,16 @@ export class Game {
       this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
       this.renderer.screenFlash = Math.max(this.renderer.screenFlash, 5);
       this.audio.play('building_explode');
+      // Structure explosion damages nearby units (2-cell radius, ~100 base damage)
+      const blastRadius = 2;
+      for (const e of this.entities) {
+        if (!e.alive) continue;
+        const dist = worldDist({ x: wx, y: wy }, e.pos);
+        if (dist > blastRadius) continue;
+        const falloff = 1 - (dist / blastRadius) * 0.6;
+        const blastDmg = Math.max(1, Math.round(100 * falloff));
+        e.takeDamage(blastDmg, 'HE');
+      }
       // Leave large scorch mark
       this.map.addDecal(s.cx, s.cy, 14, 0.6);
       // Bridge destruction: convert nearby bridge template cells to water
