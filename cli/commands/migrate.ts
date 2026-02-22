@@ -16,7 +16,7 @@ import { helpcrunchCreateChat, helpcrunchPostMessage, helpcrunchFetch } from '..
 import type { HelpcrunchAuth } from '../connectors/helpcrunch.js';
 import { kayakoCreateCase, kayakoPostReply, kayakoPostNote } from '../connectors/kayako.js';
 import type { KayakoAuth } from '../connectors/kayako.js';
-import { intercomCreateConversation, intercomReplyToConversation, intercomAddNote } from '../connectors/intercom.js';
+import { intercomCreateConversation, intercomReplyToConversation, intercomAddNote, intercomFetch } from '../connectors/intercom.js';
 import type { IntercomAuth } from '../connectors/intercom.js';
 import { helpscoutCreateConversation, helpscoutReply, helpscoutAddNote } from '../connectors/helpscout.js';
 import type { HelpScoutAuth } from '../connectors/helpscout.js';
@@ -171,6 +171,40 @@ async function resolveHelpcrunchCustomer(auth: HelpcrunchAuth, email: string, cu
   return created.id;
 }
 
+// ---- Intercom contact resolution ----
+
+const intercomContactCache = new Map<string, string>();
+
+async function resolveIntercomContact(auth: IntercomAuth, email: string, customers: Customer[]): Promise<string> {
+  if (intercomContactCache.has(email)) return intercomContactCache.get(email)!;
+
+  // Search Intercom for existing contact by email
+  try {
+    const result = await intercomFetch<{ data: Array<{ id: string; email: string | null }> }>(
+      auth, '/contacts/search', {
+        method: 'POST',
+        body: { query: { field: 'email', operator: '=', value: email } },
+      },
+    );
+    if (result.data.length > 0) {
+      intercomContactCache.set(email, result.data[0].id);
+      return result.data[0].id;
+    }
+  } catch { /* not found, create */ }
+
+  // Find name from source customers
+  const srcCustomer = customers.find(c => c.email === email);
+  const name = srcCustomer?.name ?? email.split('@')[0] ?? 'Migrated User';
+
+  // Create contact in Intercom
+  const created = await intercomFetch<{ id: string }>(auth, '/contacts', {
+    method: 'POST',
+    body: { role: 'user', email, name },
+  });
+  intercomContactCache.set(email, created.id);
+  return created.id;
+}
+
 // ---- Per-ticket migration ----
 
 interface MigrateResult {
@@ -248,8 +282,8 @@ async function migrateTicket(
     }
     case 'intercom': {
       const a = auth as IntercomAuth;
-      // Intercom needs a contact ID — use requester directly or find from customers
-      const contactId = ticket.requester;
+      const email = findRequesterEmail(ticket, customers) || ticket.requester;
+      const contactId = await resolveIntercomContact(a, email, customers);
       const result = await intercomCreateConversation(a, contactId, body);
       destId = result.id;
       break;

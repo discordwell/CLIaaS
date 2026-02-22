@@ -399,14 +399,14 @@ export async function intercomVerifyConnection(auth: IntercomAuth): Promise<{
 // ---- Write operations ----
 
 export async function intercomCreateConversation(auth: IntercomAuth, fromContactId: string, body: string): Promise<{ id: string }> {
-  const result = await intercomFetch<{ id: string }>(auth, '/conversations', {
+  const result = await intercomFetch<{ conversation_id: string }>(auth, '/conversations', {
     method: 'POST',
     body: {
-      from: { type: 'contact', id: fromContactId },
+      from: { type: 'user', id: fromContactId },
       body,
     },
   });
-  return { id: result.id };
+  return { id: result.conversation_id };
 }
 
 export async function intercomReplyToConversation(auth: IntercomAuth, conversationId: string, body: string, adminId: string): Promise<void> {
