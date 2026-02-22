@@ -33,6 +33,8 @@ rsync -az \
   --exclude '.next' \
   --exclude 'node_modules' \
   --exclude 'submission' \
+  --exclude '.env*' \
+  --exclude 'exports' \
   ./ "$TMP_DIR/project/"
 
 (

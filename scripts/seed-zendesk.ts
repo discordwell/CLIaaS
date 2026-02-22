@@ -8,11 +8,16 @@ import { zendeskCreateTicket, zendeskVerifyConnection, type ZendeskAuth } from '
 import chalk from 'chalk';
 import 'dotenv/config';
 
-const auth: ZendeskAuth = {
-  subdomain: process.env.ZENDESK_SUBDOMAIN ?? 'discorp',
-  email: process.env.ZENDESK_EMAIL ?? 'cordwell@gmail.com',
-  token: process.env.ZENDESK_TOKEN ?? '',
-};
+const subdomain = process.env.ZENDESK_SUBDOMAIN;
+const email = process.env.ZENDESK_EMAIL;
+const token = process.env.ZENDESK_TOKEN;
+
+if (!subdomain || !email || !token) {
+  console.error(chalk.red('Missing required env vars: ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, ZENDESK_TOKEN'));
+  process.exit(1);
+}
+
+const auth: ZendeskAuth = { subdomain, email, token };
 
 interface SeedTicket {
   subject: string;
