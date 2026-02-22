@@ -104,9 +104,11 @@ export function findPath(
         }
       }
 
+      // Terrain speed modifiers: roads are cheaper, trees are expensive
+      const speedMult = map.getSpeedMultiplier(nx, ny);
+      let moveCost = Math.round(((dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST) / speedMult);
       // Occupancy: add soft cost for occupied cells instead of hard blocking
       // This allows routing through tight corridors while preferring empty cells
-      let moveCost = (dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST;
       if (!ignoreOccupancy && map.getOccupancy(nx, ny) > 0) {
         moveCost += 20; // penalty makes occupied cells expensive but not impassable
       }

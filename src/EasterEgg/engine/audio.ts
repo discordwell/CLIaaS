@@ -122,6 +122,9 @@ export class AudioManager {
       case 'defeat_sting': this.synthDefeatSting(t, out); break;
       case 'crate_pickup': this.synthCratePickup(t, out); break;
       case 'eva_mission_accomplished': this.synthEvaMissionAccomplished(t, out); break;
+      case 'eva_reinforcements': this.synthEvaReinforcements(t, out); break;
+      case 'eva_mission_warning': this.synthEvaMissionWarning(t, out); break;
+      case 'tesla_charge': this.synthTeslaCharge(t, out); break;
     }
   }
 
@@ -805,5 +808,55 @@ export class AudioManager {
     o2.connect(g2).connect(out);
     o1.start(t); o1.stop(t + 0.15);
     o2.start(t + 0.15); o2.stop(t + 0.35);
+  }
+
+  private synthEvaReinforcements(t: number, out: AudioNode): void {
+    // "Reinforcements have arrived" — ascending hopeful three-note sequence
+    const notes = [500, 650, 900];
+    notes.forEach((freq, i) => {
+      const dt = t + i * 0.12;
+      const o = this.osc('square', freq);
+      const g = this.gain(0.12);
+      g.gain.setValueAtTime(0.12, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.1);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.1);
+    });
+  }
+
+  private synthEvaMissionWarning(t: number, out: AudioNode): void {
+    // "Warning" — urgent descending alarm with sawtooth edge
+    for (let i = 0; i < 3; i++) {
+      const dt = t + i * 0.15;
+      const freq = 800 - i * 150;
+      const o = this.osc('sawtooth', freq);
+      const g = this.gain(0.14);
+      g.gain.setValueAtTime(0.14, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.12);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.12);
+    }
+  }
+
+  private synthTeslaCharge(t: number, out: AudioNode): void {
+    // Tesla coil charging: rising electric hum with crackle overlay
+    const o = this.osc('sawtooth', 100);
+    const og = this.gain(0.15);
+    og.gain.setValueAtTime(0.05, t);
+    og.gain.linearRampToValueAtTime(0.15, t + 0.3);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o.frequency.setValueAtTime(100, t);
+    o.frequency.exponentialRampToValueAtTime(1500, t + 0.3);
+    o.connect(og).connect(out);
+    o.start(t); o.stop(t + 0.35);
+
+    const n = this.noise(0.25);
+    const ng = this.gain(0.08);
+    const nf = this.filter('highpass', 4000);
+    ng.gain.setValueAtTime(0.02, t);
+    ng.gain.linearRampToValueAtTime(0.08, t + 0.25);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    n.connect(nf).connect(ng).connect(out);
+    n.start(t); n.stop(t + 0.3);
   }
 }
