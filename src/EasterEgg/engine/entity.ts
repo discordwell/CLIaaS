@@ -117,6 +117,12 @@ export class Entity {
   waveId = 0;              // 0 = no wave group
   waveRallyTick = 0;       // tick when wave should start attacking (rally delay)
 
+  // Harvester economy
+  oreLoad = 0;                     // credits worth of ore currently carried
+  static readonly ORE_CAPACITY = 700; // max ore value per trip
+  harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'unloading' = 'idle';
+  harvestTick = 0;                 // ticks spent harvesting current cell
+
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
     this.stats = UNIT_STATS[type] ?? UNIT_STATS.E1;
@@ -141,7 +147,7 @@ export class Entity {
     return !this.stats.isInfantry && !this.isAnt &&
       this.type !== UnitType.V_APC && this.type !== UnitType.V_HARV &&
       this.type !== UnitType.V_MCV && this.type !== UnitType.V_ARTY &&
-      this.type !== UnitType.V_JEEP;
+      this.type !== UnitType.V_JEEP && this.type !== UnitType.V_TRUK;
   }
 
   /** Turret sprite frame (frames 32-63 in the vehicle SHP) */

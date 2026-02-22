@@ -7,19 +7,20 @@ import {
   type WorldPos, CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, type WarheadType,
+  PRODUCTION_ITEMS, type ProductionItem,
 } from './types';
 import { AssetManager } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
 import { Entity, resetEntityIds } from './entity';
-import { GameMap } from './map';
+import { GameMap, Terrain } from './map';
 import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
 import {
   loadScenario,
   type TeamType, type ScenarioTrigger, type MapStructure,
-  checkTriggerEvent, executeTriggerAction,
+  checkTriggerEvent, executeTriggerAction, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
 export type { MissionInfo } from './scenario';
@@ -64,6 +65,24 @@ export class Game {
   private tabCyclePool: number[] = [];
   private tabCycleTypes: string[] = [];
   private tabCycleTypeIndex = 0;
+  // Economy
+  credits = 0;
+  displayCredits = 0; // animated counter shown in sidebar (ticks toward credits)
+  /** Production queue: one active build per category */
+  productionQueue: Map<string, { item: ProductionItem; progress: number }> = new Map();
+  /** Structure placement: waiting to be placed on map */
+  pendingPlacement: ProductionItem | null = null;
+  placementValid = false;
+  placementCx = 0;
+  placementCy = 0;
+  // Power system
+  powerProduced = 0;
+  powerConsumed = 0;
+  // Sidebar dimensions
+  static readonly SIDEBAR_W = 100;
+  sidebarScroll = 0; // scroll offset for sidebar items
+  private cachedAvailableItems: ProductionItem[] | null = null;
+
   // Stats tracking
   killCount = 0;
   lossCount = 0;
@@ -100,7 +119,8 @@ export class Game {
     this.canvas = canvas;
     this.assets = new AssetManager();
     this.audio = new AudioManager();
-    this.camera = new Camera(canvas.width, canvas.height);
+    // Game viewport is narrower than canvas to leave room for sidebar
+    this.camera = new Camera(canvas.width - Game.SIDEBAR_W, canvas.height);
     this.input = new InputManager(canvas);
     this.map = new GameMap();
     this.renderer = new Renderer(canvas);
@@ -124,7 +144,7 @@ export class Game {
     });
 
     // Load scenario
-    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers } = await loadScenario(scenarioId);
+    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers, credits } = await loadScenario(scenarioId);
     this.map = map;
     this.entities = entities;
     this.structures = structures;
@@ -135,6 +155,9 @@ export class Game {
     this.waypoints = waypoints;
     this.teamTypes = teamTypes;
     this.triggers = triggers;
+    this.credits = credits;
+    this.productionQueue.clear();
+    this.pendingPlacement = null;
     this.globals.clear();
     // Set global 1 immediately — simulates the player discovering the ant area.
     // In the original, this is set by cell-entry triggers when the player explores,
@@ -240,6 +263,9 @@ export class Game {
   private update(): void {
     this.tick++;
 
+    // Cache available items once per tick (not every render frame)
+    this.cachedAvailableItems = this.getAvailableItems();
+
     // Auto-player hook (before processInput — no conflict since no mouse events in test mode)
     this.onTick?.(this);
 
@@ -313,8 +339,20 @@ export class Game {
       s.hp = Math.min(s.maxHp, s.hp + 1);
     }
 
+    // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 2 ticks
+    if (this.tick % 2 === 0) {
+      for (const s of this.structures) {
+        if (s.alive && s.type === 'QUEE' && s.hp < s.maxHp) {
+          s.hp = Math.min(s.maxHp, s.hp + 1);
+        }
+      }
+    }
+
     // Defensive structure auto-fire
     this.updateStructureCombat();
+
+    // Tick production queue — advance build progress
+    this.tickProduction();
 
     // Clean up dead entities after death animation (use deathTick instead of animFrame)
     const before = this.entities.length;
@@ -331,6 +369,30 @@ export class Game {
         }
         if (ids.size === 0) this.controlGroups.delete(g);
       }
+    }
+
+    // Animate displayed credits toward actual credits
+    if (this.displayCredits !== this.credits) {
+      const diff = this.credits - this.displayCredits;
+      const step = Math.max(1, Math.abs(diff) >> 2); // tick 25% per frame
+      if (diff > 0) this.displayCredits = Math.min(this.credits, this.displayCredits + step);
+      else this.displayCredits = Math.max(this.credits, this.displayCredits - step);
+    }
+
+    // Calculate power balance
+    this.powerProduced = 0;
+    this.powerConsumed = 0;
+    for (const s of this.structures) {
+      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      if (s.type === 'POWR') this.powerProduced += 100;
+      else if (s.type === 'APWR') this.powerProduced += 200;
+      else if (s.type === 'PROC') this.powerConsumed += 30;
+      else if (s.type === 'WEAP') this.powerConsumed += 30;
+      else if (s.type === 'TENT') this.powerConsumed += 20;
+      else if (s.type === 'DOME') this.powerConsumed += 40;
+      else if (s.type === 'TSLA') this.powerConsumed += 100;
+      else if (s.type === 'HBOX' || s.type === 'PBOX' || s.type === 'GUN') this.powerConsumed += 10;
+      else if (s.type === 'FIX') this.powerConsumed += 30;
     }
 
     // Update idle count for HUD (once per tick, not per render frame)
@@ -353,19 +415,16 @@ export class Game {
     this.map.updateFogOfWar(units);
   }
 
-  // Minimap dimensions (must match renderer)
-  private static readonly MM_SIZE = 90;
-  private static readonly MM_MARGIN = 6;
-
   /** Check if a screen click is on the minimap; if so, scroll camera there */
   private handleMinimapClick(sx: number, sy: number): boolean {
-    const mmX = this.canvas.width - Game.MM_SIZE - Game.MM_MARGIN;
-    const mmY = Game.MM_MARGIN;
-    if (sx < mmX || sx > mmX + Game.MM_SIZE || sy < mmY || sy > mmY + Game.MM_SIZE) {
+    const mmSize = Game.SIDEBAR_W - 8;
+    const mmX = this.canvas.width - Game.SIDEBAR_W + 4;
+    const mmY = this.canvas.height - mmSize - 6;
+    if (sx < mmX || sx > mmX + mmSize || sy < mmY || sy > mmY + mmSize) {
       return false;
     }
     // Convert minimap click to world coordinates
-    const scale = Game.MM_SIZE / Math.max(this.map.boundsW, this.map.boundsH);
+    const scale = mmSize / Math.max(this.map.boundsW, this.map.boundsH);
     const worldCX = this.map.boundsX + (sx - mmX) / scale;
     const worldCY = this.map.boundsY + (sy - mmY) / scale;
     this.camera.centerOn(worldCX * CELL_SIZE, worldCY * CELL_SIZE);
@@ -417,12 +476,36 @@ export class Game {
 
   /** Process player input — selection and commands */
   private processInput(): void {
-    const { leftClick, rightClick, doubleClick, dragBox, ctrlHeld, shiftHeld, keys } = this.input.state;
+    const { leftClick, rightClick, doubleClick, dragBox, ctrlHeld, shiftHeld, keys, scrollDelta } = this.input.state;
 
-    // --- Pause toggle (P or Escape) ---
-    if (keys.has('p') || keys.has('Escape')) {
+    // Sidebar scroll (mouse wheel when cursor is over sidebar)
+    if (scrollDelta !== 0 && this.input.state.mouseX >= this.canvas.width - Game.SIDEBAR_W) {
+      const items = this.cachedAvailableItems ?? this.getAvailableItems();
+      const maxScroll = Math.max(0, items.length * 22 - (this.canvas.height - 80));
+      this.sidebarScroll = Math.max(0, Math.min(maxScroll, this.sidebarScroll + Math.sign(scrollDelta) * 22));
+    }
+
+    // --- Escape: cancel placement/modes first, then pause ---
+    if (keys.has('Escape')) {
+      if (this.pendingPlacement) {
+        this.credits += this.pendingPlacement.cost;
+        this.pendingPlacement = null;
+        keys.delete('Escape');
+      } else if (this.attackMoveMode || this.sellMode || this.repairMode) {
+        this.attackMoveMode = false;
+        this.sellMode = false;
+        this.repairMode = false;
+        keys.delete('Escape');
+      } else {
+        keys.delete('Escape');
+        this.togglePause();
+        return;
+      }
+    }
+
+    // --- Pause toggle (P) ---
+    if (keys.has('p')) {
       keys.delete('p');
-      keys.delete('Escape');
       this.togglePause();
       return;
     }
@@ -584,6 +667,18 @@ export class Game {
       keys.delete('Tab');
     }
 
+    // D key: deploy MCV
+    if (keys.has('d') && !keys.has('ArrowRight')) {
+      for (const id of this.selectedIds) {
+        const unit = this.entityById.get(id);
+        if (unit?.alive && unit.type === UnitType.V_MCV) {
+          this.deployMCV(unit);
+          break;
+        }
+      }
+      keys.delete('d');
+    }
+
     // A key: toggle attack-move mode
     if (keys.has('a') && !keys.has('ArrowLeft')) {
       this.attackMoveMode = true;
@@ -655,12 +750,35 @@ export class Game {
       // Check minimap click first
       if (this.handleMinimapClick(leftClick.x, leftClick.y)) return;
 
+      // Sidebar click — handle production
+      if (leftClick.x >= this.canvas.width - Game.SIDEBAR_W) {
+        this.handleSidebarClick(leftClick.x, leftClick.y);
+        return;
+      }
+
+      // Building placement mode — click to place structure
+      if (this.pendingPlacement) {
+        const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
+        const cx = Math.floor(world.x / CELL_SIZE);
+        const cy = Math.floor(world.y / CELL_SIZE);
+        if (this.placeStructure(cx, cy)) {
+          return;
+        }
+        // Invalid placement — right-click to cancel (handled below)
+        return;
+      }
+
       // Sell mode: click on player structure to sell it
       if (this.sellMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
         if (s && s.alive && (s.house === 'Spain' || s.house === 'Greece')) {
           s.alive = false;
+          // Refund 50% of building cost
+          const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+          if (prodItem) this.credits += Math.floor(prodItem.cost * 0.5);
+          // Clear terrain footprint to passable
+          this.clearStructureFootprint(s);
           // Sell effect: explosion + sell sound
           const wx = s.cx * CELL_SIZE + CELL_SIZE;
           const wy = s.cy * CELL_SIZE + CELL_SIZE;
@@ -769,6 +887,29 @@ export class Game {
     }
 
     if (rightClick) {
+      // Cancel placement mode
+      if (this.pendingPlacement) {
+        // Refund the cost
+        this.credits += this.pendingPlacement.cost;
+        this.pendingPlacement = null;
+        return;
+      }
+
+      // Cancel production from sidebar via right-click
+      if (rightClick.x >= this.canvas.width - Game.SIDEBAR_W) {
+        const items = this.getAvailableItems();
+        const itemStartY = 24;
+        const itemH = 22;
+        const relY = rightClick.y - itemStartY + this.sidebarScroll;
+        const itemIdx = Math.floor(relY / itemH);
+        if (itemIdx >= 0 && itemIdx < items.length) {
+          const item = items[itemIdx];
+          const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+          this.cancelProduction(category);
+        }
+        return;
+      }
+
       const world = this.camera.screenToWorld(rightClick.x, rightClick.y);
 
       // Force-fire on ground: Ctrl+right-click fires at a location (artillery/splash)
@@ -859,6 +1000,26 @@ export class Game {
     }
   }
 
+  /** Handle clicks on the sidebar production panel */
+  private handleSidebarClick(sx: number, sy: number): void {
+    const sidebarX = this.canvas.width - Game.SIDEBAR_W;
+    const items = this.getAvailableItems();
+    // Credits display takes top 24px, then items start
+    const itemStartY = 24;
+    const itemH = 22;
+    const relY = sy - itemStartY + this.sidebarScroll;
+    const itemIdx = Math.floor(relY / itemH);
+    if (itemIdx < 0 || itemIdx >= items.length) return;
+    const item = items[itemIdx];
+    // Check if already building in this category
+    const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+    if (this.productionQueue.has(category)) {
+      // Right-click would cancel — for now, clicking a building item cancels
+      return;
+    }
+    this.startProduction(item);
+  }
+
   /** Map weapon name to projectile visual style */
   private weaponProjectileStyle(name: string): 'bullet' | 'fireball' | 'shell' | 'rocket' {
     switch (name) {
@@ -931,12 +1092,22 @@ export class Game {
     const cy = Math.floor(pos.y / CELL_SIZE);
     for (const s of this.structures) {
       if (!s.alive) continue;
-      // Check if click is within structure footprint (rough 2x2 area)
-      if (cx >= s.cx && cx <= s.cx + 2 && cy >= s.cy && cy <= s.cy + 2) {
+      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      if (cx >= s.cx && cx < s.cx + fw && cy >= s.cy && cy < s.cy + fh) {
         return s;
       }
     }
     return null;
+  }
+
+  /** Clear a structure's footprint cells back to passable */
+  private clearStructureFootprint(s: MapStructure): void {
+    const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        this.map.setTerrain(s.cx + dx, s.cy + dy, Terrain.CLEAR);
+      }
+    }
   }
 
   /** Damage a structure, return true if destroyed */
@@ -953,6 +1124,8 @@ export class Game {
     if (s.hp <= 0) {
       s.alive = false;
       s.rubble = true;
+      // Clear terrain footprint so units can walk through rubble
+      this.clearStructureFootprint(s);
       // Spawn destruction explosion
       const wx = s.cx * CELL_SIZE + CELL_SIZE;
       const wy = s.cy * CELL_SIZE + CELL_SIZE;
@@ -997,6 +1170,12 @@ export class Game {
       case Mission.GUARD:
         this.updateGuard(entity);
         break;
+    }
+
+    // Harvester AI — automatic ore gathering
+    if (entity.alive && entity.type === UnitType.V_HARV && entity.isPlayerUnit &&
+        entity.mission === Mission.GUARD && !entity.target) {
+      this.updateHarvester(entity);
     }
 
     // Vehicle crush: heavy vehicles kill infantry they drive over
@@ -1165,6 +1344,116 @@ export class Game {
           const oc = other.cell;
           this.minimapAlert(oc.cx, oc.cy);
         }
+      }
+    }
+  }
+
+  /** Harvester AI — seek ore, harvest, return to refinery, unload */
+  private updateHarvester(entity: Entity): void {
+    switch (entity.harvesterState) {
+      case 'idle': {
+        // Find nearest ore cell
+        const ec = entity.cell;
+        const oreCell = this.map.findNearestOre(ec.cx, ec.cy, 30);
+        if (oreCell) {
+          entity.harvesterState = 'seeking';
+          entity.mission = Mission.MOVE;
+          entity.moveTarget = { x: oreCell.cx * CELL_SIZE + CELL_SIZE / 2, y: oreCell.cy * CELL_SIZE + CELL_SIZE / 2 };
+          entity.path = findPath(this.map, ec, oreCell, true);
+          entity.pathIndex = 0;
+        }
+        break;
+      }
+      case 'seeking': {
+        // Check if we've arrived at ore
+        const ec = entity.cell;
+        const ovl = this.map.overlay[ec.cy * MAP_CELLS + ec.cx];
+        if (ovl >= 0x03 && ovl <= 0x12) {
+          entity.harvesterState = 'harvesting';
+          entity.harvestTick = 0;
+          entity.mission = Mission.GUARD;
+          entity.animState = AnimState.IDLE;
+        } else if (entity.mission === Mission.GUARD) {
+          // Arrived but no ore here — re-seek
+          entity.harvesterState = 'idle';
+        }
+        break;
+      }
+      case 'harvesting': {
+        entity.harvestTick++;
+        // Harvest every 10 ticks (~0.67s)
+        if (entity.harvestTick % 10 === 0) {
+          const ec = entity.cell;
+          const gained = this.map.depleteOre(ec.cx, ec.cy);
+          if (gained > 0) {
+            entity.oreLoad += gained;
+          }
+          // Check if full or current cell depleted
+          if (entity.oreLoad >= Entity.ORE_CAPACITY) {
+            entity.harvesterState = 'returning';
+          } else if (gained === 0) {
+            // No more ore at this cell — look for adjacent ore
+            const newOre = this.map.findNearestOre(ec.cx, ec.cy, 5);
+            if (newOre && entity.oreLoad < Entity.ORE_CAPACITY) {
+              entity.harvesterState = 'seeking';
+              entity.mission = Mission.MOVE;
+              entity.moveTarget = { x: newOre.cx * CELL_SIZE + CELL_SIZE / 2, y: newOre.cy * CELL_SIZE + CELL_SIZE / 2 };
+              entity.path = findPath(this.map, ec, newOre, true);
+              entity.pathIndex = 0;
+            } else {
+              // No more ore nearby — return with whatever we have
+              entity.harvesterState = entity.oreLoad > 0 ? 'returning' : 'idle';
+            }
+          }
+        }
+        break;
+      }
+      case 'returning': {
+        // When move completes (mission returns to GUARD), transition to unloading or re-seek
+        if (entity.mission !== Mission.GUARD) break; // still moving, wait
+        // Check if we're near a refinery
+        const ec = entity.cell;
+        let bestProc: MapStructure | null = null;
+        let bestDist = Infinity;
+        for (const s of this.structures) {
+          if (!s.alive || s.type !== 'PROC') continue;
+          if (s.house !== House.Spain && s.house !== House.Greece) continue;
+          const dx = s.cx - ec.cx;
+          const dy = s.cy - ec.cy;
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) { bestDist = dist; bestProc = s; }
+        }
+        if (!bestProc) {
+          // No refinery — idle with ore
+          entity.harvesterState = 'idle';
+          break;
+        }
+        // Check if we're adjacent to the refinery (within 2 cells)
+        const procDist = Math.abs(bestProc.cx + 1 - ec.cx) + Math.abs(bestProc.cy + 1 - ec.cy);
+        if (procDist <= 2) {
+          // Arrived at refinery — start unloading
+          entity.harvesterState = 'unloading';
+          entity.harvestTick = 0;
+        } else {
+          // Not there yet — issue move to refinery
+          const target = { cx: bestProc.cx + 1, cy: bestProc.cy + 1 };
+          entity.mission = Mission.MOVE;
+          entity.moveTarget = { x: target.cx * CELL_SIZE + CELL_SIZE / 2, y: target.cy * CELL_SIZE + CELL_SIZE / 2 };
+          entity.path = findPath(this.map, ec, target, true);
+          entity.pathIndex = 0;
+        }
+        break;
+      }
+      case 'unloading': {
+        entity.harvestTick++;
+        // Unload over 30 ticks (~2 seconds)
+        if (entity.harvestTick >= 30) {
+          this.credits += entity.oreLoad;
+          this.audio.play('heal'); // credit received sound
+          entity.oreLoad = 0;
+          entity.harvesterState = 'idle';
+        }
+        break;
       }
     }
   }
@@ -1577,6 +1866,9 @@ export class Game {
     // Hold fire stance: never auto-engage
     if (entity.stance === Stance.HOLD_FIRE) return;
 
+    // Harvesters have no weapon — don't auto-engage (would chase forever)
+    if (entity.type === UnitType.V_HARV) return;
+
     const isPlayer = entity.isPlayerUnit;
     const ec = entity.cell;
     const isDog = entity.type === 'DOG';
@@ -1652,7 +1944,9 @@ export class Game {
       }
       entity.animState = AnimState.ATTACK;
       if (entity.attackCooldown <= 0 && entity.weapon) {
-        const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15)); // structures use 256-scale HP
+        // Scale damage: base 0.15× multiplier calibrated for 256-HP structures, scale with maxHp
+        const hpScale = s.maxHp / 256;
+        const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
         this.audio.play(this.audio.weaponSound(entity.weapon.name));
@@ -1772,10 +2066,11 @@ export class Game {
 
       if (bestTarget) {
         s.attackCooldown = s.weapon.rof;
-        // Apply warhead-vs-armor multiplier (structures use HE warhead)
+        // Apply warhead-vs-armor multiplier
+        const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
         const armorIdx = bestTarget.stats.armor === 'none' ? 0
           : bestTarget.stats.armor === 'light' ? 1 : 2;
-        const mult = WARHEAD_VS_ARMOR['HE' as WarheadType]?.[armorIdx] ?? 1;
+        const mult = WARHEAD_VS_ARMOR[wh]?.[armorIdx] ?? 1;
         const damage = Math.max(1, Math.round(s.weapon.damage * mult));
         const killed = bestTarget.takeDamage(damage);
 
@@ -1785,8 +2080,8 @@ export class Game {
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
         });
 
-        // Tesla coil gets special effect
-        if (s.type === 'TSLA') {
+        // Tesla coil and Queen Ant get special effect
+        if (s.type === 'TSLA' || s.type === 'QUEE') {
           this.effects.push({
             type: 'tesla', x: bestTarget.pos.x, y: bestTarget.pos.y,
             frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
@@ -1810,7 +2105,7 @@ export class Game {
         if (s.weapon.splash && s.weapon.splash > 0) {
           this.applySplashDamage(
             bestTarget.pos,
-            { damage: s.weapon.damage, warhead: 'HE' as WarheadType, splash: s.weapon.splash },
+            { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
             bestTarget.id, isPlayerStruct,
           );
         }
@@ -2004,13 +2299,205 @@ export class Game {
       return !t.fired;
     });
 
+    // Check for ant hive structures (QUEE, LAR1, LAR2) — must destroy all enemy ones to win
+    const ANT_STRUCTURES = new Set(['QUEE', 'LAR1', 'LAR2']);
+    const antStructuresAlive = this.structures.some(s =>
+      s.alive && ANT_STRUCTURES.has(s.type) &&
+      s.house !== House.Spain && s.house !== House.Greece
+    );
+
     if (!playerAlive) {
       this.state = 'lost';
       this.onStateChange?.('lost');
-    } else if (!antsAlive && !pendingAntTriggers) {
+    } else if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
       this.state = 'won';
       this.onStateChange?.('won');
     }
+  }
+
+  /** Check if player has a building of the given type */
+  hasBuilding(type: string): boolean {
+    return this.structures.some(s => s.alive && s.type === type &&
+      (s.house === House.Spain || s.house === House.Greece));
+  }
+
+  /** Get buildable items based on current structures */
+  getAvailableItems(): ProductionItem[] {
+    return PRODUCTION_ITEMS.filter(item => this.hasBuilding(item.prerequisite));
+  }
+
+  /** Start building an item (called from sidebar click) */
+  startProduction(item: ProductionItem): void {
+    const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+    if (this.productionQueue.has(category)) return; // already building in this category
+    if (this.credits < item.cost) return;
+    this.credits -= item.cost;
+    this.productionQueue.set(category, { item, progress: 0 });
+  }
+
+  /** Cancel production in a category, refunding partial cost */
+  cancelProduction(category: string): void {
+    const entry = this.productionQueue.get(category);
+    if (!entry) return;
+    // Refund based on remaining progress
+    const refund = Math.floor(entry.item.cost * (1 - entry.progress / entry.item.buildTime));
+    this.credits += refund;
+    this.productionQueue.delete(category);
+  }
+
+  /** Advance production queues each tick */
+  private tickProduction(): void {
+    // Low power: production runs at half speed
+    const lowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
+    for (const [category, entry] of this.productionQueue) {
+      // Check prerequisite still exists
+      if (!this.hasBuilding(entry.item.prerequisite)) {
+        this.cancelProduction(category);
+        continue;
+      }
+      // Skip every other tick when low power
+      if (lowPower && this.tick % 2 === 0) continue;
+      entry.progress++;
+      if (entry.progress >= entry.item.buildTime) {
+        // Build complete
+        if (entry.item.isStructure) {
+          // Structure: go into placement mode
+          this.pendingPlacement = entry.item;
+          this.productionQueue.delete(category);
+          this.audio.play('eva_acknowledged');
+        } else {
+          // Unit: spawn at the producing structure
+          this.spawnProducedUnit(entry.item);
+          this.productionQueue.delete(category);
+          this.audio.play('eva_acknowledged');
+        }
+      }
+    }
+  }
+
+  /** Spawn a produced unit at its factory */
+  private spawnProducedUnit(item: ProductionItem): void {
+    const factoryType = item.prerequisite;
+    // Find the factory building
+    let factory: MapStructure | null = null;
+    for (const s of this.structures) {
+      if (s.alive && s.type === factoryType && (s.house === House.Spain || s.house === House.Greece)) {
+        factory = s;
+        break;
+      }
+    }
+    if (!factory) return;
+
+    const unitType = item.type as UnitType;
+    const spawnX = (factory.cx + 1) * CELL_SIZE + CELL_SIZE / 2;
+    const spawnY = (factory.cy + 2) * CELL_SIZE + CELL_SIZE / 2;
+    const entity = new Entity(unitType, House.Spain, spawnX, spawnY);
+    entity.mission = Mission.GUARD;
+    this.entities.push(entity);
+    this.entityById.set(entity.id, entity);
+
+    // If harvester, set it to auto-harvest
+    if (unitType === UnitType.V_HARV) {
+      entity.harvesterState = 'idle';
+    }
+  }
+
+  /** Place a completed structure on the map */
+  placeStructure(cx: number, cy: number): boolean {
+    if (!this.pendingPlacement) return false;
+    const item = this.pendingPlacement;
+    const [fw, fh] = STRUCTURE_SIZE[item.type] ?? [2, 2];
+    // Validate: cells must be passable and within bounds
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        if (!this.map.isPassable(cx + dx, cy + dy)) return false;
+      }
+    }
+    // Must be adjacent to an existing player structure
+    let adjacent = false;
+    for (const s of this.structures) {
+      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      const dist = Math.abs(s.cx - cx) + Math.abs(s.cy - cy);
+      if (dist <= 4) { adjacent = true; break; }
+    }
+    if (!adjacent) return false;
+
+    const image = item.type.toLowerCase();
+    const maxHp = STRUCTURE_MAX_HP[item.type] ?? 256;
+    // Create structure
+    const newStruct: MapStructure = {
+      type: item.type,
+      image,
+      house: House.Spain,
+      cx, cy,
+      hp: maxHp,
+      maxHp,
+      alive: true,
+      rubble: false,
+      weapon: STRUCTURE_WEAPONS[item.type],
+      attackCooldown: 0,
+    };
+    this.structures.push(newStruct);
+    // Mark cells as impassable
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        this.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
+      }
+    }
+    this.pendingPlacement = null;
+    this.audio.play('building_explode'); // construction complete sound
+    // Spawn free harvester with refinery
+    if (item.type === 'PROC') {
+      const harv = new Entity(UnitType.V_HARV, House.Spain,
+        (cx + 1) * CELL_SIZE + CELL_SIZE / 2, (cy + 2) * CELL_SIZE + CELL_SIZE / 2);
+      harv.harvesterState = 'idle';
+      this.entities.push(harv);
+      this.entityById.set(harv.id, harv);
+    }
+    return true;
+  }
+
+  /** Deploy MCV at its current location → FACT structure */
+  deployMCV(entity: Entity): boolean {
+    if (entity.type !== UnitType.V_MCV || !entity.alive) return false;
+    const ec = entity.cell;
+    // Need a 3x3 clear area
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!this.map.isPassable(ec.cx + dx, ec.cy + dy)) return false;
+      }
+    }
+    // Remove the MCV entity
+    entity.alive = false;
+    entity.mission = Mission.DIE;
+    // Place a Construction Yard
+    const cx = ec.cx - 1;
+    const cy = ec.cy - 1;
+    const factMaxHp = STRUCTURE_MAX_HP['FACT'] ?? 256;
+    const newStruct: MapStructure = {
+      type: 'FACT',
+      image: 'fact',
+      house: House.Spain,
+      cx, cy,
+      hp: factMaxHp,
+      maxHp: factMaxHp,
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+    };
+    this.structures.push(newStruct);
+    // Mark 3x3 footprint
+    for (let dy = 0; dy < 3; dy++) {
+      for (let dx = 0; dx < 3; dx++) {
+        this.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
+      }
+    }
+    this.audio.play('eva_acknowledged');
+    this.effects.push({
+      type: 'explosion', x: entity.pos.x, y: entity.pos.y,
+      frame: 0, maxFrames: 15, size: 10, sprite: 'piffpiff', spriteStart: 0,
+    });
+    return true;
   }
 
   /** Render the current frame */
@@ -2019,6 +2506,41 @@ export class Game {
     this.renderer.sellMode = this.sellMode;
     this.renderer.repairMode = this.repairMode;
     this.renderer.repairingStructures = this.repairingStructures;
+    // Sidebar data
+    this.renderer.sidebarCredits = this.displayCredits;
+    this.renderer.sidebarPowerProduced = this.powerProduced;
+    this.renderer.sidebarPowerConsumed = this.powerConsumed;
+    this.renderer.sidebarItems = this.cachedAvailableItems ?? this.getAvailableItems();
+    this.renderer.sidebarQueue = this.productionQueue;
+    this.renderer.sidebarScroll = this.sidebarScroll;
+    this.renderer.sidebarW = Game.SIDEBAR_W;
+    // Placement ghost
+    if (this.pendingPlacement) {
+      const { mouseX, mouseY } = this.input.state;
+      const world = this.camera.screenToWorld(mouseX, mouseY);
+      this.renderer.placementItem = this.pendingPlacement;
+      this.renderer.placementCx = Math.floor(world.x / CELL_SIZE);
+      this.renderer.placementCy = Math.floor(world.y / CELL_SIZE);
+      // Validate placement using actual footprint
+      const cx = this.renderer.placementCx;
+      const cy = this.renderer.placementCy;
+      const [pfw, pfh] = STRUCTURE_SIZE[this.pendingPlacement.type] ?? [2, 2];
+      let valid = true;
+      for (let dy = 0; dy < pfh; dy++) {
+        for (let dx = 0; dx < pfw; dx++) {
+          if (!this.map.isPassable(cx + dx, cy + dy)) valid = false;
+        }
+      }
+      // Check adjacency
+      let adj = false;
+      for (const s of this.structures) {
+        if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+        if (Math.abs(s.cx - cx) + Math.abs(s.cy - cy) <= 4) { adj = true; break; }
+      }
+      this.renderer.placementValid = valid && adj;
+    } else {
+      this.renderer.placementItem = null;
+    }
     this.renderer.render(
       this.camera,
       this.map,

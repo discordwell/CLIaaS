@@ -14,6 +14,7 @@ export interface InputState {
   keys: Set<string>;   // currently held keys
   ctrlHeld: boolean;   // ctrl/meta key held
   shiftHeld: boolean;  // shift key held
+  scrollDelta: number; // mouse wheel delta (consumed per tick)
   // Events consumed per tick
   leftClick: { x: number; y: number } | null;
   rightClick: { x: number; y: number } | null;
@@ -36,6 +37,7 @@ export class InputManager {
     keys: new Set(),
     ctrlHeld: false,
     shiftHeld: false,
+    scrollDelta: 0,
     leftClick: null,
     rightClick: null,
     doubleClick: null,
@@ -59,6 +61,7 @@ export class InputManager {
     canvas.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('mouseup', this.onMouseUp);
     canvas.addEventListener('contextmenu', this.onContextMenu);
+    canvas.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
   }
@@ -69,6 +72,7 @@ export class InputManager {
     this.state.rightClick = null;
     this.state.doubleClick = null;
     this.state.dragBox = null;
+    this.state.scrollDelta = 0;
   }
 
   /** Update the scale factor when canvas is resized */
@@ -156,6 +160,11 @@ export class InputManager {
     e.preventDefault();
   };
 
+  private onWheel = (e: WheelEvent): void => {
+    e.preventDefault();
+    this.state.scrollDelta += e.deltaY;
+  };
+
   private onKeyDown = (e: KeyboardEvent): void => {
     this.state.keys.add(e.key);
     if (e.key === 'Control' || e.key === 'Meta') this.state.ctrlHeld = true;
@@ -177,6 +186,7 @@ export class InputManager {
     this.canvas.removeEventListener('mousemove', this.onMouseMove);
     this.canvas.removeEventListener('mouseup', this.onMouseUp);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+    this.canvas.removeEventListener('wheel', this.onWheel);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
   }

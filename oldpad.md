@@ -1,5 +1,16 @@
 # Archived Session Summaries
 
+## 2026-02-22T23:00Z — Session 11: RA Visual Fidelity — Sprites, Effects, Triggers, Terrain
+- Implemented 7-part plan to make ant missions look/play like real Red Alert
+- Fixed sprite frame mapping: ants (104 frames: stand/walk/attack), infantry (DoControls formula), vehicles (BodyShape[32])
+- Added animation metadata: INFANTRY_ANIMS lookup (E1-MEDI), BODY_SHAPE table, ANT_ANIM constants
+- Added missing unit stats: 4TNK, APC, ARTY, HARV, MCV, E2, E4, E6, DOG, SPY, MEDI + weapons
+- Replaced procedural effects with RA sprite sheets: fball1, piff, piffpiff, veh-hit1
+- Implemented RA trigger system: 18-field INI format, TeamTypes, trigger evaluation (TIME/GLOBAL/ENTERED)
+- Decoded MapPack Base64→LCW terrain template data for varied terrain visuals
+- Rewrote ant sprite generator: 32→104 frames with walk/attack animations
+- Fixed 3 code review bugs: pendingAntTriggers missing CREATE_TEAM, FORCE_TRIGGER no-op, persistent trigger infinite spawning
+
 ## 2026-02-22T21:30Z — Session 10: Phase 3 Polish — Briefings, Progression, Performance
 - Mission select screen with 4 unlockable missions, briefing screen, win/lose overlays, localStorage progress
 - Performance: fog of war O(visible), pathfinding node reuse, removed dead animFrameId

@@ -1,5 +1,45 @@
 # Session Summaries
 
+## 2026-02-23T16:00Z — Session 19: Bug Fixes, Queen Ant, Larvae, GNRL
+- Fixed 9 code review bugs: harvester returning re-entrancy (double GUARD check), structure footprints using STRUCTURE_SIZE instead of hardcoded 2x2, sell mode now refunds 50% credits and clears terrain, destroyed structures clear footprint to passable, findStructureAt uses actual footprint, sidebar scroll clamped to max, cached getAvailableItems per tick, harvesters skip guard auto-attack (would chase forever with no weapon)
+- Added QUEE (Queen Ant) structure: 800 HP, TeslaZap weapon, self-healing +1 HP/2 ticks, 2x2 footprint
+- Added LAR1 (Larva, 25 HP) and LAR2 (Larvae, 50 HP) structures: 1x1 footprint
+- Added GNRL (Stavros) infantry: Sniper weapon (125 dmg, range 5, Super warhead), uses E1 sprite
+- Added TRUK (Supply Truck) vehicle type for SCA02EA scenario
+- Added Sniper weapon to WEAPON_STATS
+- Updated victory condition: must destroy all QUEE/LAR1/LAR2 structures + kill all ants
+- Fixed house mapping: France→USSR (enemy), England→Greece (allied), Turkey→Neutral
+- Structure maxHp now type-specific: QUEE=800, LAR1=25, LAR2=50, TSLA=500
+- Imported Terrain enum in index.ts; replaced magic number 4 with Terrain.WALL
+- Replaced hardcoded 128 with MAP_CELLS in map.ts and index.ts
+- All changes type check clean (npx tsc --noEmit)
+
+## 2026-02-23T14:00Z — Session 18: Economy, Production, Sidebar, Building Placement
+- Implemented full RTS economy system: harvester AI state machine (idle→seeking→harvesting→returning→unloading)
+- Added ore/gem depletion: map.depleteOre() reduces overlay levels, returns credits (25/ore, 50/gem)
+- Added map.findNearestOre() helper for harvester pathfinding
+- Implemented production queue: one active build per category (infantry/vehicle/structure)
+- ProductionItem data: 22 items (7 infantry, 7 vehicles, 8 structures) with costs/buildTimes/prerequisites
+- Sidebar UI: credits display, scrollable production buttons with category colors, build progress bars
+- Mouse wheel scrolling for sidebar when cursor over sidebar area
+- Building placement system: ghost preview (green/red), adjacency validation, click to place
+- MCV deployment: D key converts MCV to FACT (Construction Yard) structure
+- Escape key now cancels modes (placement→attack-move→sell→repair) before pausing
+- Right-click cancels placement with refund; right-click on sidebar cancels production
+- Minimap moved to bottom of sidebar; idle count moved into sidebar area
+- Terrain/fog rendering optimized to camera viewport width (not full canvas)
+- PROC (refinery) placement spawns a free harvester
+- Defensive structures (HBOX, GUN, etc.) get weapons when placed
+- All changes type check clean (npx tsc --noEmit)
+
+## 2026-02-23T12:00Z — Session 17: Ore Sparkle, Offscreen Indicators, Ambient, Tab Cycling
+- Implemented ore/gem animated sparkle effects in overlay rendering
+- Added off-screen selected unit indicators (arrow badges at screen edges)
+- Added ambient wind noise (pink noise via Web Audio API)
+- Added Tab key cycling through unit types in mixed selection (pool-based)
+- Code review fixed 6 bugs: Tab cycling one-shot, Tab focus steal, corner double-count, ambient crossfade silence, ambient stop throw, idle count per-render-frame
+- Commit: a5c8b77 — pushed to origin/main
+
 ## 2026-02-23T11:00Z — Session 16: Veterancy, Friendly Fire, Stances, Wave AI
 - Added unit veterancy system: kills tracking, promotion at 3/6 kills, damage/HP bonuses (+25%/+50%)
 - Veterancy stars rendered above health bars (silver=veteran, gold=elite)
@@ -92,18 +132,6 @@
   5. Attack-move units didn't resume move after killing target
   6. Path recalc hammered A* every tick (added 5-tick cooldown)
 - Also fixed: cellInfCount Map allocation GC pressure (reused class field)
-
-## 2026-02-22T23:00Z — Session 11: RA Visual Fidelity — Sprites, Effects, Triggers, Terrain
-- Implemented 7-part plan to make ant missions look/play like real Red Alert
-- Fixed sprite frame mapping: ants (104 frames: stand/walk/attack), infantry (DoControls formula), vehicles (BodyShape[32])
-- Added animation metadata: INFANTRY_ANIMS lookup (E1-MEDI), BODY_SHAPE table, ANT_ANIM constants
-- Added missing unit stats: 4TNK, APC, ARTY, HARV, MCV, E2, E4, E6, DOG, SPY, MEDI + weapons
-- Replaced procedural effects with RA sprite sheets: fball1, piff, piffpiff, veh-hit1
-- Implemented RA trigger system: 18-field INI format, TeamTypes, trigger evaluation (TIME/GLOBAL/ENTERED)
-- Decoded MapPack Base64→LCW terrain template data for varied terrain visuals
-- Rewrote ant sprite generator: 32→104 frames with walk/attack animations
-- Fixed 3 code review bugs: pendingAntTriggers missing CREATE_TEAM, FORCE_TRIGGER no-op, persistent trigger infinite spawning
-- User feedback: "get the actual triggers from the original gamecode" → researched exact RA source formats
 
 
 # Key Findings

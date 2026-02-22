@@ -60,6 +60,7 @@ export enum UnitType {
   V_ARTY = 'ARTY', // Artillery
   V_HARV = 'HARV', // Harvester
   V_MCV = 'MCV',   // MCV
+  V_TRUK = 'TRUK', // Supply truck
   // Player infantry
   I_E1 = 'E1',    // Rifle infantry
   I_E2 = 'E2',    // Grenadier
@@ -69,6 +70,7 @@ export enum UnitType {
   I_DOG = 'DOG',  // Attack dog
   I_SPY = 'SPY',  // Spy
   I_MEDI = 'MEDI', // Medic
+  I_GNRL = 'GNRL', // General Stavros (sniper)
 }
 
 // === Animation metadata (DoInfoStruct from RA source) ===
@@ -214,6 +216,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   ARTY: { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 4, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'ArtilleryShell', noMovingFire: true },
   HARV: { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 5, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null },
   MCV: { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 3, isInfantry: false, primaryWeapon: null },
+  TRUK: { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'heavy', speed: 8, sight: 2, rot: 5, isInfantry: false, primaryWeapon: null },
   E1: { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Rifle' },
   E2: { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Grenade' },
   E3: { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Bazooka' },
@@ -222,6 +225,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   DOG: { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 25, armor: 'none', speed: 8, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw' },
   SPY: { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null },
   MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null },
+  GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 100, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Sniper' },
 };
 
 export const WEAPON_STATS: Record<string, WeaponStats> = {
@@ -238,7 +242,46 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5, warhead: 'Super' },
   TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super', splash: 1 },
   ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2, inaccuracy: 1.5 },
+  Sniper: { name: 'Sniper', damage: 125, rof: 40, range: 5, warhead: 'Super' },
 };
+
+// === Production data ===
+export interface ProductionItem {
+  type: string;         // unit type or structure type code
+  name: string;         // display name
+  cost: number;         // credits cost
+  buildTime: number;    // ticks to build
+  prerequisite: string; // required building type (TENT/BARR→infantry, WEAP→vehicles, FACT→structures)
+  isStructure?: boolean;
+}
+
+export const PRODUCTION_ITEMS: ProductionItem[] = [
+  // Infantry (from TENT/BARR)
+  { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT' },
+  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'TENT' },
+  { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT' },
+  { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'TENT' },
+  { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT' },
+  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'TENT' },
+  { type: 'MEDI', name: 'Medic', cost: 600, buildTime: 90, prerequisite: 'TENT' },
+  // Vehicles (from WEAP)
+  { type: 'JEEP', name: 'Ranger', cost: 600, buildTime: 100, prerequisite: 'WEAP' },
+  { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP' },
+  { type: '2TNK', name: 'Med Tank', cost: 800, buildTime: 140, prerequisite: 'WEAP' },
+  { type: '3TNK', name: 'Heavy Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP' },
+  { type: 'ARTY', name: 'Artillery', cost: 600, buildTime: 120, prerequisite: 'WEAP' },
+  { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP' },
+  { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP' },
+  // Structures (from FACT)
+  { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', isStructure: true },
+  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'FACT', isStructure: true },
+  { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'FACT', isStructure: true },
+  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'FACT', isStructure: true },
+  { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'FACT', isStructure: true },
+  { type: 'HBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'FACT', isStructure: true },
+  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'FACT', isStructure: true },
+  { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'FACT', isStructure: true },
+];
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)
 // Pixel offsets from cell center for each sub-position

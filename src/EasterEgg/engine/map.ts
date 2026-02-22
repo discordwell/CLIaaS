@@ -198,6 +198,54 @@ export class GameMap {
     return true;
   }
 
+  /** Find nearest ore/gem cell to a given position (returns null if none) */
+  findNearestOre(cx: number, cy: number, maxRange = 20): CellPos | null {
+    let bestDist = Infinity;
+    let best: CellPos | null = null;
+    const r = maxRange;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const rx = cx + dx;
+        const ry = cy + dy;
+        if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
+        const ovl = this.overlay[ry * MAP_CELLS + rx];
+        if (ovl >= 0x03 && ovl <= 0x12) { // gold ore or gems
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = { cx: rx, cy: ry };
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Deplete one level of ore/gem at a cell. Returns credits gained (0 if empty). */
+  depleteOre(cx: number, cy: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
+    const idx = cy * MAP_CELLS + cx;
+    const ovl = this.overlay[idx];
+    if (ovl >= 0x03 && ovl <= 0x0E) {
+      // Gold ore (GOLD01-GOLD12) — each level worth ~25 credits
+      if (ovl > 0x03) {
+        this.overlay[idx] = ovl - 1;
+      } else {
+        this.overlay[idx] = 0xFF; // fully depleted
+      }
+      return 25;
+    } else if (ovl >= 0x0F && ovl <= 0x12) {
+      // Gems (GEM01-GEM04) — each level worth ~50 credits
+      if (ovl > 0x0F) {
+        this.overlay[idx] = ovl - 1;
+      } else {
+        this.overlay[idx] = 0xFF;
+      }
+      return 50;
+    }
+    return 0;
+  }
+
   /** Initialize a basic map with impassable borders */
   initDefault(): void {
     // Fill playable area with clear terrain

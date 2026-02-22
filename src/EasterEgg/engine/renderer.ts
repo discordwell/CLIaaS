@@ -4,13 +4,13 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, House, Stance, SUB_CELL_OFFSETS } from './types';
+import { CELL_SIZE, House, Stance, SUB_CELL_OFFSETS, type ProductionItem } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
 import { type Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
-import { type MapStructure } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 
 // House color tints (used for unit sprite remapping)
 const HOUSE_TINT: Record<string, string> = {
@@ -76,6 +76,19 @@ export class Renderer {
   showHelp = false;     // F1 help overlay
   idleCount = 0;        // number of idle player units
   minimapAlerts: Array<{ cx: number; cy: number; tick: number }> = [];
+  // Sidebar data (set by game each frame)
+  sidebarCredits = 0;  // animated display credits
+  sidebarPowerProduced = 0;
+  sidebarPowerConsumed = 0;
+  sidebarItems: ProductionItem[] = [];
+  sidebarQueue: Map<string, { item: ProductionItem; progress: number }> = new Map();
+  sidebarScroll = 0;
+  sidebarW = 100;
+  // Placement ghost
+  placementItem: ProductionItem | null = null;
+  placementCx = 0;
+  placementCy = 0;
+  placementValid = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -137,12 +150,18 @@ export class Renderer {
       ctx.restore();
     }
 
+    // Placement ghost preview
+    if (this.placementItem) {
+      this.renderPlacementGhost(camera);
+    }
+
     this.renderSelectionBox(input);
     if (this.attackMoveMode) this.renderAttackMoveIndicator(input);
     if (this.sellMode) this.renderModeLabel(input, 'SELL', 'rgba(255,200,60,0.9)');
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
     this.renderMinimap(map, entities, structures, camera);
     this.renderOffscreenIndicators(camera, entities, selectedIds);
+    this.renderSidebar();
     this.renderUnitInfo(entities, selectedIds);
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
@@ -154,8 +173,8 @@ export class Renderer {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
-    const endCX = Math.ceil((camera.x + this.width) / CELL_SIZE);
-    const endCY = Math.ceil((camera.y + this.height) / CELL_SIZE);
+    const endCX = Math.ceil((camera.x + camera.viewWidth) / CELL_SIZE);
+    const endCY = Math.ceil((camera.y + camera.viewHeight) / CELL_SIZE);
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
@@ -326,8 +345,8 @@ export class Renderer {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
-    const endCX = Math.ceil((camera.x + this.width) / CELL_SIZE);
-    const endCY = Math.ceil((camera.y + this.height) / CELL_SIZE);
+    const endCX = Math.ceil((camera.x + camera.viewWidth) / CELL_SIZE);
+    const endCY = Math.ceil((camera.y + camera.viewHeight) / CELL_SIZE);
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
@@ -870,8 +889,8 @@ export class Renderer {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
-    const endCX = Math.ceil((camera.x + this.width) / CELL_SIZE);
-    const endCY = Math.ceil((camera.y + this.height) / CELL_SIZE);
+    const endCX = Math.ceil((camera.x + camera.viewWidth) / CELL_SIZE);
+    const endCY = Math.ceil((camera.y + camera.viewHeight) / CELL_SIZE);
     const half = CELL_SIZE / 2;
 
     for (let cy = startCY; cy <= endCY; cy++) {
@@ -933,9 +952,9 @@ export class Renderer {
 
   private renderMinimap(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera): void {
     const ctx = this.ctx;
-    const mmSize = 90;
-    const mmX = this.width - mmSize - 6;
-    const mmY = 6;
+    const mmSize = this.sidebarW - 8;
+    const mmX = this.width - this.sidebarW + 4;
+    const mmY = this.height - mmSize - 6;
     const scale = mmSize / Math.max(map.boundsW, map.boundsH);
     const ox = map.boundsX;
     const oy = map.boundsY;
@@ -1073,12 +1092,12 @@ export class Renderer {
   private renderIdleCount(): void {
     const ctx = this.ctx;
     const text = `Idle: ${this.idleCount}`;
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(this.width - 60, 4, 56, 16);
+    const mmBottom = this.height - 6; // below minimap
+    const x = this.width - this.sidebarW;
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
     ctx.fillStyle = this.idleCount > 0 ? '#ff8' : '#888';
-    ctx.fillText(text, this.width - 8, 16);
+    ctx.fillText(text, x + this.sidebarW / 2, mmBottom + 12);
     ctx.textAlign = 'left';
   }
 
@@ -1101,7 +1120,9 @@ export class Renderer {
       'Ctrl+1-9  Assign group',
       '.         Cycle idle units',
       'Tab       Cycle unit types',
-      'P / Esc   Pause',
+      'D         Deploy MCV',
+      'Esc       Cancel mode',
+      'P         Pause',
       'F1        Toggle this help',
     ];
     const lineH = 13;
@@ -1124,6 +1145,120 @@ export class Renderer {
       else ctx.font = '10px monospace';
       ctx.fillText(line, px + 10, py + 14 + i * lineH);
     }
+  }
+
+  // ─── Sidebar ──────────────────────────────────────────────
+
+  private renderSidebar(): void {
+    const ctx = this.ctx;
+    const x = this.width - this.sidebarW;
+    const w = this.sidebarW;
+
+    // Background
+    ctx.fillStyle = 'rgba(20,20,25,0.95)';
+    ctx.fillRect(x, 0, w, this.height);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, this.height);
+    ctx.stroke();
+
+    // Credits
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, 14);
+
+    // Power bar
+    const pwrY = 18;
+    const pwrW = w - 8;
+    const pwrH = 6;
+    const pwrX = x + 4;
+    ctx.fillStyle = '#111';
+    ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
+    const pwrRatio = this.sidebarPowerProduced > 0
+      ? Math.min(1, this.sidebarPowerConsumed / this.sidebarPowerProduced) : 1;
+    const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced;
+    ctx.fillStyle = lowPower ? '#f44' : pwrRatio > 0.8 ? '#fa0' : '#4f4';
+    ctx.fillRect(pwrX, pwrY, pwrW * Math.min(1, pwrRatio), pwrH);
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
+
+    // Production items
+    const itemH = 22;
+    const itemStartY = 28;
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
+
+    for (let i = 0; i < this.sidebarItems.length; i++) {
+      const item = this.sidebarItems[i];
+      const iy = itemStartY + i * itemH - this.sidebarScroll;
+      if (iy < itemStartY - itemH || iy > this.height) continue;
+
+      // Category color coding
+      const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+      const catColor = category === 'infantry' ? 'rgba(80,200,80,0.15)'
+        : category === 'vehicle' ? 'rgba(80,80,200,0.15)' : 'rgba(200,200,80,0.15)';
+
+      // Item background
+      ctx.fillStyle = catColor;
+      ctx.fillRect(x + 2, iy, w - 4, itemH - 2);
+      ctx.strokeStyle = 'rgba(100,100,100,0.3)';
+      ctx.strokeRect(x + 2, iy, w - 4, itemH - 2);
+
+      // Check if this category is building
+      const qEntry = this.sidebarQueue.get(category);
+      const isBuilding = qEntry && qEntry.item.type === item.type;
+
+      if (isBuilding && qEntry) {
+        // Progress bar
+        const progress = qEntry.progress / qEntry.item.buildTime;
+        ctx.fillStyle = 'rgba(80,255,80,0.4)';
+        ctx.fillRect(x + 2, iy, (w - 4) * progress, itemH - 2);
+        // Name + progress %
+        ctx.fillStyle = '#8f8';
+        ctx.fillText(`${item.name}`, x + 4, iy + 9);
+        ctx.fillStyle = '#ccc';
+        ctx.fillText(`${Math.floor(progress * 100)}%`, x + 4, iy + 18);
+      } else {
+        // Name + cost
+        const canAfford = this.sidebarCredits >= item.cost;
+        ctx.fillStyle = canAfford ? '#ddd' : '#666';
+        ctx.fillText(item.name, x + 4, iy + 9);
+        ctx.fillStyle = canAfford ? '#FFD700' : '#553';
+        ctx.fillText(`$${item.cost}`, x + 4, iy + 18);
+      }
+    }
+
+    ctx.textAlign = 'left';
+  }
+
+  // ─── Placement Ghost ────────────────────────────────────
+
+  private renderPlacementGhost(camera: Camera): void {
+    if (!this.placementItem) return;
+    const ctx = this.ctx;
+    const screen = camera.worldToScreen(
+      this.placementCx * CELL_SIZE,
+      this.placementCy * CELL_SIZE,
+    );
+    const [fw, fh] = STRUCTURE_SIZE[this.placementItem.type] ?? [2, 2];
+
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = this.placementValid ? 'rgba(80,255,80,0.5)' : 'rgba(255,80,80,0.5)';
+    ctx.fillRect(screen.x, screen.y, fw * CELL_SIZE, fh * CELL_SIZE);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = this.placementValid ? '#8f8' : '#f88';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(screen.x, screen.y, fw * CELL_SIZE, fh * CELL_SIZE);
+    // Label
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(this.placementItem.name, screen.x + fw * CELL_SIZE / 2, screen.y - 3);
+    ctx.textAlign = 'left';
   }
 
   // ─── End Screen ─────────────────────────────────────────

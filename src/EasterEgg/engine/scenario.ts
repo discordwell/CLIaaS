@@ -441,9 +441,12 @@ function toHouse(name: string): House {
   switch (name.toLowerCase()) {
     case 'spain': return House.Spain;
     case 'greece': return House.Greece;
+    case 'england': return House.Greece;   // England is allied
     case 'ussr': return House.USSR;
     case 'ukraine': return House.Ukraine;
     case 'germany': return House.Germany;
+    case 'france': return House.USSR;      // France = ant hive faction (enemy)
+    case 'turkey': return House.Neutral;   // Turkey = neutral
     default: return House.Neutral;
   }
 }
@@ -454,9 +457,9 @@ function toUnitType(name: string): UnitType | null {
     ANT1: UnitType.ANT1, ANT2: UnitType.ANT2, ANT3: UnitType.ANT3,
     '1TNK': UnitType.V_1TNK, '2TNK': UnitType.V_2TNK, '3TNK': UnitType.V_3TNK,
     '4TNK': UnitType.V_4TNK, JEEP: UnitType.V_JEEP, APC: UnitType.V_APC,
-    ARTY: UnitType.V_ARTY, HARV: UnitType.V_HARV, MCV: UnitType.V_MCV,
+    ARTY: UnitType.V_ARTY, HARV: UnitType.V_HARV, MCV: UnitType.V_MCV, TRUK: UnitType.V_TRUK,
     E1: UnitType.I_E1, E2: UnitType.I_E2, E3: UnitType.I_E3, E4: UnitType.I_E4,
-    E6: UnitType.I_E6, DOG: UnitType.I_DOG, SPY: UnitType.I_SPY, MEDI: UnitType.I_MEDI,
+    E6: UnitType.I_E6, DOG: UnitType.I_DOG, SPY: UnitType.I_SPY, MEDI: UnitType.I_MEDI, GNRL: UnitType.I_GNRL,
   };
   return map[name] ?? null;
 }
@@ -486,6 +489,7 @@ export interface StructureWeapon {
   range: number;     // range in cells
   rof: number;       // ticks between shots
   splash?: number;   // AOE radius in cells
+  warhead?: string;  // warhead type for damage multiplier (default 'HE')
 }
 
 export interface MapStructure {
@@ -503,14 +507,15 @@ export interface MapStructure {
 }
 
 /** Weapon stats for defensive structures */
-const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
+export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
   HBOX:  { damage: 25, range: 5, rof: 15 },             // Camo Pillbox
   PBOX:  { damage: 25, range: 5, rof: 15 },             // Pillbox
   GUN:   { damage: 40, range: 6, rof: 20, splash: 0.5 }, // Guard Tower
-  TSLA:  { damage: 80, range: 7, rof: 40, splash: 1 },  // Tesla Coil
+  TSLA:  { damage: 80, range: 7, rof: 40, splash: 1, warhead: 'Super' },  // Tesla Coil
   SAM:   { damage: 50, range: 8, rof: 25 },             // SAM Site
   AGUN:  { damage: 40, range: 6, rof: 20 },             // Anti-aircraft Gun
   FTUR:  { damage: 20, range: 5, rof: 10 },             // Flame Tower
+  QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super' },  // Queen Ant (TeslaZap)
 };
 
 // Building type → sprite image name (only include buildings we have sprites for)
@@ -520,10 +525,16 @@ const STRUCTURE_IMAGES: Record<string, string> = {
 };
 
 // Building footprint sizes in cells (w, h) — defaults to 1x1
-const STRUCTURE_SIZE: Record<string, [number, number]> = {
+export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
   PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
   GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1],
+  QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
+};
+
+// Structure max HP overrides (default is 256)
+export const STRUCTURE_MAX_HP: Record<string, number> = {
+  QUEE: 800, LAR1: 25, LAR2: 50, TSLA: 500,
 };
 
 export interface ScenarioResult {
@@ -536,6 +547,7 @@ export interface ScenarioResult {
   teamTypes: TeamType[];
   triggers: ScenarioTrigger[];
   cellTriggers: Map<number, string>;
+  credits: number;
 }
 
 /** Load a scenario and create entities + map setup */
@@ -609,14 +621,15 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   for (const s of data.structures) {
     const pos = cellIndexToPos(s.cell);
     const image = STRUCTURE_IMAGES[s.type] ?? s.type.toLowerCase();
+    const maxHp = STRUCTURE_MAX_HP[s.type] ?? 256;
     structures.push({
       type: s.type,
       image,
       house: toHouse(s.house),
       cx: pos.cx,
       cy: pos.cy,
-      hp: s.hp,
-      maxHp: 256,
+      hp: Math.floor((s.hp / 256) * maxHp),
+      maxHp,
       alive: s.hp > 0,
       rubble: false,
       weapon: STRUCTURE_WEAPONS[s.type],
@@ -644,6 +657,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     teamTypes: data.teamTypes,
     triggers: data.triggers,
     cellTriggers: data.cellTriggers,
+    credits: data.playerCredits * 100, // INI Credits field is ×100
   };
 }
 
