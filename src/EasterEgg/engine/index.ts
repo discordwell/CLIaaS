@@ -14,7 +14,11 @@ import { Entity, resetEntityIds } from './entity';
 import { GameMap } from './map';
 import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
-import { loadScenario } from './scenario';
+import {
+  loadScenario,
+  type TeamType, type ScenarioTrigger,
+  checkTriggerEvent, executeTriggerAction,
+} from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
 export type { MissionInfo } from './scenario';
 
@@ -37,6 +41,12 @@ export class Game {
   tick = 0;
   missionName = '';
   scenarioId = '';
+
+  // Trigger system (from RA scenario INI)
+  private teamTypes: TeamType[] = [];
+  private triggers: ScenarioTrigger[] = [];
+  private globals = new Set<number>();
+  private waypoints = new Map<number, { cx: number; cy: number }>();
 
   // Callbacks
   onStateChange?: (state: GameState) => void;
@@ -73,12 +83,20 @@ export class Game {
     });
 
     // Load scenario
-    const { map, entities, name } = await loadScenario(scenarioId);
+    const { map, entities, name, waypoints, teamTypes, triggers } = await loadScenario(scenarioId);
     this.map = map;
     this.entities = entities;
     this.entityById.clear();
     for (const e of entities) this.entityById.set(e.id, e);
     this.missionName = name;
+    this.waypoints = waypoints;
+    this.teamTypes = teamTypes;
+    this.triggers = triggers;
+    this.globals.clear();
+    // Set global 1 immediately — simulates the player discovering the ant area.
+    // In the original, this is set by cell-entry triggers when the player explores,
+    // but for gameplay pacing we enable it at start so ant waves begin spawning.
+    this.globals.add(1);
 
     // Initial fog of war reveal
     this.updateFogOfWar();
@@ -178,6 +196,11 @@ export class Game {
       return e.frame < e.maxFrames;
     });
 
+    // Process triggers (every 15 ticks = once per second for performance)
+    if (this.tick % 15 === 0) {
+      this.processTriggers();
+    }
+
     // Clean up dead entities after death animation (use deathTick instead of animFrame)
     const before = this.entities.length;
     this.entities = this.entities.filter(
@@ -188,7 +211,8 @@ export class Game {
       for (const e of this.entities) this.entityById.set(e.id, e);
     }
 
-    // Check win/lose conditions
+    // Check win/lose — but only if triggers have had time to spawn ants
+    // The trigger system spawns ants over time, so we need a grace period
     this.checkVictoryConditions();
   }
 
@@ -443,6 +467,51 @@ export class Game {
     }
   }
 
+  /** Process trigger system — check conditions and fire actions */
+  private processTriggers(): void {
+    for (const trigger of this.triggers) {
+      // Volatile (0) and semi-persistent (1): skip once fired
+      // Persistent (2): allowed to re-fire after timer reset
+      if (trigger.fired && trigger.persistence <= 1) continue;
+
+      // Check event conditions
+      const e1Met = checkTriggerEvent(trigger.event1, this.tick, this.globals, trigger.timerTick);
+      const e2Met = checkTriggerEvent(trigger.event2, this.tick, this.globals, trigger.timerTick);
+
+      let shouldFire = false;
+      switch (trigger.eventControl) {
+        case 0: shouldFire = e1Met; break;            // only event1
+        case 1: shouldFire = e1Met && e2Met; break;   // AND
+        case 2: shouldFire = e1Met || e2Met; break;   // OR
+        default: shouldFire = e1Met; break;
+      }
+
+      if (!shouldFire) continue;
+      trigger.fired = true;
+
+      // Persistent triggers: reset timer so TIME events must elapse again
+      if (trigger.persistence === 2) {
+        trigger.timerTick = this.tick;
+      }
+
+      // Execute actions
+      const executeAction = (action: typeof trigger.action1) => {
+        const spawned = executeTriggerAction(
+          action, this.teamTypes, this.waypoints, this.globals, this.triggers
+        );
+        for (const entity of spawned) {
+          this.entities.push(entity);
+          this.entityById.set(entity.id, entity);
+        }
+      };
+
+      executeAction(trigger.action1);
+      if (trigger.actionControl === 1) {
+        executeAction(trigger.action2);
+      }
+    }
+  }
+
   /** Check win/lose conditions */
   private checkVictoryConditions(): void {
     if (this.tick < GAME_TICKS_PER_SEC * 3) return;
@@ -450,10 +519,28 @@ export class Game {
     const playerAlive = this.entities.some(e => e.alive && e.isPlayerUnit);
     const antsAlive = this.entities.some(e => e.alive && e.isAnt);
 
+    // Check if any unfired triggers will still spawn ants
+    const pendingAntTriggers = this.triggers.some(t => {
+      if (t.fired && t.persistence <= 1) return false; // volatile/semi-persistent already fired
+      // Persistent triggers that fired still re-fire — consider them pending
+      // Check if any action spawns an ant team (REINFORCEMENTS=7 or CREATE_TEAM=4)
+      const checksTeam = (team: number) => {
+        if (team < 0 || team >= this.teamTypes.length) return false;
+        return this.teamTypes[team].members.some(m => m.type.startsWith('ANT'));
+      };
+      const isSpawnAction = (a: number) => a === 7 || a === 4;
+      const spawnsAnts = (isSpawnAction(t.action1.action) && checksTeam(t.action1.team)) ||
+             (isSpawnAction(t.action2.action) && checksTeam(t.action2.team));
+      if (!spawnsAnts) return false;
+      // For persistent triggers that already fired, check if they'll fire again (TIME events)
+      if (t.fired && t.persistence === 2) return true;
+      return !t.fired;
+    });
+
     if (!playerAlive) {
       this.state = 'lost';
       this.onStateChange?.('lost');
-    } else if (!antsAlive) {
+    } else if (!antsAlive && !pendingAntTriggers) {
       this.state = 'won';
       this.onStateChange?.('won');
     }

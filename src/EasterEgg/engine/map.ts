@@ -31,6 +31,10 @@ export class GameMap {
   /** Fog of war: 0=shroud, 1=fog (explored), 2=visible */
   visibility: Uint8Array;
 
+  /** Terrain template data from MapPack (set by scenario loader) */
+  templateType: Uint8Array;
+  templateIcon: Uint8Array;
+
   /** Indices of cells currently marked visible (for efficient downgrade) */
   private visibleCells: number[] = [];
 
@@ -38,6 +42,8 @@ export class GameMap {
     this.cells = new Array(MAP_CELLS * MAP_CELLS).fill(Terrain.CLEAR);
     this.occupancy = new Int32Array(MAP_CELLS * MAP_CELLS);
     this.visibility = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    this.templateType = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    this.templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.boundsX = 0;
     this.boundsY = 0;
     this.boundsW = MAP_CELLS;

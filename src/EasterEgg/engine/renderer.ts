@@ -80,20 +80,74 @@ export class Renderer {
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
         const h = cellHash(cx, cy);
 
+        // Use MapPack template data for richer variation when available
+        const idx = cy * 128 + cx;
+        const tmpl = map.templateType[idx] || 0;
+        const icon = map.templateIcon[idx] || 0;
+
         switch (terrain) {
           case Terrain.CLEAR: {
-            // Grass with natural variation
-            const r = 45 + (h % 12) - 6;
-            const g = 75 + (h % 18) - 9;
-            const b = 30 + (h % 8) - 4;
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
-            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Occasional dirt patch
-            if (h < 15) {
-              ctx.fillStyle = `rgba(90,70,40,0.3)`;
-              ctx.fillRect(screen.x + 4, screen.y + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+            // Use template+icon data for richer TEMPERATE terrain variation
+            // Template types in TEMPERATE: different ground textures
+            if (tmpl > 0 && tmpl !== 0xFF) {
+              // Template-aware rendering: use template/icon combo for visual variation
+              const isRoad = tmpl >= 0x27 && tmpl <= 0x34;
+              const isRough = tmpl >= 0x0D && tmpl <= 0x12;
+              const isShoreDirt = tmpl >= 0x06 && tmpl <= 0x0C;
+
+              if (isRoad) {
+                // Road tiles — gray-brown dirt path
+                const v = (icon * 7 + h) % 12;
+                ctx.fillStyle = `rgb(${85 + v},${78 + v},${65 + v})`;
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+                // Road texture lines
+                ctx.fillStyle = `rgba(100,90,75,0.4)`;
+                ctx.fillRect(screen.x + 2, screen.y + 11, 20, 2);
+              } else if (isRough) {
+                // Rough terrain — darker, mottled earth
+                const r = 55 + (h % 15) - 7;
+                const g = 52 + (h % 12) - 6;
+                const b = 35 + (h % 10) - 5;
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+                // Scatter some rocks
+                ctx.fillStyle = `rgba(70,65,50,0.6)`;
+                ctx.fillRect(screen.x + (h % 14) + 2, screen.y + ((h >> 3) % 12) + 3, 5, 4);
+                ctx.fillRect(screen.x + ((h >> 5) % 10) + 6, screen.y + ((h >> 2) % 14) + 1, 3, 3);
+              } else if (isShoreDirt) {
+                // Shore/dirt transition — sandy brown
+                const r = 75 + (h % 14) - 7;
+                const g = 68 + (h % 12) - 6;
+                const b = 45 + (h % 10) - 5;
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              } else {
+                // Other templates — grass with template-influenced variation
+                const tVar = ((tmpl * 13 + icon * 7) % 20) - 10;
+                const r = 42 + (h % 10) + tVar * 0.3;
+                const g = 72 + (h % 14) + tVar * 0.5;
+                const b = 28 + (h % 8) + tVar * 0.2;
+                ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+                // Subtle detail from template
+                if ((h + icon) % 5 === 0) {
+                  ctx.fillStyle = `rgba(85,65,40,0.2)`;
+                  ctx.fillRect(screen.x + 3, screen.y + 3, CELL_SIZE - 6, CELL_SIZE - 6);
+                }
+              }
+            } else {
+              // Default clear grass (no MapPack data)
+              const r = 45 + (h % 12) - 6;
+              const g = 75 + (h % 18) - 9;
+              const b = 30 + (h % 8) - 4;
+              ctx.fillStyle = `rgb(${r},${g},${b})`;
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              if (h < 15) {
+                ctx.fillStyle = `rgba(90,70,40,0.3)`;
+                ctx.fillRect(screen.x + 4, screen.y + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+              }
             }
-            // Grass tuft detail
+            // Grass tuft detail (always)
             if (h > 200) {
               ctx.fillStyle = `rgba(60,100,35,0.6)`;
               const gx = screen.x + (h % 16) + 4;
@@ -103,14 +157,12 @@ export class Renderer {
             break;
           }
           case Terrain.WATER: {
-            // Animated water with ripple
             const wave = Math.sin((tick * 0.15) + cx * 0.7 + cy * 0.5) * 8;
             const r = 15 + wave;
             const g = 45 + wave * 1.5;
             const b = 85 + wave * 2;
             ctx.fillStyle = `rgb(${r},${g},${b})`;
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Ripple highlights
             if ((h + tick) % 30 < 8) {
               ctx.fillStyle = 'rgba(100,160,200,0.15)';
               ctx.fillRect(screen.x + 3, screen.y + 8, 18, 2);
@@ -121,20 +173,19 @@ export class Renderer {
             const v = h % 10;
             ctx.fillStyle = `rgb(${65 + v},${60 + v},${50 + v})`;
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Rocky texture dots
             ctx.fillStyle = `rgba(80,75,60,0.5)`;
             ctx.fillRect(screen.x + (h % 10) + 2, screen.y + ((h >> 3) % 10) + 2, 4, 3);
             ctx.fillRect(screen.x + ((h >> 5) % 12) + 1, screen.y + ((h >> 2) % 14) + 5, 3, 4);
             break;
           }
           case Terrain.TREE: {
-            // Ground
+            // Ground under tree
             ctx.fillStyle = `rgb(${35 + (h % 8)},${55 + (h % 10)},${25 + (h % 6)})`;
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
             // Tree trunk
             ctx.fillStyle = '#4a3520';
             ctx.fillRect(screen.x + 10, screen.y + 14, 4, 10);
-            // Tree canopy (layered circles)
+            // Tree canopy (layered circles for depth)
             ctx.fillStyle = '#1a4a15';
             ctx.beginPath();
             ctx.arc(screen.x + 12, screen.y + 10, 8, 0, Math.PI * 2);
@@ -152,7 +203,6 @@ export class Renderer {
           case Terrain.WALL: {
             ctx.fillStyle = `rgb(${75 + (h % 8)},${75 + (h % 8)},${70 + (h % 8)})`;
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Brick lines
             ctx.strokeStyle = 'rgba(0,0,0,0.2)';
             ctx.lineWidth = 1;
             ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);

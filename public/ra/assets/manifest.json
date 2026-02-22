@@ -245,28 +245,28 @@
   "ant1": {
     "frameWidth": 24,
     "frameHeight": 24,
-    "frameCount": 32,
+    "frameCount": 104,
     "columns": 16,
-    "rows": 2,
+    "rows": 7,
     "sheetWidth": 384,
-    "sheetHeight": 48
+    "sheetHeight": 168
   },
   "ant2": {
     "frameWidth": 24,
     "frameHeight": 24,
-    "frameCount": 32,
+    "frameCount": 104,
     "columns": 16,
-    "rows": 2,
+    "rows": 7,
     "sheetWidth": 384,
-    "sheetHeight": 48
+    "sheetHeight": 168
   },
   "ant3": {
     "frameWidth": 24,
     "frameHeight": 24,
-    "frameCount": 32,
+    "frameCount": 104,
     "columns": 16,
-    "rows": 2,
+    "rows": 7,
     "sheetWidth": 384,
-    "sheetHeight": 48
+    "sheetHeight": 168
   }
 }

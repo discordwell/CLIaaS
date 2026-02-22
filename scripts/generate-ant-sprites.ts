@@ -2,7 +2,12 @@
 /**
  * Generate procedural pixel-art ant sprites as PNG sprite sheets.
  * Creates ANT1 (warrior/red), ANT2 (fire/orange), ANT3 (scout/green).
- * Each sprite has 32 rotation frames like vehicles.
+ *
+ * 104 frames per ant matching RA's ant unit layout:
+ *   Frames  0-7:   Standing (8 directions × 1 frame)
+ *   Frames  8-71:  Walking  (8 directions × 8 walk frames, with leg animation)
+ *   Frames 72-103: Attacking (8 directions × 4 attack frames, with mandible animation)
+ *
  * Uses pure Node.js — writes raw PNG with no dependencies.
  */
 
@@ -18,43 +23,35 @@ const ASSETS_DIR = join(ROOT, 'public/ra/assets');
 const FRAME_W = 24;
 const FRAME_H = 24;
 const COLS = 16;
-const FRAME_COUNT = 32;
+const FRAME_COUNT = 104;
 const ROWS = Math.ceil(FRAME_COUNT / COLS);
 const SHEET_W = COLS * FRAME_W;
 const SHEET_H = ROWS * FRAME_H;
 
 // --- Pure PNG encoder ---
 function encodePNG(rgba: Uint8Array, w: number, h: number): Buffer {
-  // PNG structure: signature + IHDR + IDAT + IEND
   const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-
-  // IHDR
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0);
   ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // color type: RGBA
-  ihdr[10] = 0; // compression
-  ihdr[11] = 0; // filter
-  ihdr[12] = 0; // interlace
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
   const ihdrChunk = pngChunk('IHDR', ihdr);
-
-  // IDAT — raw image data with filter bytes
-  const rawSize = h * (1 + w * 4); // filter byte per row + RGBA pixels
+  const rawSize = h * (1 + w * 4);
   const rawBuf = Buffer.alloc(rawSize);
   for (let y = 0; y < h; y++) {
     const rowOffset = y * (1 + w * 4);
-    rawBuf[rowOffset] = 0; // filter: none
+    rawBuf[rowOffset] = 0;
     for (let x = 0; x < w * 4; x++) {
       rawBuf[rowOffset + 1 + x] = rgba[y * w * 4 + x];
     }
   }
   const compressed = deflateSync(rawBuf);
   const idatChunk = pngChunk('IDAT', compressed);
-
-  // IEND
   const iendChunk = pngChunk('IEND', Buffer.alloc(0));
-
   return Buffer.concat([sig, ihdrChunk, idatChunk, iendChunk]);
 }
 
@@ -125,7 +122,6 @@ class PixelCanvas {
   }
 
   drawLine(x0: number, y0: number, x1: number, y1: number, r: number, g: number, b: number, a = 255): void {
-    // Bresenham's line
     let ix0 = Math.round(x0), iy0 = Math.round(y0);
     const ix1 = Math.round(x1), iy1 = Math.round(y1);
     const dx = Math.abs(ix1 - ix0);
@@ -186,95 +182,155 @@ const ANT_DEFS: Record<string, AntColor> = {
   },
 };
 
+// Animation state type for drawing
+type AntAnimState = 'stand' | 'walk' | 'attack';
+
 function drawAntOnCanvas(
   pc: PixelCanvas,
-  ox: number, oy: number,  // frame top-left
-  angle: number,            // rotation in radians (0 = north)
+  ox: number, oy: number,     // frame top-left
+  angle: number,                // rotation in radians (0 = north)
   colors: AntColor,
+  animState: AntAnimState,
+  animPhase: number,           // 0-1 animation progress within the state
 ): void {
   const cx = ox + FRAME_W / 2;
   const cy = oy + FRAME_H / 2;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
 
-  // Helper: rotate point around center
+  // Rotate point around center
   const rot = (lx: number, ly: number): [number, number] => {
     return [cx + lx * cos - ly * sin, cy + lx * sin + ly * cos];
   };
 
-  // Draw from back to front (abdomen → thorax → head)
-  // All coordinates are in local space (x=right, y=down), origin=center
+  // --- Leg animation ---
+  // Walking: legs cycle in alternating tripod gait
+  // Attack: legs plant firmly
+  const legCycle = animState === 'walk' ? Math.sin(animPhase * Math.PI * 2) * 1.5 : 0;
 
-  // Abdomen (rear, largest)
-  const abd = rot(0, 3);
+  // --- Body parts ---
+  // Abdomen (rear) — slight bob during walk
+  const abdY = 3 + (animState === 'walk' ? Math.sin(animPhase * Math.PI * 4) * 0.5 : 0);
+  const abd = rot(0, abdY);
   pc.fillEllipse(abd[0], abd[1], 3.5, 4, ...colors.body);
 
   // Thorax (middle)
   const thx = rot(0, -1);
   pc.fillCircle(thx[0], thx[1], 2.5, ...colors.body);
 
-  // Head (front)
-  const hd = rot(0, -4.5);
+  // Head (front) — lunges forward during attack
+  const headY = animState === 'attack' ? -5.5 - Math.sin(animPhase * Math.PI) * 1.5 : -4.5;
+  const hd = rot(0, headY);
   pc.fillCircle(hd[0], hd[1], 2.5, ...colors.head);
 
-  // Legs — 3 pairs
-  const legPairs = [
-    { y: -1, outLen: 5, outAngle: -0.5 },  // front
-    { y: 1, outLen: 5, outAngle: 0 },        // middle
-    { y: 3, outLen: 5, outAngle: 0.5 },      // rear
+  // --- Legs with animation ---
+  const legDefs = [
+    { y: -1, outLen: 5, outAngle: -0.5, phase: 0 },    // front pair
+    { y: 1, outLen: 5, outAngle: 0, phase: 0.33 },      // middle pair
+    { y: 3, outLen: 5, outAngle: 0.5, phase: 0.67 },    // rear pair
   ];
-  for (const leg of legPairs) {
+
+  for (const leg of legDefs) {
+    // Alternating tripod gait: legs on opposite sides move in anti-phase
+    const leftSwing = animState === 'walk'
+      ? Math.sin((animPhase + leg.phase) * Math.PI * 2) * 1.5
+      : 0;
+    const rightSwing = -leftSwing; // opposite phase
+
     // Left leg
     const lBase = rot(-2, leg.y);
-    const lTip = rot(-2 - leg.outLen * Math.cos(leg.outAngle), leg.y - leg.outLen * Math.sin(leg.outAngle));
+    const lTip = rot(
+      -2 - leg.outLen * Math.cos(leg.outAngle + leftSwing * 0.15),
+      leg.y - leg.outLen * Math.sin(leg.outAngle) + leftSwing,
+    );
     pc.drawLine(lBase[0], lBase[1], lTip[0], lTip[1], ...colors.legs);
 
     // Right leg
     const rBase = rot(2, leg.y);
-    const rTip = rot(2 + leg.outLen * Math.cos(leg.outAngle), leg.y - leg.outLen * Math.sin(leg.outAngle));
+    const rTip = rot(
+      2 + leg.outLen * Math.cos(leg.outAngle + rightSwing * 0.15),
+      leg.y - leg.outLen * Math.sin(leg.outAngle) + rightSwing,
+    );
     pc.drawLine(rBase[0], rBase[1], rTip[0], rTip[1], ...colors.legs);
   }
 
-  // Mandibles
-  const mL = rot(-1.5, -6.5);
-  const mLtip = rot(-3, -8);
-  pc.drawLine(mL[0], mL[1], mLtip[0], mLtip[1], ...colors.accent);
+  // --- Mandibles with attack animation ---
+  const mandibleSpread = animState === 'attack'
+    ? 1.5 + Math.sin(animPhase * Math.PI * 2) * 2.0  // wider during attack
+    : 1.5;
+  const mandibleLen = animState === 'attack'
+    ? 2.0 + Math.sin(animPhase * Math.PI) * 1.0       // longer reach
+    : 1.5;
 
-  const mR = rot(1.5, -6.5);
-  const mRtip = rot(3, -8);
-  pc.drawLine(mR[0], mR[1], mRtip[0], mRtip[1], ...colors.accent);
+  const mLbase = rot(-mandibleSpread, headY - 2);
+  const mLtip = rot(-mandibleSpread - mandibleLen * 0.5, headY - 2 - mandibleLen);
+  pc.drawLine(mLbase[0], mLbase[1], mLtip[0], mLtip[1], ...colors.accent);
+
+  const mRbase = rot(mandibleSpread, headY - 2);
+  const mRtip = rot(mandibleSpread + mandibleLen * 0.5, headY - 2 - mandibleLen);
+  pc.drawLine(mRbase[0], mRbase[1], mRtip[0], mRtip[1], ...colors.accent);
 
   // Antennae
-  const aL = rot(-1, -6.5);
-  const aLtip = rot(-3.5, -9.5);
+  const aL = rot(-1, headY - 2);
+  const aLtip = rot(-3.5, headY - 5);
   pc.drawLine(aL[0], aL[1], aLtip[0], aLtip[1], ...colors.legs);
 
-  const aR = rot(1, -6.5);
-  const aRtip = rot(3.5, -9.5);
+  const aR = rot(1, headY - 2);
+  const aRtip = rot(3.5, headY - 5);
   pc.drawLine(aR[0], aR[1], aRtip[0], aRtip[1], ...colors.legs);
 
   // Eyes
-  const eL = rot(-1.5, -5);
-  const eR = rot(1.5, -5);
+  const eL = rot(-1.5, headY - 0.5);
+  const eR = rot(1.5, headY - 0.5);
   pc.setPixel(eL[0], eL[1], ...colors.eyes);
   pc.setPixel(eR[0], eR[1], ...colors.eyes);
 }
 
 // --- Main ---
-console.log('Generating ant sprite sheets...\n');
+console.log('Generating ant sprite sheets (104 frames)...\n');
 
 for (const [name, colors] of Object.entries(ANT_DEFS)) {
   const pc = new PixelCanvas(SHEET_W, SHEET_H);
 
-  for (let i = 0; i < FRAME_COUNT; i++) {
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
+  let frameIdx = 0;
+
+  // Frames 0-7: Standing (8 directions × 1 frame)
+  for (let dir = 0; dir < 8; dir++) {
+    const col = frameIdx % COLS;
+    const row = Math.floor(frameIdx / COLS);
     const ox = col * FRAME_W;
     const oy = row * FRAME_H;
+    const angle = (dir / 8) * Math.PI * 2;
+    drawAntOnCanvas(pc, ox, oy, angle, colors, 'stand', 0);
+    frameIdx++;
+  }
 
-    // 32 rotation frames: 0=N, 8=E, 16=S, 24=W (clockwise)
-    const angle = (i / 32) * Math.PI * 2;
-    drawAntOnCanvas(pc, ox, oy, angle, colors);
+  // Frames 8-71: Walking (8 directions × 8 walk frames)
+  for (let dir = 0; dir < 8; dir++) {
+    for (let f = 0; f < 8; f++) {
+      const col = frameIdx % COLS;
+      const row = Math.floor(frameIdx / COLS);
+      const ox = col * FRAME_W;
+      const oy = row * FRAME_H;
+      const angle = (dir / 8) * Math.PI * 2;
+      const phase = f / 8; // 0-1 animation cycle
+      drawAntOnCanvas(pc, ox, oy, angle, colors, 'walk', phase);
+      frameIdx++;
+    }
+  }
+
+  // Frames 72-103: Attacking (8 directions × 4 attack frames)
+  for (let dir = 0; dir < 8; dir++) {
+    for (let f = 0; f < 4; f++) {
+      const col = frameIdx % COLS;
+      const row = Math.floor(frameIdx / COLS);
+      const ox = col * FRAME_W;
+      const oy = row * FRAME_H;
+      const angle = (dir / 8) * Math.PI * 2;
+      const phase = f / 4;
+      drawAntOnCanvas(pc, ox, oy, angle, colors, 'attack', phase);
+      frameIdx++;
+    }
   }
 
   const outPath = join(ASSETS_DIR, `${name}.png`);

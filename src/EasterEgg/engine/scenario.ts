@@ -3,9 +3,81 @@
  * Reads unit placements, waypoints, team types, and triggers from SCA01-04EA.INI.
  */
 
-import { type CellPos, cellIndexToPos, cellToWorld, House, UnitType } from './types';
+import { type CellPos, cellIndexToPos, cellToWorld, House, UnitType, GAME_TICKS_PER_SEC } from './types';
 import { Entity } from './entity';
 import { GameMap, Terrain } from './map';
+
+// === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===
+
+// Trigger event types (TEventType)
+const TEVENT_NONE = 0;
+const TEVENT_PLAYER_ENTERED = 1;
+const TEVENT_TIME = 13;
+const TEVENT_GLOBAL_SET = 27;
+
+// Trigger action types (TActionType)
+const TACTION_NONE = 0;
+const TACTION_WIN = 1;
+const TACTION_LOSE = 2;
+const TACTION_CREATE_TEAM = 4;
+const TACTION_REINFORCEMENTS = 7;
+const TACTION_SET_GLOBAL = 28;
+const TACTION_FORCE_TRIGGER = 22;
+
+// Team mission types (TeamMissionType)
+const TMISSION_ATTACK = 0;
+const TMISSION_ATT_WAYPT = 1;
+const TMISSION_MOVE = 3;
+const TMISSION_GUARD = 5;
+const TMISSION_LOOP = 6;
+
+// Time unit: Data.Value is in 1/10th minute increments (6 seconds each)
+// Convert to game ticks: value * 6 * GAME_TICKS_PER_SEC
+const TIME_UNIT_TICKS = 6 * GAME_TICKS_PER_SEC; // 90 ticks per time unit
+
+export interface TeamMember {
+  type: string;   // unit type name (e.g. 'ANT3')
+  count: number;
+}
+
+export interface TeamMission {
+  mission: number;  // TMISSION_* enum
+  data: number;     // waypoint or other param
+}
+
+export interface TeamType {
+  name: string;
+  house: number;        // house ID
+  origin: number;       // starting waypoint
+  members: TeamMember[];
+  missions: TeamMission[];
+}
+
+export interface TriggerEvent {
+  type: number;    // TEVENT_* enum
+  team: number;    // team index or -1
+  data: number;    // parameter (time value for TIME, global ID for GLOBAL_SET)
+}
+
+export interface TriggerAction {
+  action: number;  // TACTION_* enum
+  team: number;    // team index or -1
+  trigger: number; // trigger index or -1
+  data: number;    // parameter
+}
+
+export interface ScenarioTrigger {
+  name: string;
+  persistence: number;   // 0=volatile, 1=semi, 2=persistent
+  eventControl: number;  // 0=only, 1=and, 2=or
+  actionControl: number; // 0=only, 1=and
+  event1: TriggerEvent;
+  event2: TriggerEvent;
+  action1: TriggerAction;
+  action2: TriggerAction;
+  fired: boolean;         // has this trigger fired?
+  timerTick: number;      // game tick when timer started (for TIME events)
+}
 
 // === Mission Metadata ===
 
@@ -115,6 +187,9 @@ interface ScenarioData {
     cell: number;
     type: string;
   }>;
+  teamTypes: TeamType[];
+  triggers: ScenarioTrigger[];
+  mapPack: string;  // raw Base64 MapPack data
 }
 
 /** Parse an INI-format scenario file */
@@ -238,6 +313,75 @@ export function parseScenarioINI(text: string): ScenarioData {
     }
   }
 
+  // Parse TeamTypes
+  // Format: name=House,Flags,RecruitPriority,InitNum,MaxAllowed,Origin,Trigger,ClassCount,members...,MissionCount,missions...
+  const teamTypes: TeamType[] = [];
+  const ttSection = sections.get('TeamTypes');
+  if (ttSection) {
+    for (const [name, value] of ttSection) {
+      const parts = value.split(',');
+      if (parts.length < 8) continue;
+      const house = parseInt(parts[0]);
+      const origin = parseInt(parts[5]);
+      const classCount = parseInt(parts[7]);
+
+      const members: TeamMember[] = [];
+      for (let i = 0; i < classCount; i++) {
+        const memberStr = parts[8 + i];
+        if (!memberStr) break;
+        const [mType, mCount] = memberStr.split(':');
+        members.push({ type: mType, count: parseInt(mCount) || 1 });
+      }
+
+      const missionCountIdx = 8 + classCount;
+      const missionCount = parseInt(parts[missionCountIdx]) || 0;
+      const missions: TeamMission[] = [];
+      for (let i = 0; i < missionCount; i++) {
+        const missionStr = parts[missionCountIdx + 1 + i];
+        if (!missionStr) break;
+        const [mId, mData] = missionStr.split(':');
+        missions.push({ mission: parseInt(mId), data: parseInt(mData) || 0 });
+      }
+
+      teamTypes.push({ name, house, origin, members, missions });
+    }
+  }
+
+  // Parse Triggers (18-field format from RA source)
+  // Format: name=PersType,House,EventControl,ActionControl,
+  //   E1.Event,E1.Team,E1.Data, E2.Event,E2.Team,E2.Data,
+  //   A1.Action,A1.Team,A1.Trigger,A1.Data, A2.Action,A2.Team,A2.Trigger,A2.Data
+  const triggers: ScenarioTrigger[] = [];
+  const trigSection = sections.get('Trigs');
+  if (trigSection) {
+    for (const [name, value] of trigSection) {
+      const f = value.split(',').map(s => parseInt(s.trim()));
+      if (f.length < 18) continue;
+      triggers.push({
+        name,
+        persistence: f[0],
+        eventControl: f[2],
+        actionControl: f[3],
+        event1: { type: f[4], team: f[5], data: f[6] },
+        event2: { type: f[7], team: f[8], data: f[9] },
+        action1: { action: f[10], team: f[11], trigger: f[12], data: f[13] },
+        action2: { action: f[14], team: f[15], trigger: f[16], data: f[17] },
+        fired: false,
+        timerTick: 0,
+      });
+    }
+  }
+
+  // Collect MapPack data (Base64 across numbered lines)
+  let mapPack = '';
+  const mapPackSection = sections.get('MapPack');
+  if (mapPackSection) {
+    const sortedKeys = [...mapPackSection.keys()].sort((a, b) => parseInt(a) - parseInt(b));
+    for (const key of sortedKeys) {
+      mapPack += mapPackSection.get(key)!;
+    }
+  }
+
   return {
     name: get('Basic', 'Name', 'Unknown Mission'),
     mapBounds: { x: mapX, y: mapY, w: mapW, h: mapH },
@@ -248,6 +392,9 @@ export function parseScenarioINI(text: string): ScenarioData {
     infantry,
     structures,
     terrain,
+    teamTypes,
+    triggers,
+    mapPack,
   };
 }
 
@@ -276,10 +423,35 @@ function toUnitType(name: string): UnitType | null {
   return map[name] ?? null;
 }
 
+/** Map house ID number to House enum (from RA house numbering) */
+function houseIdToHouse(id: number): House {
+  // RA house IDs: 0=Spain, 1=Greece, 2=USSR, 3=England, 4=Ukraine, 5=Germany
+  switch (id) {
+    case 0: return House.Spain;
+    case 1: return House.Greece;
+    case 2: return House.USSR;
+    case 4: return House.Ukraine;
+    case 5: return House.Germany;
+    default: return House.USSR; // ant teams use various house IDs
+  }
+}
+
+/** Check if a team is an ant team (contains ant units) */
+function isAntTeam(team: TeamType): boolean {
+  return team.members.some(m => m.type.startsWith('ANT'));
+}
+
+export interface ScenarioResult {
+  map: GameMap;
+  entities: Entity[];
+  name: string;
+  waypoints: Map<number, CellPos>;
+  teamTypes: TeamType[];
+  triggers: ScenarioTrigger[];
+}
+
 /** Load a scenario and create entities + map setup */
-export async function loadScenario(
-  scenarioId: string
-): Promise<{ map: GameMap; entities: Entity[]; name: string; waypoints: Map<number, CellPos> }> {
+export async function loadScenario(scenarioId: string): Promise<ScenarioResult> {
   const url = `/ra/assets/${scenarioId}.ini`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load scenario: ${url}`);
@@ -291,7 +463,12 @@ export async function loadScenario(
   map.setBounds(data.mapBounds.x, data.mapBounds.y, data.mapBounds.w, data.mapBounds.h);
   map.initDefault();
 
-  // Apply terrain features
+  // Decode MapPack for terrain data
+  if (data.mapPack) {
+    decodeMapPack(data.mapPack, map);
+  }
+
+  // Apply terrain features from [TERRAIN] section
   for (const t of data.terrain) {
     const pos = cellIndexToPos(t.cell);
     const type = t.type.toLowerCase();
@@ -300,18 +477,15 @@ export async function loadScenario(
     } else if (type.includes('rock') || type.includes('cliff')) {
       map.setTerrain(pos.cx, pos.cy, Terrain.ROCK);
     } else if (type.startsWith('t') && /^t\d/.test(type)) {
-      // Tree templates: T01, T02, ... T15
       map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
     } else if (type.startsWith('tc')) {
-      // Tree clumps: TC01-TC05
       map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
     }
   }
 
-  // Create entities
+  // Create entities from INI unit/infantry placements
   const entities: Entity[] = [];
 
-  // Vehicle units
   for (const u of data.units) {
     const unitType = toUnitType(u.type);
     if (!unitType) continue;
@@ -323,7 +497,6 @@ export async function loadScenario(
     entities.push(entity);
   }
 
-  // Infantry
   for (const inf of data.infantry) {
     const unitType = toUnitType(inf.type);
     if (!unitType) continue;
@@ -336,32 +509,226 @@ export async function loadScenario(
     entities.push(entity);
   }
 
-  // Spawn initial ant waves at distant waypoints only.
-  // In the original, ants are spawned by triggers/team types over time.
-  // We place scouts at waypoints that are far from the player start (WP98).
-  const playerStart = data.waypoints.get(98);
-  const minSpawnDist = 25; // minimum cells from player to spawn ants
-  const antSpawnWaypoints = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 16, 17, 18, 20, 21, 26];
-  let antCount = 0;
-  for (const wpIdx of antSpawnWaypoints) {
-    if (antCount >= 8) break; // don't spawn too many initially
-    const wp = data.waypoints.get(wpIdx);
-    if (!wp) continue;
-    // Only spawn at waypoints far from player
-    if (playerStart) {
-      const dx = wp.cx - playerStart.cx;
-      const dy = wp.cy - playerStart.cy;
-      if (Math.sqrt(dx * dx + dy * dy) < minSpawnDist) continue;
+  // No hardcoded ant spawning — the trigger system handles all ant wave spawning.
+  // Triggers fire based on elapsed time and global variables, spawning TeamType teams.
+
+  return {
+    map,
+    entities,
+    name: data.name,
+    waypoints: data.waypoints,
+    teamTypes: data.teamTypes,
+    triggers: data.triggers,
+  };
+}
+
+// === MapPack Decoder ===
+// MapPack contains Base64-encoded, LCW-compressed terrain template data.
+// Two layers: templateType (128x128) and templateIcon (128x128).
+// The template type + icon determine the visual appearance of each map cell.
+
+/** Decode MapPack data and apply terrain types to the map */
+function decodeMapPack(base64Data: string, map: GameMap): void {
+  try {
+    // Decode Base64
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
-    const world = cellToWorld(wp.cx, wp.cy);
-    const antType = antCount % 3 === 0 ? UnitType.ANT1
-                  : antCount % 3 === 1 ? UnitType.ANT3
-                  : UnitType.ANT2;
-    const ant = new Entity(antType, House.USSR, world.x, world.y);
-    ant.facing = Math.floor(Math.random() * 8);
-    entities.push(ant);
-    antCount++;
+
+    const MAP_SIZE = 128 * 128; // 16384 cells
+    const templateType = new Uint8Array(MAP_SIZE);
+    const templateIcon = new Uint8Array(MAP_SIZE);
+
+    // LCW decompress two layers from the packed data
+    const offset1 = lcwDecompressMapPack(bytes, 0, templateType, MAP_SIZE);
+    if (offset1 > 0) {
+      lcwDecompressMapPack(bytes, offset1, templateIcon, MAP_SIZE);
+    }
+
+    // Store template data on the map
+    map.templateType = templateType;
+    map.templateIcon = templateIcon;
+
+    // Use template types to set better terrain classification
+    // RA template type IDs: 0xFF=clear, 0x00=clear, others map to specific terrain
+    // Common TEMPERATE template types:
+    // 0-3: Clear terrain variations
+    // 4-7: Water tiles
+    // 8-11: Shore/beach transitions
+    // 12-15: Road tiles
+    // 16+: Rock, cliff, rough terrain, etc.
+    for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
+      for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
+        const idx = cy * 128 + cx;
+        const tmpl = templateType[idx];
+
+        // Classify terrain based on template type ranges
+        // These are approximate — TEMPERATE theater template types
+        if (tmpl === 0xFF || tmpl === 0x00) {
+          // Clear (default)
+        } else if (tmpl >= 1 && tmpl <= 5) {
+          // Water body templates
+          map.setTerrain(cx, cy, Terrain.WATER);
+        } else if (tmpl >= 6 && tmpl <= 11) {
+          // Shore/water edge templates — treat as water
+          const icon = templateIcon[idx];
+          // Some shore icons are land, some are water
+          if (icon % 2 === 0) {
+            map.setTerrain(cx, cy, Terrain.WATER);
+          }
+        } else if (tmpl >= 0x18 && tmpl <= 0x20) {
+          // Rock/cliff templates
+          map.setTerrain(cx, cy, Terrain.ROCK);
+        }
+      }
+    }
+  } catch {
+    // MapPack decode failed — terrain stays at default
+  }
+}
+
+/** Simple LCW decompression for MapPack data — returns bytes consumed from source */
+function lcwDecompressMapPack(
+  source: Uint8Array,
+  srcStart: number,
+  dest: Uint8Array,
+  destLength: number,
+): number {
+  let sp = srcStart;
+  let dp = 0;
+  const destEnd = destLength;
+
+  while (dp < destEnd && sp < source.length) {
+    const opCode = source[sp++];
+
+    if (!(opCode & 0x80)) {
+      // Short copy from destination (back-reference)
+      let count = (opCode >> 4) + 3;
+      if (count > destEnd - dp) count = destEnd - dp;
+      if (!count) return sp;
+      const offset = source[sp++] + ((opCode & 0x0f) << 8);
+      let cp = dp - offset;
+      if (cp < 0) return sp; // invalid back-reference
+      while (count-- > 0 && cp < destEnd) dest[dp++] = dest[cp++];
+    } else if (!(opCode & 0x40)) {
+      if (opCode === 0x80) {
+        return sp; // End of data
+      } else {
+        let count = opCode & 0x3f;
+        while (count-- > 0 && sp < source.length) dest[dp++] = source[sp++];
+      }
+    } else {
+      if (opCode === 0xfe) {
+        let count = source[sp] + (source[sp + 1] << 8);
+        const data = source[sp + 2];
+        sp += 3;
+        if (count > destEnd - dp) count = destEnd - dp;
+        while (count-- > 0) dest[dp++] = data;
+      } else if (opCode === 0xff) {
+        let count = source[sp] + (source[sp + 1] << 8);
+        let cp = source[sp + 2] + (source[sp + 3] << 8);
+        sp += 4;
+        while (count-- > 0) dest[dp++] = dest[cp++];
+      } else {
+        let count = (opCode & 0x3f) + 3;
+        let cp = source[sp] + (source[sp + 1] << 8);
+        sp += 2;
+        while (count-- > 0) dest[dp++] = dest[cp++];
+      }
+    }
   }
 
-  return { map, entities, name: data.name, waypoints: data.waypoints };
+  return sp;
+}
+
+// === Trigger System ===
+
+/** Check if a trigger event condition is met */
+export function checkTriggerEvent(
+  event: TriggerEvent,
+  gameTick: number,
+  globals: Set<number>,
+  triggerStartTick: number,
+): boolean {
+  switch (event.type) {
+    case TEVENT_NONE:
+      return true;
+    case TEVENT_TIME: {
+      // Data.Value is in 1/10th minute increments (6 seconds each)
+      const requiredTicks = event.data * TIME_UNIT_TICKS;
+      return (gameTick - triggerStartTick) >= requiredTicks;
+    }
+    case TEVENT_GLOBAL_SET:
+      return globals.has(event.data);
+    case TEVENT_PLAYER_ENTERED:
+      // Simplified: always true after some initial time
+      return gameTick > 15 * GAME_TICKS_PER_SEC;
+    default:
+      return false;
+  }
+}
+
+/** Execute a trigger action — returns entities to spawn */
+export function executeTriggerAction(
+  action: TriggerAction,
+  teamTypes: TeamType[],
+  waypoints: Map<number, CellPos>,
+  globals: Set<number>,
+  triggers: ScenarioTrigger[],
+): Entity[] {
+  const spawned: Entity[] = [];
+
+  switch (action.action) {
+    case TACTION_NONE:
+      break;
+
+    case TACTION_REINFORCEMENTS:
+    case TACTION_CREATE_TEAM: {
+      const team = teamTypes[action.team];
+      if (!team) break;
+
+      // Find spawn waypoint from team origin
+      const wp = waypoints.get(team.origin);
+      if (!wp) break;
+      const world = cellToWorld(wp.cx, wp.cy);
+
+      // Spawn team members
+      const house = isAntTeam(team) ? House.USSR : House.Spain;
+      for (const member of team.members) {
+        for (let i = 0; i < member.count; i++) {
+          const unitType = toUnitType(member.type);
+          if (!unitType) continue;
+          // Spread units slightly around waypoint
+          const offsetX = (Math.random() - 0.5) * 48;
+          const offsetY = (Math.random() - 0.5) * 48;
+          const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
+          entity.facing = Math.floor(Math.random() * 8);
+          spawned.push(entity);
+        }
+      }
+      break;
+    }
+
+    case TACTION_SET_GLOBAL:
+      globals.add(action.data);
+      break;
+
+    case TACTION_FORCE_TRIGGER: {
+      // Force another trigger to re-evaluate by resetting its fired state
+      const target = triggers[action.trigger];
+      if (target) {
+        target.fired = false;
+      }
+      break;
+    }
+
+    case TACTION_WIN:
+    case TACTION_LOSE:
+      // Handled by the game loop via state changes
+      break;
+  }
+
+  return spawned;
 }
