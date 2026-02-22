@@ -1389,8 +1389,10 @@ export function executeTriggerAction(
           const inf = infantry[i];
           transport.passengers.push(inf);
           inf.transportRef = transport;
-          // Hide loaded infantry (they travel inside the transport)
-          inf.alive = false;
+          // Remove loaded infantry from spawned list — they live in transport.passengers
+          // and will be re-added to the entity list when unloaded (TMISSION_UNLOAD)
+          const idx = result.spawned.indexOf(inf);
+          if (idx >= 0) result.spawned.splice(idx, 1);
         }
       }
       break;

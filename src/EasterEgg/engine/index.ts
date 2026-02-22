@@ -1875,15 +1875,30 @@ export class Game {
             passenger.alive = true;
             passenger.hp = passenger.maxHp;
             passenger.transportRef = null;
-            const offsetX = (Math.random() - 0.5) * CELL_SIZE * 2;
-            const offsetY = (Math.random() - 0.5) * CELL_SIZE * 2;
-            passenger.pos = { x: entity.pos.x + offsetX, y: entity.pos.y + offsetY };
+            passenger.deathTick = 0;
+            // Find passable position near transport (like player-initiated unload)
+            let px = entity.pos.x, py = entity.pos.y;
+            for (let attempt = 0; attempt < 8; attempt++) {
+              const ox = entity.pos.x + (Math.random() - 0.5) * CELL_SIZE * 2;
+              const oy = entity.pos.y + (Math.random() - 0.5) * CELL_SIZE * 2;
+              const tc = worldToCell(ox, oy);
+              if (this.map.isPassable(tc.cx, tc.cy)) {
+                px = ox; py = oy;
+                break;
+              }
+            }
+            passenger.pos = { x: px, y: py };
             passenger.mission = Mission.GUARD;
             passenger.animState = AnimState.IDLE;
+            passenger.animFrame = 0;
             // Passengers keep their team missions and advance past UNLOAD
             passenger.teamMissionIndex = entity.teamMissionIndex + 1;
+            // Re-add to entity list (passengers aren't in the list while loaded)
+            this.entities.push(passenger);
+            this.entityById.set(passenger.id, passenger);
           }
           entity.passengers = [];
+          this.audio.play('eva_reinforcements');
         }
         entity.teamMissionIndex++;
         break;
@@ -1902,7 +1917,8 @@ export class Game {
             if (d < 3) { // within 3 cells
               entity.passengers.push(other);
               other.transportRef = entity;
-              other.alive = false;
+              // Defer removal from entity list (same as player-initiated load)
+              this._pendingTransportLoads.push(other.id);
             }
           }
         }
