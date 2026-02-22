@@ -104,6 +104,7 @@ export class Renderer {
   missionName = ''; // mission title shown as overlay at start
   theatre = 'TEMPERATE'; // map theatre (affects terrain colors)
   musicTrack = ''; // currently playing music track name
+  gameSpeed = 1; // player game speed (1/2/4x)
   // Placement ghost
   placementItem: ProductionItem | null = null;
   placementCx = 0;
@@ -1789,6 +1790,17 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
+  /** Render game speed indicator when not at 1x */
+  renderGameSpeed(): void {
+    if (this.gameSpeed <= 1) return;
+    const ctx = this.ctx;
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = this.gameSpeed >= 4 ? 'rgba(255,100,50,0.8)' : 'rgba(255,200,50,0.8)';
+    ctx.fillText(`▸▸ ${this.gameSpeed}×`, 6, this.height - 6);
+    ctx.textAlign = 'left';
+  }
+
   // ─── Pause Overlay ──────────────────────────────────────
 
   renderPauseOverlay(): void {
@@ -1855,6 +1867,9 @@ export class Renderer {
         '+/-       Volume up/down',
         'M         Mute/unmute',
         'N         Next music track',
+      ]},
+      { title: 'SPEED', lines: [
+        '` (tick)  Cycle 1×/2×/4× speed',
       ]},
       { title: 'SYSTEM', lines: [
         'Esc       Cancel / Pause',

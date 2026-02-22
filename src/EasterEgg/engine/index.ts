@@ -154,6 +154,11 @@ export class Game {
 
   // Turbo mode (for E2E test runner)
   turboMultiplier = 1;
+  // Player game speed (cycles 1→2→4→1 with backtick key)
+  gameSpeed = 1;
+  // Mission stats
+  structuresBuilt = 0;
+  structuresLost = 0;
 
   // Callbacks
   onStateChange?: (state: GameState) => void;
@@ -235,6 +240,10 @@ export class Game {
     this.builtStructureTypes.clear();
     this.evaMessages = [];
     this.unitsLeftMap = 0;
+    this.gameSpeed = 1;
+    this.turboMultiplier = 1;
+    this.structuresBuilt = 0;
+    this.structuresLost = 0;
     this.bridgeCellCount = this.map.countBridgeCells();
     // Initialize trigger timers to game tick 0 (start of mission)
     for (const t of this.triggers) t.timerTick = 0;
@@ -621,6 +630,7 @@ export class Game {
         // Track completed construction for TEVENT_BUILD
         if (wasBuiding && s.buildProgress >= 1) {
           this.builtStructureTypes.add(s.type);
+          if (s.house === 'Spain' || s.house === 'Greece') this.structuresBuilt++;
         }
       }
       // Sell: 0→1 over ~1 second = 15 ticks, then finalize
@@ -883,6 +893,12 @@ export class Game {
     if (keys.has('n')) {
       this.audio.music.next();
       keys.delete('n');
+    }
+    // Backtick: cycle game speed 1→2→4→1
+    if (keys.has('`')) {
+      this.gameSpeed = this.gameSpeed === 1 ? 2 : this.gameSpeed === 2 ? 4 : 1;
+      if (this.turboMultiplier <= 4) this.turboMultiplier = this.gameSpeed;
+      keys.delete('`');
     }
 
     // Home/Space: center camera on selected units
@@ -1612,6 +1628,7 @@ export class Game {
       this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
       this.renderer.screenFlash = Math.max(this.renderer.screenFlash, 5);
       this.audio.play('building_explode');
+      if (s.house === House.Spain || s.house === House.Greece) this.structuresLost++;
       // Structure explosion damages nearby units (2-cell radius, ~100 base damage)
       const blastRadius = 2;
       for (const e of this.entities) {
@@ -4058,8 +4075,10 @@ export class Game {
 
     // Render EVA messages, mission timer, music track, and mission name overlay
     this.renderer.musicTrack = this.audio.music.currentTrack;
+    this.renderer.gameSpeed = this.gameSpeed;
     this.renderer.renderEvaMessages(this.tick);
     this.renderer.renderMusicTrack(this.tick);
+    this.renderer.renderGameSpeed();
     this.renderer.missionName = this.missionName;
     // Mission name overlay fades during first 4 seconds (60 ticks)
     if (this.tick < 60) {

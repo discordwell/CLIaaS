@@ -642,6 +642,42 @@ export default function AntGame({ onExit }: AntGameProps) {
             </div>
           )}
 
+          {/* Mission Stats */}
+          {gameRef.current && (() => {
+            const g = gameRef.current!;
+            const secs = Math.floor(g.tick / 15);
+            const mins = Math.floor(secs / 60);
+            const s = secs % 60;
+            return (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'auto auto',
+                gap: '4px 20px',
+                padding: '14px 24px',
+                background: 'rgba(30,20,10,0.5)',
+                border: '1px solid #442200',
+                marginBottom: '16px',
+                fontSize: '13px',
+                fontFamily: 'monospace',
+              }}>
+                <span style={{ color: '#886633' }}>Time:</span>
+                <span style={{ color: '#ddd' }}>{mins}:{s.toString().padStart(2, '0')}</span>
+                <span style={{ color: '#886633' }}>Kills:</span>
+                <span style={{ color: '#44ff44' }}>{g.killCount}</span>
+                <span style={{ color: '#886633' }}>Losses:</span>
+                <span style={{ color: '#ff6644' }}>{g.lossCount}</span>
+                <span style={{ color: '#886633' }}>Built:</span>
+                <span style={{ color: '#88bbff' }}>{g.structuresBuilt}</span>
+                {g.structuresLost > 0 && <>
+                  <span style={{ color: '#886633' }}>Destroyed:</span>
+                  <span style={{ color: '#ff6644' }}>{g.structuresLost}</span>
+                </>}
+                <span style={{ color: '#886633' }}>Credits:</span>
+                <span style={{ color: '#FFD700' }}>${g.credits}</span>
+              </div>
+            );
+          })()}
+
           <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
             {gameState === 'won' && missionIndex + 1 < MISSIONS.length && (
               <button
