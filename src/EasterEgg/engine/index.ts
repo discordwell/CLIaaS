@@ -44,7 +44,7 @@ const DIFFICULTY_MODS: Record<Difficulty, { spawnInterval: number; maxAnts: numb
 const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 'AGUN', 'FTUR']);
 
 /** Crate bonus types */
-type CrateType = 'money' | 'heal' | 'veterancy' | 'unit';
+type CrateType = 'money' | 'heal' | 'veterancy' | 'unit' | 'armor' | 'firepower';
 interface Crate {
   x: number;
   y: number;
@@ -140,6 +140,7 @@ export class Game {
   private scenarioUnitStats: Record<string, UnitStats> = UNIT_STATS;
   private scenarioWeaponStats: Record<string, WeaponStats> = WEAPON_STATS;
   private warheadOverrides: Record<string, [number, number, number]> = {};
+  private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
   private allowWin = false; // set by ALLOWWIN action — required before win condition fires
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
   private missionTimerExpired = false;
@@ -213,6 +214,7 @@ export class Game {
     this.scenarioUnitStats = scenario.scenarioUnitStats;
     this.scenarioWeaponStats = scenario.scenarioWeaponStats;
     this.warheadOverrides = scenario.warheadOverrides;
+    this.crateOverrides = scenario.crateOverrides;
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.globals.clear();
@@ -3279,6 +3281,11 @@ export class Game {
           this.missionTimer = result.setTimer * TIME_UNIT_TICKS;
           this.missionTimerExpired = false;
         }
+        if (result.timerExtend !== undefined) {
+          this.missionTimer += result.timerExtend * TIME_UNIT_TICKS;
+          this.missionTimerExpired = false;
+        }
+        // Autocreate: enable AI auto-spawning (no-op for ant missions, queen handles spawning)
         // Sound/speech from triggers
         if (result.playSpeech !== undefined) {
           this.handleTriggerSpeech(result.playSpeech);
@@ -3677,9 +3684,25 @@ export class Game {
     return true;
   }
 
+  /** Map INI crate reward name to our CrateType */
+  private static readonly CRATE_NAME_MAP: Record<string, CrateType> = {
+    money: 'money', heal: 'heal', veterancy: 'veterancy', unit: 'unit',
+    armor: 'armor', firepower: 'firepower',
+  };
+
   /** Spawn a crate on a random revealed, passable cell */
   private spawnCrate(): void {
+    // Build crate distribution — silver crates are common, wood rarer
+    // Default: money×2, heal, veterancy, unit. Overrides from [General] replace silver/wood types.
     const crateTypes: CrateType[] = ['money', 'money', 'heal', 'veterancy', 'unit'];
+    if (this.crateOverrides.silver) {
+      const t = Game.CRATE_NAME_MAP[this.crateOverrides.silver];
+      if (t) { crateTypes[0] = t; crateTypes[1] = t; } // silver = first 2 slots
+    }
+    if (this.crateOverrides.wood) {
+      const t = Game.CRATE_NAME_MAP[this.crateOverrides.wood];
+      if (t) crateTypes[4] = t; // wood = last slot
+    }
     const type = crateTypes[Math.floor(Math.random() * crateTypes.length)];
     // Try up to 20 random cells to find a valid spawn
     for (let attempt = 0; attempt < 20; attempt++) {
@@ -3728,6 +3751,20 @@ export class Game {
         this.evaMessages.push({ text: 'REINFORCEMENTS', tick: this.tick });
         break;
       }
+      case 'armor':
+        // Double HP (like RA Armor crate — increases maxHp and heals to new max)
+        unit.maxHp = Math.round(unit.maxHp * 2);
+        unit.hp = unit.maxHp;
+        this.evaMessages.push({ text: 'ARMOR UPGRADE', tick: this.tick });
+        break;
+      case 'firepower':
+        // Promote to elite (max veterancy — 1.5× damage)
+        if (unit.veterancy < 2) {
+          unit.kills = 6;
+          unit.creditKill();
+        }
+        this.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: this.tick });
+        break;
     }
   }
 

@@ -44,11 +44,13 @@ const TACTION_REINFORCEMENTS = 7;
 const TACTION_DZ = 8;
 const TACTION_TEXT_TRIGGER = 11;
 const TACTION_DESTROY_TRIGGER = 12;
+const TACTION_AUTOCREATE = 13;
 const TACTION_ALLOWWIN = 15;
 const TACTION_REVEAL_SOME = 17;
 const TACTION_PLAY_SOUND = 19;
 const TACTION_PLAY_SPEECH = 21;
 const TACTION_FORCE_TRIGGER = 22;
+const TACTION_TIMER_EXTEND = 25;
 const TACTION_SET_TIMER = 27;
 const TACTION_SET_GLOBAL = 28;
 const TACTION_CLEAR_GLOBAL = 29;
@@ -113,6 +115,7 @@ export interface TriggerAction {
 export interface ScenarioTrigger {
   name: string;
   persistence: number;   // 0=volatile, 1=semi, 2=persistent
+  house: number;         // RA house index that owns this trigger
   eventControl: number;  // 0=only, 1=and, 2=or
   actionControl: number; // 0=only, 1=and
   event1: TriggerEvent;
@@ -472,6 +475,7 @@ export function parseScenarioINI(text: string): ScenarioData {
       triggers.push({
         name,
         persistence: f[0],
+        house: f[1],
         eventControl: f[2],
         actionControl: f[3],
         event1: { type: f[4], team: f[5], data: f[6] },
@@ -725,6 +729,8 @@ export interface ScenarioResult {
   scenarioWeaponStats: Record<string, WeaponStats>;
   /** Per-scenario warhead damage multipliers (overrides for WARHEAD_VS_ARMOR) */
   warheadOverrides: Record<string, [number, number, number]>;
+  /** Crate type overrides from [General] — maps crate color to reward type */
+  crateOverrides: { silver?: string; wood?: string; water?: string };
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -1001,6 +1007,15 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   // Patch all entities with scenario-local stats and weapons
   applyScenarioOverrides(entities, scenarioUnitStats, scenarioWeaponStats);
 
+  // Parse [General] section for crate type overrides
+  const crateOverrides: { silver?: string; wood?: string; water?: string } = {};
+  const generalSection = data.rawSections.get('General');
+  if (generalSection) {
+    if (generalSection.has('SilverCrate')) crateOverrides.silver = generalSection.get('SilverCrate')!.toLowerCase();
+    if (generalSection.has('WoodCrate')) crateOverrides.wood = generalSection.get('WoodCrate')!.toLowerCase();
+    if (generalSection.has('WaterCrate')) crateOverrides.water = generalSection.get('WaterCrate')!.toLowerCase();
+  }
+
   return {
     map,
     entities,
@@ -1017,6 +1032,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     scenarioUnitStats,
     scenarioWeaponStats,
     warheadOverrides,
+    crateOverrides,
   };
 }
 
@@ -1298,6 +1314,8 @@ export interface TriggerActionResult {
   creepShadow?: boolean;    // reshroud entire map (CREEP_SHADOW)
   textMessage?: number;  // text trigger ID to display
   setTimer?: number;     // mission timer value to set (in 1/10th minute units)
+  timerExtend?: number;  // extend mission timer by this many 1/10th minute units
+  autocreate?: boolean;  // enable autocreation of teams (AI base production)
   destroyTriggeringUnit?: boolean; // kill the unit that triggered this
   playSound?: number;    // play a sound effect (PLAY_SOUND)
   playSpeech?: number;   // play EVA speech (PLAY_SPEECH)
@@ -1452,6 +1470,16 @@ export function executeTriggerAction(
 
     case TACTION_BEGIN_PRODUCTION:
       // AI production start — not needed for ant missions
+      break;
+
+    case TACTION_AUTOCREATE:
+      // Enable autocreation of teams from AI base (queen spawning in ant missions)
+      result.autocreate = true;
+      break;
+
+    case TACTION_TIMER_EXTEND:
+      // Extend mission timer by action.data (in 1/10th minute units)
+      result.timerExtend = action.data;
       break;
 
     case TACTION_CREEP_SHADOW:
