@@ -56,6 +56,7 @@ export class Game {
   entityById = new Map<number, Entity>();
   structures: MapStructure[] = [];
   selectedIds = new Set<number>();
+  selectedStructureIdx = -1; // index into structures[] for selected building (-1 = none)
   controlGroups: Map<number, Set<number>> = new Map(); // 1-9 → entity IDs
   attackMoveMode = false;
   sellMode = false;
@@ -95,6 +96,8 @@ export class Game {
   private cachedAvailableItems: ProductionItem[] | null = null;
   /** Rally points: produced units auto-move here (per factory type) */
   private rallyPoints = new Map<string, WorldPos>(); // factory type → world position
+  /** Deferred transport load removals (entity IDs to remove from entities after iteration) */
+  private _pendingTransportLoads: number[] = [];
 
   // Crate system
   crates: Crate[] = [];
@@ -367,6 +370,16 @@ export class Game {
       this.updateEntity(entity);
     }
 
+    // Process deferred transport loads (remove loaded passengers from world)
+    if (this._pendingTransportLoads.length > 0) {
+      const loadSet = new Set(this._pendingTransportLoads);
+      this.entities = this.entities.filter(e => !loadSet.has(e.id));
+      for (const id of this._pendingTransportLoads) {
+        this.entityById.delete(id);
+      }
+      this._pendingTransportLoads.length = 0;
+    }
+
     // Check for units leaving the map edge (civilian evacuation)
     for (const entity of this.entities) {
       if (!entity.alive) continue;
@@ -425,14 +438,26 @@ export class Game {
       this.processTriggers();
     }
 
-    // Repair structures being repaired (1 HP per tick ≈ 15 HP/sec)
+    // Repair structures being repaired (1 HP per tick ≈ 15 HP/sec, costs credits)
     for (const idx of this.repairingStructures) {
       const s = this.structures[idx];
       if (!s || !s.alive || s.hp >= s.maxHp || s.sellProgress !== undefined) {
         this.repairingStructures.delete(idx);
         continue;
       }
+      // Repair costs credits: ~25% of build cost to fully repair
+      const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+      const repairCostPerHp = prodItem ? (prodItem.cost * 0.25) / s.maxHp : 0.5;
+      const cost = Math.ceil(repairCostPerHp);
+      if (this.credits < cost) {
+        // Can't afford — stop repairing this structure
+        this.repairingStructures.delete(idx);
+        continue;
+      }
+      this.credits -= cost;
       s.hp = Math.min(s.maxHp, s.hp + 1);
+      // Play repair sound every ~1 second
+      if (this.tick % 15 === 0) this.audio.play('repair');
     }
 
     // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 2 ticks
@@ -440,6 +465,15 @@ export class Game {
       for (const s of this.structures) {
         if (s.alive && s.type === 'QUEE' && s.hp < s.maxHp) {
           s.hp = Math.min(s.maxHp, s.hp + 1);
+        }
+      }
+    }
+
+    // Elite unit auto-heal: +1 HP every 30 ticks (~2 seconds) for veterancy 2 units
+    if (this.tick % 30 === 0) {
+      for (const e of this.entities) {
+        if (e.alive && e.isPlayerUnit && e.veterancy >= 2 && e.hp < e.maxHp) {
+          e.hp = Math.min(e.maxHp, e.hp + 1);
         }
       }
     }
@@ -525,14 +559,18 @@ export class Game {
     this.powerConsumed = 0;
     for (const s of this.structures) {
       if (!s.alive || s.sellProgress !== undefined || (s.house !== House.Spain && s.house !== House.Greece)) continue;
-      if (s.type === 'POWR') this.powerProduced += 100;
+      // Power production
+      if (s.type === 'FACT') this.powerProduced += 20;       // Construction Yard — base power
+      else if (s.type === 'POWR') this.powerProduced += 100;
       else if (s.type === 'APWR') this.powerProduced += 200;
+      // Power consumption
       else if (s.type === 'PROC') this.powerConsumed += 30;
       else if (s.type === 'WEAP') this.powerConsumed += 30;
       else if (s.type === 'TENT') this.powerConsumed += 20;
       else if (s.type === 'DOME') this.powerConsumed += 40;
       else if (s.type === 'TSLA') this.powerConsumed += 100;
       else if (s.type === 'HBOX' || s.type === 'PBOX' || s.type === 'GUN') this.powerConsumed += 10;
+      else if (s.type === 'SAM' || s.type === 'AGUN') this.powerConsumed += 20;
       else if (s.type === 'FIX') this.powerConsumed += 30;
     }
 
@@ -563,8 +601,14 @@ export class Game {
           const wy = s.cy * CELL_SIZE + CELL_SIZE;
           this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
             sprite: 'veh-hit1', spriteStart: 0 });
-          // Spawn a rifleman at the building site (recovered crew)
-          const inf = new Entity(UnitType.I_E1, House.Spain, wx, wy);
+          // Spawn infantry at the building site — type depends on building sold
+          // Advanced tech buildings spawn engineers, barracks spawn grenadiers, etc.
+          const sellInfType = s.type === 'TSLA' || s.type === 'DOME' || s.type === 'APWR'
+            ? UnitType.I_E6  // Engineer from tech buildings
+            : s.type === 'TENT' ? UnitType.I_E2  // Grenadier from barracks
+            : s.type === 'WEAP' || s.type === 'FIX' ? UnitType.I_E3  // Rocket from factory
+            : UnitType.I_E1; // Rifleman from everything else
+          const inf = new Entity(sellInfType, House.Spain, wx, wy);
           inf.mission = Mission.GUARD;
           this.entities.push(inf);
           this.entityById.set(inf.id, inf);
@@ -1032,6 +1076,7 @@ export class Game {
       const clicked = this.findEntityAt(world);
 
       if (clicked && clicked.isPlayerUnit) {
+        this.selectedStructureIdx = -1; // clear structure selection
         if (ctrlHeld) {
           // Ctrl+click: toggle selection
           if (this.selectedIds.has(clicked.id)) {
@@ -1053,11 +1098,21 @@ export class Game {
           for (const e of this.entities) e.selected = false;
           this.selectedIds.clear();
         }
+        // Click on player structure: select it for info display
+        const clickedStruct = this.findStructureAt(world);
+        if (clickedStruct && clickedStruct.alive &&
+            (clickedStruct.house === House.Spain || clickedStruct.house === House.Greece)) {
+          this.selectedStructureIdx = this.structures.indexOf(clickedStruct);
+          this.audio.play('select');
+        } else {
+          this.selectedStructureIdx = -1;
+        }
       }
     }
 
     if (dragBox) {
       this.tabCyclePool = [];
+      this.selectedStructureIdx = -1;
       if (!ctrlHeld) {
         this.selectedIds.clear();
         for (const e of this.entities) e.selected = false;
@@ -1085,10 +1140,7 @@ export class Game {
       // Cancel production from sidebar via right-click
       if (rightClick.x >= this.canvas.width - Game.SIDEBAR_W) {
         const items = this.getAvailableItems();
-        const itemStartY = 24;
-        const itemH = 22;
-        const relY = rightClick.y - itemStartY + this.sidebarScroll;
-        const itemIdx = Math.floor(relY / itemH);
+        const itemIdx = this.sidebarItemAtY(rightClick.y);
         if (itemIdx >= 0 && itemIdx < items.length) {
           const item = items[itemIdx];
           const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
@@ -1164,6 +1216,85 @@ export class Game {
       const target = this.findEntityAt(world);
       const targetStruct = !target ? this.findStructureAt(world) : null;
 
+      // Transport load: selected infantry right-click on friendly transport
+      if (target && target.isPlayerUnit && target.isTransport && target.alive) {
+        let loaded = 0;
+        for (const id of this.selectedIds) {
+          const unit = this.entityById.get(id);
+          if (!unit?.alive || unit.id === target.id) continue;
+          if (!unit.stats.isInfantry) continue;
+          if (target.passengers.length >= target.maxPassengers) break;
+          // Move infantry to transport, then load on arrival
+          const dist = worldDist(unit.pos, target.pos);
+          if (dist < CELL_SIZE * 1.5) {
+            // Close enough — load immediately
+            target.passengers.push(unit);
+            unit.transportRef = target;
+            unit.selected = false;
+            this.selectedIds.delete(unit.id);
+            // Remove from world (will be re-added on unload)
+            this.entities = this.entities.filter(e => e.id !== unit.id);
+            this.entityById.delete(unit.id);
+            this.map.setOccupancy(unit.cell.cx, unit.cell.cy, 0);
+            loaded++;
+          } else {
+            // Move toward transport (they'll be loaded by proximity check)
+            unit.mission = Mission.MOVE;
+            unit.moveTarget = { ...target.pos };
+            unit.path = findPath(this.map, unit.cell, target.cell, true);
+            unit.pathIndex = 0;
+          }
+        }
+        if (loaded > 0) {
+          this.audio.play('move_ack_infantry');
+          this.effects.push({
+            type: 'marker', x: target.pos.x, y: target.pos.y, frame: 0, maxFrames: 15, size: 8,
+            markerColor: 'rgba(80,200,255,1)',
+          });
+        }
+        return;
+      }
+
+      // Transport unload: selected transport right-clicks open ground
+      if (!target && !targetStruct) {
+        for (const id of this.selectedIds) {
+          const unit = this.entityById.get(id);
+          if (!unit?.alive || !unit.isTransport || unit.passengers.length === 0) continue;
+          // Unload passengers around the click point (on passable terrain)
+          for (const p of unit.passengers) {
+            // Find a passable position near the click point
+            let px = world.x, py = world.y;
+            for (let attempt = 0; attempt < 8; attempt++) {
+              const ox = world.x + (Math.random() - 0.5) * CELL_SIZE * 2;
+              const oy = world.y + (Math.random() - 0.5) * CELL_SIZE * 2;
+              const tc = worldToCell(ox, oy);
+              if (this.map.isPassable(tc.cx, tc.cy)) {
+                px = ox; py = oy;
+                break;
+              }
+            }
+            p.alive = true;
+            p.hp = p.hp > 0 ? p.hp : 1; // ensure alive units have HP
+            p.transportRef = null;
+            p.pos = { x: px, y: py };
+            p.mission = Mission.GUARD;
+            p.animState = AnimState.IDLE;
+            p.animFrame = 0;
+            p.deathTick = 0;
+            this.entities.push(p);
+            this.entityById.set(p.id, p);
+          }
+          unit.passengers = [];
+          this.audio.play('move_ack');
+          this.effects.push({
+            type: 'marker', x: world.x, y: world.y, frame: 0, maxFrames: 15, size: 10,
+            markerColor: 'rgba(80,200,255,1)',
+          });
+          // Don't process further — unload was the command
+          return;
+        }
+      }
+
       let commandIssued = false;
       // Spread group move targets so units don't all converge to one cell
       const units: Entity[] = [];
@@ -1180,11 +1311,13 @@ export class Game {
           unit.target = target;
           unit.targetStructure = null;
           unit.moveTarget = null;
+          unit.guardOrigin = null; // explicit attack clears guard return
         } else if (targetStruct && targetStruct.alive) {
           // Attack structure
           unit.mission = Mission.ATTACK;
           unit.target = null;
           unit.targetStructure = targetStruct;
+          unit.guardOrigin = null;
           unit.moveTarget = null;
         } else {
           // Spread units in a grid around the target point
@@ -1203,9 +1336,10 @@ export class Game {
             unit.target = null;
             unit.targetStructure = null;
             unit.forceFirePos = null;
-            // Clear team mission scripts when player gives direct orders
+            // Clear team mission scripts and guard origin when player gives direct orders
             unit.teamMissions = [];
             unit.teamMissionIndex = 0;
+            unit.guardOrigin = null;
             unit.path = findPath(
               this.map,
               unit.cell,
@@ -1242,15 +1376,33 @@ export class Game {
     }
   }
 
+  /** Map a sidebar Y coordinate to the item index, accounting for category headers */
+  private sidebarItemAtY(sy: number): number {
+    const items = this.getAvailableItems();
+    const itemH = 22;
+    const headerH = 12;
+    const itemStartY = (this.powerProduced > 0 || this.powerConsumed > 0) ? 36 : 28;
+    const relY = sy - itemStartY + this.sidebarScroll;
+    if (relY < 0) return -1;
+    let accY = 0;
+    let lastCategory = '';
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+      if (category !== lastCategory) {
+        lastCategory = category;
+        accY += headerH;
+      }
+      if (relY >= accY && relY < accY + itemH) return i;
+      accY += itemH;
+    }
+    return -1;
+  }
+
   /** Handle clicks on the sidebar production panel */
   private handleSidebarClick(sx: number, sy: number): void {
-    const sidebarX = this.canvas.width - Game.SIDEBAR_W;
     const items = this.getAvailableItems();
-    // Credits display takes top 24px, then items start
-    const itemStartY = 24;
-    const itemH = 22;
-    const relY = sy - itemStartY + this.sidebarScroll;
-    const itemIdx = Math.floor(relY / itemH);
+    const itemIdx = this.sidebarItemAtY(sy);
     if (itemIdx < 0 || itemIdx >= items.length) return;
     const item = items[itemIdx];
     // startProduction handles both new builds and queueing
@@ -1489,6 +1641,32 @@ export class Game {
     if (entity.alive && !entity.stats.isInfantry && !entity.isAnt &&
         entity.stats.speed > 0 && entity.animState === AnimState.WALK) {
       this.checkVehicleCrush(entity);
+    }
+
+    // Auto-load into transport: infantry moving toward a friendly transport
+    if (entity.alive && entity.stats.isInfantry && entity.isPlayerUnit &&
+        entity.mission === Mission.MOVE && entity.moveTarget) {
+      for (const other of this.entities) {
+        if (!other.alive || other.id === entity.id || !other.isTransport) continue;
+        if (!other.isPlayerUnit || other.passengers.length >= other.maxPassengers) continue;
+        const dist = worldDist(entity.pos, other.pos);
+        if (dist < CELL_SIZE * 1.2) {
+          // Close enough — check if move target was the transport
+          const tgtDist = worldDist(entity.moveTarget, other.pos);
+          if (tgtDist < CELL_SIZE * 2) {
+            other.passengers.push(entity);
+            entity.transportRef = other;
+            entity.selected = false;
+            this.selectedIds.delete(entity.id);
+            // Mark for removal from world (will be re-added on unload)
+            entity.mission = Mission.SLEEP;
+            this.map.setOccupancy(entity.cell.cx, entity.cell.cy, 0);
+            // Defer removal to avoid mutating array during iteration
+            this._pendingTransportLoads.push(entity.id);
+            break;
+          }
+        }
+      }
     }
 
     entity.tickAnimation();
@@ -2044,6 +2222,17 @@ export class Game {
     if (!entity.target?.alive) {
       entity.target = null;
       entity.forceFirePos = null;
+      // Return to guard origin if player unit was auto-engaging (not given explicit attack order)
+      if (entity.isPlayerUnit && entity.guardOrigin) {
+        const d = worldDist(entity.pos, entity.guardOrigin);
+        if (d > CELL_SIZE * 1.5) {
+          entity.mission = Mission.MOVE;
+          entity.moveTarget = { x: entity.guardOrigin.x, y: entity.guardOrigin.y };
+          entity.path = findPath(this.map, entity.cell, worldToCell(entity.guardOrigin.x, entity.guardOrigin.y), true);
+          entity.pathIndex = 0;
+          return;
+        }
+      }
       entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
       return;
@@ -2109,6 +2298,21 @@ export class Game {
             splashCenter, entity.weapon, directHit ? entity.target.id : -1,
             entity.isPlayerUnit, entity,
           );
+        }
+
+        // Armor-based hit indicator at impact point
+        if (directHit && !killed) {
+          const armor = entity.target.stats.armor;
+          if (armor === 'heavy') {
+            // Metal spark for heavy armor
+            this.effects.push({ type: 'muzzle', x: impactX, y: impactY,
+              frame: 0, maxFrames: 3, size: 3, muzzleColor: '255,255,200' });
+          } else if (armor === 'light') {
+            // Dust puff for light armor
+            this.effects.push({ type: 'muzzle', x: impactX, y: impactY,
+              frame: 0, maxFrames: 4, size: 2, muzzleColor: '180,160,120' });
+          }
+          // Infantry: use existing blood effects (already handled below)
         }
 
         // Play weapon sound
@@ -2245,6 +2449,11 @@ export class Game {
   private updateGuard(entity: Entity): void {
     entity.animState = AnimState.IDLE;
 
+    // Save guard origin when first entering guard stance (for return-after-chase)
+    if (entity.isPlayerUnit && !entity.guardOrigin) {
+      entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
+    }
+
     // Medic heal cooldown ticks down every frame (not rate-limited)
     if (entity.type === 'MEDI' && entity.attackCooldown > 0) {
       entity.attackCooldown--;
@@ -2253,16 +2462,21 @@ export class Game {
     if (this.tick - entity.lastGuardScan < 15) return;
     entity.lastGuardScan = this.tick;
 
-    // Medic auto-heal: find nearest damaged friendly infantry
+    // Medic auto-heal: find most damaged friendly infantry in range
     if (entity.type === 'MEDI' && entity.isPlayerUnit) {
       let healTarget: Entity | null = null;
+      let lowestHpRatio = 1.0;
       let healDist = Infinity;
       for (const other of this.entities) {
         if (!other.alive || other.id === entity.id) continue;
         if (!other.isPlayerUnit || !other.stats.isInfantry) continue;
         if (other.hp >= other.maxHp) continue;
         const dist = worldDist(entity.pos, other.pos);
-        if (dist < entity.stats.sight * 1.5 && dist < healDist) {
+        if (dist > entity.stats.sight * 1.5) continue;
+        // Prefer most damaged unit (lowest HP ratio), then closest
+        const hpRatio = other.hp / other.maxHp;
+        if (hpRatio < lowestHpRatio || (hpRatio === lowestHpRatio && dist < healDist)) {
+          lowestHpRatio = hpRatio;
           healDist = dist;
           healTarget = other;
         }
@@ -2277,6 +2491,11 @@ export class Game {
             entity.desiredFacing = directionTo(entity.pos, healTarget.pos);
             entity.tickRotation();
             this.audio.play('heal');
+            // Green heal sparkle on target
+            this.effects.push({
+              type: 'muzzle', x: healTarget.pos.x, y: healTarget.pos.y - 4,
+              frame: 0, maxFrames: 6, size: 4, muzzleColor: '80,255,80',
+            });
           }
         } else {
           entity.animState = AnimState.WALK;
@@ -3182,6 +3401,7 @@ export class Game {
       }
     }
     this.pendingPlacement = null;
+    this.audio.play('eva_building');
     // Check if placing this structure unlocks new production items
     const oldItems = this.cachedAvailableItems ?? [];
     this.cachedAvailableItems = null; // force recompute
@@ -3341,6 +3561,23 @@ export class Game {
     const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;
     this.renderer.crates = this.crates;
+    // Selected structure info for info panel + highlight
+    this.renderer.selectedStructureIdx = this.selectedStructureIdx;
+    if (this.selectedStructureIdx >= 0 && this.selectedIds.size === 0) {
+      const ss = this.structures[this.selectedStructureIdx];
+      if (ss?.alive) {
+        const prodItem = PRODUCTION_ITEMS.find(p => p.type === ss.type);
+        this.renderer.selectedStructure = {
+          type: ss.type, hp: ss.hp, maxHp: ss.maxHp,
+          name: prodItem?.name ?? ss.type,
+        };
+      } else {
+        this.renderer.selectedStructure = null;
+        this.selectedStructureIdx = -1;
+      }
+    } else {
+      this.renderer.selectedStructure = null;
+    }
     this.renderer.evaMessages = this.evaMessages;
     this.renderer.missionTimer = this.missionTimer;
     this.renderer.theatre = this.theatre;

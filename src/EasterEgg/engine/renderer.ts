@@ -7,7 +7,7 @@
 import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, type ProductionItem } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
-import { type Entity } from './entity';
+import { Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -94,6 +94,8 @@ export class Renderer {
   radarStaticCounter = 0;
   crates: Array<{ x: number; y: number; type: string }> = [];
   evaMessages: Array<{ text: string; tick: number }> = [];
+  selectedStructure: { type: string; hp: number; maxHp: number; name: string } | null = null;
+  selectedStructureIdx = -1; // index into structures[] for selection highlight
   missionTimer = 0; // 0 = hidden
   missionName = ''; // mission title shown as overlay at start
   theatre = 'TEMPERATE'; // map theatre (affects terrain colors)
@@ -157,6 +159,7 @@ export class Renderer {
     this.renderCrates(camera, map, tick);
     this.renderCorpses(camera, map);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
+    this.renderTargetLines(camera, entities, selectedIds);
     this.renderWaypoints(camera, entities, selectedIds);
     this.renderEffects(camera, effects, assets);
     this.renderFogOfWar(camera, map);
@@ -600,6 +603,19 @@ export class Renderer {
       const screenX = s.cx * CELL_SIZE - camera.x;
       const screenY = s.cy * CELL_SIZE - camera.y;
 
+      // Structure bib/foundation — concrete slab underneath the building
+      const [bibW, bibH] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      const bibX = screenX - 1;
+      const bibY = screenY + bibH * CELL_SIZE - CELL_SIZE * 0.4;
+      const bibPxW = bibW * CELL_SIZE + 2;
+      const bibPxH = CELL_SIZE * 0.5;
+      if (vis === 1) ctx.globalAlpha = 0.4;
+      ctx.fillStyle = this.palColor(PAL_ROCK_START + 4, -10);
+      ctx.fillRect(bibX, bibY, bibPxW, bibPxH);
+      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2, -5);
+      ctx.fillRect(bibX + 1, bibY + 1, bibPxW - 2, bibPxH - 2);
+      if (vis === 1) ctx.globalAlpha = 1;
+
       // Construction/sell animation: clip building sprite progressively
       const isConstructing = s.buildProgress !== undefined && s.buildProgress < 1;
       const isSelling = s.sellProgress !== undefined;
@@ -708,6 +724,14 @@ export class Renderer {
         }
       }
 
+      // Selection highlight — white border when structure is selected
+      if (this.selectedStructureIdx === structIdx) {
+        const [selW, selH] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(screenX - 1, screenY - 1, selW * CELL_SIZE + 2, selH * CELL_SIZE + 2);
+      }
+
       // Repair indicator: pulsing green border + wrench icon
       if (this.repairingStructures.has(structIdx)) {
         const pulse = 0.4 + 0.4 * Math.sin(tick * 0.3);
@@ -723,6 +747,25 @@ export class Renderer {
         ctx.textAlign = 'center';
         ctx.fillText('\u2692', wx, wy); // ⚒ hammer and pick
         ctx.textAlign = 'left';
+      }
+
+      // Construction Yard primary marker — spinning gear icon when producing
+      if (s.type === 'FACT' && (s.house === 'Spain' || s.house === 'Greece') && vis === 2) {
+        const hasProduction = this.sidebarQueue.size > 0;
+        if (hasProduction) {
+          // Animated spinning gear
+          const gx = screenX + CELL_SIZE * 1.5;
+          const gy = screenY + 4;
+          ctx.save();
+          ctx.translate(gx, gy);
+          ctx.rotate(tick * 0.1);
+          ctx.fillStyle = '#FFD700';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('\u2699', 0, 3); // ⚙ gear
+          ctx.restore();
+          ctx.textAlign = 'left';
+        }
       }
     }
   }
@@ -839,6 +882,17 @@ export class Renderer {
         ctx.beginPath();
         ctx.ellipse(screen.x, screen.y + spriteH * 0.3 + altY, rx, ry, 0, 0, Math.PI * 2);
         ctx.stroke();
+        // Medic heal range circle (dashed green)
+        if (entity.type === UnitType.I_MEDI) {
+          const healRange = entity.stats.sight * 1.5 * CELL_SIZE;
+          ctx.strokeStyle = 'rgba(80,255,80,0.2)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y + altY, healRange, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
 
       // Draw sprite with house-color tint
@@ -882,6 +936,18 @@ export class Renderer {
             spriteW,
             spriteH,
           );
+        }
+        // Harvester harvesting animation: small ore chunks flying into harvester
+        if (entity.type === UnitType.V_HARV && entity.harvesterState === 'harvesting') {
+          for (let i = 0; i < 2; i++) {
+            const angle = ((tick * 0.5 + i * 3.14) % (Math.PI * 2));
+            const dist = 6 + Math.sin(tick * 0.4 + i * 2) * 3;
+            const ox = screen.x + Math.cos(angle) * dist;
+            const oy = screen.y + Math.sin(angle) * dist * 0.6;
+            const oa = 0.6 + 0.3 * Math.sin(tick * 0.3 + i);
+            ctx.fillStyle = `rgba(180,140,40,${oa})`;
+            ctx.fillRect(ox - 1, oy - 1, 2, 2);
+          }
         }
         // Harvester unloading animation: pulsing money particles rising from unit
         if (entity.type === UnitType.V_HARV && entity.harvesterState === 'unloading') {
@@ -936,6 +1002,19 @@ export class Renderer {
 
       ctx.globalAlpha = 1;
 
+      // Harvester ore load bar (small gold bar above health bar, only when selected)
+      if (entity.alive && entity.type === UnitType.V_HARV && selectedIds.has(entity.id) && entity.oreLoad > 0) {
+        const oreRatio = entity.oreLoad / Entity.ORE_CAPACITY;
+        const oreBarW = Math.max(spriteW, 18);
+        const oreBarH = 2;
+        const oreBarX = screen.x - oreBarW / 2;
+        const oreBarY = screen.y - spriteH / 2 - 9;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(oreBarX - 1, oreBarY - 1, oreBarW + 2, oreBarH + 2);
+        ctx.fillStyle = '#c8a030'; // gold ore color
+        ctx.fillRect(oreBarX, oreBarY, oreBarW * oreRatio, oreBarH);
+      }
+
       // Health bar (show for damaged units and selected units)
       if (entity.alive && (entity.hp < entity.maxHp || selectedIds.has(entity.id))) {
         this.renderHealthBar(
@@ -945,6 +1024,16 @@ export class Renderer {
           entity.hp / entity.maxHp,
           selectedIds.has(entity.id),
         );
+      }
+
+      // Elite unit golden glow (subtle pulsing outline)
+      if (entity.alive && entity.veterancy >= 2) {
+        const glow = 0.12 + 0.06 * Math.sin(tick * 0.15 + entity.id);
+        ctx.strokeStyle = `rgba(255,215,0,${glow})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(screen.x, screen.y + altY, spriteW * 0.55, spriteH * 0.35, 0, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
       // Veterancy star indicator (above health bar)
@@ -969,6 +1058,17 @@ export class Renderer {
           ctx.closePath();
           ctx.fill();
         }
+      }
+
+      // Stance indicator for selected player units (small dot to right of selection circle)
+      if (entity.alive && entity.isPlayerUnit && selectedIds.has(entity.id) &&
+          entity.stance !== Stance.AGGRESSIVE) {
+        const dotX = screen.x + spriteW * 0.45 + 3;
+        const dotY = screen.y + spriteH * 0.3 + altY;
+        ctx.fillStyle = entity.stance === Stance.HOLD_FIRE ? '#f44' : '#ff0'; // red=hold, yellow=defensive
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 2, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
   }
@@ -1038,6 +1138,36 @@ export class Renderer {
         prev = screen;
       }
       ctx.setLineDash([]);
+    }
+  }
+
+  // ─── Target Lines ───────────────────────────────────────
+
+  private renderTargetLines(camera: Camera, entities: Entity[], selectedIds: Set<number>): void {
+    const ctx = this.ctx;
+    for (const entity of entities) {
+      if (!entity.alive || !selectedIds.has(entity.id)) continue;
+      if (!entity.target?.alive) continue;
+      // Draw thin dashed line from attacker to target
+      const from = camera.worldToScreen(entity.pos.x, entity.pos.y);
+      const to = camera.worldToScreen(entity.target.pos.x, entity.target.pos.y);
+      ctx.strokeStyle = 'rgba(255,80,80,0.35)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Small red diamond on target
+      ctx.fillStyle = 'rgba(255,80,80,0.5)';
+      ctx.beginPath();
+      ctx.moveTo(to.x, to.y - 4);
+      ctx.lineTo(to.x + 4, to.y);
+      ctx.lineTo(to.x, to.y + 4);
+      ctx.lineTo(to.x - 4, to.y);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 
@@ -1586,19 +1716,25 @@ export class Renderer {
     ctx.fillStyle = '#FFD700';
     ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, 14);
 
-    // Power bar with numeric labels
+    // Power bar with numeric labels + low-power pulse
     const pwrY = 18;
     const pwrW = w - 8;
     const pwrH = 8;
     const pwrX = x + 4;
+    const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
     ctx.fillStyle = '#111';
     ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
     const pwrRatio = this.sidebarPowerProduced > 0
       ? Math.min(1, this.sidebarPowerConsumed / this.sidebarPowerProduced) : 1;
-    const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced;
     const pwrColor = lowPower ? '#f44' : pwrRatio > 0.8 ? '#fa0' : '#4f4';
     ctx.fillStyle = pwrColor;
     ctx.fillRect(pwrX, pwrY, pwrW * Math.min(1, pwrRatio), pwrH);
+    // Low-power pulsing red glow on the power bar
+    if (lowPower) {
+      const pulse = 0.15 + 0.15 * Math.sin(Date.now() * 0.005);
+      ctx.fillStyle = `rgba(255,40,40,${pulse})`;
+      ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
+    }
     ctx.strokeStyle = '#444';
     ctx.lineWidth = 1;
     ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
@@ -1608,21 +1744,54 @@ export class Renderer {
       ctx.fillStyle = lowPower ? '#f88' : '#888';
       ctx.textAlign = 'center';
       ctx.fillText(`${this.sidebarPowerConsumed}/${this.sidebarPowerProduced}`, x + w / 2, pwrY + pwrH + 8);
+      // LOW POWER warning text (flashing)
+      if (lowPower) {
+        const flash = Math.sin(Date.now() * 0.006) > 0;
+        if (flash) {
+          ctx.font = 'bold 7px monospace';
+          ctx.fillStyle = '#f44';
+          ctx.fillText('LOW POWER', x + w / 2, pwrY + pwrH + 16);
+        }
+      }
     }
 
-    // Production items
+    // Production items — grouped by category with section headers
     const itemH = 22;
+    const headerH = 12;
     const itemStartY = (this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0) ? 36 : 28;
     ctx.font = '9px monospace';
     ctx.textAlign = 'left';
 
+    let currentY = itemStartY - this.sidebarScroll;
+    let lastCategory = '';
+
     for (let i = 0; i < this.sidebarItems.length; i++) {
       const item = this.sidebarItems[i];
-      const iy = itemStartY + i * itemH - this.sidebarScroll;
+      const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+
+      // Category section header when category changes
+      if (category !== lastCategory) {
+        lastCategory = category;
+        if (currentY >= itemStartY - headerH && currentY < this.height) {
+          const headerLabel = category === 'structure' ? 'STRUCTURES'
+            : category === 'infantry' ? 'INFANTRY' : 'VEHICLES';
+          const headerColor = category === 'infantry' ? 'rgba(80,200,80,0.6)'
+            : category === 'vehicle' ? 'rgba(80,120,255,0.6)' : 'rgba(200,180,60,0.6)';
+          ctx.fillStyle = 'rgba(40,40,50,0.9)';
+          ctx.fillRect(x + 1, currentY, w - 2, headerH);
+          ctx.fillStyle = headerColor;
+          ctx.font = 'bold 7px monospace';
+          ctx.fillText(headerLabel, x + 4, currentY + 9);
+          ctx.font = '9px monospace';
+        }
+        currentY += headerH;
+      }
+
+      const iy = currentY;
+      currentY += itemH;
       if (iy < itemStartY - itemH || iy > this.height) continue;
 
       // Category color coding
-      const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
       const catColor = category === 'infantry' ? 'rgba(80,200,80,0.15)'
         : category === 'vehicle' ? 'rgba(80,80,200,0.15)' : 'rgba(200,200,80,0.15)';
 
@@ -1637,16 +1806,17 @@ export class Renderer {
       const isBuilding = qEntry && qEntry.item.type === item.type;
 
       if (isBuilding && qEntry) {
-        // Progress bar
+        // Progress bar — red tint when low power is slowing production
         const progress = qEntry.progress / qEntry.item.buildTime;
-        ctx.fillStyle = 'rgba(80,255,80,0.4)';
+        ctx.fillStyle = lowPower ? 'rgba(255,80,80,0.35)' : 'rgba(80,255,80,0.4)';
         ctx.fillRect(x + 2, iy, (w - 4) * progress, itemH - 2);
         // Name + progress %
-        ctx.fillStyle = '#8f8';
+        ctx.fillStyle = lowPower ? '#f88' : '#8f8';
         ctx.fillText(`${item.name}`, x + 4, iy + 9);
         const queueText = qEntry.queueCount > 1 ? ` [x${qEntry.queueCount}]` : '';
+        const slowText = lowPower ? ' SLOW' : '';
         ctx.fillStyle = '#ccc';
-        ctx.fillText(`${Math.floor(progress * 100)}%${queueText}`, x + 4, iy + 18);
+        ctx.fillText(`${Math.floor(progress * 100)}%${queueText}${slowText}`, x + 4, iy + 18);
       } else {
         // Name + cost
         const canAfford = this.sidebarCredits >= item.cost;
@@ -1827,6 +1997,11 @@ export class Renderer {
   // ─── Unit Info Panel ─────────────────────────────────────
 
   private renderUnitInfo(entities: Entity[], selectedIds: Set<number>): void {
+    // Show structure info if a building is selected (no units selected)
+    if (selectedIds.size === 0 && this.selectedStructure) {
+      this.renderStructureInfo();
+      return;
+    }
     if (selectedIds.size === 0) return;
     const ctx = this.ctx;
 
@@ -1835,7 +2010,9 @@ export class Renderer {
     if (selected.length === 0) return;
 
     const panelW = 180;
-    const panelH = selected.length === 1 ? 74 : 30;
+    const panelH = selected.length === 1
+      ? (selected[0].type === UnitType.V_HARV ? 78 : 74)
+      : 46;
     const px = 6;
     const py = this.height - panelH - 6;
 
@@ -1864,17 +2041,82 @@ export class Renderer {
       } else {
         ctx.fillText(`Unarmed  Arm:${armorStr}`, px + 8, py + 41);
       }
-      // Veterancy + kills + stance
-      const vetStr = unit.veterancy >= 2 ? 'Elite' : unit.veterancy >= 1 ? 'Veteran' : 'Rookie';
-      const stanceStr = unit.stance === Stance.HOLD_FIRE ? 'Hold' : unit.stance === Stance.DEFENSIVE ? 'Def' : 'Agg';
-      ctx.fillStyle = unit.veterancy >= 2 ? '#FFD700' : unit.veterancy >= 1 ? '#C0C0C0' : this.palColor(PAL_ROCK_START + 2);
-      ctx.fillText(`${vetStr}  K:${unit.kills}  [${stanceStr}]`, px + 8, py + 54);
-      // Health bar
-      this.renderHealthBar(px + panelW / 2, py + 62, panelW - 20, unit.hp / unit.maxHp, true);
+      // Harvester: ore load bar + state
+      if (unit.type === UnitType.V_HARV) {
+        const oreRatio = unit.oreLoad / Entity.ORE_CAPACITY; // Entity.ORE_CAPACITY
+        const stateLabel = unit.harvesterState === 'harvesting' ? 'Harvesting'
+          : unit.harvesterState === 'seeking' ? 'Seeking ore'
+          : unit.harvesterState === 'returning' ? 'Returning'
+          : unit.harvesterState === 'unloading' ? 'Unloading'
+          : 'Idle';
+        ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+        ctx.fillText(`Ore: ${unit.oreLoad}/${Entity.ORE_CAPACITY}  ${stateLabel}`, px + 8, py + 54);
+        // Ore load bar
+        const barX = px + 8;
+        const barY = py + 58;
+        const barW = panelW - 20;
+        const barH = 3;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.fillStyle = oreRatio > 0.5 ? '#c8a030' : '#806020';
+        ctx.fillRect(barX, barY, barW * oreRatio, barH);
+        // Health bar below ore bar
+        this.renderHealthBar(px + panelW / 2, py + 66, panelW - 20, unit.hp / unit.maxHp, true);
+      } else if (unit.isTransport && unit.passengers.length > 0) {
+        // Transport: show passenger count
+        ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+        ctx.fillText(`Passengers: ${unit.passengers.length}/${unit.maxPassengers}`, px + 8, py + 54);
+        this.renderHealthBar(px + panelW / 2, py + 62, panelW - 20, unit.hp / unit.maxHp, true);
+      } else {
+        // Veterancy + kills + stance
+        const vetStr = unit.veterancy >= 2 ? 'Elite' : unit.veterancy >= 1 ? 'Veteran' : 'Rookie';
+        const stanceStr = unit.stance === Stance.HOLD_FIRE ? 'Hold' : unit.stance === Stance.DEFENSIVE ? 'Def' : 'Agg';
+        ctx.fillStyle = unit.veterancy >= 2 ? '#FFD700' : unit.veterancy >= 1 ? '#C0C0C0' : this.palColor(PAL_ROCK_START + 2);
+        ctx.fillText(`${vetStr}  K:${unit.kills}  [${stanceStr}]`, px + 8, py + 54);
+        // Health bar
+        this.renderHealthBar(px + panelW / 2, py + 62, panelW - 20, unit.hp / unit.maxHp, true);
+      }
     } else {
-      // Multiple selected — palette green
+      // Multiple selected — show type breakdown with counts
+      const typeCounts = new Map<string, number>();
+      for (const u of selected) {
+        const name = u.stats.name;
+        typeCounts.set(name, (typeCounts.get(name) ?? 0) + 1);
+      }
       ctx.fillStyle = this.palColor(PAL_GREEN_HP);
-      ctx.fillText(`${selected.length} units selected`, px + 8, py + 18);
+      ctx.fillText(`${selected.length} units selected`, px + 8, py + 13);
+      // Show up to 2 type lines in the panel
+      ctx.font = '9px monospace';
+      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+      let row = 0;
+      for (const [name, count] of typeCounts) {
+        if (row >= 2) { ctx.fillText('...', px + 8, py + 24); break; }
+        ctx.fillText(`${count}x ${name}`, px + 8, py + 24 + row * 10);
+        row++;
+      }
     }
+  }
+
+  private renderStructureInfo(): void {
+    const ss = this.selectedStructure;
+    if (!ss) return;
+    const ctx = this.ctx;
+    const panelW = 160;
+    const panelH = 48;
+    const px = 6;
+    const py = this.height - panelH - 6;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, py, panelW, panelH);
+
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(ss.name, px + 8, py + 15);
+    ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+    ctx.fillText(`HP: ${ss.hp}/${ss.maxHp}`, px + 8, py + 28);
+    this.renderHealthBar(px + panelW / 2, py + 36, panelW - 20, ss.hp / ss.maxHp, true);
   }
 }
