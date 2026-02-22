@@ -408,8 +408,9 @@ export async function hubspotCreateNote(auth: HubSpotAuth, ticketId: string, bod
   });
 
   // Associate note with ticket
-  await hubspotFetch(auth, `/crm/v3/objects/notes/${note.id}/associations/tickets/${ticketId}/note_to_ticket`, {
+  await hubspotFetch(auth, `/crm/v4/objects/notes/${note.id}/associations/tickets/${ticketId}`, {
     method: 'PUT',
+    body: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 17 }],
   });
 
   return { id: note.id };

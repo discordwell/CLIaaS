@@ -256,15 +256,14 @@ async function migrateTicket(
     }
     case 'helpscout': {
       const a = auth as HelpScoutAuth;
-      // Help Scout needs a mailbox ID — use env var or default to 0
       const mailboxId = parseInt(process.env.HELPSCOUT_MAILBOX_ID ?? '0', 10);
+      if (!mailboxId) throw new Error('HELPSCOUT_MAILBOX_ID env var required for migration');
       const requesterEmail = findRequesterEmail(ticket, customers);
-      await helpscoutCreateConversation(a, mailboxId, ticket.subject, body, {
+      const result = await helpscoutCreateConversation(a, mailboxId, ticket.subject, body, {
         customerEmail: requesterEmail,
         tags: ticket.tags,
       });
-      // Help Scout create returns 201 with Location header but no body — use ticket ID as ref
-      destId = `hs-migrated-${ticket.id}`;
+      destId = String(result.id);
       break;
     }
     case 'zoho-desk': {
@@ -328,9 +327,9 @@ async function migrateTicket(
         }
         case 'helpscout':
           if (msg.type === 'note') {
-            await helpscoutAddNote(auth as HelpScoutAuth, Number(destId.replace('hs-migrated-', '')), msg.body);
+            await helpscoutAddNote(auth as HelpScoutAuth, Number(destId), msg.body);
           } else {
-            await helpscoutReply(auth as HelpScoutAuth, Number(destId.replace('hs-migrated-', '')), msg.body);
+            await helpscoutReply(auth as HelpScoutAuth, Number(destId), msg.body);
           }
           break;
         case 'zoho-desk':

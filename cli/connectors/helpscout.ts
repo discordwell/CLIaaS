@@ -151,9 +151,10 @@ export async function helpscoutFetch<T>(auth: HelpScoutAuth, path: string, optio
       throw new Error(`Help Scout API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
     }
 
-    // 201/204 responses may have no body
+    // 201/204 responses may have no body — return Location header if present
     if (res.status === 201 || res.status === 204) {
-      return {} as T;
+      const location = res.headers.get('Location') ?? '';
+      return { location } as T;
     }
 
     return res.json() as Promise<T>;
@@ -428,7 +429,7 @@ export async function helpscoutCreateConversation(auth: HelpScoutAuth, mailboxId
   customerEmail?: string;
   tags?: string[];
   assignTo?: number;
-}): Promise<void> {
+}): Promise<{ id: number }> {
   const conversation: Record<string, unknown> = {
     type: 'email',
     mailboxId,
@@ -443,10 +444,14 @@ export async function helpscoutCreateConversation(auth: HelpScoutAuth, mailboxId
   if (options?.tags) conversation.tags = options.tags;
   if (options?.assignTo) conversation.assignTo = options.assignTo;
 
-  await helpscoutFetch(auth, '/conversations', {
+  const result = await helpscoutFetch<{ location: string }>(auth, '/conversations', {
     method: 'POST',
     body: conversation,
   });
+
+  // Extract conversation ID from Location header (e.g., "https://api.helpscout.net/v2/conversations/12345")
+  const id = parseInt(result.location?.split('/').pop() ?? '0', 10);
+  return { id };
 }
 
 export async function helpscoutReply(auth: HelpScoutAuth, conversationId: number, body: string): Promise<void> {

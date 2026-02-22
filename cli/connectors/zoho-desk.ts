@@ -430,7 +430,7 @@ export async function zodeskCreateTicket(auth: ZohoDeskAuth, subject: string, de
 export async function zodeskSendReply(auth: ZohoDeskAuth, ticketId: string, content: string): Promise<void> {
   await zodeskFetch(auth, `/tickets/${ticketId}/sendReply`, {
     method: 'POST',
-    body: { content, channel: 'FORUMS' },
+    body: { content, channel: 'EMAIL' },
   });
 }
 

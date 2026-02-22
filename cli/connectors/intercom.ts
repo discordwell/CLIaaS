@@ -331,11 +331,11 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string): Promis
   while (hasMoreArticles) {
     try {
       const data = await intercomFetch<{
-        data: { articles: ICArticle[] };
-        pages: { next?: string; total_pages: number };
+        data: ICArticle[];
+        pages: { next?: string; total_pages: number; page: number };
       }>(auth, `/articles?per_page=50&page=${articlePage}`);
 
-      for (const a of data.data.articles) {
+      for (const a of data.data) {
         const article: KBArticle = {
           id: `ic-kb-${a.id}`,
           externalId: a.id,
