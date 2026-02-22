@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-02-22T04:30Z — Session 3: Real API integration & write operations
+- Fixed Kayako connector based on API research (9 issues):
+  - Added X-Session-ID session management
+  - Fixed articles endpoint `/api/v1/articles.json` (was wrong `/helpcenter/articles.json`)
+  - Posts: replaced `is_requester` with `source` field, switched to cursor pagination (`after_id`)
+  - Triggers: `predicate_collections` fallback added
+  - Organizations: handle domain resource references
+  - Articles: handle `section_id` as integer
+  - Notes: separate endpoint `/cases/:id/notes.json` now fetched
+  - MFA handling for 403 responses
+- Added Zendesk write operations: verify, update, reply (public + internal), create
+- Added Kayako write operations: verify, update, reply, note, create
+- Exported `zendeskFetch` and `kayakoFetch` with method/body support for PUT/POST
+- Updated docs page with all 12 new Zendesk/Kayako commands
+- All `pnpm check` passing (lint + typecheck + build)
+
 ## 2026-02-22T03:40Z — Session 2: Continued building after compaction
 - Verified demo page build, added /demo links to landing and dashboard
 - Committed + pushed wave 2 (demo mode, stats, search, export, web terminal, eslint fixes)
@@ -28,3 +44,10 @@
 - Demo command is `cliaas demo --tickets 50 --out /tmp/cliaas-demo` (not `demo generate`)
 - The `public/ra/` and `src/EasterEgg/` dirs contain vendored code — already in eslint ignores
 - Landing page was restyled with zinc-950 borders design between sessions
+- Zendesk API: `email/token:apikey` Basic auth confirmed, cursor-based incremental exports, 10 req/min rate limit
+- Kayako API: Basic auth + X-Session-ID required after first request, cases at `/api/v1/cases.json`, posts use `after_id` cursor pagination
+- Kayako articles endpoint is `/api/v1/articles.json` NOT `/api/v1/helpcenter/articles.json`
+- Kayako triggers use `predicate_collections` not `conditions`
+- Kayako posts have `source` field (AGENT/API/MAIL/etc) not `is_requester`
+- Kayako notes are separate from posts: `/api/v1/cases/:id/notes.json`
+- No credentials configured yet — need user to provide for real testing

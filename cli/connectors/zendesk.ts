@@ -6,7 +6,7 @@ import type {
   Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
 } from '../schema/types.js';
 
-interface ZendeskAuth {
+export interface ZendeskAuth {
   subdomain: string;
   email: string;
   token: string;
@@ -111,7 +111,10 @@ interface ZendeskSLAPolicy {
   policy_metrics: unknown[];
 }
 
-async function zendeskFetch<T>(auth: ZendeskAuth, path: string): Promise<T> {
+export async function zendeskFetch<T>(auth: ZendeskAuth, path: string, options?: {
+  method?: string;
+  body?: unknown;
+}): Promise<T> {
   const url = path.startsWith('http') ? path : `https://${auth.subdomain}.zendesk.com${path}`;
   const credentials = Buffer.from(`${auth.email}/token:${auth.token}`).toString('base64');
 
@@ -120,14 +123,17 @@ async function zendeskFetch<T>(auth: ZendeskAuth, path: string): Promise<T> {
 
   while (true) {
     const res = await fetch(url, {
+      method: options?.method ?? 'GET',
       headers: {
         'Authorization': `Basic ${credentials}`,
         'Content-Type': 'application/json',
       },
+      body: options?.body ? JSON.stringify(options.body) : undefined,
     });
 
     if (res.status === 429) {
-      const retryAfter = parseInt(res.headers.get('Retry-After') ?? '10', 10);
+      const rawRetryAfter = parseInt(res.headers.get('Retry-After') ?? '10', 10);
+      const retryAfter = isNaN(rawRetryAfter) ? 10 : rawRetryAfter;
       if (retries >= maxRetries) throw new Error('Rate limit exceeded after max retries');
       retries++;
       await sleep(retryAfter * 1000);
@@ -135,7 +141,8 @@ async function zendeskFetch<T>(auth: ZendeskAuth, path: string): Promise<T> {
     }
 
     if (!res.ok) {
-      throw new Error(`Zendesk API error: ${res.status} ${res.statusText} for ${url}`);
+      const errorBody = await res.text().catch(() => '');
+      throw new Error(`Zendesk API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
     }
 
     return res.json() as Promise<T>;
@@ -235,7 +242,8 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
           commentsUrl = commentsData.next_page;
         }
       } catch {
-        // Skip comment hydration errors for individual tickets
+        // Log but continue — individual ticket comment failures shouldn't halt export
+        ticketSpinner.text = `Exporting tickets... ${counts.tickets} (comment fetch failed for #${t.id})`;
       }
     }
 
@@ -304,10 +312,11 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
       }
       orgPage = data.links?.next ?? null;
     }
-  } catch {
-    // Organizations endpoint may not be available on all plans
+  } catch (err) {
+    orgSpinner.warn(`Organizations: ${err instanceof Error ? err.message : 'endpoint not available'}`);
   }
-  orgSpinner.succeed(`${counts.organizations} organizations exported`);
+  if (counts.organizations > 0) orgSpinner.succeed(`${counts.organizations} organizations exported`);
+  else orgSpinner.info('0 organizations exported (endpoint may not be available)');
 
   // Export KB articles
   const kbSpinner = ora('Exporting KB articles...').start();
@@ -329,10 +338,11 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
       }
       articlesUrl = data.next_page;
     }
-  } catch {
-    // Help Center may not be enabled
+  } catch (err) {
+    kbSpinner.warn(`KB Articles: ${err instanceof Error ? err.message : 'Help Center not enabled'}`);
   }
-  kbSpinner.succeed(`${counts.kbArticles} KB articles exported`);
+  if (counts.kbArticles > 0) kbSpinner.succeed(`${counts.kbArticles} KB articles exported`);
+  else kbSpinner.info('0 KB articles exported (Help Center may not be enabled)');
 
   // Export business rules
   const rulesSpinner = ora('Exporting business rules...').start();
@@ -347,7 +357,7 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
       appendJsonl(rulesFile, rule);
       counts.rules++;
     }
-  } catch { /* skip */ }
+  } catch { /* endpoint may require admin access */ }
   try {
     // Triggers
     const triggers = await zendeskFetch<{ triggers: ZendeskTrigger[] }>(auth, '/api/v2/triggers.json');
@@ -359,7 +369,7 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
       appendJsonl(rulesFile, rule);
       counts.rules++;
     }
-  } catch { /* skip */ }
+  } catch { /* endpoint may require admin access */ }
   try {
     // Automations
     const autos = await zendeskFetch<{ automations: ZendeskAutomation[] }>(auth, '/api/v2/automations.json');
@@ -371,7 +381,7 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
       appendJsonl(rulesFile, rule);
       counts.rules++;
     }
-  } catch { /* skip */ }
+  } catch { /* endpoint may require admin access */ }
   try {
     // SLA Policies
     const slas = await zendeskFetch<{ sla_policies: ZendeskSLAPolicy[] }>(auth, '/api/v2/slas/policies.json');
@@ -383,7 +393,7 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
       appendJsonl(rulesFile, rule);
       counts.rules++;
     }
-  } catch { /* skip */ }
+  } catch { /* endpoint may require admin access */ }
   rulesSpinner.succeed(`${counts.rules} business rules exported`);
 
   const manifest: ExportManifest = {
@@ -401,5 +411,94 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
 export function loadManifest(outDir: string): ExportManifest | null {
   const manifestPath = join(outDir, 'manifest.json');
   if (!existsSync(manifestPath)) return null;
-  return JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  try {
+    return JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+// ----- Write Operations -----
+
+export async function zendeskUpdateTicket(auth: ZendeskAuth, ticketId: number, updates: {
+  status?: string;
+  priority?: string;
+  assignee_id?: number;
+  tags?: string[];
+  subject?: string;
+  custom_fields?: Array<{ id: number; value: unknown }>;
+}): Promise<void> {
+  await zendeskFetch(auth, `/api/v2/tickets/${ticketId}.json`, {
+    method: 'PUT',
+    body: { ticket: updates },
+  });
+}
+
+export async function zendeskPostComment(auth: ZendeskAuth, ticketId: number, body: string, isPublic = true): Promise<void> {
+  await zendeskFetch(auth, `/api/v2/tickets/${ticketId}.json`, {
+    method: 'PUT',
+    body: {
+      ticket: {
+        comment: {
+          body,
+          public: isPublic,
+        },
+      },
+    },
+  });
+}
+
+export async function zendeskCreateTicket(auth: ZendeskAuth, subject: string, body: string, options?: {
+  requester_id?: number;
+  priority?: string;
+  tags?: string[];
+  assignee_id?: number;
+}): Promise<{ id: number }> {
+  const ticket: Record<string, unknown> = {
+    subject,
+    comment: { body },
+  };
+  if (options?.requester_id) ticket.requester_id = options.requester_id;
+  if (options?.priority) ticket.priority = options.priority;
+  if (options?.tags) ticket.tags = options.tags;
+  if (options?.assignee_id) ticket.assignee_id = options.assignee_id;
+
+  const result = await zendeskFetch<{ ticket: { id: number } }>(auth, '/api/v2/tickets.json', {
+    method: 'POST',
+    body: { ticket },
+  });
+  return { id: result.ticket.id };
+}
+
+export async function zendeskVerifyConnection(auth: ZendeskAuth): Promise<{
+  success: boolean;
+  userName?: string;
+  ticketCount?: number;
+  plan?: string;
+  error?: string;
+}> {
+  try {
+    // Test auth by getting current user
+    const me = await zendeskFetch<{ user: { name: string; email: string; role: string } }>(
+      auth,
+      '/api/v2/users/me.json',
+    );
+
+    // Get ticket count
+    const countData = await zendeskFetch<{ count: { value: number } }>(
+      auth,
+      '/api/v2/tickets/count.json',
+    );
+
+    return {
+      success: true,
+      userName: me.user.name,
+      ticketCount: countData.count.value,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }

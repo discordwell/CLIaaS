@@ -2,16 +2,76 @@ import Link from "next/link";
 
 const cliCommands = [
   {
+    name: "zendesk verify",
+    desc: "Test Zendesk API connectivity and authentication",
+    usage: "cliaas zendesk verify --subdomain <x> --email <e> --token <t>",
+    flags: ["--subdomain", "--email", "--token"],
+  },
+  {
     name: "zendesk export",
     desc: "Export tickets, users, orgs, KB articles, and business rules from Zendesk",
     usage: "cliaas zendesk export --subdomain <x> --email <e> --token <t> --out ./exports/zendesk",
-    flags: ["--subdomain", "--email", "--token", "--out", "--incremental"],
+    flags: ["--subdomain", "--email", "--token", "--out"],
+  },
+  {
+    name: "zendesk sync",
+    desc: "Incremental sync using cursor state from a previous export",
+    usage: "cliaas zendesk sync --out ./exports/zendesk",
+    flags: ["--subdomain", "--email", "--token", "--out"],
+  },
+  {
+    name: "zendesk update",
+    desc: "Update a Zendesk ticket (status, priority, assignee, tags)",
+    usage: "cliaas zendesk update --ticket <id> --status solved --priority high",
+    flags: ["--ticket", "--status", "--priority", "--assignee", "--tags", "--subdomain", "--email", "--token"],
+  },
+  {
+    name: "zendesk reply",
+    desc: "Post a public reply or internal note to a Zendesk ticket",
+    usage: "cliaas zendesk reply --ticket <id> --body \"Your issue has been resolved.\" [--internal]",
+    flags: ["--ticket", "--body", "--internal", "--subdomain", "--email", "--token"],
+  },
+  {
+    name: "zendesk create",
+    desc: "Create a new Zendesk ticket",
+    usage: "cliaas zendesk create --subject \"Bug report\" --body \"Steps to reproduce...\"",
+    flags: ["--subject", "--body", "--priority", "--tags", "--assignee", "--subdomain", "--email", "--token"],
+  },
+  {
+    name: "kayako verify",
+    desc: "Test Kayako API connectivity and authentication",
+    usage: "cliaas kayako verify --domain <x> --email <e> --password <p>",
+    flags: ["--domain", "--email", "--password"],
   },
   {
     name: "kayako export",
     desc: "Export cases, users, orgs, and KB articles from Kayako",
     usage: "cliaas kayako export --domain <x> --email <e> --password <p> --out ./exports/kayako",
     flags: ["--domain", "--email", "--password", "--out"],
+  },
+  {
+    name: "kayako update",
+    desc: "Update a Kayako case (status, priority, assignee, tags)",
+    usage: "cliaas kayako update --case <id> --status OPEN --priority HIGH",
+    flags: ["--case", "--status", "--priority", "--assignee", "--tags", "--domain", "--email", "--password"],
+  },
+  {
+    name: "kayako reply",
+    desc: "Post a reply to a Kayako case",
+    usage: "cliaas kayako reply --case <id> --body \"We're looking into this.\"",
+    flags: ["--case", "--body", "--domain", "--email", "--password"],
+  },
+  {
+    name: "kayako note",
+    desc: "Post an internal note to a Kayako case",
+    usage: "cliaas kayako note --case <id> --body \"Escalating to tier 2.\"",
+    flags: ["--case", "--body", "--domain", "--email", "--password"],
+  },
+  {
+    name: "kayako create",
+    desc: "Create a new Kayako case",
+    usage: "cliaas kayako create --subject \"New inquiry\" --body \"Customer needs help.\"",
+    flags: ["--subject", "--body", "--priority", "--tags", "--domain", "--email", "--password"],
   },
   {
     name: "tickets list",
