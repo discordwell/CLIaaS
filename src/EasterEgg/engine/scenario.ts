@@ -1230,6 +1230,8 @@ export interface TriggerGameState {
   unitsLeftMap: number;        // count of units that have left the map
   // Building existence check (for BUILDING_EXISTS)
   structureTypes: Set<string>; // set of alive structure type names
+  // Structure types player has built during this game (for TEVENT_BUILD)
+  builtStructureTypes: Set<string>;
   // Trigger attachment: names of triggers whose attached object was destroyed
   destroyedTriggerNames: Set<string>;
   // Per-house alive status (for ALL_DESTROYED — RA house index → has alive units/structures)
@@ -1293,9 +1295,21 @@ export function checkTriggerEvent(
     case TEVENT_ATTACKED:
       // Something was attacked — simplified: always true after first combat
       return state.enemyKillCount > 0;
-    case TEVENT_BUILD:
-      // Something was built — in ant missions, not typically player-triggered
-      return false;
+    case TEVENT_BUILD: {
+      // Player has built a structure of the specified type (event.data = StructType index)
+      // Uses the same STRUCT_TYPES mapping as BUILDING_EXISTS
+      const BUILD_STRUCT_TYPES: Record<number, string> = {
+        0: 'ATEK', 1: 'IRON', 2: 'WEAP', 3: 'PDOX', 4: 'PBOX', 5: 'HBOX',
+        6: 'DOME', 7: 'GAP',  8: 'GUN',  9: 'AGUN', 10: 'FTUR', 11: 'FACT',
+        12: 'PROC', 13: 'SILO', 14: 'HPAD', 15: 'SAM', 16: 'AFLD', 17: 'POWR',
+        18: 'APWR', 19: 'STEK', 20: 'HOSP', 21: 'BARR', 22: 'TENT', 23: 'KENN',
+        24: 'FIX',  25: 'BIO',  26: 'MISS', 27: 'SYRD', 28: 'SPEN', 29: 'MSLO',
+        30: 'FCOM', 31: 'TSLA', 32: 'QUEE', 33: 'LAR1', 34: 'LAR2',
+      };
+      const buildType = BUILD_STRUCT_TYPES[event.data];
+      if (buildType) return state.builtStructureTypes.has(buildType);
+      return state.builtStructureTypes.size > 0; // fallback: any structure built
+    }
     case TEVENT_LEAVES_MAP:
       // Units have left the map edge (civilian evacuation)
       return state.unitsLeftMap > 0;

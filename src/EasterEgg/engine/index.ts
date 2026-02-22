@@ -144,6 +144,7 @@ export class Game {
   private allowWin = false; // set by ALLOWWIN action — required before win condition fires
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
   private missionTimerExpired = false;
+  private builtStructureTypes = new Set<string>(); // types player has constructed (for TEVENT_BUILD)
   /** EVA text message queue — displayed briefly on screen */
   private evaMessages: { text: string; tick: number }[] = [];
   /** Count of units that have left the map (for TEVENT_LEAVES_MAP) */
@@ -231,6 +232,7 @@ export class Game {
     this.allowWin = false;
     this.missionTimer = 0;
     this.missionTimerExpired = false;
+    this.builtStructureTypes.clear();
     this.evaMessages = [];
     this.unitsLeftMap = 0;
     this.bridgeCellCount = this.map.countBridgeCells();
@@ -614,7 +616,12 @@ export class Game {
     for (const s of this.structures) {
       // Construction: 0→1 over ~2 seconds = 30 ticks
       if (s.buildProgress !== undefined && s.buildProgress < 1) {
+        const wasBuiding = s.buildProgress < 1;
         s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
+        // Track completed construction for TEVENT_BUILD
+        if (wasBuiding && s.buildProgress >= 1) {
+          this.builtStructureTypes.add(s.type);
+        }
       }
       // Sell: 0→1 over ~1 second = 15 ticks, then finalize
       // Guard: skip if structure was destroyed mid-sell (e.g. by enemy attack)
@@ -3273,7 +3280,7 @@ export class Game {
   private buildTriggerState(trigger: ScenarioTrigger, shared: {
     structureTypes: Set<string>; destroyedTriggerNames: Set<string>;
     enemyUnitsAlive: number; playerFactories: number;
-    houseAlive: Map<number, boolean>;
+    houseAlive: Map<number, boolean>; builtStructureTypes: Set<string>;
   }): TriggerGameState {
     return {
       gameTick: this.tick,
@@ -3290,6 +3297,7 @@ export class Game {
       structureTypes: shared.structureTypes,
       destroyedTriggerNames: shared.destroyedTriggerNames,
       houseAlive: shared.houseAlive,
+      builtStructureTypes: shared.builtStructureTypes,
     };
   }
 
@@ -3329,7 +3337,7 @@ export class Game {
         if (hi !== undefined) houseAlive.set(hi, true);
       }
     }
-    const shared = { structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories, houseAlive };
+    const shared = { structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories, houseAlive, builtStructureTypes: this.builtStructureTypes };
 
     for (const trigger of this.triggers) {
       // Volatile (0) and semi-persistent (1): skip once fired
