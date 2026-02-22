@@ -1,0 +1,51 @@
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { listRetentionPolicies, createRetentionPolicy } from '@/lib/compliance';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    const policies = listRetentionPolicies();
+    return NextResponse.json({ policies });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to list retention policies' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { resource, retentionDays, action } = body;
+
+    if (!resource || !retentionDays || !action) {
+      return NextResponse.json(
+        { error: 'resource, retentionDays, and action are required' },
+        { status: 400 }
+      );
+    }
+
+    if (!['delete', 'archive'].includes(action)) {
+      return NextResponse.json(
+        { error: 'action must be "delete" or "archive"' },
+        { status: 400 }
+      );
+    }
+
+    const policy = createRetentionPolicy({
+      resource,
+      retentionDays: parseInt(retentionDays, 10),
+      action,
+    });
+
+    return NextResponse.json({ policy }, { status: 201 });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to create retention policy' },
+      { status: 500 }
+    );
+  }
+}
