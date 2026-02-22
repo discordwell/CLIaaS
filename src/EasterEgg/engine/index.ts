@@ -428,7 +428,7 @@ export class Game {
     // Repair structures being repaired (1 HP per tick ≈ 15 HP/sec)
     for (const idx of this.repairingStructures) {
       const s = this.structures[idx];
-      if (!s || !s.alive || s.hp >= s.maxHp) {
+      if (!s || !s.alive || s.hp >= s.maxHp || s.sellProgress !== undefined) {
         this.repairingStructures.delete(idx);
         continue;
       }
@@ -524,7 +524,7 @@ export class Game {
     this.powerProduced = 0;
     this.powerConsumed = 0;
     for (const s of this.structures) {
-      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      if (!s.alive || s.sellProgress !== undefined || (s.house !== House.Spain && s.house !== House.Greece)) continue;
       if (s.type === 'POWR') this.powerProduced += 100;
       else if (s.type === 'APWR') this.powerProduced += 200;
       else if (s.type === 'PROC') this.powerConsumed += 30;
@@ -549,12 +549,16 @@ export class Game {
         s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
       }
       // Sell: 0→1 over ~1 second = 15 ticks, then finalize
-      if (s.sellProgress !== undefined) {
+      // Guard: skip if structure was destroyed mid-sell (e.g. by enemy attack)
+      if (s.sellProgress !== undefined && s.alive) {
         s.sellProgress = Math.min(1, s.sellProgress + 1 / 15);
         if (s.sellProgress >= 1) {
           s.alive = false;
           s.sellProgress = undefined;
           this.clearStructureFootprint(s);
+          // Refund 50% of building cost on successful sell completion
+          const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+          if (prodItem) this.credits += Math.floor(prodItem.cost * 0.5);
           const wx = s.cx * CELL_SIZE + CELL_SIZE;
           const wy = s.cy * CELL_SIZE + CELL_SIZE;
           this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
@@ -611,7 +615,8 @@ export class Game {
       const { mouseX, mouseY } = this.input.state;
       const world = this.camera.screenToWorld(mouseX, mouseY);
       const s = this.findStructureAt(world);
-      if (s && (s.house === House.Spain || s.house === House.Greece)) {
+      if (s && s.alive && s.sellProgress === undefined &&
+          (s.house === House.Spain || s.house === House.Greece)) {
         this.canvas.style.cursor = 'pointer';
       }
       return;
@@ -970,11 +975,8 @@ export class Game {
         const s = this.findStructureAt(world);
         if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) &&
             s.sellProgress === undefined) {
-          s.sellProgress = 0; // start sell animation
-          // Refund 50% of building cost immediately
-          const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
-          if (prodItem) this.credits += Math.floor(prodItem.cost * 0.5);
-          this.audio.play('building_explode');
+          s.sellProgress = 0; // start sell animation (refund deferred to finalization)
+          this.audio.play('sell');
         }
         this.sellMode = false;
         return;
@@ -2149,6 +2151,10 @@ export class Game {
           entity.creditKill();
           this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 18, size: 16,
             sprite: 'fball1', spriteStart: 0 });
+          // Vehicle debris flying outward
+          if (!entity.target.stats.isInfantry) {
+            this.effects.push({ type: 'debris', x: tx, y: ty, frame: 0, maxFrames: 12, size: 18 });
+          }
           // Screen shake on large explosion
           this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
           // Scorch mark on terrain
@@ -2511,7 +2517,7 @@ export class Game {
   /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
   private updateStructureCombat(): void {
     for (const s of this.structures) {
-      if (!s.alive || !s.weapon) continue;
+      if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
       if (s.attackCooldown > 0) { s.attackCooldown--; continue; }
 
       const isPlayerStruct = s.house === House.Spain || s.house === House.Greece;
@@ -3041,6 +3047,7 @@ export class Game {
     if (this.credits < item.cost) return;
     this.credits -= item.cost;
     this.productionQueue.set(category, { item, progress: 0, queueCount: 1 });
+    this.audio.play('eva_building');
   }
 
   /** Cancel production in a category — removes one from queue, or cancels active build */
@@ -3175,6 +3182,14 @@ export class Game {
       }
     }
     this.pendingPlacement = null;
+    // Check if placing this structure unlocks new production items
+    const oldItems = this.cachedAvailableItems ?? [];
+    this.cachedAvailableItems = null; // force recompute
+    const newItems = this.getAvailableItems();
+    if (newItems.length > oldItems.length) {
+      this.audio.play('eva_new_options');
+      this.evaMessages.push({ text: 'NEW CONSTRUCTION OPTIONS', tick: this.tick });
+    }
     // Spawn free harvester with refinery
     if (item.type === 'PROC') {
       const harv = new Entity(UnitType.V_HARV, House.Spain,
@@ -3256,15 +3271,18 @@ export class Game {
     switch (crate.type) {
       case 'money':
         this.credits += 500;
+        this.evaMessages.push({ text: 'MONEY CRATE', tick: this.tick });
         break;
       case 'heal':
         unit.hp = unit.maxHp;
+        this.evaMessages.push({ text: 'UNIT HEALED', tick: this.tick });
         break;
       case 'veterancy':
         if (unit.veterancy < 2) {
           unit.kills = unit.veterancy === 0 ? 3 : 6;
           unit.creditKill(); // triggers promotion
         }
+        this.evaMessages.push({ text: 'UNIT PROMOTED', tick: this.tick });
         break;
       case 'unit': {
         // Spawn a random infantry unit nearby
@@ -3274,9 +3292,34 @@ export class Game {
         bonus.mission = Mission.GUARD;
         this.entities.push(bonus);
         this.entityById.set(bonus.id, bonus);
+        this.evaMessages.push({ text: 'REINFORCEMENTS', tick: this.tick });
         break;
       }
     }
+  }
+
+  /** Render mission name overlay that fades in during first few seconds */
+  private renderMissionNameOverlay(): void {
+    const ctx = this.canvas.getContext('2d')!;
+    const w = this.canvas.width - Game.SIDEBAR_W;
+    const alpha = this.tick < 30 ? 1.0 : 1.0 - (this.tick - 30) / 30;
+    if (alpha <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Semi-transparent banner background
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 14, w, 28);
+
+    // Mission name
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(this.missionName.toUpperCase(), w / 2, 34);
+    ctx.textAlign = 'left';
+
+    ctx.restore();
   }
 
   /** Render the current frame */
@@ -3294,7 +3337,9 @@ export class Game {
     this.renderer.sidebarQueue = this.productionQueue;
     this.renderer.sidebarScroll = this.sidebarScroll;
     this.renderer.sidebarW = Game.SIDEBAR_W;
-    this.renderer.hasRadar = this.hasBuilding('DOME');
+    // Radar requires DOME and sufficient power
+    const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
+    this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;
     this.renderer.crates = this.crates;
     this.renderer.evaMessages = this.evaMessages;
     this.renderer.missionTimer = this.missionTimer;
@@ -3338,8 +3383,13 @@ export class Game {
       this.tick,
     );
 
-    // Render EVA messages and mission timer
+    // Render EVA messages, mission timer, and mission name overlay
     this.renderer.renderEvaMessages(this.tick);
+    this.renderer.missionName = this.missionName;
+    // Mission name overlay fades during first 4 seconds (60 ticks)
+    if (this.tick < 60) {
+      this.renderMissionNameOverlay();
+    }
 
     // Render pause overlay
     if (this.state === 'paused') {
@@ -3348,11 +3398,16 @@ export class Game {
 
     // Render end screen overlay when game is over
     if (this.state === 'won' || this.state === 'lost') {
+      const structsBuilt = this.structures.filter(s => s.house === House.Spain || s.house === House.Greece).length;
+      const structsLost = this.structures.filter(s => !s.alive && (s.house === House.Spain || s.house === House.Greece)).length;
       this.renderer.renderEndScreen(
         this.state === 'won',
         this.killCount,
         this.lossCount,
         this.tick,
+        structsBuilt,
+        structsLost,
+        this.credits,
       );
     }
   }

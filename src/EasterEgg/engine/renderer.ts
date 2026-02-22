@@ -37,7 +37,7 @@ const PAL_GREEN_HP = 120;     // bright green [0,255,0]
 const PAL_RED_HP = 104;       // red [190,0,0]
 
 export interface Effect {
-  type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker';
+  type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker' | 'debris';
   x: number;
   y: number;
   frame: number;
@@ -95,6 +95,7 @@ export class Renderer {
   crates: Array<{ x: number; y: number; type: string }> = [];
   evaMessages: Array<{ text: string; tick: number }> = [];
   missionTimer = 0; // 0 = hidden
+  missionName = ''; // mission title shown as overlay at start
   theatre = 'TEMPERATE'; // map theatre (affects terrain colors)
   // Placement ghost
   placementItem: ProductionItem | null = null;
@@ -546,6 +547,16 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(screen.x, screen.y + bob, 2, 0, Math.PI * 2);
       ctx.fill();
+      // Sparkle/glimmer effect
+      const sparkPhase = (tick * 0.2 + screen.x * 0.1) % (Math.PI * 2);
+      if (Math.sin(sparkPhase) > 0.7) {
+        const sa = (Math.sin(sparkPhase) - 0.7) * 3.3;
+        ctx.fillStyle = `rgba(255,255,200,${sa})`;
+        const spx = screen.x + sz * 0.6;
+        const spy = screen.y - sz * 0.6 + bob;
+        ctx.fillRect(spx - 1, spy, 3, 1);
+        ctx.fillRect(spx, spy - 1, 1, 3);
+      }
     }
   }
 
@@ -596,7 +607,7 @@ export class Renderer {
       if (sheet) {
         // Determine frame: damaged buildings use second half of frames
         const totalFrames = sheet.meta.frameCount;
-        const damaged = s.hp < 128; // less than 50% health
+        const damaged = s.hp < s.maxHp * 0.5; // less than 50% health
         let frame = 0;
         if (totalFrames > 2) {
           const halfFrames = Math.floor(totalFrames / 2);
@@ -673,7 +684,7 @@ export class Renderer {
       }
 
       // Fire/smoke animation on damaged structures (< 50% HP)
-      if (s.alive && s.hp < 128 && vis >= 1 && !isConstructing && !isSelling) {
+      if (s.alive && s.hp < s.maxHp * 0.5 && vis >= 1 && !isConstructing && !isSelling) {
         const fireSeed = (s.cx * 31 + s.cy * 17) | 0;
         for (let f = 0; f < 2; f++) {
           const fx = screenX + CELL_SIZE * 0.5 + ((fireSeed + f * 13) % 12) - 6;
@@ -697,12 +708,21 @@ export class Renderer {
         }
       }
 
-      // Repair indicator: pulsing green border
+      // Repair indicator: pulsing green border + wrench icon
       if (this.repairingStructures.has(structIdx)) {
         const pulse = 0.4 + 0.4 * Math.sin(tick * 0.3);
         ctx.strokeStyle = `rgba(80,255,80,${pulse})`;
         ctx.lineWidth = 2;
         ctx.strokeRect(screenX, screenY, CELL_SIZE * 2, CELL_SIZE * 2);
+        // Wrench icon (animated sparkle)
+        const wx = screenX + CELL_SIZE;
+        const wy = screenY - 4;
+        const sparkle = Math.sin(tick * 0.5) > 0;
+        ctx.fillStyle = sparkle ? '#8f8' : '#4c4';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('\u2692', wx, wy); // ⚒ hammer and pick
+        ctx.textAlign = 'left';
       }
     }
   }
@@ -1189,6 +1209,21 @@ export class Renderer {
           ctx.stroke();
           break;
         }
+        case 'debris': {
+          // Flying debris pieces from vehicle destruction
+          const alpha = 1 - progress;
+          const seed = (fx.x * 7 + fx.y * 11) | 0;
+          for (let i = 0; i < 4; i++) {
+            const angle = ((seed + i * 90) % 360) * Math.PI / 180;
+            const dist = progress * fx.size * (1.5 + (i % 2));
+            const arcY = -Math.sin(progress * Math.PI) * 15; // arc upward
+            const px = screen.x + Math.cos(angle) * dist;
+            const py = screen.y + Math.sin(angle) * dist + arcY;
+            ctx.fillStyle = `rgba(60,55,50,${alpha * 0.8})`;
+            ctx.fillRect(px - 2, py - 1, 3 + (i % 2), 2);
+          }
+          break;
+        }
       }
     }
   }
@@ -1320,7 +1355,15 @@ export class Renderer {
         } else if (terrain === Terrain.ROCK || terrain === Terrain.WALL) {
           ctx.fillStyle = this.palColor(PAL_ROCK_START + 8, vis === 2 ? 0 : -40);
         } else {
-          ctx.fillStyle = this.palColor(PAL_GRASS_START + 6, vis === 2 ? 0 : -40);
+          // Check for ore/gem overlay
+          const ovl = map.overlay[cy * 128 + cx];
+          if (ovl >= 0x03 && ovl <= 0x0E) {
+            ctx.fillStyle = vis === 2 ? '#c8a030' : '#806020'; // gold ore dot
+          } else if (ovl >= 0x0F && ovl <= 0x12) {
+            ctx.fillStyle = vis === 2 ? '#3090d0' : '#205880'; // blue gem dot
+          } else {
+            ctx.fillStyle = this.palColor(PAL_GRASS_START + 6, vis === 2 ? 0 : -40);
+          }
         }
         ctx.fillRect(px, py, ps, ps);
       }
@@ -1650,6 +1693,9 @@ export class Renderer {
     killCount: number,
     lossCount: number,
     tick: number,
+    structsBuilt = 0,
+    structsLost = 0,
+    creditsRemaining = 0,
   ): void {
     const ctx = this.ctx;
     const w = this.width;
@@ -1659,21 +1705,68 @@ export class Renderer {
     ctx.fillStyle = won ? 'rgba(0,40,0,0.75)' : 'rgba(60,0,0,0.75)';
     ctx.fillRect(0, 0, w, h);
 
+    // Score panel border
+    const panelW = 280;
+    const panelH = 220;
+    const px = (w - panelW) / 2;
+    const py = (h - panelH) / 2 - 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = won ? '#4a4' : '#a44';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, panelW, panelH);
+
     // Title
     ctx.textAlign = 'center';
-    ctx.font = 'bold 24px monospace';
+    ctx.font = 'bold 18px monospace';
     ctx.fillStyle = won ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
-    ctx.fillText(won ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED', w / 2, h / 2 - 60);
+    ctx.fillText(won ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED', w / 2, py + 24);
 
-    // Stats
-    ctx.font = '14px monospace';
-    ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+    // Divider
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px + 10, py + 34);
+    ctx.lineTo(px + panelW - 10, py + 34);
+    ctx.stroke();
+
+    // Stats — RA-style table layout
+    ctx.font = '11px monospace';
+    const leftX = px + 16;
+    const rightX = px + panelW - 16;
+    let row = py + 54;
+    const rowH = 20;
+
+    const drawRow = (label: string, value: string, color = '#ccc') => {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#999';
+      ctx.fillText(label, leftX, row);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = color;
+      ctx.fillText(value, rightX, row);
+      row += rowH;
+    };
+
     const minutes = Math.floor(tick / (15 * 60));
     const seconds = Math.floor((tick / 15) % 60);
     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    ctx.fillText(`Time: ${timeStr}`, w / 2, h / 2 - 20);
-    ctx.fillText(`Enemies Killed: ${killCount}`, w / 2, h / 2 + 5);
-    ctx.fillText(`Units Lost: ${lossCount}`, w / 2, h / 2 + 30);
+    drawRow('Time', timeStr);
+    drawRow('Enemies Killed', String(killCount), '#f84');
+    drawRow('Units Lost', String(lossCount), lossCount > 0 ? '#f44' : '#8f8');
+    drawRow('Structures Built', String(structsBuilt), '#8cf');
+    drawRow('Structures Lost', String(structsLost), structsLost > 0 ? '#f44' : '#8f8');
+    drawRow('Credits Remaining', `$${creditsRemaining}`, '#FFD700');
+
+    // Score calculation (RA-style: kills * 50 - losses * 30 + time bonus)
+    const timeBonus = Math.max(0, 1000 - Math.floor(tick / 15));
+    const score = killCount * 50 - lossCount * 30 - structsLost * 100 + timeBonus;
+    row += 4;
+    ctx.beginPath();
+    ctx.moveTo(px + 10, row - 14);
+    ctx.lineTo(px + panelW - 10, row - 14);
+    ctx.stroke();
+    ctx.font = 'bold 13px monospace';
+    drawRow('SCORE', String(Math.max(0, score)), '#FFD700');
 
     // Prompt
     ctx.font = '12px monospace';

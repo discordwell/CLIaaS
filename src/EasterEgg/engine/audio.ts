@@ -15,7 +15,8 @@ export type SoundName =
   | 'move_ack_infantry' | 'move_ack_vehicle' | 'move_ack_dog'
   | 'unit_lost' | 'building_explode' | 'heal'
   | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged'
-  | 'eva_construction_complete' | 'eva_unit_ready' | 'eva_low_power';
+  | 'eva_construction_complete' | 'eva_unit_ready' | 'eva_low_power'
+  | 'eva_new_options' | 'eva_building' | 'repair' | 'sell';
 
 export class AudioManager {
   private ctx: AudioContext | null = null;
@@ -111,6 +112,10 @@ export class AudioManager {
       case 'eva_construction_complete': this.synthEvaConstructionComplete(t, out); break;
       case 'eva_unit_ready': this.synthEvaUnitReady(t, out); break;
       case 'eva_low_power': this.synthEvaLowPower(t, out); break;
+      case 'eva_new_options': this.synthEvaNewOptions(t, out); break;
+      case 'eva_building': this.synthEvaBuilding(t, out); break;
+      case 'repair': this.synthRepair(t, out); break;
+      case 'sell': this.synthSell(t, out); break;
     }
   }
 
@@ -674,5 +679,62 @@ export class AudioManager {
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
     o2.connect(g2).connect(out);
     o2.start(t + 0.18); o2.stop(t + 0.35);
+  }
+
+  private synthEvaNewOptions(t: number, out: AudioNode): void {
+    // "New construction options" — ascending three-note excited sequence
+    const notes = [500, 700, 1000];
+    notes.forEach((freq, i) => {
+      const dt = t + i * 0.1;
+      const o = this.osc('square', freq);
+      const g = this.gain(0.11);
+      g.gain.setValueAtTime(0.11, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.1);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.1);
+    });
+  }
+
+  private synthEvaBuilding(t: number, out: AudioNode): void {
+    // "Building" — single low confirming tone
+    const o = this.osc('square', 400);
+    const g = this.gain(0.1);
+    g.gain.setValueAtTime(0.1, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.12);
+  }
+
+  private synthSell(t: number, out: AudioNode): void {
+    // Descending metallic crunch — building being dismantled
+    const o = this.osc('sawtooth', 300);
+    const og = this.gain(0.2);
+    og.gain.setValueAtTime(0.2, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    o.frequency.setValueAtTime(300, t);
+    o.frequency.exponentialRampToValueAtTime(80, t + 0.25);
+    o.connect(og).connect(out);
+    o.start(t); o.stop(t + 0.25);
+    // Metal crunch noise
+    const n = this.noise(0.15);
+    const ng = this.gain(0.15);
+    const nf = this.filter('bandpass', 1500, 2);
+    ng.gain.setValueAtTime(0.15, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    n.connect(nf).connect(ng).connect(out);
+    n.start(t); n.stop(t + 0.15);
+  }
+
+  private synthRepair(t: number, out: AudioNode): void {
+    // Wrench sound: quick metallic tapping
+    for (let i = 0; i < 2; i++) {
+      const dt = t + i * 0.06;
+      const o = this.osc('triangle', 1800 - i * 300);
+      const g = this.gain(0.06);
+      g.gain.setValueAtTime(0.06, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.04);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.04);
+    }
   }
 }
