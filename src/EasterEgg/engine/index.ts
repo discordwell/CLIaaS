@@ -1454,7 +1454,7 @@ export class Game {
   /** Map weapon name to projectile visual style */
   private weaponProjectileStyle(name: string): 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade' {
     switch (name) {
-      case 'FireballLauncher': case 'Flamethrower': return 'fireball';
+      case 'FireballLauncher': case 'Flamethrower': case 'Napalm': return 'fireball';
       case 'TankGun': case 'ArtilleryShell': return 'shell';
       case 'Bazooka': case 'MammothTusk': return 'rocket';
       case 'Grenade': return 'grenade';
@@ -1466,7 +1466,7 @@ export class Game {
   private weaponMuzzleColor(name: string): string {
     switch (name) {
       case 'TeslaZap': return '120,180,255';           // blue electric
-      case 'FireballLauncher': case 'Flamethrower': return '255,140,30';  // orange fire
+      case 'FireballLauncher': case 'Flamethrower': case 'Napalm': return '255,140,30';  // orange fire
       case 'TankGun': case 'ArtilleryShell': return '255,220,100';       // warm yellow
       case 'Bazooka': case 'MammothTusk': return '255,180,60';           // rocket orange
       case 'Mandible': return '200,255,200';            // green organic
@@ -2422,9 +2422,13 @@ export class Game {
         const sx = entity.pos.x;
         const sy = entity.pos.y;
 
-        if (entity.isAnt && entity.type === 'ANT3') {
+        if (entity.isAnt && (entity.weapon.name === 'TeslaZap' || entity.weapon.name === 'TeslaCannon')) {
           this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
             sprite: 'piffpiff', spriteStart: 0 });
+        } else if (entity.isAnt && entity.weapon.name === 'Napalm') {
+          // Napalm ant: fire burst at target
+          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 10, size: 10,
+            sprite: 'piffpiff', spriteStart: 0, muzzleColor: '255,140,30' });
         } else if (entity.isAnt) {
           this.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 8, size: 6,
             sprite: 'piffpiff', spriteStart: 0 });

@@ -142,6 +142,8 @@ export class AudioManager {
       case 'Grenade': return 'grenade';
       case 'Bazooka': return 'bazooka';
       case 'DogJaw': return 'dogjaw';
+      case 'Napalm': return 'flamethrower';
+      case 'Sniper': return 'rifle';
       default: return 'rifle';
     }
   }
