@@ -37,6 +37,7 @@ export enum House {
   USSR = 'USSR',       // Ant faction
   Ukraine = 'Ukraine', // Ant faction ally
   Germany = 'Germany', // Ant faction ally
+  Turkey = 'Turkey',   // Neutral / scenario-specific
   Neutral = 'Neutral',
 }
 
@@ -184,6 +185,7 @@ export interface UnitStats {
   isInfantry: boolean;
   primaryWeapon: string | null;
   noMovingFire?: boolean; // must stop to fire (ants, artillery)
+  passengers?: number;     // max passenger capacity (transports only)
 }
 
 // Warhead types from RA (determines damage vs armor class)
@@ -218,7 +220,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 4, isInfantry: false, primaryWeapon: 'MammothTusk' },
   JEEP: { type: UnitType.V_JEEP, name: 'Ranger', image: 'jeep', strength: 150, armor: 'light', speed: 10, sight: 4, rot: 8, isInfantry: false, primaryWeapon: 'MachineGun' },
   '4TNK': { type: UnitType.V_4TNK, name: 'Tesla Tank', image: '4tnk', strength: 400, armor: 'heavy', speed: 5, sight: 5, rot: 4, isInfantry: false, primaryWeapon: 'TeslaCannon' },
-  APC: { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 8, sight: 4, rot: 6, isInfantry: false, primaryWeapon: 'MachineGun' },
+  APC: { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 8, sight: 4, rot: 6, isInfantry: false, primaryWeapon: 'MachineGun', passengers: 5 },
   ARTY: { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 4, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'ArtilleryShell', noMovingFire: true },
   HARV: { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 5, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null },
   MCV: { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 3, isInfantry: false, primaryWeapon: null },
@@ -244,8 +246,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   C9: { type: UnitType.I_C9, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   C10: { type: UnitType.I_C10, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   // Transport vehicles
-  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'light', speed: 12, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null },
-  LST: { type: UnitType.V_LST, name: 'Transport', image: 'truk', strength: 400, armor: 'heavy', speed: 6, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null },
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'light', speed: 12, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5 },
+  LST: { type: UnitType.V_LST, name: 'Transport', image: 'truk', strength: 400, armor: 'heavy', speed: 6, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8 },
 };
 
 export const WEAPON_STATS: Record<string, WeaponStats> = {

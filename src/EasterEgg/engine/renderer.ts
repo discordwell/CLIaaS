@@ -19,6 +19,7 @@ const HOUSE_TINT: Record<string, string> = {
   [House.USSR]:    'rgba(255,60,60,0.30)',     // red — ant faction
   [House.Ukraine]: 'rgba(200,80,200,0.25)',    // purple — ant faction
   [House.Germany]: 'rgba(160,160,160,0.25)',   // gray — ant faction
+  [House.Turkey]:  'rgba(200,200,100,0.25)',   // olive — neutral/scenario
   [House.Neutral]: 'rgba(0,0,0,0)',            // no tint
 };
 
@@ -90,6 +91,7 @@ export class Renderer {
   crates: Array<{ x: number; y: number; type: string }> = [];
   evaMessages: Array<{ text: string; tick: number }> = [];
   missionTimer = 0; // 0 = hidden
+  theatre = 'TEMPERATE'; // map theatre (affects terrain colors)
   // Placement ghost
   placementItem: ProductionItem | null = null;
   placementCx = 0;
@@ -196,7 +198,23 @@ export class Renderer {
 
         switch (terrain) {
           case Terrain.CLEAR: {
-            if (tmpl > 0 && tmpl !== 0xFF) {
+            if (this.theatre === 'INTERIOR') {
+              // INTERIOR theatre — concrete/stone floors
+              const bright = 60 + (h % 12) - 6;
+              ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 5})`;
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              // Tile grid lines
+              if ((cx + cy) % 2 === 0) {
+                ctx.fillStyle = `rgba(80,78,72,0.3)`;
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, 1);
+                ctx.fillRect(screen.x, screen.y, 1, CELL_SIZE);
+              }
+              // Occasional stain detail
+              if (h > 220) {
+                ctx.fillStyle = 'rgba(40,35,30,0.15)';
+                ctx.fillRect(screen.x + 4, screen.y + 4, 16, 12);
+              }
+            } else if (tmpl > 0 && tmpl !== 0xFF) {
               // Template-aware rendering using palette colors
               const isRoad = tmpl >= 0x27 && tmpl <= 0x34;
               const isRough = tmpl >= 0x0D && tmpl <= 0x12;
@@ -239,9 +257,14 @@ export class Renderer {
                 }
               }
             } else {
-              // Default clear grass — palette green (indices 146-151)
-              const palIdx = PAL_GRASS_START + 2 + (h % 6);
-              ctx.fillStyle = this.palColor(palIdx, (h % 10) - 5);
+              // Default clear — palette green (TEMPERATE) or concrete (INTERIOR)
+              if (this.theatre === 'INTERIOR') {
+                const bright = 60 + (h % 8) - 4;
+                ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 5})`;
+              } else {
+                const palIdx = PAL_GRASS_START + 2 + (h % 6);
+                ctx.fillStyle = this.palColor(palIdx, (h % 10) - 5);
+              }
               ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
               if (h < 15) {
                 ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);
@@ -277,48 +300,79 @@ export class Renderer {
             break;
           }
           case Terrain.ROCK: {
-            // Rock using palette gray ramp (indices 132-140)
-            const palIdx = PAL_ROCK_START + 4 + (h % 8);
-            ctx.fillStyle = this.palColor(palIdx);
-            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Rock detail using darker grays
-            ctx.fillStyle = this.palColor(PAL_ROCK_START + 10);
-            ctx.globalAlpha = 0.5;
-            ctx.fillRect(screen.x + (h % 10) + 2, screen.y + ((h >> 3) % 10) + 2, 4, 3);
-            ctx.fillRect(screen.x + ((h >> 5) % 12) + 1, screen.y + ((h >> 2) % 14) + 5, 3, 4);
-            ctx.globalAlpha = 1;
+            if (this.theatre === 'INTERIOR') {
+              // Interior: dark stone walls
+              const bright = 35 + (h % 8);
+              ctx.fillStyle = `rgb(${bright},${bright - 3},${bright - 5})`;
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              ctx.fillStyle = 'rgba(20,15,10,0.3)';
+              ctx.fillRect(screen.x + (h % 10) + 2, screen.y + ((h >> 3) % 10) + 2, 4, 3);
+            } else {
+              // Rock using palette gray ramp (indices 132-140)
+              const palIdx = PAL_ROCK_START + 4 + (h % 8);
+              ctx.fillStyle = this.palColor(palIdx);
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              // Rock detail using darker grays
+              ctx.fillStyle = this.palColor(PAL_ROCK_START + 10);
+              ctx.globalAlpha = 0.5;
+              ctx.fillRect(screen.x + (h % 10) + 2, screen.y + ((h >> 3) % 10) + 2, 4, 3);
+              ctx.fillRect(screen.x + ((h >> 5) % 12) + 1, screen.y + ((h >> 2) % 14) + 5, 3, 4);
+              ctx.globalAlpha = 1;
+            }
             break;
           }
           case Terrain.TREE: {
-            // Ground under tree — dark grass from palette
-            ctx.fillStyle = this.palColor(PAL_GRASS_START + 9, (h % 8) - 4);
-            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Tree trunk — palette brown (dirt index ~88)
-            ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);
-            ctx.fillRect(screen.x + 10, screen.y + 14, 4, 10);
-            // Tree canopy — palette greens (dark→medium)
-            ctx.fillStyle = this.palColor(PAL_GRASS_START + 10);
-            ctx.beginPath();
-            ctx.arc(screen.x + 12, screen.y + 10, 8, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = this.palColor(PAL_GRASS_START + 8);
-            ctx.beginPath();
-            ctx.arc(screen.x + 10, screen.y + 8, 6, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = this.palColor(PAL_GRASS_START + 6);
-            ctx.beginPath();
-            ctx.arc(screen.x + 13, screen.y + 7, 4, 0, Math.PI * 2);
-            ctx.fill();
+            if (this.theatre === 'INTERIOR') {
+              // Interior: support columns/pillars instead of trees
+              const bright = 50 + (h % 6);
+              ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              ctx.fillStyle = `rgb(${bright + 15},${bright + 12},${bright + 8})`;
+              ctx.fillRect(screen.x + 8, screen.y + 4, 8, 16);
+              ctx.fillStyle = `rgb(${bright + 8},${bright + 5},${bright + 2})`;
+              ctx.fillRect(screen.x + 6, screen.y + 2, 12, 4);
+              ctx.fillRect(screen.x + 6, screen.y + 18, 12, 4);
+            } else {
+              // Ground under tree — dark grass from palette
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 9, (h % 8) - 4);
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              // Tree trunk — palette brown (dirt index ~88)
+              ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);
+              ctx.fillRect(screen.x + 10, screen.y + 14, 4, 10);
+              // Tree canopy — palette greens (dark→medium)
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 10);
+              ctx.beginPath();
+              ctx.arc(screen.x + 12, screen.y + 10, 8, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 8);
+              ctx.beginPath();
+              ctx.arc(screen.x + 10, screen.y + 8, 6, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 6);
+              ctx.beginPath();
+              ctx.arc(screen.x + 13, screen.y + 7, 4, 0, Math.PI * 2);
+              ctx.fill();
+            }
             break;
           }
           case Terrain.WALL: {
-            // Walls using palette gray ramp
-            const palIdx = PAL_ROCK_START + 5 + (h % 4);
-            ctx.fillStyle = this.palColor(palIdx);
-            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
+            if (this.theatre === 'INTERIOR') {
+              // Interior: concrete walls
+              const bright = 40 + (h % 6);
+              ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
+            } else {
+              // Walls using palette gray ramp
+              const palIdx = PAL_ROCK_START + 5 + (h % 4);
+              ctx.fillStyle = this.palColor(palIdx);
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+              ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
+            }
             break;
           }
         }
@@ -330,6 +384,25 @@ export class Renderer {
 
   private renderDecals(camera: Camera, map: GameMap): void {
     const ctx = this.ctx;
+    // Render pre-placed smudge marks from scenario INI
+    for (const s of map.smudges) {
+      const screen = camera.worldToScreen(s.cx * CELL_SIZE + CELL_SIZE / 2, s.cy * CELL_SIZE + CELL_SIZE / 2);
+      if (screen.x < -CELL_SIZE || screen.x > this.width + CELL_SIZE ||
+          screen.y < -CELL_SIZE || screen.y > this.height + CELL_SIZE) continue;
+      // SC = scorch marks (darker, smaller), CR = craters (larger, round)
+      const isCrater = s.type.startsWith('CR');
+      const size = isCrater ? 10 : 7;
+      const alpha = isCrater ? 0.4 : 0.3;
+      ctx.fillStyle = `rgba(20,15,10,${alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(screen.x, screen.y, size, size * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(10,5,0,${alpha * 0.6})`;
+      ctx.beginPath();
+      ctx.ellipse(screen.x, screen.y, size * 0.5, size * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Render dynamic decals (from combat)
     for (const d of map.decals) {
       const screen = camera.worldToScreen(d.cx * CELL_SIZE + CELL_SIZE / 2, d.cy * CELL_SIZE + CELL_SIZE / 2);
       if (screen.x < -d.size * 2 || screen.x > this.width + d.size * 2 ||

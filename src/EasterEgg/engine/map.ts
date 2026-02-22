@@ -57,6 +57,9 @@ export class GameMap {
   /** Set of cell trigger names that have been activated by player entry */
   activatedCellTriggers = new Set<string>();
 
+  /** Pre-placed smudge marks (scorch, craters) from scenario INI */
+  smudges: Array<{ type: string; cx: number; cy: number }> = [];
+
   /** Indices of cells currently marked visible (for efficient downgrade) */
   private visibleCells: number[] = [];
 

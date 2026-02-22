@@ -116,6 +116,7 @@ export class Game {
   private globals = new Set<number>();
   private waypoints = new Map<number, { cx: number; cy: number }>();
   private toCarryOver = false; // save surviving units for next mission
+  private theatre = 'TEMPERATE'; // map theatre (TEMPERATE, INTERIOR)
   private allowWin = false; // set by ALLOWWIN action — required before win condition fires
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
   private missionTimerExpired = false;
@@ -171,7 +172,7 @@ export class Game {
     });
 
     // Load scenario
-    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers, credits, toCarryOver } = await loadScenario(scenarioId);
+    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers, credits, toCarryOver, theatre } = await loadScenario(scenarioId);
     this.map = map;
     this.entities = entities;
     this.structures = structures;
@@ -184,6 +185,7 @@ export class Game {
     this.triggers = triggers;
     this.credits = credits;
     this.toCarryOver = toCarryOver;
+    this.theatre = theatre;
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.globals.clear();
@@ -1503,9 +1505,45 @@ export class Game {
         break;
       }
 
-      case Game.TMISSION_UNLOAD:
+      case Game.TMISSION_UNLOAD: {
+        // Unload passengers at current position
+        if (entity.passengers.length > 0) {
+          for (const passenger of entity.passengers) {
+            // Restore passenger as alive entity near transport
+            passenger.alive = true;
+            passenger.hp = passenger.maxHp;
+            passenger.transportRef = null;
+            const offsetX = (Math.random() - 0.5) * CELL_SIZE * 2;
+            const offsetY = (Math.random() - 0.5) * CELL_SIZE * 2;
+            passenger.pos = { x: entity.pos.x + offsetX, y: entity.pos.y + offsetY };
+            passenger.mission = Mission.GUARD;
+            passenger.animState = AnimState.IDLE;
+            // Passengers keep their team missions and advance past UNLOAD
+            passenger.teamMissionIndex = entity.teamMissionIndex + 1;
+          }
+          entity.passengers = [];
+        }
+        entity.teamMissionIndex++;
+        break;
+      }
+
       case Game.TMISSION_LOAD: {
-        // Load/Unload — transport mechanics stub, advance
+        // Load nearby infantry into this transport
+        if (entity.isTransport) {
+          const maxLoad = entity.maxPassengers;
+          for (const other of this.entities) {
+            if (entity.passengers.length >= maxLoad) break;
+            if (!other.alive || !other.stats.isInfantry) continue;
+            if (other.house !== entity.house) continue;
+            if (other.transportRef) continue;
+            const d = worldDist(entity.pos, other.pos);
+            if (d < 3) { // within 3 cells
+              entity.passengers.push(other);
+              other.transportRef = entity;
+              other.alive = false;
+            }
+          }
+        }
         entity.teamMissionIndex++;
         break;
       }
@@ -3047,6 +3085,7 @@ export class Game {
     this.renderer.crates = this.crates;
     this.renderer.evaMessages = this.evaMessages;
     this.renderer.missionTimer = this.missionTimer;
+    this.renderer.theatre = this.theatre;
     // Placement ghost
     if (this.pendingPlacement) {
       const { mouseX, mouseY } = this.input.state;

@@ -264,6 +264,9 @@ interface ScenarioData {
   overlayPack: string;  // raw Base64 OverlayPack data
   toCarryOver: boolean; // surviving units carry to next mission
   toInherit: boolean;   // next mission inherits carry-over units
+  baseStructures: Array<{ type: string; cell: number; house: string }>; // [Base] section pre-placed structures
+  smudges: Array<{ type: string; cell: number }>; // [SMUDGE] section scorch/crater marks
+  theatre: string; // TEMPERATE, INTERIOR, etc.
 }
 
 /** Parse an INI-format scenario file */
@@ -323,6 +326,25 @@ export function parseScenarioINI(text: string): ScenarioData {
   const unitsSection = sections.get('UNITS');
   if (unitsSection) {
     for (const [, value] of unitsSection) {
+      const parts = value.split(',');
+      if (parts.length >= 7) {
+        units.push({
+          house: parts[0],
+          type: parts[1],
+          hp: parseInt(parts[2]),
+          cell: parseInt(parts[3]),
+          facing: parseInt(parts[4]),
+          mission: parts[5],
+          trigger: parts[6],
+        });
+      }
+    }
+  }
+
+  // Ships (same format as vehicles)
+  const shipsSection = sections.get('SHIPS');
+  if (shipsSection) {
+    for (const [, value] of shipsSection) {
       const parts = value.split(',');
       if (parts.length >= 7) {
         units.push({
@@ -487,6 +509,36 @@ export function parseScenarioINI(text: string): ScenarioData {
     }
   }
 
+  // Parse [Base] section — pre-placed structures for AI houses
+  // Format: 000=TYPE,cellIndex
+  const baseStructures: ScenarioData['baseStructures'] = [];
+  const baseSection = sections.get('Base');
+  if (baseSection) {
+    const basePlayer = baseSection.get('Player') ?? 'Neutral';
+    for (const [key, value] of baseSection) {
+      if (key === 'Player' || key === 'Count') continue;
+      const parts = value.split(',');
+      if (parts.length >= 2) {
+        baseStructures.push({ type: parts[0], cell: parseInt(parts[1]), house: basePlayer });
+      }
+    }
+  }
+
+  // Parse [SMUDGE] section — scorch marks and craters
+  // Format: cellIndex=TYPE,cellIndex,rotation
+  const smudges: ScenarioData['smudges'] = [];
+  const smudgeSection = sections.get('SMUDGE');
+  if (smudgeSection) {
+    for (const [, value] of smudgeSection) {
+      const parts = value.split(',');
+      if (parts.length >= 2) {
+        smudges.push({ type: parts[0], cell: parseInt(parts[1]) });
+      }
+    }
+  }
+
+  const theatre = get('Map', 'Theater', 'TEMPERATE').toUpperCase();
+
   return {
     name: get('Basic', 'Name', 'Unknown Mission'),
     briefing,
@@ -505,6 +557,9 @@ export function parseScenarioINI(text: string): ScenarioData {
     overlayPack,
     toCarryOver: get('Basic', 'ToCarryOver', 'no').toLowerCase() === 'yes',
     toInherit: get('Basic', 'ToInherit', 'no').toLowerCase() === 'yes',
+    baseStructures,
+    smudges,
+    theatre,
   };
 }
 
@@ -519,6 +574,9 @@ function toHouse(name: string): House {
     case 'germany': return House.Germany;
     case 'france': return House.USSR;      // France = ant hive faction (enemy)
     case 'turkey': return House.Neutral;   // Turkey = neutral
+    case 'goodguy': return House.Spain;    // GoodGuy = player
+    case 'badguy': return House.USSR;      // BadGuy = enemy
+    case 'special': return House.Neutral;  // Special = neutral/scenario
     default: return House.Neutral;
   }
 }
@@ -543,7 +601,8 @@ function toUnitType(name: string): UnitType | null {
 
 /** Map house ID number to House enum (from RA house numbering) */
 function houseIdToHouse(id: number): House {
-  // RA house IDs: 0=Spain, 1=Greece, 2=USSR, 3=England, 4=Ukraine, 5=Germany
+  // RA house IDs: 0=Spain, 1=Greece, 2=USSR, 3=England, 4=Ukraine, 5=Germany,
+  // 6=France, 7=Turkey, 8=GoodGuy, 9=BadGuy, 10=Neutral, 11=Special
   switch (id) {
     case 0: return House.Spain;
     case 1: return House.Greece;
@@ -551,6 +610,12 @@ function houseIdToHouse(id: number): House {
     case 3: return House.Greece;   // England — allied, treat as Greece
     case 4: return House.Ukraine;
     case 5: return House.Germany;
+    case 6: return House.USSR;     // France — enemy in ant missions
+    case 7: return House.Neutral;  // Turkey — neutral
+    case 8: return House.Spain;    // GoodGuy — player
+    case 9: return House.USSR;     // BadGuy — enemy
+    case 10: return House.Neutral; // Neutral
+    case 11: return House.Neutral; // Special
     default: return House.Neutral;
   }
 }
@@ -630,6 +695,7 @@ export interface ScenarioResult {
   cellTriggers: Map<number, string>;
   credits: number;
   toCarryOver: boolean;
+  theatre: string;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -746,6 +812,39 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     }
   }
 
+  // Add base structures from [Base] section (pre-placed buildings)
+  for (const bs of data.baseStructures) {
+    const baseHouse = toHouse(bs.house);
+    const pos = cellIndexToPos(bs.cell);
+    const image = STRUCTURE_IMAGES[bs.type] ?? bs.type.toLowerCase();
+    const maxHp = STRUCTURE_MAX_HP[bs.type] ?? 256;
+    structures.push({
+      type: bs.type,
+      image,
+      house: baseHouse,
+      cx: pos.cx,
+      cy: pos.cy,
+      hp: maxHp,
+      maxHp,
+      alive: true,
+      rubble: false,
+      weapon: STRUCTURE_WEAPONS[bs.type],
+      attackCooldown: 0,
+    });
+    const [fw, fh] = STRUCTURE_SIZE[bs.type] ?? [1, 1];
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
+      }
+    }
+  }
+
+  // Store smudge marks on the map for rendering
+  map.smudges = data.smudges.map(s => ({
+    type: s.type,
+    ...cellIndexToPos(s.cell),
+  }));
+
   // Store cell triggers on the map for runtime checks
   map.cellTriggers = data.cellTriggers;
 
@@ -808,6 +907,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     cellTriggers: data.cellTriggers,
     credits: data.playerCredits * 100, // INI Credits field is ×100
     toCarryOver: data.toCarryOver,
+    theatre: data.theatre,
   };
 }
 
@@ -1082,6 +1182,8 @@ export function executeTriggerAction(
 
       // Spawn team members using the actual house from TeamType data
       const house = houseIdToHouse(team.house);
+      let transport: Entity | null = null;
+      const infantry: Entity[] = [];
       for (const member of team.members) {
         for (let i = 0; i < member.count; i++) {
           const unitType = toUnitType(member.type);
@@ -1099,7 +1201,24 @@ export function executeTriggerAction(
             }));
             entity.teamMissionIndex = 0;
           }
+          // Track transports and infantry for auto-loading
+          if (entity.isTransport && !transport) {
+            transport = entity;
+          } else if (entity.stats.isInfantry) {
+            infantry.push(entity);
+          }
           result.spawned.push(entity);
+        }
+      }
+      // Auto-load infantry into transport when team has both
+      if (transport && infantry.length > 0) {
+        const maxLoad = transport.maxPassengers;
+        for (let i = 0; i < Math.min(infantry.length, maxLoad); i++) {
+          const inf = infantry[i];
+          transport.passengers.push(inf);
+          inf.transportRef = transport;
+          // Hide loaded infantry (they travel inside the transport)
+          inf.alive = false;
         }
       }
       break;

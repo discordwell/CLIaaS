@@ -120,6 +120,10 @@ export class Entity {
   waveId = 0;              // 0 = no wave group
   waveRallyTick = 0;       // tick when wave should start attacking (rally delay)
 
+  // Transport passengers
+  passengers: Entity[] = [];       // loaded infantry (hidden from entity list)
+  transportRef: Entity | null = null; // reference to transport carrying this unit
+
   // Harvester economy
   oreLoad = 0;                     // credits worth of ore currently carried
   static readonly ORE_CAPACITY = 700; // max ore value per trip
@@ -144,6 +148,14 @@ export class Entity {
 
   get isPlayerUnit(): boolean {
     return this.house === House.Spain || this.house === House.Greece;
+  }
+
+  get isTransport(): boolean {
+    return (this.stats.passengers ?? 0) > 0;
+  }
+
+  get maxPassengers(): number {
+    return this.stats.passengers ?? 0;
   }
 
   get hasTurret(): boolean {
@@ -253,6 +265,13 @@ export class Entity {
       this.deathTick = 0;
       // Select death animation variant randomly
       this.deathVariant = Math.random() < 0.4 ? 1 : 0;
+      // Kill all passengers when transport is destroyed
+      for (const p of this.passengers) {
+        p.alive = false;
+        p.mission = Mission.DIE;
+        p.transportRef = null;
+      }
+      this.passengers = [];
       return true;
     }
     return false;
