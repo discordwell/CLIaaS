@@ -111,7 +111,20 @@ mkdir -p "$CS_GENERAL"
 echo "Extracting Counterstrike GENERAL.MIX (contains ant scenarios)..."
 "$CCMIXAR" unpack -game ra1 -mix "$CS_EXTRACTED/GENERAL.MIX" -dir "$CS_GENERAL"
 
-# Create EXPAND.MIX from CS GENERAL.MIX contents (includes SCM50-59 ant missions)
+# Copy loose files from CS MAIN.MIX extraction (ant SHPs, scenarios, etc.)
+# These are NOT inside GENERAL.MIX but are direct contents of MAIN.MIX
+echo "Including loose Counterstrike files (ant sprites, etc.)..."
+for f in "$CS_EXTRACTED"/*.SHP "$CS_EXTRACTED"/*.INI; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    # Skip nested MIX files and files already in CS_GENERAL
+    if [ ! -f "$CS_GENERAL/$base" ]; then
+        cp "$f" "$CS_GENERAL/"
+        echo "  + $base ($(du -h "$f" | cut -f1))"
+    fi
+done
+
+# Create EXPAND.MIX from CS GENERAL.MIX contents + loose CS files (includes ant missions)
 EXPAND_MIX="$WORK_DIR/EXPAND.MIX"
 echo "Creating EXPAND.MIX from Counterstrike content..."
 "$CCMIXAR" pack -game ra1 -dir "$CS_GENERAL" -mix "$EXPAND_MIX"

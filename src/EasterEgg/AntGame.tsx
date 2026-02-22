@@ -1,101 +1,49 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { Game, type GameState } from './engine';
 
 interface AntGameProps {
   onExit: () => void;
 }
 
-type EmscriptenModule = {
-  canvas: HTMLCanvasElement;
-  print: (...args: string[]) => void;
-  printErr: (...args: string[]) => void;
-  setStatus: (text: string) => void;
-  totalDependencies: number;
-  monitorRunDependencies: (left: number) => void;
-  onRuntimeInitialized: () => void;
-  locateFile: (path: string) => string;
-  preRun: (() => void)[];
-  noInitialRun: boolean;
-  arguments: string[];
-  [key: string]: unknown;
-};
-
-declare global {
-  interface Window {
-    Module: EmscriptenModule;
-  }
-}
-
 export default function AntGame({ onExit }: AntGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [status, setStatus] = useState('Initializing...');
+  const gameRef = useRef<Game | null>(null);
   const [showIntro, setShowIntro] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
+  const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [gameState, setGameState] = useState<GameState>('loading');
   const gameStarted = useRef(false);
-  const scriptsLoaded = useRef(false);
 
   const startGame = useCallback(async () => {
     if (gameStarted.current || !canvasRef.current) return;
     gameStarted.current = true;
     setShowIntro(false);
     setLoading(true);
-    setStatus('Loading Red Alert...');
+    setStatus('Loading assets...');
 
     const canvas = canvasRef.current;
+    const game = new Game(canvas);
+    gameRef.current = game;
 
-    // Set up the Emscripten Module
-    const mod: EmscriptenModule = {
-      canvas,
-      print: (...args: string[]) => console.log('[RA]', ...args),
-      printErr: (...args: string[]) => console.warn('[RA]', ...args),
-      setStatus: (text: string) => {
-        if (!text) {
-          setLoading(false);
-          setStatus('');
-          return;
-        }
-        // Parse progress from Emscripten status messages like "Downloading... (5/10)"
-        const match = text.match(/\((\d+(?:\.\d+)?)\/(\d+)\)/);
-        if (match) {
-          const current = parseFloat(match[1]);
-          const total = parseFloat(match[2]);
-          setLoadProgress(Math.round((current / total) * 100));
-        }
-        setStatus(text);
-      },
-      totalDependencies: 0,
-      monitorRunDependencies: function (left: number) {
-        this.totalDependencies = Math.max(this.totalDependencies, left);
-        if (left === 0) {
-          setLoading(false);
-          setStatus('');
-        } else {
-          const done = this.totalDependencies - left;
-          setStatus(`Preparing... (${done}/${this.totalDependencies})`);
-          setLoadProgress(Math.round((done / this.totalDependencies) * 100));
-        }
-      },
-      onRuntimeInitialized: () => {
-        setStatus('Red Alert initialized!');
-        setLoading(false);
-      },
-      locateFile: (path: string) => `/ra/${path}`,
-      preRun: [],
-      noInitialRun: false,
-      arguments: ['-CD.'],
+    game.onLoadProgress = (loaded, total) => {
+      setLoadProgress(Math.round((loaded / total) * 100));
+      setStatus(`Loading sprites... (${loaded}/${total})`);
     };
 
-    window.Module = mod;
+    game.onStateChange = (state) => {
+      setGameState(state);
+      if (state === 'playing') {
+        setLoading(false);
+        setStatus('');
+      }
+    };
 
     try {
-      // Load the gamedata.js first (sets up preloaded filesystem)
-      await loadScript('/ra/gamedata.js');
-      // Then load the main WASM application
-      await loadScript('/ra/rasdl.js');
-      scriptsLoaded.current = true;
+      await game.start('SCA01EA');
     } catch (e) {
       setError(`Failed to load game: ${e instanceof Error ? e.message : String(e)}`);
       setLoading(false);
@@ -105,12 +53,10 @@ export default function AntGame({ onExit }: AntGameProps) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      // Clean up global Module
-      if (window.Module) {
-        delete (window as unknown as Record<string, unknown>).Module;
+      if (gameRef.current) {
+        gameRef.current.stop();
+        gameRef.current = null;
       }
-      // Remove injected scripts
-      document.querySelectorAll('script[data-ra-game]').forEach(s => s.remove());
     };
   }, []);
 
@@ -130,18 +76,28 @@ export default function AntGame({ onExit }: AntGameProps) {
     return () => window.removeEventListener('keydown', handleKey);
   }, [showIntro, startGame, onExit]);
 
-  // Handle ESC to exit during gameplay
+  // Handle F10 to exit during gameplay
   useEffect(() => {
-    if (showIntro || !scriptsLoaded.current) return;
+    if (showIntro) return;
     const handleKey = (e: KeyboardEvent) => {
-      // Double-tap ESC to exit (single ESC is used by the game)
       if (e.key === 'F10') {
+        e.preventDefault();
         onExit();
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [showIntro, onExit]);
+
+  // Handle canvas resize
+  useEffect(() => {
+    if (!canvasRef.current || !gameRef.current) return;
+    const observer = new ResizeObserver(() => {
+      gameRef.current?.input.updateScale();
+    });
+    observer.observe(canvasRef.current);
+    return () => observer.disconnect();
+  }, [gameState]);
 
   return (
     <div style={{
@@ -191,27 +147,27 @@ export default function AntGame({ onExit }: AntGameProps) {
             marginBottom: '8px',
             textAlign: 'center',
           }}>
-            COMMAND &amp; CONQUER
+            IT CAME FROM RED ALERT!
           </h1>
           <h2 style={{
             color: '#cc3300',
-            fontSize: '32px',
+            fontSize: '24px',
             fontWeight: 'bold',
             letterSpacing: '6px',
             marginBottom: '8px',
             textTransform: 'uppercase',
           }}>
-            RED ALERT
+            The Giant Ant Missions
           </h2>
           <h3 style={{
             color: '#ffaa44',
-            fontSize: '18px',
+            fontSize: '16px',
             fontWeight: 'normal',
-            letterSpacing: '8px',
+            letterSpacing: '4px',
             marginBottom: '40px',
             textTransform: 'uppercase',
           }}>
-            Native WebAssembly Port
+            TypeScript Engine Reimplementation
           </h3>
 
           <div style={{
@@ -223,11 +179,11 @@ export default function AntGame({ onExit }: AntGameProps) {
             marginBottom: '40px',
           }}>
             <p style={{ color: '#cccccc', fontSize: '15px', marginBottom: '16px' }}>
-              The full original Red Alert, compiled from C++ source to
-              WebAssembly and running natively in your browser.
+              The classic giant ant missions from Command &amp; Conquer: Red Alert,
+              rebuilt from scratch as a pure TypeScript/Canvas 2D game.
             </p>
             <p style={{ color: '#aaaaaa', marginBottom: '8px' }}>
-              Game data will be downloaded on launch (~26MB).
+              Select units with left click, right click to move/attack.
             </p>
             <p style={{ color: '#888888', fontSize: '11px' }}>
               Press <strong style={{ color: '#44aaff' }}>F10</strong> at any time to return to CLIaaS.
@@ -249,9 +205,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             fontSize: '11px',
             textAlign: 'center',
           }}>
-            A CLIaaS Easter Egg | Freeware release by Electronic Arts
-            <br />
-            Source: Daft-Freak/CnC_and_Red_Alert (GPL v3) | Compiled with Emscripten
+            A CLIaaS Easter Egg | Based on C&amp;C Red Alert Counterstrike
           </div>
 
           <style>{`
@@ -306,6 +260,49 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
+      {/* Win/Lose Overlay */}
+      {(gameState === 'won' || gameState === 'lost') && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(0,0,0,0.75)',
+          zIndex: 100001,
+          fontFamily: 'monospace',
+        }}>
+          <div style={{
+            color: gameState === 'won' ? '#44ff44' : '#ff4444',
+            fontSize: '48px',
+            fontWeight: 'bold',
+            marginBottom: '20px',
+            textShadow: `0 0 20px ${gameState === 'won' ? '#44ff44' : '#ff4444'}`,
+          }}>
+            {gameState === 'won' ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED'}
+          </div>
+          <button
+            onClick={onExit}
+            style={{
+              background: '#333',
+              color: '#fff',
+              border: '1px solid #666',
+              padding: '10px 30px',
+              fontFamily: 'monospace',
+              fontSize: '14px',
+              cursor: 'pointer',
+              marginTop: '20px',
+            }}
+          >
+            Return to CLIaaS
+          </button>
+        </div>
+      )}
+
       {/* Error Overlay */}
       {error && (
         <div style={{
@@ -345,7 +342,7 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
-      {/* Game Canvas - sized exactly to maintain 320:200 aspect ratio so SDL mouse coords map correctly */}
+      {/* Game Canvas */}
       <div style={{
         display: showIntro ? 'none' : 'flex',
         justifyContent: 'center',
@@ -356,30 +353,17 @@ export default function AntGame({ onExit }: AntGameProps) {
       }}>
         <canvas
           ref={canvasRef}
-          id="canvas"
-          width={320}
-          height={200}
+          width={640}
+          height={400}
           onContextMenu={(e) => e.preventDefault()}
           tabIndex={-1}
           style={{
-            width: 'min(100vw, calc(100vh * 320 / 200))',
-            height: 'min(100vh, calc(100vw * 200 / 320))',
+            width: 'min(100vw, calc(100vh * 640 / 400))',
+            height: 'min(100vh, calc(100vw * 400 / 640))',
             imageRendering: 'pixelated',
           }}
         />
       </div>
     </div>
   );
-}
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = true;
-    script.setAttribute('data-ra-game', 'true');
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(script);
-  });
 }
