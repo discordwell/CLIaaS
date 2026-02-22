@@ -6,10 +6,11 @@ import type { Ticket, Message, KBArticle, TriageResult, KBSuggestion } from '../
 export class ClaudeProvider implements LLMProvider {
   name = 'claude';
   private client: Anthropic;
-  private model = 'claude-sonnet-4-5-20250929';
+  private model: string;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, model?: string) {
     this.client = new Anthropic({ apiKey });
+    this.model = model ?? 'claude-sonnet-4-5-20250929';
   }
 
   private async complete(prompt: string): Promise<string> {

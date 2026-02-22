@@ -23,7 +23,7 @@ export function getProvider(): LLMProvider {
         console.error(chalk.yellow('Or set ANTHROPIC_API_KEY environment variable'));
         process.exit(1);
       }
-      return new ClaudeProvider(apiKey);
+      return new ClaudeProvider(apiKey, config.claude?.model);
     }
     case 'openai': {
       const apiKey = config.openai?.apiKey ?? envOpenAI;
@@ -33,7 +33,7 @@ export function getProvider(): LLMProvider {
         console.error(chalk.yellow('Or set OPENAI_API_KEY environment variable'));
         process.exit(1);
       }
-      return new OpenAIProvider(apiKey);
+      return new OpenAIProvider(apiKey, config.openai?.model);
     }
     case 'openclaw': {
       const cfg = config.openclaw;

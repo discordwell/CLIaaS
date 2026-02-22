@@ -27,7 +27,7 @@ export default function Home() {
       {/* HEADER SECTION */}
       <header className="border-2 border-zinc-950 bg-white p-8 sm:p-12">
         <p className="font-mono text-sm font-bold uppercase tracking-widest text-zinc-950">
-          CLIaaS.COM
+          COMMAND-LINE NATIVE
         </p>
         <h1 className="mt-6 max-w-4xl text-4xl font-bold leading-none sm:text-7xl">
           Replace your helpdesk UI with a CLI that actually works.
@@ -43,6 +43,12 @@ export default function Home() {
             className="border-2 border-zinc-950 bg-zinc-950 px-8 py-3 font-mono text-sm font-bold uppercase text-white transition-colors hover:bg-zinc-800 hover:text-white"
           >
             Open Dashboard
+          </Link>
+          <Link
+            href="/demo"
+            className="border-2 border-zinc-950 bg-white px-8 py-3 font-mono text-sm font-bold uppercase text-zinc-950 transition-colors hover:bg-zinc-100"
+          >
+            Try Demo
           </Link>
           <a
             href="https://github.com/discordwell/CLIaaS"
@@ -76,16 +82,16 @@ export default function Home() {
           Exporting business rules... 47 business rules exported{"\n\n"}
 
           <span className="text-emerald-400">$ cliaas triage --limit 5</span>{"\n"}
-          #4521 <span className="text-red-400">[URGENT]</span> "Billing error on invoice #2026-0142" → billing, assign:sarah{"\n"}
-          #4519 <span className="text-orange-400">[HIGH]</span>   "Can't reset password"                → auth, assign:mike{"\n"}
-          #4518 <span className="text-yellow-400">[NORMAL]</span> "Feature request: dark mode"           → product, assign:backlog{"\n"}
-          #4517 <span className="text-yellow-400">[NORMAL]</span> "Slow load times on dashboard"         → engineering, assign:ops{"\n"}
-          #4515 <span className="text-zinc-500">[LOW]</span>    "Update company address"               → admin, assign:support{"\n\n"}
+          #4521 <span className="text-red-400">[URGENT]</span> {'"Billing error on invoice #2026-0142"'} {"→"} billing, assign:sarah{"\n"}
+          #4519 <span className="text-orange-400">[HIGH]</span>   {'"Can\'t reset password"'}                {"→"} auth, assign:mike{"\n"}
+          #4518 <span className="text-yellow-400">[NORMAL]</span> {'"Feature request: dark mode"'}           {"→"} product, assign:backlog{"\n"}
+          #4517 <span className="text-yellow-400">[NORMAL]</span> {'"Slow load times on dashboard"'}         {"→"} engineering, assign:ops{"\n"}
+          #4515 <span className="text-zinc-500">[LOW]</span>    {'"Update company address"'}               {"→"} admin, assign:support{"\n\n"}
 
           <span className="text-emerald-400">$ cliaas draft reply --ticket 4521 --tone professional</span>{"\n"}
-          Draft: "Hi Sarah, I've reviewed invoice #INV-2026-0142 and can confirm{"\n"}
-          the billing discrepancy. I've issued a corrective credit of $47.50{"\n"}
-          which will appear on your next statement..."{"\n"}
+          {"Draft: \"Hi Sarah, I've reviewed invoice #INV-2026-0142 and can confirm"}{"\n"}
+          {"the billing discrepancy. I've issued a corrective credit of $47.50"}{"\n"}
+          {"which will appear on your next statement...\""}{"\n"}
           <span className="text-zinc-500">[approve] [edit] [discard]</span>
         </pre>
       </section>
@@ -129,6 +135,7 @@ export default function Home() {
           <div className="mt-6 flex flex-col gap-4 font-mono text-sm">
             {[
               { path: "/dashboard", note: "connector status + quickstart" },
+              { path: "/demo", note: "interactive terminal playground" },
               { path: "/settings", note: "credentials + LLM provider config" },
               { path: "/api/health", note: "deploy healthcheck" },
               { path: "/api/connectors", note: "Zendesk + Kayako connector specs" },

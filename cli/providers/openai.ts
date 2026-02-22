@@ -6,10 +6,11 @@ import type { Ticket, Message, KBArticle, TriageResult, KBSuggestion } from '../
 export class OpenAIProvider implements LLMProvider {
   name = 'openai';
   private client: OpenAI;
-  private model = 'gpt-4o';
+  private model: string;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, model?: string) {
     this.client = new OpenAI({ apiKey });
+    this.model = model ?? 'gpt-4o';
   }
 
   private async complete(prompt: string): Promise<string> {

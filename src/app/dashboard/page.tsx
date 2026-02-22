@@ -42,6 +42,12 @@ export default function DashboardPage() {
             Settings
           </Link>
           <Link
+            href="/demo"
+            className="border-2 border-line bg-panel px-6 py-3 font-mono text-sm font-bold uppercase text-foreground transition-colors hover:bg-accent-soft"
+          >
+            Try Demo
+          </Link>
+          <Link
             href="/api/connectors"
             className="border-2 border-line bg-panel px-6 py-3 font-mono text-sm font-bold uppercase text-foreground transition-colors hover:bg-accent-soft"
           >

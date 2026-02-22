@@ -7,6 +7,9 @@ import { registerDraftCommand } from './draft.js';
 import { registerKBCommand } from './kb.js';
 import { registerSummarizeCommand } from './summarize.js';
 import { registerConfigCommand } from './config.js';
+import { registerDemoCommand } from './demo.js';
+import { registerStatsCommand } from './stats.js';
+import { registerExportCommand } from './export.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -17,4 +20,7 @@ export function registerCommands(program: Command): void {
   registerKBCommand(program);
   registerSummarizeCommand(program);
   registerConfigCommand(program);
+  registerDemoCommand(program);
+  registerStatsCommand(program);
+  registerExportCommand(program);
 }

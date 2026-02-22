@@ -2,6 +2,18 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { exportZendesk, loadManifest } from '../connectors/zendesk.js';
 
+function resolveAuth(opts: { subdomain?: string; email?: string; token?: string }) {
+  const subdomain = opts.subdomain ?? process.env.ZENDESK_SUBDOMAIN;
+  const email = opts.email ?? process.env.ZENDESK_EMAIL;
+  const token = opts.token ?? process.env.ZENDESK_TOKEN;
+
+  if (!subdomain) { console.error(chalk.red('Missing --subdomain or ZENDESK_SUBDOMAIN env var')); process.exit(1); }
+  if (!email) { console.error(chalk.red('Missing --email or ZENDESK_EMAIL env var')); process.exit(1); }
+  if (!token) { console.error(chalk.red('Missing --token or ZENDESK_TOKEN env var')); process.exit(1); }
+
+  return { subdomain, email, token };
+}
+
 export function registerZendeskCommands(program: Command): void {
   const zendesk = program
     .command('zendesk')
@@ -10,16 +22,14 @@ export function registerZendeskCommands(program: Command): void {
   zendesk
     .command('export')
     .description('Export all data from a Zendesk instance')
-    .requiredOption('--subdomain <subdomain>', 'Zendesk subdomain (e.g., acme)')
-    .requiredOption('--email <email>', 'Agent email address')
-    .requiredOption('--token <token>', 'Zendesk API token')
+    .option('--subdomain <subdomain>', 'Zendesk subdomain (or ZENDESK_SUBDOMAIN env)')
+    .option('--email <email>', 'Agent email (or ZENDESK_EMAIL env)')
+    .option('--token <token>', 'API token (or ZENDESK_TOKEN env)')
     .option('--out <dir>', 'Output directory', './exports/zendesk')
-    .action(async (opts: { subdomain: string; email: string; token: string; out: string }) => {
+    .action(async (opts: { subdomain?: string; email?: string; token?: string; out: string }) => {
+      const auth = resolveAuth(opts);
       try {
-        const manifest = await exportZendesk(
-          { subdomain: opts.subdomain, email: opts.email, token: opts.token },
-          opts.out,
-        );
+        const manifest = await exportZendesk(auth, opts.out);
         console.log(chalk.green('\nExport summary:'));
         console.log(`  Tickets:       ${manifest.counts.tickets}`);
         console.log(`  Messages:      ${manifest.counts.messages}`);
@@ -36,21 +46,18 @@ export function registerZendeskCommands(program: Command): void {
   zendesk
     .command('sync')
     .description('Incremental sync from cursor state')
-    .requiredOption('--subdomain <subdomain>', 'Zendesk subdomain')
-    .requiredOption('--email <email>', 'Agent email address')
-    .requiredOption('--token <token>', 'Zendesk API token')
+    .option('--subdomain <subdomain>', 'Zendesk subdomain (or ZENDESK_SUBDOMAIN env)')
+    .option('--email <email>', 'Agent email (or ZENDESK_EMAIL env)')
+    .option('--token <token>', 'API token (or ZENDESK_TOKEN env)')
     .option('--out <dir>', 'Output directory', './exports/zendesk')
-    .action(async (opts: { subdomain: string; email: string; token: string; out: string }) => {
+    .action(async (opts: { subdomain?: string; email?: string; token?: string; out: string }) => {
+      const auth = resolveAuth(opts);
       try {
         const existing = loadManifest(opts.out);
         if (!existing) {
           console.log(chalk.yellow('No previous export found. Running full export...'));
         }
-        await exportZendesk(
-          { subdomain: opts.subdomain, email: opts.email, token: opts.token },
-          opts.out,
-          existing?.cursorState,
-        );
+        await exportZendesk(auth, opts.out, existing?.cursorState);
       } catch (err) {
         console.error(chalk.red(`Sync failed: ${err instanceof Error ? err.message : err}`));
         process.exit(1);

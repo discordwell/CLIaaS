@@ -4,8 +4,8 @@ import { homedir } from 'os';
 
 export interface CLIConfig {
   provider: 'claude' | 'openai' | 'openclaw';
-  claude?: { apiKey: string };
-  openai?: { apiKey: string };
+  claude?: { apiKey: string; model?: string };
+  openai?: { apiKey: string; model?: string };
   openclaw?: { baseUrl: string; apiKey?: string; model: string };
 }
 
