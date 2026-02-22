@@ -7,8 +7,8 @@ CLIaaS
 An LLM-powered CLI that replaces legacy helpdesk UIs (Zendesk, Kayako) with scriptable export, triage, drafting, and KB workflows.
 
 ## Team Members
-- Name:
-- Email:
+- Name: Robert Cordwell
+- Email: cordwell@gmail.com
 
 ## Live Deployment URL
 - https://cliaas.com
@@ -30,7 +30,7 @@ Support teams are trapped in legacy helpdesk UIs that charge per-seat and resist
 ## Architecture
 
 - **CLI**: Node.js + Commander.js with real API connectors and LLM provider abstraction
-- **Connectors**: Zendesk (node-zendesk + cursor pagination) and Kayako (custom HTTP client + offset pagination)
+- **Connectors**: Zendesk (cursor-based incremental sync with rate-limit retry), Kayako Cloud (custom HTTP client + offset pagination), and Kayako Classic (REST API + HMAC-SHA256 auth)
 - **LLM Providers**: Claude (Anthropic SDK), OpenAI, OpenClaw-compatible (Ollama, Together, LM Studio, etc.)
 - **Web**: Next.js App Router landing page, dashboard, and settings — deployed to cliaas.com
 - **Schema**: Canonical types (Ticket, Message, Customer, Organization, KBArticle, Rule) shared across connectors
@@ -41,3 +41,4 @@ Support teams are trapped in legacy helpdesk UIs that charge per-seat and resist
 - Commander.js, chalk, ora (CLI)
 - @anthropic-ai/sdk, openai (LLM providers)
 - Deployed via systemd + nginx on VPS
+- **Live Data**: Zendesk integration tested against real tenant (discorp.zendesk.com) with 25+ seeded tickets spanning billing, auth, bugs, feature requests, onboarding, API issues, and account management

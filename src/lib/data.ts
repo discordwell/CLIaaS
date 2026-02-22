@@ -5,7 +5,7 @@ import { join } from 'path';
 export interface Ticket {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako';
+  source: 'zendesk' | 'kayako' | 'kayako-classic';
   subject: string;
   status: string;
   priority: string;
@@ -59,6 +59,7 @@ const EXPORT_DIRS = [
   '/tmp/cliaas-demo',
   './exports/zendesk',
   './exports/kayako',
+  './exports/kayako-classic',
   './exports',
 ];
 
@@ -69,22 +70,37 @@ export function findExportDir(): string | null {
   return null;
 }
 
+function findAllExportDirs(): string[] {
+  return EXPORT_DIRS.filter(dir => existsSync(join(dir, 'manifest.json')));
+}
+
+function loadAllFromDirs<T>(filename: string): T[] {
+  const dirs = findAllExportDirs();
+  const seen = new Set<string>();
+  const results: T[] = [];
+
+  for (const dir of dirs) {
+    for (const item of readJsonl<T & { id?: string }>(join(dir, filename))) {
+      const key = item.id ?? JSON.stringify(item);
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push(item);
+      }
+    }
+  }
+  return results;
+}
+
 export function loadTickets(): Ticket[] {
-  const dir = findExportDir();
-  if (!dir) return [];
-  return readJsonl<Ticket>(join(dir, 'tickets.jsonl'));
+  return loadAllFromDirs<Ticket>('tickets.jsonl');
 }
 
 export function loadMessages(): Message[] {
-  const dir = findExportDir();
-  if (!dir) return [];
-  return readJsonl<Message>(join(dir, 'messages.jsonl'));
+  return loadAllFromDirs<Message>('messages.jsonl');
 }
 
 export function loadKBArticles(): KBArticle[] {
-  const dir = findExportDir();
-  if (!dir) return [];
-  return readJsonl<KBArticle>(join(dir, 'kb_articles.jsonl'));
+  return loadAllFromDirs<KBArticle>('kb_articles.jsonl');
 }
 
 export function computeStats(tickets: Ticket[]): TicketStats {
