@@ -39,7 +39,8 @@ export class Camera {
   }
 
   /** Edge-of-screen scrolling based on mouse position */
-  edgeScroll(mouseX: number, mouseY: number): void {
+  edgeScroll(mouseX: number, mouseY: number, mouseActive: boolean): void {
+    if (!mouseActive) return; // Don't scroll until mouse enters canvas
     let dx = 0;
     let dy = 0;
     if (mouseX < EDGE_SCROLL_MARGIN) dx = -SCROLL_SPEED;

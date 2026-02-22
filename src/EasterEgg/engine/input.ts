@@ -5,6 +5,7 @@
 export interface InputState {
   mouseX: number;      // screen-space mouse X
   mouseY: number;      // screen-space mouse Y
+  mouseActive: boolean; // true after first mouse move on canvas
   mouseDown: boolean;  // left button currently held
   rightDown: boolean;  // right button currently held
   dragStartX: number;  // drag box start (screen)
@@ -23,6 +24,7 @@ export class InputManager {
   state: InputState = {
     mouseX: 0,
     mouseY: 0,
+    mouseActive: false,
     mouseDown: false,
     rightDown: false,
     dragStartX: 0,
@@ -67,6 +69,7 @@ export class InputManager {
   /** Convert DOM event coordinates to canvas-space */
   private toCanvas(e: MouseEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
     return {
       x: (e.clientX - rect.left) * this.scaleX,
       y: (e.clientY - rect.top) * this.scaleY,
@@ -91,6 +94,7 @@ export class InputManager {
     const pos = this.toCanvas(e);
     this.state.mouseX = pos.x;
     this.state.mouseY = pos.y;
+    this.state.mouseActive = true;
 
     if (this.state.mouseDown && !this.state.isDragging) {
       const dx = pos.x - this.state.dragStartX;

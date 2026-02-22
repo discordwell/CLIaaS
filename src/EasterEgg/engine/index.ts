@@ -6,14 +6,13 @@
 import {
   type WorldPos, CELL_SIZE, GAME_TICKS_PER_SEC,
   Mission, AnimState, worldDist, directionTo, worldToCell,
-  PLAYER_HOUSES, ANT_HOUSES,
 } from './types';
 import { AssetManager } from './assets';
 import { Camera } from './camera';
 import { InputManager } from './input';
 import { Entity, resetEntityIds } from './entity';
 import { GameMap } from './map';
-import { Renderer } from './renderer';
+import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
 import { loadScenario } from './scenario';
 
@@ -31,6 +30,7 @@ export class Game {
   entities: Entity[] = [];
   entityById = new Map<number, Entity>();
   selectedIds = new Set<number>();
+  effects: Effect[] = [];
   state: GameState = 'loading';
   tick = 0;
   missionName = '';
@@ -42,6 +42,7 @@ export class Game {
   // Internal
   private canvas: HTMLCanvasElement;
   private animFrameId = 0;
+  private timerId = 0;
   private lastTime = 0;
   private accumulator = 0;
   private readonly tickInterval = 1000 / GAME_TICKS_PER_SEC;
@@ -67,14 +68,17 @@ export class Game {
     });
 
     // Load scenario
-    const { map, entities, name, waypoints } = await loadScenario(scenarioId);
+    const { map, entities, name } = await loadScenario(scenarioId);
     this.map = map;
     this.entities = entities;
     this.entityById.clear();
     for (const e of entities) this.entityById.set(e.id, e);
     this.missionName = name;
 
-    // Center camera on player start (waypoint 98 = player start in ant missions)
+    // Initial fog of war reveal
+    this.updateFogOfWar();
+
+    // Center camera on player start
     const playerUnits = entities.filter(e => e.isPlayerUnit);
     if (playerUnits.length > 0) {
       const avg = playerUnits.reduce(
@@ -90,23 +94,29 @@ export class Game {
     this.state = 'playing';
     this.onStateChange?.('playing');
     this.lastTime = performance.now();
-    this.gameLoop(this.lastTime);
+    this.gameLoop();
   }
 
   /** Stop the game */
   stop(): void {
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
+    if (this.timerId) clearTimeout(this.timerId);
     this.animFrameId = 0;
+    this.timerId = 0;
     this.input.destroy();
   }
 
-  /** Main game loop */
-  private gameLoop = (time: number): void => {
-    this.animFrameId = requestAnimationFrame(this.gameLoop);
+  /** Main game loop — uses setTimeout fallback when RAF is throttled */
+  private gameLoop = (): void => {
+    if (this.state !== 'playing') {
+      // Still render final frame but stop ticking
+      this.render();
+      return;
+    }
 
-    const dt = time - this.lastTime;
-    this.lastTime = time;
-    // Cap accumulator to prevent spiral of death on first frame or after pause
+    const now = performance.now();
+    const dt = now - this.lastTime;
+    this.lastTime = now;
     this.accumulator += Math.min(dt, 200);
 
     // Fixed timestep updates
@@ -117,21 +127,34 @@ export class Game {
       }
     }
 
-    // Render every frame (not just on tick)
     this.render();
+    this.scheduleNext();
   };
+
+  /** Schedule next frame — prefer RAF, fall back to setTimeout */
+  private scheduleNext(): void {
+    if (this.state !== 'playing') return;
+    // Use setTimeout as the primary timer — immune to Chrome RAF throttling.
+    // 16ms ≈ 60fps render rate, game ticks at fixed 15fps inside.
+    this.timerId = window.setTimeout(this.gameLoop, 16);
+  }
 
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
-    this.input.clearEvents();
 
-    // Process input
+    // Process input (before clearing events so we can read them)
     this.processInput();
+
+    // Clear one-shot events after consumption
+    this.input.clearEvents();
 
     // Update camera scrolling
     this.camera.keyScroll(this.input.state.keys);
-    this.camera.edgeScroll(this.input.state.mouseX, this.input.state.mouseY);
+    this.camera.edgeScroll(this.input.state.mouseX, this.input.state.mouseY, this.input.state.mouseActive);
+
+    // Update fog of war
+    this.updateFogOfWar();
 
     // Update all entities
     for (const entity of this.entities) {
@@ -142,10 +165,16 @@ export class Game {
       this.updateEntity(entity);
     }
 
-    // Clean up dead entities after death animation
+    // Update effects
+    this.effects = this.effects.filter(e => {
+      e.frame++;
+      return e.frame < e.maxFrames;
+    });
+
+    // Clean up dead entities after death animation (use deathTick instead of animFrame)
     const before = this.entities.length;
     this.entities = this.entities.filter(
-      e => e.alive || e.animFrame < 15
+      e => e.alive || e.deathTick < 45 // ~3 seconds at 15fps
     );
     if (this.entities.length < before) {
       this.entityById.clear();
@@ -156,27 +185,33 @@ export class Game {
     this.checkVictoryConditions();
   }
 
+  /** Update fog of war based on player unit positions */
+  private updateFogOfWar(): void {
+    const units = this.entities
+      .filter(e => e.alive && e.isPlayerUnit)
+      .map(e => ({ x: e.pos.x, y: e.pos.y, sight: e.stats.sight }));
+    this.map.updateFogOfWar(units);
+  }
+
   /** Process player input — selection and commands */
   private processInput(): void {
     const { leftClick, rightClick, dragBox } = this.input.state;
 
-    // Left click = select unit
     if (leftClick) {
       const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
       const clicked = this.findEntityAt(world);
 
       if (clicked && clicked.isPlayerUnit) {
         this.selectedIds.clear();
+        for (const e of this.entities) e.selected = false;
         this.selectedIds.add(clicked.id);
         clicked.selected = true;
       } else {
-        // Deselect all
         for (const e of this.entities) e.selected = false;
         this.selectedIds.clear();
       }
     }
 
-    // Drag box = select multiple units
     if (dragBox) {
       this.selectedIds.clear();
       for (const e of this.entities) {
@@ -191,7 +226,6 @@ export class Game {
       }
     }
 
-    // Right click = command selected units
     if (rightClick) {
       const world = this.camera.screenToWorld(rightClick.x, rightClick.y);
       const target = this.findEntityAt(world);
@@ -201,12 +235,10 @@ export class Game {
         if (!unit || !unit.alive) continue;
 
         if (target && !target.isPlayerUnit && target.alive) {
-          // Attack command
           unit.mission = Mission.ATTACK;
           unit.target = target;
           unit.moveTarget = null;
         } else {
-          // Move command
           unit.mission = Mission.MOVE;
           unit.moveTarget = { x: world.x, y: world.y };
           unit.target = null;
@@ -225,7 +257,7 @@ export class Game {
   /** Find an entity near a world position */
   private findEntityAt(pos: WorldPos): Entity | null {
     let closest: Entity | null = null;
-    let closestDist = 20; // pick radius in pixels
+    let closestDist = 20;
 
     for (const e of this.entities) {
       if (!e.alive) continue;
@@ -242,9 +274,12 @@ export class Game {
 
   /** Update a single entity's AI and movement */
   private updateEntity(entity: Entity): void {
-    // Ant AI: HUNT behavior
+    // Ant AI: HUNT behavior (rate-limited to every 8 ticks)
     if (entity.isAnt && entity.mission !== Mission.DIE) {
-      this.updateAntAI(entity);
+      if (this.tick - entity.lastAIScan >= 8) {
+        entity.lastAIScan = this.tick;
+        this.updateAntAI(entity);
+      }
     }
 
     switch (entity.mission) {
@@ -267,10 +302,8 @@ export class Game {
 
   /** Ant AI — continuously hunt nearest player unit */
   private updateAntAI(entity: Entity): void {
-    // Already attacking? Keep at it
     if (entity.mission === Mission.ATTACK && entity.target?.alive) return;
 
-    // Find nearest player unit
     let nearest: Entity | null = null;
     let nearestDist = Infinity;
 
@@ -299,14 +332,12 @@ export class Game {
 
     entity.animState = AnimState.WALK;
 
-    // Follow path
     if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
       const nextCell = entity.path[entity.pathIndex];
       const target: WorldPos = {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
         y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
       };
-
       if (entity.moveToward(target, entity.stats.speed * 0.5)) {
         entity.pathIndex++;
       }
@@ -331,19 +362,31 @@ export class Game {
       return;
     }
 
-    const dist = worldDist(entity.pos, entity.target.pos);
-
     if (entity.inRange(entity.target)) {
-      // In range — face target and fire
       entity.facing = directionTo(entity.pos, entity.target.pos);
       entity.animState = AnimState.ATTACK;
 
       if (entity.attackCooldown <= 0 && entity.weapon) {
-        entity.target.takeDamage(entity.weapon.damage);
+        const killed = entity.target.takeDamage(entity.weapon.damage);
         entity.attackCooldown = entity.weapon.rof;
+
+        // Spawn attack effect at target
+        const tx = entity.target.pos.x;
+        const ty = entity.target.pos.y;
+        if (entity.isAnt && entity.type === 'ANT3') {
+          this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12 });
+        } else if (entity.isAnt) {
+          this.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 10, size: 6 });
+        } else {
+          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 4, size: 5 });
+          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 12, size: 8 });
+        }
+
+        if (killed) {
+          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 20, size: 16 });
+        }
       }
     } else {
-      // Move toward target
       entity.animState = AnimState.WALK;
       entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
     }
@@ -359,7 +402,6 @@ export class Game {
       return;
     }
 
-    // Same as attack but repath periodically
     if (entity.inRange(entity.target)) {
       entity.mission = Mission.ATTACK;
       this.updateAttack(entity);
@@ -369,15 +411,17 @@ export class Game {
     }
   }
 
-  /** Guard mode — attack nearby enemies */
+  /** Guard mode — attack nearby enemies (rate-limited to every 15 ticks) */
   private updateGuard(entity: Entity): void {
     entity.animState = AnimState.IDLE;
 
-    // Auto-attack nearby enemies
+    if (this.tick - entity.lastGuardScan < 15) return;
+    entity.lastGuardScan = this.tick;
+
     const isPlayer = entity.isPlayerUnit;
     for (const other of this.entities) {
       if (!other.alive) continue;
-      if (isPlayer === other.isPlayerUnit) continue; // skip allies
+      if (isPlayer === other.isPlayerUnit) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist < (entity.stats.sight * CELL_SIZE)) {
         entity.mission = Mission.ATTACK;
@@ -387,9 +431,9 @@ export class Game {
     }
   }
 
-  /** Check win/lose conditions (grace period: first 3 seconds are safe) */
+  /** Check win/lose conditions */
   private checkVictoryConditions(): void {
-    if (this.tick < GAME_TICKS_PER_SEC * 3) return; // 3-second grace period
+    if (this.tick < GAME_TICKS_PER_SEC * 3) return;
 
     const playerAlive = this.entities.some(e => e.alive && e.isPlayerUnit);
     const antsAlive = this.entities.some(e => e.alive && e.isAnt);
@@ -412,6 +456,8 @@ export class Game {
       this.assets,
       this.input.state,
       this.selectedIds,
+      this.effects,
+      this.tick,
     );
   }
 }

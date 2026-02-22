@@ -75,7 +75,8 @@ export function findPath(
       if (open[i].f < open[bestIdx].f) bestIdx = i;
     }
     const current = open[bestIdx];
-    open.splice(bestIdx, 1);
+    open[bestIdx] = open[open.length - 1];
+    open.pop();
 
     const ck = key(current.cx, current.cy);
     openMap.delete(ck);

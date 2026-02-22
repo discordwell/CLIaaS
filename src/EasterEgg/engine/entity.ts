@@ -42,6 +42,14 @@ export class Entity {
   animFrame = 0;
   animTick = 0;
 
+  // Death / visual
+  deathTick = 0;       // ticks since death (for corpse fade + cleanup)
+  damageFlash = 0;     // ticks remaining for damage flash effect
+
+  // AI rate-limiting
+  lastGuardScan = 0;   // tick when guard last scanned
+  lastAIScan = 0;      // tick when ant AI last scanned
+
   // Combat
   attackCooldown = 0;
   weapon: WeaponStats | null;
@@ -122,6 +130,7 @@ export class Entity {
   takeDamage(amount: number): boolean {
     if (!this.alive) return false;
     this.hp -= amount;
+    this.damageFlash = 4;
     if (this.hp <= 0) {
       this.hp = 0;
       this.alive = false;
@@ -129,6 +138,7 @@ export class Entity {
       this.animState = AnimState.DIE;
       this.animFrame = 0;
       this.animTick = 0;
+      this.deathTick = 0;
       return true;
     }
     return false;
@@ -149,6 +159,8 @@ export class Entity {
       this.animTick = 0;
       this.animFrame++;
     }
+    if (!this.alive) this.deathTick++;
+    if (this.damageFlash > 0) this.damageFlash--;
   }
 
   /** Move toward a world position at the unit's speed */

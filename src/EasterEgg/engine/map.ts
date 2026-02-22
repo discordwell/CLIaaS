@@ -28,9 +28,13 @@ export class GameMap {
   /** Occupancy: entity ID at each cell (0 = empty) */
   occupancy: Int32Array;
 
+  /** Fog of war: 0=shroud, 1=fog (explored), 2=visible */
+  visibility: Uint8Array;
+
   constructor() {
     this.cells = new Array(MAP_CELLS * MAP_CELLS).fill(Terrain.CLEAR);
     this.occupancy = new Int32Array(MAP_CELLS * MAP_CELLS);
+    this.visibility = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.boundsX = 0;
     this.boundsY = 0;
     this.boundsW = MAP_CELLS;
@@ -91,6 +95,41 @@ export class GameMap {
   getOccupancy(cx: number, cy: number): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return -1;
     return this.occupancy[cy * MAP_CELLS + cx];
+  }
+
+  /** Get visibility at cell: 0=shroud, 1=fog, 2=visible */
+  getVisibility(cx: number, cy: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
+    return this.visibility[cy * MAP_CELLS + cx];
+  }
+
+  /** Set visibility at cell */
+  setVisibility(cx: number, cy: number, v: number): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      this.visibility[cy * MAP_CELLS + cx] = v;
+    }
+  }
+
+  /** Update fog of war: downgrade visible to fog, then reveal around units */
+  updateFogOfWar(units: Array<{ x: number; y: number; sight: number }>): void {
+    // Downgrade all visible cells to fog (explored)
+    for (let i = 0; i < this.visibility.length; i++) {
+      if (this.visibility[i] === 2) this.visibility[i] = 1;
+    }
+    // Reveal around each player unit
+    for (const u of units) {
+      const cx = Math.floor(u.x / CELL_SIZE);
+      const cy = Math.floor(u.y / CELL_SIZE);
+      const s = u.sight;
+      const s2 = s * s;
+      for (let dy = -s; dy <= s; dy++) {
+        for (let dx = -s; dx <= s; dx++) {
+          if (dx * dx + dy * dy <= s2) {
+            this.setVisibility(cx + dx, cy + dy, 2);
+          }
+        }
+      }
+    }
   }
 
   /** Initialize a basic map with impassable borders */

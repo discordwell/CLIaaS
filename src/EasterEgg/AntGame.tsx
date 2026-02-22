@@ -91,13 +91,14 @@ export default function AntGame({ onExit }: AntGameProps) {
 
   // Handle canvas resize
   useEffect(() => {
-    if (!canvasRef.current || !gameRef.current) return;
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
     const observer = new ResizeObserver(() => {
       gameRef.current?.input.updateScale();
     });
-    observer.observe(canvasRef.current);
+    observer.observe(canvas);
     return () => observer.disconnect();
-  }, [gameState]);
+  }, []);
 
   return (
     <div style={{
