@@ -71,18 +71,20 @@ export async function sendTicketReply(params: {
   body: string;
   bodyHtml?: string;
   agentName?: string;
+  originalMessageId?: string;
 }): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const messageId = `<ticket-${params.ticketId}-${Date.now()}@${process.env.NEXT_PUBLIC_BASE_URL?.replace(/https?:\/\//, '') || 'cliaas.com'}>`;
+  const domain = process.env.NEXT_PUBLIC_BASE_URL?.replace(/https?:\/\//, '') || 'cliaas.com';
+  const threadId = `<ticket-${params.ticketId}@${domain}>`;
 
   return sendEmail({
     to: params.customerEmail,
     subject: params.subject.startsWith('Re:') ? params.subject : `Re: ${params.subject}`,
     text: params.body,
     html: params.bodyHtml || `<div>${params.body.replace(/\n/g, '<br>')}</div>`,
-    inReplyTo: messageId,
-    references: messageId,
+    inReplyTo: params.originalMessageId || threadId,
+    references: [threadId, params.originalMessageId].filter(Boolean).join(' '),
     from: params.agentName
-      ? `${params.agentName} via CLIaaS <noreply@${process.env.NEXT_PUBLIC_BASE_URL?.replace(/https?:\/\//, '') || 'cliaas.com'}>`
+      ? `${params.agentName} via CLIaaS <noreply@${domain}>`
       : undefined,
   });
 }

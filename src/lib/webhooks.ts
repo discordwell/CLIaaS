@@ -162,6 +162,42 @@ async function computeHmacSignature(
   return createHmac('sha256', secret).update(payload).digest('hex');
 }
 
+// ---- URL Validation (SSRF prevention) ----
+
+const BLOCKED_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]', '0.0.0.0'];
+const PRIVATE_IP_PATTERNS = [
+  /^10\./,             // 10.0.0.0/8
+  /^172\.(1[6-9]|2\d|3[01])\./,  // 172.16.0.0/12
+  /^192\.168\./,       // 192.168.0.0/16
+  /^169\.254\./,       // link-local
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // CGNAT 100.64.0.0/10
+];
+
+export function validateWebhookUrl(url: string): { valid: boolean; error?: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { valid: false, error: 'Invalid URL' };
+  }
+
+  if (parsed.protocol !== 'https:') {
+    return { valid: false, error: 'Webhook URLs must use HTTPS' };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  if (BLOCKED_HOSTNAMES.includes(hostname)) {
+    return { valid: false, error: 'Webhook URLs cannot target localhost' };
+  }
+
+  if (PRIVATE_IP_PATTERNS.some((p) => p.test(hostname))) {
+    return { valid: false, error: 'Webhook URLs cannot target private/internal IPs' };
+  }
+
+  return { valid: true };
+}
+
 // ---- Public API ----
 
 export function listWebhooks(): WebhookConfig[] {
@@ -178,6 +214,8 @@ export function createWebhook(
   input: Omit<WebhookConfig, 'id' | 'createdAt' | 'updatedAt'>
 ): WebhookConfig {
   ensureDefaults();
+  const urlCheck = validateWebhookUrl(input.url);
+  if (!urlCheck.valid) throw new Error(urlCheck.error);
   const webhook: WebhookConfig = {
     ...input,
     id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -195,6 +233,10 @@ export function updateWebhook(
   ensureDefaults();
   const idx = webhooks.findIndex((w) => w.id === id);
   if (idx === -1) return null;
+  if (updates.url) {
+    const urlCheck = validateWebhookUrl(updates.url);
+    if (!urlCheck.valid) throw new Error(urlCheck.error);
+  }
   webhooks[idx] = {
     ...webhooks[idx],
     ...updates,
@@ -241,6 +283,9 @@ async function sendWithRetry(
   webhook: WebhookConfig,
   event: WebhookEvent
 ): Promise<void> {
+  const urlCheck = validateWebhookUrl(webhook.url);
+  if (!urlCheck.valid) return;
+
   const payload = JSON.stringify({
     event: event.type,
     timestamp: event.timestamp,
@@ -311,6 +356,9 @@ export async function testWebhook(
   url: string,
   secret: string
 ): Promise<{ success: boolean; responseCode: number | null; error?: string }> {
+  const urlCheck = validateWebhookUrl(url);
+  if (!urlCheck.valid) return { success: false, responseCode: null, error: urlCheck.error };
+
   const event: WebhookEvent = {
     type: 'ticket.created',
     timestamp: new Date().toISOString(),
