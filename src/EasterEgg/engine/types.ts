@@ -75,6 +75,8 @@ export enum UnitType {
   // Civilian infantry (for evacuation missions)
   I_C1 = 'C1', I_C2 = 'C2', I_C3 = 'C3', I_C4 = 'C4', I_C5 = 'C5',
   I_C6 = 'C6', I_C7 = 'C7', I_C8 = 'C8', I_C9 = 'C9', I_C10 = 'C10',
+  // Specialist infantry
+  I_CHAN = 'CHAN',  // Specialist (nest gas infantry for SCA03EA)
   // Transport vehicles
   V_TRAN = 'TRAN', // Chinook transport helicopter
   V_LST = 'LST',   // Landing ship transport
@@ -234,6 +236,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   SPY: { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null },
   MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null },
   GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 100, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Sniper' },
+  CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'e1', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null },
   // Civilians (use E1 sprite, no weapon, slow)
   C1: { type: UnitType.I_C1, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   C2: { type: UnitType.I_C2, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
@@ -265,6 +268,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super', splash: 1 },
   ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2, inaccuracy: 1.5 },
   Sniper: { name: 'Sniper', damage: 125, rof: 40, range: 5, warhead: 'Super' },
+  Napalm: { name: 'Napalm', damage: 60, rof: 25, range: 1.75, warhead: 'Super' },
 };
 
 // === Production data ===

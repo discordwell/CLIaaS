@@ -4,9 +4,10 @@
  */
 
 import {
-  type WorldPos, CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
+  type WorldPos, type UnitStats, type WeaponStats,
+  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
-  WARHEAD_VS_ARMOR, type WarheadType,
+  WARHEAD_VS_ARMOR, type WarheadType, UNIT_STATS, WEAPON_STATS,
   PRODUCTION_ITEMS, type ProductionItem,
 } from './types';
 import { AssetManager } from './assets';
@@ -18,7 +19,7 @@ import { GameMap, Terrain } from './map';
 import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
 import {
-  loadScenario,
+  loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
   checkTriggerEvent, executeTriggerAction, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
@@ -135,6 +136,10 @@ export class Game {
   private waypoints = new Map<number, { cx: number; cy: number }>();
   private toCarryOver = false; // save surviving units for next mission
   private theatre = 'TEMPERATE'; // map theatre (TEMPERATE, INTERIOR)
+  /** Per-scenario stat overrides (from INI [TypeName] sections) */
+  private scenarioUnitStats: Record<string, UnitStats> = UNIT_STATS;
+  private scenarioWeaponStats: Record<string, WeaponStats> = WEAPON_STATS;
+  private warheadOverrides: Record<string, [number, number, number]> = {};
   private allowWin = false; // set by ALLOWWIN action — required before win condition fires
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
   private missionTimerExpired = false;
@@ -191,20 +196,23 @@ export class Game {
     });
 
     // Load scenario
-    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers, credits, toCarryOver, theatre } = await loadScenario(scenarioId);
-    this.map = map;
-    this.entities = entities;
-    this.structures = structures;
+    const scenario = await loadScenario(scenarioId);
+    this.map = scenario.map;
+    this.entities = scenario.entities;
+    this.structures = scenario.structures;
     this.entityById.clear();
-    for (const e of entities) this.entityById.set(e.id, e);
-    this.missionName = name;
-    this.missionBriefing = briefing;
-    this.waypoints = waypoints;
-    this.teamTypes = teamTypes;
-    this.triggers = triggers;
-    this.credits = credits;
-    this.toCarryOver = toCarryOver;
-    this.theatre = theatre;
+    for (const e of scenario.entities) this.entityById.set(e.id, e);
+    this.missionName = scenario.name;
+    this.missionBriefing = scenario.briefing;
+    this.waypoints = scenario.waypoints;
+    this.teamTypes = scenario.teamTypes;
+    this.triggers = scenario.triggers;
+    this.credits = scenario.credits;
+    this.toCarryOver = scenario.toCarryOver;
+    this.theatre = scenario.theatre;
+    this.scenarioUnitStats = scenario.scenarioUnitStats;
+    this.scenarioWeaponStats = scenario.scenarioWeaponStats;
+    this.warheadOverrides = scenario.warheadOverrides;
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.globals.clear();
@@ -231,7 +239,7 @@ export class Game {
     this.updateFogOfWar();
 
     // Center camera on player start
-    const playerUnits = entities.filter(e => e.isPlayerUnit);
+    const playerUnits = this.entities.filter(e => e.isPlayerUnit);
     if (playerUnits.length > 0) {
       const avg = playerUnits.reduce(
         (acc, e) => ({ x: acc.x + e.pos.x, y: acc.y + e.pos.y }),
@@ -2343,9 +2351,7 @@ export class Game {
         }
 
         // Apply warhead-vs-armor damage multiplier + veterancy bonus
-        const armorIdx = entity.target.stats.armor === 'none' ? 0
-          : entity.target.stats.armor === 'light' ? 1 : 2;
-        const mult = WARHEAD_VS_ARMOR[entity.weapon.warhead]?.[armorIdx] ?? 1;
+        const mult = this.getWarheadMult(entity.weapon.warhead, entity.target.stats.armor);
         const damage = Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
         const killed = directHit ? entity.target.takeDamage(damage, entity.weapon.warhead) : false;
 
@@ -2798,6 +2804,7 @@ export class Game {
     const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     for (const s of this.structures) {
       if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
+      if (s.ammo === 0) continue; // out of ammo (e.g. SCA04EA TSLA Ammo=3)
       if (s.attackCooldown > 0) {
         if (!isLowPower || this.tick % 2 === 0) s.attackCooldown--;
         continue;
@@ -2827,11 +2834,10 @@ export class Game {
 
       if (bestTarget) {
         s.attackCooldown = s.weapon.rof;
+        if (s.ammo > 0) s.ammo--; // consume ammo (ignores -1 unlimited)
         // Apply warhead-vs-armor multiplier
         const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
-        const armorIdx = bestTarget.stats.armor === 'none' ? 0
-          : bestTarget.stats.armor === 'light' ? 1 : 2;
-        const mult = WARHEAD_VS_ARMOR[wh]?.[armorIdx] ?? 1;
+        const mult = this.getWarheadMult(wh, bestTarget.stats.armor);
         const damage = Math.max(1, Math.round(s.weapon.damage * mult));
         const killed = bestTarget.takeDamage(damage, wh);
 
@@ -2976,6 +2982,14 @@ export class Game {
     }
   }
 
+  /** Get warhead-vs-armor damage multiplier, respecting per-scenario overrides */
+  private getWarheadMult(warhead: WarheadType, armor: 'none' | 'light' | 'heavy'): number {
+    const armorIdx = armor === 'none' ? 0 : armor === 'light' ? 1 : 2;
+    const overridden = this.warheadOverrides[warhead];
+    if (overridden) return overridden[armorIdx] ?? 1;
+    return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
+  }
+
   /** Apply AOE splash damage to entities near an impact point */
   private applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
@@ -2994,9 +3008,7 @@ export class Game {
       // Friendly fire deals half splash damage
       const falloff = 1 - (dist / splashRange) * 0.75;
       const friendlyMod = isFriendly ? 0.5 : 1.0;
-      const armorIdx = other.stats.armor === 'none' ? 0
-        : other.stats.armor === 'light' ? 1 : 2;
-      const mult = WARHEAD_VS_ARMOR[weapon.warhead]?.[armorIdx] ?? 1;
+      const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
       const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5 * friendlyMod));
       const killed = other.takeDamage(splashDmg, weapon.warhead);
 
@@ -3265,6 +3277,10 @@ export class Game {
         }
         if (result.playSound !== undefined) {
           this.handleTriggerSound(result.playSound);
+        }
+        // Apply per-scenario stat overrides to spawned entities
+        if (result.spawned.length > 0) {
+          applyScenarioOverrides(result.spawned, this.scenarioUnitStats, this.scenarioWeaponStats);
         }
         // Tag ant spawns with wave coordination
         const ants = result.spawned.filter(e => e.isAnt);
@@ -3578,6 +3594,7 @@ export class Game {
       rubble: false,
       weapon: STRUCTURE_WEAPONS[item.type],
       attackCooldown: 0,
+      ammo: -1,
       buildProgress: 0, // starts construction animation
     };
     this.structures.push(newStruct);
@@ -3635,6 +3652,7 @@ export class Game {
       alive: true,
       rubble: false,
       attackCooldown: 0,
+      ammo: -1,
     };
     this.structures.push(newStruct);
     // Mark 3x3 footprint

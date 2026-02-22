@@ -3,7 +3,12 @@
  * Reads unit placements, waypoints, team types, and triggers from SCA01-04EA.INI.
  */
 
-import { type CellPos, CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell, House, Mission, UnitType, GAME_TICKS_PER_SEC } from './types';
+import {
+  type CellPos, type UnitStats, type WeaponStats, type WarheadType,
+  CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
+  House, Mission, UnitType, GAME_TICKS_PER_SEC,
+  UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
+} from './types';
 import { Entity } from './entity';
 import { GameMap, Terrain } from './map';
 
@@ -275,6 +280,7 @@ interface ScenarioData {
   baseStructures: Array<{ type: string; cell: number; house: string }>; // [Base] section pre-placed structures
   smudges: Array<{ type: string; cell: number }>; // [SMUDGE] section scorch/crater marks
   theatre: string; // TEMPERATE, INTERIOR, etc.
+  rawSections: Map<string, Map<string, string>>; // all INI sections for per-scenario overrides
 }
 
 /** Parse an INI-format scenario file */
@@ -569,6 +575,7 @@ export function parseScenarioINI(text: string): ScenarioData {
     baseStructures,
     smudges,
     theatre,
+    rawSections: sections,
   };
 }
 
@@ -602,8 +609,10 @@ function toUnitType(name: string): UnitType | null {
     // Civilians
     C1: UnitType.I_C1, C2: UnitType.I_C2, C3: UnitType.I_C3, C4: UnitType.I_C4, C5: UnitType.I_C5,
     C6: UnitType.I_C6, C7: UnitType.I_C7, C8: UnitType.I_C8, C9: UnitType.I_C9, C10: UnitType.I_C10,
-    // Transports (CHAN is alternate name for TRAN/Chinook)
-    TRAN: UnitType.V_TRAN, CHAN: UnitType.V_TRAN, LST: UnitType.V_LST,
+    // Specialist infantry (CHAN = nest gas specialist in SCA03EA)
+    CHAN: UnitType.I_CHAN,
+    // Transports
+    TRAN: UnitType.V_TRAN, LST: UnitType.V_LST,
   };
   return map[name] ?? null;
 }
@@ -655,6 +664,7 @@ export interface MapStructure {
   rubble: boolean;    // destroyed structure leaves rubble
   weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
   attackCooldown: number;    // ticks until next shot
+  ammo: number;              // remaining shots (-1 = unlimited)
   triggerName?: string;      // attached trigger name (from INI)
   buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
@@ -707,6 +717,12 @@ export interface ScenarioResult {
   credits: number;
   toCarryOver: boolean;
   theatre: string;
+  /** Per-scenario unit stats (UNIT_STATS merged with INI overrides) */
+  scenarioUnitStats: Record<string, UnitStats>;
+  /** Per-scenario weapon stats (WEAPON_STATS merged with INI overrides) */
+  scenarioWeaponStats: Record<string, WeaponStats>;
+  /** Per-scenario warhead damage multipliers (overrides for WARHEAD_VS_ARMOR) */
+  warheadOverrides: Record<string, [number, number, number]>;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -812,6 +828,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       rubble: false,
       weapon: STRUCTURE_WEAPONS[s.type],
       attackCooldown: 0,
+      ammo: -1,
       triggerName: trigName,
     });
     // Mark structure footprint cells as impassable (WALL terrain)
@@ -841,6 +858,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       rubble: false,
       weapon: STRUCTURE_WEAPONS[bs.type],
       attackCooldown: 0,
+      ammo: -1,
     });
     const [fw, fh] = STRUCTURE_SIZE[bs.type] ?? [1, 1];
     for (let dy = 0; dy < fh; dy++) {
@@ -906,6 +924,80 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     }
   }
 
+  // === Per-scenario stat overrides from INI [TypeName] sections ===
+  // RA scenarios override unit/weapon/structure stats via INI sections matching the type name.
+  // Build scenario-local copies of UNIT_STATS and WEAPON_STATS with overrides applied.
+
+  const scenarioUnitStats: Record<string, UnitStats> = { ...UNIT_STATS };
+  const scenarioWeaponStats: Record<string, WeaponStats> = { ...WEAPON_STATS };
+  const warheadOverrides: Record<string, [number, number, number]> = {};
+
+  // Apply unit stat overrides from INI sections
+  for (const typeName of Object.keys(UNIT_STATS)) {
+    const section = data.rawSections.get(typeName);
+    if (!section) continue;
+    const base: UnitStats = { ...UNIT_STATS[typeName] };
+    if (section.has('Strength')) base.strength = parseInt(section.get('Strength')!);
+    if (section.has('Speed')) base.speed = parseInt(section.get('Speed')!);
+    if (section.has('Sight')) base.sight = parseInt(section.get('Sight')!);
+    if (section.has('ROT')) base.rot = parseInt(section.get('ROT')!);
+    if (section.has('Primary')) base.primaryWeapon = section.get('Primary')!;
+    if (section.has('NoMovingFire')) base.noMovingFire = section.get('NoMovingFire')!.toLowerCase() === 'yes';
+    if (section.has('Passengers')) base.passengers = parseInt(section.get('Passengers')!);
+    if (section.has('Armor')) {
+      const a = section.get('Armor')!.toLowerCase();
+      if (a === 'light' || a === 'heavy' || a === 'none') base.armor = a;
+    }
+    scenarioUnitStats[typeName] = base;
+  }
+
+  // Apply weapon stat overrides from INI sections (and detect new weapons)
+  const weaponNames = new Set(Object.keys(WEAPON_STATS));
+  // Also check for weapons referenced by unit overrides that might be new (e.g. Napalm)
+  for (const stats of Object.values(scenarioUnitStats)) {
+    if (stats.primaryWeapon) weaponNames.add(stats.primaryWeapon);
+  }
+  for (const weaponName of weaponNames) {
+    const section = data.rawSections.get(weaponName);
+    if (!section) continue;
+    const base: WeaponStats = { ...(WEAPON_STATS[weaponName] ?? { name: weaponName, damage: 0, rof: 20, range: 1, warhead: 'HE' as const }) };
+    if (section.has('Damage')) base.damage = parseInt(section.get('Damage')!);
+    if (section.has('ROF')) base.rof = parseInt(section.get('ROF')!);
+    if (section.has('Range')) base.range = parseFloat(section.get('Range')!);
+    if (section.has('Warhead')) base.warhead = section.get('Warhead')! as WarheadType;
+    scenarioWeaponStats[weaponName] = base;
+  }
+
+  // Apply warhead Verses overrides (e.g. [Fire] Verses=90%,100%,150%,150%,50%)
+  // RA has 5 armor classes: none(0), wood(1), aluminum(2), steel(3), heavy(4)
+  // Our 3-class system: none←RA[0], light←RA[2], heavy←RA[3]
+  for (const whName of Object.keys(WARHEAD_VS_ARMOR)) {
+    const section = data.rawSections.get(whName);
+    if (!section?.has('Verses')) continue;
+    const parts = section.get('Verses')!.split(',').map(s => parseInt(s) / 100);
+    if (parts.length >= 4) {
+      warheadOverrides[whName] = [parts[0], parts[2], parts[3]];
+    }
+  }
+
+  // Apply structure overrides from INI (e.g. [TSLA] Ammo=3, Strength=500)
+  for (const s of structures) {
+    const section = data.rawSections.get(s.type);
+    if (!section) continue;
+    if (section.has('Ammo')) {
+      s.ammo = parseInt(section.get('Ammo')!);
+    }
+    if (section.has('Strength')) {
+      const newMax = parseInt(section.get('Strength')!);
+      const hpRatio = s.maxHp > 0 ? s.hp / s.maxHp : 1;
+      s.maxHp = newMax;
+      s.hp = Math.round(hpRatio * newMax);
+    }
+  }
+
+  // Patch all entities with scenario-local stats and weapons
+  applyScenarioOverrides(entities, scenarioUnitStats, scenarioWeaponStats);
+
   return {
     map,
     entities,
@@ -919,7 +1011,31 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     credits: data.playerCredits * 100, // INI Credits field is ×100
     toCarryOver: data.toCarryOver,
     theatre: data.theatre,
+    scenarioUnitStats,
+    scenarioWeaponStats,
+    warheadOverrides,
   };
+}
+
+/** Apply per-scenario unit/weapon stat overrides to a list of entities.
+ *  Used both at load time and when spawning trigger reinforcements. */
+export function applyScenarioOverrides(
+  entities: Entity[],
+  unitStats: Record<string, UnitStats>,
+  weaponStats: Record<string, WeaponStats>,
+): void {
+  for (const entity of entities) {
+    const overridden = unitStats[entity.type];
+    if (!overridden) continue;
+    const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
+    entity.stats = overridden;
+    entity.maxHp = overridden.strength;
+    entity.hp = Math.round(hpRatio * entity.maxHp);
+    // Re-resolve weapon from scenario weapon stats
+    entity.weapon = overridden.primaryWeapon
+      ? weaponStats[overridden.primaryWeapon] ?? null
+      : null;
+  }
 }
 
 // === OverlayPack Decoder ===
