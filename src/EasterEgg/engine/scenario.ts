@@ -116,6 +116,7 @@ export interface ScenarioTrigger {
   fired: boolean;         // has this trigger fired?
   timerTick: number;      // game tick when timer started (for TIME events)
   playerEntered: boolean; // has a player unit entered a cell with this trigger?
+  forceFirePending: boolean; // set by FORCE_TRIGGER — fires on next check regardless of events
 }
 
 // === Mission Metadata ===
@@ -472,6 +473,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         fired: false,
         timerTick: 0,
         playerEntered: false,
+        forceFirePending: false,
       });
     }
   }
@@ -1100,6 +1102,7 @@ export function checkTriggerEvent(
 ): boolean {
   switch (event.type) {
     case TEVENT_NONE:
+      return false; // no event — only fires when forced by FORCE_TRIGGER
     case TEVENT_ANY:
       return true;
     case TEVENT_TIME: {
@@ -1124,11 +1127,17 @@ export function checkTriggerEvent(
     case TEVENT_MISSION_TIMER_EXPIRED:
       return state.missionTimerExpired;
     case TEVENT_BUILDING_EXISTS: {
-      // Check if a specific building type exists (event.data is building type index)
-      // Map RA building type indices to type codes used in ant missions
-      const BUILDING_TYPES = ['FACT', 'POWR', 'BARR', 'TENT', 'PROC', 'WEAP', 'FIX', 'SILO',
-        'DOME', 'GUN', 'SAM', 'HBOX', 'PBOX', 'TSLA', 'AGUN', 'FTUR', 'QUEE', 'LAR1', 'LAR2'];
-      const btype = BUILDING_TYPES[event.data];
+      // Check if a specific building type exists (event.data is RA StructType enum index)
+      // RA StructType enum order from BTYPE.H:
+      const STRUCT_TYPES: Record<number, string> = {
+        0: 'ATEK', 1: 'IRON', 2: 'WEAP', 3: 'PDOX', 4: 'PBOX', 5: 'HBOX',
+        6: 'DOME', 7: 'GAP',  8: 'GUN',  9: 'AGUN', 10: 'FTUR', 11: 'FACT',
+        12: 'PROC', 13: 'SILO', 14: 'HPAD', 15: 'SAM', 16: 'AFLD', 17: 'POWR',
+        18: 'APWR', 19: 'STEK', 20: 'HOSP', 21: 'BARR', 22: 'TENT', 23: 'KENN',
+        24: 'FIX',  25: 'BIO',  26: 'MISS', 27: 'SYRD', 28: 'SPEN', 29: 'MSLO',
+        30: 'FCOM', 31: 'TSLA', 32: 'QUEE', 33: 'LAR1', 34: 'LAR2',
+      };
+      const btype = STRUCT_TYPES[event.data];
       if (btype) return state.structureTypes.has(btype);
       return state.structureTypes.size > 0; // fallback: any building
     }
@@ -1247,9 +1256,11 @@ export function executeTriggerAction(
       break;
 
     case TACTION_FORCE_TRIGGER: {
-      // Force another trigger to re-evaluate by resetting its fired state
+      // Force another trigger to fire on the next check regardless of event conditions
       if (action.trigger >= 0 && action.trigger < triggers.length) {
-        triggers[action.trigger].fired = false;
+        const target = triggers[action.trigger];
+        target.fired = false;
+        target.forceFirePending = true;
       }
       break;
     }

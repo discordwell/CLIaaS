@@ -208,10 +208,13 @@ export class Game {
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.globals.clear();
-    // Set global 1 immediately — simulates the player discovering the ant area.
-    // In the original, this is set by cell-entry triggers when the player explores,
-    // but for gameplay pacing we enable it at start so ant waves begin spawning.
-    this.globals.add(1);
+    // SCA01EA: Set global 1 at start so ant waves spawn immediately.
+    // rvl2 would set it at time 30 anyway, but this ensures action from the start.
+    // Other scenarios (SCA02-04) use global 1 for different purposes (DZ flares,
+    // reinforcement timing) and must NOT have it set early.
+    if (scenarioId === 'SCA01EA') {
+      this.globals.add(1);
+    }
     // First crate spawns after 60 seconds
     this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
     this.crates = [];
@@ -3151,17 +3154,23 @@ export class Game {
       // Persistent (2): allowed to re-fire after timer reset
       if (trigger.fired && trigger.persistence <= 1) continue;
 
-      // Check event conditions
-      const state = this.buildTriggerState(trigger, shared);
-      const e1Met = checkTriggerEvent(trigger.event1, state);
-      const e2Met = checkTriggerEvent(trigger.event2, state);
-
+      // Force-fired triggers bypass event conditions
       let shouldFire = false;
-      switch (trigger.eventControl) {
-        case 0: shouldFire = e1Met; break;            // only event1
-        case 1: shouldFire = e1Met && e2Met; break;   // AND
-        case 2: shouldFire = e1Met || e2Met; break;   // OR
-        default: shouldFire = e1Met; break;
+      if (trigger.forceFirePending) {
+        shouldFire = true;
+        trigger.forceFirePending = false;
+      } else {
+        // Check event conditions
+        const state = this.buildTriggerState(trigger, shared);
+        const e1Met = checkTriggerEvent(trigger.event1, state);
+        const e2Met = checkTriggerEvent(trigger.event2, state);
+
+        switch (trigger.eventControl) {
+          case 0: shouldFire = e1Met; break;            // only event1
+          case 1: shouldFire = e1Met && e2Met; break;   // AND
+          case 2: shouldFire = e1Met || e2Met; break;   // OR
+          default: shouldFire = e1Met; break;
+        }
       }
 
       if (!shouldFire) continue;
@@ -3349,13 +3358,29 @@ export class Game {
     if (this.tick < GAME_TICKS_PER_SEC * 3) return;
 
     const playerAlive = this.entities.some(e => e.alive && e.isPlayerUnit);
-    const antsAlive = this.entities.some(e => e.alive && e.isAnt);
 
-    // Check if any unfired triggers will still spawn ants
+    // Loss: all player units dead
+    if (!playerAlive) {
+      this.state = 'lost';
+      this.audio.play('defeat_sting');
+      this.onStateChange?.('lost');
+      return;
+    }
+
+    // Win conditions are primarily trigger-driven (TACTION_WIN).
+    // Only use the "all ants dead" shortcut if no trigger will fire TACTION_WIN.
+    // SCA01EA uses timer-based win; SCA02EA uses bridge+zone win — these must NOT
+    // be short-circuited by killing all ants.
+    const hasTriggerWin = this.triggers.some(t => {
+      if (t.fired && t.persistence <= 1) return false;
+      return t.action1.action === 1 || t.action2.action === 1; // TACTION_WIN = 1
+    });
+    if (hasTriggerWin) return; // let triggers handle win condition
+
+    // Fallback: all ants dead + no more incoming = win
+    const antsAlive = this.entities.some(e => e.alive && e.isAnt);
     const pendingAntTriggers = this.triggers.some(t => {
-      if (t.fired && t.persistence <= 1) return false; // volatile/semi-persistent already fired
-      // Persistent triggers that fired still re-fire — consider them pending
-      // Check if any action spawns an ant team (REINFORCEMENTS=7 or CREATE_TEAM=4)
+      if (t.fired && t.persistence <= 1) return false;
       const checksTeam = (team: number) => {
         if (team < 0 || team >= this.teamTypes.length) return false;
         return this.teamTypes[team].members.some(m => m.type.startsWith('ANT'));
@@ -3364,27 +3389,17 @@ export class Game {
       const spawnsAnts = (isSpawnAction(t.action1.action) && checksTeam(t.action1.team)) ||
              (isSpawnAction(t.action2.action) && checksTeam(t.action2.team));
       if (!spawnsAnts) return false;
-      // For persistent triggers that already fired, check if they'll fire again (TIME events)
       if (t.fired && t.persistence === 2) return true;
       return !t.fired;
     });
-
-    // Check for ant hive structures (QUEE, LAR1, LAR2) — must destroy all enemy ones to win
     const ANT_STRUCTURES = new Set(['QUEE', 'LAR1', 'LAR2']);
     const antStructuresAlive = this.structures.some(s =>
       s.alive && ANT_STRUCTURES.has(s.type) &&
       s.house !== House.Spain && s.house !== House.Greece
     );
 
-    if (!playerAlive) {
-      this.state = 'lost';
-      this.audio.play('defeat_sting');
-      this.onStateChange?.('lost');
-    } else if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
-      // Save surviving units for carry-over to next mission
-      if (this.toCarryOver) {
-        saveCarryover(this.entities);
-      }
+    if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
+      if (this.toCarryOver) saveCarryover(this.entities);
       this.state = 'won';
       this.audio.play('victory_fanfare');
       this.audio.play('eva_mission_accomplished');
