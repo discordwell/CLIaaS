@@ -3,7 +3,7 @@
  * Reads unit placements, waypoints, team types, and triggers from SCA01-04EA.INI.
  */
 
-import { type CellPos, cellIndexToPos, cellToWorld, House, UnitType, GAME_TICKS_PER_SEC } from './types';
+import { type CellPos, CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell, House, Mission, UnitType, GAME_TICKS_PER_SEC } from './types';
 import { Entity } from './entity';
 import { GameMap, Terrain } from './map';
 
@@ -151,6 +151,43 @@ export function saveProgress(completedMission: number): void {
   }
 }
 
+// --- Mission carry-over: surviving units transfer to next mission ---
+const CARRYOVER_KEY = 'antmissions_carryover';
+
+interface CarryoverUnit {
+  type: string;
+  hp: number;
+  maxHp: number;
+  kills: number;
+  veterancy: number;
+}
+
+export function saveCarryover(entities: Entity[]): void {
+  try {
+    const alive = entities
+      .filter(e => e.alive && e.isPlayerUnit)
+      .map(e => ({
+        type: e.type,
+        hp: e.hp,
+        maxHp: e.maxHp,
+        kills: e.kills,
+        veterancy: e.veterancy,
+      }));
+    localStorage.setItem(CARRYOVER_KEY, JSON.stringify(alive));
+  } catch { /* noop */ }
+}
+
+export function loadCarryover(): CarryoverUnit[] {
+  try {
+    const val = localStorage.getItem(CARRYOVER_KEY);
+    if (val) {
+      localStorage.removeItem(CARRYOVER_KEY); // consume once
+      return JSON.parse(val) as CarryoverUnit[];
+    }
+  } catch { /* noop */ }
+  return [];
+}
+
 interface ScenarioData {
   name: string;
   briefing: string;
@@ -194,6 +231,8 @@ interface ScenarioData {
   cellTriggers: Map<number, string>;
   mapPack: string;      // raw Base64 MapPack data
   overlayPack: string;  // raw Base64 OverlayPack data
+  toCarryOver: boolean; // surviving units carry to next mission
+  toInherit: boolean;   // next mission inherits carry-over units
 }
 
 /** Parse an INI-format scenario file */
@@ -433,6 +472,8 @@ export function parseScenarioINI(text: string): ScenarioData {
     cellTriggers,
     mapPack,
     overlayPack,
+    toCarryOver: get('Basic', 'ToCarryOver', 'no').toLowerCase() === 'yes',
+    toInherit: get('Basic', 'ToInherit', 'no').toLowerCase() === 'yes',
   };
 }
 
@@ -548,6 +589,23 @@ export interface ScenarioResult {
   triggers: ScenarioTrigger[];
   cellTriggers: Map<number, string>;
   credits: number;
+  toCarryOver: boolean;
+}
+
+/** Convert INI mission string to Mission enum and apply to entity */
+function applyMission(entity: Entity, missionStr: string): void {
+  const m = missionStr.trim();
+  if (m === 'Hunt') {
+    entity.mission = Mission.HUNT;
+  } else if (m === 'Area Guard') {
+    entity.mission = Mission.AREA_GUARD;
+    entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
+  } else if (m === 'Sleep') {
+    entity.mission = Mission.SLEEP;
+  } else {
+    // Default: Guard
+    entity.mission = Mission.GUARD;
+  }
 }
 
 /** Load a scenario and create entities + map setup */
@@ -600,6 +658,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     entity.desiredFacing = entity.facing;
     entity.turretFacing = entity.facing;
     entity.hp = Math.floor((u.hp / 256) * entity.maxHp);
+    applyMission(entity, u.mission);
     entities.push(entity);
   }
 
@@ -613,6 +672,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     entity.desiredFacing = entity.facing;
     entity.hp = Math.floor((inf.hp / 256) * entity.maxHp);
     entity.subCell = inf.subCell;
+    applyMission(entity, inf.mission);
     entities.push(entity);
   }
 
@@ -647,6 +707,53 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   // Store cell triggers on the map for runtime checks
   map.cellTriggers = data.cellTriggers;
 
+  // Apply carry-over units from previous mission (if ToInherit=yes)
+  if (data.toInherit) {
+    const carried = loadCarryover();
+    if (carried.length > 0) {
+      // Spawn carry-over units near the player start position
+      const playerUnits = entities.filter(e => e.isPlayerUnit);
+      let spawnX = 0, spawnY = 0;
+      if (playerUnits.length > 0) {
+        spawnX = playerUnits[0].pos.x;
+        spawnY = playerUnits[0].pos.y;
+      }
+      for (let i = 0; i < carried.length; i++) {
+        const cu = carried[i];
+        const unitType = toUnitType(cu.type);
+        if (!unitType) continue;
+        // Spread units in a grid around the spawn point, ensuring passable terrain
+        const col = i % 5;
+        const row = Math.floor(i / 5);
+        let ox = (col - 2) * CELL_SIZE;
+        let oy = (row + 1) * CELL_SIZE;
+        // Find nearest passable cell if grid position is blocked
+        const candidateCell = worldToCell(spawnX + ox, spawnY + oy);
+        if (!map.isPassable(candidateCell.cx, candidateCell.cy)) {
+          let found = false;
+          for (let r = 1; r <= 5 && !found; r++) {
+            for (let dy = -r; dy <= r && !found; dy++) {
+              for (let dx = -r; dx <= r && !found; dx++) {
+                if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                if (map.isPassable(candidateCell.cx + dx, candidateCell.cy + dy)) {
+                  ox = (candidateCell.cx + dx) * CELL_SIZE + CELL_SIZE / 2 - spawnX;
+                  oy = (candidateCell.cy + dy) * CELL_SIZE + CELL_SIZE / 2 - spawnY;
+                  found = true;
+                }
+              }
+            }
+          }
+        }
+        const entity = new Entity(unitType, House.Spain, spawnX + ox, spawnY + oy);
+        entity.hp = cu.hp;
+        entity.maxHp = cu.maxHp;
+        entity.kills = cu.kills;
+        entity.veterancy = cu.veterancy;
+        entities.push(entity);
+      }
+    }
+  }
+
   return {
     map,
     entities,
@@ -658,6 +765,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     triggers: data.triggers,
     cellTriggers: data.cellTriggers,
     credits: data.playerCredits * 100, // INI Credits field is ×100
+    toCarryOver: data.toCarryOver,
   };
 }
 

@@ -113,6 +113,9 @@ export class Entity {
   teamMissionIndex = 0;
   teamMissionWaiting = 0;  // ticks to wait at current mission (for GUARD duration)
 
+  // Area Guard: remember spawn origin so unit returns if it strays too far
+  guardOrigin: WorldPos | null = null; // set when unit spawns with Area Guard mission
+
   // Wave coordination: ants from the same trigger share a waveId
   waveId = 0;              // 0 = no wave group
   waveRallyTick = 0;       // tick when wave should start attacking (rally delay)

@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-02-23T17:15Z — Session 20: Area Guard, Service Depot, Production Queue, Radar, Crates
+- Implemented Area Guard mission: patrol/defend spawn area, attack nearby enemies, return if >8 cells from origin
+- Added `applyMission()` INI mission string parser (Guard/Area Guard/Hunt/Sleep)
+- Added `idleMission()` helper: all GUARD idle transitions respect guardOrigin
+- Service Depot (FIX building) auto-repair: heals nearby vehicles 2 HP/3 ticks with spark effect
+- Production queue: queue up to 5 of same item per category, right-click cancels one from queue
+- Radar requirement: DOME building required for minimap, shows cached static noise without it
+- Mission carry-over: localStorage save/load surviving units between missions (ToCarryOver/ToInherit INI flags)
+- Carry-over units spawn with passability check (code review fix: prevents stuck in walls)
+- Crate drops: money/heal/veterancy/unit bonuses, spawn every 60-90s, max 3 on map, 3min expiry
+- E key: select all units of same type on entire map
+- Area Guard ants now engage enemies while returning home (code review fix)
+- Idle cycle (period key) includes AREA_GUARD player units (code review fix)
+- Radar static noise performance fix: cached Uint8Array, updates every 10 frames (code review fix)
+- All changes type check clean (npx tsc --noEmit)
+
 ## 2026-02-23T16:00Z — Session 19: Bug Fixes, Queen Ant, Larvae, GNRL
 - Fixed 9 code review bugs: harvester returning re-entrancy (double GUARD check), structure footprints using STRUCTURE_SIZE instead of hardcoded 2x2, sell mode now refunds 50% credits and clears terrain, destroyed structures clear footprint to passable, findStructureAt uses actual footprint, sidebar scroll clamped to max, cached getAvailableItems per tick, harvesters skip guard auto-attack (would chase forever with no weapon)
 - Added QUEE (Queen Ant) structure: 800 HP, TeslaZap weapon, self-healing +1 HP/2 ticks, 2x2 footprint
@@ -57,81 +73,6 @@
 - Improved pathfinding: soft occupancy costs (+20 penalty) instead of hard blocking
 - Code review fixed 6 issues: S key not consumed, turret fires while rotating, EVA skipped on enemy splash kill, defensive stance stale forceFirePos, DEFENSE_TYPES allocation, orphaned JSDoc
 - All changes type check clean (npx tsc --noEmit)
-
-## 2026-02-23T09:00Z — Session 15: Base Defense, Sell/Repair, EVA, Polish
-- Added artillery scatter/inaccuracy — weapons with inaccuracy field scatter impact point randomly
-- Inaccuracy set on Grenade (0.5) and ArtilleryShell (1.5); projectiles travel to scattered point
-- Added dog anti-infantry targeting priority — dogs prefer infantry over vehicles in guard scan
-- Improved guard scan: all units now pick closest enemy (was first-in-list)
-- Added LOS check in updateAttack — units can't fire through walls, move to get clear shot
-- Added structure health bars on damaged buildings (visible cells only)
-- Expanded unit info panel: weapon name, range, armor class for single selection
-- Added sell mode (Q key) — sells player structures, spawns rifleman, with cursor/label indicator
-- Added repair mode (R key) — toggles repair on damaged structures (1 HP/tick), pulsing green border
-- Added defensive structure auto-fire: HBOX, PBOX, GUN, TSLA, SAM, AGUN, FTUR attack nearby enemies
-- Structure weapons defined in STRUCTURE_WEAPONS lookup with damage, range, rof, splash
-- Tesla coils get special tesla zap effect; other structures fire bullet projectiles
-- Structure weapons now apply warhead-vs-armor multipliers (code review fix)
-- Added EVA announcements: eva_unit_lost (3-note descending), eva_base_attack (4-note alarm)
-- Base attack EVA throttled to once per 5 seconds to prevent spam
-- Imported House, UnitType enums into index.ts for proper type usage
-- Code review found 1 critical bug (structure weapons ignoring armor), fixed
-- Added engineer (E6) building capture — enter hostile structure to convert to player
-- Added force-fire on ground (Ctrl+RMB) — artillery fires at ground position using splash/inaccuracy
-- Added shift+RMB waypoint queue — queue moves for patrol routes
-- Added X key scatter — selected units move to random nearby positions
-- Added Home/Space to center camera on selected units
-- Added G key as guard position shortcut (same as S/stop)
-- Added F1 help overlay with all keyboard shortcuts
-- Added +/-/M volume controls
-- Added structures to minimap (white=player, red=enemy)
-- Added shiftHeld tracking to input system; forceFirePos and moveQueue to Entity
-- 3 commits pushed: fdb3ee7, 91a14f6, 62bdfc0
-- All changes type check clean (npx tsc --noEmit)
-
-## 2026-02-23T07:00Z — Session 14: Combat Mechanics, LOS, Structure Damage
-- Added Bresenham line-of-sight (LOS) to map.ts — vision/targeting blocked by walls/rocks
-- Integrated LOS into fog of war reveal, guard scan, and ant AI targeting
-- Added AOE splash damage system — explosive weapons deal falloff damage to nearby units
-- Splash radius added to: FireballLauncher, MammothTusk, Bazooka, Grenade, Flamethrower, TeslaCannon, ArtilleryShell
-- Made structures damageable and destroyable — right-click to attack buildings
-- MapStructure now has maxHp, alive fields; destruction spawns explosion + scorch mark
-- Added medic auto-heal — medics automatically heal nearby damaged friendly infantry
-- Added infantry scatter on explosion — infantry near splash damage get pushed away
-- Added death animation variety — die2 variant selected randomly (40% chance)
-- Added terrain scorch marks/decals — persistent burn marks where units die
-- Added audio: unit_lost notification, building_explode, heal sounds
-- Fixed control group memory leak — prune dead entity IDs from groups
-- Avoided circular dependency: entity.ts uses StructureRef interface instead of importing MapStructure
-- All changes type check clean (npx tsc --noEmit)
-
-## 2026-02-23T01:30Z — Session 13: 1:1 Fidelity Features + Critical Bug Fixes
-- Continued implementing 1:1 RA ant mission features (Tasks #17-32)
-- Fixed screen shake save/restore mismatch bug in renderer
-- Added NoMovingFire flag (ants, artillery must face target before firing)
-- Added gradual rotation via tickRotation() with per-unit rot speed stat
-- Added infantry sub-cell rendering (5 positions per cell: center + 4 corners)
-- Added vehicle turret rendering (separate body/turret sprite layers, turret tracks target)
-- Added victory/defeat screen with stats (time, kills, losses)
-- Added custom cursor states (crosshair for attack, pointer for move, not-allowed for impassable)
-- Added building damage states and idle animations
-- Added command markers (green/red/yellow rings at move/attack destinations)
-- Added OverlayPack decoding for ore/gem/wall rendering on map
-- Added pause toggle (P/Escape) with pause overlay
-- Added shroud edge blending (soft transitions between shroud and revealed)
-- Fixed Escape key conflict between React UI and game engine pause
-- Added attack-move visual indicator ("A" crosshair near cursor)
-- Added path recalculation when blocked (with cooldown to prevent A* spam)
-- Added idle animation variety (per-unit random fidget delay)
-- Added voice acknowledgment pitch variety (randomized blip frequencies)
-- Code review found 6 critical bugs, all fixed:
-  1. Turret/desired facing not initialized from scenario data
-  2. TMISSION_GUARD duration 8x too long (scan rate vs tick rate)
-  3. HUNT mode walked through walls (now uses pathfinding)
-  4. noMovingFire was dead code (now enforces facing before attack)
-  5. Attack-move units didn't resume move after killing target
-  6. Path recalc hammered A* every tick (added 5-tick cooldown)
-- Also fixed: cellInfCount Map allocation GC pressure (reused class field)
 
 
 # Key Findings

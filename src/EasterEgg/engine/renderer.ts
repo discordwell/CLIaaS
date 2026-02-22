@@ -81,9 +81,13 @@ export class Renderer {
   sidebarPowerProduced = 0;
   sidebarPowerConsumed = 0;
   sidebarItems: ProductionItem[] = [];
-  sidebarQueue: Map<string, { item: ProductionItem; progress: number }> = new Map();
+  sidebarQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
   sidebarScroll = 0;
   sidebarW = 100;
+  hasRadar = false; // requires DOME building for minimap
+  radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
+  radarStaticCounter = 0;
+  crates: Array<{ x: number; y: number; type: string }> = [];
   // Placement ghost
   placementItem: ProductionItem | null = null;
   placementCx = 0;
@@ -141,6 +145,7 @@ export class Renderer {
     this.renderDecals(camera, map);
     this.renderOverlays(camera, map, tick);
     this.renderStructures(camera, map, structures, assets, tick);
+    this.renderCrates(camera, map, tick);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
     this.renderWaypoints(camera, entities, selectedIds);
     this.renderEffects(camera, effects, assets);
@@ -413,6 +418,42 @@ export class Renderer {
   }
 
   // ─── Structures ─────────────────────────────────────────
+
+  private renderCrates(camera: Camera, map: GameMap, tick: number): void {
+    const ctx = this.ctx;
+    for (const crate of this.crates) {
+      const cx = Math.floor(crate.x / CELL_SIZE);
+      const cy = Math.floor(crate.y / CELL_SIZE);
+      if (map.getVisibility(cx, cy) !== 2) continue; // only show in visible area
+      const screen = camera.worldToScreen(crate.x, crate.y);
+      if (screen.x < -20 || screen.x > this.width || screen.y < -20 || screen.y > this.height) continue;
+      // Draw a wooden crate icon
+      const sz = 8;
+      const bob = Math.sin(tick * 0.15) * 1.5; // gentle bobbing
+      ctx.fillStyle = '#8B4513';
+      ctx.fillRect(screen.x - sz, screen.y - sz + bob, sz * 2, sz * 2);
+      ctx.strokeStyle = '#D2691E';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(screen.x - sz, screen.y - sz + bob, sz * 2, sz * 2);
+      // Cross lines on crate
+      ctx.beginPath();
+      ctx.moveTo(screen.x - sz, screen.y - sz + bob);
+      ctx.lineTo(screen.x + sz, screen.y + sz + bob);
+      ctx.moveTo(screen.x + sz, screen.y - sz + bob);
+      ctx.lineTo(screen.x - sz, screen.y + sz + bob);
+      ctx.strokeStyle = '#654321';
+      ctx.stroke();
+      // Type indicator dot
+      const typeColor = crate.type === 'money' ? '#FFD700'
+        : crate.type === 'heal' ? '#00FF00'
+        : crate.type === 'veterancy' ? '#FF4444'
+        : '#4488FF';
+      ctx.fillStyle = typeColor;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y + bob, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
   private renderStructures(
     camera: Camera, map: GameMap, structures: MapStructure[], assets: AssetManager, tick: number,
@@ -966,6 +1007,32 @@ export class Renderer {
     ctx.lineWidth = 1;
     ctx.strokeRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
 
+    // No radar: show static noise instead of map (update every 10 render calls)
+    if (!this.hasRadar) {
+      this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
+      if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
+        const cells = Math.ceil(mmSize / 3);
+        this.radarStaticData = new Uint8Array(cells * cells);
+        for (let i = 0; i < this.radarStaticData.length; i++) {
+          this.radarStaticData[i] = Math.floor(Math.random() * 40);
+        }
+      }
+      const cells = Math.ceil(mmSize / 3);
+      for (let i = 0; i < this.radarStaticData!.length; i++) {
+        const px = mmX + (i % cells) * 3;
+        const py = mmY + Math.floor(i / cells) * 3;
+        const v = this.radarStaticData![i];
+        ctx.fillStyle = `rgb(${v},${v + 5},${v})`;
+        ctx.fillRect(px, py, 3, 3);
+      }
+      ctx.fillStyle = '#666';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('NO RADAR', mmX + mmSize / 2, mmY + mmSize / 2);
+      ctx.textAlign = 'left';
+      return;
+    }
+
     // Terrain (with fog awareness)
     for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 2) {
       for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 2) {
@@ -1120,6 +1187,7 @@ export class Renderer {
       'Ctrl+1-9  Assign group',
       '.         Cycle idle units',
       'Tab       Cycle unit types',
+      'E         Select all same type',
       'D         Deploy MCV',
       'Esc       Cancel mode',
       'P         Pause',
@@ -1220,8 +1288,9 @@ export class Renderer {
         // Name + progress %
         ctx.fillStyle = '#8f8';
         ctx.fillText(`${item.name}`, x + 4, iy + 9);
+        const queueText = qEntry.queueCount > 1 ? ` [x${qEntry.queueCount}]` : '';
         ctx.fillStyle = '#ccc';
-        ctx.fillText(`${Math.floor(progress * 100)}%`, x + 4, iy + 18);
+        ctx.fillText(`${Math.floor(progress * 100)}%${queueText}`, x + 4, iy + 18);
       } else {
         // Name + cost
         const canAfford = this.sidebarCredits >= item.cost;

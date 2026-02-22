@@ -296,6 +296,7 @@ export const SUB_CELL_OFFSETS: { x: number; y: number }[] = [
 // === Entity Mission States ===
 export enum Mission {
   GUARD = 'GUARD',
+  AREA_GUARD = 'AREA_GUARD', // patrol/defend spawn area — return if straying too far
   MOVE = 'MOVE',
   ATTACK = 'ATTACK',
   HUNT = 'HUNT',

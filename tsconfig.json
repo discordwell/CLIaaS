@@ -31,5 +31,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "src/EasterEgg/CnC_and_Red_Alert", "scripts", "cli/db", "exports/routes"]
+  "exclude": ["node_modules", "src/EasterEgg", "scripts", "cli/db", "exports/routes"]
 }

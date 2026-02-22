@@ -21,6 +21,7 @@ import {
   loadScenario,
   type TeamType, type ScenarioTrigger, type MapStructure,
   checkTriggerEvent, executeTriggerAction, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
+  saveCarryover,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
 export type { MissionInfo } from './scenario';
@@ -30,6 +31,15 @@ export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
 
 /** Defensive structure types that ants prioritize attacking */
 const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 'AGUN', 'FTUR']);
+
+/** Crate bonus types */
+type CrateType = 'money' | 'heal' | 'veterancy' | 'unit';
+interface Crate {
+  x: number;
+  y: number;
+  type: CrateType;
+  tick: number; // tick when spawned
+}
 
 export class Game {
   // Core systems
@@ -68,8 +78,8 @@ export class Game {
   // Economy
   credits = 0;
   displayCredits = 0; // animated counter shown in sidebar (ticks toward credits)
-  /** Production queue: one active build per category */
-  productionQueue: Map<string, { item: ProductionItem; progress: number }> = new Map();
+  /** Production queue: active build + queued repeats per category (max 5 total) */
+  productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
   /** Structure placement: waiting to be placed on map */
   pendingPlacement: ProductionItem | null = null;
   placementValid = false;
@@ -82,6 +92,12 @@ export class Game {
   static readonly SIDEBAR_W = 100;
   sidebarScroll = 0; // scroll offset for sidebar items
   private cachedAvailableItems: ProductionItem[] | null = null;
+  /** Rally points: produced units auto-move here (per factory type) */
+  private rallyPoints = new Map<string, WorldPos>(); // factory type → world position
+
+  // Crate system
+  crates: Crate[] = [];
+  private nextCrateTick = 0;
 
   // Stats tracking
   killCount = 0;
@@ -98,6 +114,7 @@ export class Game {
   private triggers: ScenarioTrigger[] = [];
   private globals = new Set<number>();
   private waypoints = new Map<number, { cx: number; cy: number }>();
+  private toCarryOver = false; // save surviving units for next mission
 
   // Turbo mode (for E2E test runner)
   turboMultiplier = 1;
@@ -144,7 +161,7 @@ export class Game {
     });
 
     // Load scenario
-    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers, credits } = await loadScenario(scenarioId);
+    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers, credits, toCarryOver } = await loadScenario(scenarioId);
     this.map = map;
     this.entities = entities;
     this.structures = structures;
@@ -156,6 +173,7 @@ export class Game {
     this.teamTypes = teamTypes;
     this.triggers = triggers;
     this.credits = credits;
+    this.toCarryOver = toCarryOver;
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.globals.clear();
@@ -163,6 +181,9 @@ export class Game {
     // In the original, this is set by cell-entry triggers when the player explores,
     // but for gameplay pacing we enable it at start so ant waves begin spawning.
     this.globals.add(1);
+    // First crate spawns after 60 seconds
+    this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
+    this.crates = [];
 
     // Initial fog of war reveal
     this.updateFogOfWar();
@@ -321,6 +342,32 @@ export class Game {
       return e.frame < e.maxFrames;
     });
 
+    // Crate spawning (every 60-90 seconds, max 3 on map)
+    if (this.tick >= this.nextCrateTick && this.crates.length < 3) {
+      this.spawnCrate();
+      this.nextCrateTick = this.tick + GAME_TICKS_PER_SEC * (60 + Math.floor(Math.random() * 30));
+    }
+
+    // Crate pickup — player units walking over crates
+    for (let i = this.crates.length - 1; i >= 0; i--) {
+      const crate = this.crates[i];
+      // Expire after 3 minutes
+      if (this.tick - crate.tick > GAME_TICKS_PER_SEC * 180) {
+        this.crates.splice(i, 1);
+        continue;
+      }
+      for (const e of this.entities) {
+        if (!e.alive || !e.isPlayerUnit) continue;
+        const dx = e.pos.x - crate.x;
+        const dy = e.pos.y - crate.y;
+        if (dx * dx + dy * dy < CELL_SIZE * CELL_SIZE) {
+          this.pickupCrate(crate, e);
+          this.crates.splice(i, 1);
+          break;
+        }
+      }
+    }
+
     // Check cell triggers — detect player units entering trigger cells
     this.checkCellTriggers();
 
@@ -344,6 +391,31 @@ export class Game {
       for (const s of this.structures) {
         if (s.alive && s.type === 'QUEE' && s.hp < s.maxHp) {
           s.hp = Math.min(s.maxHp, s.hp + 1);
+        }
+      }
+    }
+
+    // Service Depot (FIX) auto-repair nearby player vehicles (every 3 ticks ≈ 5 HP/sec)
+    if (this.tick % 3 === 0) {
+      for (const s of this.structures) {
+        if (!s.alive || s.type !== 'FIX') continue;
+        if (s.house !== House.Spain && s.house !== House.Greece) continue;
+        const sx = s.cx * CELL_SIZE + CELL_SIZE;
+        const sy = s.cy * CELL_SIZE + CELL_SIZE;
+        for (const e of this.entities) {
+          if (!e.alive || !e.isPlayerUnit || e.hp >= e.maxHp) continue;
+          if (e.stats.isInfantry) continue; // depot only repairs vehicles
+          const dist = worldDist({ x: sx, y: sy }, e.pos);
+          if (dist < 3) {
+            e.hp = Math.min(e.maxHp, e.hp + 2);
+            // Visual spark effect every 15 ticks
+            if (this.tick % 15 === 0) {
+              this.effects.push({
+                type: 'muzzle', x: e.pos.x, y: e.pos.y - 4,
+                frame: 0, maxFrames: 5, size: 3, sprite: 'piff', spriteStart: 0,
+              });
+            }
+          }
         }
       }
     }
@@ -398,7 +470,7 @@ export class Game {
     // Update idle count for HUD (once per tick, not per render frame)
     let idleCount = 0;
     for (const e of this.entities) {
-      if (e.alive && e.isPlayerUnit && e.mission === Mission.GUARD && !e.target) idleCount++;
+      if (e.alive && e.isPlayerUnit && (e.mission === Mission.GUARD || e.mission === Mission.AREA_GUARD) && !e.target) idleCount++;
     }
     this.renderer.idleCount = idleCount;
 
@@ -619,7 +691,8 @@ export class Game {
     // Period (.): cycle through idle player units
     if (keys.has('.')) {
       const idle = this.entities.filter(e =>
-        e.alive && e.isPlayerUnit && e.mission === Mission.GUARD && !e.target
+        e.alive && e.isPlayerUnit &&
+        (e.mission === Mission.GUARD || e.mission === Mission.AREA_GUARD) && !e.target
       );
       if (idle.length > 0) {
         this.lastIdleCycleIdx = this.lastIdleCycleIdx % idle.length;
@@ -634,6 +707,23 @@ export class Game {
         this.lastIdleCycleIdx = (this.lastIdleCycleIdx + 1) % idle.length;
       }
       keys.delete('.');
+    }
+
+    // E key: select all units of same type on the entire map
+    if (keys.has('e') && !keys.has('ArrowRight') && this.selectedIds.size > 0) {
+      const first = this.entityById.get([...this.selectedIds][0]);
+      if (first?.alive) {
+        for (const e of this.entities) e.selected = false;
+        this.selectedIds.clear();
+        for (const e of this.entities) {
+          if (e.alive && e.isPlayerUnit && e.type === first.type) {
+            this.selectedIds.add(e.id);
+            e.selected = true;
+          }
+        }
+        this.audio.play(this.selectionSound());
+      }
+      keys.delete('e');
     }
 
     // Tab: cycle through unit types in mixed selection (uses stored pool)
@@ -997,6 +1087,20 @@ export class Game {
           markerColor: isAttack ? 'rgba(255,60,60,1)' : 'rgba(80,255,80,1)',
         });
       }
+
+      // Rally point: right-click with no units selected sets rally for active production
+      if (!commandIssued && this.selectedIds.size === 0 && this.productionQueue.size > 0) {
+        for (const [, entry] of this.productionQueue) {
+          if (!entry.item.isStructure) {
+            this.rallyPoints.set(entry.item.prerequisite, { x: world.x, y: world.y });
+          }
+        }
+        this.effects.push({
+          type: 'marker', x: world.x, y: world.y, frame: 0, maxFrames: 20, size: 8,
+          markerColor: 'rgba(255,200,60,1)', // yellow rally marker
+        });
+        this.audio.play('move_ack');
+      }
     }
   }
 
@@ -1011,12 +1115,7 @@ export class Game {
     const itemIdx = Math.floor(relY / itemH);
     if (itemIdx < 0 || itemIdx >= items.length) return;
     const item = items[itemIdx];
-    // Check if already building in this category
-    const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
-    if (this.productionQueue.has(category)) {
-      // Right-click would cancel — for now, clicking a building item cancels
-      return;
-    }
+    // startProduction handles both new builds and queueing
     this.startProduction(item);
   }
 
@@ -1146,7 +1245,8 @@ export class Game {
   /** Update a single entity's AI and movement */
   private updateEntity(entity: Entity): void {
     // Team mission script execution (rate-limited to every 8 ticks)
-    if (entity.isAnt && entity.mission !== Mission.DIE) {
+    // Area Guard ants use their own patrol logic, not global hunt AI
+    if (entity.isAnt && entity.mission !== Mission.DIE && entity.mission !== Mission.AREA_GUARD) {
       if (this.tick - entity.lastAIScan >= 8) {
         entity.lastAIScan = this.tick;
         if (entity.teamMissions.length > 0) {
@@ -1169,6 +1269,9 @@ export class Game {
         break;
       case Mission.GUARD:
         this.updateGuard(entity);
+        break;
+      case Mission.AREA_GUARD:
+        this.updateAreaGuard(entity);
         break;
     }
 
@@ -1548,10 +1651,15 @@ export class Game {
     }
   }
 
+  /** Get the idle mission for an entity (AREA_GUARD if it has a guard origin, otherwise GUARD) */
+  private idleMission(entity: Entity): Mission {
+    return entity.guardOrigin ? Mission.AREA_GUARD : Mission.GUARD;
+  }
+
   /** Move toward move target along path */
   private updateMove(entity: Entity): void {
     if (!entity.moveTarget && entity.path.length === 0) {
-      entity.mission = Mission.GUARD;
+      entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
       return;
     }
@@ -1592,12 +1700,12 @@ export class Game {
           entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true);
           entity.pathIndex = 0;
         } else {
-          entity.mission = Mission.GUARD;
+          entity.mission = this.idleMission(entity);
           entity.animState = AnimState.IDLE;
         }
       }
     } else {
-      entity.mission = Mission.GUARD;
+      entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
     }
   }
@@ -1608,7 +1716,7 @@ export class Game {
     if (entity.targetStructure) {
       if (!entity.targetStructure.alive) {
         entity.targetStructure = null;
-        entity.mission = Mission.GUARD;
+        entity.mission = this.idleMission(entity);
         entity.animState = AnimState.IDLE;
         return;
       }
@@ -1625,7 +1733,7 @@ export class Game {
     if (!entity.target?.alive) {
       entity.target = null;
       entity.forceFirePos = null;
-      entity.mission = Mission.GUARD;
+      entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
       return;
     }
@@ -1764,7 +1872,7 @@ export class Game {
         entity.target = null;
         entity.forceFirePos = null;
         entity.targetStructure = null;
-        entity.mission = Mission.GUARD;
+        entity.mission = this.idleMission(entity);
         entity.animState = AnimState.IDLE;
       } else {
         entity.animState = AnimState.WALK;
@@ -1785,7 +1893,7 @@ export class Game {
         entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true);
         entity.pathIndex = 0;
       } else {
-        entity.mission = Mission.GUARD;
+        entity.mission = this.idleMission(entity);
       }
       return;
     }
@@ -1903,6 +2011,59 @@ export class Game {
         }
       }
     }
+    if (bestTarget) {
+      entity.mission = Mission.ATTACK;
+      entity.target = bestTarget;
+    }
+  }
+
+  /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
+  private updateAreaGuard(entity: Entity): void {
+    entity.animState = AnimState.IDLE;
+    if (this.tick - entity.lastGuardScan < 15) return;
+    entity.lastGuardScan = this.tick;
+
+    const origin = entity.guardOrigin ?? entity.pos;
+    const ec = entity.cell;
+    const scanRange = entity.stats.sight * 1.5;
+
+    // If too far from origin (>8 cells), return home — but still attack enemies en route
+    const distFromOrigin = worldDist(entity.pos, origin);
+    if (distFromOrigin > 8) {
+      // Check for enemies while returning
+      const isPlayer = entity.isPlayerUnit;
+      for (const other of this.entities) {
+        if (!other.alive || other.isPlayerUnit === isPlayer) continue;
+        const dist = worldDist(entity.pos, other.pos);
+        if (dist > entity.stats.sight * CELL_SIZE) continue;
+        const oc2 = other.cell;
+        if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc2.cx, oc2.cy)) continue;
+        // Found an enemy — attack it
+        entity.mission = Mission.ATTACK;
+        entity.target = other;
+        entity.animState = AnimState.WALK;
+        return;
+      }
+      entity.mission = Mission.MOVE;
+      entity.moveTarget = { x: origin.x, y: origin.y };
+      entity.path = findPath(this.map, ec, worldToCell(origin.x, origin.y), true);
+      entity.pathIndex = 0;
+      return;
+    }
+
+    // Look for enemies within scan range
+    let bestTarget: Entity | null = null;
+    let bestDist = Infinity;
+    const isPlayer = entity.isPlayerUnit;
+    for (const other of this.entities) {
+      if (!other.alive || other.isPlayerUnit === isPlayer) continue;
+      const dist = worldDist(entity.pos, other.pos);
+      if (dist > scanRange) continue;
+      const oc = other.cell;
+      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
+      if (dist < bestDist) { bestDist = dist; bestTarget = other; }
+    }
+
     if (bestTarget) {
       entity.mission = Mission.ATTACK;
       entity.target = bestTarget;
@@ -2310,6 +2471,10 @@ export class Game {
       this.state = 'lost';
       this.onStateChange?.('lost');
     } else if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
+      // Save surviving units for carry-over to next mission
+      if (this.toCarryOver) {
+        saveCarryover(this.entities);
+      }
       this.state = 'won';
       this.onStateChange?.('won');
     }
@@ -2329,20 +2494,35 @@ export class Game {
   /** Start building an item (called from sidebar click) */
   startProduction(item: ProductionItem): void {
     const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
-    if (this.productionQueue.has(category)) return; // already building in this category
+    const existing = this.productionQueue.get(category);
+    if (existing) {
+      // Already building — queue another of the same item (max 5 total)
+      if (existing.item.type === item.type && existing.queueCount < 5) {
+        if (this.credits < item.cost) return;
+        this.credits -= item.cost;
+        existing.queueCount++;
+      }
+      return;
+    }
     if (this.credits < item.cost) return;
     this.credits -= item.cost;
-    this.productionQueue.set(category, { item, progress: 0 });
+    this.productionQueue.set(category, { item, progress: 0, queueCount: 1 });
   }
 
-  /** Cancel production in a category, refunding partial cost */
+  /** Cancel production in a category — removes one from queue, or cancels active build */
   cancelProduction(category: string): void {
     const entry = this.productionQueue.get(category);
     if (!entry) return;
-    // Refund based on remaining progress
-    const refund = Math.floor(entry.item.cost * (1 - entry.progress / entry.item.buildTime));
-    this.credits += refund;
-    this.productionQueue.delete(category);
+    if (entry.queueCount > 1) {
+      // Dequeue one — refund full cost of queued item
+      entry.queueCount--;
+      this.credits += entry.item.cost;
+    } else {
+      // Cancel active build — refund based on remaining progress
+      const refund = Math.floor(entry.item.cost * (1 - entry.progress / entry.item.buildTime));
+      this.credits += refund;
+      this.productionQueue.delete(category);
+    }
   }
 
   /** Advance production queues each tick */
@@ -2368,8 +2548,14 @@ export class Game {
         } else {
           // Unit: spawn at the producing structure
           this.spawnProducedUnit(entry.item);
-          this.productionQueue.delete(category);
           this.audio.play('eva_acknowledged');
+          // If more queued, restart for next unit; otherwise remove
+          if (entry.queueCount > 1) {
+            entry.queueCount--;
+            entry.progress = 0;
+          } else {
+            this.productionQueue.delete(category);
+          }
         }
       }
     }
@@ -2399,6 +2585,15 @@ export class Game {
     // If harvester, set it to auto-harvest
     if (unitType === UnitType.V_HARV) {
       entity.harvesterState = 'idle';
+    }
+
+    // Auto-move to rally point if set
+    const rally = this.rallyPoints.get(factoryType);
+    if (rally && unitType !== UnitType.V_HARV) {
+      entity.mission = Mission.MOVE;
+      entity.moveTarget = { x: rally.x, y: rally.y };
+      entity.path = findPath(this.map, entity.cell, worldToCell(rally.x, rally.y), true);
+      entity.pathIndex = 0;
     }
   }
 
@@ -2500,6 +2695,56 @@ export class Game {
     return true;
   }
 
+  /** Spawn a crate on a random revealed, passable cell */
+  private spawnCrate(): void {
+    const crateTypes: CrateType[] = ['money', 'money', 'heal', 'veterancy', 'unit'];
+    const type = crateTypes[Math.floor(Math.random() * crateTypes.length)];
+    // Try up to 20 random cells to find a valid spawn
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const cx = this.map.boundsX + Math.floor(Math.random() * this.map.boundsW);
+      const cy = this.map.boundsY + Math.floor(Math.random() * this.map.boundsH);
+      if (!this.map.isPassable(cx, cy)) continue;
+      if (this.map.getVisibility(cx, cy) === 0) continue; // must be explored
+      const x = cx * CELL_SIZE + CELL_SIZE / 2;
+      const y = cy * CELL_SIZE + CELL_SIZE / 2;
+      this.crates.push({ x, y, type, tick: this.tick });
+      return;
+    }
+  }
+
+  /** Apply crate bonus to the unit that picked it up */
+  private pickupCrate(crate: Crate, unit: Entity): void {
+    this.audio.play('eva_acknowledged');
+    this.effects.push({
+      type: 'explosion', x: crate.x, y: crate.y,
+      frame: 0, maxFrames: 10, size: 8, sprite: 'piffpiff', spriteStart: 0,
+    });
+    switch (crate.type) {
+      case 'money':
+        this.credits += 500;
+        break;
+      case 'heal':
+        unit.hp = unit.maxHp;
+        break;
+      case 'veterancy':
+        if (unit.veterancy < 2) {
+          unit.kills = unit.veterancy === 0 ? 3 : 6;
+          unit.creditKill(); // triggers promotion
+        }
+        break;
+      case 'unit': {
+        // Spawn a random infantry unit nearby
+        const types = [UnitType.I_E1, UnitType.I_E2, UnitType.I_E3, UnitType.I_E4];
+        const uType = types[Math.floor(Math.random() * types.length)];
+        const bonus = new Entity(uType, House.Spain, crate.x + CELL_SIZE, crate.y);
+        bonus.mission = Mission.GUARD;
+        this.entities.push(bonus);
+        this.entityById.set(bonus.id, bonus);
+        break;
+      }
+    }
+  }
+
   /** Render the current frame */
   private render(): void {
     this.renderer.attackMoveMode = this.attackMoveMode;
@@ -2514,6 +2759,8 @@ export class Game {
     this.renderer.sidebarQueue = this.productionQueue;
     this.renderer.sidebarScroll = this.sidebarScroll;
     this.renderer.sidebarW = Game.SIDEBAR_W;
+    this.renderer.hasRadar = this.hasBuilding('DOME');
+    this.renderer.crates = this.crates;
     // Placement ghost
     if (this.pendingPlacement) {
       const { mouseX, mouseY } = this.input.state;
