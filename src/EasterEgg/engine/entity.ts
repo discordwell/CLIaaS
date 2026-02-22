@@ -11,6 +11,10 @@ import {
 
 let nextId = 1;
 
+export function resetEntityIds(): void {
+  nextId = 1;
+}
+
 export class Entity {
   id = nextId++;
   type: UnitType;
@@ -159,9 +163,9 @@ export class Entity {
       return true; // arrived
     }
 
+    this.facing = directionTo(this.pos, target);
     this.pos.x += (dx / dist) * speed;
     this.pos.y += (dy / dist) * speed;
-    this.facing = directionTo(this.pos, target);
     return false;
   }
 }

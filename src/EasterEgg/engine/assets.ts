@@ -43,6 +43,7 @@ export class AssetManager {
   async loadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
     // Load manifest
     const manifestRes = await fetch(`${BASE_URL}/manifest.json`);
+    if (!manifestRes.ok) throw new Error(`Failed to load manifest: ${manifestRes.status}`);
     this.manifest = await manifestRes.json();
     if (!this.manifest) throw new Error('Empty manifest');
 

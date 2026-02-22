@@ -11,7 +11,7 @@ import {
 import { AssetManager } from './assets';
 import { Camera } from './camera';
 import { InputManager } from './input';
-import { Entity } from './entity';
+import { Entity, resetEntityIds } from './entity';
 import { GameMap } from './map';
 import { Renderer } from './renderer';
 import { findPath } from './pathfinding';
@@ -29,6 +29,7 @@ export class Game {
 
   // Game state
   entities: Entity[] = [];
+  entityById = new Map<number, Entity>();
   selectedIds = new Set<number>();
   state: GameState = 'loading';
   tick = 0;
@@ -58,6 +59,7 @@ export class Game {
   async start(scenarioId = 'SCA01EA'): Promise<void> {
     this.state = 'loading';
     this.onStateChange?.('loading');
+    resetEntityIds();
 
     // Load sprite sheets
     await this.assets.loadAll((loaded, total) => {
@@ -68,6 +70,8 @@ export class Game {
     const { map, entities, name, waypoints } = await loadScenario(scenarioId);
     this.map = map;
     this.entities = entities;
+    this.entityById.clear();
+    for (const e of entities) this.entityById.set(e.id, e);
     this.missionName = name;
 
     // Center camera on player start (waypoint 98 = player start in ant missions)
@@ -115,12 +119,12 @@ export class Game {
 
     // Render every frame (not just on tick)
     this.render();
-    this.input.clearEvents();
   };
 
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
+    this.input.clearEvents();
 
     // Process input
     this.processInput();
@@ -139,9 +143,14 @@ export class Game {
     }
 
     // Clean up dead entities after death animation
+    const before = this.entities.length;
     this.entities = this.entities.filter(
       e => e.alive || e.animFrame < 15
     );
+    if (this.entities.length < before) {
+      this.entityById.clear();
+      for (const e of this.entities) this.entityById.set(e.id, e);
+    }
 
     // Check win/lose conditions
     this.checkVictoryConditions();
@@ -188,7 +197,7 @@ export class Game {
       const target = this.findEntityAt(world);
 
       for (const id of this.selectedIds) {
-        const unit = this.entities.find(e => e.id === id);
+        const unit = this.entityById.get(id);
         if (!unit || !unit.alive) continue;
 
         if (target && !target.isPlayerUnit && target.alive) {
