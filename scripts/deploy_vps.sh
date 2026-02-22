@@ -51,7 +51,28 @@ echo "Domain: $DOMAIN"
 echo ""
 
 echo "[1/6] Creating remote directories..."
-"${SSH_CMD[@]}" "mkdir -p '$REMOTE_APP_DIR' '$REMOTE_SHARED_DIR'"
+"${SSH_CMD[@]}" bash -s -- \
+  "$REMOTE_DIR" \
+  "$REMOTE_APP_DIR" \
+  "$REMOTE_SHARED_DIR" \
+  "$SUDO" \
+  "$APP_USER" \
+  "$APP_GROUP" <<'CMDS'
+set -euo pipefail
+REMOTE_DIR="$1"
+APP_DIR="$2"
+SHARED_DIR="$3"
+SUDO_CMD="$4"
+APP_USER="$5"
+APP_GROUP="$6"
+
+if [[ -n "$SUDO_CMD" ]]; then
+  $SUDO_CMD mkdir -p "$APP_DIR" "$SHARED_DIR"
+  $SUDO_CMD chown -R "${APP_USER}:${APP_GROUP}" "$REMOTE_DIR"
+else
+  mkdir -p "$APP_DIR" "$SHARED_DIR"
+fi
+CMDS
 
 echo "[2/6] Syncing source..."
 rsync -az --delete -e "$RSYNC_SSH" \
@@ -75,8 +96,11 @@ if command -v pnpm >/dev/null 2>&1; then
 elif command -v corepack >/dev/null 2>&1; then
   corepack pnpm install --frozen-lockfile
   corepack pnpm build
+elif command -v npm >/dev/null 2>&1; then
+  npm install
+  npm run build
 else
-  echo "ERROR: pnpm/corepack not installed on remote host."
+  echo "ERROR: no supported package manager found (pnpm/corepack/npm)."
   exit 1
 fi
 
@@ -112,20 +136,47 @@ if ! curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/dev/null; then
 fi
 CMDS
 
-echo "[6/6] Configuring nginx reverse proxy..."
+echo "[6/6] Configuring edge reverse proxy..."
 if [[ "$SKIP_NGINX" == "1" ]]; then
-  echo "SKIP_NGINX=1 -> skipping nginx config"
+  echo "SKIP_NGINX=1 -> skipping reverse proxy config"
 else
-  rsync -az -e "$RSYNC_SSH" "$TMP_NGINX" "$VPS_SSH:/tmp/${SERVICE_NAME}.nginx.conf"
-  "${SSH_CMD[@]}" bash -s -- "$SERVICE_NAME" "$SUDO" <<'CMDS'
+  PROXY_MODE="$("${SSH_CMD[@]}" bash -s -- "$SUDO" <<'CMDS'
+set -euo pipefail
+SUDO_CMD="$1"
+if $SUDO_CMD docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^kamal-proxy$'; then
+  echo "kamal"
+elif command -v nginx >/dev/null 2>&1; then
+  echo "nginx"
+else
+  echo "none"
+fi
+CMDS
+)"
+
+  if [[ "$PROXY_MODE" == "kamal" ]]; then
+    "${SSH_CMD[@]}" bash -s -- "$SERVICE_NAME" "$DOMAIN" "$APP_PORT" "$SUDO" <<'CMDS'
+set -euo pipefail
+SERVICE_NAME="$1"
+DOMAIN="$2"
+APP_PORT="$3"
+SUDO_CMD="$4"
+SERVICE_ROUTE="${SERVICE_NAME}-web"
+
+$SUDO_CMD docker exec kamal-proxy kamal-proxy deploy "$SERVICE_ROUTE" \
+  --host "$DOMAIN" \
+  --host "www.$DOMAIN" \
+  --path-prefix / \
+  --target "172.18.0.1:${APP_PORT}" \
+  --health-check-path /api/health \
+  --tls \
+  --forward-headers
+CMDS
+  elif [[ "$PROXY_MODE" == "nginx" ]]; then
+    rsync -az -e "$RSYNC_SSH" "$TMP_NGINX" "$VPS_SSH:/tmp/${SERVICE_NAME}.nginx.conf"
+    "${SSH_CMD[@]}" bash -s -- "$SERVICE_NAME" "$SUDO" <<'CMDS'
 set -euo pipefail
 SERVICE_NAME="$1"
 SUDO_CMD="$2"
-
-if ! command -v nginx >/dev/null 2>&1; then
-  echo "WARN: nginx not installed. Skipping nginx setup."
-  exit 0
-fi
 
 if [[ -d /etc/nginx/sites-available && -d /etc/nginx/sites-enabled ]]; then
   $SUDO_CMD cp "/tmp/${SERVICE_NAME}.nginx.conf" "/etc/nginx/sites-available/${SERVICE_NAME}.conf"
@@ -140,12 +191,12 @@ fi
 $SUDO_CMD nginx -t
 $SUDO_CMD systemctl reload nginx
 CMDS
+  else
+    echo "WARN: No supported reverse proxy detected (kamal-proxy/nginx)."
+  fi
 fi
 
 echo ""
 echo "Deploy complete."
 echo "- App health endpoint: http://$VPS_HOST/api/health"
 echo "- Domain target: https://$DOMAIN"
-echo ""
-echo "If TLS is not enabled yet, run on the server:"
-echo "  certbot --nginx -d $DOMAIN -d www.$DOMAIN"

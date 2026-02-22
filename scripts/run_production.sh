@@ -12,5 +12,9 @@ if command -v corepack >/dev/null 2>&1; then
   exec corepack pnpm start --hostname "$HOST" --port "$PORT"
 fi
 
-echo "pnpm is required to run production server. Install pnpm or enable corepack."
+if command -v npm >/dev/null 2>&1; then
+  exec npm run start -- --hostname "$HOST" --port "$PORT"
+fi
+
+echo "Neither pnpm/corepack nor npm is available on this host."
 exit 1
