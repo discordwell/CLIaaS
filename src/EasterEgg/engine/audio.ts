@@ -17,7 +17,8 @@ export type SoundName =
   | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged'
   | 'eva_construction_complete' | 'eva_unit_ready' | 'eva_low_power'
   | 'eva_new_options' | 'eva_building' | 'repair' | 'sell'
-  | 'victory_fanfare' | 'defeat_sting' | 'crate_pickup' | 'eva_mission_accomplished';
+  | 'victory_fanfare' | 'defeat_sting' | 'crate_pickup' | 'eva_mission_accomplished'
+  | 'eva_reinforcements' | 'eva_mission_warning' | 'tesla_charge';
 
 export class AudioManager {
   private ctx: AudioContext | null = null;

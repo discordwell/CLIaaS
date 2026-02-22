@@ -1160,9 +1160,14 @@ export interface TriggerActionResult {
   allowWin?: boolean;
   allHunt?: boolean;
   revealAll?: boolean;
+  revealWaypoint?: number;  // reveal area around a specific waypoint (REVEAL_SOME)
+  dropZone?: number;        // drop zone flare at waypoint (DZ)
+  creepShadow?: boolean;    // reshroud entire map (CREEP_SHADOW)
   textMessage?: number;  // text trigger ID to display
   setTimer?: number;     // mission timer value to set (in 1/10th minute units)
   destroyTriggeringUnit?: boolean; // kill the unit that triggered this
+  playSound?: number;    // play a sound effect (PLAY_SOUND)
+  playSpeech?: number;   // play EVA speech (PLAY_SPEECH)
 }
 
 /** Execute a trigger action — returns result with entities and side effects */
@@ -1284,17 +1289,21 @@ export function executeTriggerAction(
       break;
 
     case TACTION_DZ:
-      // Drop zone flare — cosmetic, play EVA sound
+      // Drop zone flare at waypoint — reveal area + visual marker
+      result.dropZone = action.data;
       break;
 
     case TACTION_REVEAL_SOME:
-      // Reveal area around a waypoint — simplified to reveal all
-      result.revealAll = true;
+      // Reveal area around a waypoint (action.data = waypoint index)
+      result.revealWaypoint = action.data;
       break;
 
     case TACTION_PLAY_SOUND:
+      result.playSound = action.data;
+      break;
+
     case TACTION_PLAY_SPEECH:
-      // Sound/speech — would need audio mapping, stub for now
+      result.playSpeech = action.data;
       break;
 
     case TACTION_DESTROY_OBJECT:
@@ -1303,8 +1312,12 @@ export function executeTriggerAction(
       break;
 
     case TACTION_BEGIN_PRODUCTION:
+      // AI production start — not needed for ant missions
+      break;
+
     case TACTION_CREEP_SHADOW:
-      // Advanced actions — stub for ant missions
+      // Reshroud entire map (used in SCA04EA tunnel darkness)
+      result.creepShadow = true;
       break;
   }
 

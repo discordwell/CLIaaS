@@ -163,6 +163,15 @@ export class GameMap {
     this.visibility.fill(2);
   }
 
+  /** Creep shadow: downgrade all visible/fog cells back to shroud (darkness).
+   *  Used by SCA04EA tunnel mission — map reshrouds periodically until power is restored. */
+  creepShadow(): void {
+    for (let i = 0; i < this.visibility.length; i++) {
+      if (this.visibility[i] > 0) this.visibility[i] = 0;
+    }
+    this.visibleCells.length = 0;
+  }
+
   /** Update fog of war: downgrade visible to fog, then reveal around units */
   updateFogOfWar(units: Array<{ x: number; y: number; sight: number }>): void {
     // Downgrade only previously visible cells to fog (O(visible) instead of O(16384))

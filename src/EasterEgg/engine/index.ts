@@ -2770,7 +2770,8 @@ export class Game {
           muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
         });
         const projStyle = this.weaponProjectileStyle(entity.weapon.name);
-        const travelFrames = projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
+        const travelFrames = projStyle === 'grenade' ? 10
+          : projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
         this.effects.push({
           type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
           startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
@@ -2791,10 +2792,9 @@ export class Game {
 
   /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
   private updateStructureCombat(): void {
+    const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     for (const s of this.structures) {
       if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
-      // Low power: defensive structures fire at half speed (skip every other cooldown tick)
-      const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
       if (s.attackCooldown > 0) {
         if (!isLowPower || this.tick % 2 === 0) s.attackCooldown--;
         continue;
@@ -3200,8 +3200,32 @@ export class Game {
           }
         }
         if (result.revealAll) {
-          // Reveal entire map
           this.map.revealAll();
+        }
+        // Reveal area around a specific waypoint (~10 cell radius)
+        if (result.revealWaypoint !== undefined) {
+          const wp = this.waypoints.get(result.revealWaypoint);
+          if (wp) {
+            this.revealAroundCell(wp.cx, wp.cy, 10);
+          }
+        }
+        // Drop zone flare: reveal + visual marker + EVA announcement
+        if (result.dropZone !== undefined) {
+          const wp = this.waypoints.get(result.dropZone);
+          if (wp) {
+            this.revealAroundCell(wp.cx, wp.cy, 8);
+            const world = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+            this.effects.push({
+              type: 'marker', x: world.x, y: world.y,
+              frame: 0, maxFrames: 90, size: 6,
+            });
+            this.minimapAlert(wp.cx, wp.cy);
+            this.audio.play('eva_reinforcements');
+          }
+        }
+        // Creep shadow: reshroud entire map (SCA04EA tunnel darkness)
+        if (result.creepShadow) {
+          this.map.creepShadow();
         }
         if (result.textMessage !== undefined) {
           this.showEvaMessage(result.textMessage);
@@ -3209,6 +3233,13 @@ export class Game {
         if (result.setTimer !== undefined) {
           this.missionTimer = result.setTimer * TIME_UNIT_TICKS;
           this.missionTimerExpired = false;
+        }
+        // Sound/speech from triggers
+        if (result.playSpeech !== undefined) {
+          this.handleTriggerSpeech(result.playSpeech);
+        }
+        if (result.playSound !== undefined) {
+          this.handleTriggerSound(result.playSound);
         }
         // Tag ant spawns with wave coordination
         const ants = result.spawned.filter(e => e.isAnt);
@@ -3251,7 +3282,7 @@ export class Game {
 
   /** Display an EVA text message (by trigger data ID) */
   private showEvaMessage(id: number): void {
-    // Map message IDs to text — from the original RA ant mission briefing strings
+    // Map message IDs to text — from RA tutorial.txt / mission text strings
     const messages: Record<number, string> = {
       0: 'Scouts report movement in the area.',
       1: 'Reinforcements have arrived.',
@@ -3262,10 +3293,55 @@ export class Game {
       6: 'Civilians have been evacuated.',
       7: 'Bridge destroyed.',
       8: 'Power restored.',
+      9: 'Drop zone established.',
+      10: 'Construction options available.',
+      87: 'Warning: Ant activity detected in tunnels.',
+      88: 'We have lost contact with the outpost.',
+      96: 'Bridge charges set. Take cover!',
+      100: 'Alert! Large ant force approaching.',
     };
     const text = messages[id] ?? `EVA: Message ${id}`;
     this.evaMessages.push({ text, tick: this.tick });
     this.audio.play('eva_acknowledged');
+  }
+
+  /** Reveal map around a specific cell with given radius */
+  private revealAroundCell(cx: number, cy: number, radius: number): void {
+    const r2 = radius * radius;
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (dx * dx + dy * dy <= r2) {
+          const rx = cx + dx;
+          const ry = cy + dy;
+          if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+            this.map.setVisibility(rx, ry, 2);
+          }
+        }
+      }
+    }
+  }
+
+  /** Handle trigger speech events (EVA voice lines) */
+  private handleTriggerSpeech(speechId: number): void {
+    // RA speech IDs map to EVA voice lines; play closest match
+    const speechMap: Record<number, SoundName> = {
+      88: 'eva_mission_warning',
+    };
+    const sound = speechMap[speechId];
+    if (sound) this.audio.play(sound);
+  }
+
+  /** Handle trigger sound effects */
+  private handleTriggerSound(soundData: number): void {
+    // Data may be negative (unsigned 16-bit packed as signed)
+    const soundId = soundData < 0 ? soundData + 65536 : soundData;
+    // Map common RA sound IDs to our audio system
+    const soundMap: Record<number, SoundName> = {
+      47: 'building_explode',
+      85: 'tesla_charge',
+    };
+    const sound = soundMap[soundId];
+    if (sound) this.audio.play(sound);
   }
 
   /** Check win/lose conditions */

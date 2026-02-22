@@ -1182,6 +1182,8 @@ export class Renderer {
     const ctx = this.ctx;
 
     for (const fx of effects) {
+      // Skip effects with negative frame (staggered delay — not yet visible)
+      if (fx.frame < 0) continue;
       const screen = camera.worldToScreen(fx.x, fx.y);
       const progress = fx.frame / fx.maxFrames;
 
