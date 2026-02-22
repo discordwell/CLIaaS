@@ -84,6 +84,7 @@ function sleep(ms: number): Promise<void> {
 export async function intercomFetch<T>(auth: IntercomAuth, path: string, options?: {
   method?: string;
   body?: unknown;
+  apiVersion?: string;
 }): Promise<T> {
   const url = path.startsWith('http') ? path : `https://api.intercom.io${path}`;
 
@@ -96,7 +97,7 @@ export async function intercomFetch<T>(auth: IntercomAuth, path: string, options
       headers: {
         'Authorization': `Bearer ${auth.accessToken}`,
         'Content-Type': 'application/json',
-        'Intercom-Version': '2.11',
+        'Intercom-Version': options?.apiVersion ?? '2.11',
       },
       body: options?.body ? JSON.stringify(options.body) : undefined,
     });
@@ -115,6 +116,7 @@ export async function intercomFetch<T>(auth: IntercomAuth, path: string, options
       throw new Error(`Intercom API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
     }
 
+    if (res.status === 204) return {} as T;
     return res.json() as Promise<T>;
   }
 }
@@ -431,4 +433,12 @@ export async function intercomAddNote(auth: IntercomAuth, conversationId: string
       body,
     },
   });
+}
+
+export async function intercomDeleteConversation(auth: IntercomAuth, conversationId: string): Promise<void> {
+  await intercomFetch(auth, `/conversations/${conversationId}`, { method: 'DELETE', apiVersion: 'Unstable' });
+}
+
+export async function intercomDeleteContact(auth: IntercomAuth, contactId: string): Promise<void> {
+  await intercomFetch(auth, `/contacts/${contactId}`, { method: 'DELETE' });
 }

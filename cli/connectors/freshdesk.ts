@@ -127,6 +127,7 @@ export async function freshdeskFetch<T>(auth: FreshdeskAuth, path: string, optio
       throw new Error(`Freshdesk API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
     }
 
+    if (res.status === 204) return {} as T;
     return res.json() as Promise<T>;
   }
 }
@@ -450,4 +451,8 @@ export async function freshdeskCreateTicket(auth: FreshdeskAuth, subject: string
     body: ticket,
   });
   return { id: result.id };
+}
+
+export async function freshdeskDeleteTicket(auth: FreshdeskAuth, ticketId: number): Promise<void> {
+  await freshdeskFetch(auth, `/api/v2/tickets/${ticketId}`, { method: 'DELETE' });
 }

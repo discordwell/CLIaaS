@@ -6,9 +6,9 @@ import ora from 'ora';
 import { loadTickets, loadMessages, getTicketMessages } from '../data.js';
 import type { Ticket, Message, Customer, TicketStatus, TicketPriority } from '../schema/types.js';
 
-import { zendeskCreateTicket, zendeskPostComment } from '../connectors/zendesk.js';
+import { zendeskCreateTicket, zendeskPostComment, zendeskDeleteTicket } from '../connectors/zendesk.js';
 import type { ZendeskAuth } from '../connectors/zendesk.js';
-import { freshdeskCreateTicket, freshdeskReply, freshdeskAddNote } from '../connectors/freshdesk.js';
+import { freshdeskCreateTicket, freshdeskReply, freshdeskAddNote, freshdeskDeleteTicket } from '../connectors/freshdesk.js';
 import type { FreshdeskAuth } from '../connectors/freshdesk.js';
 import { grooveCreateTicket, groovePostMessage } from '../connectors/groove.js';
 import type { GrooveAuth } from '../connectors/groove.js';
@@ -16,7 +16,7 @@ import { helpcrunchCreateChat, helpcrunchPostMessage, helpcrunchFetch } from '..
 import type { HelpcrunchAuth } from '../connectors/helpcrunch.js';
 import { kayakoCreateCase, kayakoPostReply, kayakoPostNote } from '../connectors/kayako.js';
 import type { KayakoAuth } from '../connectors/kayako.js';
-import { intercomCreateConversation, intercomReplyToConversation, intercomAddNote, intercomFetch } from '../connectors/intercom.js';
+import { intercomCreateConversation, intercomReplyToConversation, intercomAddNote, intercomFetch, intercomDeleteConversation, intercomDeleteContact } from '../connectors/intercom.js';
 import type { IntercomAuth } from '../connectors/intercom.js';
 import { helpscoutCreateConversation, helpscoutReply, helpscoutAddNote } from '../connectors/helpscout.js';
 import type { HelpScoutAuth } from '../connectors/helpscout.js';
@@ -396,7 +396,8 @@ export function registerMigrateCommand(program: Command): void {
     .requiredOption('--to <connector>', 'Target connector (zendesk | freshdesk | groove | helpcrunch | kayako | intercom | helpscout | zoho-desk | hubspot)')
     .option('--dry-run', 'Preview migration without making API calls')
     .option('--limit <n>', 'Migrate only the first N tickets', parseInt)
-    .action(async (opts: { from: string; to: string; dryRun?: boolean; limit?: number }) => {
+    .option('--cleanup', 'Delete all previously migrated tickets from the target (reverses migration)')
+    .action(async (opts: { from: string; to: string; dryRun?: boolean; limit?: number; cleanup?: boolean }) => {
       const connector = opts.to as TargetConnector;
       const validConnectors: TargetConnector[] = ['zendesk', 'freshdesk', 'groove', 'helpcrunch', 'kayako', 'intercom', 'helpscout', 'zoho-desk', 'hubspot'];
       if (!validConnectors.includes(connector)) {
@@ -420,6 +421,63 @@ export function registerMigrateCommand(program: Command): void {
         }
       }
 
+      // Load migration map
+      const migrationMap = loadMigrationMap(opts.from, connector);
+
+      // Cleanup mode: delete all migrated tickets from target
+      if (opts.cleanup) {
+        const entries = Object.entries(migrationMap);
+        if (entries.length === 0) {
+          console.log(chalk.yellow('\nNo migrated tickets to clean up.'));
+          return;
+        }
+
+        console.log(chalk.cyan(`\nCleaning up ${entries.length} migrated tickets from ${connector}\n`));
+        const spinner = ora('Deleting...').start();
+        let deleted = 0;
+        let failed = 0;
+
+        for (const [sourceId, entry] of entries) {
+          spinner.text = `Deleting ${deleted + failed + 1}/${entries.length}: ${sourceId} → ${entry.destId}`;
+          try {
+            switch (connector) {
+              case 'zendesk':
+                await zendeskDeleteTicket(auth as ZendeskAuth, Number(entry.destId));
+                break;
+              case 'freshdesk':
+                await freshdeskDeleteTicket(auth as FreshdeskAuth, Number(entry.destId));
+                break;
+              case 'intercom':
+                await intercomDeleteConversation(auth as IntercomAuth, entry.destId);
+                break;
+              default:
+                throw new Error(`Cleanup not supported for ${connector}`);
+            }
+            delete migrationMap[sourceId];
+            saveMigrationMap(opts.from, connector, migrationMap);
+            deleted++;
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            // Treat 404 as already deleted
+            if (errMsg.includes('404')) {
+              delete migrationMap[sourceId];
+              saveMigrationMap(opts.from, connector, migrationMap);
+              deleted++;
+            } else {
+              failed++;
+              spinner.warn(`  Failed to delete ${sourceId} → ${entry.destId}: ${errMsg}`);
+              spinner.start();
+            }
+          }
+        }
+
+        spinner.succeed('Cleanup complete');
+        console.log(chalk.green(`  Deleted: ${deleted}`));
+        if (failed > 0) console.log(chalk.red(`  Failed:  ${failed}`));
+        console.log('');
+        return;
+      }
+
       // Load source data
       const loadSpinner = ora('Loading source data...').start();
       const tickets = loadTickets(opts.from);
@@ -427,8 +485,6 @@ export function registerMigrateCommand(program: Command): void {
       const customers = loadCustomers(opts.from);
       loadSpinner.succeed(`Loaded ${tickets.length} tickets, ${allMessages.length} messages, ${customers.length} customers`);
 
-      // Load migration map
-      const migrationMap = loadMigrationMap(opts.from, connector);
       const alreadyMigrated = Object.keys(migrationMap).length;
       if (alreadyMigrated > 0) {
         console.log(chalk.yellow(`  ${alreadyMigrated} tickets already migrated (will be skipped)`));

@@ -236,6 +236,7 @@ export async function zendeskFetch<T>(auth: ZendeskAuth, path: string, options?:
       throw new Error(`Zendesk API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
     }
 
+    if (res.status === 204) return {} as T;
     return res.json() as Promise<T>;
   }
 }
@@ -860,4 +861,8 @@ export async function zendeskVerifyConnection(auth: ZendeskAuth): Promise<{
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+export async function zendeskDeleteTicket(auth: ZendeskAuth, ticketId: number): Promise<void> {
+  await zendeskFetch(auth, `/api/v2/tickets/${ticketId}.json`, { method: 'DELETE' });
 }
