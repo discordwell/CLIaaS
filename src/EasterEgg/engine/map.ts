@@ -35,6 +35,12 @@ export class GameMap {
   templateType: Uint8Array;
   templateIcon: Uint8Array;
 
+  /** Cell triggers: maps cell index to trigger name (set by scenario loader) */
+  cellTriggers = new Map<number, string>();
+
+  /** Set of cell trigger names that have been activated by player entry */
+  activatedCellTriggers = new Set<string>();
+
   /** Indices of cells currently marked visible (for efficient downgrade) */
   private visibleCells: number[] = [];
 

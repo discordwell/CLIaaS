@@ -10,6 +10,20 @@ import { type AssetManager } from './assets';
 import { type Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
+import { type MapStructure } from './scenario';
+
+// TEMPERATE.PAL palette index ranges for terrain rendering
+// These are the actual palette indices from the extracted TEMPERAT.PAL
+const PAL_GRASS_START = 144;  // indices 144-155: green terrain ramp (light→dark)
+const PAL_GRASS_COUNT = 12;
+const PAL_WATER_START = 96;   // indices 96-102: animated water cycle (ping-pong)
+const PAL_WATER_COUNT = 7;
+const PAL_ROCK_START = 128;   // indices 128-143: gray ramp (light→dark)
+const PAL_ROCK_COUNT = 16;
+const PAL_DIRT_START = 80;    // indices 80-95: sand/dirt ramp (gold→dark brown)
+const PAL_DIRT_COUNT = 16;
+const PAL_GREEN_HP = 120;     // bright green [0,255,0]
+const PAL_RED_HP = 104;       // red [190,0,0]
 
 export interface Effect {
   type: 'explosion' | 'muzzle' | 'blood' | 'tesla';
@@ -35,6 +49,7 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private width: number;
   private height: number;
+  private pal: number[][] | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -43,10 +58,22 @@ export class Renderer {
     this.ctx.imageSmoothingEnabled = false;
   }
 
+  /** Get an RGB string from the TEMPERATE palette, with optional brightness offset */
+  private palColor(idx: number, brightnessOffset = 0): string {
+    if (!this.pal) return '#555';
+    const c = this.pal[idx];
+    if (!c) return '#555';
+    const r = Math.max(0, Math.min(255, c[0] + brightnessOffset));
+    const g = Math.max(0, Math.min(255, c[1] + brightnessOffset));
+    const b = Math.max(0, Math.min(255, c[2] + brightnessOffset));
+    return `rgb(${r},${g},${b})`;
+  }
+
   render(
     camera: Camera,
     map: GameMap,
     entities: Entity[],
+    structures: MapStructure[],
     assets: AssetManager,
     input: InputState,
     selectedIds: Set<number>,
@@ -56,7 +83,11 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
+    // Cache palette reference from assets
+    if (!this.pal) this.pal = assets.getPalette();
+
     this.renderTerrain(camera, map, tick);
+    this.renderStructures(camera, map, structures, assets);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
     this.renderEffects(camera, effects, assets);
     this.renderFogOfWar(camera, map);
@@ -87,121 +118,125 @@ export class Renderer {
 
         switch (terrain) {
           case Terrain.CLEAR: {
-            // Use template+icon data for richer TEMPERATE terrain variation
-            // Template types in TEMPERATE: different ground textures
             if (tmpl > 0 && tmpl !== 0xFF) {
-              // Template-aware rendering: use template/icon combo for visual variation
+              // Template-aware rendering using palette colors
               const isRoad = tmpl >= 0x27 && tmpl <= 0x34;
               const isRough = tmpl >= 0x0D && tmpl <= 0x12;
               const isShoreDirt = tmpl >= 0x06 && tmpl <= 0x0C;
 
               if (isRoad) {
-                // Road tiles — gray-brown dirt path
-                const v = (icon * 7 + h) % 12;
-                ctx.fillStyle = `rgb(${85 + v},${78 + v},${65 + v})`;
+                // Road tiles — palette dirt/sand colors (indices 84-90)
+                const palIdx = PAL_DIRT_START + 4 + ((icon * 7 + h) % 6);
+                ctx.fillStyle = this.palColor(palIdx);
                 ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-                // Road texture lines
-                ctx.fillStyle = `rgba(100,90,75,0.4)`;
+                // Road line detail using slightly lighter dirt
+                ctx.fillStyle = this.palColor(PAL_DIRT_START + 2, 10);
                 ctx.fillRect(screen.x + 2, screen.y + 11, 20, 2);
               } else if (isRough) {
-                // Rough terrain — darker, mottled earth
-                const r = 55 + (h % 15) - 7;
-                const g = 52 + (h % 12) - 6;
-                const b = 35 + (h % 10) - 5;
-                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                // Rough terrain — darker palette dirt (indices 88-94)
+                const palIdx = PAL_DIRT_START + 8 + (h % 6);
+                ctx.fillStyle = this.palColor(palIdx);
                 ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-                // Scatter some rocks
-                ctx.fillStyle = `rgba(70,65,50,0.6)`;
+                // Rock scatter using darker dirt
+                ctx.fillStyle = this.palColor(PAL_DIRT_START + 12, -8);
                 ctx.fillRect(screen.x + (h % 14) + 2, screen.y + ((h >> 3) % 12) + 3, 5, 4);
                 ctx.fillRect(screen.x + ((h >> 5) % 10) + 6, screen.y + ((h >> 2) % 14) + 1, 3, 3);
               } else if (isShoreDirt) {
-                // Shore/dirt transition — sandy brown
-                const r = 75 + (h % 14) - 7;
-                const g = 68 + (h % 12) - 6;
-                const b = 45 + (h % 10) - 5;
-                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                // Shore/dirt transition — palette sand/brown (indices 82-88)
+                const palIdx = PAL_DIRT_START + 2 + (h % 6);
+                ctx.fillStyle = this.palColor(palIdx);
                 ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
               } else {
-                // Other templates — grass with template-influenced variation
-                const tVar = ((tmpl * 13 + icon * 7) % 20) - 10;
-                const r = 42 + (h % 10) + tVar * 0.3;
-                const g = 72 + (h % 14) + tVar * 0.5;
-                const b = 28 + (h % 8) + tVar * 0.2;
-                ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+                // Other templates — grass with palette variation
+                const palIdx = PAL_GRASS_START + 3 + ((tmpl * 13 + icon * 7 + h) % 6);
+                const bri = ((h % 12) - 6);
+                ctx.fillStyle = this.palColor(palIdx, bri);
                 ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-                // Subtle detail from template
+                // Subtle dirt patch detail from template
                 if ((h + icon) % 5 === 0) {
-                  ctx.fillStyle = `rgba(85,65,40,0.2)`;
+                  ctx.fillStyle = this.palColor(PAL_DIRT_START + 6, -20);
+                  ctx.globalAlpha = 0.2;
                   ctx.fillRect(screen.x + 3, screen.y + 3, CELL_SIZE - 6, CELL_SIZE - 6);
+                  ctx.globalAlpha = 1;
                 }
               }
             } else {
-              // Default clear grass (no MapPack data)
-              const r = 45 + (h % 12) - 6;
-              const g = 75 + (h % 18) - 9;
-              const b = 30 + (h % 8) - 4;
-              ctx.fillStyle = `rgb(${r},${g},${b})`;
+              // Default clear grass — palette green (indices 146-151)
+              const palIdx = PAL_GRASS_START + 2 + (h % 6);
+              ctx.fillStyle = this.palColor(palIdx, (h % 10) - 5);
               ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
               if (h < 15) {
-                ctx.fillStyle = `rgba(90,70,40,0.3)`;
+                ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);
+                ctx.globalAlpha = 0.25;
                 ctx.fillRect(screen.x + 4, screen.y + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+                ctx.globalAlpha = 1;
               }
             }
-            // Grass tuft detail (always)
+            // Grass tuft detail — darker green from palette
             if (h > 200) {
-              ctx.fillStyle = `rgba(60,100,35,0.6)`;
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 8);
+              ctx.globalAlpha = 0.6;
               const gx = screen.x + (h % 16) + 4;
               const gy = screen.y + ((h >> 4) % 16) + 4;
               ctx.fillRect(gx, gy, 2, 3);
+              ctx.globalAlpha = 1;
             }
             break;
           }
           case Terrain.WATER: {
-            const wave = Math.sin((tick * 0.15) + cx * 0.7 + cy * 0.5) * 8;
-            const r = 15 + wave;
-            const g = 45 + wave * 1.5;
-            const b = 85 + wave * 2;
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            // Animated water using palette indices 96-102 (7-frame ping-pong cycle)
+            const phase = (tick + h) % (PAL_WATER_COUNT * 2 - 2);
+            const waterIdx = phase < PAL_WATER_COUNT ? phase : (PAL_WATER_COUNT * 2 - 2 - phase);
+            ctx.fillStyle = this.palColor(PAL_WATER_START + waterIdx);
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+            // Wave highlight using lighter water color
             if ((h + tick) % 30 < 8) {
-              ctx.fillStyle = 'rgba(100,160,200,0.15)';
+              ctx.fillStyle = this.palColor(PAL_WATER_START, 0);
+              ctx.globalAlpha = 0.15;
               ctx.fillRect(screen.x + 3, screen.y + 8, 18, 2);
+              ctx.globalAlpha = 1;
             }
             break;
           }
           case Terrain.ROCK: {
-            const v = h % 10;
-            ctx.fillStyle = `rgb(${65 + v},${60 + v},${50 + v})`;
+            // Rock using palette gray ramp (indices 132-140)
+            const palIdx = PAL_ROCK_START + 4 + (h % 8);
+            ctx.fillStyle = this.palColor(palIdx);
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            ctx.fillStyle = `rgba(80,75,60,0.5)`;
+            // Rock detail using darker grays
+            ctx.fillStyle = this.palColor(PAL_ROCK_START + 10);
+            ctx.globalAlpha = 0.5;
             ctx.fillRect(screen.x + (h % 10) + 2, screen.y + ((h >> 3) % 10) + 2, 4, 3);
             ctx.fillRect(screen.x + ((h >> 5) % 12) + 1, screen.y + ((h >> 2) % 14) + 5, 3, 4);
+            ctx.globalAlpha = 1;
             break;
           }
           case Terrain.TREE: {
-            // Ground under tree
-            ctx.fillStyle = `rgb(${35 + (h % 8)},${55 + (h % 10)},${25 + (h % 6)})`;
+            // Ground under tree — dark grass from palette
+            ctx.fillStyle = this.palColor(PAL_GRASS_START + 9, (h % 8) - 4);
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Tree trunk
-            ctx.fillStyle = '#4a3520';
+            // Tree trunk — palette brown (dirt index ~88)
+            ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);
             ctx.fillRect(screen.x + 10, screen.y + 14, 4, 10);
-            // Tree canopy (layered circles for depth)
-            ctx.fillStyle = '#1a4a15';
+            // Tree canopy — palette greens (dark→medium)
+            ctx.fillStyle = this.palColor(PAL_GRASS_START + 10);
             ctx.beginPath();
             ctx.arc(screen.x + 12, screen.y + 10, 8, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = '#256320';
+            ctx.fillStyle = this.palColor(PAL_GRASS_START + 8);
             ctx.beginPath();
             ctx.arc(screen.x + 10, screen.y + 8, 6, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = '#2d7528';
+            ctx.fillStyle = this.palColor(PAL_GRASS_START + 6);
             ctx.beginPath();
             ctx.arc(screen.x + 13, screen.y + 7, 4, 0, Math.PI * 2);
             ctx.fill();
             break;
           }
           case Terrain.WALL: {
-            ctx.fillStyle = `rgb(${75 + (h % 8)},${75 + (h % 8)},${70 + (h % 8)})`;
+            // Walls using palette gray ramp
+            const palIdx = PAL_ROCK_START + 5 + (h % 4);
+            ctx.fillStyle = this.palColor(palIdx);
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
             ctx.strokeStyle = 'rgba(0,0,0,0.2)';
             ctx.lineWidth = 1;
@@ -209,6 +244,44 @@ export class Renderer {
             break;
           }
         }
+      }
+    }
+  }
+
+  // ─── Structures ─────────────────────────────────────────
+
+  private renderStructures(
+    camera: Camera, map: GameMap, structures: MapStructure[], assets: AssetManager,
+  ): void {
+    const ctx = this.ctx;
+    for (const s of structures) {
+      const vis = map.getVisibility(s.cx, s.cy);
+      if (vis === 0) continue; // fully shrouded
+
+      const screenX = s.cx * CELL_SIZE - camera.x;
+      const screenY = s.cy * CELL_SIZE - camera.y;
+
+      const sheet = assets.getSheet(s.image);
+      if (sheet) {
+        // Draw first frame of the sprite sheet
+        if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
+        assets.drawFrame(ctx, s.image, 0, screenX + sheet.meta.frameWidth / 2, screenY + sheet.meta.frameHeight / 2, {
+          centerX: true,
+          centerY: true,
+        });
+        if (vis === 1) ctx.globalAlpha = 1;
+      } else {
+        // Fallback: colored rectangle for buildings without sprites
+        const isPlayer = s.house === 'Spain' || s.house === 'Greece';
+        ctx.fillStyle = isPlayer
+          ? this.palColor(PAL_ROCK_START + 2, 10)   // light gray for player
+          : this.palColor(PAL_DIRT_START + 6);       // brown for neutral/enemy
+        if (vis === 1) ctx.globalAlpha = 0.6;
+        ctx.fillRect(screenX + 2, screenY + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(screenX + 2, screenY + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+        if (vis === 1) ctx.globalAlpha = 1;
       }
     }
   }
@@ -259,11 +332,11 @@ export class Renderer {
         ctx.globalAlpha = fadeAlpha;
       }
 
-      // Selection circle (drawn under unit)
+      // Selection circle (drawn under unit) — palette bright green
       if (selectedIds.has(entity.id) && entity.alive) {
         const rx = spriteW * 0.45;
         const ry = spriteW * 0.2;
-        ctx.strokeStyle = '#33ff33';
+        ctx.strokeStyle = this.palColor(PAL_GREEN_HP);
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.ellipse(screen.x, screen.y + spriteH * 0.3, rx, ry, 0, 0, Math.PI * 2);
@@ -330,8 +403,10 @@ export class Renderer {
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(bx, y, barW, barH);
 
-    // Health fill with pip segments
-    const color = ratio > 0.66 ? '#00cc00' : ratio > 0.33 ? '#cccc00' : '#cc0000';
+    // Health fill with pip segments — palette-accurate green/yellow/red
+    const color = ratio > 0.66 ? this.palColor(PAL_GREEN_HP) :
+                  ratio > 0.33 ? this.palColor(156) :  // palette yellow [255,255,158]
+                                 this.palColor(PAL_RED_HP);
     const fillW = barW * ratio;
     ctx.fillStyle = color;
     ctx.fillRect(bx, y, fillW, barH);
@@ -483,12 +558,14 @@ export class Renderer {
     const x2 = Math.max(input.dragStartX, input.mouseX);
     const y2 = Math.max(input.dragStartY, input.mouseY);
 
-    // Semi-transparent fill
-    ctx.fillStyle = 'rgba(0,255,0,0.08)';
+    // Semi-transparent fill — palette green
+    ctx.fillStyle = this.palColor(PAL_GREEN_HP);
+    ctx.globalAlpha = 0.08;
     ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    ctx.globalAlpha = 1;
 
-    // Green border
-    ctx.strokeStyle = '#33ff33';
+    // Green border — palette green
+    ctx.strokeStyle = this.palColor(PAL_GREEN_HP);
     ctx.lineWidth = 1;
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
   }
@@ -523,13 +600,13 @@ export class Renderer {
         const ps = Math.max(scale * 2, 1);
 
         if (terrain === Terrain.WATER) {
-          ctx.fillStyle = vis === 2 ? '#1a4a6a' : '#0a2535';
+          ctx.fillStyle = this.palColor(PAL_WATER_START + 2, vis === 2 ? 0 : -50);
         } else if (terrain === Terrain.TREE) {
-          ctx.fillStyle = vis === 2 ? '#1a5a1a' : '#0d2d0d';
+          ctx.fillStyle = this.palColor(PAL_GRASS_START + 9, vis === 2 ? 0 : -40);
         } else if (terrain === Terrain.ROCK || terrain === Terrain.WALL) {
-          ctx.fillStyle = vis === 2 ? '#444' : '#222';
+          ctx.fillStyle = this.palColor(PAL_ROCK_START + 8, vis === 2 ? 0 : -40);
         } else {
-          ctx.fillStyle = vis === 2 ? '#2a4a1a' : '#15250d';
+          ctx.fillStyle = this.palColor(PAL_GRASS_START + 6, vis === 2 ? 0 : -40);
         }
         ctx.fillRect(px, py, ps, ps);
       }
@@ -544,7 +621,7 @@ export class Renderer {
       if (vis === 0) continue;
       if (vis === 1 && !e.isPlayerUnit) continue;
 
-      ctx.fillStyle = e.isPlayerUnit ? '#33ff33' : '#ff3333';
+      ctx.fillStyle = e.isPlayerUnit ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
       ctx.fillRect(
         mmX + (ecx - ox) * scale,
         mmY + (ecy - oy) * scale,
@@ -589,17 +666,17 @@ export class Renderer {
 
     if (selected.length === 1) {
       const unit = selected[0];
-      // Unit name
-      ctx.fillStyle = unit.isPlayerUnit ? '#33ff33' : '#ff3333';
+      // Unit name — palette green/red
+      ctx.fillStyle = unit.isPlayerUnit ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
       ctx.fillText(unit.stats.name, px + 8, py + 15);
-      // HP
-      ctx.fillStyle = '#aaa';
+      // HP — palette light gray
+      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
       ctx.fillText(`HP: ${unit.hp}/${unit.maxHp}`, px + 8, py + 28);
       // Health bar
       this.renderHealthBar(px + panelW / 2, py + 38, panelW - 20, unit.hp / unit.maxHp, true);
     } else {
-      // Multiple selected
-      ctx.fillStyle = '#33ff33';
+      // Multiple selected — palette green
+      ctx.fillStyle = this.palColor(PAL_GREEN_HP);
       ctx.fillText(`${selected.length} units selected`, px + 8, py + 18);
     }
   }

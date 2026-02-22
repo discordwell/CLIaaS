@@ -4,7 +4,7 @@
  */
 
 import {
-  type WorldPos, CELL_SIZE, GAME_TICKS_PER_SEC,
+  type WorldPos, CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, worldDist, directionTo, worldToCell,
 } from './types';
 import { AssetManager } from './assets';
@@ -16,7 +16,7 @@ import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
 import {
   loadScenario,
-  type TeamType, type ScenarioTrigger,
+  type TeamType, type ScenarioTrigger, type MapStructure,
   checkTriggerEvent, executeTriggerAction,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
@@ -35,11 +35,13 @@ export class Game {
   // Game state
   entities: Entity[] = [];
   entityById = new Map<number, Entity>();
+  structures: MapStructure[] = [];
   selectedIds = new Set<number>();
   effects: Effect[] = [];
   state: GameState = 'loading';
   tick = 0;
   missionName = '';
+  missionBriefing = '';
   scenarioId = '';
 
   // Trigger system (from RA scenario INI)
@@ -87,12 +89,14 @@ export class Game {
     });
 
     // Load scenario
-    const { map, entities, name, waypoints, teamTypes, triggers } = await loadScenario(scenarioId);
+    const { map, entities, structures, name, briefing, waypoints, teamTypes, triggers, cellTriggers } = await loadScenario(scenarioId);
     this.map = map;
     this.entities = entities;
+    this.structures = structures;
     this.entityById.clear();
     for (const e of entities) this.entityById.set(e.id, e);
     this.missionName = name;
+    this.missionBriefing = briefing;
     this.waypoints = waypoints;
     this.teamTypes = teamTypes;
     this.triggers = triggers;
@@ -202,6 +206,9 @@ export class Game {
       e.frame++;
       return e.frame < e.maxFrames;
     });
+
+    // Check cell triggers — detect player units entering trigger cells
+    this.checkCellTriggers();
 
     // Process triggers (every 15 ticks = once per second for performance)
     if (this.tick % 15 === 0) {
@@ -474,6 +481,25 @@ export class Game {
     }
   }
 
+  /** Check cell triggers — fire when player units enter trigger cells */
+  private checkCellTriggers(): void {
+    if (this.map.cellTriggers.size === 0) return;
+    for (const entity of this.entities) {
+      if (!entity.alive || !entity.isPlayerUnit) continue;
+      const cellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
+      const trigName = this.map.cellTriggers.get(cellIdx);
+      if (trigName && !this.map.activatedCellTriggers.has(`${cellIdx}:${trigName}`)) {
+        this.map.activatedCellTriggers.add(`${cellIdx}:${trigName}`);
+        // Find matching trigger by name and mark its PLAYER_ENTERED condition as met
+        for (const trigger of this.triggers) {
+          if (trigger.name === trigName) {
+            trigger.playerEntered = true;
+          }
+        }
+      }
+    }
+  }
+
   /** Process trigger system — check conditions and fire actions */
   private processTriggers(): void {
     for (const trigger of this.triggers) {
@@ -482,8 +508,8 @@ export class Game {
       if (trigger.fired && trigger.persistence <= 1) continue;
 
       // Check event conditions
-      const e1Met = checkTriggerEvent(trigger.event1, this.tick, this.globals, trigger.timerTick);
-      const e2Met = checkTriggerEvent(trigger.event2, this.tick, this.globals, trigger.timerTick);
+      const e1Met = checkTriggerEvent(trigger.event1, this.tick, this.globals, trigger.timerTick, trigger.playerEntered);
+      const e2Met = checkTriggerEvent(trigger.event2, this.tick, this.globals, trigger.timerTick, trigger.playerEntered);
 
       let shouldFire = false;
       switch (trigger.eventControl) {
@@ -559,6 +585,7 @@ export class Game {
       this.camera,
       this.map,
       this.entities,
+      this.structures,
       this.assets,
       this.input.state,
       this.selectedIds,

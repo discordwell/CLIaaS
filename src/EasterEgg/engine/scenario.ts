@@ -77,6 +77,7 @@ export interface ScenarioTrigger {
   action2: TriggerAction;
   fired: boolean;         // has this trigger fired?
   timerTick: number;      // game tick when timer started (for TIME events)
+  playerEntered: boolean; // has a player unit entered a cell with this trigger?
 }
 
 // === Mission Metadata ===
@@ -92,26 +93,26 @@ export const MISSIONS: MissionInfo[] = [
   {
     id: 'SCA01EA',
     title: 'It Came From Red Alert!',
-    briefing: 'Commander, we have a situation. Giant mutant ants have been spotted near a civilian settlement. Reports indicate they are extremely aggressive and have already overwhelmed a patrol unit. Take your forces and eliminate the ant threat before they spread further. Exercise caution — these creatures are heavily armored.',
-    objective: 'Destroy all giant ants in the area.',
+    briefing: 'We\'ve lost contact with one of our outposts. Before it went off-line, we recieved a brief communique about giant ants. We\'re unsure what to make of this report, so we want you to investigate.\n\nScout the area, bring the outpost back on-line, and report your findings. If there is a threat, reinforcements will be sent in to help you.\n\nKeep the base functional and radio contact open -- we don\'t want to lose the outpost again.',
+    objective: 'Scout the area and eliminate the ant threat.',
   },
   {
     id: 'SCA02EA',
-    title: 'The Hive',
-    briefing: 'Intelligence has located the primary ant nest. These creatures are breeding at an alarming rate and must be stopped at the source. You have been given a stronger force for this assault. Push into the hive territory and destroy every last ant. Expect heavy resistance.',
-    objective: 'Locate and destroy the ant hive.',
+    title: 'Evacuation',
+    briefing: 'Who would\'ve believed it -- Giant Ants.\n\nNow that your MCV has arrived, we must evacuate the civilians in the area -- they don\'t stand a chance against these ants.\n\nThere are two villages in your immediate area. Locate them and evacuate the civilians to the island in the northwest. You\'ll also have to take out all the bridges in this area to stop the ants from completely overrunning you.\n\nYou must destroy the bridges, and evac at least one civilian from each town for the mission to be a success.',
+    objective: 'Evacuate civilians and destroy bridges.',
   },
   {
     id: 'SCA03EA',
-    title: 'The Aftermath',
-    briefing: 'Despite our earlier victories, a massive ant swarm has been detected heading toward our forward operating base. Hold your position and repel the assault. Reinforcements are limited — use your forces wisely. We cannot afford to lose this foothold.',
-    objective: 'Defend the base and eliminate all attacking ants.',
+    title: 'Extermination',
+    briefing: 'The source of the ant\'s activity has been pinpointed in this area. We suspect that their nests are in this area -- they must be destroyed.\n\nA team of civilian specialists are en-route to your location. Use them to gas all the ant nests in the area. In addition, destroy all ants that you encounter.\n\nBe careful -- these things can chew through anything. Good luck.',
+    objective: 'Destroy all ant nests in the area.',
   },
   {
     id: 'SCA04EA',
-    title: 'The Last Stand',
-    briefing: 'This is it, Commander. We have tracked the ants to their final stronghold — the queen\'s chamber deep in hostile territory. A full assault force has been assembled. Destroy the queen and every remaining ant to end this threat once and for all. Good luck.',
-    objective: 'Destroy the ant queen and all remaining forces.',
+    title: 'Tunnel Rats',
+    briefing: 'We\'ve discovered a series of tunnels underneath the ruined base. Now that we\'ve cut off their escape routes, the ants have nowhere left to run to.\n\nPerform a sweep and clear of all the tunnels, and find the cause of these abominations. Destroy anything that isn\'t human!\n\nThe power to the tunnel lights has been knocked out, which will limit visibility. Find the generator controls, and you can re-activate the lights.',
+    objective: 'Clear the tunnels and destroy all ants.',
   },
 ];
 
@@ -152,6 +153,7 @@ export function saveProgress(completedMission: number): void {
 
 interface ScenarioData {
   name: string;
+  briefing: string;
   mapBounds: { x: number; y: number; w: number; h: number };
   waypoints: Map<number, CellPos>;
   playerCredits: number;
@@ -189,6 +191,7 @@ interface ScenarioData {
   }>;
   teamTypes: TeamType[];
   triggers: ScenarioTrigger[];
+  cellTriggers: Map<number, string>;
   mapPack: string;  // raw Base64 MapPack data
 }
 
@@ -368,6 +371,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         action2: { action: f[14], team: f[15], trigger: f[16], data: f[17] },
         fired: false,
         timerTick: 0,
+        playerEntered: false,
       });
     }
   }
@@ -382,8 +386,29 @@ export function parseScenarioINI(text: string): ScenarioData {
     }
   }
 
+  // Parse [Briefing] section — numbered lines concatenated, @@ = paragraph break
+  let briefing = '';
+  const briefSection = sections.get('Briefing');
+  if (briefSection) {
+    const sortedKeys = [...briefSection.keys()].sort((a, b) => parseInt(a) - parseInt(b));
+    briefing = sortedKeys.map(k => briefSection.get(k)!).join('').replace(/@@/g, '\n\n');
+  }
+
+  // Parse [CellTriggers] section — maps cell index to trigger name
+  const cellTriggers = new Map<number, string>();
+  const ctSection = sections.get('CellTriggers');
+  if (ctSection) {
+    for (const [key, value] of ctSection) {
+      const cellIdx = parseInt(key);
+      if (!isNaN(cellIdx)) {
+        cellTriggers.set(cellIdx, value);
+      }
+    }
+  }
+
   return {
     name: get('Basic', 'Name', 'Unknown Mission'),
+    briefing,
     mapBounds: { x: mapX, y: mapY, w: mapW, h: mapH },
     waypoints,
     playerCredits: credits,
@@ -394,6 +419,7 @@ export function parseScenarioINI(text: string): ScenarioData {
     terrain,
     teamTypes,
     triggers,
+    cellTriggers,
     mapPack,
   };
 }
@@ -430,9 +456,10 @@ function houseIdToHouse(id: number): House {
     case 0: return House.Spain;
     case 1: return House.Greece;
     case 2: return House.USSR;
+    case 3: return House.Greece;   // England — allied, treat as Greece
     case 4: return House.Ukraine;
     case 5: return House.Germany;
-    default: return House.USSR; // ant teams use various house IDs
+    default: return House.Neutral;
   }
 }
 
@@ -441,13 +468,39 @@ function isAntTeam(team: TeamType): boolean {
   return team.members.some(m => m.type.startsWith('ANT'));
 }
 
+/** A placed structure on the map (static building, not a unit) */
+export interface MapStructure {
+  type: string;       // building type code (WEAP, POWR, TENT, etc.)
+  image: string;      // sprite sheet name (lowercase)
+  house: House;
+  cx: number;         // cell position
+  cy: number;
+  hp: number;         // 0-256 (proportion of max HP)
+}
+
+// Building type → sprite image name (only include buildings we have sprites for)
+const STRUCTURE_IMAGES: Record<string, string> = {
+  FACT: 'fact', POWR: 'powr', BARR: 'barr', TENT: 'tent',
+  GUN: 'gun', SAM: 'sam',
+};
+
+// Building footprint sizes in cells (w, h) — defaults to 1x1
+const STRUCTURE_SIZE: Record<string, [number, number]> = {
+  FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
+  PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
+  GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1],
+};
+
 export interface ScenarioResult {
   map: GameMap;
   entities: Entity[];
+  structures: MapStructure[];
   name: string;
+  briefing: string;
   waypoints: Map<number, CellPos>;
   teamTypes: TeamType[];
   triggers: ScenarioTrigger[];
+  cellTriggers: Map<number, string>;
 }
 
 /** Load a scenario and create entities + map setup */
@@ -476,9 +529,8 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       map.setTerrain(pos.cx, pos.cy, Terrain.WATER);
     } else if (type.includes('rock') || type.includes('cliff')) {
       map.setTerrain(pos.cx, pos.cy, Terrain.ROCK);
-    } else if (type.startsWith('t') && /^t\d/.test(type)) {
-      map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
-    } else if (type.startsWith('tc')) {
+    } else if (/^tc?\d/.test(type)) {
+      // T01-T17 = single trees, TC01-TC05 = tree clumps
       map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
     }
   }
@@ -509,16 +561,41 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     entities.push(entity);
   }
 
-  // No hardcoded ant spawning — the trigger system handles all ant wave spawning.
-  // Triggers fire based on elapsed time and global variables, spawning TeamType teams.
+  // Create structures from INI and mark their cells as impassable
+  const structures: MapStructure[] = [];
+  for (const s of data.structures) {
+    const pos = cellIndexToPos(s.cell);
+    const image = STRUCTURE_IMAGES[s.type] ?? s.type.toLowerCase();
+    structures.push({
+      type: s.type,
+      image,
+      house: toHouse(s.house),
+      cx: pos.cx,
+      cy: pos.cy,
+      hp: s.hp,
+    });
+    // Mark structure footprint cells as impassable (WALL terrain)
+    const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
+      }
+    }
+  }
+
+  // Store cell triggers on the map for runtime checks
+  map.cellTriggers = data.cellTriggers;
 
   return {
     map,
     entities,
+    structures,
     name: data.name,
+    briefing: data.briefing,
     waypoints: data.waypoints,
     teamTypes: data.teamTypes,
     triggers: data.triggers,
+    cellTriggers: data.cellTriggers,
   };
 }
 
@@ -551,37 +628,45 @@ function decodeMapPack(base64Data: string, map: GameMap): void {
     map.templateType = templateType;
     map.templateIcon = templateIcon;
 
-    // Use template types to set better terrain classification
-    // RA template type IDs: 0xFF=clear, 0x00=clear, others map to specific terrain
-    // Common TEMPERATE template types:
-    // 0-3: Clear terrain variations
-    // 4-7: Water tiles
-    // 8-11: Shore/beach transitions
-    // 12-15: Road tiles
-    // 16+: Rock, cliff, rough terrain, etc.
+    // Use template types to set terrain classification
+    // TEMPERATE theater template type IDs (from RA TEMPERAT.INI):
+    //   0, 255: Clear/grass (default)
+    //   1-2: Pure water body tiles
+    //   3-56: Shore/beach transitions (mixed water+land — use icon to distinguish)
+    //   57-58, 97-110: Rock debris/formations
+    //   59-96: Water cliff edges
+    //   112-130: River segments and bridges
+    //   131-172: Land cliffs and rock formations
+    //   173-228: Road network tiles (passable)
+    //   229-234: River crossings
+    //   235-252: Bridge structures (passable)
     for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
       for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
         const idx = cy * 128 + cx;
         const tmpl = templateType[idx];
 
-        // Classify terrain based on template type ranges
-        // These are approximate — TEMPERATE theater template types
         if (tmpl === 0xFF || tmpl === 0x00) {
           // Clear (default)
-        } else if (tmpl >= 1 && tmpl <= 5) {
-          // Water body templates
+        } else if (tmpl >= 1 && tmpl <= 2) {
+          // Pure water body
           map.setTerrain(cx, cy, Terrain.WATER);
-        } else if (tmpl >= 6 && tmpl <= 11) {
-          // Shore/water edge templates — treat as water
+        } else if (tmpl >= 3 && tmpl <= 56) {
+          // Shore/beach transitions — icon 0-3 are typically water portions
           const icon = templateIcon[idx];
-          // Some shore icons are land, some are water
-          if (icon % 2 === 0) {
+          if (icon < 4) {
             map.setTerrain(cx, cy, Terrain.WATER);
           }
-        } else if (tmpl >= 0x18 && tmpl <= 0x20) {
-          // Rock/cliff templates
+          // Other icons are land (shore dirt) — stays CLEAR
+        } else if ((tmpl >= 59 && tmpl <= 96) || (tmpl >= 112 && tmpl <= 130) ||
+                   (tmpl >= 229 && tmpl <= 234)) {
+          // Water cliffs, rivers — treat as water
+          map.setTerrain(cx, cy, Terrain.WATER);
+        } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 97 && tmpl <= 110) ||
+                   (tmpl >= 131 && tmpl <= 172)) {
+          // Rock debris, formations, land cliffs — impassable
           map.setTerrain(cx, cy, Terrain.ROCK);
         }
+        // 173-228: roads, 235-252: bridges → stay as CLEAR (passable)
       }
     }
   } catch {
@@ -651,6 +736,7 @@ export function checkTriggerEvent(
   gameTick: number,
   globals: Set<number>,
   triggerStartTick: number,
+  playerEntered: boolean,
 ): boolean {
   switch (event.type) {
     case TEVENT_NONE:
@@ -663,8 +749,8 @@ export function checkTriggerEvent(
     case TEVENT_GLOBAL_SET:
       return globals.has(event.data);
     case TEVENT_PLAYER_ENTERED:
-      // Simplified: always true after some initial time
-      return gameTick > 15 * GAME_TICKS_PER_SEC;
+      // True when a player unit has entered a cell associated with this trigger
+      return playerEntered;
     default:
       return false;
   }
@@ -694,8 +780,8 @@ export function executeTriggerAction(
       if (!wp) break;
       const world = cellToWorld(wp.cx, wp.cy);
 
-      // Spawn team members
-      const house = isAntTeam(team) ? House.USSR : House.Spain;
+      // Spawn team members using the actual house from TeamType data
+      const house = houseIdToHouse(team.house);
       for (const member of team.members) {
         for (let i = 0; i < member.count; i++) {
           const unitType = toUnitType(member.type);
