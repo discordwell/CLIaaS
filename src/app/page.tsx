@@ -134,7 +134,8 @@ export default function Home() {
           <h2 className="text-2xl font-bold">Internal Routes</h2>
           <div className="mt-6 flex flex-col gap-4 font-mono text-sm">
             {[
-              { path: "/dashboard", note: "connector status + quickstart" },
+              { path: "/dashboard", note: "live metrics + connector status" },
+              { path: "/tickets", note: "browse and filter ticket queue" },
               { path: "/demo", note: "interactive terminal playground" },
               { path: "/settings", note: "credentials + LLM provider config" },
               { path: "/api/health", note: "deploy healthcheck" },

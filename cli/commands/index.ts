@@ -10,6 +10,8 @@ import { registerConfigCommand } from './config.js';
 import { registerDemoCommand } from './demo.js';
 import { registerStatsCommand } from './stats.js';
 import { registerExportCommand } from './export.js';
+import { registerPipelineCommand } from './pipeline.js';
+import { registerWatchCommand } from './watch.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -23,4 +25,6 @@ export function registerCommands(program: Command): void {
   registerDemoCommand(program);
   registerStatsCommand(program);
   registerExportCommand(program);
+  registerPipelineCommand(program);
+  registerWatchCommand(program);
 }
