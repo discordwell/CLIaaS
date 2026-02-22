@@ -3,8 +3,8 @@ import { loadKBArticles } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
-export default function KBPage() {
-  const articles = loadKBArticles();
+export default async function KBPage() {
+  const articles = await loadKBArticles();
 
   // Group by top-level category
   const categories: Record<string, typeof articles> = {};

@@ -39,8 +39,8 @@ const statusColor: Record<string, string> = {
 
 export const dynamic = "force-dynamic";
 
-export default function DashboardPage() {
-  const tickets = loadTickets();
+export default async function DashboardPage() {
+  const tickets = await loadTickets();
   const stats = computeStats(tickets);
   const hasData = tickets.length > 0;
 

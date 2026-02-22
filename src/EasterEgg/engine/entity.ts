@@ -6,6 +6,7 @@ import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats,
   Dir, Mission, AnimState, House, UnitType,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE,
+  INFANTRY_ANIMS, BODY_SHAPE, ANT_ANIM,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
 } from './types';
 
@@ -89,38 +90,61 @@ export class Entity {
   /** Calculate the sprite frame index for the current state */
   get spriteFrame(): number {
     const dir = this.facing;
-    const stats = this.stats;
 
-    if (stats.isInfantry) {
-      // Infantry frame layout:
-      // Walk: dir*8 + walkFrame (0-7 per direction, 8 directions)
-      // Fire: 64 + dir*2 + fireFrame
-      // Die: 80+ (death sequence)
-      // Idle: dir*8 (first walk frame)
+    // --- Ant units: 104-frame layout (stand/walk/attack) ---
+    if (this.isAnt) {
       switch (this.animState) {
         case AnimState.WALK:
-          return dir * 8 + (this.animFrame % 6);
+          return ANT_ANIM.walkBase + dir * ANT_ANIM.walkCount + (this.animFrame % ANT_ANIM.walkCount);
         case AnimState.ATTACK:
-          return 48 + dir * 2 + (this.animFrame % 2);
+          return ANT_ANIM.attackBase + dir * ANT_ANIM.attackCount + (this.animFrame % ANT_ANIM.attackCount);
         case AnimState.DIE:
-          return 64 + Math.min(this.animFrame, 7);
+          // Use last attack frame fading out
+          return ANT_ANIM.attackBase + dir * ANT_ANIM.attackCount;
         default:
-          return dir * 8; // idle = first walk frame
+          return ANT_ANIM.standBase + dir;
       }
     }
 
-    // Vehicle/ant frame layout:
-    // 32 rotation frames (body), each at 360/32 = 11.25° intervals
-    // For 8-direction facing: dir * 4 gives the base frame
-    const bodyFrame = dir * 4;
+    // --- Infantry: DoControls layout (base + facing*jump + animFrame%count) ---
+    if (this.stats.isInfantry) {
+      const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
+      switch (this.animState) {
+        case AnimState.WALK: {
+          const d = anim.walk;
+          return d.frame + dir * d.jump + (this.animFrame % d.count);
+        }
+        case AnimState.ATTACK: {
+          const d = anim.fire;
+          return d.frame + dir * d.jump + (this.animFrame % d.count);
+        }
+        case AnimState.DIE: {
+          const d = anim.die1;
+          return d.frame + Math.min(this.animFrame, d.count - 1);
+        }
+        default: {
+          // Idle: use idle fidget if available and enough time has passed
+          if (anim.idle && this.animFrame > 15) {
+            const d = anim.idle;
+            return d.frame + (this.animFrame % d.count);
+          }
+          const d = anim.ready;
+          return d.frame + dir * d.jump;
+        }
+      }
+    }
+
+    // --- Vehicles: 32-frame body rotation via BodyShape lookup ---
+    const facingIndex = dir * 4; // 8 directions → 32-step index
+    const bodyFrame = BODY_SHAPE[facingIndex];
 
     switch (this.animState) {
       case AnimState.WALK:
-        return bodyFrame; // vehicles don't animate walk
+        return bodyFrame;
       case AnimState.ATTACK:
-        return bodyFrame; // attack = same frame (fire effect is separate)
+        return bodyFrame; // fire effect is separate
       case AnimState.DIE:
-        return 32 + Math.min(this.animFrame, 7); // damaged frames
+        return 32 + Math.min(this.animFrame, 7);
       default:
         return bodyFrame;
     }

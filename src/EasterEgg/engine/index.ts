@@ -44,6 +44,7 @@ export class Game {
 
   // Internal
   private canvas: HTMLCanvasElement;
+  private stopped = false;
   private timerId = 0;
   private lastTime = 0;
   private accumulator = 0;
@@ -61,6 +62,7 @@ export class Game {
   /** Load assets and start a scenario */
   async start(scenarioId = 'SCA01EA'): Promise<void> {
     this.state = 'loading';
+    this.stopped = false;
     this.scenarioId = scenarioId;
     this.onStateChange?.('loading');
     resetEntityIds();
@@ -95,7 +97,7 @@ export class Game {
     }
 
     // If stop() was called during async loading, don't start the loop
-    if (this.state === 'paused') return;
+    if (this.stopped) return;
 
     this.state = 'playing';
     this.onStateChange?.('playing');
@@ -106,6 +108,7 @@ export class Game {
   /** Stop the game */
   stop(): void {
     this.state = 'paused';
+    this.stopped = true;
     if (this.timerId) clearTimeout(this.timerId);
     this.timerId = 0;
     this.input.destroy();
@@ -374,20 +377,25 @@ export class Game {
         const killed = entity.target.takeDamage(entity.weapon.damage);
         entity.attackCooldown = entity.weapon.rof;
 
-        // Spawn attack effect at target
+        // Spawn attack effect at target using sprite sheets
         const tx = entity.target.pos.x;
         const ty = entity.target.pos.y;
         if (entity.isAnt && entity.type === 'ANT3') {
-          this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12 });
+          this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
+            sprite: 'piffpiff', spriteStart: 0 });
         } else if (entity.isAnt) {
-          this.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 10, size: 6 });
+          this.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 8, size: 6,
+            sprite: 'piffpiff', spriteStart: 0 });
         } else {
-          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 4, size: 5 });
-          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 12, size: 8 });
+          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 4, size: 5,
+            sprite: 'piff', spriteStart: 0 });
+          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 17, size: 8,
+            sprite: 'veh-hit1', spriteStart: 0 });
         }
 
         if (killed) {
-          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 20, size: 16 });
+          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 18, size: 16,
+            sprite: 'fball1', spriteStart: 0 });
         }
       }
     } else {

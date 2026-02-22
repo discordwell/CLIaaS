@@ -18,6 +18,9 @@ export interface Effect {
   frame: number;
   maxFrames: number;
   size: number;
+  // Sprite-based effect rendering
+  sprite?: string;       // sprite sheet name (e.g. 'fball1', 'piff')
+  spriteStart?: number;  // first frame index in the sheet
 }
 
 // Pseudo-random hash for terrain variation
@@ -55,7 +58,7 @@ export class Renderer {
 
     this.renderTerrain(camera, map, tick);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
-    this.renderEffects(camera, effects);
+    this.renderEffects(camera, effects, assets);
     this.renderFogOfWar(camera, map);
     this.renderSelectionBox(input);
     this.renderMinimap(map, entities, camera);
@@ -294,18 +297,35 @@ export class Renderer {
 
   // ─── Effects ─────────────────────────────────────────────
 
-  private renderEffects(camera: Camera, effects: Effect[]): void {
+  private renderEffects(camera: Camera, effects: Effect[], assets: AssetManager): void {
     const ctx = this.ctx;
 
     for (const fx of effects) {
       const screen = camera.worldToScreen(fx.x, fx.y);
       const progress = fx.frame / fx.maxFrames;
 
+      // Sprite-based rendering: if the effect has a sprite sheet, use it
+      if (fx.sprite) {
+        const sheet = assets.getSheet(fx.sprite);
+        if (sheet) {
+          const frameIdx = (fx.spriteStart ?? 0) + Math.min(fx.frame, sheet.meta.frameCount - 1);
+          const alpha = fx.type === 'tesla' ? 1 - progress * 0.5 : 1;
+          if (alpha < 1) ctx.globalAlpha = alpha;
+          assets.drawFrame(ctx, fx.sprite, frameIdx % sheet.meta.frameCount, screen.x, screen.y, {
+            centerX: true,
+            centerY: true,
+          });
+          if (alpha < 1) ctx.globalAlpha = 1;
+          continue;
+        }
+        // Fall through to procedural if sprite not loaded
+      }
+
+      // Procedural fallback for effects without sprite sheets
       switch (fx.type) {
         case 'explosion': {
           const radius = fx.size * (0.3 + progress * 0.7);
           const alpha = 1 - progress;
-          // Outer glow
           const gradient = ctx.createRadialGradient(
             screen.x, screen.y, 0,
             screen.x, screen.y, radius,
@@ -317,7 +337,6 @@ export class Renderer {
           ctx.beginPath();
           ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
           ctx.fill();
-          // Core flash (first few frames)
           if (progress < 0.3) {
             ctx.fillStyle = `rgba(255,255,200,${(0.3 - progress) * 2})`;
             ctx.beginPath();
@@ -337,7 +356,6 @@ export class Renderer {
         }
         case 'blood': {
           const alpha = 1 - progress;
-          // Scatter particles
           const seed = (fx.x * 7 + fx.y * 13) | 0;
           for (let i = 0; i < 5; i++) {
             const angle = ((seed + i * 73) % 360) * Math.PI / 180;
@@ -351,7 +369,6 @@ export class Renderer {
         }
         case 'tesla': {
           const alpha = 1 - progress;
-          // Electric arc: jagged line segments
           ctx.strokeStyle = `rgba(100,200,255,${alpha})`;
           ctx.lineWidth = 2;
           ctx.beginPath();
@@ -368,7 +385,6 @@ export class Renderer {
             );
           }
           ctx.stroke();
-          // Glow
           ctx.strokeStyle = `rgba(150,220,255,${alpha * 0.3})`;
           ctx.lineWidth = 4;
           ctx.stroke();

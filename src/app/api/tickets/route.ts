@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  let tickets = loadTickets();
+  let tickets = await loadTickets();
 
   // Filters
   const status = searchParams.get("status");

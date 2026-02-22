@@ -71,6 +71,96 @@ export enum UnitType {
   I_MEDI = 'MEDI', // Medic
 }
 
+// === Animation metadata (DoInfoStruct from RA source) ===
+export interface DoInfo {
+  frame: number;   // starting frame index
+  count: number;   // frames per facing (or total if jump=0)
+  jump: number;    // stride between facings (0 = no facing variants)
+}
+
+export interface InfantryAnim {
+  ready: DoInfo;      // standing idle
+  walk: DoInfo;       // walking
+  fire: DoInfo;       // firing weapon (standing)
+  die1: DoInfo;       // death animation 1
+  idle?: DoInfo;      // idle fidget animation (optional)
+}
+
+// Infantry animation layouts per type (from idata.cpp DoControls)
+export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
+  E1: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 72, count: 7, jump: 7 },
+    die1:  { frame: 200, count: 8, jump: 0 },
+    idle:  { frame: 224, count: 6, jump: 0 },
+  },
+  E2: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 72, count: 10, jump: 10 },
+    die1:  { frame: 312, count: 8, jump: 0 },
+    idle:  { frame: 280, count: 6, jump: 0 },
+  },
+  E3: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 72, count: 7, jump: 7 },
+    die1:  { frame: 200, count: 8, jump: 0 },
+    idle:  { frame: 224, count: 6, jump: 0 },
+  },
+  E4: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 72, count: 10, jump: 10 },
+    die1:  { frame: 312, count: 8, jump: 0 },
+    idle:  { frame: 280, count: 6, jump: 0 },
+  },
+  E6: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 24, count: 6, jump: 6 },  // engineers don't fire, reuse walk
+    die1:  { frame: 200, count: 8, jump: 0 },
+  },
+  DOG: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 72, count: 4, jump: 4 },
+    die1:  { frame: 200, count: 8, jump: 0 },
+    idle:  { frame: 180, count: 3, jump: 0 },
+  },
+  SPY: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 72, count: 7, jump: 7 },
+    die1:  { frame: 200, count: 8, jump: 0 },
+    idle:  { frame: 224, count: 6, jump: 0 },
+  },
+  MEDI: {
+    ready: { frame: 0, count: 1, jump: 1 },
+    walk:  { frame: 24, count: 6, jump: 6 },
+    fire:  { frame: 72, count: 7, jump: 7 },  // heal animation
+    die1:  { frame: 200, count: 8, jump: 0 },
+  },
+};
+
+// Vehicle body rotation lookup table (BodyShape[32] from RA source)
+// Maps 32-step facing index to sprite frame index
+export const BODY_SHAPE: number[] = [
+  0, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17,
+  16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
+];
+
+// Ant animation frame ranges (104 total frames)
+// Standing: 0-7 (8 directions × 1 frame)
+// Walking: 8-71 (8 directions × 8 walk frames)
+// Attacking: 72-103 (8 directions × 4 attack frames)
+export const ANT_ANIM = {
+  standBase: 0,
+  walkBase: 8, walkCount: 8,
+  attackBase: 72, attackCount: 4,
+};
+
 // === Unit stats from SCA01EA.INI ===
 export interface UnitStats {
   type: UnitType;
@@ -101,8 +191,19 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'heavy', speed: 6, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'TankGun' },
   '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 4, isInfantry: false, primaryWeapon: 'MammothTusk' },
   JEEP: { type: UnitType.V_JEEP, name: 'Ranger', image: 'jeep', strength: 150, armor: 'light', speed: 10, sight: 4, rot: 8, isInfantry: false, primaryWeapon: 'MachineGun' },
+  '4TNK': { type: UnitType.V_4TNK, name: 'Tesla Tank', image: '4tnk', strength: 400, armor: 'heavy', speed: 5, sight: 5, rot: 4, isInfantry: false, primaryWeapon: 'TeslaCannon' },
+  APC: { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 8, sight: 4, rot: 6, isInfantry: false, primaryWeapon: 'MachineGun' },
+  ARTY: { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 4, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'ArtilleryShell' },
+  HARV: { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 5, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null },
+  MCV: { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 3, isInfantry: false, primaryWeapon: null },
   E1: { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Rifle' },
+  E2: { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Grenade' },
   E3: { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Bazooka' },
+  E4: { type: UnitType.I_E4, name: 'Flamethrower', image: 'e4', strength: 40, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Flamethrower' },
+  E6: { type: UnitType.I_E6, name: 'Engineer', image: 'e6', strength: 25, armor: 'none', speed: 4, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  DOG: { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 25, armor: 'none', speed: 8, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw' },
+  SPY: { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null },
+  MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null },
 };
 
 export const WEAPON_STATS: Record<string, WeaponStats> = {
@@ -114,6 +215,11 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   MachineGun: { name: 'MachineGun', damage: 10, rof: 15, range: 4 },
   Rifle: { name: 'Rifle', damage: 15, rof: 20, range: 3 },
   Bazooka: { name: 'Bazooka', damage: 40, rof: 60, range: 5 },
+  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5 },
+  Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3 },
+  DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5 },
+  TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5 },
+  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8 },
 };
 
 // === Entity Mission States ===

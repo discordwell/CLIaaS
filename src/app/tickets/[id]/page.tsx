@@ -24,17 +24,15 @@ export default async function TicketDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const tickets = loadTickets();
+  const tickets = await loadTickets();
   const ticket = tickets.find((t) => t.id === id || t.externalId === id);
 
   if (!ticket) notFound();
 
-  const messages = loadMessages()
-    .filter((m) => m.ticketId === ticket.id)
-    .sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
+  const messages = (await loadMessages(ticket.id)).sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-4xl px-6 py-12 text-zinc-950">

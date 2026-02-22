@@ -23,7 +23,7 @@ export default async function TicketsPage({
   searchParams: Promise<{ status?: string; priority?: string; q?: string }>;
 }) {
   const params = await searchParams;
-  let tickets = loadTickets();
+  let tickets = await loadTickets();
   const stats = computeStats(tickets);
 
   if (params.status) {
