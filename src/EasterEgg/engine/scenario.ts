@@ -91,6 +91,7 @@ export interface TeamMission {
 export interface TeamType {
   name: string;
   house: number;        // house ID
+  flags: number;        // bitfield: bit1=IsSuicide, bit2=IsAutocreate, etc.
   origin: number;       // starting waypoint
   members: TeamMember[];
   missions: TeamMission[];
@@ -432,6 +433,7 @@ export function parseScenarioINI(text: string): ScenarioData {
       const parts = value.split(',');
       if (parts.length < 8) continue;
       const house = parseInt(parts[0]);
+      const flags = parseInt(parts[1]) || 0;
       const origin = parseInt(parts[5]);
       const classCount = parseInt(parts[7]);
 
@@ -453,7 +455,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         missions.push({ mission: parseInt(mId), data: parseInt(mData) || 0 });
       }
 
-      teamTypes.push({ name, house, origin, members, missions });
+      teamTypes.push({ name, house, flags, origin, members, missions });
     }
   }
 
@@ -944,6 +946,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     if (section.has('Primary')) base.primaryWeapon = section.get('Primary')!;
     if (section.has('NoMovingFire')) base.noMovingFire = section.get('NoMovingFire')!.toLowerCase() === 'yes';
     if (section.has('Passengers')) base.passengers = parseInt(section.get('Passengers')!);
+    if (section.has('GuardRange')) base.guardRange = parseInt(section.get('GuardRange')!);
     if (section.has('Armor')) {
       const a = section.get('Armor')!.toLowerCase();
       if (a === 'light' || a === 'heavy' || a === 'none') base.armor = a;
@@ -1344,6 +1347,10 @@ export function executeTriggerAction(
               data: m.data,
             }));
             entity.teamMissionIndex = 0;
+          }
+          // IsSuicide teams (flags bit 1) fight to the death — use HUNT mission
+          if (team.flags & 2) {
+            entity.mission = Mission.HUNT;
           }
           // Track transports and infantry for auto-loading
           if (entity.isTransport && !transport) {

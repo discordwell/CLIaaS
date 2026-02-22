@@ -1821,13 +1821,19 @@ export class Game {
 
       case Game.TMISSION_GUARD: {
         // Guard area for a duration — data is in 1/10th minute units
-        // This runs every 8 ticks (AI scan rate), so decrement by 8
+        // Uses AREA_GUARD so units defend their position but return when enemies flee
+        // (RA "Sticky" behavior — bridge guard ants don't chase indefinitely)
         if (entity.teamMissionWaiting === 0) {
           entity.teamMissionWaiting = tm.data * TIME_UNIT_TICKS;
-          entity.mission = Mission.GUARD;
+          entity.mission = Mission.AREA_GUARD;
+          entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
         }
+        // This runs every 8 ticks (AI scan rate), so decrement by 8
         entity.teamMissionWaiting -= 8;
-        // While guarding, still auto-attack nearby enemies
+        // Reset to AREA_GUARD if entity switched to ATTACK from an auto-engage
+        if (entity.mission === Mission.GUARD) {
+          entity.mission = Mission.AREA_GUARD;
+        }
         if (entity.teamMissionWaiting <= 0) {
           entity.teamMissionWaiting = 0;
           entity.teamMissionIndex++;
@@ -2579,10 +2585,12 @@ export class Game {
     const isPlayer = entity.isPlayerUnit;
     const ec = entity.cell;
     const isDog = entity.type === 'DOG';
-    // Defensive stance: reduced scan range (weapon range only, not full sight)
+    // Guard scan range: use guardRange if defined (from INI GuardRange=N), else sight
+    // Defensive stance: reduced to weapon range only
+    const baseRange = entity.stats.guardRange ?? entity.stats.sight;
     const scanRange = entity.stance === Stance.DEFENSIVE
-      ? Math.min(entity.stats.sight, (entity.weapon?.range ?? 2) + 1)
-      : entity.stats.sight;
+      ? Math.min(baseRange, (entity.weapon?.range ?? 2) + 1)
+      : baseRange;
     let bestTarget: Entity | null = null;
     let bestDist = Infinity;
     let bestIsInfantry = false;

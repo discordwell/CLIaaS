@@ -188,6 +188,7 @@ export interface UnitStats {
   primaryWeapon: string | null;
   noMovingFire?: boolean; // must stop to fire (ants, artillery)
   passengers?: number;     // max passenger capacity (transports only)
+  guardRange?: number;     // max chase distance in cells for guard behavior (default: sight)
 }
 
 // Warhead types from RA (determines damage vs armor class)
