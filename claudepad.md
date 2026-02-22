@@ -1,5 +1,38 @@
 # Session Summaries
 
+## 2026-02-24T00:00Z — Session 23: Visual Fidelity & Combat Polish — Turrets, Retaliation, Audio, Pathfinding
+- GUN/SAM structure turret rotation: 8-dir facing toward targets, BODY_SHAPE frame selection
+- GUN: 128-frame layout (32 rotation × 2 fire × 2 damage), firingFlash muzzle effect
+- SAM: 68-frame layout (34 normal + 34 damaged), turret tracks targets
+- Vehicle death animation fix: freeze at body frame instead of showing turret frames
+- Unit retaliation: idle/unengaged enemies counter-attack when shot (triggerRetaliation)
+- Infantry scatter: 40% chance to dodge away from direct bullet hits (scatterInfantry)
+- Splash damage retaliation: units hit by AOE retarget the attacker
+- 3 missing audio synths: eva_reinforcements, eva_mission_warning, tesla_charge
+- Napalm/Sniper weapon sound/projectile/muzzle color mappings
+- Weapon-aware ant effects: ANT3 shows fire burst with Napalm (not hardcoded tesla)
+- Water crate override wired up in spawnCrate (was dead code)
+- Terrain-aware pathfinding: roads cost less, trees cost more (A* speed multiplier)
+- Structure explosion damage: 2-cell blast radius ~100 damage when buildings destroyed
+- 5 commits pushed, all type check clean, code reviewed
+
+## 2026-02-23T21:15Z — Session 22: 1:1 Fidelity Batch — Stat Overrides, Trigger Polish, Combat Fixes
+- Per-scenario stat overrides from INI: scenarioUnitStats, scenarioWeaponStats, warheadOverrides
+- CHAN infantry type (was incorrectly mapped to V_TRAN helicopter), Napalm weapon
+- TSLA ammo system (-1=unlimited, N=remaining shots, checked in structure combat)
+- TMISSION_GUARD → AREA_GUARD with guardOrigin (bridge guard ants don't chase infinitely)
+- GuardRange from INI: limits how far guard units chase, used in updateGuard scan
+- IsSuicide team flag (bit 1): teams fight to death with HUNT mission
+- Trigger house field (f[1]) stored in ScenarioTrigger
+- TACTION_TIMER_EXTEND (25) and TACTION_AUTOCREATE (13) handlers
+- [General] SilverCrate/WoodCrate overrides: armor (+2× HP) and firepower (elite) crate types
+- Artillery minRange (2 cells): retreat from point-blank, clamped to map bounds
+- ALLOWWIN gate: fallback "all ants dead" win requires allowWin flag when scenario uses it
+- Difficulty waveSize multiplier applied to queen spawn count (easy=0.7×, hard=1.3×)
+- Queen-spawned ants get per-scenario stat overrides (fixes SCA04EA ANT1/ANT3 stats)
+- Critical bugfix: worldDist returns cells but minRange comparison multiplied by CELL_SIZE
+- 6 commits pushed, all type check clean, code reviewed
+
 ## 2026-02-22T18:00Z — Session 21: Trigger System, Civilians, Bridges, Evacuation
 - Expanded trigger event/action system: 11 new events, 13 new actions (from EA open-source RA enums)
 - Added TriggerGameState + TriggerActionResult interfaces for clean event/action separation
@@ -49,32 +82,6 @@
 - Imported Terrain enum in index.ts; replaced magic number 4 with Terrain.WALL
 - Replaced hardcoded 128 with MAP_CELLS in map.ts and index.ts
 - All changes type check clean (npx tsc --noEmit)
-
-## 2026-02-23T14:00Z — Session 18: Economy, Production, Sidebar, Building Placement
-- Implemented full RTS economy system: harvester AI state machine (idle→seeking→harvesting→returning→unloading)
-- Added ore/gem depletion: map.depleteOre() reduces overlay levels, returns credits (25/ore, 50/gem)
-- Added map.findNearestOre() helper for harvester pathfinding
-- Implemented production queue: one active build per category (infantry/vehicle/structure)
-- ProductionItem data: 22 items (7 infantry, 7 vehicles, 8 structures) with costs/buildTimes/prerequisites
-- Sidebar UI: credits display, scrollable production buttons with category colors, build progress bars
-- Mouse wheel scrolling for sidebar when cursor over sidebar area
-- Building placement system: ghost preview (green/red), adjacency validation, click to place
-- MCV deployment: D key converts MCV to FACT (Construction Yard) structure
-- Escape key now cancels modes (placement→attack-move→sell→repair) before pausing
-- Right-click cancels placement with refund; right-click on sidebar cancels production
-- Minimap moved to bottom of sidebar; idle count moved into sidebar area
-- Terrain/fog rendering optimized to camera viewport width (not full canvas)
-- PROC (refinery) placement spawns a free harvester
-- Defensive structures (HBOX, GUN, etc.) get weapons when placed
-- All changes type check clean (npx tsc --noEmit)
-
-## 2026-02-23T12:00Z — Session 17: Ore Sparkle, Offscreen Indicators, Ambient, Tab Cycling
-- Implemented ore/gem animated sparkle effects in overlay rendering
-- Added off-screen selected unit indicators (arrow badges at screen edges)
-- Added ambient wind noise (pink noise via Web Audio API)
-- Added Tab key cycling through unit types in mixed selection (pool-based)
-- Code review fixed 6 bugs: Tab cycling one-shot, Tab focus steal, corner double-count, ambient crossfade silence, ambient stop throw, idle count per-render-frame
-- Commit: a5c8b77 — pushed to origin/main
 
 
 # Key Findings

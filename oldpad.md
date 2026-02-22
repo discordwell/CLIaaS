@@ -1,5 +1,31 @@
 # Archived Session Summaries
 
+## 2026-02-23T14:00Z — Session 18: Economy, Production, Sidebar, Building Placement
+- Implemented full RTS economy system: harvester AI state machine (idle→seeking→harvesting→returning→unloading)
+- Added ore/gem depletion: map.depleteOre() reduces overlay levels, returns credits (25/ore, 50/gem)
+- Added map.findNearestOre() helper for harvester pathfinding
+- Implemented production queue: one active build per category (infantry/vehicle/structure)
+- ProductionItem data: 22 items (7 infantry, 7 vehicles, 8 structures) with costs/buildTimes/prerequisites
+- Sidebar UI: credits display, scrollable production buttons with category colors, build progress bars
+- Mouse wheel scrolling for sidebar when cursor over sidebar area
+- Building placement system: ghost preview (green/red), adjacency validation, click to place
+- MCV deployment: D key converts MCV to FACT (Construction Yard) structure
+- Escape key now cancels modes (placement→attack-move→sell→repair) before pausing
+- Right-click cancels placement with refund; right-click on sidebar cancels production
+- Minimap moved to bottom of sidebar; idle count moved into sidebar area
+- Terrain/fog rendering optimized to camera viewport width (not full canvas)
+- PROC (refinery) placement spawns a free harvester
+- Defensive structures (HBOX, GUN, etc.) get weapons when placed
+- All changes type check clean (npx tsc --noEmit)
+
+## 2026-02-23T12:00Z — Session 17: Ore Sparkle, Offscreen Indicators, Ambient, Tab Cycling
+- Implemented ore/gem animated sparkle effects in overlay rendering
+- Added off-screen selected unit indicators (arrow badges at screen edges)
+- Added ambient wind noise (pink noise via Web Audio API)
+- Added Tab key cycling through unit types in mixed selection (pool-based)
+- Code review fixed 6 bugs: Tab cycling one-shot, Tab focus steal, corner double-count, ambient crossfade silence, ambient stop throw, idle count per-render-frame
+- Commit: a5c8b77 — pushed to origin/main
+
 ## 2026-02-23T11:00Z — Session 16: Veterancy, Friendly Fire, Stances, Wave AI
 - Added unit veterancy system: kills tracking, promotion at 3/6 kills, damage/HP bonuses (+25%/+50%)
 - Veterancy stars rendered above health bars (silver=veteran, gold=elite)
