@@ -453,6 +453,26 @@ export class Game {
       }
     }
 
+    // F1: toggle help overlay
+    if (keys.has('F1')) {
+      this.renderer.showHelp = !this.renderer.showHelp;
+      keys.delete('F1');
+    }
+
+    // Volume controls: +/- and M for mute
+    if (keys.has('+') || keys.has('=')) {
+      this.audio.setVolume(this.audio.getVolume() + 0.1);
+      keys.delete('+'); keys.delete('=');
+    }
+    if (keys.has('-') || keys.has('_')) {
+      this.audio.setVolume(this.audio.getVolume() - 0.1);
+      keys.delete('-'); keys.delete('_');
+    }
+    if (keys.has('m')) {
+      this.audio.toggleMute();
+      keys.delete('m');
+    }
+
     // Home/Space: center camera on selected units
     if ((keys.has('Home') || keys.has(' ')) && this.selectedIds.size > 0) {
       let cx = 0, cy = 0, count = 0;

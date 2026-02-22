@@ -42,6 +42,8 @@ export class AudioManager {
     }
   }
 
+  getVolume(): number { return this.volume; }
+
   setVolume(v: number): void {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : this.volume;

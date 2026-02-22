@@ -73,6 +73,7 @@ export class Renderer {
   sellMode = false;      // show sell cursor indicator
   repairMode = false;    // show repair cursor indicator
   repairingStructures = new Set<number>(); // indices of structures being repaired
+  showHelp = false;     // F1 help overlay
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -137,8 +138,9 @@ export class Renderer {
     if (this.attackMoveMode) this.renderAttackMoveIndicator(input);
     if (this.sellMode) this.renderModeLabel(input, 'SELL', 'rgba(255,200,60,0.9)');
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
-    this.renderMinimap(map, entities, camera);
+    this.renderMinimap(map, entities, structures, camera);
     this.renderUnitInfo(entities, selectedIds);
+    if (this.showHelp) this.renderHelpOverlay();
   }
 
   // ─── Terrain ─────────────────────────────────────────────
@@ -819,7 +821,7 @@ export class Renderer {
 
   // ─── Minimap ─────────────────────────────────────────────
 
-  private renderMinimap(map: GameMap, entities: Entity[], camera: Camera): void {
+  private renderMinimap(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera): void {
     const ctx = this.ctx;
     const mmSize = 90;
     const mmX = this.width - mmSize - 6;
@@ -857,6 +859,17 @@ export class Renderer {
         }
         ctx.fillRect(px, py, ps, ps);
       }
+    }
+
+    // Structure dots
+    for (const s of structures) {
+      if (!s.alive) continue;
+      const vis = map.getVisibility(s.cx, s.cy);
+      if (vis === 0) continue;
+      const isPlayer = s.house === 'Spain' || s.house === 'Greece';
+      ctx.fillStyle = isPlayer ? '#fff' : this.palColor(PAL_RED_HP);
+      const sSize = Math.max(scale * 2, 3);
+      ctx.fillRect(mmX + (s.cx - ox) * scale, mmY + (s.cy - oy) * scale, sSize, sSize);
     }
 
     // Unit dots
@@ -928,6 +941,49 @@ export class Renderer {
     ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
     ctx.fillText('Press P to resume', this.width / 2, this.height / 2 + 15);
     ctx.textAlign = 'left';
+  }
+
+  // ─── Help Overlay ──────────────────────────────────────
+
+  private renderHelpOverlay(): void {
+    const ctx = this.ctx;
+    const w = 240;
+    const lines = [
+      'KEYBOARD SHORTCUTS',
+      '',
+      'S / G     Stop / Guard',
+      'A         Attack-move',
+      'X         Scatter units',
+      'Q         Sell building',
+      'R         Repair building',
+      'Ctrl+RMB  Force-fire ground',
+      'Shift+RMB Queue waypoint',
+      'Home/Space Center on units',
+      '1-9       Select group',
+      'Ctrl+1-9  Assign group',
+      'P / Esc   Pause',
+      'F1        Toggle this help',
+    ];
+    const lineH = 13;
+    const h = lines.length * lineH + 16;
+    const px = (this.width - w) / 2;
+    const py = (this.height - h) / 2;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(px, py, w, h);
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, py, w, h);
+
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      ctx.fillStyle = i === 0 ? '#fff' : '#ccc';
+      if (i === 0) ctx.font = 'bold 10px monospace';
+      else ctx.font = '10px monospace';
+      ctx.fillText(line, px + 10, py + 14 + i * lineH);
+    }
   }
 
   // ─── End Screen ─────────────────────────────────────────
