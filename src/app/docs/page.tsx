@@ -74,6 +74,42 @@ const cliCommands = [
     flags: ["--subject", "--body", "--priority", "--tags", "--domain", "--email", "--password"],
   },
   {
+    name: "kayako-classic verify",
+    desc: "Test Kayako Classic API connectivity (HMAC-SHA256 auth)",
+    usage: "cliaas kayako-classic verify --domain <x> --apikey <k> --secret <s>",
+    flags: ["--domain", "--apikey", "--secret"],
+  },
+  {
+    name: "kayako-classic export",
+    desc: "Export tickets, users, orgs, and KB articles from Kayako Classic",
+    usage: "cliaas kayako-classic export --domain <x> --apikey <k> --secret <s> --out ./exports/kayako-classic",
+    flags: ["--domain", "--apikey", "--secret", "--out"],
+  },
+  {
+    name: "kayako-classic update",
+    desc: "Update a Kayako Classic ticket (status, priority, department, assignee)",
+    usage: "cliaas kayako-classic update --ticket <id> --statusid 2 --priorityid 3",
+    flags: ["--ticket", "--subject", "--statusid", "--priorityid", "--departmentid", "--ownerstaffid", "--domain", "--apikey", "--secret"],
+  },
+  {
+    name: "kayako-classic reply",
+    desc: "Post a reply to a Kayako Classic ticket",
+    usage: "cliaas kayako-classic reply --ticket <id> --body \"We're looking into this.\"",
+    flags: ["--ticket", "--body", "--staffid", "--domain", "--apikey", "--secret"],
+  },
+  {
+    name: "kayako-classic note",
+    desc: "Post an internal note to a Kayako Classic ticket",
+    usage: "cliaas kayako-classic note --ticket <id> --body \"Escalating to tier 2.\"",
+    flags: ["--ticket", "--body", "--staffid", "--domain", "--apikey", "--secret"],
+  },
+  {
+    name: "kayako-classic create",
+    desc: "Create a new Kayako Classic ticket",
+    usage: "cliaas kayako-classic create --subject \"Bug report\" --body \"Steps...\" --departmentid 1",
+    flags: ["--subject", "--body", "--departmentid", "--email", "--fullname", "--statusid", "--priorityid", "--staffid", "--domain", "--apikey", "--secret"],
+  },
+  {
     name: "tickets list",
     desc: "List and filter exported tickets",
     usage: "cliaas tickets list [--status open] [--priority high] [--assignee <name>]",

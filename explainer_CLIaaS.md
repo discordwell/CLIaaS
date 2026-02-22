@@ -1,4 +1,4 @@
-# CLIaaS - Hackathon Explainer
+# CLIaaS - Explainer
 
 ## Product Name
 CLIaaS

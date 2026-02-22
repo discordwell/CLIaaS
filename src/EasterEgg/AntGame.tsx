@@ -85,7 +85,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       locateFile: (path: string) => `/ra/${path}`,
       preRun: [],
       noInitialRun: false,
-      arguments: [],
+      arguments: ['-CD.'],
     };
 
     window.Module = mod;
@@ -345,19 +345,29 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
-      {/* Game Canvas */}
-      <canvas
-        ref={canvasRef}
-        id="canvas"
-        onContextMenu={(e) => e.preventDefault()}
-        tabIndex={-1}
-        style={{
-          display: showIntro ? 'none' : 'block',
-          width: '100%',
-          height: '100%',
-          background: '#000',
-        }}
-      />
+      {/* Game Canvas - sized exactly to maintain 320:200 aspect ratio so SDL mouse coords map correctly */}
+      <div style={{
+        display: showIntro ? 'none' : 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: '100vw',
+        height: '100vh',
+        background: '#000',
+      }}>
+        <canvas
+          ref={canvasRef}
+          id="canvas"
+          width={320}
+          height={200}
+          onContextMenu={(e) => e.preventDefault()}
+          tabIndex={-1}
+          style={{
+            width: 'min(100vw, calc(100vh * 320 / 200))',
+            height: 'min(100vh, calc(100vw * 200 / 320))',
+            imageRendering: 'pixelated',
+          }}
+        />
+      </div>
     </div>
   );
 }

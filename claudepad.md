@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-02-22T05:25Z — Session 4: Red Alert WASM Easter Egg rendering + mouse fix
+- Fixed black screen: Added `LORES=1` to CMake (gamedata only has LORES.MIX, not HIRES.MIX)
+- Fixed canvas CSS: Replaced `object-fit: contain` with exact aspect-ratio sizing for SDL mouse mapping
+- Fixed mouse coordinates: Added `Window_To_Game_Coords()` in keyboard.cpp to scale to 320x200
+- Removed `SDL_WINDOW_ALLOW_HIGHDPI` flag
+- Cleaned up all 44 `[RA-DBG]` debug printf statements
+- Game renders: title screen, main menu, difficulty dialog, choose side all working
+- Pending: verify mouse clicks with final build, test actual gameplay
+
 ## 2026-02-22T04:30Z — Session 3: Real API integration & write operations
 - Fixed Kayako connector based on API research (9 issues):
   - Added X-Session-ID session management

@@ -10,8 +10,3 @@
 - Keep framework as Next.js App Router.
 - Prioritize clean deploy path to a public URL.
 - Ignore any code in the EasterEgg folder unless you are specifically tasked with developing it.
-
-## Required Deliverables
-- `landing_page_<team_name>.png` (public landing screenshot, >=1280px width)
-- `explainer_<team_name>.md` (problem, solution, team, links)
-- Next.js routes/components included in single zip submission

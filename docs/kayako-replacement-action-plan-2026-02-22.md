@@ -57,7 +57,7 @@ Practical implication:
 4. Expand: plug in other systems (CRM/issue tracker/chat) and make Kayako optional.
 5. Convert: if team runs 80% of support from CLIaaS, Kayako renewal becomes hard to justify.
 
-## Build plan (compressed for hackathon speed)
+## Build plan
 
 ## Phase 0: Setup and proof account (February 22, 2026)
 
@@ -160,7 +160,7 @@ Instrumentation checklist:
 - Save raw payload samples and transform fixtures.
 - Build parity tests: source count vs imported count by entity/date.
 
-## GTM motion (post-hackathon)
+## GTM motion
 
 ICP:
 - 10-200 seat support teams on older helpdesk stacks.

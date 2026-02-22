@@ -16,10 +16,12 @@ import { registerBatchCommand } from './batch.js';
 import { registerDuplicatesCommand } from './duplicates.js';
 import { registerSLACommand } from './sla.js';
 import { registerSentimentCommand } from './sentiment.js';
+import { registerKayakoClassicCommands } from './kayako-classic.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
   registerKayakoCommands(program);
+  registerKayakoClassicCommands(program);
   registerTicketCommands(program);
   registerTriageCommand(program);
   registerDraftCommand(program);

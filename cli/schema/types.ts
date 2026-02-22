@@ -8,7 +8,7 @@ export type MessageType = 'reply' | 'note' | 'system';
 export interface Ticket {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako';
+  source: 'zendesk' | 'kayako' | 'kayako-classic';
   subject: string;
   status: TicketStatus;
   priority: TicketPriority;
@@ -33,7 +33,7 @@ export interface Message {
 export interface Customer {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako';
+  source: 'zendesk' | 'kayako' | 'kayako-classic';
   name: string;
   email: string;
   phone?: string;
@@ -43,7 +43,7 @@ export interface Customer {
 export interface Organization {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako';
+  source: 'zendesk' | 'kayako' | 'kayako-classic';
   name: string;
   domains: string[];
 }
@@ -51,7 +51,7 @@ export interface Organization {
 export interface KBArticle {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako';
+  source: 'zendesk' | 'kayako' | 'kayako-classic';
   title: string;
   body: string;
   categoryPath: string[];
@@ -62,7 +62,7 @@ export type RuleType = 'macro' | 'trigger' | 'automation' | 'sla';
 export interface Rule {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako';
+  source: 'zendesk' | 'kayako' | 'kayako-classic';
   type: RuleType;
   title: string;
   conditions: unknown;
@@ -71,7 +71,7 @@ export interface Rule {
 }
 
 export interface ExportManifest {
-  source: 'zendesk' | 'kayako';
+  source: 'zendesk' | 'kayako' | 'kayako-classic';
   exportedAt: string;
   counts: {
     tickets: number;
