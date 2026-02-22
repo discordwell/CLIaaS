@@ -2940,8 +2940,9 @@ export class Game {
         }) < CELL_SIZE * 15
       ).length;
       if (nearbyAnts >= mods.maxAnts) continue;
-      // Spawn 1-2 ants near the queen
-      const count = 1 + (Math.random() < 0.4 ? 1 : 0);
+      // Spawn 1-2 ants near the queen (scaled by difficulty waveSize)
+      const baseCount = 1 + (Math.random() < 0.4 ? 1 : 0);
+      const count = Math.max(1, Math.round(baseCount * mods.waveSize));
       // Difficulty affects ant type composition: higher difficulty = more fire ants (ANT3)
       for (let i = 0; i < count; i++) {
         let aType: UnitType;
@@ -2963,6 +2964,7 @@ export class Game {
         if (!this.map.isPassable(sc.cx, sc.cy)) continue;
         const house = s.house;
         const ant = new Entity(aType, house, spawnX, spawnY);
+        applyScenarioOverrides([ant], this.scenarioUnitStats, this.scenarioWeaponStats);
         ant.mission = Mission.AREA_GUARD;
         ant.guardOrigin = { x: spawnX, y: spawnY };
         this.entities.push(ant);
