@@ -11,6 +11,7 @@ type SoundName =
   | 'explode_sm' | 'explode_lg'
   | 'die_infantry' | 'die_vehicle' | 'die_ant'
   | 'move_ack' | 'attack_ack' | 'select'
+  | 'select_infantry' | 'select_vehicle' | 'select_dog'
   | 'unit_lost' | 'building_explode' | 'heal'
   | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged';
 
@@ -89,6 +90,9 @@ export class AudioManager {
       case 'move_ack': this.synthAck(t, out, 800 + (Math.random() - 0.5) * 200); break;
       case 'attack_ack': this.synthAck(t, out, 600 + (Math.random() - 0.5) * 150); break;
       case 'select': this.synthSelect(t, out); break;
+      case 'select_infantry': this.synthSelectInfantry(t, out); break;
+      case 'select_vehicle': this.synthSelectVehicle(t, out); break;
+      case 'select_dog': this.synthSelectDog(t, out); break;
       case 'unit_lost': this.synthUnitLost(t, out); break;
       case 'building_explode': this.synthBuildingExplode(t, out); break;
       case 'heal': this.synthHeal(t, out); break;
@@ -407,6 +411,44 @@ export class AudioManager {
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
     o2.connect(g2).connect(out);
     o2.start(t + 0.05); o2.stop(t + 0.09);
+  }
+
+  private synthSelectInfantry(t: number, out: AudioNode): void {
+    // Crisp click-blip (infantry reports)
+    const pitchVar = 1 + (Math.random() - 0.5) * 0.1;
+    const o = this.osc('square', 600 * pitchVar);
+    const g = this.gain(0.08);
+    g.gain.setValueAtTime(0.08, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.05);
+  }
+
+  private synthSelectVehicle(t: number, out: AudioNode): void {
+    // Low thunk (heavy machinery)
+    const pitchVar = 1 + (Math.random() - 0.5) * 0.1;
+    const o = this.osc('triangle', 350 * pitchVar);
+    const g = this.gain(0.12);
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.07);
+  }
+
+  private synthSelectDog(t: number, out: AudioNode): void {
+    // Quick yip (two rapid high notes)
+    const o1 = this.osc('sine', 1200);
+    const g1 = this.gain(0.08);
+    g1.gain.setValueAtTime(0.08, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+    o1.connect(g1).connect(out);
+    o1.start(t); o1.stop(t + 0.03);
+    const o2 = this.osc('sine', 1500);
+    const g2 = this.gain(0.08);
+    g2.gain.setValueAtTime(0.08, t + 0.04);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    o2.connect(g2).connect(out);
+    o2.start(t + 0.04); o2.stop(t + 0.07);
   }
 
   // --- Notification sounds ---

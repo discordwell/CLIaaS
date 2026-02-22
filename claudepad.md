@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-02-23T11:00Z — Session 16: Veterancy, Friendly Fire, Stances, Wave AI
+- Added unit veterancy system: kills tracking, promotion at 3/6 kills, damage/HP bonuses (+25%/+50%)
+- Veterancy stars rendered above health bars (silver=veteran, gold=elite)
+- Veterancy + kills + stance shown in unit info panel
+- Enabled friendly fire on splash damage (50% reduced), tracks as player losses
+- Added stance system: Aggressive/Defensive/Hold Fire (Z key to cycle)
+  - Hold fire: never auto-engage; Defensive: weapon range scan only, no pursuit
+- Added gradual turret rotation (2 steps/tick via tickTurretRotation)
+- Added ant wave coordination: waveId + rally delay, wave-mates cluster then attack together
+- Added ant building targeting priority: ants target defensive structures when no units visible
+- Added vehicle crush mechanic: non-infantry vehicles kill enemy infantry in same cell
+- Added waypoint markers: dashed green lines + dots showing shift+click queue
+- Added destroyed structure rubble: persistent debris tiles at destruction site
+- Added unit-type selection sounds: select_infantry, select_vehicle, select_dog
+- Improved pathfinding: soft occupancy costs (+20 penalty) instead of hard blocking
+- Code review fixed 6 issues: S key not consumed, turret fires while rotating, EVA skipped on enemy splash kill, defensive stance stale forceFirePos, DEFENSE_TYPES allocation, orphaned JSDoc
+- All changes type check clean (npx tsc --noEmit)
+
 ## 2026-02-23T09:00Z — Session 15: Base Defense, Sell/Repair, EVA, Polish
 - Added artillery scatter/inaccuracy — weapons with inaccuracy field scatter impact point randomly
 - Inaccuracy set on Grenade (0.5) and ArtilleryShell (1.5); projectiles travel to scattered point
@@ -18,6 +36,17 @@
 - Base attack EVA throttled to once per 5 seconds to prevent spam
 - Imported House, UnitType enums into index.ts for proper type usage
 - Code review found 1 critical bug (structure weapons ignoring armor), fixed
+- Added engineer (E6) building capture — enter hostile structure to convert to player
+- Added force-fire on ground (Ctrl+RMB) — artillery fires at ground position using splash/inaccuracy
+- Added shift+RMB waypoint queue — queue moves for patrol routes
+- Added X key scatter — selected units move to random nearby positions
+- Added Home/Space to center camera on selected units
+- Added G key as guard position shortcut (same as S/stop)
+- Added F1 help overlay with all keyboard shortcuts
+- Added +/-/M volume controls
+- Added structures to minimap (white=player, red=enemy)
+- Added shiftHeld tracking to input system; forceFirePos and moveQueue to Entity
+- 3 commits pushed: fdb3ee7, 91a14f6, 62bdfc0
 - All changes type check clean (npx tsc --noEmit)
 
 ## 2026-02-23T07:00Z — Session 14: Combat Mechanics, LOS, Structure Damage
@@ -75,28 +104,6 @@
 - Rewrote ant sprite generator: 32→104 frames with walk/attack animations
 - Fixed 3 code review bugs: pendingAntTriggers missing CREATE_TEAM, FORCE_TRIGGER no-op, persistent trigger infinite spawning
 - User feedback: "get the actual triggers from the original gamecode" → researched exact RA source formats
-
-## 2026-02-22T21:30Z — Session 10: Phase 3 Polish — Briefings, Progression, Performance
-- Addressed code review findings from Session 9 (committed d797242):
-  - Fixed guard scan range 24x too large (worldDist returns cells, not pixels)
-  - Fixed selection box Y2 typo (dragStartX → dragStartY)
-  - Fixed stop() race condition (set state=paused before clearing timers)
-  - Removed redundant state check in game loop accumulator
-- Built Phase 3 Polish features:
-  - Mission select screen with 4 unlockable ant missions
-  - Mission briefing screen with text, objective, LAUNCH MISSION button
-  - Win/lose overlays with Next Mission / Retry / Replay / Mission Select / Exit
-  - localStorage progress tracking (antmissions_progress key)
-  - Keyboard shortcuts: 1-4 select, Enter launch, Esc back, F10 exit
-  - All-complete celebration screen with trophy
-- Performance optimizations:
-  - Fog of war: track visibleCells array, downgrade only those (O(visible) vs O(16384))
-  - Pathfinding: check existing node before allocating new AStarNode object
-  - Removed dead animFrameId field from Game class
-- Added to scenario.ts: MISSIONS array, MissionInfo type, loadProgress/saveProgress
-- Re-exported mission types from engine/index.ts barrel
-- Committed b2d85e3, pushed to main
-- Note: build broken by pre-existing drizzle-orm import in cli/db/ingest-zendesk.ts (not our code)
 
 
 # Key Findings

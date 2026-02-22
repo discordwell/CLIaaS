@@ -260,6 +260,13 @@ export enum Mission {
   DIE = 'DIE',
 }
 
+// === Unit Stance (affects guard/pursuit behavior) ===
+export enum Stance {
+  AGGRESSIVE = 0,  // chase enemies beyond guard range
+  DEFENSIVE = 1,   // fight back but return to position
+  HOLD_FIRE = 2,   // never auto-attack
+}
+
 // === Animation States ===
 export enum AnimState {
   IDLE = 'IDLE',

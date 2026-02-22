@@ -1,5 +1,10 @@
 # Archived Session Summaries
 
+## 2026-02-22T21:30Z — Session 10: Phase 3 Polish — Briefings, Progression, Performance
+- Mission select screen with 4 unlockable missions, briefing screen, win/lose overlays, localStorage progress
+- Performance: fog of war O(visible), pathfinding node reuse, removed dead animFrameId
+- Committed b2d85e3
+
 ## 2026-02-22T20:00Z — Session 9: Bug Fixes & Visual Fidelity
 - Fixed 3 critical bugs: RAF throttling, edge scroll drift, input event ordering
 - Added fog of war, procedural terrain, particle effects, death fade, selection circles

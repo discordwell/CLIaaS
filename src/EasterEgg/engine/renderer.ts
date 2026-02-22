@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, House, SUB_CELL_OFFSETS } from './types';
+import { CELL_SIZE, House, Stance, SUB_CELL_OFFSETS } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
 import { type Entity } from './entity';
@@ -127,6 +127,7 @@ export class Renderer {
     this.renderOverlays(camera, map);
     this.renderStructures(camera, map, structures, assets, tick);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
+    this.renderWaypoints(camera, entities, selectedIds);
     this.renderEffects(camera, effects, assets);
     this.renderFogOfWar(camera, map);
 
@@ -373,7 +374,34 @@ export class Renderer {
   ): void {
     const ctx = this.ctx;
     for (const s of structures) {
-      if (!s.alive) continue; // destroyed structures are not rendered
+      // Render rubble for destroyed structures
+      if (!s.alive) {
+        if (!s.rubble) continue;
+        const vis = map.getVisibility(s.cx, s.cy);
+        if (vis === 0) continue;
+        const screenX = s.cx * CELL_SIZE - camera.x;
+        const screenY = s.cy * CELL_SIZE - camera.y;
+        if (vis === 1) ctx.globalAlpha = 0.5;
+        // Draw rubble: scattered dark rectangles
+        ctx.fillStyle = 'rgba(60,50,40,0.7)';
+        const rng = (s.cx * 31 + s.cy * 17); // deterministic seed
+        for (let i = 0; i < 6; i++) {
+          const rx = screenX + 4 + ((rng + i * 7) % 20);
+          const ry = screenY + 4 + ((rng + i * 13) % 16);
+          const rw = 3 + (i % 3) * 2;
+          const rh = 2 + ((i + 1) % 3) * 2;
+          ctx.fillRect(rx, ry, rw, rh);
+        }
+        // Darker outline pieces
+        ctx.fillStyle = 'rgba(30,25,20,0.6)';
+        for (let i = 0; i < 4; i++) {
+          const rx = screenX + 6 + ((rng + i * 11 + 3) % 18);
+          const ry = screenY + 6 + ((rng + i * 9 + 5) % 14);
+          ctx.fillRect(rx, ry, 4, 3);
+        }
+        if (vis === 1) ctx.globalAlpha = 1;
+        continue;
+      }
       const vis = map.getVisibility(s.cx, s.cy);
       if (vis === 0) continue; // fully shrouded
 
@@ -549,6 +577,30 @@ export class Renderer {
           selectedIds.has(entity.id),
         );
       }
+
+      // Veterancy star indicator (above health bar)
+      if (entity.alive && entity.veterancy > 0) {
+        const starY = screen.y - spriteH / 2 - (entity.hp < entity.maxHp || selectedIds.has(entity.id) ? 12 : 5);
+        const starX = screen.x;
+        ctx.fillStyle = entity.veterancy >= 2 ? '#FFD700' : '#C0C0C0'; // gold or silver
+        const starSize = 3;
+        const count = entity.veterancy; // 1 star = veteran, 2 stars = elite
+        for (let i = 0; i < count; i++) {
+          const sx = starX - (count - 1) * 3 + i * 6;
+          // Draw 4-pointed star
+          ctx.beginPath();
+          ctx.moveTo(sx, starY - starSize);
+          ctx.lineTo(sx + starSize * 0.4, starY - starSize * 0.4);
+          ctx.lineTo(sx + starSize, starY);
+          ctx.lineTo(sx + starSize * 0.4, starY + starSize * 0.4);
+          ctx.lineTo(sx, starY + starSize);
+          ctx.lineTo(sx - starSize * 0.4, starY + starSize * 0.4);
+          ctx.lineTo(sx - starSize, starY);
+          ctx.lineTo(sx - starSize * 0.4, starY - starSize * 0.4);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
     }
   }
 
@@ -585,6 +637,38 @@ export class Renderer {
     for (let i = 1; i < pips; i++) {
       const px = bx + (barW / pips) * i;
       ctx.fillRect(px, y, 1, barH);
+    }
+  }
+
+  // ─── Waypoint Markers ────────────────────────────────────
+
+  private renderWaypoints(camera: Camera, entities: Entity[], selectedIds: Set<number>): void {
+    const ctx = this.ctx;
+    for (const entity of entities) {
+      if (!entity.alive || !selectedIds.has(entity.id)) continue;
+      if (entity.moveQueue.length === 0) continue;
+
+      ctx.strokeStyle = 'rgba(100,255,100,0.5)';
+      ctx.fillStyle = 'rgba(100,255,100,0.6)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+
+      // Draw line from current moveTarget (or position) through queue
+      const start = entity.moveTarget ?? entity.pos;
+      let prev = camera.worldToScreen(start.x, start.y);
+      for (const wp of entity.moveQueue) {
+        const screen = camera.worldToScreen(wp.x, wp.y);
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(screen.x, screen.y);
+        ctx.stroke();
+        // Waypoint dot
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        prev = screen;
+      }
+      ctx.setLineDash([]);
     }
   }
 
@@ -953,6 +1037,7 @@ export class Renderer {
       '',
       'S / G     Stop / Guard',
       'A         Attack-move',
+      'Z         Cycle stance',
       'X         Scatter units',
       'Q         Sell building',
       'R         Repair building',
@@ -1036,7 +1121,7 @@ export class Renderer {
     if (selected.length === 0) return;
 
     const panelW = 180;
-    const panelH = selected.length === 1 ? 62 : 30;
+    const panelH = selected.length === 1 ? 74 : 30;
     const px = 6;
     const py = this.height - panelH - 6;
 
@@ -1065,8 +1150,13 @@ export class Renderer {
       } else {
         ctx.fillText(`Unarmed  Arm:${armorStr}`, px + 8, py + 41);
       }
+      // Veterancy + kills + stance
+      const vetStr = unit.veterancy >= 2 ? 'Elite' : unit.veterancy >= 1 ? 'Veteran' : 'Rookie';
+      const stanceStr = unit.stance === Stance.HOLD_FIRE ? 'Hold' : unit.stance === Stance.DEFENSIVE ? 'Def' : 'Agg';
+      ctx.fillStyle = unit.veterancy >= 2 ? '#FFD700' : unit.veterancy >= 1 ? '#C0C0C0' : this.palColor(PAL_ROCK_START + 2);
+      ctx.fillText(`${vetStr}  K:${unit.kills}  [${stanceStr}]`, px + 8, py + 54);
       // Health bar
-      this.renderHealthBar(px + panelW / 2, py + 50, panelW - 20, unit.hp / unit.maxHp, true);
+      this.renderHealthBar(px + panelW / 2, py + 62, panelW - 20, unit.hp / unit.maxHp, true);
     } else {
       // Multiple selected — palette green
       ctx.fillStyle = this.palColor(PAL_GREEN_HP);

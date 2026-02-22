@@ -497,6 +497,7 @@ export interface MapStructure {
   hp: number;         // current HP (0-256 scale)
   maxHp: number;      // max HP (256 = full)
   alive: boolean;     // whether structure is still standing
+  rubble: boolean;    // destroyed structure leaves rubble
   weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
   attackCooldown: number;    // ticks until next shot
 }
@@ -617,6 +618,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       hp: s.hp,
       maxHp: 256,
       alive: s.hp > 0,
+      rubble: false,
       weapon: STRUCTURE_WEAPONS[s.type],
       attackCooldown: 0,
     });

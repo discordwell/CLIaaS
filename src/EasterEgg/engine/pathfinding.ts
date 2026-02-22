@@ -95,7 +95,6 @@ export function findPath(
 
       if (closed.has(nk)) continue;
       if (!map.isTerrainPassable(nx, ny)) continue;
-      if (!ignoreOccupancy && map.getOccupancy(nx, ny) > 0) continue;
 
       // Check diagonal passability (can't cut corners)
       if (dx !== 0 && dy !== 0) {
@@ -105,7 +104,12 @@ export function findPath(
         }
       }
 
-      const moveCost = (dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST;
+      // Occupancy: add soft cost for occupied cells instead of hard blocking
+      // This allows routing through tight corridors while preferring empty cells
+      let moveCost = (dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST;
+      if (!ignoreOccupancy && map.getOccupancy(nx, ny) > 0) {
+        moveCost += 20; // penalty makes occupied cells expensive but not impassable
+      }
       const g = current.g + moveCost;
 
       const existing = openMap.get(nk);

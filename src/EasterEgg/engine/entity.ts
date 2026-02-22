@@ -4,7 +4,7 @@
 
 import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats,
-  Dir, Mission, AnimState, House, UnitType,
+  Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE,
   INFANTRY_ANIMS, BODY_SHAPE, ANT_ANIM,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
@@ -39,6 +39,7 @@ export class Entity {
   facing: Dir = Dir.N;
   desiredFacing: Dir = Dir.N; // target facing for gradual rotation
   turretFacing: Dir = Dir.N;  // turret direction (for turreted vehicles)
+  desiredTurretFacing: Dir = Dir.N; // target turret facing for gradual rotation
 
   // Health
   hp: number;
@@ -47,6 +48,7 @@ export class Entity {
 
   // Mission / AI
   mission: Mission = Mission.GUARD;
+  stance: Stance = Stance.AGGRESSIVE; // default aggressive (like original RA)
   target: Entity | null = null;
   targetStructure: StructureRef | null = null; // for attacking buildings
   forceFirePos: WorldPos | null = null; // force-fire ground position (Ctrl+right-click)
@@ -73,6 +75,32 @@ export class Entity {
   // Combat
   attackCooldown = 0;
   weapon: WeaponStats | null;
+  kills = 0;      // kills by this unit
+  veterancy = 0;  // 0=rookie, 1=veteran, 2=elite
+
+  /** Damage multiplier from veterancy (1.0 / 1.25 / 1.5) */
+  get damageMultiplier(): number {
+    return this.veterancy === 2 ? 1.5 : this.veterancy === 1 ? 1.25 : 1.0;
+  }
+
+  /** Credit a kill and check for promotion */
+  creditKill(): void {
+    this.kills++;
+    const oldVet = this.veterancy;
+    if (this.kills >= 6 && this.veterancy < 2) {
+      this.veterancy = 2;
+    } else if (this.kills >= 3 && this.veterancy < 1) {
+      this.veterancy = 1;
+    }
+    // On promotion, scale max HP and heal the bonus amount
+    if (this.veterancy > oldVet) {
+      const hpRatio = this.veterancy === 2 ? 1.5 : 1.25;
+      const newMax = Math.round(this.stats.strength * hpRatio);
+      const bonus = newMax - this.maxHp;
+      this.maxHp = newMax;
+      this.hp = Math.min(this.hp + bonus, this.maxHp);
+    }
+  }
 
   // Selection
   selected = false;
@@ -84,6 +112,10 @@ export class Entity {
   teamMissions: TeamMissionEntry[] = [];
   teamMissionIndex = 0;
   teamMissionWaiting = 0;  // ticks to wait at current mission (for GUARD duration)
+
+  // Wave coordination: ants from the same trigger share a waveId
+  waveId = 0;              // 0 = no wave group
+  waveRallyTick = 0;       // tick when wave should start attacking (rally delay)
 
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
@@ -245,6 +277,19 @@ export class Entity {
       this.facing = ((this.facing + 7) % 8) as Dir; // -1 mod 8
     }
     return this.facing === this.desiredFacing;
+  }
+
+  /** Gradually rotate turret toward desiredTurretFacing.
+   *  Turret rotation is faster than body (2 steps per tick for most vehicles). */
+  tickTurretRotation(): boolean {
+    if (this.turretFacing === this.desiredTurretFacing) return true;
+    const diff = (this.desiredTurretFacing - this.turretFacing + 8) % 8;
+    if (diff <= 4) {
+      this.turretFacing = ((this.turretFacing + 1) % 8) as Dir;
+    } else {
+      this.turretFacing = ((this.turretFacing + 7) % 8) as Dir;
+    }
+    return this.turretFacing === this.desiredTurretFacing;
   }
 
   /** Move toward a world position at the unit's speed */

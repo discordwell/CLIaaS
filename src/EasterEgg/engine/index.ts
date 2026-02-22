@@ -5,7 +5,7 @@
 
 import {
   type WorldPos, CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
-  Mission, AnimState, House, UnitType, worldDist, directionTo, worldToCell,
+  Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, type WarheadType,
 } from './types';
 import { AssetManager } from './assets';
@@ -26,6 +26,9 @@ export type { MissionInfo } from './scenario';
 export { AudioManager } from './audio';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
+
+/** Defensive structure types that ants prioritize attacking */
+const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 'AGUN', 'FTUR']);
 
 export class Game {
   // Core systems
@@ -49,6 +52,8 @@ export class Game {
   private repairingStructures = new Set<number>();
   /** Tick when last EVA base attack warning played (throttle to once per 5s) */
   private lastBaseAttackEva = 0;
+  /** Counter for wave group coordination */
+  private nextWaveId = 1;
   private cellInfCount = new Map<number, number>(); // reused each tick for sub-cell assignment
   // Stats tracking
   killCount = 0;
@@ -421,6 +426,17 @@ export class Game {
         unit.animState = AnimState.IDLE;
       }
       keys.delete('g');
+      keys.delete('s');
+    }
+
+    // Z = cycle stance (Aggressive → Defensive → Hold Fire → Aggressive)
+    if (keys.has('z')) {
+      for (const id of this.selectedIds) {
+        const unit = this.entityById.get(id);
+        if (!unit || !unit.alive || !unit.isPlayerUnit) continue;
+        unit.stance = ((unit.stance + 1) % 3) as Stance;
+      }
+      keys.delete('z');
     }
 
     // Ctrl+1-9: assign control group
@@ -446,7 +462,7 @@ export class Game {
                 unit.selected = true;
               }
             }
-            if (this.selectedIds.size > 0) this.audio.play('select');
+            if (this.selectedIds.size > 0) this.audio.play(this.selectionSound());
           }
           keys.delete(String(g)); // consume
         }
@@ -547,7 +563,7 @@ export class Game {
             e.selected = true;
           }
         }
-        this.audio.play('select');
+        this.audio.play(this.selectionSound());
       }
     }
 
@@ -643,7 +659,7 @@ export class Game {
           this.selectedIds.add(clicked.id);
           clicked.selected = true;
         }
-        this.audio.play('select');
+        this.audio.play(this.selectionSound());
       } else {
         if (!ctrlHeld) {
           for (const e of this.entities) e.selected = false;
@@ -781,6 +797,19 @@ export class Game {
     return { x: offsetX, y: offsetY };
   }
 
+  /** Get appropriate selection sound for current selection */
+  private selectionSound(): 'select' | 'select_infantry' | 'select_vehicle' | 'select_dog' {
+    // Pick sound based on first selected alive unit
+    for (const id of this.selectedIds) {
+      const e = this.entityById.get(id);
+      if (!e?.alive) continue;
+      if (e.type === UnitType.I_DOG) return 'select_dog';
+      if (e.stats.isInfantry) return 'select_infantry';
+      return 'select_vehicle';
+    }
+    return 'select';
+  }
+
   /** Find an entity near a world position */
   private findEntityAt(pos: WorldPos): Entity | null {
     let closest: Entity | null = null;
@@ -825,6 +854,7 @@ export class Game {
     }
     if (s.hp <= 0) {
       s.alive = false;
+      s.rubble = true;
       // Spawn destruction explosion
       const wx = s.cx * CELL_SIZE + CELL_SIZE;
       const wy = s.cy * CELL_SIZE + CELL_SIZE;
@@ -869,6 +899,12 @@ export class Game {
       case Mission.GUARD:
         this.updateGuard(entity);
         break;
+    }
+
+    // Vehicle crush: heavy vehicles kill infantry they drive over
+    if (entity.alive && !entity.stats.isInfantry && !entity.isAnt &&
+        entity.stats.speed > 0 && entity.animState === AnimState.WALK) {
+      this.checkVehicleCrush(entity);
     }
 
     entity.tickAnimation();
@@ -1003,9 +1039,71 @@ export class Game {
     }
   }
 
+  /** Vehicle crush — heavy vehicles instantly kill infantry they drive over */
+  private checkVehicleCrush(vehicle: Entity): void {
+    const vc = vehicle.cell;
+    for (const other of this.entities) {
+      if (!other.alive || other.id === vehicle.id) continue;
+      if (!other.stats.isInfantry) continue;
+      if (other.isPlayerUnit === vehicle.isPlayerUnit) continue; // no friendly crush
+      const oc = other.cell;
+      if (oc.cx === vc.cx && oc.cy === vc.cy) {
+        other.takeDamage(other.hp + 10); // instant kill
+        vehicle.creditKill();
+        this.effects.push({
+          type: 'blood', x: other.pos.x, y: other.pos.y,
+          frame: 0, maxFrames: 6, size: 4, sprite: 'piffpiff', spriteStart: 0,
+        });
+        this.audio.play('die_infantry');
+        if (vehicle.isPlayerUnit) this.killCount++;
+        else {
+          this.lossCount++;
+          this.audio.play('eva_unit_lost');
+        }
+      }
+    }
+  }
+
   /** Ant AI — hunt nearest visible player unit (fog-aware, LOS-aware) */
   private updateAntAI(entity: Entity): void {
     if (entity.mission === Mission.ATTACK && entity.target?.alive) return;
+
+    // Wave coordination: wait for rally delay before engaging
+    if (entity.waveId > 0 && this.tick < entity.waveRallyTick) {
+      // During rally, cluster toward other wave members
+      let waveCX = 0, waveCY = 0, waveCount = 0;
+      for (const other of this.entities) {
+        if (other.alive && other.waveId === entity.waveId) {
+          waveCX += other.pos.x;
+          waveCY += other.pos.y;
+          waveCount++;
+        }
+      }
+      if (waveCount > 1) {
+        waveCX /= waveCount;
+        waveCY /= waveCount;
+        const dist = worldDist(entity.pos, { x: waveCX, y: waveCY });
+        if (dist > CELL_SIZE * 2) {
+          entity.animState = AnimState.WALK;
+          entity.moveToward({ x: waveCX, y: waveCY }, entity.stats.speed * 0.3);
+          return;
+        }
+      }
+      entity.animState = AnimState.IDLE;
+      return;
+    }
+
+    // If a wave-mate found a target, share it
+    if (entity.waveId > 0 && !entity.target?.alive) {
+      for (const other of this.entities) {
+        if (other.alive && other.waveId === entity.waveId &&
+            other.id !== entity.id && other.target?.alive) {
+          entity.mission = Mission.HUNT;
+          entity.target = other.target;
+          return;
+        }
+      }
+    }
 
     let nearest: Entity | null = null;
     let nearestDist = Infinity;
@@ -1028,6 +1126,31 @@ export class Game {
     if (nearest) {
       entity.mission = Mission.HUNT;
       entity.target = nearest;
+      return;
+    }
+
+    // No units in sight — target nearest player structure (prefer defensive)
+    let bestStruct: MapStructure | null = null;
+    let bestStructDist = Infinity;
+    let bestIsDefense = false;
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      if (s.house !== 'Spain' && s.house !== 'Greece') continue;
+      const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+      const dist = worldDist(entity.pos, sPos);
+      if (dist > entity.stats.sight * 2) continue;
+      const isDef = ANT_TARGET_DEFENSE_TYPES.has(s.type);
+      // Prefer defensive structures over other buildings
+      if (isDef && !bestIsDefense) {
+        bestStruct = s; bestStructDist = dist; bestIsDefense = true;
+      } else if (isDef === bestIsDefense && dist < bestStructDist) {
+        bestStruct = s; bestStructDist = dist; bestIsDefense = isDef;
+      }
+    }
+    if (bestStruct) {
+      entity.mission = Mission.ATTACK;
+      entity.target = null;
+      entity.targetStructure = bestStruct;
     }
   }
 
@@ -1127,7 +1250,8 @@ export class Game {
 
       // Turreted vehicles: turret tracks target, body may stay still
       if (entity.hasTurret) {
-        entity.turretFacing = directionTo(entity.pos, entity.target.pos);
+        entity.desiredTurretFacing = directionTo(entity.pos, entity.target.pos);
+        if (!entity.tickTurretRotation()) entity.tickTurretRotation(); // 2 steps/tick
       } else {
         entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
         const facingReady = entity.tickRotation();
@@ -1158,11 +1282,11 @@ export class Game {
           directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
         }
 
-        // Apply warhead-vs-armor damage multiplier
+        // Apply warhead-vs-armor damage multiplier + veterancy bonus
         const armorIdx = entity.target.stats.armor === 'none' ? 0
           : entity.target.stats.armor === 'light' ? 1 : 2;
         const mult = WARHEAD_VS_ARMOR[entity.weapon.warhead]?.[armorIdx] ?? 1;
-        const damage = Math.max(1, Math.round(entity.weapon.damage * mult));
+        const damage = Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
         const killed = directHit ? entity.target.takeDamage(damage) : false;
 
         // AOE splash damage to nearby units (at impact point, not target)
@@ -1170,7 +1294,7 @@ export class Game {
           const splashCenter = { x: impactX, y: impactY };
           this.applySplashDamage(
             splashCenter, entity.weapon, directHit ? entity.target.id : -1,
-            entity.isPlayerUnit,
+            entity.isPlayerUnit, entity,
           );
         }
 
@@ -1211,6 +1335,7 @@ export class Game {
         }
 
         if (killed) {
+          entity.creditKill();
           this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 18, size: 16,
             sprite: 'fball1', spriteStart: 0 });
           // Screen shake on large explosion
@@ -1238,8 +1363,17 @@ export class Game {
         }
       }
     } else {
-      entity.animState = AnimState.WALK;
-      entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+      // Defensive stance: don't chase, return to guard
+      if (entity.stance === Stance.DEFENSIVE) {
+        entity.target = null;
+        entity.forceFirePos = null;
+        entity.targetStructure = null;
+        entity.mission = Mission.GUARD;
+        entity.animState = AnimState.IDLE;
+      } else {
+        entity.animState = AnimState.WALK;
+        entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+      }
     }
 
     if (entity.attackCooldown > 0) entity.attackCooldown--;
@@ -1333,9 +1467,16 @@ export class Game {
       }
     }
 
+    // Hold fire stance: never auto-engage
+    if (entity.stance === Stance.HOLD_FIRE) return;
+
     const isPlayer = entity.isPlayerUnit;
     const ec = entity.cell;
     const isDog = entity.type === 'DOG';
+    // Defensive stance: reduced scan range (weapon range only, not full sight)
+    const scanRange = entity.stance === Stance.DEFENSIVE
+      ? Math.min(entity.stats.sight, (entity.weapon?.range ?? 2) + 1)
+      : entity.stats.sight;
     let bestTarget: Entity | null = null;
     let bestDist = Infinity;
     let bestIsInfantry = false;
@@ -1343,7 +1484,7 @@ export class Game {
       if (!other.alive) continue;
       if (isPlayer === other.isPlayerUnit) continue;
       const dist = worldDist(entity.pos, other.pos);
-      if (dist >= entity.stats.sight) continue;
+      if (dist >= scanRange) continue;
       // Check line of sight — can't target through walls
       const oc = other.cell;
       if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
@@ -1462,7 +1603,7 @@ export class Game {
         if (entity.weapon.splash && entity.weapon.splash > 0) {
           this.applySplashDamage(
             { x: impactX, y: impactY }, entity.weapon, -1,
-            entity.isPlayerUnit,
+            entity.isPlayerUnit, entity,
           );
         }
 
@@ -1591,24 +1732,25 @@ export class Game {
   /** Apply AOE splash damage to entities near an impact point */
   private applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
-    primaryTargetId: number, attackerIsPlayer: boolean,
+    primaryTargetId: number, attackerIsPlayer: boolean, attacker?: Entity,
   ): void {
     const splashRange = weapon.splash ?? 0;
     if (splashRange <= 0) return;
 
     for (const other of this.entities) {
       if (!other.alive || other.id === primaryTargetId) continue;
-      // Don't splash friendly units (no friendly fire)
-      if (other.isPlayerUnit === attackerIsPlayer) continue;
+      const isFriendly = other.isPlayerUnit === attackerIsPlayer;
       const dist = worldDist(center, other.pos);
       if (dist > splashRange) continue;
 
       // Splash damage falls off linearly with distance (100% at center, 25% at edge)
+      // Friendly fire deals half splash damage
       const falloff = 1 - (dist / splashRange) * 0.75;
+      const friendlyMod = isFriendly ? 0.5 : 1.0;
       const armorIdx = other.stats.armor === 'none' ? 0
         : other.stats.armor === 'light' ? 1 : 2;
       const mult = WARHEAD_VS_ARMOR[weapon.warhead]?.[armorIdx] ?? 1;
-      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5));
+      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5 * friendlyMod));
       const killed = other.takeDamage(splashDmg);
 
       // Infantry scatter: push nearby infantry away from explosion
@@ -1626,6 +1768,8 @@ export class Game {
       }
 
       if (killed) {
+        // Credit kill only for enemy kills (not friendly fire)
+        if (!isFriendly && attacker) attacker.creditKill();
         this.effects.push({
           type: 'explosion', x: other.pos.x, y: other.pos.y,
           frame: 0, maxFrames: 18, size: 12,
@@ -1636,8 +1780,16 @@ export class Game {
         else if (other.stats.isInfantry) this.audio.play('die_infantry');
         else this.audio.play('die_vehicle');
         // Track kills/losses from splash
-        if (attackerIsPlayer) this.killCount++;
-        else this.lossCount++;
+        if (!isFriendly && attackerIsPlayer) this.killCount++;
+        else if (!isFriendly && other.isPlayerUnit) {
+          this.lossCount++;
+          this.audio.play('eva_unit_lost');
+        }
+        // Friendly fire kills still count as losses
+        if (isFriendly && attackerIsPlayer) {
+          this.lossCount++;
+          this.audio.play('eva_unit_lost');
+        }
       }
     }
   }
@@ -1693,6 +1845,16 @@ export class Game {
         const spawned = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers
         );
+        // Tag ant spawns with wave coordination
+        const ants = spawned.filter(e => e.isAnt);
+        if (ants.length > 1) {
+          const wid = this.nextWaveId++;
+          const rallyDelay = this.tick + GAME_TICKS_PER_SEC * 2; // 2-second rally
+          for (const ant of ants) {
+            ant.waveId = wid;
+            ant.waveRallyTick = rallyDelay;
+          }
+        }
         for (const entity of spawned) {
           this.entities.push(entity);
           this.entityById.set(entity.id, entity);
