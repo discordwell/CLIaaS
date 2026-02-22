@@ -211,6 +211,7 @@ export interface WeaponStats {
   warhead: WarheadType;
   splash?: number;    // AOE splash radius in cells (0 = point damage only)
   inaccuracy?: number; // scatter radius in cells (0 = perfect aim)
+  minRange?: number;   // minimum range in cells (artillery can't fire at close range)
 }
 
 // Unit stat definitions from scenario INI
@@ -267,7 +268,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3, warhead: 'Fire', splash: 1 },
   DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5, warhead: 'Super' },
   TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super', splash: 1 },
-  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2, inaccuracy: 1.5 },
+  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2, inaccuracy: 1.5, minRange: 2 },
   Sniper: { name: 'Sniper', damage: 125, rof: 40, range: 5, warhead: 'Super' },
   Napalm: { name: 'Napalm', damage: 60, rof: 25, range: 1.75, warhead: 'Super' },
 };

@@ -2312,6 +2312,22 @@ export class Game {
       return;
     }
 
+    // Minimum range check: artillery can't fire at point-blank
+    if (entity.weapon?.minRange && entity.target) {
+      const dist = worldDist(entity.pos, entity.target.pos);
+      if (dist < entity.weapon.minRange * CELL_SIZE) {
+        // Target too close — retreat away from target
+        entity.animState = AnimState.WALK;
+        const dx = entity.pos.x - entity.target.pos.x;
+        const dy = entity.pos.y - entity.target.pos.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const retreatX = entity.pos.x + (dx / len) * CELL_SIZE * 2;
+        const retreatY = entity.pos.y + (dy / len) * CELL_SIZE * 2;
+        entity.moveToward({ x: retreatX, y: retreatY }, entity.stats.speed * 0.4);
+        return;
+      }
+    }
+
     if (entity.inRange(entity.target)) {
       // Check line of sight — can't fire through walls/rocks
       const ec = entity.cell;
@@ -3447,6 +3463,12 @@ export class Game {
       s.alive && ANT_STRUCTURES.has(s.type) &&
       s.house !== House.Spain && s.house !== House.Greece
     );
+
+    // If scenario uses ALLOWWIN, gate fallback win on the flag being set
+    const hasAllowWinTrigger = this.triggers.some(t =>
+      t.action1.action === 15 || (t.actionControl === 1 && t.action2.action === 15)
+    );
+    if (hasAllowWinTrigger && !this.allowWin) return;
 
     if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
       if (this.toCarryOver) saveCarryover(this.entities);
