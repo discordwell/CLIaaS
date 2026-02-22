@@ -22,6 +22,10 @@ import { registerFreshdeskCommands } from './freshdesk.js';
 import { registerGrooveCommands } from './groove.js';
 import { registerDbCommands } from './db.js';
 import { registerMigrateCommand } from './migrate.js';
+import { registerIntercomCommands } from './intercom.js';
+import { registerHelpScoutCommands } from './helpscout.js';
+import { registerZohoDeskCommands } from './zoho-desk.js';
+import { registerHubSpotCommands } from './hubspot.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -46,5 +50,9 @@ export function registerCommands(program: Command): void {
   registerSLACommand(program);
   registerSentimentCommand(program);
   registerDbCommands(program);
+  registerIntercomCommands(program);
+  registerHelpScoutCommands(program);
+  registerZohoDeskCommands(program);
+  registerHubSpotCommands(program);
   registerMigrateCommand(program);
 }

@@ -8,7 +8,7 @@ export type MessageType = 'reply' | 'note' | 'system';
 export interface Ticket {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   subject: string;
   status: TicketStatus;
   priority: TicketPriority;
@@ -47,7 +47,7 @@ export interface Attachment {
 export interface Customer {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   name: string;
   email: string;
   phone?: string;
@@ -57,7 +57,7 @@ export interface Customer {
 export interface Organization {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   name: string;
   domains: string[];
 }
@@ -65,7 +65,7 @@ export interface Organization {
 export interface KBArticle {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   title: string;
   body: string;
   categoryPath: string[];
@@ -74,14 +74,14 @@ export interface KBArticle {
 export interface Group {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   name: string;
 }
 
 export interface CustomField {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   objectType: string;
   name: string;
   fieldType: string;
@@ -92,7 +92,7 @@ export interface CustomField {
 export interface View {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   name: string;
   query: unknown;
   active?: boolean;
@@ -101,7 +101,7 @@ export interface View {
 export interface SLAPolicy {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   name: string;
   enabled: boolean;
   targets?: unknown;
@@ -111,7 +111,7 @@ export interface SLAPolicy {
 export interface AuditEvent {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   ticketId: string;
   authorId?: string;
   eventType: string;
@@ -122,7 +122,7 @@ export interface AuditEvent {
 export interface CSATRating {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   ticketId: string;
   rating: number;
   comment?: string;
@@ -132,7 +132,7 @@ export interface CSATRating {
 export interface TimeEntry {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   ticketId: string;
   agentId?: string;
   minutes: number;
@@ -143,7 +143,7 @@ export interface TimeEntry {
 export interface TicketForm {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   name: string;
   active?: boolean;
   position?: number;
@@ -154,7 +154,7 @@ export interface TicketForm {
 export interface Brand {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   name: string;
   raw?: unknown;
 }
@@ -164,7 +164,7 @@ export type RuleType = 'macro' | 'trigger' | 'automation' | 'sla';
 export interface Rule {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   type: RuleType;
   title: string;
   conditions: unknown;
@@ -173,7 +173,7 @@ export interface Rule {
 }
 
 export interface ExportManifest {
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
   exportedAt: string;
   counts: {
     tickets: number;

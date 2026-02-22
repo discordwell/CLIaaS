@@ -16,8 +16,17 @@ import { helpcrunchCreateChat, helpcrunchPostMessage, helpcrunchFetch } from '..
 import type { HelpcrunchAuth } from '../connectors/helpcrunch.js';
 import { kayakoCreateCase, kayakoPostReply, kayakoPostNote } from '../connectors/kayako.js';
 import type { KayakoAuth } from '../connectors/kayako.js';
+import { intercomCreateConversation, intercomReplyToConversation, intercomAddNote } from '../connectors/intercom.js';
+import type { IntercomAuth } from '../connectors/intercom.js';
+import { helpscoutCreateConversation, helpscoutReply, helpscoutAddNote } from '../connectors/helpscout.js';
+import type { HelpScoutAuth } from '../connectors/helpscout.js';
+import { zodeskCreateTicket, zodeskSendReply, zodeskAddComment } from '../connectors/zoho-desk.js';
+import type { ZohoDeskAuth } from '../connectors/zoho-desk.js';
+import { hubspotCreateTicket, hubspotCreateNote } from '../connectors/hubspot.js';
+import type { HubSpotAuth } from '../connectors/hubspot.js';
 
-type TargetConnector = 'zendesk' | 'freshdesk' | 'groove' | 'helpcrunch' | 'kayako';
+type TargetConnector = 'zendesk' | 'freshdesk' | 'groove' | 'helpcrunch' | 'kayako' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
+type AnyAuth = ZendeskAuth | FreshdeskAuth | GrooveAuth | HelpcrunchAuth | KayakoAuth | IntercomAuth | HelpScoutAuth | ZohoDeskAuth | HubSpotAuth;
 
 interface MigrationEntry {
   destId: string;
@@ -28,7 +37,7 @@ type MigrationMap = Record<string, MigrationEntry>;
 
 // ---- Auth resolution ----
 
-function resolveTargetAuth(connector: TargetConnector): ZendeskAuth | FreshdeskAuth | GrooveAuth | HelpcrunchAuth | KayakoAuth {
+function resolveTargetAuth(connector: TargetConnector): AnyAuth {
   switch (connector) {
     case 'zendesk': {
       const subdomain = process.env.ZENDESK_SUBDOMAIN;
@@ -59,6 +68,28 @@ function resolveTargetAuth(connector: TargetConnector): ZendeskAuth | FreshdeskA
       const password = process.env.KAYAKO_PASSWORD;
       if (!domain || !email || !password) throw new Error('Missing KAYAKO_DOMAIN, KAYAKO_EMAIL, or KAYAKO_PASSWORD env vars');
       return { domain, email, password } as KayakoAuth;
+    }
+    case 'intercom': {
+      const accessToken = process.env.INTERCOM_ACCESS_TOKEN;
+      if (!accessToken) throw new Error('Missing INTERCOM_ACCESS_TOKEN env var');
+      return { accessToken } as IntercomAuth;
+    }
+    case 'helpscout': {
+      const appId = process.env.HELPSCOUT_APP_ID;
+      const appSecret = process.env.HELPSCOUT_APP_SECRET;
+      if (!appId || !appSecret) throw new Error('Missing HELPSCOUT_APP_ID or HELPSCOUT_APP_SECRET env vars');
+      return { appId, appSecret } as HelpScoutAuth;
+    }
+    case 'zoho-desk': {
+      const orgId = process.env.ZOHO_DESK_ORG_ID;
+      const accessToken = process.env.ZOHO_DESK_ACCESS_TOKEN;
+      if (!orgId || !accessToken) throw new Error('Missing ZOHO_DESK_ORG_ID or ZOHO_DESK_ACCESS_TOKEN env vars');
+      return { orgId, accessToken } as ZohoDeskAuth;
+    }
+    case 'hubspot': {
+      const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
+      if (!accessToken) throw new Error('Missing HUBSPOT_ACCESS_TOKEN env var');
+      return { accessToken } as HubSpotAuth;
     }
   }
 }
@@ -156,7 +187,7 @@ async function migrateTicket(
   ticket: Ticket,
   messages: Message[],
   connector: TargetConnector,
-  auth: ZendeskAuth | FreshdeskAuth | GrooveAuth | HelpcrunchAuth | KayakoAuth,
+  auth: AnyAuth,
   customers: Customer[],
 ): Promise<MigrateResult> {
   const sorted = [...messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -215,6 +246,44 @@ async function migrateTicket(
       destId = String(result.id);
       break;
     }
+    case 'intercom': {
+      const a = auth as IntercomAuth;
+      // Intercom needs a contact ID — use requester directly or find from customers
+      const contactId = ticket.requester;
+      const result = await intercomCreateConversation(a, contactId, body);
+      destId = result.id;
+      break;
+    }
+    case 'helpscout': {
+      const a = auth as HelpScoutAuth;
+      // Help Scout needs a mailbox ID — use env var or default to 0
+      const mailboxId = parseInt(process.env.HELPSCOUT_MAILBOX_ID ?? '0', 10);
+      const requesterEmail = findRequesterEmail(ticket, customers);
+      await helpscoutCreateConversation(a, mailboxId, ticket.subject, body, {
+        customerEmail: requesterEmail,
+        tags: ticket.tags,
+      });
+      // Help Scout create returns 201 with Location header but no body — use ticket ID as ref
+      destId = `hs-migrated-${ticket.id}`;
+      break;
+    }
+    case 'zoho-desk': {
+      const a = auth as ZohoDeskAuth;
+      const result = await zodeskCreateTicket(a, ticket.subject, body, {
+        priority: ticket.priority === 'low' ? 'Low' : ticket.priority === 'high' ? 'High' : ticket.priority === 'urgent' ? 'Urgent' : 'Medium',
+        status: ticket.status === 'open' ? 'Open' : ticket.status === 'closed' ? 'Closed' : 'Open',
+      });
+      destId = result.id;
+      break;
+    }
+    case 'hubspot': {
+      const a = auth as HubSpotAuth;
+      const result = await hubspotCreateTicket(a, ticket.subject, body, {
+        priority: ticket.priority === 'low' ? 'LOW' : ticket.priority === 'high' ? 'HIGH' : 'MEDIUM',
+      });
+      destId = result.id;
+      break;
+    }
     default:
       throw new Error(`Unsupported connector: ${connector satisfies never}`);
   }
@@ -247,6 +316,34 @@ async function migrateTicket(
             await kayakoPostReply(auth as KayakoAuth, Number(destId), msg.body);
           }
           break;
+        case 'intercom': {
+          // Intercom requires an admin ID for replies/notes — use env var
+          const adminId = process.env.INTERCOM_ADMIN_ID ?? '0';
+          if (msg.type === 'note') {
+            await intercomAddNote(auth as IntercomAuth, destId, msg.body, adminId);
+          } else {
+            await intercomReplyToConversation(auth as IntercomAuth, destId, msg.body, adminId);
+          }
+          break;
+        }
+        case 'helpscout':
+          if (msg.type === 'note') {
+            await helpscoutAddNote(auth as HelpScoutAuth, Number(destId.replace('hs-migrated-', '')), msg.body);
+          } else {
+            await helpscoutReply(auth as HelpScoutAuth, Number(destId.replace('hs-migrated-', '')), msg.body);
+          }
+          break;
+        case 'zoho-desk':
+          if (msg.type === 'note') {
+            await zodeskAddComment(auth as ZohoDeskAuth, destId, msg.body, false);
+          } else {
+            await zodeskSendReply(auth as ZohoDeskAuth, destId, msg.body);
+          }
+          break;
+        case 'hubspot':
+          // HubSpot only supports notes on tickets, not threaded replies
+          await hubspotCreateNote(auth as HubSpotAuth, destId, msg.body);
+          break;
       }
     } catch {
       failedMessages++;
@@ -263,12 +360,12 @@ export function registerMigrateCommand(program: Command): void {
     .command('migrate')
     .description('Migrate tickets from an export directory to a target connector')
     .requiredOption('--from <dir>', 'Source export directory (e.g., ./exports/zendesk)')
-    .requiredOption('--to <connector>', 'Target connector (zendesk | freshdesk | groove | helpcrunch | kayako)')
+    .requiredOption('--to <connector>', 'Target connector (zendesk | freshdesk | groove | helpcrunch | kayako | intercom | helpscout | zoho-desk | hubspot)')
     .option('--dry-run', 'Preview migration without making API calls')
     .option('--limit <n>', 'Migrate only the first N tickets', parseInt)
     .action(async (opts: { from: string; to: string; dryRun?: boolean; limit?: number }) => {
       const connector = opts.to as TargetConnector;
-      const validConnectors: TargetConnector[] = ['zendesk', 'freshdesk', 'groove', 'helpcrunch', 'kayako'];
+      const validConnectors: TargetConnector[] = ['zendesk', 'freshdesk', 'groove', 'helpcrunch', 'kayako', 'intercom', 'helpscout', 'zoho-desk', 'hubspot'];
       if (!validConnectors.includes(connector)) {
         console.error(chalk.red(`Invalid target connector: ${opts.to}. Must be one of: ${validConnectors.join(', ')}`));
         process.exit(1);
@@ -280,7 +377,7 @@ export function registerMigrateCommand(program: Command): void {
       }
 
       // Resolve auth (skip in dry-run)
-      let auth: ReturnType<typeof resolveTargetAuth> | null = null;
+      let auth: AnyAuth | null = null;
       if (!opts.dryRun) {
         try {
           auth = resolveTargetAuth(connector);
