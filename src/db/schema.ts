@@ -5,6 +5,7 @@ import {
   text,
   varchar,
   integer,
+  bigint,
   boolean,
   jsonb,
   timestamp,
@@ -96,74 +97,94 @@ export const userStatusEnum = pgEnum('user_status', [
   'disabled',
 ]);
 
-export const tenants = pgTable('tenants', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  name: text('name').notNull(),
-  plan: text('plan').notNull().default('free'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const tenantsNameIdx = uniqueIndex('tenants_name_idx').on(tenants.name);
-
-export const workspaces = pgTable('workspaces', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  tenantId: uuid('tenant_id').notNull().references(() => tenants.id),
-  name: text('name').notNull(),
-  timezone: text('timezone').notNull().default('UTC'),
-  defaultInboxId: uuid('default_inbox_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const workspaceTenantNameIdx = uniqueIndex('workspaces_tenant_name_idx').on(
-  workspaces.tenantId,
-  workspaces.name,
+export const tenants = pgTable(
+  'tenants',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    plan: text('plan').notNull().default('free'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    tenantsNameIdx: uniqueIndex('tenants_name_idx').on(table.name),
+  }),
 );
 
-export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  email: varchar('email', { length: 320 }),
-  name: text('name').notNull(),
-  role: userRoleEnum('role').notNull().default('agent'),
-  status: userStatusEnum('status').notNull().default('active'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const usersWorkspaceEmailIdx = uniqueIndex('users_workspace_email_idx').on(
-  users.workspaceId,
-  users.email,
+export const workspaces = pgTable(
+  'workspaces',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id),
+    name: text('name').notNull(),
+    timezone: text('timezone').notNull().default('UTC'),
+    defaultInboxId: uuid('default_inbox_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    workspaceTenantNameIdx: uniqueIndex('workspaces_tenant_name_idx').on(
+      table.tenantId,
+      table.name,
+    ),
+  }),
 );
 
-export const organizations = pgTable('organizations', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  name: text('name').notNull(),
-  domains: text('domains').array().notNull().default([]),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const organizationsWorkspaceNameIdx = uniqueIndex('orgs_workspace_name_idx').on(
-  organizations.workspaceId,
-  organizations.name,
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    email: varchar('email', { length: 320 }),
+    name: text('name').notNull(),
+    role: userRoleEnum('role').notNull().default('agent'),
+    status: userStatusEnum('status').notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    usersWorkspaceEmailIdx: uniqueIndex('users_workspace_email_idx').on(
+      table.workspaceId,
+      table.email,
+    ),
+  }),
 );
 
-export const customers = pgTable('customers', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  externalRef: text('external_ref'),
-  name: text('name').notNull(),
-  email: varchar('email', { length: 320 }),
-  phone: text('phone'),
-  orgId: uuid('org_id').references(() => organizations.id),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const organizations = pgTable(
+  'organizations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    domains: text('domains').array().notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    organizationsWorkspaceNameIdx: uniqueIndex('orgs_workspace_name_idx').on(
+      table.workspaceId,
+      table.name,
+    ),
+  }),
+);
 
-export const customersWorkspaceEmailIdx = index('customers_workspace_email_idx').on(
-  customers.workspaceId,
-  customers.email,
+export const customers = pgTable(
+  'customers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    externalRef: text('external_ref'),
+    name: text('name').notNull(),
+    email: varchar('email', { length: 320 }),
+    phone: text('phone'),
+    orgId: uuid('org_id').references(() => organizations.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customersWorkspaceEmailIdx: index('customers_workspace_email_idx').on(
+      table.workspaceId,
+      table.email,
+    ),
+  }),
 );
 
 export const groups = pgTable('groups', {
@@ -183,87 +204,105 @@ export const inboxes = pgTable('inboxes', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const ticketForms = pgTable('ticket_forms', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  name: text('name').notNull(),
-  active: boolean('active').notNull().default(true),
-  position: integer('position'),
-  fieldIds: integer('field_ids').array().notNull().default([]),
-  raw: jsonb('raw'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const ticketFormsWorkspaceNameIdx = uniqueIndex('ticket_forms_workspace_name_idx').on(
-  ticketForms.workspaceId,
-  ticketForms.name,
+export const ticketForms = pgTable(
+  'ticket_forms',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    active: boolean('active').notNull().default(true),
+    position: integer('position'),
+    fieldIds: bigint('field_ids', { mode: 'number' }).array().notNull().default([]),
+    raw: jsonb('raw'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ticketFormsWorkspaceNameIdx: uniqueIndex('ticket_forms_workspace_name_idx').on(
+      table.workspaceId,
+      table.name,
+    ),
+  }),
 );
 
-export const brands = pgTable('brands', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  name: text('name').notNull(),
-  raw: jsonb('raw'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const brandsWorkspaceNameIdx = uniqueIndex('brands_workspace_name_idx').on(
-  brands.workspaceId,
-  brands.name,
+export const brands = pgTable(
+  'brands',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    raw: jsonb('raw'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    brandsWorkspaceNameIdx: uniqueIndex('brands_workspace_name_idx').on(
+      table.workspaceId,
+      table.name,
+    ),
+  }),
 );
 
-export const tickets = pgTable('tickets', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  requesterId: uuid('requester_id').references(() => customers.id),
-  assigneeId: uuid('assignee_id').references(() => users.id),
-  groupId: uuid('group_id').references(() => groups.id),
-  brandId: uuid('brand_id').references(() => brands.id),
-  ticketFormId: uuid('ticket_form_id').references(() => ticketForms.id),
-  inboxId: uuid('inbox_id').references(() => inboxes.id),
-  subject: text('subject').notNull(),
-  status: ticketStatusEnum('status').notNull().default('open'),
-  priority: ticketPriorityEnum('priority').notNull().default('normal'),
-  source: providerEnum('source').default('zendesk'),
-  customFields: jsonb('custom_fields'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  closedAt: timestamp('closed_at', { withTimezone: true }),
-});
-
-export const ticketsWorkspaceStatusIdx = index('tickets_workspace_status_idx').on(
-  tickets.workspaceId,
-  tickets.status,
+export const tickets = pgTable(
+  'tickets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    requesterId: uuid('requester_id').references(() => customers.id),
+    assigneeId: uuid('assignee_id').references(() => users.id),
+    groupId: uuid('group_id').references(() => groups.id),
+    brandId: uuid('brand_id').references(() => brands.id),
+    ticketFormId: uuid('ticket_form_id').references(() => ticketForms.id),
+    inboxId: uuid('inbox_id').references(() => inboxes.id),
+    subject: text('subject').notNull(),
+    status: ticketStatusEnum('status').notNull().default('open'),
+    priority: ticketPriorityEnum('priority').notNull().default('normal'),
+    source: providerEnum('source').default('zendesk'),
+    customFields: jsonb('custom_fields'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+  },
+  table => ({
+    ticketsWorkspaceStatusIdx: index('tickets_workspace_status_idx').on(
+      table.workspaceId,
+      table.status,
+    ),
+  }),
 );
 
-export const conversations = pgTable('conversations', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
-  channelType: channelTypeEnum('channel_type').notNull().default('email'),
-  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
-  lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const conversationsTicketIdx = uniqueIndex('conversations_ticket_idx').on(
-  conversations.ticketId,
+export const conversations = pgTable(
+  'conversations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
+    channelType: channelTypeEnum('channel_type').notNull().default('email'),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    conversationsTicketIdx: uniqueIndex('conversations_ticket_idx').on(table.ticketId),
+  }),
 );
 
-export const messages = pgTable('messages', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  conversationId: uuid('conversation_id').notNull().references(() => conversations.id),
-  authorType: messageAuthorEnum('author_type').notNull().default('customer'),
-  authorId: uuid('author_id'),
-  body: text('body').notNull(),
-  bodyHtml: text('body_html'),
-  visibility: messageVisibilityEnum('visibility').notNull().default('public'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const messagesConversationIdx = index('messages_conversation_idx').on(
-  messages.conversationId,
-  messages.createdAt,
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    conversationId: uuid('conversation_id').notNull().references(() => conversations.id),
+    authorType: messageAuthorEnum('author_type').notNull().default('customer'),
+    authorId: uuid('author_id'),
+    body: text('body').notNull(),
+    bodyHtml: text('body_html'),
+    visibility: messageVisibilityEnum('visibility').notNull().default('public'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    messagesConversationIdx: index('messages_conversation_idx').on(
+      table.conversationId,
+      table.createdAt,
+    ),
+  }),
 );
 
 export const attachments = pgTable('attachments', {
@@ -276,16 +315,20 @@ export const attachments = pgTable('attachments', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const tags = pgTable('tags', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  name: text('name').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const tagsWorkspaceNameIdx = uniqueIndex('tags_workspace_name_idx').on(
-  tags.workspaceId,
-  tags.name,
+export const tags = pgTable(
+  'tags',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    tagsWorkspaceNameIdx: uniqueIndex('tags_workspace_name_idx').on(
+      table.workspaceId,
+      table.name,
+    ),
+  }),
 );
 
 export const ticketTags = pgTable(
@@ -417,49 +460,61 @@ export const kbRevisions = pgTable('kb_revisions', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const integrations = pgTable('integrations', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  provider: providerEnum('provider').notNull(),
-  status: integrationStatusEnum('status').notNull().default('active'),
-  credentialsRef: text('credentials_ref'),
-  metadata: jsonb('metadata'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const integrationsWorkspaceProviderIdx = uniqueIndex('integrations_workspace_provider_idx').on(
-  integrations.workspaceId,
-  integrations.provider,
+export const integrations = pgTable(
+  'integrations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    provider: providerEnum('provider').notNull(),
+    status: integrationStatusEnum('status').notNull().default('active'),
+    credentialsRef: text('credentials_ref'),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    integrationsWorkspaceProviderIdx: uniqueIndex('integrations_workspace_provider_idx').on(
+      table.workspaceId,
+      table.provider,
+    ),
+  }),
 );
 
-export const externalObjects = pgTable('external_objects', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  integrationId: uuid('integration_id').notNull().references(() => integrations.id),
-  objectType: text('object_type').notNull(),
-  externalId: text('external_id').notNull(),
-  internalId: uuid('internal_id').notNull(),
-  checksum: text('checksum'),
-  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const externalObjectsUniqueIdx = uniqueIndex('external_objects_unique_idx').on(
-  externalObjects.integrationId,
-  externalObjects.objectType,
-  externalObjects.externalId,
+export const externalObjects = pgTable(
+  'external_objects',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    objectType: text('object_type').notNull(),
+    externalId: text('external_id').notNull(),
+    internalId: uuid('internal_id').notNull(),
+    checksum: text('checksum'),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    externalObjectsUniqueIdx: uniqueIndex('external_objects_unique_idx').on(
+      table.integrationId,
+      table.objectType,
+      table.externalId,
+    ),
+  }),
 );
 
-export const syncCursors = pgTable('sync_cursors', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  integrationId: uuid('integration_id').notNull().references(() => integrations.id),
-  objectType: text('object_type').notNull(),
-  cursor: text('cursor').notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const syncCursorsUniqueIdx = uniqueIndex('sync_cursors_unique_idx').on(
-  syncCursors.integrationId,
-  syncCursors.objectType,
+export const syncCursors = pgTable(
+  'sync_cursors',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    objectType: text('object_type').notNull(),
+    cursor: text('cursor').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    syncCursorsUniqueIdx: uniqueIndex('sync_cursors_unique_idx').on(
+      table.integrationId,
+      table.objectType,
+    ),
+  }),
 );
 
 export const importJobs = pgTable('import_jobs', {
@@ -480,34 +535,42 @@ export const exportJobs = pgTable('export_jobs', {
   error: text('error'),
 });
 
-export const rawRecords = pgTable('raw_records', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  integrationId: uuid('integration_id').notNull().references(() => integrations.id),
-  objectType: text('object_type').notNull(),
-  externalId: text('external_id'),
-  payload: jsonb('payload').notNull(),
-  receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const rawRecordsUniqueIdx = uniqueIndex('raw_records_unique_idx').on(
-  rawRecords.integrationId,
-  rawRecords.objectType,
-  rawRecords.externalId,
+export const rawRecords = pgTable(
+  'raw_records',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    objectType: text('object_type').notNull(),
+    externalId: text('external_id'),
+    payload: jsonb('payload').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    rawRecordsUniqueIdx: uniqueIndex('raw_records_unique_idx').on(
+      table.integrationId,
+      table.objectType,
+      table.externalId,
+    ),
+  }),
 );
 
-export const auditEvents = pgTable('audit_events', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  actorType: text('actor_type').notNull(),
-  actorId: uuid('actor_id'),
-  action: text('action').notNull(),
-  objectType: text('object_type').notNull(),
-  objectId: uuid('object_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  diff: jsonb('diff'),
-});
-
-export const auditEventsWorkspaceIdx = index('audit_events_workspace_idx').on(
-  auditEvents.workspaceId,
-  auditEvents.createdAt,
+export const auditEvents = pgTable(
+  'audit_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    actorType: text('actor_type').notNull(),
+    actorId: uuid('actor_id'),
+    action: text('action').notNull(),
+    objectType: text('object_type').notNull(),
+    objectId: uuid('object_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    diff: jsonb('diff'),
+  },
+  table => ({
+    auditEventsWorkspaceIdx: index('audit_events_workspace_idx').on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+  }),
 );

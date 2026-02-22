@@ -33,9 +33,11 @@ const workflows = [
 ];
 
 const providers = [
-  { name: "Claude", tag: "Anthropic", color: "bg-orange-500" },
-  { name: "GPT-4o", tag: "OpenAI", color: "bg-emerald-500" },
-  { name: "OpenClaw", tag: "Any endpoint", color: "bg-violet-500" },
+  { name: "GPT-5.3", tag: "OpenAI", color: "bg-emerald-500" },
+  { name: "Claude Opus 4.6", tag: "Anthropic", color: "bg-orange-500" },
+  { name: "Claude Sonnet 4.6", tag: "Anthropic", color: "bg-orange-300" },
+  { name: "Kimi K2.5", tag: "Moonshot AI", color: "bg-sky-500" },
+  { name: "Gemini 3.1", tag: "Google", color: "bg-blue-500" },
 ];
 
 export default function Home() {
@@ -50,14 +52,19 @@ export default function Home() {
           </p>
         </div>
         <h1 className="mt-6 max-w-4xl text-4xl font-bold leading-[0.95] sm:text-7xl">
-          Your helpdesk,
+          AI lives in the command line.
           <br />
-          <span className="text-zinc-400">minus the UI.</span>
+          <span className="text-zinc-400">Now, so does your helpdesk.</span>
         </h1>
         <p className="mt-6 max-w-2xl text-lg font-medium leading-relaxed text-zinc-600">
-          CLIaaS exfiltrates your entire Zendesk or Kayako instance — tickets,
-          users, KB articles, macros, triggers, SLAs — then runs LLM-powered
-          triage, reply drafting, and shift summaries from the terminal.
+          CLIaaS moves support operations from locked SaaS workflows into a CLI
+          you control, with real exports, real APIs, and real agentic
+          automation.
+        </p>
+        <p className="mt-4 max-w-3xl text-base font-medium leading-relaxed text-zinc-500">
+          No more waiting on your SaaS to release their &quot;custom&quot; janky
+          frontier model reskins. Our agentic harnesses are built using
+          future-proofed standards: MCP, agents.md, and claude.md.
         </p>
         <div className="mt-10 flex flex-wrap gap-4">
           <Link
@@ -188,9 +195,9 @@ export default function Home() {
       <div className="mt-8 grid gap-8 sm:grid-cols-2">
         {/* LLM PROVIDERS */}
         <section className="border-2 border-zinc-950 bg-white p-6">
-          <h2 className="text-2xl font-bold">LLM Providers</h2>
+          <h2 className="text-2xl font-bold">Frontier Models</h2>
           <p className="mt-2 text-sm font-medium text-zinc-600">
-            Same prompt pipeline, your choice of model.
+            Current baseline: GPT-5.3, Opus and Sonnet 4.6, Kimi K2.5, Gemini 3.1.
           </p>
           <div className="mt-6 flex flex-col gap-4">
             {providers.map((p) => (
