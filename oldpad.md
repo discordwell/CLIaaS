@@ -1,5 +1,26 @@
 # Archived Session Summaries
 
+## 2026-02-23T17:15Z — Session 20: Area Guard, Service Depot, Production Queue, Radar, Crates
+- Implemented Area Guard mission: patrol/defend spawn area, attack nearby enemies, return if >8 cells from origin
+- Added `applyMission()` INI mission string parser (Guard/Area Guard/Hunt/Sleep)
+- Added `idleMission()` helper: all GUARD idle transitions respect guardOrigin
+- Service Depot (FIX building) auto-repair: heals nearby vehicles 2 HP/3 ticks with spark effect
+- Production queue: queue up to 5 of same item per category, right-click cancels one from queue
+- Radar requirement: DOME building required for minimap, shows cached static noise without it
+- Mission carry-over: localStorage save/load surviving units between missions (ToCarryOver/ToInherit INI flags)
+- Carry-over units spawn with passability check (code review fix: prevents stuck in walls)
+- Crate drops: money/heal/veterancy/unit bonuses, spawn every 60-90s, max 3 on map, 3min expiry
+- E key: select all units of same type on entire map
+- Area Guard ants now engage enemies while returning home (code review fix)
+- Idle cycle (period key) includes AREA_GUARD player units (code review fix)
+- Radar static noise performance fix: cached Uint8Array, updates every 10 frames (code review fix)
+- All changes type check clean (npx tsc --noEmit)
+
+## 2026-02-23T16:00Z — Session 19: Bug Fixes, Queen Ant, Larvae, GNRL
+- Fixed 9 code review bugs: harvester, structure footprints, sell mode, sidebar scroll, etc.
+- Added QUEE (Queen Ant) structure, LAR1/LAR2 (Larvae), GNRL (Stavros), TRUK (Supply Truck)
+- Updated victory condition: must destroy all QUEE/LAR1/LAR2 + kill all ants
+
 ## 2026-02-23T14:00Z — Session 18: Economy, Production, Sidebar, Building Placement
 - Implemented full RTS economy system: harvester AI state machine (idle→seeking→harvesting→returning→unloading)
 - Added ore/gem depletion: map.depleteOre() reduces overlay levels, returns credits (25/ore, 50/gem)

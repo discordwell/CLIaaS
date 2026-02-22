@@ -221,7 +221,7 @@ export class Renderer {
         switch (terrain) {
           case Terrain.CLEAR: {
             if (this.theatre === 'INTERIOR') {
-              // INTERIOR theatre — concrete/stone floors
+              // INTERIOR theatre — always concrete/stone floors (ignores template data)
               const bright = 60 + (h % 12) - 6;
               ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 5})`;
               ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
@@ -236,6 +236,7 @@ export class Renderer {
                 ctx.fillStyle = 'rgba(40,35,30,0.15)';
                 ctx.fillRect(screen.x + 4, screen.y + 4, 16, 12);
               }
+              break; // skip TEMPERATE template rendering and grass tufts
             } else if (tmpl > 0 && tmpl !== 0xFF) {
               // Template-aware rendering using palette colors
               const isRoad = tmpl >= 0x27 && tmpl <= 0x34;
@@ -279,14 +280,9 @@ export class Renderer {
                 }
               }
             } else {
-              // Default clear — palette green (TEMPERATE) or concrete (INTERIOR)
-              if (this.theatre === 'INTERIOR') {
-                const bright = 60 + (h % 8) - 4;
-                ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 5})`;
-              } else {
-                const palIdx = PAL_GRASS_START + 2 + (h % 6);
-                ctx.fillStyle = this.palColor(palIdx, (h % 10) - 5);
-              }
+              // Default clear — palette green (TEMPERATE only; INTERIOR already handled above)
+              const palIdx = PAL_GRASS_START + 2 + (h % 6);
+              ctx.fillStyle = this.palColor(palIdx, (h % 10) - 5);
               ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
               if (h < 15) {
                 ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);

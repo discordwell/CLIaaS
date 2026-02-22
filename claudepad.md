@@ -1,5 +1,49 @@
 # Session Summaries
 
+## 2026-02-24T02:00Z — Session 25: Transport Fix + Bug Audit (INTERRUPTED — bugs queued)
+- Committed f506c8a: Fix transport passenger lifecycle (passengers vanished after 3s because alive=false + entity cleanup)
+- Ran 2 independent code reviews + 2 audits, cross-referenced findings
+- **VERIFIED REAL BUGS still needing fixes (prioritized):**
+
+### BUG 1 — CRITICAL: Mission timer ticks 15x too slow
+- `index.ts` ~line 2590: `this.missionTimer--` inside `processTriggers()` which runs every 15 ticks
+- Timer is SET in game ticks (`result.setTimer * TIME_UNIT_TICKS`) but decremented by 1 per 15 ticks
+- **Fix:** Change `this.missionTimer--` to `this.missionTimer -= 15`
+
+### BUG 2 — HIGH: enemyUnitsAlive counts neutral civilians as enemies
+- `index.ts` ~line 3296: `if (e.alive && !e.isPlayerUnit && !e.isCivilian) enemyUnitsAlive++`
+- Wait — this line ALREADY excludes civilians with `!e.isCivilian`. Need to verify if there's a SECOND count elsewhere.
+- Check line ~2575 in updateHunt for a separate count that may NOT exclude civilians.
+
+### BUG 3 — MEDIUM: AREA_GUARD doesn't clear target/targetStructure on retreat
+- `index.ts` ~line 2712: sets `mission=MOVE, moveTarget=origin` but doesn't clear `entity.target` or `entity.targetStructure`
+- **Fix:** Add `entity.target = null; entity.targetStructure = null;` before line 2712
+
+### BUG 4 — MEDIUM: Artillery minRange not enforced vs structures
+- `updateAttackStructure()` at ~line 2739 has no minRange check
+- **Fix:** Add minRange check similar to updateAttack entity version
+
+### BUG 5 — LOW: HUNT pathfinding global recalc causes lag spike
+- `index.ts` ~line 2557: `this.tick % 15 === 0` recalcs ALL hunting units on same tick
+- **Fix:** Change to `(this.tick + entity.id) % 15 === 0` to stagger
+
+### BUG 6 — LOW: Team GUARD/IDLE duration decrements by hardcoded 8
+- `index.ts` ~line 1844: `entity.teamMissionWaiting -= 8` instead of actual elapsed ticks
+- Minor timing inaccuracy, not critical
+
+### FALSE POSITIVES from code reviews (DO NOT FIX):
+- hasTurret missing TRAN/LST: WRONG — entity.ts line 175 already excludes both
+- Dead loop in civilian evacuation: Need to verify — line 376-378 area
+- BUILDING_TYPES ordering: Already validated in session 21 against RA source
+- Semi-persistent trigger playerEntered not reset: Check if this actually matters — triggers with persistence=1 skip when `trigger.fired && persistence <= 1` (line 3307), so playerEntered flag is irrelevant after firing
+- Duplicate TMISSION constants: True but harmless, not a bug
+- Cell trigger per-unit activation: This IS correct behavior — each unit should independently trigger cell triggers
+
+### UNVERIFIED (check before fixing):
+- Civilian flee target can be out-of-bounds (line 1352-1363): Minor, findPath handles it
+- structureTypes in trigger state doesn't distinguish houses: Check if ant scenarios need house-specific building checks
+- TEVENT_DESTROYED only tracks structures not units: Check if any ant scenario attaches triggers to units
+
 ## 2026-02-24T00:00Z — Session 23: Visual Fidelity & Combat Polish — Turrets, Retaliation, Audio, Pathfinding
 - GUN/SAM structure turret rotation: 8-dir facing toward targets, BODY_SHAPE frame selection
 - GUN: 128-frame layout (32 rotation × 2 fire × 2 damage), firingFlash muzzle effect
@@ -53,35 +97,17 @@
 - Fixed cell trigger persistence: per-entity tracking, persistent triggers reset on re-entry
 - All changes type check clean (npx tsc --noEmit)
 
-## 2026-02-23T17:15Z — Session 20: Area Guard, Service Depot, Production Queue, Radar, Crates
-- Implemented Area Guard mission: patrol/defend spawn area, attack nearby enemies, return if >8 cells from origin
-- Added `applyMission()` INI mission string parser (Guard/Area Guard/Hunt/Sleep)
-- Added `idleMission()` helper: all GUARD idle transitions respect guardOrigin
-- Service Depot (FIX building) auto-repair: heals nearby vehicles 2 HP/3 ticks with spark effect
-- Production queue: queue up to 5 of same item per category, right-click cancels one from queue
-- Radar requirement: DOME building required for minimap, shows cached static noise without it
-- Mission carry-over: localStorage save/load surviving units between missions (ToCarryOver/ToInherit INI flags)
-- Carry-over units spawn with passability check (code review fix: prevents stuck in walls)
-- Crate drops: money/heal/veterancy/unit bonuses, spawn every 60-90s, max 3 on map, 3min expiry
-- E key: select all units of same type on entire map
-- Area Guard ants now engage enemies while returning home (code review fix)
-- Idle cycle (period key) includes AREA_GUARD player units (code review fix)
-- Radar static noise performance fix: cached Uint8Array, updates every 10 frames (code review fix)
-- All changes type check clean (npx tsc --noEmit)
-
-## 2026-02-23T16:00Z — Session 19: Bug Fixes, Queen Ant, Larvae, GNRL
-- Fixed 9 code review bugs: harvester returning re-entrancy (double GUARD check), structure footprints using STRUCTURE_SIZE instead of hardcoded 2x2, sell mode now refunds 50% credits and clears terrain, destroyed structures clear footprint to passable, findStructureAt uses actual footprint, sidebar scroll clamped to max, cached getAvailableItems per tick, harvesters skip guard auto-attack (would chase forever with no weapon)
-- Added QUEE (Queen Ant) structure: 800 HP, TeslaZap weapon, self-healing +1 HP/2 ticks, 2x2 footprint
-- Added LAR1 (Larva, 25 HP) and LAR2 (Larvae, 50 HP) structures: 1x1 footprint
-- Added GNRL (Stavros) infantry: Sniper weapon (125 dmg, range 5, Super warhead), uses E1 sprite
-- Added TRUK (Supply Truck) vehicle type for SCA02EA scenario
-- Added Sniper weapon to WEAPON_STATS
-- Updated victory condition: must destroy all QUEE/LAR1/LAR2 structures + kill all ants
-- Fixed house mapping: France→USSR (enemy), England→Greece (allied), Turkey→Neutral
-- Structure maxHp now type-specific: QUEE=800, LAR1=25, LAR2=50, TSLA=500
-- Imported Terrain enum in index.ts; replaced magic number 4 with Terrain.WALL
-- Replaced hardcoded 128 with MAP_CELLS in map.ts and index.ts
-- All changes type check clean (npx tsc --noEmit)
+## 2026-02-23T05:30Z — Session 24: CLIaaS Migration & Live Testing
+- Built migrate command: `pnpm cliaas migrate --from <dir> --to <connector>` with crash recovery maps
+- Added 4 new connectors: Intercom, Help Scout, Zoho Desk, HubSpot (export + write + verify)
+- Live-tested migration against 4 platforms: Zendesk (30/30), Freshdesk (30/30), Groove (30/30), Intercom (30/30)
+- Added `--cleanup` flag to reverse migrations (delete migrated tickets from target)
+- Fixed Intercom: `type:"user"` not `type:"contact"`, `conversation_id` response field, contact auto-resolution
+- Fixed 204 No Content handling in Zendesk/Freshdesk/Intercom fetch wrappers
+- Intercom delete needs `Intercom-Version: Unstable`; added apiVersion option to intercomFetch
+- Freshdesk free plan blocks API DELETE; Groove has no delete API
+- Saved all connector credentials to .env (Zendesk, Freshdesk, Groove, HelpCrunch, Intercom)
+- 4 commits pushed, all type check clean
 
 
 # Key Findings
@@ -100,3 +126,10 @@
 - Zendesk credentials: subdomain=discorp, email=cordwell@gmail.com, token in .env
 - Kayako Classic domain: classichelp.kayako.com (needs API key + secret from admin REST API settings)
 - Kayako Classic API: HMAC-SHA256 auth, XML responses, path-based pagination for tickets, marker-based for users
+- Intercom API: `type:"user"` (not `type:"contact"`) for creating conversations; response returns `conversation_id`
+- Intercom delete conversation requires `Intercom-Version: Unstable` header
+- Intercom contact search: POST `/contacts/search` with `{query:{field:"email",operator:"=",value:"..."}}`
+- Freshdesk free plan blocks DELETE via API (405 Method Not Allowed)
+- Groove API has no delete endpoint (REST v1 is deprecated, recommend GraphQL v2)
+- All connector creds saved in .env (gitignored): Zendesk, Freshdesk, Groove, HelpCrunch, Intercom
+- Intercom workspace: "Discorp", admin ID 9982601 (Robert Cordwell), Freshdesk subdomain: cliaas

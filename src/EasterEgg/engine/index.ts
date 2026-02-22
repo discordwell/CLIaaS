@@ -1757,8 +1757,13 @@ export class Game {
   /** Execute team mission scripts — units follow waypoint patrol routes */
   private updateTeamMission(entity: Entity): void {
     if (entity.teamMissionIndex >= entity.teamMissions.length) {
-      // Script complete — fall back to hunt AI
-      this.updateAntAI(entity);
+      // Script complete — ants fall back to hunt AI, allied units idle
+      if (entity.isAnt) {
+        this.updateAntAI(entity);
+      } else {
+        entity.mission = this.idleMission(entity);
+        entity.animState = AnimState.IDLE;
+      }
       return;
     }
 
@@ -2551,10 +2556,10 @@ export class Game {
       entity.animState = AnimState.ATTACK;
     } else {
       entity.animState = AnimState.WALK;
-      // Use pathfinding to reach target (recalc periodically)
+      // Use pathfinding to reach target (recalc periodically, staggered by entity ID)
       const targetCell = worldToCell(entity.target.pos.x, entity.target.pos.y);
       if (entity.path.length === 0 || entity.pathIndex >= entity.path.length ||
-          (this.tick % 15 === 0)) {
+          ((this.tick + entity.id) % 15 === 0)) {
         entity.path = findPath(this.map, entity.cell, targetCell, true);
         entity.pathIndex = 0;
       }
@@ -2711,6 +2716,8 @@ export class Game {
       }
       entity.mission = Mission.MOVE;
       entity.moveTarget = { x: origin.x, y: origin.y };
+      entity.target = null;
+      entity.targetStructure = null;
       entity.path = findPath(this.map, ec, worldToCell(origin.x, origin.y), true);
       entity.pathIndex = 0;
       return;
@@ -2743,6 +2750,22 @@ export class Game {
     };
     const dist = worldDist(entity.pos, structPos);
     const range = entity.weapon?.range ?? 2;
+
+    // Minimum range check: artillery can't fire at point-blank structures
+    if (entity.weapon?.minRange && dist < entity.weapon.minRange) {
+      entity.animState = AnimState.WALK;
+      const dx = entity.pos.x - structPos.x;
+      const dy = entity.pos.y - structPos.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const minX = this.map.boundsX * CELL_SIZE;
+      const maxX = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
+      const minY = this.map.boundsY * CELL_SIZE;
+      const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
+      const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
+      const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
+      entity.moveToward({ x: retreatX, y: retreatY }, entity.stats.speed * 0.4);
+      return;
+    }
 
     if (dist <= range) {
       // Engineer capture: consume engineer, convert building to player
