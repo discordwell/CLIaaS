@@ -14,7 +14,8 @@ export type SoundName =
   | 'select_infantry' | 'select_vehicle' | 'select_dog'
   | 'move_ack_infantry' | 'move_ack_vehicle' | 'move_ack_dog'
   | 'unit_lost' | 'building_explode' | 'heal'
-  | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged';
+  | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged'
+  | 'eva_construction_complete' | 'eva_unit_ready' | 'eva_low_power';
 
 export class AudioManager {
   private ctx: AudioContext | null = null;
@@ -107,6 +108,9 @@ export class AudioManager {
       case 'eva_unit_lost': this.synthEvaUnitLost(t, out); break;
       case 'eva_base_attack': this.synthEvaBaseAttack(t, out); break;
       case 'eva_acknowledged': this.synthEvaAcknowledged(t, out); break;
+      case 'eva_construction_complete': this.synthEvaConstructionComplete(t, out); break;
+      case 'eva_unit_ready': this.synthEvaUnitReady(t, out); break;
+      case 'eva_low_power': this.synthEvaLowPower(t, out); break;
     }
   }
 
@@ -622,5 +626,53 @@ export class AudioManager {
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
     o2.connect(g2).connect(out);
     o2.start(t + 0.1); o2.stop(t + 0.18);
+  }
+
+  private synthEvaConstructionComplete(t: number, out: AudioNode): void {
+    // "Construction complete" — triumphant ascending four-note fanfare
+    const notes = [400, 500, 600, 800];
+    notes.forEach((freq, i) => {
+      const dt = t + i * 0.1;
+      const o = this.osc('square', freq);
+      const g = this.gain(0.13);
+      g.gain.setValueAtTime(0.13, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.12);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.12);
+    });
+  }
+
+  private synthEvaUnitReady(t: number, out: AudioNode): void {
+    // "Unit ready" — two quick ascending pips
+    const o1 = this.osc('square', 600);
+    const g1 = this.gain(0.1);
+    g1.gain.setValueAtTime(0.1, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    o1.connect(g1).connect(out);
+    o1.start(t); o1.stop(t + 0.06);
+
+    const o2 = this.osc('square', 900);
+    const g2 = this.gain(0.12);
+    g2.gain.setValueAtTime(0.12, t + 0.08);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    o2.connect(g2).connect(out);
+    o2.start(t + 0.08); o2.stop(t + 0.16);
+  }
+
+  private synthEvaLowPower(t: number, out: AudioNode): void {
+    // "Low power" — descending two-note warning
+    const o1 = this.osc('sawtooth', 600);
+    const g1 = this.gain(0.12);
+    g1.gain.setValueAtTime(0.12, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o1.connect(g1).connect(out);
+    o1.start(t); o1.stop(t + 0.15);
+
+    const o2 = this.osc('sawtooth', 350);
+    const g2 = this.gain(0.12);
+    g2.gain.setValueAtTime(0.12, t + 0.18);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o2.connect(g2).connect(out);
+    o2.start(t + 0.18); o2.stop(t + 0.35);
   }
 }

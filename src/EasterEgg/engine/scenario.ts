@@ -648,6 +648,7 @@ export interface MapStructure {
   attackCooldown: number;    // ticks until next shot
   triggerName?: string;      // attached trigger name (from INI)
   buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
+  sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
 }
 
 /** Weapon stats for defensive structures */

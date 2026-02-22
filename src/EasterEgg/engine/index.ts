@@ -104,6 +104,9 @@ export class Game {
   killCount = 0;
   lossCount = 0;
   effects: Effect[] = [];
+  /** Persistent corpses left by dead units (capped to prevent memory growth) */
+  corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; alpha: number }> = [];
+  private static readonly MAX_CORPSES = 100;
   state: GameState = 'loading';
   tick = 0;
   missionName = '';
@@ -474,11 +477,26 @@ export class Game {
       this.updateQueenSpawning();
     }
 
+    // Ore regeneration — existing ore cells slowly grow and spread (every 60 seconds)
+    if (this.tick % (GAME_TICKS_PER_SEC * 60) === 0 && this.tick > 0) {
+      this.tickOreRegeneration();
+    }
+
     // Tick production queue — advance build progress
     this.tickProduction();
 
-    // Clean up dead entities after death animation (use deathTick instead of animFrame)
+    // Clean up dead entities after death animation — save corpse before removal
     const before = this.entities.length;
+    for (const e of this.entities) {
+      if (!e.alive && e.deathTick >= 45) {
+        // Save as persistent corpse
+        if (this.corpses.length >= Game.MAX_CORPSES) this.corpses.shift();
+        this.corpses.push({
+          x: e.pos.x, y: e.pos.y, type: e.type, facing: e.facing,
+          isInfantry: e.stats.isInfantry, alpha: 0.5,
+        });
+      }
+    }
     this.entities = this.entities.filter(
       e => e.alive || e.deathTick < 45 // ~3 seconds at 15fps
     );
@@ -518,10 +536,35 @@ export class Game {
       else if (s.type === 'FIX') this.powerConsumed += 30;
     }
 
-    // Tick structure construction animation (0→1 over ~2 seconds = 30 ticks)
+    // Low power warning (every 10 seconds when power demand exceeds supply)
+    if (this.powerConsumed > this.powerProduced && this.powerProduced > 0 &&
+        this.tick % (GAME_TICKS_PER_SEC * 10) === 0) {
+      this.audio.play('eva_low_power');
+    }
+
+    // Tick structure construction and sell animations
     for (const s of this.structures) {
+      // Construction: 0→1 over ~2 seconds = 30 ticks
       if (s.buildProgress !== undefined && s.buildProgress < 1) {
         s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
+      }
+      // Sell: 0→1 over ~1 second = 15 ticks, then finalize
+      if (s.sellProgress !== undefined) {
+        s.sellProgress = Math.min(1, s.sellProgress + 1 / 15);
+        if (s.sellProgress >= 1) {
+          s.alive = false;
+          s.sellProgress = undefined;
+          this.clearStructureFootprint(s);
+          const wx = s.cx * CELL_SIZE + CELL_SIZE;
+          const wy = s.cy * CELL_SIZE + CELL_SIZE;
+          this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
+            sprite: 'veh-hit1', spriteStart: 0 });
+          // Spawn a rifleman at the building site (recovered crew)
+          const inf = new Entity(UnitType.I_E1, House.Spain, wx, wy);
+          inf.mission = Mission.GUARD;
+          this.entities.push(inf);
+          this.entityById.set(inf.id, inf);
+        }
       }
     }
 
@@ -595,12 +638,17 @@ export class Game {
     const world = this.camera.screenToWorld(mouseX, mouseY);
     const hovered = this.findEntityAt(world);
     if (hovered && !hovered.isPlayerUnit && hovered.alive) {
-      this.canvas.style.cursor = 'crosshair'; // attack cursor
+      this.canvas.style.cursor = 'crosshair'; // attack cursor over enemy unit
     } else {
-      // Check if terrain is passable
-      const cell = worldToCell(world.x, world.y);
-      const passable = this.map.isPassable(cell.cx, cell.cy);
-      this.canvas.style.cursor = passable ? 'pointer' : 'not-allowed';
+      const hoveredStruct = this.findStructureAt(world);
+      if (hoveredStruct && hoveredStruct.alive &&
+          hoveredStruct.house !== House.Spain && hoveredStruct.house !== House.Greece) {
+        this.canvas.style.cursor = 'crosshair'; // attack cursor over enemy structure
+      } else {
+        const cell = worldToCell(world.x, world.y);
+        const passable = this.map.isPassable(cell.cx, cell.cy);
+        this.canvas.style.cursor = passable ? 'pointer' : 'not-allowed';
+      }
     }
   }
 
@@ -916,28 +964,17 @@ export class Game {
         return;
       }
 
-      // Sell mode: click on player structure to sell it
+      // Sell mode: click on player structure to start sell animation
       if (this.sellMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
-        if (s && s.alive && (s.house === House.Spain || s.house === House.Greece)) {
-          s.alive = false;
-          // Refund 50% of building cost
+        if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) &&
+            s.sellProgress === undefined) {
+          s.sellProgress = 0; // start sell animation
+          // Refund 50% of building cost immediately
           const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
           if (prodItem) this.credits += Math.floor(prodItem.cost * 0.5);
-          // Clear terrain footprint to passable
-          this.clearStructureFootprint(s);
-          // Sell effect: explosion + sell sound
-          const wx = s.cx * CELL_SIZE + CELL_SIZE;
-          const wy = s.cy * CELL_SIZE + CELL_SIZE;
-          this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
-            sprite: 'veh-hit1', spriteStart: 0 });
           this.audio.play('building_explode');
-          // Spawn a rifleman at the building site (representing recovered crew)
-          const inf = new Entity(UnitType.I_E1, House.Spain, wx, wy);
-          inf.mission = Mission.GUARD;
-          this.entities.push(inf);
-          this.entityById.set(inf.id, inf);
         }
         this.sellMode = false;
         return;
@@ -1056,6 +1093,47 @@ export class Game {
           this.cancelProduction(category);
         }
         return;
+      }
+
+      // Minimap right-click: move selected units to that world position
+      if (this.selectedIds.size > 0) {
+        const mmSize = Game.SIDEBAR_W - 8;
+        const mmX = this.canvas.width - Game.SIDEBAR_W + 4;
+        const mmY = this.canvas.height - mmSize - 6;
+        if (rightClick.x >= mmX && rightClick.x <= mmX + mmSize &&
+            rightClick.y >= mmY && rightClick.y <= mmY + mmSize) {
+          const scale = mmSize / Math.max(this.map.boundsW, this.map.boundsH);
+          const worldCX = this.map.boundsX + (rightClick.x - mmX) / scale;
+          const worldCY = this.map.boundsY + (rightClick.y - mmY) / scale;
+          const wx = worldCX * CELL_SIZE;
+          const wy = worldCY * CELL_SIZE;
+          const units: Entity[] = [];
+          for (const id of this.selectedIds) {
+            const u = this.entityById.get(id);
+            if (u?.alive) units.push(u);
+          }
+          let si = 0;
+          for (const u of units) {
+            const spread = units.length > 1 ? this.spreadOffset(si, units.length) : { x: 0, y: 0 };
+            si++;
+            u.mission = Mission.MOVE;
+            u.moveTarget = { x: wx + spread.x, y: wy + spread.y };
+            u.moveQueue = [];
+            u.target = null;
+            u.targetStructure = null;
+            u.forceFirePos = null;
+            u.teamMissions = [];
+            u.teamMissionIndex = 0;
+            u.path = findPath(this.map, u.cell, worldToCell(wx + spread.x, wy + spread.y), true);
+            u.pathIndex = 0;
+          }
+          if (units.length > 0) {
+            this.audio.play('move_ack');
+            this.effects.push({ type: 'marker', x: wx, y: wy, frame: 0, maxFrames: 15, size: 10,
+              markerColor: 'rgba(60,255,60,1)' });
+          }
+          return;
+        }
       }
 
       const world = this.camera.screenToWorld(rightClick.x, rightClick.y);
@@ -1187,6 +1265,18 @@ export class Game {
     }
   }
 
+  /** Map weapon name to muzzle flash color (RGB) */
+  private weaponMuzzleColor(name: string): string {
+    switch (name) {
+      case 'TeslaZap': return '120,180,255';           // blue electric
+      case 'FireballLauncher': case 'Flamethrower': return '255,140,30';  // orange fire
+      case 'TankGun': case 'ArtilleryShell': return '255,220,100';       // warm yellow
+      case 'Bazooka': case 'MammothTusk': return '255,180,60';           // rocket orange
+      case 'Mandible': return '200,255,200';            // green organic
+      default: return '255,255,180';                    // standard gunfire white-yellow
+    }
+  }
+
   /** Calculate spread offset for group move — arranges units in a grid */
   private spreadOffset(idx: number, total: number): { x: number; y: number } {
     if (total <= 1) return { x: 0, y: 0 };
@@ -1292,6 +1382,7 @@ export class Game {
         sprite: 'fball1', spriteStart: 0,
       });
       this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
+      this.renderer.screenFlash = Math.max(this.renderer.screenFlash, 5);
       this.audio.play('building_explode');
       // Leave large scorch mark
       this.map.addDecal(s.cx, s.cy, 14, 0.6);
@@ -1858,8 +1949,6 @@ export class Game {
     if (!entity.moveTarget && entity.path.length === 0) {
       entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
-      // Air units descend when stopped
-      if (entity.isAirUnit) entity.flightAltitude = Math.max(0, entity.flightAltitude - 2);
       return;
     }
 
@@ -2038,7 +2127,7 @@ export class Game {
         } else {
           // Muzzle flash at attacker
           this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
-            sprite: 'piff', spriteStart: 0 });
+            sprite: 'piff', spriteStart: 0, muzzleColor: this.weaponMuzzleColor(entity.weapon.name) });
 
           // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
           const projStyle = this.weaponProjectileStyle(entity.weapon.name);
@@ -2335,6 +2424,7 @@ export class Game {
         this.effects.push({
           type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
+          muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
         });
         this.effects.push({
           type: 'explosion', x: structPos.x, y: structPos.y,
@@ -2396,6 +2486,7 @@ export class Game {
         this.effects.push({
           type: 'muzzle', x: sx, y: sy,
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
+          muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
         });
         const projStyle = this.weaponProjectileStyle(entity.weapon.name);
         const travelFrames = projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
@@ -2455,10 +2546,13 @@ export class Game {
         const damage = Math.max(1, Math.round(s.weapon.damage * mult));
         const killed = bestTarget.takeDamage(damage);
 
-        // Fire effects
+        // Fire effects — color based on structure type
+        const structMuzzleColor = (s.type === 'TSLA' || s.type === 'QUEE') ? '120,180,255'
+          : s.type === 'FTUR' ? '255,140,30' : '255,255,180';
         this.effects.push({
           type: 'muzzle', x: sx, y: sy,
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
+          muzzleColor: structMuzzleColor,
         });
 
         // Tesla coil and Queen Ant get special effect
@@ -2542,6 +2636,43 @@ export class Game {
         ant.guardOrigin = { x: spawnX, y: spawnY };
         this.entities.push(ant);
         this.entityById.set(ant.id, ant);
+      }
+    }
+  }
+
+  /** Ore regeneration — existing ore grows and spreads to adjacent cells */
+  private tickOreRegeneration(): void {
+    const bx = this.map.boundsX, by = this.map.boundsY;
+    const bw = this.map.boundsW, bh = this.map.boundsH;
+    // Scan playable area for ore cells
+    for (let cy = by; cy < by + bh; cy++) {
+      for (let cx = bx; cx < bx + bw; cx++) {
+        const idx = cy * MAP_CELLS + cx;
+        const ovl = this.map.overlay[idx];
+        if (ovl < 0x03 || ovl > 0x12) continue; // not ore or gem
+
+        // 15% chance to grow one level (increase overlay index)
+        if (Math.random() < 0.15) {
+          if (ovl >= 0x03 && ovl < 0x0E) {
+            this.map.overlay[idx] = ovl + 1; // gold ore: grow
+          } else if (ovl >= 0x0F && ovl < 0x12) {
+            this.map.overlay[idx] = ovl + 1; // gem: grow
+          }
+        }
+
+        // 5% chance to spread to an adjacent clear cell
+        if (Math.random() < 0.05) {
+          const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+          const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
+          const nx = cx + dx, ny = cy + dy;
+          if (nx >= bx && nx < bx + bw && ny >= by && ny < by + bh) {
+            const nidx = ny * MAP_CELLS + nx;
+            if (this.map.overlay[nidx] === 0xFF && this.map.getTerrain(nx, ny) === Terrain.CLEAR) {
+              // Spread: place minimum ore/gem level
+              this.map.overlay[nidx] = ovl >= 0x0F ? 0x0F : 0x03;
+            }
+          }
+        }
       }
     }
   }
@@ -2666,30 +2797,25 @@ export class Game {
     }
   }
 
-  /** Build trigger game state snapshot for event checks */
-  private buildTriggerState(trigger: ScenarioTrigger): TriggerGameState {
-    const structureTypes = new Set<string>();
-    const destroyedTriggerNames = new Set<string>();
-    for (const s of this.structures) {
-      if (s.alive) structureTypes.add(s.type);
-      else if (s.triggerName) destroyedTriggerNames.add(s.triggerName);
-    }
+  /** Build trigger game state snapshot for event checks (uses precomputed shared state) */
+  private buildTriggerState(trigger: ScenarioTrigger, shared: {
+    structureTypes: Set<string>; destroyedTriggerNames: Set<string>;
+    enemyUnitsAlive: number; playerFactories: number;
+  }): TriggerGameState {
     return {
       gameTick: this.tick,
       globals: this.globals,
       triggerStartTick: trigger.timerTick,
       triggerName: trigger.name,
       playerEntered: trigger.playerEntered,
-      enemyUnitsAlive: this.entities.filter(e => e.alive && !e.isPlayerUnit && !e.isCivilian).length,
+      enemyUnitsAlive: shared.enemyUnitsAlive,
       enemyKillCount: this.killCount,
-      playerFactories: this.structures.filter(s => s.alive &&
-        (s.house === House.Spain || s.house === House.Greece) &&
-        (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'TENT')).length,
+      playerFactories: shared.playerFactories,
       missionTimerExpired: this.missionTimerExpired,
       bridgesAlive: this.bridgeCellCount,
       unitsLeftMap: this.unitsLeftMap,
-      structureTypes,
-      destroyedTriggerNames,
+      structureTypes: shared.structureTypes,
+      destroyedTriggerNames: shared.destroyedTriggerNames,
     };
   }
 
@@ -2703,13 +2829,34 @@ export class Game {
       }
     }
 
+    // Precompute shared state once for all triggers (avoids O(N*M) recomputation)
+    const structureTypes = new Set<string>();
+    const destroyedTriggerNames = new Set<string>();
+    let playerFactories = 0;
+    for (const s of this.structures) {
+      if (s.alive) {
+        structureTypes.add(s.type);
+        if ((s.house === House.Spain || s.house === House.Greece) &&
+            (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'TENT')) {
+          playerFactories++;
+        }
+      } else if (s.triggerName) {
+        destroyedTriggerNames.add(s.triggerName);
+      }
+    }
+    let enemyUnitsAlive = 0;
+    for (const e of this.entities) {
+      if (e.alive && !e.isPlayerUnit && !e.isCivilian) enemyUnitsAlive++;
+    }
+    const shared = { structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories };
+
     for (const trigger of this.triggers) {
       // Volatile (0) and semi-persistent (1): skip once fired
       // Persistent (2): allowed to re-fire after timer reset
       if (trigger.fired && trigger.persistence <= 1) continue;
 
       // Check event conditions
-      const state = this.buildTriggerState(trigger);
+      const state = this.buildTriggerState(trigger, shared);
       const e1Met = checkTriggerEvent(trigger.event1, state);
       const e2Met = checkTriggerEvent(trigger.event2, state);
 
@@ -2931,11 +3078,11 @@ export class Game {
           // Structure: go into placement mode
           this.pendingPlacement = entry.item;
           this.productionQueue.delete(category);
-          this.audio.play('eva_acknowledged');
+          this.audio.play('eva_construction_complete');
         } else {
           // Unit: spawn at the producing structure
           this.spawnProducedUnit(entry.item);
-          this.audio.play('eva_acknowledged');
+          this.audio.play('eva_unit_ready');
           // If more queued, restart for next unit; otherwise remove
           if (entry.queueCount > 1) {
             entry.queueCount--;
@@ -3028,7 +3175,6 @@ export class Game {
       }
     }
     this.pendingPlacement = null;
-    this.audio.play('building_explode'); // construction placed sound
     // Spawn free harvester with refinery
     if (item.type === 'PROC') {
       const harv = new Entity(UnitType.V_HARV, House.Spain,
@@ -3139,6 +3285,7 @@ export class Game {
     this.renderer.sellMode = this.sellMode;
     this.renderer.repairMode = this.repairMode;
     this.renderer.repairingStructures = this.repairingStructures;
+    this.renderer.corpses = this.corpses;
     // Sidebar data
     this.renderer.sidebarCredits = this.displayCredits;
     this.renderer.sidebarPowerProduced = this.powerProduced;

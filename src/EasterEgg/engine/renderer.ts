@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, type ProductionItem } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, type ProductionItem } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
 import { type Entity } from './entity';
@@ -46,6 +46,8 @@ export interface Effect {
   // Sprite-based effect rendering
   sprite?: string;       // sprite sheet name (e.g. 'fball1', 'piff')
   spriteStart?: number;  // first frame index in the sheet
+  // Muzzle flash color (RGB string, e.g. '255,200,60')
+  muzzleColor?: string;
   // Projectile travel
   startX?: number;       // projectile origin
   startY?: number;
@@ -70,10 +72,12 @@ export class Renderer {
   private height: number;
   private pal: number[][] | null = null;
   screenShake = 0;      // remaining shake ticks
+  screenFlash = 0;      // remaining flash ticks (white flash on big explosions)
   attackMoveMode = false; // show attack-move cursor indicator
   sellMode = false;      // show sell cursor indicator
   repairMode = false;    // show repair cursor indicator
   repairingStructures = new Set<number>(); // indices of structures being repaired
+  corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; alpha: number }> = [];
   showHelp = false;     // F1 help overlay
   idleCount = 0;        // number of idle player units
   minimapAlerts: Array<{ cx: number; cy: number; tick: number }> = [];
@@ -150,6 +154,7 @@ export class Renderer {
     this.renderOverlays(camera, map, tick);
     this.renderStructures(camera, map, structures, assets, tick);
     this.renderCrates(camera, map, tick);
+    this.renderCorpses(camera, map);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
     this.renderWaypoints(camera, entities, selectedIds);
     this.renderEffects(camera, effects, assets);
@@ -157,6 +162,14 @@ export class Renderer {
 
     if (shaking) {
       ctx.restore();
+    }
+
+    // Screen flash overlay (big explosions)
+    if (this.screenFlash > 0) {
+      const flashAlpha = Math.min(0.4, this.screenFlash * 0.08);
+      ctx.fillStyle = `rgba(255,255,220,${flashAlpha})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+      this.screenFlash--;
     }
 
     // Placement ghost preview
@@ -462,20 +475,26 @@ export class Renderer {
             ctx.fillRect(sx + 1, sy - 1, 1, 4); // vertical glint arm
           }
         } else if (ovl >= 0x0F && ovl <= 0x12) {
-          // Gems (GEM01-GEM04) — purple/magenta tones
-          ctx.fillStyle = 'rgba(160,60,200,0.35)';
+          // Gems (GEM01-GEM04) — blue/teal crystalline tones (like original RA)
+          const gemDensity = ovl - 0x0F; // 0-3
+          const gemBase = 0.25 + gemDensity * 0.08;
+          ctx.fillStyle = `rgba(40,120,200,${gemBase})`;
           ctx.fillRect(screen.x + 2, screen.y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-          // Gem facets
-          ctx.fillStyle = 'rgba(200,100,255,0.6)';
+          // Gem facets — brighter crystals at higher density
+          const facetAlpha = 0.4 + gemDensity * 0.15;
+          ctx.fillStyle = `rgba(100,200,255,${facetAlpha})`;
           ctx.fillRect(screen.x + 5 + (h % 6), screen.y + 5, 4, 4);
           ctx.fillRect(screen.x + 12 + (h % 4), screen.y + 12, 3, 3);
+          if (gemDensity >= 2) {
+            ctx.fillRect(screen.x + 8 + (h % 3), screen.y + 10, 3, 3);
+          }
           // Animated gem sparkle — brighter and more frequent than ore
           const gemPhase = (tick + h * 5) % 24;
           if (gemPhase < 6) {
             const sparkAlpha = gemPhase < 3 ? gemPhase / 3 : (6 - gemPhase) / 3;
             const gx = screen.x + 6 + ((h * 13) % 12);
             const gy = screen.y + 6 + ((h * 9) % 12);
-            ctx.fillStyle = `rgba(220,180,255,${sparkAlpha * 0.9})`;
+            ctx.fillStyle = `rgba(180,230,255,${sparkAlpha * 0.9})`;
             ctx.fillRect(gx, gy, 2, 2);
             ctx.fillRect(gx - 1, gy + 1, 4, 1);
             ctx.fillRect(gx + 1, gy - 1, 1, 4);
@@ -534,7 +553,8 @@ export class Renderer {
     camera: Camera, map: GameMap, structures: MapStructure[], assets: AssetManager, tick: number,
   ): void {
     const ctx = this.ctx;
-    for (const s of structures) {
+    for (let structIdx = 0; structIdx < structures.length; structIdx++) {
+      const s = structures[structIdx];
       // Render rubble for destroyed structures
       if (!s.alive) {
         if (!s.rubble) continue;
@@ -569,8 +589,9 @@ export class Renderer {
       const screenX = s.cx * CELL_SIZE - camera.x;
       const screenY = s.cy * CELL_SIZE - camera.y;
 
-      // Construction animation: clip building sprite progressively
+      // Construction/sell animation: clip building sprite progressively
       const isConstructing = s.buildProgress !== undefined && s.buildProgress < 1;
+      const isSelling = s.sellProgress !== undefined;
       const sheet = assets.getSheet(s.image);
       if (sheet) {
         // Determine frame: damaged buildings use second half of frames
@@ -596,8 +617,18 @@ export class Renderer {
           ctx.beginPath();
           ctx.rect(screenX - fh / 2, screenY + fh / 2 - revealH, sheet.meta.frameWidth + fh, revealH);
           ctx.clip();
-          // Draw with green-tinted construction overlay
           ctx.globalAlpha = 0.5 + prog * 0.5;
+        }
+        // Sell: shrink building top-to-bottom (reverse of construction) while fading
+        if (isSelling) {
+          const prog = s.sellProgress!;
+          const fh = sheet.meta.frameHeight;
+          const remainH = Math.floor(fh * (1 - prog));
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(screenX - fh / 2, screenY + fh / 2 - remainH, sheet.meta.frameWidth + fh, remainH);
+          ctx.clip();
+          ctx.globalAlpha = Math.max(0.15, 1 - prog);
         }
         assets.drawFrame(ctx, s.image, frame % totalFrames, screenX + sheet.meta.frameWidth / 2, screenY + sheet.meta.frameHeight / 2, {
           centerX: true,
@@ -610,6 +641,14 @@ export class Renderer {
           ctx.restore();
           ctx.fillStyle = `rgba(80,255,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
           ctx.fillRect(screenX - 2, revealY - 1, sheet.meta.frameWidth + 4, 2);
+        }
+        if (isSelling) {
+          // Red sell scanline at the shrinking edge
+          const fh = sheet.meta.frameHeight;
+          const shrinkY = screenY + fh / 2 - Math.floor(fh * (1 - s.sellProgress!));
+          ctx.restore();
+          ctx.fillStyle = `rgba(255,80,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
+          ctx.fillRect(screenX - 2, shrinkY - 1, sheet.meta.frameWidth + 4, 2);
         }
         if (vis === 1) ctx.globalAlpha = 1;
       } else {
@@ -633,14 +672,71 @@ export class Renderer {
         this.renderHealthBar(barX, barY, CELL_SIZE * 1.5, s.hp / s.maxHp, false);
       }
 
+      // Fire/smoke animation on damaged structures (< 50% HP)
+      if (s.alive && s.hp < 128 && vis >= 1 && !isConstructing && !isSelling) {
+        const fireSeed = (s.cx * 31 + s.cy * 17) | 0;
+        for (let f = 0; f < 2; f++) {
+          const fx = screenX + CELL_SIZE * 0.5 + ((fireSeed + f * 13) % 12) - 6;
+          const fy = screenY + CELL_SIZE * 0.3;
+          // Flame: animated orange/red flicker
+          const flicker = Math.sin(tick * 0.5 + f * 2.1) * 0.3;
+          const fh = 6 + Math.sin(tick * 0.7 + f * 1.5) * 3;
+          ctx.fillStyle = `rgba(255,${120 + flicker * 60},30,${0.5 + flicker * 0.2})`;
+          ctx.beginPath();
+          ctx.ellipse(fx, fy - fh * 0.5, 3, fh * 0.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // Smoke rising above flame
+          const smokeY = fy - fh - 2 - (tick * 0.4 + f * 3) % 8;
+          const smokeAlpha = 0.3 - ((tick * 0.4 + f * 3) % 8) / 20;
+          if (smokeAlpha > 0) {
+            ctx.fillStyle = `rgba(40,40,40,${smokeAlpha})`;
+            ctx.beginPath();
+            ctx.arc(fx + Math.sin(tick * 0.2 + f) * 2, smokeY, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+
       // Repair indicator: pulsing green border
-      const sIdx = structures.indexOf(s);
-      if (this.repairingStructures.has(sIdx)) {
+      if (this.repairingStructures.has(structIdx)) {
         const pulse = 0.4 + 0.4 * Math.sin(tick * 0.3);
         ctx.strokeStyle = `rgba(80,255,80,${pulse})`;
         ctx.lineWidth = 2;
         ctx.strokeRect(screenX, screenY, CELL_SIZE * 2, CELL_SIZE * 2);
       }
+    }
+  }
+
+  // ─── Corpses ─────────────────────────────────────────────
+
+  private renderCorpses(camera: Camera, map: GameMap): void {
+    const ctx = this.ctx;
+    for (const c of this.corpses) {
+      const ecx = Math.floor(c.x / CELL_SIZE);
+      const ecy = Math.floor(c.y / CELL_SIZE);
+      if (map.getVisibility(ecx, ecy) === 0) continue; // shrouded
+      const screen = camera.worldToScreen(c.x, c.y);
+      if (screen.x < -20 || screen.x > this.width + 20 || screen.y < -20 || screen.y > this.height + 20) continue;
+      ctx.globalAlpha = c.alpha;
+      if (c.isInfantry) {
+        // Infantry corpse: small dark blob
+        ctx.fillStyle = '#2a1a0a';
+        ctx.fillRect(screen.x - 3, screen.y - 1, 6, 3);
+        ctx.fillStyle = '#4a2a1a';
+        ctx.fillRect(screen.x - 2, screen.y - 1, 4, 2);
+      } else {
+        // Vehicle wreckage: dark twisted metal shapes
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(screen.x - 6, screen.y - 4, 12, 8);
+        ctx.fillStyle = '#3a2a2a';
+        ctx.fillRect(screen.x - 4, screen.y - 3, 8, 6);
+        // Burn mark around wreck
+        ctx.fillStyle = 'rgba(20,15,10,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(screen.x, screen.y + 2, 8, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -767,6 +863,22 @@ export class Renderer {
             spriteH,
           );
         }
+        // Harvester unloading animation: pulsing money particles rising from unit
+        if (entity.type === UnitType.V_HARV && entity.harvesterState === 'unloading') {
+          const phase = (tick * 0.3) % (Math.PI * 2);
+          for (let i = 0; i < 3; i++) {
+            const px = screen.x - 4 + (i * 4);
+            const py = screen.y - spriteH * 0.3 - ((tick * 0.8 + i * 5) % 12);
+            const pa = 0.8 - ((tick * 0.8 + i * 5) % 12) / 12;
+            ctx.fillStyle = `rgba(255,220,60,${pa})`;
+            ctx.fillRect(px, py, 2, 2);
+          }
+          // Subtle yellow glow around harvester
+          ctx.fillStyle = `rgba(255,220,60,${0.1 + 0.05 * Math.sin(phase)})`;
+          ctx.beginPath();
+          ctx.ellipse(screen.x, screen.y, spriteW * 0.5, spriteH * 0.4, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else {
         // Fallback
         const size = entity.stats.isInfantry ? 8 : 16;
@@ -784,6 +896,22 @@ export class Renderer {
           spriteW,
           spriteH,
         );
+      }
+
+      // Smoke trail from heavily damaged vehicles (below 50% HP)
+      if (entity.alive && !entity.stats.isInfantry && entity.hp < entity.maxHp * 0.5) {
+        const smokePhase = (tick + entity.id * 7) % 12;
+        for (let s = 0; s < 3; s++) {
+          const py = screen.y - spriteH * 0.3 - s * 4 - smokePhase * 0.5;
+          const px = screen.x + Math.sin((tick + s * 4) * 0.3) * 2;
+          const sa = (0.5 - s * 0.12) * (1 - smokePhase / 12);
+          if (sa > 0) {
+            ctx.fillStyle = `rgba(40,40,40,${sa})`;
+            ctx.beginPath();
+            ctx.arc(px, py, 2 + s * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
 
       ctx.globalAlpha = 1;
@@ -1013,9 +1141,15 @@ export class Renderer {
         case 'muzzle': {
           const alpha = 1 - progress;
           const r = fx.size * (1 - progress * 0.5);
-          ctx.fillStyle = `rgba(255,255,150,${alpha})`;
+          const mc = fx.muzzleColor ?? '255,255,150';
+          ctx.fillStyle = `rgba(${mc},${alpha})`;
           ctx.beginPath();
           ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          // Bright core
+          ctx.fillStyle = `rgba(255,255,255,${alpha * 0.6})`;
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y, r * 0.4, 0, Math.PI * 2);
           ctx.fill();
           break;
         }
