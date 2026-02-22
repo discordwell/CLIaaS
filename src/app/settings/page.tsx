@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const connectors = [
   {
     name: "Zendesk",
@@ -38,45 +40,50 @@ const llmProviders = [
 
 export default function SettingsPage() {
   return (
-    <main className="mx-auto min-h-screen w-full max-w-4xl px-6 py-10">
-      <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">
+    <main className="mx-auto min-h-screen w-full max-w-5xl px-6 py-12 text-foreground">
+      <header className="border-2 border-line bg-panel p-8 sm:p-12">
+        <div className="mb-6">
+          <Link href="/dashboard" className="font-mono text-sm font-bold text-muted hover:text-foreground">
+            ← BACK TO DASHBOARD
+          </Link>
+        </div>
+        <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-foreground">
           Settings
         </p>
-        <h1 className="mt-3 text-3xl font-semibold">Configuration</h1>
-        <p className="mt-2 text-muted">
+        <h1 className="mt-4 text-4xl font-bold">Configuration</h1>
+        <p className="mt-4 text-lg font-medium text-muted">
           All credentials are stored locally in{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">~/.cliaas/config.json</code>.
+          <code className="bg-inverted px-2 py-1 font-mono text-sm text-inverted-fg">~/.cliaas/config.json</code>.
           Configure via CLI commands below.
         </p>
       </header>
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-semibold">Helpdesk Connectors</h2>
-        <div className="mt-4 space-y-4">
+      <section className="mt-8 border-2 border-line bg-panel p-8">
+        <h2 className="text-2xl font-bold">Helpdesk Connectors</h2>
+        <div className="mt-6 space-y-6">
           {connectors.map((c) => (
             <div
               key={c.name}
-              className="rounded-lg border border-slate-200 px-4 py-4"
+              className="border-2 border-line p-5"
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-semibold">{c.name}</p>
-                  <p className="font-mono text-xs text-muted">{c.direction}</p>
+                  <p className="text-lg font-bold">{c.name}</p>
+                  <p className="font-mono text-xs font-bold uppercase text-muted">{c.direction}</p>
                 </div>
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                <span className="border-2 border-line bg-emerald-400 px-3 py-1 font-mono text-xs font-bold uppercase text-black">
                   {c.status}
                 </span>
               </div>
-              <div className="mt-3 space-y-1">
-                <p className="text-xs font-semibold text-muted">Required credentials:</p>
+              <div className="mt-5 space-y-2">
+                <p className="font-mono text-xs font-bold uppercase text-muted">Required credentials:</p>
                 <div className="flex flex-wrap gap-2">
                   {c.fields.map((f) => (
-                    <span key={f} className="rounded bg-slate-100 px-2 py-1 text-xs font-mono text-slate-700">{f}</span>
+                    <span key={f} className="border-2 border-line bg-panel px-2 py-1 font-mono text-xs font-bold uppercase text-foreground">{f}</span>
                   ))}
                 </div>
               </div>
-              <code className="mt-3 block rounded bg-slate-900 px-3 py-2 font-mono text-xs text-cyan-100">
+              <code className="mt-5 block border-t-2 border-line bg-zinc-950 p-4 font-mono text-sm text-emerald-400">
                 {c.configCmd}
               </code>
             </div>
@@ -84,36 +91,36 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-semibold">LLM Providers</h2>
-        <p className="mt-2 text-sm text-muted">
+      <section className="mt-8 border-2 border-line bg-panel p-8">
+        <h2 className="text-2xl font-bold">LLM Providers</h2>
+        <p className="mt-2 text-sm font-medium text-muted">
           Select your preferred LLM for triage, drafting, KB suggestions, and summaries.
         </p>
-        <div className="mt-4 space-y-4">
+        <div className="mt-6 space-y-6">
           {llmProviders.map((p) => (
             <div
               key={p.id}
-              className="rounded-lg border border-slate-200 px-4 py-4"
+              className="border-2 border-line p-5"
             >
-              <p className="font-semibold">{p.name}</p>
-              <p className="mt-1 text-sm text-muted">{p.desc}</p>
-              <code className="mt-2 block rounded bg-slate-900 px-3 py-2 font-mono text-xs text-cyan-100">
+              <p className="text-lg font-bold">{p.name}</p>
+              <p className="mt-1 text-sm font-medium text-muted">{p.desc}</p>
+              <code className="mt-4 block border-t-2 border-line bg-zinc-950 p-4 font-mono text-sm text-emerald-400">
                 {p.configCmd}
               </code>
             </div>
           ))}
         </div>
-        <div className="mt-4 rounded-lg bg-slate-50 px-4 py-3">
-          <p className="text-sm font-semibold">Switch active provider:</p>
-          <code className="mt-1 block font-mono text-xs text-slate-700">
+        <div className="mt-6 border-2 border-line bg-accent-soft p-5">
+          <p className="font-mono text-xs font-bold uppercase text-foreground">Switch active provider:</p>
+          <code className="mt-2 block font-mono text-sm font-bold text-foreground">
             cliaas config set-provider claude|openai|openclaw
           </code>
         </div>
       </section>
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-semibold">View Current Config</h2>
-        <code className="mt-3 block rounded-lg bg-slate-900 px-4 py-3 font-mono text-sm text-cyan-100">
+      <section className="mt-8 border-2 border-line bg-panel p-8">
+        <h2 className="text-2xl font-bold">View Current Config</h2>
+        <code className="mt-4 block border-2 border-line bg-zinc-950 p-4 font-mono text-sm font-bold text-emerald-400">
           cliaas config show
         </code>
       </section>

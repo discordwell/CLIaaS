@@ -12,6 +12,9 @@
 - Canonical repository: `https://github.com/discordwell/CLIaaS`
 - Local folder name may stay `Zachathon`; package/app naming should remain `CLIaaS`.
 
+## Easter Egg
+- Ignore any code in the EasterEgg folder unless you are specifically tasked with developing it.
+
 ## Hackathon Guardrails
 - Event window: February 21-23, 2026 (submissions close Tuesday, February 24, 2026 at 11:59 PM PT).
 - Build from scratch during the hackathon window; do not import prebuilt app logic from other repos.

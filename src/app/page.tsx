@@ -23,23 +23,24 @@ const providers = [
 
 export default function Home() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-10 text-slate-900 sm:px-10">
-      <header className="rounded-3xl border border-slate-200/80 bg-panel/90 p-8 shadow-sm">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">
-          CLIAAS.COM
+    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-12 text-zinc-950 sm:px-10">
+      {/* HEADER SECTION */}
+      <header className="border-2 border-zinc-950 bg-white p-8 sm:p-12">
+        <p className="font-mono text-sm font-bold uppercase tracking-widest text-zinc-950">
+          CLIaaS.COM
         </p>
-        <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight sm:text-6xl">
+        <h1 className="mt-6 max-w-4xl text-4xl font-bold leading-none sm:text-7xl">
           Replace your helpdesk UI with a CLI that actually works.
         </h1>
-        <p className="mt-5 max-w-2xl text-lg text-muted">
+        <p className="mt-6 max-w-2xl text-lg font-medium text-zinc-600">
           CLIaaS exports your Zendesk and Kayako data, then runs LLM-powered
           triage, drafts, and KB suggestions from the terminal. No browser tabs.
           No per-seat licensing. Just your data and an LLM.
         </p>
-        <div className="mt-8 flex flex-wrap gap-3">
+        <div className="mt-10 flex flex-wrap gap-4">
           <Link
             href="/dashboard"
-            className="rounded-full bg-accent px-6 py-3 font-semibold text-white transition hover:brightness-95"
+            className="border-2 border-zinc-950 bg-zinc-950 px-8 py-3 font-mono text-sm font-bold uppercase text-white transition-colors hover:bg-zinc-800 hover:text-white"
           >
             Open Dashboard
           </Link>
@@ -47,91 +48,104 @@ export default function Home() {
             href="https://github.com/discordwell/CLIaaS"
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-full border border-slate-300 bg-white px-6 py-3 font-semibold transition hover:bg-slate-50"
+            className="border-2 border-zinc-950 bg-white px-8 py-3 font-mono text-sm font-bold uppercase text-zinc-950 transition-colors hover:bg-zinc-100"
           >
             GitHub
           </a>
         </div>
       </header>
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-3">
+      {/* TERMINAL SECTION */}
+      <section className="mt-8 border-2 border-zinc-950 bg-zinc-950 p-6 text-zinc-100 sm:p-8">
+        <div className="mb-4 flex items-center justify-between border-b border-zinc-800 pb-4">
+          <p className="font-mono text-xs font-bold uppercase tracking-widest text-zinc-400">
+            Real CLI — Real APIs
+          </p>
+          <div className="flex gap-2">
+            <div className="h-3 w-3 rounded-full bg-zinc-700"></div>
+            <div className="h-3 w-3 rounded-full bg-zinc-700"></div>
+            <div className="h-3 w-3 rounded-full bg-zinc-700"></div>
+          </div>
+        </div>
+        <pre className="overflow-x-auto font-mono text-sm leading-relaxed text-zinc-300">
+          <span className="text-emerald-400">$ cliaas zendesk export --subdomain acme --out ./data</span>{"\n"}
+          Exporting tickets... 2,847 tickets exported (12,403 messages){"\n"}
+          Exporting users... 342 users exported{"\n"}
+          Exporting organizations... 28 organizations exported{"\n"}
+          Exporting KB articles... 89 articles exported{"\n"}
+          Exporting business rules... 47 business rules exported{"\n\n"}
+
+          <span className="text-emerald-400">$ cliaas triage --limit 5</span>{"\n"}
+          #4521 <span className="text-red-400">[URGENT]</span> "Billing error on invoice #2026-0142" → billing, assign:sarah{"\n"}
+          #4519 <span className="text-orange-400">[HIGH]</span>   "Can't reset password"                → auth, assign:mike{"\n"}
+          #4518 <span className="text-yellow-400">[NORMAL]</span> "Feature request: dark mode"           → product, assign:backlog{"\n"}
+          #4517 <span className="text-yellow-400">[NORMAL]</span> "Slow load times on dashboard"         → engineering, assign:ops{"\n"}
+          #4515 <span className="text-zinc-500">[LOW]</span>    "Update company address"               → admin, assign:support{"\n\n"}
+
+          <span className="text-emerald-400">$ cliaas draft reply --ticket 4521 --tone professional</span>{"\n"}
+          Draft: "Hi Sarah, I've reviewed invoice #INV-2026-0142 and can confirm{"\n"}
+          the billing discrepancy. I've issued a corrective credit of $47.50{"\n"}
+          which will appear on your next statement..."{"\n"}
+          <span className="text-zinc-500">[approve] [edit] [discard]</span>
+        </pre>
+      </section>
+
+      {/* FEATURES SECTION */}
+      <section className="mt-8 grid gap-6 sm:grid-cols-3">
         {coreFeatures.map((feature) => (
           <article
             key={feature.title}
-            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            className="border-2 border-zinc-950 bg-white p-6"
           >
-            <h2 className="text-xl font-semibold">{feature.title}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted">{feature.text}</p>
+            <h2 className="text-xl font-bold">{feature.title}</h2>
+            <p className="mt-3 text-sm font-medium leading-relaxed text-zinc-600">{feature.text}</p>
           </article>
         ))}
       </section>
 
-      <section className="mt-8 rounded-2xl border border-slate-200 bg-slate-950 p-6 text-slate-100 shadow-sm">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-cyan-300">
-          Real CLI — Real APIs
-        </p>
-        <pre className="mt-3 overflow-x-auto font-mono text-sm leading-7 text-cyan-100">
-{`$ cliaas zendesk export --subdomain acme --out ./data
-Exporting tickets... 2,847 tickets exported (12,403 messages)
-Exporting users... 342 users exported
-Exporting organizations... 28 organizations exported
-Exporting KB articles... 89 articles exported
-Exporting business rules... 47 business rules exported
+      <div className="mt-8 grid gap-8 sm:grid-cols-2">
+        {/* PROVIDERS SECTION */}
+        <section className="border-2 border-zinc-950 bg-white p-6">
+          <h2 className="text-2xl font-bold">LLM Providers</h2>
+          <p className="mt-2 text-sm font-medium text-zinc-600">
+            Choose your model. All three providers use the same prompt pipeline.
+          </p>
+          <div className="mt-6 flex flex-col gap-4">
+            {providers.map((p) => (
+              <div
+                key={p.name}
+                className="flex flex-col justify-center border-l-4 border-zinc-950 pl-4"
+              >
+                <p className="font-bold">{p.name}</p>
+                <p className="text-sm font-medium text-zinc-600">{p.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
-$ cliaas triage --limit 5
-#4521 [URGENT] "Billing error on invoice #2026-0142" → billing, assign:sarah
-#4519 [HIGH]   "Can't reset password"                → auth, assign:mike
-#4518 [NORMAL] "Feature request: dark mode"           → product, assign:backlog
-#4517 [NORMAL] "Slow load times on dashboard"         → engineering, assign:ops
-#4515 [LOW]    "Update company address"               → admin, assign:support
-
-$ cliaas draft reply --ticket 4521 --tone professional
-Draft: "Hi Sarah, I've reviewed invoice #INV-2026-0142 and can confirm
-the billing discrepancy. I've issued a corrective credit of $47.50
-which will appear on your next statement..."
-[approve] [edit] [discard]`}
-        </pre>
-      </section>
-
-      <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-2xl font-semibold">LLM Providers</h2>
-        <p className="mt-2 text-sm text-muted">
-          Choose your model. All three providers use the same prompt pipeline.
-        </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          {providers.map((p) => (
-            <div
-              key={p.name}
-              className="rounded-lg border border-slate-200 px-4 py-3"
-            >
-              <p className="font-semibold">{p.name}</p>
-              <p className="text-xs text-muted">{p.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-2xl font-semibold">Routes</h2>
-        <div className="mt-4 grid gap-2 font-mono text-sm">
-          {[
-            { path: "/dashboard", note: "connector status + quickstart" },
-            { path: "/settings", note: "credentials + LLM provider config" },
-            { path: "/api/health", note: "deploy healthcheck" },
-            { path: "/api/connectors", note: "Zendesk + Kayako connector specs" },
-          ].map((route) => (
-            <div
-              key={route.path}
-              className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3"
-            >
-              <Link href={route.path} className="text-accent underline-offset-2 hover:underline">
-                {route.path}
-              </Link>
-              <span className="text-muted">{route.note}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+        {/* ROUTES SECTION */}
+        <section className="border-2 border-zinc-950 bg-white p-6">
+          <h2 className="text-2xl font-bold">Internal Routes</h2>
+          <div className="mt-6 flex flex-col gap-4 font-mono text-sm">
+            {[
+              { path: "/dashboard", note: "connector status + quickstart" },
+              { path: "/settings", note: "credentials + LLM provider config" },
+              { path: "/api/health", note: "deploy healthcheck" },
+              { path: "/api/connectors", note: "Zendesk + Kayako connector specs" },
+            ].map((route) => (
+              <div
+                key={route.path}
+                className="flex items-start justify-between border-b border-zinc-200 pb-3 last:border-0 last:pb-0"
+              >
+                <Link href={route.path} className="font-bold hover:underline">
+                  {route.path}
+                </Link>
+                <span className="ml-4 text-right text-zinc-500">{route.note}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }
