@@ -37,6 +37,7 @@ rsync -az \
 
 (
   cd "$TMP_DIR"
+  mkdir -p "$(dirname "$ZIP_PATH")"
   zip -qr "$ZIP_PATH" .
 )
 
