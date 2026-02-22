@@ -113,6 +113,19 @@ export class GameMap {
     return PASSABLE.has(this.getTerrain(cx, cy));
   }
 
+  /** Get terrain speed multiplier (1.0 = normal, >1 = faster, <1 = slower).
+   *  Roads (templates 166-174) give +30% speed. Rough terrain gives -15%. */
+  getSpeedMultiplier(cx: number, cy: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 1.0;
+    const tmpl = this.templateType[cy * MAP_CELLS + cx];
+    // Road templates (D1-D43 in TEMPERATE = template IDs roughly 166-174)
+    if (tmpl >= 166 && tmpl <= 174) return 1.3;
+    // Rough/beach terrain
+    const terrain = this.cells[cy * MAP_CELLS + cx];
+    if (terrain === Terrain.TREE) return 0.85;
+    return 1.0;
+  }
+
   /** Check if cell is within playable bounds */
   inBounds(cx: number, cy: number): boolean {
     return cx >= this.boundsX && cx < this.boundsX + this.boundsW &&

@@ -341,7 +341,10 @@ export class Game {
     this.cellInfCount.clear();
     for (const entity of this.entities) {
       if (entity.alive) {
-        this.map.setOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
+        // Air units don't block ground occupancy when airborne
+        if (!entity.isAirUnit || entity.flightAltitude === 0) {
+          this.map.setOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
+        }
         // Assign sub-cell positions for infantry so they spread within the cell
         if (entity.stats.isInfantry) {
           const ci = entity.cell.cy * 128 + entity.cell.cx;
@@ -513,6 +516,13 @@ export class Game {
       else if (s.type === 'TSLA') this.powerConsumed += 100;
       else if (s.type === 'HBOX' || s.type === 'PBOX' || s.type === 'GUN') this.powerConsumed += 10;
       else if (s.type === 'FIX') this.powerConsumed += 30;
+    }
+
+    // Tick structure construction animation (0→1 over ~2 seconds = 30 ticks)
+    for (const s of this.structures) {
+      if (s.buildProgress !== undefined && s.buildProgress < 1) {
+        s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
+      }
     }
 
     // Update idle count for HUD (once per tick, not per render frame)
@@ -1311,6 +1321,11 @@ export class Game {
       }
     }
 
+    // Air units: gradually descend when not moving
+    if (entity.isAirUnit && entity.mission !== Mission.MOVE && entity.flightAltitude > 0) {
+      entity.flightAltitude = Math.max(0, entity.flightAltitude - 2);
+    }
+
     switch (entity.mission) {
       case Mission.MOVE:
         this.updateMove(entity);
@@ -1843,10 +1858,31 @@ export class Game {
     if (!entity.moveTarget && entity.path.length === 0) {
       entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
+      // Air units descend when stopped
+      if (entity.isAirUnit) entity.flightAltitude = Math.max(0, entity.flightAltitude - 2);
       return;
     }
 
     entity.animState = AnimState.WALK;
+
+    // Air units fly directly to destination — no pathfinding, no terrain collision
+    if (entity.isAirUnit && entity.moveTarget) {
+      // Ascend to flight altitude
+      if (entity.flightAltitude < Entity.FLIGHT_ALTITUDE) {
+        entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 3);
+      }
+      if (entity.moveToward(entity.moveTarget, entity.stats.speed * 0.7)) {
+        entity.moveTarget = null;
+        if (entity.moveQueue.length > 0) {
+          const next = entity.moveQueue.shift()!;
+          entity.moveTarget = next;
+        } else {
+          entity.mission = this.idleMission(entity);
+          entity.animState = AnimState.IDLE;
+        }
+      }
+      return;
+    }
 
     if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
       const nextCell = entity.path[entity.pathIndex];
@@ -1869,11 +1905,13 @@ export class Game {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
         y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
       };
-      if (entity.moveToward(target, entity.stats.speed * 0.5)) {
+      const terrainSpeed = entity.stats.speed * 0.5 * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy);
+      if (entity.moveToward(target, terrainSpeed)) {
         entity.pathIndex++;
       }
     } else if (entity.moveTarget) {
-      if (entity.moveToward(entity.moveTarget, entity.stats.speed * 0.5)) {
+      const terrainSpeed2 = entity.stats.speed * 0.5 * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy);
+      if (entity.moveToward(entity.moveTarget, terrainSpeed2)) {
         entity.moveTarget = null;
         // Check for queued waypoints
         if (entity.moveQueue.length > 0) {
@@ -2575,6 +2613,33 @@ export class Game {
         }
       }
     }
+
+    // Tree destruction: large explosions (splash >= 1.5) can destroy trees in the blast radius
+    if (splashRange >= 1.5 && weapon.damage >= 30) {
+      const cc = worldToCell(center.x, center.y);
+      const r = Math.ceil(splashRange);
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > splashRange * splashRange) continue;
+          const tx = cc.cx + dx;
+          const ty = cc.cy + dy;
+          if (this.map.getTerrain(tx, ty) === Terrain.TREE) {
+            // 40% chance to destroy tree per explosion
+            if (Math.random() < 0.4) {
+              this.map.setTerrain(tx, ty, Terrain.CLEAR);
+              this.map.addDecal(tx, ty, 6, 0.4); // stump/scorch mark
+              this.effects.push({
+                type: 'explosion',
+                x: tx * CELL_SIZE + CELL_SIZE / 2,
+                y: ty * CELL_SIZE + CELL_SIZE / 2,
+                frame: 0, maxFrames: 10, size: 8,
+                sprite: 'piffpiff', spriteStart: 0,
+              });
+            }
+          }
+        }
+      }
+    }
   }
 
   /** Check cell triggers — fire when player units enter trigger cells */
@@ -2941,7 +3006,7 @@ export class Game {
 
     const image = item.type.toLowerCase();
     const maxHp = STRUCTURE_MAX_HP[item.type] ?? 256;
-    // Create structure
+    // Create structure with construction animation
     const newStruct: MapStructure = {
       type: item.type,
       image,
@@ -2953,6 +3018,7 @@ export class Game {
       rubble: false,
       weapon: STRUCTURE_WEAPONS[item.type],
       attackCooldown: 0,
+      buildProgress: 0, // starts construction animation
     };
     this.structures.push(newStruct);
     // Mark cells as impassable
@@ -2962,7 +3028,7 @@ export class Game {
       }
     }
     this.pendingPlacement = null;
-    this.audio.play('building_explode'); // construction complete sound
+    this.audio.play('building_explode'); // construction placed sound
     // Spawn free harvester with refinery
     if (item.type === 'PROC') {
       const harv = new Entity(UnitType.V_HARV, House.Spain,

@@ -158,6 +158,15 @@ export class Entity {
     return this.stats.passengers ?? 0;
   }
 
+  /** Air units fly over terrain, ignoring pathfinding and ground passability */
+  get isAirUnit(): boolean {
+    return this.type === UnitType.V_TRAN;
+  }
+
+  /** Flight altitude offset (pixels) — visual only, for rendering above ground */
+  flightAltitude = 0;
+  static readonly FLIGHT_ALTITUDE = 20; // pixels above ground when airborne
+
   get hasTurret(): boolean {
     return !this.stats.isInfantry && !this.isAnt &&
       this.type !== UnitType.V_APC && this.type !== UnitType.V_HARV &&

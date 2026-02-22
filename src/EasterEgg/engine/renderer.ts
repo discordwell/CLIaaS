@@ -569,6 +569,8 @@ export class Renderer {
       const screenX = s.cx * CELL_SIZE - camera.x;
       const screenY = s.cy * CELL_SIZE - camera.y;
 
+      // Construction animation: clip building sprite progressively
+      const isConstructing = s.buildProgress !== undefined && s.buildProgress < 1;
       const sheet = assets.getSheet(s.image);
       if (sheet) {
         // Determine frame: damaged buildings use second half of frames
@@ -585,10 +587,30 @@ export class Renderer {
           frame = damaged ? 1 : 0;
         }
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
+        // Construction: reveal building from bottom up with scanline effect
+        if (isConstructing) {
+          const prog = s.buildProgress!;
+          const fh = sheet.meta.frameHeight;
+          const revealH = Math.floor(fh * prog);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(screenX - fh / 2, screenY + fh / 2 - revealH, sheet.meta.frameWidth + fh, revealH);
+          ctx.clip();
+          // Draw with green-tinted construction overlay
+          ctx.globalAlpha = 0.5 + prog * 0.5;
+        }
         assets.drawFrame(ctx, s.image, frame % totalFrames, screenX + sheet.meta.frameWidth / 2, screenY + sheet.meta.frameHeight / 2, {
           centerX: true,
           centerY: true,
         });
+        if (isConstructing) {
+          // Green construction scanline at the build edge
+          const fh = sheet.meta.frameHeight;
+          const revealY = screenY + fh / 2 - Math.floor(fh * s.buildProgress!);
+          ctx.restore();
+          ctx.fillStyle = `rgba(80,255,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
+          ctx.fillRect(screenX - 2, revealY - 1, sheet.meta.frameWidth + 4, 2);
+        }
         if (vis === 1) ctx.globalAlpha = 1;
       } else {
         // Fallback: colored rectangle for buildings without sprites
@@ -652,6 +674,8 @@ export class Renderer {
 
       // Apply infantry sub-cell offset
       const subOff = entity.stats.isInfantry ? (SUB_CELL_OFFSETS[entity.subCell] ?? SUB_CELL_OFFSETS[0]) : SUB_CELL_OFFSETS[0];
+      // Air units: apply flight altitude offset (renders higher, shadow at ground level)
+      const altY = entity.isAirUnit ? entity.flightAltitude : 0;
       const screen = camera.worldToScreen(entity.pos.x + subOff.x, entity.pos.y + subOff.y);
       const sheet = assets.getSheet(entity.stats.image);
       const spriteW = sheet ? sheet.meta.frameWidth : (entity.stats.isInfantry ? 50 : 24);
@@ -670,6 +694,26 @@ export class Renderer {
         ctx.globalAlpha = fadeAlpha;
       }
 
+      // Unit shadow (drawn at ground level before altitude offset)
+      if (entity.alive) {
+        if (entity.isAirUnit && altY > 0) {
+          // Air unit shadow — offset by altitude for parallax
+          ctx.fillStyle = 'rgba(0,0,0,0.25)';
+          ctx.beginPath();
+          ctx.ellipse(screen.x + altY * 0.3, screen.y + spriteH * 0.3, spriteW * 0.3, spriteH * 0.12, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (!entity.stats.isInfantry) {
+          // Ground vehicle shadow — subtle dark ellipse under unit
+          ctx.fillStyle = 'rgba(0,0,0,0.18)';
+          ctx.beginPath();
+          ctx.ellipse(screen.x, screen.y + spriteH * 0.35, spriteW * 0.35, spriteH * 0.12, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Apply altitude offset for rendering (sprite drawn higher)
+      screen.y -= altY;
+
       // Selection circle (drawn under unit) — palette bright green
       if (selectedIds.has(entity.id) && entity.alive) {
         const rx = spriteW * 0.45;
@@ -677,7 +721,7 @@ export class Renderer {
         ctx.strokeStyle = this.palColor(PAL_GREEN_HP);
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.ellipse(screen.x, screen.y + spriteH * 0.3, rx, ry, 0, 0, Math.PI * 2);
+        ctx.ellipse(screen.x, screen.y + spriteH * 0.3 + altY, rx, ry, 0, 0, Math.PI * 2);
         ctx.stroke();
       }
 
@@ -695,6 +739,22 @@ export class Renderer {
             centerX: true,
             centerY: true,
           });
+        }
+        // Air unit rotor animation overlay (spinning rotor blades)
+        if (entity.isAirUnit && entity.alive) {
+          const rotorPhase = (tick * 3) % 4; // 4-phase rotor spin
+          ctx.strokeStyle = 'rgba(160,160,160,0.6)';
+          ctx.lineWidth = 1;
+          const rr = spriteW * 0.4;
+          const ang = (rotorPhase / 4) * Math.PI;
+          ctx.beginPath();
+          ctx.moveTo(screen.x - Math.cos(ang) * rr, screen.y - spriteH * 0.3 - Math.sin(ang) * rr * 0.4);
+          ctx.lineTo(screen.x + Math.cos(ang) * rr, screen.y - spriteH * 0.3 + Math.sin(ang) * rr * 0.4);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(screen.x - Math.cos(ang + Math.PI / 2) * rr, screen.y - spriteH * 0.3 - Math.sin(ang + Math.PI / 2) * rr * 0.4);
+          ctx.lineTo(screen.x + Math.cos(ang + Math.PI / 2) * rr, screen.y - spriteH * 0.3 + Math.sin(ang + Math.PI / 2) * rr * 0.4);
+          ctx.stroke();
         }
         // Apply house-color tint as a colored overlay on the sprite area
         const tint = HOUSE_TINT[entity.house];
@@ -1349,25 +1409,33 @@ export class Renderer {
     ctx.fillStyle = '#FFD700';
     ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, 14);
 
-    // Power bar
+    // Power bar with numeric labels
     const pwrY = 18;
     const pwrW = w - 8;
-    const pwrH = 6;
+    const pwrH = 8;
     const pwrX = x + 4;
     ctx.fillStyle = '#111';
     ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
     const pwrRatio = this.sidebarPowerProduced > 0
       ? Math.min(1, this.sidebarPowerConsumed / this.sidebarPowerProduced) : 1;
     const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced;
-    ctx.fillStyle = lowPower ? '#f44' : pwrRatio > 0.8 ? '#fa0' : '#4f4';
+    const pwrColor = lowPower ? '#f44' : pwrRatio > 0.8 ? '#fa0' : '#4f4';
+    ctx.fillStyle = pwrColor;
     ctx.fillRect(pwrX, pwrY, pwrW * Math.min(1, pwrRatio), pwrH);
     ctx.strokeStyle = '#444';
     ctx.lineWidth = 1;
     ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
+    // Power numeric label (only show if player has power structures)
+    if (this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0) {
+      ctx.font = '7px monospace';
+      ctx.fillStyle = lowPower ? '#f88' : '#888';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${this.sidebarPowerConsumed}/${this.sidebarPowerProduced}`, x + w / 2, pwrY + pwrH + 8);
+    }
 
     // Production items
     const itemH = 22;
-    const itemStartY = 28;
+    const itemStartY = (this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0) ? 36 : 28;
     ctx.font = '9px monospace';
     ctx.textAlign = 'left';
 

@@ -647,6 +647,7 @@ export interface MapStructure {
   weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
   attackCooldown: number;    // ticks until next shot
   triggerName?: string;      // attached trigger name (from INI)
+  buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
 }
 
 /** Weapon stats for defensive structures */
