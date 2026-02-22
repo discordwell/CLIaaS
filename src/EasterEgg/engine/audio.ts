@@ -4,7 +4,7 @@
  * No external audio files needed.
  */
 
-type SoundName =
+export type SoundName =
   | 'rifle' | 'machinegun' | 'cannon' | 'artillery'
   | 'mandible' | 'teslazap' | 'fireball' | 'flamethrower'
   | 'grenade' | 'bazooka' | 'dogjaw'
@@ -12,6 +12,7 @@ type SoundName =
   | 'die_infantry' | 'die_vehicle' | 'die_ant'
   | 'move_ack' | 'attack_ack' | 'select'
   | 'select_infantry' | 'select_vehicle' | 'select_dog'
+  | 'move_ack_infantry' | 'move_ack_vehicle' | 'move_ack_dog'
   | 'unit_lost' | 'building_explode' | 'heal'
   | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged';
 
@@ -88,6 +89,9 @@ export class AudioManager {
       case 'die_vehicle': this.synthDieVehicle(t, out); break;
       case 'die_ant': this.synthDieAnt(t, out); break;
       case 'move_ack': this.synthAck(t, out, 800 + (Math.random() - 0.5) * 200); break;
+      case 'move_ack_infantry': this.synthAck(t, out, 900 + (Math.random() - 0.5) * 150); break;
+      case 'move_ack_vehicle': this.synthAckVehicle(t, out); break;
+      case 'move_ack_dog': this.synthAckDog(t, out); break;
       case 'attack_ack': this.synthAck(t, out, 600 + (Math.random() - 0.5) * 150); break;
       case 'select': this.synthSelect(t, out); break;
       case 'select_infantry': this.synthSelectInfantry(t, out); break;
@@ -433,6 +437,27 @@ export class AudioManager {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
     o.connect(g).connect(out);
     o.start(t); o.stop(t + 0.07);
+  }
+
+  private synthAckVehicle(t: number, out: AudioNode): void {
+    // Low engine rumble acknowledgment
+    const o = this.osc('sawtooth', 200 + Math.random() * 50);
+    const g = this.gain(0.06);
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.1);
+  }
+
+  private synthAckDog(t: number, out: AudioNode): void {
+    // Quick bark: descending chirp
+    const o = this.osc('sine', 1400);
+    const g = this.gain(0.07);
+    g.gain.setValueAtTime(0.07, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    o.frequency.exponentialRampToValueAtTime(800, t + 0.06);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.06);
   }
 
   private synthSelectDog(t: number, out: AudioNode): void {

@@ -74,6 +74,8 @@ export class Renderer {
   repairMode = false;    // show repair cursor indicator
   repairingStructures = new Set<number>(); // indices of structures being repaired
   showHelp = false;     // F1 help overlay
+  idleCount = 0;        // number of idle player units
+  minimapAlerts: Array<{ cx: number; cy: number; tick: number }> = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -141,6 +143,7 @@ export class Renderer {
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
     this.renderMinimap(map, entities, structures, camera);
     this.renderUnitInfo(entities, selectedIds);
+    if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
   }
 
@@ -982,6 +985,21 @@ export class Renderer {
       (camera.viewWidth / CELL_SIZE) * scale,
       (camera.viewHeight / CELL_SIZE) * scale,
     );
+
+    // Alert flashes (pulsing red dots for EVA alerts)
+    const now = Date.now();
+    for (let i = this.minimapAlerts.length - 1; i >= 0; i--) {
+      const alert = this.minimapAlerts[i];
+      const age = now - alert.tick;
+      if (age > 3000) { this.minimapAlerts.splice(i, 1); continue; }
+      const alpha = (Math.sin(age * 0.01) * 0.5 + 0.5) * (1 - age / 3000);
+      ctx.fillStyle = `rgba(255,60,60,${alpha})`;
+      const ax = mmX + (alert.cx - ox) * scale;
+      const ay = mmY + (alert.cy - oy) * scale;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // ─── Attack-Move Indicator ──────────────────────────────
@@ -1029,6 +1047,18 @@ export class Renderer {
 
   // ─── Help Overlay ──────────────────────────────────────
 
+  private renderIdleCount(): void {
+    const ctx = this.ctx;
+    const text = `Idle: ${this.idleCount}`;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(this.width - 60, 4, 56, 16);
+    ctx.fillStyle = this.idleCount > 0 ? '#ff8' : '#888';
+    ctx.fillText(text, this.width - 8, 16);
+    ctx.textAlign = 'left';
+  }
+
   private renderHelpOverlay(): void {
     const ctx = this.ctx;
     const w = 240;
@@ -1046,6 +1076,7 @@ export class Renderer {
       'Home/Space Center on units',
       '1-9       Select group',
       'Ctrl+1-9  Assign group',
+      '.         Cycle idle units',
       'P / Esc   Pause',
       'F1        Toggle this help',
     ];

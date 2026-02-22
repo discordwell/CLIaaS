@@ -9,7 +9,7 @@ import {
   WARHEAD_VS_ARMOR, type WarheadType,
 } from './types';
 import { AssetManager } from './assets';
-import { AudioManager } from './audio';
+import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
 import { Entity, resetEntityIds } from './entity';
@@ -55,6 +55,11 @@ export class Game {
   /** Counter for wave group coordination */
   private nextWaveId = 1;
   private cellInfCount = new Map<number, number>(); // reused each tick for sub-cell assignment
+  /** Index for cycling through idle units with period key */
+  private lastIdleCycleIdx = 0;
+  /** Double-tap detection for control group camera centering */
+  private lastGroupKey = 0;
+  private lastGroupTime = 0;
   // Stats tracking
   killCount = 0;
   lossCount = 0;
@@ -448,7 +453,8 @@ export class Game {
         }
       }
     } else {
-      // 1-9 without ctrl: recall control group (but not while typing other stuff)
+      // 1-9 without ctrl: recall control group; double-tap to center camera
+      const now = Date.now();
       for (let g = 1; g <= 9; g++) {
         if (keys.has(String(g))) {
           const group = this.controlGroups.get(g);
@@ -463,6 +469,17 @@ export class Game {
               }
             }
             if (this.selectedIds.size > 0) this.audio.play(this.selectionSound());
+            // Double-tap: center camera on group
+            if (this.lastGroupKey === g && now - this.lastGroupTime < 400) {
+              let cx = 0, cy = 0, count = 0;
+              for (const id of this.selectedIds) {
+                const u = this.entityById.get(id);
+                if (u?.alive) { cx += u.pos.x; cy += u.pos.y; count++; }
+              }
+              if (count > 0) this.camera.centerOn(cx / count, cy / count);
+            }
+            this.lastGroupKey = g;
+            this.lastGroupTime = now;
           }
           keys.delete(String(g)); // consume
         }
@@ -501,6 +518,26 @@ export class Game {
       }
       keys.delete('Home');
       keys.delete(' ');
+    }
+
+    // Period (.): cycle through idle player units
+    if (keys.has('.')) {
+      const idle = this.entities.filter(e =>
+        e.alive && e.isPlayerUnit && e.mission === Mission.GUARD && !e.target
+      );
+      if (idle.length > 0) {
+        this.lastIdleCycleIdx = this.lastIdleCycleIdx % idle.length;
+        const unit = idle[this.lastIdleCycleIdx];
+        // Select only this unit
+        for (const e of this.entities) e.selected = false;
+        this.selectedIds.clear();
+        this.selectedIds.add(unit.id);
+        unit.selected = true;
+        this.camera.centerOn(unit.pos.x, unit.pos.y);
+        this.audio.play(this.selectionSound());
+        this.lastIdleCycleIdx = (this.lastIdleCycleIdx + 1) % idle.length;
+      }
+      keys.delete('.');
     }
 
     // A key: toggle attack-move mode
@@ -765,7 +802,7 @@ export class Game {
       }
       if (commandIssued) {
         const isAttack = (target && !target.isPlayerUnit) || targetStruct;
-        this.audio.play(isAttack ? 'attack_ack' : 'move_ack');
+        this.audio.play(this.ackSound(!!isAttack));
         // Spawn command marker at destination
         this.effects.push({
           type: 'marker', x: world.x, y: world.y, frame: 0, maxFrames: 15, size: 10,
@@ -795,6 +832,19 @@ export class Game {
     const offsetX = (col - (cols - 1) / 2) * spacing;
     const offsetY = (row - (Math.ceil(total / cols) - 1) / 2) * spacing;
     return { x: offsetX, y: offsetY };
+  }
+
+  /** Get appropriate acknowledgment sound for current selection */
+  private ackSound(isAttack: boolean): SoundName {
+    for (const id of this.selectedIds) {
+      const e = this.entityById.get(id);
+      if (!e?.alive) continue;
+      if (isAttack) return 'attack_ack';
+      if (e.type === UnitType.I_DOG) return 'move_ack_dog';
+      if (e.stats.isInfantry) return 'move_ack_infantry';
+      return 'move_ack_vehicle';
+    }
+    return isAttack ? 'attack_ack' : 'move_ack';
   }
 
   /** Get appropriate selection sound for current selection */
@@ -851,6 +901,7 @@ export class Game {
         this.tick - this.lastBaseAttackEva > GAME_TICKS_PER_SEC * 5) {
       this.lastBaseAttackEva = this.tick;
       this.audio.play('eva_base_attack');
+      this.minimapAlert(s.cx, s.cy);
     }
     if (s.hp <= 0) {
       s.alive = false;
@@ -1039,6 +1090,11 @@ export class Game {
     }
   }
 
+  /** Add a flashing alert on the minimap at a cell position */
+  private minimapAlert(cx: number, cy: number): void {
+    this.renderer.minimapAlerts.push({ cx, cy, tick: Date.now() });
+  }
+
   /** Vehicle crush — heavy vehicles instantly kill infantry they drive over */
   private checkVehicleCrush(vehicle: Entity): void {
     const vc = vehicle.cell;
@@ -1059,6 +1115,8 @@ export class Game {
         else {
           this.lossCount++;
           this.audio.play('eva_unit_lost');
+          const oc = other.cell;
+          this.minimapAlert(oc.cx, oc.cy);
         }
       }
     }
@@ -1359,6 +1417,8 @@ export class Game {
           } else {
             this.lossCount++;
             this.audio.play('eva_unit_lost');
+            const tc = entity.target.cell;
+            this.minimapAlert(tc.cx, tc.cy);
           }
         }
       }
@@ -1784,11 +1844,15 @@ export class Game {
         else if (!isFriendly && other.isPlayerUnit) {
           this.lossCount++;
           this.audio.play('eva_unit_lost');
+          const oc = other.cell;
+          this.minimapAlert(oc.cx, oc.cy);
         }
         // Friendly fire kills still count as losses
         if (isFriendly && attackerIsPlayer) {
           this.lossCount++;
           this.audio.play('eva_unit_lost');
+          const oc = other.cell;
+          this.minimapAlert(oc.cx, oc.cy);
         }
       }
     }
@@ -1908,6 +1972,9 @@ export class Game {
     this.renderer.sellMode = this.sellMode;
     this.renderer.repairMode = this.repairMode;
     this.renderer.repairingStructures = this.repairingStructures;
+    this.renderer.idleCount = this.entities.filter(e =>
+      e.alive && e.isPlayerUnit && e.mission === Mission.GUARD && !e.target
+    ).length;
     this.renderer.render(
       this.camera,
       this.map,
