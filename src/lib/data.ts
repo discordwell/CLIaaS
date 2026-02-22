@@ -9,7 +9,7 @@ export interface Ticket {
   subject: string;
   status: string;
   priority: string;
-  assignee: string | null;
+  assignee?: string | null;
   requester: string;
   tags: string[];
   createdAt: string;

@@ -13,6 +13,7 @@ import { registerExportCommand } from './export.js';
 import { registerPipelineCommand } from './pipeline.js';
 import { registerWatchCommand } from './watch.js';
 import { registerBatchCommand } from './batch.js';
+import { registerDuplicatesCommand } from './duplicates.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -29,4 +30,5 @@ export function registerCommands(program: Command): void {
   registerPipelineCommand(program);
   registerWatchCommand(program);
   registerBatchCommand(program);
+  registerDuplicatesCommand(program);
 }

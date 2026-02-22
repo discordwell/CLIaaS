@@ -51,8 +51,8 @@ export async function GET(request: NextRequest) {
   }
 
   // Pagination
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "50"), 200);
-  const offset = parseInt(searchParams.get("offset") ?? "0");
+  const limit = Math.min(parseInt(searchParams.get("limit") ?? "50") || 50, 200);
+  const offset = parseInt(searchParams.get("offset") ?? "0") || 0;
   const total = tickets.length;
   tickets = tickets.slice(offset, offset + limit);
 

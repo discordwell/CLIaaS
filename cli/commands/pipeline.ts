@@ -114,9 +114,9 @@ export function registerPipelineCommand(program: Command): void {
               const topArticles = kbSuggestions.slice(0, 2);
               const matched = topArticles
                 .map(s => articles.find(a => a.id === s.articleId))
-                .filter(Boolean);
+                .filter((a): a is NonNullable<typeof a> => Boolean(a));
               if (matched.length > 0) {
-                contextText = matched.map(a => `## ${a!.title}\n${a!.body}`).join('\n\n');
+                contextText = matched.map(a => `## ${a.title}\n${a.body}`).join('\n\n');
               }
             }
           }

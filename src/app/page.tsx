@@ -136,6 +136,7 @@ export default function Home() {
             {[
               { path: "/dashboard", note: "live metrics + connector status" },
               { path: "/tickets", note: "browse and filter ticket queue" },
+              { path: "/kb", note: "knowledge base article browser" },
               { path: "/demo", note: "interactive terminal playground" },
               { path: "/settings", note: "credentials + LLM provider config" },
               { path: "/api/health", note: "deploy healthcheck" },
