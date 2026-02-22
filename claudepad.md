@@ -1,13 +1,28 @@
 # Session Summaries
 
+## 2026-02-22T07:00Z — Session 6: Zendesk live integration, Kayako Classic code review fixes
+- Set up Zendesk account: subdomain=discorp, email=cordwell@gmail.com
+- Changed Zendesk language from Japanese to English (US), timezone to Pacific
+- Enabled API token access, generated token, saved to .env
+- Verified Zendesk CLI: `zendesk verify` and `zendesk export` working with real data
+- Exported 1 ticket, 3 users, 1 org, 1 KB article, 21 rules from live Zendesk
+- Applied 13 code review fixes to Kayako Classic connector (3 HIGH, 5 MEDIUM, 5 LOW)
+- Kayako Classic user's domain: classichelp.kayako.com (API key/secret needed from admin panel)
+
+## 2026-02-22T06:00Z — Session 5: Mouse verification, Kayako Classic, commit
+- Verified mouse clicks work in browser: Counterstrike and Aftermath buttons respond correctly
+- Mouse coordinate mapping confirmed via JS debug interceptor (game coords match source code button positions)
+- Fixed pre-existing KN_LCTRL bug in keyboard.cpp (was checking KMOD_SHIFT instead of KMOD_CTRL)
+- Added Kayako Classic connector (HMAC-SHA256 auth, XML parsing, full export pipeline)
+- Code review passed (sub-agent), committed + pushed to GitHub (eb9f216)
+
 ## 2026-02-22T05:25Z — Session 4: Red Alert WASM Easter Egg rendering + mouse fix
 - Fixed black screen: Added `LORES=1` to CMake (gamedata only has LORES.MIX, not HIRES.MIX)
 - Fixed canvas CSS: Replaced `object-fit: contain` with exact aspect-ratio sizing for SDL mouse mapping
 - Fixed mouse coordinates: Added `Window_To_Game_Coords()` in keyboard.cpp to scale to 320x200
 - Removed `SDL_WINDOW_ALLOW_HIGHDPI` flag
 - Cleaned up all 44 `[RA-DBG]` debug printf statements
-- Game renders: title screen, main menu, difficulty dialog, choose side all working
-- Pending: verify mouse clicks with final build, test actual gameplay
+- Game renders: title screen, main menu, credits, all working with mouse input
 
 ## 2026-02-22T04:30Z — Session 3: Real API integration & write operations
 - Fixed Kayako connector based on API research (9 issues):
@@ -59,4 +74,6 @@
 - Kayako triggers use `predicate_collections` not `conditions`
 - Kayako posts have `source` field (AGENT/API/MAIL/etc) not `is_requester`
 - Kayako notes are separate from posts: `/api/v1/cases/:id/notes.json`
-- No credentials configured yet — need user to provide for real testing
+- Zendesk credentials: subdomain=discorp, email=cordwell@gmail.com, token in .env
+- Kayako Classic domain: classichelp.kayako.com (needs API key + secret from admin REST API settings)
+- Kayako Classic API: HMAC-SHA256 auth, XML responses, path-based pagination for tickets, marker-based for users
