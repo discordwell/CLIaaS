@@ -94,6 +94,9 @@ export class Game {
       );
     }
 
+    // If stop() was called during async loading, don't start the loop
+    if (this.state === 'paused') return;
+
     this.state = 'playing';
     this.onStateChange?.('playing');
     this.lastTime = performance.now();

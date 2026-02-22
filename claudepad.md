@@ -1,5 +1,27 @@
 # Session Summaries
 
+## 2026-02-22T21:30Z — Session 10: Phase 3 Polish — Briefings, Progression, Performance
+- Addressed code review findings from Session 9 (committed d797242):
+  - Fixed guard scan range 24x too large (worldDist returns cells, not pixels)
+  - Fixed selection box Y2 typo (dragStartX → dragStartY)
+  - Fixed stop() race condition (set state=paused before clearing timers)
+  - Removed redundant state check in game loop accumulator
+- Built Phase 3 Polish features:
+  - Mission select screen with 4 unlockable ant missions
+  - Mission briefing screen with text, objective, LAUNCH MISSION button
+  - Win/lose overlays with Next Mission / Retry / Replay / Mission Select / Exit
+  - localStorage progress tracking (antmissions_progress key)
+  - Keyboard shortcuts: 1-4 select, Enter launch, Esc back, F10 exit
+  - All-complete celebration screen with trophy
+- Performance optimizations:
+  - Fog of war: track visibleCells array, downgrade only those (O(visible) vs O(16384))
+  - Pathfinding: check existing node before allocating new AStarNode object
+  - Removed dead animFrameId field from Game class
+- Added to scenario.ts: MISSIONS array, MissionInfo type, loadProgress/saveProgress
+- Re-exported mission types from engine/index.ts barrel
+- Committed b2d85e3, pushed to main
+- Note: build broken by pre-existing drizzle-orm import in cli/db/ingest-zendesk.ts (not our code)
+
 ## 2026-02-22T20:00Z — Session 9: Bug Fixes & Visual Fidelity
 - Fixed 3 critical bugs found during browser testing:
   1. RAF throttling: switched game loop to setTimeout (immune to Chrome background tab throttling)
