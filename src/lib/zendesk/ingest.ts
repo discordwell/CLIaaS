@@ -22,6 +22,11 @@ import {
   customFields,
   views,
   slaPolicies,
+  ticketForms,
+  brands,
+  auditEvents,
+  csatRatings,
+  timeEntries,
   rules,
 } from '../../db/schema.js';
 import type {
@@ -37,6 +42,9 @@ import type {
   SLAPolicy,
   TicketForm,
   Brand,
+  AuditEvent,
+  CSATRating,
+  TimeEntry,
 } from './types';
 
 export interface IngestOptions {
@@ -58,6 +66,9 @@ export interface IngestData {
   slaPolicies: SLAPolicy[];
   ticketForms: TicketForm[];
   brands: Brand[];
+  auditEvents: AuditEvent[];
+  csatRatings: CSATRating[];
+  timeEntries: TimeEntry[];
 }
 
 function readJsonl<T>(filePath: string): T[] {
@@ -190,6 +201,9 @@ export async function ingestZendeskExportDir(opts: IngestOptions): Promise<void>
     slaPolicies: readJsonl<SLAPolicy>(join(opts.dir, 'sla_policies.jsonl')),
     ticketForms: readJsonl<TicketForm>(join(opts.dir, 'ticket_forms.jsonl')),
     brands: readJsonl<Brand>(join(opts.dir, 'brands.jsonl')),
+    auditEvents: readJsonl<AuditEvent>(join(opts.dir, 'audit_events.jsonl')),
+    csatRatings: readJsonl<CSATRating>(join(opts.dir, 'csat_ratings.jsonl')),
+    timeEntries: readJsonl<TimeEntry>(join(opts.dir, 'time_entries.jsonl')),
   };
 
   await ingestZendeskData({ tenant: opts.tenant, workspace: opts.workspace, data });
@@ -211,6 +225,9 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
     slaPolicies: slaPoliciesData,
     ticketForms: ticketFormsData,
     brands: brandsData,
+    auditEvents: auditEventsData,
+    csatRatings: csatRatingsData,
+    timeEntries: timeEntriesData,
   } = opts.data;
 
   const agentExternalIds = new Set<string>();
@@ -223,6 +240,8 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
 
   const orgIdByExternal = new Map<string, string>();
   const groupIdByExternal = new Map<string, string>();
+  const brandIdByExternal = new Map<string, string>();
+  const ticketFormIdByExternal = new Map<string, string>();
   const customerIdByExternal = new Map<string, string>();
   const userIdByExternal = new Map<string, string>();
   const ticketIdByCanonical = new Map<string, string>();
@@ -235,14 +254,14 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
     if (existingId) {
       await db
         .update(groups)
-        .set({ name: group.name })
+        .set({ name: group.name, updatedAt: new Date() })
         .where(eq(groups.id, existingId));
       groupIdByExternal.set(group.externalId, existingId);
       continue;
     }
     const [row] = await db
       .insert(groups)
-      .values({ workspaceId, name: group.name, createdAt: new Date() })
+      .values({ workspaceId, name: group.name, createdAt: new Date(), updatedAt: new Date() })
       .returning({ id: groups.id });
     await upsertExternalObject(integrationId, 'group', group.externalId, row.id);
     groupIdByExternal.set(group.externalId, row.id);
@@ -338,6 +357,70 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
     }
   }
 
+  for (const brand of brandsData) {
+    await upsertRawRecord(integrationId, 'brand', brand.externalId, brand);
+    const existingId = await findExternalInternalId(integrationId, 'brand', brand.externalId);
+    if (existingId) {
+      await db
+        .update(brands)
+        .set({
+          name: brand.name,
+          raw: brand.raw ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(brands.id, existingId));
+      brandIdByExternal.set(brand.externalId, existingId);
+      continue;
+    }
+    const [row] = await db
+      .insert(brands)
+      .values({
+        workspaceId,
+        name: brand.name,
+        raw: brand.raw ?? null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning({ id: brands.id });
+    await upsertExternalObject(integrationId, 'brand', brand.externalId, row.id);
+    brandIdByExternal.set(brand.externalId, row.id);
+  }
+
+  for (const form of ticketFormsData) {
+    await upsertRawRecord(integrationId, 'ticket_form', form.externalId, form);
+    const existingId = await findExternalInternalId(integrationId, 'ticket_form', form.externalId);
+    if (existingId) {
+      await db
+        .update(ticketForms)
+        .set({
+          name: form.name,
+          active: form.active ?? true,
+          position: form.position ?? null,
+          fieldIds: form.fieldIds ?? [],
+          raw: form.raw ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(ticketForms.id, existingId));
+      ticketFormIdByExternal.set(form.externalId, existingId);
+      continue;
+    }
+    const [row] = await db
+      .insert(ticketForms)
+      .values({
+        workspaceId,
+        name: form.name,
+        active: form.active ?? true,
+        position: form.position ?? null,
+        fieldIds: form.fieldIds ?? [],
+        raw: form.raw ?? null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning({ id: ticketForms.id });
+    await upsertExternalObject(integrationId, 'ticket_form', form.externalId, row.id);
+    ticketFormIdByExternal.set(form.externalId, row.id);
+  }
+
   for (const field of fieldsData) {
     await upsertRawRecord(integrationId, 'custom_field', field.externalId, field);
     const existingId = await findExternalInternalId(integrationId, 'custom_field', field.externalId);
@@ -377,7 +460,8 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
         .update(views)
         .set({
           name: view.name,
-          query: view.query ?? null,
+          query: view.query ?? {},
+          active: view.active ?? true,
         })
         .where(eq(views.id, existingId));
       continue;
@@ -387,7 +471,8 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
       .values({
         workspaceId,
         name: view.name,
-        query: view.query ?? null,
+        query: view.query ?? {},
+        active: view.active ?? true,
         createdAt: new Date(),
       })
       .returning({ id: views.id });
@@ -423,14 +508,6 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
     await upsertExternalObject(integrationId, 'sla_policy', policy.externalId, row.id);
   }
 
-  for (const form of ticketFormsData) {
-    await upsertRawRecord(integrationId, 'ticket_form', form.externalId, form);
-  }
-
-  for (const brand of brandsData) {
-    await upsertRawRecord(integrationId, 'brand', brand.externalId, brand);
-  }
-
   const existingTags = await db
     .select({ id: tags.id, name: tags.name })
     .from(tags)
@@ -445,6 +522,8 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
     const requesterId = customerIdByExternal.get(ticket.requester);
     const assigneeId = ticket.assignee ? userIdByExternal.get(ticket.assignee) : undefined;
     const groupId = ticket.groupId ? groupIdByExternal.get(ticket.groupId) : undefined;
+    const brandId = ticket.brandId ? brandIdByExternal.get(ticket.brandId) : undefined;
+    const ticketFormId = ticket.ticketFormId ? ticketFormIdByExternal.get(ticket.ticketFormId) : undefined;
 
     if (existingId) {
       await db
@@ -456,6 +535,8 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
           requesterId,
           assigneeId,
           groupId,
+          brandId,
+          ticketFormId,
           customFields: ticket.customFields ?? null,
           updatedAt: new Date(ticket.updatedAt),
         })
@@ -469,6 +550,8 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
           requesterId,
           assigneeId,
           groupId,
+          brandId,
+          ticketFormId,
           subject: ticket.subject,
           status: ticket.status,
           priority: ticket.priority,
@@ -531,6 +614,104 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
         await db.insert(ticketTags).values({ ticketId, tagId }).onConflictDoNothing();
       }
     }
+  }
+
+  for (const audit of auditEventsData) {
+    await upsertRawRecord(integrationId, 'audit_event', audit.externalId, audit);
+    const existingId = await findExternalInternalId(integrationId, 'audit_event', audit.externalId);
+    const ticketInternalId = ticketIdByCanonical.get(audit.ticketId);
+    if (!ticketInternalId) continue;
+    const authorId = audit.authorId ? userIdByExternal.get(audit.authorId) ?? customerIdByExternal.get(audit.authorId) : undefined;
+    if (existingId) {
+      await db
+        .update(auditEvents)
+        .set({
+          actorType: audit.authorId ? 'user' : 'system',
+          actorId: authorId,
+          action: audit.eventType,
+          objectType: 'ticket',
+          objectId: ticketInternalId,
+          createdAt: new Date(audit.createdAt),
+          diff: audit.raw ?? null,
+        })
+        .where(eq(auditEvents.id, existingId));
+      continue;
+    }
+    const [row] = await db
+      .insert(auditEvents)
+      .values({
+        workspaceId,
+        actorType: audit.authorId ? 'user' : 'system',
+        actorId: authorId,
+        action: audit.eventType,
+        objectType: 'ticket',
+        objectId: ticketInternalId,
+        createdAt: new Date(audit.createdAt),
+        diff: audit.raw ?? null,
+      })
+      .returning({ id: auditEvents.id });
+    await upsertExternalObject(integrationId, 'audit_event', audit.externalId, row.id);
+  }
+
+  for (const rating of csatRatingsData) {
+    await upsertRawRecord(integrationId, 'csat_rating', rating.externalId, rating);
+    const existingId = await findExternalInternalId(integrationId, 'csat_rating', rating.externalId);
+    const ticketInternalId = ticketIdByCanonical.get(rating.ticketId);
+    if (!ticketInternalId) continue;
+    if (existingId) {
+      await db
+        .update(csatRatings)
+        .set({
+          ticketId: ticketInternalId,
+          rating: rating.rating,
+          comment: rating.comment ?? null,
+          createdAt: new Date(rating.createdAt),
+        })
+        .where(eq(csatRatings.id, existingId));
+      continue;
+    }
+    const [row] = await db
+      .insert(csatRatings)
+      .values({
+        ticketId: ticketInternalId,
+        rating: rating.rating,
+        comment: rating.comment ?? null,
+        createdAt: new Date(rating.createdAt),
+      })
+      .returning({ id: csatRatings.id });
+    await upsertExternalObject(integrationId, 'csat_rating', rating.externalId, row.id);
+  }
+
+  for (const entry of timeEntriesData) {
+    await upsertRawRecord(integrationId, 'time_entry', entry.externalId, entry);
+    const existingId = await findExternalInternalId(integrationId, 'time_entry', entry.externalId);
+    const ticketInternalId = ticketIdByCanonical.get(entry.ticketId);
+    if (!ticketInternalId) continue;
+    const agentId = entry.agentId ? userIdByExternal.get(entry.agentId) : undefined;
+    if (existingId) {
+      await db
+        .update(timeEntries)
+        .set({
+          ticketId: ticketInternalId,
+          userId: agentId,
+          minutes: entry.minutes,
+          note: entry.note ?? null,
+          createdAt: new Date(entry.createdAt),
+        })
+        .where(eq(timeEntries.id, existingId));
+      continue;
+    }
+    const [row] = await db
+      .insert(timeEntries)
+      .values({
+        ticketId: ticketInternalId,
+        userId: agentId,
+        minutes: entry.minutes,
+        note: entry.note ?? null,
+        createdAt: new Date(entry.createdAt),
+      })
+      .returning({ id: timeEntries.id });
+    await upsertExternalObject(integrationId, 'time_entry', entry.externalId, row.id);
   }
 
   for (const message of messagesData) {

@@ -105,6 +105,38 @@ export interface SLAPolicy {
   schedules?: unknown;
 }
 
+export interface AuditEvent {
+  id: string;
+  externalId: string;
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  ticketId: string;
+  authorId?: string;
+  eventType: string;
+  createdAt: string;
+  raw?: unknown;
+}
+
+export interface CSATRating {
+  id: string;
+  externalId: string;
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  ticketId: string;
+  rating: number;
+  comment?: string;
+  createdAt: string;
+}
+
+export interface TimeEntry {
+  id: string;
+  externalId: string;
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  ticketId: string;
+  agentId?: string;
+  minutes: number;
+  note?: string;
+  createdAt: string;
+}
+
 export interface TicketForm {
   id: string;
   externalId: string;

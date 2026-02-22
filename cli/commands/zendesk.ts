@@ -82,6 +82,15 @@ export function registerZendeskCommands(program: Command): void {
         if (manifest.counts.brands !== undefined) {
           console.log(`  Brands:        ${manifest.counts.brands}`);
         }
+        if (manifest.counts.auditEvents !== undefined) {
+          console.log(`  Audit Events:  ${manifest.counts.auditEvents}`);
+        }
+        if (manifest.counts.csatRatings !== undefined) {
+          console.log(`  CSAT Ratings:  ${manifest.counts.csatRatings}`);
+        }
+        if (manifest.counts.timeEntries !== undefined) {
+          console.log(`  Time Entries:  ${manifest.counts.timeEntries}`);
+        }
       } catch (err) {
         console.error(chalk.red(`Export failed: ${err instanceof Error ? err.message : err}`));
         process.exit(1);

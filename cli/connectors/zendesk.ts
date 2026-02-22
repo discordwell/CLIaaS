@@ -16,6 +16,9 @@ import type {
   SLAPolicy,
   TicketForm,
   Brand,
+  AuditEvent,
+  CSATRating,
+  TimeEntry,
   ExportManifest,
   TicketStatus,
   TicketPriority,
@@ -49,6 +52,8 @@ interface ZendeskTicket {
   priority: string | null;
   assignee_id: number | null;
   group_id?: number | null;
+  brand_id?: number | null;
+  ticket_form_id?: number | null;
   requester_id: number;
   tags: string[];
   created_at: string;
@@ -171,6 +176,32 @@ interface ZendeskSLAPolicy {
   policy_metrics: unknown[];
 }
 
+interface ZendeskAudit {
+  id: number;
+  ticket_id: number;
+  author_id: number | null;
+  created_at: string;
+  events: Array<{ type: string }>;
+}
+
+interface ZendeskCSAT {
+  id: number;
+  score: string | null;
+  comment: string | null;
+  ticket_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ZendeskTimeEntry {
+  id: number;
+  ticket_id: number;
+  user_id: number | null;
+  time_spent: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export async function zendeskFetch<T>(auth: ZendeskAuth, path: string, options?: {
   method?: string;
   body?: unknown;
@@ -244,6 +275,9 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
   const slaPoliciesFile = join(outDir, 'sla_policies.jsonl');
   const formsFile = join(outDir, 'ticket_forms.jsonl');
   const brandsFile = join(outDir, 'brands.jsonl');
+  const auditsFile = join(outDir, 'audit_events.jsonl');
+  const csatFile = join(outDir, 'csat_ratings.jsonl');
+  const timeEntriesFile = join(outDir, 'time_entries.jsonl');
   const customersFile = join(outDir, 'customers.jsonl');
   const orgsFile = join(outDir, 'organizations.jsonl');
   const kbFile = join(outDir, 'kb_articles.jsonl');
@@ -251,7 +285,7 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
 
   // Clear existing files if no cursor state (full export)
   if (!cursorState) {
-    for (const f of [ticketsFile, messagesFile, groupsFile, fieldsFile, viewsFile, slaPoliciesFile, formsFile, brandsFile, customersFile, orgsFile, kbFile, rulesFile]) {
+    for (const f of [ticketsFile, messagesFile, groupsFile, fieldsFile, viewsFile, slaPoliciesFile, formsFile, brandsFile, auditsFile, csatFile, timeEntriesFile, customersFile, orgsFile, kbFile, rulesFile]) {
       writeFileSync(f, '');
     }
   }
@@ -270,6 +304,9 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
     slaPolicies: 0,
     ticketForms: 0,
     brands: 0,
+    auditEvents: 0,
+    csatRatings: 0,
+    timeEntries: 0,
   };
   const newCursorState: Record<string, string> = { ...cursorState };
 
@@ -293,6 +330,8 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
         priority: mapPriority(t.priority),
         assignee: t.assignee_id ? String(t.assignee_id) : undefined,
         groupId: t.group_id ? String(t.group_id) : undefined,
+        brandId: t.brand_id ? String(t.brand_id) : undefined,
+        ticketFormId: t.ticket_form_id ? String(t.ticket_form_id) : undefined,
         requester: String(t.requester_id),
         tags: t.tags,
         createdAt: t.created_at,
@@ -543,6 +582,88 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
   }
   if (counts.brands > 0) brandSpinner.succeed(`${counts.brands} brands exported`);
   else brandSpinner.info('0 brands exported (endpoint may not be available)');
+
+  // Export audit events (ticket audits)
+  const auditSpinner = ora('Exporting ticket audits...').start();
+  try {
+    let auditsUrl: string | null = '/api/v2/ticket_audits.json?page[size]=100';
+    while (auditsUrl) {
+      const data: { audits: ZendeskAudit[]; next_page: string | null } = await zendeskFetch(auth, auditsUrl);
+      for (const audit of data.audits) {
+        const event: AuditEvent = {
+          id: `zd-audit-${audit.id}`,
+          externalId: String(audit.id),
+          source: 'zendesk',
+          ticketId: `zd-${audit.ticket_id}`,
+          authorId: audit.author_id ? String(audit.author_id) : undefined,
+          eventType: audit.events[0]?.type ?? 'audit',
+          createdAt: audit.created_at,
+          raw: audit,
+        };
+        appendJsonl(auditsFile, event);
+        counts.auditEvents++;
+      }
+      auditsUrl = data.next_page;
+    }
+  } catch (err) {
+    auditSpinner.warn(`Ticket audits: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.auditEvents > 0) auditSpinner.succeed(`${counts.auditEvents} audit events exported`);
+  else auditSpinner.info('0 audit events exported (endpoint may not be available)');
+
+  // Export CSAT ratings
+  const csatSpinner = ora('Exporting CSAT ratings...').start();
+  try {
+    let csatUrl: string | null = '/api/v2/satisfaction_ratings.json?page[size]=100';
+    while (csatUrl) {
+      const data: { satisfaction_ratings: ZendeskCSAT[]; next_page: string | null } = await zendeskFetch(auth, csatUrl);
+      for (const rating of data.satisfaction_ratings) {
+        const csat: CSATRating = {
+          id: `zd-csat-${rating.id}`,
+          externalId: String(rating.id),
+          source: 'zendesk',
+          ticketId: `zd-${rating.ticket_id}`,
+          rating: rating.score ? parseInt(rating.score, 10) : 0,
+          comment: rating.comment ?? undefined,
+          createdAt: rating.created_at,
+        };
+        appendJsonl(csatFile, csat);
+        counts.csatRatings++;
+      }
+      csatUrl = data.next_page;
+    }
+  } catch (err) {
+    csatSpinner.warn(`CSAT: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.csatRatings > 0) csatSpinner.succeed(`${counts.csatRatings} CSAT ratings exported`);
+  else csatSpinner.info('0 CSAT ratings exported (endpoint may not be available)');
+
+  // Export time entries
+  const timeSpinner = ora('Exporting time entries...').start();
+  try {
+    let timeUrl: string | null = '/api/v2/time_entries.json?page[size]=100';
+    while (timeUrl) {
+      const data: { time_entries: ZendeskTimeEntry[]; next_page: string | null } = await zendeskFetch(auth, timeUrl);
+      for (const entry of data.time_entries) {
+        const timeEntry: TimeEntry = {
+          id: `zd-time-${entry.id}`,
+          externalId: String(entry.id),
+          source: 'zendesk',
+          ticketId: `zd-${entry.ticket_id}`,
+          agentId: entry.user_id ? String(entry.user_id) : undefined,
+          minutes: Math.round(entry.time_spent / 60),
+          createdAt: entry.created_at,
+        };
+        appendJsonl(timeEntriesFile, timeEntry);
+        counts.timeEntries++;
+      }
+      timeUrl = data.next_page;
+    }
+  } catch (err) {
+    timeSpinner.warn(`Time entries: ${err instanceof Error ? err.message : 'endpoint not available'}`);
+  }
+  if (counts.timeEntries > 0) timeSpinner.succeed(`${counts.timeEntries} time entries exported`);
+  else timeSpinner.info('0 time entries exported (endpoint may not be available)');
 
   // Export KB articles
   const kbSpinner = ora('Exporting KB articles...').start();

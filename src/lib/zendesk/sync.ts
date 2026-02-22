@@ -7,8 +7,10 @@ import type {
   ZendeskUser,
   ZendeskOrganization,
   ZendeskGroup,
+  ZendeskBrand,
+  ZendeskTicketForm,
 } from './api';
-import type { Ticket, Message, Attachment, Customer, Organization, KBArticle, Rule, Group } from './types';
+import type { Ticket, Message, Attachment, Customer, Organization, KBArticle, Rule, Group, Brand, TicketForm } from './types';
 
 export interface ZendeskSyncOptions {
   auth?: ZendeskAuth;
@@ -71,6 +73,24 @@ async function fetchGroup(auth: ZendeskAuth, groupId: number): Promise<ZendeskGr
   }
 }
 
+async function fetchBrand(auth: ZendeskAuth, brandId: number): Promise<ZendeskBrand | null> {
+  try {
+    const data = await zendeskFetch<{ brand: ZendeskBrand }>(auth, `/api/v2/brands/${brandId}.json`);
+    return data.brand;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchTicketForm(auth: ZendeskAuth, formId: number): Promise<ZendeskTicketForm | null> {
+  try {
+    const data = await zendeskFetch<{ ticket_form: ZendeskTicketForm }>(auth, `/api/v2/ticket_forms/${formId}.json`);
+    return data.ticket_form;
+  } catch {
+    return null;
+  }
+}
+
 export async function syncZendeskTicketById(options: ZendeskSyncOptions): Promise<void> {
   const auth = options.auth ?? getAuthFromEnv();
   const ticket = await fetchTicket(auth, options.ticketId);
@@ -85,6 +105,8 @@ export async function syncZendeskTicketById(options: ZendeskSyncOptions): Promis
     priority: mapPriority(ticket.priority),
     assignee: ticket.assignee_id ? String(ticket.assignee_id) : undefined,
     groupId: ticket.group_id ? String(ticket.group_id) : undefined,
+    brandId: ticket.brand_id ? String(ticket.brand_id) : undefined,
+    ticketFormId: ticket.ticket_form_id ? String(ticket.ticket_form_id) : undefined,
     requester: String(ticket.requester_id),
     tags: ticket.tags ?? [],
     createdAt: ticket.created_at,
@@ -160,6 +182,37 @@ export async function syncZendeskTicketById(options: ZendeskSyncOptions): Promis
     }
   }
 
+  const canonicalBrands: Brand[] = [];
+  if (ticket.brand_id) {
+    const brand = await fetchBrand(auth, ticket.brand_id);
+    if (brand) {
+      canonicalBrands.push({
+        id: `zd-brand-${brand.id}`,
+        externalId: String(brand.id),
+        source: 'zendesk',
+        name: brand.name,
+        raw: brand,
+      });
+    }
+  }
+
+  const canonicalForms: TicketForm[] = [];
+  if (ticket.ticket_form_id) {
+    const form = await fetchTicketForm(auth, ticket.ticket_form_id);
+    if (form) {
+      canonicalForms.push({
+        id: `zd-form-${form.id}`,
+        externalId: String(form.id),
+        source: 'zendesk',
+        name: form.name,
+        active: form.active,
+        position: form.position,
+        fieldIds: form.ticket_field_ids,
+        raw: form,
+      });
+    }
+  }
+
   const canonicalCustomers: Customer[] = users.map(user => ({
     id: `zd-user-${user.id}`,
     externalId: String(user.id),
@@ -179,8 +232,8 @@ export async function syncZendeskTicketById(options: ZendeskSyncOptions): Promis
     customFields: [],
     views: [],
     slaPolicies: [],
-    ticketForms: [],
-    brands: [],
+    ticketForms: canonicalForms,
+    brands: canonicalBrands,
     kbArticles: [] as KBArticle[],
     rules: [] as Rule[],
   };

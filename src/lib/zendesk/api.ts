@@ -11,6 +11,8 @@ export interface ZendeskTicket {
   priority: string | null;
   assignee_id: number | null;
   group_id?: number | null;
+  brand_id?: number | null;
+  ticket_form_id?: number | null;
   requester_id: number;
   tags: string[];
   created_at: string;
@@ -53,6 +55,20 @@ export interface ZendeskOrganization {
 export interface ZendeskGroup {
   id: number;
   name: string;
+}
+
+export interface ZendeskTicketForm {
+  id: number;
+  name: string;
+  active: boolean;
+  position?: number;
+  ticket_field_ids?: number[];
+}
+
+export interface ZendeskBrand {
+  id: number;
+  name: string;
+  subdomain?: string;
 }
 
 export async function zendeskFetch<T>(auth: ZendeskAuth, path: string, options?: {

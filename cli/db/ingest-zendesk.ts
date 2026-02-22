@@ -42,6 +42,9 @@ export async function ingestZendeskToDb(opts: IngestOptions): Promise<void> {
   const slaPoliciesData = readJsonl<unknown>(join(opts.dir, 'sla_policies.jsonl'));
   const formsData = readJsonl<unknown>(join(opts.dir, 'ticket_forms.jsonl'));
   const brandsData = readJsonl<unknown>(join(opts.dir, 'brands.jsonl'));
+  const auditEventsData = readJsonl<unknown>(join(opts.dir, 'audit_events.jsonl'));
+  const csatRatingsData = readJsonl<unknown>(join(opts.dir, 'csat_ratings.jsonl'));
+  const timeEntriesData = readJsonl<unknown>(join(opts.dir, 'time_entries.jsonl'));
   const kbData = readJsonl<KBArticle>(join(opts.dir, 'kb_articles.jsonl'));
   const rulesData = readJsonl<Rule>(join(opts.dir, 'rules.jsonl'));
   const attachmentsCount = messagesData.reduce((sum, msg) => sum + (msg.attachments?.length ?? 0), 0);
@@ -62,6 +65,9 @@ export async function ingestZendeskToDb(opts: IngestOptions): Promise<void> {
   console.log(chalk.gray(`  Forms:     ${formsData.length}`));
   console.log(chalk.gray(`  Brands:    ${brandsData.length}`));
   console.log(chalk.gray(`  Attach:    ${attachmentsCount}`));
+  console.log(chalk.gray(`  Audits:    ${auditEventsData.length}`));
+  console.log(chalk.gray(`  CSAT:      ${csatRatingsData.length}`));
+  console.log(chalk.gray(`  Time:      ${timeEntriesData.length}`));
   console.log(chalk.gray(`  KB:        ${kbData.length}`));
   console.log(chalk.gray(`  Rules:     ${rulesData.length}`));
 }
