@@ -1,29 +1,41 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Game, type GameState } from './engine';
+import {
+  Game, type GameState, type MissionInfo,
+  MISSIONS, getMissionIndex, loadProgress, saveProgress,
+} from './engine';
 
 interface AntGameProps {
   onExit: () => void;
 }
 
+type Screen = 'select' | 'briefing' | 'loading' | 'playing';
+
 export default function AntGame({ onExit }: AntGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<Game | null>(null);
-  const [showIntro, setShowIntro] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [loadProgress, setLoadProgress] = useState(0);
+  const [screen, setScreen] = useState<Screen>('select');
+  const [loadProgress_, setLoadProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [gameState, setGameState] = useState<GameState>('loading');
-  const gameStarted = useRef(false);
+  const [unlockedMissions, setUnlockedMissions] = useState(loadProgress);
+  const [selectedMission, setSelectedMission] = useState<MissionInfo | null>(null);
+  const [missionIndex, setMissionIndex] = useState(0);
 
-  const startGame = useCallback(async () => {
-    if (gameStarted.current || !canvasRef.current) return;
-    gameStarted.current = true;
-    setShowIntro(false);
-    setLoading(true);
+  const launchMission = useCallback(async (mission: MissionInfo) => {
+    if (!canvasRef.current) return;
+    setScreen('loading');
     setStatus('Loading assets...');
+    setLoadProgress(0);
+    setGameState('loading');
+
+    // Stop previous game if running
+    if (gameRef.current) {
+      gameRef.current.stop();
+      gameRef.current = null;
+    }
 
     const canvas = canvasRef.current;
     const game = new Game(canvas);
@@ -37,18 +49,47 @@ export default function AntGame({ onExit }: AntGameProps) {
     game.onStateChange = (state) => {
       setGameState(state);
       if (state === 'playing') {
-        setLoading(false);
+        setScreen('playing');
         setStatus('');
+      }
+      if (state === 'won') {
+        const idx = getMissionIndex(mission.id);
+        if (idx >= 0) saveProgress(idx);
+        setUnlockedMissions(loadProgress());
       }
     };
 
     try {
-      await game.start('SCA01EA');
+      await game.start(mission.id);
     } catch (e) {
-      setError(`Failed to load game: ${e instanceof Error ? e.message : String(e)}`);
-      setLoading(false);
+      setError(`Failed to load mission: ${e instanceof Error ? e.message : String(e)}`);
+      setScreen('select');
     }
   }, []);
+
+  const selectMission = useCallback((index: number) => {
+    const mission = MISSIONS[index];
+    if (!mission) return;
+    setMissionIndex(index);
+    setSelectedMission(mission);
+    setScreen('briefing');
+  }, []);
+
+  const handleNextMission = useCallback(() => {
+    const nextIdx = missionIndex + 1;
+    if (nextIdx < MISSIONS.length) {
+      selectMission(nextIdx);
+    } else {
+      // All missions complete — back to select
+      setScreen('select');
+    }
+  }, [missionIndex, selectMission]);
+
+  const handleRetry = useCallback(() => {
+    if (selectedMission) {
+      launchMission(selectedMission);
+    }
+  }, [selectedMission, launchMission]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -60,34 +101,29 @@ export default function AntGame({ onExit }: AntGameProps) {
     };
   }, []);
 
-  // Handle intro keypress
+  // Keyboard shortcuts
   useEffect(() => {
-    if (!showIntro) return;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (e.key === 'Escape' || e.key === 'F10') {
         e.preventDefault();
-        startGame();
+        if (screen === 'briefing') {
+          setScreen('select');
+        } else {
+          onExit();
+        }
       }
-      if (e.key === 'Escape') {
-        onExit();
+      if (screen === 'select' && e.key >= '1' && e.key <= '4') {
+        const idx = parseInt(e.key) - 1;
+        if (idx <= unlockedMissions) selectMission(idx);
+      }
+      if (screen === 'briefing' && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        if (selectedMission) launchMission(selectedMission);
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [showIntro, startGame, onExit]);
-
-  // Handle F10 to exit during gameplay
-  useEffect(() => {
-    if (showIntro) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'F10') {
-        e.preventDefault();
-        onExit();
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [showIntro, onExit]);
+  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, onExit]);
 
   // Handle canvas resize
   useEffect(() => {
@@ -100,6 +136,8 @@ export default function AntGame({ onExit }: AntGameProps) {
     return () => observer.disconnect();
   }, []);
 
+  const allComplete = unlockedMissions >= MISSIONS.length;
+
   return (
     <div style={{
       position: 'fixed',
@@ -111,8 +149,8 @@ export default function AntGame({ onExit }: AntGameProps) {
       background: '#000',
       overflow: 'hidden',
     }}>
-      {/* Intro Screen */}
-      {showIntro && (
+      {/* ── Mission Select Screen ── */}
+      {screen === 'select' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -126,84 +164,139 @@ export default function AntGame({ onExit }: AntGameProps) {
           background: 'radial-gradient(ellipse at center, #1a0a00 0%, #000000 70%)',
           zIndex: 100000,
           fontFamily: 'monospace',
-          cursor: 'pointer',
-        }}
-        onClick={startGame}
-        >
+        }}>
           <div style={{
-            fontSize: '100px',
-            marginBottom: '20px',
+            fontSize: '80px',
+            marginBottom: '10px',
             filter: 'drop-shadow(0 0 20px #ff4400) drop-shadow(0 0 40px #cc2200)',
             animation: 'pulse 2s ease-in-out infinite',
           }}>
-            🐜
+            {allComplete ? '\u{1F3C6}' : '\u{1F41C}'}
           </div>
 
           <h1 style={{
             color: '#ff4400',
-            fontSize: '42px',
+            fontSize: '36px',
             fontWeight: 'bold',
             textShadow: '0 0 20px #ff4400, 0 0 40px #cc2200',
-            letterSpacing: '4px',
-            marginBottom: '8px',
+            letterSpacing: '3px',
+            marginBottom: '4px',
             textAlign: 'center',
           }}>
             IT CAME FROM RED ALERT!
           </h1>
           <h2 style={{
             color: '#cc3300',
-            fontSize: '24px',
+            fontSize: '16px',
             fontWeight: 'bold',
-            letterSpacing: '6px',
-            marginBottom: '8px',
+            letterSpacing: '4px',
+            marginBottom: '30px',
             textTransform: 'uppercase',
           }}>
             The Giant Ant Missions
           </h2>
-          <h3 style={{
-            color: '#ffaa44',
-            fontSize: '16px',
-            fontWeight: 'normal',
-            letterSpacing: '4px',
-            marginBottom: '40px',
-            textTransform: 'uppercase',
-          }}>
-            TypeScript Engine Reimplementation
-          </h3>
 
-          <div style={{
-            color: '#888',
-            fontSize: '13px',
-            lineHeight: '2',
-            textAlign: 'center',
-            maxWidth: '600px',
-            marginBottom: '40px',
-          }}>
-            <p style={{ color: '#cccccc', fontSize: '15px', marginBottom: '16px' }}>
-              The classic giant ant missions from Command &amp; Conquer: Red Alert,
-              rebuilt from scratch as a pure TypeScript/Canvas 2D game.
-            </p>
-            <p style={{ color: '#aaaaaa', marginBottom: '8px' }}>
-              Select units with left click, right click to move/attack.
-            </p>
-            <p style={{ color: '#888888', fontSize: '11px' }}>
-              Press <strong style={{ color: '#44aaff' }}>F10</strong> at any time to return to CLIaaS.
-            </p>
+          {/* Mission List */}
+          <div style={{ width: '100%', maxWidth: '500px' }}>
+            {MISSIONS.map((m, i) => {
+              const unlocked = i <= unlockedMissions;
+              const completed = i < unlockedMissions;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => unlocked && selectMission(i)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    width: '100%',
+                    padding: '12px 16px',
+                    marginBottom: '8px',
+                    background: unlocked ? 'rgba(255,68,0,0.08)' : 'rgba(40,40,40,0.3)',
+                    border: `1px solid ${unlocked ? '#553300' : '#222'}`,
+                    color: unlocked ? '#eee' : '#555',
+                    fontFamily: 'monospace',
+                    fontSize: '14px',
+                    cursor: unlocked ? 'pointer' : 'not-allowed',
+                    textAlign: 'left',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (unlocked) (e.target as HTMLElement).style.background = 'rgba(255,68,0,0.18)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (unlocked) (e.target as HTMLElement).style.background = 'rgba(255,68,0,0.08)';
+                  }}
+                >
+                  <span style={{
+                    fontSize: '18px',
+                    color: completed ? '#44ff44' : unlocked ? '#ff4400' : '#444',
+                    minWidth: '24px',
+                    textAlign: 'center',
+                  }}>
+                    {completed ? '\u2713' : unlocked ? `${i + 1}` : '\u{1F512}'}
+                  </span>
+                  <div>
+                    <div style={{
+                      fontWeight: 'bold',
+                      color: unlocked ? '#ff6633' : '#555',
+                    }}>
+                      Mission {i + 1}: {m.title}
+                    </div>
+                    <div style={{
+                      fontSize: '11px',
+                      color: unlocked ? '#888' : '#444',
+                      marginTop: '2px',
+                    }}>
+                      {unlocked ? m.objective : 'Complete previous mission to unlock'}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
+          {allComplete && (
+            <div style={{
+              color: '#44ff44',
+              fontSize: '14px',
+              marginTop: '16px',
+              textShadow: '0 0 10px #44ff44',
+            }}>
+              All missions completed! Select any mission to replay.
+            </div>
+          )}
+
           <div style={{
-            color: '#ff4400',
-            fontSize: '18px',
-            animation: 'blink 1.2s step-end infinite',
+            display: 'flex',
+            gap: '20px',
+            marginTop: '24px',
+            alignItems: 'center',
           }}>
-            PRESS ENTER OR CLICK TO LAUNCH
+            <button
+              onClick={onExit}
+              style={{
+                background: '#222',
+                color: '#888',
+                border: '1px solid #444',
+                padding: '8px 24px',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              Return to CLIaaS
+            </button>
+            <span style={{ color: '#444', fontSize: '11px' }}>
+              Press 1-4 to select | F10 to exit
+            </span>
           </div>
 
           <div style={{
             position: 'absolute',
-            bottom: '20px',
-            color: '#444',
-            fontSize: '11px',
+            bottom: '16px',
+            color: '#333',
+            fontSize: '10px',
             textAlign: 'center',
           }}>
             A CLIaaS Easter Egg | Based on C&amp;C Red Alert Counterstrike
@@ -212,18 +305,153 @@ export default function AntGame({ onExit }: AntGameProps) {
           <style>{`
             @keyframes pulse {
               0%, 100% { transform: scale(1); }
-              50% { transform: scale(1.08); }
-            }
-            @keyframes blink {
-              0%, 100% { opacity: 1; }
-              50% { opacity: 0; }
+              50% { transform: scale(1.06); }
             }
           `}</style>
         </div>
       )}
 
-      {/* Loading Overlay */}
-      {loading && !showIntro && (
+      {/* ── Mission Briefing Screen ── */}
+      {screen === 'briefing' && selectedMission && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'radial-gradient(ellipse at center, #0a0a00 0%, #000000 70%)',
+            zIndex: 100000,
+            fontFamily: 'monospace',
+            cursor: 'pointer',
+          }}
+          onClick={() => launchMission(selectedMission)}
+        >
+          <div style={{
+            color: '#ff4400',
+            fontSize: '12px',
+            letterSpacing: '6px',
+            textTransform: 'uppercase',
+            marginBottom: '8px',
+          }}>
+            Mission Briefing
+          </div>
+
+          <h1 style={{
+            color: '#ff6633',
+            fontSize: '32px',
+            fontWeight: 'bold',
+            textShadow: '0 0 15px rgba(255,68,0,0.5)',
+            letterSpacing: '2px',
+            marginBottom: '6px',
+          }}>
+            {selectedMission.title}
+          </h1>
+
+          <div style={{
+            color: '#cc3300',
+            fontSize: '13px',
+            letterSpacing: '2px',
+            marginBottom: '30px',
+          }}>
+            Mission {missionIndex + 1} of {MISSIONS.length}
+          </div>
+
+          <div style={{
+            maxWidth: '550px',
+            padding: '24px 28px',
+            background: 'rgba(40,25,10,0.4)',
+            border: '1px solid #442200',
+            marginBottom: '24px',
+          }}>
+            <div style={{
+              color: '#ccaa88',
+              fontSize: '14px',
+              lineHeight: '1.8',
+              marginBottom: '16px',
+            }}>
+              {selectedMission.briefing}
+            </div>
+            <div style={{
+              borderTop: '1px solid #332211',
+              paddingTop: '12px',
+            }}>
+              <span style={{ color: '#886633', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
+                Objective:
+              </span>
+              <span style={{ color: '#ffaa44', fontSize: '13px', marginLeft: '8px' }}>
+                {selectedMission.objective}
+              </span>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            gap: '16px',
+            alignItems: 'center',
+          }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setScreen('select');
+              }}
+              style={{
+                background: '#222',
+                color: '#888',
+                border: '1px solid #444',
+                padding: '10px 20px',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              Back
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                launchMission(selectedMission);
+              }}
+              style={{
+                background: '#441100',
+                color: '#ff6633',
+                border: '1px solid #663300',
+                padding: '10px 32px',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '2px',
+                animation: 'glow 2s ease-in-out infinite',
+              }}
+            >
+              LAUNCH MISSION
+            </button>
+          </div>
+
+          <div style={{
+            color: '#555',
+            fontSize: '11px',
+            marginTop: '16px',
+          }}>
+            Press ENTER to launch | ESC to go back
+          </div>
+
+          <style>{`
+            @keyframes glow {
+              0%, 100% { box-shadow: 0 0 8px rgba(255,68,0,0.3); }
+              50% { box-shadow: 0 0 20px rgba(255,68,0,0.6); }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* ── Loading Overlay ── */}
+      {screen === 'loading' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -249,20 +477,20 @@ export default function AntGame({ onExit }: AntGameProps) {
             overflow: 'hidden',
           }}>
             <div style={{
-              width: `${loadProgress}%`,
+              width: `${loadProgress_}%`,
               height: '100%',
               background: 'linear-gradient(90deg, #cc2200, #ff4400)',
               transition: 'width 0.3s ease',
             }} />
           </div>
           <div style={{ color: '#666', fontSize: '12px', marginTop: '8px' }}>
-            {loadProgress}%
+            {loadProgress_}%
           </div>
         </div>
       )}
 
-      {/* Win/Lose Overlay */}
-      {(gameState === 'won' || gameState === 'lost') && (
+      {/* ── Win/Lose Overlay ── */}
+      {(gameState === 'won' || gameState === 'lost') && screen === 'playing' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -281,30 +509,89 @@ export default function AntGame({ onExit }: AntGameProps) {
             color: gameState === 'won' ? '#44ff44' : '#ff4444',
             fontSize: '48px',
             fontWeight: 'bold',
-            marginBottom: '20px',
+            marginBottom: '12px',
             textShadow: `0 0 20px ${gameState === 'won' ? '#44ff44' : '#ff4444'}`,
           }}>
             {gameState === 'won' ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED'}
           </div>
-          <button
-            onClick={onExit}
-            style={{
-              background: '#333',
-              color: '#fff',
-              border: '1px solid #666',
-              padding: '10px 30px',
-              fontFamily: 'monospace',
-              fontSize: '14px',
-              cursor: 'pointer',
-              marginTop: '20px',
-            }}
-          >
-            Return to CLIaaS
-          </button>
+
+          {gameState === 'won' && missionIndex + 1 >= MISSIONS.length && (
+            <div style={{
+              color: '#ffaa44',
+              fontSize: '16px',
+              marginBottom: '20px',
+              textShadow: '0 0 10px #ffaa44',
+            }}>
+              All ant missions complete! The threat has been neutralized.
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
+            {gameState === 'won' && missionIndex + 1 < MISSIONS.length && (
+              <button
+                onClick={handleNextMission}
+                style={{
+                  background: '#224400',
+                  color: '#44ff44',
+                  border: '1px solid #336600',
+                  padding: '10px 30px',
+                  fontFamily: 'monospace',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  letterSpacing: '1px',
+                }}
+              >
+                Next Mission
+              </button>
+            )}
+            <button
+              onClick={handleRetry}
+              style={{
+                background: '#333',
+                color: '#fff',
+                border: '1px solid #666',
+                padding: '10px 24px',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                cursor: 'pointer',
+              }}
+            >
+              {gameState === 'lost' ? 'Retry' : 'Replay'}
+            </button>
+            <button
+              onClick={() => setScreen('select')}
+              style={{
+                background: '#222',
+                color: '#aaa',
+                border: '1px solid #444',
+                padding: '10px 24px',
+                fontFamily: 'monospace',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Mission Select
+            </button>
+            <button
+              onClick={onExit}
+              style={{
+                background: '#222',
+                color: '#888',
+                border: '1px solid #444',
+                padding: '10px 24px',
+                fontFamily: 'monospace',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Exit
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Error Overlay */}
+      {/* ── Error Overlay ── */}
       {error && (
         <div style={{
           position: 'absolute',
@@ -327,7 +614,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             {error}
           </div>
           <button
-            onClick={onExit}
+            onClick={() => { setError(null); setScreen('select'); }}
             style={{
               background: '#333',
               color: '#fff',
@@ -338,14 +625,14 @@ export default function AntGame({ onExit }: AntGameProps) {
               cursor: 'pointer',
             }}
           >
-            Return to CLIaaS
+            Back to Mission Select
           </button>
         </div>
       )}
 
-      {/* Game Canvas */}
+      {/* ── Game Canvas ── */}
       <div style={{
-        display: showIntro ? 'none' : 'flex',
+        display: screen === 'playing' || screen === 'loading' ? 'flex' : 'none',
         justifyContent: 'center',
         alignItems: 'center',
         width: '100vw',

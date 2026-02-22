@@ -109,7 +109,15 @@ export function findPath(
       const g = current.g + moveCost;
 
       const existing = openMap.get(nk);
-      if (existing && g >= existing.g) continue;
+      if (existing) {
+        // Only update if we found a better path
+        if (g < existing.g) {
+          existing.g = g;
+          existing.f = g + existing.h;
+          existing.parent = current;
+        }
+        continue;
+      }
 
       const node: AStarNode = {
         cx: nx, cy: ny,
@@ -119,17 +127,8 @@ export function findPath(
         parent: current,
       };
       node.f = node.g + node.h;
-
-      if (existing) {
-        // Update existing node
-        existing.g = g;
-        existing.h = node.h;
-        existing.f = node.f;
-        existing.parent = current;
-      } else {
-        open.push(node);
-        openMap.set(nk, node);
-      }
+      open.push(node);
+      openMap.set(nk, node);
     }
   }
 
