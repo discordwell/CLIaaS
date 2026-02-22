@@ -79,6 +79,7 @@ export class Renderer {
   repairingStructures = new Set<number>(); // indices of structures being repaired
   corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; alpha: number }> = [];
   showHelp = false;     // F1 help overlay
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal';
   idleCount = 0;        // number of idle player units
   minimapAlerts: Array<{ cx: number; cy: number; tick: number }> = [];
   // Sidebar data (set by game each frame)
@@ -104,6 +105,7 @@ export class Renderer {
   placementCx = 0;
   placementCy = 0;
   placementValid = false;
+  placementCells: boolean[] | null = null; // per-cell passability for placement preview
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -1499,15 +1501,19 @@ export class Renderer {
       }
     }
 
-    // Structure dots
+    // Structure outlines (using actual footprint sizes)
     for (const s of structures) {
       if (!s.alive) continue;
       const vis = map.getVisibility(s.cx, s.cy);
       if (vis === 0) continue;
       const isPlayer = s.house === 'Spain' || s.house === 'Greece';
-      ctx.fillStyle = isPlayer ? '#fff' : this.palColor(PAL_RED_HP);
-      const sSize = Math.max(scale * 2, 3);
-      ctx.fillRect(mmX + (s.cx - ox) * scale, mmY + (s.cy - oy) * scale, sSize, sSize);
+      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      const sx = mmX + (s.cx - ox) * scale;
+      const sy = mmY + (s.cy - oy) * scale;
+      const sw = Math.max(fw * scale, 2);
+      const sh = Math.max(fh * scale, 2);
+      ctx.fillStyle = isPlayer ? 'rgba(255,255,255,0.8)' : 'rgba(200,60,60,0.8)';
+      ctx.fillRect(sx, sy, sw, sh);
     }
 
     // Unit dots
@@ -1575,9 +1581,30 @@ export class Renderer {
 
   private renderModeLabel(input: InputState, label: string, color: string): void {
     const ctx = this.ctx;
-    ctx.font = 'bold 10px monospace';
-    ctx.fillStyle = color;
-    ctx.fillText(label, input.mouseX + 12, input.mouseY - 4);
+    const mx = input.mouseX;
+    const my = input.mouseY;
+    // Draw icon near cursor
+    if (label === 'SELL') {
+      // Dollar sign icon
+      ctx.font = 'bold 14px monospace';
+      ctx.fillStyle = 'rgba(255,200,60,0.9)';
+      ctx.fillText('$', mx + 10, my + 4);
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = 'rgba(255,200,60,0.6)';
+      ctx.fillText('SELL', mx + 10, my + 14);
+    } else if (label === 'REPAIR') {
+      // Wrench icon (unicode)
+      ctx.font = '12px monospace';
+      ctx.fillStyle = 'rgba(80,255,80,0.9)';
+      ctx.fillText('\u{1F527}', mx + 8, my + 4);
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = 'rgba(80,255,80,0.6)';
+      ctx.fillText('FIX', mx + 10, my + 14);
+    } else {
+      ctx.font = 'bold 10px monospace';
+      ctx.fillStyle = color;
+      ctx.fillText(label, mx + 12, my - 4);
+    }
   }
 
   // ─── EVA Messages & Mission Timer ──────────────────────
@@ -1648,48 +1675,88 @@ export class Renderer {
 
   private renderHelpOverlay(): void {
     const ctx = this.ctx;
-    const w = 240;
-    const lines = [
-      'KEYBOARD SHORTCUTS',
-      '',
-      'S / G     Stop / Guard',
-      'A         Attack-move',
-      'Z         Cycle stance',
-      'X         Scatter units',
-      'Q         Sell building',
-      'R         Repair building',
-      'Ctrl+RMB  Force-fire ground',
-      'Shift+RMB Queue waypoint',
-      'Home/Space Center on units',
-      '1-9       Select group',
-      'Ctrl+1-9  Assign group',
-      '.         Cycle idle units',
-      'Tab       Cycle unit types',
-      'E         Select all same type',
-      'D         Deploy MCV',
-      'Esc       Cancel mode',
-      'P         Pause',
-      'F1        Toggle this help',
+    const w = 280;
+    const sections: Array<{ title: string; lines: string[] }> = [
+      { title: 'UNIT COMMANDS', lines: [
+        'S / G     Stop / Guard',
+        'A         Attack-move mode',
+        'Z         Cycle stance (Agg/Def/Hold)',
+        'X         Scatter units',
+        'Ctrl+RMB  Force-fire ground',
+        'Shift+RMB Queue waypoints',
+        'D         Deploy MCV',
+      ]},
+      { title: 'SELECTION', lines: [
+        'LMB       Click select / drag box',
+        'DblClick   Select all of type',
+        'E         Select all same type',
+        '1-9       Recall control group',
+        'Ctrl+1-9  Assign control group',
+        'Tab       Cycle unit types',
+        '.         Cycle idle units',
+      ]},
+      { title: 'BUILDINGS', lines: [
+        'Q         Sell mode',
+        'R         Repair mode',
+        'RMB build Set rally point',
+      ]},
+      { title: 'CAMERA', lines: [
+        'Home/Spc  Center on selection',
+        'Arrow/WASD Scroll map',
+        'Minimap    Click to move camera',
+      ]},
+      { title: 'SYSTEM', lines: [
+        'Esc       Cancel / Pause',
+        'F1        Toggle this help',
+        `Difficulty: ${this.difficulty.toUpperCase()}`,
+      ]},
     ];
-    const lineH = 13;
-    const h = lines.length * lineH + 16;
+
+    const lineH = 12;
+    const sectionGap = 6;
+    let totalLines = 0;
+    for (const s of sections) totalLines += 1 + s.lines.length; // title + lines
+    const h = totalLines * lineH + sections.length * sectionGap + 20;
     const px = (this.width - w) / 2;
     const py = (this.height - h) / 2;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillStyle = 'rgba(0,0,0,0.88)';
     ctx.fillRect(px, py, w, h);
-    ctx.strokeStyle = '#666';
+    ctx.strokeStyle = '#664400';
     ctx.lineWidth = 1;
     ctx.strokeRect(px, py, w, h);
-
-    ctx.font = '10px monospace';
+    // Title bar
+    ctx.fillStyle = 'rgba(255,68,0,0.15)';
+    ctx.fillRect(px + 1, py + 1, w - 2, 16);
+    ctx.font = 'bold 10px monospace';
+    ctx.fillStyle = '#ff6633';
+    ctx.textAlign = 'center';
+    ctx.fillText('COMMAND REFERENCE', px + w / 2, py + 12);
     ctx.textAlign = 'left';
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      ctx.fillStyle = i === 0 ? '#fff' : '#ccc';
-      if (i === 0) ctx.font = 'bold 10px monospace';
-      else ctx.font = '10px monospace';
-      ctx.fillText(line, px + 10, py + 14 + i * lineH);
+
+    let curY = py + 22;
+    for (const section of sections) {
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = '#ffaa44';
+      ctx.fillText(section.title, px + 8, curY);
+      curY += lineH;
+      ctx.font = '9px monospace';
+      ctx.fillStyle = '#bbb';
+      for (const line of section.lines) {
+        // Highlight key portion (before first space gap)
+        const split = line.indexOf('  ');
+        if (split > 0) {
+          ctx.fillStyle = '#ddd';
+          ctx.fillText(line.slice(0, split), px + 12, curY);
+          ctx.fillStyle = '#999';
+          ctx.fillText(line.slice(split), px + 12 + ctx.measureText(line.slice(0, split)).width, curY);
+        } else {
+          ctx.fillStyle = '#999';
+          ctx.fillText(line, px + 12, curY);
+        }
+        curY += lineH;
+      }
+      curY += sectionGap;
     }
   }
 
@@ -1841,18 +1908,33 @@ export class Renderer {
     );
     const [fw, fh] = STRUCTURE_SIZE[this.placementItem.type] ?? [2, 2];
 
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = this.placementValid ? 'rgba(80,255,80,0.5)' : 'rgba(255,80,80,0.5)';
-    ctx.fillRect(screen.x, screen.y, fw * CELL_SIZE, fh * CELL_SIZE);
+    // Per-cell passability coloring
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        const cellPassable = this.placementCells?.[dy * fw + dx] ?? this.placementValid;
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = cellPassable ? 'rgba(80,255,80,0.5)' : 'rgba(255,80,80,0.5)';
+        ctx.fillRect(screen.x + dx * CELL_SIZE, screen.y + dy * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = cellPassable ? 'rgba(80,255,80,0.3)' : 'rgba(255,80,80,0.3)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(screen.x + dx * CELL_SIZE, screen.y + dy * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+      }
+    }
+
     ctx.globalAlpha = 1;
     ctx.strokeStyle = this.placementValid ? '#8f8' : '#f88';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.5;
     ctx.strokeRect(screen.x, screen.y, fw * CELL_SIZE, fh * CELL_SIZE);
+
     // Label
     ctx.font = '8px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
     ctx.fillText(this.placementItem.name, screen.x + fw * CELL_SIZE / 2, screen.y - 3);
+    // Cost label
+    ctx.fillStyle = this.placementValid ? '#8f8' : '#f88';
+    ctx.fillText(this.placementValid ? 'Click to place' : 'Cannot place here', screen.x + fw * CELL_SIZE / 2, screen.y + fh * CELL_SIZE + 10);
     ctx.textAlign = 'left';
   }
 
@@ -1866,6 +1948,7 @@ export class Renderer {
     structsBuilt = 0,
     structsLost = 0,
     creditsRemaining = 0,
+    survivors: Array<{ type: string; name: string; hp: number; maxHp: number; vet: number }> = [],
   ): void {
     const ctx = this.ctx;
     const w = this.width;
@@ -1877,7 +1960,8 @@ export class Renderer {
 
     // Score panel border
     const panelW = 280;
-    const panelH = 220;
+    const survivorRows = won && survivors.length > 0 ? Math.ceil(new Set(survivors.map(s => s.type)).size / 3) + 2 : 0;
+    const panelH = 220 + survivorRows * 12;
     const px = (w - panelW) / 2;
     const py = (h - panelH) / 2 - 20;
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -1938,10 +2022,43 @@ export class Renderer {
     ctx.font = 'bold 13px monospace';
     drawRow('SCORE', String(Math.max(0, score)), '#FFD700');
 
+    // Survivors roster (victory only)
+    if (won && survivors.length > 0) {
+      row += 6;
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#8cf';
+      ctx.fillText('SURVIVING FORCES', w / 2, row);
+      row += 12;
+      // Group by type
+      const typeCounts = new Map<string, { count: number; name: string; vets: number }>();
+      for (const s of survivors) {
+        const entry = typeCounts.get(s.type) ?? { count: 0, name: s.name, vets: 0 };
+        entry.count++;
+        if (s.vet > 0) entry.vets++;
+        typeCounts.set(s.type, entry);
+      }
+      ctx.font = '9px monospace';
+      let col = 0;
+      for (const [, info] of typeCounts) {
+        const tx = px + 16 + col * 90;
+        if (tx + 80 > px + panelW) break;
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#aaa';
+        const vetStr = info.vets > 0 ? ` (${info.vets}\u2605)` : '';
+        ctx.fillText(`${info.count}x ${info.name}${vetStr}`, tx, row);
+        col++;
+        if (col >= 3) { col = 0; row += 11; }
+      }
+      if (col > 0) row += 11;
+    }
+
     // Prompt
     ctx.font = '12px monospace';
     ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
-    ctx.fillText('Press any key to continue', w / 2, h / 2 + 70);
+    const promptY = Math.max(row + 20, h / 2 + 70);
+    ctx.textAlign = 'center';
+    ctx.fillText('Press any key to continue', w / 2, promptY);
     ctx.textAlign = 'left';
   }
 

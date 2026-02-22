@@ -16,7 +16,8 @@ export type SoundName =
   | 'unit_lost' | 'building_explode' | 'heal'
   | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged'
   | 'eva_construction_complete' | 'eva_unit_ready' | 'eva_low_power'
-  | 'eva_new_options' | 'eva_building' | 'repair' | 'sell';
+  | 'eva_new_options' | 'eva_building' | 'repair' | 'sell'
+  | 'victory_fanfare' | 'defeat_sting' | 'crate_pickup' | 'eva_mission_accomplished';
 
 export class AudioManager {
   private ctx: AudioContext | null = null;
@@ -116,6 +117,10 @@ export class AudioManager {
       case 'eva_building': this.synthEvaBuilding(t, out); break;
       case 'repair': this.synthRepair(t, out); break;
       case 'sell': this.synthSell(t, out); break;
+      case 'victory_fanfare': this.synthVictoryFanfare(t, out); break;
+      case 'defeat_sting': this.synthDefeatSting(t, out); break;
+      case 'crate_pickup': this.synthCratePickup(t, out); break;
+      case 'eva_mission_accomplished': this.synthEvaMissionAccomplished(t, out); break;
     }
   }
 
@@ -736,5 +741,68 @@ export class AudioManager {
       o.connect(g).connect(out);
       o.start(dt); o.stop(dt + 0.04);
     }
+  }
+
+  private synthVictoryFanfare(t: number, out: AudioNode): void {
+    // Ascending triumph: C-E-G-C major arpeggio with brass timbre
+    const notes = [523, 659, 784, 1047]; // C5-E5-G5-C6
+    notes.forEach((freq, i) => {
+      const dt = t + i * 0.15;
+      const o = this.osc('sawtooth', freq);
+      const g = this.gain(0.12);
+      const f = this.filter('lowpass', 2000, 1);
+      g.gain.setValueAtTime(0.12, dt);
+      g.gain.setValueAtTime(0.12, dt + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + (i === 3 ? 0.6 : 0.13));
+      o.connect(f).connect(g).connect(out);
+      o.start(dt); o.stop(dt + (i === 3 ? 0.6 : 0.14));
+    });
+  }
+
+  private synthDefeatSting(t: number, out: AudioNode): void {
+    // Descending minor: dramatic low brass descending
+    const notes = [440, 370, 311, 220]; // A4-F#4-Eb4-A3
+    notes.forEach((freq, i) => {
+      const dt = t + i * 0.2;
+      const o = this.osc('sawtooth', freq);
+      const g = this.gain(0.1);
+      const f = this.filter('lowpass', 1200, 1);
+      g.gain.setValueAtTime(0.1, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.35);
+      o.connect(f).connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.35);
+    });
+  }
+
+  private synthCratePickup(t: number, out: AudioNode): void {
+    // Quick chime: ascending two-tone sparkle
+    const o1 = this.osc('sine', 800);
+    const o2 = this.osc('sine', 1200);
+    const g1 = this.gain(0.08);
+    const g2 = this.gain(0.08);
+    g1.gain.setValueAtTime(0.08, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    g2.gain.setValueAtTime(0.08, t + 0.05);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o1.connect(g1).connect(out);
+    o2.connect(g2).connect(out);
+    o1.start(t); o1.stop(t + 0.1);
+    o2.start(t + 0.05); o2.stop(t + 0.15);
+  }
+
+  private synthEvaMissionAccomplished(t: number, out: AudioNode): void {
+    // "Mission Accomplished" — two rising confirmatory tones
+    const o1 = this.osc('square', 600);
+    const o2 = this.osc('square', 800);
+    const g1 = this.gain(0.08);
+    const g2 = this.gain(0.08);
+    g1.gain.setValueAtTime(0.08, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    g2.gain.setValueAtTime(0.08, t + 0.15);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o1.connect(g1).connect(out);
+    o2.connect(g2).connect(out);
+    o1.start(t); o1.stop(t + 0.15);
+    o2.start(t + 0.15); o2.stop(t + 0.35);
   }
 }

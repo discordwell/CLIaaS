@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  Game, type GameState, type MissionInfo,
-  MISSIONS, getMissionIndex, loadProgress, saveProgress,
+  Game, type GameState, type MissionInfo, type Difficulty,
+  MISSIONS, getMissionIndex, loadProgress, saveProgress, DIFFICULTIES,
 } from './engine';
 import { TestRunner, type TestLogEntry } from './engine/testRunner';
 import { resolvePreset } from './engine/turbo';
@@ -25,6 +25,7 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [unlockedMissions, setUnlockedMissions] = useState(loadProgress);
   const [selectedMission, setSelectedMission] = useState<MissionInfo | null>(null);
   const [missionIndex, setMissionIndex] = useState(0);
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [testMode, setTestMode] = useState(false);
   const [testLog, setTestLog] = useState<TestLogEntry[]>([]);
   const testRunnerRef = useRef<TestRunner | null>(null);
@@ -65,12 +66,12 @@ export default function AntGame({ onExit }: AntGameProps) {
     };
 
     try {
-      await game.start(mission.id);
+      await game.start(mission.id, difficulty);
     } catch (e) {
       setError(`Failed to load mission: ${e instanceof Error ? e.message : String(e)}`);
       setScreen('select');
     }
-  }, []);
+  }, [difficulty]);
 
   const selectMission = useCallback((index: number) => {
     const mission = MISSIONS[index];
@@ -517,10 +518,41 @@ export default function AntGame({ onExit }: AntGameProps) {
             </button>
           </div>
 
+          {/* Difficulty selector */}
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            marginTop: '20px',
+            alignItems: 'center',
+          }}>
+            <span style={{ color: '#886633', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
+              Difficulty:
+            </span>
+            {DIFFICULTIES.map(d => (
+              <button
+                key={d}
+                onClick={(e) => { e.stopPropagation(); setDifficulty(d); }}
+                style={{
+                  background: d === difficulty ? (d === 'easy' ? '#224422' : d === 'hard' ? '#442222' : '#443311') : '#1a1a1a',
+                  color: d === difficulty ? (d === 'easy' ? '#66ff66' : d === 'hard' ? '#ff6666' : '#ffaa44') : '#555',
+                  border: `1px solid ${d === difficulty ? '#664400' : '#333'}`,
+                  padding: '4px 14px',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                }}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+
           <div style={{
             color: '#555',
             fontSize: '11px',
-            marginTop: '16px',
+            marginTop: '12px',
           }}>
             Press ENTER to launch | ESC to go back
           </div>

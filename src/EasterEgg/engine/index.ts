@@ -29,6 +29,15 @@ export type { MissionInfo } from './scenario';
 export { AudioManager } from './audio';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
+export type Difficulty = 'easy' | 'normal' | 'hard';
+export const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
+
+/** Difficulty modifiers for queen spawn rate and ant composition */
+const DIFFICULTY_MODS: Record<Difficulty, { spawnInterval: number; maxAnts: number; fireAntChance: number; waveSize: number }> = {
+  easy:   { spawnInterval: 45, maxAnts: 15, fireAntChance: 0.15, waveSize: 0.7 },
+  normal: { spawnInterval: 30, maxAnts: 20, fireAntChance: 0.33, waveSize: 1.0 },
+  hard:   { spawnInterval: 20, maxAnts: 28, fireAntChance: 0.50, waveSize: 1.3 },
+};
 
 /** Defensive structure types that ants prioritize attacking */
 const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 'AGUN', 'FTUR']);
@@ -99,6 +108,9 @@ export class Game {
   /** Deferred transport load removals (entity IDs to remove from entities after iteration) */
   private _pendingTransportLoads: number[] = [];
 
+  // Difficulty
+  difficulty: Difficulty = 'normal';
+
   // Crate system
   crates: Crate[] = [];
   private nextCrateTick = 0;
@@ -161,10 +173,11 @@ export class Game {
   }
 
   /** Load assets and start a scenario */
-  async start(scenarioId = 'SCA01EA'): Promise<void> {
+  async start(scenarioId = 'SCA01EA', difficulty: Difficulty = 'normal'): Promise<void> {
     this.state = 'loading';
     this.stopped = false;
     this.scenarioId = scenarioId;
+    this.difficulty = difficulty;
     this.onStateChange?.('loading');
     resetEntityIds();
 
@@ -506,8 +519,9 @@ export class Game {
     // Defensive structure auto-fire
     this.updateStructureCombat();
 
-    // Queen Ant spawning — QUEE periodically spawns ants when not under heavy attack
-    if (this.tick % (GAME_TICKS_PER_SEC * 30) === 0) { // every 30 seconds
+    // Queen Ant spawning — QUEE periodically spawns ants (rate varies by difficulty)
+    const spawnSec = DIFFICULTY_MODS[this.difficulty].spawnInterval;
+    if (this.tick % (GAME_TICKS_PER_SEC * spawnSec) === 0) {
       this.updateQueenSpawning();
     }
 
@@ -710,6 +724,21 @@ export class Game {
       const items = this.cachedAvailableItems ?? this.getAvailableItems();
       const maxScroll = Math.max(0, items.length * 22 - (this.canvas.height - 80));
       this.sidebarScroll = Math.max(0, Math.min(maxScroll, this.sidebarScroll + Math.sign(scrollDelta) * 22));
+    }
+
+    // Minimap drag scroll: while holding left button on minimap, continuously scroll
+    if (this.input.state.mouseDown) {
+      const { mouseX, mouseY } = this.input.state;
+      const mmSize = Game.SIDEBAR_W - 8;
+      const mmX = this.canvas.width - Game.SIDEBAR_W + 4;
+      const mmY = this.canvas.height - mmSize - 6;
+      if (mouseX >= mmX && mouseX <= mmX + mmSize &&
+          mouseY >= mmY && mouseY <= mmY + mmSize) {
+        const scale = mmSize / Math.max(this.map.boundsW, this.map.boundsH);
+        const worldCX = this.map.boundsX + (mouseX - mmX) / scale;
+        const worldCY = this.map.boundsY + (mouseY - mmY) / scale;
+        this.camera.centerOn(worldCX * CELL_SIZE, worldCY * CELL_SIZE);
+      }
     }
 
     // --- Escape: cancel placement/modes first, then pause ---
@@ -2831,23 +2860,32 @@ export class Game {
     }
   }
 
-  /** Queen Ant spawns ants periodically — 1-2 ants per alive QUEE every 30 seconds */
+  /** Queen Ant spawns ants periodically (rate/composition affected by difficulty) */
   private updateQueenSpawning(): void {
+    const mods = DIFFICULTY_MODS[this.difficulty];
     for (const s of this.structures) {
       if (!s.alive || s.type !== 'QUEE') continue;
       if (s.house === House.Spain || s.house === House.Greece) continue; // player queens don't spawn
-      // Don't spawn if too many ants already alive (max 20 per queen)
+      // Don't spawn if too many ants already alive (cap by difficulty)
       const nearbyAnts = this.entities.filter(e =>
         e.alive && e.isAnt && worldDist(e.pos, {
           x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE,
         }) < CELL_SIZE * 15
       ).length;
-      if (nearbyAnts >= 20) continue;
+      if (nearbyAnts >= mods.maxAnts) continue;
       // Spawn 1-2 ants near the queen
       const count = 1 + (Math.random() < 0.4 ? 1 : 0);
-      const antTypes = [UnitType.ANT1, UnitType.ANT2, UnitType.ANT3];
+      // Difficulty affects ant type composition: higher difficulty = more fire ants (ANT3)
       for (let i = 0; i < count; i++) {
-        const aType = antTypes[Math.floor(Math.random() * antTypes.length)];
+        let aType: UnitType;
+        const roll = Math.random();
+        if (roll < mods.fireAntChance) {
+          aType = UnitType.ANT3; // fire ant (strongest)
+        } else if (roll < mods.fireAntChance + 0.33) {
+          aType = UnitType.ANT2; // warrior ant
+        } else {
+          aType = UnitType.ANT1; // soldier ant (weakest)
+        }
         const ox = (Math.random() - 0.5) * CELL_SIZE * 3;
         const oy = (Math.random() - 0.5) * CELL_SIZE * 3;
         const spawnX = s.cx * CELL_SIZE + CELL_SIZE + ox;
@@ -3110,10 +3148,13 @@ export class Game {
         if (result.win && this.state === 'playing') {
           if (this.toCarryOver) saveCarryover(this.entities);
           this.state = 'won';
+          this.audio.play('victory_fanfare');
+          this.audio.play('eva_mission_accomplished');
           this.onStateChange?.('won');
         }
         if (result.lose && this.state === 'playing') {
           this.state = 'lost';
+          this.audio.play('defeat_sting');
           this.onStateChange?.('lost');
         }
         if (result.allowWin) this.allowWin = true;
@@ -3228,6 +3269,7 @@ export class Game {
 
     if (!playerAlive) {
       this.state = 'lost';
+      this.audio.play('defeat_sting');
       this.onStateChange?.('lost');
     } else if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
       // Save surviving units for carry-over to next mission
@@ -3235,6 +3277,8 @@ export class Game {
         saveCarryover(this.entities);
       }
       this.state = 'won';
+      this.audio.play('victory_fanfare');
+      this.audio.play('eva_mission_accomplished');
       this.onStateChange?.('won');
     }
   }
@@ -3483,7 +3527,7 @@ export class Game {
 
   /** Apply crate bonus to the unit that picked it up */
   private pickupCrate(crate: Crate, unit: Entity): void {
-    this.audio.play('eva_acknowledged');
+    this.audio.play('crate_pickup');
     this.effects.push({
       type: 'explosion', x: crate.x, y: crate.y,
       frame: 0, maxFrames: 10, size: 8, sprite: 'piffpiff', spriteStart: 0,
@@ -3581,6 +3625,7 @@ export class Game {
     this.renderer.evaMessages = this.evaMessages;
     this.renderer.missionTimer = this.missionTimer;
     this.renderer.theatre = this.theatre;
+    this.renderer.difficulty = this.difficulty;
     // Placement ghost
     if (this.pendingPlacement) {
       const { mouseX, mouseY } = this.input.state;
@@ -3588,14 +3633,17 @@ export class Game {
       this.renderer.placementItem = this.pendingPlacement;
       this.renderer.placementCx = Math.floor(world.x / CELL_SIZE);
       this.renderer.placementCy = Math.floor(world.y / CELL_SIZE);
-      // Validate placement using actual footprint
+      // Validate placement using actual footprint (per-cell)
       const cx = this.renderer.placementCx;
       const cy = this.renderer.placementCy;
       const [pfw, pfh] = STRUCTURE_SIZE[this.pendingPlacement.type] ?? [2, 2];
       let valid = true;
+      const cells: boolean[] = [];
       for (let dy = 0; dy < pfh; dy++) {
         for (let dx = 0; dx < pfw; dx++) {
-          if (!this.map.isPassable(cx + dx, cy + dy)) valid = false;
+          const passable = this.map.isPassable(cx + dx, cy + dy);
+          cells.push(passable);
+          if (!passable) valid = false;
         }
       }
       // Check adjacency
@@ -3605,8 +3653,10 @@ export class Game {
         if (Math.abs(s.cx - cx) + Math.abs(s.cy - cy) <= 4) { adj = true; break; }
       }
       this.renderer.placementValid = valid && adj;
+      this.renderer.placementCells = cells;
     } else {
       this.renderer.placementItem = null;
+      this.renderer.placementCells = null;
     }
     this.renderer.render(
       this.camera,
@@ -3637,6 +3687,12 @@ export class Game {
     if (this.state === 'won' || this.state === 'lost') {
       const structsBuilt = this.structures.filter(s => s.house === House.Spain || s.house === House.Greece).length;
       const structsLost = this.structures.filter(s => !s.alive && (s.house === House.Spain || s.house === House.Greece)).length;
+      // Build survivors roster for victory screen
+      const survivors = this.state === 'won'
+        ? this.entities.filter(e => e.alive && e.isPlayerUnit).map(e => ({
+            type: e.type, name: e.stats.name, hp: e.hp, maxHp: e.maxHp, vet: e.veterancy,
+          }))
+        : [];
       this.renderer.renderEndScreen(
         this.state === 'won',
         this.killCount,
@@ -3645,6 +3701,7 @@ export class Game {
         structsBuilt,
         structsLost,
         this.credits,
+        survivors,
       );
     }
   }
