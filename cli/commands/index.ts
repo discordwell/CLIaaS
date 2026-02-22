@@ -21,6 +21,7 @@ import { registerHelpcrunchCommands } from './helpcrunch.js';
 import { registerFreshdeskCommands } from './freshdesk.js';
 import { registerGrooveCommands } from './groove.js';
 import { registerDbCommands } from './db.js';
+import { registerMigrateCommand } from './migrate.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -45,4 +46,5 @@ export function registerCommands(program: Command): void {
   registerSLACommand(program);
   registerSentimentCommand(program);
   registerDbCommands(program);
+  registerMigrateCommand(program);
 }
