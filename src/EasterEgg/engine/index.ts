@@ -3096,10 +3096,18 @@ export class Game {
     }
   }
 
+  /** Map our House enum to RA HousesType index (for trigger event checks) */
+  private static readonly HOUSE_TO_INDEX: Record<string, number> = {
+    [House.Spain]: 0, [House.Greece]: 1, [House.USSR]: 2,
+    [House.Ukraine]: 4, [House.Germany]: 5,
+    [House.Turkey]: 7, [House.Neutral]: 10,
+  };
+
   /** Build trigger game state snapshot for event checks (uses precomputed shared state) */
   private buildTriggerState(trigger: ScenarioTrigger, shared: {
     structureTypes: Set<string>; destroyedTriggerNames: Set<string>;
     enemyUnitsAlive: number; playerFactories: number;
+    houseAlive: Map<number, boolean>;
   }): TriggerGameState {
     return {
       gameTick: this.tick,
@@ -3115,6 +3123,7 @@ export class Game {
       unitsLeftMap: this.unitsLeftMap,
       structureTypes: shared.structureTypes,
       destroyedTriggerNames: shared.destroyedTriggerNames,
+      houseAlive: shared.houseAlive,
     };
   }
 
@@ -3131,6 +3140,7 @@ export class Game {
     // Precompute shared state once for all triggers (avoids O(N*M) recomputation)
     const structureTypes = new Set<string>();
     const destroyedTriggerNames = new Set<string>();
+    const houseAlive = new Map<number, boolean>();
     let playerFactories = 0;
     for (const s of this.structures) {
       if (s.alive) {
@@ -3139,6 +3149,8 @@ export class Game {
             (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'TENT')) {
           playerFactories++;
         }
+        const hi = Game.HOUSE_TO_INDEX[s.house];
+        if (hi !== undefined) houseAlive.set(hi, true);
       } else if (s.triggerName) {
         destroyedTriggerNames.add(s.triggerName);
       }
@@ -3146,8 +3158,12 @@ export class Game {
     let enemyUnitsAlive = 0;
     for (const e of this.entities) {
       if (e.alive && !e.isPlayerUnit && !e.isCivilian) enemyUnitsAlive++;
+      if (e.alive) {
+        const hi = Game.HOUSE_TO_INDEX[e.house];
+        if (hi !== undefined) houseAlive.set(hi, true);
+      }
     }
-    const shared = { structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories };
+    const shared = { structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories, houseAlive };
 
     for (const trigger of this.triggers) {
       // Volatile (0) and semi-persistent (1): skip once fired
@@ -3355,6 +3371,7 @@ export class Game {
 
   /** Check win/lose conditions */
   private checkVictoryConditions(): void {
+    if (this.state !== 'playing') return;
     if (this.tick < GAME_TICKS_PER_SEC * 3) return;
 
     const playerAlive = this.entities.some(e => e.alive && e.isPlayerUnit);
@@ -3373,7 +3390,9 @@ export class Game {
     // be short-circuited by killing all ants.
     const hasTriggerWin = this.triggers.some(t => {
       if (t.fired && t.persistence <= 1) return false;
-      return t.action1.action === 1 || t.action2.action === 1; // TACTION_WIN = 1
+      // Only count actions that would actually execute based on actionControl
+      return t.action1.action === 1 || // TACTION_WIN = 1
+        (t.actionControl === 1 && t.action2.action === 1);
     });
     if (hasTriggerWin) return; // let triggers handle win condition
 

@@ -1094,6 +1094,8 @@ export interface TriggerGameState {
   structureTypes: Set<string>; // set of alive structure type names
   // Trigger attachment: names of triggers whose attached object was destroyed
   destroyedTriggerNames: Set<string>;
+  // Per-house alive status (for ALL_DESTROYED — RA house index → has alive units/structures)
+  houseAlive: Map<number, boolean>;
 }
 
 export function checkTriggerEvent(
@@ -1115,9 +1117,12 @@ export function checkTriggerEvent(
       return !state.globals.has(event.data);
     case TEVENT_PLAYER_ENTERED:
       return state.playerEntered;
-    case TEVENT_ALL_DESTROYED:
-      // All enemy (non-player) units destroyed
-      return state.enemyUnitsAlive === 0;
+    case TEVENT_ALL_DESTROYED: {
+      // All units/structures of the specified house destroyed (event.data = RA house index)
+      // RA source: HouseClass::As_Pointer(Event.Data.House)->Is_All_Destroyed()
+      const houseIdx = event.data;
+      return !(state.houseAlive.get(houseIdx) ?? false);
+    }
     case TEVENT_NUNITS_DESTROYED:
       // N enemy units have been killed (event.data = threshold)
       return state.enemyKillCount >= event.data;
