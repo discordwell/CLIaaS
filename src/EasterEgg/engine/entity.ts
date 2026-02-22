@@ -49,7 +49,9 @@ export class Entity {
   mission: Mission = Mission.GUARD;
   target: Entity | null = null;
   targetStructure: StructureRef | null = null; // for attacking buildings
+  forceFirePos: WorldPos | null = null; // force-fire ground position (Ctrl+right-click)
   moveTarget: WorldPos | null = null;
+  moveQueue: WorldPos[] = []; // shift+click waypoint queue
   path: CellPos[] = [];
   pathIndex = 0;
 

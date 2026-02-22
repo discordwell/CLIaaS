@@ -13,6 +13,7 @@ export interface InputState {
   isDragging: boolean;
   keys: Set<string>;   // currently held keys
   ctrlHeld: boolean;   // ctrl/meta key held
+  shiftHeld: boolean;  // shift key held
   // Events consumed per tick
   leftClick: { x: number; y: number } | null;
   rightClick: { x: number; y: number } | null;
@@ -34,6 +35,7 @@ export class InputManager {
     isDragging: false,
     keys: new Set(),
     ctrlHeld: false,
+    shiftHeld: false,
     leftClick: null,
     rightClick: null,
     doubleClick: null,
@@ -157,11 +159,13 @@ export class InputManager {
   private onKeyDown = (e: KeyboardEvent): void => {
     this.state.keys.add(e.key);
     if (e.key === 'Control' || e.key === 'Meta') this.state.ctrlHeld = true;
+    if (e.key === 'Shift') this.state.shiftHeld = true;
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
     this.state.keys.delete(e.key);
     if (e.key === 'Control' || e.key === 'Meta') this.state.ctrlHeld = false;
+    if (e.key === 'Shift') this.state.shiftHeld = false;
   };
 
   destroy(): void {

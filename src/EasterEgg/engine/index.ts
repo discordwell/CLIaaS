@@ -395,7 +395,7 @@ export class Game {
 
   /** Process player input — selection and commands */
   private processInput(): void {
-    const { leftClick, rightClick, doubleClick, dragBox, ctrlHeld, keys } = this.input.state;
+    const { leftClick, rightClick, doubleClick, dragBox, ctrlHeld, shiftHeld, keys } = this.input.state;
 
     // --- Pause toggle (P or Escape) ---
     if (keys.has('p') || keys.has('Escape')) {
@@ -406,17 +406,21 @@ export class Game {
     }
 
     // --- Keyboard shortcuts ---
-    // S = stop all selected units
-    if (keys.has('s') && !keys.has('ArrowDown')) {
+    // S = stop all selected units, G = guard position (same as stop)
+    if ((keys.has('s') && !keys.has('ArrowDown')) || keys.has('g')) {
       for (const id of this.selectedIds) {
         const unit = this.entityById.get(id);
         if (!unit || !unit.alive) continue;
         unit.mission = Mission.GUARD;
         unit.target = null;
+        unit.targetStructure = null;
+        unit.forceFirePos = null;
         unit.moveTarget = null;
+        unit.moveQueue = [];
         unit.path = [];
         unit.animState = AnimState.IDLE;
       }
+      keys.delete('g');
     }
 
     // Ctrl+1-9: assign control group
@@ -449,12 +453,45 @@ export class Game {
       }
     }
 
+    // Home/Space: center camera on selected units
+    if ((keys.has('Home') || keys.has(' ')) && this.selectedIds.size > 0) {
+      let cx = 0, cy = 0, count = 0;
+      for (const id of this.selectedIds) {
+        const u = this.entityById.get(id);
+        if (u?.alive) { cx += u.pos.x; cy += u.pos.y; count++; }
+      }
+      if (count > 0) {
+        this.camera.centerOn(cx / count, cy / count);
+      }
+      keys.delete('Home');
+      keys.delete(' ');
+    }
+
     // A key: toggle attack-move mode
     if (keys.has('a') && !keys.has('ArrowLeft')) {
       this.attackMoveMode = true;
       this.sellMode = false;
       this.repairMode = false;
       keys.delete('a');
+    }
+
+    // X key: scatter selected units to random nearby positions
+    if (keys.has('x')) {
+      for (const id of this.selectedIds) {
+        const unit = this.entityById.get(id);
+        if (!unit?.alive) continue;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = CELL_SIZE * (2 + Math.random() * 2);
+        const goalX = unit.pos.x + Math.cos(angle) * dist;
+        const goalY = unit.pos.y + Math.sin(angle) * dist;
+        unit.mission = Mission.MOVE;
+        unit.moveTarget = { x: goalX, y: goalY };
+        unit.target = null;
+        unit.moveQueue = [];
+        unit.path = findPath(this.map, unit.cell, worldToCell(goalX, goalY), true);
+        unit.pathIndex = 0;
+      }
+      keys.delete('x');
     }
 
     // Q key: toggle sell mode
@@ -613,6 +650,28 @@ export class Game {
 
     if (rightClick) {
       const world = this.camera.screenToWorld(rightClick.x, rightClick.y);
+
+      // Force-fire on ground: Ctrl+right-click fires at a location (artillery/splash)
+      if (ctrlHeld && this.selectedIds.size > 0) {
+        for (const id of this.selectedIds) {
+          const unit = this.entityById.get(id);
+          if (!unit?.alive || !unit.weapon) continue;
+          // Only weapons with splash or inaccuracy benefit from ground attack
+          if (!unit.weapon.splash && !unit.weapon.inaccuracy) continue;
+          unit.mission = Mission.ATTACK;
+          unit.target = null;
+          unit.targetStructure = null;
+          // Create a temporary ground target position
+          unit.forceFirePos = { x: world.x, y: world.y };
+        }
+        this.audio.play('attack_ack');
+        this.effects.push({
+          type: 'marker', x: world.x, y: world.y, frame: 0, maxFrames: 15, size: 10,
+          markerColor: 'rgba(255,200,60,1)',
+        });
+        return;
+      }
+
       const target = this.findEntityAt(world);
       const targetStruct = !target ? this.findStructureAt(world) : null;
 
@@ -644,20 +703,28 @@ export class Game {
           spreadIdx++;
           const goalX = world.x + spread.x;
           const goalY = world.y + spread.y;
-          unit.mission = Mission.MOVE;
-          unit.moveTarget = { x: goalX, y: goalY };
-          unit.target = null;
-          unit.targetStructure = null;
-          // Clear team mission scripts when player gives direct orders
-          unit.teamMissions = [];
-          unit.teamMissionIndex = 0;
-          unit.path = findPath(
-            this.map,
-            unit.cell,
-            worldToCell(goalX, goalY),
-            true
-          );
-          unit.pathIndex = 0;
+
+          if (shiftHeld && unit.mission === Mission.MOVE) {
+            // Shift+click: queue waypoint (don't change current path)
+            unit.moveQueue.push({ x: goalX, y: goalY });
+          } else {
+            unit.mission = Mission.MOVE;
+            unit.moveTarget = { x: goalX, y: goalY };
+            unit.moveQueue = [];
+            unit.target = null;
+            unit.targetStructure = null;
+            unit.forceFirePos = null;
+            // Clear team mission scripts when player gives direct orders
+            unit.teamMissions = [];
+            unit.teamMissionIndex = 0;
+            unit.path = findPath(
+              this.map,
+              unit.cell,
+              worldToCell(goalX, goalY),
+              true
+            );
+            unit.pathIndex = 0;
+          }
         }
       }
       if (commandIssued) {
@@ -981,8 +1048,16 @@ export class Game {
     } else if (entity.moveTarget) {
       if (entity.moveToward(entity.moveTarget, entity.stats.speed * 0.5)) {
         entity.moveTarget = null;
-        entity.mission = Mission.GUARD;
-        entity.animState = AnimState.IDLE;
+        // Check for queued waypoints
+        if (entity.moveQueue.length > 0) {
+          const next = entity.moveQueue.shift()!;
+          entity.moveTarget = next;
+          entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true);
+          entity.pathIndex = 0;
+        } else {
+          entity.mission = Mission.GUARD;
+          entity.animState = AnimState.IDLE;
+        }
       }
     } else {
       entity.mission = Mission.GUARD;
@@ -1004,8 +1079,15 @@ export class Game {
       return;
     }
 
+    // Handle force-fire on ground (no entity target)
+    if (entity.forceFirePos && !entity.target) {
+      this.updateForceFireGround(entity);
+      return;
+    }
+
     if (!entity.target?.alive) {
       entity.target = null;
+      entity.forceFirePos = null;
       entity.mission = Mission.GUARD;
       entity.animState = AnimState.IDLE;
       return;
@@ -1267,7 +1349,7 @@ export class Game {
     }
   }
 
-  /** Attack a structure (building) */
+  /** Attack a structure (building) — engineers capture instead */
   private updateAttackStructure(entity: Entity, s: MapStructure): void {
     const structPos: WorldPos = {
       x: s.cx * CELL_SIZE + CELL_SIZE,
@@ -1277,6 +1359,23 @@ export class Game {
     const range = entity.weapon?.range ?? 2;
 
     if (dist <= range) {
+      // Engineer capture: consume engineer, convert building to player
+      if (entity.type === UnitType.I_E6 && entity.isPlayerUnit) {
+        s.house = House.Spain;
+        s.hp = s.maxHp;
+        // Kill the engineer (consumed)
+        entity.alive = false;
+        entity.mission = Mission.DIE;
+        entity.targetStructure = null;
+        this.audio.play('eva_acknowledged');
+        // Flash effect
+        this.effects.push({
+          type: 'explosion', x: structPos.x, y: structPos.y,
+          frame: 0, maxFrames: 10, size: 10, sprite: 'piffpiff', spriteStart: 0,
+        });
+        return;
+      }
+
       entity.desiredFacing = directionTo(entity.pos, structPos);
       entity.tickRotation();
       if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
@@ -1306,6 +1405,71 @@ export class Game {
     } else {
       entity.animState = AnimState.WALK;
       entity.moveToward(structPos, entity.stats.speed * 0.5);
+    }
+    if (entity.attackCooldown > 0) entity.attackCooldown--;
+  }
+
+  /** Force-fire on ground — fire at a location with no target entity */
+  private updateForceFireGround(entity: Entity): void {
+    const target = entity.forceFirePos!;
+    const dist = worldDist(entity.pos, target);
+    const range = entity.weapon?.range ?? 2;
+
+    if (dist <= range) {
+      entity.desiredFacing = directionTo(entity.pos, target);
+      const facingReady = entity.tickRotation();
+      if (entity.stats.noMovingFire && !facingReady) {
+        entity.animState = AnimState.IDLE;
+        return;
+      }
+      entity.animState = AnimState.ATTACK;
+
+      if (entity.attackCooldown <= 0 && entity.weapon) {
+        entity.attackCooldown = entity.weapon.rof;
+
+        // Apply scatter
+        let impactX = target.x;
+        let impactY = target.y;
+        if (entity.weapon.inaccuracy && entity.weapon.inaccuracy > 0) {
+          const scatter = entity.weapon.inaccuracy * CELL_SIZE;
+          const angle = Math.random() * Math.PI * 2;
+          const d = Math.random() * scatter;
+          impactX += Math.cos(angle) * d;
+          impactY += Math.sin(angle) * d;
+        }
+
+        // Splash damage at impact
+        if (entity.weapon.splash && entity.weapon.splash > 0) {
+          this.applySplashDamage(
+            { x: impactX, y: impactY }, entity.weapon, -1,
+            entity.isPlayerUnit,
+          );
+        }
+
+        // Weapon sound + effects
+        this.audio.play(this.audio.weaponSound(entity.weapon.name));
+        const sx = entity.pos.x;
+        const sy = entity.pos.y;
+        this.effects.push({
+          type: 'muzzle', x: sx, y: sy,
+          frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
+        });
+        const projStyle = this.weaponProjectileStyle(entity.weapon.name);
+        const travelFrames = projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
+        this.effects.push({
+          type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
+          startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
+        });
+        this.effects.push({
+          type: 'explosion', x: impactX, y: impactY,
+          frame: 0, maxFrames: 17, size: 8, sprite: 'veh-hit1', spriteStart: 0,
+        });
+        const tc = worldToCell(impactX, impactY);
+        this.map.addDecal(tc.cx, tc.cy, 3, 0.3);
+      }
+    } else {
+      entity.animState = AnimState.WALK;
+      entity.moveToward(target, entity.stats.speed * 0.5);
     }
     if (entity.attackCooldown > 0) entity.attackCooldown--;
   }
