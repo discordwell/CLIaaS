@@ -111,11 +111,12 @@ export async function grooveFetch<T>(auth: GrooveAuth, path: string, options?: {
       body: options?.body ? JSON.stringify(options.body) : undefined,
     });
 
-    if (res.status === 429) {
-      const rawRetryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10);
-      const retryAfter = isNaN(rawRetryAfter) ? 60 : Math.max(rawRetryAfter, 30);
+    if (res.status === 429 || res.status === 503) {
+      const rawRetryAfter = parseInt(res.headers.get('Retry-After') ?? '90', 10);
+      const retryAfter = isNaN(rawRetryAfter) ? 90 : Math.max(rawRetryAfter, 60);
       if (retries >= maxRetries) throw new Error('Rate limit exceeded after max retries');
       retries++;
+      process.stderr.write(`  [rate-limit ${res.status}] retry ${retries}/${maxRetries}, waiting ${retryAfter}s...\n`);
       await sleep(retryAfter * 1000);
       continue;
     }

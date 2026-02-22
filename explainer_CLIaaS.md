@@ -4,7 +4,7 @@
 CLIaaS
 
 ## One-line Description
-An LLM-powered CLI that replaces legacy helpdesk UIs (Zendesk, Kayako) with scriptable export, triage, drafting, and KB workflows.
+An LLM-powered CLI that replaces legacy helpdesk UIs with scriptable export, triage, drafting, and KB workflows — supporting 6 helpdesk platforms.
 
 ## Team Members
 - Name: Robert Cordwell
@@ -17,11 +17,11 @@ An LLM-powered CLI that replaces legacy helpdesk UIs (Zendesk, Kayako) with scri
 - https://github.com/discordwell/CLIaaS
 
 ## Problem We Solved (2-3 sentences)
-Support teams are trapped in legacy helpdesk UIs that charge per-seat and resist automation. CLIaaS exfiltrates your entire helpdesk — tickets, users, KB articles, macros, triggers, SLA policies — from Zendesk and Kayako via their real APIs, normalizes it into a canonical schema, then runs LLM-powered triage, reply drafting, KB suggestions, and shift summaries from the terminal. No browser tabs, no per-seat licensing — just your data and an LLM.
+Support teams are trapped in legacy helpdesk UIs that charge per-seat and resist automation. CLIaaS exfiltrates your entire helpdesk — tickets, users, KB articles, macros, triggers, SLA policies — from 6 platforms (Zendesk, Kayako Cloud, Kayako Classic, HelpCrunch, Freshdesk, Groove) via their real APIs, normalizes it into a canonical schema, then runs LLM-powered triage, reply drafting, KB suggestions, and shift summaries from the terminal. No browser tabs, no per-seat licensing — just your data and an LLM.
 
 ## How It Works
 
-1. **Export**: `cliaas zendesk export` or `cliaas kayako export` pulls all data via real APIs into local JSONL files with cursor-based incremental sync
+1. **Export**: `cliaas <platform> export` (zendesk, kayako, kayako-classic, helpcrunch, freshdesk, groove) pulls all data via real APIs into local JSONL files
 2. **Triage**: `cliaas triage` sends open tickets to your LLM (Claude, GPT-4o, or any OpenAI-compatible endpoint) for priority/category/assignment suggestions
 3. **Draft**: `cliaas draft reply --ticket <id>` generates context-aware reply drafts using ticket history and KB articles
 4. **Suggest**: `cliaas kb suggest --ticket <id>` surfaces the most relevant knowledge base articles for a given ticket
@@ -30,7 +30,7 @@ Support teams are trapped in legacy helpdesk UIs that charge per-seat and resist
 ## Architecture
 
 - **CLI**: Node.js + Commander.js with real API connectors and LLM provider abstraction
-- **Connectors**: Zendesk (cursor-based incremental sync with rate-limit retry), Kayako Cloud (custom HTTP client + offset pagination), and Kayako Classic (REST API + HMAC-SHA256 auth)
+- **Connectors**: Zendesk (cursor-based incremental sync), Kayako Cloud (offset pagination), Kayako Classic (HMAC-SHA256 auth + XML), HelpCrunch (Bearer token + offset pagination), Freshdesk (Basic auth + page pagination + KB hierarchy), Groove (Bearer token + hypermedia links)
 - **LLM Providers**: Claude (Anthropic SDK), OpenAI, OpenClaw-compatible (Ollama, Together, LM Studio, etc.)
 - **Web**: Next.js App Router landing page, dashboard, and settings — deployed to cliaas.com
 - **Schema**: Canonical types (Ticket, Message, Customer, Organization, KBArticle, Rule) shared across connectors
@@ -41,4 +41,4 @@ Support teams are trapped in legacy helpdesk UIs that charge per-seat and resist
 - Commander.js, chalk, ora (CLI)
 - @anthropic-ai/sdk, openai (LLM providers)
 - Deployed via systemd + nginx on VPS
-- **Live Data**: Zendesk integration tested against real tenant (discorp.zendesk.com) with 25+ seeded tickets spanning billing, auth, bugs, feature requests, onboarding, API issues, and account management
+- **Live Data**: Zendesk (discorp.zendesk.com, 25+ seeded tickets), HelpCrunch (3 agents verified), Groove (1 agent verified), Freshdesk (cliaas.freshdesk.com, 14-day trial) — all tested against real API tenants
