@@ -108,6 +108,7 @@ export class Renderer {
   placementItem: ProductionItem | null = null;
   placementCx = 0;
   placementCy = 0;
+  private _selectedIds: Set<number> = new Set();
   placementValid = false;
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
 
@@ -142,6 +143,7 @@ export class Renderer {
   ): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
+    this._selectedIds = selectedIds;
 
     // Cache palette reference from assets
     if (!this.pal) this.pal = assets.getPalette();
@@ -712,26 +714,45 @@ export class Renderer {
         this.renderHealthBar(barX, barY, CELL_SIZE * 1.5, s.hp / s.maxHp, false);
       }
 
-      // Fire/smoke animation on damaged structures (< 50% HP)
-      if (s.alive && s.hp < s.maxHp * 0.5 && vis >= 1 && !isConstructing && !isSelling) {
+      // Damage effects: light smoke (<75%), fire+smoke (<50%), intense fire (<25%)
+      if (s.alive && s.hp < s.maxHp * 0.75 && vis >= 1 && !isConstructing && !isSelling) {
+        const hpRatio = s.hp / s.maxHp;
         const fireSeed = (s.cx * 31 + s.cy * 17) | 0;
-        for (let f = 0; f < 2; f++) {
-          const fx = screenX + CELL_SIZE * 0.5 + ((fireSeed + f * 13) % 12) - 6;
-          const fy = screenY + CELL_SIZE * 0.3;
-          // Flame: animated orange/red flicker
-          const flicker = Math.sin(tick * 0.5 + f * 2.1) * 0.3;
-          const fh = 6 + Math.sin(tick * 0.7 + f * 1.5) * 3;
-          ctx.fillStyle = `rgba(255,${120 + flicker * 60},30,${0.5 + flicker * 0.2})`;
-          ctx.beginPath();
-          ctx.ellipse(fx, fy - fh * 0.5, 3, fh * 0.5, 0, 0, Math.PI * 2);
-          ctx.fill();
-          // Smoke rising above flame
-          const smokeY = fy - fh - 2 - (tick * 0.4 + f * 3) % 8;
-          const smokeAlpha = 0.3 - ((tick * 0.4 + f * 3) % 8) / 20;
-          if (smokeAlpha > 0) {
-            ctx.fillStyle = `rgba(40,40,40,${smokeAlpha})`;
+        const [fw] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+        const numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
+
+        for (let f = 0; f < numFires; f++) {
+          const fx = screenX + CELL_SIZE * 0.3 * fw + ((fireSeed + f * 13) % (fw * 10)) - fw * 3;
+          const fy = screenY + CELL_SIZE * 0.3 + f * 4;
+
+          if (hpRatio < 0.5) {
+            // Fire: animated orange/red flicker
+            const flicker = Math.sin(tick * 0.5 + f * 2.1) * 0.3;
+            const intensity = hpRatio < 0.25 ? 1.4 : 1.0;
+            const fh = (6 + Math.sin(tick * 0.7 + f * 1.5) * 3) * intensity;
+            ctx.fillStyle = `rgba(255,${100 + flicker * 60},${hpRatio < 0.25 ? 10 : 30},${(0.5 + flicker * 0.2) * intensity})`;
             ctx.beginPath();
-            ctx.arc(fx + Math.sin(tick * 0.2 + f) * 2, smokeY, 3, 0, Math.PI * 2);
+            ctx.ellipse(fx, fy - fh * 0.5, 3 * intensity, fh * 0.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Inner bright core for critical damage
+            if (hpRatio < 0.25) {
+              ctx.fillStyle = `rgba(255,220,100,${0.3 + flicker * 0.2})`;
+              ctx.beginPath();
+              ctx.ellipse(fx, fy - fh * 0.3, 1.5, fh * 0.25, 0, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+
+          // Smoke rising (all damage tiers, heavier when more damaged)
+          const smokeSpeed = hpRatio < 0.25 ? 0.6 : hpRatio < 0.5 ? 0.4 : 0.25;
+          const smokeSize = hpRatio < 0.25 ? 4 : hpRatio < 0.5 ? 3 : 2;
+          const smokeBase = hpRatio < 0.5 ? 0.35 : 0.2;
+          const smokeY = fy - 8 - (tick * smokeSpeed + f * 3) % 12;
+          const smokeAlpha = smokeBase - ((tick * smokeSpeed + f * 3) % 12) / 30;
+          if (smokeAlpha > 0) {
+            ctx.fillStyle = `rgba(40,40,40,${smokeAlpha.toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(fx + Math.sin(tick * 0.15 + f) * 2, smokeY, smokeSize, 0, Math.PI * 2);
             ctx.fill();
           }
         }
@@ -1559,11 +1580,12 @@ export class Renderer {
       const sy = mmY + (s.cy - oy) * scale;
       const sw = Math.max(fw * scale, 2);
       const sh = Math.max(fh * scale, 2);
-      ctx.fillStyle = isPlayer ? 'rgba(255,255,255,0.8)' : 'rgba(200,60,60,0.8)';
+      ctx.fillStyle = isPlayer ? 'rgba(80,220,255,0.85)' : 'rgba(220,50,50,0.85)';
       ctx.fillRect(sx, sy, sw, sh);
     }
 
-    // Unit dots
+    // Unit dots — bright cyan for player (like original RA), red for enemies
+    const blinkOn = Math.floor(Date.now() / 300) % 2 === 0; // blink cycle for selected
     for (const e of entities) {
       if (!e.alive) continue;
       const ecx = Math.floor(e.pos.x / CELL_SIZE);
@@ -1572,11 +1594,22 @@ export class Renderer {
       if (vis === 0) continue;
       if (vis === 1 && !e.isPlayerUnit) continue;
 
-      ctx.fillStyle = e.isPlayerUnit ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
+      // Selected units blink white on minimap
+      const isSelected = this._selectedIds.has(e.id);
+      if (isSelected && !blinkOn) {
+        ctx.fillStyle = '#fff';
+      } else if (e.isPlayerUnit) {
+        ctx.fillStyle = '#40e0ff'; // cyan like original RA player color
+      } else if (e.isCivilian) {
+        ctx.fillStyle = '#c0c0c0'; // gray for civilians
+      } else {
+        ctx.fillStyle = '#ff3030'; // bright red for enemies
+      }
+      const dotSize = Math.max(scale, 2);
       ctx.fillRect(
         mmX + (ecx - ox) * scale,
         mmY + (ecy - oy) * scale,
-        Math.max(scale, 2), Math.max(scale, 2),
+        dotSize, dotSize,
       );
     }
 
