@@ -5,7 +5,7 @@
 
 import {
   type WorldPos, CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
-  Mission, AnimState, worldDist, directionTo, worldToCell,
+  Mission, AnimState, House, UnitType, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, type WarheadType,
 } from './types';
 import { AssetManager } from './assets';
@@ -43,6 +43,12 @@ export class Game {
   selectedIds = new Set<number>();
   controlGroups: Map<number, Set<number>> = new Map(); // 1-9 → entity IDs
   attackMoveMode = false;
+  sellMode = false;
+  repairMode = false;
+  /** Set of structure indices currently being repaired */
+  private repairingStructures = new Set<number>();
+  /** Tick when last EVA base attack warning played (throttle to once per 5s) */
+  private lastBaseAttackEva = 0;
   private cellInfCount = new Map<number, number>(); // reused each tick for sub-cell assignment
   // Stats tracking
   killCount = 0;
@@ -282,6 +288,19 @@ export class Game {
       this.processTriggers();
     }
 
+    // Repair structures being repaired (1 HP per tick ≈ 15 HP/sec)
+    for (const idx of this.repairingStructures) {
+      const s = this.structures[idx];
+      if (!s || !s.alive || s.hp >= s.maxHp) {
+        this.repairingStructures.delete(idx);
+        continue;
+      }
+      s.hp = Math.min(s.maxHp, s.hp + 1);
+    }
+
+    // Defensive structure auto-fire
+    this.updateStructureCombat();
+
     // Clean up dead entities after death animation (use deathTick instead of animFrame)
     const before = this.entities.length;
     this.entities = this.entities.filter(
@@ -333,6 +352,26 @@ export class Game {
 
   /** Update cursor based on mouse position and selection state */
   private updateCursor(): void {
+    if (this.sellMode) {
+      this.canvas.style.cursor = 'not-allowed'; // sell cursor (changes over buildings)
+      const { mouseX, mouseY } = this.input.state;
+      const world = this.camera.screenToWorld(mouseX, mouseY);
+      const s = this.findStructureAt(world);
+      if (s && (s.house === 'Spain' || s.house === 'Greece')) {
+        this.canvas.style.cursor = 'pointer';
+      }
+      return;
+    }
+    if (this.repairMode) {
+      this.canvas.style.cursor = 'not-allowed';
+      const { mouseX, mouseY } = this.input.state;
+      const world = this.camera.screenToWorld(mouseX, mouseY);
+      const s = this.findStructureAt(world);
+      if (s && s.alive && (s.house === 'Spain' || s.house === 'Greece') && s.hp < s.maxHp) {
+        this.canvas.style.cursor = 'pointer';
+      }
+      return;
+    }
     if (this.selectedIds.size === 0) {
       this.canvas.style.cursor = 'default';
       return;
@@ -413,7 +452,25 @@ export class Game {
     // A key: toggle attack-move mode
     if (keys.has('a') && !keys.has('ArrowLeft')) {
       this.attackMoveMode = true;
+      this.sellMode = false;
+      this.repairMode = false;
       keys.delete('a');
+    }
+
+    // Q key: toggle sell mode
+    if (keys.has('q')) {
+      this.sellMode = !this.sellMode;
+      this.repairMode = false;
+      this.attackMoveMode = false;
+      keys.delete('q');
+    }
+
+    // R key: toggle repair mode
+    if (keys.has('r')) {
+      this.repairMode = !this.repairMode;
+      this.sellMode = false;
+      this.attackMoveMode = false;
+      keys.delete('r');
     }
 
     // --- Double-click: select all same type on screen ---
@@ -441,6 +498,45 @@ export class Game {
     if (leftClick) {
       // Check minimap click first
       if (this.handleMinimapClick(leftClick.x, leftClick.y)) return;
+
+      // Sell mode: click on player structure to sell it
+      if (this.sellMode) {
+        const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
+        const s = this.findStructureAt(world);
+        if (s && s.alive && (s.house === 'Spain' || s.house === 'Greece')) {
+          s.alive = false;
+          // Sell effect: explosion + sell sound
+          const wx = s.cx * CELL_SIZE + CELL_SIZE;
+          const wy = s.cy * CELL_SIZE + CELL_SIZE;
+          this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
+            sprite: 'veh-hit1', spriteStart: 0 });
+          this.audio.play('building_explode');
+          // Spawn a rifleman at the building site (representing recovered crew)
+          const inf = new Entity(UnitType.I_E1, House.Spain, wx, wy);
+          inf.mission = Mission.GUARD;
+          this.entities.push(inf);
+          this.entityById.set(inf.id, inf);
+        }
+        this.sellMode = false;
+        return;
+      }
+
+      // Repair mode: click on damaged player structure to toggle repair
+      if (this.repairMode) {
+        const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
+        const s = this.findStructureAt(world);
+        if (s && s.alive && (s.house === 'Spain' || s.house === 'Greece') && s.hp < s.maxHp) {
+          const idx = this.structures.indexOf(s);
+          if (this.repairingStructures.has(idx)) {
+            this.repairingStructures.delete(idx);
+          } else {
+            this.repairingStructures.add(idx);
+            this.audio.play('heal');
+          }
+        }
+        this.repairMode = false;
+        return;
+      }
 
       // Attack-move: A+click = move to point but attack enemies along the way
       if (this.attackMoveMode) {
@@ -634,6 +730,12 @@ export class Game {
   private damageStructure(s: MapStructure, damage: number): boolean {
     if (!s.alive) return false;
     s.hp = Math.max(0, s.hp - damage);
+    // EVA "base under attack" for player structures (throttled)
+    if ((s.house === House.Spain || s.house === House.Greece) &&
+        this.tick - this.lastBaseAttackEva > GAME_TICKS_PER_SEC * 5) {
+      this.lastBaseAttackEva = this.tick;
+      this.audio.play('eva_base_attack');
+    }
     if (s.hp <= 0) {
       s.alive = false;
       // Spawn destruction explosion
@@ -910,6 +1012,17 @@ export class Game {
     }
 
     if (entity.inRange(entity.target)) {
+      // Check line of sight — can't fire through walls/rocks
+      const ec = entity.cell;
+      const tc = entity.target.cell;
+      if (!this.map.hasLineOfSight(ec.cx, ec.cy, tc.cx, tc.cy)) {
+        // LOS blocked — move toward target to get clear shot
+        entity.animState = AnimState.WALK;
+        entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+        if (entity.attackCooldown > 0) entity.attackCooldown--;
+        return;
+      }
+
       // Turreted vehicles: turret tracks target, body may stay still
       if (entity.hasTurret) {
         entity.turretFacing = directionTo(entity.pos, entity.target.pos);
@@ -925,18 +1038,36 @@ export class Game {
       entity.animState = AnimState.ATTACK;
 
       if (entity.attackCooldown <= 0 && entity.weapon) {
+        entity.attackCooldown = entity.weapon.rof;
+
+        // Apply weapon inaccuracy — scatter the impact point
+        let impactX = entity.target.pos.x;
+        let impactY = entity.target.pos.y;
+        let directHit = true;
+        if (entity.weapon.inaccuracy && entity.weapon.inaccuracy > 0) {
+          const scatter = entity.weapon.inaccuracy * CELL_SIZE;
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * scatter;
+          impactX += Math.cos(angle) * dist;
+          impactY += Math.sin(angle) * dist;
+          // Check if scattered shot still hits the target (within half-cell)
+          const dx = impactX - entity.target.pos.x;
+          const dy = impactY - entity.target.pos.y;
+          directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
+        }
+
         // Apply warhead-vs-armor damage multiplier
         const armorIdx = entity.target.stats.armor === 'none' ? 0
           : entity.target.stats.armor === 'light' ? 1 : 2;
         const mult = WARHEAD_VS_ARMOR[entity.weapon.warhead]?.[armorIdx] ?? 1;
         const damage = Math.max(1, Math.round(entity.weapon.damage * mult));
-        const killed = entity.target.takeDamage(damage);
-        entity.attackCooldown = entity.weapon.rof;
+        const killed = directHit ? entity.target.takeDamage(damage) : false;
 
-        // AOE splash damage to nearby units
+        // AOE splash damage to nearby units (at impact point, not target)
         if (entity.weapon.splash && entity.weapon.splash > 0) {
+          const splashCenter = { x: impactX, y: impactY };
           this.applySplashDamage(
-            entity.target.pos, entity.weapon, entity.target.id,
+            splashCenter, entity.weapon, directHit ? entity.target.id : -1,
             entity.isPlayerUnit,
           );
         }
@@ -961,19 +1092,19 @@ export class Game {
           this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
             sprite: 'piff', spriteStart: 0 });
 
-          // Projectile travel from attacker to target
+          // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
           const projStyle = this.weaponProjectileStyle(entity.weapon.name);
           if (projStyle !== 'bullet' || worldDist(entity.pos, entity.target.pos) > 2) {
             const travelFrames = projStyle === 'bullet' ? 3
               : projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
             this.effects.push({
               type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
-              startX: sx, startY: sy, endX: tx, endY: ty, projStyle,
+              startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
             });
           }
 
-          // Impact at target
-          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 17, size: 8,
+          // Impact explosion at scattered impact point
+          this.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0, maxFrames: 17, size: 8,
             sprite: 'veh-hit1', spriteStart: 0 });
         }
 
@@ -1000,7 +1131,7 @@ export class Game {
             this.killCount++;
           } else {
             this.lossCount++;
-            this.audio.play('unit_lost');
+            this.audio.play('eva_unit_lost');
           }
         }
       }
@@ -1102,18 +1233,37 @@ export class Game {
 
     const isPlayer = entity.isPlayerUnit;
     const ec = entity.cell;
+    const isDog = entity.type === 'DOG';
+    let bestTarget: Entity | null = null;
+    let bestDist = Infinity;
+    let bestIsInfantry = false;
     for (const other of this.entities) {
       if (!other.alive) continue;
       if (isPlayer === other.isPlayerUnit) continue;
       const dist = worldDist(entity.pos, other.pos);
-      if (dist < entity.stats.sight) {
-        // Check line of sight — can't target through walls
-        const oc = other.cell;
-        if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
-        entity.mission = Mission.ATTACK;
-        entity.target = other;
-        break;
+      if (dist >= entity.stats.sight) continue;
+      // Check line of sight — can't target through walls
+      const oc = other.cell;
+      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
+
+      if (isDog) {
+        // Dogs prioritize infantry (useless vs vehicles)
+        const otherIsInf = other.stats.isInfantry;
+        if (otherIsInf && !bestIsInfantry) {
+          bestTarget = other; bestDist = dist; bestIsInfantry = true;
+        } else if (otherIsInf === bestIsInfantry && dist < bestDist) {
+          bestTarget = other; bestDist = dist; bestIsInfantry = otherIsInf;
+        }
+      } else {
+        // Non-dogs: pick closest enemy
+        if (dist < bestDist) {
+          bestTarget = other; bestDist = dist;
+        }
       }
+    }
+    if (bestTarget) {
+      entity.mission = Mission.ATTACK;
+      entity.target = bestTarget;
     }
   }
 
@@ -1158,6 +1308,100 @@ export class Game {
       entity.moveToward(structPos, entity.stats.speed * 0.5);
     }
     if (entity.attackCooldown > 0) entity.attackCooldown--;
+  }
+
+  /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
+  private updateStructureCombat(): void {
+    for (const s of this.structures) {
+      if (!s.alive || !s.weapon) continue;
+      if (s.attackCooldown > 0) { s.attackCooldown--; continue; }
+
+      const isPlayerStruct = s.house === House.Spain || s.house === House.Greece;
+      const sx = s.cx * CELL_SIZE + CELL_SIZE;
+      const sy = s.cy * CELL_SIZE + CELL_SIZE;
+      const structPos: WorldPos = { x: sx, y: sy };
+      const range = s.weapon.range;
+
+      // Find closest enemy in range
+      let bestTarget: Entity | null = null;
+      let bestDist = Infinity;
+      for (const e of this.entities) {
+        if (!e.alive) continue;
+        if (isPlayerStruct === e.isPlayerUnit) continue; // don't shoot friendlies
+        const dist = worldDist(structPos, e.pos);
+        if (dist < range && dist < bestDist) {
+          // LOS check
+          const ec = e.cell;
+          if (!this.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
+          bestTarget = e;
+          bestDist = dist;
+        }
+      }
+
+      if (bestTarget) {
+        s.attackCooldown = s.weapon.rof;
+        // Apply warhead-vs-armor multiplier (structures use HE warhead)
+        const armorIdx = bestTarget.stats.armor === 'none' ? 0
+          : bestTarget.stats.armor === 'light' ? 1 : 2;
+        const mult = WARHEAD_VS_ARMOR['HE' as WarheadType]?.[armorIdx] ?? 1;
+        const damage = Math.max(1, Math.round(s.weapon.damage * mult));
+        const killed = bestTarget.takeDamage(damage);
+
+        // Fire effects
+        this.effects.push({
+          type: 'muzzle', x: sx, y: sy,
+          frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
+        });
+
+        // Tesla coil gets special effect
+        if (s.type === 'TSLA') {
+          this.effects.push({
+            type: 'tesla', x: bestTarget.pos.x, y: bestTarget.pos.y,
+            frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
+          });
+          this.audio.play('teslazap');
+        } else {
+          // Projectile from structure to target
+          this.effects.push({
+            type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: 5, size: 3,
+            startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
+            projStyle: 'bullet',
+          });
+          this.effects.push({
+            type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
+            frame: 0, maxFrames: 10, size: 6, sprite: 'veh-hit1', spriteStart: 0,
+          });
+          this.audio.play('machinegun');
+        }
+
+        // Splash damage
+        if (s.weapon.splash && s.weapon.splash > 0) {
+          this.applySplashDamage(
+            bestTarget.pos,
+            { damage: s.weapon.damage, warhead: 'HE' as WarheadType, splash: s.weapon.splash },
+            bestTarget.id, isPlayerStruct,
+          );
+        }
+
+        if (killed) {
+          this.effects.push({
+            type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
+            frame: 0, maxFrames: 18, size: 16, sprite: 'fball1', spriteStart: 0,
+          });
+          this.renderer.screenShake = Math.max(this.renderer.screenShake, 4);
+          const tc = worldToCell(bestTarget.pos.x, bestTarget.pos.y);
+          this.map.addDecal(tc.cx, tc.cy, bestTarget.stats.isInfantry ? 4 : 8, 0.5);
+          if (isPlayerStruct) this.killCount++;
+          if (bestTarget.isAnt) {
+            this.audio.play('die_ant');
+          } else if (bestTarget.stats.isInfantry) {
+            this.audio.play('die_infantry');
+          } else {
+            this.audio.play('die_vehicle');
+          }
+        }
+      }
+    }
   }
 
   /** Apply AOE splash damage to entities near an impact point */
@@ -1315,6 +1559,9 @@ export class Game {
   /** Render the current frame */
   private render(): void {
     this.renderer.attackMoveMode = this.attackMoveMode;
+    this.renderer.sellMode = this.sellMode;
+    this.renderer.repairMode = this.repairMode;
+    this.renderer.repairingStructures = this.repairingStructures;
     this.renderer.render(
       this.camera,
       this.map,

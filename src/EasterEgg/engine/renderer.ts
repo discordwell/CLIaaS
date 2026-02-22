@@ -70,6 +70,9 @@ export class Renderer {
   private pal: number[][] | null = null;
   screenShake = 0;      // remaining shake ticks
   attackMoveMode = false; // show attack-move cursor indicator
+  sellMode = false;      // show sell cursor indicator
+  repairMode = false;    // show repair cursor indicator
+  repairingStructures = new Set<number>(); // indices of structures being repaired
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -132,6 +135,8 @@ export class Renderer {
 
     this.renderSelectionBox(input);
     if (this.attackMoveMode) this.renderAttackMoveIndicator(input);
+    if (this.sellMode) this.renderModeLabel(input, 'SELL', 'rgba(255,200,60,0.9)');
+    if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
     this.renderMinimap(map, entities, camera);
     this.renderUnitInfo(entities, selectedIds);
   }
@@ -406,6 +411,22 @@ export class Renderer {
         ctx.lineWidth = 1;
         ctx.strokeRect(screenX + 2, screenY + 2, CELL_SIZE - 4, CELL_SIZE - 4);
         if (vis === 1) ctx.globalAlpha = 1;
+      }
+
+      // Health bar on damaged structures (visible only)
+      if (vis === 2 && s.hp < s.maxHp) {
+        const barX = screenX + CELL_SIZE;
+        const barY = screenY - 2;
+        this.renderHealthBar(barX, barY, CELL_SIZE * 1.5, s.hp / s.maxHp, false);
+      }
+
+      // Repair indicator: pulsing green border
+      const sIdx = structures.indexOf(s);
+      if (this.repairingStructures.has(sIdx)) {
+        const pulse = 0.4 + 0.4 * Math.sin(tick * 0.3);
+        ctx.strokeStyle = `rgba(80,255,80,${pulse})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(screenX, screenY, CELL_SIZE * 2, CELL_SIZE * 2);
       }
     }
   }
@@ -886,6 +907,13 @@ export class Renderer {
     ctx.fillText('A', mx + s + 2, my - 2);
   }
 
+  private renderModeLabel(input: InputState, label: string, color: string): void {
+    const ctx = this.ctx;
+    ctx.font = 'bold 10px monospace';
+    ctx.fillStyle = color;
+    ctx.fillText(label, input.mouseX + 12, input.mouseY - 4);
+  }
+
   // ─── Pause Overlay ──────────────────────────────────────
 
   renderPauseOverlay(): void {
@@ -952,7 +980,7 @@ export class Renderer {
     if (selected.length === 0) return;
 
     const panelW = 180;
-    const panelH = selected.length === 1 ? 50 : 30;
+    const panelH = selected.length === 1 ? 62 : 30;
     const px = 6;
     const py = this.height - panelH - 6;
 
@@ -973,8 +1001,16 @@ export class Renderer {
       // HP — palette light gray
       ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
       ctx.fillText(`HP: ${unit.hp}/${unit.maxHp}`, px + 8, py + 28);
+      // Weapon, armor, range
+      const wpn = unit.weapon;
+      const armorStr = unit.stats.armor === 'none' ? 'None' : unit.stats.armor === 'light' ? 'Light' : 'Heavy';
+      if (wpn) {
+        ctx.fillText(`${wpn.name}  Rng:${wpn.range}  Arm:${armorStr}`, px + 8, py + 41);
+      } else {
+        ctx.fillText(`Unarmed  Arm:${armorStr}`, px + 8, py + 41);
+      }
       // Health bar
-      this.renderHealthBar(px + panelW / 2, py + 38, panelW - 20, unit.hp / unit.maxHp, true);
+      this.renderHealthBar(px + panelW / 2, py + 50, panelW - 20, unit.hp / unit.maxHp, true);
     } else {
       // Multiple selected — palette green
       ctx.fillStyle = this.palColor(PAL_GREEN_HP);

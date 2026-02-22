@@ -196,7 +196,8 @@ export interface WeaponStats {
   rof: number;    // rate of fire (ticks between shots)
   range: number;  // range in cells
   warhead: WarheadType;
-  splash?: number; // AOE splash radius in cells (0 = point damage only)
+  splash?: number;    // AOE splash radius in cells (0 = point damage only)
+  inaccuracy?: number; // scatter radius in cells (0 = perfect aim)
 }
 
 // Unit stat definitions from scenario INI
@@ -232,11 +233,11 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   MachineGun: { name: 'MachineGun', damage: 10, rof: 15, range: 4, warhead: 'SA' },
   Rifle: { name: 'Rifle', damage: 15, rof: 20, range: 3, warhead: 'SA' },
   Bazooka: { name: 'Bazooka', damage: 40, rof: 60, range: 5, warhead: 'AP', splash: 1 },
-  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5, warhead: 'HE', splash: 1.5 },
+  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5, warhead: 'HE', splash: 1.5, inaccuracy: 0.5 },
   Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3, warhead: 'Fire', splash: 1 },
   DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5, warhead: 'Super' },
   TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super', splash: 1 },
-  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2 },
+  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2, inaccuracy: 1.5 },
 };
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)

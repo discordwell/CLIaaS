@@ -481,6 +481,13 @@ function isAntTeam(team: TeamType): boolean {
 }
 
 /** A placed structure on the map (static building, not a unit) */
+export interface StructureWeapon {
+  damage: number;
+  range: number;     // range in cells
+  rof: number;       // ticks between shots
+  splash?: number;   // AOE radius in cells
+}
+
 export interface MapStructure {
   type: string;       // building type code (WEAP, POWR, TENT, etc.)
   image: string;      // sprite sheet name (lowercase)
@@ -490,7 +497,20 @@ export interface MapStructure {
   hp: number;         // current HP (0-256 scale)
   maxHp: number;      // max HP (256 = full)
   alive: boolean;     // whether structure is still standing
+  weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
+  attackCooldown: number;    // ticks until next shot
 }
+
+/** Weapon stats for defensive structures */
+const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
+  HBOX:  { damage: 25, range: 5, rof: 15 },             // Camo Pillbox
+  PBOX:  { damage: 25, range: 5, rof: 15 },             // Pillbox
+  GUN:   { damage: 40, range: 6, rof: 20, splash: 0.5 }, // Guard Tower
+  TSLA:  { damage: 80, range: 7, rof: 40, splash: 1 },  // Tesla Coil
+  SAM:   { damage: 50, range: 8, rof: 25 },             // SAM Site
+  AGUN:  { damage: 40, range: 6, rof: 20 },             // Anti-aircraft Gun
+  FTUR:  { damage: 20, range: 5, rof: 10 },             // Flame Tower
+};
 
 // Building type → sprite image name (only include buildings we have sprites for)
 const STRUCTURE_IMAGES: Record<string, string> = {
@@ -597,6 +617,8 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       hp: s.hp,
       maxHp: 256,
       alive: s.hp > 0,
+      weapon: STRUCTURE_WEAPONS[s.type],
+      attackCooldown: 0,
     });
     // Mark structure footprint cells as impassable (WALL terrain)
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];

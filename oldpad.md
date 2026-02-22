@@ -1,5 +1,12 @@
 # Archived Session Summaries
 
+## 2026-02-22T20:00Z — Session 9: Bug Fixes & Visual Fidelity
+- Fixed 3 critical bugs: RAF throttling, edge scroll drift, input event ordering
+- Added fog of war, procedural terrain, particle effects, death fade, selection circles
+- Improved health bars, unit info panel, fog-aware minimap
+- Rate-limited AI scanning, pathfinding swap-and-pop optimization
+- Committed 88b515a
+
 ## 2026-02-22T18:30Z — Session 8: Native TS Ant Mission Engine
 - Replaced WASM/Emscripten Easter egg with pure TypeScript/Canvas 2D game engine
 - Built 10 engine modules: types, assets, camera, input, entity, map, pathfinding, renderer, scenario, index

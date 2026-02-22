@@ -11,7 +11,8 @@ type SoundName =
   | 'explode_sm' | 'explode_lg'
   | 'die_infantry' | 'die_vehicle' | 'die_ant'
   | 'move_ack' | 'attack_ack' | 'select'
-  | 'unit_lost' | 'building_explode' | 'heal';
+  | 'unit_lost' | 'building_explode' | 'heal'
+  | 'eva_unit_lost' | 'eva_base_attack' | 'eva_acknowledged';
 
 export class AudioManager {
   private ctx: AudioContext | null = null;
@@ -89,6 +90,9 @@ export class AudioManager {
       case 'unit_lost': this.synthUnitLost(t, out); break;
       case 'building_explode': this.synthBuildingExplode(t, out); break;
       case 'heal': this.synthHeal(t, out); break;
+      case 'eva_unit_lost': this.synthEvaUnitLost(t, out); break;
+      case 'eva_base_attack': this.synthEvaBaseAttack(t, out); break;
+      case 'eva_acknowledged': this.synthEvaAcknowledged(t, out); break;
     }
   }
 
@@ -446,5 +450,52 @@ export class AudioManager {
     o.frequency.linearRampToValueAtTime(800, t + 0.12);
     o.connect(og).connect(out);
     o.start(t); o.stop(t + 0.12);
+  }
+
+  // --- EVA announcements (robotic multi-tone sequences) ---
+
+  private synthEvaUnitLost(t: number, out: AudioNode): void {
+    // "Unit lost" — descending three-note robotic sequence
+    const notes = [700, 500, 350];
+    notes.forEach((freq, i) => {
+      const dt = t + i * 0.12;
+      const o = this.osc('square', freq);
+      const g = this.gain(0.12);
+      g.gain.setValueAtTime(0.12, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.1);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.1);
+    });
+  }
+
+  private synthEvaBaseAttack(t: number, out: AudioNode): void {
+    // "Base under attack" — urgent alternating two-note alarm
+    for (let i = 0; i < 4; i++) {
+      const dt = t + i * 0.1;
+      const freq = i % 2 === 0 ? 900 : 700;
+      const o = this.osc('square', freq);
+      const g = this.gain(0.15);
+      g.gain.setValueAtTime(0.15, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.08);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.08);
+    }
+  }
+
+  private synthEvaAcknowledged(t: number, out: AudioNode): void {
+    // "Acknowledged" — ascending two-note confirmation
+    const o1 = this.osc('square', 500);
+    const g1 = this.gain(0.1);
+    g1.gain.setValueAtTime(0.1, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    o1.connect(g1).connect(out);
+    o1.start(t); o1.stop(t + 0.08);
+
+    const o2 = this.osc('square', 800);
+    const g2 = this.gain(0.1);
+    g2.gain.setValueAtTime(0.1, t + 0.1);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    o2.connect(g2).connect(out);
+    o2.start(t + 0.1); o2.stop(t + 0.18);
   }
 }

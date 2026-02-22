@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-02-23T09:00Z — Session 15: Base Defense, Sell/Repair, EVA, Polish
+- Added artillery scatter/inaccuracy — weapons with inaccuracy field scatter impact point randomly
+- Inaccuracy set on Grenade (0.5) and ArtilleryShell (1.5); projectiles travel to scattered point
+- Added dog anti-infantry targeting priority — dogs prefer infantry over vehicles in guard scan
+- Improved guard scan: all units now pick closest enemy (was first-in-list)
+- Added LOS check in updateAttack — units can't fire through walls, move to get clear shot
+- Added structure health bars on damaged buildings (visible cells only)
+- Expanded unit info panel: weapon name, range, armor class for single selection
+- Added sell mode (Q key) — sells player structures, spawns rifleman, with cursor/label indicator
+- Added repair mode (R key) — toggles repair on damaged structures (1 HP/tick), pulsing green border
+- Added defensive structure auto-fire: HBOX, PBOX, GUN, TSLA, SAM, AGUN, FTUR attack nearby enemies
+- Structure weapons defined in STRUCTURE_WEAPONS lookup with damage, range, rof, splash
+- Tesla coils get special tesla zap effect; other structures fire bullet projectiles
+- Structure weapons now apply warhead-vs-armor multipliers (code review fix)
+- Added EVA announcements: eva_unit_lost (3-note descending), eva_base_attack (4-note alarm)
+- Base attack EVA throttled to once per 5 seconds to prevent spam
+- Imported House, UnitType enums into index.ts for proper type usage
+- Code review found 1 critical bug (structure weapons ignoring armor), fixed
+- All changes type check clean (npx tsc --noEmit)
+
 ## 2026-02-23T07:00Z — Session 14: Combat Mechanics, LOS, Structure Damage
 - Added Bresenham line-of-sight (LOS) to map.ts — vision/targeting blocked by walls/rocks
 - Integrated LOS into fog of war reveal, guard scan, and ant AI targeting
@@ -78,25 +98,6 @@
 - Committed b2d85e3, pushed to main
 - Note: build broken by pre-existing drizzle-orm import in cli/db/ingest-zendesk.ts (not our code)
 
-## 2026-02-22T20:00Z — Session 9: Bug Fixes & Visual Fidelity
-- Fixed 3 critical bugs found during browser testing:
-  1. RAF throttling: switched game loop to setTimeout (immune to Chrome background tab throttling)
-  2. Edge scroll drift: added mouseActive guard (camera no longer scrolls when mouse at 0,0)
-  3. Input event ordering: moved clearEvents() AFTER processInput() (selection/commands now work)
-- Added full visual fidelity to renderer:
-  - Fog of war system (shroud=black, fog=semi-transparent, visible=clear)
-  - Procedural terrain variation via cellHash
-  - Explosion, muzzle flash, blood splatter, tesla arc particle effects
-  - Death fade animation, damage flash overlay
-  - Selection circles (green ellipses under selected units)
-  - Improved health bars with pip segments, color coding (green/yellow/red)
-  - Unit info panel for selected units
-  - Fog-aware minimap with camera viewport indicator
-- Entity system: added deathTick, damageFlash, lastGuardScan, lastAIScan fields
-- Rate-limited AI scanning (guard every 15 ticks, ant AI every 8 ticks)
-- Pathfinding: swap-and-pop optimization for O(1) open list removal
-- Committed 88b515a, pushed to main
-- Note: Chrome extension clicks don't reach canvas mousedown/mouseup handlers (testing artifact only)
 
 # Key Findings
 
