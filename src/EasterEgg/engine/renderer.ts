@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, type ProductionItem } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, type ProductionItem } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
 import { Entity } from './entity';
@@ -630,7 +630,18 @@ export class Renderer {
         const totalFrames = sheet.meta.frameCount;
         const damaged = s.hp < s.maxHp * 0.5; // less than 50% health
         let frame = 0;
-        if (totalFrames > 2) {
+        // GUN turret: 128 frames = [32 normal][32 firing][32 damaged][32 damaged firing]
+        if (s.type === 'GUN' && s.turretDir !== undefined) {
+          const facingFrame = BODY_SHAPE[(s.turretDir * 4) % 32];
+          const baseFrame = damaged ? 64 : 0;
+          const firingOffset = (s.firingFlash && s.firingFlash > 0) ? 32 : 0;
+          frame = baseFrame + firingOffset + facingFrame;
+        // SAM launcher: 68 frames = [2 closed + 32 rotation][34 damaged]
+        } else if (s.type === 'SAM' && s.turretDir !== undefined) {
+          const baseFrame = damaged ? 34 : 0;
+          const facingFrame = BODY_SHAPE[(s.turretDir * 4) % 32];
+          frame = baseFrame + 2 + facingFrame;
+        } else if (totalFrames > 2) {
           const halfFrames = Math.floor(totalFrames / 2);
           const baseFrame = damaged ? halfFrames : 0;
           // Animate idle loop (every 8 ticks = ~0.5s per frame)

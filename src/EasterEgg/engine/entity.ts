@@ -253,7 +253,7 @@ export class Entity {
       case AnimState.ATTACK:
         return bodyFrame; // fire effect is separate
       case AnimState.DIE:
-        return 32 + Math.min(this.animFrame, 7);
+        return bodyFrame; // freeze at last facing; explosion effect handles visual
       default:
         return bodyFrame;
     }

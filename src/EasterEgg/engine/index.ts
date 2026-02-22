@@ -2383,6 +2383,12 @@ export class Game {
         const damage = Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
         const killed = directHit ? entity.target.takeDamage(damage, entity.weapon.warhead) : false;
 
+        // Retaliation: victim attacks shooter if idle/unengaged
+        if (directHit && !killed) {
+          this.triggerRetaliation(entity.target, entity);
+          this.scatterInfantry(entity.target, entity.pos);
+        }
+
         // AOE splash damage to nearby units (at impact point, not target)
         if (entity.weapon.splash && entity.weapon.splash > 0) {
           const splashCenter = { x: impactX, y: impactY };
@@ -2830,11 +2836,28 @@ export class Game {
   }
 
   /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
+  /** Turreted structure types (GUN/SAM) — turret rotates to face target */
+  private static readonly TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
+
   private updateStructureCombat(): void {
     const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     for (const s of this.structures) {
       if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
       if (s.ammo === 0) continue; // out of ammo (e.g. SCA04EA TSLA Ammo=3)
+
+      // Turret rotation tick (every frame, independent of cooldown)
+      if (Game.TURRETED_STRUCTURES.has(s.type)) {
+        if (s.turretDir === undefined) s.turretDir = 4; // default: South
+        if (s.desiredTurretDir === undefined) s.desiredTurretDir = s.turretDir;
+        if (s.turretDir !== s.desiredTurretDir) {
+          const diff = (s.desiredTurretDir - s.turretDir + 8) % 8;
+          s.turretDir = diff <= 4
+            ? (s.turretDir + 1) % 8
+            : (s.turretDir + 7) % 8;
+        }
+        if (s.firingFlash !== undefined && s.firingFlash > 0) s.firingFlash--;
+      }
+
       if (s.attackCooldown > 0) {
         if (!isLowPower || this.tick % 2 === 0) s.attackCooldown--;
         continue;
@@ -2863,7 +2886,12 @@ export class Game {
       }
 
       if (bestTarget) {
+        // Update turret direction for turreted structures
+        if (Game.TURRETED_STRUCTURES.has(s.type)) {
+          s.desiredTurretDir = directionTo(structPos, bestTarget.pos);
+        }
         s.attackCooldown = s.weapon.rof;
+        if (Game.TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
         if (s.ammo > 0) s.ammo--; // consume ammo (ignores -1 unlimited)
         // Apply warhead-vs-armor multiplier
         const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
@@ -3022,6 +3050,35 @@ export class Game {
     return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
   }
 
+  /** Trigger retaliation: a damaged unit without a target attacks the shooter.
+   *  In original RA, idle/moving units always counter-attack when hit. */
+  private triggerRetaliation(victim: Entity, attacker: Entity): void {
+    if (!victim.alive || !attacker.alive) return;
+    if (victim.isPlayerUnit === attacker.isPlayerUnit) return; // no friendly retaliation
+    if (!victim.weapon) return; // unarmed units can't retaliate
+    // Only retarget if no current target or current target is dead
+    if (victim.target && victim.target.alive) return;
+    // Don't interrupt scripted team missions (except HUNT which already attacks)
+    if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
+    victim.target = attacker;
+  }
+
+  /** Infantry scatter: push infantry slightly away from attacker on direct hit.
+   *  In original RA, infantry move randomly when shot at. */
+  private scatterInfantry(victim: Entity, attackerPos: WorldPos): void {
+    if (!victim.alive || !victim.stats.isInfantry || victim.isAnt) return;
+    if (Math.random() > 0.4) return; // 40% chance to scatter per hit
+    const angle = Math.atan2(victim.pos.y - attackerPos.y, victim.pos.x - attackerPos.x);
+    const jitter = (Math.random() - 0.5) * 1.2; // add randomness to scatter direction
+    const scatterX = victim.pos.x + Math.cos(angle + jitter) * CELL_SIZE * 0.5;
+    const scatterY = victim.pos.y + Math.sin(angle + jitter) * CELL_SIZE * 0.5;
+    const sc = worldToCell(scatterX, scatterY);
+    if (this.map.isPassable(sc.cx, sc.cy)) {
+      victim.pos.x = scatterX;
+      victim.pos.y = scatterY;
+    }
+  }
+
   /** Apply AOE splash damage to entities near an impact point */
   private applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
@@ -3043,6 +3100,11 @@ export class Game {
       const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
       const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5 * friendlyMod));
       const killed = other.takeDamage(splashDmg, weapon.warhead);
+
+      // Retaliation from splash damage
+      if (!killed && attacker && !isFriendly) {
+        this.triggerRetaliation(other, attacker);
+      }
 
       // Infantry scatter: push nearby infantry away from explosion
       if (other.alive && other.stats.isInfantry && dist < splashRange * 0.8) {
@@ -3721,7 +3783,7 @@ export class Game {
   /** Spawn a crate on a random revealed, passable cell */
   private spawnCrate(): void {
     // Build crate distribution — silver crates are common, wood rarer
-    // Default: money×2, heal, veterancy, unit. Overrides from [General] replace silver/wood types.
+    // Default: money×2, heal, veterancy, unit. Overrides from [General] replace silver/wood/water types.
     const crateTypes: CrateType[] = ['money', 'money', 'heal', 'veterancy', 'unit'];
     if (this.crateOverrides.silver) {
       const t = Game.CRATE_NAME_MAP[this.crateOverrides.silver];
@@ -3730,6 +3792,10 @@ export class Game {
     if (this.crateOverrides.wood) {
       const t = Game.CRATE_NAME_MAP[this.crateOverrides.wood];
       if (t) crateTypes[4] = t; // wood = last slot
+    }
+    if (this.crateOverrides.water) {
+      const t = Game.CRATE_NAME_MAP[this.crateOverrides.water];
+      if (t) crateTypes[2] = t; // water = middle slot
     }
     const type = crateTypes[Math.floor(Math.random() * crateTypes.length)];
     // Try up to 20 random cells to find a valid spawn
