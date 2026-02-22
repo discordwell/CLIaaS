@@ -7,6 +7,77 @@ import { type CellPos, cellIndexToPos, cellToWorld, House, UnitType } from './ty
 import { Entity } from './entity';
 import { GameMap, Terrain } from './map';
 
+// === Mission Metadata ===
+
+export interface MissionInfo {
+  id: string;        // scenario file ID (e.g. 'SCA01EA')
+  title: string;     // display name
+  briefing: string;  // pre-mission briefing text
+  objective: string; // one-line objective
+}
+
+export const MISSIONS: MissionInfo[] = [
+  {
+    id: 'SCA01EA',
+    title: 'It Came From Red Alert!',
+    briefing: 'Commander, we have a situation. Giant mutant ants have been spotted near a civilian settlement. Reports indicate they are extremely aggressive and have already overwhelmed a patrol unit. Take your forces and eliminate the ant threat before they spread further. Exercise caution — these creatures are heavily armored.',
+    objective: 'Destroy all giant ants in the area.',
+  },
+  {
+    id: 'SCA02EA',
+    title: 'The Hive',
+    briefing: 'Intelligence has located the primary ant nest. These creatures are breeding at an alarming rate and must be stopped at the source. You have been given a stronger force for this assault. Push into the hive territory and destroy every last ant. Expect heavy resistance.',
+    objective: 'Locate and destroy the ant hive.',
+  },
+  {
+    id: 'SCA03EA',
+    title: 'The Aftermath',
+    briefing: 'Despite our earlier victories, a massive ant swarm has been detected heading toward our forward operating base. Hold your position and repel the assault. Reinforcements are limited — use your forces wisely. We cannot afford to lose this foothold.',
+    objective: 'Defend the base and eliminate all attacking ants.',
+  },
+  {
+    id: 'SCA04EA',
+    title: 'The Last Stand',
+    briefing: 'This is it, Commander. We have tracked the ants to their final stronghold — the queen\'s chamber deep in hostile territory. A full assault force has been assembled. Destroy the queen and every remaining ant to end this threat once and for all. Good luck.',
+    objective: 'Destroy the ant queen and all remaining forces.',
+  },
+];
+
+/** Get mission info by index (0-based) */
+export function getMission(index: number): MissionInfo | null {
+  return MISSIONS[index] ?? null;
+}
+
+/** Get mission index by scenario ID */
+export function getMissionIndex(scenarioId: string): number {
+  return MISSIONS.findIndex(m => m.id === scenarioId);
+}
+
+// === localStorage Progress ===
+
+const PROGRESS_KEY = 'antmissions_progress';
+
+export function loadProgress(): number {
+  try {
+    const val = localStorage.getItem(PROGRESS_KEY);
+    return val ? Math.min(parseInt(val, 10) || 0, MISSIONS.length) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function saveProgress(completedMission: number): void {
+  try {
+    const current = loadProgress();
+    const next = completedMission + 1;
+    if (next > current) {
+      localStorage.setItem(PROGRESS_KEY, String(next));
+    }
+  } catch {
+    // localStorage unavailable
+  }
+}
+
 interface ScenarioData {
   name: string;
   mapBounds: { x: number; y: number; w: number; h: number };

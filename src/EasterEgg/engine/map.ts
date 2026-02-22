@@ -31,6 +31,9 @@ export class GameMap {
   /** Fog of war: 0=shroud, 1=fog (explored), 2=visible */
   visibility: Uint8Array;
 
+  /** Indices of cells currently marked visible (for efficient downgrade) */
+  private visibleCells: number[] = [];
+
   constructor() {
     this.cells = new Array(MAP_CELLS * MAP_CELLS).fill(Terrain.CLEAR);
     this.occupancy = new Int32Array(MAP_CELLS * MAP_CELLS);
@@ -112,10 +115,12 @@ export class GameMap {
 
   /** Update fog of war: downgrade visible to fog, then reveal around units */
   updateFogOfWar(units: Array<{ x: number; y: number; sight: number }>): void {
-    // Downgrade all visible cells to fog (explored)
-    for (let i = 0; i < this.visibility.length; i++) {
-      if (this.visibility[i] === 2) this.visibility[i] = 1;
+    // Downgrade only previously visible cells to fog (O(visible) instead of O(16384))
+    for (const idx of this.visibleCells) {
+      if (this.visibility[idx] === 2) this.visibility[idx] = 1;
     }
+    this.visibleCells.length = 0;
+
     // Reveal around each player unit
     for (const u of units) {
       const cx = Math.floor(u.x / CELL_SIZE);
@@ -125,7 +130,13 @@ export class GameMap {
       for (let dy = -s; dy <= s; dy++) {
         for (let dx = -s; dx <= s; dx++) {
           if (dx * dx + dy * dy <= s2) {
-            this.setVisibility(cx + dx, cy + dy, 2);
+            const rx = cx + dx;
+            const ry = cy + dy;
+            if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+              const idx = ry * MAP_CELLS + rx;
+              this.visibility[idx] = 2;
+              this.visibleCells.push(idx);
+            }
           }
         }
       }

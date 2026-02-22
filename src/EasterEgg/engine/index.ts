@@ -15,6 +15,8 @@ import { GameMap } from './map';
 import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
 import { loadScenario } from './scenario';
+export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
+export type { MissionInfo } from './scenario';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
 
@@ -34,6 +36,7 @@ export class Game {
   state: GameState = 'loading';
   tick = 0;
   missionName = '';
+  scenarioId = '';
 
   // Callbacks
   onStateChange?: (state: GameState) => void;
@@ -41,7 +44,6 @@ export class Game {
 
   // Internal
   private canvas: HTMLCanvasElement;
-  private animFrameId = 0;
   private timerId = 0;
   private lastTime = 0;
   private accumulator = 0;
@@ -59,6 +61,7 @@ export class Game {
   /** Load assets and start a scenario */
   async start(scenarioId = 'SCA01EA'): Promise<void> {
     this.state = 'loading';
+    this.scenarioId = scenarioId;
     this.onStateChange?.('loading');
     resetEntityIds();
 
@@ -100,9 +103,7 @@ export class Game {
   /** Stop the game */
   stop(): void {
     this.state = 'paused';
-    if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
     if (this.timerId) clearTimeout(this.timerId);
-    this.animFrameId = 0;
     this.timerId = 0;
     this.input.destroy();
   }

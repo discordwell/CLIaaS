@@ -20,6 +20,7 @@ import { registerKayakoClassicCommands } from './kayako-classic.js';
 import { registerHelpcrunchCommands } from './helpcrunch.js';
 import { registerFreshdeskCommands } from './freshdesk.js';
 import { registerGrooveCommands } from './groove.js';
+import { registerDbCommands } from './db.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -43,4 +44,5 @@ export function registerCommands(program: Command): void {
   registerDuplicatesCommand(program);
   registerSLACommand(program);
   registerSentimentCommand(program);
+  registerDbCommands(program);
 }
