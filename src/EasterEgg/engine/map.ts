@@ -134,8 +134,10 @@ export class GameMap {
             const ry = cy + dy;
             if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
               const idx = ry * MAP_CELLS + rx;
-              this.visibility[idx] = 2;
-              this.visibleCells.push(idx);
+              if (this.visibility[idx] !== 2) {
+                this.visibility[idx] = 2;
+                this.visibleCells.push(idx);
+              }
             }
           }
         }

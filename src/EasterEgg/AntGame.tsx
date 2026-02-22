@@ -80,7 +80,11 @@ export default function AntGame({ onExit }: AntGameProps) {
     if (nextIdx < MISSIONS.length) {
       selectMission(nextIdx);
     } else {
-      // All missions complete — back to select
+      // All missions complete — stop game and back to select
+      if (gameRef.current) {
+        gameRef.current.stop();
+        gameRef.current = null;
+      }
       setScreen('select');
     }
   }, [missionIndex, selectMission]);
@@ -90,6 +94,14 @@ export default function AntGame({ onExit }: AntGameProps) {
       launchMission(selectedMission);
     }
   }, [selectedMission, launchMission]);
+
+  const handleMissionSelect = useCallback(() => {
+    if (gameRef.current) {
+      gameRef.current.stop();
+      gameRef.current = null;
+    }
+    setScreen('select');
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -112,7 +124,7 @@ export default function AntGame({ onExit }: AntGameProps) {
           onExit();
         }
       }
-      if (screen === 'select' && e.key >= '1' && e.key <= '4') {
+      if (screen === 'select' && e.key >= '1' && e.key <= String(MISSIONS.length)) {
         const idx = parseInt(e.key) - 1;
         if (idx <= unlockedMissions) selectMission(idx);
       }
@@ -560,7 +572,7 @@ export default function AntGame({ onExit }: AntGameProps) {
               {gameState === 'lost' ? 'Retry' : 'Replay'}
             </button>
             <button
-              onClick={() => setScreen('select')}
+              onClick={handleMissionSelect}
               style={{
                 background: '#222',
                 color: '#aaa',
