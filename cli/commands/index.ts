@@ -14,6 +14,8 @@ import { registerPipelineCommand } from './pipeline.js';
 import { registerWatchCommand } from './watch.js';
 import { registerBatchCommand } from './batch.js';
 import { registerDuplicatesCommand } from './duplicates.js';
+import { registerSLACommand } from './sla.js';
+import { registerSentimentCommand } from './sentiment.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -31,4 +33,6 @@ export function registerCommands(program: Command): void {
   registerWatchCommand(program);
   registerBatchCommand(program);
   registerDuplicatesCommand(program);
+  registerSLACommand(program);
+  registerSentimentCommand(program);
 }
