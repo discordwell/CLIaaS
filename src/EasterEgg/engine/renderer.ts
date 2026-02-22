@@ -119,6 +119,7 @@ export class Renderer {
     }
 
     this.renderTerrain(camera, map, tick);
+    this.renderDecals(camera, map);
     this.renderOverlays(camera, map);
     this.renderStructures(camera, map, structures, assets, tick);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
@@ -287,6 +288,26 @@ export class Renderer {
     }
   }
 
+  // ─── Terrain Decals (scorch marks, craters) ────────────
+
+  private renderDecals(camera: Camera, map: GameMap): void {
+    const ctx = this.ctx;
+    for (const d of map.decals) {
+      const screen = camera.worldToScreen(d.cx * CELL_SIZE + CELL_SIZE / 2, d.cy * CELL_SIZE + CELL_SIZE / 2);
+      if (screen.x < -d.size * 2 || screen.x > this.width + d.size * 2 ||
+          screen.y < -d.size * 2 || screen.y > this.height + d.size * 2) continue;
+      ctx.fillStyle = `rgba(20,15,10,${d.alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(screen.x, screen.y, d.size, d.size * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Darker center
+      ctx.fillStyle = `rgba(10,5,0,${d.alpha * 0.6})`;
+      ctx.beginPath();
+      ctx.ellipse(screen.x, screen.y, d.size * 0.5, d.size * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   // ─── Overlays (ore, gems, walls) ────────────────────────
 
   private renderOverlays(camera: Camera, map: GameMap): void {
@@ -345,6 +366,7 @@ export class Renderer {
   ): void {
     const ctx = this.ctx;
     for (const s of structures) {
+      if (!s.alive) continue; // destroyed structures are not rendered
       const vis = map.getVisibility(s.cx, s.cy);
       if (vis === 0) continue; // fully shrouded
 

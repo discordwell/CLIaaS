@@ -83,6 +83,7 @@ export interface InfantryAnim {
   walk: DoInfo;       // walking
   fire: DoInfo;       // firing weapon (standing)
   die1: DoInfo;       // death animation 1
+  die2?: DoInfo;      // death animation 2 (alternative death, e.g. blown up)
   idle?: DoInfo;      // idle fidget animation (optional)
 }
 
@@ -93,6 +94,7 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     walk:  { frame: 24, count: 6, jump: 6 },
     fire:  { frame: 72, count: 7, jump: 7 },
     die1:  { frame: 200, count: 8, jump: 0 },
+    die2:  { frame: 208, count: 8, jump: 0 },
     idle:  { frame: 224, count: 6, jump: 0 },
   },
   E2: {
@@ -194,6 +196,7 @@ export interface WeaponStats {
   rof: number;    // rate of fire (ticks between shots)
   range: number;  // range in cells
   warhead: WarheadType;
+  splash?: number; // AOE splash radius in cells (0 = point damage only)
 }
 
 // Unit stat definitions from scenario INI
@@ -223,17 +226,17 @@ export const UNIT_STATS: Record<string, UnitStats> = {
 export const WEAPON_STATS: Record<string, WeaponStats> = {
   Mandible: { name: 'Mandible', damage: 50, rof: 15, range: 1.5, warhead: 'Super' },
   TeslaZap: { name: 'TeslaZap', damage: 60, rof: 25, range: 1.75, warhead: 'Super' },
-  FireballLauncher: { name: 'FireballLauncher', damage: 40, rof: 20, range: 3, warhead: 'Fire' },
+  FireballLauncher: { name: 'FireballLauncher', damage: 40, rof: 20, range: 3, warhead: 'Fire', splash: 1.5 },
   TankGun: { name: 'TankGun', damage: 25, rof: 50, range: 5, warhead: 'AP' },
-  MammothTusk: { name: 'MammothTusk', damage: 75, rof: 80, range: 5.5, warhead: 'AP' },
+  MammothTusk: { name: 'MammothTusk', damage: 75, rof: 80, range: 5.5, warhead: 'AP', splash: 1.5 },
   MachineGun: { name: 'MachineGun', damage: 10, rof: 15, range: 4, warhead: 'SA' },
   Rifle: { name: 'Rifle', damage: 15, rof: 20, range: 3, warhead: 'SA' },
-  Bazooka: { name: 'Bazooka', damage: 40, rof: 60, range: 5, warhead: 'AP' },
-  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5, warhead: 'HE' },
-  Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3, warhead: 'Fire' },
+  Bazooka: { name: 'Bazooka', damage: 40, rof: 60, range: 5, warhead: 'AP', splash: 1 },
+  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5, warhead: 'HE', splash: 1.5 },
+  Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3, warhead: 'Fire', splash: 1 },
   DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5, warhead: 'Super' },
-  TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super' },
-  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE' },
+  TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super', splash: 1 },
+  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2 },
 };
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)

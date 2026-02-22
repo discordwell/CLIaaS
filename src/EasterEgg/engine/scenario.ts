@@ -487,7 +487,9 @@ export interface MapStructure {
   house: House;
   cx: number;         // cell position
   cy: number;
-  hp: number;         // 0-256 (proportion of max HP)
+  hp: number;         // current HP (0-256 scale)
+  maxHp: number;      // max HP (256 = full)
+  alive: boolean;     // whether structure is still standing
 }
 
 // Building type → sprite image name (only include buildings we have sprites for)
@@ -593,6 +595,8 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       cx: pos.cx,
       cy: pos.cy,
       hp: s.hp,
+      maxHp: 256,
+      alive: s.hp > 0,
     });
     // Mark structure footprint cells as impassable (WALL terrain)
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];

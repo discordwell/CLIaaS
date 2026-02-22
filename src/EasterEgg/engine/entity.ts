@@ -9,6 +9,12 @@ import {
   INFANTRY_ANIMS, BODY_SHAPE, ANT_ANIM,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
 } from './types';
+// Structure reference is typed loosely to avoid circular dependency with scenario.ts
+export interface StructureRef {
+  alive: boolean;
+  cx: number;
+  cy: number;
+}
 
 export interface TeamMissionEntry {
   mission: number;  // TMISSION_* type
@@ -42,6 +48,7 @@ export class Entity {
   // Mission / AI
   mission: Mission = Mission.GUARD;
   target: Entity | null = null;
+  targetStructure: StructureRef | null = null; // for attacking buildings
   moveTarget: WorldPos | null = null;
   path: CellPos[] = [];
   pathIndex = 0;
@@ -53,6 +60,7 @@ export class Entity {
 
   // Death / visual
   deathTick = 0;       // ticks since death (for corpse fade + cleanup)
+  deathVariant = 0;    // 0=die1, 1=die2 (selected randomly on death)
   damageFlash = 0;     // ticks remaining for damage flash effect
 
   // AI rate-limiting
@@ -146,7 +154,7 @@ export class Entity {
           return d.frame + dir * d.jump + (this.animFrame % d.count);
         }
         case AnimState.DIE: {
-          const d = anim.die1;
+          const d = (this.deathVariant === 1 && anim.die2) ? anim.die2 : anim.die1;
           return d.frame + Math.min(this.animFrame, d.count - 1);
         }
         default: {
@@ -191,6 +199,8 @@ export class Entity {
       this.animFrame = 0;
       this.animTick = 0;
       this.deathTick = 0;
+      // Select death animation variant randomly
+      this.deathVariant = Math.random() < 0.4 ? 1 : 0;
       return true;
     }
     return false;

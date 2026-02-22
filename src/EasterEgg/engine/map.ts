@@ -38,6 +38,19 @@ export class GameMap {
   /** Overlay types from OverlayPack (0xFF = no overlay) */
   overlay: Uint8Array;
 
+  /** Terrain decals: scorch marks and craters from explosions (capped at 200) */
+  decals: Array<{ cx: number; cy: number; size: number; alpha: number }> = [];
+  private static readonly MAX_DECALS = 200;
+
+  /** Add a terrain decal (capped to prevent memory growth) */
+  addDecal(cx: number, cy: number, size: number, alpha: number): void {
+    if (this.decals.length >= GameMap.MAX_DECALS) {
+      // Remove oldest decal (FIFO)
+      this.decals.shift();
+    }
+    this.decals.push({ cx, cy, size, alpha });
+  }
+
   /** Cell triggers: maps cell index to trigger name (set by scenario loader) */
   cellTriggers = new Map<number, string>();
 
@@ -137,7 +150,7 @@ export class GameMap {
     }
     this.visibleCells.length = 0;
 
-    // Reveal around each player unit
+    // Reveal around each player unit (with LOS blocking)
     for (const u of units) {
       const cx = Math.floor(u.x / CELL_SIZE);
       const cy = Math.floor(u.y / CELL_SIZE);
@@ -149,6 +162,8 @@ export class GameMap {
             const rx = cx + dx;
             const ry = cy + dy;
             if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+              // Check line of sight from unit to this cell
+              if (!this.hasLineOfSight(cx, cy, rx, ry)) continue;
               const idx = ry * MAP_CELLS + rx;
               if (this.visibility[idx] !== 2) {
                 this.visibility[idx] = 2;
@@ -159,6 +174,28 @@ export class GameMap {
         }
       }
     }
+  }
+
+  /** Bresenham line-of-sight: check if a clear line exists between two cells.
+   *  Returns true if no opaque cell (ROCK, WALL) blocks the line.
+   *  Water and trees are transparent (you can see over water/through sparse trees). */
+  hasLineOfSight(x0: number, y0: number, x1: number, y1: number): boolean {
+    let dx = Math.abs(x1 - x0);
+    let dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    // Don't check start or end cell — only intermediate cells
+    while (x0 !== x1 || y0 !== y1) {
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx)  { err += dx; y0 += sy; }
+      // Check the intermediate cell (skip destination)
+      if (x0 === x1 && y0 === y1) break;
+      const t = this.getTerrain(x0, y0);
+      if (t === Terrain.ROCK || t === Terrain.WALL) return false;
+    }
+    return true;
   }
 
   /** Initialize a basic map with impassable borders */

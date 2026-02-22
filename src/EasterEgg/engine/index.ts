@@ -6,7 +6,7 @@
 import {
   type WorldPos, CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, worldDist, directionTo, worldToCell,
-  WARHEAD_VS_ARMOR,
+  WARHEAD_VS_ARMOR, type WarheadType,
 } from './types';
 import { AssetManager } from './assets';
 import { AudioManager } from './audio';
@@ -290,6 +290,13 @@ export class Game {
     if (this.entities.length < before) {
       this.entityById.clear();
       for (const e of this.entities) this.entityById.set(e.id, e);
+      // Prune dead IDs from control groups
+      for (const [g, ids] of this.controlGroups) {
+        for (const id of ids) {
+          if (!this.entityById.has(id)) ids.delete(id);
+        }
+        if (ids.size === 0) this.controlGroups.delete(g);
+      }
     }
 
     // Check win/lose — but only if triggers have had time to spawn ants
@@ -511,6 +518,7 @@ export class Game {
     if (rightClick) {
       const world = this.camera.screenToWorld(rightClick.x, rightClick.y);
       const target = this.findEntityAt(world);
+      const targetStruct = !target ? this.findStructureAt(world) : null;
 
       let commandIssued = false;
       // Spread group move targets so units don't all converge to one cell
@@ -526,6 +534,13 @@ export class Game {
         if (target && !target.isPlayerUnit && target.alive) {
           unit.mission = Mission.ATTACK;
           unit.target = target;
+          unit.targetStructure = null;
+          unit.moveTarget = null;
+        } else if (targetStruct && targetStruct.alive) {
+          // Attack structure
+          unit.mission = Mission.ATTACK;
+          unit.target = null;
+          unit.targetStructure = targetStruct;
           unit.moveTarget = null;
         } else {
           // Spread units in a grid around the target point
@@ -536,6 +551,7 @@ export class Game {
           unit.mission = Mission.MOVE;
           unit.moveTarget = { x: goalX, y: goalY };
           unit.target = null;
+          unit.targetStructure = null;
           // Clear team mission scripts when player gives direct orders
           unit.teamMissions = [];
           unit.teamMissionIndex = 0;
@@ -549,7 +565,7 @@ export class Game {
         }
       }
       if (commandIssued) {
-        const isAttack = target && !target.isPlayerUnit;
+        const isAttack = (target && !target.isPlayerUnit) || targetStruct;
         this.audio.play(isAttack ? 'attack_ack' : 'move_ack');
         // Spawn command marker at destination
         this.effects.push({
@@ -598,6 +614,43 @@ export class Game {
       }
     }
     return closest;
+  }
+
+  /** Find a structure near a world position */
+  private findStructureAt(pos: WorldPos): MapStructure | null {
+    const cx = Math.floor(pos.x / CELL_SIZE);
+    const cy = Math.floor(pos.y / CELL_SIZE);
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      // Check if click is within structure footprint (rough 2x2 area)
+      if (cx >= s.cx && cx <= s.cx + 2 && cy >= s.cy && cy <= s.cy + 2) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  /** Damage a structure, return true if destroyed */
+  private damageStructure(s: MapStructure, damage: number): boolean {
+    if (!s.alive) return false;
+    s.hp = Math.max(0, s.hp - damage);
+    if (s.hp <= 0) {
+      s.alive = false;
+      // Spawn destruction explosion
+      const wx = s.cx * CELL_SIZE + CELL_SIZE;
+      const wy = s.cy * CELL_SIZE + CELL_SIZE;
+      this.effects.push({
+        type: 'explosion', x: wx, y: wy,
+        frame: 0, maxFrames: 22, size: 20,
+        sprite: 'fball1', spriteStart: 0,
+      });
+      this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
+      this.audio.play('building_explode');
+      // Leave large scorch mark
+      this.map.addDecal(s.cx, s.cy, 14, 0.6);
+      return true;
+    }
+    return false;
   }
 
   /** Update a single entity's AI and movement */
@@ -761,18 +814,22 @@ export class Game {
     }
   }
 
-  /** Ant AI — hunt nearest visible player unit (fog-aware) */
+  /** Ant AI — hunt nearest visible player unit (fog-aware, LOS-aware) */
   private updateAntAI(entity: Entity): void {
     if (entity.mission === Mission.ATTACK && entity.target?.alive) return;
 
     let nearest: Entity | null = null;
     let nearestDist = Infinity;
+    const ec = entity.cell;
 
     for (const other of this.entities) {
       if (!other.alive || !other.isPlayerUnit) continue;
       const dist = worldDist(entity.pos, other.pos);
       // Fog-aware: ants can only see units within their sight range
       if (dist > entity.stats.sight * 1.5) continue;
+      // LOS check: can't see through walls
+      const oc = other.cell;
+      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
       if (dist < nearestDist) {
         nearestDist = dist;
         nearest = other;
@@ -833,6 +890,18 @@ export class Game {
 
   /** Attack target */
   private updateAttack(entity: Entity): void {
+    // Handle structure targets
+    if (entity.targetStructure) {
+      if (!entity.targetStructure.alive) {
+        entity.targetStructure = null;
+        entity.mission = Mission.GUARD;
+        entity.animState = AnimState.IDLE;
+        return;
+      }
+      this.updateAttackStructure(entity, entity.targetStructure as MapStructure);
+      return;
+    }
+
     if (!entity.target?.alive) {
       entity.target = null;
       entity.mission = Mission.GUARD;
@@ -863,6 +932,14 @@ export class Game {
         const damage = Math.max(1, Math.round(entity.weapon.damage * mult));
         const killed = entity.target.takeDamage(damage);
         entity.attackCooldown = entity.weapon.rof;
+
+        // AOE splash damage to nearby units
+        if (entity.weapon.splash && entity.weapon.splash > 0) {
+          this.applySplashDamage(
+            entity.target.pos, entity.weapon, entity.target.id,
+            entity.isPlayerUnit,
+          );
+        }
 
         // Play weapon sound
         this.audio.play(this.audio.weaponSound(entity.weapon.name));
@@ -905,6 +982,10 @@ export class Game {
             sprite: 'fball1', spriteStart: 0 });
           // Screen shake on large explosion
           this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
+          // Scorch mark on terrain
+          const tc = worldToCell(tx, ty);
+          const scorchSize = entity.target.stats.isInfantry ? 4 : 8;
+          this.map.addDecal(tc.cx, tc.cy, scorchSize, 0.5);
           // Death sound
           if (entity.target.isAnt) {
             this.audio.play('die_ant');
@@ -919,6 +1000,7 @@ export class Game {
             this.killCount++;
           } else {
             this.lossCount++;
+            this.audio.play('unit_lost');
           }
         }
       }
@@ -973,22 +1055,161 @@ export class Game {
     }
   }
 
-  /** Guard mode — attack nearby enemies (rate-limited to every 15 ticks) */
+  /** Guard mode — attack nearby enemies or auto-heal (rate-limited to every 15 ticks) */
   private updateGuard(entity: Entity): void {
     entity.animState = AnimState.IDLE;
+
+    // Medic heal cooldown ticks down every frame (not rate-limited)
+    if (entity.type === 'MEDI' && entity.attackCooldown > 0) {
+      entity.attackCooldown--;
+    }
 
     if (this.tick - entity.lastGuardScan < 15) return;
     entity.lastGuardScan = this.tick;
 
+    // Medic auto-heal: find nearest damaged friendly infantry
+    if (entity.type === 'MEDI' && entity.isPlayerUnit) {
+      let healTarget: Entity | null = null;
+      let healDist = Infinity;
+      for (const other of this.entities) {
+        if (!other.alive || other.id === entity.id) continue;
+        if (!other.isPlayerUnit || !other.stats.isInfantry) continue;
+        if (other.hp >= other.maxHp) continue;
+        const dist = worldDist(entity.pos, other.pos);
+        if (dist < entity.stats.sight * 1.5 && dist < healDist) {
+          healDist = dist;
+          healTarget = other;
+        }
+      }
+      if (healTarget) {
+        // Move toward and heal
+        if (healDist < 1.5) {
+          entity.animState = AnimState.ATTACK; // heal animation
+          if (entity.attackCooldown <= 0) {
+            healTarget.hp = Math.min(healTarget.maxHp, healTarget.hp + 8);
+            entity.attackCooldown = 20; // heal every ~1.3s (cooldown decremented each tick above)
+            entity.desiredFacing = directionTo(entity.pos, healTarget.pos);
+            entity.tickRotation();
+            this.audio.play('heal');
+          }
+        } else {
+          entity.animState = AnimState.WALK;
+          entity.moveToward(healTarget.pos, entity.stats.speed * 0.5);
+        }
+        return;
+      }
+    }
+
     const isPlayer = entity.isPlayerUnit;
+    const ec = entity.cell;
     for (const other of this.entities) {
       if (!other.alive) continue;
       if (isPlayer === other.isPlayerUnit) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist < entity.stats.sight) {
+        // Check line of sight — can't target through walls
+        const oc = other.cell;
+        if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
         entity.mission = Mission.ATTACK;
         entity.target = other;
         break;
+      }
+    }
+  }
+
+  /** Attack a structure (building) */
+  private updateAttackStructure(entity: Entity, s: MapStructure): void {
+    const structPos: WorldPos = {
+      x: s.cx * CELL_SIZE + CELL_SIZE,
+      y: s.cy * CELL_SIZE + CELL_SIZE,
+    };
+    const dist = worldDist(entity.pos, structPos);
+    const range = entity.weapon?.range ?? 2;
+
+    if (dist <= range) {
+      entity.desiredFacing = directionTo(entity.pos, structPos);
+      entity.tickRotation();
+      if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
+        entity.animState = AnimState.IDLE;
+        return;
+      }
+      entity.animState = AnimState.ATTACK;
+      if (entity.attackCooldown <= 0 && entity.weapon) {
+        const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15)); // structures use 256-scale HP
+        const destroyed = this.damageStructure(s, damage);
+        entity.attackCooldown = entity.weapon.rof;
+        this.audio.play(this.audio.weaponSound(entity.weapon.name));
+        // Muzzle + impact effects
+        this.effects.push({
+          type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
+          frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
+        });
+        this.effects.push({
+          type: 'explosion', x: structPos.x, y: structPos.y,
+          frame: 0, maxFrames: 10, size: 8,
+          sprite: 'veh-hit1', spriteStart: 0,
+        });
+        if (destroyed) {
+          if (entity.isPlayerUnit) this.killCount++;
+        }
+      }
+    } else {
+      entity.animState = AnimState.WALK;
+      entity.moveToward(structPos, entity.stats.speed * 0.5);
+    }
+    if (entity.attackCooldown > 0) entity.attackCooldown--;
+  }
+
+  /** Apply AOE splash damage to entities near an impact point */
+  private applySplashDamage(
+    center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
+    primaryTargetId: number, attackerIsPlayer: boolean,
+  ): void {
+    const splashRange = weapon.splash ?? 0;
+    if (splashRange <= 0) return;
+
+    for (const other of this.entities) {
+      if (!other.alive || other.id === primaryTargetId) continue;
+      // Don't splash friendly units (no friendly fire)
+      if (other.isPlayerUnit === attackerIsPlayer) continue;
+      const dist = worldDist(center, other.pos);
+      if (dist > splashRange) continue;
+
+      // Splash damage falls off linearly with distance (100% at center, 25% at edge)
+      const falloff = 1 - (dist / splashRange) * 0.75;
+      const armorIdx = other.stats.armor === 'none' ? 0
+        : other.stats.armor === 'light' ? 1 : 2;
+      const mult = WARHEAD_VS_ARMOR[weapon.warhead]?.[armorIdx] ?? 1;
+      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5));
+      const killed = other.takeDamage(splashDmg);
+
+      // Infantry scatter: push nearby infantry away from explosion
+      if (other.alive && other.stats.isInfantry && dist < splashRange * 0.8) {
+        const angle = Math.atan2(other.pos.y - center.y, other.pos.x - center.x);
+        const pushDist = CELL_SIZE * (1 - dist / splashRange);
+        const scatterX = other.pos.x + Math.cos(angle) * pushDist;
+        const scatterY = other.pos.y + Math.sin(angle) * pushDist;
+        // Only scatter to passable terrain
+        const sc = worldToCell(scatterX, scatterY);
+        if (this.map.isPassable(sc.cx, sc.cy)) {
+          other.pos.x = scatterX;
+          other.pos.y = scatterY;
+        }
+      }
+
+      if (killed) {
+        this.effects.push({
+          type: 'explosion', x: other.pos.x, y: other.pos.y,
+          frame: 0, maxFrames: 18, size: 12,
+          sprite: 'fball1', spriteStart: 0,
+        });
+        this.renderer.screenShake = Math.max(this.renderer.screenShake, 4);
+        if (other.isAnt) this.audio.play('die_ant');
+        else if (other.stats.isInfantry) this.audio.play('die_infantry');
+        else this.audio.play('die_vehicle');
+        // Track kills/losses from splash
+        if (attackerIsPlayer) this.killCount++;
+        else this.lossCount++;
       }
     }
   }

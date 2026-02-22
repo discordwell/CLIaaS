@@ -10,7 +10,8 @@ type SoundName =
   | 'grenade' | 'bazooka' | 'dogjaw'
   | 'explode_sm' | 'explode_lg'
   | 'die_infantry' | 'die_vehicle' | 'die_ant'
-  | 'move_ack' | 'attack_ack' | 'select';
+  | 'move_ack' | 'attack_ack' | 'select'
+  | 'unit_lost' | 'building_explode' | 'heal';
 
 export class AudioManager {
   private ctx: AudioContext | null = null;
@@ -85,6 +86,9 @@ export class AudioManager {
       case 'move_ack': this.synthAck(t, out, 800 + (Math.random() - 0.5) * 200); break;
       case 'attack_ack': this.synthAck(t, out, 600 + (Math.random() - 0.5) * 150); break;
       case 'select': this.synthSelect(t, out); break;
+      case 'unit_lost': this.synthUnitLost(t, out); break;
+      case 'building_explode': this.synthBuildingExplode(t, out); break;
+      case 'heal': this.synthHeal(t, out); break;
     }
   }
 
@@ -397,5 +401,50 @@ export class AudioManager {
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
     o2.connect(g2).connect(out);
     o2.start(t + 0.05); o2.stop(t + 0.09);
+  }
+
+  // --- Notification sounds ---
+
+  private synthUnitLost(t: number, out: AudioNode): void {
+    // RA-style descending two-note warning tone
+    const o1 = this.osc('sine', 600);
+    const g1 = this.gain(0.2);
+    g1.gain.setValueAtTime(0.2, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o1.connect(g1).connect(out);
+    o1.start(t); o1.stop(t + 0.15);
+
+    const o2 = this.osc('sine', 400);
+    const g2 = this.gain(0.2);
+    g2.gain.setValueAtTime(0.2, t + 0.15);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o2.connect(g2).connect(out);
+    o2.start(t + 0.15); o2.stop(t + 0.35);
+  }
+
+  private synthBuildingExplode(t: number, out: AudioNode): void {
+    // Heavy explosion with sustained rumble
+    this.synthExplode(t, out, 0.4, 0.6);
+    // Additional crumble: low-freq noise
+    const n = this.noise(0.4);
+    const ng = this.gain(0.2);
+    const nf = this.filter('lowpass', 300);
+    ng.gain.setValueAtTime(0.1, t + 0.2);
+    ng.gain.linearRampToValueAtTime(0.2, t + 0.3);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    n.connect(nf).connect(ng).connect(out);
+    n.start(t + 0.15); n.stop(t + 0.6);
+  }
+
+  private synthHeal(t: number, out: AudioNode): void {
+    // Soft ascending tone
+    const o = this.osc('sine', 500);
+    const og = this.gain(0.08);
+    og.gain.setValueAtTime(0.08, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    o.frequency.setValueAtTime(500, t);
+    o.frequency.linearRampToValueAtTime(800, t + 0.12);
+    o.connect(og).connect(out);
+    o.start(t); o.stop(t + 0.12);
   }
 }
