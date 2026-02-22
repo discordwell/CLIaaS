@@ -34,11 +34,20 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const body = await request.json();
+  const body = await request.json().catch(() => ({} as Record<string, unknown>));
   const { status, priority } = body as { status?: string; priority?: string };
+
+  const VALID_STATUSES = ['open', 'pending', 'solved', 'closed'];
+  const VALID_PRIORITIES = ['urgent', 'high', 'normal', 'low'];
 
   if (!status && !priority) {
     return NextResponse.json({ error: "No updates provided" }, { status: 400 });
+  }
+  if (status && !VALID_STATUSES.includes(status)) {
+    return NextResponse.json({ error: `Invalid status: ${status}` }, { status: 400 });
+  }
+  if (priority && !VALID_PRIORITIES.includes(priority)) {
+    return NextResponse.json({ error: `Invalid priority: ${priority}` }, { status: 400 });
   }
 
   const source = resolveSource(id);
@@ -52,6 +61,10 @@ export async function PATCH(
   }
 
   const externalId = extractExternalId(id);
+  const numericId = parseInt(externalId, 10);
+  if (isNaN(numericId)) {
+    return NextResponse.json({ error: 'Invalid ticket ID format' }, { status: 400 });
+  }
 
   try {
     const updates: Record<string, string> = {};
@@ -62,28 +75,28 @@ export async function PATCH(
       case 'zendesk':
         await zendeskUpdateTicket(
           auth as Parameters<typeof zendeskUpdateTicket>[0],
-          parseInt(externalId, 10),
+          numericId,
           updates,
         );
         break;
       case 'helpcrunch':
         await helpcrunchUpdateChat(
           auth as Parameters<typeof helpcrunchUpdateChat>[0],
-          parseInt(externalId, 10),
+          numericId,
           updates,
         );
         break;
       case 'freshdesk':
         await freshdeskUpdateTicket(
           auth as Parameters<typeof freshdeskUpdateTicket>[0],
-          parseInt(externalId, 10),
+          numericId,
           updates,
         );
         break;
       case 'groove':
         await grooveUpdateTicket(
           auth as Parameters<typeof grooveUpdateTicket>[0],
-          parseInt(externalId, 10),
+          numericId,
           updates,
         );
         break;

@@ -6,7 +6,7 @@ import { freshdeskCreateTicket } from '@cli/connectors/freshdesk';
 import { grooveCreateTicket } from '@cli/connectors/groove';
 
 export async function POST(request: Request) {
-  const body = await request.json();
+  const body = await request.json().catch(() => ({} as Record<string, unknown>));
   const { source, subject, message, priority, to } = body as {
     source: ConnectorName;
     subject?: string;
@@ -15,8 +15,13 @@ export async function POST(request: Request) {
     to?: string; // email for Groove, customer ID for HelpCrunch
   };
 
+  const VALID_SOURCES = ['zendesk', 'helpcrunch', 'freshdesk', 'groove'];
+
   if (!source || !message?.trim()) {
     return NextResponse.json({ error: 'source and message are required' }, { status: 400 });
+  }
+  if (!VALID_SOURCES.includes(source)) {
+    return NextResponse.json({ error: `Invalid source: ${source}` }, { status: 400 });
   }
 
   const auth = getAuth(source);
@@ -25,7 +30,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    let result: Record<string, unknown>;
+    let result: Record<string, unknown> = {};
 
     switch (source) {
       case 'zendesk':

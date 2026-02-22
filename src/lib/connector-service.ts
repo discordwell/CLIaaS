@@ -76,7 +76,8 @@ export function getConnectorStatus(id: ConnectorId): ConnectorMeta {
   const def = defs[id];
   const envVars: Record<string, string | undefined> = {};
   for (const key of def.envKeys) {
-    envVars[key] = process.env[key];
+    // Only expose whether the var is set, never the raw value
+    envVars[key] = isSet(process.env[key]) ? '••••••••' : undefined;
   }
   const configured = def.envKeys.every(k => isSet(process.env[k]));
   const manifest = readManifest(def.exportDir);

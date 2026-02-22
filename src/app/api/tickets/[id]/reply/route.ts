@@ -11,7 +11,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const body = await request.json();
+  const body = await request.json().catch(() => ({} as Record<string, unknown>));
   const { message, isNote } = body as { message: string; isNote?: boolean };
 
   if (!message?.trim()) {
@@ -29,13 +29,17 @@ export async function POST(
   }
 
   const externalId = extractExternalId(id);
+  const numericId = parseInt(externalId, 10);
+  if (isNaN(numericId)) {
+    return NextResponse.json({ error: 'Invalid ticket ID format' }, { status: 400 });
+  }
 
   try {
     switch (source) {
       case 'zendesk':
         await zendeskPostComment(
           auth as Parameters<typeof zendeskPostComment>[0],
-          parseInt(externalId, 10),
+          numericId,
           message,
           !isNote,
         );
@@ -43,7 +47,7 @@ export async function POST(
       case 'helpcrunch':
         await helpcrunchPostMessage(
           auth as Parameters<typeof helpcrunchPostMessage>[0],
-          parseInt(externalId, 10),
+          numericId,
           message,
         );
         break;
@@ -51,13 +55,13 @@ export async function POST(
         if (isNote) {
           await freshdeskAddNote(
             auth as Parameters<typeof freshdeskAddNote>[0],
-            parseInt(externalId, 10),
+            numericId,
             message,
           );
         } else {
           await freshdeskReply(
             auth as Parameters<typeof freshdeskReply>[0],
-            parseInt(externalId, 10),
+            numericId,
             message,
           );
         }
@@ -65,7 +69,7 @@ export async function POST(
       case 'groove':
         await groovePostMessage(
           auth as Parameters<typeof groovePostMessage>[0],
-          parseInt(externalId, 10),
+          numericId,
           message,
           !!isNote,
         );
