@@ -415,7 +415,7 @@ export class Renderer {
     const x1 = Math.min(input.dragStartX, input.mouseX);
     const y1 = Math.min(input.dragStartY, input.mouseY);
     const x2 = Math.max(input.dragStartX, input.mouseX);
-    const y2 = Math.max(input.dragStartX, input.mouseY);
+    const y2 = Math.max(input.dragStartY, input.mouseY);
 
     // Semi-transparent fill
     ctx.fillStyle = 'rgba(0,255,0,0.08)';

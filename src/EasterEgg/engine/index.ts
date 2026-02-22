@@ -99,6 +99,7 @@ export class Game {
 
   /** Stop the game */
   stop(): void {
+    this.state = 'paused';
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
     if (this.timerId) clearTimeout(this.timerId);
     this.animFrameId = 0;
@@ -122,9 +123,8 @@ export class Game {
     // Fixed timestep updates
     while (this.accumulator >= this.tickInterval) {
       this.accumulator -= this.tickInterval;
-      if (this.state === 'playing') {
-        this.update();
-      }
+      this.update();
+      if (this.state !== 'playing') break;
     }
 
     this.render();
@@ -423,7 +423,7 @@ export class Game {
       if (!other.alive) continue;
       if (isPlayer === other.isPlayerUnit) continue;
       const dist = worldDist(entity.pos, other.pos);
-      if (dist < (entity.stats.sight * CELL_SIZE)) {
+      if (dist < entity.stats.sight) {
         entity.mission = Mission.ATTACK;
         entity.target = other;
         break;
