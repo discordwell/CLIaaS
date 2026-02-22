@@ -58,6 +58,12 @@ export default async function DashboardPage() {
             Customers
           </Link>
           <Link
+            href="/chat"
+            className="border-2 border-zinc-950 bg-white px-6 py-3 font-mono text-sm font-bold uppercase text-zinc-950 transition-colors hover:bg-zinc-100"
+          >
+            Live Chat
+          </Link>
+          <Link
             href="/demo"
             className="border-2 border-zinc-950 bg-white px-6 py-3 font-mono text-sm font-bold uppercase text-zinc-950 transition-colors hover:bg-zinc-100"
           >
