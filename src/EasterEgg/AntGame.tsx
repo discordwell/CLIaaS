@@ -5,6 +5,8 @@ import {
   Game, type GameState, type MissionInfo,
   MISSIONS, getMissionIndex, loadProgress, saveProgress,
 } from './engine';
+import { TestRunner, type TestLogEntry } from './engine/testRunner';
+import { resolvePreset } from './engine/turbo';
 
 interface AntGameProps {
   onExit: () => void;
@@ -23,6 +25,9 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [unlockedMissions, setUnlockedMissions] = useState(loadProgress);
   const [selectedMission, setSelectedMission] = useState<MissionInfo | null>(null);
   const [missionIndex, setMissionIndex] = useState(0);
+  const [testMode, setTestMode] = useState(false);
+  const [testLog, setTestLog] = useState<TestLogEntry[]>([]);
+  const testRunnerRef = useRef<TestRunner | null>(null);
 
   const launchMission = useCallback(async (mission: MissionInfo) => {
     if (!canvasRef.current) return;
@@ -103,9 +108,38 @@ export default function AntGame({ onExit }: AntGameProps) {
     setScreen('select');
   }, []);
 
+  // Detect ?anttest= URL param and launch automated test run
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const anttest = params.get('anttest');
+    if (!anttest || !canvasRef.current) return;
+
+    setTestMode(true);
+    setScreen('playing');
+
+    const preset = resolvePreset(anttest);
+    const runner = new TestRunner(canvasRef.current, preset);
+    testRunnerRef.current = runner;
+
+    runner.onLog = (entry) => {
+      setTestLog(prev => [...prev, entry]);
+    };
+
+    runner.runAll();
+
+    return () => {
+      runner.stop();
+      testRunnerRef.current = null;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (testRunnerRef.current) {
+        testRunnerRef.current.stop();
+        testRunnerRef.current = null;
+      }
       if (gameRef.current) {
         gameRef.current.stop();
         gameRef.current = null;
@@ -161,8 +195,45 @@ export default function AntGame({ onExit }: AntGameProps) {
       background: '#000',
       overflow: 'hidden',
     }}>
+      {/* ── Test Mode Overlay ── */}
+      {testMode && testLog.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 100010,
+          fontFamily: 'monospace',
+          fontSize: '13px',
+          lineHeight: '1.6',
+          background: 'rgba(0,0,0,0.75)',
+          padding: '12px 16px',
+          borderRadius: '4px',
+          border: '1px solid #333',
+          maxWidth: '500px',
+          pointerEvents: 'none',
+        }}>
+          <div style={{ color: '#44ff44', fontWeight: 'bold', marginBottom: '6px' }}>
+            E2E Ant Mission Test
+          </div>
+          {testLog.map((entry, i) => {
+            let color = '#888';
+            let prefix = '';
+            if (entry.type === 'start') { color = '#ffaa00'; prefix = '[START] '; }
+            if (entry.type === 'pass') { color = '#44ff44'; prefix = '[PASS]  '; }
+            if (entry.type === 'fail') { color = '#ff4444'; prefix = '[FAIL]  '; }
+            if (entry.type === 'timeout') { color = '#ff8800'; prefix = '[TIMEOUT] '; }
+            if (entry.type === 'done') { color = entry.detail?.startsWith('ALL') ? '#44ff44' : '#ff4444'; prefix = ''; }
+            return (
+              <div key={i} style={{ color }}>
+                {prefix}{entry.mission ? `${entry.mission}: ` : ''}{entry.detail || entry.mission || ''}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── Mission Select Screen ── */}
-      {screen === 'select' && (
+      {!testMode && screen === 'select' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -324,7 +395,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Mission Briefing Screen ── */}
-      {screen === 'briefing' && selectedMission && (
+      {!testMode && screen === 'briefing' && selectedMission && (
         <div
           style={{
             position: 'absolute',
@@ -463,7 +534,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Loading Overlay ── */}
-      {screen === 'loading' && (
+      {!testMode && screen === 'loading' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -502,7 +573,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Win/Lose Overlay ── */}
-      {(gameState === 'won' || gameState === 'lost') && screen === 'playing' && (
+      {!testMode && (gameState === 'won' || gameState === 'lost') && screen === 'playing' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -644,7 +715,7 @@ export default function AntGame({ onExit }: AntGameProps) {
 
       {/* ── Game Canvas ── */}
       <div style={{
-        display: screen === 'playing' || screen === 'loading' ? 'flex' : 'none',
+        display: testMode || screen === 'playing' || screen === 'loading' ? 'flex' : 'none',
         justifyContent: 'center',
         alignItems: 'center',
         width: '100vw',

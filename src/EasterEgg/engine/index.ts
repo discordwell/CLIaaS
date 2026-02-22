@@ -48,9 +48,13 @@ export class Game {
   private globals = new Set<number>();
   private waypoints = new Map<number, { cx: number; cy: number }>();
 
+  // Turbo mode (for E2E test runner)
+  turboMultiplier = 1;
+
   // Callbacks
   onStateChange?: (state: GameState) => void;
   onLoadProgress?: (loaded: number, total: number) => void;
+  onTick?: (game: Game) => void;
 
   // Internal
   private canvas: HTMLCanvasElement;
@@ -143,7 +147,7 @@ export class Game {
     const now = performance.now();
     const dt = now - this.lastTime;
     this.lastTime = now;
-    this.accumulator += Math.min(dt, 200);
+    this.accumulator += Math.min(dt, 200 * this.turboMultiplier);
 
     // Fixed timestep updates
     while (this.accumulator >= this.tickInterval) {
@@ -167,6 +171,9 @@ export class Game {
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
+
+    // Auto-player hook (before processInput — no conflict since no mouse events in test mode)
+    this.onTick?.(this);
 
     // Process input (before clearing events so we can read them)
     this.processInput();
