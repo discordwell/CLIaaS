@@ -47,3 +47,6 @@ next-env.d.ts
 
 # Easter Egg - Red Alert C++ source (cloned at build time)
 /src/EasterEgg/CnC_and_Red_Alert
+
+# Easter Egg - Red Alert music (downloaded separately, ~122MB)
+/public/ra/music/

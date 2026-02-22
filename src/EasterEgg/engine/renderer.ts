@@ -103,6 +103,7 @@ export class Renderer {
   missionTimer = 0; // 0 = hidden
   missionName = ''; // mission title shown as overlay at start
   theatre = 'TEMPERATE'; // map theatre (affects terrain colors)
+  musicTrack = ''; // currently playing music track name
   // Placement ghost
   placementItem: ProductionItem | null = null;
   placementCx = 0;
@@ -1689,6 +1690,31 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
+  // ─── Music Track Display ─────────────────────────────────
+
+  private lastMusicTrack = '';
+  private musicTrackShowTick = 0;
+
+  renderMusicTrack(tick: number): void {
+    if (!this.musicTrack) return;
+    // Detect track change → reset display timer
+    if (this.musicTrack !== this.lastMusicTrack) {
+      this.lastMusicTrack = this.musicTrack;
+      this.musicTrackShowTick = tick;
+    }
+    // Show for 4 seconds (60 ticks) after track change
+    const age = tick - this.musicTrackShowTick;
+    if (age > 60) return;
+    const alpha = age < 45 ? 0.7 : 0.7 * (1 - (age - 45) / 15);
+    const ctx = this.ctx;
+    const gameW = this.width - this.sidebarW;
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = `rgba(180,180,180,${alpha.toFixed(2)})`;
+    ctx.fillText(`♪ ${this.musicTrack}`, gameW - 6, this.height - 6);
+    ctx.textAlign = 'left';
+  }
+
   // ─── Pause Overlay ──────────────────────────────────────
 
   renderPauseOverlay(): void {
@@ -1750,6 +1776,11 @@ export class Renderer {
         'Home/Spc  Center on selection',
         'Arrow/WASD Scroll map',
         'Minimap    Click to move camera',
+      ]},
+      { title: 'AUDIO', lines: [
+        '+/-       Volume up/down',
+        'M         Mute/unmute',
+        'N         Next music track',
       ]},
       { title: 'SYSTEM', lines: [
         'Esc       Cancel / Pause',

@@ -1,8 +1,232 @@
 /**
- * Audio system — Web Audio API synthesized sound effects.
- * Generates RA-style retro sounds using oscillators, noise, and filters.
- * No external audio files needed.
+ * Audio system — Web Audio API synthesized sound effects + music playback.
+ * SFX: Generates RA-style retro sounds using oscillators, noise, and filters.
+ * Music: Streams original Red Alert soundtrack MP3s from public/ra/music/.
  */
+
+/** Track list for the Red Alert soundtrack (Frank Klepacki, 1996) */
+const MUSIC_TRACKS = [
+  '01_hell_march',
+  '02_radio',
+  '03_crush',
+  '04_roll_out',
+  '05_mud',
+  '06_twin_cannon',
+  '07_face_the_enemy',
+  '08_run',
+  '09_terminate',
+  '10_big_foot',
+  '11_workmen',
+  '12_militant_force',
+  '13_dense',
+  '14_vector',
+  '15_smash',
+];
+
+/**
+ * Music player — streams MP3 soundtrack files via HTML5 Audio.
+ * Features: shuffled playlist, crossfade, volume/mute sync, pause/resume.
+ */
+export class MusicPlayer {
+  private basePath: string;
+  private playlist: number[] = [];
+  private playlistIndex = 0;
+  private current: HTMLAudioElement | null = null;
+  private fading: HTMLAudioElement | null = null; // outgoing track during crossfade
+  private volume = 0.4;
+  private muted = false;
+  private playing = false;
+  private available = false; // true once we confirm at least one track loads
+  private pendingPlay = false; // play() called before probe completed
+  private fadeTimer: ReturnType<typeof setInterval> | null = null;
+  private trackName = ''; // current track display name
+
+  constructor(basePath = '/ra/music') {
+    this.basePath = basePath;
+    this.shuffle();
+    // Probe first track to see if music files are present
+    this.probe();
+  }
+
+  /** Check if music files exist (non-blocking) */
+  private probe(): void {
+    const audio = new Audio();
+    const idx = this.playlist[0];
+    audio.src = `${this.basePath}/${MUSIC_TRACKS[idx]}.mp3`;
+    audio.preload = 'metadata';
+    audio.addEventListener('loadedmetadata', () => {
+      this.available = true;
+      // If play() was called before probe completed, start now
+      if (this.pendingPlay) {
+        this.pendingPlay = false;
+        this.play();
+      }
+      audio.src = ''; // release
+    }, { once: true });
+    audio.addEventListener('error', () => {
+      this.available = false;
+      this.pendingPlay = false;
+    }, { once: true });
+  }
+
+  /** Whether music files are present */
+  get isAvailable(): boolean { return this.available; }
+
+  /** Current track human-readable name */
+  get currentTrack(): string { return this.trackName; }
+
+  /** Whether music is actively playing */
+  get isPlaying(): boolean { return this.playing; }
+
+  /** Shuffle playlist using Fisher-Yates */
+  private shuffle(): void {
+    this.playlist = MUSIC_TRACKS.map((_, i) => i);
+    for (let i = this.playlist.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.playlist[i], this.playlist[j]] = [this.playlist[j], this.playlist[i]];
+    }
+    this.playlistIndex = 0;
+  }
+
+  /** Start playing music */
+  play(): void {
+    if (this.playing) return;
+    if (!this.available) {
+      // Probe still in progress — defer until it completes
+      this.pendingPlay = true;
+      return;
+    }
+    this.playing = true;
+    this.playTrack(this.playlist[this.playlistIndex]);
+  }
+
+  /** Play a specific track by index */
+  private playTrack(trackIdx: number): void {
+    const name = MUSIC_TRACKS[trackIdx];
+    this.trackName = name.replace(/^\d+_/, '').replace(/_/g, ' ');
+
+    const audio = new Audio(`${this.basePath}/${name}.mp3`);
+    audio.volume = this.muted ? 0 : this.volume;
+    audio.addEventListener('ended', () => this.advance());
+    audio.addEventListener('error', () => this.advance()); // skip broken tracks
+
+    // Start crossfade if currently playing
+    if (this.current) {
+      this.crossfadeOut(this.current);
+    }
+
+    this.current = audio;
+    audio.play().catch(() => {
+      // Autoplay blocked — will retry on next user interaction
+      this.playing = false;
+    });
+  }
+
+  /** Crossfade outgoing track */
+  private crossfadeOut(audio: HTMLAudioElement): void {
+    // Clean up any previous fade completely first
+    if (this.fadeTimer) {
+      clearInterval(this.fadeTimer);
+      this.fadeTimer = null;
+    }
+    if (this.fading) {
+      this.fading.pause();
+      this.fading.src = '';
+      this.fading = null;
+    }
+    this.fading = audio;
+    const startVol = audio.volume;
+    const steps = 20;
+    let step = 0;
+    this.fadeTimer = setInterval(() => {
+      step++;
+      audio.volume = Math.max(0, startVol * (1 - step / steps));
+      if (step >= steps) {
+        clearInterval(this.fadeTimer!);
+        this.fadeTimer = null;
+        audio.pause();
+        audio.src = '';
+        if (this.fading === audio) this.fading = null;
+      }
+    }, 100); // 2 second crossfade (20 steps x 100ms)
+  }
+
+  /** Advance to next track in playlist */
+  private advance(): void {
+    if (!this.playing) return;
+    this.playlistIndex++;
+    if (this.playlistIndex >= this.playlist.length) {
+      this.shuffle(); // reshuffle and loop
+    }
+    this.playTrack(this.playlist[this.playlistIndex]);
+  }
+
+  /** Skip to next track */
+  next(): void {
+    if (!this.available) return;
+    this.playing = true;
+    this.advance();
+  }
+
+  /** Pause music */
+  pause(): void {
+    if (this.current && this.playing) {
+      this.current.pause();
+    }
+  }
+
+  /** Resume music */
+  resume(): void {
+    if (this.current && this.playing) {
+      this.current.play().catch(() => {});
+    }
+  }
+
+  /** Stop music completely */
+  stop(): void {
+    this.playing = false;
+    this.pendingPlay = false;
+    if (this.fadeTimer) {
+      clearInterval(this.fadeTimer);
+      this.fadeTimer = null;
+    }
+    if (this.current) {
+      this.current.pause();
+      this.current.src = '';
+      this.current = null;
+    }
+    if (this.fading) {
+      this.fading.pause();
+      this.fading.src = '';
+      this.fading = null;
+    }
+    this.trackName = '';
+  }
+
+  /** Set volume (0-1) */
+  setVolume(v: number): void {
+    this.volume = Math.max(0, Math.min(1, v));
+    const vol = this.muted ? 0 : this.volume;
+    if (this.current) this.current.volume = vol;
+    if (this.fading) this.fading.volume = Math.min(this.fading.volume, vol);
+  }
+
+  /** Set muted state */
+  setMuted(m: boolean): void {
+    this.muted = m;
+    const vol = m ? 0 : this.volume;
+    if (this.current) this.current.volume = vol;
+    if (this.fading) this.fading.volume = vol;
+  }
+
+  /** Get current volume */
+  getVolume(): number { return this.volume; }
+
+  /** Clean up */
+  destroy(): void {
+    this.stop();
+  }
+}
 
 export type SoundName =
   | 'rifle' | 'machinegun' | 'cannon' | 'artillery'
@@ -31,6 +255,12 @@ export class AudioManager {
   private ambientNode: AudioBufferSourceNode | null = null;
   private ambientGain: GainNode | null = null;
   private ambientRunning = false;
+  // Music player
+  readonly music: MusicPlayer;
+
+  constructor() {
+    this.music = new MusicPlayer();
+  }
 
   /** Initialize audio context (must be called from user gesture) */
   init(): void {
@@ -57,13 +287,17 @@ export class AudioManager {
   setVolume(v: number): void {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : this.volume;
+    this.music.setVolume(v);
   }
 
   toggleMute(): boolean {
     this.muted = !this.muted;
     if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : this.volume;
+    this.music.setMuted(this.muted);
     return this.muted;
   }
+
+  isMuted(): boolean { return this.muted; }
 
   /** Play a named sound effect */
   play(name: SoundName): void {
@@ -201,6 +435,7 @@ export class AudioManager {
 
   destroy(): void {
     this.stopAmbient();
+    this.music.destroy();
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;

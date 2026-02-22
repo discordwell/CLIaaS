@@ -259,6 +259,7 @@ export class Game {
     this.state = 'playing';
     this.onStateChange?.('playing');
     this.audio.startAmbient();
+    this.audio.music.play();
     this.lastTime = performance.now();
     this.gameLoop();
   }
@@ -277,9 +278,11 @@ export class Game {
   togglePause(): void {
     if (this.state === 'playing') {
       this.state = 'paused';
+      this.audio.music.pause();
       this.onStateChange?.('paused');
     } else if (this.state === 'paused') {
       this.state = 'playing';
+      this.audio.music.resume();
       this.onStateChange?.('playing');
       this.lastTime = performance.now();
       this.scheduleNext();
@@ -869,6 +872,10 @@ export class Game {
     if (keys.has('m')) {
       this.audio.toggleMute();
       keys.delete('m');
+    }
+    if (keys.has('n')) {
+      this.audio.music.next();
+      keys.delete('n');
     }
 
     // Home/Space: center camera on selected units
@@ -3365,12 +3372,14 @@ export class Game {
         if (result.win && this.state === 'playing') {
           if (this.toCarryOver) saveCarryover(this.entities);
           this.state = 'won';
+          this.audio.music.stop();
           this.audio.play('victory_fanfare');
           this.audio.play('eva_mission_accomplished');
           this.onStateChange?.('won');
         }
         if (result.lose && this.state === 'playing') {
           this.state = 'lost';
+          this.audio.music.stop();
           this.audio.play('defeat_sting');
           this.onStateChange?.('lost');
         }
@@ -3547,6 +3556,7 @@ export class Game {
     // Loss: all player units dead
     if (!playerAlive) {
       this.state = 'lost';
+      this.audio.music.stop();
       this.audio.play('defeat_sting');
       this.onStateChange?.('lost');
       return;
@@ -3594,6 +3604,7 @@ export class Game {
     if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
       if (this.toCarryOver) saveCarryover(this.entities);
       this.state = 'won';
+      this.audio.music.stop();
       this.audio.play('victory_fanfare');
       this.audio.play('eva_mission_accomplished');
       this.onStateChange?.('won');
@@ -4023,8 +4034,10 @@ export class Game {
       this.tick,
     );
 
-    // Render EVA messages, mission timer, and mission name overlay
+    // Render EVA messages, mission timer, music track, and mission name overlay
+    this.renderer.musicTrack = this.audio.music.currentTrack;
     this.renderer.renderEvaMessages(this.tick);
+    this.renderer.renderMusicTrack(this.tick);
     this.renderer.missionName = this.missionName;
     // Mission name overlay fades during first 4 seconds (60 ticks)
     if (this.tick < 60) {
