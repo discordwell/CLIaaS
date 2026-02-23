@@ -197,6 +197,15 @@
     "sheetWidth": 800,
     "sheetHeight": 507
   },
+  "shok": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 316,
+    "columns": 16,
+    "rows": 20,
+    "sheetWidth": 800,
+    "sheetHeight": 780
+  },
   "piff": {
     "frameWidth": 9,
     "frameHeight": 13,
@@ -233,6 +242,51 @@
     "sheetWidth": 480,
     "sheetHeight": 34
   },
+  "veh-hit2": {
+    "frameWidth": 21,
+    "frameHeight": 17,
+    "frameCount": 22,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 336,
+    "sheetHeight": 34
+  },
+  "veh-hit3": {
+    "frameWidth": 19,
+    "frameHeight": 13,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 266,
+    "sheetHeight": 13
+  },
+  "napalm1": {
+    "frameWidth": 16,
+    "frameHeight": 16,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 224,
+    "sheetHeight": 16
+  },
+  "napalm2": {
+    "frameWidth": 41,
+    "frameHeight": 41,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 574,
+    "sheetHeight": 41
+  },
+  "napalm3": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 1008,
+    "sheetHeight": 72
+  },
   "atomsfx": {
     "frameWidth": 78,
     "frameHeight": 121,
@@ -259,6 +313,51 @@
     "rows": 1,
     "sheetWidth": 192,
     "sheetHeight": 24
+  },
+  "fire1": {
+    "frameWidth": 23,
+    "frameHeight": 23,
+    "frameCount": 15,
+    "columns": 15,
+    "rows": 1,
+    "sheetWidth": 345,
+    "sheetHeight": 23
+  },
+  "fire2": {
+    "frameWidth": 23,
+    "frameHeight": 23,
+    "frameCount": 15,
+    "columns": 15,
+    "rows": 1,
+    "sheetWidth": 345,
+    "sheetHeight": 23
+  },
+  "fire3": {
+    "frameWidth": 23,
+    "frameHeight": 23,
+    "frameCount": 15,
+    "columns": 15,
+    "rows": 1,
+    "sheetWidth": 345,
+    "sheetHeight": 23
+  },
+  "frag1": {
+    "frameWidth": 45,
+    "frameHeight": 33,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 630,
+    "sheetHeight": 33
+  },
+  "art-exp1": {
+    "frameWidth": 41,
+    "frameHeight": 35,
+    "frameCount": 22,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 656,
+    "sheetHeight": 70
   },
   "fact": {
     "frameWidth": 72,
@@ -368,6 +467,15 @@
     "sheetWidth": 768,
     "sheetHeight": 120
   },
+  "hbox": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 4,
+    "columns": 4,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 24
+  },
   "tsla": {
     "frameWidth": 24,
     "frameHeight": 48,
@@ -422,6 +530,15 @@
     "sheetWidth": 1152,
     "sheetHeight": 48
   },
+  "mslo": {
+    "frameWidth": 48,
+    "frameHeight": 24,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 768,
+    "sheetHeight": 24
+  },
   "atek": {
     "frameWidth": 48,
     "frameHeight": 48,
@@ -466,6 +583,69 @@
     "rows": 1,
     "sheetWidth": 48,
     "sheetHeight": 24
+  },
+  "syrd": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 48
+  },
+  "spen": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 48
+  },
+  "bio": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 3,
+    "columns": 3,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 48
+  },
+  "miss": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 3,
+    "columns": 3,
+    "rows": 1,
+    "sheetWidth": 216,
+    "sheetHeight": 48
+  },
+  "v19": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 29,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "fcom": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 48
+  },
+  "hosp": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 9,
+    "columns": 9,
+    "rows": 1,
+    "sheetWidth": 432,
+    "sheetHeight": 48
   },
   "fenc": {
     "frameWidth": 24,
