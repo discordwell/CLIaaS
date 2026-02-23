@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/__tests__/**/*.test.ts', 'src/**/__tests__/**/*.test.tsx'],
+    include: ['src/**/__tests__/**/*.test.ts', 'src/**/__tests__/**/*.test.tsx', 'cli/**/__tests__/**/*.test.ts'],
     environmentMatchGlobs: [
       ['src/components/__tests__/**', 'jsdom'],
       ['src/app/__tests__/**', 'jsdom'],
