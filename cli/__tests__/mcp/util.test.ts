@@ -25,8 +25,8 @@ describe('MCP util', () => {
 
   describe('findTicket', () => {
     const tickets: Ticket[] = [
-      { id: 'tk-1', externalId: 'ext-100', subject: 'Test', status: 'open', priority: 'normal', requester: 'user', assignee: null, tags: [], source: 'zendesk', createdAt: '2024-01-01', updatedAt: '2024-01-01' },
-      { id: 'tk-2', externalId: 'ext-200', subject: 'Test 2', status: 'open', priority: 'high', requester: 'user', assignee: null, tags: [], source: 'zendesk', createdAt: '2024-01-01', updatedAt: '2024-01-01' },
+      { id: 'tk-1', externalId: 'ext-100', subject: 'Test', status: 'open', priority: 'normal', requester: 'user', assignee: undefined, tags: [], source: 'zendesk', createdAt: '2024-01-01', updatedAt: '2024-01-01' },
+      { id: 'tk-2', externalId: 'ext-200', subject: 'Test 2', status: 'open', priority: 'high', requester: 'user', assignee: undefined, tags: [], source: 'zendesk', createdAt: '2024-01-01', updatedAt: '2024-01-01' },
     ];
 
     it('finds by internal ID', () => {
