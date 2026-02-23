@@ -183,6 +183,9 @@ export class Game {
   structuresBuilt = 0;
   structuresLost = 0;
 
+  // Base discovery — player must find their base before production is available
+  private baseDiscovered = false;
+
   // AI autocreate flag — gated by trigger action
   private autocreateEnabled = false;
   // AI base rebuild system
@@ -259,6 +262,7 @@ export class Game {
     this.baseRebuildQueue = [];
     this.baseRebuildCooldown = 0;
     this.autocreateEnabled = false;
+    this.baseDiscovered = false;
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.globals.clear();
@@ -522,26 +526,27 @@ export class Game {
       this.processTriggers();
     }
 
-    // Repair structures being repaired (1 HP per tick ≈ 15 HP/sec, costs credits)
-    for (const idx of this.repairingStructures) {
-      const s = this.structures[idx];
-      if (!s || !s.alive || s.hp >= s.maxHp || s.sellProgress !== undefined) {
-        this.repairingStructures.delete(idx);
-        continue;
+    // Repair structures being repaired (1 HP per 15 ticks ≈ 1 HP/sec, costs credits)
+    if (this.tick % 15 === 0) {
+      for (const idx of this.repairingStructures) {
+        const s = this.structures[idx];
+        if (!s || !s.alive || s.hp >= s.maxHp || s.sellProgress !== undefined) {
+          this.repairingStructures.delete(idx);
+          continue;
+        }
+        // Repair costs credits: ~25% of build cost to fully repair
+        const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+        const repairCostPerHp = prodItem ? (prodItem.cost * 0.25) / s.maxHp : 0.5;
+        const cost = Math.ceil(repairCostPerHp);
+        if (this.credits < cost) {
+          // Can't afford — stop repairing this structure
+          this.repairingStructures.delete(idx);
+          continue;
+        }
+        this.credits -= cost;
+        s.hp = Math.min(s.maxHp, s.hp + 1);
+        this.audio.play('repair');
       }
-      // Repair costs credits: ~25% of build cost to fully repair
-      const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
-      const repairCostPerHp = prodItem ? (prodItem.cost * 0.25) / s.maxHp : 0.5;
-      const cost = Math.ceil(repairCostPerHp);
-      if (this.credits < cost) {
-        // Can't afford — stop repairing this structure
-        this.repairingStructures.delete(idx);
-        continue;
-      }
-      this.credits -= cost;
-      s.hp = Math.min(s.maxHp, s.hp + 1);
-      // Play repair sound every ~1 second
-      if (this.tick % 15 === 0) this.audio.play('repair');
     }
 
     // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 2 ticks
@@ -606,6 +611,9 @@ export class Game {
     if (this.tick % (GAME_TICKS_PER_SEC * 60) === 0 && this.tick > 0) {
       this.tickOreRegeneration();
     }
+
+    // Base discovery — check if a player unit is near any player structure
+    this.checkBaseDiscovery();
 
     // Tick production queue — advance build progress
     this.tickProduction();
@@ -676,10 +684,10 @@ export class Game {
     for (const s of this.structures) {
       // Construction: 0→1 over ~2 seconds = 30 ticks
       if (s.buildProgress !== undefined && s.buildProgress < 1) {
-        const wasBuiding = s.buildProgress < 1;
+        const wasBuilding = s.buildProgress < 1;
         s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
         // Track completed construction for TEVENT_BUILD
-        if (wasBuiding && s.buildProgress >= 1) {
+        if (wasBuilding && s.buildProgress >= 1) {
           this.builtStructureTypes.add(s.type);
           if (s.house === 'Spain' || s.house === 'Greece') this.structuresBuilt++;
         }
@@ -726,11 +734,25 @@ export class Game {
     this.checkVictoryConditions();
   }
 
-  /** Update fog of war based on player unit positions */
+  /** Update fog of war based on player unit and structure positions */
   private updateFogOfWar(): void {
-    const units = this.entities
-      .filter(e => e.alive && e.isPlayerUnit)
-      .map(e => ({ x: e.pos.x, y: e.pos.y, sight: e.stats.sight }));
+    const units: Array<{x: number; y: number; sight: number}> = [];
+    // Player units
+    for (const e of this.entities) {
+      if (e.alive && e.isPlayerUnit) {
+        units.push({ x: e.pos.x, y: e.pos.y, sight: e.stats.sight });
+      }
+    }
+    // Player structures (defense buildings get 7, others get 5)
+    const DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'SAM', 'PBOX', 'GAP', 'AGUN']);
+    for (const s of this.structures) {
+      if (s.alive && (s.house === House.Spain || s.house === House.Greece)) {
+        const sight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
+        const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
+        const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
+        units.push({ x: wx, y: wy, sight });
+      }
+    }
     this.map.updateFogOfWar(units);
   }
 
@@ -3890,6 +3912,54 @@ export class Game {
     }
   }
 
+  /** Check if a player unit has discovered the base (enables production) */
+  private checkBaseDiscovery(): void {
+    if (this.baseDiscovered) return;
+    for (const e of this.entities) {
+      if (!e.alive || !e.isPlayerUnit) continue;
+      for (const s of this.structures) {
+        if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+        const dx = e.pos.x / CELL_SIZE - s.cx;
+        const dy = e.pos.y / CELL_SIZE - s.cy;
+        if (dx * dx + dy * dy < 25) { // 5-cell radius
+          this.baseDiscovered = true;
+          this.audio.play('eva_new_options');
+          this.showEvaMessage(10); // "Construction options available."
+          this.revealAroundCell(s.cx, s.cy, 10);
+          this.spawnBaseReinforcements();
+          return;
+        }
+      }
+    }
+  }
+
+  /** Spawn reinforcement infantry near barracks when base is first discovered */
+  private spawnBaseReinforcements(): void {
+    const barracks = this.structures.find(b =>
+      b.alive && b.type === 'TENT' && (b.house === House.Spain || b.house === House.Greece)
+    );
+    if (!barracks) return;
+    const bx = barracks.cx * CELL_SIZE + CELL_SIZE;
+    const by = barracks.cy * CELL_SIZE + CELL_SIZE * 2;
+    const types = [
+      UnitType.I_E1, UnitType.I_E1, UnitType.I_E1, // 3 Rifle soldiers
+      UnitType.I_E2, UnitType.I_E2,                 // 2 Grenadiers
+    ];
+    for (let i = 0; i < types.length; i++) {
+      const rx = bx + ((i % 3) - 1) * CELL_SIZE;
+      const ry = by + Math.floor(i / 3) * CELL_SIZE;
+      const inf = new Entity(types[i], House.Spain, rx, ry);
+      inf.mission = Mission.GUARD;
+      this.entities.push(inf);
+      this.entityById.set(inf.id, inf);
+      this.effects.push({
+        type: 'marker', x: rx, y: ry,
+        frame: 0, maxFrames: 15, size: 14, markerColor: 'rgba(100,200,255,1)',
+      });
+    }
+    this.audio.play('eva_reinforcements');
+  }
+
   /** Handle trigger speech events (EVA voice lines) */
   private handleTriggerSpeech(speechId: number): void {
     // RA speech IDs map to EVA voice lines; play closest match
@@ -3986,6 +4056,8 @@ export class Game {
 
   /** Get buildable items based on current structures + faction + tech prereqs */
   getAvailableItems(): ProductionItem[] {
+    // No production until player discovers their base
+    if (!this.baseDiscovered) return [];
     return PRODUCTION_ITEMS.filter(item => {
       // Must have primary prerequisite building
       if (!this.hasBuilding(item.prerequisite)) return false;

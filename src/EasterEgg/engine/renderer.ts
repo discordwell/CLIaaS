@@ -460,9 +460,12 @@ export class Renderer {
         const icon = map.templateIcon[idx] || 0;
 
         // Try real tileset tile first (skip for INTERIOR theatre)
+        // For TREE terrain, draw ground from atlas but still render tree overlay on top
+        let atlasDrawn = false;
         if (useTileset && tmpl > 0 && tmpl !== 0xFF) {
           if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
-            continue; // Tile drawn from atlas, skip procedural
+            if (terrain !== Terrain.TREE) continue; // Tile drawn from atlas, skip procedural
+            atlasDrawn = true; // Fall through to TREE case below
           }
         }
 
@@ -616,8 +619,8 @@ export class Renderer {
               ctx.fillRect(screen.x + 6, screen.y + 2, 12, 4);
               ctx.fillRect(screen.x + 6, screen.y + 18, 12, 4);
             } else {
-              // Ground under tree — dark grass with dithering
-              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+              // Ground under tree — skip grass if atlas already drew the ground tile
+              if (!atlasDrawn) this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
               // Tree shadow on ground
               ctx.fillStyle = 'rgba(0,0,0,0.2)';
               ctx.beginPath();
@@ -744,17 +747,41 @@ export class Renderer {
         const h = cellHash(cx, cy);
 
         if (ovl >= 0x03 && ovl <= 0x0E) {
-          // Gold ore (GOLD01-GOLD12) — palette gold/yellow tones
+          // Gold ore (GOLD01-GOLD12) — layered procedural with gold/amber palette
           const density = ovl - 0x03; // 0-11
-          ctx.fillStyle = this.palColor(PAL_DIRT_START + 2 + (density % 4), 20);
-          ctx.fillRect(screen.x + 2, screen.y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-          // Ore scatter dots
-          const dots = 2 + Math.floor(density / 3);
-          ctx.fillStyle = this.palColor(PAL_DIRT_START, 40);
-          for (let d = 0; d < dots; d++) {
-            const dx = ((h + d * 37) % 16) + 3;
-            const dy = (((h >> 3) + d * 53) % 16) + 3;
-            ctx.fillRect(screen.x + dx, screen.y + dy, 3, 2);
+          const densityRatio = density / 11;
+          // Base dirt ground showing through (semi-transparent ore layer)
+          ctx.fillStyle = this.palColor(PAL_DIRT_START + 4 + (h % 3));
+          ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+          // Ore deposit layer — denser coverage at higher values
+          const coverage = 0.3 + densityRatio * 0.5;
+          for (let py = 0; py < CELL_SIZE; py += 2) {
+            for (let px = 0; px < CELL_SIZE; px += 2) {
+              const ph = cellHash(cx * 24 + px, cy * 24 + py);
+              if ((ph % 100) / 100 < coverage) {
+                // Gold/amber palette variation based on position
+                const shade = (ph % 3);
+                const r = shade === 0 ? 180 + (ph % 40) : shade === 1 ? 200 + (ph % 30) : 160 + (ph % 35);
+                const g = shade === 0 ? 140 + (ph % 30) : shade === 1 ? 160 + (ph % 25) : 120 + (ph % 30);
+                const b = shade === 0 ? 40 + (ph % 20) : shade === 1 ? 60 + (ph % 15) : 30 + (ph % 20);
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                const sz = density > 6 ? 2 : 1;
+                ctx.fillRect(screen.x + px, screen.y + py, sz, sz);
+              }
+            }
+          }
+          // Chunky ore nuggets at higher densities
+          const nuggets = Math.floor(density / 2);
+          for (let n = 0; n < nuggets; n++) {
+            const nh = (h + n * 47) & 0xFF;
+            const nx = (nh % 16) + 3, ny = ((nh >> 3) % 14) + 3;
+            const ns = 2 + (nh % 2);
+            ctx.fillStyle = `rgb(${210 + (nh % 30)},${170 + (nh % 20)},${50 + (nh % 20)})`;
+            ctx.fillRect(screen.x + nx, screen.y + ny, ns, ns);
+            // Dark edge for depth
+            ctx.fillStyle = 'rgba(80,60,20,0.4)';
+            ctx.fillRect(screen.x + nx + ns, screen.y + ny + 1, 1, ns);
+            ctx.fillRect(screen.x + nx + 1, screen.y + ny + ns, ns, 1);
           }
           // Animated sparkle — one glint cycles per cell at staggered intervals
           const sparklePhase = (tick + h * 3) % 40;
@@ -934,6 +961,8 @@ export class Renderer {
         } else if (totalFrames === 2) {
           frame = damaged ? 1 : 0;
         }
+        // Clamp frame to valid range (prevent overflow for non-standard frame counts)
+        frame = Math.min(frame, totalFrames - 1);
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
         // Construction: reveal building from bottom up with scanline effect
         if (isConstructing) {
@@ -1097,6 +1126,9 @@ export class Renderer {
           ctx.textAlign = 'left';
         }
       }
+
+      // Always reset alpha — prevents leak from fog dimming/brownout to next structure
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -2744,17 +2776,17 @@ export class Renderer {
     const selected = entities.filter(e => selectedIds.has(e.id) && e.alive);
     if (selected.length === 0) return;
 
-    const panelW = 180;
+    const panelW = 160;
     const panelH = selected.length === 1
-      ? (selected[0].type === UnitType.V_HARV ? 78 : 74)
-      : 46;
+      ? (selected[0].type === UnitType.V_HARV ? 50 : 38)
+      : 38;
     const px = 6;
     const py = this.height - panelH - 6;
 
-    // Panel background
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    // Panel background — RA-style minimal dark panel
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
     ctx.fillRect(px, py, panelW, panelH);
-    ctx.strokeStyle = '#444';
+    ctx.strokeStyle = '#333';
     ctx.lineWidth = 1;
     ctx.strokeRect(px, py, panelW, panelH);
 
@@ -2762,65 +2794,41 @@ export class Renderer {
 
     if (selected.length === 1) {
       const unit = selected[0];
-      // Unit name — palette green/red
+      // Unit name
       ctx.fillStyle = unit.isPlayerUnit ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
-      ctx.fillText(unit.stats.name, px + 8, py + 15);
-      // HP — palette light gray
-      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-      ctx.fillText(`HP: ${unit.hp}/${unit.maxHp}`, px + 8, py + 28);
-      // Weapon, armor, range
-      const wpn = unit.weapon;
-      const armorStr = unit.stats.armor === 'none' ? 'None' : unit.stats.armor === 'light' ? 'Light' : 'Heavy';
-      if (wpn) {
-        ctx.fillText(`${wpn.name}  Rng:${wpn.range}  Arm:${armorStr}`, px + 8, py + 41);
-      } else {
-        ctx.fillText(`Unarmed  Arm:${armorStr}`, px + 8, py + 41);
-      }
+      ctx.fillText(unit.stats.name, px + 8, py + 14);
+      // Health bar
+      this.renderHealthBar(px + panelW / 2, py + 22, panelW - 20, unit.hp / unit.maxHp, true);
       // Harvester: ore load bar + state
       if (unit.type === UnitType.V_HARV) {
-        const oreRatio = unit.oreLoad / Entity.ORE_CAPACITY; // Entity.ORE_CAPACITY
+        const oreRatio = unit.oreLoad / Entity.ORE_CAPACITY;
         const stateLabel = unit.harvesterState === 'harvesting' ? 'Harvesting'
           : unit.harvesterState === 'seeking' ? 'Seeking ore'
           : unit.harvesterState === 'returning' ? 'Returning'
           : unit.harvesterState === 'unloading' ? 'Unloading'
           : 'Idle';
         ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-        ctx.fillText(`Ore: ${unit.oreLoad}/${Entity.ORE_CAPACITY}  ${stateLabel}`, px + 8, py + 54);
+        ctx.font = '9px monospace';
+        ctx.fillText(`${stateLabel}  ${unit.oreLoad}/${Entity.ORE_CAPACITY}`, px + 8, py + 34);
         // Ore load bar
         const barX = px + 8;
-        const barY = py + 58;
+        const barY = py + 38;
         const barW = panelW - 20;
         const barH = 3;
         ctx.fillStyle = '#111';
         ctx.fillRect(barX, barY, barW, barH);
         ctx.fillStyle = oreRatio > 0.5 ? '#c8a030' : '#806020';
         ctx.fillRect(barX, barY, barW * oreRatio, barH);
-        // Health bar below ore bar
-        this.renderHealthBar(px + panelW / 2, py + 66, panelW - 20, unit.hp / unit.maxHp, true);
-      } else if (unit.isTransport && unit.passengers.length > 0) {
-        // Transport: show passenger count
-        ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-        ctx.fillText(`Passengers: ${unit.passengers.length}/${unit.maxPassengers}`, px + 8, py + 54);
-        this.renderHealthBar(px + panelW / 2, py + 62, panelW - 20, unit.hp / unit.maxHp, true);
-      } else {
-        // Veterancy + kills + stance
-        const vetStr = unit.veterancy >= 2 ? 'Elite' : unit.veterancy >= 1 ? 'Veteran' : 'Rookie';
-        const stanceStr = unit.stance === Stance.HOLD_FIRE ? 'Hold' : unit.stance === Stance.DEFENSIVE ? 'Def' : 'Agg';
-        ctx.fillStyle = unit.veterancy >= 2 ? '#FFD700' : unit.veterancy >= 1 ? '#C0C0C0' : this.palColor(PAL_ROCK_START + 2);
-        ctx.fillText(`${vetStr}  K:${unit.kills}  [${stanceStr}]`, px + 8, py + 54);
-        // Health bar
-        this.renderHealthBar(px + panelW / 2, py + 62, panelW - 20, unit.hp / unit.maxHp, true);
       }
     } else {
-      // Multiple selected — show type breakdown with counts
+      // Multiple selected — count + type breakdown
       const typeCounts = new Map<string, number>();
       for (const u of selected) {
         const name = u.stats.name;
         typeCounts.set(name, (typeCounts.get(name) ?? 0) + 1);
       }
       ctx.fillStyle = this.palColor(PAL_GREEN_HP);
-      ctx.fillText(`${selected.length} units selected`, px + 8, py + 13);
-      // Show up to 2 type lines in the panel
+      ctx.fillText(`${selected.length} units`, px + 8, py + 14);
       ctx.font = '9px monospace';
       ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
       let row = 0;

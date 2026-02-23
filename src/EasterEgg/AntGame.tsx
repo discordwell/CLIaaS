@@ -91,6 +91,8 @@ export default function AntGame({ onExit }: AntGameProps) {
       if (state === 'playing') {
         setScreen('playing');
         setStatus('');
+        // Focus canvas so keyboard input (WASD/arrows) reaches the game
+        canvasRef.current?.focus();
       }
       if (state === 'won') {
         const idx = getMissionIndex(mission.id);
@@ -916,11 +918,12 @@ export default function AntGame({ onExit }: AntGameProps) {
           width={640}
           height={400}
           onContextMenu={(e) => e.preventDefault()}
-          tabIndex={-1}
+          tabIndex={0}
           style={{
             width: 'min(100vw, calc(100vh * 640 / 400))',
             height: 'min(100vh, calc(100vw * 400 / 640))',
             imageRendering: 'pixelated',
+            outline: 'none',
           }}
         />
       </div>
