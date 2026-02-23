@@ -62,11 +62,17 @@ export class AssetManager {
   private tilesetImage: HTMLImageElement | null = null;
   private tilesetMeta: TilesetMeta | null = null;
 
+  /** Mutable progress callback — can be replaced by later callers */
+  private _onProgress?: (loaded: number, total: number) => void;
+  private _loadedCount = 0;
+  private _totalCount = 0;
+
   /** Whether all assets have finished loading */
   get isLoaded(): boolean { return this.loaded; }
 
   /** Load manifest and all sprite sheets. Calls onProgress(loaded, total) during loading.
-   *  Safe to call multiple times — subsequent calls await the existing load. */
+   *  Safe to call multiple times — subsequent calls await the existing load.
+   *  A later caller's onProgress replaces any previous one so the UI stays live. */
   async loadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
     if (this.loaded) {
       // Already loaded — report 100% and return
@@ -77,60 +83,66 @@ export class AssetManager {
       return;
     }
     if (this.loadPromise) {
-      // Already loading — attach progress and wait
+      // Already loading — replace progress callback and report current state
+      if (onProgress) {
+        this._onProgress = onProgress;
+        if (this._totalCount > 0) {
+          onProgress(this._loadedCount, this._totalCount);
+        }
+      }
       await this.loadPromise;
-      if (this.manifest) {
+      // Final 100% report
+      if (this.manifest && onProgress) {
         const total = Object.keys(this.manifest).length;
-        onProgress?.(total, total);
+        onProgress(total, total);
       }
       return;
     }
-    this.loadPromise = this.doLoadAll(onProgress);
+    if (onProgress) this._onProgress = onProgress;
+    this.loadPromise = this.doLoadAll();
     await this.loadPromise;
   }
 
-  private async doLoadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
-    // Load manifest
+  private async doLoadAll(): Promise<void> {
+    // Load manifest (required — must complete before we know what sprites to fetch)
     const manifestRes = await fetch(`${BASE_URL}/manifest.json`);
     if (!manifestRes.ok) throw new Error(`Failed to load manifest: ${manifestRes.status}`);
     this.manifest = await manifestRes.json();
     if (!this.manifest) throw new Error('Empty manifest');
 
-    // Load palette
-    try {
-      const palRes = await fetch(`${BASE_URL}/palette.json`);
-      this.palette = await palRes.json();
-    } catch {
-      // Palette is optional
-    }
-
-    // Load tileset atlas (non-blocking — falls back to procedural if missing)
-    try {
-      const [tilesetMetaRes, tilesetImg] = await Promise.all([
-        fetch(`${BASE_URL}/tileset.json`).then(r => r.ok ? r.json() : null),
-        loadImage(`${BASE_URL}/tileset.png`).catch(() => null),
-      ]);
-      if (tilesetMetaRes && tilesetImg) {
-        this.tilesetMeta = tilesetMetaRes as TilesetMeta;
-        this.tilesetImage = tilesetImg;
-      }
-    } catch {
-      // Tileset is optional — renderer falls back to procedural colors
-    }
-
-    // Load all sprite sheets in parallel
+    // Build sprite load promises
     const names = Object.keys(this.manifest);
-    const total = names.length;
-    let loaded = 0;
+    this._totalCount = names.length;
+    this._loadedCount = 0;
 
-    const promises = names.map(async (name) => {
+    const spritePromises = names.map(async (name) => {
       const image = await loadImage(`${BASE_URL}/${name}.png`);
       this.sheets.set(name, { image, meta: this.manifest![name] });
-      loaded++;
-      onProgress?.(loaded, total);
+      this._loadedCount++;
+      this._onProgress?.(this._loadedCount, this._totalCount);
     });
 
-    await Promise.all(promises);
+    // Load palette, tileset, and ALL sprites in parallel (tileset no longer blocks sprites)
+    await Promise.all([
+      // Palette (optional)
+      fetch(`${BASE_URL}/palette.json`)
+        .then(r => r.json())
+        .then(p => { this.palette = p; })
+        .catch(() => {}),
+      // Tileset atlas (optional — renderer falls back to procedural colors)
+      Promise.all([
+        fetch(`${BASE_URL}/tileset.json`).then(r => r.ok ? r.json() : null),
+        loadImage(`${BASE_URL}/tileset.png`).catch(() => null),
+      ]).then(([meta, img]) => {
+        if (meta && img) {
+          this.tilesetMeta = meta as TilesetMeta;
+          this.tilesetImage = img;
+        }
+      }).catch(() => {}),
+      // All sprite sheets
+      ...spritePromises,
+    ]);
+
     this.loaded = true;
   }
 
