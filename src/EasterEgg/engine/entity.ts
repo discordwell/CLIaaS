@@ -74,7 +74,9 @@ export class Entity {
 
   // Combat
   attackCooldown = 0;
+  attackCooldown2 = 0;
   weapon: WeaponStats | null;
+  weapon2: WeaponStats | null = null;
   kills = 0;      // kills by this unit
   veterancy = 0;  // 0=rookie, 1=veteran, 2=elite
 
@@ -139,6 +141,9 @@ export class Entity {
     this.maxHp = this.stats.strength;
     this.weapon = this.stats.primaryWeapon
       ? WEAPON_STATS[this.stats.primaryWeapon] ?? null
+      : null;
+    this.weapon2 = this.stats.secondaryWeapon
+      ? WEAPON_STATS[this.stats.secondaryWeapon] ?? null
       : null;
   }
 

@@ -4,7 +4,8 @@
  */
 
 import {
-  type WorldPos, type UnitStats, type WeaponStats,
+  type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
+  type AllianceTable, buildDefaultAlliances,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, type WarheadType, UNIT_STATS, WEAPON_STATS,
@@ -50,6 +51,22 @@ interface Crate {
   y: number;
   type: CrateType;
   tick: number; // tick when spawned
+}
+
+/** In-flight projectile for deferred damage */
+interface InflightProjectile {
+  attackerId: number;
+  targetId: number;
+  targetPos: WorldPos;   // position at time of launch (for partial tracking)
+  weapon: WeaponStats;
+  damage: number;
+  speed: number;         // cells per tick
+  travelFrames: number;  // total frames to travel
+  currentFrame: number;
+  directHit: boolean;    // was the shot accurate (for inaccurate weapons)
+  impactX: number;       // final impact position (may be scattered)
+  impactY: number;
+  attackerIsPlayer: boolean;
 }
 
 export class Game {
@@ -140,7 +157,9 @@ export class Game {
   /** Per-scenario stat overrides (from INI [TypeName] sections) */
   private scenarioUnitStats: Record<string, UnitStats> = UNIT_STATS;
   private scenarioWeaponStats: Record<string, WeaponStats> = WEAPON_STATS;
-  private warheadOverrides: Record<string, [number, number, number]> = {};
+  private warheadOverrides: Record<string, [number, number, number, number, number]> = {};
+  private inflightProjectiles: InflightProjectile[] = [];
+  private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
   private allowWin = false; // set by ALLOWWIN action — required before win condition fires
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
@@ -162,6 +181,13 @@ export class Game {
   // Mission stats
   structuresBuilt = 0;
   structuresLost = 0;
+
+  // AI autocreate flag — gated by trigger action
+  private autocreateEnabled = false;
+  // AI base rebuild system
+  private baseBlueprint: Array<{ type: string; cell: number; house: House }> = [];
+  private baseRebuildQueue: Array<{ type: string; cell: number; house: House }> = [];
+  private baseRebuildCooldown = 0;
 
   // Callbacks
   onStateChange?: (state: GameState) => void;
@@ -228,6 +254,10 @@ export class Game {
     this.scenarioWeaponStats = scenario.scenarioWeaponStats;
     this.warheadOverrides = scenario.warheadOverrides;
     this.crateOverrides = scenario.crateOverrides;
+    this.baseBlueprint = scenario.baseBlueprint ?? [];
+    this.baseRebuildQueue = [];
+    this.baseRebuildCooldown = 0;
+    this.autocreateEnabled = false;
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.globals.clear();
@@ -241,6 +271,8 @@ export class Game {
     // First crate spawns after 60 seconds
     this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
     this.crates = [];
+    this.inflightProjectiles = [];
+    this.alliances = buildDefaultAlliances();
     this.allowWin = false;
     this.missionTimer = 0;
     this.missionTimerExpired = false;
@@ -554,11 +586,17 @@ export class Game {
     // Defensive structure auto-fire
     this.updateStructureCombat();
 
+    // Advance in-flight projectiles
+    this.updateInflightProjectiles();
+
     // Queen Ant spawning — QUEE periodically spawns ants (rate varies by difficulty)
     const spawnSec = (DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal).spawnInterval;
     if (this.tick % (GAME_TICKS_PER_SEC * spawnSec) === 0) {
       this.updateQueenSpawning();
     }
+
+    // AI base rebuild — check for missing structures and rebuild
+    this.updateBaseRebuild();
 
     // Ore regeneration — existing ore cells slowly grow and spread (every 60 seconds)
     if (this.tick % (GAME_TICKS_PER_SEC * 60) === 0 && this.tick > 0) {
@@ -1406,7 +1444,7 @@ export class Game {
       for (const unit of units) {
         commandIssued = true;
 
-        if (target && !target.isPlayerUnit && target.alive) {
+        if (target && !this.isPlayerControlled(target) && target.alive) {
           unit.mission = Mission.ATTACK;
           unit.target = target;
           unit.targetStructure = null;
@@ -1451,7 +1489,7 @@ export class Game {
         }
       }
       if (commandIssued) {
-        const isAttack = (target && !target.isPlayerUnit) || targetStruct;
+        const isAttack = (target && !this.isPlayerControlled(target)) || targetStruct;
         this.audio.play(this.ackSound(!!isAttack));
         // Spawn command marker at destination
         this.effects.push({
@@ -1939,30 +1977,63 @@ export class Game {
       case Game.TMISSION_UNLOAD: {
         // Unload passengers at current position
         if (entity.passengers.length > 0) {
+          // For naval units, find shore cells to unload onto
+          const isNaval = entity.isNavalUnit;
+          const shoreCells: Array<{ x: number; y: number; dist: number }> = [];
+
+          if (isNaval) {
+            // Search 3-cell radius for shore cells (passable land adjacent to water)
+            const ec = entity.cell;
+            for (let dy = -3; dy <= 3; dy++) {
+              for (let dx = -3; dx <= 3; dx++) {
+                const cx = ec.cx + dx;
+                const cy = ec.cy + dy;
+                if (!this.map.isPassable(cx, cy)) continue;
+                if (this.map.isShoreCell(cx, cy)) {
+                  const wx = cx * CELL_SIZE + CELL_SIZE / 2;
+                  const wy = cy * CELL_SIZE + CELL_SIZE / 2;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  shoreCells.push({ x: wx, y: wy, dist });
+                }
+              }
+            }
+            shoreCells.sort((a, b) => a.dist - b.dist);
+          }
+
+          let shoreIdx = 0;
           for (const passenger of entity.passengers) {
-            // Restore passenger as alive entity near transport
             passenger.alive = true;
             passenger.hp = passenger.maxHp;
             passenger.transportRef = null;
             passenger.deathTick = 0;
-            // Find passable position near transport (like player-initiated unload)
-            let px = entity.pos.x, py = entity.pos.y;
-            for (let attempt = 0; attempt < 8; attempt++) {
-              const ox = entity.pos.x + (Math.random() - 0.5) * CELL_SIZE * 2;
-              const oy = entity.pos.y + (Math.random() - 0.5) * CELL_SIZE * 2;
-              const tc = worldToCell(ox, oy);
-              if (this.map.isPassable(tc.cx, tc.cy)) {
-                px = ox; py = oy;
-                break;
+
+            let px: number, py: number;
+            if (isNaval && shoreCells.length > 0) {
+              // Place on shore cells, cycling through available ones
+              const shore = shoreCells[shoreIdx % shoreCells.length];
+              px = shore.x + (Math.random() - 0.5) * CELL_SIZE * 0.5;
+              py = shore.y + (Math.random() - 0.5) * CELL_SIZE * 0.5;
+              shoreIdx++;
+            } else {
+              // Non-naval: random placement near transport (existing behavior)
+              px = entity.pos.x;
+              py = entity.pos.y;
+              for (let attempt = 0; attempt < 8; attempt++) {
+                const ox = entity.pos.x + (Math.random() - 0.5) * CELL_SIZE * 2;
+                const oy = entity.pos.y + (Math.random() - 0.5) * CELL_SIZE * 2;
+                const tc = worldToCell(ox, oy);
+                if (this.map.isPassable(tc.cx, tc.cy)) {
+                  px = ox; py = oy;
+                  break;
+                }
               }
             }
+
             passenger.pos = { x: px, y: py };
             passenger.mission = Mission.GUARD;
             passenger.animState = AnimState.IDLE;
             passenger.animFrame = 0;
-            // Passengers keep their team missions and advance past UNLOAD
             passenger.teamMissionIndex = entity.teamMissionIndex + 1;
-            // Re-add to entity list (passengers aren't in the list while loaded)
             this.entities.push(passenger);
             this.entityById.set(passenger.id, passenger);
           }
@@ -2021,7 +2092,7 @@ export class Game {
           let nearDist = entity.stats.sight;
           for (const other of this.entities) {
             if (!other.alive || other.isAnt === entity.isAnt) continue;
-            if (other.isPlayerUnit === entity.isPlayerUnit) continue;
+            if (this.entitiesAllied(other, entity)) continue;
             const d = worldDist(entity.pos, other.pos);
             if (d < nearDist) { nearDist = d; nearest = other; }
           }
@@ -2060,7 +2131,7 @@ export class Game {
     for (const other of this.entities) {
       if (!other.alive || other.id === vehicle.id) continue;
       if (!other.stats.isInfantry) continue;
-      if (other.isPlayerUnit === vehicle.isPlayerUnit) continue; // no friendly crush
+      if (this.entitiesAllied(other, vehicle)) continue; // no friendly crush
       const oc = other.cell;
       if (oc.cx === vc.cx && oc.cy === vc.cy) {
         other.takeDamage(other.hp + 10, 'Super'); // instant kill, always die2
@@ -2071,7 +2142,7 @@ export class Game {
         });
         this.playSoundAt('die_infantry', other.pos.x, other.pos.y);
         this.map.addDecal(oc.cx, oc.cy, 3, 0.3);
-        if (vehicle.isPlayerUnit) this.killCount++;
+        if (this.isPlayerControlled(vehicle)) this.killCount++;
         else {
           this.lossCount++;
           this.audio.play('eva_unit_lost');
@@ -2437,6 +2508,7 @@ export class Game {
         entity.animState = AnimState.WALK;
         entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
         if (entity.attackCooldown > 0) entity.attackCooldown--;
+        if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
         return;
       }
 
@@ -2477,36 +2549,62 @@ export class Game {
         // Apply warhead-vs-armor damage multiplier + veterancy bonus
         const mult = this.getWarheadMult(entity.weapon.warhead, entity.target.stats.armor);
         const damage = Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
-        const killed = directHit ? entity.target.takeDamage(damage, entity.weapon.warhead) : false;
 
-        // Retaliation: victim attacks shooter if idle/unengaged
-        if (directHit && !killed) {
-          this.triggerRetaliation(entity.target, entity);
-          this.scatterInfantry(entity.target, entity.pos);
+        if (entity.weapon.projectileSpeed) {
+          // Deferred damage: projectile must travel to target
+          this.launchProjectile(entity, entity.target, entity.weapon, damage, impactX, impactY, directHit);
+        } else {
+          // Instant damage (melee, hitscan weapons)
+          const killed = directHit ? entity.target.takeDamage(damage, entity.weapon.warhead) : false;
+
+          if (directHit && !killed) {
+            this.triggerRetaliation(entity.target, entity);
+            this.scatterInfantry(entity.target, entity.pos);
+          }
+
+          if (entity.weapon.splash && entity.weapon.splash > 0) {
+            const splashCenter = { x: impactX, y: impactY };
+            this.applySplashDamage(
+              splashCenter, entity.weapon, directHit ? entity.target.id : -1,
+              entity.house, entity,
+            );
+          }
+
+          if (killed) {
+            entity.creditKill();
+            const ktx = entity.target.pos.x;
+            const kty = entity.target.pos.y;
+            this.effects.push({ type: 'explosion', x: ktx, y: kty, frame: 0, maxFrames: 18, size: 16,
+              sprite: 'fball1', spriteStart: 0 });
+            if (!entity.target.stats.isInfantry) {
+              this.effects.push({ type: 'debris', x: ktx, y: kty, frame: 0, maxFrames: 12, size: 18 });
+            }
+            this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
+            const tc2 = worldToCell(ktx, kty);
+            this.map.addDecal(tc2.cx, tc2.cy, entity.target.stats.isInfantry ? 6 : 10, 0.6);
+            if (entity.target.isAnt) this.playSoundAt('die_ant', ktx, kty);
+            else if (entity.target.stats.isInfantry) this.playSoundAt('die_infantry', ktx, kty);
+            else this.playSoundAt('die_vehicle', ktx, kty);
+            this.playSoundAt('explode_lg', ktx, kty);
+            if (this.isPlayerControlled(entity)) this.killCount++;
+            else if (this.isPlayerControlled(entity.target)) {
+              this.lossCount++;
+              this.audio.play('eva_unit_lost');
+              this.minimapAlert(tc2.cx, tc2.cy);
+            }
+          }
         }
 
-        // AOE splash damage to nearby units (at impact point, not target)
-        if (entity.weapon.splash && entity.weapon.splash > 0) {
-          const splashCenter = { x: impactX, y: impactY };
-          this.applySplashDamage(
-            splashCenter, entity.weapon, directHit ? entity.target.id : -1,
-            entity.isPlayerUnit, entity,
-          );
-        }
-
-        // Armor-based hit indicator at impact point
-        if (directHit && !killed) {
+        // Armor-based hit indicator at impact point (fires immediately regardless of projectile travel)
+        {
           const armor = entity.target.stats.armor;
           if (armor === 'heavy') {
-            // Metal spark for heavy armor
             this.effects.push({ type: 'muzzle', x: impactX, y: impactY,
               frame: 0, maxFrames: 3, size: 3, muzzleColor: '255,255,200' });
           } else if (armor === 'light') {
-            // Dust puff for light armor
             this.effects.push({ type: 'muzzle', x: impactX, y: impactY,
               frame: 0, maxFrames: 4, size: 2, muzzleColor: '180,160,120' });
           }
-          // Infantry: use existing blood effects (already handled below)
         }
 
         // Play weapon sound (spatially positioned)
@@ -2556,39 +2654,6 @@ export class Game {
             sprite: 'veh-hit1', spriteStart: 0 });
         }
 
-        if (killed) {
-          entity.creditKill();
-          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 18, size: 16,
-            sprite: 'fball1', spriteStart: 0 });
-          // Vehicle debris flying outward
-          if (!entity.target.stats.isInfantry) {
-            this.effects.push({ type: 'debris', x: tx, y: ty, frame: 0, maxFrames: 12, size: 18 });
-          }
-          // Screen shake on large explosion
-          this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
-          // Scorch mark on terrain
-          const tc = worldToCell(tx, ty);
-          const scorchSize = entity.target.stats.isInfantry ? 4 : 8;
-          this.map.addDecal(tc.cx, tc.cy, scorchSize, 0.5);
-          // Death sound (spatially positioned at target)
-          if (entity.target.isAnt) {
-            this.playSoundAt('die_ant', tx, ty);
-          } else if (entity.target.stats.isInfantry) {
-            this.playSoundAt('die_infantry', tx, ty);
-          } else {
-            this.playSoundAt('die_vehicle', tx, ty);
-          }
-          this.playSoundAt('explode_lg', tx, ty);
-          // Track kills/losses
-          if (entity.isPlayerUnit) {
-            this.killCount++;
-          } else {
-            this.lossCount++;
-            this.audio.play('eva_unit_lost');
-            const tc = entity.target.cell;
-            this.minimapAlert(tc.cx, tc.cy);
-          }
-        }
       }
     } else {
       // Defensive stance: don't chase, return to guard
@@ -2604,7 +2669,49 @@ export class Game {
       }
     }
 
+    // Secondary weapon fires independently
+    if (entity.weapon2 && entity.attackCooldown2 <= 0 && entity.target?.alive) {
+      const dist2 = worldDist(entity.pos, entity.target.pos);
+      if (dist2 <= entity.weapon2.range) {
+        entity.attackCooldown2 = entity.weapon2.rof;
+        const mult2 = this.getWarheadMult(entity.weapon2.warhead, entity.target.stats.armor);
+        const dmg2 = Math.max(1, Math.round(entity.weapon2.damage * mult2 * entity.damageMultiplier));
+
+        if (entity.weapon2.projectileSpeed) {
+          this.launchProjectile(entity, entity.target, entity.weapon2, dmg2,
+            entity.target.pos.x, entity.target.pos.y, true);
+        } else {
+          const killed2 = entity.target.takeDamage(dmg2, entity.weapon2.warhead);
+          if (!killed2) this.triggerRetaliation(entity.target, entity);
+          if (killed2) {
+            entity.creditKill();
+            this.effects.push({ type: 'explosion', x: entity.target.pos.x, y: entity.target.pos.y,
+              frame: 0, maxFrames: 18, size: 16, sprite: 'fball1', spriteStart: 0 });
+            this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
+            const tc2 = worldToCell(entity.target.pos.x, entity.target.pos.y);
+            this.map.addDecal(tc2.cx, tc2.cy, entity.target.stats.isInfantry ? 6 : 10, 0.6);
+            if (entity.target.isAnt) this.playSoundAt('die_ant', entity.target.pos.x, entity.target.pos.y);
+            else if (entity.target.stats.isInfantry) this.playSoundAt('die_infantry', entity.target.pos.x, entity.target.pos.y);
+            else this.playSoundAt('die_vehicle', entity.target.pos.x, entity.target.pos.y);
+            if (this.isPlayerControlled(entity)) this.killCount++;
+            else if (this.isPlayerControlled(entity.target)) {
+              this.lossCount++;
+              this.audio.play('eva_unit_lost');
+              this.minimapAlert(tc2.cx, tc2.cy);
+            }
+          }
+        }
+
+        // Secondary weapon muzzle flash
+        this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
+          frame: 0, maxFrames: 3, size: 3, sprite: 'piff', spriteStart: 0,
+          muzzleColor: this.weaponMuzzleColor(entity.weapon2.name) });
+        this.playSoundAt(this.audio.weaponSound(entity.weapon2.name), entity.pos.x, entity.pos.y);
+      }
+    }
+
     if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
   }
 
   /** Hunt mode — move toward target and attack */
@@ -2752,7 +2859,6 @@ export class Game {
     // Harvesters have no weapon — don't auto-engage (would chase forever)
     if (entity.type === UnitType.V_HARV) return;
 
-    const isPlayer = entity.isPlayerUnit;
     const ec = entity.cell;
     const isDog = entity.type === 'DOG';
     // Guard scan range: use guardRange if defined (from INI GuardRange=N), else sight
@@ -2766,7 +2872,7 @@ export class Game {
     let bestIsInfantry = false;
     for (const other of this.entities) {
       if (!other.alive) continue;
-      if (isPlayer === other.isPlayerUnit) continue;
+      if (this.entitiesAllied(entity, other)) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist >= scanRange) continue;
       // Check line of sight — can't target through walls
@@ -2808,9 +2914,8 @@ export class Game {
     const distFromOrigin = worldDist(entity.pos, origin);
     if (distFromOrigin > 8) {
       // Check for enemies while returning
-      const isPlayer = entity.isPlayerUnit;
       for (const other of this.entities) {
-        if (!other.alive || other.isPlayerUnit === isPlayer) continue;
+        if (!other.alive || this.entitiesAllied(entity, other)) continue;
         const dist = worldDist(entity.pos, other.pos);
         if (dist > entity.stats.sight) continue;
         const oc2 = other.cell;
@@ -2833,9 +2938,8 @@ export class Game {
     // Look for enemies within scan range
     let bestTarget: Entity | null = null;
     let bestDist = Infinity;
-    const isPlayer = entity.isPlayerUnit;
     for (const other of this.entities) {
-      if (!other.alive || other.isPlayerUnit === isPlayer) continue;
+      if (!other.alive || this.entitiesAllied(entity, other)) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist > scanRange) continue;
       const oc = other.cell;
@@ -2941,7 +3045,7 @@ export class Game {
           sprite: 'veh-hit1', spriteStart: 0,
         });
         if (destroyed) {
-          if (entity.isPlayerUnit) this.killCount++;
+          if (this.isPlayerControlled(entity)) this.killCount++;
         }
       }
     } else {
@@ -2949,6 +3053,7 @@ export class Game {
       entity.moveToward(structPos, entity.stats.speed * 0.5);
     }
     if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
   }
 
   /** Force-fire on ground — fire at a location with no target entity */
@@ -2984,7 +3089,7 @@ export class Game {
         if (entity.weapon.splash && entity.weapon.splash > 0) {
           this.applySplashDamage(
             { x: impactX, y: impactY }, entity.weapon, -1,
-            entity.isPlayerUnit, entity,
+            entity.house, entity,
           );
         }
 
@@ -3016,6 +3121,7 @@ export class Game {
       entity.moveToward(target, entity.stats.speed * 0.5);
     }
     if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
   }
 
   /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
@@ -3051,7 +3157,6 @@ export class Game {
         continue;
       }
 
-      const isPlayerStruct = s.house === House.Spain || s.house === House.Greece;
       const sx = s.cx * CELL_SIZE + CELL_SIZE;
       const sy = s.cy * CELL_SIZE + CELL_SIZE;
       const structPos: WorldPos = { x: sx, y: sy };
@@ -3062,7 +3167,7 @@ export class Game {
       let bestDist = Infinity;
       for (const e of this.entities) {
         if (!e.alive) continue;
-        if (isPlayerStruct === e.isPlayerUnit) continue; // don't shoot friendlies
+        if (this.isAllied(s.house, e.house)) continue; // don't shoot friendlies
         const dist = worldDist(structPos, e.pos);
         if (dist < range && dist < bestDist) {
           // LOS check
@@ -3123,7 +3228,7 @@ export class Game {
           this.applySplashDamage(
             bestTarget.pos,
             { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
-            bestTarget.id, isPlayerStruct,
+            bestTarget.id, s.house,
           );
         }
 
@@ -3135,7 +3240,7 @@ export class Game {
           this.renderer.screenShake = Math.max(this.renderer.screenShake, 4);
           const tc = worldToCell(bestTarget.pos.x, bestTarget.pos.y);
           this.map.addDecal(tc.cx, tc.cy, bestTarget.stats.isInfantry ? 4 : 8, 0.5);
-          if (isPlayerStruct) this.killCount++;
+          if (s.house === House.Spain || s.house === House.Greece) this.killCount++;
           if (bestTarget.isAnt) {
             this.playSoundAt('die_ant', bestTarget.pos.x, bestTarget.pos.y);
           } else if (bestTarget.stats.isInfantry) {
@@ -3150,6 +3255,7 @@ export class Game {
 
   /** Queen Ant spawns ants periodically (rate/composition affected by difficulty) */
   private updateQueenSpawning(): void {
+    if (!this.autocreateEnabled) return;
     const mods = DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal;
     for (const s of this.structures) {
       if (!s.alive || s.type !== 'QUEE') continue;
@@ -3232,18 +3338,33 @@ export class Game {
   }
 
   /** Get warhead-vs-armor damage multiplier, respecting per-scenario overrides */
-  private getWarheadMult(warhead: WarheadType, armor: 'none' | 'light' | 'heavy'): number {
-    const armorIdx = armor === 'none' ? 0 : armor === 'light' ? 1 : 2;
+  private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
+    const armorIdx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'medium' ? 3 : 4;
     const overridden = this.warheadOverrides[warhead];
     if (overridden) return overridden[armorIdx] ?? 1;
     return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
+  }
+
+  /** Check if two houses are allied */
+  private isAllied(a: House, b: House): boolean {
+    return this.alliances.get(a)?.has(b) ?? false;
+  }
+
+  /** Check if two entities are allied (including same-house) */
+  private entitiesAllied(a: Entity, b: Entity): boolean {
+    return this.isAllied(a.house, b.house);
+  }
+
+  /** Check if an entity is player-controlled (Spain or Greece) */
+  private isPlayerControlled(e: Entity): boolean {
+    return e.house === House.Spain || e.house === House.Greece;
   }
 
   /** Trigger retaliation: a damaged unit without a target attacks the shooter.
    *  In original RA, idle/moving units always counter-attack when hit. */
   private triggerRetaliation(victim: Entity, attacker: Entity): void {
     if (!victim.alive || !attacker.alive) return;
-    if (victim.isPlayerUnit === attacker.isPlayerUnit) return; // no friendly retaliation
+    if (this.entitiesAllied(victim, attacker)) return; // no friendly retaliation
     if (!victim.weapon) return; // unarmed units can't retaliate
     // Only retarget if no current target or current target is dead
     if (victim.target && victim.target.alive) return;
@@ -3268,17 +3389,118 @@ export class Game {
     }
   }
 
+  /** Launch a projectile with travel time — damage is deferred until arrival */
+  private launchProjectile(
+    attacker: Entity, target: Entity | null, weapon: WeaponStats,
+    damage: number, impactX: number, impactY: number, directHit: boolean,
+  ): void {
+    const dist = worldDist(attacker.pos, { x: impactX, y: impactY });
+    const speed = weapon.projectileSpeed!;
+    const travelFrames = Math.max(1, Math.round(dist / speed));
+
+    this.inflightProjectiles.push({
+      attackerId: attacker.id,
+      targetId: target?.id ?? -1,
+      targetPos: target ? { x: target.pos.x, y: target.pos.y } : { x: impactX, y: impactY },
+      weapon,
+      damage,
+      speed,
+      travelFrames,
+      currentFrame: 0,
+      directHit,
+      impactX,
+      impactY,
+      attackerIsPlayer: this.isPlayerControlled(attacker),
+    });
+  }
+
+  /** Advance in-flight projectiles; apply damage + splash on arrival */
+  private updateInflightProjectiles(): void {
+    const arrived: InflightProjectile[] = [];
+
+    for (const proj of this.inflightProjectiles) {
+      proj.currentFrame++;
+
+      // Partial tracking: blend launch target pos with current pos (50% tracking)
+      const target = this.entityById.get(proj.targetId);
+      if (target && target.alive) {
+        const t = 0.5; // tracking factor
+        proj.impactX += (target.pos.x - proj.impactX) * t * (1 / proj.travelFrames);
+        proj.impactY += (target.pos.y - proj.impactY) * t * (1 / proj.travelFrames);
+      }
+
+      if (proj.currentFrame >= proj.travelFrames) {
+        arrived.push(proj);
+      }
+    }
+
+    // Remove arrived projectiles
+    this.inflightProjectiles = this.inflightProjectiles.filter(p => p.currentFrame < p.travelFrames);
+
+    // Apply damage for arrived projectiles
+    for (const proj of arrived) {
+      const target = this.entityById.get(proj.targetId);
+      const attacker = this.entityById.get(proj.attackerId);
+
+      if (proj.directHit && target && target.alive) {
+        const killed = target.takeDamage(proj.damage, proj.weapon.warhead);
+
+        if (!killed && attacker) {
+          this.triggerRetaliation(target, attacker);
+          this.scatterInfantry(target, { x: proj.impactX, y: proj.impactY });
+        }
+
+        if (killed) {
+          if (attacker) attacker.creditKill();
+          this.effects.push({ type: 'explosion', x: target.pos.x, y: target.pos.y,
+            frame: 0, maxFrames: 18, size: 16, sprite: 'fball1', spriteStart: 0 });
+          if (!target.stats.isInfantry) {
+            this.effects.push({ type: 'debris', x: target.pos.x, y: target.pos.y,
+              frame: 0, maxFrames: 12, size: 18 });
+          }
+          this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
+          const tc = worldToCell(target.pos.x, target.pos.y);
+          this.map.addDecal(tc.cx, tc.cy, target.stats.isInfantry ? 6 : 10, 0.6);
+          if (target.isAnt) this.playSoundAt('die_ant', target.pos.x, target.pos.y);
+          else if (target.stats.isInfantry) this.playSoundAt('die_infantry', target.pos.x, target.pos.y);
+          else this.playSoundAt('die_vehicle', target.pos.x, target.pos.y);
+          if (proj.attackerIsPlayer) this.killCount++;
+          else if (this.isPlayerControlled(target)) {
+            this.lossCount++;
+            this.audio.play('eva_unit_lost');
+            this.minimapAlert(tc.cx, tc.cy);
+          }
+        }
+      }
+
+      // Splash damage at impact point
+      if (proj.weapon.splash && proj.weapon.splash > 0) {
+        const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? House.Spain : House.USSR);
+        this.applySplashDamage(
+          { x: proj.impactX, y: proj.impactY }, proj.weapon,
+          proj.directHit && target ? target.id : -1,
+          attackerHouse, attacker ?? undefined,
+        );
+      }
+
+      // Impact explosion effect
+      this.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
+        frame: 0, maxFrames: 17, size: 8, sprite: 'veh-hit1', spriteStart: 0 });
+    }
+  }
+
   /** Apply AOE splash damage to entities near an impact point */
   private applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
-    primaryTargetId: number, attackerIsPlayer: boolean, attacker?: Entity,
+    primaryTargetId: number, attackerHouse: House, attacker?: Entity,
   ): void {
     const splashRange = weapon.splash ?? 0;
     if (splashRange <= 0) return;
+    const attackerIsPlayerControlled = attackerHouse === House.Spain || attackerHouse === House.Greece;
 
     for (const other of this.entities) {
       if (!other.alive || other.id === primaryTargetId) continue;
-      const isFriendly = other.isPlayerUnit === attackerIsPlayer;
+      const isFriendly = this.isAllied(other.house, attackerHouse);
       const dist = worldDist(center, other.pos);
       if (dist > splashRange) continue;
 
@@ -3322,15 +3544,15 @@ export class Game {
         else if (other.stats.isInfantry) this.playSoundAt('die_infantry', other.pos.x, other.pos.y);
         else this.playSoundAt('die_vehicle', other.pos.x, other.pos.y);
         // Track kills/losses from splash
-        if (!isFriendly && attackerIsPlayer) this.killCount++;
-        else if (!isFriendly && other.isPlayerUnit) {
+        if (!isFriendly && attackerIsPlayerControlled) this.killCount++;
+        else if (!isFriendly && this.isPlayerControlled(other)) {
           this.lossCount++;
           this.audio.play('eva_unit_lost');
           const oc = other.cell;
           this.minimapAlert(oc.cx, oc.cy);
         }
         // Friendly fire kills still count as losses
-        if (isFriendly && attackerIsPlayer) {
+        if (isFriendly && attackerIsPlayerControlled) {
           this.lossCount++;
           this.audio.play('eva_unit_lost');
           const oc = other.cell;
@@ -3453,7 +3675,7 @@ export class Game {
     }
     let enemyUnitsAlive = 0;
     for (const e of this.entities) {
-      if (e.alive && !e.isPlayerUnit && !e.isCivilian) enemyUnitsAlive++;
+      if (e.alive && !this.isPlayerControlled(e) && !e.isCivilian) enemyUnitsAlive++;
       if (e.alive) {
         const hi = Game.HOUSE_TO_INDEX[e.house];
         if (hi !== undefined) houseAlive.set(hi, true);
@@ -3520,7 +3742,7 @@ export class Game {
         if (result.allHunt) {
           // Set all enemy units to HUNT mission
           for (const e of this.entities) {
-            if (e.alive && !e.isPlayerUnit) {
+            if (e.alive && !this.isPlayerControlled(e)) {
               e.mission = Mission.HUNT;
             }
           }
@@ -3564,7 +3786,8 @@ export class Game {
           this.missionTimer += result.timerExtend * TIME_UNIT_TICKS;
           this.missionTimerExpired = false;
         }
-        // Autocreate: enable AI auto-spawning (no-op for ant missions, queen handles spawning)
+        // Autocreate: enable AI auto-spawning (queen spawning + base rebuild)
+        if (result.autocreate) this.autocreateEnabled = true;
         // Sound/speech from triggers
         if (result.playSpeech !== undefined) {
           this.handleTriggerSpeech(result.playSpeech);
@@ -3817,7 +4040,13 @@ export class Game {
       }
       // Skip every other tick when low power
       if (lowPower && this.tick % 2 === 0) continue;
-      entry.progress++;
+      // Multi-factory speed bonus: 1 factory=1x, 2=1.5x, 3=1.75x, 4+=2x
+      const factoryCount = this.countPlayerBuildings(entry.item.prerequisite);
+      const speedMult = factoryCount <= 1 ? 1.0
+        : factoryCount === 2 ? 1.5
+        : factoryCount === 3 ? 1.75
+        : 2.0;
+      entry.progress += speedMult;
       if (entry.progress >= entry.item.buildTime) {
         // Build complete
         if (entry.item.isStructure) {
@@ -3838,6 +4067,119 @@ export class Game {
           }
         }
       }
+    }
+  }
+
+  /** Count alive player buildings of a given type */
+  private countPlayerBuildings(type: string): number {
+    let count = 0;
+    for (const s of this.structures) {
+      if (s.alive && s.type === type && (s.house === House.Spain || s.house === House.Greece)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /** AI base rebuild — compare alive structures against blueprint, rebuild missing ones */
+  private updateBaseRebuild(): void {
+    if (this.baseBlueprint.length === 0) return;
+
+    // Cooldown between rebuilds (30 seconds = 450 ticks)
+    if (this.baseRebuildCooldown > 0) {
+      this.baseRebuildCooldown--;
+      return;
+    }
+
+    // Check every 5 seconds (75 ticks)
+    if (this.tick % 75 !== 0) return;
+
+    // Find AI houses that have a ConYard (FACT) — required to rebuild
+    const aiHousesWithFact = new Set<House>();
+    for (const s of this.structures) {
+      if (s.alive && s.type === 'FACT' && s.house !== House.Spain && s.house !== House.Greece) {
+        aiHousesWithFact.add(s.house);
+      }
+    }
+    if (aiHousesWithFact.size === 0) return;
+
+    // Build set of alive structures (type+cell as key)
+    const aliveSet = new Set<string>();
+    for (const s of this.structures) {
+      if (s.alive) aliveSet.add(`${s.type}:${s.cx},${s.cy}`);
+    }
+
+    // Queue missing structures from blueprint
+    if (this.baseRebuildQueue.length === 0) {
+      for (const bp of this.baseBlueprint) {
+        if (!aiHousesWithFact.has(bp.house)) continue;
+        const pos = { cx: bp.cell % MAP_CELLS, cy: Math.floor(bp.cell / MAP_CELLS) };
+        const key = `${bp.type}:${pos.cx},${pos.cy}`;
+        if (!aliveSet.has(key)) {
+          // Check if cell is available (not blocked by another structure)
+          const [fw, fh] = STRUCTURE_SIZE[bp.type] ?? [1, 1];
+          let blocked = false;
+          for (let dy = 0; dy < fh && !blocked; dy++) {
+            for (let dx = 0; dx < fw && !blocked; dx++) {
+              for (const s of this.structures) {
+                if (s.alive && s.cx === pos.cx + dx && s.cy === pos.cy + dy) {
+                  blocked = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!blocked) {
+            this.baseRebuildQueue.push(bp);
+          }
+        }
+      }
+    }
+
+    // Process one rebuild per cycle
+    if (this.baseRebuildQueue.length > 0) {
+      const bp = this.baseRebuildQueue.shift()!;
+      if (!aiHousesWithFact.has(bp.house)) return;
+
+      const pos = { cx: bp.cell % MAP_CELLS, cy: Math.floor(bp.cell / MAP_CELLS) };
+      const STRUCTURE_IMAGES: Record<string, string> = {
+        FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
+        WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
+        GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
+        GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
+        ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
+        QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
+      };
+
+      const image = STRUCTURE_IMAGES[bp.type] ?? bp.type.toLowerCase();
+      const maxHp = STRUCTURE_MAX_HP[bp.type] ?? 256;
+
+      this.structures.push({
+        type: bp.type,
+        image,
+        house: bp.house,
+        cx: pos.cx,
+        cy: pos.cy,
+        hp: maxHp,
+        maxHp,
+        alive: true,
+        rubble: false,
+        weapon: STRUCTURE_WEAPONS[bp.type],
+        attackCooldown: 0,
+        ammo: -1,
+        buildProgress: 0, // starts with build animation
+      });
+
+      // Mark footprint as impassable
+      const [fw, fh] = STRUCTURE_SIZE[bp.type] ?? [1, 1];
+      for (let dy = 0; dy < fh; dy++) {
+        for (let dx = 0; dx < fw; dx++) {
+          this.map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
+        }
+      }
+
+      // Set 30s rebuild cooldown
+      this.baseRebuildCooldown = GAME_TICKS_PER_SEC * 30;
     }
   }
 

@@ -4,7 +4,7 @@
  */
 
 import {
-  type CellPos, type UnitStats, type WeaponStats, type WarheadType,
+  type CellPos, type UnitStats, type WeaponStats, type WarheadType, type ArmorType,
   CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
   House, Mission, UnitType, GAME_TICKS_PER_SEC,
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
@@ -736,9 +736,11 @@ export interface ScenarioResult {
   /** Per-scenario weapon stats (WEAPON_STATS merged with INI overrides) */
   scenarioWeaponStats: Record<string, WeaponStats>;
   /** Per-scenario warhead damage multipliers (overrides for WARHEAD_VS_ARMOR) */
-  warheadOverrides: Record<string, [number, number, number]>;
+  warheadOverrides: Record<string, [number, number, number, number, number]>;
   /** Crate type overrides from [General] — maps crate color to reward type */
   crateOverrides: { silver?: string; wood?: string; water?: string };
+  /** AI base blueprint for rebuild system — structures from [Base] section */
+  baseBlueprint: Array<{ type: string; cell: number; house: House }>;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -946,7 +948,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
 
   const scenarioUnitStats: Record<string, UnitStats> = { ...UNIT_STATS };
   const scenarioWeaponStats: Record<string, WeaponStats> = { ...WEAPON_STATS };
-  const warheadOverrides: Record<string, [number, number, number]> = {};
+  const warheadOverrides: Record<string, [number, number, number, number, number]> = {};
 
   // Apply unit stat overrides from INI sections
   for (const typeName of Object.keys(UNIT_STATS)) {
@@ -958,12 +960,13 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     if (section.has('Sight')) base.sight = parseInt(section.get('Sight')!);
     if (section.has('ROT')) base.rot = parseInt(section.get('ROT')!);
     if (section.has('Primary')) base.primaryWeapon = section.get('Primary')!;
+    if (section.has('Secondary')) base.secondaryWeapon = section.get('Secondary')!;
     if (section.has('NoMovingFire')) base.noMovingFire = section.get('NoMovingFire')!.toLowerCase() === 'yes';
     if (section.has('Passengers')) base.passengers = parseInt(section.get('Passengers')!);
     if (section.has('GuardRange')) base.guardRange = parseInt(section.get('GuardRange')!);
     if (section.has('Armor')) {
       const a = section.get('Armor')!.toLowerCase();
-      if (a === 'light' || a === 'heavy' || a === 'none') base.armor = a;
+      if (a === 'none' || a === 'wood' || a === 'light' || a === 'medium' || a === 'heavy') base.armor = a as ArmorType;
     }
     scenarioUnitStats[typeName] = base;
   }
@@ -986,14 +989,16 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   }
 
   // Apply warhead Verses overrides (e.g. [Fire] Verses=90%,100%,150%,150%,50%)
-  // RA has 5 armor classes: none(0), wood(1), aluminum(2), steel(3), heavy(4)
-  // Our 3-class system: none←RA[0], light←RA[2], heavy←RA[3]
+  // RA 5 armor classes: none(0), wood(1), light/aluminum(2), medium/steel(3), heavy(4)
   for (const whName of Object.keys(WARHEAD_VS_ARMOR)) {
     const section = data.rawSections.get(whName);
     if (!section?.has('Verses')) continue;
     const parts = section.get('Verses')!.split(',').map(s => parseInt(s) / 100);
-    if (parts.length >= 4) {
-      warheadOverrides[whName] = [parts[0], parts[2], parts[3]];
+    if (parts.length >= 5) {
+      warheadOverrides[whName] = [parts[0], parts[1], parts[2], parts[3], parts[4]];
+    } else if (parts.length >= 4) {
+      // Legacy 4-element: none, wood, light, heavy → expand to 5
+      warheadOverrides[whName] = [parts[0], parts[1], parts[2], parts[3], parts[3]];
     }
   }
 
@@ -1041,6 +1046,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     scenarioWeaponStats,
     warheadOverrides,
     crateOverrides,
+    baseBlueprint: data.baseStructures.map(bs => ({ type: bs.type, cell: bs.cell, house: toHouse(bs.house) })),
   };
 }
 
@@ -1061,6 +1067,10 @@ export function applyScenarioOverrides(
     // Re-resolve weapon from scenario weapon stats
     entity.weapon = overridden.primaryWeapon
       ? weaponStats[overridden.primaryWeapon] ?? null
+      : null;
+    // Re-resolve secondary weapon from scenario weapon stats
+    entity.weapon2 = overridden.secondaryWeapon
+      ? weaponStats[overridden.secondaryWeapon] ?? null
       : null;
   }
 }
