@@ -429,7 +429,7 @@ function ConversationDetail({
     e.preventDefault();
     if (!replyBody.trim()) return;
     setReplying(true);
-    onReply(conversation.id, conversation.phoneNumber, replyBody);
+    await onReply(conversation.id, conversation.phoneNumber, replyBody);
     setReplyBody("");
     setReplying(false);
   }
@@ -1029,7 +1029,7 @@ function SocialConversationDetail({
     e.preventDefault();
     if (!replyBody.trim()) return;
     setReplying(true);
-    onReply(conversation.id, conversation.externalUserId, replyBody);
+    await onReply(conversation.id, conversation.externalUserId, replyBody);
     setReplyBody("");
     setReplying(false);
   }

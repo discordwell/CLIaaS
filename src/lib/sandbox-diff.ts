@@ -3,8 +3,9 @@
  * Compares sandbox data against production to detect changes.
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { getSourceDir, getSandboxDir } from './sandbox-clone';
 
 // ---- Types ----
 
@@ -27,17 +28,6 @@ export interface SandboxDiff {
     total: number;
   };
   generatedAt: string;
-}
-
-// ---- Helpers ----
-
-function getSourceDir(): string {
-  return process.env.CLIAAS_DATA_DIR || '/tmp/cliaas-demo';
-}
-
-function getSandboxDir(sandboxId: string): string {
-  const baseDir = process.env.CLIAAS_DATA_DIR || '/tmp/cliaas-demo';
-  return join(baseDir, 'sandboxes', sandboxId);
 }
 
 function parseJsonlFile(filePath: string): Map<string, Record<string, unknown>> {
@@ -105,9 +95,7 @@ export function diffSandbox(sandboxId: string): SandboxDiff {
 
   // Compare each JSONL file in sandbox against production
   const jsonlFiles = existsSync(sandboxDir)
-    ? require('fs')
-        .readdirSync(sandboxDir)
-        .filter((f: string) => f.endsWith('.jsonl'))
+    ? readdirSync(sandboxDir).filter((f: string) => f.endsWith('.jsonl'))
     : [];
 
   for (const file of jsonlFiles) {
@@ -228,8 +216,7 @@ export function applyDiff(
 
       // Write updated production file
       const lines = Array.from(prodData.values()).map((obj) => JSON.stringify(obj));
-      const { writeFileSync: wfs } = require('fs');
-      wfs(prodPath, lines.join('\n') + '\n', 'utf-8');
+      writeFileSync(prodPath, lines.join('\n') + '\n', 'utf-8');
     } catch (err) {
       errors.push(`${file}: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }

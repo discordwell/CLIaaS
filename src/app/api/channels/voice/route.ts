@@ -32,6 +32,14 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
+  // Validate required IVRConfig fields
+  if (typeof body.enabled !== 'boolean' || typeof body.mainMenuId !== 'string' || !Array.isArray(body.menus)) {
+    return NextResponse.json(
+      { error: 'Invalid IVR config: enabled (boolean), mainMenuId (string), and menus (array) are required' },
+      { status: 400 },
+    );
+  }
+
   const config = body as IVRConfig;
   saveIVRConfig(config);
   return NextResponse.json({ ok: true, config });

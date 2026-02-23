@@ -116,4 +116,17 @@ describe('sandbox-clone', () => {
     expect(manifest).not.toBeNull();
     expect(manifest?.sandboxId).toBe('test-sbx-6');
   });
+
+  it('rejects path traversal in sandbox ID', async () => {
+    const { getSandboxDir } = await import('@/lib/sandbox-clone');
+
+    expect(() => getSandboxDir('../../etc')).toThrow('Invalid sandbox ID');
+    expect(() => getSandboxDir('../..')).toThrow('Invalid sandbox ID');
+    expect(() => getSandboxDir('test/../../etc')).toThrow('Invalid sandbox ID');
+    expect(() => getSandboxDir('')).toThrow('Invalid sandbox ID');
+
+    // Valid IDs should work
+    expect(() => getSandboxDir('valid-sandbox-123')).not.toThrow();
+    expect(() => getSandboxDir('sandbox_test')).not.toThrow();
+  });
 });

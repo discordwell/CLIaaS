@@ -7,7 +7,6 @@ import {
   generateVoicemailTwiml,
 } from '@/lib/channels/voice-ivr';
 import { createCall, getCallBySid, updateCall } from '@/lib/channels/voice-store';
-import { ticketCreated } from '@/lib/events';
 
 export const dynamic = 'force-dynamic';
 

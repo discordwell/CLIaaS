@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  escapeXml,
   generateGatherTwiml,
   generateTransferTwiml,
   generateVoicemailTwiml,
@@ -9,6 +8,7 @@ import {
   type IVRMenu,
   type IVRConfig,
 } from '@/lib/channels/voice-ivr';
+import { escapeXml } from '@/lib/channels/twilio';
 
 const testMenu: IVRMenu = {
   id: 'main',
@@ -119,5 +119,17 @@ describe('routeByDigit', () => {
     const xml = routeByDigit(testMenu, '9', testConfig);
     expect(xml).toContain('<Gather');
     expect(xml).toContain('Welcome to support');
+  });
+
+  it('falls back to voicemail when transfer has no transferTo', () => {
+    const menuWithMissingTransfer: IVRMenu = {
+      ...testMenu,
+      items: [
+        { digit: '1', label: 'Sales', action: 'transfer' },
+      ],
+    };
+    const xml = routeByDigit(menuWithMissingTransfer, '1', testConfig);
+    expect(xml).toContain('<Record');
+    expect(xml).toContain('Please leave a message.');
   });
 });

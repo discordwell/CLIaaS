@@ -18,6 +18,9 @@ describe('push', () => {
   afterEach(() => {
     process.env = originalEnv;
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    // Clean global singleton state
+    (global as Record<string, unknown>).__cliaaPushSubs = undefined;
+    (global as Record<string, unknown>).__cliaaPushSubsLoaded = undefined;
   });
 
   it('isDemoMode returns true without VAPID keys', async () => {

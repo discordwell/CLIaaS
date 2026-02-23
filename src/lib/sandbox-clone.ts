@@ -5,7 +5,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
 
 // ---- Types ----
 
@@ -41,19 +41,31 @@ const FILE_CATEGORIES: Record<string, string[]> = {
   plugins: ['plugins.jsonl'],
 };
 
-function getSourceDir(): string {
+// ---- Path helpers (shared validation) ----
+
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+export function getSourceDir(): string {
   return process.env.CLIAAS_DATA_DIR || '/tmp/cliaas-demo';
 }
 
-function getSandboxDir(sandboxId: string): string {
+export function getSandboxDir(sandboxId: string): string {
+  if (!SAFE_ID_RE.test(sandboxId)) {
+    throw new Error(`Invalid sandbox ID: ${sandboxId}`);
+  }
   const baseDir = process.env.CLIAAS_DATA_DIR || '/tmp/cliaas-demo';
-  return join(baseDir, 'sandboxes', sandboxId);
+  const resolved = join(baseDir, 'sandboxes', sandboxId);
+  // Extra safety: verify the resolved path stays within sandboxes dir
+  if (basename(resolved) !== sandboxId) {
+    throw new Error(`Invalid sandbox ID: ${sandboxId}`);
+  }
+  return resolved;
 }
 
 // ---- ID Remapping ----
 
-function remapId(oldId: string, prefix: string): string {
-  return `${prefix}-sbx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+function remapId(_oldId: string, prefix: string): string {
+  return `${prefix}-sbx-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 }
 
 function remapJsonlIds(

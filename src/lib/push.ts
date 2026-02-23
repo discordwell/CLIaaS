@@ -40,24 +40,33 @@ export function isDemoMode(): boolean {
   return !process.env.VAPID_PUBLIC_KEY;
 }
 
-// ---- Subscription Store ----
+// ---- Subscription Store (global singleton for HMR survival) ----
 
 const SUBSCRIPTIONS_FILE = 'push-subscriptions.jsonl';
 
-const subscriptions: Map<string, PushSubscription> = new Map();
-let loaded = false;
+declare global {
+  // eslint-disable-next-line no-var
+  var __cliaaPushSubs: Map<string, PushSubscription> | undefined;
+  // eslint-disable-next-line no-var
+  var __cliaaPushSubsLoaded: boolean | undefined;
+}
 
-function ensureLoaded(): void {
-  if (loaded) return;
-  loaded = true;
-  const saved = readJsonlFile<PushSubscription>(SUBSCRIPTIONS_FILE);
-  for (const sub of saved) {
-    subscriptions.set(sub.id, sub);
+function getStore(): Map<string, PushSubscription> {
+  if (!global.__cliaaPushSubs) {
+    global.__cliaaPushSubs = new Map();
   }
+  if (!global.__cliaaPushSubsLoaded) {
+    const saved = readJsonlFile<PushSubscription>(SUBSCRIPTIONS_FILE);
+    for (const sub of saved) {
+      global.__cliaaPushSubs.set(sub.id, sub);
+    }
+    global.__cliaaPushSubsLoaded = true;
+  }
+  return global.__cliaaPushSubs;
 }
 
 function persist(): void {
-  writeJsonlFile(SUBSCRIPTIONS_FILE, Array.from(subscriptions.values()));
+  writeJsonlFile(SUBSCRIPTIONS_FILE, Array.from(getStore().values()));
 }
 
 export function addSubscription(
@@ -65,7 +74,7 @@ export function addSubscription(
   keys: { p256dh: string; auth: string },
   userId?: string,
 ): PushSubscription {
-  ensureLoaded();
+  const store = getStore();
   const sub: PushSubscription = {
     id: `push-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     endpoint,
@@ -73,16 +82,16 @@ export function addSubscription(
     userId,
     createdAt: new Date().toISOString(),
   };
-  subscriptions.set(sub.id, sub);
+  store.set(sub.id, sub);
   persist();
   return sub;
 }
 
 export function removeSubscription(endpoint: string): boolean {
-  ensureLoaded();
-  for (const [id, sub] of subscriptions) {
+  const store = getStore();
+  for (const [id, sub] of store) {
     if (sub.endpoint === endpoint) {
-      subscriptions.delete(id);
+      store.delete(id);
       persist();
       return true;
     }
@@ -91,19 +100,18 @@ export function removeSubscription(endpoint: string): boolean {
 }
 
 export function listSubscriptions(): PushSubscription[] {
-  ensureLoaded();
-  return Array.from(subscriptions.values());
+  return Array.from(getStore().values());
 }
 
 // ---- Send Push ----
 
 export async function sendPush(payload: PushPayload): Promise<{ sent: number; failed: number }> {
-  ensureLoaded();
+  const store = getStore();
   const config = getVapidConfig();
 
   if (!config) {
     // Demo mode: log and return mock
-    return { sent: subscriptions.size, failed: 0 };
+    return { sent: store.size, failed: 0 };
   }
 
   // Use web-push library
@@ -111,15 +119,16 @@ export async function sendPush(payload: PushPayload): Promise<{ sent: number; fa
   try {
     webpush = await import('web-push');
   } catch {
-    return { sent: 0, failed: subscriptions.size };
+    return { sent: 0, failed: store.size };
   }
 
   webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
 
   let sent = 0;
   let failed = 0;
+  let removedAny = false;
 
-  const promises = Array.from(subscriptions.values()).map(async (sub) => {
+  const promises = Array.from(store.values()).map(async (sub) => {
     try {
       await webpush!.sendNotification(
         {
@@ -133,12 +142,13 @@ export async function sendPush(payload: PushPayload): Promise<{ sent: number; fa
       failed++;
       // Remove expired subscriptions (410 Gone)
       if (err && typeof err === 'object' && 'statusCode' in err && (err as { statusCode: number }).statusCode === 410) {
-        subscriptions.delete(sub.id);
+        store.delete(sub.id);
+        removedAny = true;
       }
     }
   });
 
   await Promise.allSettled(promises);
-  persist();
+  if (removedAny) persist();
   return { sent, failed };
 }

@@ -1,6 +1,8 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 
+const BASE_URL = () => process.env.CLIAAS_API_URL || 'http://localhost:3000';
+
 export function registerVoiceCommands(program: Command): void {
   const voice = program
     .command('voice')
@@ -12,7 +14,7 @@ export function registerVoiceCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (opts: { json?: boolean }) => {
       try {
-        const baseUrl = process.env.CLIAAS_API_URL || 'http://localhost:3000';
+        const baseUrl = BASE_URL();
         const res = await fetch(`${baseUrl}/api/channels/voice`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -99,7 +101,7 @@ export function registerVoiceCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (opts: { json?: boolean }) => {
       try {
-        const baseUrl = process.env.CLIAAS_API_URL || 'http://localhost:3000';
+        const baseUrl = BASE_URL();
         const res = await fetch(`${baseUrl}/api/channels/voice/calls`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();

@@ -63,7 +63,6 @@ function getCallStore(): Map<string, VoiceCall> {
     global.__cliaasVoiceCalls = new Map();
   }
   if (!global.__cliaasVoiceCallsLoaded) {
-    global.__cliaasVoiceCallsLoaded = true;
     const saved = readJsonlFile<VoiceCall>(CALLS_FILE);
     if (saved.length > 0) {
       for (const call of saved) {
@@ -72,6 +71,7 @@ function getCallStore(): Map<string, VoiceCall> {
     } else {
       seedDemoCalls(global.__cliaasVoiceCalls);
     }
+    global.__cliaasVoiceCallsLoaded = true;
   }
   return global.__cliaasVoiceCalls;
 }
@@ -81,7 +81,6 @@ function getAgentStore(): VoiceAgent[] {
     global.__cliaasVoiceAgents = [];
   }
   if (!global.__cliaasVoiceAgentsLoaded) {
-    global.__cliaasVoiceAgentsLoaded = true;
     const saved = readJsonlFile<VoiceAgent>(AGENTS_FILE);
     if (saved.length > 0) {
       global.__cliaasVoiceAgents = saved;
@@ -93,6 +92,7 @@ function getAgentStore(): VoiceAgent[] {
       ];
       persistAgents(global.__cliaasVoiceAgents);
     }
+    global.__cliaasVoiceAgentsLoaded = true;
   }
   return global.__cliaasVoiceAgents;
 }

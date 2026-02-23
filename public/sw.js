@@ -39,24 +39,14 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (request.method !== 'GET') return;
 
-  // API routes: network-first (freshness matters)
+  // API routes: network-only (avoid caching sensitive data)
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          // Cache successful API responses for offline fallback
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
-          return response;
-        })
-        .catch(() =>
-          caches.match(request).then((cached) => cached || new Response('{"error":"offline"}', {
+        .catch(() => new Response('{"error":"offline"}', {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
           }))
-        )
     );
     return;
   }

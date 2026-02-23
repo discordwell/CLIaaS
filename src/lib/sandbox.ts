@@ -139,9 +139,12 @@ export function promoteSandbox(
 
   const result = applyDiff(id, selectedEntryIds);
 
-  sandbox.status = 'archived';
-  sandbox.promotedAt = new Date().toISOString();
-  persistSandboxes();
+  // Only archive if at least one change was applied
+  if (result.applied > 0) {
+    sandbox.status = 'archived';
+    sandbox.promotedAt = new Date().toISOString();
+    persistSandboxes();
+  }
 
   return { sandbox, ...result };
 }

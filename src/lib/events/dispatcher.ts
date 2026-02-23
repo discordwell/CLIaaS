@@ -8,6 +8,7 @@ import { executePluginHook } from '../plugins';
 import { eventBus, type EventType as SSEEventType } from '../realtime/events';
 
 // ---- Canonical event types (dot-notation) ----
+// All canonical events are a subset of WebhookEventType by design.
 
 export type CanonicalEvent =
   | 'ticket.created'
@@ -16,6 +17,17 @@ export type CanonicalEvent =
   | 'message.created'
   | 'sla.breached'
   | 'csat.submitted';
+
+// Compile-time check: every CanonicalEvent must be assignable to WebhookEventType
+const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
+  'ticket.created': 'ticket.created',
+  'ticket.updated': 'ticket.updated',
+  'ticket.resolved': 'ticket.resolved',
+  'message.created': 'message.created',
+  'sla.breached': 'sla.breached',
+  'csat.submitted': 'csat.submitted',
+};
+void _typeCheck;
 
 // ---- SSE event type mapping (dots → colons) ----
 
@@ -36,7 +48,7 @@ export function dispatch(
 
   // Fan-out to all 3 channels in parallel, fire-and-forget
   void Promise.allSettled([
-    // 1. Webhooks
+    // 1. Webhooks (CanonicalEvent is validated as WebhookEventType subset above)
     dispatchWebhook({
       type: event as WebhookEventType,
       timestamp,

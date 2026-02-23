@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
         rating,
         comment: comment ?? null,
       };
+      csatSubmitted({ ticketId, rating, comment: comment ?? null });
       return NextResponse.json({ ok: true, updated: true });
     }
 

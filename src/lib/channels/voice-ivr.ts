@@ -4,6 +4,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { escapeXml } from './twilio';
 
 // ---- Types ----
 
@@ -38,17 +39,6 @@ export interface IVRConfig {
     schedule: Record<string, { start: string; end: string } | null>; // 'mon' -> { start: '09:00', end: '17:00' }
   };
   updatedAt: string;
-}
-
-// ---- XML Escaping ----
-
-export function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
 }
 
 // ---- TwiML Generation ----
@@ -132,7 +122,10 @@ export function routeByDigit(
 
   switch (item.action) {
     case 'transfer':
-      return generateTransferTwiml(item.transferTo ?? '', statusCallbackUrl);
+      if (!item.transferTo) {
+        return generateVoicemailTwiml(config.voicemailGreeting, statusCallbackUrl);
+      }
+      return generateTransferTwiml(item.transferTo, statusCallbackUrl);
     case 'voicemail':
       return generateVoicemailTwiml(
         config.voicemailGreeting,
