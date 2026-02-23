@@ -197,6 +197,7 @@ export class Game {
   onStateChange?: (state: GameState) => void;
   onLoadProgress?: (loaded: number, total: number) => void;
   onTick?: (game: Game) => void;
+  onPostRender?: () => void;
 
   // Internal
   private canvas: HTMLCanvasElement;
@@ -2056,6 +2057,7 @@ export class Game {
             }
 
             passenger.pos = { x: px, y: py };
+            passenger.flightAltitude = 0; // ensure ground units aren't airborne after unload
             passenger.mission = Mission.GUARD;
             passenger.animState = AnimState.IDLE;
             passenger.animFrame = 0;
@@ -2207,6 +2209,15 @@ export class Game {
         } else if (entity.mission === Mission.GUARD) {
           // Arrived but no ore here — re-seek
           entity.harvesterState = 'idle';
+        } else if (entity.path.length === 0 && entity.pathIndex >= 0) {
+          // Path exhausted or failed but still in MOVE — stuck seeking.
+          // Use harvestTick as a timeout counter (30 ticks = 2s grace).
+          entity.harvestTick++;
+          if (entity.harvestTick > 30) {
+            entity.harvesterState = entity.oreLoad > 0 ? 'returning' : 'idle';
+            entity.mission = Mission.GUARD;
+            entity.harvestTick = 0;
+          }
         }
         break;
       }
@@ -2545,8 +2556,11 @@ export class Game {
       } else {
         entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
         const facingReady = entity.tickRotation();
-        // NoMovingFire units must face target before attacking
-        if (entity.stats.noMovingFire && !facingReady) {
+        // NoMovingFire units must face target before attacking.
+        // Exception: melee weapons (range <= 2) bypass facing check to prevent
+        // rotation lock where ants never catch up to moving targets.
+        const isMelee = entity.weapon && entity.weapon.range <= 2;
+        if (entity.stats.noMovingFire && !facingReady && !isMelee) {
           entity.animState = AnimState.IDLE;
           return;
         }
@@ -4642,6 +4656,9 @@ export class Game {
         survivors,
       );
     }
+
+    // Fire onPostRender callback (used by QA screenshot capture)
+    this.onPostRender?.();
   }
 
   // === Stubbed Systems (not needed for ant missions) ===

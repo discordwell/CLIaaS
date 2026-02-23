@@ -877,6 +877,8 @@ export class Renderer {
         ctx.fillRect(spx, spy - 1, 1, 3);
       }
     }
+    // Defensive alpha reset after overlay pass
+    ctx.globalAlpha = 1;
   }
 
   private renderStructures(
@@ -1864,6 +1866,8 @@ export class Renderer {
         }
       }
     }
+    // Defensive alpha reset after effects pass
+    ctx.globalAlpha = 1;
   }
 
   // ─── Fog of War ──────────────────────────────────────────

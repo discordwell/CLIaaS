@@ -31,7 +31,8 @@
     "mcp:test": "pnpm cliaas mcp test",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:db": "DATABASE_URL=${DATABASE_URL_TEST:-postgresql://cliaas:cliaas@localhost:5433/cliaas_test} vitest run src/__tests__/db-integration"
+    "test:db": "DATABASE_URL=${DATABASE_URL_TEST:-postgresql://cliaas:cliaas@localhost:5433/cliaas_test} vitest run src/__tests__/db-integration",
+    "test:qa": "playwright test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
@@ -55,6 +56,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

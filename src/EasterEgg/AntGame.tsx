@@ -6,6 +6,7 @@ import {
   MISSIONS, getMissionIndex, loadProgress, saveProgress, DIFFICULTIES,
 } from './engine';
 import { TestRunner, type TestLogEntry } from './engine/testRunner';
+import { QATestRunner, type QALogEntry, type QAReport } from './engine/qaTestRunner';
 import { resolvePreset } from './engine/turbo';
 import { BriefingRenderer } from './engine/briefing';
 
@@ -41,6 +42,10 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [testMode, setTestMode] = useState(false);
   const [testLog, setTestLog] = useState<TestLogEntry[]>([]);
   const testRunnerRef = useRef<TestRunner | null>(null);
+  const [qaMode, setQaMode] = useState(false);
+  const [qaLog, setQaLog] = useState<QALogEntry[]>([]);
+  const [qaReport, setQaReport] = useState<QAReport | null>(null);
+  const qaRunnerRef = useRef<QATestRunner | null>(null);
   const briefingRef = useRef<BriefingRenderer | null>(null);
 
   const transitionTo = useCallback((callback: () => void) => {
@@ -197,6 +202,29 @@ export default function AntGame({ onExit }: AntGameProps) {
     const anttest = params.get('anttest');
     if (!anttest || !canvasRef.current) return;
 
+    // QA mode: full anomaly detection pipeline
+    if (anttest === 'qa') {
+      setQaMode(true);
+      setScreen('playing');
+
+      const runner = new QATestRunner(canvasRef.current);
+      qaRunnerRef.current = runner;
+
+      runner.onLog = (entry) => {
+        setQaLog(prev => [...prev, entry]);
+      };
+
+      runner.runAll().then((report) => {
+        setQaReport(report);
+      });
+
+      return () => {
+        runner.stop();
+        qaRunnerRef.current = null;
+      };
+    }
+
+    // Regular test mode
     setTestMode(true);
     setScreen('playing');
 
@@ -226,6 +254,10 @@ export default function AntGame({ onExit }: AntGameProps) {
       if (testRunnerRef.current) {
         testRunnerRef.current.stop();
         testRunnerRef.current = null;
+      }
+      if (qaRunnerRef.current) {
+        qaRunnerRef.current.stop();
+        qaRunnerRef.current = null;
       }
       if (gameRef.current) {
         gameRef.current.stop();
@@ -340,8 +372,87 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
+      {/* ── QA Mode Overlay ── */}
+      {qaMode && (
+        <div style={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 100010,
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          lineHeight: '1.5',
+          background: 'rgba(0,0,0,0.80)',
+          padding: '12px 16px',
+          borderRadius: '4px',
+          border: '1px solid #444',
+          maxWidth: '550px',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          pointerEvents: qaReport ? 'auto' : 'none',
+        }}>
+          <div style={{ color: '#00ccff', fontWeight: 'bold', marginBottom: '6px', fontSize: '14px' }}>
+            QA Pipeline {qaReport ? (qaReport.summary.passed ? '- PASSED' : '- FAILED') : '- Running...'}
+          </div>
+          {qaLog.map((entry, i) => {
+            let color = '#888';
+            let prefix = '';
+            if (entry.type === 'start') { color = '#ffaa00'; prefix = '[START] '; }
+            if (entry.type === 'pass') { color = '#44ff44'; prefix = '[PASS]  '; }
+            if (entry.type === 'fail') { color = '#ff4444'; prefix = '[FAIL]  '; }
+            if (entry.type === 'timeout') { color = '#ff8800'; prefix = '[TIMEOUT] '; }
+            if (entry.type === 'anomaly') {
+              const sev = entry.anomaly?.severity;
+              color = sev === 'critical' ? '#ff4444' : sev === 'warning' ? '#ffaa00' : '#888';
+              prefix = `[${entry.anomaly?.id}] `;
+            }
+            if (entry.type === 'done') {
+              color = entry.detail?.startsWith('PASSED') ? '#44ff44' : '#ff4444';
+              prefix = '';
+            }
+            return (
+              <div key={i} style={{ color, fontSize: entry.type === 'anomaly' ? '11px' : '12px' }}>
+                {prefix}{entry.mission ? `${entry.mission}: ` : ''}{entry.anomaly?.message ?? entry.detail ?? ''}
+              </div>
+            );
+          })}
+          {qaReport && (
+            <div style={{ marginTop: '8px', borderTop: '1px solid #333', paddingTop: '8px' }}>
+              <div style={{ color: '#aaa', fontSize: '11px', marginBottom: '4px' }}>
+                Critical: {qaReport.summary.bySeverity.critical} | Warnings: {qaReport.summary.bySeverity.warning} | Info: {qaReport.summary.bySeverity.info}
+              </div>
+              <div style={{ color: '#aaa', fontSize: '11px', marginBottom: '8px' }}>
+                Screenshots: {qaReport.screenshots.length}
+              </div>
+              <button
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(qaReport, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `qa-report-${new Date().toISOString().slice(0, 19)}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                style={{
+                  background: '#224466',
+                  color: '#88ccff',
+                  border: '1px solid #336699',
+                  padding: '6px 16px',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                Download Report
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Mission Select Screen ── */}
-      {!testMode && screen === 'select' && (
+      {!testMode && !qaMode && screen === 'select' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -503,7 +614,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Mission Briefing Screen ── */}
-      {!testMode && screen === 'briefing' && selectedMission && (
+      {!testMode && !qaMode && screen === 'briefing' && selectedMission && (
         <div
           style={{
             position: 'absolute',
@@ -673,7 +784,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Loading Overlay ── */}
-      {!testMode && screen === 'loading' && (
+      {!testMode && !qaMode && screen === 'loading' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -712,7 +823,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Win/Lose Overlay ── */}
-      {!testMode && (gameState === 'won' || gameState === 'lost') && screen === 'playing' && (
+      {!testMode && !qaMode && (gameState === 'won' || gameState === 'lost') && screen === 'playing' && (
         <div style={{
           position: 'absolute',
           top: 0,
@@ -889,7 +1000,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Cutscene Click Overlay ── */}
-      {!testMode && screen === 'cutscene' && (
+      {!testMode && !qaMode && screen === 'cutscene' && (
         <div
           onClick={() => { if (briefingRef.current) briefingRef.current.advance(); }}
           style={{
@@ -906,7 +1017,7 @@ export default function AntGame({ onExit }: AntGameProps) {
 
       {/* ── Game Canvas ── */}
       <div style={{
-        display: testMode || screen === 'playing' || screen === 'loading' || screen === 'cutscene' ? 'flex' : 'none',
+        display: testMode || qaMode || screen === 'playing' || screen === 'loading' || screen === 'cutscene' ? 'flex' : 'none',
         justifyContent: 'center',
         alignItems: 'center',
         width: '100vw',
