@@ -140,23 +140,27 @@ function loadAllFromDirs<T>(filename: string): T[] {
 
 // ---- DB context (cached) ----
 
-let _dbContext: DbContext | null = null;
-let _dbContextChecked = false;
+let _dbContextPromise: Promise<DbContext | null> | null = null;
 
 async function getDbContext(): Promise<DbContext | null> {
-  if (_dbContextChecked) return _dbContext;
-  _dbContextChecked = true;
   if (!process.env.DATABASE_URL) return null;
-  try {
-    const [{ db }, schema] = await Promise.all([
-      import('@/db'),
-      import('@/db/schema'),
-    ]);
-    _dbContext = { db, schema };
-  } catch (err) {
-    logger.warn({ err }, 'Failed to initialize DB context');
+  if (!_dbContextPromise) {
+    _dbContextPromise = (async () => {
+      try {
+        const [{ db }, schema] = await Promise.all([
+          import('@/db'),
+          import('@/db/schema'),
+        ]);
+        return { db, schema } as DbContext;
+      } catch (err) {
+        logger.warn({ err }, 'Failed to initialize DB context');
+        // Allow retry on next call
+        _dbContextPromise = null;
+        return null;
+      }
+    })();
   }
-  return _dbContext;
+  return _dbContextPromise;
 }
 
 async function getWorkspaceId(

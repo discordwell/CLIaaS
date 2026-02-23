@@ -64,11 +64,41 @@ const logger = createLogger('audit');
 
 // ---- DB helpers ----
 
+type AuditDbContext = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any;
+  schema: typeof import('@/db/schema');
+  orm: typeof import('drizzle-orm');
+};
+
+let _auditDbPromise: Promise<AuditDbContext | null> | null = null;
+
+async function getAuditDbContext(): Promise<AuditDbContext | null> {
+  if (!process.env.DATABASE_URL) return null;
+  if (!_auditDbPromise) {
+    _auditDbPromise = (async () => {
+      try {
+        const [{ db }, schema, orm] = await Promise.all([
+          import('@/db'),
+          import('@/db/schema'),
+          import('drizzle-orm'),
+        ]);
+        return { db, schema, orm } as AuditDbContext;
+      } catch (err) {
+        logger.warn({ err }, 'Failed to initialize audit DB context');
+        _auditDbPromise = null;
+        return null;
+      }
+    })();
+  }
+  return _auditDbPromise;
+}
+
 async function insertAuditToDb(record: AuditEntry): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  const ctx = await getAuditDbContext();
+  if (!ctx) return;
   try {
-    const { db } = await import('@/db');
-    const schema = await import('@/db/schema');
+    const { db, schema } = ctx;
     // Don't pass record.id — it's not a UUID. Let DB generate one.
     await db.insert(schema.auditEntries).values({
       timestamp: new Date(record.timestamp),
@@ -86,35 +116,29 @@ async function insertAuditToDb(record: AuditEntry): Promise<void> {
 }
 
 async function queryAuditFromDb(filters: AuditFilters): Promise<{ entries: AuditEntry[]; total: number } | null> {
-  if (!process.env.DATABASE_URL) return null;
+  const ctx = await getAuditDbContext();
+  if (!ctx) return null;
   try {
-    const { db } = await import('@/db');
-    const schema = await import('@/db/schema');
-    const { desc, sql } = await import('drizzle-orm');
+    const { db, schema, orm } = ctx;
+    const { desc, sql, eq, gte, lte, and } = orm;
 
     const conditions: unknown[] = [];
     if (filters.action) {
-      const { eq } = await import('drizzle-orm');
       conditions.push(eq(schema.auditEntries.action, filters.action));
     }
     if (filters.resource) {
-      const { eq } = await import('drizzle-orm');
       conditions.push(eq(schema.auditEntries.resource, filters.resource));
     }
     if (filters.userId) {
-      const { eq } = await import('drizzle-orm');
       conditions.push(eq(schema.auditEntries.userId, filters.userId));
     }
     if (filters.from) {
-      const { gte } = await import('drizzle-orm');
       conditions.push(gte(schema.auditEntries.timestamp, new Date(filters.from)));
     }
     if (filters.to) {
-      const { lte } = await import('drizzle-orm');
       conditions.push(lte(schema.auditEntries.timestamp, new Date(filters.to)));
     }
 
-    const { and } = await import('drizzle-orm');
     const whereClause = conditions.length > 0
       ? and(...(conditions as Parameters<typeof and>))
       : undefined;
