@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 
 interface AnalyticsData {
@@ -100,20 +99,6 @@ export default function AnalyticsPage() {
             <h1 className="mt-2 text-3xl font-bold">
               Support Analytics
             </h1>
-          </div>
-          <div className="flex gap-3">
-            <Link
-              href="/dashboard"
-              className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-            >
-              Dashboard
-            </Link>
-            <Link
-              href="/sla"
-              className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-            >
-              SLA Policies
-            </Link>
           </div>
         </div>
 

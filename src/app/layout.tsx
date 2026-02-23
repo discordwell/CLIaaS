@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import EasterEggProvider from "@/EasterEgg/EasterEggProvider";
+import AppNavWrapper from "@/components/AppNavWrapper";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
@@ -29,6 +30,7 @@ export default function RootLayout({
       <body
         className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased`}
       >
+        <AppNavWrapper />
         <EasterEggProvider>{children}</EasterEggProvider>
       </body>
     </html>

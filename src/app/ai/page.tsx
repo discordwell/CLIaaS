@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 
 // ---------------------------------------------------------------------------
@@ -262,20 +261,6 @@ export default function AICommandCenter() {
               Autonomous resolution, smart routing, proactive insights, and
               quality scoring.
             </p>
-          </div>
-          <div className="flex gap-3">
-            <Link
-              href="/dashboard"
-              className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-            >
-              Dashboard
-            </Link>
-            <Link
-              href="/tickets"
-              className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-            >
-              Tickets
-            </Link>
           </div>
         </div>
 

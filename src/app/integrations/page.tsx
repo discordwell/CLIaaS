@@ -287,12 +287,6 @@ export default function IntegrationsPage() {
             </p>
             <h1 className="mt-2 text-3xl font-bold">Integrations Hub</h1>
           </div>
-          <Link
-            href="/dashboard"
-            className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-          >
-            Dashboard
-          </Link>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-2">

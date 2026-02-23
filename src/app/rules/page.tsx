@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 
 interface Rule {
@@ -105,12 +104,6 @@ export default function RulesPage() {
             </h1>
           </div>
           <div className="flex gap-3">
-            <Link
-              href="/dashboard"
-              className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-            >
-              Dashboard
-            </Link>
             <button
               onClick={() => setShowForm(!showForm)}
               className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
