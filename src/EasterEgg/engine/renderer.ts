@@ -629,24 +629,35 @@ export class Renderer {
               ctx.fillRect(tx, screen.y + 12, 3, 10);
               ctx.fillStyle = this.palColor(PAL_DIRT_START + 7);
               ctx.fillRect(tx + 1, screen.y + 13, 1, 8);
-              // Canopy — layered with variation per cell
-              const cOff = h % 3;
+              // Canopy — pixel-art blocky rects (6 hash-based variants)
+              const variant = h % 6;
+              const sx = screen.x, sy = screen.y;
+              // Dark base layer
               ctx.fillStyle = this.palColor(PAL_GRASS_START + 10 + (h % 2));
-              ctx.beginPath();
-              ctx.arc(screen.x + 12, screen.y + 10, 9, 0, Math.PI * 2);
-              ctx.fill();
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 7 + cOff);
-              ctx.beginPath();
-              ctx.arc(screen.x + 10 + (h % 3), screen.y + 8, 6, 0, Math.PI * 2);
-              ctx.fill();
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 5 + cOff);
-              ctx.beginPath();
-              ctx.arc(screen.x + 13, screen.y + 7, 4, 0, Math.PI * 2);
-              ctx.fill();
-              // Leaf highlight pixels
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 3, 10);
-              ctx.fillRect(screen.x + 9, screen.y + 5, 1, 1);
-              ctx.fillRect(screen.x + 14, screen.y + 6, 1, 1);
+              if (variant < 2) {
+                ctx.fillRect(sx + 4, sy + 8, 16, 4);
+                ctx.fillRect(sx + 6, sy + 4, 12, 4);
+                ctx.fillRect(sx + 8, sy + 2, 8, 2);
+                ctx.fillRect(sx + 6, sy + 12, 10, 2);
+              } else if (variant < 4) {
+                ctx.fillRect(sx + 3, sy + 7, 18, 5);
+                ctx.fillRect(sx + 5, sy + 3, 14, 4);
+                ctx.fillRect(sx + 7, sy + 1, 10, 2);
+                ctx.fillRect(sx + 5, sy + 12, 12, 2);
+              } else {
+                ctx.fillRect(sx + 5, sy + 8, 14, 4);
+                ctx.fillRect(sx + 7, sy + 5, 10, 3);
+                ctx.fillRect(sx + 9, sy + 3, 6, 2);
+                ctx.fillRect(sx + 7, sy + 12, 10, 2);
+              }
+              // Mid-tone highlight blocks
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 7 + (h % 3));
+              ctx.fillRect(sx + 6 + (h % 3), sy + 4, 6, 4);
+              ctx.fillRect(sx + 8 + (h % 2), sy + 8, 4, 3);
+              // Light highlight pixels
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 4 + (h % 2));
+              ctx.fillRect(sx + 8 + (h % 4), sy + 4, 2, 2);
+              ctx.fillRect(sx + 12 + (h % 2), sy + 6, 2, 1);
             }
             break;
           }

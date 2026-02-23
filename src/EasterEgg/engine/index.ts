@@ -391,6 +391,9 @@ export class Game {
   private update(): void {
     this.tick++;
 
+    // Periodically resume audio context if browser suspended it (e.g. tab blur)
+    if (this.tick % 45 === 0) this.audio.resume();
+
     // Prune expired EVA messages (older than 5 seconds)
     if (this.tick % 75 === 0) {
       this.evaMessages = this.evaMessages.filter(m => this.tick - m.tick < 75);
@@ -2700,6 +2703,7 @@ export class Game {
               this.audio.play('eva_unit_lost');
               this.minimapAlert(tc2.cx, tc2.cy);
             }
+            entity.target = null;
           }
         }
 

@@ -324,6 +324,8 @@ export class AudioManager {
     if (this.ctx?.state === 'suspended') {
       this.ctx.resume();
     }
+    // Also resume HTML5 music player in case it was paused by browser throttle
+    this.music.resume();
   }
 
   /**
@@ -414,7 +416,7 @@ export class AudioManager {
   /** Play a named sound effect. Prefers real samples, falls back to synthesis. */
   play(name: SoundName): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
-    if (this.ctx.state === 'suspended') return;
+    if (this.ctx.state === 'suspended') { this.ctx.resume(); return; }
 
     // Rate-limit same sounds
     const now = performance.now();
@@ -435,7 +437,7 @@ export class AudioManager {
   /** Play a sound at a world position with stereo panning based on camera center */
   playAt(name: SoundName, worldX: number, worldY: number, cameraX: number, cameraW: number): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
-    if (this.ctx.state === 'suspended') return;
+    if (this.ctx.state === 'suspended') { this.ctx.resume(); return; }
 
     // Rate-limit same sounds
     const now = performance.now();
