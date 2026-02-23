@@ -83,6 +83,42 @@ Suggest the most relevant articles. Respond with ONLY a JSON array (no markdown)
 ]`;
 }
 
+export function buildRagReplyPrompt(
+  ticket: Ticket,
+  messages: Message[],
+  ragContext: string,
+  opts?: { tone?: string },
+): string {
+  const context = buildTicketContext(ticket, messages);
+  const tone = opts?.tone ?? 'professional';
+
+  return `You are a customer support agent. Draft a reply to this support ticket using the retrieved knowledge base context below.
+
+Tone: ${tone}
+${context}
+
+${ragContext}
+
+Instructions:
+- Use the retrieved context to provide an accurate, helpful reply
+- Cite source titles when referencing specific information
+- If the context doesn't cover the customer's question, acknowledge what you can help with and what needs escalation
+- Write ONLY the reply text, ready to send`;
+}
+
+export function buildRagAskPrompt(question: string, ragContext: string): string {
+  return `You are a knowledgeable support assistant. Answer the following question using ONLY the provided context. If the context doesn't contain enough information, say so clearly.
+
+Cite your sources by referencing the source titles when using information from them.
+
+${ragContext}
+
+## Question
+${question}
+
+Provide a clear, helpful answer based on the context above.`;
+}
+
 export function buildSummarizePrompt(tickets: Ticket[], period?: string): string {
   const stats = {
     total: tickets.length,

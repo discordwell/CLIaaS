@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   index,
   inet,
+  customType,
 } from 'drizzle-orm/pg-core';
 
 export const providerEnum = pgEnum('provider', [
@@ -695,3 +696,77 @@ export const automationRules = pgTable(
     ),
   }),
 );
+
+// ---- RAG (Retrieval-Augmented Generation) ----
+
+const vector = customType<{ data: number[]; driverParam: string }>({
+  dataType() {
+    return 'vector(1536)';
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(',')}]`;
+  },
+  fromDriver(value: unknown): number[] {
+    return String(value)
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map(Number);
+  },
+});
+
+export const ragChunkSourceEnum = pgEnum('rag_chunk_source', [
+  'kb_article',
+  'ticket_thread',
+  'external_file',
+]);
+
+export const ragJobStatusEnum = pgEnum('rag_job_status', [
+  'running',
+  'success',
+  'error',
+]);
+
+export const ragChunks = pgTable(
+  'rag_chunks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    sourceType: ragChunkSourceEnum('source_type').notNull(),
+    sourceId: text('source_id').notNull(),
+    sourceTitle: text('source_title').notNull(),
+    chunkIndex: integer('chunk_index').notNull(),
+    content: text('content').notNull(),
+    tokenCount: integer('token_count').notNull(),
+    contentHash: varchar('content_hash', { length: 64 }).notNull(),
+    metadata: jsonb('metadata').notNull().default({}),
+    embedding: vector('embedding'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ragChunksWorkspaceSourceIdx: index('rag_chunks_workspace_source_idx').on(
+      table.workspaceId,
+      table.sourceType,
+      table.sourceId,
+    ),
+    ragChunksDedup: uniqueIndex('rag_chunks_dedup_idx').on(
+      table.workspaceId,
+      table.sourceId,
+      table.chunkIndex,
+    ),
+  }),
+);
+
+export const ragImportJobs = pgTable('rag_import_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+  sourceType: ragChunkSourceEnum('source_type').notNull(),
+  status: ragJobStatusEnum('status').notNull().default('running'),
+  totalSources: integer('total_sources').notNull().default(0),
+  totalChunks: integer('total_chunks').notNull().default(0),
+  newChunks: integer('new_chunks').notNull().default(0),
+  skippedChunks: integer('skipped_chunks').notNull().default(0),
+  error: text('error'),
+  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+});

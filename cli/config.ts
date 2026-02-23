@@ -7,6 +7,13 @@ export interface CLIConfig {
   claude?: { apiKey: string; model?: string };
   openai?: { apiKey: string; model?: string };
   openclaw?: { baseUrl: string; apiKey?: string; model: string };
+  rag?: {
+    embeddingModel?: string;
+    chunkSize?: number;
+    chunkOverlap?: number;
+    topK?: number;
+    hybridWeight?: number;
+  };
 }
 
 const CONFIG_DIR = join(homedir(), '.cliaas');

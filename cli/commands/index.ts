@@ -26,6 +26,7 @@ import { registerIntercomCommands } from './intercom.js';
 import { registerHelpScoutCommands } from './helpscout.js';
 import { registerZohoDeskCommands } from './zoho-desk.js';
 import { registerHubSpotCommands } from './hubspot.js';
+import { registerRagCommands } from './rag.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -55,4 +56,5 @@ export function registerCommands(program: Command): void {
   registerZohoDeskCommands(program);
   registerHubSpotCommands(program);
   registerMigrateCommand(program);
+  registerRagCommands(program);
 }
