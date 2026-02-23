@@ -436,7 +436,7 @@ export type AllianceTable = Map<House, Set<House>>;
 export function buildDefaultAlliances(): AllianceTable {
   const table: AllianceTable = new Map();
   // Each house is always allied with itself
-  for (const h of Object.values(House).filter((v): v is House => typeof v === 'number')) {
+  for (const h of Object.values(House)) {
     table.set(h, new Set([h]));
   }
   // Spain ↔ Greece
