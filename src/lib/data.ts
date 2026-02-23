@@ -1,6 +1,9 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { and, eq, inArray } from 'drizzle-orm';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('data');
 
 // Canonical types (subset for web display)
 export interface Ticket {
@@ -31,6 +34,8 @@ export interface KBArticle {
   title: string;
   body: string;
   categoryPath: string[];
+  status?: string;
+  updatedAt?: string;
 }
 
 export interface TicketStats {
@@ -42,11 +47,43 @@ export interface TicketStats {
   recentTickets: Ticket[];
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  source: string;
+  createdAt?: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  source: string;
+}
+
+export interface CSATRating {
+  ticketId: string;
+  rating: number;
+  createdAt: string;
+}
+
+export interface RuleRecord {
+  id: string;
+  type: string;
+  name: string;
+  enabled: boolean;
+  conditions: unknown;
+  actions: unknown;
+  source?: string;
+}
+
 type DbContext = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   db: any;
   schema: typeof import('@/db/schema');
 };
+
+// ---- JSONL helpers ----
 
 function readJsonl<T>(filePath: string): T[] {
   if (!existsSync(filePath)) return [];
@@ -101,13 +138,25 @@ function loadAllFromDirs<T>(filename: string): T[] {
   return results;
 }
 
+// ---- DB context (cached) ----
+
+let _dbContext: DbContext | null = null;
+let _dbContextChecked = false;
+
 async function getDbContext(): Promise<DbContext | null> {
+  if (_dbContextChecked) return _dbContext;
+  _dbContextChecked = true;
   if (!process.env.DATABASE_URL) return null;
-  const [{ db }, schema] = await Promise.all([
-    import('@/db'),
-    import('@/db/schema'),
-  ]);
-  return { db, schema };
+  try {
+    const [{ db }, schema] = await Promise.all([
+      import('@/db'),
+      import('@/db/schema'),
+    ]);
+    _dbContext = { db, schema };
+  } catch (err) {
+    logger.warn({ err }, 'Failed to initialize DB context');
+  }
+  return _dbContext;
 }
 
 async function getWorkspaceId(
@@ -131,6 +180,8 @@ async function getWorkspaceId(
     .limit(1);
   return rows[0]?.id ?? null;
 }
+
+// ---- DB loaders ----
 
 async function loadTicketsFromDb(): Promise<Ticket[]> {
   const ctx = await getDbContext();
@@ -312,12 +363,15 @@ async function loadKBArticlesFromDb(): Promise<KBArticle[]> {
 
   const rows: Array<{
     id: string; title: string; body: string; categoryPath: string[] | null;
+    status: string; updatedAt: Date;
   }> = await db
     .select({
       id: schema.kbArticles.id,
       title: schema.kbArticles.title,
       body: schema.kbArticles.body,
       categoryPath: schema.kbArticles.categoryPath,
+      status: schema.kbArticles.status,
+      updatedAt: schema.kbArticles.updatedAt,
     })
     .from(schema.kbArticles)
     .where(eq(schema.kbArticles.workspaceId, workspaceId));
@@ -327,15 +381,122 @@ async function loadKBArticlesFromDb(): Promise<KBArticle[]> {
     title: row.title,
     body: row.body,
     categoryPath: row.categoryPath ?? [],
+    status: row.status,
+    updatedAt: row.updatedAt.toISOString(),
   }));
 }
+
+async function loadCustomersFromDb(): Promise<Customer[]> {
+  const ctx = await getDbContext();
+  if (!ctx) return [];
+  const { db, schema } = ctx;
+  const workspaceId = await getWorkspaceId(db, schema);
+  if (!workspaceId) return [];
+
+  const rows = await db
+    .select({
+      id: schema.customers.id,
+      name: schema.customers.name,
+      email: schema.customers.email,
+      createdAt: schema.customers.createdAt,
+    })
+    .from(schema.customers)
+    .where(eq(schema.customers.workspaceId, workspaceId));
+
+  return rows.map((r: { id: string; name: string; email: string | null; createdAt: Date }) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email ?? '',
+    source: 'zendesk' as const,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+async function loadOrganizationsFromDb(): Promise<Organization[]> {
+  const ctx = await getDbContext();
+  if (!ctx) return [];
+  const { db, schema } = ctx;
+  const workspaceId = await getWorkspaceId(db, schema);
+  if (!workspaceId) return [];
+
+  const rows = await db
+    .select({
+      id: schema.organizations.id,
+      name: schema.organizations.name,
+    })
+    .from(schema.organizations)
+    .where(eq(schema.organizations.workspaceId, workspaceId));
+
+  return rows.map((r: { id: string; name: string }) => ({
+    id: r.id,
+    name: r.name,
+    source: 'zendesk' as const,
+  }));
+}
+
+async function loadRulesFromDb(): Promise<RuleRecord[]> {
+  const ctx = await getDbContext();
+  if (!ctx) return [];
+  const { db, schema } = ctx;
+  const workspaceId = await getWorkspaceId(db, schema);
+  if (!workspaceId) return [];
+
+  const rows = await db
+    .select({
+      id: schema.rules.id,
+      type: schema.rules.type,
+      name: schema.rules.name,
+      enabled: schema.rules.enabled,
+      conditions: schema.rules.conditions,
+      actions: schema.rules.actions,
+      source: schema.rules.source,
+    })
+    .from(schema.rules)
+    .where(eq(schema.rules.workspaceId, workspaceId));
+
+  return rows.map((r: { id: string; type: string; name: string; enabled: boolean; conditions: unknown; actions: unknown; source: string | null }) => ({
+    id: r.id,
+    type: r.type,
+    name: r.name,
+    enabled: r.enabled,
+    conditions: r.conditions,
+    actions: r.actions,
+    source: r.source ?? 'zendesk',
+  }));
+}
+
+async function loadCSATRatingsFromDb(): Promise<CSATRating[]> {
+  const ctx = await getDbContext();
+  if (!ctx) return [];
+  const { db, schema } = ctx;
+  const workspaceId = await getWorkspaceId(db, schema);
+  if (!workspaceId) return [];
+
+  const rows = await db
+    .select({
+      ticketId: schema.csatRatings.ticketId,
+      rating: schema.csatRatings.rating,
+      createdAt: schema.csatRatings.createdAt,
+    })
+    .from(schema.csatRatings)
+    .innerJoin(schema.tickets, eq(schema.tickets.id, schema.csatRatings.ticketId))
+    .where(eq(schema.tickets.workspaceId, workspaceId));
+
+  return rows.map((r: { ticketId: string; rating: number; createdAt: Date }) => ({
+    ticketId: r.ticketId,
+    rating: r.rating,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+// ---- Public read API ----
 
 export async function loadTickets(): Promise<Ticket[]> {
   if (process.env.DATABASE_URL) {
     try {
       return await loadTicketsFromDb();
-    } catch {
-      // DB unavailable, fall back to JSONL
+    } catch (err) {
+      logger.warn({ err }, 'DB loadTickets failed, falling back to JSONL');
     }
   }
   return loadAllFromDirs<Ticket>('tickets.jsonl');
@@ -345,8 +506,8 @@ export async function loadMessages(ticketId?: string): Promise<Message[]> {
   if (process.env.DATABASE_URL) {
     try {
       return await loadMessagesFromDb(ticketId);
-    } catch {
-      // DB unavailable, fall back to JSONL
+    } catch (err) {
+      logger.warn({ err }, 'DB loadMessages failed, falling back to JSONL');
     }
   }
   const messages = loadAllFromDirs<Message>('messages.jsonl');
@@ -357,36 +518,149 @@ export async function loadKBArticles(): Promise<KBArticle[]> {
   if (process.env.DATABASE_URL) {
     try {
       return await loadKBArticlesFromDb();
-    } catch {
-      // DB unavailable, fall back to JSONL
+    } catch (err) {
+      logger.warn({ err }, 'DB loadKBArticles failed, falling back to JSONL');
     }
   }
   return loadAllFromDirs<KBArticle>('kb_articles.jsonl');
 }
 
-// ---- Customer & Organization loading ----
-
-export interface Customer {
-  id: string;
-  name: string;
-  email: string;
-  source: string;
-  createdAt?: string;
-}
-
-export interface Organization {
-  id: string;
-  name: string;
-  source: string;
-}
-
 export async function loadCustomers(): Promise<Customer[]> {
+  if (process.env.DATABASE_URL) {
+    try {
+      return await loadCustomersFromDb();
+    } catch (err) {
+      logger.warn({ err }, 'DB loadCustomers failed, falling back to JSONL');
+    }
+  }
   return loadAllFromDirs<Customer>('customers.jsonl');
 }
 
 export async function loadOrganizations(): Promise<Organization[]> {
+  if (process.env.DATABASE_URL) {
+    try {
+      return await loadOrganizationsFromDb();
+    } catch (err) {
+      logger.warn({ err }, 'DB loadOrganizations failed, falling back to JSONL');
+    }
+  }
   return loadAllFromDirs<Organization>('organizations.jsonl');
 }
+
+export async function loadRules(): Promise<RuleRecord[]> {
+  if (process.env.DATABASE_URL) {
+    try {
+      return await loadRulesFromDb();
+    } catch (err) {
+      logger.warn({ err }, 'DB loadRules failed, falling back to JSONL');
+    }
+  }
+  return loadAllFromDirs<RuleRecord>('rules.jsonl');
+}
+
+export async function loadCSATRatings(): Promise<CSATRating[]> {
+  if (process.env.DATABASE_URL) {
+    try {
+      return await loadCSATRatingsFromDb();
+    } catch (err) {
+      logger.warn({ err }, 'DB loadCSATRatings failed, falling back to JSONL');
+    }
+  }
+  return [];
+}
+
+// ---- Write operations (DB-only, throw in demo mode) ----
+
+export async function updateTicket(
+  ticketId: string,
+  updates: Partial<Pick<Ticket, 'status' | 'priority' | 'subject'>>,
+): Promise<void> {
+  const ctx = await getDbContext();
+  if (!ctx) throw new Error('Database not configured. Write operations require a database.');
+  const { db, schema } = ctx;
+
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (updates.status !== undefined) set.status = updates.status;
+  if (updates.priority !== undefined) set.priority = updates.priority;
+  if (updates.subject !== undefined) set.subject = updates.subject;
+
+  await db.update(schema.tickets).set(set).where(eq(schema.tickets.id, ticketId));
+}
+
+export async function createKBArticle(article: {
+  title: string;
+  body: string;
+  categoryPath?: string[];
+  status?: string;
+}): Promise<{ id: string }> {
+  const ctx = await getDbContext();
+  if (!ctx) throw new Error('Database not configured. Write operations require a database.');
+  const { db, schema } = ctx;
+  const workspaceId = await getWorkspaceId(db, schema);
+  if (!workspaceId) throw new Error('No workspace found');
+
+  const [row] = await db
+    .insert(schema.kbArticles)
+    .values({
+      workspaceId,
+      title: article.title.trim(),
+      body: article.body.trim(),
+      categoryPath: article.categoryPath ?? [],
+      status: article.status ?? 'published',
+    })
+    .returning({ id: schema.kbArticles.id });
+
+  return { id: row.id };
+}
+
+export async function createMessage(message: {
+  ticketId: string;
+  body: string;
+  authorType?: 'user' | 'customer' | 'system';
+  authorId?: string;
+  visibility?: 'public' | 'internal';
+}): Promise<{ id: string }> {
+  const ctx = await getDbContext();
+  if (!ctx) throw new Error('Database not configured. Write operations require a database.');
+  const { db, schema } = ctx;
+
+  // Find conversation for this ticket
+  const convRows = await db
+    .select({ id: schema.conversations.id })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.ticketId, message.ticketId))
+    .limit(1);
+
+  let conversationId = convRows[0]?.id;
+  if (!conversationId) {
+    const [convRow] = await db
+      .insert(schema.conversations)
+      .values({
+        ticketId: message.ticketId,
+        channelType: 'email',
+        startedAt: new Date(),
+        lastActivityAt: new Date(),
+      })
+      .returning({ id: schema.conversations.id });
+    conversationId = convRow.id;
+  }
+
+  const [row] = await db
+    .insert(schema.messages)
+    .values({
+      conversationId,
+      authorType: message.authorType ?? 'system',
+      authorId: message.authorId ?? null,
+      body: message.body,
+      visibility: message.visibility ?? 'public',
+      createdAt: new Date(),
+    })
+    .returning({ id: schema.messages.id });
+
+  return { id: row.id };
+}
+
+// ---- Stats ----
 
 export function computeStats(tickets: Ticket[]): TicketStats {
   const byStatus: Record<string, number> = {};

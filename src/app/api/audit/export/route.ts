@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
       to: searchParams.get('to') ?? undefined,
     };
 
-    const data = exportAudit(format, filters);
+    const data = await exportAudit(format, filters);
     const contentType =
       format === 'csv' ? 'text/csv' : 'application/json';
     const ext = format === 'csv' ? 'csv' : 'json';

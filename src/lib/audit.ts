@@ -22,7 +22,7 @@ export interface AuditFilters {
   offset?: number;
 }
 
-// ---- Circular buffer (last 10,000 entries) ----
+// ---- Circular buffer (last 10,000 entries — in-memory fallback) ----
 
 const MAX_ENTRIES = 10000;
 const buffer: AuditEntry[] = [];
@@ -62,6 +62,100 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('audit');
 
+// ---- DB helpers ----
+
+async function insertAuditToDb(record: AuditEntry): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    const { db } = await import('@/db');
+    const schema = await import('@/db/schema');
+    // Don't pass record.id — it's not a UUID. Let DB generate one.
+    await db.insert(schema.auditEntries).values({
+      timestamp: new Date(record.timestamp),
+      userId: record.userId,
+      userName: record.userName,
+      action: record.action,
+      resource: record.resource,
+      resourceId: record.resourceId,
+      details: record.details,
+      ipAddress: record.ipAddress,
+    });
+  } catch (err) {
+    logger.warn({ err }, 'Failed to persist audit entry to DB');
+  }
+}
+
+async function queryAuditFromDb(filters: AuditFilters): Promise<{ entries: AuditEntry[]; total: number } | null> {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const { db } = await import('@/db');
+    const schema = await import('@/db/schema');
+    const { desc, sql } = await import('drizzle-orm');
+
+    const conditions: unknown[] = [];
+    if (filters.action) {
+      const { eq } = await import('drizzle-orm');
+      conditions.push(eq(schema.auditEntries.action, filters.action));
+    }
+    if (filters.resource) {
+      const { eq } = await import('drizzle-orm');
+      conditions.push(eq(schema.auditEntries.resource, filters.resource));
+    }
+    if (filters.userId) {
+      const { eq } = await import('drizzle-orm');
+      conditions.push(eq(schema.auditEntries.userId, filters.userId));
+    }
+    if (filters.from) {
+      const { gte } = await import('drizzle-orm');
+      conditions.push(gte(schema.auditEntries.timestamp, new Date(filters.from)));
+    }
+    if (filters.to) {
+      const { lte } = await import('drizzle-orm');
+      conditions.push(lte(schema.auditEntries.timestamp, new Date(filters.to)));
+    }
+
+    const { and } = await import('drizzle-orm');
+    const whereClause = conditions.length > 0
+      ? and(...(conditions as Parameters<typeof and>))
+      : undefined;
+
+    // Get total count
+    const countResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.auditEntries)
+      .where(whereClause);
+    const total = Number(countResult[0]?.count ?? 0);
+
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit ?? 50;
+
+    const rows = await db
+      .select()
+      .from(schema.auditEntries)
+      .where(whereClause)
+      .orderBy(desc(schema.auditEntries.timestamp))
+      .offset(offset)
+      .limit(limit);
+
+    const entries: AuditEntry[] = rows.map((r: typeof rows[0]) => ({
+      id: r.id,
+      timestamp: r.timestamp.toISOString(),
+      userId: r.userId,
+      userName: r.userName,
+      action: r.action,
+      resource: r.resource,
+      resourceId: r.resourceId,
+      details: (r.details as Record<string, unknown>) ?? {},
+      ipAddress: r.ipAddress ?? '',
+    }));
+
+    return { entries, total };
+  } catch (err) {
+    logger.warn({ err }, 'Failed to query audit from DB');
+    return null;
+  }
+}
+
 // ---- Public API ----
 
 export function recordAudit(
@@ -78,6 +172,8 @@ export function recordAudit(
   while (buffer.length > MAX_ENTRIES) {
     buffer.shift();
   }
+  // Persist to DB (fire-and-forget)
+  insertAuditToDb(record).catch(() => {});
   // Also write to immutable secure audit log
   try {
     recordSecureAudit({
@@ -93,10 +189,15 @@ export function recordAudit(
   return record;
 }
 
-export function queryAudit(filters: AuditFilters = {}): {
+export async function queryAudit(filters: AuditFilters = {}): Promise<{
   entries: AuditEntry[];
   total: number;
-} {
+}> {
+  // Try DB first
+  const dbResult = await queryAuditFromDb(filters);
+  if (dbResult !== null) return dbResult;
+
+  // Fall back to in-memory buffer
   ensureDefaults();
   let results = [...buffer];
 
@@ -136,11 +237,11 @@ export function queryAudit(filters: AuditFilters = {}): {
   return { entries, total };
 }
 
-export function exportAudit(
+export async function exportAudit(
   format: 'json' | 'csv',
   filters: AuditFilters = {}
-): string {
-  const { entries } = queryAudit({ ...filters, limit: MAX_ENTRIES });
+): Promise<string> {
+  const { entries } = await queryAudit({ ...filters, limit: MAX_ENTRIES });
 
   if (format === 'json') {
     return JSON.stringify(entries, null, 2);

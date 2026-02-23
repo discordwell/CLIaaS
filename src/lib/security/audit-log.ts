@@ -6,6 +6,9 @@
 
 import { createHash, randomUUID } from 'crypto';
 import { readJsonlFile, writeJsonlFile } from '@/lib/jsonl-store';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('secure-audit');
 
 // ---- Types ----
 
@@ -128,6 +131,43 @@ function persist(): void {
   writeJsonlFile(JSONL_FILE, getStore());
 }
 
+async function persistToDb(record: SecureAuditEntry): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    const { db } = await import('@/db');
+    const schema = await import('@/db/schema');
+
+    // Get first workspace for the audit event
+    const workspaceRows = await db
+      .select({ id: schema.workspaces.id })
+      .from(schema.workspaces)
+      .limit(1);
+    const workspaceId = workspaceRows[0]?.id;
+    if (!workspaceId) return;
+
+    await db.insert(schema.auditEvents).values({
+      workspaceId,
+      actorType: record.actor.type,
+      actorId: null,
+      action: record.action,
+      objectType: record.resource.type,
+      objectId: null,
+      createdAt: new Date(record.timestamp),
+      diff: {
+        outcome: record.outcome,
+        actor: record.actor,
+        resource: record.resource,
+        details: record.details,
+        hash: record.hash,
+        prevHash: record.prevHash,
+        sequence: record.sequence,
+      },
+    });
+  } catch (err) {
+    logger.warn({ err }, 'Failed to persist secure audit to DB');
+  }
+}
+
 // ---- Public API ----
 
 export function recordSecureAudit(
@@ -154,6 +194,8 @@ export function recordSecureAudit(
 
   store.push(record);
   persist();
+  // Fire-and-forget DB persistence
+  persistToDb(record).catch(() => {});
   return record;
 }
 

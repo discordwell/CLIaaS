@@ -1,4 +1,4 @@
-import { loadTickets, loadMessages, type Ticket, type Message } from '@/lib/data';
+import { loadTickets, loadMessages, loadCSATRatings, type Ticket, type Message } from '@/lib/data';
 
 // ---- Types ----
 
@@ -44,38 +44,6 @@ export interface AnalyticsData {
 export interface DateRange {
   from: Date;
   to: Date;
-}
-
-// ---- CSAT helpers ----
-
-interface CSATRating {
-  ticketId: string;
-  rating: number;
-  createdAt: string;
-}
-
-async function loadCSATRatings(): Promise<CSATRating[]> {
-  if (process.env.DATABASE_URL) {
-    try {
-      const { db } = await import('@/db');
-      const schema = await import('@/db/schema');
-      const rows = await db
-        .select({
-          ticketId: schema.csatRatings.ticketId,
-          rating: schema.csatRatings.rating,
-          createdAt: schema.csatRatings.createdAt,
-        })
-        .from(schema.csatRatings);
-      return rows.map((r) => ({
-        ticketId: r.ticketId,
-        rating: r.rating,
-        createdAt: r.createdAt.toISOString(),
-      }));
-    } catch {
-      // DB unavailable
-    }
-  }
-  return [];
 }
 
 // ---- Utility helpers ----

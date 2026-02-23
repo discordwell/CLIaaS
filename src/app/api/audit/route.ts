@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
         : undefined,
     };
 
-    const result = queryAudit(filters);
+    const result = await queryAudit(filters);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(

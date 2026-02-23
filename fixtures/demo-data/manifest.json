@@ -1,0 +1,12 @@
+{
+  "source": "zendesk",
+  "exportedAt": "2026-02-22T03:23:49.236Z",
+  "counts": {
+    "tickets": 30,
+    "messages": 123,
+    "customers": 20,
+    "organizations": 8,
+    "kbArticles": 9,
+    "rules": 6
+  }
+}

@@ -1,0 +1,8 @@
+{"id":"demo-org-1","externalId":"1","source":"zendesk","name":"Acme Corp","domains":["acmecorp.com"]}
+{"id":"demo-org-2","externalId":"2","source":"zendesk","name":"Globex Industries","domains":["globex.com","globex.io"]}
+{"id":"demo-org-3","externalId":"3","source":"zendesk","name":"Initech Solutions","domains":["initech.com"]}
+{"id":"demo-org-4","externalId":"4","source":"zendesk","name":"Massive Dynamic","domains":["massivedynamic.com"]}
+{"id":"demo-org-5","externalId":"5","source":"zendesk","name":"Stark Industries","domains":["stark.com"]}
+{"id":"demo-org-6","externalId":"6","source":"zendesk","name":"Wayne Enterprises","domains":["wayne.co"]}
+{"id":"demo-org-7","externalId":"7","source":"zendesk","name":"Cyberdyne Systems","domains":["cyberdyne.io"]}
+{"id":"demo-org-8","externalId":"8","source":"zendesk","name":"Umbrella Corp","domains":["umbrella.com"]}
