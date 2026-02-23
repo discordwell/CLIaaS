@@ -693,8 +693,12 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
 
 // Building type → sprite image name (only include buildings we have sprites for)
 const STRUCTURE_IMAGES: Record<string, string> = {
-  FACT: 'fact', POWR: 'powr', BARR: 'barr', TENT: 'tent',
-  GUN: 'gun', SAM: 'sam',
+  FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
+  WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
+  GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
+  GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
+  ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
+  FENC: 'fenc', BRIK: 'brik', SBAG: 'sbag', BARB: 'barb', WOOD: 'wood',
 };
 
 // Building footprint sizes in cells (w, h) — defaults to 1x1

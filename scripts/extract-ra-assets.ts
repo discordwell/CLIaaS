@@ -37,6 +37,10 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'HARV.SHP', 'harv'],    // Harvester
   ['CONQUER.MIX', 'MCV.SHP', 'mcv'],      // MCV
   ['CONQUER.MIX', 'ARTY.SHP', 'arty'],    // Artillery
+  ['CONQUER.MIX', 'TRUK.SHP', 'truk'],    // Supply truck / transport
+  ['CONQUER.MIX', 'MNLY.SHP', 'mnly'],    // Minelayer
+  ['CONQUER.MIX', 'MGG.SHP', 'mgg'],      // Mobile gap generator
+  ['CONQUER.MIX', 'V2RL.SHP', 'v2rl'],    // V2 rocket launcher
   // Infantry (LORES.MIX — not CONQUER.MIX!)
   ['LORES.MIX', 'E1.SHP', 'e1'],          // Rifle infantry
   ['LORES.MIX', 'E2.SHP', 'e2'],          // Grenadier
@@ -46,6 +50,8 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['LORES.MIX', 'DOG.SHP', 'dog'],        // Attack dog
   ['LORES.MIX', 'SPY.SHP', 'spy'],        // Spy
   ['LORES.MIX', 'MEDI.SHP', 'medi'],      // Medic
+  ['LORES.MIX', 'THF.SHP', 'thf'],        // Thief
+  ['LORES.MIX', 'SHOK.SHP', 'shok'],      // Shock trooper
   // Ant units (EXPAND.MIX — Counterstrike content)
   ['EXPAND.MIX', 'ANT1.SHP', 'ant1'],     // Small ant
   ['EXPAND.MIX', 'ANT2.SHP', 'ant2'],     // Medium ant
@@ -59,13 +65,44 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'PIFFPIFF.SHP', 'piffpiff'],
   ['CONQUER.MIX', 'FBALL1.SHP', 'fball1'],
   ['CONQUER.MIX', 'VEH-HIT1.SHP', 'veh-hit1'],
-  // Buildings (CONQUER.MIX)
-  ['CONQUER.MIX', 'FACT.SHP', 'fact'],    // War factory
-  ['CONQUER.MIX', 'POWR.SHP', 'powr'],    // Power plant
-  ['CONQUER.MIX', 'BARR.SHP', 'barr'],    // Barracks
-  ['CONQUER.MIX', 'TENT.SHP', 'tent'],    // Soviet barracks
+  ['CONQUER.MIX', 'NAPALM.SHP', 'napalm'],
+  ['CONQUER.MIX', 'ATOMSFX.SHP', 'atomsfx'],     // Nuclear explosion
+  ['CONQUER.MIX', 'SMOKEY.SHP', 'smokey'],        // Smoke effect
+  ['CONQUER.MIX', 'LITNING.SHP', 'litning'],      // Lightning effect
+  // Buildings — production (CONQUER.MIX)
+  ['CONQUER.MIX', 'FACT.SHP', 'fact'],    // Construction Yard
+  ['CONQUER.MIX', 'POWR.SHP', 'powr'],    // Power Plant
+  ['CONQUER.MIX', 'APWR.SHP', 'apwr'],    // Advanced Power Plant
+  ['CONQUER.MIX', 'BARR.SHP', 'barr'],    // Allied Barracks
+  ['CONQUER.MIX', 'TENT.SHP', 'tent'],    // Soviet Barracks
+  ['CONQUER.MIX', 'WEAP.SHP', 'weap'],    // War Factory
+  ['CONQUER.MIX', 'PROC.SHP', 'proc'],    // Ore Refinery
+  ['CONQUER.MIX', 'SILO.SHP', 'silo'],    // Ore Silo
+  ['CONQUER.MIX', 'DOME.SHP', 'dome'],    // Radar Dome
+  ['CONQUER.MIX', 'FIX.SHP', 'fix'],      // Service Depot
+  // Buildings — defense
   ['CONQUER.MIX', 'GUN.SHP', 'gun'],      // Turret
   ['CONQUER.MIX', 'SAM.SHP', 'sam'],      // SAM site
+  ['CONQUER.MIX', 'HBOX.SHP', 'hbox'],    // Pillbox
+  ['CONQUER.MIX', 'TSLA.SHP', 'tsla'],    // Tesla Coil
+  ['CONQUER.MIX', 'AGUN.SHP', 'agun'],    // Anti-Aircraft Gun
+  ['CONQUER.MIX', 'GAP.SHP', 'gap'],      // Gap Generator
+  ['CONQUER.MIX', 'PBOX.SHP', 'pbox'],    // Camo Pillbox
+  // Buildings — tech/special
+  ['CONQUER.MIX', 'HPAD.SHP', 'hpad'],    // Helipad
+  ['CONQUER.MIX', 'AFLD.SHP', 'afld'],    // Airfield
+  ['CONQUER.MIX', 'MSLO.SHP', 'mslo'],    // Missile Silo
+  ['CONQUER.MIX', 'ATEK.SHP', 'atek'],    // Allied Tech Center
+  ['CONQUER.MIX', 'STEK.SHP', 'stek'],    // Soviet Tech Center
+  ['CONQUER.MIX', 'IRON.SHP', 'iron'],    // Iron Curtain
+  ['CONQUER.MIX', 'PDOX.SHP', 'pdox'],    // Chronosphere
+  ['CONQUER.MIX', 'KENN.SHP', 'kenn'],    // Kennel
+  // Walls / fences
+  ['CONQUER.MIX', 'FENC.SHP', 'fenc'],    // Chain-link fence
+  ['CONQUER.MIX', 'BRIK.SHP', 'brik'],    // Concrete wall
+  ['CONQUER.MIX', 'SBAG.SHP', 'sbag'],    // Sandbags
+  ['CONQUER.MIX', 'BARB.SHP', 'barb'],    // Barbed wire
+  ['CONQUER.MIX', 'WOOD.SHP', 'wood'],    // Wooden fence
 ];
 
 function log(msg: string): void {

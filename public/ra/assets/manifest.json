@@ -80,6 +80,42 @@
     "sheetWidth": 384,
     "sheetHeight": 48
   },
+  "truk": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "mnly": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 48,
+    "columns": 16,
+    "rows": 3,
+    "sheetWidth": 384,
+    "sheetHeight": 72
+  },
+  "mgg": {
+    "frameWidth": 40,
+    "frameHeight": 40,
+    "frameCount": 40,
+    "columns": 16,
+    "rows": 3,
+    "sheetWidth": 640,
+    "sheetHeight": 120
+  },
+  "v2rl": {
+    "frameWidth": 40,
+    "frameHeight": 40,
+    "frameCount": 80,
+    "columns": 16,
+    "rows": 5,
+    "sheetWidth": 640,
+    "sheetHeight": 200
+  },
   "e1": {
     "frameWidth": 50,
     "frameHeight": 39,
@@ -152,6 +188,15 @@
     "sheetWidth": 800,
     "sheetHeight": 624
   },
+  "thf": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 193,
+    "columns": 16,
+    "rows": 13,
+    "sheetWidth": 800,
+    "sheetHeight": 507
+  },
   "piff": {
     "frameWidth": 9,
     "frameHeight": 13,
@@ -188,6 +233,33 @@
     "sheetWidth": 480,
     "sheetHeight": 34
   },
+  "atomsfx": {
+    "frameWidth": 78,
+    "frameHeight": 121,
+    "frameCount": 27,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 1248,
+    "sheetHeight": 242
+  },
+  "smokey": {
+    "frameWidth": 19,
+    "frameHeight": 17,
+    "frameCount": 7,
+    "columns": 7,
+    "rows": 1,
+    "sheetWidth": 133,
+    "sheetHeight": 17
+  },
+  "litning": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 8,
+    "columns": 8,
+    "rows": 1,
+    "sheetWidth": 192,
+    "sheetHeight": 24
+  },
   "fact": {
     "frameWidth": 72,
     "frameHeight": 72,
@@ -205,6 +277,15 @@
     "rows": 1,
     "sheetWidth": 96,
     "sheetHeight": 48
+  },
+  "apwr": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 72
   },
   "barr": {
     "frameWidth": 48,
@@ -224,6 +305,51 @@
     "sheetWidth": 768,
     "sheetHeight": 96
   },
+  "weap": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 48
+  },
+  "proc": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 72
+  },
+  "silo": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 240,
+    "sheetHeight": 24
+  },
+  "dome": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 48
+  },
+  "fix": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 1008,
+    "sheetHeight": 72
+  },
   "gun": {
     "frameWidth": 24,
     "frameHeight": 24,
@@ -241,6 +367,150 @@
     "rows": 5,
     "sheetWidth": 768,
     "sheetHeight": 120
+  },
+  "tsla": {
+    "frameWidth": 24,
+    "frameHeight": 48,
+    "frameCount": 20,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 96
+  },
+  "agun": {
+    "frameWidth": 24,
+    "frameHeight": 48,
+    "frameCount": 128,
+    "columns": 16,
+    "rows": 8,
+    "sheetWidth": 384,
+    "sheetHeight": 384
+  },
+  "gap": {
+    "frameWidth": 24,
+    "frameHeight": 48,
+    "frameCount": 64,
+    "columns": 16,
+    "rows": 4,
+    "sheetWidth": 384,
+    "sheetHeight": 192
+  },
+  "pbox": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 48,
+    "sheetHeight": 24
+  },
+  "hpad": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 672,
+    "sheetHeight": 48
+  },
+  "afld": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 1152,
+    "sheetHeight": 48
+  },
+  "atek": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 48
+  },
+  "stek": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 48
+  },
+  "iron": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 22,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 96
+  },
+  "pdox": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 58,
+    "columns": 16,
+    "rows": 4,
+    "sheetWidth": 768,
+    "sheetHeight": 192
+  },
+  "kenn": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 48,
+    "sheetHeight": 24
+  },
+  "fenc": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "brik": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 64,
+    "columns": 16,
+    "rows": 4,
+    "sheetWidth": 384,
+    "sheetHeight": 96
+  },
+  "sbag": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "barb": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "wood": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
   },
   "ant1": {
     "frameWidth": 24,
