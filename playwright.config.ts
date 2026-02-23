@@ -13,6 +13,7 @@ export default defineConfig({
         '--mute-audio',
         '--use-gl=swiftshader',    // Software WebGL for headless
         '--enable-webgl',
+        '--autoplay-policy=no-user-gesture-required',  // Allow audio without gesture
       ],
     },
   },

@@ -16,55 +16,243 @@
 <progress id="progress" max="100" value="0"></progress>
 <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 <script>
-// Intercept WebGL context creation to enable preserveDrawingBuffer for screenshots
+// === Self-capture + rendering hook system ===
 (function() {
-  var origGetContext = HTMLCanvasElement.prototype.getContext;
-  HTMLCanvasElement.prototype.getContext = function(type, attrs) {
-    if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
-      attrs = Object.assign({}, attrs || {}, { preserveDrawingBuffer: true });
-    }
-    return origGetContext.call(this, type, attrs);
+  window.__wasmScreenshots = [];
+  window.__wasmCaptureQueue = [];
+  window.__wasmFrameCount = 0;
+  window.__wasmHasContent = false;
+  window.__wasmReady = false;
+  window.__wasmLogs = [];
+  window.__wasmDiag = {};
+  window.__wasmRenderCount = 0;      // How many putImageData calls
+  window.__wasmRenderSamples = [];   // Sample pixel data from renders
+
+  var MAX_SCREENSHOTS = 100;
+  var PERIODIC_INTERVAL = 90;
+
+  function wlog(msg) {
+    var entry = '[' + new Date().toISOString() + '] ' + msg;
+    window.__wasmLogs.push(entry);
+    console.log('WASM-capture: ' + msg);
+  }
+  window.__wlog = wlog;
+
+  window.__wasmRequestCapture = function(key) {
+    window.__wasmCaptureQueue.push(key);
   };
+
+  // === Hook putImageData to detect SDL2 rendering ===
+  var origPutImageData = CanvasRenderingContext2D.prototype.putImageData;
+  CanvasRenderingContext2D.prototype.putImageData = function(imageData, dx, dy) {
+    window.__wasmRenderCount++;
+    // Sample first 20 renders
+    if (window.__wasmRenderCount <= 20 || window.__wasmRenderCount % 100 === 0) {
+      var data = imageData.data;
+      var w = imageData.width, h = imageData.height;
+      // Sample center pixel
+      var cx = Math.floor(w / 2), cy = Math.floor(h / 2);
+      var idx = (cy * w + cx) * 4;
+      var centerPx = [data[idx], data[idx+1], data[idx+2], data[idx+3]];
+      // Count non-black pixels in a sample
+      var nonBlack = 0;
+      var totalSampled = 0;
+      for (var i = 0; i < data.length && totalSampled < 1000; i += 4 * Math.max(1, Math.floor(data.length / 4000))) {
+        totalSampled++;
+        if (data[i] > 5 || data[i+1] > 5 || data[i+2] > 5) nonBlack++;
+      }
+      var sample = {
+        render: window.__wasmRenderCount,
+        w: w, h: h,
+        centerPx: centerPx,
+        nonBlack: nonBlack,
+        totalSampled: totalSampled,
+        at: Date.now()
+      };
+      window.__wasmRenderSamples.push(sample);
+      if (nonBlack > 0 && !window.__wasmHasContent) {
+        window.__wasmHasContent = true;
+        window.__wasmReady = true;
+        wlog('First non-black render! render#' + window.__wasmRenderCount +
+             ' nonBlack=' + nonBlack + '/' + totalSampled +
+             ' center=' + JSON.stringify(centerPx));
+      }
+      if (window.__wasmRenderCount <= 5) {
+        wlog('putImageData #' + window.__wasmRenderCount +
+             ' ' + w + 'x' + h +
+             ' center=' + JSON.stringify(centerPx) +
+             ' nonBlack=' + nonBlack + '/' + totalSampled);
+      }
+    }
+    return origPutImageData.call(this, imageData, dx, dy);
+  };
+
+  // Check 2D canvas pixels
+  function hasRealContent(canvas) {
+    try {
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return false;
+      var w = canvas.width, h = canvas.height;
+      if (w === 0 || h === 0) return false;
+      var row = ctx.getImageData(0, Math.floor(h/2), w, 1).data;
+      for (var j = 0; j < row.length; j += 4) {
+        if (row[j] > 5 || row[j+1] > 5 || row[j+2] > 5) return true;
+      }
+      return false;
+    } catch(e) { return false; }
+  }
+
+  function captureFrame(key) {
+    var canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    try {
+      var dataUrl = canvas.toDataURL('image/png');
+      if (!window.__wasmHasContent) {
+        if (hasRealContent(canvas)) {
+          window.__wasmHasContent = true;
+          window.__wasmReady = true;
+          wlog('First real canvas content at frame ' + window.__wasmFrameCount);
+        }
+      }
+      if (window.__wasmScreenshots.length >= MAX_SCREENSHOTS) {
+        var evictIdx = window.__wasmScreenshots.findIndex(function(s) {
+          return s.key.startsWith('periodic-');
+        });
+        if (evictIdx >= 0) window.__wasmScreenshots.splice(evictIdx, 1);
+        else window.__wasmScreenshots.shift();
+      }
+      window.__wasmScreenshots.push({
+        key: key, dataUrl: dataUrl, timestamp: Date.now(), frame: window.__wasmFrameCount
+      });
+    } catch (e) { wlog('Capture error: ' + e.message); }
+  }
+
+  function logDiagnostics() {
+    var canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    var diag = {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      frameCount: window.__wasmFrameCount,
+      hasContent: window.__wasmHasContent,
+      renderCount: window.__wasmRenderCount,
+    };
+    try {
+      var ctx = canvas.getContext('2d');
+      if (ctx) {
+        diag.contextType = '2d';
+        var px = ctx.getImageData(Math.floor(canvas.width/2), Math.floor(canvas.height/2), 1, 1).data;
+        diag.centerPixel = [px[0], px[1], px[2], px[3]];
+      }
+    } catch(e) { diag.contextError = e.message; }
+    if (window.Module) {
+      diag.moduleCtx = !!window.Module.ctx;
+      if (window.Module.SDL2) {
+        diag.sdl2W = window.Module.SDL2.w;
+        diag.sdl2H = window.Module.SDL2.h;
+        diag.sdl2HasCtx = !!window.Module.SDL2.ctx;
+        diag.sdl2HasAudioCtx = !!window.Module.SDL2.audioContext;
+        diag.sdl2HasImage = !!window.Module.SDL2.image;
+      }
+    }
+    window.__wasmDiag = diag;
+    wlog('Diagnostics: ' + JSON.stringify(diag));
+  }
+
+  function captureLoop() {
+    window.__wasmFrameCount++;
+    while (window.__wasmCaptureQueue.length > 0) {
+      captureFrame(window.__wasmCaptureQueue.shift());
+    }
+    if (window.__wasmFrameCount % PERIODIC_INTERVAL === 0) {
+      captureFrame('periodic-' + window.__wasmFrameCount);
+    }
+    if (window.__wasmFrameCount % 300 === 1) logDiagnostics();
+    requestAnimationFrame(captureLoop);
+  }
+
+  setTimeout(function() {
+    wlog('Starting capture loop');
+    logDiagnostics();
+    requestAnimationFrame(captureLoop);
+  }, 2000);
+})();
+
+// === Pre-create AudioContext so SDL2 doesn't block ===
+(function() {
+  var OrigAC = window.AudioContext || window.webkitAudioContext;
+  if (!OrigAC) return;
+  try {
+    var preCtx = new OrigAC();
+    preCtx.resume().catch(function(){});
+    window.__preAudioCtx = preCtx;
+  } catch(e) {}
+  function PatchedAC() {
+    var ac;
+    try { ac = new OrigAC(); ac.resume().catch(function(){}); }
+    catch(e) { ac = new OrigAC(); }
+    return ac;
+  }
+  PatchedAC.prototype = OrigAC.prototype;
+  window.AudioContext = PatchedAC;
+  if (window.webkitAudioContext) window.webkitAudioContext = PatchedAC;
 })();
 
 var statusElement = document.getElementById("status");
 var progressElement = document.getElementById("progress");
 var canvasElement = document.getElementById("canvas");
 
-// Scale canvas to fill viewport
 function resizeCanvas() {
-  var w = window.innerWidth;
-  var h = window.innerHeight;
-  canvasElement.style.width = w + 'px';
-  canvasElement.style.height = h + 'px';
+  canvasElement.style.width = window.innerWidth + 'px';
+  canvasElement.style.height = window.innerHeight + 'px';
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
+window.addEventListener('load', function() {
+  canvasElement.focus();
+  setTimeout(function() {
+    canvasElement.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX:320, clientY:200}));
+    canvasElement.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, clientX:320, clientY:200}));
+    canvasElement.dispatchEvent(new MouseEvent('click', {bubbles:true, clientX:320, clientY:200}));
+    canvasElement.focus();
+    if (window.__preAudioCtx) window.__preAudioCtx.resume().catch(function(){});
+  }, 500);
+});
+
 var Module = {
-  print: function() { console.log(Array.from(arguments).join(' ')); },
+  print: function() {
+    var msg = Array.from(arguments).join(' ');
+    console.log(msg);
+    if (window.__wlog) window.__wlog('WASM: ' + msg);
+  },
+  printErr: function() {
+    var msg = Array.from(arguments).join(' ');
+    console.error(msg);
+    if (window.__wlog) window.__wlog('WASM-ERR: ' + msg);
+  },
   canvas: canvasElement,
   setStatus: function(text) {
     if (text) {
       statusElement.innerHTML = text;
       var m = text.match(/\((\d+)\/(\d+)\)/);
-      if (m) {
-        progressElement.value = parseInt(m[1]);
-        progressElement.max = parseInt(m[2]);
-      }
+      if (m) { progressElement.value = parseInt(m[1]); progressElement.max = parseInt(m[2]); }
     } else {
       statusElement.style.display = 'none';
       progressElement.style.display = 'none';
+      if (window.__wlog) window.__wlog('Module.setStatus cleared — WASM loaded');
+      if (window.__wasmRequestCapture) window.__wasmRequestCapture('wasm-loaded');
     }
   },
   totalDependencies: 0,
   monitorRunDependencies: function(left) {
     this.totalDependencies = Math.max(this.totalDependencies, left);
-    Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+    Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
   }
 };
 Module.setStatus('Downloading...');
 </script>
+<script src="gamedata.js"></script>
 <script async src="rasdl.js"></script>
 </body>
 </html>
