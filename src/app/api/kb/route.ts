@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadKBArticles, createKBArticle } from '@/lib/data';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,13 +49,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { title, body: articleBody, categoryPath, status: articleStatus } = body as {
+    const parsed = await parseJsonBody<{
       title?: string;
       body?: string;
       categoryPath?: string[];
       status?: string;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { title, body: articleBody, categoryPath, status: articleStatus } = parsed.data;
 
     if (!title?.trim() || !articleBody?.trim()) {
       return NextResponse.json(

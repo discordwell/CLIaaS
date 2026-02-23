@@ -50,6 +50,8 @@ export interface ExecutionResult {
   actionsExecuted: number;
   errors: string[];
   changes: Record<string, unknown>;
+  notifications: Array<{ type: string; to: string; template?: string; data?: Record<string, unknown> }>;
+  webhooks: Array<{ url: string; method: string; body: unknown }>;
 }
 
 export function evaluateRule(
@@ -63,6 +65,8 @@ export function evaluateRule(
     actionsExecuted: 0,
     errors: [],
     changes: {},
+    notifications: [],
+    webhooks: [],
   };
 
   if (!rule.enabled) return result;
@@ -76,10 +80,12 @@ export function evaluateRule(
 
   if (!result.matched) return result;
 
-  const { changes, errors } = executeActions(rule.actions, ticket);
+  const { changes, errors, notifications, webhooks } = executeActions(rule.actions, ticket);
   result.actionsExecuted = rule.actions.length - errors.length;
   result.errors = errors;
   result.changes = changes;
+  result.notifications = notifications;
+  result.webhooks = webhooks;
 
   return result;
 }
@@ -116,12 +122,16 @@ export function applyMacro(
     actionsExecuted: 0,
     errors: [],
     changes: {},
+    notifications: [],
+    webhooks: [],
   };
 
-  const { changes, errors } = executeActions(rule.actions, ticket);
+  const { changes, errors, notifications, webhooks } = executeActions(rule.actions, ticket);
   result.actionsExecuted = rule.actions.length - errors.length;
   result.errors = errors;
   result.changes = changes;
+  result.notifications = notifications;
+  result.webhooks = webhooks;
 
   return result;
 }

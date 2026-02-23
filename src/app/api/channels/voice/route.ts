@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { isDemoMode } from '@/lib/channels/twilio';
 import { getIVRConfig, saveIVRConfig, type IVRConfig } from '@/lib/channels/voice-ivr';
 import { getAllCalls, getAgents, getActiveCalls } from '@/lib/channels/voice-store';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,10 +28,9 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const body = await request.json().catch(() => null);
-  if (!body) {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
+  const parsed = await parseJsonBody<Record<string, unknown>>(request);
+  if ('error' in parsed) return parsed.error;
+  const body = parsed.data;
 
   // Validate required IVRConfig fields
   if (typeof body.enabled !== 'boolean' || typeof body.mainMenuId !== 'string' || !Array.isArray(body.menus)) {
@@ -40,7 +40,7 @@ export async function PUT(request: Request) {
     );
   }
 
-  const config = body as IVRConfig;
+  const config = body as unknown as IVRConfig;
   saveIVRConfig(config);
   return NextResponse.json({ ok: true, config });
 }

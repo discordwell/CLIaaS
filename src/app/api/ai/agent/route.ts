@@ -7,6 +7,7 @@ import {
   DEFAULT_AGENT_CONFIG,
   type AIAgentConfig,
 } from '@/lib/ai/agent';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,12 +44,13 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { ticketId, dryRun = true, config: configOverrides } = body as {
+    const parsed = await parseJsonBody<{
       ticketId?: string;
       dryRun?: boolean;
       config?: Partial<AIAgentConfig>;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { ticketId, dryRun = true, config: configOverrides } = parsed.data;
 
     if (!ticketId) {
       return NextResponse.json(

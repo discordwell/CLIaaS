@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getWebhook, updateWebhook, deleteWebhook } from '@/lib/webhooks';
 import { requireAuth } from '@/lib/api-auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +36,9 @@ export async function PATCH(
   const { id } = await params;
 
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const webhook = updateWebhook(id, body);
+    const parsed = await parseJsonBody<Record<string, unknown>>(request);
+    if ('error' in parsed) return parsed.error;
+    const webhook = updateWebhook(id, parsed.data);
     if (!webhook) {
       return NextResponse.json({ error: 'Webhook not found' }, { status: 404 });
     }

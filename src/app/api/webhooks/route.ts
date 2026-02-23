@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { listWebhooks, createWebhook } from '@/lib/webhooks';
 import type { WebhookEventType } from '@/lib/webhooks';
 import { requireAuth } from '@/lib/api-auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,14 +24,15 @@ export async function POST(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { url, events, secret, enabled, retryPolicy } = body as {
+    const parsed = await parseJsonBody<{
       url?: string;
       events?: WebhookEventType[];
       secret?: string;
       enabled?: boolean;
       retryPolicy?: { maxAttempts?: number; delaysMs?: number[] };
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { url, events, secret, enabled, retryPolicy } = parsed.data;
 
     if (!url || !url.trim()) {
       return NextResponse.json(

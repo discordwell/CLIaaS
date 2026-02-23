@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { resolveTicket } from '@/lib/ai/resolution-pipeline';
 import { loadTickets, loadMessages, loadKBArticles } from '@/lib/data';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { ticketId } = body as { ticketId?: string };
+    const parsed = await parseJsonBody<{ ticketId?: string }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { ticketId } = parsed.data;
 
     if (!ticketId) {
       return NextResponse.json({ error: 'ticketId is required' }, { status: 400 });

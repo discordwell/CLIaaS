@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadTickets } from '@/lib/data';
+import { getPortalEmail } from '@/lib/portal/get-portal-email';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
-
-function getPortalEmail(request: NextRequest): string | null {
-  return request.cookies.get('cliaas-portal-email')?.value ?? null;
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -100,12 +98,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { subject, description, priority } = body as {
+    const parsed = await parseJsonBody<{
       subject?: string;
       description?: string;
       priority?: string;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { subject, description, priority } = parsed.data;
 
     if (!subject?.trim() || !description?.trim()) {
       return NextResponse.json(

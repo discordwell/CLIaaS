@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadTickets } from '@/lib/data';
 import { generateToken } from '@/lib/portal/magic-link';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { email } = body as { email?: string };
+    const parsed = await parseJsonBody<{ email?: string }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { email } = parsed.data;
 
     if (!email || !email.includes('@')) {
       return NextResponse.json(

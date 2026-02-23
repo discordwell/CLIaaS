@@ -9,7 +9,7 @@ const logger = createLogger('data');
 export interface Ticket {
   id: string;
   externalId: string;
-  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove';
+  source: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'hubspot' | 'zoho-desk';
   subject: string;
   status: string;
   priority: string;

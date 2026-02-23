@@ -8,6 +8,7 @@ import { runAgent, DEFAULT_AGENT_CONFIG, type AIAgentConfig, type AIAgentResult 
 import { enqueueApproval, type ApprovalEntry } from './approval-queue';
 import { recordResolution } from './roi-tracker';
 import type { Ticket, Message, KBArticle } from '@/lib/data';
+import { buildBaseTicketFromEvent } from '@/lib/automation/ticket-from-event';
 
 // ---- Pipeline configuration ----
 
@@ -120,19 +121,13 @@ export async function handleTicketEvent(
   // Only handle ticket.created and message.created
   if (event !== 'ticket.created' && event !== 'message.created') return null;
 
-  // Build minimal Ticket and Message from event data
+  // Build Ticket from event data using shared builder
+  const base = buildBaseTicketFromEvent(data);
   const ticket: Ticket = {
-    id: String(data.ticketId ?? data.id ?? ''),
+    ...base,
+    assignee: base.assignee ?? undefined,
     externalId: String(data.externalId ?? data.ticketId ?? data.id ?? ''),
     source: (data.source as Ticket['source']) ?? 'zendesk',
-    subject: String(data.subject ?? ''),
-    status: String(data.status ?? 'open') as Ticket['status'],
-    priority: String(data.priority ?? 'normal') as Ticket['priority'],
-    requester: String(data.requester ?? ''),
-    assignee: data.assignee != null ? String(data.assignee) : undefined,
-    tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
-    createdAt: String(data.createdAt ?? new Date().toISOString()),
-    updatedAt: String(data.updatedAt ?? new Date().toISOString()),
   };
 
   if (!ticket.id) return null;

@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { testWebhook } from '@/lib/webhooks';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { url, secret } = body as { url?: string; secret?: string };
+    const parsed = await parseJsonBody<{ url?: string; secret?: string }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { url, secret } = parsed.data;
 
     if (!url || !url.trim()) {
       return NextResponse.json(

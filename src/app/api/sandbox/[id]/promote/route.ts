@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { promoteSandbox } from '@/lib/sandbox';
 import { requireRole } from '@/lib/api-auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +14,9 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const body = await request.json().catch(() => ({}));
-  const { selectedEntryIds } = body as { selectedEntryIds?: string[] };
+  const parsed = await parseJsonBody<{ selectedEntryIds?: string[] }>(request);
+  if ('error' in parsed) return parsed.error;
+  const { selectedEntryIds } = parsed.data;
 
   const result = promoteSandbox(id, selectedEntryIds);
   if (!result) {

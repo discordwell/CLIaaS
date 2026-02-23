@@ -28,6 +28,7 @@ function getTokenStore(): Map<string, MagicLinkToken> {
 }
 
 export function generateToken(email: string): MagicLinkToken {
+  cleanupExpiredTokens();
   const store = getTokenStore();
   const now = Date.now();
   const token: MagicLinkToken = {

@@ -1,21 +1,18 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { validateSCIMAuth } from '@/lib/scim/auth';
-import { toSCIMGroup, scimError, type SCIMGroup } from '@/lib/scim/schema';
+import { requireSCIMAuth } from '@/lib/scim/auth';
+import { toSCIMGroup, scimError, applyGroupPatchOps, type SCIMPatchOp } from '@/lib/scim/schema';
+import { getGroups, setGroups } from '@/lib/scim/store';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
-
-function getGroups() {
-  return global.__cliaasScimGroups ?? [];
-}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!validateSCIMAuth(request.headers.get('authorization'))) {
-    return NextResponse.json(scimError(401, 'Unauthorized'), { status: 401 });
-  }
+  const auth = requireSCIMAuth(request);
+  if (!auth.ok) return auth.response;
 
   const { id } = await params;
   const group = getGroups().find(g => g.id === id);
@@ -30,9 +27,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!validateSCIMAuth(request.headers.get('authorization'))) {
-    return NextResponse.json(scimError(401, 'Unauthorized'), { status: 401 });
-  }
+  const auth = requireSCIMAuth(request);
+  if (!auth.ok) return auth.response;
 
   const { id } = await params;
   const groups = getGroups();
@@ -42,16 +38,12 @@ export async function PATCH(
   }
 
   try {
-    const body = await request.json() as Partial<SCIMGroup>;
+    const parsed = await parseJsonBody<SCIMPatchOp>(request);
+    if ('error' in parsed) return parsed.error;
+    const body = parsed.data;
     const group = groups[idx];
-
-    if (body.displayName) group.name = body.displayName;
-    if (body.members) {
-      group.members = body.members.map(m => ({ id: m.value, name: m.display ?? '' }));
-    }
-    group.updatedAt = new Date().toISOString();
-
-    global.__cliaasScimGroups = groups;
+    applyGroupPatchOps(group, body);
+    setGroups(groups);
     return NextResponse.json(toSCIMGroup(group));
   } catch (err) {
     return NextResponse.json(
@@ -65,9 +57,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!validateSCIMAuth(request.headers.get('authorization'))) {
-    return NextResponse.json(scimError(401, 'Unauthorized'), { status: 401 });
-  }
+  const auth = requireSCIMAuth(request);
+  if (!auth.ok) return auth.response;
 
   const { id } = await params;
   const groups = getGroups();
@@ -77,6 +68,6 @@ export async function DELETE(
   }
 
   groups.splice(idx, 1);
-  global.__cliaasScimGroups = groups;
+  setGroups(groups);
   return new NextResponse(null, { status: 204 });
 }

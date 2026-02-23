@@ -6,14 +6,16 @@ import { helpcrunchPostMessage } from '@cli/connectors/helpcrunch';
 import { freshdeskReply, freshdeskAddNote } from '@cli/connectors/freshdesk';
 import { groovePostMessage } from '@cli/connectors/groove';
 import { messageCreated } from '@/lib/events';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const body = await request.json().catch(() => ({} as Record<string, unknown>));
-  const { message, isNote } = body as { message: string; isNote?: boolean };
+  const parsed = await parseJsonBody<{ message: string; isNote?: boolean }>(request);
+  if ('error' in parsed) return parsed.error;
+  const { message, isNote } = parsed.data;
 
   if (!message?.trim()) {
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });

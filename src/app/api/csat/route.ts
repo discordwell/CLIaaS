@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { csatSubmitted } from '@/lib/events';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,12 +16,13 @@ const demoRatings: Array<{
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { ticketId, rating, comment } = body as {
+    const parsed = await parseJsonBody<{
       ticketId?: string;
       rating?: number;
       comment?: string;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { ticketId, rating, comment } = parsed.data;
 
     if (!ticketId) {
       return NextResponse.json(

@@ -43,30 +43,29 @@ export function getPendingApprovals(): ApprovalEntry[] {
   return getApprovalQueue().filter(e => e.status === 'pending');
 }
 
-export function approveEntry(id: string, reviewedBy: string): ApprovalEntry | null {
+function transitionEntry(
+  id: string,
+  status: 'approved' | 'rejected' | 'edited',
+  reviewedBy: string,
+  extra?: Partial<ApprovalEntry>,
+): ApprovalEntry | null {
   const entry = getApproval(id);
   if (!entry || entry.status !== 'pending') return null;
-  entry.status = 'approved';
+  entry.status = status;
   entry.reviewedBy = reviewedBy;
   entry.reviewedAt = new Date().toISOString();
+  if (extra) Object.assign(entry, extra);
   return entry;
+}
+
+export function approveEntry(id: string, reviewedBy: string): ApprovalEntry | null {
+  return transitionEntry(id, 'approved', reviewedBy);
 }
 
 export function rejectEntry(id: string, reviewedBy: string): ApprovalEntry | null {
-  const entry = getApproval(id);
-  if (!entry || entry.status !== 'pending') return null;
-  entry.status = 'rejected';
-  entry.reviewedBy = reviewedBy;
-  entry.reviewedAt = new Date().toISOString();
-  return entry;
+  return transitionEntry(id, 'rejected', reviewedBy);
 }
 
 export function editEntry(id: string, editedReply: string, reviewedBy: string): ApprovalEntry | null {
-  const entry = getApproval(id);
-  if (!entry || entry.status !== 'pending') return null;
-  entry.status = 'edited';
-  entry.editedReply = editedReply;
-  entry.reviewedBy = reviewedBy;
-  entry.reviewedAt = new Date().toISOString();
-  return entry;
+  return transitionEntry(id, 'edited', reviewedBy, { editedReply });
 }

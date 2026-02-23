@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncZendeskTicketById } from "@/lib/zendesk/sync";
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 function extractTicketId(payload: Record<string, unknown>): string | null {
   const direct = payload.ticket_id ?? payload.ticketId ?? payload.id;
@@ -33,7 +34,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const payload = await request.json().catch(() => ({} as Record<string, unknown>));
+  const parsed = await parseJsonBody<Record<string, unknown>>(request);
+  if ('error' in parsed) return parsed.error;
+  const payload = parsed.data;
   const ticketId = extractTicketId(payload);
   const fallbackId = request.nextUrl.searchParams.get("ticket_id");
   const resolvedTicketId = ticketId ?? fallbackId;

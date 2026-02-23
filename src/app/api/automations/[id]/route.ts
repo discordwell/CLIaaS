@@ -5,6 +5,7 @@ import {
   updateAutomationRule,
   removeAutomationRule,
 } from '@/lib/automation/executor';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,8 +27,9 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const updated = updateAutomationRule(id, body as Record<string, unknown>);
+    const parsed = await parseJsonBody<Record<string, unknown>>(request);
+    if ('error' in parsed) return parsed.error;
+    const updated = updateAutomationRule(id, parsed.data);
     if (!updated) {
       return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
     }

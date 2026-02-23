@@ -3,16 +3,18 @@ import type { NextRequest } from 'next/server';
 import { checkTicketSLA } from '@/lib/sla';
 import { loadTickets, loadMessages, type Ticket } from '@/lib/data';
 import { slaBreached } from '@/lib/events';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { ticketId, ticket: rawTicket } = body as {
+    const parsed = await parseJsonBody<{
       ticketId?: string;
       ticket?: Ticket;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { ticketId, ticket: rawTicket } = parsed.data;
 
     let ticket: Ticket | undefined;
 

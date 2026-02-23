@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getTeamsIntegration } from '@/lib/integrations/teams';
 import type { TeamsActivityPayload } from '@/lib/integrations/teams';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
+    const parsed = await parseJsonBody<Record<string, unknown>>(request);
+    if ('error' in parsed) return parsed.error;
+    const body = parsed.data;
     const teams = getTeamsIntegration();
 
     // Handle incoming activity from Teams

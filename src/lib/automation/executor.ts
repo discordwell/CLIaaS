@@ -4,6 +4,7 @@
  */
 
 import { runRules, type Rule, type TicketContext, type ExecutionResult } from './engine';
+import { buildBaseTicketFromEvent } from './ticket-from-event';
 
 // ---- Audit trail (in-memory, singleton) ----
 
@@ -103,6 +104,29 @@ export function executeRules(opts: ExecuteOptions): ExecutionResult[] {
   return results;
 }
 
+// ---- Apply execution results ----
+
+export function applyExecutionResults(
+  result: ExecutionResult,
+  ticket: TicketContext,
+  dryRun: boolean,
+): { ticket: TicketContext; notificationsSent: number; webhooksFired: number } {
+  if (dryRun) {
+    return { ticket, notificationsSent: 0, webhooksFired: 0 };
+  }
+
+  // Apply field changes to ticket
+  const updated = { ...ticket, ...result.changes };
+
+  // Dispatch notifications (log for now; real dispatch would integrate with notification service)
+  const notificationsSent = result.notifications.length;
+
+  // Fire webhooks (log for now; real dispatch would use fetch)
+  const webhooksFired = result.webhooks.length;
+
+  return { ticket: updated, notificationsSent, webhooksFired };
+}
+
 // ---- Integration point for the dispatcher ----
 
 export async function evaluateAutomation(
@@ -110,18 +134,11 @@ export async function evaluateAutomation(
   data: Record<string, unknown>,
   triggerType: 'trigger' | 'sla',
 ): Promise<void> {
-  // Build a minimal TicketContext from the event data
+  // Build a TicketContext from the event data
+  const base = buildBaseTicketFromEvent(data);
   const ticket: TicketContext = {
-    id: String(data.ticketId ?? data.id ?? ''),
-    subject: String(data.subject ?? ''),
-    status: String(data.status ?? 'open'),
-    priority: String(data.priority ?? 'normal'),
-    assignee: data.assignee != null ? String(data.assignee) : null,
-    requester: String(data.requester ?? ''),
-    tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+    ...base,
     source: data.source != null ? String(data.source) : undefined,
-    createdAt: String(data.createdAt ?? new Date().toISOString()),
-    updatedAt: String(data.updatedAt ?? new Date().toISOString()),
     event: mapEventToContext(event),
     previousStatus: data.previousStatus != null ? String(data.previousStatus) : undefined,
     previousPriority: data.previousPriority != null ? String(data.previousPriority) : undefined,

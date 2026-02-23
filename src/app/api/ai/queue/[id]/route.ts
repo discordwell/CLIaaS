@@ -6,6 +6,7 @@ import {
   rejectEntry,
   editEntry,
 } from '@/lib/ai/approval-queue';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,12 +28,13 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { action, editedReply, reviewedBy } = body as {
+    const parsed = await parseJsonBody<{
       action?: 'approve' | 'reject' | 'edit';
       editedReply?: string;
       reviewedBy?: string;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { action, editedReply, reviewedBy } = parsed.data;
 
     const reviewer = reviewedBy ?? 'agent';
 

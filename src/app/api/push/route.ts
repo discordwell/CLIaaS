@@ -6,6 +6,7 @@ import {
   isDemoMode,
   getVapidConfig,
 } from '@/lib/push';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,22 +24,26 @@ export async function GET() {
 
 // POST: add subscription
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  if (!body?.endpoint || !body?.keys?.p256dh || !body?.keys?.auth) {
+  const parsed = await parseJsonBody<{ endpoint?: string; keys?: { p256dh?: string; auth?: string }; userId?: string }>(request);
+  if ('error' in parsed) return parsed.error;
+  const body = parsed.data;
+  if (!body.endpoint || !body.keys?.p256dh || !body.keys?.auth) {
     return NextResponse.json(
       { error: 'endpoint and keys (p256dh, auth) are required' },
       { status: 400 },
     );
   }
 
-  const sub = addSubscription(body.endpoint, body.keys, body.userId);
+  const sub = addSubscription(body.endpoint, body.keys as { p256dh: string; auth: string }, body.userId);
   return NextResponse.json({ ok: true, id: sub.id }, { status: 201 });
 }
 
 // DELETE: remove subscription
 export async function DELETE(request: Request) {
-  const body = await request.json().catch(() => null);
-  if (!body?.endpoint) {
+  const parsed = await parseJsonBody<{ endpoint?: string }>(request);
+  if ('error' in parsed) return parsed.error;
+  const body = parsed.data;
+  if (!body.endpoint) {
     return NextResponse.json(
       { error: 'endpoint is required' },
       { status: 400 },

@@ -1,6 +1,7 @@
 // Build auth objects for each connector from environment variables.
 // Used by API routes to call connector functions on the server.
 
+import type { ConnectorId } from './connector-registry';
 import type { ZendeskAuth } from '../../cli/connectors/zendesk';
 import type { HelpcrunchAuth } from '../../cli/connectors/helpcrunch';
 import type { FreshdeskAuth } from '../../cli/connectors/freshdesk';
@@ -12,17 +13,7 @@ import type { ZohoDeskAuth } from '../../cli/connectors/zoho-desk';
 import type { KayakoAuth } from '../../cli/connectors/kayako';
 import type { KayakoClassicAuth } from '../../cli/connectors/kayako-classic';
 
-export type ConnectorName =
-  | 'zendesk'
-  | 'helpcrunch'
-  | 'freshdesk'
-  | 'groove'
-  | 'intercom'
-  | 'helpscout'
-  | 'hubspot'
-  | 'zoho-desk'
-  | 'kayako'
-  | 'kayako-classic';
+export type ConnectorName = ConnectorId;
 
 export function getZendeskAuth(): ZendeskAuth | null {
   const subdomain = process.env.ZENDESK_SUBDOMAIN;

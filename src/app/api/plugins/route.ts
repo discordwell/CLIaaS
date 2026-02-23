@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { PluginRegistry } from '@/lib/plugins';
 import { requireRole } from '@/lib/api-auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,9 +23,7 @@ export async function POST(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { id, name, version, description, author, hooks, actions, enabled, config } =
-      body as {
+    const parsed = await parseJsonBody<{
         id?: string;
         name?: string;
         version?: string;
@@ -34,7 +33,10 @@ export async function POST(request: NextRequest) {
         actions?: Array<{ id: string; name: string; description: string }>;
         enabled?: boolean;
         config?: Record<string, unknown>;
-      };
+      }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { id, name, version, description, author, hooks, actions, enabled, config } =
+      parsed.data;
 
     if (!id || !name) {
       return NextResponse.json(

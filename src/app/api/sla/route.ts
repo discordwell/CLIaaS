@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listPolicies, createPolicy } from '@/lib/sla';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,14 +19,15 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { name, conditions, targets, escalation, enabled } = body as {
+    const parsed = await parseJsonBody<{
       name?: string;
       conditions?: { priority?: string[]; tags?: string[]; source?: string[] };
       targets?: { firstResponse?: number; resolution?: number };
       escalation?: Array<{ afterMinutes: number; action: 'notify' | 'escalate' | 'reassign'; to?: string }>;
       enabled?: boolean;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { name, conditions, targets, escalation, enabled } = parsed.data;
 
     if (!name || !name.trim()) {
       return NextResponse.json(

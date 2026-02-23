@@ -5,16 +5,18 @@ import { helpcrunchCreateChat } from '@cli/connectors/helpcrunch';
 import { freshdeskCreateTicket } from '@cli/connectors/freshdesk';
 import { grooveCreateTicket } from '@cli/connectors/groove';
 import { ticketCreated } from '@/lib/events';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({} as Record<string, unknown>));
-  const { source, subject, message, priority, to } = body as {
+  const parsed = await parseJsonBody<{
     source: ConnectorName;
     subject?: string;
     message: string;
     priority?: string;
     to?: string; // email for Groove, customer ID for HelpCrunch
-  };
+  }>(request);
+  if ('error' in parsed) return parsed.error;
+  const { source, subject, message, priority, to } = parsed.data;
 
   const VALID_SOURCES = ['zendesk', 'helpcrunch', 'freshdesk', 'groove'];
 

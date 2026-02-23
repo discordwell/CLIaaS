@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getSlackIntegration } from '@/lib/integrations/slack';
 import type { SlackCommandPayload } from '@/lib/integrations/slack';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,7 +42,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Handle JSON event payloads
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
+    const parsed = await parseJsonBody<Record<string, unknown>>(request);
+    if ('error' in parsed) return parsed.error;
+    const body = parsed.data;
 
     // Slack URL verification challenge
     if (body.type === 'url_verification') {

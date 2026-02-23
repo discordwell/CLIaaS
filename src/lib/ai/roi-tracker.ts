@@ -10,7 +10,7 @@ export interface ROIMetrics {
   escalated: number;
   avgConfidence: number;
   estimatedTimeSavedMinutes: number;
-  estimatedCostPerResolution: number;
+  avgCostPerResolution: number;
   resolutionRate: number;
 }
 
@@ -44,14 +44,16 @@ export function recordResolution(result: AIAgentResult): void {
 
 export function getROIMetrics(): ROIMetrics {
   const state = getMetricsState();
-  const total = state.totalResolutions || 1; // avoid division by zero
-  const avgConfidence = state.confidenceSum / total;
+  const total = state.totalResolutions;
+  const avgConfidence = total > 0 ? state.confidenceSum / total : 0;
 
   // Estimated time saved: ~8 minutes per AI-resolved ticket
   const timeSaved = state.aiResolved * 8;
 
-  // Estimated cost per resolution: ~$0.03 per LLM call
-  const costPerResolution = total > 0 ? (state.totalResolutions * 0.03) / (state.aiResolved || 1) : 0;
+  // Average cost per AI resolution: ~$0.03 per LLM call
+  const avgCost = state.aiResolved > 0
+    ? (state.totalResolutions * 0.03) / state.aiResolved
+    : 0;
 
   return {
     totalResolutions: state.totalResolutions,
@@ -59,8 +61,8 @@ export function getROIMetrics(): ROIMetrics {
     escalated: state.escalated,
     avgConfidence: Math.round(avgConfidence * 100) / 100,
     estimatedTimeSavedMinutes: timeSaved,
-    estimatedCostPerResolution: Math.round(costPerResolution * 100) / 100,
-    resolutionRate: Math.round((state.aiResolved / total) * 100),
+    avgCostPerResolution: Math.round(avgCost * 100) / 100,
+    resolutionRate: total > 0 ? Math.round((state.aiResolved / total) * 100) : 0,
   };
 }
 

@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { sendPush, type PushPayload } from '@/lib/push';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  if (!body?.title || !body?.body) {
+  const parsed = await parseJsonBody<{ title?: string; body?: string; url?: string; tag?: string }>(request);
+  if ('error' in parsed) return parsed.error;
+  const body = parsed.data;
+  if (!body.title || !body.body) {
     return NextResponse.json(
       { error: 'title and body are required' },
       { status: 400 },

@@ -112,3 +112,64 @@ export function scimError(status: number, detail: string) {
     detail,
   };
 }
+
+// ---- SCIM PatchOp (RFC 7644 §3.5.2) ----
+
+export interface SCIMPatchOp {
+  schemas: string[];
+  Operations: Array<{
+    op: 'add' | 'remove' | 'replace';
+    path?: string;
+    value?: unknown;
+  }>;
+}
+
+export function applyUserPatchOps(
+  user: { name: string; email: string; status: string; updatedAt: string },
+  patch: SCIMPatchOp,
+): void {
+  if (!Array.isArray(patch.Operations)) return;
+  for (const op of patch.Operations) {
+    if (op.op === 'remove' && op.path) {
+      if (op.path === 'name.formatted') user.name = '';
+      continue;
+    }
+    if ((op.op === 'add' || op.op === 'replace') && op.path) {
+      if (op.path === 'name.formatted' && typeof op.value === 'string') {
+        user.name = op.value;
+      } else if (op.path === 'emails' && Array.isArray(op.value) && op.value[0]?.value) {
+        user.email = String(op.value[0].value);
+      } else if (op.path === 'active' && typeof op.value === 'boolean') {
+        user.status = op.value ? 'active' : 'inactive';
+      }
+    }
+  }
+  user.updatedAt = new Date().toISOString();
+}
+
+export function applyGroupPatchOps(
+  group: { name: string; updatedAt: string; members?: Array<{ id: string; name: string }> },
+  patch: SCIMPatchOp,
+): void {
+  if (!Array.isArray(patch.Operations)) return;
+  for (const op of patch.Operations) {
+    if (op.path === 'displayName' && typeof op.value === 'string' && op.op !== 'remove') {
+      group.name = op.value;
+    }
+    if (op.path === 'members' && Array.isArray(op.value)) {
+      const newMembers = op.value.map((m: { value: string; display?: string }) => ({
+        id: m.value,
+        name: m.display ?? '',
+      }));
+      if (op.op === 'add') {
+        group.members = [...(group.members ?? []), ...newMembers];
+      } else if (op.op === 'replace') {
+        group.members = newMembers;
+      }
+    }
+    if (op.op === 'remove' && op.path === 'members') {
+      group.members = [];
+    }
+  }
+  group.updatedAt = new Date().toISOString();
+}

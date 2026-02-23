@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getAutomationRules, executeRules } from '@/lib/automation/executor';
+import { getAutomationRules } from '@/lib/automation/executor';
+import { evaluateRule } from '@/lib/automation/engine';
 import type { TicketContext } from '@/lib/automation/engine';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,8 +18,9 @@ export async function POST(
   }
 
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const ticket = body.ticket as TicketContext | undefined;
+    const parsed = await parseJsonBody<{ ticket?: TicketContext }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { ticket } = parsed.data;
 
     if (!ticket || !ticket.id) {
       return NextResponse.json(
@@ -26,18 +29,13 @@ export async function POST(
       );
     }
 
-    const results = executeRules({
-      ticket,
-      event: 'test.dry_run',
-      triggerType: rule.type === 'sla' ? 'sla' : rule.type === 'automation' ? 'automation' : 'trigger',
-      dryRun: true,
-    });
-
-    const ruleResult = results.find(r => r.ruleId === id);
+    const result = evaluateRule(rule, ticket);
     return NextResponse.json({
-      matched: ruleResult?.matched ?? false,
-      changes: ruleResult?.changes ?? {},
-      errors: ruleResult?.errors ?? [],
+      matched: result.matched,
+      changes: result.changes,
+      notifications: result.notifications,
+      webhooks: result.webhooks,
+      errors: result.errors,
     });
   } catch (err) {
     return NextResponse.json(

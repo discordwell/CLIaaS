@@ -7,6 +7,7 @@ import {
   DEFAULT_ROUTING_CONFIG,
   type RoutingConfig,
 } from '@/lib/ai/router';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,18 +23,19 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
+    const parsed = await parseJsonBody<{
+      ticketId?: string;
+      useLLM?: boolean;
+      config?: Partial<RoutingConfig>;
+      apply?: boolean;
+    }>(request);
+    if ('error' in parsed) return parsed.error;
     const {
       ticketId,
       useLLM = false,
       config: configOverrides,
       apply = false,
-    } = body as {
-      ticketId?: string;
-      useLLM?: boolean;
-      config?: Partial<RoutingConfig>;
-      apply?: boolean;
-    };
+    } = parsed.data;
 
     if (!ticketId) {
       return NextResponse.json(

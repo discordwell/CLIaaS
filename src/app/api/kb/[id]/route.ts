@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadKBArticles } from '@/lib/data';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,13 +95,14 @@ export async function PATCH(
       );
     }
 
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { title, body: articleBody, categoryPath, status: articleStatus } = body as {
+    const parsed = await parseJsonBody<{
       title?: string;
       body?: string;
       categoryPath?: string[];
       status?: string;
-    };
+    }>(request);
+    if ('error' in parsed) return parsed.error;
+    const { title, body: articleBody, categoryPath, status: articleStatus } = parsed.data;
 
     if (!title && !articleBody && !categoryPath && !articleStatus) {
       return NextResponse.json(

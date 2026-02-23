@@ -1,26 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { validateSCIMAuth } from '@/lib/scim/auth';
+import { requireSCIMAuth } from '@/lib/scim/auth';
 import { toSCIMGroup, wrapListResponse, scimError, type SCIMGroup } from '@/lib/scim/schema';
+import { getGroups, setGroups } from '@/lib/scim/store';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __cliaasScimGroups: Array<{
-    id: string; name: string; createdAt: string; updatedAt: string;
-    members?: Array<{ id: string; name: string }>;
-  }> | undefined;
-}
-
-function getGroups() {
-  return global.__cliaasScimGroups ?? [];
-}
-
 export async function GET(request: NextRequest) {
-  if (!validateSCIMAuth(request.headers.get('authorization'))) {
-    return NextResponse.json(scimError(401, 'Unauthorized'), { status: 401 });
-  }
+  const auth = requireSCIMAuth(request);
+  if (!auth.ok) return auth.response;
 
   const groups = getGroups();
   const scimGroups = groups.map(toSCIMGroup);
@@ -28,12 +17,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!validateSCIMAuth(request.headers.get('authorization'))) {
-    return NextResponse.json(scimError(401, 'Unauthorized'), { status: 401 });
-  }
+  const auth = requireSCIMAuth(request);
+  if (!auth.ok) return auth.response;
 
   try {
-    const body = await request.json() as Partial<SCIMGroup>;
+    const parsed = await parseJsonBody<Partial<SCIMGroup>>(request);
+    if ('error' in parsed) return parsed.error;
+    const body = parsed.data;
     const displayName = body.displayName;
 
     if (!displayName) {
@@ -51,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     const groups = getGroups();
     groups.push(group);
-    global.__cliaasScimGroups = groups;
+    setGroups(groups);
 
     return NextResponse.json(toSCIMGroup(group), { status: 201 });
   } catch (err) {

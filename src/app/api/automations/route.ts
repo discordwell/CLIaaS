@@ -5,6 +5,7 @@ import {
   addAutomationRule,
 } from '@/lib/automation/executor';
 import type { Rule } from '@/lib/automation/engine';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,8 +16,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({} as Record<string, unknown>));
-    const { name, type, conditions, actions, enabled } = body as Partial<Rule>;
+    const parsed = await parseJsonBody<Partial<Rule>>(request);
+    if ('error' in parsed) return parsed.error;
+    const { name, type, conditions, actions, enabled } = parsed.data;
 
     if (!name || !type) {
       return NextResponse.json(

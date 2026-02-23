@@ -7,6 +7,7 @@ import { helpcrunchUpdateChat } from "@cli/connectors/helpcrunch";
 import { freshdeskUpdateTicket } from "@cli/connectors/freshdesk";
 import { grooveUpdateTicket } from "@cli/connectors/groove";
 import { ticketUpdated, ticketResolved } from "@/lib/events";
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +36,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const body = await request.json().catch(() => ({} as Record<string, unknown>));
-  const { status, priority } = body as { status?: string; priority?: string };
+  const parsed = await parseJsonBody<{ status?: string; priority?: string }>(request);
+  if ('error' in parsed) return parsed.error;
+  const { status, priority } = parsed.data;
 
   const VALID_STATUSES = ['open', 'pending', 'solved', 'closed'];
   const VALID_PRIORITIES = ['urgent', 'high', 'normal', 'low'];
