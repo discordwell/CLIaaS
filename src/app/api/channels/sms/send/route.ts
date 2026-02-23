@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { sendMessage as twilioSend } from '@/lib/channels/twilio';
 import { addMessage } from '@/lib/channels/sms-store';
 import { requireAuth } from '@/lib/api-auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,9 +11,11 @@ export async function POST(request: NextRequest) {
   const auth = requireAuth(request);
   if ('error' in auth) return auth.error;
 
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const body = await request.json();
-    const { to, body: messageBody, channel, conversationId } = body as {
+    const { to, body: messageBody, channel, conversationId } = parsed.data as {
       to: string;
       body: string;
       channel: 'sms' | 'whatsapp';

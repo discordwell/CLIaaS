@@ -10,6 +10,7 @@ import {
   buildTicketFromChat,
 } from '@/lib/chat';
 import { eventBus } from '@/lib/realtime/events';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,15 +68,9 @@ export async function GET(request: NextRequest) {
  *   { action: "typing", sessionId: "...", role: "customer"|"agent", typing: boolean }
  */
 export async function POST(request: NextRequest) {
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: 'Invalid JSON body' },
-      { status: 400 },
-    );
-  }
+  const parsed = await parseJsonBody<Record<string, unknown>>(request);
+  if ('error' in parsed) return parsed.error;
+  const body = parsed.data;
 
   const action = body.action as string;
 

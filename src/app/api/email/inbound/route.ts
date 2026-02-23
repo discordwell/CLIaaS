@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parseInboundEmail, extractTicketId, extractEmailAddress } from '@/lib/email/parser';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,9 @@ export async function POST(request: Request) {
       const formData = await request.formData();
       body = Object.fromEntries(formData.entries()) as Record<string, unknown>;
     } else {
-      body = await request.json();
+      const parsed = await parseJsonBody(request);
+      if ('error' in parsed) return parsed.error;
+      body = parsed.data;
     }
 
     const email = parseInboundEmail(body);

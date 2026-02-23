@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,9 +40,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const body = await request.json();
-    const { name, type, conditions, actions, enabled } = body;
+    const { name, type, conditions, actions, enabled } = parsed.data;
 
     if (!name || !type) {
       return NextResponse.json(

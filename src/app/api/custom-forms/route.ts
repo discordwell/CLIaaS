@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listForms, createForm } from '@/lib/custom-fields';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +18,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const body = await request.json();
-    const { name, fields, ticketType } = body;
+    const { name, fields, ticketType } = parsed.data;
 
     if (!name || !fields || !Array.isArray(fields)) {
       return NextResponse.json(

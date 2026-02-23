@@ -6,6 +6,7 @@ import {
   type SSOProvider,
 } from '@/lib/auth/sso-config';
 import { requireRole } from '@/lib/api-auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,8 +39,11 @@ export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'admin');
   if ('error' in auth) return auth.error;
 
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const body = await request.json();
+    const body = parsed.data;
     const { name, protocol, enabled } = body;
 
     if (!name || !protocol) {

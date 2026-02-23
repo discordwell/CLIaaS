@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listFields, createField } from '@/lib/custom-fields';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +18,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const body = await request.json();
-    const { name, key, type, required, options, conditions, sortOrder } = body;
+    const { name, key, type, required, options, conditions, sortOrder } = parsed.data;
 
     if (!name || !key || !type) {
       return NextResponse.json(

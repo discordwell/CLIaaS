@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listRetentionPolicies, createRetentionPolicy } from '@/lib/compliance';
 import { requireRole } from '@/lib/api-auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,9 +25,11 @@ export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'admin');
   if ('error' in auth) return auth.error;
 
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const body = await request.json();
-    const { resource, retentionDays, action } = body;
+    const { resource, retentionDays, action } = parsed.data;
 
     if (!resource || !retentionDays || !action) {
       return NextResponse.json(

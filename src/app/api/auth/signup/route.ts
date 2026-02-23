@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { hashPassword } from '@/lib/password';
 import { createToken, setSessionCookie } from '@/lib/auth';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const { email, password, name, workspaceName } = await request.json();
+    const { email, password, name, workspaceName } = parsed.data;
 
     if (!email || !password || !name || !workspaceName) {
       return NextResponse.json(

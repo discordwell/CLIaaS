@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getTimeEntries, logManualTime } from '@/lib/time-tracking';
+import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,9 +29,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const parsed = await parseJsonBody(request);
+  if ('error' in parsed) return parsed.error;
+
   try {
-    const body = await request.json();
-    const { ticketId, userId, userName, durationMinutes, billable, notes } = body;
+    const { ticketId, userId, userName, durationMinutes, billable, notes } = parsed.data;
 
     if (!ticketId || !userId || !userName || !durationMinutes) {
       return NextResponse.json(
