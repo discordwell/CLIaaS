@@ -122,6 +122,44 @@ export async function sendMessage(msg: OutboundMessage): Promise<TwilioResponse>
   };
 }
 
+// ---- Make Outbound Call ----
+
+export async function makeCall(to: string, twimlUrl: string): Promise<{ sid: string; status: string }> {
+  const config = getConfig();
+
+  if (!config) {
+    const mockSid = `CA${crypto.randomUUID().replace(/-/g, '').slice(0, 32)}`;
+    logger.info({ to, twimlUrl }, 'Demo outbound call');
+    return { sid: mockSid, status: 'queued' };
+  }
+
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Calls.json`;
+  const credentials = Buffer.from(`${config.accountSid}:${config.authToken}`).toString('base64');
+
+  const body = new URLSearchParams({
+    To: to,
+    From: config.phoneNumber,
+    Url: twimlUrl,
+  });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Twilio API error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  return { sid: data.sid, status: data.status };
+}
+
 // ---- Parse Inbound ----
 
 export function parseInbound(formData: FormData): InboundMessage {
@@ -171,7 +209,7 @@ export function generateTwiml(body?: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${body ? `<Message>${escapeXml(body)}</Message>` : ''}</Response>`;
 }
 
-function escapeXml(str: string): string {
+export function escapeXml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

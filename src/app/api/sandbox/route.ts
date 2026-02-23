@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listSandboxes, createSandbox } from '@/lib/sandbox';
+import type { CloneOptions } from '@/lib/sandbox-clone';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name } = body;
+    const { name, cloneOptions } = body as { name?: string; cloneOptions?: CloneOptions };
 
     if (!name) {
       return NextResponse.json(
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const sandbox = createSandbox(name);
+    const sandbox = createSandbox(name, cloneOptions);
     return NextResponse.json({ sandbox }, { status: 201 });
   } catch (err) {
     return NextResponse.json(

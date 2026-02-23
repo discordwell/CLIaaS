@@ -6,6 +6,7 @@ import { zendeskUpdateTicket } from "@cli/connectors/zendesk";
 import { helpcrunchUpdateChat } from "@cli/connectors/helpcrunch";
 import { freshdeskUpdateTicket } from "@cli/connectors/freshdesk";
 import { grooveUpdateTicket } from "@cli/connectors/groove";
+import { ticketUpdated, ticketResolved } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,10 @@ export async function PATCH(
         break;
     }
 
+    ticketUpdated({ ticketId: id, ...updates });
+    if (status === 'solved' || status === 'closed') {
+      ticketResolved({ ticketId: id, status });
+    }
     return NextResponse.json({ status: 'ok', updated: updates });
   } catch (err) {
     return NextResponse.json(

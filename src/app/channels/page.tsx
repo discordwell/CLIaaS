@@ -54,11 +54,12 @@ interface SocialConversation {
 
 // ---- Tab definitions ----
 
-type Tab = "sms" | "whatsapp" | "facebook" | "instagram" | "x";
+type Tab = "sms" | "whatsapp" | "voice" | "facebook" | "instagram" | "x";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "sms", label: "SMS" },
   { key: "whatsapp", label: "WhatsApp" },
+  { key: "voice", label: "Voice" },
   { key: "facebook", label: "Facebook" },
   { key: "instagram", label: "Instagram" },
   { key: "x", label: "X (Twitter)" },
@@ -126,6 +127,7 @@ export default function ChannelsPage() {
       <div className="mt-8">
         {tab === "sms" && <MessagingTab channel="sms" />}
         {tab === "whatsapp" && <MessagingTab channel="whatsapp" />}
+        {tab === "voice" && <VoiceTab />}
         {tab === "facebook" && <SocialTab platform="facebook" />}
         {tab === "instagram" && <SocialTab platform="instagram" />}
         {tab === "x" && <SocialTab platform="twitter" />}
@@ -517,6 +519,272 @@ function ConversationDetail({
         </div>
       )}
     </section>
+  );
+}
+
+// ======================== VOICE TAB ========================
+
+interface VoiceCallData {
+  id: string;
+  callSid: string;
+  direction: "inbound" | "outbound";
+  from: string;
+  to: string;
+  status: string;
+  duration?: number;
+  recordingUrl?: string;
+  transcription?: string;
+  agentId?: string;
+  ivrPath?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface VoiceAgentData {
+  id: string;
+  name: string;
+  extension: string;
+  phoneNumber: string;
+  status: "available" | "busy" | "offline";
+}
+
+function VoiceTab() {
+  const [calls, setCalls] = useState<VoiceCallData[]>([]);
+  const [agents, setAgents] = useState<VoiceAgentData[]>([]);
+  const [demo, setDemo] = useState(true);
+  const [stats, setStats] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/channels/voice");
+      const data = await res.json();
+      setCalls(data.calls ?? []);
+      setAgents(data.agents ?? []);
+      setDemo(data.demo ?? true);
+      setStats(data.stats ?? {});
+    } catch {
+      setCalls([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const selected = calls.find((c) => c.id === selectedId);
+
+  function formatDuration(sec?: number): string {
+    if (!sec) return "—";
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+
+  function statusColor(status: string): string {
+    switch (status) {
+      case "in-progress":
+      case "ringing":
+        return "bg-emerald-100 text-emerald-700";
+      case "completed":
+        return "bg-zinc-200 text-zinc-600";
+      case "voicemail":
+        return "bg-blue-100 text-blue-700";
+      case "failed":
+      case "busy":
+      case "no-answer":
+        return "bg-red-100 text-red-700";
+      default:
+        return "bg-zinc-200 text-zinc-600";
+    }
+  }
+
+  if (loading) return <LoadingBlock label="Loading voice calls..." />;
+
+  return (
+    <>
+      {/* Config Status */}
+      <section className="mb-4 border-2 border-zinc-950 bg-white p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">
+              Voice / Phone Configuration
+            </h3>
+            <div className="mt-2 flex items-center gap-3">
+              <span
+                className={`px-2 py-0.5 font-mono text-xs font-bold uppercase ${
+                  demo
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-emerald-100 text-emerald-700"
+                }`}
+              >
+                {demo ? "Demo Mode" : "Live"}
+              </span>
+              <span className="font-mono text-xs text-zinc-500">
+                {stats.active ?? 0} active call{(stats.active ?? 0) !== 1 ? "s" : ""}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats row */}
+        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {[
+            { label: "Total Calls", value: stats.total ?? 0 },
+            { label: "Completed", value: stats.completed ?? 0 },
+            { label: "Voicemails", value: stats.voicemails ?? 0 },
+            { label: "Active Now", value: stats.active ?? 0 },
+          ].map((s) => (
+            <div key={s.label} className="border border-zinc-200 p-3">
+              <p className="font-mono text-xs text-zinc-500">{s.label}</p>
+              <p className="mt-1 text-xl font-bold">{s.value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Agents */}
+      <section className="mb-4 border-2 border-zinc-950 bg-white p-6">
+        <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">
+          Agents
+        </h3>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {agents.map((a) => (
+            <div
+              key={a.id}
+              className="flex items-center gap-2 border border-zinc-200 px-3 py-2"
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  a.status === "available"
+                    ? "bg-emerald-500"
+                    : a.status === "busy"
+                    ? "bg-amber-500"
+                    : "bg-zinc-400"
+                }`}
+              />
+              <span className="text-sm font-medium">{a.name}</span>
+              <span className="font-mono text-xs text-zinc-500">
+                ext. {a.extension}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Call Detail */}
+      {selected && (
+        <section className="mb-4 border-2 border-zinc-950 bg-white">
+          <div className="flex items-center justify-between border-b-2 border-zinc-950 p-6">
+            <div>
+              <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">
+                Call Details
+              </h3>
+              <p className="mt-1 text-sm font-medium">
+                {selected.from} → {selected.to}
+              </p>
+            </div>
+            <button
+              onClick={() => setSelectedId(null)}
+              className="border-2 border-zinc-300 bg-white px-3 py-1 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
+            >
+              Dismiss
+            </button>
+          </div>
+          <div className="space-y-2 p-6">
+            <DetailRow label="SID" value={selected.callSid} />
+            <DetailRow label="Direction" value={selected.direction} />
+            <DetailRow label="Status" value={selected.status} />
+            <DetailRow label="Duration" value={formatDuration(selected.duration)} />
+            <DetailRow label="IVR Path" value={selected.ivrPath?.join(" → ") ?? "—"} />
+            {selected.recordingUrl && (
+              <DetailRow label="Recording" value={selected.recordingUrl} />
+            )}
+            {selected.transcription && (
+              <div>
+                <p className="font-mono text-xs text-zinc-500">Transcription</p>
+                <p className="mt-1 text-sm">{selected.transcription}</p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Call List */}
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-bold">
+          {calls.length} Call{calls.length !== 1 ? "s" : ""}
+        </h2>
+      </div>
+
+      {calls.length > 0 ? (
+        <section className="border-2 border-zinc-950 bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b-2 border-zinc-200 bg-zinc-50 text-left">
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Status</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Direction</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">From</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Duration</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Time</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500" />
+                </tr>
+              </thead>
+              <tbody>
+                {calls.map((c) => (
+                  <tr
+                    key={c.id}
+                    className={`border-b border-zinc-100 transition-colors hover:bg-zinc-50 ${
+                      selectedId === c.id ? "bg-zinc-100" : ""
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 font-mono text-xs font-bold uppercase ${statusColor(c.status)}`}>
+                        {c.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs">{c.direction}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{c.from}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{formatDuration(c.duration)}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-500">{timeAgo(c.createdAt)}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => setSelectedId(selectedId === c.id ? null : c.id)}
+                        className="font-mono text-xs font-bold uppercase text-blue-600 hover:text-blue-800"
+                      >
+                        {selectedId === c.id ? "Hide" : "View"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <EmptyBlock
+          message="No voice calls"
+          sub={
+            demo
+              ? "Running in demo mode. Calls will appear when your Twilio voice webhook is configured."
+              : "Configure your Twilio voice webhook to start receiving calls."
+          }
+        />
+      )}
+    </>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-4">
+      <span className="w-24 shrink-0 font-mono text-xs text-zinc-500">{label}</span>
+      <span className="font-mono text-xs">{value}</span>
+    </div>
   );
 }
 

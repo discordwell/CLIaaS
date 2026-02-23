@@ -5,6 +5,7 @@ import { zendeskPostComment } from '@cli/connectors/zendesk';
 import { helpcrunchPostMessage } from '@cli/connectors/helpcrunch';
 import { freshdeskReply, freshdeskAddNote } from '@cli/connectors/freshdesk';
 import { groovePostMessage } from '@cli/connectors/groove';
+import { messageCreated } from '@/lib/events';
 
 export async function POST(
   request: Request,
@@ -76,6 +77,7 @@ export async function POST(
         break;
     }
 
+    messageCreated({ ticketId: id, source, isNote: !!isNote });
     return NextResponse.json({ status: 'ok' });
   } catch (err) {
     return NextResponse.json(

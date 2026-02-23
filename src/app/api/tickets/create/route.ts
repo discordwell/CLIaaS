@@ -4,6 +4,7 @@ import { zendeskCreateTicket } from '@cli/connectors/zendesk';
 import { helpcrunchCreateChat } from '@cli/connectors/helpcrunch';
 import { freshdeskCreateTicket } from '@cli/connectors/freshdesk';
 import { grooveCreateTicket } from '@cli/connectors/groove';
+import { ticketCreated } from '@/lib/events';
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({} as Record<string, unknown>));
@@ -74,6 +75,7 @@ export async function POST(request: Request) {
         break;
     }
 
+    ticketCreated({ source, subject, ...result });
     return NextResponse.json({ status: 'ok', ...result });
   } catch (err) {
     return NextResponse.json(

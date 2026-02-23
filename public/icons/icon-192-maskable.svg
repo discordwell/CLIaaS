@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <rect width="192" height="192" fill="#09090b" rx="0"/>
+  <text x="96" y="90.7" text-anchor="middle" dominant-baseline="central" font-family="monospace" font-weight="bold" font-size="53" fill="white">CLI</text>
+  <text x="96" y="133.1" text-anchor="middle" dominant-baseline="central" font-family="monospace" font-weight="bold" font-size="15" fill="#a1a1aa">aaS</text>
+  <rect x="42" y="149" width="107" height="2" fill="#a1a1aa"/>
+</svg>

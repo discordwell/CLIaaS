@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { csatSubmitted } from '@/lib/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
             .set({ rating, comment: comment ?? null })
             .where(eq(schema.csatRatings.ticketId, ticketId));
 
+          csatSubmitted({ ticketId, rating, comment: comment ?? null });
           return NextResponse.json({ ok: true, updated: true });
         }
 
@@ -83,6 +85,7 @@ export async function POST(request: NextRequest) {
           })
           .returning();
 
+        csatSubmitted({ ticketId, rating, comment: comment ?? null, id: csatRating.id });
         return NextResponse.json(
           { ok: true, id: csatRating.id },
           { status: 201 }
@@ -112,6 +115,7 @@ export async function POST(request: NextRequest) {
       createdAt: new Date().toISOString(),
     });
 
+    csatSubmitted({ ticketId, rating, comment: comment ?? null, id });
     return NextResponse.json({ ok: true, id }, { status: 201 });
   } catch (err) {
     return NextResponse.json(

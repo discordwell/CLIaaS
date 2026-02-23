@@ -28,6 +28,8 @@ import { registerZohoDeskCommands } from './zoho-desk.js';
 import { registerHubSpotCommands } from './hubspot.js';
 import { registerRagCommands } from './rag.js';
 import { registerMcpCommands } from './mcp.js';
+import { registerVoiceCommands } from './voice.js';
+import { registerSandboxCommands } from './sandbox.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -59,4 +61,6 @@ export function registerCommands(program: Command): void {
   registerMigrateCommand(program);
   registerRagCommands(program);
   registerMcpCommands(program);
+  registerVoiceCommands(program);
+  registerSandboxCommands(program);
 }
