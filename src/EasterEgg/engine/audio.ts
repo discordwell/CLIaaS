@@ -1,6 +1,14 @@
 /**
- * Audio system — Web Audio API synthesized sound effects + music playback.
- * SFX: Generates RA-style retro sounds using oscillators, noise, and filters.
+ * Audio system — real Red Alert .AUD samples + synthesized fallback.
+ *
+ * SFX priority:
+ *   1. Pre-extracted WAV files from public/ra/audio/ (decoded from original .AUD)
+ *   2. Synthesized sounds via Web Audio oscillators/noise (fallback)
+ *
+ * The extraction pipeline (scripts/extract-ra-audio.ts) decodes Westwood IMA
+ * ADPCM from SOUNDS.MIX, SPEECH.MIX, and Aftermath expansion files into
+ * browser-compatible 16-bit PCM WAV files.
+ *
  * Music: Streams original Red Alert soundtrack MP3s from public/ra/music/.
  */
 
@@ -244,6 +252,35 @@ export type SoundName =
   | 'victory_fanfare' | 'defeat_sting' | 'crate_pickup' | 'eva_mission_accomplished'
   | 'eva_reinforcements' | 'eva_mission_warning' | 'tesla_charge';
 
+/** Base path for extracted audio WAV files */
+const AUDIO_BASE_URL = '/ra/audio';
+
+/**
+ * Sound names that have extracted WAV files available.
+ * This list matches the output of scripts/extract-ra-audio.ts.
+ * If a WAV file doesn't exist, the synthesized fallback is used.
+ */
+const SAMPLE_SOUND_NAMES: SoundName[] = [
+  // Weapons
+  'rifle', 'machinegun', 'cannon', 'artillery', 'teslazap',
+  'grenade', 'bazooka', 'mandible', 'fireball', 'flamethrower', 'dogjaw',
+  // Explosions / deaths
+  'explode_sm', 'explode_lg', 'building_explode', 'die_ant',
+  // Unit acknowledgments
+  'move_ack', 'attack_ack', 'select',
+  'move_ack_infantry', 'move_ack_vehicle', 'move_ack_dog',
+  'select_infantry', 'select_vehicle', 'select_dog',
+  // UI / building
+  'heal', 'sell', 'repair', 'crate_pickup', 'tesla_charge',
+  // EVA voice lines
+  'eva_acknowledged', 'eva_unit_lost', 'eva_base_attack',
+  'eva_construction_complete', 'eva_unit_ready', 'eva_low_power',
+  'eva_new_options', 'eva_building', 'eva_mission_accomplished',
+  'eva_reinforcements', 'eva_mission_warning',
+  // Victory / defeat
+  'victory_fanfare', 'defeat_sting',
+];
+
 export class AudioManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -251,6 +288,10 @@ export class AudioManager {
   private muted = false;
   private lastPlayed = new Map<string, number>();
   private readonly MIN_INTERVAL = 40; // ms between same sound
+  // Sampled audio system — loaded from extracted WAV files
+  private sampleBuffers = new Map<string, AudioBuffer>();
+  private samplesLoaded = false;
+  private samplesLoading = false;
   // Ambient sound system
   private ambientNode: AudioBufferSourceNode | null = null;
   private ambientGain: GainNode | null = null;
@@ -282,6 +323,74 @@ export class AudioManager {
     }
   }
 
+  /**
+   * Load extracted WAV samples from public/ra/audio/.
+   * Non-blocking: starts loading in background. Sounds that haven't loaded
+   * yet will use synthesized fallback. Call after init().
+   */
+  async loadSamples(): Promise<void> {
+    if (!this.ctx || this.samplesLoaded || this.samplesLoading) return;
+    this.samplesLoading = true;
+
+    // First check if audio manifest exists (indicates extraction was run)
+    try {
+      const manifestRes = await fetch(`${AUDIO_BASE_URL}/manifest.json`);
+      if (!manifestRes.ok) {
+        // No extracted audio available — synth-only mode
+        this.samplesLoading = false;
+        return;
+      }
+      // manifest.json exists, proceed to load WAV files
+    } catch {
+      this.samplesLoading = false;
+      return;
+    }
+
+    const ctx = this.ctx;
+
+    // Load all WAV files in parallel, silently skipping failures
+    const loadPromises = SAMPLE_SOUND_NAMES.map(async (name) => {
+      try {
+        const response = await fetch(`${AUDIO_BASE_URL}/${name}.wav`);
+        if (!response.ok) return; // file not available, will use synth
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        this.sampleBuffers.set(name, audioBuffer);
+      } catch {
+        // Failed to load/decode — synth fallback will be used
+      }
+    });
+
+    await Promise.all(loadPromises);
+    this.samplesLoaded = true;
+    this.samplesLoading = false;
+  }
+
+  /** Whether real audio samples have been loaded */
+  get hasSamples(): boolean { return this.samplesLoaded && this.sampleBuffers.size > 0; }
+
+  /** Number of loaded sample buffers */
+  get sampleCount(): number { return this.sampleBuffers.size; }
+
+  /**
+   * Play a sampled sound through Web Audio.
+   * Returns true if the sample was found and played, false otherwise.
+   */
+  private playSample(name: string, out: AudioNode): boolean {
+    const buffer = this.sampleBuffers.get(name);
+    if (!buffer || !this.ctx) return false;
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    // Apply a gain node to normalize volume for sampled sounds
+    // (original RA samples tend to be loud; scale to match synth levels)
+    const sampleGain = this.ctx.createGain();
+    sampleGain.gain.value = 0.6;
+    source.connect(sampleGain).connect(out);
+    source.start();
+    return true;
+  }
+
   getVolume(): number { return this.volume; }
 
   setVolume(v: number): void {
@@ -299,7 +408,7 @@ export class AudioManager {
 
   isMuted(): boolean { return this.muted; }
 
-  /** Play a named sound effect */
+  /** Play a named sound effect. Prefers real samples, falls back to synthesis. */
   play(name: SoundName): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
     if (this.ctx.state === 'suspended') return;
@@ -310,9 +419,18 @@ export class AudioManager {
     if (now - last < this.MIN_INTERVAL) return;
     this.lastPlayed.set(name, now);
 
-    const t = this.ctx.currentTime;
     const out = this.masterGain;
 
+    // Try playing from loaded sample first
+    if (this.playSample(name, out)) return;
+
+    // Fall back to synthesized audio
+    const t = this.ctx.currentTime;
+    this.playSynth(name, t, out);
+  }
+
+  /** Route to the appropriate synthesis function (used as fallback) */
+  private playSynth(name: SoundName, t: number, out: AudioNode): void {
     switch (name) {
       case 'rifle': this.synthRifle(t, out); break;
       case 'machinegun': this.synthMachinegun(t, out); break;
@@ -436,6 +554,8 @@ export class AudioManager {
   destroy(): void {
     this.stopAmbient();
     this.music.destroy();
+    this.sampleBuffers.clear();
+    this.samplesLoaded = false;
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;

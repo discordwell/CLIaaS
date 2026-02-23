@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-02-24T09:00Z — Session 27: Real RA Audio Playback Implementation
+- Wrote Westwood IMA ADPCM decoder (audDecoder.ts): parses AUD headers, decodes chunked 4-bit IMA ADPCM, converts to Web Audio AudioBuffer
+- Created build-time extraction script (scripts/extract-ra-audio.ts): extracts AUDs from SOUNDS.MIX + SPEECH.MIX + Aftermath expansion, decodes to WAV
+- 42 sound effects extracted: weapons (rifle, cannon, tesla, mandible), explosions, ant sounds, EVA voice lines, unit acks, victory/defeat
+- Updated AudioManager: loadSamples() fetches WAVs at runtime, play() tries samples first then synth fallback
+- Non-breaking: all existing synthesis kept intact as fallback; game works identically without extracted audio
+- Added /public/ra/audio/ to .gitignore (generated binary files)
+- Sources: SOUNDS.MIX (23 SFX), SPEECH.MIX (16 EVA voices), Aftermath (ANTBITE, ANTDIE, BUZZY1, TANK01, STAVCMDR/STAVCRSE/STAVMOV/STAVYES)
+
 ## 2026-02-24T07:45Z — Session 26: Bug Fixes + RA Soundtrack Implementation
 - Resolved all 6 bugs from Session 25 audit: Bug 5 fixed (HUNT pathfinding stagger), Bugs 1/3/4 already fixed in uncommitted diff, Bugs 2/6 verified as non-bugs
 - Committed 9195b3d: bug audit fixes (pathfinding lag, AREA_GUARD cleanup, artillery vs structures)

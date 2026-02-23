@@ -196,6 +196,9 @@ export class Game {
     // Initialize audio (needs user gesture context — start() is called from click)
     this.audio.init();
     this.audio.resume();
+    // Start loading real audio samples in background (non-blocking).
+    // Synthesized sounds are used as fallback until samples are ready.
+    this.audio.loadSamples();
 
     // Load sprite sheets
     await this.assets.loadAll((loaded, total) => {
@@ -4166,6 +4169,7 @@ export class Game {
   // MSUB (Missile Sub), QTNK (MAD Tank), STNK (Stealth Tank) — none appear in
   // ant mission INI files. Sprites not extracted.
 
-  // AFTERMATH SOUNDS: ANTBITE.AUD, ANTDIE.AUD, BUZZY1.AUD, TANK01.AUD —
-  // original RA .AUD files. Engine uses Web Audio synthesized SFX instead.
+  // AFTERMATH SOUNDS: ANTBITE.AUD, ANTDIE.AUD, BUZZY1.AUD, TANK01.AUD, etc.
+  // Extracted to WAV by scripts/extract-ra-audio.ts -> public/ra/audio/.
+  // AudioManager.loadSamples() loads them at runtime; synth fallback if unavailable.
 }
