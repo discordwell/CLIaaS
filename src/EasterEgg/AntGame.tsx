@@ -7,12 +7,13 @@ import {
 } from './engine';
 import { TestRunner, type TestLogEntry } from './engine/testRunner';
 import { resolvePreset } from './engine/turbo';
+import { BriefingRenderer } from './engine/briefing';
 
 interface AntGameProps {
   onExit: () => void;
 }
 
-type Screen = 'select' | 'briefing' | 'loading' | 'playing';
+type Screen = 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing';
 
 export default function AntGame({ onExit }: AntGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,9 +30,17 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [testMode, setTestMode] = useState(false);
   const [testLog, setTestLog] = useState<TestLogEntry[]>([]);
   const testRunnerRef = useRef<TestRunner | null>(null);
+  const briefingRef = useRef<BriefingRenderer | null>(null);
 
   const launchMission = useCallback(async (mission: MissionInfo) => {
     if (!canvasRef.current) return;
+
+    // Clean up any running briefing cutscene
+    if (briefingRef.current) {
+      briefingRef.current.stop();
+      briefingRef.current = null;
+    }
+
     setScreen('loading');
     setStatus('Loading assets...');
     setLoadProgress(0);
@@ -72,6 +81,29 @@ export default function AntGame({ onExit }: AntGameProps) {
       setScreen('select');
     }
   }, [difficulty]);
+
+  /** Start the animated briefing cutscene before launching the mission */
+  const startCutscene = useCallback((mission: MissionInfo) => {
+    if (!canvasRef.current) return;
+
+    // Clean up previous briefing if any
+    if (briefingRef.current) {
+      briefingRef.current.stop();
+      briefingRef.current = null;
+    }
+
+    setScreen('cutscene');
+
+    const renderer = new BriefingRenderer(canvasRef.current);
+    briefingRef.current = renderer;
+
+    renderer.onComplete = () => {
+      briefingRef.current = null;
+      launchMission(mission);
+    };
+
+    renderer.start(mission.id);
+  }, [launchMission]);
 
   const selectMission = useCallback((index: number) => {
     const mission = MISSIONS[index];
@@ -137,6 +169,10 @@ export default function AntGame({ onExit }: AntGameProps) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (briefingRef.current) {
+        briefingRef.current.stop();
+        briefingRef.current = null;
+      }
       if (testRunnerRef.current) {
         testRunnerRef.current.stop();
         testRunnerRef.current = null;
@@ -153,12 +189,24 @@ export default function AntGame({ onExit }: AntGameProps) {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'F10') {
         e.preventDefault();
-        if (screen === 'briefing') {
+        if (screen === 'cutscene') {
+          // Skip the animated briefing cutscene
+          if (briefingRef.current) {
+            briefingRef.current.skip();
+            // skip() calls onComplete which triggers launchMission
+          }
+        } else if (screen === 'briefing') {
           setScreen('select');
         } else if (screen === 'select') {
           onExit();
         }
         // During gameplay, Escape is handled by the game engine (pause toggle)
+      }
+      if (screen === 'cutscene' && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        if (briefingRef.current) {
+          briefingRef.current.advance();
+        }
       }
       if (screen === 'select' && e.key >= '1' && e.key <= String(MISSIONS.length)) {
         const idx = parseInt(e.key) - 1;
@@ -166,12 +214,12 @@ export default function AntGame({ onExit }: AntGameProps) {
       }
       if (screen === 'briefing' && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
-        if (selectedMission) launchMission(selectedMission);
+        if (selectedMission) startCutscene(selectedMission);
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, onExit]);
+  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, onExit]);
 
   // Handle canvas resize
   useEffect(() => {
@@ -414,7 +462,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             fontFamily: 'monospace',
             cursor: 'pointer',
           }}
-          onClick={() => launchMission(selectedMission)}
+          onClick={() => startCutscene(selectedMission)}
         >
           <div style={{
             color: '#ff4400',
@@ -499,7 +547,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                launchMission(selectedMission);
+                startCutscene(selectedMission);
               }}
               style={{
                 background: '#441100',
@@ -782,9 +830,25 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
+      {/* ── Cutscene Click Overlay ── */}
+      {!testMode && screen === 'cutscene' && (
+        <div
+          onClick={() => { if (briefingRef.current) briefingRef.current.advance(); }}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: 100000,
+            cursor: 'pointer',
+          }}
+        />
+      )}
+
       {/* ── Game Canvas ── */}
       <div style={{
-        display: testMode || screen === 'playing' || screen === 'loading' ? 'flex' : 'none',
+        display: testMode || screen === 'playing' || screen === 'loading' || screen === 'cutscene' ? 'flex' : 'none',
         justifyContent: 'center',
         alignItems: 'center',
         width: '100vw',
