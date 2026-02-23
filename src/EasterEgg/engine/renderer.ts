@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity } from './entity';
@@ -79,6 +79,8 @@ export class Renderer {
   attackMoveMode = false; // show attack-move cursor indicator
   sellMode = false;      // show sell cursor indicator
   repairMode = false;    // show repair cursor indicator
+  private scoreAnimStartTime = 0; // timestamp when score screen first appeared
+  private scoreAnimActive = false; // whether score animation is running
   repairingStructures = new Set<number>(); // indices of structures being repaired
   corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; isAnt: boolean; alpha: number; deathVariant: number }> = [];
   showHelp = false;     // F1 help overlay
@@ -105,6 +107,10 @@ export class Renderer {
   theatre = 'TEMPERATE'; // map theatre (affects terrain colors)
   musicTrack = ''; // currently playing music track name
   gameSpeed = 1; // player game speed (1/2/4x)
+  // Custom cursor state
+  cursorType: CursorType = CursorType.DEFAULT;
+  cursorX = 0;
+  cursorY = 0;
   // Placement ghost
   placementItem: ProductionItem | null = null;
   placementCx = 0;
@@ -198,7 +204,7 @@ export class Renderer {
 
     // Placement ghost preview
     if (this.placementItem) {
-      this.renderPlacementGhost(camera);
+      this.renderPlacementGhost(camera, assets);
     }
 
     this.renderSelectionBox(input);
@@ -211,6 +217,164 @@ export class Renderer {
     this.renderUnitInfo(entities, selectedIds);
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
+    this.renderCursor();
+  }
+
+  // ─── Custom Cursor ────────────────────────────────────────
+
+  private renderCursor(): void {
+    const ctx = this.ctx;
+    const x = this.cursorX;
+    const y = this.cursorY;
+
+    ctx.save();
+    ctx.lineWidth = 1.5;
+
+    switch (this.cursorType) {
+      case CursorType.DEFAULT: {
+        // Green arrow pointer
+        ctx.fillStyle = '#44ff44';
+        ctx.strokeStyle = '#003300';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + 16);
+        ctx.lineTo(x + 4, y + 12);
+        ctx.lineTo(x + 8, y + 18);
+        ctx.lineTo(x + 10, y + 16);
+        ctx.lineTo(x + 6, y + 10);
+        ctx.lineTo(x + 11, y + 10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        break;
+      }
+      case CursorType.MOVE: {
+        // Green 4-way arrow
+        const s = 6;
+        ctx.fillStyle = '#44ff44';
+        ctx.strokeStyle = '#003300';
+        ctx.beginPath();
+        // Up arrow
+        ctx.moveTo(x, y - s * 2); ctx.lineTo(x - s, y - s); ctx.lineTo(x + s, y - s);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        // Down arrow
+        ctx.beginPath();
+        ctx.moveTo(x, y + s * 2); ctx.lineTo(x - s, y + s); ctx.lineTo(x + s, y + s);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        // Left arrow
+        ctx.beginPath();
+        ctx.moveTo(x - s * 2, y); ctx.lineTo(x - s, y - s); ctx.lineTo(x - s, y + s);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        // Right arrow
+        ctx.beginPath();
+        ctx.moveTo(x + s * 2, y); ctx.lineTo(x + s, y - s); ctx.lineTo(x + s, y + s);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        // Center dot
+        ctx.fillStyle = '#44ff44';
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case CursorType.NOMOVE: {
+        // Red circle with X
+        const r = 7;
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4);
+        ctx.moveTo(x + 4, y - 4); ctx.lineTo(x - 4, y + 4);
+        ctx.stroke();
+        break;
+      }
+      case CursorType.ATTACK: {
+        // Red crosshair with center gap
+        const r = 8;
+        const gap = 3;
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = 1.5;
+        // Outer circle
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        // Crosshair lines with gap
+        ctx.beginPath();
+        ctx.moveTo(x - r - 2, y); ctx.lineTo(x - gap, y);
+        ctx.moveTo(x + gap, y); ctx.lineTo(x + r + 2, y);
+        ctx.moveTo(x, y - r - 2); ctx.lineTo(x, y - gap);
+        ctx.moveTo(x, y + gap); ctx.lineTo(x, y + r + 2);
+        ctx.stroke();
+        break;
+      }
+      case CursorType.SELL: {
+        // Yellow $ sign
+        ctx.font = 'bold 16px monospace';
+        ctx.fillStyle = '#FFD700';
+        ctx.strokeStyle = '#553300';
+        ctx.lineWidth = 2;
+        ctx.textAlign = 'center';
+        ctx.strokeText('$', x, y + 6);
+        ctx.fillText('$', x, y + 6);
+        ctx.textAlign = 'left';
+        break;
+      }
+      case CursorType.REPAIR: {
+        // Green wrench icon
+        ctx.strokeStyle = '#44ff44';
+        ctx.fillStyle = '#44ff44';
+        ctx.lineWidth = 2;
+        // Simple wrench shape
+        ctx.beginPath();
+        ctx.moveTo(x - 2, y - 8);
+        ctx.lineTo(x + 2, y - 8);
+        ctx.lineTo(x + 2, y);
+        ctx.lineTo(x + 5, y + 3);
+        ctx.lineTo(x + 3, y + 5);
+        ctx.lineTo(x, y + 2);
+        ctx.lineTo(x - 3, y + 5);
+        ctx.lineTo(x - 5, y + 3);
+        ctx.lineTo(x - 2, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#003300';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        break;
+      }
+      default: {
+        // Scroll cursors — directional white arrows
+        if (this.cursorType.startsWith('SCROLL_')) {
+          const dir = this.cursorType.replace('SCROLL_', '');
+          const arrows: Record<string, [number, number]> = {
+            N: [0, -1], NE: [1, -1], E: [1, 0], SE: [1, 1],
+            S: [0, 1], SW: [-1, 1], W: [-1, 0], NW: [-1, -1],
+          };
+          const [dx, dy] = arrows[dir] ?? [0, 0];
+          const s = 8;
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+          ctx.lineWidth = 1;
+          // Arrow triangle pointing in scroll direction
+          const tipX = x + dx * s * 2;
+          const tipY = y + dy * s * 2;
+          const perpX = -dy;
+          const perpY = dx;
+          ctx.beginPath();
+          ctx.moveTo(tipX, tipY);
+          ctx.lineTo(tipX - dx * s + perpX * s * 0.6, tipY - dy * s + perpY * s * 0.6);
+          ctx.lineTo(tipX - dx * s - perpX * s * 0.6, tipY - dy * s - perpY * s * 0.6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+        break;
+      }
+    }
+
+    ctx.restore();
   }
 
   // ─── Terrain ─────────────────────────────────────────────
@@ -815,6 +979,17 @@ export class Renderer {
         ctx.lineWidth = 1;
         ctx.strokeRect(screenX + 2, screenY + 2, CELL_SIZE - 4, CELL_SIZE - 4);
         if (vis === 1) ctx.globalAlpha = 1;
+      }
+
+      // Power brownout dimming for defensive structures (matches severe brownout threshold in index.ts)
+      if (this.sidebarPowerConsumed > this.sidebarPowerProduced * 1.5 && this.sidebarPowerProduced > 0) {
+        const defenseTypes = ['HBOX', 'GUN', 'TSLA', 'PBOX'];
+        if (defenseTypes.includes(s.type)) {
+          const pulse = 0.15 + 0.1 * Math.sin(tick * 0.15);
+          ctx.fillStyle = `rgba(0,0,0,${pulse})`;
+          const [bw, bh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+          ctx.fillRect(screenX, screenY, bw * CELL_SIZE, bh * CELL_SIZE);
+        }
       }
 
       // Health bar on damaged structures (visible only)
@@ -2269,7 +2444,7 @@ export class Renderer {
 
   // ─── Placement Ghost ────────────────────────────────────
 
-  private renderPlacementGhost(camera: Camera): void {
+  private renderPlacementGhost(camera: Camera, assets: AssetManager): void {
     if (!this.placementItem) return;
     const ctx = this.ctx;
     const screen = camera.worldToScreen(
@@ -2299,6 +2474,17 @@ export class Renderer {
     ctx.lineWidth = 1.5;
     ctx.strokeRect(screen.x, screen.y, fw * CELL_SIZE, fh * CELL_SIZE);
 
+    // Draw building sprite preview at 50% opacity
+    const buildingSheet = assets.getSheet(this.placementItem.type.toLowerCase());
+    if (buildingSheet) {
+      ctx.globalAlpha = 0.5;
+      assets.drawFrame(ctx, this.placementItem.type.toLowerCase(), 0,
+        screen.x + fw * CELL_SIZE / 2,
+        screen.y + fh * CELL_SIZE / 2,
+        { centerX: true, centerY: true });
+      ctx.globalAlpha = 1;
+    }
+
     // Label
     ctx.font = '8px monospace';
     ctx.textAlign = 'center';
@@ -2326,6 +2512,15 @@ export class Renderer {
     const w = this.width;
     const h = this.height;
 
+    // Initialize score animation timer on first render
+    if (this.scoreAnimStartTime === 0) {
+      this.scoreAnimStartTime = Date.now();
+      this.scoreAnimActive = true;
+    }
+    const scoreAnimTick = (Date.now() - this.scoreAnimStartTime) / 1000;
+    const animProgress = Math.min(1, scoreAnimTick / 1.5); // 1.5s to count up
+    const animateValue = (val: number) => Math.floor(val * animProgress);
+
     // Semi-transparent overlay
     ctx.fillStyle = won ? 'rgba(0,40,0,0.75)' : 'rgba(60,0,0,0.75)';
     ctx.fillRect(0, 0, w, h);
@@ -2333,7 +2528,7 @@ export class Renderer {
     // Score panel border
     const panelW = 280;
     const survivorRows = won && survivors.length > 0 ? Math.ceil(new Set(survivors.map(s => s.type)).size / 3) + 2 : 0;
-    const panelH = 220 + survivorRows * 12;
+    const panelH = 260 + survivorRows * 12;
     const px = (w - panelW) / 2;
     const py = (h - panelH) / 2 - 20;
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -2356,7 +2551,7 @@ export class Renderer {
     ctx.lineTo(px + panelW - 10, py + 34);
     ctx.stroke();
 
-    // Stats — RA-style table layout
+    // Stats — RA-style table layout with animated counters
     ctx.font = '11px monospace';
     const leftX = px + 16;
     const rightX = px + panelW - 16;
@@ -2377,11 +2572,11 @@ export class Renderer {
     const seconds = Math.floor((tick / 15) % 60);
     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
     drawRow('Time', timeStr);
-    drawRow('Enemies Killed', String(killCount), '#f84');
-    drawRow('Units Lost', String(lossCount), lossCount > 0 ? '#f44' : '#8f8');
-    drawRow('Structures Built', String(structsBuilt), '#8cf');
-    drawRow('Structures Lost', String(structsLost), structsLost > 0 ? '#f44' : '#8f8');
-    drawRow('Credits Remaining', `$${creditsRemaining}`, '#FFD700');
+    drawRow('Enemies Killed', String(animateValue(killCount)), '#f84');
+    drawRow('Units Lost', String(animateValue(lossCount)), lossCount > 0 ? '#f44' : '#8f8');
+    drawRow('Structures Built', String(animateValue(structsBuilt)), '#8cf');
+    drawRow('Structures Lost', String(animateValue(structsLost)), structsLost > 0 ? '#f44' : '#8f8');
+    drawRow('Credits Remaining', `$${animateValue(creditsRemaining)}`, '#FFD700');
 
     // Score calculation (RA-style: kills * 50 - losses * 30 + time bonus)
     const timeBonus = Math.max(0, 1000 - Math.floor(tick / 15));
@@ -2392,7 +2587,47 @@ export class Renderer {
     ctx.lineTo(px + panelW - 10, row - 14);
     ctx.stroke();
     ctx.font = 'bold 13px monospace';
-    drawRow('SCORE', String(Math.max(0, score)), '#FFD700');
+    drawRow('SCORE', String(Math.max(0, animateValue(score))), '#FFD700');
+
+    // Letter grade based on score
+    const finalScore = Math.max(0, score);
+    const grade = finalScore >= 2000 ? 'S' : finalScore >= 1500 ? 'A' : finalScore >= 1000 ? 'B' : finalScore >= 500 ? 'C' : finalScore >= 200 ? 'D' : 'F';
+    const gradeColor = grade === 'S' ? '#FFD700' : grade === 'A' ? '#C0C0C0' : grade === 'B' ? '#CD7F32' : '#888';
+    if (animProgress >= 1) {
+      ctx.font = 'bold 24px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = gradeColor;
+      ctx.fillText(grade, w / 2, row + 4);
+      row += 28;
+    }
+
+    // Bar graph: kills vs losses
+    if (animProgress > 0.5) {
+      const barProgress = Math.min(1, (animProgress - 0.5) * 2);
+      const barW = 100;
+      const barH = 8;
+      const barX = (w - barW) / 2;
+      const maxVal = Math.max(killCount, lossCount, 1);
+      // Kills bar (green)
+      ctx.fillStyle = '#111';
+      ctx.fillRect(barX, row, barW, barH);
+      ctx.fillStyle = '#4a4';
+      ctx.fillRect(barX, row, barW * (killCount / maxVal) * barProgress, barH);
+      ctx.font = '7px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#8f8';
+      ctx.fillText('K', barX - 10, row + 7);
+      row += barH + 3;
+      // Losses bar (red)
+      ctx.fillStyle = '#111';
+      ctx.fillRect(barX, row, barW, barH);
+      ctx.fillStyle = '#a44';
+      ctx.fillRect(barX, row, barW * (lossCount / maxVal) * barProgress, barH);
+      ctx.fillStyle = '#f88';
+      ctx.fillText('L', barX - 10, row + 7);
+      row += barH + 6;
+      ctx.textAlign = 'left';
+    }
 
     // Survivors roster (victory only)
     if (won && survivors.length > 0) {

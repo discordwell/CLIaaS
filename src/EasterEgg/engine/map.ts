@@ -113,6 +113,27 @@ export class GameMap {
     return PASSABLE.has(this.getTerrain(cx, cy));
   }
 
+  /** Check if a cell is water-passable (for naval units) */
+  isWaterPassable(cx: number, cy: number): boolean {
+    if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
+        cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
+      return false;
+    }
+    return this.getTerrain(cx, cy) === Terrain.WATER;
+  }
+
+  /** Check if a cell is a shore cell (land cell adjacent to water) */
+  isShoreCell(cx: number, cy: number): boolean {
+    if (!this.isPassable(cx, cy)) return false;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        if (this.getTerrain(cx + dx, cy + dy) === Terrain.WATER) return true;
+      }
+    }
+    return false;
+  }
+
   /** Get terrain speed multiplier (1.0 = normal, >1 = faster, <1 = slower).
    *  Roads (templates 166-174) give +30% speed. Rough terrain gives -15%. */
   getSpeedMultiplier(cx: number, cy: number): number {

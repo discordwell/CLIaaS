@@ -405,3 +405,21 @@ export function directionTo(from: WorldPos, to: WorldPos): Dir {
   // atan2 gives E=0 but we want N=0, so rotate
   return ((octant + 6) % 8) as Dir;
 }
+
+// === Cursor Types (canvas-rendered) ===
+export enum CursorType {
+  DEFAULT = 'DEFAULT',
+  MOVE = 'MOVE',
+  NOMOVE = 'NOMOVE',
+  ATTACK = 'ATTACK',
+  SELL = 'SELL',
+  REPAIR = 'REPAIR',
+  SCROLL_N = 'SCROLL_N',
+  SCROLL_NE = 'SCROLL_NE',
+  SCROLL_E = 'SCROLL_E',
+  SCROLL_SE = 'SCROLL_SE',
+  SCROLL_S = 'SCROLL_S',
+  SCROLL_SW = 'SCROLL_SW',
+  SCROLL_W = 'SCROLL_W',
+  SCROLL_NW = 'SCROLL_NW',
+}

@@ -26,11 +26,36 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [unlockedMissions, setUnlockedMissions] = useState(loadProgress);
   const [selectedMission, setSelectedMission] = useState<MissionInfo | null>(null);
   const [missionIndex, setMissionIndex] = useState(0);
-  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+  const [difficulty, setDifficulty] = useState<Difficulty>(() => {
+    try {
+      const saved = localStorage.getItem('antmissions_settings');
+      if (saved) {
+        const settings = JSON.parse(saved);
+        return settings.difficulty ?? 'normal';
+      }
+    } catch { /* ignore */ }
+    return 'normal';
+  });
+  const [fadeOpacity, setFadeOpacity] = useState(0);
+  const [fadeActive, setFadeActive] = useState(false);
   const [testMode, setTestMode] = useState(false);
   const [testLog, setTestLog] = useState<TestLogEntry[]>([]);
   const testRunnerRef = useRef<TestRunner | null>(null);
   const briefingRef = useRef<BriefingRenderer | null>(null);
+
+  const transitionTo = useCallback((callback: () => void) => {
+    setFadeActive(true);
+    setFadeOpacity(1); // fade to black
+    setTimeout(() => {
+      callback();
+      setTimeout(() => {
+        setFadeOpacity(0); // fade in
+        setTimeout(() => {
+          setFadeActive(false);
+        }, 500);
+      }, 50);
+    }, 400);
+  }, []);
 
   const launchMission = useCallback(async (mission: MissionInfo) => {
     if (!canvasRef.current) return;
@@ -76,6 +101,15 @@ export default function AntGame({ onExit }: AntGameProps) {
 
     try {
       await game.start(mission.id, difficulty);
+      // Restore saved audio settings
+      try {
+        const saved = localStorage.getItem('antmissions_settings');
+        if (saved) {
+          const settings = JSON.parse(saved);
+          if (typeof settings.volume === 'number') game.audio.setVolume(settings.volume);
+          if (settings.muted) game.audio.toggleMute();
+        }
+      } catch { /* ignore */ }
     } catch (e) {
       setError(`Failed to load mission: ${e instanceof Error ? e.message : String(e)}`);
       setScreen('select');
@@ -92,40 +126,52 @@ export default function AntGame({ onExit }: AntGameProps) {
       briefingRef.current = null;
     }
 
-    setScreen('cutscene');
+    transitionTo(() => {
+      setScreen('cutscene');
 
-    const renderer = new BriefingRenderer(canvasRef.current);
-    briefingRef.current = renderer;
+      const renderer = new BriefingRenderer(canvasRef.current!);
+      briefingRef.current = renderer;
 
-    renderer.onComplete = () => {
-      briefingRef.current = null;
-      launchMission(mission);
-    };
+      renderer.onComplete = () => {
+        briefingRef.current = null;
+        launchMission(mission);
+      };
 
-    renderer.start(mission.id);
-  }, [launchMission]);
+      renderer.start(mission.id);
+    });
+  }, [launchMission, transitionTo]);
 
   const selectMission = useCallback((index: number) => {
     const mission = MISSIONS[index];
     if (!mission) return;
     setMissionIndex(index);
     setSelectedMission(mission);
-    setScreen('briefing');
-  }, []);
+    transitionTo(() => setScreen('briefing'));
+  }, [transitionTo]);
 
   const handleNextMission = useCallback(() => {
     const nextIdx = missionIndex + 1;
     if (nextIdx < MISSIONS.length) {
-      selectMission(nextIdx);
+      // Directly set state instead of calling selectMission (which has its own transitionTo)
+      const mission = MISSIONS[nextIdx];
+      transitionTo(() => {
+        if (mission) {
+          setMissionIndex(nextIdx);
+          setSelectedMission(mission);
+          setScreen('briefing');
+        }
+      });
     } else {
       // All missions complete — stop game and back to select
-      if (gameRef.current) {
-        gameRef.current.stop();
-        gameRef.current = null;
-      }
-      setScreen('select');
+      transitionTo(() => {
+        if (gameRef.current) {
+          gameRef.current.stop();
+          gameRef.current = null;
+        }
+        setScreen('select');
+      });
     }
-  }, [missionIndex, selectMission]);
+  }, [missionIndex, selectMission, transitionTo]);
 
   const handleRetry = useCallback(() => {
     if (selectedMission) {
@@ -134,12 +180,14 @@ export default function AntGame({ onExit }: AntGameProps) {
   }, [selectedMission, launchMission]);
 
   const handleMissionSelect = useCallback(() => {
-    if (gameRef.current) {
-      gameRef.current.stop();
-      gameRef.current = null;
-    }
-    setScreen('select');
-  }, []);
+    transitionTo(() => {
+      if (gameRef.current) {
+        gameRef.current.stop();
+        gameRef.current = null;
+      }
+      setScreen('select');
+    });
+  }, [transitionTo]);
 
   // Detect ?anttest= URL param and launch automated test run
   useEffect(() => {
@@ -183,6 +231,14 @@ export default function AntGame({ onExit }: AntGameProps) {
       }
     };
   }, []);
+
+  // Save settings to localStorage when they change
+  useEffect(() => {
+    try {
+      const settings = { difficulty, volume: gameRef.current?.audio?.getVolume(), muted: gameRef.current?.audio?.isMuted() };
+      localStorage.setItem('antmissions_settings', JSON.stringify(settings));
+    } catch { /* ignore */ }
+  }, [difficulty]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -868,6 +924,20 @@ export default function AntGame({ onExit }: AntGameProps) {
           }}
         />
       </div>
+
+      {/* ── Fade Transition Overlay ── */}
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        background: '#000',
+        opacity: fadeOpacity,
+        transition: fadeActive ? 'opacity 0.4s ease-in-out' : 'none',
+        pointerEvents: fadeActive ? 'all' : 'none',
+        zIndex: fadeActive ? 200000 : -1,
+      }} />
     </div>
   );
 }

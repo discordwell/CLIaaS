@@ -8,7 +8,7 @@ import {
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, type WarheadType, UNIT_STATS, WEAPON_STATS,
-  PRODUCTION_ITEMS, type ProductionItem,
+  PRODUCTION_ITEMS, type ProductionItem, CursorType,
 } from './types';
 import { AssetManager } from './assets';
 import { AudioManager, type SoundName } from './audio';
@@ -71,6 +71,7 @@ export class Game {
   attackMoveMode = false;
   sellMode = false;
   repairMode = false;
+  cursorType: CursorType = CursorType.DEFAULT;
   /** Set of structure indices currently being repaired */
   private repairingStructures = new Set<number>();
   /** Tick when last EVA base attack warning played (throttle to once per 5s) */
@@ -154,6 +155,8 @@ export class Game {
 
   // Turbo mode (for E2E test runner)
   turboMultiplier = 1;
+  // Trigger debug logging
+  debugTriggers = false;
   // Player game speed (cycles 1→2→4→1 with backtick key)
   gameSpeed = 1;
   // Mission stats
@@ -182,6 +185,7 @@ export class Game {
     this.input = new InputManager(canvas);
     this.map = new GameMap();
     this.renderer = new Renderer(canvas);
+    canvas.style.cursor = 'none'; // hide native cursor — we draw our own
   }
 
   /** Load assets and start a scenario */
@@ -286,6 +290,7 @@ export class Game {
     this.timerId = 0;
     this.input.destroy();
     this.audio.destroy();
+    this.canvas.style.cursor = 'default';
   }
 
   /** Toggle pause/unpause */
@@ -703,51 +708,70 @@ export class Game {
     return true;
   }
 
-  /** Update cursor based on mouse position and selection state */
+  /** Update cursor type based on mouse position and selection state */
   private updateCursor(): void {
+    const { mouseX, mouseY } = this.input.state;
+
+    // Edge scroll cursors (3px margin from viewport edges, not in sidebar)
+    const edgeMargin = 3;
+    const inSidebar = mouseX >= this.canvas.width - Game.SIDEBAR_W;
+    if (!inSidebar) {
+      const atTop = mouseY <= edgeMargin;
+      const atBottom = mouseY >= this.canvas.height - edgeMargin;
+      const atLeft = mouseX <= edgeMargin;
+      const atRight = mouseX >= this.canvas.width - Game.SIDEBAR_W - edgeMargin;
+      if (atTop && atLeft) { this.cursorType = CursorType.SCROLL_NW; return; }
+      if (atTop && atRight) { this.cursorType = CursorType.SCROLL_NE; return; }
+      if (atBottom && atLeft) { this.cursorType = CursorType.SCROLL_SW; return; }
+      if (atBottom && atRight) { this.cursorType = CursorType.SCROLL_SE; return; }
+      if (atTop) { this.cursorType = CursorType.SCROLL_N; return; }
+      if (atBottom) { this.cursorType = CursorType.SCROLL_S; return; }
+      if (atLeft) { this.cursorType = CursorType.SCROLL_W; return; }
+      if (atRight) { this.cursorType = CursorType.SCROLL_E; return; }
+    }
+
     if (this.sellMode) {
-      this.canvas.style.cursor = 'not-allowed'; // sell cursor (changes over buildings)
-      const { mouseX, mouseY } = this.input.state;
       const world = this.camera.screenToWorld(mouseX, mouseY);
       const s = this.findStructureAt(world);
       if (s && s.alive && s.sellProgress === undefined &&
           (s.house === House.Spain || s.house === House.Greece)) {
-        this.canvas.style.cursor = 'pointer';
+        this.cursorType = CursorType.SELL;
+      } else {
+        this.cursorType = CursorType.NOMOVE;
       }
       return;
     }
     if (this.repairMode) {
-      this.canvas.style.cursor = 'not-allowed';
-      const { mouseX, mouseY } = this.input.state;
       const world = this.camera.screenToWorld(mouseX, mouseY);
       const s = this.findStructureAt(world);
       if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) && s.hp < s.maxHp) {
-        this.canvas.style.cursor = 'pointer';
+        this.cursorType = CursorType.REPAIR;
+      } else {
+        this.cursorType = CursorType.NOMOVE;
       }
       return;
     }
     if (this.selectedIds.size === 0) {
-      this.canvas.style.cursor = 'default';
+      this.cursorType = CursorType.DEFAULT;
       return;
     }
     if (this.attackMoveMode) {
-      this.canvas.style.cursor = 'crosshair';
+      this.cursorType = CursorType.ATTACK;
       return;
     }
-    const { mouseX, mouseY } = this.input.state;
     const world = this.camera.screenToWorld(mouseX, mouseY);
     const hovered = this.findEntityAt(world);
     if (hovered && !hovered.isPlayerUnit && hovered.alive) {
-      this.canvas.style.cursor = 'crosshair'; // attack cursor over enemy unit
+      this.cursorType = CursorType.ATTACK;
     } else {
       const hoveredStruct = this.findStructureAt(world);
       if (hoveredStruct && hoveredStruct.alive &&
           hoveredStruct.house !== House.Spain && hoveredStruct.house !== House.Greece) {
-        this.canvas.style.cursor = 'crosshair'; // attack cursor over enemy structure
+        this.cursorType = CursorType.ATTACK;
       } else {
         const cell = worldToCell(world.x, world.y);
         const passable = this.map.isPassable(cell.cx, cell.cy);
-        this.canvas.style.cursor = passable ? 'pointer' : 'not-allowed';
+        this.cursorType = passable ? CursorType.MOVE : CursorType.NOMOVE;
       }
     }
   }
@@ -1508,6 +1532,11 @@ export class Game {
     }
   }
 
+  /** Play a positional sound at a world location (spatial stereo panning) */
+  private playSoundAt(name: SoundName, worldX: number, worldY: number): void {
+    this.audio.playAt(name, worldX, worldY, this.camera.x, this.camera.viewWidth);
+  }
+
   /** Calculate spread offset for group move — arranges units in a grid */
   private spreadOffset(idx: number, total: number): { x: number; y: number } {
     if (total <= 1) return { x: 0, y: 0 };
@@ -1631,7 +1660,7 @@ export class Game {
       });
       this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
       this.renderer.screenFlash = Math.max(this.renderer.screenFlash, 5);
-      this.audio.play('building_explode');
+      this.playSoundAt('building_explode', wx, wy);
       if (s.house === House.Spain || s.house === House.Greece) this.structuresLost++;
       // Structure explosion damages nearby units (2-cell radius, ~100 base damage)
       const blastRadius = 2;
@@ -2040,7 +2069,7 @@ export class Game {
           type: 'blood', x: other.pos.x, y: other.pos.y,
           frame: 0, maxFrames: 6, size: 4, sprite: 'piffpiff', spriteStart: 0,
         });
-        this.audio.play('die_infantry');
+        this.playSoundAt('die_infantry', other.pos.x, other.pos.y);
         this.map.addDecal(oc.cx, oc.cy, 3, 0.3);
         if (vehicle.isPlayerUnit) this.killCount++;
         else {
@@ -2302,7 +2331,8 @@ export class Game {
         entity.lastPathRecalc = this.tick;
         entity.path = findPath(
           this.map, entity.cell,
-          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true
+          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+          entity.isNavalUnit
         );
         entity.pathIndex = 0;
         if (entity.path.length === 0) {
@@ -2326,7 +2356,7 @@ export class Game {
         if (entity.moveQueue.length > 0) {
           const next = entity.moveQueue.shift()!;
           entity.moveTarget = next;
-          entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true);
+          entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit);
           entity.pathIndex = 0;
         } else {
           entity.mission = this.idleMission(entity);
@@ -2479,8 +2509,8 @@ export class Game {
           // Infantry: use existing blood effects (already handled below)
         }
 
-        // Play weapon sound
-        this.audio.play(this.audio.weaponSound(entity.weapon.name));
+        // Play weapon sound (spatially positioned)
+        this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
 
         // Spawn attack effects + projectiles
         const tx = entity.target.pos.x;
@@ -2540,15 +2570,15 @@ export class Game {
           const tc = worldToCell(tx, ty);
           const scorchSize = entity.target.stats.isInfantry ? 4 : 8;
           this.map.addDecal(tc.cx, tc.cy, scorchSize, 0.5);
-          // Death sound
+          // Death sound (spatially positioned at target)
           if (entity.target.isAnt) {
-            this.audio.play('die_ant');
+            this.playSoundAt('die_ant', tx, ty);
           } else if (entity.target.stats.isInfantry) {
-            this.audio.play('die_infantry');
+            this.playSoundAt('die_infantry', tx, ty);
           } else {
-            this.audio.play('die_vehicle');
+            this.playSoundAt('die_vehicle', tx, ty);
           }
-          this.audio.play('explode_lg');
+          this.playSoundAt('explode_lg', tx, ty);
           // Track kills/losses
           if (entity.isPlayerUnit) {
             this.killCount++;
@@ -2665,7 +2695,7 @@ export class Game {
             entity.attackCooldown = 20; // heal every ~1.3s (cooldown decremented each tick above)
             entity.desiredFacing = directionTo(entity.pos, healTarget.pos);
             entity.tickRotation();
-            this.audio.play('heal');
+            this.playSoundAt('heal', healTarget.pos.x, healTarget.pos.y);
             // Green heal sparkle on target
             this.effects.push({
               type: 'muzzle', x: healTarget.pos.x, y: healTarget.pos.y - 4,
@@ -2678,6 +2708,42 @@ export class Game {
         }
         return;
       }
+    }
+
+    // Civilians auto-flee nearby ants (SCA02EA evacuation behavior)
+    if (entity.isCivilian && entity.isPlayerUnit) {
+      let nearestAntDist = Infinity;
+      let nearestAntPos: WorldPos | null = null;
+      for (const other of this.entities) {
+        if (!other.alive || !other.isAnt) continue;
+        const dist = worldDist(entity.pos, other.pos);
+        if (dist < 5 && dist < nearestAntDist) {
+          nearestAntDist = dist;
+          nearestAntPos = other.pos;
+        }
+      }
+      if (nearestAntPos && !entity.moveTarget) {
+        // Flee in opposite direction
+        const dx = entity.pos.x - nearestAntPos.x;
+        const dy = entity.pos.y - nearestAntPos.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const fleeDist = 4 * CELL_SIZE;
+        const fleeX = entity.pos.x + (dx / len) * fleeDist;
+        const fleeY = entity.pos.y + (dy / len) * fleeDist;
+        // Clamp to map bounds
+        const bx0 = this.map.boundsX * CELL_SIZE;
+        const by0 = this.map.boundsY * CELL_SIZE;
+        const bx1 = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
+        const by1 = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
+        entity.moveTarget = {
+          x: Math.max(bx0 + CELL_SIZE, Math.min(bx1 - CELL_SIZE, fleeX)),
+          y: Math.max(by0 + CELL_SIZE, Math.min(by1 - CELL_SIZE, fleeY)),
+        };
+        entity.mission = Mission.MOVE;
+        entity.path = [];
+        entity.pathIndex = 0;
+      }
+      return; // civilians don't auto-attack
     }
 
     // Hold fire stance: never auto-engage
@@ -2862,7 +2928,7 @@ export class Game {
         const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
-        this.audio.play(this.audio.weaponSound(entity.weapon.name));
+        this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
         // Muzzle + impact effects
         this.effects.push({
           type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
@@ -2922,8 +2988,8 @@ export class Game {
           );
         }
 
-        // Weapon sound + effects
-        this.audio.play(this.audio.weaponSound(entity.weapon.name));
+        // Weapon sound + effects (spatially positioned)
+        this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
         const sx = entity.pos.x;
         const sy = entity.pos.y;
         this.effects.push({
@@ -2955,11 +3021,16 @@ export class Game {
   /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
   /** Turreted structure types (GUN/SAM) — turret rotates to face target */
   private static readonly TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
+  private static readonly DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'PBOX']);
 
   private updateStructureCombat(): void {
     const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     for (const s of this.structures) {
       if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
+      // Severe brownout: defensive structures cannot fire at all
+      if (this.powerConsumed > this.powerProduced * 1.5 && this.powerProduced > 0 && Game.DEFENSE_TYPES.has(s.type)) {
+        continue;
+      }
       if (s.ammo === 0) continue; // out of ammo (e.g. SCA04EA TSLA Ammo=3)
 
       // Turret rotation tick (every frame, independent of cooldown)
@@ -3032,7 +3103,7 @@ export class Game {
             frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
             startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
           });
-          this.audio.play('teslazap');
+          this.playSoundAt('teslazap', sx, sy);
         } else {
           // Projectile from structure to target
           this.effects.push({
@@ -3044,7 +3115,7 @@ export class Game {
             type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
             frame: 0, maxFrames: 10, size: 6, sprite: 'veh-hit1', spriteStart: 0,
           });
-          this.audio.play('machinegun');
+          this.playSoundAt('machinegun', sx, sy);
         }
 
         // Splash damage
@@ -3066,11 +3137,11 @@ export class Game {
           this.map.addDecal(tc.cx, tc.cy, bestTarget.stats.isInfantry ? 4 : 8, 0.5);
           if (isPlayerStruct) this.killCount++;
           if (bestTarget.isAnt) {
-            this.audio.play('die_ant');
+            this.playSoundAt('die_ant', bestTarget.pos.x, bestTarget.pos.y);
           } else if (bestTarget.stats.isInfantry) {
-            this.audio.play('die_infantry');
+            this.playSoundAt('die_infantry', bestTarget.pos.x, bestTarget.pos.y);
           } else {
-            this.audio.play('die_vehicle');
+            this.playSoundAt('die_vehicle', bestTarget.pos.x, bestTarget.pos.y);
           }
         }
       }
@@ -3247,9 +3318,9 @@ export class Game {
           sprite: 'fball1', spriteStart: 0,
         });
         this.renderer.screenShake = Math.max(this.renderer.screenShake, 4);
-        if (other.isAnt) this.audio.play('die_ant');
-        else if (other.stats.isInfantry) this.audio.play('die_infantry');
-        else this.audio.play('die_vehicle');
+        if (other.isAnt) this.playSoundAt('die_ant', other.pos.x, other.pos.y);
+        else if (other.stats.isInfantry) this.playSoundAt('die_infantry', other.pos.x, other.pos.y);
+        else this.playSoundAt('die_vehicle', other.pos.x, other.pos.y);
         // Track kills/losses from splash
         if (!isFriendly && attackerIsPlayer) this.killCount++;
         else if (!isFriendly && other.isPlayerUnit) {
@@ -3415,6 +3486,9 @@ export class Game {
       }
 
       if (!shouldFire) continue;
+      if (this.debugTriggers) {
+        console.log(`[TRIGGER] ${trigger.name} fired | event1=${trigger.event1.type} action1=${trigger.action1.action}${trigger.action2 ? ' action2=' + trigger.action2.action : ''}`);
+      }
       trigger.fired = true;
 
       // Persistent triggers: reset timer so TIME events must elapse again
@@ -3848,6 +3922,7 @@ export class Game {
       }
     }
     this.pendingPlacement = null;
+    this.audio.play('building_placed');
     this.audio.play('eva_building');
     // Check if placing this structure unlocks new production items
     const oldItems = this.cachedAvailableItems ?? [];
@@ -3951,7 +4026,7 @@ export class Game {
 
   /** Apply crate bonus to the unit that picked it up */
   private pickupCrate(crate: Crate, unit: Entity): void {
-    this.audio.play('crate_pickup');
+    this.playSoundAt('crate_pickup', crate.x, crate.y);
     this.effects.push({
       type: 'explosion', x: crate.x, y: crate.y,
       frame: 0, maxFrames: 10, size: 8, sprite: 'piffpiff', spriteStart: 0,
@@ -4096,6 +4171,9 @@ export class Game {
       this.renderer.placementItem = null;
       this.renderer.placementCells = null;
     }
+    this.renderer.cursorType = this.cursorType;
+    this.renderer.cursorX = this.input.state.mouseX;
+    this.renderer.cursorY = this.input.state.mouseY;
     this.renderer.render(
       this.camera,
       this.map,

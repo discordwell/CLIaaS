@@ -163,6 +163,11 @@ export class Entity {
     return this.type === UnitType.V_TRAN;
   }
 
+  /** Naval units can traverse water tiles */
+  get isNavalUnit(): boolean {
+    return this.type === UnitType.V_LST;
+  }
+
   /** Flight altitude offset (pixels) — visual only, for rendering above ground */
   flightAltitude = 0;
   static readonly FLIGHT_ALTITUDE = 20; // pixels above ground when airborne

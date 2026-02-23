@@ -250,7 +250,8 @@ export type SoundName =
   | 'eva_construction_complete' | 'eva_unit_ready' | 'eva_low_power'
   | 'eva_new_options' | 'eva_building' | 'repair' | 'sell'
   | 'victory_fanfare' | 'defeat_sting' | 'crate_pickup' | 'eva_mission_accomplished'
-  | 'eva_reinforcements' | 'eva_mission_warning' | 'tesla_charge';
+  | 'eva_reinforcements' | 'eva_mission_warning' | 'tesla_charge'
+  | 'sniper' | 'building_placed' | 'mammoth_cannon';
 
 /** Base path for extracted audio WAV files */
 const AUDIO_BASE_URL = '/ra/audio';
@@ -263,7 +264,7 @@ const AUDIO_BASE_URL = '/ra/audio';
 const SAMPLE_SOUND_NAMES: SoundName[] = [
   // Weapons
   'rifle', 'machinegun', 'cannon', 'artillery', 'teslazap',
-  'grenade', 'bazooka', 'mandible', 'fireball', 'flamethrower', 'dogjaw',
+  'grenade', 'bazooka', 'mandible', 'fireball', 'flamethrower', 'dogjaw', 'sniper',
   // Explosions / deaths
   'explode_sm', 'explode_lg', 'building_explode', 'die_ant',
   // Unit acknowledgments
@@ -271,7 +272,9 @@ const SAMPLE_SOUND_NAMES: SoundName[] = [
   'move_ack_infantry', 'move_ack_vehicle', 'move_ack_dog',
   'select_infantry', 'select_vehicle', 'select_dog',
   // UI / building
-  'heal', 'sell', 'repair', 'crate_pickup', 'tesla_charge',
+  'heal', 'sell', 'repair', 'crate_pickup', 'tesla_charge', 'building_placed',
+  // Heavy weapons
+  'mammoth_cannon',
   // EVA voice lines
   'eva_acknowledged', 'eva_unit_lost', 'eva_base_attack',
   'eva_construction_complete', 'eva_unit_ready', 'eva_low_power',
@@ -429,6 +432,38 @@ export class AudioManager {
     this.playSynth(name, t, out);
   }
 
+  /** Play a sound at a world position with stereo panning based on camera center */
+  playAt(name: SoundName, worldX: number, worldY: number, cameraX: number, cameraW: number): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (this.ctx.state === 'suspended') return;
+
+    // Rate-limit same sounds
+    const now = performance.now();
+    const last = this.lastPlayed.get(name) ?? 0;
+    if (now - last < this.MIN_INTERVAL) return;
+    this.lastPlayed.set(name, now);
+
+    // Calculate stereo pan based on world position relative to camera center
+    const cameraCenterX = cameraX + cameraW / 2;
+    const relativeX = (worldX - cameraCenterX) / (cameraW / 2); // -1 to +1
+    const pan = Math.max(-1, Math.min(1, relativeX * 0.6)); // 60% strength
+
+    // Create panner node
+    const panner = this.ctx.createStereoPanner();
+    panner.pan.value = pan;
+    panner.connect(this.masterGain);
+
+    // Auto-disconnect panner after sound finishes (prevent audio graph leak)
+    setTimeout(() => { try { panner.disconnect(); } catch { /* already disconnected */ } }, 3000);
+
+    // Try playing from loaded sample first
+    if (this.playSample(name, panner)) return;
+
+    // Fall back to synthesized audio
+    const t = this.ctx.currentTime;
+    this.playSynth(name, t, panner);
+  }
+
   /** Route to the appropriate synthesis function (used as fallback) */
   private playSynth(name: SoundName, t: number, out: AudioNode): void {
     switch (name) {
@@ -477,6 +512,9 @@ export class AudioManager {
       case 'eva_reinforcements': this.synthEvaReinforcements(t, out); break;
       case 'eva_mission_warning': this.synthEvaMissionWarning(t, out); break;
       case 'tesla_charge': this.synthTeslaCharge(t, out); break;
+      case 'sniper': this.synthSniper(t, out); break;
+      case 'building_placed': this.synthBuildingPlaced(t, out); break;
+      case 'mammoth_cannon': this.synthMammothCannon(t, out); break;
     }
   }
 
@@ -489,13 +527,14 @@ export class AudioManager {
       case 'Flamethrower': return 'flamethrower';
       case 'Rifle': return 'rifle';
       case 'MachineGun': return 'machinegun';
-      case 'TankGun': case 'MammothTusk': return 'cannon';
+      case 'TankGun': return 'cannon';
+      case 'MammothTusk': return 'mammoth_cannon';
       case 'ArtilleryShell': return 'artillery';
       case 'Grenade': return 'grenade';
       case 'Bazooka': return 'bazooka';
       case 'DogJaw': return 'dogjaw';
       case 'Napalm': return 'flamethrower';
-      case 'Sniper': return 'rifle';
+      case 'Sniper': return 'sniper';
       default: return 'rifle';
     }
   }
@@ -753,6 +792,25 @@ export class AudioManager {
     o.frequency.exponentialRampToValueAtTime(150, t + 0.06);
     o.connect(og).connect(out);
     o.start(t); o.stop(t + 0.06);
+  }
+
+  private synthSniper(t: number, out: AudioNode): void {
+    // Sharp crack with echo — high-pitched snap
+    const n = this.noise(0.03);
+    const ng = this.gain(0.5);
+    const nf = this.filter('highpass', 4000);
+    ng.gain.setValueAtTime(0.5, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+    n.connect(nf).connect(ng).connect(out);
+    n.start(t); n.stop(t + 0.03);
+    // Echo
+    const n2 = this.noise(0.06);
+    const ng2 = this.gain(0.15);
+    const nf2 = this.filter('bandpass', 2000, 2);
+    ng2.gain.setValueAtTime(0.15, t + 0.08);
+    ng2.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    n2.connect(nf2).connect(ng2).connect(out);
+    n2.start(t + 0.08); n2.stop(t + 0.14);
   }
 
   // --- Explosion ---
@@ -1215,5 +1273,45 @@ export class AudioManager {
     ng.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
     n.connect(nf).connect(ng).connect(out);
     n.start(t); n.stop(t + 0.3);
+  }
+
+  private synthBuildingPlaced(t: number, out: AudioNode): void {
+    // Hammer thunk + rising confirmation tone
+    const n = this.noise(0.06);
+    const ng = this.gain(0.35);
+    const nf = this.filter('lowpass', 800);
+    ng.gain.setValueAtTime(0.35, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    n.connect(nf).connect(ng).connect(out);
+    n.start(t); n.stop(t + 0.06);
+    // Rising tone
+    const o = this.osc('sine', 400);
+    const og = this.gain(0.1);
+    og.gain.setValueAtTime(0.1, t + 0.05);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o.frequency.setValueAtTime(400, t + 0.05);
+    o.frequency.linearRampToValueAtTime(700, t + 0.15);
+    o.connect(og).connect(out);
+    o.start(t + 0.05); o.stop(t + 0.15);
+  }
+
+  private synthMammothCannon(t: number, out: AudioNode): void {
+    // Deep boom with sub-bass rumble
+    const o = this.osc('sine', 40);
+    const og = this.gain(0.6);
+    og.gain.setValueAtTime(0.6, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o.frequency.setValueAtTime(40, t);
+    o.frequency.exponentialRampToValueAtTime(15, t + 0.3);
+    o.connect(og).connect(out);
+    o.start(t); o.stop(t + 0.3);
+    // Impact noise
+    const n = this.noise(0.12);
+    const ng = this.gain(0.4);
+    const nf = this.filter('lowpass', 600);
+    ng.gain.setValueAtTime(0.4, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    n.connect(nf).connect(ng).connect(out);
+    n.start(t); n.stop(t + 0.12);
   }
 }

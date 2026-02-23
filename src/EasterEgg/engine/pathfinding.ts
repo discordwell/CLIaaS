@@ -37,12 +37,13 @@ export function findPath(
   map: GameMap,
   start: CellPos,
   goal: CellPos,
-  ignoreOccupancy = false
+  ignoreOccupancy = false,
+  naval = false,
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
 
   // Check if goal is reachable
-  if (!map.isTerrainPassable(goal.cx, goal.cy)) {
+  if (naval ? !map.isWaterPassable(goal.cx, goal.cy) : !map.isTerrainPassable(goal.cx, goal.cy)) {
     // Find nearest passable cell to goal
     return [];
   }
@@ -94,12 +95,15 @@ export function findPath(
       const nk = key(nx, ny);
 
       if (closed.has(nk)) continue;
-      if (!map.isTerrainPassable(nx, ny)) continue;
+      if (naval ? !map.isWaterPassable(nx, ny) : !map.isTerrainPassable(nx, ny)) continue;
 
       // Check diagonal passability (can't cut corners)
       if (dx !== 0 && dy !== 0) {
-        if (!map.isTerrainPassable(current.cx + dx, current.cy) ||
-            !map.isTerrainPassable(current.cx, current.cy + dy)) {
+        const passCheck = naval
+          ? (cx: number, cy: number) => map.isWaterPassable(cx, cy)
+          : (cx: number, cy: number) => map.isTerrainPassable(cx, cy);
+        if (!passCheck(current.cx + dx, current.cy) ||
+            !passCheck(current.cx, current.cy + dy)) {
           continue;
         }
       }
