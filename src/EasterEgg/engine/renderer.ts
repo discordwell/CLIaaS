@@ -899,8 +899,8 @@ export class Renderer {
           const d = (c.deathVariant === 1 && anim.die2) ? anim.die2 : anim.die1;
           frame = d.frame + d.count - 1;
         } else if (c.isAnt) {
-          // Ants: use first attack frame for facing (curled up pose)
-          frame = ANT_ANIM.attackBase + c.facing * ANT_ANIM.attackCount;
+          // Ants: use final death frame from ANT*.SHP death strip
+          frame = ANT_ANIM.deathBase + ANT_ANIM.deathCount - 1;
         } else {
           // Vehicles: use body frame for facing direction
           const facingIndex = c.facing * 4;

@@ -19,7 +19,8 @@
     "db:studio": "drizzle-kit studio",
     "export:routes": "bash scripts/export_routes.sh",
     "bundle:submission": "bash scripts/make_submission_zip.sh",
-    "extract-assets": "tsx scripts/extract-ra-assets.ts"
+    "extract-assets": "tsx scripts/extract-ra-assets.ts",
+    "extract-ant-originals": "bash scripts/extract-freeware-ant-originals.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

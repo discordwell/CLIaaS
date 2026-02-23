@@ -164,14 +164,16 @@ export const BODY_SHAPE: number[] = [
   16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
 ];
 
-// Ant animation frame ranges (104 total frames)
+// Ant animation frame ranges in original ANT*.SHP sheets (112 total frames)
 // Standing: 0-7 (8 directions × 1 frame)
 // Walking: 8-71 (8 directions × 8 walk frames)
 // Attacking: 72-103 (8 directions × 4 attack frames)
+// Dying: 104-111 (8-frame shared death sequence)
 export const ANT_ANIM = {
   standBase: 0,
   walkBase: 8, walkCount: 8,
   attackBase: 72, attackCount: 4,
+  deathBase: 104, deathCount: 8,
 };
 
 // === Unit stats from SCA01EA.INI ===

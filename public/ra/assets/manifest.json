@@ -693,30 +693,30 @@
     "sheetHeight": 48
   },
   "ant1": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 104,
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 112,
     "columns": 16,
     "rows": 7,
-    "sheetWidth": 384,
-    "sheetHeight": 168
+    "sheetWidth": 768,
+    "sheetHeight": 336
   },
   "ant2": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 104,
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 112,
     "columns": 16,
     "rows": 7,
-    "sheetWidth": 384,
-    "sheetHeight": 168
+    "sheetWidth": 768,
+    "sheetHeight": 336
   },
   "ant3": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 104,
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 112,
     "columns": 16,
     "rows": 7,
-    "sheetWidth": 384,
-    "sheetHeight": 168
+    "sheetWidth": 768,
+    "sheetHeight": 336
   }
 }

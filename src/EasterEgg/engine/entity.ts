@@ -199,7 +199,7 @@ export class Entity {
   get spriteFrame(): number {
     const dir = this.facing;
 
-    // --- Ant units: 104-frame layout (stand/walk/attack) ---
+    // --- Ant units: 112-frame layout (stand/walk/attack/death) ---
     if (this.isAnt) {
       switch (this.animState) {
         case AnimState.WALK:
@@ -207,8 +207,7 @@ export class Entity {
         case AnimState.ATTACK:
           return ANT_ANIM.attackBase + dir * ANT_ANIM.attackCount + (this.animFrame % ANT_ANIM.attackCount);
         case AnimState.DIE:
-          // Use last attack frame fading out
-          return ANT_ANIM.attackBase + dir * ANT_ANIM.attackCount;
+          return ANT_ANIM.deathBase + Math.min(this.animFrame, ANT_ANIM.deathCount - 1);
         default:
           return ANT_ANIM.standBase + dir;
       }

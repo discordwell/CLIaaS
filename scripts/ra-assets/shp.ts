@@ -16,13 +16,14 @@
  *
  * Frame flags:
  *   0x80 = standalone LCW compressed frame (keyframe)
- *   0x40 = XOR delta frame (LCW compressed delta, apply to reference)
- *   0x20 = uncompressed raw pixel data
+ *   0x40 = XOR base frame (xor-delta vs referenced keyframe by data offset)
+ *   0x20 = XOR chain frame (xor-delta vs previous decoded frame)
  *
- * Frame data is LCW-compressed indexed pixel data (palette indices).
+ * Frame data uses LCW for keyframes and Westwood XOR-Delta for deltas.
  */
 
 import { lcwDecompress } from './lcw.js';
+import { xorDeltaApply } from './xor.js';
 
 export interface ShpFrame {
   width: number;
@@ -74,8 +75,20 @@ export function parseShp(data: Buffer): ShpFile {
   const frameSize = width * height;
   const frames: ShpFrame[] = [];
 
-  // Build a map from file offset → decoded pixel buffer for XOR delta references
+  // Some SHPs use delta frames that are not contiguous in the index table.
+  // Use the next greater file offset globally (not just the next index entry).
+  const frameOffsets = [...new Set(entries
+    .map((e) => e.offset)
+    .filter((off) => off > 0 && off < data.length))]
+    .sort((a, b) => a - b);
+  const nextOffsetByOffset = new Map<number, number>();
+  for (let i = 0; i < frameOffsets.length; i++) {
+    nextOffsetByOffset.set(frameOffsets[i], frameOffsets[i + 1] ?? data.length);
+  }
+
+  // Build maps for delta references.
   const decodedByOffset = new Map<number, Uint8Array>();
+  const decodedByIndex: Uint8Array[] = [];
 
   for (let i = 0; i < frameCount; i++) {
     const pixels = new Uint8Array(frameSize);
@@ -87,9 +100,7 @@ export function parseShp(data: Buffer): ShpFile {
       continue;
     }
 
-    // Calculate frame data length from offset to next entry's offset
-    const nextOffset = entries[i + 1].offset;
-    const frameDataEnd = nextOffset > entry.offset ? nextOffset : data.length;
+    const frameDataEnd = nextOffsetByOffset.get(entry.offset) ?? data.length;
     const frameLen = frameDataEnd - entry.offset;
 
     if (entry.offset >= data.length || frameLen <= 0) {
@@ -105,18 +116,17 @@ export function parseShp(data: Buffer): ShpFile {
     );
 
     if (entry.flags & 0x80) {
-      // Standalone LCW compressed keyframe
+      // Standalone LCW-compressed keyframe.
       lcwDecompress(frameData, pixels, frameSize);
       decodedByOffset.set(entry.offset, new Uint8Array(pixels));
     } else if (entry.flags & 0x40) {
-      // XOR delta frame — decompress delta, then XOR with reference
-      // Find reference frame pixels by file offset
+      // XOR base: apply xor-delta against a referenced keyframe by data offset.
       const refPixels = decodedByOffset.get(entry.refOffset);
       if (refPixels) {
         pixels.set(refPixels);
       } else if (entry.refOffset > 0 && entry.refOffset < data.length) {
-        // Reference not yet decoded — decode it now
-        const refEnd = findNextOffset(entries, entry.refOffset);
+        // If missing, decode the referenced LCW keyframe directly by offset.
+        const refEnd = nextOffsetByOffset.get(entry.refOffset) ?? data.length;
         const refLen = refEnd - entry.refOffset;
         if (refLen > 0) {
           const refData = new Uint8Array(
@@ -129,17 +139,16 @@ export function parseShp(data: Buffer): ShpFile {
         }
       }
 
-      // Decompress the delta
-      const tempBuf = new Uint8Array(frameSize);
-      lcwDecompress(frameData, tempBuf, frameSize);
-
-      // XOR delta onto reference
-      for (let j = 0; j < frameSize; j++) {
-        pixels[j] ^= tempBuf[j];
-      }
+      xorDeltaApply(frameData, pixels, frameSize);
       decodedByOffset.set(entry.offset, new Uint8Array(pixels));
     } else if (entry.flags & 0x20) {
-      // Uncompressed raw pixel data
+      // XOR chain: apply xor-delta against previous decoded frame in chain.
+      const prev = i > 0 ? decodedByIndex[i - 1] : null;
+      if (prev) pixels.set(prev);
+      xorDeltaApply(frameData, pixels, frameSize);
+      decodedByOffset.set(entry.offset, new Uint8Array(pixels));
+    } else if (entry.flags === 0) {
+      // Rare fallback: treat as raw frame bytes.
       pixels.set(frameData.subarray(0, Math.min(frameSize, frameData.length)));
       decodedByOffset.set(entry.offset, new Uint8Array(pixels));
     } else {
@@ -148,19 +157,9 @@ export function parseShp(data: Buffer): ShpFile {
       decodedByOffset.set(entry.offset, new Uint8Array(pixels));
     }
 
+    decodedByIndex.push(new Uint8Array(pixels));
     frames.push({ width, height, pixels });
   }
 
   return { width, height, frameCount, frames };
-}
-
-/** Find the smallest offset in entries that is strictly greater than targetOffset */
-function findNextOffset(entries: FrameEntry[], targetOffset: number): number {
-  let best = Infinity;
-  for (const e of entries) {
-    if (e.offset > targetOffset && e.offset < best) {
-      best = e.offset;
-    }
-  }
-  return best === Infinity ? targetOffset + 4096 : best;
 }

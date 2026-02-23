@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-02-24T07:45Z — Session 26: Bug Fixes + RA Soundtrack Implementation
+- Resolved all 6 bugs from Session 25 audit: Bug 5 fixed (HUNT pathfinding stagger), Bugs 1/3/4 already fixed in uncommitted diff, Bugs 2/6 verified as non-bugs
+- Committed 9195b3d: bug audit fixes (pathfinding lag, AREA_GUARD cleanup, artillery vs structures)
+- Downloaded Red Alert soundtrack from Internet Archive (Frank Klepacki, 1996, CC BY-NC-ND 4.0)
+- 15 MP3 tracks, 122MB total, stored in public/ra/music/ (gitignored)
+- Created download script: scripts/download-ra-music.sh
+- Implemented MusicPlayer class in audio.ts: HTML5 Audio streaming, shuffled playlist, crossfade, probe-with-deferred-play
+- Integrated into game lifecycle: auto-start, pause/resume, stop on win/lose, N key skip
+- Track name HUD display: bottom-right, fades after 4s, AUDIO section in F1 help
+- Code reviewed and fixed: crossfade memory leak, probe race condition, volume/mute sync for fading track
+- Committed d9e1f85, pushed
+- **TODO**: Music files need to be on VPS for live site (run download-ra-music.sh on server)
+
 ## 2026-02-24T02:00Z — Session 25: Transport Fix + Bug Audit (INTERRUPTED — bugs queued)
 - Committed f506c8a: Fix transport passenger lifecycle (passengers vanished after 3s because alive=false + entity cleanup)
 - Ran 2 independent code reviews + 2 audits, cross-referenced findings
