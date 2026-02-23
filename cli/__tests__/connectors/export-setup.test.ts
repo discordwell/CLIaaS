@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, readFileSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { setupExport, appendJsonl, writeManifest } from '../../connectors/base/export-setup.js';
 
@@ -48,7 +48,7 @@ describe('appendJsonl', () => {
     const record2 = { id: 2, name: 'second' };
 
     // Initialize the file
-    require('fs').writeFileSync(filePath, '');
+    writeFileSync(filePath, '');
 
     appendJsonl(filePath, record1);
     appendJsonl(filePath, record2);

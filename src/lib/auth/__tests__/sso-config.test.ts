@@ -9,7 +9,7 @@ describe('sso-config', () => {
     process.env.CLIAAS_DATA_DIR = TEST_DIR;
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
 
-    const g = globalThis as any;
+    const g = globalThis as Record<string, unknown>;
     g.__cliaasSSO = undefined;
     g.__cliaasSSO_loaded = undefined;
   });

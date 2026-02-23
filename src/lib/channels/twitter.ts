@@ -61,7 +61,7 @@ export function handleCrcChallenge(crcToken: string): string {
 
 // ---- Parse Account Activity ----
 
-export function parseAccountActivity(body: any): TwitterDM[] {
+export function parseAccountActivity(body: Record<string, unknown> | null | undefined): TwitterDM[] {
   const dms: TwitterDM[] = [];
 
   if (

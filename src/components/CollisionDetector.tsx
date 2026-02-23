@@ -51,15 +51,17 @@ export default function CollisionDetector({
   }, [ticketId, currentUserId]);
 
   useEffect(() => {
-    updatePresence();
-    fetchViewers();
+    const tick = () => {
+      void updatePresence();
+      void fetchViewers();
+    };
+    // Defer initial fetch to avoid synchronous setState in effect
+    const initialTimer = setTimeout(tick, 0);
 
-    intervalRef.current = setInterval(() => {
-      updatePresence();
-      fetchViewers();
-    }, 10_000);
+    intervalRef.current = setInterval(tick, 10_000);
 
     return () => {
+      clearTimeout(initialTimer);
       if (intervalRef.current) clearInterval(intervalRef.current);
       // Signal leave
       if (currentUserId) {

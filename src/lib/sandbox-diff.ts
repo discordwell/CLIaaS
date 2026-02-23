@@ -78,7 +78,7 @@ export function diffSandbox(sandboxId: string): SandboxDiff {
 
   // Get the manifest to know the ID mappings
   const manifestPath = join(sandboxDir, '_manifest.json');
-  let reverseIdMap: Record<string, string> = {};
+  const reverseIdMap: Record<string, string> = {};
 
   if (existsSync(manifestPath)) {
     try {

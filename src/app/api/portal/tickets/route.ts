@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
         const { eq } = await import('drizzle-orm');
 
         // Find or create customer
-        let customers = await db
+        const customers = await db
           .select({ id: schema.customers.id })
           .from(schema.customers)
           .where(eq(schema.customers.email, email))

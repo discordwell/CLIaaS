@@ -75,7 +75,7 @@ function waitForStderr(child: ReturnType<typeof spawn>, pattern: string, timeout
 
 describe('MCP Server', () => {
   it(
-    'starts, initializes, and lists all 18 tools',
+    'starts, initializes, and lists all 25 tools',
     { timeout: 30000 },
     async () => {
       const child = spawn('npx', ['tsx', SERVER_PATH], {
@@ -127,10 +127,11 @@ describe('MCP Server', () => {
         expect(toolsResponse.result).toBeDefined();
 
         const tools = toolsResponse.result!.tools ?? [];
-        expect(tools.length).toBe(18);
+        expect(tools.length).toBe(25);
 
         const toolNames = tools.map((t: { name: string }) => t.name).sort();
         expect(toolNames).toEqual([
+          'ai_resolve',
           'config_set_provider',
           'config_show',
           'detect_duplicates',
@@ -141,9 +142,15 @@ describe('MCP Server', () => {
           'rag_ask',
           'rag_search',
           'rag_status',
+          'rule_create',
+          'rule_toggle',
           'sentiment_analyze',
           'sla_report',
           'summarize_queue',
+          'ticket_create',
+          'ticket_note',
+          'ticket_reply',
+          'ticket_update',
           'tickets_list',
           'tickets_search',
           'tickets_show',

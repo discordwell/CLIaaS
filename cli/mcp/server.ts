@@ -9,6 +9,7 @@ import { registerKBTools } from './tools/kb.js';
 import { registerRagTools } from './tools/rag.js';
 import { registerQueueTools } from './tools/queue.js';
 import { registerConfigTools } from './tools/config.js';
+import { registerActionTools } from './tools/actions.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -24,6 +25,7 @@ registerKBTools(server);
 registerRagTools(server);
 registerQueueTools(server);
 registerConfigTools(server);
+registerActionTools(server);
 
 // Register resources and prompts
 registerResources(server);

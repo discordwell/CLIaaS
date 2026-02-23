@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadTickets } from '@/lib/data';
+import { generateToken } from '@/lib/portal/magic-link';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,42 +26,38 @@ export async function POST(request: NextRequest) {
         const schema = await import('@/db/schema');
         const { eq } = await import('drizzle-orm');
 
-        const customers = await db
+        await db
           .select({ id: schema.customers.id, email: schema.customers.email })
           .from(schema.customers)
           .where(eq(schema.customers.email, normalizedEmail))
           .limit(1);
-
-        if (customers.length === 0) {
-          // Still allow access -- they might want to create a ticket
-        }
       } catch {
         // DB unavailable, fall through to JSONL
       }
     }
 
-    // For JSONL/demo mode, check if the email appears as a requester
+    // Generate a magic-link token
+    const token = generateToken(normalizedEmail);
+
+    // In production, send email with the verification link.
+    // For now, return the token and a link for dev/demo use.
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+    const verifyUrl = `${baseUrl}/api/portal/auth/verify?token=${token.token}`;
+
+    // Check if the email has tickets for the response
     const tickets = await loadTickets();
     const hasTickets = tickets.some(
       (t) => t.requester.toLowerCase() === normalizedEmail
     );
 
-    // Set the portal email cookie
-    const response = NextResponse.json({
+    return NextResponse.json({
       ok: true,
       email: normalizedEmail,
       hasTickets,
+      verifyUrl,
+      // Include token in dev mode for easy testing
+      ...(process.env.NODE_ENV !== 'production' && { token: token.token }),
     });
-
-    response.cookies.set('cliaas-portal-email', normalizedEmail, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60, // 30 days
-      path: '/',
-    });
-
-    return response;
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Authentication failed' },

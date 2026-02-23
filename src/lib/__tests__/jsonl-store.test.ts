@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readJsonlFile, writeJsonlFile } from '@/lib/jsonl-store';
-import { existsSync, mkdirSync, rmSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 const TEST_DIR = '/tmp/cliaas-test-jsonl-' + process.pid;
@@ -47,7 +47,7 @@ describe('jsonl-store', () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const filePath = join(TEST_DIR, 'malformed.jsonl');
     const content = '{"ok":true}\nnot-json\n{"also":"ok"}\n';
-    require('fs').writeFileSync(filePath, content, 'utf-8');
+    writeFileSync(filePath, content, 'utf-8');
     const loaded = readJsonlFile<{ ok?: boolean; also?: string }>(filePath.replace(TEST_DIR + '/', ''));
     expect(loaded).toHaveLength(2);
     expect(loaded[0]).toEqual({ ok: true });

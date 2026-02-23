@@ -23,6 +23,10 @@ export const providerEnum = pgEnum('provider', [
   'helpcrunch',
   'freshdesk',
   'groove',
+  'intercom',
+  'helpscout',
+  'zoho-desk',
+  'hubspot',
 ]);
 
 export const ticketStatusEnum = pgEnum('ticket_status', [

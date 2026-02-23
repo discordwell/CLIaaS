@@ -63,7 +63,7 @@ export function verifyWebhook(
 
 // ---- Parse Webhook Payload ----
 
-export function parseWebhookPayload(body: any): MetaMessage[] {
+export function parseWebhookPayload(body: Record<string, unknown> | null | undefined): MetaMessage[] {
   const messages: MetaMessage[] = [];
 
   if (!body?.entry || !Array.isArray(body.entry)) {
