@@ -899,7 +899,23 @@ export class Renderer {
           const d = (c.deathVariant === 1 && anim.die2) ? anim.die2 : anim.die1;
           frame = d.frame + d.count - 1;
         } else if (c.isAnt) {
-          // Ants: use final death frame from ANT*.SHP death strip
+          // Ants: use dedicated ANTDIE.SHP sprite if available, else fall back to in-sprite death
+          const antdieSheet = assets.getSheet('antdie');
+          if (antdieSheet) {
+            const dieFrame = antdieSheet.meta.frameCount - 1; // last frame = final death pose
+            assets.drawFrame(ctx, 'antdie', dieFrame, screen.x, screen.y, {
+              centerX: true,
+              centerY: true,
+            });
+            // Darken overlay
+            ctx.globalAlpha = c.alpha * 0.45;
+            ctx.fillStyle = '#000000';
+            const ahw = antdieSheet.meta.frameWidth / 2;
+            const ahh = antdieSheet.meta.frameHeight / 2;
+            ctx.fillRect(screen.x - ahw, screen.y - ahh, antdieSheet.meta.frameWidth, antdieSheet.meta.frameHeight);
+            ctx.globalAlpha = 1;
+            continue; // skip the generic sprite draw below
+          }
           frame = ANT_ANIM.deathBase + ANT_ANIM.deathCount - 1;
         } else {
           // Vehicles: use body frame for facing direction

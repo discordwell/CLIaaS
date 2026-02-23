@@ -699,6 +699,7 @@ const STRUCTURE_IMAGES: Record<string, string> = {
   GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
   ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
   FENC: 'fenc', BRIK: 'brik', SBAG: 'sbag', BARB: 'barb', WOOD: 'wood',
+  QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
 };
 
 // Building footprint sizes in cells (w, h) — defaults to 1x1

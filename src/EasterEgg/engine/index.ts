@@ -2823,6 +2823,29 @@ export class Game {
         return;
       }
 
+      // CHAN nest-gas: consume specialist, destroy LAR1/LAR2 nest (SCA03EA mechanic)
+      if (entity.type === UnitType.I_CHAN && (s.type === 'LAR1' || s.type === 'LAR2')) {
+        // Consume the CHAN specialist
+        entity.alive = false;
+        entity.mission = Mission.DIE;
+        entity.targetStructure = null;
+        // Destroy the nest
+        this.damageStructure(s, s.maxHp + 1);
+        this.killCount++;
+        this.audio.play('eva_acknowledged');
+        // Green gas cloud effect — multiple expanding puffs
+        for (let i = 0; i < 5; i++) {
+          const ox = (Math.random() - 0.5) * 20;
+          const oy = (Math.random() - 0.5) * 20;
+          this.effects.push({
+            type: 'explosion', x: structPos.x + ox, y: structPos.y + oy,
+            frame: 0, maxFrames: 14, size: 10 + i * 2,
+            sprite: 'smokey', spriteStart: 0,
+          });
+        }
+        return;
+      }
+
       entity.desiredFacing = directionTo(entity.pos, structPos);
       entity.tickRotation();
       if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
@@ -4121,4 +4144,28 @@ export class Game {
       );
     }
   }
+
+  // === Stubbed Systems (not needed for ant missions) ===
+  // These mechanics exist in the original RA engine but are unused in SCA01-04EA.
+  // Explicitly stubbed so the absence is deliberate, not accidental.
+
+  // SPY DISGUISE: Spy units can disguise as enemy units. Not used in ant missions
+  // since there are no enemy infantry to disguise as (ants don't have infantry).
+  // STUB: If called, logs a warning.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private spyDisguise(_spy: Entity, _target: Entity): void {
+    console.warn('[STUB] Spy disguise not implemented — not used in ant missions');
+  }
+
+  // FORMATION MOVEMENT: Units can move in formation (CHANGE_FORMATION team mission).
+  // Not used by any ant mission TeamTypes. Units move individually instead.
+  // STUB: If a CHANGE_FORMATION team mission is encountered, it's skipped.
+  // (Already handled: scenario.ts TMISSION index 2 is commented "unused")
+
+  // AFTERMATH VEHICLES: CTNK (Chrono Tank), DTRK (Demo Truck), CARR (Carrier),
+  // MSUB (Missile Sub), QTNK (MAD Tank), STNK (Stealth Tank) — none appear in
+  // ant mission INI files. Sprites not extracted.
+
+  // AFTERMATH SOUNDS: ANTBITE.AUD, ANTDIE.AUD, BUZZY1.AUD, TANK01.AUD —
+  // original RA .AUD files. Engine uses Web Audio synthesized SFX instead.
 }

@@ -30,10 +30,10 @@ const ASSETS: Array<{ shp: string; name: string; promote: boolean }> = [
   { shp: 'ANT1.SHP', name: 'ant1', promote: true },
   { shp: 'ANT2.SHP', name: 'ant2', promote: true },
   { shp: 'ANT3.SHP', name: 'ant3', promote: true },
-  { shp: 'LAR1.SHP', name: 'lar1', promote: false },
-  { shp: 'LAR2.SHP', name: 'lar2', promote: false },
-  { shp: 'QUEE.SHP', name: 'quee', promote: false },
-  { shp: 'ANTDIE.SHP', name: 'antdie', promote: false },
+  { shp: 'LAR1.SHP', name: 'lar1', promote: true },
+  { shp: 'LAR2.SHP', name: 'lar2', promote: true },
+  { shp: 'QUEE.SHP', name: 'quee', promote: true },
+  { shp: 'ANTDIE.SHP', name: 'antdie', promote: true },
 ];
 
 interface SpriteSheetMeta {
@@ -161,7 +161,31 @@ function main(): void {
   writeFileSync(ACTIVE_MANIFEST_PATH, JSON.stringify(activeManifest, null, 2));
 
   log(`Wrote originals to ${ORIGINAL_ASSETS_DIR}`);
-  log('Updated active ANT1/2/3 sheets and manifest in public/ra/assets');
+  log('Updated active sheets and manifest in public/ra/assets');
+
+  // === Extra Aftermath assets available but NOT extracted ===
+  // These files exist in the Aftermath EXPAND2.MIX but are not used by the
+  // ant mission engine. Listed here for reference if future missions need them.
+  //
+  // Sounds (AUD format):
+  //   ANTBITE.AUD  — ant melee attack sound
+  //   ANTDIE.AUD   — ant death scream
+  //   BUZZY1.AUD   — ambient ant hive buzzing
+  //   TANK01.AUD   — tank engine loop
+  //
+  // Vehicles (SHP sprites):
+  //   CARR.SHP     — Aircraft Carrier
+  //   CTNK.SHP     — Chrono Tank
+  //   DTRK.SHP     — Demolition Truck
+  //   MSUB.SHP     — Missile Submarine
+  //   QTNK.SHP     — MAD Tank
+  //   STNK.SHP     — Stealth Tank (Phase Transport)
+  //
+  // Stavros voice lines (AUD format):
+  //   STAVCMDR.AUD — "Commander..." (mission briefing)
+  //   STAVCRSE.AUD — "Curse them!" (unit lost)
+  //   STAVMOV.AUD  — "Move out!" (unit ordered)
+  //   STAVYES.AUD  — "Yes!" (acknowledged)
 }
 
 try {

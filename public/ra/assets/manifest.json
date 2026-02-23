@@ -718,5 +718,41 @@
     "rows": 7,
     "sheetWidth": 768,
     "sheetHeight": 336
+  },
+  "lar1": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 3,
+    "columns": 3,
+    "rows": 1,
+    "sheetWidth": 72,
+    "sheetHeight": 24
+  },
+  "lar2": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 3,
+    "columns": 3,
+    "rows": 1,
+    "sheetWidth": 72,
+    "sheetHeight": 24
+  },
+  "quee": {
+    "frameWidth": 48,
+    "frameHeight": 24,
+    "frameCount": 20,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 48
+  },
+  "antdie": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 8,
+    "columns": 8,
+    "rows": 1,
+    "sheetWidth": 384,
+    "sheetHeight": 48
   }
 }
