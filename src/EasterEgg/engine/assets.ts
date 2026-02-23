@@ -1,6 +1,7 @@
 /**
  * Asset loader — loads pre-extracted sprite sheets and metadata at runtime.
  * Sprite sheets are PNGs in /ra/assets/ with JSON manifest.
+ * Also loads the TEMPERATE tileset atlas for terrain rendering.
  */
 
 export interface SpriteSheetMeta {
@@ -22,6 +23,22 @@ export interface AssetManifest {
   [name: string]: SpriteSheetMeta;
 }
 
+/** Tileset lookup entry: atlas pixel position for a (templateType, icon) pair */
+export interface TilesetEntry {
+  ax: number; // x pixel offset in atlas
+  ay: number; // y pixel offset in atlas
+}
+
+/** Tileset metadata loaded from tileset.json */
+export interface TilesetMeta {
+  tileW: number;
+  tileH: number;
+  atlasW: number;
+  atlasH: number;
+  tileCount: number;
+  tiles: Record<string, TilesetEntry>; // key is "type,icon"
+}
+
 const BASE_URL = '/ra/assets';
 
 /** Load an image and return a promise that resolves when loaded */
@@ -39,6 +56,10 @@ export class AssetManager {
   private manifest: AssetManifest | null = null;
   private palette: number[][] | null = null;
 
+  /** TEMPERATE tileset atlas image and lookup data */
+  private tilesetImage: HTMLImageElement | null = null;
+  private tilesetMeta: TilesetMeta | null = null;
+
   /** Load manifest and all sprite sheets. Calls onProgress(loaded, total) during loading. */
   async loadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
     // Load manifest
@@ -53,6 +74,20 @@ export class AssetManager {
       this.palette = await palRes.json();
     } catch {
       // Palette is optional
+    }
+
+    // Load tileset atlas (non-blocking — falls back to procedural if missing)
+    try {
+      const [tilesetMetaRes, tilesetImg] = await Promise.all([
+        fetch(`${BASE_URL}/tileset.json`).then(r => r.ok ? r.json() : null),
+        loadImage(`${BASE_URL}/tileset.png`).catch(() => null),
+      ]);
+      if (tilesetMetaRes && tilesetImg) {
+        this.tilesetMeta = tilesetMetaRes as TilesetMeta;
+        this.tilesetImage = tilesetImg;
+      }
+    } catch {
+      // Tileset is optional — renderer falls back to procedural colors
     }
 
     // Load all sprite sheets in parallel
@@ -134,5 +169,20 @@ export class AssetManager {
   /** Check if a sprite sheet exists */
   hasSheet(name: string): boolean {
     return this.sheets.has(name);
+  }
+
+  /** Get tileset atlas image (null if not loaded) */
+  getTilesetImage(): HTMLImageElement | null {
+    return this.tilesetImage;
+  }
+
+  /** Get tileset metadata (null if not loaded) */
+  getTilesetMeta(): TilesetMeta | null {
+    return this.tilesetMeta;
+  }
+
+  /** Check if tileset is available */
+  hasTileset(): boolean {
+    return this.tilesetImage !== null && this.tilesetMeta !== null;
   }
 }

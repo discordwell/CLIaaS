@@ -6,7 +6,7 @@
 
 import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem } from './types';
 import { type Camera } from './camera';
-import { type AssetManager } from './assets';
+import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
@@ -110,6 +110,10 @@ export class Renderer {
   placementCx = 0;
   placementCy = 0;
   private _selectedIds: Set<number> = new Set();
+  // Tileset rendering cache
+  private tilesetImage: HTMLImageElement | null = null;
+  private tilesetMeta: TilesetMeta | null = null;
+  private tilesetReady = false;
   placementValid = false;
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
 
@@ -148,6 +152,13 @@ export class Renderer {
 
     // Cache palette reference from assets
     if (!this.pal) this.pal = assets.getPalette();
+
+    // Cache tileset atlas reference from assets (once)
+    if (!this.tilesetReady && assets.hasTileset()) {
+      this.tilesetImage = assets.getTilesetImage();
+      this.tilesetMeta = assets.getTilesetMeta();
+      this.tilesetReady = true;
+    }
 
     // Apply screen shake
     let shaking = false;
@@ -243,12 +254,35 @@ export class Renderer {
     }
   }
 
+  /** Try to draw a tile from the tileset atlas. Returns true if drawn. */
+  private drawTileFromAtlas(
+    ctx: CanvasRenderingContext2D,
+    tmpl: number,
+    icon: number,
+    sx: number,
+    sy: number,
+  ): boolean {
+    if (!this.tilesetImage || !this.tilesetMeta) return false;
+    const key = `${tmpl},${icon}`;
+    const entry = this.tilesetMeta.tiles[key];
+    if (!entry) return false;
+    ctx.drawImage(
+      this.tilesetImage,
+      entry.ax, entry.ay, this.tilesetMeta.tileW, this.tilesetMeta.tileH,
+      sx, sy, CELL_SIZE, CELL_SIZE,
+    );
+    return true;
+  }
+
   private renderTerrain(camera: Camera, map: GameMap, tick: number): void {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
     const endCX = Math.ceil((camera.x + camera.viewWidth) / CELL_SIZE);
     const endCY = Math.ceil((camera.y + camera.viewHeight) / CELL_SIZE);
+
+    // Can we use the real tileset? Only for TEMPERATE theatre.
+    const useTileset = this.tilesetReady && this.theatre === 'TEMPERATE';
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
@@ -261,6 +295,21 @@ export class Renderer {
         const tmpl = map.templateType[idx] || 0;
         const icon = map.templateIcon[idx] || 0;
 
+        // Try real tileset tile first (skip for INTERIOR theatre)
+        if (useTileset && tmpl > 0 && tmpl !== 0xFF) {
+          if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
+            continue; // Tile drawn from atlas, skip procedural
+          }
+        }
+
+        // Also handle clear tiles (type 0 or 0xFF) from tileset — use clear1 (type 255, icon 0)
+        if (useTileset && (tmpl === 0 || tmpl === 0xFF) && terrain === Terrain.CLEAR) {
+          if (this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
+            continue;
+          }
+        }
+
+        // Fallback: procedural rendering
         switch (terrain) {
           case Terrain.CLEAR: {
             if (this.theatre === 'INTERIOR') {
