@@ -12,6 +12,7 @@ import {
   primaryKey,
   uniqueIndex,
   index,
+  inet,
 } from 'drizzle-orm/pg-core';
 
 export const providerEnum = pgEnum('provider', [
@@ -69,6 +70,11 @@ export const messageAuthorEnum = pgEnum('message_author_type', [
 export const messageVisibilityEnum = pgEnum('message_visibility', [
   'public',
   'internal',
+]);
+
+export const ssoProtocolEnum = pgEnum('sso_protocol', [
+  'saml',
+  'oidc',
 ]);
 
 export const integrationStatusEnum = pgEnum('integration_status', [
@@ -136,6 +142,7 @@ export const users = pgTable(
   'users',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').references(() => tenants.id),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     email: varchar('email', { length: 320 }),
     passwordHash: text('password_hash'),
@@ -150,6 +157,7 @@ export const users = pgTable(
       table.workspaceId,
       table.email,
     ),
+    usersTenantIdx: index('users_tenant_idx').on(table.tenantId),
   }),
 );
 
@@ -252,6 +260,7 @@ export const tickets = pgTable(
   'tickets',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').references(() => tenants.id),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     requesterId: uuid('requester_id').references(() => customers.id),
     assigneeId: uuid('assignee_id').references(() => users.id),
@@ -260,9 +269,12 @@ export const tickets = pgTable(
     ticketFormId: uuid('ticket_form_id').references(() => ticketForms.id),
     inboxId: uuid('inbox_id').references(() => inboxes.id),
     subject: text('subject').notNull(),
+    description: text('description'),
+    customerEmail: varchar('customer_email', { length: 320 }),
     status: ticketStatusEnum('status').notNull().default('open'),
     priority: ticketPriorityEnum('priority').notNull().default('normal'),
     source: providerEnum('source').default('zendesk'),
+    tags: text('tags').array().default([]),
     customFields: jsonb('custom_fields'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -272,6 +284,11 @@ export const tickets = pgTable(
     ticketsWorkspaceStatusIdx: index('tickets_workspace_status_idx').on(
       table.workspaceId,
       table.status,
+    ),
+    ticketsTenantIdx: index('tickets_tenant_idx').on(table.tenantId),
+    ticketsCustomerEmailIdx: index('tickets_customer_email_idx').on(
+      table.workspaceId,
+      table.customerEmail,
     ),
   }),
 );
@@ -388,10 +405,14 @@ export const slaPolicies = pgTable('sla_policies', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
   name: text('name').notNull(),
+  priority: ticketPriorityEnum('priority'),
+  responseTime: integer('response_time'),
+  resolutionTime: integer('resolution_time'),
   enabled: boolean('enabled').notNull().default(true),
   targets: jsonb('targets'),
   schedules: jsonb('schedules'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const slaEvents = pgTable('sla_events', {
@@ -576,6 +597,101 @@ export const auditEvents = pgTable(
     auditEventsWorkspaceIdx: index('audit_events_workspace_idx').on(
       table.workspaceId,
       table.createdAt,
+    ),
+  }),
+);
+
+// ---- SSO Providers ----
+
+export const ssoProviders = pgTable(
+  'sso_providers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    protocol: ssoProtocolEnum('protocol').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    // SAML fields
+    entityId: text('entity_id'),
+    ssoUrl: text('sso_url'),
+    certificate: text('certificate'),
+    // OIDC fields
+    clientId: text('client_id'),
+    clientSecret: text('client_secret'),
+    issuer: text('issuer'),
+    authorizationUrl: text('authorization_url'),
+    tokenUrl: text('token_url'),
+    userInfoUrl: text('user_info_url'),
+    // Common
+    domainHint: text('domain_hint'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ssoProvidersDomainIdx: index('sso_providers_domain_idx').on(
+      table.workspaceId,
+      table.domainHint,
+    ),
+    ssoProvidersWorkspaceIdx: index('sso_providers_workspace_idx').on(
+      table.workspaceId,
+    ),
+  }),
+);
+
+// ---- Audit Entries (user-facing audit log) ----
+
+export const auditEntries = pgTable(
+  'audit_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
+    userId: text('user_id').notNull(),
+    userName: text('user_name').notNull(),
+    action: text('action').notNull(),
+    resource: text('resource').notNull(),
+    resourceId: text('resource_id').notNull(),
+    details: jsonb('details'),
+    ipAddress: inet('ip_address'),
+  },
+  table => ({
+    auditEntriesTimestampIdx: index('audit_entries_timestamp_idx').on(
+      table.timestamp,
+    ),
+    auditEntriesUserIdx: index('audit_entries_user_idx').on(
+      table.userId,
+    ),
+    auditEntriesActionIdx: index('audit_entries_action_idx').on(
+      table.action,
+    ),
+    auditEntriesResourceIdx: index('audit_entries_resource_idx').on(
+      table.resource,
+      table.resourceId,
+    ),
+  }),
+);
+
+// ---- Automation Rules ----
+
+export const automationRules = pgTable(
+  'automation_rules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    conditions: jsonb('conditions'),
+    actions: jsonb('actions'),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    automationRulesWorkspaceIdx: index('automation_rules_workspace_idx').on(
+      table.workspaceId,
+    ),
+    automationRulesEnabledIdx: index('automation_rules_enabled_idx').on(
+      table.workspaceId,
+      table.enabled,
     ),
   }),
 );

@@ -15,6 +15,13 @@
       "when": 1771768008950,
       "tag": "0001_lucky_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771821016326,
+      "tag": "0002_glorious_smiling_tiger",
+      "breakpoints": true
     }
   ]
 }

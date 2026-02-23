@@ -5,11 +5,17 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/__tests__/**/*.test.ts'],
+    include: ['src/**/__tests__/**/*.test.ts', 'src/**/__tests__/**/*.test.tsx'],
+    environmentMatchGlobs: [
+      ['src/components/__tests__/**', 'jsdom'],
+      ['src/app/__tests__/**', 'jsdom'],
+    ],
+    setupFiles: ['./src/test-setup.ts'],
   },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@cli': path.resolve(__dirname, './cli'),
     },
   },
 });

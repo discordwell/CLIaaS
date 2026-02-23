@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VPS_HOST="${VPS_HOST:-cliaas.com}"
-VPS_USER="${VPS_USER:-root}"
+VPS_USER="${VPS_USER:-ubuntu}"
 VPS_PORT="${VPS_PORT:-22}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/cliaas}"
 REMOTE_APP_DIR="${REMOTE_DIR}/current"
@@ -66,11 +66,14 @@ SUDO_CMD="$4"
 APP_USER="$5"
 APP_GROUP="$6"
 
+DATA_DIR="/home/${APP_USER}/cliaas-data"
+
 if [[ -n "$SUDO_CMD" ]]; then
-  $SUDO_CMD mkdir -p "$APP_DIR" "$SHARED_DIR"
+  $SUDO_CMD mkdir -p "$APP_DIR" "$SHARED_DIR" "$DATA_DIR"
   $SUDO_CMD chown -R "${APP_USER}:${APP_GROUP}" "$REMOTE_DIR"
+  $SUDO_CMD chown -R "${APP_USER}:${APP_GROUP}" "$DATA_DIR"
 else
-  mkdir -p "$APP_DIR" "$SHARED_DIR"
+  mkdir -p "$APP_DIR" "$SHARED_DIR" "$DATA_DIR"
 fi
 CMDS
 
