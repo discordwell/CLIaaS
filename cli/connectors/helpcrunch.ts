@@ -1,10 +1,9 @@
-import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
-import { join } from 'path';
-import chalk from 'chalk';
-import ora from 'ora';
 import type {
   Ticket, Message, Customer, Organization, ExportManifest, TicketStatus,
 } from '../schema/types.js';
+import {
+  createClient, paginateOffset, setupExport, appendJsonl, writeManifest, exportSpinner,
+} from './base/index.js';
 
 export interface HelpcrunchAuth {
   apiKey: string;
@@ -52,47 +51,25 @@ interface HCAgent {
   role: string;
 }
 
-// ---- Fetch wrapper ----
+// ---- Client ----
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function createHelpcrunchClient(auth: HelpcrunchAuth) {
+  return createClient({
+    baseUrl: 'https://api.helpcrunch.com/v1',
+    authHeaders: () => ({
+      Authorization: `Bearer ${auth.apiKey}`,
+    }),
+    sourceName: 'HelpCrunch',
+    defaultRetryAfterSeconds: 5,
+  });
 }
 
+/** @deprecated Use createHelpcrunchClient() + client.request() instead. Kept for backward compatibility. */
 export async function helpcrunchFetch<T>(auth: HelpcrunchAuth, path: string, options?: {
   method?: string;
   body?: unknown;
 }): Promise<T> {
-  const url = path.startsWith('http') ? path : `https://api.helpcrunch.com/v1${path}`;
-
-  let retries = 0;
-  const maxRetries = 5;
-
-  while (true) {
-    const res = await fetch(url, {
-      method: options?.method ?? 'GET',
-      headers: {
-        'Authorization': `Bearer ${auth.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
-    });
-
-    if (res.status === 429) {
-      const rawRetryAfter = parseInt(res.headers.get('Retry-After') ?? '5', 10);
-      const retryAfter = isNaN(rawRetryAfter) ? 5 : rawRetryAfter;
-      if (retries >= maxRetries) throw new Error('Rate limit exceeded after max retries');
-      retries++;
-      await sleep(retryAfter * 1000);
-      continue;
-    }
-
-    if (!res.ok) {
-      const errorBody = await res.text().catch(() => '');
-      throw new Error(`HelpCrunch API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
-    }
-
-    return res.json() as Promise<T>;
-  }
+  return createHelpcrunchClient(auth).request<T>(path, options);
 }
 
 // ---- Mapping helpers ----
@@ -117,138 +94,101 @@ function epochToISO(epoch: string | null): string {
   return new Date(num * 1000).toISOString();
 }
 
-function appendJsonl(filePath: string, record: unknown): void {
-  appendFileSync(filePath, JSON.stringify(record) + '\n');
-}
-
 // ---- Export ----
 
 export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Promise<ExportManifest> {
-  mkdirSync(outDir, { recursive: true });
-
-  const ticketsFile = join(outDir, 'tickets.jsonl');
-  const messagesFile = join(outDir, 'messages.jsonl');
-  const customersFile = join(outDir, 'customers.jsonl');
-  const orgsFile = join(outDir, 'organizations.jsonl');
-  const kbFile = join(outDir, 'kb_articles.jsonl');
-  const rulesFile = join(outDir, 'rules.jsonl');
-
-  // Full export — clear existing files
-  for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
-    writeFileSync(f, '');
-  }
-
+  const client = createHelpcrunchClient(auth);
+  const files = setupExport(outDir);
   const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
 
   // Export chats (= tickets)
-  const chatSpinner = ora('Exporting chats...').start();
-  let chatOffset = 0;
-  const chatLimit = 100;
-  let hasMoreChats = true;
+  const chatSpinner = exportSpinner('Exporting chats...');
+  await paginateOffset<HCChat>({
+    fetch: client.request.bind(client),
+    path: '/chats',
+    limit: 100,
+    dataKey: 'data',
+    onPage: async (chats) => {
+      for (const chat of chats) {
+        const ticket: Ticket = {
+          id: `hc-${chat.id}`,
+          externalId: String(chat.id),
+          source: 'helpcrunch',
+          subject: chat.lastMessageText?.slice(0, 100) ?? `Chat #${chat.id}`,
+          status: mapChatStatus(chat.status),
+          priority: 'normal', // HelpCrunch chats don't have priority
+          assignee: chat.assignee ? String(chat.assignee.id) : undefined,
+          requester: chat.customer ? String(chat.customer.id) : 'unknown',
+          tags: chat.department ? [chat.department.name ?? `dept-${chat.department.id}`] : [],
+          createdAt: epochToISO(chat.createdAt),
+          updatedAt: epochToISO(chat.lastMessageAt ?? chat.createdAt),
+        };
+        appendJsonl(files.tickets, ticket);
+        counts.tickets++;
 
-  while (hasMoreChats) {
-    const data = await helpcrunchFetch<{ data: HCChat[]; meta: { total: number } }>(
-      auth, `/chats?offset=${chatOffset}&limit=${chatLimit}`,
-    );
-
-    for (const chat of data.data) {
-      const ticket: Ticket = {
-        id: `hc-${chat.id}`,
-        externalId: String(chat.id),
-        source: 'helpcrunch',
-        subject: chat.lastMessageText?.slice(0, 100) ?? `Chat #${chat.id}`,
-        status: mapChatStatus(chat.status),
-        priority: 'normal', // HelpCrunch chats don't have priority
-        assignee: chat.assignee ? String(chat.assignee.id) : undefined,
-        requester: chat.customer ? String(chat.customer.id) : 'unknown',
-        tags: chat.department ? [chat.department.name ?? `dept-${chat.department.id}`] : [],
-        createdAt: epochToISO(chat.createdAt),
-        updatedAt: epochToISO(chat.lastMessageAt ?? chat.createdAt),
-      };
-      appendJsonl(ticketsFile, ticket);
-      counts.tickets++;
-
-      // Hydrate messages for each chat
-      try {
-        let msgOffset = 0;
-        let hasMoreMsgs = true;
-        while (hasMoreMsgs) {
-          const msgData = await helpcrunchFetch<{ data: HCMessage[] }>(
-            auth, `/chats/${chat.id}/messages?offset=${msgOffset}&limit=100`,
-          );
-          for (const m of msgData.data) {
-            const message: Message = {
-              id: `hc-msg-${m.id}`,
-              ticketId: `hc-${chat.id}`,
-              author: m.from === 'agent' && m.agent ? String(m.agent.id) : String(chat.customer?.id ?? 'customer'),
-              body: m.text ?? '',
-              type: 'reply',
-              createdAt: epochToISO(m.createdAt),
-            };
-            appendJsonl(messagesFile, message);
-            counts.messages++;
-          }
-          if (msgData.data.length < 100) {
-            hasMoreMsgs = false;
-          } else {
-            msgOffset += 100;
-          }
+        // Hydrate messages for each chat
+        try {
+          await paginateOffset<HCMessage>({
+            fetch: client.request.bind(client),
+            path: `/chats/${chat.id}/messages`,
+            limit: 100,
+            dataKey: 'data',
+            onPage: (messages) => {
+              for (const m of messages) {
+                const message: Message = {
+                  id: `hc-msg-${m.id}`,
+                  ticketId: `hc-${chat.id}`,
+                  author: m.from === 'agent' && m.agent ? String(m.agent.id) : String(chat.customer?.id ?? 'customer'),
+                  body: m.text ?? '',
+                  type: 'reply',
+                  createdAt: epochToISO(m.createdAt),
+                };
+                appendJsonl(files.messages, message);
+                counts.messages++;
+              }
+            },
+          });
+        } catch {
+          chatSpinner.text = `Exporting chats... ${counts.tickets} (messages failed for #${chat.id})`;
         }
-      } catch {
-        chatSpinner.text = `Exporting chats... ${counts.tickets} (messages failed for #${chat.id})`;
       }
-    }
-
-    chatSpinner.text = `Exporting chats... ${counts.tickets} exported`;
-
-    if (data.data.length < chatLimit || chatOffset + chatLimit >= data.meta.total) {
-      hasMoreChats = false;
-    } else {
-      chatOffset += chatLimit;
-    }
-  }
+      chatSpinner.text = `Exporting chats... ${counts.tickets} exported`;
+    },
+  });
   chatSpinner.succeed(`${counts.tickets} chats exported (${counts.messages} messages)`);
 
   // Export customers (also collect org names in same pass)
-  const customerSpinner = ora('Exporting customers...').start();
+  const customerSpinner = exportSpinner('Exporting customers...');
   const orgNames = new Set<string>();
-  let custOffset = 0;
-  let hasMoreCust = true;
-
-  while (hasMoreCust) {
-    const data = await helpcrunchFetch<{ data: HCCustomer[]; total: number }>(
-      auth, `/customers?offset=${custOffset}&limit=100`,
-    );
-
-    for (const c of data.data) {
-      if (c.company) orgNames.add(c.company);
-      const customer: Customer = {
-        id: `hc-user-${c.id}`,
-        externalId: String(c.id),
-        source: 'helpcrunch',
-        name: c.name ?? c.email ?? `Customer ${c.id}`,
-        email: c.email ?? '',
-        phone: c.phone ?? undefined,
-        orgId: c.company ? `hc-org-${c.company}` : undefined,
-      };
-      appendJsonl(customersFile, customer);
-      counts.customers++;
-    }
-
-    customerSpinner.text = `Exporting customers... ${counts.customers} exported`;
-
-    if (data.data.length < 100 || custOffset + 100 >= data.total) {
-      hasMoreCust = false;
-    } else {
-      custOffset += 100;
-    }
-  }
+  await paginateOffset<HCCustomer>({
+    fetch: client.request.bind(client),
+    path: '/customers',
+    limit: 100,
+    dataKey: 'data',
+    onPage: (customers) => {
+      for (const c of customers) {
+        if (c.company) orgNames.add(c.company);
+        const customer: Customer = {
+          id: `hc-user-${c.id}`,
+          externalId: String(c.id),
+          source: 'helpcrunch',
+          name: c.name ?? c.email ?? `Customer ${c.id}`,
+          email: c.email ?? '',
+          phone: c.phone ?? undefined,
+          orgId: c.company ? `hc-org-${c.company}` : undefined,
+        };
+        appendJsonl(files.customers, customer);
+        counts.customers++;
+      }
+      customerSpinner.text = `Exporting customers... ${counts.customers} exported`;
+    },
+  });
   customerSpinner.succeed(`${counts.customers} customers exported`);
 
   // Export agents as customers too (for author resolution)
-  const agentSpinner = ora('Exporting agents...').start();
+  const agentSpinner = exportSpinner('Exporting agents...');
   try {
-    const agents = await helpcrunchFetch<{ data: HCAgent[] }>(auth, '/agents');
+    const agents = await client.request<{ data: HCAgent[] }>('/agents');
     for (const a of agents.data) {
       const customer: Customer = {
         id: `hc-agent-${a.id}`,
@@ -257,7 +197,7 @@ export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Pr
         name: a.name,
         email: a.email,
       };
-      appendJsonl(customersFile, customer);
+      appendJsonl(files.customers, customer);
       counts.customers++;
     }
     agentSpinner.succeed(`${agents.data.length} agents exported`);
@@ -266,7 +206,7 @@ export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Pr
   }
 
   // Write organizations from company names collected during customer export
-  const orgSpinner = ora('Collecting organizations...').start();
+  const orgSpinner = exportSpinner('Collecting organizations...');
   for (const name of orgNames) {
     const org: Organization = {
       id: `hc-org-${name}`,
@@ -275,24 +215,16 @@ export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Pr
       name,
       domains: [],
     };
-    appendJsonl(orgsFile, org);
+    appendJsonl(files.organizations, org);
     counts.organizations++;
   }
   orgSpinner.succeed(`${counts.organizations} organizations collected`);
 
   // No KB or Rules API available
-  ora('KB articles: not available via HelpCrunch API').info();
-  ora('Business rules: not available via HelpCrunch API').info();
+  exportSpinner('KB articles: not available via HelpCrunch API').info();
+  exportSpinner('Business rules: not available via HelpCrunch API').info();
 
-  const manifest: ExportManifest = {
-    source: 'helpcrunch',
-    exportedAt: new Date().toISOString(),
-    counts,
-  };
-  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-
-  console.log(chalk.green(`\nExport complete → ${outDir}/manifest.json`));
-  return manifest;
+  return writeManifest(outDir, 'helpcrunch', counts);
 }
 
 // ---- Verify ----
@@ -304,8 +236,9 @@ export async function helpcrunchVerifyConnection(auth: HelpcrunchAuth): Promise<
   error?: string;
 }> {
   try {
-    const agents = await helpcrunchFetch<{ data: HCAgent[] }>(auth, '/agents');
-    const chats = await helpcrunchFetch<{ data: HCChat[]; meta: { total: number } }>(auth, '/chats?offset=0&limit=1');
+    const client = createHelpcrunchClient(auth);
+    const agents = await client.request<{ data: HCAgent[] }>('/agents');
+    const chats = await client.request<{ data: HCChat[]; meta: { total: number } }>('/chats?offset=0&limit=1');
 
     return {
       success: true,
@@ -327,20 +260,21 @@ export async function helpcrunchUpdateChat(auth: HelpcrunchAuth, chatId: number,
   assignee?: number;
   department?: number;
 }): Promise<void> {
+  const client = createHelpcrunchClient(auth);
   if (updates.status !== undefined) {
-    await helpcrunchFetch(auth, `/chats/${chatId}/status`, {
+    await client.request(`/chats/${chatId}/status`, {
       method: 'PUT',
       body: { status: updates.status },
     });
   }
   if (updates.assignee !== undefined) {
-    await helpcrunchFetch(auth, `/chats/${chatId}/assignee`, {
+    await client.request(`/chats/${chatId}/assignee`, {
       method: 'PUT',
       body: { assignee: updates.assignee },
     });
   }
   if (updates.department !== undefined) {
-    await helpcrunchFetch(auth, `/chats/${chatId}/department`, {
+    await client.request(`/chats/${chatId}/department`, {
       method: 'PUT',
       body: { department: updates.department },
     });
@@ -348,14 +282,14 @@ export async function helpcrunchUpdateChat(auth: HelpcrunchAuth, chatId: number,
 }
 
 export async function helpcrunchPostMessage(auth: HelpcrunchAuth, chatId: number, body: string): Promise<void> {
-  await helpcrunchFetch(auth, `/chats/${chatId}/messages`, {
+  await createHelpcrunchClient(auth).request(`/chats/${chatId}/messages`, {
     method: 'POST',
     body: { text: body, type: 'message' },
   });
 }
 
 export async function helpcrunchCreateChat(auth: HelpcrunchAuth, customerId: number, message: string): Promise<{ id: number }> {
-  const result = await helpcrunchFetch<{ id: number }>(auth, '/chats', {
+  const result = await createHelpcrunchClient(auth).request<{ id: number }>('/chats', {
     method: 'POST',
     body: { customer: customerId, message: { text: message } },
   });

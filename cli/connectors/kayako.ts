@@ -1,10 +1,10 @@
-import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
-import { join } from 'path';
-import chalk from 'chalk';
-import ora from 'ora';
 import type {
   Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
 } from '../schema/types.js';
+import {
+  paginateOffset, paginateCursor, setupExport, appendJsonl, writeManifest, exportSpinner,
+  type FetchFn,
+} from './base/index.js';
 
 export interface KayakoAuth {
   domain: string;
@@ -14,6 +14,8 @@ export interface KayakoAuth {
 
 // Session management: Kayako requires X-Session-ID after first auth
 let sessionId: string | null = null;
+
+// ---- Kayako API types ----
 
 interface KayakoPaginatedResponse {
   status?: number;
@@ -78,6 +80,10 @@ interface KayakoArticle {
   section?: { id: number; titles?: Array<{ translation: string }> } | null;
 }
 
+// ---- Fetch with session ID capture ----
+// Kayako requires response header / body access for session ID management,
+// so we keep kayakoFetch as the primary fetch function rather than createClient().
+
 export async function kayakoFetch<T>(auth: KayakoAuth, path: string, options?: {
   method?: string;
   body?: unknown;
@@ -108,7 +114,7 @@ export async function kayakoFetch<T>(auth: KayakoAuth, path: string, options?: {
     if (res.status === 429) {
       const rawRetryAfter = parseInt(res.headers.get('Retry-After') ?? '10', 10);
       const retryAfter = isNaN(rawRetryAfter) ? 10 : rawRetryAfter;
-      if (retries >= maxRetries) throw new Error('Rate limit exceeded after max retries');
+      if (retries >= maxRetries) throw new Error('Kayako rate limit exceeded after max retries');
       retries++;
       await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
       continue;
@@ -145,6 +151,17 @@ export function resetSession(): void {
   sessionId = null;
 }
 
+/**
+ * Adapt kayakoFetch to the FetchFn signature expected by base pagination helpers.
+ * Wraps kayakoFetch so it can be passed to paginateOffset/paginateCursor.
+ */
+function createKayakoFetchFn(auth: KayakoAuth): FetchFn {
+  return <T>(path: string, options?: { method?: string; body?: unknown }) =>
+    kayakoFetch<T>(auth, path, options);
+}
+
+// ---- Mapping helpers ----
+
 function getStatusLabel(status: KayakoCase['status']): string {
   if (typeof status === 'string') return status;
   return status?.label ?? 'open';
@@ -173,10 +190,6 @@ function mapPriority(label: string | null): TicketPriority {
   if (lower.includes('high')) return 'high';
   if (lower.includes('urgent') || lower.includes('critical')) return 'urgent';
   return 'normal';
-}
-
-function appendJsonl(filePath: string, record: unknown): void {
-  appendFileSync(filePath, JSON.stringify(record) + '\n');
 }
 
 // ----- Write Operations -----
@@ -270,230 +283,207 @@ export async function kayakoVerifyConnection(auth: KayakoAuth): Promise<{
 // ----- Export -----
 
 export async function exportKayako(auth: KayakoAuth, outDir: string): Promise<ExportManifest> {
-  mkdirSync(outDir, { recursive: true });
-
-  const ticketsFile = join(outDir, 'tickets.jsonl');
-  const messagesFile = join(outDir, 'messages.jsonl');
-  const customersFile = join(outDir, 'customers.jsonl');
-  const orgsFile = join(outDir, 'organizations.jsonl');
-  const kbFile = join(outDir, 'kb_articles.jsonl');
-  const rulesFile = join(outDir, 'rules.jsonl');
-
-  for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
-    writeFileSync(f, '');
-  }
-
+  const files = setupExport(outDir);
   const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const fetchFn = createKayakoFetchFn(auth);
 
   // Reset session for fresh export
   resetSession();
 
-  // Export cases (tickets)
-  const caseSpinner = ora('Exporting cases...').start();
-  let offset = 0;
-  const limit = 100;
-  let hasMore = true;
+  // Export cases (tickets) — offset-based with nested cursor pagination for posts
+  const caseSpinner = exportSpinner('Exporting cases...');
 
-  while (hasMore) {
-    const data = await kayakoFetch<KayakoPaginatedResponse & { data: KayakoCase[] }>(
-      auth,
-      `/api/v1/cases.json?offset=${offset}&limit=${limit}`,
-    );
+  await paginateOffset<KayakoCase>({
+    fetch: fetchFn,
+    path: '/api/v1/cases.json',
+    limit: 100,
+    dataKey: 'data',
+    onPage: async (cases) => {
+      for (const c of cases) {
+        const ticket: Ticket = {
+          id: `ky-${c.id}`,
+          externalId: String(c.id),
+          source: 'kayako',
+          subject: c.subject,
+          status: mapStatus(getStatusLabel(c.status)),
+          priority: mapPriority(getPriorityLabel(c.priority)),
+          assignee: c.assigned_agent ? c.assigned_agent.full_name : undefined,
+          requester: c.requester?.email ?? String(c.requester?.id ?? 'unknown'),
+          tags: (c.tags ?? []).map(t => t.name),
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+        };
+        appendJsonl(files.tickets, ticket);
+        counts.tickets++;
 
-    for (const c of data.data) {
-      const ticket: Ticket = {
-        id: `ky-${c.id}`,
-        externalId: String(c.id),
-        source: 'kayako',
-        subject: c.subject,
-        status: mapStatus(getStatusLabel(c.status)),
-        priority: mapPriority(getPriorityLabel(c.priority)),
-        assignee: c.assigned_agent ? c.assigned_agent.full_name : undefined,
-        requester: c.requester?.email ?? String(c.requester?.id ?? 'unknown'),
-        tags: (c.tags ?? []).map(t => t.name),
-        createdAt: c.created_at,
-        updatedAt: c.updated_at,
-      };
-      appendJsonl(ticketsFile, ticket);
-      counts.tickets++;
+        // Hydrate posts (messages) using cursor pagination (after_id parameter)
+        try {
+          await paginateCursor<KayakoPost>({
+            fetch: fetchFn,
+            initialUrl: `/api/v1/cases/${c.id}/posts.json?limit=100`,
+            getData: (response) => (response.data as KayakoPost[]) ?? [],
+            getNextUrl: (response) => {
+              const posts = (response.data as KayakoPost[]) ?? [];
+              if (posts.length < 100) return null;
+              const lastId = posts[posts.length - 1]?.id;
+              return lastId ? `/api/v1/cases/${c.id}/posts.json?after_id=${lastId}&limit=100` : null;
+            },
+            onPage: (posts) => {
+              for (const p of posts) {
+                // Determine message type from source field
+                // AGENT source = internal/agent message, others = customer reply
+                const isAgent = p.source === 'AGENT' || p.source === 'API';
+                const message: Message = {
+                  id: `ky-msg-${p.id}`,
+                  ticketId: `ky-${c.id}`,
+                  author: p.creator?.full_name ?? String(p.creator?.id ?? 'unknown'),
+                  body: p.contents,
+                  type: isAgent ? 'note' : 'reply',
+                  createdAt: p.created_at,
+                };
+                appendJsonl(files.messages, message);
+                counts.messages++;
+              }
+            },
+          });
+        } catch {
+          caseSpinner.text = `Exporting cases... ${counts.tickets} (posts fetch failed for #${c.id})`;
+        }
 
-      // Hydrate posts (messages) for each case using cursor pagination
-      try {
-        let afterId: number | null = null;
-        let hasMorePosts = true;
-        while (hasMorePosts) {
-          const postsUrl: string = afterId
-            ? `/api/v1/cases/${c.id}/posts.json?after_id=${afterId}&limit=100`
-            : `/api/v1/cases/${c.id}/posts.json?limit=100`;
-          const posts: KayakoPaginatedResponse & { data: KayakoPost[] } = await kayakoFetch<KayakoPaginatedResponse & { data: KayakoPost[] }>(
-            auth,
-            postsUrl,
-          );
-          for (const p of posts.data as KayakoPost[]) {
-            // Determine message type from source field
-            // AGENT source = internal/agent message, others = customer reply
-            const isAgent = p.source === 'AGENT' || p.source === 'API';
+        // Also fetch internal notes separately
+        try {
+          const notes = await kayakoFetch<KayakoPaginatedResponse & { data: Array<{
+            id: number;
+            body_text?: string;
+            user?: { id: number; full_name?: string } | null;
+            created_at: string;
+          }> }>(auth, `/api/v1/cases/${c.id}/notes.json?limit=100`);
+          for (const n of notes.data) {
             const message: Message = {
-              id: `ky-msg-${p.id}`,
+              id: `ky-note-${n.id}`,
               ticketId: `ky-${c.id}`,
-              author: p.creator?.full_name ?? String(p.creator?.id ?? 'unknown'),
-              body: p.contents,
-              type: isAgent ? 'note' : 'reply',
-              createdAt: p.created_at,
+              author: n.user?.full_name ?? String(n.user?.id ?? 'system'),
+              body: n.body_text ?? '',
+              type: 'note',
+              createdAt: n.created_at,
             };
-            appendJsonl(messagesFile, message);
+            appendJsonl(files.messages, message);
             counts.messages++;
-            afterId = p.id; // Track last ID for cursor pagination
           }
-          hasMorePosts = posts.data.length === 100;
+        } catch {
+          // Notes endpoint may not be available on all Kayako versions
         }
-      } catch {
-        caseSpinner.text = `Exporting cases... ${counts.tickets} (posts fetch failed for #${c.id})`;
       }
 
-      // Also fetch internal notes separately
-      try {
-        const notes = await kayakoFetch<KayakoPaginatedResponse & { data: Array<{
-          id: number;
-          body_text?: string;
-          user?: { id: number; full_name?: string } | null;
-          created_at: string;
-        }> }>(auth, `/api/v1/cases/${c.id}/notes.json?limit=100`);
-        for (const n of notes.data) {
-          const message: Message = {
-            id: `ky-note-${n.id}`,
-            ticketId: `ky-${c.id}`,
-            author: n.user?.full_name ?? String(n.user?.id ?? 'system'),
-            body: n.body_text ?? '',
-            type: 'note',
-            createdAt: n.created_at,
-          };
-          appendJsonl(messagesFile, message);
-          counts.messages++;
-        }
-      } catch {
-        // Notes endpoint may not be available on all Kayako versions
-      }
-    }
-
-    caseSpinner.text = `Exporting cases... ${counts.tickets} exported`;
-    hasMore = data.data.length === limit;
-    offset += limit;
-  }
+      caseSpinner.text = `Exporting cases... ${counts.tickets} exported`;
+    },
+  });
   caseSpinner.succeed(`${counts.tickets} cases exported (${counts.messages} messages)`);
 
   // Export users
-  const userSpinner = ora('Exporting users...').start();
-  offset = 0;
-  hasMore = true;
-  while (hasMore) {
-    const data = await kayakoFetch<KayakoPaginatedResponse & { data: KayakoUser[] }>(
-      auth,
-      `/api/v1/users.json?offset=${offset}&limit=${limit}`,
-    );
-    for (const u of data.data) {
-      // Emails may be inline or separate identity resources
-      // Try inline first, fall back to email from first identity
-      let primaryEmail = '';
-      if (u.emails && u.emails.length > 0) {
-        primaryEmail = u.emails.find(e => e.is_primary)?.email ?? u.emails[0]?.email ?? '';
+  const userSpinner = exportSpinner('Exporting users...');
+  await paginateOffset<KayakoUser>({
+    fetch: fetchFn,
+    path: '/api/v1/users.json',
+    limit: 100,
+    dataKey: 'data',
+    onPage: (users) => {
+      for (const u of users) {
+        // Emails may be inline or separate identity resources
+        // Try inline first, fall back to email from first identity
+        let primaryEmail = '';
+        if (u.emails && u.emails.length > 0) {
+          primaryEmail = u.emails.find(e => e.is_primary)?.email ?? u.emails[0]?.email ?? '';
+        }
+        const customer: Customer = {
+          id: `ky-user-${u.id}`,
+          externalId: String(u.id),
+          source: 'kayako',
+          name: u.full_name,
+          email: primaryEmail,
+          phone: u.phones?.[0]?.number ?? u.phones?.[0]?.phone,
+          orgId: u.organization?.id ? String(u.organization.id) : undefined,
+        };
+        appendJsonl(files.customers, customer);
+        counts.customers++;
       }
-      const customer: Customer = {
-        id: `ky-user-${u.id}`,
-        externalId: String(u.id),
-        source: 'kayako',
-        name: u.full_name,
-        email: primaryEmail,
-        phone: u.phones?.[0]?.number ?? u.phones?.[0]?.phone,
-        orgId: u.organization?.id ? String(u.organization.id) : undefined,
-      };
-      appendJsonl(customersFile, customer);
-      counts.customers++;
-    }
-    userSpinner.text = `Exporting users... ${counts.customers} exported`;
-    hasMore = data.data.length === limit;
-    offset += limit;
-  }
+      userSpinner.text = `Exporting users... ${counts.customers} exported`;
+    },
+  });
   userSpinner.succeed(`${counts.customers} users exported`);
 
   // Export organizations
-  const orgSpinner = ora('Exporting organizations...').start();
-  offset = 0;
-  hasMore = true;
-  while (hasMore) {
-    try {
-      const data = await kayakoFetch<KayakoPaginatedResponse & { data: KayakoOrg[] }>(
-        auth,
-        `/api/v1/organizations.json?offset=${offset}&limit=${limit}`,
-      );
-      for (const o of data.data) {
-        // Domains are resource references {id, resource_type: "identity_domain"}, not plain strings
-        const domainStrings: string[] = (o.domains ?? []).map(d => {
-          if (typeof d === 'string') return d;
-          return String(d.id); // Store the domain ID; would need /api/v1/identity_domains/:id for actual domain string
-        });
-        const org: Organization = {
-          id: `ky-org-${o.id}`,
-          externalId: String(o.id),
-          source: 'kayako',
-          name: o.name,
-          domains: domainStrings,
-        };
-        appendJsonl(orgsFile, org);
-        counts.organizations++;
-      }
-      hasMore = data.data.length === limit;
-      offset += limit;
-    } catch (err) {
-      orgSpinner.warn(`Organizations: ${err instanceof Error ? err.message : 'endpoint error'}`);
-      hasMore = false;
-    }
+  const orgSpinner = exportSpinner('Exporting organizations...');
+  try {
+    await paginateOffset<KayakoOrg>({
+      fetch: fetchFn,
+      path: '/api/v1/organizations.json',
+      limit: 100,
+      dataKey: 'data',
+      onPage: (orgs) => {
+        for (const o of orgs) {
+          // Domains are resource references {id, resource_type: "identity_domain"}, not plain strings
+          const domainStrings: string[] = (o.domains ?? []).map(d => {
+            if (typeof d === 'string') return d;
+            return String(d.id); // Store the domain ID; would need /api/v1/identity_domains/:id for actual domain string
+          });
+          const org: Organization = {
+            id: `ky-org-${o.id}`,
+            externalId: String(o.id),
+            source: 'kayako',
+            name: o.name,
+            domains: domainStrings,
+          };
+          appendJsonl(files.organizations, org);
+          counts.organizations++;
+        }
+      },
+    });
+  } catch (err) {
+    orgSpinner.warn(`Organizations: ${err instanceof Error ? err.message : 'endpoint error'}`);
   }
   orgSpinner.succeed(`${counts.organizations} organizations exported`);
 
-  // Export KB articles — correct endpoint is /api/v1/articles.json (not /helpcenter/articles.json)
-  const kbSpinner = ora('Exporting KB articles...').start();
-  offset = 0;
-  hasMore = true;
-  while (hasMore) {
-    try {
-      const data = await kayakoFetch<KayakoPaginatedResponse & { data: KayakoArticle[] }>(
-        auth,
-        `/api/v1/articles.json?offset=${offset}&limit=${limit}`,
-      );
-      for (const a of data.data) {
-        // Articles may have titles/contents as localized arrays OR as direct fields
-        const title = a.titles?.[0]?.translation ?? a.title ?? `Article ${a.id}`;
-        const body = a.contents?.[0]?.translation ?? a.body ?? '';
-        // section is section_id (integer), not a nested object with titles
-        const sectionPath: string[] = [];
-        if (a.section_id) {
-          sectionPath.push(String(a.section_id));
-        } else if (a.section) {
-          sectionPath.push(a.section.titles?.[0]?.translation ?? String(a.section.id));
+  // Export KB articles -- correct endpoint is /api/v1/articles.json (not /helpcenter/articles.json)
+  const kbSpinner = exportSpinner('Exporting KB articles...');
+  try {
+    await paginateOffset<KayakoArticle>({
+      fetch: fetchFn,
+      path: '/api/v1/articles.json',
+      limit: 100,
+      dataKey: 'data',
+      onPage: (articles) => {
+        for (const a of articles) {
+          // Articles may have titles/contents as localized arrays OR as direct fields
+          const title = a.titles?.[0]?.translation ?? a.title ?? `Article ${a.id}`;
+          const body = a.contents?.[0]?.translation ?? a.body ?? '';
+          // section is section_id (integer), not a nested object with titles
+          const sectionPath: string[] = [];
+          if (a.section_id) {
+            sectionPath.push(String(a.section_id));
+          } else if (a.section) {
+            sectionPath.push(a.section.titles?.[0]?.translation ?? String(a.section.id));
+          }
+          const article: KBArticle = {
+            id: `ky-kb-${a.id}`,
+            externalId: String(a.id),
+            source: 'kayako',
+            title,
+            body,
+            categoryPath: sectionPath,
+          };
+          appendJsonl(files.kb_articles, article);
+          counts.kbArticles++;
         }
-        const article: KBArticle = {
-          id: `ky-kb-${a.id}`,
-          externalId: String(a.id),
-          source: 'kayako',
-          title,
-          body,
-          categoryPath: sectionPath,
-        };
-        appendJsonl(kbFile, article);
-        counts.kbArticles++;
-      }
-      hasMore = data.data.length === limit;
-      offset += limit;
-    } catch (err) {
-      kbSpinner.warn(`KB Articles: ${err instanceof Error ? err.message : 'endpoint error'}`);
-      hasMore = false;
-    }
+      },
+    });
+  } catch (err) {
+    kbSpinner.warn(`KB Articles: ${err instanceof Error ? err.message : 'endpoint error'}`);
   }
   kbSpinner.succeed(`${counts.kbArticles} KB articles exported`);
 
-  // Export triggers — conditions field is actually predicate_collections
-  const rulesSpinner = ora('Exporting triggers...').start();
+  // Export triggers -- conditions field is actually predicate_collections
+  const rulesSpinner = exportSpinner('Exporting triggers...');
   try {
     const data = await kayakoFetch<KayakoPaginatedResponse & { data: KayakoTrigger[] }>(
       auth,
@@ -510,7 +500,7 @@ export async function exportKayako(auth: KayakoAuth, outDir: string): Promise<Ex
         actions: t.actions,
         active: t.is_enabled,
       };
-      appendJsonl(rulesFile, rule);
+      appendJsonl(files.rules, rule);
       counts.rules++;
     }
   } catch {
@@ -518,13 +508,5 @@ export async function exportKayako(auth: KayakoAuth, outDir: string): Promise<Ex
   }
   rulesSpinner.succeed(`${counts.rules} business rules exported`);
 
-  const manifest: ExportManifest = {
-    source: 'kayako',
-    exportedAt: new Date().toISOString(),
-    counts,
-  };
-  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-
-  console.log(chalk.green(`\nExport complete → ${outDir}/manifest.json`));
-  return manifest;
+  return writeManifest(outDir, 'kayako', counts);
 }

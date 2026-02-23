@@ -1,10 +1,9 @@
-import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
-import { join } from 'path';
-import chalk from 'chalk';
-import ora from 'ora';
 import type {
   Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
 } from '../schema/types.js';
+import {
+  createClient, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
+} from './base/index.js';
 
 export interface GrooveAuth {
   apiToken: string;
@@ -76,58 +75,28 @@ interface GVKBArticle {
   updated_at: string;
 }
 
-interface GVPagination {
-  current_page: number;
-  total_pages: number;
-  total_count: number;
-  next_page: string | null;
+// ---- Client ----
+
+function createGrooveClient(auth: GrooveAuth) {
+  return createClient({
+    baseUrl: 'https://api.groovehq.com/v1',
+    authHeaders: () => ({
+      Authorization: `Bearer ${auth.apiToken}`,
+    }),
+    sourceName: 'Groove',
+    maxRetries: 10,
+    defaultRetryAfterSeconds: 90,
+    preRequestDelayMs: 2500,
+    rateLimitStatuses: [429, 503],
+  });
 }
 
-// ---- Fetch wrapper ----
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
+/** @deprecated Use createGrooveClient() + client.request() instead. Kept for backward compatibility. */
 export async function grooveFetch<T>(auth: GrooveAuth, path: string, options?: {
   method?: string;
   body?: unknown;
 }): Promise<T> {
-  const url = path.startsWith('http') ? path : `https://api.groovehq.com/v1${path}`;
-
-  let retries = 0;
-  const maxRetries = 10;
-
-  // Pre-request delay to stay under Groove's rate limit (~30 req/min)
-  await sleep(2500);
-
-  while (true) {
-    const res = await fetch(url, {
-      method: options?.method ?? 'GET',
-      headers: {
-        'Authorization': `Bearer ${auth.apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
-    });
-
-    if (res.status === 429 || res.status === 503) {
-      const rawRetryAfter = parseInt(res.headers.get('Retry-After') ?? '90', 10);
-      const retryAfter = isNaN(rawRetryAfter) ? 90 : Math.max(rawRetryAfter, 60);
-      if (retries >= maxRetries) throw new Error('Rate limit exceeded after max retries');
-      retries++;
-      process.stderr.write(`  [rate-limit ${res.status}] retry ${retries}/${maxRetries}, waiting ${retryAfter}s...\n`);
-      await sleep(retryAfter * 1000);
-      continue;
-    }
-
-    if (!res.ok) {
-      const errorBody = await res.text().catch(() => '');
-      throw new Error(`Groove API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
-    }
-
-    return res.json() as Promise<T>;
-  }
+  return createGrooveClient(auth).request<T>(path, options);
 }
 
 // ---- Mapping helpers ----
@@ -139,10 +108,6 @@ function mapState(state: string): TicketStatus {
   return map[state] ?? 'open';
 }
 
-function appendJsonl(filePath: string, record: unknown): void {
-  appendFileSync(filePath, JSON.stringify(record) + '\n');
-}
-
 function extractIdFromHref(href: string): string {
   // Extract the last segment from href like https://api.groovehq.com/v1/messages/12345
   const parts = href.split('/');
@@ -152,122 +117,104 @@ function extractIdFromHref(href: string): string {
 // ---- Export ----
 
 export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<ExportManifest> {
-  mkdirSync(outDir, { recursive: true });
-
-  const ticketsFile = join(outDir, 'tickets.jsonl');
-  const messagesFile = join(outDir, 'messages.jsonl');
-  const customersFile = join(outDir, 'customers.jsonl');
-  const orgsFile = join(outDir, 'organizations.jsonl');
-  const kbFile = join(outDir, 'kb_articles.jsonl');
-  const rulesFile = join(outDir, 'rules.jsonl');
-
-  for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
-    writeFileSync(f, '');
-  }
-
+  const client = createGrooveClient(auth);
+  const files = setupExport(outDir);
   const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
 
   // Export tickets (page-based, max 50 per page)
-  const ticketSpinner = ora('Exporting tickets...').start();
-  let ticketPage = 1;
-  let hasMoreTickets = true;
+  const ticketSpinner = exportSpinner('Exporting tickets...');
+  await paginatePages<GVTicket>({
+    fetch: client.request.bind(client),
+    path: '/tickets',
+    pageSize: 50,
+    dataKey: 'tickets',
+    onPage: async (tickets) => {
+      for (const t of tickets) {
+        const customerEmail = t.links.customer?.href ? extractIdFromHref(t.links.customer.href) : 'unknown';
+        const assigneeEmail = t.links.assignee?.href ? extractIdFromHref(t.links.assignee.href) : undefined;
 
-  while (hasMoreTickets) {
-    const data = await grooveFetch<{ tickets: GVTicket[]; meta: { pagination: GVPagination } }>(
-      auth, `/tickets?per_page=50&page=${ticketPage}`,
-    );
+        const ticket: Ticket = {
+          id: `gv-${t.number}`,
+          externalId: String(t.number),
+          source: 'groove',
+          subject: t.title ?? `Ticket #${t.number}`,
+          status: mapState(t.state),
+          priority: 'normal', // Groove has priority field but it's often null
+          assignee: assigneeEmail,
+          requester: customerEmail,
+          tags: t.tags ?? [],
+          createdAt: t.created_at,
+          updatedAt: t.updated_at,
+        };
+        appendJsonl(files.tickets, ticket);
+        counts.tickets++;
 
-    for (const t of data.tickets) {
-      const customerEmail = t.links.customer?.href ? extractIdFromHref(t.links.customer.href) : 'unknown';
-      const assigneeEmail = t.links.assignee?.href ? extractIdFromHref(t.links.assignee.href) : undefined;
-
-      const ticket: Ticket = {
-        id: `gv-${t.number}`,
-        externalId: String(t.number),
-        source: 'groove',
-        subject: t.title ?? `Ticket #${t.number}`,
-        status: mapState(t.state),
-        priority: 'normal', // Groove has priority field but it's often null
-        assignee: assigneeEmail,
-        requester: customerEmail,
-        tags: t.tags ?? [],
-        createdAt: t.created_at,
-        updatedAt: t.updated_at,
-      };
-      appendJsonl(ticketsFile, ticket);
-      counts.tickets++;
-
-      // Hydrate messages for each ticket
-      try {
-        let msgPage = 1;
-        let hasMoreMsgs = true;
-        while (hasMoreMsgs) {
-          const msgData = await grooveFetch<{ messages: GVMessage[]; meta: { pagination: GVPagination } }>(
-            auth, `/tickets/${t.number}/messages?per_page=50&page=${msgPage}`,
-          );
-          for (const m of msgData.messages) {
-            const msgId = extractIdFromHref(m.href);
-            const authorId = m.links.author?.href ? extractIdFromHref(m.links.author.href) : 'unknown';
-            const message: Message = {
-              id: `gv-msg-${msgId}`,
-              ticketId: `gv-${t.number}`,
-              author: authorId,
-              body: m.plain_text_body ?? m.body ?? '',
-              bodyHtml: m.body,
-              type: m.note ? 'note' : 'reply',
-              createdAt: m.created_at,
-            };
-            appendJsonl(messagesFile, message);
-            counts.messages++;
-          }
-          hasMoreMsgs = msgData.meta.pagination.next_page !== null;
-          msgPage++;
+        // Hydrate messages for each ticket
+        try {
+          await paginatePages<GVMessage>({
+            fetch: client.request.bind(client),
+            path: `/tickets/${t.number}/messages`,
+            pageSize: 50,
+            dataKey: 'messages',
+            onPage: (msgs) => {
+              for (const m of msgs) {
+                const msgId = extractIdFromHref(m.href);
+                const authorId = m.links.author?.href ? extractIdFromHref(m.links.author.href) : 'unknown';
+                const message: Message = {
+                  id: `gv-msg-${msgId}`,
+                  ticketId: `gv-${t.number}`,
+                  author: authorId,
+                  body: m.plain_text_body ?? m.body ?? '',
+                  bodyHtml: m.body,
+                  type: m.note ? 'note' : 'reply',
+                  createdAt: m.created_at,
+                };
+                appendJsonl(files.messages, message);
+                counts.messages++;
+              }
+            },
+          });
+        } catch {
+          ticketSpinner.text = `Exporting tickets... ${counts.tickets} (messages failed for #${t.number})`;
         }
-      } catch {
-        ticketSpinner.text = `Exporting tickets... ${counts.tickets} (messages failed for #${t.number})`;
       }
-    }
-
-    ticketSpinner.text = `Exporting tickets... ${counts.tickets} exported`;
-    hasMoreTickets = data.meta.pagination.next_page !== null;
-    ticketPage++;
-  }
+      ticketSpinner.text = `Exporting tickets... ${counts.tickets} exported`;
+    },
+  });
   ticketSpinner.succeed(`${counts.tickets} tickets exported (${counts.messages} messages)`);
 
   // Export customers (also collect org names in same pass)
-  const customerSpinner = ora('Exporting customers...').start();
+  const customerSpinner = exportSpinner('Exporting customers...');
   const orgNames = new Set<string>();
-  let custPage = 1;
-  let hasMoreCust = true;
-
-  while (hasMoreCust) {
-    const data = await grooveFetch<{ customers: GVCustomer[]; meta: { pagination: GVPagination } }>(
-      auth, `/customers?per_page=50&page=${custPage}`,
-    );
-    for (const c of data.customers) {
-      if (c.company_name) orgNames.add(c.company_name);
-      const customer: Customer = {
-        id: `gv-user-${c.email}`,
-        externalId: c.email,
-        source: 'groove',
-        name: c.name ?? c.email,
-        email: c.email,
-        phone: c.phone_number ?? undefined,
-        orgId: c.company_name ? `gv-org-${c.company_name}` : undefined,
-      };
-      appendJsonl(customersFile, customer);
-      counts.customers++;
-    }
-    customerSpinner.text = `Exporting customers... ${counts.customers} exported`;
-    hasMoreCust = data.meta.pagination.next_page !== null;
-    custPage++;
-  }
+  await paginatePages<GVCustomer>({
+    fetch: client.request.bind(client),
+    path: '/customers',
+    pageSize: 50,
+    dataKey: 'customers',
+    onPage: (customers) => {
+      for (const c of customers) {
+        if (c.company_name) orgNames.add(c.company_name);
+        const customer: Customer = {
+          id: `gv-user-${c.email}`,
+          externalId: c.email,
+          source: 'groove',
+          name: c.name ?? c.email,
+          email: c.email,
+          phone: c.phone_number ?? undefined,
+          orgId: c.company_name ? `gv-org-${c.company_name}` : undefined,
+        };
+        appendJsonl(files.customers, customer);
+        counts.customers++;
+      }
+      customerSpinner.text = `Exporting customers... ${counts.customers} exported`;
+    },
+  });
   customerSpinner.succeed(`${counts.customers} customers exported`);
 
   // Export agents
-  const agentSpinner = ora('Exporting agents...').start();
+  const agentSpinner = exportSpinner('Exporting agents...');
   try {
-    const data = await grooveFetch<{ agents: GVAgent[] }>(auth, '/agents');
+    const data = await client.request<{ agents: GVAgent[] }>('/agents');
     for (const a of data.agents) {
       const customer: Customer = {
         id: `gv-agent-${a.email}`,
@@ -276,7 +223,7 @@ export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<Ex
         name: `${a.first_name} ${a.last_name}`.trim(),
         email: a.email,
       };
-      appendJsonl(customersFile, customer);
+      appendJsonl(files.customers, customer);
       counts.customers++;
     }
     agentSpinner.succeed(`${data.agents.length} agents exported`);
@@ -285,47 +232,44 @@ export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<Ex
   }
 
   // Write organizations from company names collected during customer export
-  const orgSpinner = ora('Collecting organizations...').start();
-  for (const name of orgNames) {
+  const orgSpinner = exportSpinner('Collecting organizations...');
+  for (const name of Array.from(orgNames)) {
     const org: Organization = {
       id: `gv-org-${name}`, externalId: name, source: 'groove', name, domains: [],
     };
-    appendJsonl(orgsFile, org);
+    appendJsonl(files.organizations, org);
     counts.organizations++;
   }
   orgSpinner.succeed(`${counts.organizations} organizations collected`);
 
   // Export KB articles
-  const kbSpinner = ora('Exporting KB articles...').start();
+  const kbSpinner = exportSpinner('Exporting KB articles...');
   try {
-    const kbsData = await grooveFetch<{ knowledge_bases: GVKB[] }>(auth, '/kb');
+    const kbsData = await client.request<{ knowledge_bases: GVKB[] }>('/kb');
     for (const kb of kbsData.knowledge_bases) {
       // Search all articles (empty keyword returns all)
-      let articlePage = 1;
-      let hasMoreArticles = true;
-      while (hasMoreArticles) {
-        try {
-          const artData = await grooveFetch<{ articles: GVKBArticle[]; meta: { pagination: GVPagination } }>(
-            auth, `/kb/${kb.id}/articles/search?per_page=50&page=${articlePage}`,
-          );
-          for (const a of artData.articles) {
-            const article: KBArticle = {
-              id: `gv-kb-${a.id}`,
-              externalId: a.id,
-              source: 'groove',
-              title: a.title,
-              body: a.body ?? '',
-              categoryPath: [kb.title, a.category_id],
-            };
-            appendJsonl(kbFile, article);
-            counts.kbArticles++;
-          }
-          hasMoreArticles = artData.meta.pagination.next_page !== null;
-          articlePage++;
-        } catch {
-          hasMoreArticles = false;
-        }
-      }
+      try {
+        await paginatePages<GVKBArticle>({
+          fetch: client.request.bind(client),
+          path: `/kb/${kb.id}/articles/search`,
+          pageSize: 50,
+          dataKey: 'articles',
+          onPage: (articles) => {
+            for (const a of articles) {
+              const article: KBArticle = {
+                id: `gv-kb-${a.id}`,
+                externalId: a.id,
+                source: 'groove',
+                title: a.title,
+                body: a.body ?? '',
+                categoryPath: [kb.title, a.category_id],
+              };
+              appendJsonl(files.kb_articles, article);
+              counts.kbArticles++;
+            }
+          },
+        });
+      } catch { /* KB articles search failed for this knowledge base */ }
     }
   } catch (err) {
     kbSpinner.warn(`KB: ${err instanceof Error ? err.message : 'not available'}`);
@@ -334,17 +278,9 @@ export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<Ex
   else kbSpinner.info('0 KB articles');
 
   // No automation rules API
-  ora('Business rules: not available via Groove API').info();
+  exportSpinner('Business rules: not available via Groove API').info();
 
-  const manifest: ExportManifest = {
-    source: 'groove',
-    exportedAt: new Date().toISOString(),
-    counts,
-  };
-  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-
-  console.log(chalk.green(`\nExport complete → ${outDir}/manifest.json`));
-  return manifest;
+  return writeManifest(outDir, 'groove', counts);
 }
 
 // ---- Verify ----
@@ -355,7 +291,8 @@ export async function grooveVerifyConnection(auth: GrooveAuth): Promise<{
   error?: string;
 }> {
   try {
-    const data = await grooveFetch<{ agents: GVAgent[] }>(auth, '/agents');
+    const client = createGrooveClient(auth);
+    const data = await client.request<{ agents: GVAgent[] }>('/agents');
     return {
       success: true,
       agentCount: data.agents.length,
@@ -375,25 +312,26 @@ export async function grooveUpdateTicket(auth: GrooveAuth, ticketNumber: number,
   assignee?: string;
   tags?: string[];
 }): Promise<void> {
+  const client = createGrooveClient(auth);
   if (updates.state) {
-    await grooveFetch(auth, `/tickets/${ticketNumber}/state`, {
+    await client.request(`/tickets/${ticketNumber}/state`, {
       method: 'PUT', body: { state: updates.state },
     });
   }
   if (updates.assignee) {
-    await grooveFetch(auth, `/tickets/${ticketNumber}/assignee`, {
+    await client.request(`/tickets/${ticketNumber}/assignee`, {
       method: 'PUT', body: { assignee: updates.assignee },
     });
   }
   if (updates.tags) {
-    await grooveFetch(auth, `/tickets/${ticketNumber}/tags`, {
+    await client.request(`/tickets/${ticketNumber}/tags`, {
       method: 'PUT', body: updates.tags,
     });
   }
 }
 
 export async function groovePostMessage(auth: GrooveAuth, ticketNumber: number, body: string, isNote = false): Promise<void> {
-  await grooveFetch(auth, `/tickets/${ticketNumber}/messages`, {
+  await createGrooveClient(auth).request(`/tickets/${ticketNumber}/messages`, {
     method: 'POST',
     body: { body, note: isNote },
   });
@@ -411,7 +349,7 @@ export async function grooveCreateTicket(auth: GrooveAuth, to: string, body: str
   if (options?.tags) ticket.tags = options.tags;
   if (options?.from) ticket.from = options.from;
 
-  const result = await grooveFetch<{ ticket: { number: number } }>(auth, '/tickets', {
+  const result = await createGrooveClient(auth).request<{ ticket: { number: number } }>('/tickets', {
     method: 'POST', body: ticket,
   });
   return { number: result.ticket.number };

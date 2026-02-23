@@ -1,12 +1,9 @@
 import { createHmac, randomBytes } from 'crypto';
-import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
-import { join } from 'path';
-import chalk from 'chalk';
-import ora from 'ora';
 import { XMLParser } from 'fast-xml-parser';
 import type {
   Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
 } from '../schema/types.js';
+import { setupExport, appendJsonl, writeManifest, exportSpinner } from './base/index.js';
 
 export interface KayakoClassicAuth {
   domain: string; // e.g. "classichelp.kayako.com"
@@ -279,10 +276,6 @@ function mapPriority(label: string | null): TicketPriority {
   return 'normal';
 }
 
-function appendJsonl(filePath: string, record: unknown): void {
-  appendFileSync(filePath, JSON.stringify(record) + '\n');
-}
-
 // ----- Write Operations -----
 
 export async function kayakoClassicVerifyConnection(auth: KayakoClassicAuth): Promise<{
@@ -452,19 +445,7 @@ export async function kayakoClassicCreateTicket(
 // ----- Export -----
 
 export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: string): Promise<ExportManifest> {
-  mkdirSync(outDir, { recursive: true });
-
-  const ticketsFile = join(outDir, 'tickets.jsonl');
-  const messagesFile = join(outDir, 'messages.jsonl');
-  const customersFile = join(outDir, 'customers.jsonl');
-  const orgsFile = join(outDir, 'organizations.jsonl');
-  const kbFile = join(outDir, 'kb_articles.jsonl');
-  const rulesFile = join(outDir, 'rules.jsonl');
-
-  for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
-    writeFileSync(f, '');
-  }
-
+  const files = setupExport(outDir);
   const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
 
   // Fetch status and priority maps first for label resolution
@@ -472,7 +453,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
   const priorityMap = await fetchPriorityMap(auth);
 
   // ----- Export Tickets -----
-  const ticketSpinner = ora('Exporting tickets...').start();
+  const ticketSpinner = exportSpinner('Exporting tickets...');
   const batchSize = 100;
   let start = 0;
   let hasMore = true;
@@ -514,7 +495,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
         createdAt: new Date(getNumber(t.creationtime) * 1000).toISOString(),
         updatedAt: new Date(getNumber(t.lastactivity) * 1000).toISOString(),
       };
-      appendJsonl(ticketsFile, ticket);
+      appendJsonl(files.tickets, ticket);
       counts.tickets++;
 
       // Fetch posts for this ticket
@@ -537,7 +518,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
             type: isPrivate ? 'note' : 'reply',
             createdAt: new Date(getNumber(p.dateline) * 1000).toISOString(),
           };
-          appendJsonl(messagesFile, message);
+          appendJsonl(files.messages, message);
           counts.messages++;
         }
       } catch {
@@ -562,7 +543,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
             type: 'note',
             createdAt: new Date(getNumber(n.creationdate) * 1000).toISOString(),
           };
-          appendJsonl(messagesFile, message);
+          appendJsonl(files.messages, message);
           counts.messages++;
         }
       } catch {
@@ -577,7 +558,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
   ticketSpinner.succeed(`${counts.tickets} tickets exported (${counts.messages} messages)`);
 
   // ----- Export Users -----
-  const userSpinner = ora('Exporting users...').start();
+  const userSpinner = exportSpinner('Exporting users...');
   let marker = 1;
   hasMore = true;
   while (hasMore) {
@@ -605,7 +586,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
           phone: getText(u.phone) || undefined,
           orgId: getNumber(u.userorganizationid) ? getText(u.userorganizationid) : undefined,
         };
-        appendJsonl(customersFile, customer);
+        appendJsonl(files.customers, customer);
         counts.customers++;
       }
 
@@ -621,7 +602,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
   userSpinner.succeed(`${counts.customers} users exported`);
 
   // ----- Export Organizations -----
-  const orgSpinner = ora('Exporting organizations...').start();
+  const orgSpinner = exportSpinner('Exporting organizations...');
   try {
     const data = await kayakoClassicFetch(auth, '/Base/UserOrganization') as Record<string, unknown>;
     const orgsContainer = (data as Record<string, unknown>)?.userorganizations as Record<string, unknown>;
@@ -635,7 +616,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
         name: getText(o.name),
         domains: [],
       };
-      appendJsonl(orgsFile, org);
+      appendJsonl(files.organizations, org);
       counts.organizations++;
     }
   } catch (err) {
@@ -644,7 +625,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
   orgSpinner.succeed(`${counts.organizations} organizations exported`);
 
   // ----- Export KB Articles -----
-  const kbSpinner = ora('Exporting KB articles...').start();
+  const kbSpinner = exportSpinner('Exporting KB articles...');
   try {
     const data = await kayakoClassicFetch(auth, '/Knowledgebase/Article') as Record<string, unknown>;
     const kbContainer = (data as Record<string, unknown>)?.kbarticles as Record<string, unknown>;
@@ -659,7 +640,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
         body: getText(a.contentstext) || getText(a.contents),
         categoryPath: getNumber(a.categoryid) ? [getText(a.categoryid)] : [],
       };
-      appendJsonl(kbFile, article);
+      appendJsonl(files.kb_articles, article);
       counts.kbArticles++;
     }
   } catch (err) {
@@ -668,7 +649,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
   kbSpinner.succeed(`${counts.kbArticles} KB articles exported`);
 
   // ----- Export Departments as rules (for reference) -----
-  const rulesSpinner = ora('Exporting departments...').start();
+  const rulesSpinner = exportSpinner('Exporting departments...');
   try {
     const data = await kayakoClassicFetch(auth, '/Base/Department') as Record<string, unknown>;
     const deptContainer = (data as Record<string, unknown>)?.departments as Record<string, unknown>;
@@ -685,7 +666,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
         actions: {},
         active: true,
       };
-      appendJsonl(rulesFile, rule);
+      appendJsonl(files.rules, rule);
       counts.rules++;
     }
   } catch {
@@ -693,13 +674,5 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
   }
   rulesSpinner.succeed(`${counts.rules} departments exported`);
 
-  const manifest: ExportManifest = {
-    source: 'kayako-classic',
-    exportedAt: new Date().toISOString(),
-    counts,
-  };
-  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-
-  console.log(chalk.green(`\nExport complete → ${outDir}/manifest.json`));
-  return manifest;
+  return writeManifest(outDir, 'kayako-classic', counts);
 }

@@ -1,10 +1,10 @@
-import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
-import { join } from 'path';
-import chalk from 'chalk';
-import ora from 'ora';
 import type {
   Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
 } from '../schema/types.js';
+import {
+  createClient, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
+  type FetchFn,
+} from './base/index.js';
 
 export interface HelpScoutAuth {
   appId: string;
@@ -79,7 +79,7 @@ interface HSArticle {
   createdAt: string;
 }
 
-// ---- OAuth2 token management ----
+// ---- OAuth2 token management (helpscout-specific) ----
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
@@ -111,54 +111,43 @@ async function getAccessToken(auth: HelpScoutAuth): Promise<string> {
   return cachedToken.token;
 }
 
-// ---- Fetch wrapper ----
+// ---- Client ----
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function createHelpScoutClient(auth: HelpScoutAuth) {
+  return createClient({
+    baseUrl: 'https://api.helpscout.net/v2',
+    authHeaders: async () => ({ Authorization: `Bearer ${await getAccessToken(auth)}` }),
+    sourceName: 'Help Scout',
+    defaultRetryAfterSeconds: 10,
+  });
 }
 
+/**
+ * Create a fetch adapter that unwraps Help Scout's _embedded pagination responses
+ * into the flat structure expected by paginatePages().
+ *
+ * Help Scout returns: { _embedded: { <key>: [...] }, page: { totalPages: N } }
+ * paginatePages expects: { <key>: [...], totalPages: N }
+ */
+function createHSPaginatedFetch(baseFetch: FetchFn, embeddedKey: string): FetchFn {
+  return async <T>(path: string, options?: { method?: string; body?: unknown }): Promise<T> => {
+    const response = await baseFetch<Record<string, unknown>>(path, options);
+    const embedded = response._embedded as Record<string, unknown> | undefined;
+    const page = response.page as { totalPages: number } | undefined;
+
+    return {
+      [embeddedKey]: embedded?.[embeddedKey] ?? [],
+      totalPages: page?.totalPages ?? 1,
+    } as T;
+  };
+}
+
+/** @deprecated Use createHelpScoutClient() + client.request() instead. Kept for backward compatibility. */
 export async function helpscoutFetch<T>(auth: HelpScoutAuth, path: string, options?: {
   method?: string;
   body?: unknown;
 }): Promise<T> {
-  const url = path.startsWith('http') ? path : `https://api.helpscout.net/v2${path}`;
-  const token = await getAccessToken(auth);
-
-  let retries = 0;
-  const maxRetries = 5;
-
-  while (true) {
-    const res = await fetch(url, {
-      method: options?.method ?? 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
-    });
-
-    if (res.status === 429) {
-      const rawRetryAfter = parseInt(res.headers.get('Retry-After') ?? '10', 10);
-      const retryAfter = isNaN(rawRetryAfter) ? 10 : rawRetryAfter;
-      if (retries >= maxRetries) throw new Error('Rate limit exceeded after max retries');
-      retries++;
-      await sleep(retryAfter * 1000);
-      continue;
-    }
-
-    if (!res.ok) {
-      const errorBody = await res.text().catch(() => '');
-      throw new Error(`Help Scout API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
-    }
-
-    // 201/204 responses may have no body — return Location header if present
-    if (res.status === 201 || res.status === 204) {
-      const location = res.headers.get('Location') ?? '';
-      return { location } as T;
-    }
-
-    return res.json() as Promise<T>;
-  }
+  return createHelpScoutClient(auth).request<T>(path, options);
 }
 
 // ---- Mapping helpers ----
@@ -170,187 +159,160 @@ function mapStatus(status: string): TicketStatus {
   return map[status] ?? 'open';
 }
 
-function appendJsonl(filePath: string, record: unknown): void {
-  appendFileSync(filePath, JSON.stringify(record) + '\n');
-}
-
 // ---- Export ----
 
 export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Promise<ExportManifest> {
-  mkdirSync(outDir, { recursive: true });
-
-  const ticketsFile = join(outDir, 'tickets.jsonl');
-  const messagesFile = join(outDir, 'messages.jsonl');
-  const customersFile = join(outDir, 'customers.jsonl');
-  const orgsFile = join(outDir, 'organizations.jsonl');
-  const kbFile = join(outDir, 'kb_articles.jsonl');
-  const rulesFile = join(outDir, 'rules.jsonl');
-
-  for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
-    writeFileSync(f, '');
-  }
-
+  const client = createHelpScoutClient(auth);
+  const files = setupExport(outDir);
   const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
 
   // Export conversations (= tickets)
-  const convSpinner = ora('Exporting conversations...').start();
-  let page = 1;
-  let hasMore = true;
+  const convSpinner = exportSpinner('Exporting conversations...');
+  const convFetch = createHSPaginatedFetch(client.request.bind(client), 'conversations');
 
-  while (hasMore) {
-    const data = await helpscoutFetch<{
-      _embedded: { conversations: HSConversation[] };
-      page: { totalPages: number; number: number };
-    }>(auth, `/conversations?page=${page}&status=all`);
+  await paginatePages<HSConversation>({
+    fetch: convFetch,
+    path: '/conversations?status=all',
+    dataKey: 'conversations',
+    totalPagesKey: 'totalPages',
+    onPage: async (conversations) => {
+      for (const conv of conversations) {
+        const ticket: Ticket = {
+          id: `hs-${conv.id}`,
+          externalId: String(conv.id),
+          source: 'helpscout',
+          subject: conv.subject ?? `Conversation #${conv.number}`,
+          status: mapStatus(conv.status),
+          priority: 'normal', // Help Scout doesn't have priority on conversations
+          assignee: conv.assignee ? String(conv.assignee.id) : undefined,
+          requester: conv.primaryCustomer?.email ?? String(conv.primaryCustomer?.id ?? 'unknown'),
+          tags: (conv.tags ?? []).map(t => t.tag),
+          createdAt: conv.createdAt,
+          updatedAt: conv.userUpdatedAt,
+          customFields: conv.customFields ? Object.fromEntries(conv.customFields.map(f => [f.name, f.value])) : undefined,
+        };
+        appendJsonl(files.tickets, ticket);
+        counts.tickets++;
 
-    for (const conv of data._embedded.conversations) {
-      const ticket: Ticket = {
-        id: `hs-${conv.id}`,
-        externalId: String(conv.id),
-        source: 'helpscout',
-        subject: conv.subject ?? `Conversation #${conv.number}`,
-        status: mapStatus(conv.status),
-        priority: 'normal', // Help Scout doesn't have priority on conversations
-        assignee: conv.assignee ? String(conv.assignee.id) : undefined,
-        requester: conv.primaryCustomer?.email ?? String(conv.primaryCustomer?.id ?? 'unknown'),
-        tags: (conv.tags ?? []).map(t => t.tag),
-        createdAt: conv.createdAt,
-        updatedAt: conv.userUpdatedAt,
-        customFields: conv.customFields ? Object.fromEntries(conv.customFields.map(f => [f.name, f.value])) : undefined,
-      };
-      appendJsonl(ticketsFile, ticket);
-      counts.tickets++;
-
-      // Hydrate threads (= messages)
-      try {
-        let threadPage = 1;
-        let hasMoreThreads = true;
-        while (hasMoreThreads) {
-          const threadData = await helpscoutFetch<{
-            _embedded: { threads: HSThread[] };
-            page: { totalPages: number };
-          }>(auth, `/conversations/${conv.id}/threads?page=${threadPage}`);
-
-          for (const t of threadData._embedded.threads) {
-            if (!t.body) continue;
-            const message: Message = {
-              id: `hs-msg-${t.id}`,
-              ticketId: `hs-${conv.id}`,
-              author: String(t.createdBy?.id ?? 'unknown'),
-              body: t.body,
-              type: t.type === 'note' ? 'note' : 'reply',
-              createdAt: t.createdAt,
-            };
-            appendJsonl(messagesFile, message);
-            counts.messages++;
-          }
-
-          hasMoreThreads = threadPage < threadData.page.totalPages;
-          threadPage++;
+        // Hydrate threads (= messages)
+        const threadFetch = createHSPaginatedFetch(client.request.bind(client), 'threads');
+        try {
+          await paginatePages<HSThread>({
+            fetch: threadFetch,
+            path: `/conversations/${conv.id}/threads`,
+            dataKey: 'threads',
+            totalPagesKey: 'totalPages',
+            onPage: (threads) => {
+              for (const t of threads) {
+                if (!t.body) continue;
+                const message: Message = {
+                  id: `hs-msg-${t.id}`,
+                  ticketId: `hs-${conv.id}`,
+                  author: String(t.createdBy?.id ?? 'unknown'),
+                  body: t.body,
+                  type: t.type === 'note' ? 'note' : 'reply',
+                  createdAt: t.createdAt,
+                };
+                appendJsonl(files.messages, message);
+                counts.messages++;
+              }
+            },
+          });
+        } catch {
+          convSpinner.text = `Exporting conversations... ${counts.tickets} (threads failed for #${conv.id})`;
         }
-      } catch {
-        convSpinner.text = `Exporting conversations... ${counts.tickets} (threads failed for #${conv.id})`;
       }
-    }
-
-    convSpinner.text = `Exporting conversations... ${counts.tickets} exported`;
-    hasMore = page < data.page.totalPages;
-    page++;
-  }
+      convSpinner.text = `Exporting conversations... ${counts.tickets} exported`;
+    },
+  });
   convSpinner.succeed(`${counts.tickets} conversations exported (${counts.messages} messages)`);
 
   // Export customers
-  const customerSpinner = ora('Exporting customers...').start();
+  const customerSpinner = exportSpinner('Exporting customers...');
   const orgNames = new Set<string>();
-  page = 1;
-  hasMore = true;
+  const customerFetch = createHSPaginatedFetch(client.request.bind(client), 'customers');
 
-  while (hasMore) {
-    const data = await helpscoutFetch<{
-      _embedded: { customers: HSCustomer[] };
-      page: { totalPages: number };
-    }>(auth, `/customers?page=${page}`);
-
-    for (const c of data._embedded.customers) {
-      const email = c.emails?.[0]?.value ?? '';
-      if (c.organization) orgNames.add(c.organization);
-      const customer: Customer = {
-        id: `hs-user-${c.id}`,
-        externalId: String(c.id),
-        source: 'helpscout',
-        name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || email || `Customer ${c.id}`,
-        email,
-        phone: c.phones?.[0]?.value ?? undefined,
-        orgId: c.organization ? `hs-org-${c.organization}` : undefined,
-      };
-      appendJsonl(customersFile, customer);
-      counts.customers++;
-    }
-
-    customerSpinner.text = `Exporting customers... ${counts.customers} exported`;
-    hasMore = page < data.page.totalPages;
-    page++;
-  }
+  await paginatePages<HSCustomer>({
+    fetch: customerFetch,
+    path: '/customers',
+    dataKey: 'customers',
+    totalPagesKey: 'totalPages',
+    onPage: (customers) => {
+      for (const c of customers) {
+        const email = c.emails?.[0]?.value ?? '';
+        if (c.organization) orgNames.add(c.organization);
+        const customer: Customer = {
+          id: `hs-user-${c.id}`,
+          externalId: String(c.id),
+          source: 'helpscout',
+          name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || email || `Customer ${c.id}`,
+          email,
+          phone: c.phones?.[0]?.value ?? undefined,
+          orgId: c.organization ? `hs-org-${c.organization}` : undefined,
+        };
+        appendJsonl(files.customers, customer);
+        counts.customers++;
+      }
+      customerSpinner.text = `Exporting customers... ${counts.customers} exported`;
+    },
+  });
   customerSpinner.succeed(`${counts.customers} customers exported`);
 
   // Export users (agents)
-  const userSpinner = ora('Exporting users...').start();
+  const userSpinner = exportSpinner('Exporting users...');
+  const userFetch = createHSPaginatedFetch(client.request.bind(client), 'users');
   try {
-    page = 1;
-    hasMore = true;
-    while (hasMore) {
-      const data = await helpscoutFetch<{
-        _embedded: { users: HSUser[] };
-        page: { totalPages: number };
-      }>(auth, `/users?page=${page}`);
-
-      for (const u of data._embedded.users) {
-        const customer: Customer = {
-          id: `hs-agent-${u.id}`,
-          externalId: `agent-${u.id}`,
-          source: 'helpscout',
-          name: `${u.firstName} ${u.lastName}`.trim(),
-          email: u.email,
-        };
-        appendJsonl(customersFile, customer);
-        counts.customers++;
-      }
-
-      hasMore = page < data.page.totalPages;
-      page++;
-    }
+    await paginatePages<HSUser>({
+      fetch: userFetch,
+      path: '/users',
+      dataKey: 'users',
+      totalPagesKey: 'totalPages',
+      onPage: (users) => {
+        for (const u of users) {
+          const customer: Customer = {
+            id: `hs-agent-${u.id}`,
+            externalId: `agent-${u.id}`,
+            source: 'helpscout',
+            name: `${u.firstName} ${u.lastName}`.trim(),
+            email: u.email,
+          };
+          appendJsonl(files.customers, customer);
+          counts.customers++;
+        }
+      },
+    });
     userSpinner.succeed('Users exported');
   } catch (err) {
     userSpinner.warn(`Users: ${err instanceof Error ? err.message : 'not available'}`);
   }
 
   // Write organizations from names collected during customer export
-  const orgSpinner = ora('Collecting organizations...').start();
+  const orgSpinner = exportSpinner('Collecting organizations...');
   for (const name of orgNames) {
     const org: Organization = {
       id: `hs-org-${name}`, externalId: name, source: 'helpscout', name, domains: [],
     };
-    appendJsonl(orgsFile, org);
+    appendJsonl(files.organizations, org);
     counts.organizations++;
   }
   orgSpinner.succeed(`${counts.organizations} organizations collected`);
 
   // Export Docs KB articles
-  const kbSpinner = ora('Exporting KB articles...').start();
+  const kbSpinner = exportSpinner('Exporting KB articles...');
   try {
-    const collectionsData = await helpscoutFetch<{
+    const collectionsData = await client.request<{
       collections: { items: HSCollection[] };
-    }>(auth, '/docs/collections');
+    }>('/docs/collections');
 
     for (const coll of collectionsData.collections.items) {
-      page = 1;
-      hasMore = true;
+      let page = 1;
+      let hasMore = true;
       while (hasMore) {
         try {
-          const articlesData = await helpscoutFetch<{
+          const articlesData = await client.request<{
             articles: { items: HSArticle[] };
             pages: { totalPages: number };
-          }>(auth, `/docs/collections/${coll.id}/articles?page=${page}`);
+          }>(`/docs/collections/${coll.id}/articles?page=${page}`);
 
           for (const a of articlesData.articles.items) {
             const article: KBArticle = {
@@ -361,7 +323,7 @@ export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Prom
               body: a.text ?? '',
               categoryPath: [coll.name, ...(a.categories ?? []).map(c => c.name)],
             };
-            appendJsonl(kbFile, article);
+            appendJsonl(files.kb_articles, article);
             counts.kbArticles++;
           }
 
@@ -379,17 +341,9 @@ export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Prom
   else kbSpinner.info('0 articles exported');
 
   // No rules API
-  ora('Business rules: not available via Help Scout API').info();
+  exportSpinner('Business rules: not available via Help Scout API').info();
 
-  const manifest: ExportManifest = {
-    source: 'helpscout',
-    exportedAt: new Date().toISOString(),
-    counts,
-  };
-  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-
-  console.log(chalk.green(`\nExport complete → ${outDir}/manifest.json`));
-  return manifest;
+  return writeManifest(outDir, 'helpscout', counts);
 }
 
 // ---- Verify ----
@@ -401,13 +355,15 @@ export async function helpscoutVerifyConnection(auth: HelpScoutAuth): Promise<{
   error?: string;
 }> {
   try {
-    const mailboxes = await helpscoutFetch<{
-      _embedded: { mailboxes: HSMailbox[] };
-    }>(auth, '/mailboxes');
+    const client = createHelpScoutClient(auth);
 
-    const users = await helpscoutFetch<{
+    const mailboxes = await client.request<{
+      _embedded: { mailboxes: HSMailbox[] };
+    }>('/mailboxes');
+
+    const users = await client.request<{
       _embedded: { users: HSUser[] };
-    }>(auth, '/users?page=1');
+    }>('/users?page=1');
 
     const me = users._embedded.users[0];
     return {
@@ -444,25 +400,35 @@ export async function helpscoutCreateConversation(auth: HelpScoutAuth, mailboxId
   if (options?.tags) conversation.tags = options.tags;
   if (options?.assignTo) conversation.assignTo = options.assignTo;
 
-  const result = await helpscoutFetch<{ location: string }>(auth, '/conversations', {
+  // Help Scout returns 201 with no JSON body, only a Location header.
+  // The base client can't surface headers, so we fetch directly for this endpoint.
+  const token = await getAccessToken(auth);
+  const res = await fetch('https://api.helpscout.net/v2/conversations', {
     method: 'POST',
-    body: conversation,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(conversation),
   });
 
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => '');
+    throw new Error(`Help Scout API error: ${res.status} ${res.statusText}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`);
+  }
+
   // Extract conversation ID from Location header (e.g., "https://api.helpscout.net/v2/conversations/12345")
-  const id = parseInt(result.location?.split('/').pop() ?? '0', 10);
+  const location = res.headers.get('Location') ?? '';
+  const id = parseInt(location.split('/').pop() ?? '0', 10);
   return { id };
 }
 
 export async function helpscoutReply(auth: HelpScoutAuth, conversationId: number, body: string): Promise<void> {
-  await helpscoutFetch(auth, `/conversations/${conversationId}/reply`, {
+  await createHelpScoutClient(auth).request(`/conversations/${conversationId}/reply`, {
     method: 'POST',
     body: { text: body },
   });
 }
 
 export async function helpscoutAddNote(auth: HelpScoutAuth, conversationId: number, body: string): Promise<void> {
-  await helpscoutFetch(auth, `/conversations/${conversationId}/notes`, {
+  await createHelpScoutClient(auth).request(`/conversations/${conversationId}/notes`, {
     method: 'POST',
     body: { text: body },
   });
