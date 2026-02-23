@@ -3506,19 +3506,18 @@ export class Game {
     for (const other of this.entities) {
       if (!other.alive || other.id === primaryTargetId) continue;
       const isFriendly = this.isAllied(other.house, attackerHouse);
+      if (isFriendly) continue; // No splash damage to allied units
       const dist = worldDist(center, other.pos);
       if (dist > splashRange) continue;
 
       // Splash damage falls off linearly with distance (100% at center, 25% at edge)
-      // Friendly fire deals half splash damage
       const falloff = 1 - (dist / splashRange) * 0.75;
-      const friendlyMod = isFriendly ? 0.5 : 1.0;
       const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
-      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5 * friendlyMod));
+      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5));
       const killed = other.takeDamage(splashDmg, weapon.warhead);
 
       // Retaliation from splash damage
-      if (!killed && attacker && !isFriendly) {
+      if (!killed && attacker) {
         this.triggerRetaliation(other, attacker);
       }
 

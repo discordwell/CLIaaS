@@ -830,6 +830,8 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   // Create structures from INI and mark their cells as impassable
   const structures: MapStructure[] = [];
   for (const s of data.structures) {
+    // Skip V-series Neutral village buildings (V01-V19) — no sprite assets
+    if (s.type.startsWith('V') && s.house === 'Neutral') continue;
     const pos = cellIndexToPos(s.cell);
     const image = STRUCTURE_IMAGES[s.type] ?? s.type.toLowerCase();
     const maxHp = STRUCTURE_MAX_HP[s.type] ?? 256;
@@ -1075,6 +1077,29 @@ export function applyScenarioOverrides(
   }
 }
 
+// === RA Section Decompressor ===
+// RA MapPack/OverlayPack use a chunk-based container format:
+//   [uint16_le compressed_size][uint16_le decompressed_size][format80 LCW data]
+//   repeated until dest is filled or input exhausted.
+
+function decompressRASections(bytes: Uint8Array, start: number, dest: Uint8Array, destSize: number): number {
+  let sp = start;
+  let dp = 0;
+  while (dp < destSize && sp + 4 <= bytes.length) {
+    const compressedSize = bytes[sp] | (bytes[sp + 1] << 8);
+    const decompressedSize = bytes[sp + 2] | (bytes[sp + 3] << 8);
+    sp += 4;
+    if (compressedSize === 0 || sp + compressedSize > bytes.length) break;
+    const chunk = new Uint8Array(decompressedSize);
+    lcwDecompressMapPack(bytes, sp, chunk, decompressedSize);
+    const copyLen = Math.min(decompressedSize, destSize - dp);
+    dest.set(chunk.subarray(0, copyLen), dp);
+    dp += copyLen;
+    sp += compressedSize;
+  }
+  return sp;
+}
+
 // === OverlayPack Decoder ===
 // OverlayPack contains Base64-encoded, LCW-compressed overlay type data.
 // Single layer: overlay type ID per cell (0xFF = no overlay).
@@ -1090,7 +1115,7 @@ function decodeOverlayPack(base64Data: string, map: GameMap): void {
     }
     const MAP_SIZE = 128 * 128;
     const overlay = new Uint8Array(MAP_SIZE).fill(0xFF);
-    lcwDecompressMapPack(bytes, 0, overlay, MAP_SIZE);
+    decompressRASections(bytes, 0, overlay, MAP_SIZE);
     map.overlay = overlay;
   } catch {
     // OverlayPack decode failed — overlays stay empty
@@ -1116,10 +1141,10 @@ function decodeMapPack(base64Data: string, map: GameMap): void {
     const templateType = new Uint8Array(MAP_SIZE);
     const templateIcon = new Uint8Array(MAP_SIZE);
 
-    // LCW decompress two layers from the packed data
-    const offset1 = lcwDecompressMapPack(bytes, 0, templateType, MAP_SIZE);
+    // Decompress two layers from the chunk-header container
+    const offset1 = decompressRASections(bytes, 0, templateType, MAP_SIZE);
     if (offset1 > 0) {
-      lcwDecompressMapPack(bytes, offset1, templateIcon, MAP_SIZE);
+      decompressRASections(bytes, offset1, templateIcon, MAP_SIZE);
     }
 
     // Store template data on the map
