@@ -7,16 +7,19 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
-const STORE_DIR = '/tmp/cliaas-demo';
+function getStoreDir(): string {
+  return process.env.CLIAAS_DATA_DIR || '/tmp/cliaas-demo';
+}
 
 function ensureDir(): void {
-  if (!existsSync(STORE_DIR)) {
-    mkdirSync(STORE_DIR, { recursive: true });
+  const dir = getStoreDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 }
 
 export function readJsonlFile<T>(filename: string): T[] {
-  const filePath = join(STORE_DIR, filename);
+  const filePath = join(getStoreDir(), filename);
   if (!existsSync(filePath)) return [];
   const results: T[] = [];
   for (const line of readFileSync(filePath, 'utf-8').split('\n')) {
@@ -32,7 +35,7 @@ export function readJsonlFile<T>(filename: string): T[] {
 
 export function writeJsonlFile<T>(filename: string, items: T[]): void {
   ensureDir();
-  const filePath = join(STORE_DIR, filename);
+  const filePath = join(getStoreDir(), filename);
   const content = items.map((item) => JSON.stringify(item)).join('\n');
   writeFileSync(filePath, content + '\n', 'utf-8');
 }

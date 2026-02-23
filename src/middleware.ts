@@ -7,15 +7,18 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('middleware');
 
-function getAuthSecret(): string {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret && process.env.NODE_ENV === 'production') {
-    throw new Error('AUTH_SECRET environment variable is required in production');
-  }
-  return secret || 'cliaas-dev-secret-change-in-production';
-}
+let _jwtSecret: Uint8Array | null = null;
 
-const JWT_SECRET = new TextEncoder().encode(getAuthSecret());
+function getJwtSecret(): Uint8Array {
+  if (!_jwtSecret) {
+    const secret = process.env.AUTH_SECRET;
+    if (!secret && process.env.NODE_ENV === 'production') {
+      throw new Error('AUTH_SECRET environment variable is required in production');
+    }
+    _jwtSecret = new TextEncoder().encode(secret || 'cliaas-dev-secret-change-in-production');
+  }
+  return _jwtSecret;
+}
 
 const COOKIE_NAME = 'cliaas-session';
 
@@ -120,7 +123,7 @@ export async function middleware(request: NextRequest) {
   }
 
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, getJwtSecret());
     // Attach user info as headers for downstream use
     const response = NextResponse.next();
     response.headers.set('x-user-id', payload.id as string);

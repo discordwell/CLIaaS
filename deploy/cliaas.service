@@ -11,6 +11,7 @@ WorkingDirectory=__APP_DIR__
 Environment=NODE_ENV=production
 Environment=HOST=0.0.0.0
 Environment=PORT=__APP_PORT__
+Environment=CLIAAS_DATA_DIR=/home/ubuntu/cliaas-data
 EnvironmentFile=__ENV_FILE__
 ExecStart=__APP_DIR__/scripts/run_production.sh
 Restart=always
