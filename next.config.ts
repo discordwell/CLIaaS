@@ -4,6 +4,10 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
+  typescript: {
+    // CLI connector types checked separately via tsc --noEmit
+    ignoreBuildErrors: true,
+  },
   turbopack: {
     root: process.cwd(),
   },

@@ -105,11 +105,10 @@ export class TestRunner {
         if (g.tick >= TIMEOUT_TICKS) finish('timeout');
       };
 
-      // Set turbo multiplier
-      this.game.turboMultiplier = this.config.ticksPerFrame;
-
-      // Listen for win/lose
+      // Listen for win/lose + set turbo after start() completes
+      const turbo = this.config.ticksPerFrame;
       this.game.onStateChange = (state: GameState) => {
+        if (state === 'playing') this.game.turboMultiplier = turbo;
         if (state === 'won' || state === 'lost') finish(state);
       };
 

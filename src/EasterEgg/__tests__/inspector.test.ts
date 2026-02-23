@@ -165,8 +165,9 @@ describe('GameInspector', () => {
   });
 
   describe('B3: Ant rotation lock', () => {
-    it('detects ant stuck facing same direction while attacking', () => {
-      const ant = makeEntity(UnitType.ANT1, House.USSR, 1200, 1200);
+    it('detects slow-rotating ant stuck facing same direction while attacking', () => {
+      // ANT2 has rot=6 (slow rotation) — B3 should fire
+      const ant = makeEntity(UnitType.ANT2, House.USSR, 1200, 1200);
       const target = makeEntity(UnitType.I_E1, House.Spain, 1210, 1200);
       ant.mission = Mission.ATTACK;
       ant.target = target;
@@ -181,6 +182,22 @@ describe('GameInspector', () => {
       const anomalies = inspector.check(game2);
       expect(findAnomaly(anomalies, 'B3')).toBeDefined();
       expect(findAnomaly(anomalies, 'B3')!.severity).toBe('critical');
+    });
+
+    it('does not fire for fast-rotating ants (rot >= 8)', () => {
+      // ANT1 has rot=8 (instant rotation) — same facing is normal
+      const ant = makeEntity(UnitType.ANT1, House.USSR, 1200, 1200);
+      const target = makeEntity(UnitType.I_E1, House.Spain, 1210, 1200);
+      ant.mission = Mission.ATTACK;
+      ant.target = target;
+      ant.facing = 0;
+
+      const game1 = mockGame({ tick: 100, entities: [ant, target] });
+      inspector.check(game1);
+
+      const game2 = mockGame({ tick: 150, entities: [ant, target] });
+      const anomalies = inspector.check(game2);
+      expect(findAnomaly(anomalies, 'B3')).toBeUndefined();
     });
   });
 

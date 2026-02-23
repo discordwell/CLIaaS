@@ -123,8 +123,9 @@ export class GameInspector {
         }
       }
 
-      // B3: Ant rotation lock
-      if (e.isAnt && e.mission === Mission.ATTACK && e.target && e.target.alive && e.inRange(e.target)) {
+      // B3: Ant rotation lock — only for slow-rotating ants (rot < 8).
+      // Ants with rot >= 8 snap instantly, so same-facing is normal (target in same direction).
+      if (e.isAnt && e.stats.rot < 8 && e.mission === Mission.ATTACK && e.target && e.target.alive && e.inRange(e.target)) {
         if (e.facing === tracker.lastFacing) {
           const facingStuckDur = tick - tracker.facingStuckTick;
           if (facingStuckDur > 45) {

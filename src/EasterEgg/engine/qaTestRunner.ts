@@ -215,11 +215,12 @@ export class QATestRunner {
         this.capture.flush(this.game.tick);
       };
 
-      // Turbo speed
-      this.game.turboMultiplier = 60;
-
       // Listen for win/lose
       this.game.onStateChange = (state: GameState) => {
+        if (state === 'playing') {
+          // Set turbo AFTER start() completes (start() resets turboMultiplier to 1)
+          this.game.turboMultiplier = 60;
+        }
         if (state === 'won') {
           this.capture.requestCapture('state', 'won');
           finish('won');

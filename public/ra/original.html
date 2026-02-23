@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Red Alert - Original WASM</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; margin: 0 auto; image-rendering: pixelated; }
+  #status { color: #ff4400; font-family: monospace; text-align: center; padding: 20px; font-size: 18px; }
+  #progress { display: block; margin: 10px auto; width: 300px; }
+</style>
+</head>
+<body>
+<div id="status">Loading Red Alert WASM...</div>
+<progress id="progress" max="100" value="0"></progress>
+<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<script>
+// Intercept WebGL context creation to enable preserveDrawingBuffer for screenshots
+(function() {
+  var origGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+    if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+      attrs = Object.assign({}, attrs || {}, { preserveDrawingBuffer: true });
+    }
+    return origGetContext.call(this, type, attrs);
+  };
+})();
+
+var statusElement = document.getElementById("status");
+var progressElement = document.getElementById("progress");
+var canvasElement = document.getElementById("canvas");
+
+// Scale canvas to fill viewport
+function resizeCanvas() {
+  var w = window.innerWidth;
+  var h = window.innerHeight;
+  canvasElement.style.width = w + 'px';
+  canvasElement.style.height = h + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+var Module = {
+  print: function() { console.log(Array.from(arguments).join(' ')); },
+  canvas: canvasElement,
+  setStatus: function(text) {
+    if (text) {
+      statusElement.innerHTML = text;
+      var m = text.match(/\((\d+)\/(\d+)\)/);
+      if (m) {
+        progressElement.value = parseInt(m[1]);
+        progressElement.max = parseInt(m[2]);
+      }
+    } else {
+      statusElement.style.display = 'none';
+      progressElement.style.display = 'none';
+    }
+  },
+  totalDependencies: 0,
+  monitorRunDependencies: function(left) {
+    this.totalDependencies = Math.max(this.totalDependencies, left);
+    Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+  }
+};
+Module.setStatus('Downloading...');
+</script>
+<script async src="rasdl.js"></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useKonamiCode } from './useKonamiCode';
 
 const AntGame = lazy(() => import('./AntGame'));
@@ -13,6 +13,14 @@ export default function EasterEggProvider({ children }: { children: React.ReactN
     import('./engine').then(m => m.preloadAssets()).catch(() => {});
     setGameActive(true);
   }, []);
+
+  // Auto-activate when ?anttest= URL param is present (for automated testing)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('anttest') && !gameActive) {
+      activateGame();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exitGame = useCallback(() => {
     setGameActive(false);

@@ -371,13 +371,20 @@ export class Game {
     const now = performance.now();
     const dt = now - this.lastTime;
     this.lastTime = now;
-    this.accumulator += Math.min(dt, 200 * this.turboMultiplier);
+    this.accumulator += Math.min(dt * this.turboMultiplier, 200 * this.turboMultiplier);
 
-    // Fixed timestep updates
-    while (this.accumulator >= this.tickInterval) {
+    // Fixed timestep updates (cap ticks per frame to avoid blocking)
+    const maxTicksPerFrame = Math.max(this.turboMultiplier, 1);
+    let ticksThisFrame = 0;
+    while (this.accumulator >= this.tickInterval && ticksThisFrame < maxTicksPerFrame) {
       this.accumulator -= this.tickInterval;
       this.update();
+      ticksThisFrame++;
       if (this.state !== 'playing') break;
+    }
+    // Drain excess accumulator to prevent spiral of death
+    if (ticksThisFrame >= maxTicksPerFrame && this.accumulator > this.tickInterval) {
+      this.accumulator = 0;
     }
 
     this.render();
