@@ -195,18 +195,7 @@ async function main(): Promise<void> {
 
   for (const [templateType, filename] of Object.entries(TEMPLATE_MAP)) {
     const typeId = parseInt(templateType);
-    const temData = temperatMix.readFile(filename);
-    if (!temData) {
-      // Try lowercase
-      const temDataLower = temperatMix.readFile(filename.toLowerCase());
-      if (!temDataLower) {
-        log(`  SKIP ${filename} (type ${typeId}): not found`);
-        templatesSkipped++;
-        continue;
-      }
-    }
-
-    const fileData = temData || temperatMix.readFile(filename.toLowerCase());
+    const fileData = temperatMix.readFile(filename) ?? temperatMix.readFile(filename.toLowerCase());
     if (!fileData || fileData.length < 40) {
       log(`  SKIP ${filename} (type ${typeId}): too small (${fileData?.length ?? 0} bytes)`);
       templatesSkipped++;
