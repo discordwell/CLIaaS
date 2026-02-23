@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listWebhooks, createWebhook } from '@/lib/webhooks';
 import type { WebhookEventType } from '@/lib/webhooks';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   try {
     const body = await request.json().catch(() => ({} as Record<string, unknown>));
     const { url, events, secret, enabled, retryPolicy } = body as {

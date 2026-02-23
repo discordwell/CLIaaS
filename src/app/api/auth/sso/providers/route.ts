@@ -5,13 +5,17 @@ import {
   createProvider,
   type SSOProvider,
 } from '@/lib/auth/sso-config';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/auth/sso/providers — List all SSO providers.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const providers = getProviders();
 
@@ -31,6 +35,9 @@ export async function GET() {
  * POST /api/auth/sso/providers — Create a new SSO provider.
  */
 export async function POST(request: NextRequest) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const body = await request.json();
     const { name, protocol, enabled } = body;

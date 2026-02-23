@@ -129,6 +129,21 @@ export function buildPatchRequest(
 }
 
 /**
+ * Build headers that simulate middleware-set auth headers.
+ * Useful for testing route-level auth guards (requireAuth, requireRole).
+ */
+export function buildAuthHeaders(
+  user: Partial<SessionUser> = TEST_USER,
+): Record<string, string> {
+  return {
+    'x-user-id': user.id ?? TEST_USER.id,
+    'x-workspace-id': user.workspaceId ?? TEST_USER.workspaceId,
+    'x-user-role': user.role ?? TEST_USER.role,
+    'x-user-email': user.email ?? TEST_USER.email,
+  };
+}
+
+/**
  * Build a POST Request with FormData (for Twilio webhooks, etc.).
  */
 export function buildFormPostRequest(

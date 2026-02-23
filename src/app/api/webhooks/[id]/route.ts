@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getWebhook, updateWebhook, deleteWebhook } from '@/lib/webhooks';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   try {
@@ -46,9 +50,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   try {

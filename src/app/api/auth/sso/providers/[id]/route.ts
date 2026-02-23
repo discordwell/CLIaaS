@@ -6,6 +6,7 @@ import {
   deleteProvider,
   type SSOProvider,
 } from '@/lib/auth/sso-config';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,9 +14,12 @@ export const dynamic = 'force-dynamic';
  * GET /api/auth/sso/providers/[id] — Get a single SSO provider.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   try {
@@ -43,6 +47,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   try {
@@ -94,9 +101,12 @@ export async function PATCH(
  * DELETE /api/auth/sso/providers/[id] — Delete an SSO provider.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   try {

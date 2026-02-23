@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { PluginRegistry } from '@/lib/plugins';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const body = await request.json().catch(() => ({} as Record<string, unknown>));
     const { id, name, version, description, author, hooks, actions, enabled, config } =

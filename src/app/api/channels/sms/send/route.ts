@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { sendMessage as twilioSend } from '@/lib/channels/twilio';
 import { addMessage } from '@/lib/channels/sms-store';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const auth = requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   try {
     const body = await request.json();
     const { to, body: messageBody, channel, conversationId } = body as {

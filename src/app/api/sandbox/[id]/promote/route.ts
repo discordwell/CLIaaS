@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { promoteSandbox } from '@/lib/sandbox';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
   const { selectedEntryIds } = body as { selectedEntryIds?: string[] };

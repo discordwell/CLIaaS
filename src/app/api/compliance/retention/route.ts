@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listRetentionPolicies, createRetentionPolicy } from '@/lib/compliance';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const policies = listRetentionPolicies();
     return NextResponse.json({ policies });
@@ -17,6 +21,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const body = await request.json();
     const { resource, retentionDays, action } = body;

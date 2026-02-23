@@ -42,10 +42,15 @@ const PUBLIC_PATHS = [
   '/api/csat',
   // SMS/WhatsApp webhook (Twilio)
   '/api/channels/sms/inbound',
+  // Voice webhooks (Twilio)
+  '/api/channels/voice/inbound',
+  '/api/channels/voice/status',
   // Social media webhooks
   '/api/channels/facebook/webhook',
   '/api/channels/instagram/webhook',
   '/api/channels/twitter/webhook',
+  // Zendesk webhook (has its own ZENDESK_WEBHOOK_SECRET verification)
+  '/api/zendesk/webhook',
 ];
 
 function isPublic(pathname: string): boolean {
@@ -114,7 +119,17 @@ export async function middleware(request: NextRequest) {
 
   // Check session cookie
   const token = request.cookies.get(COOKIE_NAME)?.value;
+  const isApiRoute = pathname.startsWith('/api/');
+
   if (!token) {
+    if (isApiRoute) {
+      const response = NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+      applySecurityHeaders(response);
+      return response;
+    }
     const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('next', pathname);
     const response = NextResponse.redirect(signInUrl);
@@ -128,10 +143,21 @@ export async function middleware(request: NextRequest) {
     const response = NextResponse.next();
     response.headers.set('x-user-id', payload.id as string);
     response.headers.set('x-workspace-id', payload.workspaceId as string);
+    response.headers.set('x-user-role', (payload.role as string) || '');
+    response.headers.set('x-user-email', (payload.email as string) || '');
     applySecurityHeaders(response);
     return response;
   } catch {
     // Invalid/expired token
+    if (isApiRoute) {
+      const response = NextResponse.json(
+        { error: 'Invalid or expired token' },
+        { status: 401 }
+      );
+      response.cookies.delete(COOKIE_NAME);
+      applySecurityHeaders(response);
+      return response;
+    }
     const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('next', pathname);
     const response = NextResponse.redirect(signInUrl);
