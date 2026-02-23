@@ -55,13 +55,41 @@ export class AssetManager {
   private sheets = new Map<string, SpriteSheet>();
   private manifest: AssetManifest | null = null;
   private palette: number[][] | null = null;
+  private loaded = false;
+  private loadPromise: Promise<void> | null = null;
 
   /** TEMPERATE tileset atlas image and lookup data */
   private tilesetImage: HTMLImageElement | null = null;
   private tilesetMeta: TilesetMeta | null = null;
 
-  /** Load manifest and all sprite sheets. Calls onProgress(loaded, total) during loading. */
+  /** Whether all assets have finished loading */
+  get isLoaded(): boolean { return this.loaded; }
+
+  /** Load manifest and all sprite sheets. Calls onProgress(loaded, total) during loading.
+   *  Safe to call multiple times — subsequent calls await the existing load. */
   async loadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
+    if (this.loaded) {
+      // Already loaded — report 100% and return
+      if (this.manifest) {
+        const total = Object.keys(this.manifest).length;
+        onProgress?.(total, total);
+      }
+      return;
+    }
+    if (this.loadPromise) {
+      // Already loading — attach progress and wait
+      await this.loadPromise;
+      if (this.manifest) {
+        const total = Object.keys(this.manifest).length;
+        onProgress?.(total, total);
+      }
+      return;
+    }
+    this.loadPromise = this.doLoadAll(onProgress);
+    await this.loadPromise;
+  }
+
+  private async doLoadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
     // Load manifest
     const manifestRes = await fetch(`${BASE_URL}/manifest.json`);
     if (!manifestRes.ok) throw new Error(`Failed to load manifest: ${manifestRes.status}`);
@@ -96,14 +124,14 @@ export class AssetManager {
     let loaded = 0;
 
     const promises = names.map(async (name) => {
-      const meta = this.manifest![name];
       const image = await loadImage(`${BASE_URL}/${name}.png`);
-      this.sheets.set(name, { image, meta });
+      this.sheets.set(name, { image, meta: this.manifest![name] });
       loaded++;
       onProgress?.(loaded, total);
     });
 
     await Promise.all(promises);
+    this.loaded = true;
   }
 
   /** Get a loaded sprite sheet by name */
@@ -185,4 +213,18 @@ export class AssetManager {
   hasTileset(): boolean {
     return this.tilesetImage !== null && this.tilesetMeta !== null;
   }
+}
+
+/** Shared singleton — preload via preloadAssets(), reused by all Game instances */
+let sharedAssets: AssetManager | null = null;
+
+/** Get or create the shared AssetManager singleton */
+export function getSharedAssets(): AssetManager {
+  if (!sharedAssets) sharedAssets = new AssetManager();
+  return sharedAssets;
+}
+
+/** Start preloading assets immediately (fire-and-forget). Returns the promise for optional await. */
+export function preloadAssets(): Promise<void> {
+  return getSharedAssets().loadAll();
 }

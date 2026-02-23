@@ -9,6 +9,8 @@ export default function EasterEggProvider({ children }: { children: React.ReactN
   const [gameActive, setGameActive] = useState(false);
 
   const activateGame = useCallback(() => {
+    // Fire-and-forget: start preloading game assets immediately while React mounts the component
+    import('./engine').then(m => m.preloadAssets()).catch(() => {});
     setGameActive(true);
   }, []);
 

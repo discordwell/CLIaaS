@@ -11,7 +11,7 @@ import {
   WARHEAD_VS_ARMOR, type WarheadType, UNIT_STATS, WEAPON_STATS,
   PRODUCTION_ITEMS, type ProductionItem, CursorType,
 } from './types';
-import { AssetManager } from './assets';
+import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
@@ -29,6 +29,7 @@ import {
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
 export type { MissionInfo } from './scenario';
 export { AudioManager } from './audio';
+export { preloadAssets } from './assets';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -204,7 +205,7 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.assets = new AssetManager();
+    this.assets = getSharedAssets();
     this.audio = new AudioManager();
     // Game viewport is narrower than canvas to leave room for sidebar
     this.camera = new Camera(canvas.width - Game.SIDEBAR_W, canvas.height);
