@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, type ProductionItem } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem } from './types';
 import { type Camera } from './camera';
 import { type AssetManager } from './assets';
 import { Entity } from './entity';
@@ -80,7 +80,7 @@ export class Renderer {
   sellMode = false;      // show sell cursor indicator
   repairMode = false;    // show repair cursor indicator
   repairingStructures = new Set<number>(); // indices of structures being repaired
-  corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; alpha: number }> = [];
+  corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; isAnt: boolean; alpha: number; deathVariant: number }> = [];
   showHelp = false;     // F1 help overlay
   difficulty: 'easy' | 'normal' | 'hard' = 'normal';
   idleCount = 0;        // number of idle player units
@@ -166,7 +166,7 @@ export class Renderer {
     this.renderOverlays(camera, map, tick);
     this.renderStructures(camera, map, structures, assets, tick);
     this.renderCrates(camera, map, tick);
-    this.renderCorpses(camera, map);
+    this.renderCorpses(camera, map, assets);
     this.renderEntities(camera, map, entities, assets, selectedIds, tick);
     this.renderTargetLines(camera, entities, selectedIds);
     this.renderWaypoints(camera, entities, selectedIds);
@@ -196,13 +196,52 @@ export class Renderer {
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
     this.renderMinimap(map, entities, structures, camera);
     this.renderOffscreenIndicators(camera, entities, selectedIds);
-    this.renderSidebar();
+    this.renderSidebar(assets);
     this.renderUnitInfo(entities, selectedIds);
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
   }
 
   // ─── Terrain ─────────────────────────────────────────────
+
+  /** Render a grass cell with RA-style dithered pixel variation */
+  private renderGrassCell(ctx: CanvasRenderingContext2D, sx: number, sy: number,
+    cx: number, cy: number, h: number, tmpl: number, icon: number): void {
+    // Base grass color from palette
+    const palIdx = PAL_GRASS_START + 3 + ((tmpl * 13 + icon * 7 + h) % 5);
+    ctx.fillStyle = this.palColor(palIdx, (h % 10) - 5);
+    ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
+    // RA-style dithered pixel variation: alternate darker/lighter grass pixels
+    for (let py = 0; py < CELL_SIZE; py += 2) {
+      for (let px = 0; px < CELL_SIZE; px += 2) {
+        const ph = cellHash(cx * 24 + px, cy * 24 + py);
+        if (ph % 6 === 0) {
+          // Darker grass pixel
+          ctx.fillStyle = this.palColor(PAL_GRASS_START + 7 + (ph % 3));
+          ctx.fillRect(sx + px, sy + py, 1, 1);
+        } else if (ph % 9 === 0) {
+          // Lighter grass pixel
+          ctx.fillStyle = this.palColor(PAL_GRASS_START + 1 + (ph % 2), 6);
+          ctx.fillRect(sx + px, sy + py, 1, 1);
+        }
+      }
+    }
+    // Dirt patch detail (sparse)
+    if (h % 7 === 0) {
+      const dx = (h % 12) + 4, dy = ((h >> 4) % 10) + 5;
+      ctx.fillStyle = this.palColor(PAL_DIRT_START + 6, -15);
+      ctx.globalAlpha = 0.25;
+      ctx.fillRect(sx + dx, sy + dy, 4 + (h % 3), 3);
+      ctx.globalAlpha = 1;
+    }
+    // Grass tuft (dark green blades)
+    if (h > 180) {
+      const gx = sx + (h % 16) + 3, gy = sy + ((h >> 4) % 14) + 4;
+      ctx.fillStyle = this.palColor(PAL_GRASS_START + 9);
+      ctx.fillRect(gx, gy, 1, 3);
+      ctx.fillRect(gx + 2, gy + 1, 1, 2);
+    }
+  }
 
   private renderTerrain(camera: Camera, map: GameMap, tick: number): void {
     const ctx = this.ctx;
@@ -248,61 +287,60 @@ export class Renderer {
               const isShoreDirt = tmpl >= 0x06 && tmpl <= 0x0C;
 
               if (isRoad) {
-                // Road tiles — palette dirt/sand colors (indices 84-90)
-                const palIdx = PAL_DIRT_START + 4 + ((icon * 7 + h) % 6);
-                ctx.fillStyle = this.palColor(palIdx);
+                // Road tiles — two-tone dirt with gravel dithering
+                const palIdx = PAL_DIRT_START + 4 + ((icon * 7 + h) % 4);
+                ctx.fillStyle = this.palColor(palIdx, 5);
                 ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-                // Road line detail using slightly lighter dirt
-                ctx.fillStyle = this.palColor(PAL_DIRT_START + 2, 10);
-                ctx.fillRect(screen.x + 2, screen.y + 11, 20, 2);
-              } else if (isRough) {
-                // Rough terrain — darker palette dirt (indices 88-94)
-                const palIdx = PAL_DIRT_START + 8 + (h % 6);
-                ctx.fillStyle = this.palColor(palIdx);
-                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-                // Rock scatter using darker dirt
-                ctx.fillStyle = this.palColor(PAL_DIRT_START + 12, -8);
-                ctx.fillRect(screen.x + (h % 14) + 2, screen.y + ((h >> 3) % 12) + 3, 5, 4);
-                ctx.fillRect(screen.x + ((h >> 5) % 10) + 6, screen.y + ((h >> 2) % 14) + 1, 3, 3);
-              } else if (isShoreDirt) {
-                // Shore/dirt transition — palette sand/brown (indices 82-88)
-                const palIdx = PAL_DIRT_START + 2 + (h % 6);
-                ctx.fillStyle = this.palColor(palIdx);
-                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-              } else {
-                // Other templates — grass with palette variation
-                const palIdx = PAL_GRASS_START + 3 + ((tmpl * 13 + icon * 7 + h) % 6);
-                const bri = ((h % 12) - 6);
-                ctx.fillStyle = this.palColor(palIdx, bri);
-                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-                // Subtle dirt patch detail from template
-                if ((h + icon) % 5 === 0) {
-                  ctx.fillStyle = this.palColor(PAL_DIRT_START + 6, -20);
-                  ctx.globalAlpha = 0.2;
-                  ctx.fillRect(screen.x + 3, screen.y + 3, CELL_SIZE - 6, CELL_SIZE - 6);
-                  ctx.globalAlpha = 1;
+                // Gravel dither pattern (RA-style pixel noise)
+                for (let py = 0; py < CELL_SIZE; py += 3) {
+                  for (let px = 0; px < CELL_SIZE; px += 3) {
+                    const ph = cellHash(cx * 24 + px, cy * 24 + py);
+                    if (ph % 4 === 0) {
+                      ctx.fillStyle = this.palColor(PAL_DIRT_START + 2 + (ph % 3), ph % 12 - 6);
+                      ctx.fillRect(screen.x + px, screen.y + py, 1, 1);
+                    }
+                  }
                 }
+                // Road edge darkening
+                ctx.fillStyle = this.palColor(PAL_DIRT_START + 8, -10);
+                ctx.globalAlpha = 0.3;
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, 2);
+                ctx.fillRect(screen.x, screen.y + CELL_SIZE - 2, CELL_SIZE, 2);
+                ctx.globalAlpha = 1;
+              } else if (isRough) {
+                // Rough terrain — dithered dirt/rock mix
+                const palIdx = PAL_DIRT_START + 8 + (h % 4);
+                ctx.fillStyle = this.palColor(palIdx);
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+                // Rock scatter with varied sizes
+                for (let r = 0; r < 3; r++) {
+                  const rh = (h + r * 47) & 0xFF;
+                  const rx = (rh % 18) + 2, ry = ((rh >> 3) % 16) + 3;
+                  const rs = 2 + (rh % 3);
+                  ctx.fillStyle = this.palColor(PAL_ROCK_START + 6 + (rh % 4));
+                  ctx.fillRect(screen.x + rx, screen.y + ry, rs, rs - 1);
+                }
+              } else if (isShoreDirt) {
+                // Shore/dirt — dithered sand transition
+                const palIdx = PAL_DIRT_START + 2 + (h % 4);
+                ctx.fillStyle = this.palColor(palIdx);
+                ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+                // Sand grain dithering
+                for (let py = 0; py < CELL_SIZE; py += 2) {
+                  for (let px = 0; px < CELL_SIZE; px += 2) {
+                    if (((px + py + h) % 5) === 0) {
+                      ctx.fillStyle = this.palColor(PAL_DIRT_START + (h % 3), 8);
+                      ctx.fillRect(screen.x + px, screen.y + py, 1, 1);
+                    }
+                  }
+                }
+              } else {
+                // Other templates — grass with dithered variation (RA-style)
+                this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
               }
             } else {
-              // Default clear — palette green (TEMPERATE only; INTERIOR already handled above)
-              const palIdx = PAL_GRASS_START + 2 + (h % 6);
-              ctx.fillStyle = this.palColor(palIdx, (h % 10) - 5);
-              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-              if (h < 15) {
-                ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);
-                ctx.globalAlpha = 0.25;
-                ctx.fillRect(screen.x + 4, screen.y + 4, CELL_SIZE - 8, CELL_SIZE - 8);
-                ctx.globalAlpha = 1;
-              }
-            }
-            // Grass tuft detail — darker green from palette
-            if (h > 200) {
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 8);
-              ctx.globalAlpha = 0.6;
-              const gx = screen.x + (h % 16) + 4;
-              const gy = screen.y + ((h >> 4) % 16) + 4;
-              ctx.fillRect(gx, gy, 2, 3);
-              ctx.globalAlpha = 1;
+              // Default clear — grass with dithered variation
+              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, 0, 0);
             }
             break;
           }
@@ -312,13 +350,23 @@ export class Renderer {
             const waterIdx = phase < PAL_WATER_COUNT ? phase : (PAL_WATER_COUNT * 2 - 2 - phase);
             ctx.fillStyle = this.palColor(PAL_WATER_START + waterIdx);
             ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Wave highlight using lighter water color
-            if ((h + tick) % 30 < 8) {
-              ctx.fillStyle = this.palColor(PAL_WATER_START, 0);
-              ctx.globalAlpha = 0.15;
-              ctx.fillRect(screen.x + 3, screen.y + 8, 18, 2);
-              ctx.globalAlpha = 1;
+            // Dithered water depth variation
+            for (let py = 0; py < CELL_SIZE; py += 3) {
+              for (let px = 0; px < CELL_SIZE; px += 3) {
+                const wp = cellHash(cx * 24 + px, cy * 24 + py + tick);
+                if (wp % 7 === 0) {
+                  ctx.fillStyle = this.palColor(PAL_WATER_START + Math.min(waterIdx + 1, PAL_WATER_COUNT - 1), 8);
+                  ctx.fillRect(screen.x + px, screen.y + py, 1, 1);
+                }
+              }
             }
+            // Wave highlights — moving ripple lines
+            const waveOff = (tick * 0.5 + h * 0.3) % CELL_SIZE;
+            ctx.fillStyle = this.palColor(PAL_WATER_START, 15);
+            ctx.globalAlpha = 0.2;
+            ctx.fillRect(screen.x + 2, screen.y + ((waveOff | 0) % CELL_SIZE), CELL_SIZE - 4, 1);
+            ctx.fillRect(screen.x + 6, screen.y + ((waveOff + 12 | 0) % CELL_SIZE), CELL_SIZE - 12, 1);
+            ctx.globalAlpha = 1;
             break;
           }
           case Terrain.ROCK: {
@@ -355,25 +403,37 @@ export class Renderer {
               ctx.fillRect(screen.x + 6, screen.y + 2, 12, 4);
               ctx.fillRect(screen.x + 6, screen.y + 18, 12, 4);
             } else {
-              // Ground under tree — dark grass from palette
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 9, (h % 8) - 4);
-              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-              // Tree trunk — palette brown (dirt index ~88)
-              ctx.fillStyle = this.palColor(PAL_DIRT_START + 8);
-              ctx.fillRect(screen.x + 10, screen.y + 14, 4, 10);
-              // Tree canopy — palette greens (dark→medium)
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 10);
+              // Ground under tree — dark grass with dithering
+              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+              // Tree shadow on ground
+              ctx.fillStyle = 'rgba(0,0,0,0.2)';
               ctx.beginPath();
-              ctx.arc(screen.x + 12, screen.y + 10, 8, 0, Math.PI * 2);
+              ctx.ellipse(screen.x + 13, screen.y + 19, 9, 4, 0, 0, Math.PI * 2);
               ctx.fill();
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 8);
+              // Trunk — darker brown with highlight
+              const tx = screen.x + 10 + (h % 2);
+              ctx.fillStyle = this.palColor(PAL_DIRT_START + 10);
+              ctx.fillRect(tx, screen.y + 12, 3, 10);
+              ctx.fillStyle = this.palColor(PAL_DIRT_START + 7);
+              ctx.fillRect(tx + 1, screen.y + 13, 1, 8);
+              // Canopy — layered with variation per cell
+              const cOff = h % 3;
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 10 + (h % 2));
               ctx.beginPath();
-              ctx.arc(screen.x + 10, screen.y + 8, 6, 0, Math.PI * 2);
+              ctx.arc(screen.x + 12, screen.y + 10, 9, 0, Math.PI * 2);
               ctx.fill();
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 6);
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 7 + cOff);
+              ctx.beginPath();
+              ctx.arc(screen.x + 10 + (h % 3), screen.y + 8, 6, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 5 + cOff);
               ctx.beginPath();
               ctx.arc(screen.x + 13, screen.y + 7, 4, 0, Math.PI * 2);
               ctx.fill();
+              // Leaf highlight pixels
+              ctx.fillStyle = this.palColor(PAL_GRASS_START + 3, 10);
+              ctx.fillRect(screen.x + 9, screen.y + 5, 1, 1);
+              ctx.fillRect(screen.x + 14, screen.y + 6, 1, 1);
             }
             break;
           }
@@ -807,7 +867,7 @@ export class Renderer {
 
   // ─── Corpses ─────────────────────────────────────────────
 
-  private renderCorpses(camera: Camera, map: GameMap): void {
+  private renderCorpses(camera: Camera, map: GameMap, assets: AssetManager): void {
     const ctx = this.ctx;
     for (const c of this.corpses) {
       const ecx = Math.floor(c.x / CELL_SIZE);
@@ -815,24 +875,56 @@ export class Renderer {
       if (map.getVisibility(ecx, ecy) === 0) continue; // shrouded
       const screen = camera.worldToScreen(c.x, c.y);
       if (screen.x < -20 || screen.x > this.width + 20 || screen.y < -20 || screen.y > this.height + 20) continue;
+
+      // Burn mark on ground under corpse
+      ctx.globalAlpha = c.alpha * 0.4;
+      ctx.fillStyle = '#1a1008';
+      const burnW = c.isInfantry ? 6 : (c.isAnt ? 10 : 12);
+      const burnH = c.isInfantry ? 4 : (c.isAnt ? 7 : 8);
+      ctx.beginPath();
+      ctx.ellipse(screen.x, screen.y + 2, burnW, burnH, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw actual sprite frame for the corpse
+      const stats = UNIT_STATS[c.type];
+      const image = stats?.image;
+      const sheet = image ? assets.getSheet(image) : null;
       ctx.globalAlpha = c.alpha;
-      if (c.isInfantry) {
-        // Infantry corpse: small dark blob
-        ctx.fillStyle = '#2a1a0a';
-        ctx.fillRect(screen.x - 3, screen.y - 1, 6, 3);
-        ctx.fillStyle = '#4a2a1a';
-        ctx.fillRect(screen.x - 2, screen.y - 1, 4, 2);
+
+      if (sheet && image) {
+        let frame = 0;
+        if (c.isInfantry) {
+          // Infantry: use last frame of death animation
+          const anim = INFANTRY_ANIMS[c.type] ?? INFANTRY_ANIMS.E1;
+          const d = (c.deathVariant === 1 && anim.die2) ? anim.die2 : anim.die1;
+          frame = d.frame + d.count - 1;
+        } else if (c.isAnt) {
+          // Ants: use first attack frame for facing (curled up pose)
+          frame = ANT_ANIM.attackBase + c.facing * ANT_ANIM.attackCount;
+        } else {
+          // Vehicles: use body frame for facing direction
+          const facingIndex = c.facing * 4;
+          frame = BODY_SHAPE[facingIndex] ?? 0;
+        }
+        assets.drawFrame(ctx, image, frame % sheet.meta.frameCount, screen.x, screen.y, {
+          centerX: true,
+          centerY: true,
+        });
+        // Darken the sprite to look like a wreck/corpse
+        ctx.globalAlpha = c.alpha * 0.45;
+        ctx.fillStyle = '#000000';
+        const hw = sheet.meta.frameWidth / 2;
+        const hh = sheet.meta.frameHeight / 2;
+        ctx.fillRect(screen.x - hw, screen.y - hh, sheet.meta.frameWidth, sheet.meta.frameHeight);
       } else {
-        // Vehicle wreckage: dark twisted metal shapes
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillRect(screen.x - 6, screen.y - 4, 12, 8);
-        ctx.fillStyle = '#3a2a2a';
-        ctx.fillRect(screen.x - 4, screen.y - 3, 8, 6);
-        // Burn mark around wreck
-        ctx.fillStyle = 'rgba(20,15,10,0.3)';
-        ctx.beginPath();
-        ctx.ellipse(screen.x, screen.y + 2, 8, 5, 0, 0, Math.PI * 2);
-        ctx.fill();
+        // Fallback: procedural corpse if no sprite available
+        if (c.isInfantry) {
+          ctx.fillStyle = '#2a1a0a';
+          ctx.fillRect(screen.x - 3, screen.y - 1, 6, 3);
+        } else {
+          ctx.fillStyle = '#1a1a1a';
+          ctx.fillRect(screen.x - 6, screen.y - 4, 12, 8);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -1017,6 +1109,27 @@ export class Renderer {
           spriteW,
           spriteH,
         );
+      }
+
+      // Movement dust trail for vehicles/ants when walking
+      if (entity.alive && !entity.stats.isInfantry && entity.animState === AnimState.WALK) {
+        const dustPhase = (tick + entity.id * 5) % 8;
+        // Dust puffs behind the unit (opposite to facing direction)
+        const facingRad = entity.facing * (Math.PI / 4);
+        const behindX = screen.x + Math.sin(facingRad) * 4;
+        const behindY = screen.y + Math.cos(facingRad) * 4;
+        for (let d = 0; d < 2; d++) {
+          const age = (dustPhase + d * 4) % 8;
+          const da = (0.25 - age * 0.03) * (entity.isAnt ? 0.5 : 1);
+          if (da > 0) {
+            const dx = behindX + Math.sin(tick * 0.4 + d * 2) * (1 + age * 0.3);
+            const dy = behindY + age * 0.3;
+            ctx.fillStyle = `rgba(140,120,90,${da.toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(dx, dy, 1 + age * 0.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
 
       // Smoke trail from heavily damaged vehicles (below 50% HP)
@@ -1928,7 +2041,7 @@ export class Renderer {
 
   // ─── Sidebar ──────────────────────────────────────────────
 
-  private renderSidebar(): void {
+  private renderSidebar(assets: AssetManager): void {
     const ctx = this.ctx;
     const x = this.width - this.sidebarW;
     const w = this.sidebarW;
@@ -2034,6 +2147,32 @@ export class Renderer {
       ctx.strokeStyle = 'rgba(100,100,100,0.3)';
       ctx.strokeRect(x + 2, iy, w - 4, itemH - 2);
 
+      // Sprite thumbnail (18x18 area on left side of item)
+      const thumbSize = 18;
+      const thumbX = x + 3;
+      const thumbCX = thumbX + thumbSize / 2;
+      const thumbCY = iy + (itemH - 2) / 2;
+      const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
+      const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
+      if (thumbSheet && spriteName) {
+        const scale = Math.min(thumbSize / thumbSheet.meta.frameWidth, thumbSize / thumbSheet.meta.frameHeight);
+        assets.drawFrame(ctx, spriteName, 0, thumbCX, thumbCY, {
+          centerX: true, centerY: true, scale,
+        });
+      } else {
+        // Fallback: colored rectangle with type abbreviation
+        const fallbackColor = category === 'infantry' ? '#4a6' : category === 'vehicle' ? '#46a' : '#a84';
+        ctx.fillStyle = fallbackColor;
+        ctx.fillRect(thumbX, iy + 2, thumbSize, thumbSize - 2);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 6px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(item.type.slice(0, 4), thumbCX, thumbCY + 2);
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'left';
+      }
+      const textX = x + 3 + thumbSize + 2; // text offset after thumbnail
+
       // Check if this category is building
       const qEntry = this.sidebarQueue.get(category);
       const isBuilding = qEntry && qEntry.item.type === item.type;
@@ -2045,18 +2184,18 @@ export class Renderer {
         ctx.fillRect(x + 2, iy, (w - 4) * progress, itemH - 2);
         // Name + progress %
         ctx.fillStyle = lowPower ? '#f88' : '#8f8';
-        ctx.fillText(`${item.name}`, x + 4, iy + 9);
+        ctx.fillText(`${item.name}`, textX, iy + 9);
         const queueText = qEntry.queueCount > 1 ? ` [x${qEntry.queueCount}]` : '';
         const slowText = lowPower ? ' SLOW' : '';
         ctx.fillStyle = '#ccc';
-        ctx.fillText(`${Math.floor(progress * 100)}%${queueText}${slowText}`, x + 4, iy + 18);
+        ctx.fillText(`${Math.floor(progress * 100)}%${queueText}${slowText}`, textX, iy + 18);
       } else {
         // Name + cost
         const canAfford = this.sidebarCredits >= item.cost;
         ctx.fillStyle = canAfford ? '#ddd' : '#666';
-        ctx.fillText(item.name, x + 4, iy + 9);
+        ctx.fillText(item.name, textX, iy + 9);
         ctx.fillStyle = canAfford ? '#FFD700' : '#553';
-        ctx.fillText(`$${item.cost}`, x + 4, iy + 18);
+        ctx.fillText(`$${item.cost}`, textX, iy + 18);
       }
     }
 

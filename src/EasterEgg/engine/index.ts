@@ -121,7 +121,7 @@ export class Game {
   lossCount = 0;
   effects: Effect[] = [];
   /** Persistent corpses left by dead units (capped to prevent memory growth) */
-  corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; alpha: number }> = [];
+  corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; isAnt: boolean; alpha: number; deathVariant: number }> = [];
   private static readonly MAX_CORPSES = 100;
   state: GameState = 'loading';
   tick = 0;
@@ -568,7 +568,8 @@ export class Game {
         if (this.corpses.length >= Game.MAX_CORPSES) this.corpses.shift();
         this.corpses.push({
           x: e.pos.x, y: e.pos.y, type: e.type, facing: e.facing,
-          isInfantry: e.stats.isInfantry, alpha: 0.5,
+          isInfantry: e.stats.isInfantry, isAnt: e.isAnt, alpha: 0.5,
+          deathVariant: e.deathVariant,
         });
       }
     }
@@ -3656,9 +3657,17 @@ export class Game {
       (s.house === House.Spain || s.house === House.Greece));
   }
 
-  /** Get buildable items based on current structures */
+  /** Get buildable items based on current structures + faction + tech prereqs */
   getAvailableItems(): ProductionItem[] {
-    return PRODUCTION_ITEMS.filter(item => this.hasBuilding(item.prerequisite));
+    return PRODUCTION_ITEMS.filter(item => {
+      // Must have primary prerequisite building
+      if (!this.hasBuilding(item.prerequisite)) return false;
+      // Faction filter: player is Allied in ant missions
+      if (item.faction === 'soviet') return false;
+      // Tech prerequisite (e.g. Artillery needs Radar Dome)
+      if (item.techPrereq && !this.hasBuilding(item.techPrereq)) return false;
+      return true;
+    });
   }
 
   /** Start building an item (called from sidebar click) */

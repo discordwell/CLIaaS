@@ -274,41 +274,48 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
 };
 
 // === Production data ===
+export type Faction = 'allied' | 'soviet' | 'both';
+
 export interface ProductionItem {
   type: string;         // unit type or structure type code
   name: string;         // display name
   cost: number;         // credits cost
   buildTime: number;    // ticks to build
   prerequisite: string; // required building type (TENT/BARR→infantry, WEAP→vehicles, FACT→structures)
+  techPrereq?: string;  // additional building required (e.g. DOME for Artillery)
+  faction: Faction;     // which faction can build this
   isStructure?: boolean;
 }
 
 export const PRODUCTION_ITEMS: ProductionItem[] = [
-  // Infantry (from TENT/BARR)
-  { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT' },
-  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'TENT' },
-  { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT' },
-  { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'TENT' },
-  { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT' },
-  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'TENT' },
-  { type: 'MEDI', name: 'Medic', cost: 600, buildTime: 90, prerequisite: 'TENT' },
-  // Vehicles (from WEAP)
-  { type: 'JEEP', name: 'Ranger', cost: 600, buildTime: 100, prerequisite: 'WEAP' },
-  { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP' },
-  { type: '2TNK', name: 'Med Tank', cost: 800, buildTime: 140, prerequisite: 'WEAP' },
-  { type: '3TNK', name: 'Heavy Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP' },
-  { type: 'ARTY', name: 'Artillery', cost: 600, buildTime: 120, prerequisite: 'WEAP' },
-  { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP' },
-  { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP' },
-  // Structures (from FACT)
-  { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', isStructure: true },
-  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'FACT', isStructure: true },
-  { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'FACT', isStructure: true },
-  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'FACT', isStructure: true },
-  { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'FACT', isStructure: true },
-  { type: 'HBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'FACT', isStructure: true },
-  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'FACT', isStructure: true },
-  { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'FACT', isStructure: true },
+  // Infantry (from TENT/BARR) — faction-accurate per RA rules.ini
+  { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', faction: 'both' },
+  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'TENT', faction: 'both' },  // Allied in ant missions
+  { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'both' },
+  { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'soviet' },
+  { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both' },
+  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'TENT', faction: 'soviet' },
+  { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied' },
+  // Vehicles (from WEAP) — faction-accurate per RA rules.ini
+  { type: 'JEEP', name: 'Ranger', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied' },
+  { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP', faction: 'allied' },
+  { type: '2TNK', name: 'Med Tank', cost: 800, buildTime: 140, prerequisite: 'WEAP', faction: 'allied' },
+  { type: '3TNK', name: 'Heavy Tank', cost: 950, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet' },
+  { type: '4TNK', name: 'Mammoth Tank', cost: 1700, buildTime: 240, prerequisite: 'WEAP', faction: 'soviet' },
+  { type: 'ARTY', name: 'Artillery', cost: 600, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME' },
+  { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied' },
+  { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both' },
+  // Structures (from FACT) — faction-accurate
+  { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'DOME', name: 'Radar Dome', cost: 1000, buildTime: 150, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'HBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'FACT', faction: 'allied', isStructure: true },
+  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'FACT', faction: 'allied', isStructure: true },
+  { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
+  { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'FACT', faction: 'both', isStructure: true },
 ];
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)
