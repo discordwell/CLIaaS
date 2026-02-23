@@ -7,8 +7,8 @@ import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import chalk from 'chalk';
 import ora, { type Ora } from 'ora';
-import type { ExportManifest } from '../../schema/types.js';
-import type { ConnectorSource } from './types.js';
+import type { ExportManifest } from '../../schema/types';
+import type { ConnectorSource } from './types';
 
 /** Standard export file names shared across connectors. */
 const STANDARD_FILES = [

@@ -1,9 +1,9 @@
 import type {
   Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus, TicketPriority,
-} from '../schema/types.js';
+} from '../schema/types';
 import {
   createClient, paginateCursor, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
-} from './base/index.js';
+} from './base/index';
 
 export interface IntercomAuth {
   accessToken: string;

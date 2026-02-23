@@ -1,9 +1,9 @@
 import type {
   Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
-} from '../schema/types.js';
+} from '../schema/types';
 import {
   createClient, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
-} from './base/index.js';
+} from './base/index';
 
 export interface GrooveAuth {
   apiToken: string;

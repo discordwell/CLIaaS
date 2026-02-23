@@ -2,8 +2,8 @@ import { createHmac, randomBytes } from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
 import type {
   Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
-} from '../schema/types.js';
-import { setupExport, appendJsonl, writeManifest, exportSpinner } from './base/index.js';
+} from '../schema/types';
+import { setupExport, appendJsonl, writeManifest, exportSpinner } from './base/index';
 
 export interface KayakoClassicAuth {
   domain: string; // e.g. "classichelp.kayako.com"

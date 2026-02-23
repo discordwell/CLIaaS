@@ -3,7 +3,7 @@
  * Replaces 10 copies of xxxFetch() across connectors.
  */
 
-import type { ClientConfig, RequestOptions } from './types.js';
+import type { ClientConfig, RequestOptions } from './types';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));

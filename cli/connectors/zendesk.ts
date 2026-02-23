@@ -4,11 +4,11 @@ import type {
   Ticket, Message, Attachment, Customer, Organization, KBArticle, Rule,
   Group, CustomField, View, SLAPolicy, TicketForm, Brand, AuditEvent,
   CSATRating, TimeEntry, ExportManifest, TicketStatus, TicketPriority,
-} from '../schema/types.js';
+} from '../schema/types';
 import {
   createClient, paginateCursor, paginateNextPage,
   setupExport, appendJsonl, writeManifest, exportSpinner,
-} from './base/index.js';
+} from './base/index';
 
 export interface ZendeskAuth {
   subdomain: string;

@@ -1,10 +1,10 @@
 import type {
   Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
-} from '../schema/types.js';
+} from '../schema/types';
 import {
   createClient, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
   type FetchFn,
-} from './base/index.js';
+} from './base/index';
 
 export interface HelpScoutAuth {
   appId: string;

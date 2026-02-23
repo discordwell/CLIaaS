@@ -1,10 +1,10 @@
 import type {
   Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
-} from '../schema/types.js';
+} from '../schema/types';
 import {
   paginateOffset, paginateCursor, setupExport, appendJsonl, writeManifest, exportSpinner,
   type FetchFn,
-} from './base/index.js';
+} from './base/index';
 
 export interface KayakoAuth {
   domain: string;

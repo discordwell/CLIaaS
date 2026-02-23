@@ -1,9 +1,9 @@
 import type {
   Ticket, Message, Customer, Organization, ExportManifest, TicketStatus,
-} from '../schema/types.js';
+} from '../schema/types';
 import {
   createClient, paginateOffset, setupExport, appendJsonl, writeManifest, exportSpinner,
-} from './base/index.js';
+} from './base/index';
 
 export interface HelpcrunchAuth {
   apiKey: string;
