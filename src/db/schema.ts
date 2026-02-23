@@ -730,7 +730,7 @@ export const ragChunks = pgTable(
   'rag_chunks',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    workspaceId: uuid('workspace_id').notNull(), // No FK — RAG DB may be separate
     sourceType: ragChunkSourceEnum('source_type').notNull(),
     sourceId: text('source_id').notNull(),
     sourceTitle: text('source_title').notNull(),
@@ -759,7 +759,7 @@ export const ragChunks = pgTable(
 
 export const ragImportJobs = pgTable('rag_import_jobs', {
   id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+  workspaceId: uuid('workspace_id').notNull(), // No FK — RAG DB may be separate
   sourceType: ragChunkSourceEnum('source_type').notNull(),
   status: ragJobStatusEnum('status').notNull().default('running'),
   totalSources: integer('total_sources').notNull().default(0),

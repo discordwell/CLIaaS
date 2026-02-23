@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { readFileSync, statSync, readdirSync } from 'fs';
 import { join, extname } from 'path';
-import { getPool } from '../../src/db/index.js';
+import { requireRagPool, getDefaultWorkspaceId } from './db.js';
 import { loadKBArticles, loadTickets, loadMessages, getTicketMessages } from '../data.js';
 import { chunkKBArticle, chunkTicketThread, chunkMarkdownFile } from './chunker.js';
 import { getEmbeddingProvider, getRagConfig } from './config.js';
@@ -9,21 +9,6 @@ import type { RagImportStats, TextChunk, ChunkSourceType } from './types.js';
 
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
-}
-
-function requirePool() {
-  const pool = getPool();
-  if (!pool) throw new Error('DATABASE_URL is not set. RAG requires a PostgreSQL database.');
-  return pool;
-}
-
-async function getDefaultWorkspaceId(): Promise<string> {
-  const pool = requirePool();
-  const result = await pool.query('SELECT id FROM workspaces LIMIT 1');
-  if (result.rows.length === 0) {
-    throw new Error('No workspace found. Run "cliaas db seed" or create a workspace first.');
-  }
-  return result.rows[0].id;
 }
 
 interface UpsertChunkInput {
@@ -39,7 +24,7 @@ interface UpsertChunkInput {
  * Returns { newChunks, skippedChunks, textsToEmbed, chunkIdsToEmbed }
  */
 async function upsertChunks(inputs: UpsertChunkInput[]) {
-  const pool = requirePool();
+  const pool = requireRagPool();
   let newChunks = 0;
   let skippedChunks = 0;
   const textsToEmbed: string[] = [];
@@ -107,7 +92,7 @@ async function upsertChunks(inputs: UpsertChunkInput[]) {
 async function embedAndStore(texts: string[], chunkIds: string[]): Promise<number> {
   if (texts.length === 0) return 0;
 
-  const pool = requirePool();
+  const pool = requireRagPool();
   const provider = getEmbeddingProvider();
   const embeddings = await provider.embed(texts);
 
@@ -128,7 +113,7 @@ async function recordJob(
   stats: RagImportStats,
   error?: string,
 ) {
-  const pool = requirePool();
+  const pool = requireRagPool();
   await pool.query(
     `INSERT INTO rag_import_jobs (workspace_id, source_type, status, total_sources,
      total_chunks, new_chunks, skipped_chunks, error, finished_at)

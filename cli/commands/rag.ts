@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { getPool } from '../../src/db/index.js';
+import { getRagPool } from '../rag/db.js';
 import { importKBArticles, importTickets, importFile } from '../rag/importer.js';
 import { retrieve, formatRetrievedContext } from '../rag/retriever.js';
 import { getProvider } from '../providers/index.js';
@@ -9,10 +9,10 @@ import { buildRagAskPrompt } from '../providers/base.js';
 import type { RagImportStats } from '../rag/types.js';
 
 function requireDb() {
-  const pool = getPool();
+  const pool = getRagPool();
   if (!pool) {
-    console.error(chalk.red('DATABASE_URL is not set. RAG requires a PostgreSQL database.'));
-    console.error(chalk.yellow('Set DATABASE_URL in .env or environment.'));
+    console.error(chalk.red('No RAG database configured.'));
+    console.error(chalk.yellow('Set RAG_DATABASE_URL (or DATABASE_URL) in .env or environment.'));
     process.exit(1);
   }
   return pool;
@@ -62,10 +62,11 @@ export function registerRagCommands(program: Command): void {
         `);
 
         // Create rag_chunks table
+        // No FK on workspace_id — RAG DB may be separate from the main app DB
         await pool.query(`
           CREATE TABLE IF NOT EXISTS rag_chunks (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            workspace_id UUID NOT NULL REFERENCES workspaces(id),
+            workspace_id UUID NOT NULL,
             source_type rag_chunk_source NOT NULL,
             source_id TEXT NOT NULL,
             source_title TEXT NOT NULL,
@@ -84,7 +85,7 @@ export function registerRagCommands(program: Command): void {
         await pool.query(`
           CREATE TABLE IF NOT EXISTS rag_import_jobs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            workspace_id UUID NOT NULL REFERENCES workspaces(id),
+            workspace_id UUID NOT NULL,
             source_type rag_chunk_source NOT NULL,
             status rag_job_status NOT NULL DEFAULT 'running',
             total_sources INTEGER NOT NULL DEFAULT 0,

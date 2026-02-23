@@ -1,21 +1,6 @@
-import { getPool } from '../../src/db/index.js';
+import { requireRagPool, getDefaultWorkspaceId } from './db.js';
 import { getEmbeddingProvider, getRagConfig } from './config.js';
 import type { RagChunk, RagSearchResult } from './types.js';
-
-function requirePool() {
-  const pool = getPool();
-  if (!pool) throw new Error('DATABASE_URL is not set. RAG requires a PostgreSQL database.');
-  return pool;
-}
-
-async function getDefaultWorkspaceId(): Promise<string> {
-  const pool = requirePool();
-  const result = await pool.query('SELECT id FROM workspaces LIMIT 1');
-  if (result.rows.length === 0) {
-    throw new Error('No workspace found.');
-  }
-  return result.rows[0].id;
-}
 
 interface RetrieveOpts {
   query: string;
@@ -29,7 +14,7 @@ interface RetrieveOpts {
  * Hybrid retrieval: vector search + full-text search merged with Reciprocal Rank Fusion.
  */
 export async function retrieve(opts: RetrieveOpts): Promise<RagSearchResult[]> {
-  const pool = requirePool();
+  const pool = requireRagPool();
   const ragConfig = getRagConfig();
   const topK = opts.topK ?? ragConfig.topK;
   const w = opts.hybridWeight ?? ragConfig.hybridWeight;
