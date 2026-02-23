@@ -4,6 +4,9 @@
  */
 
 import { createHmac, timingSafeEqual } from 'crypto';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('twitter');
 
 // ---- Types ----
 
@@ -114,7 +117,7 @@ export async function sendDM(
   // Demo mode: log and return mock ID
   if (!config) {
     const mockId = `dm_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-    console.log(`[TWITTER DEMO] DM to ${recipientId}: ${text}`);
+    logger.info({ recipientId, text }, 'Demo outbound DM');
     return { id: mockId };
   }
 

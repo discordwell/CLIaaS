@@ -58,6 +58,9 @@ function ensureDefaults(): void {
 // ---- Secure audit log delegation ----
 
 import { recordSecureAudit } from './security/audit-log';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('audit');
 
 // ---- Public API ----
 
@@ -84,8 +87,8 @@ export function recordAudit(
       outcome: 'success',
       details: entry.details,
     });
-  } catch {
-    // Don't let secure audit failures break the main audit flow
+  } catch (err) {
+    logger.error({ err }, 'Secure audit write failed');
   }
   return record;
 }

@@ -3,10 +3,19 @@ import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 import { getSecurityHeaders } from '@/lib/security/headers';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/security/rate-limiter';
+import { createLogger } from '@/lib/logger';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET || 'cliaas-dev-secret-change-in-production'
-);
+const logger = createLogger('middleware');
+
+function getAuthSecret(): string {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret && process.env.NODE_ENV === 'production') {
+    throw new Error('AUTH_SECRET environment variable is required in production');
+  }
+  return secret || 'cliaas-dev-secret-change-in-production';
+}
+
+const JWT_SECRET = new TextEncoder().encode(getAuthSecret());
 
 const COOKIE_NAME = 'cliaas-session';
 
@@ -63,6 +72,8 @@ export async function middleware(request: NextRequest) {
   if (isStaticAsset(pathname)) {
     return NextResponse.next();
   }
+
+  logger.info({ method: request.method, pathname }, 'Incoming request');
 
   // Rate limiting for API routes
   if (pathname.startsWith('/api/')) {

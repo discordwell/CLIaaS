@@ -4,6 +4,9 @@
  */
 
 import { createHmac, timingSafeEqual } from 'crypto';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('twilio');
 
 // ---- Types ----
 
@@ -68,7 +71,7 @@ export async function sendMessage(msg: OutboundMessage): Promise<TwilioResponse>
       ? `whatsapp:${msg.to}`
       : msg.to;
 
-    console.log(`[TWILIO DEMO] ${msg.channel.toUpperCase()} to ${to}: ${msg.body}`);
+    logger.info({ channel: msg.channel, to, body: msg.body }, 'Demo outbound message');
 
     return {
       sid: mockSid,

@@ -4,6 +4,9 @@
  */
 
 import { createHmac, timingSafeEqual } from 'crypto';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('meta');
 
 // ---- Types ----
 
@@ -100,9 +103,7 @@ export async function sendMessage(
   // Demo mode: log and return mock ID
   if (!config) {
     const mockId = `mid.${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-    console.log(
-      `[META DEMO] ${platform.toUpperCase()} to ${recipientId}: ${text}`,
-    );
+    logger.info({ platform, recipientId, text }, 'Demo outbound message');
     return { messageId: mockId };
   }
 
