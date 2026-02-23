@@ -7,7 +7,7 @@
 
 import { Game, MISSIONS, type GameState } from './index';
 import { AutoPlayer } from './autoPlayer';
-import { type TurboConfig } from './turbo';
+import { type TurboConfig, TIMEOUT_TICKS } from './turbo';
 
 export interface MissionResult {
   id: string;
@@ -29,8 +29,6 @@ export type TestLogEntry = {
   mission?: string;
   detail?: string;
 };
-
-const TIMEOUT_TICKS = 90_000; // ~100 min game time at 15 FPS
 
 export class TestRunner {
   private game: Game;

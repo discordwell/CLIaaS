@@ -234,7 +234,7 @@ var Module = {
   canvas: canvasElement,
   setStatus: function(text) {
     if (text) {
-      statusElement.innerHTML = text;
+      statusElement.textContent = text;
       var m = text.match(/\((\d+)\/(\d+)\)/);
       if (m) { progressElement.value = parseInt(m[1]); progressElement.max = parseInt(m[2]); }
     } else {

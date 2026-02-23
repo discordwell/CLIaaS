@@ -14,6 +14,9 @@ export const TURBO_PRESETS: Record<string, TurboConfig> = {
   turbo:  { name: 'turbo',  ticksPerFrame: 60 },
 };
 
+/** Mission timeout in ticks (~100 min game time at 15 FPS) */
+export const TIMEOUT_TICKS = 90_000;
+
 /** Resolve a ?anttest= value to a TurboConfig */
 export function resolvePreset(value: string): TurboConfig {
   if (value === 'fast') return TURBO_PRESETS.fast;

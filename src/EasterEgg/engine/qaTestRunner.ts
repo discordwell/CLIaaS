@@ -9,6 +9,7 @@ import { Game, MISSIONS, type GameState } from './index';
 import { AutoPlayer } from './autoPlayer';
 import { GameInspector, type Anomaly, type AnomalySeverity, type AnomalyCategory } from './inspector';
 import { ScreenshotCapture, type Screenshot } from './screenshotCapture';
+import { TIMEOUT_TICKS } from './turbo';
 
 // === Report types ===
 
@@ -48,8 +49,6 @@ export type QALogEntry = {
   detail?: string;
   anomaly?: Anomaly;
 };
-
-const TIMEOUT_TICKS = 90_000;
 
 // Declare window globals for Playwright access
 declare global {
