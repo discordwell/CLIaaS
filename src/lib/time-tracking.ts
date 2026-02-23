@@ -1,3 +1,5 @@
+import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+
 // ---- Types ----
 
 export interface TimeEntry {
@@ -41,6 +43,14 @@ export interface TimeFilters {
   billable?: boolean;
 }
 
+// ---- JSONL persistence ----
+
+const TIME_ENTRIES_FILE = 'time-entries.jsonl';
+
+function persistEntries(): void {
+  writeJsonlFile(TIME_ENTRIES_FILE, entries);
+}
+
 // ---- In-memory store ----
 
 const entries: TimeEntry[] = [];
@@ -51,6 +61,14 @@ function ensureDefaults(): void {
   if (defaultsLoaded) return;
   defaultsLoaded = true;
 
+  // Try loading from persisted JSONL file
+  const saved = readJsonlFile<TimeEntry>(TIME_ENTRIES_FILE);
+  if (saved.length > 0) {
+    entries.push(...saved);
+    return;
+  }
+
+  // Fall back to demo defaults
   const now = Date.now();
   const demoEntries: Omit<TimeEntry, 'id'>[] = [
     {
@@ -167,6 +185,7 @@ export function stopTimer(
 
   activeTimers.delete(key);
   entries.push(entry);
+  persistEntries();
   return entry;
 }
 
@@ -191,6 +210,7 @@ export function logManualTime(
     endTime: now.toISOString(),
   };
   entries.push(entry);
+  persistEntries();
   return entry;
 }
 

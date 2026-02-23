@@ -1,3 +1,5 @@
+import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+
 // ---- Types ----
 
 export interface Brand {
@@ -12,6 +14,14 @@ export interface Brand {
   createdAt: string;
 }
 
+// ---- JSONL persistence ----
+
+const BRANDS_FILE = 'brands.jsonl';
+
+function persistBrands(): void {
+  writeJsonlFile(BRANDS_FILE, brands);
+}
+
 // ---- In-memory store ----
 
 const brands: Brand[] = [];
@@ -21,6 +31,14 @@ function ensureDefaults(): void {
   if (defaultsLoaded) return;
   defaultsLoaded = true;
 
+  // Try loading from persisted JSONL file
+  const saved = readJsonlFile<Brand>(BRANDS_FILE);
+  if (saved.length > 0) {
+    brands.push(...saved);
+    return;
+  }
+
+  // Fall back to demo defaults
   brands.push(
     {
       id: 'brand-main',
@@ -69,6 +87,7 @@ export function createBrand(
     createdAt: new Date().toISOString(),
   };
   brands.push(brand);
+  persistBrands();
   return brand;
 }
 
@@ -80,6 +99,7 @@ export function updateBrand(
   const idx = brands.findIndex((b) => b.id === id);
   if (idx === -1) return null;
   brands[idx] = { ...brands[idx], ...updates };
+  persistBrands();
   return brands[idx];
 }
 
@@ -88,5 +108,6 @@ export function deleteBrand(id: string): boolean {
   const idx = brands.findIndex((b) => b.id === id);
   if (idx === -1) return false;
   brands.splice(idx, 1);
+  persistBrands();
   return true;
 }

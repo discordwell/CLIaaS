@@ -1,3 +1,5 @@
+import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+
 // ---- Types ----
 
 export interface CustomField {
@@ -20,6 +22,19 @@ export interface CustomForm {
   createdAt: string;
 }
 
+// ---- JSONL persistence ----
+
+const FIELDS_FILE = 'custom-fields.jsonl';
+const FORMS_FILE = 'custom-forms.jsonl';
+
+function persistFields(): void {
+  writeJsonlFile(FIELDS_FILE, fields);
+}
+
+function persistForms(): void {
+  writeJsonlFile(FORMS_FILE, forms);
+}
+
 // ---- In-memory stores ----
 
 const fields: CustomField[] = [];
@@ -30,6 +45,17 @@ function ensureDefaults(): void {
   if (defaultsLoaded) return;
   defaultsLoaded = true;
 
+  // Try loading from persisted JSONL files
+  const savedFields = readJsonlFile<CustomField>(FIELDS_FILE);
+  const savedForms = readJsonlFile<CustomForm>(FORMS_FILE);
+
+  if (savedFields.length > 0 || savedForms.length > 0) {
+    fields.push(...savedFields);
+    forms.push(...savedForms);
+    return;
+  }
+
+  // Fall back to demo defaults
   fields.push(
     {
       id: 'cf-environment',
@@ -114,6 +140,7 @@ export function createField(
     createdAt: new Date().toISOString(),
   };
   fields.push(field);
+  persistFields();
   return field;
 }
 
@@ -125,6 +152,7 @@ export function updateField(
   const idx = fields.findIndex((f) => f.id === id);
   if (idx === -1) return null;
   fields[idx] = { ...fields[idx], ...updates };
+  persistFields();
   return fields[idx];
 }
 
@@ -133,6 +161,7 @@ export function deleteField(id: string): boolean {
   const idx = fields.findIndex((f) => f.id === id);
   if (idx === -1) return false;
   fields.splice(idx, 1);
+  persistFields();
   return true;
 }
 
@@ -153,6 +182,7 @@ export function createForm(
     createdAt: new Date().toISOString(),
   };
   forms.push(form);
+  persistForms();
   return form;
 }
 
@@ -161,6 +191,7 @@ export function deleteForm(id: string): boolean {
   const idx = forms.findIndex((f) => f.id === id);
   if (idx === -1) return false;
   forms.splice(idx, 1);
+  persistForms();
   return true;
 }
 

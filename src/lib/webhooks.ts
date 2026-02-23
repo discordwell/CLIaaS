@@ -1,3 +1,5 @@
+import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+
 // ---- Types ----
 
 export type WebhookEventType =
@@ -46,6 +48,23 @@ export interface WebhookEvent {
   data: Record<string, unknown>;
 }
 
+// ---- JSONL persistence ----
+
+const WEBHOOKS_FILE = 'webhooks.jsonl';
+const WEBHOOK_LOGS_FILE = 'webhook-logs.jsonl';
+
+function persistWebhooks(): void {
+  writeJsonlFile(WEBHOOKS_FILE, webhooks);
+}
+
+function persistWebhookLogs(): void {
+  const allLogs: WebhookLog[] = [];
+  for (const logs of webhookLogs.values()) {
+    allLogs.push(...logs);
+  }
+  writeJsonlFile(WEBHOOK_LOGS_FILE, allLogs);
+}
+
 // ---- In-memory stores ----
 
 const webhooks: WebhookConfig[] = [];
@@ -57,6 +76,21 @@ function ensureDefaults(): void {
   if (defaultsLoaded) return;
   defaultsLoaded = true;
 
+  // Try loading from persisted JSONL files
+  const savedWebhooks = readJsonlFile<WebhookConfig>(WEBHOOKS_FILE);
+  const savedLogs = readJsonlFile<WebhookLog>(WEBHOOK_LOGS_FILE);
+
+  if (savedWebhooks.length > 0) {
+    webhooks.push(...savedWebhooks);
+    for (const log of savedLogs) {
+      const existing = webhookLogs.get(log.webhookId) ?? [];
+      existing.push(log);
+      webhookLogs.set(log.webhookId, existing);
+    }
+    return;
+  }
+
+  // Fall back to demo defaults
   webhooks.push(
     {
       id: 'wh-demo-1',
@@ -223,6 +257,7 @@ export function createWebhook(
     updatedAt: new Date().toISOString(),
   };
   webhooks.push(webhook);
+  persistWebhooks();
   return webhook;
 }
 
@@ -242,6 +277,7 @@ export function updateWebhook(
     ...updates,
     updatedAt: new Date().toISOString(),
   };
+  persistWebhooks();
   return webhooks[idx];
 }
 
@@ -251,6 +287,8 @@ export function deleteWebhook(id: string): boolean {
   if (idx === -1) return false;
   webhooks.splice(idx, 1);
   webhookLogs.delete(id);
+  persistWebhooks();
+  persistWebhookLogs();
   return true;
 }
 
@@ -269,6 +307,7 @@ export function recordWebhookLog(log: Omit<WebhookLog, 'id'>): WebhookLog {
     existing.splice(0, existing.length - 100);
   }
   webhookLogs.set(log.webhookId, existing);
+  persistWebhookLogs();
   return entry;
 }
 

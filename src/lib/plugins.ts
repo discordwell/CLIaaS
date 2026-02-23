@@ -1,3 +1,5 @@
+import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+
 // ---- Types ----
 
 export type PluginHookType =
@@ -35,6 +37,14 @@ export interface PluginHookContext {
 
 export type PluginHandler = (context: PluginHookContext) => Promise<void> | void;
 
+// ---- JSONL persistence ----
+
+const PLUGINS_FILE = 'plugins.jsonl';
+
+function persistPlugins(plugins: Map<string, PluginManifest>): void {
+  writeJsonlFile(PLUGINS_FILE, Array.from(plugins.values()));
+}
+
 // ---- Plugin Registry ----
 
 class PluginRegistryImpl {
@@ -46,6 +56,16 @@ class PluginRegistryImpl {
     if (this.initialized) return;
     this.initialized = true;
 
+    // Try loading from persisted JSONL file
+    const saved = readJsonlFile<PluginManifest>(PLUGINS_FILE);
+    if (saved.length > 0) {
+      for (const plugin of saved) {
+        this.plugins.set(plugin.id, plugin);
+      }
+      return;
+    }
+
+    // Fall back to demo defaults
     const demoPlugins: PluginManifest[] = [
       {
         id: 'github-sync',
@@ -145,13 +165,16 @@ class PluginRegistryImpl {
       installedAt: new Date().toISOString(),
     };
     this.plugins.set(plugin.id, plugin);
+    persistPlugins(this.plugins);
     return plugin;
   }
 
   unregister(id: string): boolean {
     this.ensureDefaults();
     this.handlers.delete(id);
-    return this.plugins.delete(id);
+    const result = this.plugins.delete(id);
+    if (result) persistPlugins(this.plugins);
+    return result;
   }
 
   list(): PluginManifest[] {

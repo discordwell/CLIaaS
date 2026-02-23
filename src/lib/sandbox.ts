@@ -1,3 +1,5 @@
+import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+
 // ---- Types ----
 
 export interface SandboxConfig {
@@ -9,6 +11,14 @@ export interface SandboxConfig {
   promotedAt?: string;
 }
 
+// ---- JSONL persistence ----
+
+const SANDBOXES_FILE = 'sandboxes.jsonl';
+
+function persistSandboxes(): void {
+  writeJsonlFile(SANDBOXES_FILE, sandboxes);
+}
+
 // ---- In-memory store ----
 
 const sandboxes: SandboxConfig[] = [];
@@ -18,6 +28,14 @@ function ensureDefaults(): void {
   if (defaultsLoaded) return;
   defaultsLoaded = true;
 
+  // Try loading from persisted JSONL file
+  const saved = readJsonlFile<SandboxConfig>(SANDBOXES_FILE);
+  if (saved.length > 0) {
+    sandboxes.push(...saved);
+    return;
+  }
+
+  // Fall back to demo defaults
   sandboxes.push(
     {
       id: 'sandbox-staging',
@@ -58,6 +76,7 @@ export function createSandbox(name: string): SandboxConfig {
     status: 'active',
   };
   sandboxes.push(sandbox);
+  persistSandboxes();
   return sandbox;
 }
 
@@ -66,6 +85,7 @@ export function deleteSandbox(id: string): boolean {
   const idx = sandboxes.findIndex((s) => s.id === id);
   if (idx === -1) return false;
   sandboxes.splice(idx, 1);
+  persistSandboxes();
   return true;
 }
 
@@ -75,5 +95,6 @@ export function promoteSandbox(id: string): SandboxConfig | null {
   if (!sandbox) return null;
   sandbox.status = 'archived';
   sandbox.promotedAt = new Date().toISOString();
+  persistSandboxes();
   return sandbox;
 }

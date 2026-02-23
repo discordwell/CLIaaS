@@ -4,6 +4,8 @@
  * When DATABASE_URL is available, also persists to the database.
  */
 
+import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+
 // ---- Types ----
 
 export interface ChatMessage {
@@ -27,16 +29,34 @@ export interface ChatSession {
   ticketId?: string;
 }
 
+// ---- JSONL persistence ----
+
+const CHAT_SESSIONS_FILE = 'chat-sessions.jsonl';
+
+function persistSessions(store: Map<string, ChatSession>): void {
+  writeJsonlFile(CHAT_SESSIONS_FILE, Array.from(store.values()));
+}
+
 // ---- Global singleton storage ----
 
 declare global {
   // eslint-disable-next-line no-var
   var __cliaasChats: Map<string, ChatSession> | undefined;
+  // eslint-disable-next-line no-var
+  var __cliaasChatsLoaded: boolean | undefined;
 }
 
 function getStore(): Map<string, ChatSession> {
   if (!global.__cliaasChats) {
     global.__cliaasChats = new Map();
+  }
+  // Load persisted sessions on first access
+  if (!global.__cliaasChatsLoaded) {
+    global.__cliaasChatsLoaded = true;
+    const saved = readJsonlFile<ChatSession>(CHAT_SESSIONS_FILE);
+    for (const session of saved) {
+      global.__cliaasChats.set(session.id, session);
+    }
   }
   return global.__cliaasChats;
 }
@@ -77,6 +97,7 @@ export function createSession(
   session.messages.push(greeting);
 
   store.set(session.id, session);
+  persistSessions(store);
   return session;
 }
 
@@ -130,6 +151,7 @@ export function addMessage(
   }
 
   store.set(sessionId, session);
+  persistSessions(store);
   return message;
 }
 
@@ -166,6 +188,7 @@ export function closeSession(sessionId: string): ChatSession | null {
   session.messages.push(closeMsg);
 
   store.set(sessionId, session);
+  persistSessions(store);
   return session;
 }
 
