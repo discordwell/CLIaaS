@@ -13,7 +13,7 @@ export class OpenAIProvider implements LLMProvider {
     this.model = model ?? 'gpt-4o';
   }
 
-  private async complete(prompt: string): Promise<string> {
+  async complete(prompt: string): Promise<string> {
     const response = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: 2048,

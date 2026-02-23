@@ -13,6 +13,7 @@ export function parseLLMJson<T>(raw: string): T {
 
 export interface LLMProvider {
   name: string;
+  complete(prompt: string): Promise<string>;
   generateReply(ticket: Ticket, messages: Message[], opts?: { tone?: string; context?: string }): Promise<string>;
   triageTicket(ticket: Ticket, messages: Message[]): Promise<TriageResult>;
   suggestKB(ticket: Ticket, articles: KBArticle[]): Promise<KBSuggestion[]>;

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cliaas": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "cli/mcp/server.ts"],
+      "env": {
+        "CLIAAS_DATA_DIR": "${CLIAAS_DATA_DIR}",
+        "DATABASE_URL": "${DATABASE_URL}",
+        "RAG_DATABASE_URL": "${RAG_DATABASE_URL}"
+      }
+    }
+  }
+}

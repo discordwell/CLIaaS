@@ -27,12 +27,15 @@
     "extract-assets": "tsx scripts/extract-ra-assets.ts",
     "extract-tiles": "tsx scripts/extract-ra-tiles.ts",
     "extract-ant-originals": "bash scripts/extract-freeware-ant-originals.sh",
+    "mcp:dev": "tsx cli/mcp/server.ts",
+    "mcp:test": "pnpm cliaas mcp test",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:db": "DATABASE_URL=${DATABASE_URL_TEST:-postgresql://cliaas:cliaas@localhost:5433/cliaas_test} vitest run src/__tests__/db-integration"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
     "dotenv": "^17.3.1",
@@ -47,7 +50,8 @@
     "pgvector": "^0.2.1",
     "pino": "^10.3.1",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -27,6 +27,7 @@ import { registerHelpScoutCommands } from './helpscout.js';
 import { registerZohoDeskCommands } from './zoho-desk.js';
 import { registerHubSpotCommands } from './hubspot.js';
 import { registerRagCommands } from './rag.js';
+import { registerMcpCommands } from './mcp.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -57,4 +58,5 @@ export function registerCommands(program: Command): void {
   registerHubSpotCommands(program);
   registerMigrateCommand(program);
   registerRagCommands(program);
+  registerMcpCommands(program);
 }
