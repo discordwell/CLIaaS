@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 
 function SignInForm() {
   const router = useRouter();
@@ -94,8 +94,47 @@ function SignInForm() {
             Create one
           </Link>
         </p>
+
+        {/* SSO Section */}
+        <SsoSection />
       </section>
     </main>
+  );
+}
+
+function SsoSection() {
+  const [providers, setProviders] = useState<
+    Array<{ id: string; name: string; protocol: string; enabled: boolean }>
+  >([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/auth/sso/providers")
+      .then((res) => res.json())
+      .then((data) => setProviders((data.providers || []).filter((p: { enabled: boolean }) => p.enabled)))
+      .catch(() => setProviders([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading || providers.length === 0) return null;
+
+  return (
+    <div className="mt-6 border-t-2 border-zinc-200 pt-6">
+      <p className="mb-3 font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
+        Or sign in with SSO
+      </p>
+      <div className="space-y-2">
+        {providers.map((p) => (
+          <a
+            key={p.id}
+            href={`/api/auth/sso/${p.protocol}/login?provider_id=${p.id}`}
+            className="block w-full border-2 border-zinc-300 px-4 py-3 text-center font-mono text-xs font-bold uppercase transition hover:border-zinc-950 hover:bg-zinc-50"
+          >
+            {p.name}
+          </a>
+        ))}
+      </div>
+    </div>
   );
 }
 

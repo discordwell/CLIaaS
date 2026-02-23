@@ -7,10 +7,12 @@ const navLinks = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/rules", label: "Rules" },
   { href: "/chat", label: "Chat" },
+  { href: "/channels", label: "Channels" },
   { href: "/ai", label: "AI" },
   { href: "/analytics", label: "Analytics" },
   { href: "/sla", label: "SLA" },
   { href: "/integrations", label: "Integrations" },
+  { href: "/security", label: "Security" },
   { href: "/enterprise", label: "Enterprise" },
   { href: "/docs", label: "Docs" },
 ];

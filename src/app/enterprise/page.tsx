@@ -100,10 +100,11 @@ interface SandboxConfig {
 
 // ---- Tab definitions ----
 
-type Tab = "brands" | "audit" | "compliance" | "fields" | "time" | "sandbox";
+type Tab = "brands" | "audit" | "compliance" | "fields" | "time" | "sandbox" | "sso";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "brands", label: "Brands" },
+  { key: "sso", label: "SSO" },
   { key: "audit", label: "Audit Log" },
   { key: "compliance", label: "Compliance" },
   { key: "fields", label: "Custom Fields" },
@@ -176,6 +177,7 @@ export default function EnterprisePage() {
       {/* Tab content */}
       <div className="mt-8">
         {tab === "brands" && <BrandsTab />}
+        {tab === "sso" && <SsoTab />}
         {tab === "audit" && <AuditTab />}
         {tab === "compliance" && <ComplianceTab />}
         {tab === "fields" && <CustomFieldsTab />}
@@ -1240,6 +1242,237 @@ function SandboxTab() {
         </section>
       ) : (
         <EmptyBlock message="No sandboxes" sub="Create a sandbox to test configuration changes safely." />
+      )}
+    </>
+  );
+}
+
+// ======================== SSO TAB ========================
+
+interface SSOProvider {
+  id: string;
+  name: string;
+  protocol: "saml" | "oidc";
+  enabled: boolean;
+  entityId?: string;
+  ssoUrl?: string;
+  clientId?: string;
+  issuer?: string;
+  domainHint?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function SsoTab() {
+  const [providers, setProviders] = useState<SSOProvider[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    protocol: "saml" as "saml" | "oidc",
+    entityId: "",
+    ssoUrl: "",
+    certificate: "",
+    clientId: "",
+    clientSecret: "",
+    issuer: "",
+    authorizationUrl: "",
+    tokenUrl: "",
+    userInfoUrl: "",
+    domainHint: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/sso/providers");
+      const data = await res.json();
+      setProviders(data.providers || []);
+    } catch {
+      setProviders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await fetch("/api/auth/sso/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      setShowForm(false);
+      setForm({ name: "", protocol: "saml", entityId: "", ssoUrl: "", certificate: "", clientId: "", clientSecret: "", issuer: "", authorizationUrl: "", tokenUrl: "", userInfoUrl: "", domainHint: "" });
+      load();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggle(id: string, enabled: boolean) {
+    await fetch(`/api/auth/sso/providers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !enabled }),
+    });
+    load();
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/auth/sso/providers/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  function handleTest(provider: SSOProvider) {
+    const url = `/api/auth/sso/${provider.protocol}/login?provider_id=${provider.id}`;
+    setTestResult(`Test URL: ${url} — Open this in a new tab to test the SSO flow.`);
+  }
+
+  if (loading) return <LoadingBlock label="Loading SSO providers..." />;
+
+  const metadataUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/api/auth/sso/saml/metadata`
+    : "/api/auth/sso/saml/metadata";
+
+  return (
+    <>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-bold">{providers.length} SSO Provider{providers.length !== 1 ? "s" : ""}</h2>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+        >
+          {showForm ? "Cancel" : "Add Provider"}
+        </button>
+      </div>
+
+      {/* SP Metadata URL */}
+      <section className="mb-4 border-2 border-zinc-950 bg-white p-6">
+        <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">SAML Service Provider Metadata</h3>
+        <p className="mt-2 font-mono text-sm text-zinc-700 break-all">{metadataUrl}</p>
+        <p className="mt-1 text-xs text-zinc-500">Share this URL with your Identity Provider to configure SAML SSO.</p>
+      </section>
+
+      {testResult && (
+        <div className="mb-4 border-2 border-blue-500 bg-blue-50 px-4 py-3 font-mono text-xs text-blue-700">
+          {testResult}
+          <button onClick={() => setTestResult(null)} className="ml-4 font-bold underline">Dismiss</button>
+        </div>
+      )}
+
+      {showForm && (
+        <section className="mb-4 border-2 border-zinc-950 bg-white p-6">
+          <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">New SSO Provider</h3>
+          <form onSubmit={handleCreate} className="mt-4 space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormInput label="Name" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="Acme Corp SSO" />
+              <label className="block">
+                <span className="font-mono text-xs font-bold uppercase">Protocol</span>
+                <select
+                  value={form.protocol}
+                  onChange={(e) => setForm({ ...form, protocol: e.target.value as "saml" | "oidc" })}
+                  className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                >
+                  <option value="saml">SAML 2.0</option>
+                  <option value="oidc">OIDC</option>
+                </select>
+              </label>
+            </div>
+
+            {form.protocol === "saml" ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormInput label="Entity ID" value={form.entityId} onChange={(v) => setForm({ ...form, entityId: v })} placeholder="https://idp.example.com/metadata" />
+                <FormInput label="SSO URL" value={form.ssoUrl} onChange={(v) => setForm({ ...form, ssoUrl: v })} placeholder="https://idp.example.com/sso" />
+                <div className="sm:col-span-2">
+                  <label className="block">
+                    <span className="font-mono text-xs font-bold uppercase">Certificate (PEM)</span>
+                    <textarea
+                      value={form.certificate}
+                      onChange={(e) => setForm({ ...form, certificate: e.target.value })}
+                      rows={3}
+                      className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-xs outline-none focus:border-zinc-950"
+                      placeholder="-----BEGIN CERTIFICATE-----"
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormInput label="Client ID" value={form.clientId} onChange={(v) => setForm({ ...form, clientId: v })} placeholder="client-id" />
+                <FormInput label="Client Secret" value={form.clientSecret} onChange={(v) => setForm({ ...form, clientSecret: v })} placeholder="client-secret" />
+                <FormInput label="Issuer" value={form.issuer} onChange={(v) => setForm({ ...form, issuer: v })} placeholder="https://accounts.google.com" />
+                <FormInput label="Authorization URL" value={form.authorizationUrl} onChange={(v) => setForm({ ...form, authorizationUrl: v })} placeholder="https://provider.com/authorize" />
+                <FormInput label="Token URL" value={form.tokenUrl} onChange={(v) => setForm({ ...form, tokenUrl: v })} placeholder="https://provider.com/token" />
+                <FormInput label="UserInfo URL" value={form.userInfoUrl} onChange={(v) => setForm({ ...form, userInfoUrl: v })} placeholder="https://provider.com/userinfo" />
+              </div>
+            )}
+
+            <FormInput label="Domain Hint" value={form.domainHint} onChange={(v) => setForm({ ...form, domainHint: v })} placeholder="company.com (auto-redirect for this email domain)" />
+
+            <button type="submit" disabled={saving} className="w-full border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50">
+              {saving ? "Creating..." : "Create Provider"}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {providers.length > 0 ? (
+        <section className="border-2 border-zinc-950 bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b-2 border-zinc-200 bg-zinc-50 text-left">
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Name</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Protocol</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Domain</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Status</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {providers.map((p) => (
+                  <tr key={p.id} className="border-b border-zinc-100 transition-colors hover:bg-zinc-50">
+                    <td className="px-4 py-3 font-medium">{p.name}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 font-mono text-xs font-bold uppercase ${p.protocol === "saml" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                        {p.protocol}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-500">{p.domainHint || "-"}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 font-mono text-xs font-bold uppercase ${p.enabled ? "bg-emerald-100 text-emerald-700" : "bg-zinc-200 text-zinc-600"}`}>
+                        {p.enabled ? "Active" : "Disabled"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-3">
+                        <button onClick={() => handleTest(p)} className="font-mono text-xs font-bold uppercase text-blue-600 hover:text-blue-800">
+                          Test
+                        </button>
+                        <button onClick={() => handleToggle(p.id, p.enabled)} className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-700">
+                          {p.enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button onClick={() => handleDelete(p.id)} className="font-mono text-xs font-bold uppercase text-red-500 hover:text-red-700">
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <EmptyBlock message="No SSO providers" sub="Add a SAML or OIDC provider to enable single sign-on." />
       )}
     </>
   );

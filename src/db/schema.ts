@@ -52,6 +52,10 @@ export const channelTypeEnum = pgEnum('channel_type', [
   'sms',
   'phone',
   'web',
+  'whatsapp',
+  'facebook',
+  'instagram',
+  'twitter',
   'other',
 ]);
 

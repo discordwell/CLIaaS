@@ -55,6 +55,10 @@ function ensureDefaults(): void {
   });
 }
 
+// ---- Secure audit log delegation ----
+
+import { recordSecureAudit } from './security/audit-log';
+
 // ---- Public API ----
 
 export function recordAudit(
@@ -70,6 +74,18 @@ export function recordAudit(
   // Enforce circular buffer limit
   while (buffer.length > MAX_ENTRIES) {
     buffer.shift();
+  }
+  // Also write to immutable secure audit log
+  try {
+    recordSecureAudit({
+      actor: { type: 'user', id: entry.userId, name: entry.userName, ip: entry.ipAddress },
+      action: entry.action,
+      resource: { type: entry.resource, id: entry.resourceId },
+      outcome: 'success',
+      details: entry.details,
+    });
+  } catch {
+    // Don't let secure audit failures break the main audit flow
   }
   return record;
 }
