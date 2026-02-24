@@ -13,9 +13,9 @@
 | Components | 14 shared React components |
 | Library modules | 58 (`src/lib/`) |
 | CLI files | 69 (`cli/`) |
-| CLI commands | 31 registered command groups |
+| CLI commands | 32 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 18 (across 6 modules) |
+| MCP tools | 27 (across 8 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
 | DB tables | 57 (Drizzle/PostgreSQL, RLS-enabled) |
@@ -36,7 +36,7 @@
          ▼                ▼                   ▼
 ┌─────────────────┐ ┌──────────────┐ ┌──────────────────┐
 │  Next.js App    │ │  Commander   │ │  MCP Server      │
-│  29 pages       │ │  31 commands │ │  18 tools        │
+│  29 pages       │ │  32 commands │ │  27 tools        │
 │  101 API routes │ │  10 connect. │ │  6 resources     │
 │                 │ │  3 providers │ │  4 prompts       │
 └────────┬────────┘ └──────┬───────┘ └────────┬─────────┘
@@ -342,7 +342,7 @@ cli/
 └── mcp/
     ├── server.ts          # stdio transport entry point
     ├── util.ts            # Safe wrappers, result helpers
-    ├── tools/             # 6 modules, 18 tools
+    ├── tools/             # 8 modules, 27 tools
     ├── resources/         # 6 resources
     └── prompts/           # 4 workflow prompts
 ```
@@ -363,6 +363,19 @@ Three implementations: Claude, OpenAI, OpenClaw. Selection via `getProvider()` w
 
 ### Connector Pattern
 Each connector exports: `verify`, `export`, `create`, `update`, `reply`, `list`. All normalize to canonical `Ticket`/`Message`/`KBArticle` types from `cli/schema/types.ts`.
+
+### Continuous Sync Engine (`cli/sync/`)
+
+The sync engine provides continuous connector sync without Redis or external dependencies:
+
+- **Engine** (`cli/sync/engine.ts`): `runSyncCycle(connectorName, opts?)` reads cursor state from the previous export manifest, calls the connector's export function with that cursor (Zendesk supports incremental cursors; others do full re-export), writes JSONL to the output directory, and returns sync stats with new cursor state.
+- **Worker** (`cli/sync/worker.ts`): `startSyncWorker(connectorName, opts?)` runs `runSyncCycle` on a configurable interval (default 5 minutes) using a simple `setTimeout` loop. Returns a handle with `stop()` and `isRunning()`.
+- **CLI** (`cli/commands/sync.ts`): Three subcommands:
+  - `cliaas sync run --connector <name>` — single cycle
+  - `cliaas sync start --connector <name> [--interval <ms>]` — continuous worker with graceful SIGINT/SIGTERM shutdown
+  - `cliaas sync status [--connector <name>]` — show cursor state and last sync time per connector
+- **MCP tools** (`cli/mcp/tools/sync.ts`): `sync_status` and `sync_trigger` for AI agent access.
+- **Auth resolution**: Each connector's credentials are resolved from standard env vars (e.g. `ZENDESK_SUBDOMAIN`, `ZENDESK_EMAIL`, `ZENDESK_TOKEN`).
 
 ---
 
@@ -498,7 +511,7 @@ CLIaaS is an AI-native helpdesk platform. The core value proposition: we make it
 
 ### Key Architectural Implications
 
-1. **MCP server is tier-agnostic**: Same 18 tools, same interface, different backends. A customer can start BYOC, upgrade to hosted, and their AI workflows don't change.
+1. **MCP server is tier-agnostic**: Same 27 tools, same interface, different backends. A customer can start BYOC, upgrade to hosted, and their AI workflows don't change.
 2. **Connectors are ongoing sync, not one-time import**: In BYOC/hybrid mode, connectors maintain continuous sync with source helpdesks. Different reliability bar than one-shot migration.
 3. **Data layer must be backend-abstract**: The MCP server and business logic should talk to a DataProvider interface, not directly to Postgres or JSONL. Backends: local-postgres, remote-api, jsonl-file, hybrid-sync.
 4. **GUI feature gating**: Free tier gets functional-but-minimal UI. Paid tier unlocks premium pages/features. Gating at the route/component level.

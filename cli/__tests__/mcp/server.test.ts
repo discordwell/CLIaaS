@@ -75,7 +75,7 @@ function waitForStderr(child: ReturnType<typeof spawn>, pattern: string, timeout
 
 describe('MCP Server', () => {
   it(
-    'starts, initializes, and lists all 25 tools',
+    'starts, initializes, and lists all 27 tools',
     { timeout: 30000 },
     async () => {
       const child = spawn('npx', ['tsx', SERVER_PATH], {
