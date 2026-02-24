@@ -169,45 +169,63 @@ async function persistToDb(record: SecureAuditEntry): Promise<void> {
   });
 }
 
+// ---- Promise-based mutex for hash chain integrity ----
+
+let _chainLock: Promise<void> = Promise.resolve();
+
+/** @internal Reset the chain lock between tests */
+export function _resetChainLock(): void {
+  _chainLock = Promise.resolve();
+}
+
 // ---- Public API ----
 
 export async function recordSecureAudit(
   entry: Omit<SecureAuditEntry, 'id' | 'sequence' | 'hash' | 'prevHash' | 'timestamp'> & { workspaceId?: string },
 ): Promise<SecureAuditEntry> {
-  ensureDefaults();
-  const store = getStore();
+  let release: () => void;
+  const prev = _chainLock;
+  _chainLock = new Promise(r => { release = r; });
+  await prev;
 
-  const prevHash = store.length > 0
-    ? store[store.length - 1].hash
-    : GENESIS_HASH;
-  const sequence = store.length + 1;
-  const timestamp = new Date().toISOString();
-  const hash = computeHash(prevHash, sequence, timestamp, entry.action, entry.details);
-
-  const record: SecureAuditEntry = {
-    ...entry,
-    id: randomUUID(),
-    sequence,
-    timestamp,
-    hash,
-    prevHash,
-    workspaceId: entry.workspaceId,
-  };
-
-  store.push(record);
-  persist();
-
-  // Synchronous DB persistence with WAL fallback
   try {
-    await persistToDb(record);
-    // On success, flush any pending WAL entries
-    await walFlush<SecureAuditEntry>('__cliaasSecureAuditWal', persistToDb);
-  } catch (err) {
-    logger.warn({ err }, 'Secure audit DB write failed, queuing to WAL');
-    walEnqueue('__cliaasSecureAuditWal', record);
-  }
+    ensureDefaults();
+    const store = getStore();
 
-  return record;
+    const prevHash = store.length > 0
+      ? store[store.length - 1].hash
+      : GENESIS_HASH;
+    const sequence = store.length + 1;
+    const timestamp = new Date().toISOString();
+    const hash = computeHash(prevHash, sequence, timestamp, entry.action, entry.details);
+
+    const record: SecureAuditEntry = {
+      ...entry,
+      id: randomUUID(),
+      sequence,
+      timestamp,
+      hash,
+      prevHash,
+      workspaceId: entry.workspaceId,
+    };
+
+    store.push(record);
+    persist();
+
+    // Synchronous DB persistence with WAL fallback
+    try {
+      await persistToDb(record);
+      // On success, flush any pending WAL entries
+      await walFlush<SecureAuditEntry>('__cliaasSecureAuditWal', persistToDb);
+    } catch (err) {
+      logger.warn({ err }, 'Secure audit DB write failed, queuing to WAL');
+      walEnqueue('__cliaasSecureAuditWal', record);
+    }
+
+    return record;
+  } finally {
+    release!();
+  }
 }
 
 export async function querySecureAuditFromDb(

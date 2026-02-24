@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const status = await getComplianceStatus();
+    const status = await getComplianceStatus(auth.user.workspaceId);
     return NextResponse.json(status);
   } catch (err) {
     return NextResponse.json(

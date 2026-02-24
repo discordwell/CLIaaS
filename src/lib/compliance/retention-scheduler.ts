@@ -90,35 +90,44 @@ export async function enforceRetentionPolicies(
   return results;
 }
 
-let _intervalHandle: ReturnType<typeof setInterval> | null = null;
+const _intervalHandles = new Map<string, ReturnType<typeof setInterval>>();
 
 /**
- * Start the retention scheduler. Runs daily (or on the provided interval).
- * Falls back to setInterval when BullMQ is unavailable.
+ * Start the retention scheduler for a workspace. Runs daily (or on the provided interval).
+ * Each workspace gets its own independent interval. Falls back to setInterval when BullMQ is unavailable.
  */
 export function startRetentionScheduler(
   workspaceId: string,
   intervalMs: number = 24 * 60 * 60 * 1000,
 ): void {
-  if (_intervalHandle) return; // Already running
+  if (_intervalHandles.has(workspaceId)) return; // Already running for this workspace
 
   logger.info({ workspaceId, intervalMs }, 'Starting retention scheduler');
-  _intervalHandle = setInterval(async () => {
+  const handle = setInterval(async () => {
     try {
       const results = await enforceRetentionPolicies(workspaceId);
-      logger.info({ results }, 'Retention enforcement completed');
+      logger.info({ workspaceId, results }, 'Retention enforcement completed');
     } catch (err) {
-      logger.error({ err }, 'Retention enforcement error');
+      logger.error({ workspaceId, err }, 'Retention enforcement error');
     }
   }, intervalMs);
+  _intervalHandles.set(workspaceId, handle);
 }
 
 /**
- * Stop the retention scheduler.
+ * Stop the retention scheduler for a specific workspace, or all workspaces if no ID given.
  */
-export function stopRetentionScheduler(): void {
-  if (_intervalHandle) {
-    clearInterval(_intervalHandle);
-    _intervalHandle = null;
+export function stopRetentionScheduler(workspaceId?: string): void {
+  if (workspaceId) {
+    const handle = _intervalHandles.get(workspaceId);
+    if (handle) {
+      clearInterval(handle);
+      _intervalHandles.delete(workspaceId);
+    }
+  } else {
+    for (const [id, handle] of _intervalHandles) {
+      clearInterval(handle);
+      _intervalHandles.delete(id);
+    }
   }
 }

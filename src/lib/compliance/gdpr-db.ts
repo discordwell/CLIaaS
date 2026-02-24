@@ -67,15 +67,28 @@ export async function exportUserDataFromDb(
         ),
       );
 
-    // Query customers by email match (userId used as lookup)
-    const customers = await db
-      .select({
-        id: schema.customers.id,
-        name: schema.customers.name,
-        email: schema.customers.email,
-      })
-      .from(schema.customers)
-      .where(eq(schema.customers.workspaceId, workspaceId));
+    // Query customers scoped to the target user's email
+    let customers: Array<{ id: string; name: string; email: string | null }> = [];
+    const [user] = await db
+      .select({ email: schema.users.email })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    if (user?.email) {
+      customers = await db
+        .select({
+          id: schema.customers.id,
+          name: schema.customers.name,
+          email: schema.customers.email,
+        })
+        .from(schema.customers)
+        .where(
+          and(
+            eq(schema.customers.workspaceId, workspaceId),
+            eq(schema.customers.email, user.email),
+          ),
+        );
+    }
 
     // Query audit entries
     const auditEntries = await db

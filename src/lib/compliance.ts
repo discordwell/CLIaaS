@@ -283,14 +283,14 @@ export async function deleteUserData(
 
 // ---- Status overview ----
 
-export async function getComplianceStatus(): Promise<ComplianceStatus> {
-  ensureDefaults();
+export async function getComplianceStatus(workspaceId?: string): Promise<ComplianceStatus> {
+  const policies = await listRetentionPolicies(workspaceId);
   const tickets = await loadTickets();
   const uniqueRequesters = new Set(tickets.map((t) => t.requester));
 
   return {
-    totalRetentionPolicies: retentionPolicies.length,
-    policySummary: retentionPolicies.map((p) => ({
+    totalRetentionPolicies: policies.length,
+    policySummary: policies.map((p) => ({
       resource: p.resource,
       retentionDays: p.retentionDays,
       action: p.action,

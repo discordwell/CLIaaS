@@ -160,6 +160,80 @@ ALTER TABLE "usage_metrics" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "billing_events" ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
+-- Step 4b: SET NOT NULL on workspace_id after backfill (15 denormalized tables)
+-- ============================================================================
+
+ALTER TABLE "conversations" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "messages" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "attachments" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "ticket_tags" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "csat_ratings" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "time_entries" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "sla_events" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "kb_categories" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "kb_revisions" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "external_objects" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "sync_cursors" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "import_jobs" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "export_jobs" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "raw_records" ALTER COLUMN "workspace_id" SET NOT NULL;
+ALTER TABLE "custom_field_values" ALTER COLUMN "workspace_id" SET NOT NULL;
+
+-- ============================================================================
+-- Step 4c: FORCE RLS (ensures even table owners are subject to policies)
+-- ============================================================================
+
+-- Tables already having workspace_id (19)
+ALTER TABLE "organizations" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "customers" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "groups" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "inboxes" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "ticket_forms" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "brands" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "tickets" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "tags" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "custom_fields" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "rules" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "automation_rules" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "sla_policies" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "views" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "kb_collections" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "kb_articles" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "integrations" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "audit_events" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "sso_providers" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "api_keys" FORCE ROW LEVEL SECURITY;
+
+-- Newly denormalized tables (15)
+ALTER TABLE "conversations" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "messages" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "attachments" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "ticket_tags" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "csat_ratings" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "time_entries" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "sla_events" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "kb_categories" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "kb_revisions" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "external_objects" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "sync_cursors" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "import_jobs" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "export_jobs" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "raw_records" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "custom_field_values" FORCE ROW LEVEL SECURITY;
+
+-- Compliance tables
+ALTER TABLE "audit_entries" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "gdpr_deletion_requests" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "retention_policies" FORCE ROW LEVEL SECURITY;
+
+-- Tenant-level tables
+ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "workspaces" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "users" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "usage_metrics" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "billing_events" FORCE ROW LEVEL SECURITY;
+
+-- ============================================================================
 -- Step 5: Create RLS policies for workspace-scoped tables
 -- ============================================================================
 

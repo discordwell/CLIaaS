@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { _resetChainLock } from '@/lib/security/audit-log';
 
 function makeActor() {
   return { type: 'user' as const, id: 'u1', name: 'Test', ip: '127.0.0.1' };
@@ -9,6 +10,7 @@ describe('audit-log', () => {
     // Reset global state between tests
     globalThis.__cliaasSecureAudit = [];
     globalThis.__cliaasSecureAuditLoaded = true; // skip demo seeding
+    _resetChainLock();
     // Set a temp dir so writes don't collide
     process.env.CLIAAS_DATA_DIR = '/tmp/cliaas-audit-test-' + process.pid;
   });
@@ -105,6 +107,28 @@ describe('audit-log', () => {
     const parsed = JSON.parse(json);
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].action).toBe('export.test');
+  });
+
+  it('concurrent calls produce unique sequences and intact chain', async () => {
+    const { recordSecureAudit, verifyChainIntegrity } = await import('@/lib/security/audit-log');
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        recordSecureAudit({
+          actor: makeActor(),
+          action: `concurrent.${i}`,
+          resource: { type: 'r', id: String(i) },
+          outcome: 'success',
+          details: { idx: i },
+        }),
+      ),
+    );
+    const sequences = results.map(r => r.sequence);
+    expect(new Set(sequences).size).toBe(5);
+    expect(sequences.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+
+    const integrity = verifyChainIntegrity();
+    expect(integrity.valid).toBe(true);
+    expect(integrity.totalEntries).toBe(5);
   });
 
   it('exportSecureAudit CSV format', async () => {
