@@ -42,6 +42,10 @@ const PUBLIC_PATHS = [
   '/api/channels/facebook/webhook',
   '/api/channels/instagram/webhook',
   '/api/channels/twitter/webhook',
+  // Google OAuth (unauthenticated users must reach these to start the flow)
+  '/api/auth/google/login',
+  '/api/auth/google/callback',
+  '/api/auth/google/complete',
   // Zendesk webhook (has its own ZENDESK_WEBHOOK_SECRET verification)
   '/api/zendesk/webhook',
   // Stripe webhook (verified via stripe-signature header)

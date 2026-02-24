@@ -1,0 +1,130 @@
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { SignJWT } from 'jose';
+import { eq } from 'drizzle-orm';
+import { createToken, setSessionCookie, getJwtSecret } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get('code');
+  const state = searchParams.get('state');
+  const error = searchParams.get('error');
+
+  if (error) {
+    return NextResponse.redirect(new URL('/sign-in?error=google_denied', request.url));
+  }
+
+  if (!code || !state) {
+    return NextResponse.redirect(new URL('/sign-in?error=google_missing_params', request.url));
+  }
+
+  // Verify state
+  const cookieStore = await cookies();
+  const savedState = cookieStore.get('google-oauth-state')?.value;
+  cookieStore.delete('google-oauth-state');
+
+  if (state !== savedState) {
+    return NextResponse.redirect(new URL('/sign-in?error=google_state_mismatch', request.url));
+  }
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    return NextResponse.redirect(new URL('/sign-in?error=google_not_configured', request.url));
+  }
+
+  const callbackUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/auth/google/callback`;
+
+  // Exchange code for tokens
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: callbackUrl,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }).toString(),
+  });
+
+  if (!tokenRes.ok) {
+    return NextResponse.redirect(new URL('/sign-in?error=google_token_exchange', request.url));
+  }
+
+  const tokenData = await tokenRes.json();
+
+  // Fetch user info from Google
+  const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` },
+  });
+
+  if (!userRes.ok) {
+    return NextResponse.redirect(new URL('/sign-in?error=google_userinfo', request.url));
+  }
+
+  const googleUser = await userRes.json();
+  const email = googleUser.email as string;
+  const name = (googleUser.name as string) || email.split('@')[0];
+
+  if (!email) {
+    return NextResponse.redirect(new URL('/sign-in?error=google_no_email', request.url));
+  }
+
+  // Check if user already exists
+  if (!process.env.DATABASE_URL) {
+    return NextResponse.redirect(new URL('/sign-in?error=db_not_configured', request.url));
+  }
+
+  const { db } = await import('@/db');
+  const schema = await import('@/db/schema');
+
+  const existing = await db
+    .select({
+      id: schema.users.id,
+      email: schema.users.email,
+      name: schema.users.name,
+      role: schema.users.role,
+      workspaceId: schema.users.workspaceId,
+    })
+    .from(schema.users)
+    .where(eq(schema.users.email, email))
+    .limit(1);
+
+  if (existing.length > 0) {
+    // Existing user — create session and redirect to dashboard
+    const user = existing[0];
+    const workspace = await db
+      .select({ tenantId: schema.workspaces.tenantId })
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.id, user.workspaceId))
+      .limit(1);
+
+    const tenantId = workspace[0]?.tenantId || user.workspaceId;
+
+    const token = await createToken({
+      id: user.id,
+      email: user.email!,
+      name: user.name || name,
+      role: user.role as 'owner' | 'admin' | 'agent',
+      workspaceId: user.workspaceId,
+      tenantId,
+    });
+
+    await setSessionCookie(token);
+    return NextResponse.redirect(new URL('/dashboard', request.url));
+  }
+
+  // New user — create a short-lived token and redirect to workspace step
+  const signupToken = await new SignJWT({ email, name, purpose: 'google-signup' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('10m')
+    .sign(getJwtSecret());
+
+  return NextResponse.redirect(
+    new URL(`/sign-up/workspace?token=${encodeURIComponent(signupToken)}`, request.url)
+  );
+}
