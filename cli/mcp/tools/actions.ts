@@ -6,8 +6,8 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { TicketStatus, TicketPriority } from '../../schema/types.js';
 import { textResult, errorResult, safeLoadTickets, findTicket } from '../util.js';
+import type { TicketStatus, TicketPriority } from '@/lib/data-provider/types.js';
 import { withConfirmation, recordMCPAction } from './confirm.js';
 import { isToolEnabled } from './scopes.js';
 
@@ -37,7 +37,7 @@ export function registerActionTools(server: McpServer): void {
       const guard = scopeGuard('ticket_update');
       if (guard) return guard;
 
-      const tickets = safeLoadTickets(dir);
+      const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
 
@@ -95,7 +95,7 @@ export function registerActionTools(server: McpServer): void {
       const guard = scopeGuard('ticket_reply');
       if (guard) return guard;
 
-      const tickets = safeLoadTickets(dir);
+      const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
 
@@ -132,7 +132,7 @@ export function registerActionTools(server: McpServer): void {
       const guard = scopeGuard('ticket_note');
       if (guard) return guard;
 
-      const tickets = safeLoadTickets(dir);
+      const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
 
@@ -281,7 +281,7 @@ export function registerActionTools(server: McpServer): void {
       const guard = scopeGuard('ai_resolve');
       if (guard) return guard;
 
-      const tickets = safeLoadTickets(dir);
+      const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
 

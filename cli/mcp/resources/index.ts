@@ -9,7 +9,7 @@ export function registerResources(server: McpServer): void {
     'cliaas://tickets',
     { description: 'Full ticket list from exported data', mimeType: 'application/json' },
     async () => {
-      const tickets = safeLoadTickets();
+      const tickets = await safeLoadTickets();
       return {
         contents: [{
           uri: 'cliaas://tickets',
@@ -38,8 +38,8 @@ export function registerResources(server: McpServer): void {
     { description: 'Single ticket with conversation thread', mimeType: 'application/json' },
     async (uri, variables) => {
       const id = variables.id as string;
-      const tickets = safeLoadTickets();
-      const messages = safeLoadMessages();
+      const tickets = await safeLoadTickets();
+      const messages = await safeLoadMessages();
       const ticket = findTicket(tickets, id);
 
       if (!ticket) {
@@ -80,7 +80,7 @@ export function registerResources(server: McpServer): void {
     'cliaas://kb-articles',
     { description: 'All knowledge base articles', mimeType: 'application/json' },
     async () => {
-      const articles = safeLoadKBArticles();
+      const articles = await safeLoadKBArticles();
       return {
         contents: [{
           uri: 'cliaas://kb-articles',
@@ -103,7 +103,7 @@ export function registerResources(server: McpServer): void {
     'cliaas://stats',
     { description: 'Queue statistics snapshot', mimeType: 'application/json' },
     async () => {
-      const tickets = safeLoadTickets();
+      const tickets = await safeLoadTickets();
       const byStatus: Record<string, number> = {};
       const byPriority: Record<string, number> = {};
       for (const t of tickets) {

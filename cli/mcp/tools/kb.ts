@@ -12,7 +12,7 @@ export function registerKBTools(server: McpServer): void {
       dir: z.string().optional().describe('Export directory override'),
     },
     async ({ query, limit, dir }) => {
-      const articles = safeLoadKBArticles(dir);
+      const articles = await safeLoadKBArticles(dir);
       if (articles.length === 0) return errorResult('No KB articles found.');
 
       const lower = query.toLowerCase();
@@ -54,7 +54,7 @@ export function registerKBTools(server: McpServer): void {
       const provResult = safeGetProvider();
       if ('error' in provResult) return errorResult(provResult.error);
 
-      const tickets = safeLoadTickets(dir);
+      const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket not found: ${ticketId}`);
 
@@ -81,7 +81,7 @@ export function registerKBTools(server: McpServer): void {
         }
       }
 
-      const articles = safeLoadKBArticles(dir);
+      const articles = await safeLoadKBArticles(dir);
       if (articles.length === 0) return errorResult('No KB articles found.');
 
       try {

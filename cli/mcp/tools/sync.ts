@@ -59,4 +59,73 @@ export function registerSyncTools(server: McpServer): void {
       }
     },
   );
+
+  // ---- Hybrid sync tools ----
+
+  server.tool(
+    'sync_pull',
+    'Pull data from hosted API into local DB (hybrid mode)',
+    {},
+    async () => {
+      try {
+        const { syncPull } = await import('../../sync/hybrid.js');
+        const result = await syncPull();
+
+        return textResult({
+          message: 'Pull complete',
+          ticketsPulled: result.ticketsPulled,
+          articlesPulled: result.articlesPulled,
+          conflicts: result.conflicts,
+          errors: result.errors.length > 0 ? result.errors : undefined,
+        });
+      } catch (err) {
+        return errorResult(`Pull failed: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
+
+  server.tool(
+    'sync_push',
+    'Push pending local changes (outbox) to hosted API (hybrid mode)',
+    {},
+    async () => {
+      try {
+        const { syncPush } = await import('../../sync/hybrid.js');
+        const result = await syncPush();
+
+        return textResult({
+          message: 'Push complete',
+          pushed: result.pushed,
+          conflicts: result.conflicts,
+          failed: result.failed,
+          errors: result.errors.length > 0 ? result.errors : undefined,
+        });
+      } catch (err) {
+        return errorResult(`Push failed: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
+
+  server.tool(
+    'sync_conflicts',
+    'List unresolved sync conflicts (hybrid mode)',
+    {},
+    async () => {
+      try {
+        const { listConflicts } = await import('../../sync/hybrid.js');
+        const conflicts = await listConflicts();
+
+        if (conflicts.length === 0) {
+          return textResult({ message: 'No unresolved conflicts', conflicts: [] });
+        }
+
+        return textResult({
+          message: `${conflicts.length} unresolved conflict(s)`,
+          conflicts,
+        });
+      } catch (err) {
+        return errorResult(`Failed to list conflicts: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
 }

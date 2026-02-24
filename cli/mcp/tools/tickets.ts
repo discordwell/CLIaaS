@@ -15,7 +15,7 @@ export function registerTicketTools(server: McpServer): void {
       dir: z.string().optional().describe('Export directory override'),
     },
     async ({ status, priority, assignee, tag, limit, dir }) => {
-      let tickets = safeLoadTickets(dir);
+      let tickets = await safeLoadTickets(dir);
 
       if (tickets.length === 0) {
         return errorResult('No ticket data found. Run an export or `cliaas demo` first.');
@@ -59,8 +59,8 @@ export function registerTicketTools(server: McpServer): void {
       dir: z.string().optional().describe('Export directory override'),
     },
     async ({ ticketId, dir }) => {
-      const tickets = safeLoadTickets(dir);
-      const messages = safeLoadMessages(dir);
+      const tickets = await safeLoadTickets(dir);
+      const messages = await safeLoadMessages(dir);
 
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) {
@@ -105,8 +105,8 @@ export function registerTicketTools(server: McpServer): void {
       dir: z.string().optional().describe('Export directory override'),
     },
     async ({ query, limit, dir }) => {
-      const allTickets = safeLoadTickets(dir);
-      const allMessages = safeLoadMessages(dir);
+      const allTickets = await safeLoadTickets(dir);
+      const allMessages = await safeLoadMessages(dir);
       const lower = query.toLowerCase();
 
       // Search tickets by subject, tags, requester

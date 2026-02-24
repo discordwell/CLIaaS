@@ -1,4 +1,5 @@
-import type { Ticket, Message, KBArticle, TriageResult, KBSuggestion } from '../schema/types.js';
+import type { Ticket, Message, KBArticle } from '@/lib/data-provider/types.js';
+import type { TriageResult, KBSuggestion } from '../schema/types.js';
 
 /** Strip markdown code fences and parse JSON from LLM output */
 export function parseLLMJson<T>(raw: string): T {

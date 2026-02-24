@@ -10,9 +10,9 @@ export function registerQueueTools(server: McpServer): void {
       dir: z.string().optional().describe('Export directory override'),
     },
     async ({ dir }) => {
-      const tickets = safeLoadTickets(dir);
-      const messages = safeLoadMessages(dir);
-      const articles = safeLoadKBArticles(dir);
+      const tickets = await safeLoadTickets(dir);
+      const messages = await safeLoadMessages(dir);
+      const articles = await safeLoadKBArticles(dir);
 
       if (tickets.length === 0) return errorResult('No ticket data found.');
 
@@ -81,8 +81,8 @@ export function registerQueueTools(server: McpServer): void {
       dir: z.string().optional().describe('Export directory override'),
     },
     async ({ status, dir }) => {
-      const tickets = safeLoadTickets(dir);
-      const messages = safeLoadMessages(dir);
+      const tickets = await safeLoadTickets(dir);
+      const messages = await safeLoadMessages(dir);
       const statuses = status?.split(',') ?? ['open', 'pending'];
 
       const active = tickets.filter(t => statuses.includes(t.status));

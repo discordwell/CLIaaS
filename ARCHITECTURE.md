@@ -15,10 +15,10 @@
 | CLI files | 69 (`cli/`) |
 | CLI commands | 32 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 27 (across 8 modules) |
+| MCP tools | 30 (across 8 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 57 (Drizzle/PostgreSQL, RLS-enabled) |
+| DB tables | 59 (Drizzle/PostgreSQL, RLS-enabled) |
 | Tests | 88 files, ~7,000 LOC |
 | Source LOC | ~49,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
@@ -36,7 +36,7 @@
          ▼                ▼                   ▼
 ┌─────────────────┐ ┌──────────────┐ ┌──────────────────┐
 │  Next.js App    │ │  Commander   │ │  MCP Server      │
-│  29 pages       │ │  32 commands │ │  27 tools        │
+│  29 pages       │ │  32 commands │ │  30 tools        │
 │  101 API routes │ │  10 connect. │ │  6 resources     │
 │                 │ │  3 providers │ │  4 prompts       │
 └────────┬────────┘ └──────┬───────┘ └────────┬─────────┘
@@ -128,8 +128,8 @@ Each domain has a dedicated store in `src/lib/`:
 ### Knowledge Base (4)
 `kb_collections` → `kb_categories` → `kb_articles` → `kb_revisions`
 
-### Integration & Sync (4)
-`integrations`, `external_objects` (ID mapping), `sync_cursors`, `raw_records`
+### Integration & Sync (6)
+`integrations`, `external_objects` (ID mapping), `sync_cursors`, `raw_records`, `sync_outbox` (hybrid push queue), `sync_conflicts` (conflict tracking)
 
 ### Jobs (2)
 `import_jobs`, `export_jobs`
@@ -342,7 +342,7 @@ cli/
 └── mcp/
     ├── server.ts          # stdio transport entry point
     ├── util.ts            # Safe wrappers, result helpers
-    ├── tools/             # 8 modules, 27 tools
+    ├── tools/             # 8 modules, 30 tools
     ├── resources/         # 6 resources
     └── prompts/           # 4 workflow prompts
 ```
@@ -374,8 +374,20 @@ The sync engine provides continuous connector sync without Redis or external dep
   - `cliaas sync run --connector <name>` — single cycle
   - `cliaas sync start --connector <name> [--interval <ms>]` — continuous worker with graceful SIGINT/SIGTERM shutdown
   - `cliaas sync status [--connector <name>]` — show cursor state and last sync time per connector
-- **MCP tools** (`cli/mcp/tools/sync.ts`): `sync_status` and `sync_trigger` for AI agent access.
+- **MCP tools** (`cli/mcp/tools/sync.ts`): `sync_status`, `sync_trigger`, `sync_pull`, `sync_push`, `sync_conflicts` for AI agent access.
 - **Auth resolution**: Each connector's credentials are resolved from standard env vars (e.g. `ZENDESK_SUBDOMAIN`, `ZENDESK_EMAIL`, `ZENDESK_TOKEN`).
+
+#### Hybrid Sync Layer (Phase 5)
+
+The hybrid sync layer enables the Tier 3 (Hybrid) architecture where a local DB syncs bidirectionally with the hosted API:
+
+- **HybridProvider** (`src/lib/data-provider/hybrid-provider.ts`): Implements DataProvider. Reads from local DbProvider (fast/offline). Writes go to local DB **and** insert a record into `sync_outbox` table (marked `pending_push`).
+- **Sync Outbox** (`sync_outbox` table): Queues local changes for push to hosted. Fields: operation (`create`/`update`), entityType, entityId, payload (JSONB), status (`pending_push`/`pushed`/`conflict`/`failed`), timestamps.
+- **Conflict Detection** (`cli/sync/conflict.ts`): `detectConflicts()` compares local outbox `createdAt` against hosted `updatedAt`. If hosted was modified after the local change was queued, flags as conflict. `partitionChanges()` splits entries into safe/conflicted groups.
+- **Sync Operations** (`cli/sync/hybrid.ts`): `syncPull()` fetches from hosted (via RemoteProvider) and merges into local DB (hosted wins). `syncPush()` reads outbox, checks for conflicts, pushes safe entries to hosted API, records conflicts in `sync_conflicts` table. `listConflicts()` / `resolveConflict()` for conflict management.
+- **CLI commands**: `cliaas sync pull`, `cliaas sync push`, `cliaas sync conflicts`, `cliaas sync resolve <id> --keep local|hosted`
+- **MCP tools**: `sync_pull`, `sync_push`, `sync_conflicts`
+- **Key principle**: Hosted always wins by default. Local-to-hosted push is an explicit user action with conflict warnings. No silent merges.
 
 ---
 
@@ -511,12 +523,12 @@ CLIaaS is an AI-native helpdesk platform. The core value proposition: we make it
 
 ### Key Architectural Implications
 
-1. **MCP server is tier-agnostic**: Same 27 tools, same interface, different backends. A customer can start BYOC, upgrade to hosted, and their AI workflows don't change.
+1. **MCP server is tier-agnostic**: Same 30 tools, same interface, different backends. A customer can start BYOC, upgrade to hosted, and their AI workflows don't change.
 2. **Connectors are ongoing sync, not one-time import**: In BYOC/hybrid mode, connectors maintain continuous sync with source helpdesks. Different reliability bar than one-shot migration.
 3. **Data layer must be backend-abstract**: The MCP server and business logic should talk to a DataProvider interface, not directly to Postgres or JSONL. Backends: local-postgres, remote-api, jsonl-file, hybrid-sync.
 4. **GUI feature gating**: Free tier gets functional-but-minimal UI. Paid tier unlocks premium pages/features. Gating at the route/component level.
 5. **Wizard-driven onboarding**: BYOC setup is a guided process via claude.md/agents.md in a WIZARD/ folder. AI-assisted infrastructure provisioning.
-6. **Sync layer for hybrid**: Hosted→local sync with conflict detection. Local→hosted requires explicit push. Hosted is always source of truth unless customer explicitly overrides.
+6. **Sync layer for hybrid** (Phase 5 complete): HybridProvider + sync_outbox + conflict detection. Hosted→local pull, outbox-based push, conflict resolution via `sync_conflicts` table. CLI + MCP tools for all operations.
 
 ### GUI Feature Gating (Phase 4)
 

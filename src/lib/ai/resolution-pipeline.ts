@@ -123,12 +123,14 @@ export async function handleTicketEvent(
 
   // Build Ticket from event data using shared builder
   const base = buildBaseTicketFromEvent(data);
-  const ticket: Ticket = {
+  const ticket = {
     ...base,
+    status: base.status as Ticket['status'],
+    priority: base.priority as Ticket['priority'],
     assignee: base.assignee ?? undefined,
     externalId: String(data.externalId ?? data.ticketId ?? data.id ?? ''),
     source: (data.source as Ticket['source']) ?? 'zendesk',
-  };
+  } satisfies Ticket;
 
   if (!ticket.id) return null;
 

@@ -75,7 +75,7 @@ function waitForStderr(child: ReturnType<typeof spawn>, pattern: string, timeout
 
 describe('MCP Server', () => {
   it(
-    'starts, initializes, and lists all 27 tools',
+    'starts, initializes, and lists all 30 tools',
     { timeout: 30000 },
     async () => {
       const child = spawn('npx', ['tsx', SERVER_PATH], {
@@ -127,7 +127,7 @@ describe('MCP Server', () => {
         expect(toolsResponse.result).toBeDefined();
 
         const tools = toolsResponse.result!.tools ?? [];
-        expect(tools.length).toBe(27);
+        expect(tools.length).toBe(30);
 
         const toolNames = tools.map((t: { name: string }) => t.name).sort();
         expect(toolNames).toEqual([
@@ -147,6 +147,9 @@ describe('MCP Server', () => {
           'sentiment_analyze',
           'sla_report',
           'summarize_queue',
+          'sync_conflicts',
+          'sync_pull',
+          'sync_push',
           'sync_status',
           'sync_trigger',
           'ticket_create',

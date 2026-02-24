@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { LLMProvider } from './base.js';
 import { parseLLMJson, buildTriagePrompt, buildReplyPrompt, buildKBSuggestPrompt, buildSummarizePrompt } from './base.js';
-import type { Ticket, Message, KBArticle, TriageResult, KBSuggestion } from '../schema/types.js';
+import type { Ticket, Message, KBArticle } from '@/lib/data-provider/types.js';
+import type { TriageResult, KBSuggestion } from '../schema/types.js';
 
 export class ClaudeProvider implements LLMProvider {
   name = 'claude';

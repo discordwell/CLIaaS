@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "cliaas": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "cli/mcp/server.ts"],
+      "env": {
+        "DATABASE_URL": "postgresql://user:password@localhost:5432/cliaas",
+        "CLIAAS_MODE": "local"
+      }
+    }
+  }
+}

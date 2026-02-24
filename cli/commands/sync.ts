@@ -6,7 +6,7 @@ import { startSyncWorker } from '../sync/worker.js';
 export function registerSyncCommands(program: Command): void {
   const sync = program
     .command('sync')
-    .description('Continuous connector sync: run, start, status');
+    .description('Connector sync + hybrid pull/push/conflicts');
 
   sync
     .command('run')
@@ -117,6 +117,123 @@ export function registerSyncCommands(program: Command): void {
           console.log(`    Cursors:      none`);
         }
         console.log('');
+      }
+    });
+
+  // ---- Hybrid sync commands ----
+
+  sync
+    .command('pull')
+    .description('Pull data from hosted API into local DB (hybrid mode)')
+    .action(async () => {
+      try {
+        console.log(chalk.cyan('\nPulling from hosted API...\n'));
+        const { syncPull } = await import('../sync/hybrid.js');
+        const result = await syncPull();
+
+        console.log(chalk.green('Pull complete:'));
+        console.log(`  Tickets pulled:  ${result.ticketsPulled}`);
+        console.log(`  Articles pulled: ${result.articlesPulled}`);
+        console.log(`  Conflicts:       ${result.conflicts}`);
+
+        if (result.errors.length > 0) {
+          console.log(chalk.yellow('\nWarnings:'));
+          for (const err of result.errors) {
+            console.log(chalk.yellow(`  - ${err}`));
+          }
+        }
+      } catch (err) {
+        console.error(chalk.red(`Pull failed: ${err instanceof Error ? err.message : err}`));
+        process.exit(1);
+      }
+    });
+
+  sync
+    .command('push')
+    .description('Push pending outbox changes to hosted API (hybrid mode)')
+    .action(async () => {
+      try {
+        console.log(chalk.cyan('\nPushing outbox to hosted API...\n'));
+        const { syncPush } = await import('../sync/hybrid.js');
+        const result = await syncPush();
+
+        console.log(chalk.green('Push complete:'));
+        console.log(`  Pushed:     ${result.pushed}`);
+        console.log(`  Conflicts:  ${result.conflicts}`);
+        console.log(`  Failed:     ${result.failed}`);
+
+        if (result.errors.length > 0) {
+          console.log(chalk.yellow('\nWarnings:'));
+          for (const err of result.errors) {
+            console.log(chalk.yellow(`  - ${err}`));
+          }
+        }
+
+        if (result.conflicts > 0) {
+          console.log(chalk.yellow(`\nRun ${chalk.bold('cliaas sync conflicts')} to view and resolve conflicts.`));
+        }
+      } catch (err) {
+        console.error(chalk.red(`Push failed: ${err instanceof Error ? err.message : err}`));
+        process.exit(1);
+      }
+    });
+
+  sync
+    .command('conflicts')
+    .description('List unresolved sync conflicts (hybrid mode)')
+    .action(async () => {
+      try {
+        const { listConflicts } = await import('../sync/hybrid.js');
+        const conflicts = await listConflicts();
+
+        if (conflicts.length === 0) {
+          console.log(chalk.green('\nNo unresolved conflicts.'));
+          return;
+        }
+
+        console.log(chalk.cyan(`\nUnresolved Conflicts (${conflicts.length}):\n`));
+        for (const c of conflicts) {
+          console.log(`  ${chalk.bold(c.id)}`);
+          console.log(`    Entity:       ${c.entityType}/${c.entityId}`);
+          console.log(`    Local at:     ${c.localUpdatedAt}`);
+          console.log(`    Hosted at:    ${c.hostedUpdatedAt}`);
+          console.log(`    Detected at:  ${c.createdAt}`);
+          console.log('');
+        }
+
+        console.log(chalk.gray(`Resolve with: cliaas sync resolve <id> --keep local|hosted`));
+      } catch (err) {
+        console.error(chalk.red(`Failed to list conflicts: ${err instanceof Error ? err.message : err}`));
+        process.exit(1);
+      }
+    });
+
+  sync
+    .command('resolve <id>')
+    .description('Resolve a sync conflict by keeping local or hosted version')
+    .requiredOption('--keep <version>', 'Which version to keep: local or hosted')
+    .action(async (id: string, opts: { keep: string }) => {
+      if (opts.keep !== 'local' && opts.keep !== 'hosted') {
+        console.error(chalk.red('--keep must be "local" or "hosted"'));
+        process.exit(1);
+      }
+
+      try {
+        const { resolveConflict } = await import('../sync/hybrid.js');
+        const result = await resolveConflict(id, opts.keep as 'local' | 'hosted');
+
+        if (result.resolved) {
+          console.log(chalk.green(`\nConflict ${id} resolved — keeping ${opts.keep} version.`));
+          if (opts.keep === 'local') {
+            console.log(chalk.gray('The local change has been re-queued. Run "cliaas sync push" to send it.'));
+          }
+        } else {
+          console.error(chalk.red(`\nFailed to resolve: ${result.error}`));
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error(chalk.red(`Resolve failed: ${err instanceof Error ? err.message : err}`));
+        process.exit(1);
       }
     });
 }

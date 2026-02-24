@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { textResult, errorResult, safeGetProvider, safeLoadTickets, safeLoadMessages, getTicketMessages, findTicket } from '../util.js';
+import type { Ticket } from '../util.js';
 import { parseLLMJson } from '../../providers/base.js';
-import type { Ticket } from '../../schema/types.js';
 
 export function registerAnalysisTools(server: McpServer): void {
   server.tool(
@@ -16,8 +16,8 @@ export function registerAnalysisTools(server: McpServer): void {
       const result = safeGetProvider();
       if ('error' in result) return errorResult(result.error);
 
-      const tickets = safeLoadTickets(dir);
-      const messages = safeLoadMessages(dir);
+      const tickets = await safeLoadTickets(dir);
+      const messages = await safeLoadMessages(dir);
 
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket not found: ${ticketId}`);
@@ -44,8 +44,8 @@ export function registerAnalysisTools(server: McpServer): void {
       const result = safeGetProvider();
       if ('error' in result) return errorResult(result.error);
 
-      const tickets = safeLoadTickets(dir);
-      const messages = safeLoadMessages(dir);
+      const tickets = await safeLoadTickets(dir);
+      const messages = await safeLoadMessages(dir);
 
       const queue = tickets.filter(t => t.status === status).slice(0, limit);
       if (queue.length === 0) return errorResult(`No ${status} tickets found.`);
@@ -82,8 +82,8 @@ export function registerAnalysisTools(server: McpServer): void {
       const result = safeGetProvider();
       if ('error' in result) return errorResult(result.error);
 
-      const tickets = safeLoadTickets(dir);
-      const messages = safeLoadMessages(dir);
+      const tickets = await safeLoadTickets(dir);
+      const messages = await safeLoadMessages(dir);
 
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket not found: ${ticketId}`);
@@ -132,8 +132,8 @@ export function registerAnalysisTools(server: McpServer): void {
       const result = safeGetProvider();
       if ('error' in result) return errorResult(result.error);
 
-      const allTickets = safeLoadTickets(dir);
-      const allMessages = safeLoadMessages(dir);
+      const allTickets = await safeLoadTickets(dir);
+      const allMessages = await safeLoadMessages(dir);
 
       let queue: Ticket[];
       if (ticketId) {
@@ -220,7 +220,7 @@ Return ONLY the JSON object, no other text.`;
       dir: z.string().optional().describe('Export directory override'),
     },
     async ({ threshold, status, limit, dir }) => {
-      let tickets = safeLoadTickets(dir);
+      let tickets = await safeLoadTickets(dir);
       if (status) tickets = tickets.filter(t => t.status === status);
       if (tickets.length === 0) return errorResult('No tickets found.');
 
@@ -284,7 +284,7 @@ Return ONLY the JSON object, no other text.`;
       const result = safeGetProvider();
       if ('error' in result) return errorResult(result.error);
 
-      const tickets = safeLoadTickets(dir);
+      const tickets = await safeLoadTickets(dir);
       if (tickets.length === 0) return errorResult('No ticket data found.');
 
       try {

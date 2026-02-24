@@ -935,6 +935,81 @@ export const billingEvents = pgTable(
   }),
 );
 
+// ---- Hybrid Sync Outbox ----
+
+export const syncOutboxOperationEnum = pgEnum('sync_outbox_operation', [
+  'create',
+  'update',
+]);
+
+export const syncOutboxEntityTypeEnum = pgEnum('sync_outbox_entity_type', [
+  'ticket',
+  'message',
+  'kb_article',
+]);
+
+export const syncOutboxStatusEnum = pgEnum('sync_outbox_status', [
+  'pending_push',
+  'pushed',
+  'conflict',
+  'failed',
+]);
+
+export const syncOutbox = pgTable(
+  'sync_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    operation: syncOutboxOperationEnum('operation').notNull(),
+    entityType: syncOutboxEntityTypeEnum('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    payload: jsonb('payload').notNull(),
+    status: syncOutboxStatusEnum('status').notNull().default('pending_push'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    pushedAt: timestamp('pushed_at', { withTimezone: true }),
+    error: text('error'),
+  },
+  table => ({
+    syncOutboxStatusIdx: index('sync_outbox_status_idx').on(
+      table.workspaceId,
+      table.status,
+    ),
+    syncOutboxEntityIdx: index('sync_outbox_entity_idx').on(
+      table.entityType,
+      table.entityId,
+    ),
+  }),
+);
+
+// ---- Sync Conflicts ----
+
+export const syncConflicts = pgTable(
+  'sync_conflicts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    entityType: syncOutboxEntityTypeEnum('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    localVersion: jsonb('local_version').notNull(),
+    hostedVersion: jsonb('hosted_version').notNull(),
+    localUpdatedAt: timestamp('local_updated_at', { withTimezone: true }).notNull(),
+    hostedUpdatedAt: timestamp('hosted_updated_at', { withTimezone: true }).notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolution: text('resolution'), // 'local' | 'hosted' | null
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    syncConflictsUnresolvedIdx: index('sync_conflicts_unresolved_idx').on(
+      table.workspaceId,
+      table.resolvedAt,
+    ),
+    syncConflictsEntityIdx: index('sync_conflicts_entity_idx').on(
+      table.entityType,
+      table.entityId,
+    ),
+  }),
+);
+
 // ---- GDPR Deletion Requests ----
 
 export const gdprDeletionRequests = pgTable(

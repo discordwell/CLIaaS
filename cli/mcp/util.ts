@@ -3,8 +3,10 @@ import { ClaudeProvider } from '../providers/claude.js';
 import { OpenAIProvider } from '../providers/openai.js';
 import { OpenClawProvider } from '../providers/openclaw.js';
 import type { LLMProvider } from '../providers/base.js';
-import { loadTickets, loadMessages, loadKBArticles, getTicketMessages } from '../data.js';
-import type { Ticket, Message, KBArticle } from '../schema/types.js';
+import { getDataProvider } from '@/lib/data-provider/index.js';
+import type { Ticket, Message, KBArticle } from '@/lib/data-provider/types.js';
+
+export type { Ticket, Message, KBArticle };
 
 /** Write to stderr — safe for MCP stdio servers (never corrupts JSON-RPC on stdout). */
 export function log(msg: string): void {
@@ -58,28 +60,31 @@ export function safeGetProvider(): { provider: LLMProvider } | { error: string }
   }
 }
 
-/** Safe ticket loader — returns empty array on missing data. */
-export function safeLoadTickets(dir?: string): Ticket[] {
+/** Safe ticket loader — now async, backed by DataProvider. */
+export async function safeLoadTickets(dir?: string): Promise<Ticket[]> {
   try {
-    return loadTickets(dir);
+    const provider = await getDataProvider(dir);
+    return await provider.loadTickets();
   } catch {
     return [];
   }
 }
 
-/** Safe message loader — returns empty array on missing data. */
-export function safeLoadMessages(dir?: string): Message[] {
+/** Safe message loader — now async, backed by DataProvider. */
+export async function safeLoadMessages(dir?: string): Promise<Message[]> {
   try {
-    return loadMessages(dir);
+    const provider = await getDataProvider(dir);
+    return await provider.loadMessages();
   } catch {
     return [];
   }
 }
 
-/** Safe KB article loader — returns empty array on missing data. */
-export function safeLoadKBArticles(dir?: string): KBArticle[] {
+/** Safe KB article loader — now async, backed by DataProvider. */
+export async function safeLoadKBArticles(dir?: string): Promise<KBArticle[]> {
   try {
-    return loadKBArticles(dir);
+    const provider = await getDataProvider(dir);
+    return await provider.loadKBArticles();
   } catch {
     return [];
   }
@@ -102,5 +107,7 @@ export function maskConfig(config: Record<string, unknown>): Record<string, unkn
   return masked;
 }
 
-/** Re-export for convenience. */
-export { getTicketMessages } from '../data.js';
+/** Filter messages by ticket ID. */
+export function getTicketMessages(ticketId: string, messages: Message[]): Message[] {
+  return messages.filter(m => m.ticketId === ticketId);
+}

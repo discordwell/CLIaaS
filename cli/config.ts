@@ -14,6 +14,9 @@ export interface CLIConfig {
     topK?: number;
     hybridWeight?: number;
   };
+  mode?: 'local' | 'db' | 'remote' | 'hybrid';
+  hostedApiUrl?: string;
+  hostedApiKey?: string;
 }
 
 const CONFIG_DIR = join(homedir(), '.cliaas');
