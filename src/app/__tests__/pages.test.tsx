@@ -42,15 +42,15 @@ describe('Home page', () => {
     expect(screen.getByText('Enterprise')).toBeInTheDocument();
   });
 
-  it('shows equinox promo', () => {
+  it('shows Ides of March promo', () => {
     render(<Home />);
-    const matches = screen.getAllByText(/March Equinox/);
+    const matches = screen.getAllByText(/Ides of March/);
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders the terminal demo section', () => {
     render(<Home />);
-    expect(screen.getByText('cliaas')).toBeInTheDocument();
+    expect(screen.getByText('claude code')).toBeInTheDocument();
   });
 
   it('renders the MCP server section', () => {
@@ -64,9 +64,10 @@ describe('Home page', () => {
     expect(screen.getByText('Intercom')).toBeInTheDocument();
   });
 
-  it('shows $79/mo for Pro Hosted', () => {
+  it('shows $59/mo for Pro Hosted with $79 strikethrough', () => {
     render(<Home />);
     expect(screen.getByText('$79')).toBeInTheDocument();
+    expect(screen.getByText('$59')).toBeInTheDocument();
   });
 });
 

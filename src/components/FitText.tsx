@@ -12,11 +12,13 @@ export default function FitText({
   maxSize = 96,
   minSize = 16,
   className = "",
+  lineClassNames,
 }: {
   lines: string[];
   maxSize?: number;
   minSize?: number;
   className?: string;
+  lineClassNames?: string[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -59,7 +61,7 @@ export default function FitText({
         <div
           key={i}
           ref={(el) => { lineRefs.current[i] = el; }}
-          className="whitespace-nowrap font-bold leading-[1.1]"
+          className={`whitespace-nowrap font-bold leading-[1.1] ${lineClassNames?.[i] ?? ""}`}
           style={{ fontSize: maxSize }}
         >
           {line}

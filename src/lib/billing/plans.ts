@@ -1,7 +1,7 @@
 /**
  * Billing plan definitions, founder eligibility, and quota lookups.
  *
- * Tiers: byoc (free) → pro_hosted ($79/mo) → enterprise (custom)
+ * Tiers: byoc (free) → pro_hosted ($59/mo) → enterprise (custom)
  * Future: pro (~$20/mo) — defined but not purchasable yet.
  * Legacy IDs (founder, free, starter, basic) all resolve to byoc quotas.
  */
@@ -44,7 +44,7 @@ export const PLANS: Record<string, PlanDefinition> = {
   pro_hosted: {
     id: 'pro_hosted',
     name: 'Pro Hosted',
-    price: 79,
+    price: 59,
     yearlyPrice: null,
     quotas: { ticketsPerMonth: 10_000, aiCallsPerMonth: Infinity, apiRequestsPerMonth: Infinity },
   },
@@ -97,8 +97,8 @@ export const PLANS: Record<string, PlanDefinition> = {
   },
 };
 
-/** March Equinox 2026 — free-forever cutoff for early signups. */
-export const FOUNDER_DEADLINE = new Date('2026-03-20T09:06:00Z');
+/** Ides of March 2026 — free-forever cutoff for early signups. */
+export const FOUNDER_DEADLINE = new Date('2026-03-15T00:00:00Z');
 
 /**
  * Check if a tenant created at `createdAt` qualifies for the free-forever BYOC plan.

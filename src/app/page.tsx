@@ -119,6 +119,38 @@ function ByocHome() {
 
 function MarketingHome() {
   return (
+    <>
+      {/* ── Nav Bar ── */}
+      <nav className="sticky top-0 z-50 border-b-2 border-line bg-panel/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3 sm:px-10">
+          <Link href="/" className="font-mono text-sm font-bold uppercase tracking-widest text-foreground">
+            CLIaaS
+          </Link>
+          <div className="flex items-center gap-4">
+            <a
+              href="https://github.com/discordwell/CLIaaS"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground"
+            >
+              GitHub
+            </a>
+            <Link
+              href="/sign-in"
+              className="font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground"
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/sign-up"
+              className="border-2 border-foreground bg-foreground px-4 py-2 font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
+            >
+              Get Started
+            </Link>
+          </div>
+        </div>
+      </nav>
+
     <main className="mx-auto w-full max-w-6xl px-6 py-16 text-foreground sm:px-10 sm:py-24">
 
       {/* ── Hero ── */}
@@ -128,36 +160,15 @@ function MarketingHome() {
           maxSize={96}
           minSize={16}
           className="mt-2"
+          lineClassNames={["text-muted", "text-foreground"]}
         />
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted">
-          Import tickets from Zendesk, Intercom, Freshdesk and more.
-          Triage, draft replies, and manage your queue from the CLI, an MCP
-          server, or the web dashboard. Bring your own AI. Keep your own data.
+          Import &amp; export tickets from Zendesk, Intercom, Freshdesk and more.
+          Our tooling and data is designed, ground-up, for full AI interoperability.
+          So answer a couple of tickets yourself, then tell OpenClaw to handle the rest.
         </p>
-        <div className="mt-10 flex flex-wrap items-center gap-4">
-          <Link
-            href="/sign-up"
-            className="border-2 border-line bg-foreground px-8 py-3.5 font-mono text-sm font-bold uppercase text-white transition-opacity hover:opacity-80"
-          >
-            Get Started Free
-          </Link>
-          <Link
-            href="/sign-in"
-            className="border-2 border-line bg-panel px-8 py-3.5 font-mono text-sm font-bold uppercase text-foreground transition-colors hover:bg-accent-soft"
-          >
-            Sign In
-          </Link>
-          <a
-            href="https://github.com/discordwell/CLIaaS"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-4 py-3.5 font-mono text-sm font-bold uppercase text-muted transition-colors hover:text-foreground"
-          >
-            GitHub
-          </a>
-        </div>
-        <p className="mt-4 font-mono text-xs text-emerald-600 font-bold uppercase">
-          Sign up before the March Equinox and BYOC stays free forever.
+        <p className="mt-6 font-mono text-xs text-emerald-600 font-bold uppercase">
+          Sign up by the Ides of March and get BYOC free. Forever. Claudeus Invictus
         </p>
       </header>
 
@@ -170,23 +181,29 @@ function MarketingHome() {
             <span className="block h-3 w-3 rounded-full bg-zinc-700" />
           </div>
           <p className="font-mono text-xs font-bold uppercase tracking-widest text-zinc-500">
-            cliaas
+            claude code
           </p>
         </div>
         <pre className="overflow-x-auto font-mono text-sm leading-[1.8] text-zinc-300">
-          <span className="text-emerald-400">$ cliaas triage --limit 3</span>{"\n"}
-          {"  "}#4521 <span className="text-red-400">[URGENT]</span> &quot;Billing error&quot;  <span className="text-zinc-600">&rarr;</span> assign:sarah{"\n"}
-          {"  "}#4519 <span className="text-orange-400">[HIGH]</span>   &quot;Login failing&quot; <span className="text-zinc-600">&rarr;</span> assign:mike{"\n"}
-          {"  "}#4518 <span className="text-yellow-400">[NORMAL]</span> &quot;Dark mode?&quot;    <span className="text-zinc-600">&rarr;</span> assign:backlog{"\n"}
+          <span className="text-blue-400">&gt; hi Claude, install cliaas</span>{"\n"}
+          {"  "}<span className="text-emerald-400">$ npm install -g cliaas</span>{"\n"}
+          {"  "}<span className="text-emerald-400">$ cliaas --version</span>{"\n"}
+          {"  "}cliaas v0.1.0{"\n"}
           {"\n"}
-          <span className="text-emerald-400">$ cliaas draft reply --ticket 4521</span>{"\n"}
-          {"  "}Draft: &quot;Hi — I&apos;ve reviewed invoice #INV-2026-0142 and{"\n"}
-          {"  "}issued a $49 credit to your account...&quot;{"\n"}
-          {"  "}<span className="text-zinc-500">[approve]  [edit]  [discard]</span>{"\n"}
+          <span className="text-blue-400">&gt; okay now set up byoc locally</span>{"\n"}
+          {"  "}<span className="text-emerald-400">$ cliaas setup wizard</span>{"\n"}
+          {"  "}<span className="text-green-400">✓</span> PostgreSQL connected (localhost:5432){"\n"}
+          {"  "}<span className="text-green-400">✓</span> Created database &apos;cliaas&apos;{"\n"}
+          {"  "}<span className="text-green-400">✓</span> Ran 42 migrations{"\n"}
+          {"  "}<span className="text-green-400">✓</span> LLM provider: claude (ANTHROPIC_API_KEY set){"\n"}
+          {"  "}<span className="text-green-400">✓</span> Wrote .claude/agents.md{"\n"}
           {"\n"}
-          <span className="text-emerald-400">$ cliaas queue stats</span>{"\n"}
-          {"  "}Open: 23  Pending: 8  Urgent: 2  CSAT: 94%{"\n"}
-          {"  "}Avg first response: 12m  Avg resolution: 4.2h
+          <span className="text-blue-400">&gt; cool my Zendesk API key is ••••••••</span>{"\n"}
+          <span className="text-blue-400">{"  "}download all my tickets plox</span>{"\n"}
+          {"  "}<span className="text-emerald-400">$ cliaas sync pull zendesk --full</span>{"\n"}
+          {"  "}<span className="text-green-400">✓</span> 2,847 tickets synced (4.2s){"\n"}
+          {"  "}<span className="text-green-400">✓</span> 11,923 messages imported{"\n"}
+          {"  "}<span className="text-green-400">✓</span> Next sync: incremental (cursor saved)
         </pre>
       </section>
 
@@ -310,7 +327,10 @@ function MarketingHome() {
           {/* BYOC */}
           <div className="flex flex-col border-2 border-line bg-panel p-6">
             <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted">
-              BYOC
+              <span className="line-through">BYOC</span>
+            </p>
+            <p className="mt-2 text-xl font-bold text-emerald-600">
+              CLAUDEUS INVICTUS <span className="text-2xl">∞</span>
             </p>
             <p className="mt-3 text-3xl font-bold">
               Free<span className="text-base font-normal text-muted">*</span>
@@ -340,10 +360,11 @@ function MarketingHome() {
               Pro Hosted
             </p>
             <p className="mt-3 text-3xl font-bold">
-              $79<span className="text-base font-normal text-muted">/mo</span>
+              <span className="text-lg line-through text-muted">$79</span>{" "}
+              <span>$59</span><span className="text-base font-normal text-muted">/mo</span>
             </p>
-            <p className="mt-1 font-mono text-xs text-muted">
-              We host it, or hybrid with your machine
+            <p className="mt-1 font-mono text-xs text-emerald-600 font-bold">
+              Early adopter lifetime discount
             </p>
             <ul className="mt-6 flex-1 space-y-2 text-sm text-muted">
               <li>Everything in BYOC</li>
@@ -390,7 +411,7 @@ function MarketingHome() {
         </div>
 
         <p className="mt-4 text-xs text-muted">
-          * Free forever if you sign up before the March Equinox (March 20, 2026)
+          * Free forever if you sign up before the Ides of March (March 15, 2026)
           and either use an integration or process 10+ tickets.
         </p>
       </section>
@@ -446,6 +467,7 @@ function MarketingHome() {
         </div>
       </footer>
     </main>
+    </>
   );
 }
 

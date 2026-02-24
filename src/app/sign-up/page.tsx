@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import GoogleAuthButton from "@/components/auth/GoogleAuthButton";
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -52,6 +53,8 @@ export default function SignUpPage() {
             {error}
           </div>
         )}
+
+        <GoogleAuthButton />
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block">

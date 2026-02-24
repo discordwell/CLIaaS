@@ -26,8 +26,8 @@ describe('Billing plans', () => {
     expect(PLANS.byoc.quotas.apiRequestsPerMonth).toBe(Infinity);
   });
 
-  it('pro_hosted is $79/mo with 10,000 tickets', () => {
-    expect(PLANS.pro_hosted.price).toBe(79);
+  it('pro_hosted is $59/mo with 10,000 tickets', () => {
+    expect(PLANS.pro_hosted.price).toBe(59);
     expect(PLANS.pro_hosted.quotas.ticketsPerMonth).toBe(10_000);
     expect(PLANS.pro_hosted.quotas.aiCallsPerMonth).toBe(Infinity);
     expect(PLANS.pro_hosted.quotas.apiRequestsPerMonth).toBe(Infinity);
@@ -52,8 +52,8 @@ describe('Billing plans', () => {
   });
 
   describe('FOUNDER_DEADLINE', () => {
-    it('is set to March Equinox 2026 (2026-03-20T09:06:00Z)', () => {
-      expect(FOUNDER_DEADLINE.toISOString()).toBe('2026-03-20T09:06:00.000Z');
+    it('is set to Ides of March 2026 (2026-03-15T00:00:00Z)', () => {
+      expect(FOUNDER_DEADLINE.toISOString()).toBe('2026-03-15T00:00:00.000Z');
     });
   });
 
@@ -63,11 +63,11 @@ describe('Billing plans', () => {
     });
 
     it('returns true for tenant created exactly at deadline', () => {
-      expect(isFounderEligible(new Date('2026-03-20T09:06:00.000Z'))).toBe(true);
+      expect(isFounderEligible(new Date('2026-03-15T00:00:00.000Z'))).toBe(true);
     });
 
     it('returns false for tenant created after deadline', () => {
-      expect(isFounderEligible(new Date('2026-03-20T09:07:00Z'))).toBe(false);
+      expect(isFounderEligible(new Date('2026-03-15T00:01:00Z'))).toBe(false);
     });
 
     it('returns false for tenant created well after deadline', () => {

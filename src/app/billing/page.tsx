@@ -29,9 +29,9 @@ const PLAN_CARDS = [
   {
     id: "pro_hosted",
     name: "Pro Hosted",
-    price: "$79",
+    price: "$59",
     period: "/mo",
-    note: "We host it, or hybrid",
+    note: "Early adopter lifetime discount (was $79)",
     features: [
       "10,000 tickets/mo",
       "Unlimited AI queries",

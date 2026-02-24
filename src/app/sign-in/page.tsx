@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, Suspense } from "react";
+import GoogleAuthButton from "@/components/auth/GoogleAuthButton";
 
 function SignInForm() {
   const router = useRouter();
@@ -52,6 +53,8 @@ function SignInForm() {
             {error}
           </div>
         )}
+
+        <GoogleAuthButton />
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block">
