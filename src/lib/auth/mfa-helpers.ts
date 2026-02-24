@@ -20,13 +20,22 @@ export function requireDatabase(): NextResponse | null {
 }
 
 /**
+ * Dynamically import database dependencies for MFA operations.
+ * Centralizes the 3-line import block used across all MFA routes.
+ */
+export async function getMfaDeps() {
+  const { db } = await import('@/db');
+  const { userMfa } = await import('@/db/schema');
+  const { eq } = await import('drizzle-orm');
+  return { db, userMfa, eq };
+}
+
+/**
  * Fetch the MFA record for a user. Returns null if no record exists.
  * Uses dynamic imports to avoid hard dependency on drizzle at module load time.
  */
 export async function getMfaRecord(userId: string) {
-  const { db } = await import('@/db');
-  const { userMfa } = await import('@/db/schema');
-  const { eq } = await import('drizzle-orm');
+  const { db, userMfa, eq } = await getMfaDeps();
 
   const rows = await db
     .select()

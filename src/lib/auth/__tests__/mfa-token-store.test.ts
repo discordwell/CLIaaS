@@ -32,9 +32,9 @@ describe('mfa-token-store', () => {
   it('cleanupExpiredTokens removes expired and used entries', () => {
     // Add entries directly to store to avoid cleanup from trackToken
     const store = globalThis.__cliaasIntermediateTokens!;
-    store.set('expired', { jti: 'expired', used: false, expiresAt: Date.now() - 1000 });
-    store.set('used', { jti: 'used', used: true, expiresAt: Date.now() + 300_000 });
-    store.set('active', { jti: 'active', used: false, expiresAt: Date.now() + 300_000 });
+    store.set('expired', { used: false, expiresAt: Date.now() - 1000 });
+    store.set('used', { used: true, expiresAt: Date.now() + 300_000 });
+    store.set('active', { used: false, expiresAt: Date.now() + 300_000 });
 
     const cleaned = cleanupExpiredTokens();
     expect(cleaned).toBe(2); // expired + used

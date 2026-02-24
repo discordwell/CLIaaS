@@ -52,6 +52,22 @@ describe('rate-limiter', () => {
     expect(blocked.retryAfter).toBeGreaterThan(0);
   });
 
+  it('cleanup does not evict long-window buckets when short-window call triggers it', () => {
+    const store = globalThis.__cliaasRateLimiter!;
+
+    // Simulate an MFA bucket with a 15-minute window, last used "recently" (30s ago)
+    store.set('mfa:user1', { tokens: 3, lastRefill: Date.now() - 30_000, windowMs: 900_000 });
+
+    // Make 100 short-window calls to trigger cleanup (cleanupCounter threshold)
+    const shortConfig = { windowMs: 60_000, maxRequests: 1000 };
+    for (let i = 0; i < 100; i++) {
+      checkRateLimit(`ip-short-${i}`, shortConfig);
+    }
+
+    // The MFA bucket should survive — its windowMs*2 = 1800s, and it's only 30s old
+    expect(store.has('mfa:user1')).toBe(true);
+  });
+
   describe('getRateLimitHeaders', () => {
     it('reports default limit (60) when no config provided', () => {
       const result = checkRateLimit('headers-default', { windowMs: 60000, maxRequests: 60 });

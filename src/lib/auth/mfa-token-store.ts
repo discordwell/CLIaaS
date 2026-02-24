@@ -7,7 +7,6 @@
  */
 
 interface TokenEntry {
-  jti: string;
   used: boolean;
   expiresAt: number;
 }
@@ -31,7 +30,7 @@ function getStore(): Map<string, TokenEntry> {
 export function trackToken(jti: string, expiresAt: number): void {
   cleanupExpiredTokens();
   const store = getStore();
-  store.set(jti, { jti, used: false, expiresAt });
+  store.set(jti, { used: false, expiresAt });
 }
 
 /**

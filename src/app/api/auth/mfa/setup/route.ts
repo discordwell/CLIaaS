@@ -7,7 +7,7 @@ import {
   generateBackupCodes,
   encryptSecret,
 } from '@/lib/auth/totp';
-import { requireDatabase } from '@/lib/auth/mfa-helpers';
+import { requireDatabase, getMfaDeps } from '@/lib/auth/mfa-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,9 +24,7 @@ export async function POST(request: NextRequest) {
     const dbError = requireDatabase();
     if (dbError) return dbError;
 
-    const { db } = await import('@/db');
-    const { userMfa } = await import('@/db/schema');
-    const { eq } = await import('drizzle-orm');
+    const { db, userMfa, eq } = await getMfaDeps();
 
     // Check if MFA is already enabled
     const existing = await db

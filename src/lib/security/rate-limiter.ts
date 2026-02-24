@@ -8,6 +8,7 @@
 interface RateLimitBucket {
   tokens: number;
   lastRefill: number;
+  windowMs: number;
 }
 
 interface RateLimitConfig {
@@ -36,17 +37,16 @@ function getStore(): Map<string, RateLimitBucket> {
   return globalThis.__cliaasRateLimiter;
 }
 
-function cleanupStale(config: RateLimitConfig): void {
+function cleanupStale(): void {
   cleanupCounter++;
   if (cleanupCounter < 100) return;
   cleanupCounter = 0;
 
   const store = getStore();
   const now = Date.now();
-  const staleThreshold = config.windowMs * 2;
 
   for (const [key, bucket] of store) {
-    if (now - bucket.lastRefill > staleThreshold) {
+    if (now - bucket.lastRefill > bucket.windowMs * 2) {
       store.delete(key);
     }
   }
@@ -66,12 +66,12 @@ export function checkRateLimit(
   const store = getStore();
   const now = Date.now();
 
-  cleanupStale(config);
+  cleanupStale();
 
   let bucket = store.get(key);
 
   if (!bucket) {
-    bucket = { tokens: config.maxRequests, lastRefill: now };
+    bucket = { tokens: config.maxRequests, lastRefill: now, windowMs: config.windowMs };
     store.set(key, bucket);
   }
 

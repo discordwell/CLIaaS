@@ -116,4 +116,54 @@ describe('auth', () => {
     const decoded = await verifyToken(token);
     expect(decoded?.id).toBe('u1');
   });
+
+  describe('intermediate tokens', () => {
+    beforeEach(() => {
+      globalThis.__cliaasIntermediateTokens = new Map();
+    });
+
+    const testUser = {
+      id: 'mfa-user-1',
+      email: 'mfa@example.com',
+      name: 'MFA User',
+      role: 'agent' as const,
+      workspaceId: 'ws-mfa',
+      tenantId: 'ten-mfa',
+    };
+
+    it('createIntermediateToken produces a valid JWT', async () => {
+      const { createIntermediateToken } = await import('@/lib/auth');
+      const token = await createIntermediateToken(testUser);
+      expect(typeof token).toBe('string');
+      expect(token.split('.')).toHaveLength(3);
+    });
+
+    it('verifyIntermediateToken round-trips — returns matching SessionUser', async () => {
+      const { createIntermediateToken, verifyIntermediateToken } = await import('@/lib/auth');
+      const token = await createIntermediateToken(testUser);
+      const decoded = await verifyIntermediateToken(token);
+      expect(decoded).toMatchObject(testUser);
+    });
+
+    it('replay prevention — second verify returns null', async () => {
+      const { createIntermediateToken, verifyIntermediateToken } = await import('@/lib/auth');
+      const token = await createIntermediateToken(testUser);
+      expect(await verifyIntermediateToken(token)).toMatchObject(testUser);
+      expect(await verifyIntermediateToken(token)).toBeNull();
+    });
+
+    it('verifyToken rejects intermediate tokens (mfaPending check)', async () => {
+      const { createIntermediateToken, verifyToken } = await import('@/lib/auth');
+      const token = await createIntermediateToken(testUser);
+      const result = await verifyToken(token);
+      expect(result).toBeNull();
+    });
+
+    it('verifyIntermediateToken returns null for a regular session token', async () => {
+      const { createToken, verifyIntermediateToken } = await import('@/lib/auth');
+      const token = await createToken(testUser);
+      const result = await verifyIntermediateToken(token);
+      expect(result).toBeNull();
+    });
+  });
 });

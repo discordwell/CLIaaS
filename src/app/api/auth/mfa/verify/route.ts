@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyTotp, decryptSecret, verifyBackupCode, type BackupCode } from '@/lib/auth/totp';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireDatabase, getMfaRecord } from '@/lib/auth/mfa-helpers';
+import { requireDatabase, getMfaRecord, getMfaDeps } from '@/lib/auth/mfa-helpers';
 import { checkRateLimit } from '@/lib/security/rate-limiter';
+import type { SessionUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,13 +35,11 @@ export async function POST(request: NextRequest) {
     const dbError = requireDatabase();
     if (dbError) return dbError;
 
-    const { db } = await import('@/db');
-    const { userMfa } = await import('@/db/schema');
-    const { eq } = await import('drizzle-orm');
+    const { db, userMfa, eq } = await getMfaDeps();
 
     let userId: string;
     // Store the verified payload to avoid re-verifying (race condition with 5m expiry)
-    let intermediatePayload: { id: string; email: string; name: string; role: 'owner' | 'admin' | 'agent'; workspaceId: string; tenantId: string } | null = null;
+    let intermediatePayload: SessionUser | null = null;
 
     if (intermediateToken) {
       // Login verification flow — validate intermediate token
@@ -121,14 +120,7 @@ export async function POST(request: NextRequest) {
     if (intermediateToken && intermediatePayload) {
       const { createToken, setSessionCookie } = await import('@/lib/auth');
 
-      const token = await createToken({
-        id: intermediatePayload.id,
-        email: intermediatePayload.email,
-        name: intermediatePayload.name,
-        role: intermediatePayload.role,
-        workspaceId: intermediatePayload.workspaceId,
-        tenantId: intermediatePayload.tenantId,
-      });
+      const token = await createToken(intermediatePayload);
 
       await setSessionCookie(token);
 

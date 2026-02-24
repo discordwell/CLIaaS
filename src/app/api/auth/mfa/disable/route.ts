@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { requireAuth } from '@/lib/api-auth';
 import { verifyTotp, decryptSecret } from '@/lib/auth/totp';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireDatabase, getMfaRecord } from '@/lib/auth/mfa-helpers';
+import { requireDatabase, getMfaRecord, getMfaDeps } from '@/lib/auth/mfa-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,9 +30,7 @@ export async function POST(request: NextRequest) {
     const dbError = requireDatabase();
     if (dbError) return dbError;
 
-    const { db } = await import('@/db');
-    const { userMfa } = await import('@/db/schema');
-    const { eq } = await import('drizzle-orm');
+    const { db, userMfa, eq } = await getMfaDeps();
 
     const mfaRecord = await getMfaRecord(auth.user.id);
     if (!mfaRecord || !mfaRecord.enabledAt) {
