@@ -15,7 +15,7 @@ describe('audit-log', () => {
 
   it('records an event and returns it with hash chain', async () => {
     const { recordSecureAudit } = await import('@/lib/security/audit-log');
-    const entry = recordSecureAudit({
+    const entry = await recordSecureAudit({
       actor: makeActor(),
       action: 'test.action',
       resource: { type: 'test', id: 't1' },
@@ -30,14 +30,14 @@ describe('audit-log', () => {
 
   it('chain links consecutive entries', async () => {
     const { recordSecureAudit } = await import('@/lib/security/audit-log');
-    const e1 = recordSecureAudit({
+    const e1 = await recordSecureAudit({
       actor: makeActor(),
       action: 'a1',
       resource: { type: 'r', id: '1' },
       outcome: 'success',
       details: {},
     });
-    const e2 = recordSecureAudit({
+    const e2 = await recordSecureAudit({
       actor: makeActor(),
       action: 'a2',
       resource: { type: 'r', id: '2' },
@@ -50,14 +50,14 @@ describe('audit-log', () => {
 
   it('verifyChainIntegrity returns valid for clean chain', async () => {
     const { recordSecureAudit, verifyChainIntegrity } = await import('@/lib/security/audit-log');
-    recordSecureAudit({
+    await recordSecureAudit({
       actor: makeActor(),
       action: 'a1',
       resource: { type: 'r', id: '1' },
       outcome: 'success',
       details: {},
     });
-    recordSecureAudit({
+    await recordSecureAudit({
       actor: makeActor(),
       action: 'a2',
       resource: { type: 'r', id: '2' },
@@ -71,14 +71,14 @@ describe('audit-log', () => {
 
   it('detects tampered entry', async () => {
     const { recordSecureAudit, verifyChainIntegrity } = await import('@/lib/security/audit-log');
-    recordSecureAudit({
+    await recordSecureAudit({
       actor: makeActor(),
       action: 'a1',
       resource: { type: 'r', id: '1' },
       outcome: 'success',
       details: {},
     });
-    recordSecureAudit({
+    await recordSecureAudit({
       actor: makeActor(),
       action: 'a2',
       resource: { type: 'r', id: '2' },
@@ -94,7 +94,7 @@ describe('audit-log', () => {
 
   it('exportSecureAudit JSON format', async () => {
     const { recordSecureAudit, exportSecureAudit } = await import('@/lib/security/audit-log');
-    recordSecureAudit({
+    await recordSecureAudit({
       actor: makeActor(),
       action: 'export.test',
       resource: { type: 'r', id: '1' },
@@ -109,7 +109,7 @@ describe('audit-log', () => {
 
   it('exportSecureAudit CSV format', async () => {
     const { recordSecureAudit, exportSecureAudit } = await import('@/lib/security/audit-log');
-    recordSecureAudit({
+    await recordSecureAudit({
       actor: makeActor(),
       action: 'csv.test',
       resource: { type: 'r', id: '1' },

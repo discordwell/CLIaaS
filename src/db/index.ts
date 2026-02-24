@@ -16,7 +16,8 @@ let _initFailed = false;
 function init(): boolean {
   if (_initFailed) return false;
 
-  const connectionString = process.env.DATABASE_URL;
+  // Prefer DATABASE_APP_ROLE_URL for RLS-compatible connections, fall back to DATABASE_URL
+  const connectionString = process.env.DATABASE_APP_ROLE_URL || process.env.DATABASE_URL;
   if (!connectionString) {
     // Demo mode: no database configured — this is fine
     _initFailed = true;

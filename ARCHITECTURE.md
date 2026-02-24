@@ -18,8 +18,8 @@
 | MCP tools | 18 (across 6 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 55 (Drizzle/PostgreSQL) |
-| Tests | 78 files, ~6,000 LOC |
+| DB tables | 57 (Drizzle/PostgreSQL, RLS-enabled) |
+| Tests | 88 files, ~7,000 LOC |
 | Source LOC | ~49,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
 
@@ -537,12 +537,16 @@ See `.env.example` for full reference. Key categories:
 - Idempotent event processing via `billing_events.stripe_event_id` unique index
 - Demo-safe: all billing functions no-op when `DATABASE_URL` or `STRIPE_SECRET_KEY` unset
 
-### Week 5: Compliance & Security
-- PostgreSQL Row-Level Security (RLS) for multi-tenant isolation
-- GDPR data export and deletion endpoints
-- Secrets management (move from .env to Vault or AWS Secrets Manager)
-- Audit log persistence to database (currently in-memory)
-- Penetration testing prep
+### Week 5: Compliance & Security ✅
+- **Audit persistence**: `recordAudit()` / `recordSecureAudit()` now async with DB-primary writes, WAL buffer for retry on transient failures (`src/lib/audit-wal.ts`), `workspaceId` on all audit entries
+- **GDPR hardening**: Real DB operations (`src/lib/compliance/gdpr-db.ts`) — `exportUserDataFromDb()` queries all user data, `deleteUserDataFromDb()` transactional anonymization with `gdpr_deletion_requests` tracking. Deletion requires `confirmDelete: true`. All operations audit-logged.
+- **Retention policies**: Persisted to DB (`retention_policies` table), enforcement scheduler (`src/lib/compliance/retention-scheduler.ts`), manual trigger via `POST /api/compliance/retention/enforce`
+- **Row-Level Security**: `workspace_id` denormalized into 15 child tables, RLS enabled on all 37+ tables, `SET LOCAL` transaction wrappers (`src/db/rls.ts`), `cliaas_app` non-superuser role (`scripts/setup-rls-roles.sql`), `DATABASE_APP_ROLE_URL` env var for RLS-compatible connections
+- **Secrets management**: SOPS + age encryption at rest (`scripts/secrets-encrypt.sh`, `scripts/secrets-decrypt.sh`, `scripts/secrets-rotate.sh`), systemd `ExecStartPre` decryption, `.sops.yaml` config
+- **Security hardening**: CSP tightened (form-action, base-uri, COOP, CORP), HSTS preload, X-XSS-Protection disabled (modern best practice), request body size validation (10MB), explicit CORS configuration, `scripts/security-audit.sh`, pentest checklist (`docs/pentest-checklist.md`)
+- **New tables**: `gdpr_deletion_requests`, `retention_policies` + 15 denormalized `workspace_id` columns
+- **Migrations**: `0003_compliance_hardening.sql`, `0004_row_level_security.sql`
+- **Tests**: 87 new tests across 10 files (audit-persistence, gdpr-db, retention-scheduler, rls, rls-denormalization, secrets-scripts, security/headers, security/auth-bypass, security/cross-tenant, security/input-validation). Total: **772 tests passing**.
 
 ### Week 6: Testing & Launch Prep
 - Auth integration tests for all 101 routes

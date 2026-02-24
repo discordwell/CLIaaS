@@ -7,6 +7,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { readJsonlFile, writeJsonlFile } from '@/lib/jsonl-store';
 import { createLogger } from '@/lib/logger';
+import { walEnqueue, walFlush } from '@/lib/audit-wal';
 
 const logger = createLogger('secure-audit');
 
@@ -28,6 +29,7 @@ export interface SecureAuditEntry {
   details: Record<string, unknown>;
   hash: string;
   prevHash: string;
+  workspaceId?: string;
 }
 
 export interface SecureAuditFilters {
@@ -133,46 +135,45 @@ function persist(): void {
 
 async function persistToDb(record: SecureAuditEntry): Promise<void> {
   if (!process.env.DATABASE_URL) return;
-  try {
-    const { db } = await import('@/db');
-    const schema = await import('@/db/schema');
+  const { db } = await import('@/db');
+  const schema = await import('@/db/schema');
 
-    // Get first workspace for the audit event
+  // Use the workspaceId from the record if provided, otherwise try first workspace
+  let workspaceId = record.workspaceId;
+  if (!workspaceId) {
     const workspaceRows = await db
       .select({ id: schema.workspaces.id })
       .from(schema.workspaces)
       .limit(1);
-    const workspaceId = workspaceRows[0]?.id;
+    workspaceId = workspaceRows[0]?.id;
     if (!workspaceId) return;
-
-    await db.insert(schema.auditEvents).values({
-      workspaceId,
-      actorType: record.actor.type,
-      actorId: null,
-      action: record.action,
-      objectType: record.resource.type,
-      objectId: null,
-      createdAt: new Date(record.timestamp),
-      diff: {
-        outcome: record.outcome,
-        actor: record.actor,
-        resource: record.resource,
-        details: record.details,
-        hash: record.hash,
-        prevHash: record.prevHash,
-        sequence: record.sequence,
-      },
-    });
-  } catch (err) {
-    logger.warn({ err }, 'Failed to persist secure audit to DB');
   }
+
+  await db.insert(schema.auditEvents).values({
+    workspaceId,
+    actorType: record.actor.type,
+    actorId: null,
+    action: record.action,
+    objectType: record.resource.type,
+    objectId: null,
+    createdAt: new Date(record.timestamp),
+    diff: {
+      outcome: record.outcome,
+      actor: record.actor,
+      resource: record.resource,
+      details: record.details,
+      hash: record.hash,
+      prevHash: record.prevHash,
+      sequence: record.sequence,
+    },
+  });
 }
 
 // ---- Public API ----
 
-export function recordSecureAudit(
-  entry: Omit<SecureAuditEntry, 'id' | 'sequence' | 'hash' | 'prevHash' | 'timestamp'>,
-): SecureAuditEntry {
+export async function recordSecureAudit(
+  entry: Omit<SecureAuditEntry, 'id' | 'sequence' | 'hash' | 'prevHash' | 'timestamp'> & { workspaceId?: string },
+): Promise<SecureAuditEntry> {
   ensureDefaults();
   const store = getStore();
 
@@ -190,13 +191,91 @@ export function recordSecureAudit(
     timestamp,
     hash,
     prevHash,
+    workspaceId: entry.workspaceId,
   };
 
   store.push(record);
   persist();
-  // Fire-and-forget DB persistence
-  persistToDb(record).catch(() => {});
+
+  // Synchronous DB persistence with WAL fallback
+  try {
+    await persistToDb(record);
+    // On success, flush any pending WAL entries
+    await walFlush<SecureAuditEntry>('__cliaasSecureAuditWal', persistToDb);
+  } catch (err) {
+    logger.warn({ err }, 'Secure audit DB write failed, queuing to WAL');
+    walEnqueue('__cliaasSecureAuditWal', record);
+  }
+
   return record;
+}
+
+export async function querySecureAuditFromDb(
+  filters: SecureAuditFilters = {},
+): Promise<{ entries: SecureAuditEntry[]; total: number } | null> {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const { db } = await import('@/db');
+    const schema = await import('@/db/schema');
+    const { desc, sql, eq, gte, lte, and } = await import('drizzle-orm');
+
+    const conditions: unknown[] = [];
+    if (filters.action) {
+      conditions.push(eq(schema.auditEvents.action, filters.action));
+    }
+    if (filters.actorId) {
+      conditions.push(sql`${schema.auditEvents.diff}->>'actor' IS NOT NULL AND ${schema.auditEvents.diff}->'actor'->>'id' = ${filters.actorId}`);
+    }
+    if (filters.from) {
+      conditions.push(gte(schema.auditEvents.createdAt, new Date(filters.from)));
+    }
+    if (filters.to) {
+      conditions.push(lte(schema.auditEvents.createdAt, new Date(filters.to)));
+    }
+
+    const whereClause = conditions.length > 0
+      ? and(...(conditions as Parameters<typeof and>))
+      : undefined;
+
+    const countResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.auditEvents)
+      .where(whereClause);
+    const total = Number(countResult[0]?.count ?? 0);
+
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit ?? 50;
+
+    const rows = await db
+      .select()
+      .from(schema.auditEvents)
+      .where(whereClause)
+      .orderBy(desc(schema.auditEvents.createdAt))
+      .offset(offset)
+      .limit(limit);
+
+    const entries: SecureAuditEntry[] = rows.map((r: typeof rows[0]) => {
+      const diff = (r.diff as Record<string, unknown>) ?? {};
+      return {
+        id: r.id,
+        sequence: (diff.sequence as number) ?? 0,
+        timestamp: r.createdAt.toISOString(),
+        actor: (diff.actor as SecureAuditEntry['actor']) ?? { type: 'system', id: r.actorType, name: '', ip: '' },
+        action: r.action,
+        resource: (diff.resource as SecureAuditEntry['resource']) ?? { type: r.objectType, id: r.objectId ?? '' },
+        outcome: (diff.outcome as SecureAuditEntry['outcome']) ?? 'success',
+        details: (diff.details as Record<string, unknown>) ?? {},
+        hash: (diff.hash as string) ?? '',
+        prevHash: (diff.prevHash as string) ?? '',
+        workspaceId: r.workspaceId ?? undefined,
+      };
+    });
+
+    return { entries, total };
+  } catch (err) {
+    logger.warn({ err }, 'Failed to query secure audit from DB');
+    return null;
+  }
 }
 
 export function querySecureAudit(

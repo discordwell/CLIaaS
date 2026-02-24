@@ -25,7 +25,7 @@ describeDb('audit DB persistence', () => {
     pool = new Pool({ connectionString: DATABASE_URL });
     db = drizzle(pool, { schema });
 
-    const entry = recordAudit({
+    const entry = await recordAudit({
       userId: 'test-user-db',
       userName: 'DB Test User',
       action: 'test.action',
@@ -34,9 +34,6 @@ describeDb('audit DB persistence', () => {
       details: { integration: true },
       ipAddress: '127.0.0.1',
     });
-
-    // Give fire-and-forget time to complete
-    await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Check DB
     const { eq } = await import('drizzle-orm');

@@ -22,6 +22,20 @@
       "when": 1771821016326,
       "tag": "0002_glorious_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1771900000000,
+      "tag": "0003_compliance_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1771900100000,
+      "tag": "0004_row_level_security",
+      "breakpoints": true
     }
   ]
 }

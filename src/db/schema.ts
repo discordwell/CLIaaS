@@ -309,12 +309,14 @@ export const conversations = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     channelType: channelTypeEnum('channel_type').notNull().default('email'),
     startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
     conversationsTicketIdx: uniqueIndex('conversations_ticket_idx').on(table.ticketId),
+    conversationsWorkspaceIdx: index('conversations_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -323,6 +325,7 @@ export const messages = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     conversationId: uuid('conversation_id').notNull().references(() => conversations.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     authorType: messageAuthorEnum('author_type').notNull().default('customer'),
     authorId: uuid('author_id'),
     body: text('body').notNull(),
@@ -335,18 +338,26 @@ export const messages = pgTable(
       table.conversationId,
       table.createdAt,
     ),
+    messagesWorkspaceIdx: index('messages_workspace_idx').on(table.workspaceId),
   }),
 );
 
-export const attachments = pgTable('attachments', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  messageId: uuid('message_id').notNull().references(() => messages.id),
-  filename: text('filename').notNull(),
-  size: integer('size').notNull().default(0),
-  contentType: text('content_type'),
-  storageKey: text('storage_key'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    messageId: uuid('message_id').notNull().references(() => messages.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    filename: text('filename').notNull(),
+    size: integer('size').notNull().default(0),
+    contentType: text('content_type'),
+    storageKey: text('storage_key'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    attachmentsWorkspaceIdx: index('attachments_workspace_idx').on(table.workspaceId),
+  }),
+);
 
 export const tags = pgTable(
   'tags',
@@ -369,9 +380,11 @@ export const ticketTags = pgTable(
   {
     ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
     tagId: uuid('tag_id').notNull().references(() => tags.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
   },
   table => ({
     pk: primaryKey({ columns: [table.ticketId, table.tagId] }),
+    ticketTagsWorkspaceIdx: index('ticket_tags_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -392,10 +405,12 @@ export const customFieldValues = pgTable(
     objectType: text('object_type').notNull(),
     objectId: uuid('object_id').notNull(),
     fieldId: uuid('field_id').notNull().references(() => customFields.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     value: jsonb('value'),
   },
   table => ({
     pk: primaryKey({ columns: [table.objectType, table.objectId, table.fieldId] }),
+    customFieldValuesWorkspaceIdx: index('custom_field_values_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -426,14 +441,21 @@ export const slaPolicies = pgTable('sla_policies', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const slaEvents = pgTable('sla_events', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
-  policyId: uuid('policy_id').notNull().references(() => slaPolicies.id),
-  metric: text('metric').notNull(),
-  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
-  breachedAt: timestamp('breached_at', { withTimezone: true }),
-});
+export const slaEvents = pgTable(
+  'sla_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
+    policyId: uuid('policy_id').notNull().references(() => slaPolicies.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    metric: text('metric').notNull(),
+    dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+    breachedAt: timestamp('breached_at', { withTimezone: true }),
+  },
+  table => ({
+    slaEventsWorkspaceIdx: index('sla_events_workspace_idx').on(table.workspaceId),
+  }),
+);
 
 export const views = pgTable('views', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -444,22 +466,36 @@ export const views = pgTable('views', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const csatRatings = pgTable('csat_ratings', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
-  rating: integer('rating').notNull(),
-  comment: text('comment'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const csatRatings = pgTable(
+  'csat_ratings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    rating: integer('rating').notNull(),
+    comment: text('comment'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    csatRatingsWorkspaceIdx: index('csat_ratings_workspace_idx').on(table.workspaceId),
+  }),
+);
 
-export const timeEntries = pgTable('time_entries', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
-  userId: uuid('user_id').references(() => users.id),
-  minutes: integer('minutes').notNull().default(0),
-  note: text('note'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const timeEntries = pgTable(
+  'time_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    userId: uuid('user_id').references(() => users.id),
+    minutes: integer('minutes').notNull().default(0),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    timeEntriesWorkspaceIdx: index('time_entries_workspace_idx').on(table.workspaceId),
+  }),
+);
 
 export const kbCollections = pgTable('kb_collections', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -468,13 +504,20 @@ export const kbCollections = pgTable('kb_collections', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const kbCategories = pgTable('kb_categories', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  collectionId: uuid('collection_id').references(() => kbCollections.id),
-  name: text('name').notNull(),
-  parentId: uuid('parent_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const kbCategories = pgTable(
+  'kb_categories',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    collectionId: uuid('collection_id').references(() => kbCollections.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    name: text('name').notNull(),
+    parentId: uuid('parent_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    kbCategoriesWorkspaceIdx: index('kb_categories_workspace_idx').on(table.workspaceId),
+  }),
+);
 
 export const kbArticles = pgTable('kb_articles', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -490,12 +533,19 @@ export const kbArticles = pgTable('kb_articles', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const kbRevisions = pgTable('kb_revisions', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  articleId: uuid('article_id').notNull().references(() => kbArticles.id),
-  body: text('body').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const kbRevisions = pgTable(
+  'kb_revisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    articleId: uuid('article_id').notNull().references(() => kbArticles.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    kbRevisionsWorkspaceIdx: index('kb_revisions_workspace_idx').on(table.workspaceId),
+  }),
+);
 
 export const integrations = pgTable(
   'integrations',
@@ -522,6 +572,7 @@ export const externalObjects = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     objectType: text('object_type').notNull(),
     externalId: text('external_id').notNull(),
     internalId: uuid('internal_id').notNull(),
@@ -534,6 +585,7 @@ export const externalObjects = pgTable(
       table.objectType,
       table.externalId,
     ),
+    externalObjectsWorkspaceIdx: index('external_objects_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -542,6 +594,7 @@ export const syncCursors = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     objectType: text('object_type').notNull(),
     cursor: text('cursor').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -551,32 +604,48 @@ export const syncCursors = pgTable(
       table.integrationId,
       table.objectType,
     ),
+    syncCursorsWorkspaceIdx: index('sync_cursors_workspace_idx').on(table.workspaceId),
   }),
 );
 
-export const importJobs = pgTable('import_jobs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  integrationId: uuid('integration_id').notNull().references(() => integrations.id),
-  status: jobStatusEnum('status').notNull().default('queued'),
-  startedAt: timestamp('started_at', { withTimezone: true }),
-  finishedAt: timestamp('finished_at', { withTimezone: true }),
-  error: text('error'),
-});
+export const importJobs = pgTable(
+  'import_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    status: jobStatusEnum('status').notNull().default('queued'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    error: text('error'),
+  },
+  table => ({
+    importJobsWorkspaceIdx: index('import_jobs_workspace_idx').on(table.workspaceId),
+  }),
+);
 
-export const exportJobs = pgTable('export_jobs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  integrationId: uuid('integration_id').notNull().references(() => integrations.id),
-  status: jobStatusEnum('status').notNull().default('queued'),
-  startedAt: timestamp('started_at', { withTimezone: true }),
-  finishedAt: timestamp('finished_at', { withTimezone: true }),
-  error: text('error'),
-});
+export const exportJobs = pgTable(
+  'export_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    status: jobStatusEnum('status').notNull().default('queued'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    error: text('error'),
+  },
+  table => ({
+    exportJobsWorkspaceIdx: index('export_jobs_workspace_idx').on(table.workspaceId),
+  }),
+);
 
 export const rawRecords = pgTable(
   'raw_records',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     integrationId: uuid('integration_id').notNull().references(() => integrations.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     objectType: text('object_type').notNull(),
     externalId: text('external_id'),
     payload: jsonb('payload').notNull(),
@@ -588,6 +657,7 @@ export const rawRecords = pgTable(
       table.objectType,
       table.externalId,
     ),
+    rawRecordsWorkspaceIdx: index('raw_records_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -655,6 +725,7 @@ export const auditEntries = pgTable(
   'audit_entries',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
     userId: text('user_id').notNull(),
     userName: text('user_name').notNull(),
@@ -677,6 +748,10 @@ export const auditEntries = pgTable(
     auditEntriesResourceIdx: index('audit_entries_resource_idx').on(
       table.resource,
       table.resourceId,
+    ),
+    auditEntriesWorkspaceIdx: index('audit_entries_workspace_idx').on(
+      table.workspaceId,
+      table.timestamp,
     ),
   }),
 );
@@ -857,5 +932,47 @@ export const billingEvents = pgTable(
   },
   table => ({
     billingEventsStripeIdx: uniqueIndex('billing_events_stripe_idx').on(table.stripeEventId),
+  }),
+);
+
+// ---- GDPR Deletion Requests ----
+
+export const gdprDeletionRequests = pgTable(
+  'gdpr_deletion_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    subjectEmail: varchar('subject_email', { length: 320 }).notNull(),
+    status: text('status').notNull().default('pending'), // pending, completed, failed
+    recordsAffected: jsonb('records_affected'),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  table => ({
+    gdprDeletionWorkspaceIdx: index('gdpr_deletion_workspace_idx').on(
+      table.workspaceId,
+      table.requestedAt,
+    ),
+  }),
+);
+
+// ---- Retention Policies ----
+
+export const retentionPolicies = pgTable(
+  'retention_policies',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    resource: text('resource').notNull(),
+    retentionDays: integer('retention_days').notNull(),
+    action: text('action').notNull().default('delete'), // delete, archive
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    retentionPoliciesWsResourceIdx: uniqueIndex('retention_policies_ws_resource').on(
+      table.workspaceId,
+      table.resource,
+    ),
   }),
 );

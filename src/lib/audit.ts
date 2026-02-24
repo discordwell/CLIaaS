@@ -10,6 +10,7 @@ export interface AuditEntry {
   resourceId: string;
   details: Record<string, unknown>;
   ipAddress: string;
+  workspaceId?: string;
 }
 
 export interface AuditFilters {
@@ -20,9 +21,10 @@ export interface AuditFilters {
   to?: string;
   limit?: number;
   offset?: number;
+  workspaceId?: string;
 }
 
-// ---- Circular buffer (last 10,000 entries — in-memory fallback) ----
+// ---- Circular buffer (last 10,000 entries — in-memory read cache) ----
 
 const MAX_ENTRIES = 10000;
 const buffer: AuditEntry[] = [];
@@ -59,6 +61,7 @@ function ensureDefaults(): void {
 
 import { recordSecureAudit } from './security/audit-log';
 import { createLogger } from '@/lib/logger';
+import { walEnqueue, walFlush } from '@/lib/audit-wal';
 
 const logger = createLogger('audit');
 
@@ -96,23 +99,20 @@ async function getAuditDbContext(): Promise<AuditDbContext | null> {
 
 async function insertAuditToDb(record: AuditEntry): Promise<void> {
   const ctx = await getAuditDbContext();
-  if (!ctx) return;
-  try {
-    const { db, schema } = ctx;
-    // Don't pass record.id — it's not a UUID. Let DB generate one.
-    await db.insert(schema.auditEntries).values({
-      timestamp: new Date(record.timestamp),
-      userId: record.userId,
-      userName: record.userName,
-      action: record.action,
-      resource: record.resource,
-      resourceId: record.resourceId,
-      details: record.details,
-      ipAddress: record.ipAddress,
-    });
-  } catch (err) {
-    logger.warn({ err }, 'Failed to persist audit entry to DB');
-  }
+  if (!ctx) throw new Error('Audit DB context unavailable');
+  const { db, schema } = ctx;
+  // Don't pass record.id — it's not a UUID. Let DB generate one.
+  await db.insert(schema.auditEntries).values({
+    workspaceId: record.workspaceId || null,
+    timestamp: new Date(record.timestamp),
+    userId: record.userId,
+    userName: record.userName,
+    action: record.action,
+    resource: record.resource,
+    resourceId: record.resourceId,
+    details: record.details,
+    ipAddress: record.ipAddress,
+  });
 }
 
 async function queryAuditFromDb(filters: AuditFilters): Promise<{ entries: AuditEntry[]; total: number } | null> {
@@ -131,6 +131,9 @@ async function queryAuditFromDb(filters: AuditFilters): Promise<{ entries: Audit
     }
     if (filters.userId) {
       conditions.push(eq(schema.auditEntries.userId, filters.userId));
+    }
+    if (filters.workspaceId) {
+      conditions.push(eq(schema.auditEntries.workspaceId, filters.workspaceId));
     }
     if (filters.from) {
       conditions.push(gte(schema.auditEntries.timestamp, new Date(filters.from)));
@@ -171,6 +174,7 @@ async function queryAuditFromDb(filters: AuditFilters): Promise<{ entries: Audit
       resourceId: r.resourceId,
       details: (r.details as Record<string, unknown>) ?? {},
       ipAddress: r.ipAddress ?? '',
+      workspaceId: r.workspaceId ?? undefined,
     }));
 
     return { entries, total };
@@ -182,9 +186,9 @@ async function queryAuditFromDb(filters: AuditFilters): Promise<{ entries: Audit
 
 // ---- Public API ----
 
-export function recordAudit(
-  entry: Omit<AuditEntry, 'id' | 'timestamp'>
-): AuditEntry {
+export async function recordAudit(
+  entry: Omit<AuditEntry, 'id' | 'timestamp'> & { workspaceId?: string }
+): Promise<AuditEntry> {
   ensureDefaults();
   const record: AuditEntry = {
     ...entry,
@@ -196,16 +200,26 @@ export function recordAudit(
   while (buffer.length > MAX_ENTRIES) {
     buffer.shift();
   }
-  // Persist to DB (fire-and-forget)
-  insertAuditToDb(record).catch(() => {});
+
+  // Persist to DB (synchronous — await result, WAL on failure)
+  try {
+    await insertAuditToDb(record);
+    // On success, flush any pending WAL entries
+    await walFlush<AuditEntry>('__cliaasAuditWal', insertAuditToDb);
+  } catch (err) {
+    logger.warn({ err }, 'Audit DB write failed, queuing to WAL');
+    walEnqueue('__cliaasAuditWal', record);
+  }
+
   // Also write to immutable secure audit log
   try {
-    recordSecureAudit({
+    await recordSecureAudit({
       actor: { type: 'user', id: entry.userId, name: entry.userName, ip: entry.ipAddress },
       action: entry.action,
       resource: { type: entry.resource, id: entry.resourceId },
       outcome: 'success',
       details: entry.details,
+      workspaceId: entry.workspaceId,
     });
   } catch (err) {
     logger.error({ err }, 'Secure audit write failed');
@@ -233,6 +247,9 @@ export async function queryAudit(filters: AuditFilters = {}): Promise<{
   }
   if (filters.userId) {
     results = results.filter((e) => e.userId === filters.userId);
+  }
+  if (filters.workspaceId) {
+    results = results.filter((e) => e.workspaceId === filters.workspaceId);
   }
   if (filters.from) {
     const fromTime = new Date(filters.from).getTime();
@@ -282,6 +299,7 @@ export async function exportAudit(
     'resourceId',
     'details',
     'ipAddress',
+    'workspaceId',
   ];
   const rows = entries.map((e) =>
     headers

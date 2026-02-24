@@ -1,0 +1,6 @@
+# SOPS configuration for CLIaaS secrets encryption
+# The age recipient key should be set per-environment.
+# This file is a template — actual .sops.yaml lives at /opt/cliaas/shared/.sops.yaml
+creation_rules:
+  - path_regex: \.env$
+    age: "REPLACE_WITH_AGE_PUBLIC_KEY"

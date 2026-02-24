@@ -1,4 +1,7 @@
 import { loadTickets, loadMessages } from '@/lib/data';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('compliance');
 
 // ---- Types ----
 
@@ -8,6 +11,7 @@ export interface RetentionPolicy {
   retentionDays: number;
   action: 'delete' | 'archive';
   createdAt: string;
+  workspaceId?: string;
 }
 
 export interface UserDataExport {
@@ -37,7 +41,7 @@ export interface ComplianceStatus {
   dataSubjects: number;
 }
 
-// ---- In-memory store ----
+// ---- In-memory store (fallback when no DB) ----
 
 const retentionPolicies: RetentionPolicy[] = [];
 let defaultsLoaded = false;
@@ -71,16 +75,88 @@ function ensureDefaults(): void {
   );
 }
 
+// ---- DB helpers for retention policies ----
+
+async function getRetentionDbContext() {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const { getDb } = await import('@/db');
+    const db = getDb();
+    if (!db) return null;
+    const schema = await import('@/db/schema');
+    const orm = await import('drizzle-orm');
+    return { db, schema, orm };
+  } catch {
+    return null;
+  }
+}
+
 // ---- Retention Policies ----
 
-export function listRetentionPolicies(): RetentionPolicy[] {
+export async function listRetentionPolicies(workspaceId?: string): Promise<RetentionPolicy[]> {
+  const ctx = await getRetentionDbContext();
+  if (ctx && workspaceId) {
+    try {
+      const { db, schema, orm } = ctx;
+      const rows = await db
+        .select()
+        .from(schema.retentionPolicies)
+        .where(orm.eq(schema.retentionPolicies.workspaceId, workspaceId));
+      return rows.map((r: typeof rows[0]) => ({
+        id: r.id,
+        resource: r.resource,
+        retentionDays: r.retentionDays,
+        action: r.action as 'delete' | 'archive',
+        createdAt: r.createdAt.toISOString(),
+        workspaceId: r.workspaceId,
+      }));
+    } catch (err) {
+      logger.warn({ err }, 'Failed to query retention policies from DB');
+    }
+  }
+
+  // Fallback to in-memory
   ensureDefaults();
   return [...retentionPolicies];
 }
 
-export function createRetentionPolicy(
-  input: Omit<RetentionPolicy, 'id' | 'createdAt'>
-): RetentionPolicy {
+export async function createRetentionPolicy(
+  input: Omit<RetentionPolicy, 'id' | 'createdAt'> & { workspaceId?: string }
+): Promise<RetentionPolicy> {
+  const ctx = await getRetentionDbContext();
+  if (ctx && input.workspaceId) {
+    try {
+      const { db, schema } = ctx;
+      const [row] = await db
+        .insert(schema.retentionPolicies)
+        .values({
+          workspaceId: input.workspaceId,
+          resource: input.resource,
+          retentionDays: input.retentionDays,
+          action: input.action,
+        })
+        .onConflictDoUpdate({
+          target: [schema.retentionPolicies.workspaceId, schema.retentionPolicies.resource],
+          set: {
+            retentionDays: input.retentionDays,
+            action: input.action,
+          },
+        })
+        .returning();
+      return {
+        id: row.id,
+        resource: row.resource,
+        retentionDays: row.retentionDays,
+        action: row.action as 'delete' | 'archive',
+        createdAt: row.createdAt.toISOString(),
+        workspaceId: row.workspaceId,
+      };
+    } catch (err) {
+      logger.warn({ err }, 'Failed to persist retention policy to DB');
+    }
+  }
+
+  // Fallback to in-memory
   ensureDefaults();
   const policy: RetentionPolicy = {
     ...input,
@@ -91,7 +167,22 @@ export function createRetentionPolicy(
   return policy;
 }
 
-export function deleteRetentionPolicy(id: string): boolean {
+export async function deleteRetentionPolicy(id: string): Promise<boolean> {
+  const ctx = await getRetentionDbContext();
+  if (ctx) {
+    try {
+      const { db, schema, orm } = ctx;
+      const deleted = await db
+        .delete(schema.retentionPolicies)
+        .where(orm.eq(schema.retentionPolicies.id, id))
+        .returning();
+      if (deleted.length > 0) return true;
+    } catch (err) {
+      logger.warn({ err }, 'Failed to delete retention policy from DB');
+    }
+  }
+
+  // Fallback to in-memory
   ensureDefaults();
   const idx = retentionPolicies.findIndex((p) => p.id === id);
   if (idx === -1) return false;

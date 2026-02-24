@@ -50,6 +50,11 @@ const PUBLIC_PATHS = [
 
 const API_KEY_PREFIX = 'cliaas_';
 const API_KEY_RATE_LIMIT = { windowMs: 60_000, maxRequests: 120 };
+const MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_ORIGINS = [
+  process.env.NEXT_PUBLIC_BASE_URL || 'https://cliaas.com',
+  'https://www.cliaas.com',
+].filter(Boolean);
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
@@ -60,7 +65,7 @@ function isStaticAsset(pathname: string): boolean {
     pathname.startsWith('/_next') ||
     pathname.startsWith('/ra/') ||
     pathname.startsWith('/favicon') ||
-    pathname.includes('.')
+    (!pathname.startsWith('/api/') && /\.[a-z0-9]{2,5}$/i.test(pathname))
   );
 }
 
@@ -97,6 +102,46 @@ export async function middleware(request: NextRequest) {
 
   logger.info({ method: request.method, pathname, requestId }, 'Incoming request');
 
+  // CORS setup for API routes
+  const requestOrigin = pathname.startsWith('/api/') ? request.headers.get('origin') : null;
+  const isAllowedOrigin = requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin);
+  const applyCors = (response: NextResponse) => {
+    if (isAllowedOrigin && requestOrigin) {
+      response.headers.set('Access-Control-Allow-Origin', requestOrigin);
+      response.headers.set('Vary', 'Origin');
+    }
+  };
+
+  // Request body size validation for API routes
+  if (pathname.startsWith('/api/')) {
+    const contentLength = parseInt(request.headers.get('content-length') || '0', 10);
+    if (contentLength > MAX_REQUEST_BODY_SIZE) {
+      const response = NextResponse.json(
+        { error: 'Request body too large' },
+        { status: 413 }
+      );
+      applyCors(response);
+      applySecurityHeaders(response);
+      return response;
+    }
+  }
+
+  // CORS preflight handling
+  if (pathname.startsWith('/api/')) {
+    if (request.method === 'OPTIONS') {
+      const response = new NextResponse(null, { status: 204 });
+      if (isAllowedOrigin) {
+        response.headers.set('Access-Control-Allow-Origin', requestOrigin);
+        response.headers.set('Vary', 'Origin');
+      }
+      response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-ID');
+      response.headers.set('Access-Control-Max-Age', '86400');
+      applySecurityHeaders(response);
+      return response;
+    }
+  }
+
   // Rate limiting for API routes
   if (pathname.startsWith('/api/')) {
     // Determine rate limit key: API key prefix or client IP
@@ -126,6 +171,7 @@ export async function middleware(request: NextRequest) {
       for (const [key, value] of Object.entries(rlHeaders)) {
         rateLimitResponse.headers.set(key, value);
       }
+      applyCors(rateLimitResponse);
       applySecurityHeaders(rateLimitResponse);
       return rateLimitResponse;
     }
@@ -134,6 +180,7 @@ export async function middleware(request: NextRequest) {
   // Allow public routes (with cleaned headers)
   if (isPublic(pathname)) {
     const response = NextResponse.next({ request: { headers: requestHeaders } });
+    applyCors(response);
     applySecurityHeaders(response);
     return response;
   }
@@ -141,6 +188,7 @@ export async function middleware(request: NextRequest) {
   // In demo mode (no DB), skip auth entirely
   if (!process.env.DATABASE_URL) {
     const response = NextResponse.next({ request: { headers: requestHeaders } });
+    applyCors(response);
     applySecurityHeaders(response);
     return response;
   }
@@ -150,6 +198,7 @@ export async function middleware(request: NextRequest) {
   if (authorizationHeader.startsWith(`Bearer ${API_KEY_PREFIX}`)) {
     requestHeaders.set('x-auth-type', 'api-key');
     const response = NextResponse.next({ request: { headers: requestHeaders } });
+    applyCors(response);
     applySecurityHeaders(response);
     return response;
   }
@@ -164,6 +213,7 @@ export async function middleware(request: NextRequest) {
         { error: 'Authentication required' },
         { status: 401 }
       );
+      applyCors(response);
       applySecurityHeaders(response);
       return response;
     }
@@ -184,6 +234,7 @@ export async function middleware(request: NextRequest) {
           { status: 401 }
         );
         response.cookies.delete(COOKIE_NAME);
+        applyCors(response);
         applySecurityHeaders(response);
         return response;
       }
@@ -203,6 +254,7 @@ export async function middleware(request: NextRequest) {
       requestHeaders.set('x-tenant-id', payload.tenantId as string);
     }
     const response = NextResponse.next({ request: { headers: requestHeaders } });
+    applyCors(response);
     applySecurityHeaders(response);
     return response;
   } catch {
@@ -213,6 +265,7 @@ export async function middleware(request: NextRequest) {
         { status: 401 }
       );
       response.cookies.delete(COOKIE_NAME);
+      applyCors(response);
       applySecurityHeaders(response);
       return response;
     }
