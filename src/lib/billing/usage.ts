@@ -79,7 +79,7 @@ export async function checkQuota(tenantId: string, metric: UsageMetric): Promise
     .where(eq(tenants.id, tenantId))
     .limit(1);
 
-  const plan = tenant?.plan ?? 'free';
+  const plan = tenant?.plan ?? 'byoc';
   const quotas = getPlanQuotas(plan);
   const usage = await getCurrentUsage(tenantId);
 

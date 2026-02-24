@@ -117,7 +117,7 @@ export const tenants = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
-    plan: text('plan').notNull().default('free'),
+    plan: text('plan').notNull().default('byoc'),
     stripeCustomerId: text('stripe_customer_id'),
     stripeSubscriptionId: text('stripe_subscription_id'),
     stripeSubscriptionStatus: text('stripe_subscription_status'),

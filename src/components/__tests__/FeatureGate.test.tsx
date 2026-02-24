@@ -21,11 +21,13 @@ vi.mock('@/lib/features', () => ({
   },
   TIER_LABELS: {
     byoc: 'BYOC',
-    free: 'Free',
-    founder: 'Founder',
-    starter: 'Starter',
     pro: 'Pro',
+    pro_hosted: 'Pro Hosted',
     enterprise: 'Enterprise',
+    basic: 'BYOC',
+    free: 'BYOC',
+    founder: 'BYOC',
+    starter: 'BYOC',
   },
 }));
 
@@ -39,8 +41,8 @@ const mockedGetMinimumTier = vi.mocked(getMinimumTier);
 describe('FeatureGate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedGetTierForTenant.mockResolvedValue('free');
-    mockedGetMinimumTier.mockReturnValue('pro');
+    mockedGetTierForTenant.mockResolvedValue('byoc');
+    mockedGetMinimumTier.mockReturnValue('enterprise');
   });
 
   it('renders children when feature is enabled (byoc default)', async () => {
@@ -57,21 +59,21 @@ describe('FeatureGate', () => {
 
   it('renders upgrade prompt when feature is disabled', async () => {
     mockedIsFeatureEnabled.mockReturnValue(false);
-    mockedGetMinimumTier.mockReturnValue('pro');
+    mockedGetMinimumTier.mockReturnValue('enterprise');
 
     const Component = await FeatureGate({
-      feature: 'sandbox',
-      children: <div>Sandbox Content</div>,
+      feature: 'sso',
+      children: <div>SSO Content</div>,
     });
 
     render(<>{Component}</>);
 
     // Should NOT render children
-    expect(screen.queryByText('Sandbox Content')).not.toBeInTheDocument();
+    expect(screen.queryByText('SSO Content')).not.toBeInTheDocument();
 
     // Should show upgrade prompt
     expect(screen.getByText('Premium Feature')).toBeInTheDocument();
-    expect(screen.getByText('Sandbox Environments')).toBeInTheDocument();
+    expect(screen.getByText('Single Sign-On (SSO)')).toBeInTheDocument();
     expect(screen.getByText('Upgrade Plan')).toBeInTheDocument();
   });
 
@@ -91,7 +93,7 @@ describe('FeatureGate', () => {
   });
 
   it('resolves tenant tier when tenantId is provided', async () => {
-    mockedGetTierForTenant.mockResolvedValue('starter');
+    mockedGetTierForTenant.mockResolvedValue('byoc');
     mockedIsFeatureEnabled.mockReturnValue(true);
 
     const Component = await FeatureGate({
@@ -121,27 +123,27 @@ describe('FeatureGate', () => {
   });
 
   it('shows current plan in upgrade prompt', async () => {
-    mockedGetTierForTenant.mockResolvedValue('free');
+    mockedGetTierForTenant.mockResolvedValue('byoc');
     mockedIsFeatureEnabled.mockReturnValue(false);
-    mockedGetMinimumTier.mockReturnValue('pro');
+    mockedGetMinimumTier.mockReturnValue('enterprise');
 
     const Component = await FeatureGate({
-      feature: 'sandbox',
-      children: <div>Sandbox Content</div>,
+      feature: 'sso',
+      children: <div>SSO Content</div>,
       tenantId: 'tenant-456',
     });
 
     render(<>{Component}</>);
 
-    expect(screen.getByText('Free')).toBeInTheDocument();
+    expect(screen.getByText('BYOC')).toBeInTheDocument();
   });
 
   it('upgrade link points to /billing', async () => {
     mockedIsFeatureEnabled.mockReturnValue(false);
-    mockedGetMinimumTier.mockReturnValue('pro');
+    mockedGetMinimumTier.mockReturnValue('enterprise');
 
     const Component = await FeatureGate({
-      feature: 'compliance',
+      feature: 'sso',
       children: <div>Content</div>,
     });
 

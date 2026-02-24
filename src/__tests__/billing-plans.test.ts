@@ -2,28 +2,35 @@ import { describe, it, expect } from 'vitest';
 import { PLANS, FOUNDER_DEADLINE, isFounderEligible, getPlanQuotas } from '@/lib/billing/plans';
 
 describe('Billing plans', () => {
-  it('defines all six plan tiers', () => {
+  it('defines active plan tiers', () => {
     expect(Object.keys(PLANS)).toEqual(
-      expect.arrayContaining(['byoc', 'founder', 'free', 'starter', 'pro', 'enterprise']),
+      expect.arrayContaining(['byoc', 'pro_hosted', 'enterprise']),
     );
-    expect(Object.keys(PLANS)).toHaveLength(6);
   });
 
-  it('byoc, founder, and free plans are $0', () => {
+  it('defines future pro tier', () => {
+    expect(PLANS.pro).toBeDefined();
+    expect(PLANS.pro.future).toBe(true);
+  });
+
+  it('includes legacy plan IDs for backwards compatibility', () => {
+    expect(Object.keys(PLANS)).toEqual(
+      expect.arrayContaining(['founder', 'free', 'starter', 'basic']),
+    );
+  });
+
+  it('byoc plan is $0 with unlimited quotas', () => {
     expect(PLANS.byoc.price).toBe(0);
-    expect(PLANS.founder.price).toBe(0);
-    expect(PLANS.free.price).toBe(0);
-  });
-
-  it('byoc has unlimited quotas', () => {
     expect(PLANS.byoc.quotas.ticketsPerMonth).toBe(Infinity);
     expect(PLANS.byoc.quotas.aiCallsPerMonth).toBe(Infinity);
     expect(PLANS.byoc.quotas.apiRequestsPerMonth).toBe(Infinity);
   });
 
-  it('starter is $29/mo and pro is $99/mo', () => {
-    expect(PLANS.starter.price).toBe(29);
-    expect(PLANS.pro.price).toBe(99);
+  it('pro_hosted is $79/mo with 10,000 tickets', () => {
+    expect(PLANS.pro_hosted.price).toBe(79);
+    expect(PLANS.pro_hosted.quotas.ticketsPerMonth).toBe(10_000);
+    expect(PLANS.pro_hosted.quotas.aiCallsPerMonth).toBe(Infinity);
+    expect(PLANS.pro_hosted.quotas.apiRequestsPerMonth).toBe(Infinity);
   });
 
   it('enterprise has custom pricing (null)', () => {
@@ -36,13 +43,17 @@ describe('Billing plans', () => {
     expect(PLANS.enterprise.quotas.apiRequestsPerMonth).toBe(Infinity);
   });
 
-  it('founder quotas match pro quotas', () => {
-    expect(PLANS.founder.quotas).toEqual(PLANS.pro.quotas);
+  it('legacy plans all map to byoc-equivalent unlimited quotas', () => {
+    for (const legacyId of ['founder', 'free', 'starter', 'basic']) {
+      expect(PLANS[legacyId].price).toBe(0);
+      expect(PLANS[legacyId].quotas.ticketsPerMonth).toBe(Infinity);
+      expect(PLANS[legacyId].quotas.aiCallsPerMonth).toBe(Infinity);
+    }
   });
 
   describe('FOUNDER_DEADLINE', () => {
-    it('is set to Mar 1 2026 07:59:59 UTC (= Feb 28 11:59:59 PM PST)', () => {
-      expect(FOUNDER_DEADLINE.toISOString()).toBe('2026-03-01T07:59:59.000Z');
+    it('is set to March Equinox 2026 (2026-03-20T09:06:00Z)', () => {
+      expect(FOUNDER_DEADLINE.toISOString()).toBe('2026-03-20T09:06:00.000Z');
     });
   });
 
@@ -52,11 +63,11 @@ describe('Billing plans', () => {
     });
 
     it('returns true for tenant created exactly at deadline', () => {
-      expect(isFounderEligible(new Date('2026-03-01T07:59:59.000Z'))).toBe(true);
+      expect(isFounderEligible(new Date('2026-03-20T09:06:00.000Z'))).toBe(true);
     });
 
     it('returns false for tenant created after deadline', () => {
-      expect(isFounderEligible(new Date('2026-03-01T08:00:00Z'))).toBe(false);
+      expect(isFounderEligible(new Date('2026-03-20T09:07:00Z'))).toBe(false);
     });
 
     it('returns false for tenant created well after deadline', () => {
@@ -65,14 +76,21 @@ describe('Billing plans', () => {
   });
 
   describe('getPlanQuotas', () => {
-    it('returns correct quotas for known plans', () => {
-      expect(getPlanQuotas('free').ticketsPerMonth).toBe(100);
-      expect(getPlanQuotas('starter').ticketsPerMonth).toBe(1_000);
-      expect(getPlanQuotas('pro').ticketsPerMonth).toBe(10_000);
+    it('returns correct quotas for active plans', () => {
+      expect(getPlanQuotas('byoc').ticketsPerMonth).toBe(Infinity);
+      expect(getPlanQuotas('pro_hosted').ticketsPerMonth).toBe(10_000);
+      expect(getPlanQuotas('enterprise').ticketsPerMonth).toBe(Infinity);
     });
 
-    it('falls back to free tier for unknown plans', () => {
-      expect(getPlanQuotas('nonexistent')).toEqual(PLANS.free.quotas);
+    it('returns unlimited quotas for legacy plans', () => {
+      expect(getPlanQuotas('free').ticketsPerMonth).toBe(Infinity);
+      expect(getPlanQuotas('starter').ticketsPerMonth).toBe(Infinity);
+      expect(getPlanQuotas('basic').ticketsPerMonth).toBe(Infinity);
+      expect(getPlanQuotas('founder').ticketsPerMonth).toBe(Infinity);
+    });
+
+    it('falls back to byoc tier for unknown plans', () => {
+      expect(getPlanQuotas('nonexistent')).toEqual(PLANS.byoc.quotas);
     });
   });
 });

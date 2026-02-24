@@ -19,32 +19,53 @@ describe('Home page', () => {
 
   it('renders the hero headline', () => {
     render(<Home />);
-    expect(screen.getByText(/Replace your helpdesk UI with a CLI/)).toBeInTheDocument();
+    expect(screen.getByText(/AI-powered support ops/)).toBeInTheDocument();
   });
 
-  it('renders the Open Dashboard CTA link', () => {
+  it('renders the Get Started Free CTA link', () => {
     render(<Home />);
-    const dashboardLink = screen.getByText('Open Dashboard');
-    expect(dashboardLink.closest('a')).toHaveAttribute('href', '/dashboard');
+    const signupLinks = screen.getAllByText('Get Started Free');
+    expect(signupLinks[0].closest('a')).toHaveAttribute('href', '/sign-up');
   });
 
-  it('renders the GitHub link with correct target', () => {
+  it('renders the Sign In link', () => {
     render(<Home />);
-    const githubLink = screen.getByText('GitHub');
-    expect(githubLink.closest('a')).toHaveAttribute('href', 'https://github.com/discordwell/CLIaaS');
-    expect(githubLink.closest('a')).toHaveAttribute('target', '_blank');
+    const signinLink = screen.getAllByText('Sign In')[0];
+    expect(signinLink.closest('a')).toHaveAttribute('href', '/sign-in');
   });
 
-  it('renders tier cards', () => {
+  it('renders pricing section with three tiers', () => {
     render(<Home />);
-    expect(screen.getByText('BYOC (Free)')).toBeInTheDocument();
-    expect(screen.getByText('Hosted (Paid)')).toBeInTheDocument();
-    expect(screen.getByText('Hybrid')).toBeInTheDocument();
+    expect(screen.getByText('BYOC')).toBeInTheDocument();
+    expect(screen.getByText('Pro Hosted')).toBeInTheDocument();
+    expect(screen.getByText('Enterprise')).toBeInTheDocument();
   });
 
-  it('renders the workflow demo section', () => {
+  it('shows equinox promo', () => {
     render(<Home />);
-    expect(screen.getByText('Workflow Demo')).toBeInTheDocument();
+    const matches = screen.getAllByText(/March Equinox/);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders the terminal demo section', () => {
+    render(<Home />);
+    expect(screen.getByText('cliaas')).toBeInTheDocument();
+  });
+
+  it('renders the MCP server section', () => {
+    render(<Home />);
+    expect(screen.getByText(/Your helpdesk is now an AI tool/)).toBeInTheDocument();
+  });
+
+  it('renders connector names', () => {
+    render(<Home />);
+    expect(screen.getByText('Zendesk')).toBeInTheDocument();
+    expect(screen.getByText('Intercom')).toBeInTheDocument();
+  });
+
+  it('shows $79/mo for Pro Hosted', () => {
+    render(<Home />);
+    expect(screen.getByText('$79')).toBeInTheDocument();
   });
 });
 

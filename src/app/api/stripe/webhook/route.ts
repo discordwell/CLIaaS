@@ -82,8 +82,10 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
           if (stripe) {
             const sub = await stripe.subscriptions.retrieve(subscriptionId);
             const priceId = sub.items.data[0]?.price?.id;
-            if (priceId === process.env.STRIPE_PRICE_STARTER) plan = 'starter';
+            if (priceId === process.env.STRIPE_PRICE_PRO_HOSTED) plan = 'pro_hosted';
             else if (priceId === process.env.STRIPE_PRICE_PRO) plan = 'pro';
+            // Legacy
+            else if (priceId === process.env.STRIPE_PRICE_STARTER) plan = 'starter';
           }
         } catch {
           logger.warn({ subscriptionId }, 'Could not resolve plan from subscription');
@@ -119,8 +121,10 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
         const items = (obj.items as { data?: Array<{ price?: { id?: string } }> })?.data;
         const priceId = items?.[0]?.price?.id;
         let plan = tenant.plan;
-        if (priceId === process.env.STRIPE_PRICE_STARTER) plan = 'starter';
+        if (priceId === process.env.STRIPE_PRICE_PRO_HOSTED) plan = 'pro_hosted';
         else if (priceId === process.env.STRIPE_PRICE_PRO) plan = 'pro';
+        // Legacy
+        else if (priceId === process.env.STRIPE_PRICE_STARTER) plan = 'starter';
 
         await db
           .update(tenants)
@@ -148,12 +152,12 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
         await db
           .update(tenants)
           .set({
-            plan: 'free',
+            plan: 'byoc',
             stripeSubscriptionStatus: 'canceled',
             cancelAtPeriodEnd: false,
           })
           .where(eq(tenants.id, tenant.id));
-        logger.info({ tenantId: tenant.id }, 'Subscription deleted, reverted to free');
+        logger.info({ tenantId: tenant.id }, 'Subscription deleted, reverted to byoc');
       }
       break;
     }

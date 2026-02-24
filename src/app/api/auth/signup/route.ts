@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { hashPassword } from '@/lib/password';
 import { createToken, setSessionCookie } from '@/lib/auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { isFounderEligible } from '@/lib/billing/plans';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -51,8 +51,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create tenant (founder plan for early signups)
-    const plan = isFounderEligible(new Date()) ? 'founder' : 'free';
+    // All signups get the BYOC plan (free forever before March Equinox)
+    const plan = 'byoc';
     const [tenant] = await db
       .insert(schema.tenants)
       .values({ name: workspaceName, plan })

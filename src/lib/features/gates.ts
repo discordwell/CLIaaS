@@ -1,14 +1,21 @@
 /**
  * Feature gating matrix — maps features to the tier levels that unlock them.
+ *
+ * Tiers: byoc (free) → pro_hosted ($79) → enterprise (custom)
+ * Legacy tiers (basic, free, founder, starter) all resolve like byoc.
+ * SSO is enterprise-only. Everything else is available to all tiers.
  */
 
 export type TierLevel =
   | 'byoc'
+  | 'pro'
+  | 'pro_hosted'
+  | 'enterprise'
+  // Legacy tier IDs still in DB for existing tenants
+  | 'basic'
   | 'free'
   | 'founder'
-  | 'starter'
-  | 'pro'
-  | 'enterprise';
+  | 'starter';
 
 export type Feature =
   | 'analytics'
@@ -22,25 +29,28 @@ export type Feature =
   | 'sso'
   | 'custom_branding';
 
+/** All tiers (including legacy aliases). */
+export const ALL_TIERS: TierLevel[] = [
+  'byoc', 'pro', 'pro_hosted', 'enterprise',
+  'basic', 'free', 'founder', 'starter',
+];
+
 /**
  * Which tiers have access to each feature.
  *
- * - byoc: local self-hosted, gets everything (customer owns infra)
- * - free: minimal GUI
- * - founder: generous early-adopter tier
- * - starter/pro/enterprise: paid hosted tiers
+ * Everything is enabled for all tiers except SSO (enterprise only).
  */
 export const FEATURE_MATRIX: Record<Feature, TierLevel[]> = {
-  analytics:           ['byoc', 'founder', 'starter', 'pro', 'enterprise'],
-  ai_dashboard:        ['byoc', 'founder', 'pro', 'enterprise'],
-  advanced_automation: ['byoc', 'pro', 'enterprise'],
-  sla_management:      ['byoc', 'founder', 'starter', 'pro', 'enterprise'],
-  compliance:          ['byoc', 'pro', 'enterprise'],
-  sandbox:             ['byoc', 'pro', 'enterprise'],
-  voice_channels:      ['byoc', 'starter', 'pro', 'enterprise'],
-  social_channels:     ['byoc', 'starter', 'pro', 'enterprise'],
-  sso:                 ['byoc', 'enterprise'],
-  custom_branding:     ['byoc', 'pro', 'enterprise'],
+  analytics:           [...ALL_TIERS],
+  ai_dashboard:        [...ALL_TIERS],
+  advanced_automation: [...ALL_TIERS],
+  sla_management:      [...ALL_TIERS],
+  compliance:          [...ALL_TIERS],
+  sandbox:             [...ALL_TIERS],
+  voice_channels:      [...ALL_TIERS],
+  social_channels:     [...ALL_TIERS],
+  sso:                 ['enterprise'],
+  custom_branding:     [...ALL_TIERS],
 };
 
 /** Check whether a specific feature is enabled for a given tier. */
@@ -59,10 +69,9 @@ export function getAvailableFeatures(tier: TierLevel): Feature[] {
 
 /**
  * Return the minimum tier required to unlock a feature.
- * Tier ordering: free < founder < starter < pro < enterprise
- * (byoc is excluded since it is a special local mode)
+ * Tier ordering: byoc < pro < pro_hosted < enterprise
  */
-const TIER_ORDER: TierLevel[] = ['free', 'founder', 'starter', 'pro', 'enterprise'];
+const TIER_ORDER: TierLevel[] = ['byoc', 'pro', 'pro_hosted', 'enterprise'];
 
 export function getMinimumTier(feature: Feature): TierLevel {
   const allowed = FEATURE_MATRIX[feature];
@@ -88,10 +97,13 @@ export const FEATURE_LABELS: Record<Feature, string> = {
 
 /** Human-readable tier labels. */
 export const TIER_LABELS: Record<TierLevel, string> = {
-  byoc:       'BYOC',
-  free:       'Free',
-  founder:    'Founder',
-  starter:    'Starter',
-  pro:        'Pro',
-  enterprise: 'Enterprise',
+  byoc:        'BYOC',
+  pro:         'Pro',
+  pro_hosted:  'Pro Hosted',
+  enterprise:  'Enterprise',
+  // Legacy
+  basic:       'BYOC',
+  free:        'BYOC',
+  founder:     'BYOC',
+  starter:     'BYOC',
 };

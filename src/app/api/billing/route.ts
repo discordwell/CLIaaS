@@ -11,7 +11,7 @@ export async function GET(request: Request) {
 
   // Demo mode: return mock billing data
   if (!process.env.DATABASE_URL) {
-    const plan = PLANS.founder;
+    const plan = PLANS.byoc;
     return NextResponse.json({
       plan: plan.id,
       planName: plan.name,
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
   }
 
-  const plan = PLANS[tenant.plan] ?? PLANS.free;
+  const plan = PLANS[tenant.plan] ?? PLANS.byoc;
   const quotas = getPlanQuotas(tenant.plan);
   const usage = await getCurrentUsage(tenantId);
 

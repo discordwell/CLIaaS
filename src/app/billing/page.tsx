@@ -27,26 +27,32 @@ interface BillingData {
 
 const PLAN_CARDS = [
   {
-    id: "starter",
-    name: "Starter",
-    price: "$29",
-    features: ["1,000 tickets/mo", "100 AI calls/mo", "5,000 API requests/mo"],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: "$99",
+    id: "pro_hosted",
+    name: "Pro Hosted",
+    price: "$79",
+    period: "/mo",
+    note: "We host it, or hybrid",
     features: [
       "10,000 tickets/mo",
-      "1,000 AI calls/mo",
-      "25,000 API requests/mo",
+      "Unlimited AI queries",
+      "Full fancy GUI",
+      "We manage your infra",
+      "Priority support",
     ],
   },
   {
     id: "enterprise",
     name: "Enterprise",
     price: "Custom",
-    features: ["Unlimited everything", "Dedicated support", "SLA guarantees"],
+    period: "",
+    note: ">10k tickets/mo",
+    features: [
+      "Unlimited everything",
+      "SSO / SAML / SCIM",
+      "Dedicated support",
+      "Custom SLA guarantees",
+      "On-prem or hybrid",
+    ],
   },
 ];
 
@@ -143,9 +149,9 @@ export default function BillingPage() {
     );
   }
 
-  const isFounder = data.plan === "founder";
-  const isFree = data.plan === "free";
-  const isPaid = data.plan === "starter" || data.plan === "pro";
+  const BYOC_PLANS = ['byoc', 'basic', 'founder', 'free', 'starter'];
+  const isByoc = BYOC_PLANS.includes(data.plan);
+  const isPaid = data.plan === 'pro' || data.plan === 'pro_hosted' || data.plan === 'enterprise';
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
@@ -156,20 +162,18 @@ export default function BillingPage() {
         </p>
         <div className="mt-4 flex items-center gap-4">
           <h1 className="text-4xl font-bold">{data.planName} Plan</h1>
-          {isFounder && (
-            <span className="border-2 border-amber-500 bg-amber-50 px-3 py-1 font-mono text-xs font-bold uppercase text-amber-700">
-              Founder
+          {isByoc && (
+            <span className="border-2 border-emerald-500 bg-emerald-50 px-3 py-1 font-mono text-xs font-bold uppercase text-emerald-700">
+              Free Forever
             </span>
           )}
         </div>
         <p className="mt-4 text-lg font-medium text-zinc-600">
-          {isFounder
-            ? "You locked in Pro-level access for free as an early adopter."
+          {isByoc
+            ? "Your BYOC plan is free forever as an early adopter."
             : data.price === null
               ? "Custom enterprise pricing."
-              : data.price === 0
-                ? "Free tier — upgrade to unlock more capacity."
-                : `$${data.price}/mo — manage your subscription below.`}
+              : `$${data.price}/mo — manage your subscription below.`}
         </p>
       </header>
 
@@ -233,19 +237,19 @@ export default function BillingPage() {
         </section>
       )}
 
-      {/* Upgrade Cards (show for free/founder or if no subscription) */}
-      {(isFree || isFounder || !isPaid) && (
+      {/* Upgrade Cards */}
+      {(isByoc || !isPaid) && (
         <section className="mt-6">
           <h2 className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-950">
-            {isFree ? "Upgrade Your Plan" : "Available Plans"}
+            {isByoc ? "Upgrade Your Plan" : "Available Plans"}
           </h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
             {PLAN_CARDS.map((plan) => {
               const isCurrent = data.plan === plan.id;
               return (
                 <div
                   key={plan.id}
-                  className={`border-2 bg-white p-6 ${
+                  className={`flex flex-col border-2 bg-white p-6 ${
                     isCurrent
                       ? "border-zinc-950 ring-2 ring-zinc-950"
                       : "border-zinc-300"
@@ -256,13 +260,18 @@ export default function BillingPage() {
                   </h3>
                   <p className="mt-2 text-3xl font-bold">
                     {plan.price}
-                    {plan.price !== "Custom" && (
+                    {plan.period && (
                       <span className="text-sm font-normal text-zinc-500">
-                        /mo
+                        {plan.period}
                       </span>
                     )}
                   </p>
-                  <ul className="mt-4 space-y-2">
+                  {plan.note && (
+                    <p className="mt-1 font-mono text-xs text-zinc-500">
+                      {plan.note}
+                    </p>
+                  )}
+                  <ul className="mt-4 flex-1 space-y-2">
                     {plan.features.map((f) => (
                       <li
                         key={f}
@@ -286,14 +295,10 @@ export default function BillingPage() {
                   ) : (
                     <button
                       onClick={() => handleCheckout(plan.id)}
-                      disabled={actionLoading || isFounder}
+                      disabled={actionLoading}
                       className="mt-6 border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
                     >
-                      {isFounder
-                        ? "Founder (Pro-level free)"
-                        : actionLoading
-                          ? "Loading..."
-                          : "Upgrade"}
+                      {actionLoading ? "Loading..." : "Upgrade"}
                     </button>
                   )}
                 </div>

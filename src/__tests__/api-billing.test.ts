@@ -31,12 +31,12 @@ describe('Billing API routes', () => {
       expect(body.subscription).toBeNull();
     });
 
-    it('returns founder plan in demo mode', async () => {
+    it('returns byoc plan in demo mode', async () => {
       const { GET } = await import('@/app/api/billing/route');
       const req = new NextRequest('http://localhost:3000/api/billing');
       const res = await GET(req);
       const body = await res.json();
-      expect(body.plan).toBe('founder');
+      expect(body.plan).toBe('byoc');
       expect(body.price).toBe(0);
     });
   });
@@ -50,7 +50,7 @@ describe('Billing API routes', () => {
       const req = new NextRequest('http://localhost:3000/api/billing/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: 'starter' }),
+        body: JSON.stringify({ plan: 'pro_hosted' }),
       });
       const res = await POST(req);
       expect(res.status).toBe(503);
@@ -152,7 +152,6 @@ describe('Billing API routes', () => {
 
   describe('Quota enforcement (demo mode)', () => {
     it('ticket creation passes in demo mode (no quota block)', async () => {
-      // In demo mode, checkQuota always returns allowed: true
       const { checkQuota } = await import('@/lib/billing/usage');
       const result = await checkQuota('any-tenant', 'ticket');
       expect(result.allowed).toBe(true);

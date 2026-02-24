@@ -6,6 +6,8 @@ import { parseJsonBody } from '@/lib/parse-json-body';
 export const dynamic = 'force-dynamic';
 
 const PLAN_TO_PRICE_ENV: Record<string, string> = {
+  pro_hosted: 'STRIPE_PRICE_PRO_HOSTED',
+  // Legacy plan IDs — keep for backwards compat with existing links
   starter: 'STRIPE_PRICE_STARTER',
   pro: 'STRIPE_PRICE_PRO',
 };
@@ -19,7 +21,7 @@ export async function POST(request: Request) {
 
   const { plan } = parsed.data;
   if (!plan || !PLAN_TO_PRICE_ENV[plan]) {
-    return NextResponse.json({ error: 'Invalid plan. Must be "starter" or "pro".' }, { status: 400 });
+    return NextResponse.json({ error: `Invalid plan. Must be one of: ${Object.keys(PLAN_TO_PRICE_ENV).join(', ')}.` }, { status: 400 });
   }
 
   if (!process.env.STRIPE_SECRET_KEY) {

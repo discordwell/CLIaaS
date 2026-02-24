@@ -3,6 +3,7 @@
  */
 
 export {
+  ALL_TIERS,
   FEATURE_MATRIX,
   FEATURE_LABELS,
   TIER_LABELS,
@@ -36,15 +37,13 @@ export async function getTierForTenant(tenantId: string): Promise<import('./gate
     if (rows.length === 0) return 'byoc';
 
     const plan = rows[0].plan;
-    const validTiers: import('./gates').TierLevel[] = [
-      'byoc', 'free', 'founder', 'starter', 'pro', 'enterprise',
-    ];
+    const { ALL_TIERS: validTiers } = await import('./gates');
     if (validTiers.includes(plan as import('./gates').TierLevel)) {
       return plan as import('./gates').TierLevel;
     }
 
-    // Unknown plan string — fall back to free for hosted, byoc for local
-    return 'free';
+    // Unknown plan string — fall back to byoc
+    return 'byoc';
   } catch {
     // No DB connection (BYOC / local mode) — return most permissive tier
     return 'byoc';

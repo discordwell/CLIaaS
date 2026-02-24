@@ -10,23 +10,36 @@ import {
 import type { Feature, TierLevel } from '../gates';
 
 describe('isFeatureEnabled', () => {
-  it('returns true for byoc on all features', () => {
+  it('returns true for byoc on all features except sso', () => {
     const features = Object.keys(FEATURE_MATRIX) as Feature[];
     for (const feature of features) {
-      expect(isFeatureEnabled(feature, 'byoc')).toBe(true);
+      if (feature === 'sso') {
+        expect(isFeatureEnabled(feature, 'byoc')).toBe(false);
+      } else {
+        expect(isFeatureEnabled(feature, 'byoc')).toBe(true);
+      }
     }
   });
 
-  it('returns false for free tier on premium features', () => {
-    expect(isFeatureEnabled('analytics', 'free')).toBe(false);
-    expect(isFeatureEnabled('ai_dashboard', 'free')).toBe(false);
-    expect(isFeatureEnabled('sandbox', 'free')).toBe(false);
-    expect(isFeatureEnabled('sso', 'free')).toBe(false);
-    expect(isFeatureEnabled('compliance', 'free')).toBe(false);
+  it('returns true for all legacy tiers on non-sso features', () => {
+    const legacyTiers: TierLevel[] = ['basic', 'free', 'founder', 'starter'];
+    for (const tier of legacyTiers) {
+      expect(isFeatureEnabled('analytics', tier)).toBe(true);
+      expect(isFeatureEnabled('ai_dashboard', tier)).toBe(true);
+      expect(isFeatureEnabled('sandbox', tier)).toBe(true);
+      expect(isFeatureEnabled('compliance', tier)).toBe(true);
+    }
   });
 
-  it('returns true for founder tier on analytics', () => {
-    expect(isFeatureEnabled('analytics', 'founder')).toBe(true);
+  it('sso is enterprise-only', () => {
+    expect(isFeatureEnabled('sso', 'enterprise')).toBe(true);
+    expect(isFeatureEnabled('sso', 'byoc')).toBe(false);
+    expect(isFeatureEnabled('sso', 'pro')).toBe(false);
+    expect(isFeatureEnabled('sso', 'pro_hosted')).toBe(false);
+    expect(isFeatureEnabled('sso', 'basic')).toBe(false);
+    expect(isFeatureEnabled('sso', 'free')).toBe(false);
+    expect(isFeatureEnabled('sso', 'founder')).toBe(false);
+    expect(isFeatureEnabled('sso', 'starter')).toBe(false);
   });
 
   it('returns true for enterprise on all features', () => {
@@ -36,34 +49,23 @@ describe('isFeatureEnabled', () => {
     }
   });
 
-  it('returns true for pro tier on compliance and sandbox', () => {
-    expect(isFeatureEnabled('compliance', 'pro')).toBe(true);
-    expect(isFeatureEnabled('sandbox', 'pro')).toBe(true);
-  });
-
-  it('returns false for starter tier on sso', () => {
-    expect(isFeatureEnabled('sso', 'starter')).toBe(false);
-  });
-
-  it('returns true for starter tier on voice_channels', () => {
-    expect(isFeatureEnabled('voice_channels', 'starter')).toBe(true);
-  });
-
-  it('returns true for starter tier on social_channels', () => {
-    expect(isFeatureEnabled('social_channels', 'starter')).toBe(true);
+  it('returns true for pro_hosted on all features except sso', () => {
+    const features = Object.keys(FEATURE_MATRIX) as Feature[];
+    for (const feature of features) {
+      if (feature === 'sso') {
+        expect(isFeatureEnabled(feature, 'pro_hosted')).toBe(false);
+      } else {
+        expect(isFeatureEnabled(feature, 'pro_hosted')).toBe(true);
+      }
+    }
   });
 });
 
 describe('getAvailableFeatures', () => {
-  it('returns no features for free tier', () => {
-    const features = getAvailableFeatures('free');
-    expect(features).toEqual([]);
-  });
-
-  it('returns all features for byoc tier', () => {
+  it('returns all features except sso for byoc tier', () => {
     const features = getAvailableFeatures('byoc');
     const allFeatures = Object.keys(FEATURE_MATRIX) as Feature[];
-    expect(features).toEqual(allFeatures);
+    expect(features).toEqual(allFeatures.filter(f => f !== 'sso'));
   });
 
   it('returns all features for enterprise tier', () => {
@@ -72,61 +74,37 @@ describe('getAvailableFeatures', () => {
     expect(features).toEqual(allFeatures);
   });
 
-  it('returns correct subset for starter tier', () => {
-    const features = getAvailableFeatures('starter');
-    expect(features).toContain('analytics');
-    expect(features).toContain('sla_management');
-    expect(features).toContain('voice_channels');
-    expect(features).toContain('social_channels');
-    expect(features).not.toContain('sso');
-    expect(features).not.toContain('sandbox');
-    expect(features).not.toContain('compliance');
+  it('returns all features except sso for legacy tiers', () => {
+    const legacyTiers: TierLevel[] = ['basic', 'free', 'founder', 'starter'];
+    const allFeatures = Object.keys(FEATURE_MATRIX) as Feature[];
+    const expectedFeatures = allFeatures.filter(f => f !== 'sso');
+    for (const tier of legacyTiers) {
+      expect(getAvailableFeatures(tier)).toEqual(expectedFeatures);
+    }
   });
 
-  it('returns correct subset for founder tier', () => {
-    const features = getAvailableFeatures('founder');
-    expect(features).toContain('analytics');
-    expect(features).toContain('ai_dashboard');
-    expect(features).toContain('sla_management');
-    expect(features).not.toContain('sso');
-    expect(features).not.toContain('sandbox');
-  });
-
-  it('returns correct subset for pro tier', () => {
+  it('returns all features except sso for pro tier', () => {
     const features = getAvailableFeatures('pro');
     expect(features).toContain('analytics');
     expect(features).toContain('ai_dashboard');
-    expect(features).toContain('advanced_automation');
-    expect(features).toContain('compliance');
-    expect(features).toContain('sandbox');
-    expect(features).toContain('custom_branding');
+    expect(features).toContain('sla_management');
+    expect(features).toContain('voice_channels');
+    expect(features).toContain('social_channels');
     expect(features).not.toContain('sso');
   });
 });
 
 describe('getMinimumTier', () => {
-  it('returns founder for analytics (first hosted tier with access)', () => {
-    expect(getMinimumTier('analytics')).toBe('founder');
-  });
-
-  it('returns founder for ai_dashboard', () => {
-    expect(getMinimumTier('ai_dashboard')).toBe('founder');
-  });
-
-  it('returns pro for sandbox', () => {
-    expect(getMinimumTier('sandbox')).toBe('pro');
+  it('returns byoc for most features', () => {
+    expect(getMinimumTier('analytics')).toBe('byoc');
+    expect(getMinimumTier('ai_dashboard')).toBe('byoc');
+    expect(getMinimumTier('sandbox')).toBe('byoc');
+    expect(getMinimumTier('compliance')).toBe('byoc');
+    expect(getMinimumTier('voice_channels')).toBe('byoc');
   });
 
   it('returns enterprise for sso', () => {
     expect(getMinimumTier('sso')).toBe('enterprise');
-  });
-
-  it('returns starter for voice_channels', () => {
-    expect(getMinimumTier('voice_channels')).toBe('starter');
-  });
-
-  it('returns pro for compliance', () => {
-    expect(getMinimumTier('compliance')).toBe('pro');
   });
 });
 
@@ -143,10 +121,17 @@ describe('FEATURE_LABELS', () => {
 
 describe('TIER_LABELS', () => {
   it('has a label for every tier', () => {
-    const tiers: TierLevel[] = ['byoc', 'free', 'founder', 'starter', 'pro', 'enterprise'];
+    const tiers: TierLevel[] = ['byoc', 'pro', 'pro_hosted', 'enterprise', 'basic', 'free', 'founder', 'starter'];
     for (const tier of tiers) {
       expect(TIER_LABELS[tier]).toBeDefined();
       expect(typeof TIER_LABELS[tier]).toBe('string');
     }
+  });
+
+  it('legacy tiers all display as BYOC', () => {
+    expect(TIER_LABELS.basic).toBe('BYOC');
+    expect(TIER_LABELS.free).toBe('BYOC');
+    expect(TIER_LABELS.founder).toBe('BYOC');
+    expect(TIER_LABELS.starter).toBe('BYOC');
   });
 });

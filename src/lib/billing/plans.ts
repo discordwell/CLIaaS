@@ -1,5 +1,9 @@
 /**
  * Billing plan definitions, founder eligibility, and quota lookups.
+ *
+ * Tiers: byoc (free) → pro_hosted ($79/mo) → enterprise (custom)
+ * Future: pro (~$20/mo) — defined but not purchasable yet.
+ * Legacy IDs (founder, free, starter, basic) all resolve to byoc quotas.
  */
 
 export interface PlanQuotas {
@@ -12,61 +16,100 @@ export interface PlanDefinition {
   id: string;
   name: string;
   price: number | null; // null = custom pricing
+  yearlyPrice: number | null;
   quotas: PlanQuotas;
+  /** If true, plan is defined but not yet available for purchase. */
+  future?: boolean;
 }
 
+/* ── Shared quota presets ─────────────────────────────────────────────────── */
+
+const UNLIMITED: PlanQuotas = {
+  ticketsPerMonth: Infinity,
+  aiCallsPerMonth: Infinity,
+  apiRequestsPerMonth: Infinity,
+};
+
+/* ── Plan definitions ─────────────────────────────────────────────────────── */
+
 export const PLANS: Record<string, PlanDefinition> = {
+  // ── Active tiers ──
   byoc: {
     id: 'byoc',
     name: 'BYOC',
     price: 0,
-    quotas: { ticketsPerMonth: Infinity, aiCallsPerMonth: Infinity, apiRequestsPerMonth: Infinity },
+    yearlyPrice: 0,
+    quotas: { ...UNLIMITED },
   },
-  founder: {
-    id: 'founder',
-    name: 'Founder',
-    price: 0,
-    quotas: { ticketsPerMonth: 10_000, aiCallsPerMonth: 1_000, apiRequestsPerMonth: 25_000 },
-  },
-  free: {
-    id: 'free',
-    name: 'Free',
-    price: 0,
-    quotas: { ticketsPerMonth: 100, aiCallsPerMonth: 10, apiRequestsPerMonth: 1_000 },
-  },
-  starter: {
-    id: 'starter',
-    name: 'Starter',
-    price: 29,
-    quotas: { ticketsPerMonth: 1_000, aiCallsPerMonth: 100, apiRequestsPerMonth: 5_000 },
-  },
-  pro: {
-    id: 'pro',
-    name: 'Pro',
-    price: 99,
-    quotas: { ticketsPerMonth: 10_000, aiCallsPerMonth: 1_000, apiRequestsPerMonth: 25_000 },
+  pro_hosted: {
+    id: 'pro_hosted',
+    name: 'Pro Hosted',
+    price: 79,
+    yearlyPrice: null,
+    quotas: { ticketsPerMonth: 10_000, aiCallsPerMonth: Infinity, apiRequestsPerMonth: Infinity },
   },
   enterprise: {
     id: 'enterprise',
     name: 'Enterprise',
     price: null,
-    quotas: { ticketsPerMonth: Infinity, aiCallsPerMonth: Infinity, apiRequestsPerMonth: Infinity },
+    yearlyPrice: null,
+    quotas: { ...UNLIMITED },
+  },
+
+  // ── Future tier (defined, not purchasable) ──
+  pro: {
+    id: 'pro',
+    name: 'Pro',
+    price: 20,
+    yearlyPrice: 200,
+    quotas: { ticketsPerMonth: 1_000, aiCallsPerMonth: Infinity, apiRequestsPerMonth: Infinity },
+    future: true,
+  },
+
+  // ── Legacy plan IDs — all map to byoc quotas ──
+  founder: {
+    id: 'founder',
+    name: 'Founder (BYOC)',
+    price: 0,
+    yearlyPrice: 0,
+    quotas: { ...UNLIMITED },
+  },
+  free: {
+    id: 'free',
+    name: 'Free (BYOC)',
+    price: 0,
+    yearlyPrice: 0,
+    quotas: { ...UNLIMITED },
+  },
+  starter: {
+    id: 'starter',
+    name: 'Starter (BYOC)',
+    price: 0,
+    yearlyPrice: 0,
+    quotas: { ...UNLIMITED },
+  },
+  basic: {
+    id: 'basic',
+    name: 'Basic (BYOC)',
+    price: 0,
+    yearlyPrice: 0,
+    quotas: { ...UNLIMITED },
   },
 };
 
-/** Feb 28 2026 11:59:59 PM PST = Mar 1 2026 07:59:59 UTC */
-export const FOUNDER_DEADLINE = new Date('2026-03-01T07:59:59Z');
+/** March Equinox 2026 — free-forever cutoff for early signups. */
+export const FOUNDER_DEADLINE = new Date('2026-03-20T09:06:00Z');
 
 /**
- * Check if a tenant created at `createdAt` qualifies for the Founder plan.
+ * Check if a tenant created at `createdAt` qualifies for the free-forever BYOC plan.
  */
 export function isFounderEligible(createdAt: Date): boolean {
   return createdAt.getTime() <= FOUNDER_DEADLINE.getTime();
 }
 
 /**
- * Get quotas for a plan. Falls back to free tier for unknown plans.
+ * Get quotas for a plan. Falls back to byoc tier for unknown plans.
  */
 export function getPlanQuotas(planId: string): PlanQuotas {
-  return PLANS[planId]?.quotas ?? PLANS.free.quotas;
+  return PLANS[planId]?.quotas ?? PLANS.byoc.quotas;
 }
