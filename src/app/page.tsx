@@ -128,13 +128,17 @@ function MarketingHome() {
           </Link>
           <div className="flex items-center gap-4">
             <a
-              href="https://github.com/discordwell/CLIaaS"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground"
+              href="#pricing"
+              className="hidden font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground sm:block"
             >
-              GitHub
+              Pricing
             </a>
+            <Link
+              href="/docs"
+              className="hidden font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground sm:block"
+            >
+              Docs
+            </Link>
             <Link
               href="/sign-in"
               className="font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground"
@@ -356,29 +360,27 @@ function MarketingHome() {
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           {/* BYOC */}
           <div className="flex flex-col border-2 border-line bg-panel p-6">
-            <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted">
-              <span className="line-through">BYOC</span>
+            <div className="flex items-center justify-between">
+              <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted">
+                <span className="line-through">BYOC</span>
+              </p>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter" className="text-emerald-500"><path d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 1 0 0-8c-2 0-4 1.33-6 4Z"/></svg>
+            </div>
+            <p className="mt-4 text-3xl font-bold uppercase text-foreground">
+              Self-Hosted
             </p>
-            <p className="mt-2 text-xl font-bold text-emerald-600">
-              CLAUDEUS INVICTUS <span className="text-2xl">∞</span>
+            <p className="mt-1 text-lg font-bold text-muted">
+              Free Forever<span className="text-sm font-normal">*</span>
             </p>
-            <p className="mt-3 text-3xl font-bold">
-              Free<span className="text-base font-normal text-muted">*</span>
-            </p>
-            <p className="mt-1 font-mono text-xs text-emerald-600 font-bold uppercase">
-              Free forever for early adopters
-            </p>
-            <ul className="mt-6 flex-1 space-y-2 text-sm text-muted">
-              <li>Self-hosted — your machine, your data</li>
-              <li>Full CLI + MCP server</li>
-              <li>Full web dashboard</li>
-              <li>Unlimited local tickets</li>
-              <li>Bring your own DB + AI keys</li>
-              <li>Community support</li>
+            <ul className="mt-6 flex-1 space-y-3 text-sm font-medium text-muted">
+              <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-muted"></span> Your infra, your data</li>
+              <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-muted"></span> Unrestricted CLI & Web GUI</li>
+              <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-muted"></span> Unlimited tickets & agents</li>
+              <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-muted"></span> Bring your own AI models</li>
             </ul>
             <Link
               href="/sign-up"
-              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
+              className="mt-8 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
             >
               Get Started Free
             </Link>
@@ -433,7 +435,7 @@ function MarketingHome() {
             </ul>
             <a
               href="mailto:hello@cliaas.com"
-              className="mt-6 block border-2 border-line py-3 text-center font-mono text-xs font-bold uppercase text-foreground transition-colors hover:bg-accent-soft"
+              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
             >
               Let&apos;s Talk
             </a>
