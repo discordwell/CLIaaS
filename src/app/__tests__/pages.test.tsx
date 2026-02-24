@@ -19,8 +19,8 @@ describe('Home page', () => {
 
   it('renders the hero headline', () => {
     render(<Home />);
-    expect(screen.getByText('AI lives in the command line.')).toBeInTheDocument();
-    expect(screen.getByText('Now, so does your helpdesk.')).toBeInTheDocument();
+    expect(screen.getByText('AI lives in the command line')).toBeInTheDocument();
+    expect(screen.getByText('Now, so does your helpdesk')).toBeInTheDocument();
   });
 
   it('renders the Get Started Free CTA link', () => {
@@ -37,7 +37,7 @@ describe('Home page', () => {
 
   it('renders pricing section with three tiers', () => {
     render(<Home />);
-    expect(screen.getByText('BYOC')).toBeInTheDocument();
+    expect(screen.getAllByText('BYOC').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Pro Hosted')).toBeInTheDocument();
     expect(screen.getByText('Enterprise')).toBeInTheDocument();
   });

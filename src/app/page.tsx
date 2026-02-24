@@ -156,7 +156,7 @@ function MarketingHome() {
       {/* ── Hero ── */}
       <header className="border-2 border-line bg-panel p-8 sm:p-14">
         <FitText
-          lines={["AI lives in the command line.", "Now, so does your helpdesk."]}
+          lines={["AI lives in the command line", "Now, so does your helpdesk"]}
           maxSize={96}
           minSize={16}
           className="mt-2"
@@ -168,7 +168,7 @@ function MarketingHome() {
           So answer a couple of tickets yourself, then tell OpenClaw to handle the rest.
         </p>
         <p className="mt-6 font-mono text-xs text-emerald-600 font-bold uppercase">
-          Sign up by the Ides of March and get BYOC free. Forever. Claudeus Invictus
+          Sign up by the Ides of March and get <span className="line-through">BYOC</span> claudeus invictus. Free, Forever.
         </p>
       </header>
 
@@ -185,25 +185,42 @@ function MarketingHome() {
           </p>
         </div>
         <pre className="overflow-x-auto font-mono text-sm leading-[1.8] text-zinc-300">
-          <span className="text-blue-400">&gt; hi Claude, install cliaas</span>{"\n"}
-          {"  "}<span className="text-emerald-400">$ npm install -g cliaas</span>{"\n"}
-          {"  "}<span className="text-emerald-400">$ cliaas --version</span>{"\n"}
-          {"  "}cliaas v0.1.0{"\n"}
-          {"\n"}
-          <span className="text-blue-400">&gt; okay now set up byoc locally</span>{"\n"}
-          {"  "}<span className="text-emerald-400">$ cliaas setup wizard</span>{"\n"}
-          {"  "}<span className="text-green-400">✓</span> PostgreSQL connected (localhost:5432){"\n"}
-          {"  "}<span className="text-green-400">✓</span> Created database &apos;cliaas&apos;{"\n"}
-          {"  "}<span className="text-green-400">✓</span> Ran 42 migrations{"\n"}
-          {"  "}<span className="text-green-400">✓</span> LLM provider: claude (ANTHROPIC_API_KEY set){"\n"}
-          {"  "}<span className="text-green-400">✓</span> Wrote .claude/agents.md{"\n"}
-          {"\n"}
-          <span className="text-blue-400">&gt; cool my Zendesk API key is ••••••••</span>{"\n"}
-          <span className="text-blue-400">{"  "}download all my tickets plox</span>{"\n"}
-          {"  "}<span className="text-emerald-400">$ cliaas sync pull zendesk --full</span>{"\n"}
-          {"  "}<span className="text-green-400">✓</span> 2,847 tickets synced (4.2s){"\n"}
-          {"  "}<span className="text-green-400">✓</span> 11,923 messages imported{"\n"}
-          {"  "}<span className="text-green-400">✓</span> Next sync: incremental (cursor saved)
+{/* ── Turn 1: Install ── */}
+<span className="text-blue-400">{"❯ "}hi Claude, install cliaas</span>{"\n"}
+{"\n"}
+{"  "}<span className="text-zinc-500">Explore</span>(<span className="text-zinc-400">Find CLIaaS install method</span>) <span className="text-zinc-600">Haiku 4.5</span>{"\n"}
+{"  "}<span className="text-green-400">Done</span> <span className="text-zinc-600">(14 tool uses · 43.6k tokens · 33s)</span>{"\n"}
+{"\n"}
+{"  "}<span className="text-emerald-400">Bash</span>(<span className="text-zinc-400">npm install -g cliaas</span>){"\n"}
+{"    "}<span className="text-zinc-500">added 1 package in 3s</span>{"\n"}
+{"\n"}
+{"  "}CLIaaS is installed and the MCP server is configured.{"\n"}
+{"  "}Claude Code will auto-connect to all 18 MCP tools{"\n"}
+{"  "}when working in this project.{"\n"}
+{"\n"}
+{/* ── Turn 2: Setup ── */}
+<span className="text-blue-400">{"❯ "}okay now set up byoc locally</span>{"\n"}
+{"\n"}
+{"  "}<span className="text-emerald-400">Bash</span>(<span className="text-zinc-400">cliaas setup wizard</span>){"\n"}
+{"    "}<span className="text-green-400">✓</span> PostgreSQL connected (localhost:5432){"\n"}
+{"    "}<span className="text-green-400">✓</span> Created database &apos;cliaas&apos;{"\n"}
+{"    "}<span className="text-green-400">✓</span> Ran 42 migrations{"\n"}
+{"    "}<span className="text-green-400">✓</span> LLM provider: claude (ANTHROPIC_API_KEY set){"\n"}
+{"    "}<span className="text-zinc-500">+2 lines (ctrl+e to expand)</span>{"\n"}
+{"\n"}
+{"  "}Your BYOC instance is ready. Database, migrations, and{"\n"}
+{"  "}LLM provider are all configured.{"\n"}
+{"\n"}
+{/* ── Turn 3: Sync ── */}
+<span className="text-blue-400">{"❯ "}cool my Zendesk API key is •••••••• download all my tickets</span>{"\n"}
+{"\n"}
+{"  "}<span className="text-emerald-400">Bash</span>(<span className="text-zinc-400">cliaas sync pull zendesk --full</span>){"\n"}
+{"    "}<span className="text-green-400">✓</span> 2,847 tickets synced (4.2s){"\n"}
+{"    "}<span className="text-green-400">✓</span> 11,923 messages imported{"\n"}
+{"    "}<span className="text-green-400">✓</span> Next sync: incremental (cursor saved){"\n"}
+{"\n"}
+{"  "}All 2,847 tickets and 11,923 messages are synced. Future{"\n"}
+{"  "}syncs will be incremental — cursor is saved.
         </pre>
       </section>
 
