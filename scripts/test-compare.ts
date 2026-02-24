@@ -86,24 +86,46 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
 
     await saveCanvas(page, path.join(TS_DIR, '02-final.png'));
 
-    const report = await page.evaluate(() => {
-      return (window as unknown as { __qaReport?: unknown }).__qaReport;
+    // Extract report metadata (without the massive screenshot data URLs)
+    const meta = await page.evaluate(() => {
+      const r = (window as unknown as { __qaReport?: {
+        summary: { bySeverity: { critical: number; warning: number; info: number } };
+        screenshots?: Array<{ key: string; dataUrl: string }>;
+      } }).__qaReport;
+      if (!r) return null;
+      return {
+        summary: r.summary,
+        screenshotCount: r.screenshots?.length ?? 0,
+      };
     });
 
-    if (report) {
-      fs.writeFileSync(path.join(TS_DIR, 'qa-report.json'), JSON.stringify(report, null, 2));
+    if (meta) {
+      console.log(`TS Engine: ${meta.summary.bySeverity.critical} critical, ${meta.summary.bySeverity.warning} warnings, ${meta.summary.bySeverity.info} info`);
 
-      const screenshots = (report as { screenshots?: Array<{ key: string; dataUrl: string }> })?.screenshots ?? [];
-      for (const ss of screenshots) {
-        if (!ss.dataUrl.startsWith('data:image/png;base64,')) continue;
-        const base64 = ss.dataUrl.replace('data:image/png;base64,', '');
-        const fileName = ss.key.replace(/[^a-zA-Z0-9._-]/g, '_') + '.png';
-        fs.writeFileSync(path.join(TS_DIR, fileName), Buffer.from(base64, 'base64'));
+      // Extract screenshots in batches of 10 to avoid massive transfers
+      const BATCH = 10;
+      const total = Math.min(meta.screenshotCount, 30);
+      let saved = 0;
+      for (let i = 0; i < total; i += BATCH) {
+        const batch = await page.evaluate(([start, end]: [number, number]) => {
+          const r = (window as unknown as { __qaReport?: {
+            screenshots?: Array<{ key: string; dataUrl: string }>;
+          } }).__qaReport;
+          return (r?.screenshots ?? []).slice(start, end).map(ss => ({
+            key: ss.key,
+            dataUrl: ss.dataUrl,
+          }));
+        }, [i, Math.min(i + BATCH, total)] as [number, number]);
+
+        for (const ss of batch) {
+          if (!ss.dataUrl.startsWith('data:image/png;base64,')) continue;
+          const base64 = ss.dataUrl.replace('data:image/png;base64,', '');
+          const fileName = ss.key.replace(/[^a-zA-Z0-9._-]/g, '_') + '.png';
+          fs.writeFileSync(path.join(TS_DIR, fileName), Buffer.from(base64, 'base64'));
+          saved++;
+        }
       }
-      console.log(`TS Engine: ${screenshots.length} screenshots saved`);
-
-      const summary = (report as { summary: { bySeverity: { critical: number; warning: number; info: number } } }).summary;
-      console.log(`TS Engine: ${summary.bySeverity.critical} critical, ${summary.bySeverity.warning} warnings, ${summary.bySeverity.info} info`);
+      console.log(`TS Engine: ${saved} screenshots saved (of ${meta.screenshotCount} total)`);
     }
 
     fs.writeFileSync(path.join(TS_DIR, 'console.log'), logs.join('\n'));
@@ -114,15 +136,17 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
 
     const logs: string[] = [];
     page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
-
-    // Dismiss any dialogs automatically (WASM may trigger alert() dialogs)
     page.on('dialog', async dialog => {
       console.log(`WASM: Dialog: ${dialog.type()} - ${dialog.message()}`);
       await dialog.accept();
     });
 
-    // Navigate to WASM original (self-capture system is embedded in the page)
-    await page.goto(`${BASE_URL}/ra/original.html`, { waitUntil: 'load' });
+    // Navigate with ?autoplay=ants — original.html provides screen detection.
+    // Menu navigation uses Playwright CDP keyboard events (trusted).
+    // Dispatched (non-trusted) keyboard events don't work because ASYNCIFY
+    // prevents WASM calls during JS execution windows. Trusted CDP events
+    // are processed by Chrome's input pipeline at a lower level.
+    await page.goto(`${BASE_URL}/ra/original.html?autoplay=ants`, { waitUntil: 'load' });
     await page.waitForSelector('canvas', { timeout: 30000 });
     console.log('WASM: Canvas found, waiting for WASM to load...');
 
@@ -133,20 +157,15 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
           const status = document.getElementById('status');
           return status && (status.style.display === 'none' || status.innerHTML === 'All downloads complete.');
         },
-        { timeout: 120000, polling: 1000 },
+        { timeout: 120000, polling: 2000 },
       );
       console.log('WASM: Loaded');
     } catch {
       console.log('WASM: Load detection timed out, continuing anyway');
     }
 
-    // The WASM game may block the main thread once it starts its synchronous
-    // main loop. All page.evaluate() and page.screenshot() calls will hang.
-    // Strategy: use short timeouts on each operation, and collect whatever
-    // data we can before the game blocks.
-
     /** Try an evaluate with a short timeout, return null on failure */
-    async function tryEval<T>(fn: () => T, timeoutMs = 3000): Promise<T | null> {
+    async function tryEval<T>(fn: () => T, timeoutMs = 5000): Promise<T | null> {
       try {
         return await Promise.race([
           page.evaluate(fn),
@@ -157,157 +176,209 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
       }
     }
 
-    // Capture pre-game-loop data
-    await wait(2000);
-    const preLoopData = await tryEval(() => {
-      const w = window as unknown as {
-        __wasmRenderCount: number;
-        __wasmFrameCount: number;
-        __wasmRenderSamples: Array<Record<string, unknown>>;
-        __wasmLogs: string[];
-      };
-      return {
-        renderCount: w.__wasmRenderCount || 0,
-        frameCount: w.__wasmFrameCount || 0,
-        samples: w.__wasmRenderSamples || [],
-        logs: w.__wasmLogs || [],
-      };
-    });
 
-    if (preLoopData) {
-      console.log(`WASM: Pre-loop: ${preLoopData.renderCount} putImageData calls, ${preLoopData.frameCount} rAF frames`);
-      if (preLoopData.samples.length > 0) {
-        for (const s of preLoopData.samples.slice(0, 5)) {
-          console.log(`  render#${s.render}: ${s.w}x${s.h} center=${JSON.stringify(s.centerPx)} nonBlack=${s.nonBlack}/${s.totalSampled}`);
+    // === Menu navigation strategy ===
+    // Key findings from testing:
+    // 1. Without keyboard input: game renders at ~73fps, evaluate works fine,
+    //    but game stuck at "CHOOSE YOUR SIDE" (screenshots identical).
+    // 2. Page-dispatched (non-trusted) keyboard events BLOCK the main thread
+    //    entirely — even evaluate() stops working for minutes.
+    // 3. Playwright CDP keyboard.press() works initially, but after the first
+    //    Enter the game enters a blocking movie/transition state.
+    //
+    // Approach: Send one CDP Enter at a time. After each, wait for the game
+    // to become responsive again (evaluate succeeds) before sending the next.
+    // This lets us navigate menus without permanently blocking the main thread.
+
+    // Helper: wait until evaluate works (game is responsive)
+    async function waitForResponsive(maxWaitMs: number): Promise<boolean> {
+      const start = Date.now();
+      while (Date.now() - start < maxWaitMs) {
+        const result = await tryEval(() => {
+          return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
+        });
+        if (result !== null) return true;
+        await wait(3000);
+      }
+      return false;
+    }
+
+    // Wait for initial content
+    console.log('WASM: Waiting for content...');
+    await wait(5000);
+
+    const initiallyResponsive = await waitForResponsive(15000);
+    if (!initiallyResponsive) {
+      console.log('WASM: Game not responsive initially, skipping keyboard navigation');
+    } else {
+      console.log('WASM: Game responsive, navigating menus via CDP keyboard...');
+
+      const keyLabels = [
+        'choose-side',   // Select ALLIES at "CHOOSE YOUR SIDE"
+        'advance-1',     // Skip movie / advance
+        'start-game',    // Start New Game at main menu
+        'briefing-1',    // Continue through briefing
+        'briefing-2',    // More advances (briefing animation takes time)
+        'briefing-3',
+        'advance-4',     // Get past "OK" dialogs
+        'advance-5',
+        'advance-6',     // Additional presses to ensure we reach gameplay
+        'advance-7',
+        'advance-8',
+        'advance-9',
+        'advance-10',
+      ];
+
+      for (const label of keyLabels) {
+        console.log(`WASM: Pressing Enter (${label})...`);
+        let keyOk = false;
+        try {
+          await Promise.race([
+            page.keyboard.press('Enter').then(() => { keyOk = true; }),
+            new Promise<void>(resolve => setTimeout(resolve, 10000)),
+          ]);
+        } catch {
+          console.log(`WASM: Page closed during ${label}`);
+          break;
+        }
+
+        if (keyOk) {
+          console.log(`WASM: Enter delivered (${label})`);
+        } else {
+          console.log(`WASM: CDP timed out (${label}) — game in transition`);
+        }
+
+        // Wait for game to become responsive again (up to 90s per transition)
+        console.log(`WASM: Waiting for game to recover...`);
+        const recovered = await waitForResponsive(90000);
+        if (recovered) {
+          console.log(`WASM: Game responsive after ${label}`);
+          // Save a screenshot
+          await Promise.race([
+            saveCanvas(page, path.join(WASM_DIR, `screen-${label}.png`)),
+            new Promise<boolean>(resolve => setTimeout(() => resolve(false), 5000)),
+          ]);
+        } else {
+          console.log(`WASM: Game still blocked after 90s — may be permanently stuck`);
+          break;
         }
       }
     }
 
-    // Try to request a capture before the game blocks
-    await tryEval(() => {
-      (window as unknown as { __wasmRequestCapture: (k: string) => void }).__wasmRequestCapture('pre-game');
-    });
+    console.log('WASM: Menu navigation complete');
 
-    // Wait for game to start rendering
-    console.log('WASM: Waiting for rendering to begin...');
-    let hasContent = false;
-    for (let attempt = 0; attempt < 15; attempt++) {
-      await wait(2000);
-      const check = await tryEval(() => ({
-        hasContent: (window as unknown as { __wasmHasContent: boolean }).__wasmHasContent,
-        renders: (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount,
-      }), 2000);
-      if (!check) { console.log('WASM: Main thread blocked'); break; }
-      if (check.hasContent) { hasContent = true; break; }
-      console.log(`WASM: [${attempt + 1}/15] renders=${check.renders} content=${check.hasContent}`);
-    }
+    // Let the game run for 30s to accumulate varied screenshots
+    console.log('WASM: Running game for 30s...');
+    await wait(30000);
 
-    if (!hasContent) {
-      console.log('WASM: No content rendered, saving what we have');
-    } else {
-      console.log('WASM: Game is rendering! Navigating to ant mission...');
-    }
-
-    // Navigate the menus to reach the ant mission.
-    // Menu flow: Main Menu → "Start New Game" → "CHOOSE YOUR SIDE" → allies/soviet
-    // For ant missions, we need to reach the counterstrike expansion content.
-    // The menu buttons are positioned at specific pixel locations.
-    //
-    // Main screen shows "CHOOSE YOUR SIDE" with ALLIES (left) and SOVIET (right).
-    // The game auto-navigates to this screen from the title.
-    // Viewport is 640x400, canvas fills it.
-
-    async function clickCanvas(xRatio: number, yRatio: number, label: string) {
-      const el = await page.$('canvas');
-      if (!el) return;
-      const box = await el.boundingBox();
-      if (!box) return;
-      const x = box.x + box.width * xRatio;
-      const y = box.y + box.height * yRatio;
-      console.log(`WASM: Click ${label} at (${Math.round(x)}, ${Math.round(y)})`);
-      await page.mouse.click(x, y);
-      await wait(2000);
-      await tryEval(() => {
-        (window as unknown as { __wasmRequestCapture: (s: string) => void }).__wasmRequestCapture('after-click');
-      }, 2000);
-    }
-
-    // The "CHOOSE YOUR SIDE" screen: ALLIES button at ~35% x, SOVIET at ~65% x, ~70% y
-    await clickCanvas(0.35, 0.70, 'allies-button');
-    await wait(1000);
-
-    // After choosing side, mission select screen appears.
-    // Try clicking through several screens to advance.
-    for (let i = 0; i < 8; i++) {
-      await clickCanvas(0.5, 0.6, `menu-advance-${i}`);
-      await wait(1500);
-    }
-
-    // Request captures every few seconds during gameplay
-    console.log('WASM: Running game, capturing periodically...');
-    for (let i = 0; i < 20; i++) {
-      await wait(3000);
-      const status = await tryEval(() => ({
-        renders: (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount,
-        screenshots: (window as unknown as { __wasmScreenshots: unknown[] }).__wasmScreenshots?.length || 0,
-      }), 2000);
-      if (!status) {
-        console.log(`WASM: Main thread blocked at iteration ${i}`);
-        break;
-      }
-      // Request a named capture
-      await tryEval(() => {
-        (window as unknown as { __wasmRequestCapture: (s: string) => void }).__wasmRequestCapture('gameplay');
-      }, 1000);
-      if (i % 5 === 0) {
-        console.log(`WASM: [${i}/20] renders=${status.renders} screenshots=${status.screenshots}`);
-      }
-    }
-
-    // Extract all screenshots
-    const result = await tryEval(() => {
+    // Extract metadata
+    const meta = await tryEval(() => {
       const w = window as unknown as {
-        __wasmScreenshots: Array<{ key: string; dataUrl: string; frame: number }>;
+        __wasmScreenshots: Array<{ key: string; frame: number }>;
         __wasmFrameCount: number;
+        __wasmRenderCount: number;
         __wasmHasContent: boolean;
         __wasmLogs: string[];
         __wasmDiag: Record<string, unknown>;
-        __wasmRenderCount: number;
-        __wasmRenderSamples: Array<Record<string, unknown>>;
+        __autoplayLog: string[];
+        __autoplayState: string;
+        __autoplayScreenChanges: number;
       };
       return {
-        screenshots: w.__wasmScreenshots || [],
+        count: (w.__wasmScreenshots || []).length,
         frameCount: w.__wasmFrameCount || 0,
+        renderCount: w.__wasmRenderCount || 0,
         hasContent: w.__wasmHasContent || false,
         logs: w.__wasmLogs || [],
         diag: w.__wasmDiag || {},
-        renderCount: w.__wasmRenderCount || 0,
-        renderSamples: (w.__wasmRenderSamples || []).slice(0, 20),
+        autoplayLog: w.__autoplayLog || [],
+        autoplayState: w.__autoplayState || 'unknown',
+        screenChanges: w.__autoplayScreenChanges || 0,
       };
     }, 10000);
 
-    if (result) {
-      console.log(`WASM: ${result.frameCount} rAF, ${result.renderCount} renders, content=${result.hasContent}`);
-      console.log(`WASM: ${result.screenshots.length} total screenshots`);
-      console.log(`WASM: diagnostics: ${JSON.stringify(result.diag, null, 2)}`);
-
-      let saved = 0;
-      for (let i = 0; i < result.screenshots.length; i++) {
-        const ss = result.screenshots[i];
-        if (!ss || !ss.dataUrl) continue;
-        const key = ss.key || `unnamed-${i}`;
-        const fileName = key.replace(/[^a-zA-Z0-9._-]/g, '_') + '.png';
-        if (saveDataUrl(ss.dataUrl, path.join(WASM_DIR, fileName))) saved++;
-      }
-      console.log(`WASM: ${saved} screenshots saved`);
-
-      const allLogs = [...result.logs, '', '--- Console logs ---', ...logs];
-      fs.writeFileSync(path.join(WASM_DIR, 'console.log'), allLogs.join('\n'));
-    } else {
-      console.log('WASM: Could not extract results (main thread blocked)');
+    if (!meta) {
+      console.log('WASM: Could not extract metadata (main thread blocked)');
       fs.writeFileSync(path.join(WASM_DIR, 'console.log'), logs.join('\n'));
+      console.log('WASM: Test complete');
+      return;
     }
 
+    console.log(`WASM: ${meta.frameCount} rAF, ${meta.renderCount} renders, ${meta.count} screenshots, autoplay=${meta.autoplayState}, screenChanges=${meta.screenChanges}`);
+
+    // Extract screenshots in batches of 10
+    const maxScreenshots = Math.min(meta.count, 30);
+    let saved = 0;
+    const fileSizes: number[] = [];
+    const BATCH_SIZE = 10;
+
+    for (let batch = 0; batch * BATCH_SIZE < maxScreenshots; batch++) {
+      const start = batch * BATCH_SIZE;
+      const end = Math.min(start + BATCH_SIZE, maxScreenshots);
+      console.log(`WASM: Extracting screenshots ${start}-${end - 1}...`);
+
+      let batchData: Array<{ key: string; dataUrl: string }> | null = null;
+      try {
+        batchData = await Promise.race([
+          page.evaluate(([s, e]: [number, number]) => {
+            const w = window as unknown as {
+              __wasmScreenshots: Array<{ key: string; dataUrl: string; frame: number }>;
+            };
+            const screenshots = w.__wasmScreenshots || [];
+            return screenshots.slice(s, e).map(ss => ({
+              key: ss.key,
+              dataUrl: ss.dataUrl,
+            }));
+          }, [start, end] as [number, number]),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 30000)),
+        ]);
+      } catch {
+        batchData = null;
+      }
+
+      if (!batchData) {
+        console.log(`WASM: Batch ${batch} extraction failed, skipping`);
+        continue;
+      }
+
+      for (const ss of batchData) {
+        if (!ss || !ss.dataUrl) continue;
+        const key = ss.key || `unnamed-${saved}`;
+        const fileName = key.replace(/[^a-zA-Z0-9._-]/g, '_') + '.png';
+        const filePath = path.join(WASM_DIR, fileName);
+        if (saveDataUrl(ss.dataUrl, filePath)) {
+          saved++;
+          fileSizes.push(fs.statSync(filePath).size);
+        }
+      }
+    }
+
+    console.log(`WASM: ${saved} screenshots saved`);
+
+    // Verify screenshots are not all identical
+    if (fileSizes.length >= 3) {
+      const uniqueSizes = new Set(fileSizes);
+      const varied = uniqueSizes.size > 1;
+      console.log(`WASM: Screenshot variance: ${uniqueSizes.size} unique sizes out of ${fileSizes.length} files — ${varied ? 'VARIED (good)' : 'ALL IDENTICAL (bad)'}`);
+      if (!varied) {
+        console.warn('WASM: WARNING — all screenshots are identical, game may not have progressed past menu');
+      }
+    }
+
+    // Save logs
+    const allLogs = [
+      ...(meta.logs || []),
+      '',
+      '--- Autoplay log ---',
+      ...(meta.autoplayLog || []),
+      '',
+      `--- Diagnostics ---`,
+      JSON.stringify(meta.diag, null, 2),
+      '',
+      '--- Console logs ---',
+      ...logs,
+    ];
+    fs.writeFileSync(path.join(WASM_DIR, 'console.log'), allLogs.join('\n'));
     console.log('WASM: Test complete');
   });
 });

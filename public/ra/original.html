@@ -14,7 +14,7 @@
 <body>
 <div id="status">Loading Red Alert WASM...</div>
 <progress id="progress" max="100" value="0"></progress>
-<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<canvas id="canvas" width="320" height="200" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 <script>
 // === Self-capture + rendering hook system ===
 (function() {
@@ -40,6 +40,37 @@
 
   window.__wasmRequestCapture = function(key) {
     window.__wasmCaptureQueue.push(key);
+  };
+
+  // Capture uncaught errors
+  window.__wasmErrors = [];
+  window.addEventListener('error', function(e) {
+    var msg = 'UNCAUGHT: ' + (e.message || e) + ' @ ' + (e.filename || '') + ':' + (e.lineno || '');
+    window.__wasmErrors.push(msg);
+    wlog(msg);
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    var msg = 'UNHANDLED_REJECTION: ' + (e.reason || e);
+    window.__wasmErrors.push(msg);
+    wlog(msg);
+  });
+
+  // === Hook createImageData to fix 0-dimension SDL2 surface ===
+  // The WASM binary's SDL2 passes w=0, h=0 to the EM_ASM rendering function.
+  // createImageData(0, 0) would throw IndexSizeError. Substitute the actual
+  // game resolution (320x200 for LORES=1) so SDL2.image has the right size
+  // and the pixel copy from WASM heap reads the correct frame buffer.
+  var origCreateImageData = CanvasRenderingContext2D.prototype.createImageData;
+  var GAME_RES_W = 320, GAME_RES_H = 200;
+  CanvasRenderingContext2D.prototype.createImageData = function(w, h) {
+    if (w <= 0 || h <= 0) {
+      wlog('createImageData(' + w + ', ' + h + ') → substituted ' + GAME_RES_W + 'x' + GAME_RES_H);
+      return origCreateImageData.call(this, GAME_RES_W, GAME_RES_H);
+    }
+    if (w > 1 && h > 1) {
+      wlog('createImageData(' + w + ', ' + h + ')');
+    }
+    return origCreateImageData.call(this, w, h);
   };
 
   // === Hook putImageData to detect SDL2 rendering ===
@@ -178,6 +209,159 @@
   }, 2000);
 })();
 
+// === Intercept WASM imports at binding time ===
+// Two critical fixes for headless Chrome:
+// 1. _emscripten_set_canvas_element_size: SDL2 calls with (0,0) instead of (320,200)
+// 2. _emscripten_get_element_css_size: getBoundingClientRect returns 0x0 in headless,
+//    causing SDL2 to allocate a 0-byte pixel buffer (SDL_WINDOW_RESIZABLE reads CSS dims)
+(function() {
+  var GAME_W = 320, GAME_H = 200;
+  var origInstantiate = WebAssembly.instantiate;
+  var origInstantiateStreaming = WebAssembly.instantiateStreaming;
+
+  function wrapImports(imports) {
+    if (!imports) return imports;
+    for (var mod in imports) {
+      if (typeof imports[mod] !== 'object') continue;
+      var modObj = imports[mod];
+      for (var key in modObj) {
+        var fn = modObj[key];
+        if (typeof fn !== 'function') continue;
+        var src = fn.toString();
+
+        // Wrap _emscripten_set_focus_callback_on_thread: capture the C callback
+        // so we can manually invoke it to simulate focus gain and unblock
+        // the GameInFocus wait loop in init.cpp:3188-3190.
+        if (src.indexOf('"focus"') !== -1 && src.indexOf('registerFocusEventCallback') !== -1) {
+          if (window.__wlog) window.__wlog('Wrapping WASM import "' + key + '" (focus_callback)');
+          modObj[key] = (function(origFn) {
+            var wrapper = function(target, userData, useCapture, callbackfunc, targetThread) {
+              var result = origFn(target, userData, useCapture, callbackfunc, targetThread);
+              if (window.__wlog) window.__wlog('WASM→set_focus_callback(target=' + target + ', cb=' + callbackfunc + ', ud=' + userData + ') result=' + result);
+              // Store for deferred focus simulation
+              window.__wasmFocusCb = callbackfunc;
+              window.__wasmFocusUd = userData;
+              // Schedule focus simulation — fires during emscripten_sleep yields
+              setTimeout(function simulateFocus() {
+                try {
+                  if (typeof dynCall_iiii === 'undefined' || typeof _malloc === 'undefined') {
+                    setTimeout(simulateFocus, 200);
+                    return;
+                  }
+                  var ev = _malloc(256);
+                  // nodeName "CANVAS\0" at offset 0
+                  var name = 'CANVAS';
+                  for (var i = 0; i < name.length; i++) HEAPU8[ev + i] = name.charCodeAt(i);
+                  HEAPU8[ev + name.length] = 0;
+                  // id "canvas\0" at offset 128
+                  var id = 'canvas';
+                  for (var i = 0; i < id.length; i++) HEAPU8[ev + 128 + i] = id.charCodeAt(i);
+                  HEAPU8[ev + 128 + id.length] = 0;
+                  if (window.__wlog) window.__wlog('Invoking focus callback: dynCall_iiii(' + callbackfunc + ', 13, ' + ev + ', ' + userData + ')');
+                  dynCall_iiii(callbackfunc, 13, ev, userData);
+                  _free(ev);
+                  if (window.__wlog) window.__wlog('Focus callback invoked successfully!');
+                } catch(e) {
+                  if (window.__wlog) window.__wlog('Focus simulation error: ' + e.message);
+                  // Retry — game might not be ready yet
+                  setTimeout(simulateFocus, 500);
+                }
+              }, 100);
+              return result;
+            };
+            wrapper.isAsync = origFn.isAsync;
+            return wrapper;
+          })(fn);
+        }
+
+        // Wrap _emscripten_set_canvas_element_size: force 320x200 when SDL2 sends 0x0
+        if (src.indexOf('findCanvasEventTarget') !== -1 &&
+            src.indexOf('getBoundingClientRect') === -1) {
+          if (window.__wlog) window.__wlog('Wrapping WASM import "' + key + '" (set_canvas_element_size)');
+          modObj[key] = (function(origFn) {
+            var wrapper = function(target, width, height) {
+              if (width <= 1 && height <= 1) {
+                if (window.__wlog) window.__wlog('WASM→set_canvas_size(' + target + ', ' + width + '→' + GAME_W + ', ' + height + '→' + GAME_H + ')');
+                return origFn(target, GAME_W, GAME_H);
+              }
+              return origFn(target, width, height);
+            };
+            wrapper.isAsync = origFn.isAsync;
+            return wrapper;
+          })(fn);
+        }
+
+        // Wrap _emscripten_get_element_css_size: in headless Chrome,
+        // getBoundingClientRect() returns 0x0 because canvas has no layout.
+        // SDL2's SDL_WINDOW_RESIZABLE reads CSS dims to set window size,
+        // which causes a 0-byte pixel buffer allocation. After calling the
+        // original, patch HEAPF64 to return GAME_W x GAME_H if it wrote 0.
+        if (src.indexOf('getBoundingClientRect') !== -1 &&
+            src.indexOf('HEAPF64') !== -1) {
+          if (window.__wlog) window.__wlog('Wrapping WASM import "' + key + '" (get_element_css_size)');
+          modObj[key] = (function(origFn) {
+            var wrapper = function(target, widthPtr, heightPtr) {
+              var result = origFn(target, widthPtr, heightPtr);
+              // After the call, check what was written to HEAPF64
+              // widthPtr and heightPtr are byte offsets into the HEAP
+              try {
+                if (typeof HEAPF64 !== 'undefined') {
+                  var w = HEAPF64[widthPtr >> 3];
+                  var h = HEAPF64[heightPtr >> 3];
+                  // NaN-safe check: NaN <= 0 is false, so use !(x > 0) which catches NaN, 0, negative
+                  if (!(w > 0) || !(h > 0)) {
+                    HEAPF64[widthPtr >> 3] = GAME_W;
+                    HEAPF64[heightPtr >> 3] = GAME_H;
+                    if (window.__wlog) window.__wlog('WASM→get_css_size: ' + w + 'x' + h + ' → forced ' + GAME_W + 'x' + GAME_H);
+                  }
+                }
+              } catch(e) {
+                if (window.__wlog) window.__wlog('WASM→get_css_size patch error: ' + e.message);
+              }
+              return result;
+            };
+            wrapper.isAsync = origFn.isAsync;
+            return wrapper;
+          })(fn);
+        }
+      }
+    }
+    return imports;
+  }
+
+  WebAssembly.instantiate = function(source, imports) {
+    if (window.__wlog) window.__wlog('Intercepted WebAssembly.instantiate');
+    return origInstantiate.call(WebAssembly, source, wrapImports(imports));
+  };
+  if (origInstantiateStreaming) {
+    WebAssembly.instantiateStreaming = function(source, imports) {
+      if (window.__wlog) window.__wlog('Intercepted WebAssembly.instantiateStreaming');
+      return origInstantiateStreaming.call(WebAssembly, source, wrapImports(imports));
+    };
+  }
+})();
+
+// === Patch canvas.getBoundingClientRect for headless browsers ===
+// In headless Chrome, getBoundingClientRect() returns all zeros because the canvas
+// has no visual layout. SDL2's Emscripten port uses this to determine window size
+// (via _emscripten_get_element_css_size). Patch it to return proper dimensions.
+(function() {
+  var canvas = document.getElementById('canvas');
+  if (!canvas) return;
+  var origGetBCR = canvas.getBoundingClientRect.bind(canvas);
+  canvas.getBoundingClientRect = function() {
+    var rect = origGetBCR();
+    if (rect.width <= 0 || rect.height <= 0) {
+      // Headless: return dimensions matching the CSS style (set by resizeCanvas)
+      var w = window.innerWidth || 640;
+      var h = window.innerHeight || 400;
+      if (window.__wlog) window.__wlog('getBoundingClientRect patched: 0x0 → ' + w + 'x' + h);
+      return { left: 0, top: 0, right: w, bottom: h, width: w, height: h, x: 0, y: 0 };
+    }
+    return rect;
+  };
+})();
+
 // === Pre-create AudioContext so SDL2 doesn't block ===
 (function() {
   var OrigAC = window.AudioContext || window.webkitAudioContext;
@@ -210,6 +394,8 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 window.addEventListener('load', function() {
+  // Make canvas focusable and give it focus
+  canvasElement.tabIndex = 0;
   canvasElement.focus();
   setTimeout(function() {
     canvasElement.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX:320, clientY:200}));
@@ -218,9 +404,200 @@ window.addEventListener('load', function() {
     canvasElement.focus();
     if (window.__preAudioCtx) window.__preAudioCtx.resume().catch(function(){});
   }, 500);
+
+  // Fallback focus simulation: periodically dispatch focus events on the canvas.
+  // The Emscripten SDL2 port registers "focus" event listeners on the canvas via
+  // emscripten_set_focus_callback. If those listeners were registered, dispatching
+  // a FocusEvent should trigger the C callback that sets GameInFocus = true.
+  var focusAttempts = 0;
+  var focusInterval = setInterval(function() {
+    focusAttempts++;
+    canvasElement.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    canvasElement.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    canvasElement.focus();
+    // Also dispatch on window/document for SDL2 ports that listen there
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    if (focusAttempts > 60) clearInterval(focusInterval); // Stop after 30s
+  }, 500);
 });
 
 var Module = {
+  preRun: [function() {
+    var wlog = window.__wlog || function(m) { console.log('preRun: ' + m); };
+
+    // Fix Emscripten event target resolution: specialHTMLTargets[0] is initialized
+    // to 0 (falsy) by the runtime, so emscripten_set_*_callback(0, ...) calls
+    // (target=0 meaning "default canvas") fail to register any event listeners.
+    // Patch it here — after runtime init but before main() — so SDL2 input works.
+    if (typeof specialHTMLTargets !== 'undefined') {
+      specialHTMLTargets[0] = Module.canvas;
+      wlog('preRun: patched specialHTMLTargets[0] = <' + Module.canvas.tagName + ' ' +
+           Module.canvas.width + 'x' + Module.canvas.height + '>');
+    } else {
+      wlog('preRun: specialHTMLTargets not defined yet');
+    }
+
+    // Hook _emscripten_set_canvas_element_size for diagnostics
+    if (typeof _emscripten_set_canvas_element_size === 'function') {
+      var origSetSize = _emscripten_set_canvas_element_size;
+      _emscripten_set_canvas_element_size = function(target, width, height) {
+        wlog('_emscripten_set_canvas_element_size(' + target + ', ' + width + ', ' + height + ')');
+        var result = origSetSize(target, width, height);
+        wlog('  → result=' + result + ' canvas=' + Module.canvas.width + 'x' + Module.canvas.height);
+        return result;
+      };
+      wlog('preRun: hooked _emscripten_set_canvas_element_size');
+    } else {
+      wlog('preRun: _emscripten_set_canvas_element_size not yet defined');
+    }
+
+    // Override _emscripten_get_element_css_size to return proper dimensions.
+    // CRITICAL FIX: Emscripten's internal getBoundingClientRect helper returns
+    // {left:0, top:0} (NO width/height) when the target is in specialHTMLTargets.
+    // Since we patched specialHTMLTargets[0] = canvas for event handling, this
+    // causes rect.width = undefined → NaN in HEAPF64. SDL2's SDL_WINDOW_RESIZABLE
+    // reads these values to set window dimensions, resulting in a 0-byte pixel buffer.
+    if (typeof _emscripten_get_element_css_size === 'function') {
+      var origGetCssSize = _emscripten_get_element_css_size;
+      _emscripten_get_element_css_size = function(target, widthPtr, heightPtr) {
+        var result = origGetCssSize(target, widthPtr, heightPtr);
+        // Check if valid values were written (guard against NaN from missing rect properties)
+        if (typeof HEAPF64 !== 'undefined') {
+          var w = HEAPF64[widthPtr >> 3];
+          var h = HEAPF64[heightPtr >> 3];
+          if (!(w > 0) || !(h > 0) || isNaN(w) || isNaN(h)) {
+            HEAPF64[widthPtr >> 3] = GAME_W;
+            HEAPF64[heightPtr >> 3] = GAME_H;
+            wlog('_emscripten_get_element_css_size: ' + w + 'x' + h + ' → forced ' + GAME_W + 'x' + GAME_H);
+          }
+        }
+        return result;
+      };
+      wlog('preRun: hooked _emscripten_get_element_css_size');
+    } else {
+      wlog('preRun: _emscripten_get_element_css_size not yet defined');
+    }
+
+    // Intercept canvas.width/height — the WASM binary calls
+    // _emscripten_set_canvas_element_size(0, 0, 0) and (0, 1, 1) during init
+    // instead of the actual game resolution. Substitute 640x400 for any 0/1 values,
+    // and log all writes for diagnostics.
+    var canvas = Module.canvas;
+    var _widthDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
+    var _heightDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
+    // Match the LORES=1 game resolution (320x200 internal, CSS scales to window)
+    var GAME_W = 320, GAME_H = 200;
+    var _dimSetCount = 0;
+    Object.defineProperty(canvas, 'width', {
+      get: function() { return _widthDesc.get.call(this); },
+      set: function(v) {
+        _dimSetCount++;
+        if (v <= 1 && _dimSetCount <= 30) {
+          // WASM init sends 0 or 1 — substitute actual game resolution
+          wlog('canvas.width = ' + v + ' → forced to ' + GAME_W + ' (set #' + _dimSetCount + ')');
+          v = GAME_W;
+        } else if (_dimSetCount <= 10) {
+          wlog('canvas.width = ' + v + ' (set #' + _dimSetCount + ')');
+        }
+        _widthDesc.set.call(this, v);
+      },
+      configurable: true
+    });
+    Object.defineProperty(canvas, 'height', {
+      get: function() { return _heightDesc.get.call(this); },
+      set: function(v) {
+        if (v <= 1 && _dimSetCount <= 30) {
+          wlog('canvas.height = ' + v + ' → forced to ' + GAME_H);
+          v = GAME_H;
+        } else if (_dimSetCount <= 10) {
+          wlog('canvas.height = ' + v);
+        }
+        _heightDesc.set.call(this, v);
+      },
+      configurable: true
+    });
+
+    // Patch the SDL2 rendering EM_ASM function to fix w=0, h=0 from C code.
+    // The EM_ASM at address 204400 receives ($0=w, $1=h, $2=pixels) from C.
+    // SDL2 internally stores 0x0 dimensions, so w=0 and h=0 are passed.
+    // Wrap it to substitute the actual game resolution (320x200).
+    if (typeof ASM_CONSTS !== 'undefined' && ASM_CONSTS[204400]) {
+      var origRenderASM = ASM_CONSTS[204400];
+      ASM_CONSTS[204400] = function($0, $1, $2) {
+        var w = $0 <= 0 ? 320 : $0;
+        var h = $1 <= 0 ? 200 : $1;
+        return origRenderASM(w, h, $2);
+      };
+      wlog('preRun: patched ASM_CONSTS[204400] (SDL2 render) to fix 0x0 dimensions');
+    } else {
+      wlog('preRun: ASM_CONSTS[204400] not found, scanning for SDL2 render EM_ASM...');
+      // Fallback: scan all ASM_CONSTS for the SDL2 rendering function
+      if (typeof ASM_CONSTS !== 'undefined') {
+        for (var addr in ASM_CONSTS) {
+          var fn = ASM_CONSTS[addr];
+          if (typeof fn === 'function' && fn.toString().indexOf('putImageData') !== -1) {
+            var origFn = ASM_CONSTS[addr];
+            ASM_CONSTS[addr] = function($0, $1, $2) {
+              var w = $0 <= 0 ? 320 : $0;
+              var h = $1 <= 0 ? 200 : $1;
+              return origFn(w, h, $2);
+            };
+            wlog('preRun: patched ASM_CONSTS[' + addr + '] (SDL2 render fallback)');
+            break;
+          }
+        }
+      }
+    }
+
+    // Trace event listener registration and handler invocation
+    var origAddEventListener = canvas.addEventListener.bind(canvas);
+    var handlerMap = {};
+    canvas.addEventListener = function(type, handler, options) {
+      wlog('canvas.addEventListener("' + type + '", ...) registered');
+      // Wrap mouse handlers to log when they fire
+      if (type === 'mousedown' || type === 'mousemove') {
+        var origHandler = handler;
+        var wrappedCount = 0;
+        handler = function(e) {
+          wrappedCount++;
+          if (type === 'mousedown' || wrappedCount <= 5) {
+            wlog('canvas.' + type + ' handler FIRED: clientX=' + e.clientX +
+                 ' clientY=' + e.clientY + ' trusted=' + e.isTrusted +
+                 ' button=' + e.button);
+          }
+          return origHandler.call(this, e);
+        };
+      }
+      return origAddEventListener(type, handler, options);
+    };
+    // Also trace on document
+    var origDocAddEventListener = document.addEventListener.bind(document);
+    document.addEventListener = function(type, handler, options) {
+      if (type.indexOf('mouse') !== -1 || type.indexOf('key') !== -1 || type.indexOf('pointer') !== -1) {
+        wlog('document.addEventListener("' + type + '", ...) registered');
+        if (type === 'mouseup') {
+          var origHandler = handler;
+          handler = function(e) {
+            wlog('document.mouseup handler FIRED: clientX=' + e.clientX +
+                 ' clientY=' + e.clientY + ' trusted=' + e.isTrusted);
+            return origHandler.call(this, e);
+          };
+        }
+      }
+      return origDocAddEventListener(type, handler, options);
+    };
+    // Also check window for keyboard events
+    var origWinAddEventListener = window.addEventListener.bind(window);
+    window.addEventListener = function(type, handler, options) {
+      if (type.indexOf('key') !== -1 || type.indexOf('mouse') !== -1) {
+        wlog('window.addEventListener("' + type + '", ...) registered');
+      }
+      return origWinAddEventListener(type, handler, options);
+    };
+
+    wlog('preRun: complete, canvas=' + canvas.width + 'x' + canvas.height);
+  }],
   print: function() {
     var msg = Array.from(arguments).join(' ');
     console.log(msg);
@@ -251,6 +628,168 @@ var Module = {
   }
 };
 Module.setStatus('Downloading...');
+
+// === Diagnostic: wrap dynCall_iiii to trace mouse callback execution ===
+// The mousedown handler calls dynCall_iiii(callbackfunc, eventType, eventStruct, userData).
+// This wrapper logs mouse-related calls and catches errors.
+(function() {
+  var installed = false;
+  function tryInstall() {
+    if (installed) return;
+    if (typeof dynCall_iiii !== 'function') {
+      setTimeout(tryInstall, 200);
+      return;
+    }
+    installed = true;
+    var origDynCall = dynCall_iiii;
+    var mouseCallCount = 0;
+    dynCall_iiii = function(func, a1, a2, a3) {
+      // Event type IDs: mousedown=5, mouseup=6, mousemove=8, focus=13
+      if (a1 >= 5 && a1 <= 8) {
+        mouseCallCount++;
+        if (mouseCallCount <= 30) {
+          var asyncState = typeof Asyncify !== 'undefined' ? Asyncify.state : 'N/A';
+          console.log('dynCall_iiii MOUSE: func=' + func + ' type=' + a1 +
+                      ' Asyncify.state=' + asyncState);
+        }
+      }
+      try {
+        return origDynCall(func, a1, a2, a3);
+      } catch(e) {
+        console.error('dynCall_iiii ERROR: func=' + func + ' type=' + a1 + ' err=' + e.message);
+        return 0;
+      }
+    };
+    console.log('dynCall_iiii wrapper installed (traces mouse events)');
+  }
+  setTimeout(tryInstall, 1000);
+})();
+
+// === Autoplay coordination ===
+// Activated by ?autoplay=ants (or ?autoplay=allies).
+// Provides screen detection helpers for Playwright test. Menu navigation
+// is driven externally by Playwright via CDP keyboard.press() events.
+//
+// IMPORTANT: Do NOT dispatch keyboard events from page-level timers.
+// Page-dispatched KeyboardEvents cause the WASM main thread to block
+// permanently (ASYNCIFY's unwind/rewind cycle gets disrupted). Only
+// Playwright's trusted CDP keyboard events work for menu navigation.
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var autoplay = params.get('autoplay');
+  if (!autoplay) return;
+
+  window.__wasmGameplayStarted = false;
+  window.__autoplayState = 'waiting-for-content';
+  window.__autoplayLog = [];
+  window.__autoplayScreenChanges = 0;
+
+  function alog(msg) {
+    var entry = '[autoplay ' + new Date().toISOString() + '] ' + msg;
+    window.__autoplayLog.push(entry);
+    console.log(entry);
+  }
+
+  // --- Screen detection helpers ---
+  window.__getScreenHash = function() {
+    var canvas = document.getElementById('canvas');
+    if (!canvas) return '';
+    try {
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return '';
+      var hash = '';
+      for (var sy = 0; sy < 4; sy++) {
+        for (var sx = 0; sx < 4; sx++) {
+          var px = ctx.getImageData(
+            Math.floor(canvas.width * (sx + 0.5) / 4),
+            Math.floor(canvas.height * (sy + 0.5) / 4),
+            1, 1
+          ).data;
+          hash += String.fromCharCode(px[0] & 0xF0, px[1] & 0xF0, px[2] & 0xF0);
+        }
+      }
+      return hash;
+    } catch(e) { return ''; }
+  };
+
+  window.__getNonBlackCount = function() {
+    var canvas = document.getElementById('canvas');
+    if (!canvas) return 0;
+    try {
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return 0;
+      var w = canvas.width, h = canvas.height;
+      var data = ctx.getImageData(0, 0, w, h).data;
+      var count = 0;
+      var step = Math.max(4, Math.floor(data.length / 4000)) * 4;
+      for (var i = 0; i < data.length; i += step) {
+        if (data[i] > 10 || data[i+1] > 10 || data[i+2] > 10) count++;
+      }
+      return count;
+    } catch(e) { return 0; }
+  };
+
+  // --- Screen monitoring ---
+  // Tracks screen changes passively (no keyboard dispatches).
+  // Menu navigation is handled by the Playwright test.
+  var lastHash = '';
+
+  function startMonitoring() {
+    window.__autoplayState = 'monitoring';
+    lastHash = window.__getScreenHash();
+    alog('Monitoring started');
+
+    function checkScreen() {
+      if (window.__wasmGameplayStarted) return;
+      var newHash = window.__getScreenHash();
+      if (newHash !== lastHash && newHash !== '') {
+        window.__autoplayScreenChanges++;
+        lastHash = newHash;
+        if (window.__wasmRequestCapture) window.__wasmRequestCapture('screen-change-' + window.__autoplayScreenChanges);
+      }
+      setTimeout(checkScreen, 2000);
+    }
+    setTimeout(checkScreen, 2000);
+  }
+
+  // --- Content detection and startup ---
+  var stateStartTime = Date.now();
+
+  function tick() {
+    if (window.__autoplayState === 'waiting-for-content') {
+      if (window.__wasmHasContent || window.__getNonBlackCount() > 50) {
+        alog('Content detected, starting screen monitoring...');
+        window.__autoplayState = 'content-detected';
+        setTimeout(startMonitoring, 3000);
+      } else if (Date.now() - stateStartTime > 120000) {
+        alog('TIMEOUT waiting for content');
+        window.__autoplayState = 'failed';
+        window.__wasmGameplayStarted = true;
+        return;
+      } else {
+        setTimeout(tick, 500);
+      }
+    }
+  }
+
+  // Start detection after WASM loads
+  var origSetStatus = Module.setStatus;
+  Module.setStatus = function(text) {
+    origSetStatus.call(Module, text);
+    if (!text && window.__autoplayState === 'waiting-for-content') {
+      alog('WASM loaded, starting content detection...');
+      setTimeout(function() { tick(); }, 3000);
+    }
+  };
+
+  // Fallback: start after 30s even if setStatus never clears
+  setTimeout(function() {
+    if (window.__autoplayState === 'waiting-for-content') {
+      alog('Fallback: starting detection after 30s timeout');
+      tick();
+    }
+  }, 30000);
+})();
 </script>
 <script src="gamedata.js"></script>
 <script async src="rasdl.js"></script>

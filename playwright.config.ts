@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './scripts',
   testMatch: 'test-*.ts',
-  timeout: 10 * 60 * 1000, // 10 minutes
+  timeout: 15 * 60 * 1000, // 15 minutes
   retries: 0,
   use: {
     headless: true,
