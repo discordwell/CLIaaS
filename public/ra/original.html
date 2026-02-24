@@ -259,7 +259,7 @@
                   HEAPU8[ev + 128 + id.length] = 0;
                   if (window.__wlog) window.__wlog('Invoking focus callback: dynCall_iiii(' + callbackfunc + ', 13, ' + ev + ', ' + userData + ')');
                   dynCall_iiii(callbackfunc, 13, ev, userData);
-                  _free(ev);
+                  try { _free(ev); } catch(e2) { /* ev leaked but safe — Asyncify may be mid-unwind */ }
                   if (window.__wlog) window.__wlog('Focus callback invoked successfully!');
                 } catch(e) {
                   if (window.__wlog) window.__wlog('Focus simulation error: ' + e.message);
@@ -740,7 +740,6 @@ Module.setStatus('Downloading...');
     alog('Monitoring started');
 
     function checkScreen() {
-      if (window.__wasmGameplayStarted) return;
       var newHash = window.__getScreenHash();
       if (newHash !== lastHash && newHash !== '') {
         window.__autoplayScreenChanges++;

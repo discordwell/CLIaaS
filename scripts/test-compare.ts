@@ -118,7 +118,7 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
         }, [i, Math.min(i + BATCH, total)] as [number, number]);
 
         for (const ss of batch) {
-          if (!ss.dataUrl.startsWith('data:image/png;base64,')) continue;
+          if (!ss || !ss.dataUrl || !ss.dataUrl.startsWith('data:image/png;base64,')) continue;
           const base64 = ss.dataUrl.replace('data:image/png;base64,', '');
           const fileName = ss.key.replace(/[^a-zA-Z0-9._-]/g, '_') + '.png';
           fs.writeFileSync(path.join(TS_DIR, fileName), Buffer.from(base64, 'base64'));
