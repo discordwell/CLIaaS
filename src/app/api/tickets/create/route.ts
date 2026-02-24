@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { type ConnectorName, getAuth } from '@/lib/connector-auth';
 import { zendeskCreateTicket } from '@cli/connectors/zendesk';
 import { helpcrunchCreateChat } from '@cli/connectors/helpcrunch';
@@ -6,8 +7,12 @@ import { freshdeskCreateTicket } from '@cli/connectors/freshdesk';
 import { grooveCreateTicket } from '@cli/connectors/groove';
 import { ticketCreated } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const authResult = await requireAuth(request);
+  if ('error' in authResult) return authResult.error;
+
   const parsed = await parseJsonBody<{
     source: ConnectorName;
     subject?: string;

@@ -3,10 +3,14 @@ import type { NextRequest } from 'next/server';
 import { getSlackIntegration } from '@/lib/integrations/slack';
 import type { SlackCommandPayload } from '@/lib/integrations/slack';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const slack = getSlackIntegration();
     const status = slack.getStatus();
@@ -20,6 +24,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const contentType = request.headers.get('content-type') ?? '';
     const slack = getSlackIntegration();

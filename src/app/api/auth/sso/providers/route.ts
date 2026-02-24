@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/auth/sso/providers — List all SSO providers.
  */
 export async function GET(request: NextRequest) {
-  const auth = requireRole(request, 'admin');
+  const auth = await requireRole(request, 'admin');
   if ('error' in auth) return auth.error;
 
   try {
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
  * POST /api/auth/sso/providers — Create a new SSO provider.
  */
 export async function POST(request: NextRequest) {
-  const auth = requireRole(request, 'admin');
+  const auth = await requireRole(request, 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody(request);

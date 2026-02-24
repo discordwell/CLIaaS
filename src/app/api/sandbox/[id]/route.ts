@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getSandbox, deleteSandbox } from '@/lib/sandbox';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
   const sandbox = getSandbox(id);
   if (!sandbox) {
@@ -17,9 +21,12 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
   const deleted = deleteSandbox(id);
   if (!deleted) {

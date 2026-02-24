@@ -8,7 +8,7 @@ import { parseJsonBody } from '@/lib/parse-json-body';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody(request);

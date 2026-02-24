@@ -4,6 +4,10 @@
  * These read the identity headers set by middleware (x-user-id, x-user-role, etc.)
  * rather than re-verifying the JWT. In demo mode (no DATABASE_URL), a default
  * admin user is returned so all guards pass.
+ *
+ * API key authentication is handled via the x-auth-type header set by middleware.
+ * When x-auth-type is 'api-key', the Authorization bearer token is validated
+ * against the api_keys table instead of reading identity headers.
  */
 
 import { NextResponse } from 'next/server';
@@ -15,6 +19,7 @@ export interface AuthUser {
   email: string;
   role: Role;
   workspaceId: string;
+  authType?: 'session' | 'api-key';
 }
 
 const DEMO_USER: AuthUser = {
@@ -22,6 +27,7 @@ const DEMO_USER: AuthUser = {
   email: 'demo@cliaas.local',
   role: 'admin',
   workspaceId: 'demo-workspace',
+  authType: 'session',
 };
 
 const ROLE_HIERARCHY: Record<Role, number> = {
@@ -34,12 +40,30 @@ const ROLE_HIERARCHY: Record<Role, number> = {
  * Extract the authenticated user from middleware-set request headers.
  * Returns DEMO_USER when no DATABASE_URL (demo mode).
  * Returns null if headers are missing (should not happen behind middleware).
+ *
+ * When x-auth-type is 'api-key', validates the bearer token via api-keys service.
  */
-export function getAuthUser(request: Request): AuthUser | null {
+export async function getAuthUser(request: Request): Promise<AuthUser | null> {
   if (!process.env.DATABASE_URL) {
     return DEMO_USER;
   }
 
+  // API key authentication path
+  const authType = request.headers.get('x-auth-type');
+  if (authType === 'api-key') {
+    const authHeader = request.headers.get('authorization') || '';
+    const rawKey = authHeader.replace(/^Bearer\s+/i, '');
+    if (!rawKey) return null;
+
+    try {
+      const { validateApiKey } = await import('@/lib/api-keys');
+      return await validateApiKey(rawKey);
+    } catch {
+      return null;
+    }
+  }
+
+  // Session-based authentication path (JWT headers from middleware)
   const id = request.headers.get('x-user-id');
   const workspaceId = request.headers.get('x-workspace-id');
   if (!id || !workspaceId) {
@@ -51,6 +75,7 @@ export function getAuthUser(request: Request): AuthUser | null {
     email: request.headers.get('x-user-email') || '',
     role: (request.headers.get('x-user-role') || 'agent') as Role,
     workspaceId,
+    authType: 'session',
   };
 }
 
@@ -60,8 +85,8 @@ type AuthError = { error: NextResponse };
 /**
  * Require an authenticated user. Returns the user or a 401 response.
  */
-export function requireAuth(request: Request): AuthSuccess | AuthError {
-  const user = getAuthUser(request);
+export async function requireAuth(request: Request): Promise<AuthSuccess | AuthError> {
+  const user = await getAuthUser(request);
   if (!user) {
     return {
       error: NextResponse.json(
@@ -77,11 +102,11 @@ export function requireAuth(request: Request): AuthSuccess | AuthError {
  * Require a minimum role level. Returns the user or 401/403 response.
  * Role hierarchy: owner > admin > agent
  */
-export function requireRole(
+export async function requireRole(
   request: Request,
   minimumRole: Role,
-): AuthSuccess | AuthError {
-  const auth = requireAuth(request);
+): Promise<AuthSuccess | AuthError> {
+  const auth = await requireAuth(request);
   if ('error' in auth) return auth;
 
   const userLevel = ROLE_HIERARCHY[auth.user.role] ?? 0;

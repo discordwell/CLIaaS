@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { verifyPassword } from '@/lib/password';
-import { createToken, setSessionCookie } from '@/lib/auth';
+import { createToken, createIntermediateToken, setSessionCookie } from '@/lib/auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
@@ -70,15 +70,33 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = await createToken({
+    const sessionUser = {
       id: user.id,
       email: user.email!,
       name: user.name,
       role: user.role,
       workspaceId: user.workspaceId,
       tenantId: user.tenantId,
-    });
+    };
 
+    // Check if MFA is enabled for this user
+    const mfaRows = await db
+      .select({ enabledAt: schema.userMfa.enabledAt })
+      .from(schema.userMfa)
+      .where(eq(schema.userMfa.userId, user.id))
+      .limit(1);
+
+    if (mfaRows[0]?.enabledAt) {
+      // MFA is enabled — return intermediate token instead of full session
+      const intermediateToken = await createIntermediateToken(sessionUser);
+      return NextResponse.json({
+        mfaRequired: true,
+        intermediateToken,
+      });
+    }
+
+    // No MFA — issue full session
+    const token = await createToken(sessionUser);
     await setSessionCookie(token);
 
     return NextResponse.json({

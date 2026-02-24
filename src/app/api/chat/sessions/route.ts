@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { getActiveSessions, getAllSessions } from '@/lib/chat';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +10,10 @@ export const dynamic = 'force-dynamic';
  * List chat sessions for the agent dashboard.
  * Optional: ?all=true to include closed sessions.
  */
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const url = new URL(request.url);
   const includeAll = url.searchParams.get('all') === 'true';
 

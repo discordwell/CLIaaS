@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadTickets, loadMessages, loadKBArticles } from '@/lib/data';
 import { generateInsights } from '@/lib/ai/proactive';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,9 @@ export const dynamic = 'force-dynamic';
  *   useLLM: 'true' | 'false' (default 'true')
  */
 export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   try {
     const { searchParams } = request.nextUrl;
     const useLLM = searchParams.get('useLLM') !== 'false';

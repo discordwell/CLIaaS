@@ -3,10 +3,14 @@ import type { NextRequest } from 'next/server';
 import { getTeamsIntegration } from '@/lib/integrations/teams';
 import type { TeamsActivityPayload } from '@/lib/integrations/teams';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const teams = getTeamsIntegration();
     const status = teams.getStatus();
@@ -20,6 +24,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const parsed = await parseJsonBody<Record<string, unknown>>(request);
     if ('error' in parsed) return parsed.error;

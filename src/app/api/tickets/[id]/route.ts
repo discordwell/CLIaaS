@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { loadTickets, loadMessages } from "@/lib/data";
 import { resolveSource, extractExternalId } from "@/lib/connector-service";
 import { getAuth } from "@/lib/connector-auth";
@@ -8,13 +9,17 @@ import { freshdeskUpdateTicket } from "@cli/connectors/freshdesk";
 import { grooveUpdateTicket } from "@cli/connectors/groove";
 import { ticketUpdated, ticketResolved } from "@/lib/events";
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requireAuth(request);
+  if ('error' in authResult) return authResult.error;
+
   const { id } = await params;
   const tickets = await loadTickets();
   const ticket = tickets.find((t) => t.id === id || t.externalId === id);
@@ -32,9 +37,12 @@ export async function GET(
 }
 
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requireAuth(request);
+  if ('error' in authResult) return authResult.error;
+
   const { id } = await params;
   const parsed = await parseJsonBody<{ status?: string; priority?: string }>(request);
   if ('error' in parsed) return parsed.error;

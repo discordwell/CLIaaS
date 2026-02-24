@@ -11,6 +11,7 @@ import {
 } from '@/lib/chat';
 import { eventBus } from '@/lib/realtime/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +69,9 @@ export async function GET(request: NextRequest) {
  *   { action: "typing", sessionId: "...", role: "customer"|"agent", typing: boolean }
  */
 export async function POST(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const parsed = await parseJsonBody<Record<string, unknown>>(request);
   if ('error' in parsed) return parsed.error;
   const body = parsed.data;

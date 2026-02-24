@@ -774,3 +774,44 @@ export const ragImportJobs = pgTable('rag_import_jobs', {
   startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
 });
+
+// ---- API Keys ----
+
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    keyHash: varchar('key_hash', { length: 64 }).notNull(),
+    prefix: varchar('prefix', { length: 12 }).notNull(),
+    scopes: text('scopes').array().notNull().default([]),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  table => ({
+    apiKeysWorkspaceIdx: index('api_keys_workspace_idx').on(table.workspaceId),
+    apiKeysHashIdx: uniqueIndex('api_keys_hash_idx').on(table.keyHash),
+    apiKeysPrefixIdx: index('api_keys_prefix_idx').on(table.prefix),
+  }),
+);
+
+// ---- User MFA (TOTP) ----
+
+export const userMfa = pgTable(
+  'user_mfa',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    totpSecret: text('totp_secret').notNull(),
+    backupCodes: jsonb('backup_codes').notNull(),
+    enabledAt: timestamp('enabled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    userMfaUserIdx: uniqueIndex('user_mfa_user_idx').on(table.userId),
+  }),
+);

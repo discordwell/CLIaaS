@@ -1,4 +1,5 @@
 import { eventBus, type AppEvent } from '@/lib/realtime/events';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +8,9 @@ export const dynamic = 'force-dynamic';
  * Clients connect via EventSource and receive ticket/presence events.
  */
 export async function GET(request: Request) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
 

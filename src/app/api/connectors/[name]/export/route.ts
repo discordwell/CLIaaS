@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { type ConnectorName, getAuth } from '@/lib/connector-auth';
+import { requireRole } from '@/lib/api-auth';
 import { exportZendesk } from '@cli/connectors/zendesk';
 import { exportHelpcrunch } from '@cli/connectors/helpcrunch';
 import { exportFreshdesk } from '@cli/connectors/freshdesk';
@@ -31,9 +33,12 @@ const EXPORT_DIRS: Record<ConnectorName, string> = {
 };
 
 export async function POST(
-  _req: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ name: string }> },
 ) {
+  const roleCheck = await requireRole(request, 'admin');
+  if ('error' in roleCheck) return roleCheck.error;
+
   const { name } = await params;
   if (!VALID_CONNECTORS.includes(name as ConnectorName)) {
     return NextResponse.json({ error: 'Unknown connector' }, { status: 404 });

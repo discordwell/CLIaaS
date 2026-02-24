@@ -4,10 +4,14 @@ import { checkTicketSLA } from '@/lib/sla';
 import { loadTickets, loadMessages, type Ticket } from '@/lib/data';
 import { slaBreached } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   try {
     const parsed = await parseJsonBody<{
       ticketId?: string;

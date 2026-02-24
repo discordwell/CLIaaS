@@ -1,16 +1,21 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { type ConnectorName, getAuth } from '@/lib/connector-auth';
 import { zendeskVerifyConnection } from '@cli/connectors/zendesk';
 import { helpcrunchVerifyConnection } from '@cli/connectors/helpcrunch';
 import { freshdeskVerifyConnection } from '@cli/connectors/freshdesk';
 import { grooveVerifyConnection } from '@cli/connectors/groove';
+import { requireRole } from '@/lib/api-auth';
 
 const VALID_CONNECTORS = ['zendesk', 'helpcrunch', 'freshdesk', 'groove'];
 
 export async function POST(
-  _req: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ name: string }> },
 ) {
+  const roleCheck = await requireRole(request, 'admin');
+  if ('error' in roleCheck) return roleCheck.error;
+
   const { name } = await params;
   if (!VALID_CONNECTORS.includes(name)) {
     return NextResponse.json({ error: 'Unknown connector' }, { status: 404 });

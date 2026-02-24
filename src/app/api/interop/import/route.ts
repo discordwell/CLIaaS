@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConnector } from "@/lib/connectors";
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireRole } from '@/lib/api-auth';
 
 export async function POST(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   const parsed = await parseJsonBody<Record<string, unknown>>(request);
   if ('error' in parsed) return parsed.error;
   const body = parsed.data;

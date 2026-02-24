@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { exportSecureAudit } from '@/lib/security/audit-log';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const { searchParams } = request.nextUrl;
     const format = (searchParams.get('format') === 'csv' ? 'csv' : 'json') as 'json' | 'csv';

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import {
   addSubscription,
   removeSubscription,
@@ -7,11 +8,15 @@ import {
   getVapidConfig,
 } from '@/lib/push';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 // GET: list subscriptions + config
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const subs = listSubscriptions();
   const vapid = getVapidConfig();
 
@@ -23,7 +28,10 @@ export async function GET() {
 }
 
 // POST: add subscription
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const parsed = await parseJsonBody<{ endpoint?: string; keys?: { p256dh?: string; auth?: string }; userId?: string }>(request);
   if ('error' in parsed) return parsed.error;
   const body = parsed.data;
@@ -39,7 +47,10 @@ export async function POST(request: Request) {
 }
 
 // DELETE: remove subscription
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const parsed = await parseJsonBody<{ endpoint?: string }>(request);
   if ('error' in parsed) return parsed.error;
   const body = parsed.data;

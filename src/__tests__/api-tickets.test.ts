@@ -87,7 +87,7 @@ describe('Tickets API routes', () => {
   describe('GET /api/tickets/[id]', () => {
     it('returns 404 for a non-existent ticket', async () => {
       const { GET } = await import('@/app/api/tickets/[id]/route');
-      const req = new Request('http://localhost:3000/api/tickets/nonexistent-id');
+      const req = new NextRequest('http://localhost:3000/api/tickets/nonexistent-id');
       const res = await GET(req, {
         params: Promise.resolve({ id: 'nonexistent-id' }),
       });
@@ -106,7 +106,7 @@ describe('Tickets API routes', () => {
       if (listBody.tickets.length > 0) {
         const ticketId = listBody.tickets[0].id;
         const { GET } = await import('@/app/api/tickets/[id]/route');
-        const req = new Request(`http://localhost:3000/api/tickets/${ticketId}`);
+        const req = new NextRequest(`http://localhost:3000/api/tickets/${ticketId}`);
         const res = await GET(req, {
           params: Promise.resolve({ id: ticketId }),
         });
@@ -125,7 +125,7 @@ describe('Tickets API routes', () => {
   describe('PATCH /api/tickets/[id]', () => {
     it('returns 400 when no updates are provided', async () => {
       const { PATCH } = await import('@/app/api/tickets/[id]/route');
-      const req = new Request('http://localhost:3000/api/tickets/zd-123', {
+      const req = new NextRequest('http://localhost:3000/api/tickets/zd-123', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -140,7 +140,7 @@ describe('Tickets API routes', () => {
 
     it('returns 400 for invalid status values', async () => {
       const { PATCH } = await import('@/app/api/tickets/[id]/route');
-      const req = new Request('http://localhost:3000/api/tickets/zd-123', {
+      const req = new NextRequest('http://localhost:3000/api/tickets/zd-123', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'invalid_status' }),
@@ -155,7 +155,7 @@ describe('Tickets API routes', () => {
 
     it('returns 400 for invalid priority values', async () => {
       const { PATCH } = await import('@/app/api/tickets/[id]/route');
-      const req = new Request('http://localhost:3000/api/tickets/zd-123', {
+      const req = new NextRequest('http://localhost:3000/api/tickets/zd-123', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ priority: 'mega_urgent' }),
@@ -171,7 +171,7 @@ describe('Tickets API routes', () => {
     it('returns 400 when connector is not configured', async () => {
       // Zendesk is not configured in test env, so zd- prefix should fail
       const { PATCH } = await import('@/app/api/tickets/[id]/route');
-      const req = new Request('http://localhost:3000/api/tickets/zd-999', {
+      const req = new NextRequest('http://localhost:3000/api/tickets/zd-999', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'solved' }),
@@ -190,7 +190,7 @@ describe('Tickets API routes', () => {
   describe('POST /api/tickets/create', () => {
     it('returns 400 when source or message is missing', async () => {
       const { POST } = await import('@/app/api/tickets/create/route');
-      const req = new Request('http://localhost:3000/api/tickets/create', {
+      const req = new NextRequest('http://localhost:3000/api/tickets/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: 'zendesk' }),
@@ -203,7 +203,7 @@ describe('Tickets API routes', () => {
 
     it('returns 400 for invalid source', async () => {
       const { POST } = await import('@/app/api/tickets/create/route');
-      const req = new Request('http://localhost:3000/api/tickets/create', {
+      const req = new NextRequest('http://localhost:3000/api/tickets/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: 'invalid_source', message: 'Help!' }),

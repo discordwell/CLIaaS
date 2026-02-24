@@ -19,7 +19,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireRole(request, 'admin');
+  const auth = await requireRole(request, 'admin');
   if ('error' in auth) return auth.error;
 
   try {

@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { loadCustomers, loadOrganizations } from '@/lib/data';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { searchParams } = new URL(request.url);
   const q = searchParams.get('q')?.toLowerCase();
   const source = searchParams.get('source');

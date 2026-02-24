@@ -36,6 +36,8 @@ export async function createToken(user: SessionUser): Promise<string> {
 export async function verifyToken(token: string): Promise<SessionUser | null> {
   try {
     const { payload } = await jwtVerify(token, getJwtSecret());
+    // Reject intermediate MFA tokens — they cannot be used as full sessions
+    if (payload.mfaPending) return null;
     return payload as unknown as SessionUser;
   } catch {
     return null;
@@ -67,4 +69,37 @@ export async function setSessionCookie(token: string) {
 export async function clearSessionCookie() {
   const cookieStore = await cookies();
   cookieStore.delete(COOKIE_NAME);
+}
+
+/**
+ * Create a short-lived intermediate token for MFA pending state.
+ * This token cannot be used for API access — only for completing MFA verification.
+ */
+export async function createIntermediateToken(user: SessionUser): Promise<string> {
+  return new SignJWT({ ...user, mfaPending: true })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .sign(getJwtSecret());
+}
+
+/**
+ * Verify an intermediate MFA token. Returns the user payload only if
+ * the token has mfaPending: true and is still valid.
+ */
+export async function verifyIntermediateToken(token: string): Promise<SessionUser | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecret());
+    if (!payload.mfaPending) return null;
+    return {
+      id: payload.id as string,
+      email: payload.email as string,
+      name: payload.name as string,
+      role: payload.role as string,
+      workspaceId: payload.workspaceId as string,
+      tenantId: payload.tenantId as string,
+    };
+  } catch {
+    return null;
+  }
 }

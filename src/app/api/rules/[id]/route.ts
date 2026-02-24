@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   if (!process.env.DATABASE_URL) {
@@ -35,6 +39,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
   const parsed = await parseJsonBody(request);
   if ('error' in parsed) return parsed.error;
@@ -68,9 +75,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   if (!process.env.DATABASE_URL) {

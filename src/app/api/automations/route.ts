@@ -6,15 +6,22 @@ import {
 } from '@/lib/automation/executor';
 import type { Rule } from '@/lib/automation/engine';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const rules = getAutomationRules();
   return NextResponse.json({ rules });
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   try {
     const parsed = await parseJsonBody<Partial<Rule>>(request);
     if ('error' in parsed) return parsed.error;

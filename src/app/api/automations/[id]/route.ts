@@ -6,13 +6,17 @@ import {
   removeAutomationRule,
 } from '@/lib/automation/executor';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
   const rule = getAutomationRules().find(r => r.id === id);
   if (!rule) {
@@ -25,6 +29,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
   try {
     const parsed = await parseJsonBody<Record<string, unknown>>(request);
@@ -43,9 +50,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
   const removed = removeAutomationRule(id);
   if (!removed) {

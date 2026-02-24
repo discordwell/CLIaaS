@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { resolveSource, extractExternalId } from '@/lib/connector-service';
 import { getAuth } from '@/lib/connector-auth';
 import { zendeskPostComment } from '@cli/connectors/zendesk';
@@ -7,11 +8,15 @@ import { freshdeskReply, freshdeskAddNote } from '@cli/connectors/freshdesk';
 import { groovePostMessage } from '@cli/connectors/groove';
 import { messageCreated } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export async function POST(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const authResult = await requireAuth(request);
+  if ('error' in authResult) return authResult.error;
+
   const { id } = await params;
   const parsed = await parseJsonBody<{ message: string; isNote?: boolean }>(request);
   if ('error' in parsed) return parsed.error;

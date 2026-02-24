@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { isDemoMode } from '@/lib/channels/twilio';
 import { getIVRConfig, saveIVRConfig, type IVRConfig } from '@/lib/channels/voice-ivr';
 import { getAllCalls, getAgents, getActiveCalls } from '@/lib/channels/voice-store';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const config = getIVRConfig();
   const calls = getAllCalls();
   const agents = getAgents();
@@ -27,7 +32,10 @@ export async function GET() {
   });
 }
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   const parsed = await parseJsonBody<Record<string, unknown>>(request);
   if ('error' in parsed) return parsed.error;
   const body = parsed.data;

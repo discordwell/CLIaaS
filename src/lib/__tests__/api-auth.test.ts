@@ -40,34 +40,35 @@ describe('api-auth', () => {
   });
 
   describe('getAuthUser', () => {
-    it('returns DEMO_USER when no DATABASE_URL', () => {
+    it('returns DEMO_USER when no DATABASE_URL', async () => {
       delete process.env.DATABASE_URL;
-      const user = getAuthUser(makeRequest());
+      const user = await getAuthUser(makeRequest());
       expect(user).not.toBeNull();
       expect(user!.id).toBe('demo-user');
       expect(user!.role).toBe('admin');
     });
 
-    it('returns user from headers when DATABASE_URL is set', () => {
+    it('returns user from headers when DATABASE_URL is set', async () => {
       process.env.DATABASE_URL = 'postgres://localhost/test';
-      const user = getAuthUser(makeRequest(ADMIN_HEADERS));
+      const user = await getAuthUser(makeRequest(ADMIN_HEADERS));
       expect(user).toEqual({
         id: 'user-1',
         email: 'admin@test.com',
         role: 'admin',
         workspaceId: 'ws-1',
+        authType: 'session',
       });
     });
 
-    it('returns null when headers are missing and DATABASE_URL is set', () => {
+    it('returns null when headers are missing and DATABASE_URL is set', async () => {
       process.env.DATABASE_URL = 'postgres://localhost/test';
-      const user = getAuthUser(makeRequest());
+      const user = await getAuthUser(makeRequest());
       expect(user).toBeNull();
     });
 
-    it('defaults role to agent when x-user-role header is missing', () => {
+    it('defaults role to agent when x-user-role header is missing', async () => {
       process.env.DATABASE_URL = 'postgres://localhost/test';
-      const user = getAuthUser(makeRequest({
+      const user = await getAuthUser(makeRequest({
         'x-user-id': 'user-1',
         'x-workspace-id': 'ws-1',
       }));
@@ -77,27 +78,27 @@ describe('api-auth', () => {
   });
 
   describe('requireAuth', () => {
-    it('returns user when authenticated', () => {
+    it('returns user when authenticated', async () => {
       process.env.DATABASE_URL = 'postgres://localhost/test';
-      const result = requireAuth(makeRequest(ADMIN_HEADERS));
+      const result = await requireAuth(makeRequest(ADMIN_HEADERS));
       expect('user' in result).toBe(true);
       if ('user' in result) {
         expect(result.user.id).toBe('user-1');
       }
     });
 
-    it('returns 401 error when not authenticated', () => {
+    it('returns 401 error when not authenticated', async () => {
       process.env.DATABASE_URL = 'postgres://localhost/test';
-      const result = requireAuth(makeRequest());
+      const result = await requireAuth(makeRequest());
       expect('error' in result).toBe(true);
       if ('error' in result) {
         expect(result.error.status).toBe(401);
       }
     });
 
-    it('passes in demo mode (no DATABASE_URL)', () => {
+    it('passes in demo mode (no DATABASE_URL)', async () => {
       delete process.env.DATABASE_URL;
-      const result = requireAuth(makeRequest());
+      const result = await requireAuth(makeRequest());
       expect('user' in result).toBe(true);
       if ('user' in result) {
         expect(result.user.id).toBe('demo-user');
@@ -110,40 +111,40 @@ describe('api-auth', () => {
       process.env.DATABASE_URL = 'postgres://localhost/test';
     });
 
-    it('allows admin for admin-required route', () => {
-      const result = requireRole(makeRequest(ADMIN_HEADERS), 'admin');
+    it('allows admin for admin-required route', async () => {
+      const result = await requireRole(makeRequest(ADMIN_HEADERS), 'admin');
       expect('user' in result).toBe(true);
     });
 
-    it('allows owner for admin-required route', () => {
-      const result = requireRole(makeRequest(OWNER_HEADERS), 'admin');
+    it('allows owner for admin-required route', async () => {
+      const result = await requireRole(makeRequest(OWNER_HEADERS), 'admin');
       expect('user' in result).toBe(true);
     });
 
-    it('returns 403 for agent on admin-required route', () => {
-      const result = requireRole(makeRequest(AGENT_HEADERS), 'admin');
+    it('returns 403 for agent on admin-required route', async () => {
+      const result = await requireRole(makeRequest(AGENT_HEADERS), 'admin');
       expect('error' in result).toBe(true);
       if ('error' in result) {
         expect(result.error.status).toBe(403);
       }
     });
 
-    it('allows agent for agent-required route', () => {
-      const result = requireRole(makeRequest(AGENT_HEADERS), 'agent');
+    it('allows agent for agent-required route', async () => {
+      const result = await requireRole(makeRequest(AGENT_HEADERS), 'agent');
       expect('user' in result).toBe(true);
     });
 
-    it('returns 401 when not authenticated', () => {
-      const result = requireRole(makeRequest(), 'admin');
+    it('returns 401 when not authenticated', async () => {
+      const result = await requireRole(makeRequest(), 'admin');
       expect('error' in result).toBe(true);
       if ('error' in result) {
         expect(result.error.status).toBe(401);
       }
     });
 
-    it('passes in demo mode regardless of required role', () => {
+    it('passes in demo mode regardless of required role', async () => {
       delete process.env.DATABASE_URL;
-      const result = requireRole(makeRequest(), 'admin');
+      const result = await requireRole(makeRequest(), 'admin');
       expect('user' in result).toBe(true);
       if ('user' in result) {
         expect(result.user.role).toBe('admin');
