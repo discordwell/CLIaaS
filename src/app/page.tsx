@@ -147,7 +147,7 @@ function MarketingHome() {
             </Link>
             <Link
               href="/sign-up"
-              className="border-2 border-foreground bg-foreground px-4 py-2 font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
+              className="border-2 border-foreground bg-foreground px-4 py-2 font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
             >
               Get Started
             </Link>
@@ -408,7 +408,7 @@ function MarketingHome() {
             </ul>
             <Link
               href="/sign-up"
-              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
+              className="mt-8 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
             >
               Start Pro Hosted
             </Link>
@@ -435,7 +435,7 @@ function MarketingHome() {
             </ul>
             <a
               href="mailto:hello@cliaas.com"
-              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
+              className="mt-8 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
             >
               Let&apos;s Talk
             </a>
