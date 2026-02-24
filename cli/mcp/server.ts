@@ -10,6 +10,7 @@ import { registerRagTools } from './tools/rag.js';
 import { registerQueueTools } from './tools/queue.js';
 import { registerConfigTools } from './tools/config.js';
 import { registerActionTools } from './tools/actions.js';
+import { registerSyncTools } from './tools/sync.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -26,6 +27,7 @@ registerRagTools(server);
 registerQueueTools(server);
 registerConfigTools(server);
 registerActionTools(server);
+registerSyncTools(server);
 
 // Register resources and prompts
 registerResources(server);

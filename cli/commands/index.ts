@@ -30,6 +30,7 @@ import { registerRagCommands } from './rag.js';
 import { registerMcpCommands } from './mcp.js';
 import { registerVoiceCommands } from './voice.js';
 import { registerSandboxCommands } from './sandbox.js';
+import { registerSyncCommands } from './sync.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -63,4 +64,5 @@ export function registerCommands(program: Command): void {
   registerMcpCommands(program);
   registerVoiceCommands(program);
   registerSandboxCommands(program);
+  registerSyncCommands(program);
 }

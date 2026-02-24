@@ -127,7 +127,7 @@ describe('MCP Server', () => {
         expect(toolsResponse.result).toBeDefined();
 
         const tools = toolsResponse.result!.tools ?? [];
-        expect(tools.length).toBe(25);
+        expect(tools.length).toBe(27);
 
         const toolNames = tools.map((t: { name: string }) => t.name).sort();
         expect(toolNames).toEqual([
@@ -147,6 +147,8 @@ describe('MCP Server', () => {
           'sentiment_analyze',
           'sla_report',
           'summarize_queue',
+          'sync_status',
+          'sync_trigger',
           'ticket_create',
           'ticket_note',
           'ticket_reply',

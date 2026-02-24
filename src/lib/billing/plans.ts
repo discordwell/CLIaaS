@@ -16,6 +16,12 @@ export interface PlanDefinition {
 }
 
 export const PLANS: Record<string, PlanDefinition> = {
+  byoc: {
+    id: 'byoc',
+    name: 'BYOC',
+    price: 0,
+    quotas: { ticketsPerMonth: Infinity, aiCallsPerMonth: Infinity, apiRequestsPerMonth: Infinity },
+  },
   founder: {
     id: 'founder',
     name: 'Founder',

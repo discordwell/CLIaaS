@@ -467,6 +467,69 @@ See `.env.example` for full reference. Key categories:
 
 ---
 
+## Product Vision & Tiering
+
+CLIaaS is an AI-native helpdesk platform. The core value proposition: we make it as easy as possible for AI agents (Claude Code, etc.) to read, triage, and act on support tickets — without locking customers into proprietary AI features or workflows. Customers bring their own AI, their own processes, their own infrastructure if they want. We provide the rails.
+
+### Three Tiers
+
+**Tier 1 — BYOC (Bring Your Own Computer) — Free**
+- Open source repo, clone and run an install wizard
+- Wizard lives in a `WIZARD/` folder: custom `claude.md` + `agents.md` that walks the user through setup, then stays out of the way
+- Sets up local Postgres, syncs from existing helpdesk via connectors
+- MCP server runs locally against local DB
+- Minimal/functional GUI — ticket list, detail view, basic dashboard. No premium features.
+- Customer owns everything; if CLIaaS disappears, nothing breaks
+- Target: technical teams, self-hosters, tinkerers, anyone who wants full control
+
+**Tier 2 — Hosted — Paid**
+- Data lives on CLIaaS infrastructure
+- Full GUI with all premium features (analytics, AI dashboard, advanced automation, etc.)
+- MCP connects to CLIaaS API (remote)
+- We manage infra, backups, scaling
+- Target: teams who want it to Just Work
+
+**Tier 3 — Hybrid — Paid**
+- Hosted DB (source of truth) + local DB that syncs down
+- Locally-created data (e.g. manual ticket entry) requires explicit "push upstream" action — not silent merge, clear user action with conflict warnings
+- If CLIaaS goes down, local copy keeps working
+- Full GUI + premium features
+- Target: enterprises, teams that need both convenience and resilience
+
+### Key Architectural Implications
+
+1. **MCP server is tier-agnostic**: Same 18 tools, same interface, different backends. A customer can start BYOC, upgrade to hosted, and their AI workflows don't change.
+2. **Connectors are ongoing sync, not one-time import**: In BYOC/hybrid mode, connectors maintain continuous sync with source helpdesks. Different reliability bar than one-shot migration.
+3. **Data layer must be backend-abstract**: The MCP server and business logic should talk to a DataProvider interface, not directly to Postgres or JSONL. Backends: local-postgres, remote-api, jsonl-file, hybrid-sync.
+4. **GUI feature gating**: Free tier gets functional-but-minimal UI. Paid tier unlocks premium pages/features. Gating at the route/component level.
+5. **Wizard-driven onboarding**: BYOC setup is a guided process via claude.md/agents.md in a WIZARD/ folder. AI-assisted infrastructure provisioning.
+6. **Sync layer for hybrid**: Hosted→local sync with conflict detection. Local→hosted requires explicit push. Hosted is always source of truth unless customer explicitly overrides.
+
+### GUI Feature Gating (Phase 4)
+
+Feature gating controls which GUI pages are available based on the tenant's plan tier. Implementation:
+
+- **Feature matrix** (`src/lib/features/gates.ts`): Defines 10 gateable features and which of 6 tier levels unlock each. BYOC and Enterprise unlock everything.
+- **Tier resolution** (`src/lib/features/index.ts`): `getTierForTenant()` reads the tenant's plan from DB; falls back to `byoc` when no DB is available (self-hosted mode gets full access).
+- **FeatureGate component** (`src/components/FeatureGate.tsx`): Async server component that wraps premium page content. Renders children if feature is enabled, otherwise shows an upgrade prompt card linking to `/billing`.
+- **Gated pages**: Analytics, AI Dashboard, Sandbox, SLA Management, Channels. Each page has a `_content.tsx` client component and a `page.tsx` server wrapper that applies the gate.
+- **Ungated pages**: Dashboard, Tickets, KB, Customers, Settings (always available).
+- **BYOC plan** added to `src/lib/billing/plans.ts` with unlimited quotas and $0 price.
+
+Feature matrix summary:
+| Feature | free | founder | starter | pro | enterprise | byoc |
+|---------|------|---------|---------|-----|------------|------|
+| analytics | - | Y | Y | Y | Y | Y |
+| ai_dashboard | - | Y | - | Y | Y | Y |
+| sla_management | - | Y | Y | Y | Y | Y |
+| voice_channels | - | - | Y | Y | Y | Y |
+| social_channels | - | - | Y | Y | Y | Y |
+| advanced_automation | - | - | - | Y | Y | Y |
+| compliance | - | - | - | Y | Y | Y |
+| sandbox | - | - | - | Y | Y | Y |
+| custom_branding | - | - | - | Y | Y | Y |
+| sso | - | - | - | - | Y | Y |
+
 ## Key Design Decisions
 
 1. **JSONL-first persistence** — Zero-dependency demo mode. No database needed to try CLIaaS.

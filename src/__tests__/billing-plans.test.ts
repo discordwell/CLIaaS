@@ -2,16 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { PLANS, FOUNDER_DEADLINE, isFounderEligible, getPlanQuotas } from '@/lib/billing/plans';
 
 describe('Billing plans', () => {
-  it('defines all five plan tiers', () => {
+  it('defines all six plan tiers', () => {
     expect(Object.keys(PLANS)).toEqual(
-      expect.arrayContaining(['founder', 'free', 'starter', 'pro', 'enterprise']),
+      expect.arrayContaining(['byoc', 'founder', 'free', 'starter', 'pro', 'enterprise']),
     );
-    expect(Object.keys(PLANS)).toHaveLength(5);
+    expect(Object.keys(PLANS)).toHaveLength(6);
   });
 
-  it('founder and free plans are $0', () => {
+  it('byoc, founder, and free plans are $0', () => {
+    expect(PLANS.byoc.price).toBe(0);
     expect(PLANS.founder.price).toBe(0);
     expect(PLANS.free.price).toBe(0);
+  });
+
+  it('byoc has unlimited quotas', () => {
+    expect(PLANS.byoc.quotas.ticketsPerMonth).toBe(Infinity);
+    expect(PLANS.byoc.quotas.aiCallsPerMonth).toBe(Infinity);
+    expect(PLANS.byoc.quotas.apiRequestsPerMonth).toBe(Infinity);
   });
 
   it('starter is $29/mo and pro is $99/mo', () => {
