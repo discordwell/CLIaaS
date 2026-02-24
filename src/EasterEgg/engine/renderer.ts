@@ -220,6 +220,71 @@ export class Renderer {
     this.renderCursor();
   }
 
+  // ─── Layer Isolation (comparison mode) ───────────────────
+
+  /** Render a single layer in isolation and return its data URL.
+   *  Used by the comparison test harness to capture per-layer screenshots. */
+  renderLayer(
+    layer: 'terrain' | 'units' | 'buildings' | 'overlays' | 'full-no-ui',
+    camera: Camera,
+    map: GameMap,
+    entities: Entity[],
+    structures: MapStructure[],
+    assets: AssetManager,
+    selectedIds: Set<number>,
+    effects: Effect[],
+    tick: number,
+  ): string | null {
+    const ctx = this.ctx;
+
+    // Cache palette + tileset if not yet loaded
+    if (!this.pal) this.pal = assets.getPalette();
+    if (!this.tilesetReady && assets.hasTileset()) {
+      this.tilesetImage = assets.getTilesetImage();
+      this.tilesetMeta = assets.getTilesetMeta();
+      this.tilesetReady = true;
+    }
+
+    ctx.clearRect(0, 0, this.width, this.height);
+
+    switch (layer) {
+      case 'terrain':
+        this.renderTerrain(camera, map, tick);
+        break;
+      case 'units':
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, this.width, this.height);
+        this.renderEntities(camera, map, entities, assets, selectedIds, tick);
+        break;
+      case 'buildings':
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, this.width, this.height);
+        this.renderStructures(camera, map, structures, assets, tick);
+        break;
+      case 'overlays':
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, this.width, this.height);
+        this.renderOverlays(camera, map, tick);
+        break;
+      case 'full-no-ui':
+        this.renderTerrain(camera, map, tick);
+        this.renderDecals(camera, map);
+        this.renderOverlays(camera, map, tick);
+        this.renderStructures(camera, map, structures, assets, tick);
+        this.renderCrates(camera, map, tick);
+        this.renderCorpses(camera, map, assets);
+        this.renderEntities(camera, map, entities, assets, selectedIds, tick);
+        this.renderEffects(camera, effects, assets);
+        break;
+    }
+
+    try {
+      return ctx.canvas.toDataURL('image/png');
+    } catch {
+      return null;
+    }
+  }
+
   // ─── Custom Cursor ────────────────────────────────────────
 
   private renderCursor(): void {

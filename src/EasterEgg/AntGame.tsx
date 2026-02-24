@@ -224,6 +224,57 @@ export default function AntGame({ onExit }: AntGameProps) {
       };
     }
 
+    // Comparison mode: start paused, fog off, expose globals for Playwright
+    if (anttest === 'compare') {
+      setTestMode(true);
+      setScreen('playing');
+
+      const canvas = canvasRef.current;
+      const game = new Game(canvas);
+      gameRef.current = game;
+      game.comparisonMode = true;
+      game.fogDisabled = true;
+
+      game.onLoadProgress = (loaded, total) => {
+        setLoadProgress(Math.round((loaded / total) * 100));
+      };
+      game.onStateChange = (s) => setStatus(s);
+
+      const scenarioId = params.get('scenario') || 'SCA01EA';
+      const difficulty = (params.get('difficulty') || 'normal') as Difficulty;
+
+      game.start(scenarioId, difficulty).then(() => {
+        // Immediately pause and disable fog
+        game.pause();
+        game.disableFog();
+        game.step(1); // render one frame so canvas has content
+
+        // Expose Playwright-accessible globals
+        const w = window as unknown as Record<string, unknown>;
+        w.__tsGame = game;
+        w.__tsCompareReady = true;
+
+        w.__tsCaptureLayer = (layer: string) => {
+          return game.renderer.renderLayer(
+            layer as 'terrain' | 'units' | 'buildings' | 'overlays' | 'full-no-ui',
+            game.camera, game.map,
+            game.entities, game.structures, game.assets,
+            game.selectedIds, game.effects, game.tick,
+          );
+        };
+
+        w.__tsPause = () => game.pause();
+        w.__tsResume = () => game.resume();
+        w.__tsStep = (n: number) => game.step(n);
+        w.__tsSetCamera = (wx: number, wy: number) => game.camera.centerOn(wx, wy);
+      });
+
+      return () => {
+        game.stop();
+        gameRef.current = null;
+      };
+    }
+
     // Regular test mode
     setTestMode(true);
     setScreen('playing');

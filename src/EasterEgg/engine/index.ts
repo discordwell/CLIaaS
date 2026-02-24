@@ -193,6 +193,11 @@ export class Game {
   private baseRebuildQueue: Array<{ type: string; cell: number; house: House }> = [];
   private baseRebuildCooldown = 0;
 
+  // Comparison mode — activated via ?anttest=compare
+  comparisonMode = false;
+  /** When true, fog of war is disabled (all cells visible) */
+  fogDisabled = false;
+
   // Callbacks
   onStateChange?: (state: GameState) => void;
   onLoadProgress?: (loaded: number, total: number) => void;
@@ -344,6 +349,43 @@ export class Game {
       this.lastTime = performance.now();
       this.scheduleNext();
     }
+  }
+
+  /** Pause for comparison mode (does not toggle — sets paused state) */
+  pause(): void {
+    if (this.state === 'playing') {
+      this.state = 'paused';
+      this.audio.music.pause();
+      this.onStateChange?.('paused');
+    }
+  }
+
+  /** Resume from comparison-mode pause */
+  resume(): void {
+    if (this.state === 'paused') {
+      this.state = 'playing';
+      this.audio.music.resume();
+      this.onStateChange?.('playing');
+      this.lastTime = performance.now();
+      this.scheduleNext();
+    }
+  }
+
+  /** Advance N ticks (for stepped comparison) then re-pause */
+  step(n = 1): void {
+    const wasPaused = this.state === 'paused';
+    if (wasPaused) this.state = 'playing';
+    for (let i = 0; i < n && this.state === 'playing'; i++) {
+      this.update();
+    }
+    this.render();
+    if (wasPaused) this.state = 'paused';
+  }
+
+  /** Disable fog of war (reveal entire map) */
+  disableFog(): void {
+    this.fogDisabled = true;
+    this.map.revealAll();
   }
 
   /** Main game loop — uses setTimeout fallback when RAF is throttled */
@@ -744,6 +786,10 @@ export class Game {
 
   /** Update fog of war based on player unit and structure positions */
   private updateFogOfWar(): void {
+    if (this.fogDisabled) {
+      this.map.revealAll();
+      return;
+    }
     const units: Array<{x: number; y: number; sight: number}> = [];
     // Player units
     for (const e of this.entities) {

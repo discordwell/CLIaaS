@@ -79,6 +79,20 @@ export class ScreenshotCapture {
     return this.screenshots.size;
   }
 
+  /** Immediate capture with custom key — callable from Playwright via window global */
+  captureNow(key: string): Screenshot | null {
+    if (!this.canvas) return null;
+    try {
+      const dataUrl = this.canvas.toDataURL('image/png');
+      if (this.screenshots.size >= MAX_SCREENSHOTS) this.evict();
+      const ss: Screenshot = { key, dataUrl, tick: 0, trigger: 'state', detail: key };
+      this.screenshots.set(key, ss);
+      return ss;
+    } catch {
+      return null;
+    }
+  }
+
   /** Clear all screenshots for a new mission */
   reset(): void {
     this.screenshots.clear();

@@ -1,0 +1,39 @@
+{
+  "differences": [
+    {
+      "id": "TERR-001",
+      "category": "terrain",
+      "description": "TS uses procedural gradient fills; WASM uses actual RA tileset tiles",
+      "status": "open",
+      "notes": ""
+    },
+    {
+      "id": "TERR-002",
+      "category": "terrain",
+      "description": "TS water uses palette-indexed dithered animation; original uses SDL frame buffer",
+      "status": "open",
+      "notes": ""
+    },
+    {
+      "id": "ORE-001",
+      "category": "overlays",
+      "description": "TS ore is procedural gold/amber pixels; original uses overlay tile sprites",
+      "status": "open",
+      "notes": ""
+    },
+    {
+      "id": "UNIT-001",
+      "category": "units",
+      "description": "TS house-color tint is semi-transparent overlay; original uses palette remapping",
+      "status": "open",
+      "notes": ""
+    },
+    {
+      "id": "BLDG-001",
+      "category": "buildings",
+      "description": "TS animates all building frames; original only animates specific buildings",
+      "status": "open",
+      "notes": ""
+    }
+  ]
+}

@@ -28,6 +28,11 @@
   window.__wasmRenderCount = 0;      // How many putImageData calls
   window.__wasmRenderSamples = [];   // Sample pixel data from renders
 
+  // === Comparison mode flags ===
+  window.__wasmPaused = false;        // When true, skip emscripten_set_main_loop callbacks
+  window.__captureOnNextRender = false; // When true, capture at putImageData time
+  window.__captureOnRenderKey = '';     // Key to tag the captured screenshot
+
   var MAX_SCREENSHOTS = 100;
   var PERIODIC_INTERVAL = 90;
 
@@ -40,6 +45,24 @@
 
   window.__wasmRequestCapture = function(key) {
     window.__wasmCaptureQueue.push(key);
+  };
+
+  /** Capture on next putImageData call (reliable — captures actual rendered frame) */
+  window.__wasmCaptureOnRender = function(key) {
+    window.__captureOnRenderKey = key || '';
+    window.__captureOnNextRender = true;
+  };
+
+  /** Pause/unpause the game loop (skip emscripten_set_main_loop callbacks) */
+  window.__wasmSetPaused = function(paused) {
+    window.__wasmPaused = !!paused;
+    wlog('Pause set to: ' + window.__wasmPaused);
+  };
+
+  /** Get the last screenshot captured by capture-on-render */
+  window.__wasmGetLastScreenshot = function() {
+    if (window.__wasmScreenshots.length === 0) return null;
+    return window.__wasmScreenshots[window.__wasmScreenshots.length - 1];
   };
 
   // Capture uncaught errors
@@ -115,6 +138,36 @@
              ' nonBlack=' + nonBlack + '/' + totalSampled);
       }
     }
+    // === Capture-on-render: grab frame at putImageData time ===
+    // This captures the actual rendered frame before the canvas clears,
+    // solving the blank-screenshot problem where rAF captures after clear.
+    if (window.__captureOnNextRender && imageData.width >= 300) {
+      window.__captureOnNextRender = false;
+      try {
+        // Copy ImageData to an offscreen canvas and grab the data URL
+        var offCanvas = document.createElement('canvas');
+        offCanvas.width = imageData.width;
+        offCanvas.height = imageData.height;
+        var offCtx = offCanvas.getContext('2d');
+        offCtx.putImageData(imageData, 0, 0);
+        var dataUrl = offCanvas.toDataURL('image/png');
+        var key = window.__captureOnRenderKey || ('render-' + window.__wasmRenderCount);
+        if (window.__wasmScreenshots.length >= MAX_SCREENSHOTS) {
+          var evictIdx = window.__wasmScreenshots.findIndex(function(s) {
+            return s.key.startsWith('periodic-');
+          });
+          if (evictIdx >= 0) window.__wasmScreenshots.splice(evictIdx, 1);
+          else window.__wasmScreenshots.shift();
+        }
+        window.__wasmScreenshots.push({
+          key: key, dataUrl: dataUrl, timestamp: Date.now(), frame: window.__wasmFrameCount
+        });
+        wlog('Capture-on-render: key=' + key + ' size=' + dataUrl.length);
+      } catch (e) {
+        wlog('Capture-on-render error: ' + e.message);
+      }
+    }
+
     return origPutImageData.call(this, imageData, dx, dy);
   };
 
@@ -425,6 +478,26 @@ window.addEventListener('load', function() {
 var Module = {
   preRun: [function() {
     var wlog = window.__wlog || function(m) { console.log('preRun: ' + m); };
+
+    // === Pause hook: intercept _emscripten_set_main_loop_arg to support pausing ===
+    // When __wasmPaused is true, the main loop callback is skipped (game freezes).
+    var origSetMainLoop = null;
+    if (typeof _emscripten_set_main_loop_arg === 'function') {
+      origSetMainLoop = _emscripten_set_main_loop_arg;
+      _emscripten_set_main_loop_arg = function(func, arg, fps, simulateInfiniteLoop) {
+        wlog('Intercepted _emscripten_set_main_loop_arg (fps=' + fps + ')');
+        // Wrap the callback to check pause flag
+        var origFunc = func;
+        var wrappedFunc = function() {
+          if (window.__wasmPaused) return; // skip frame when paused
+          return origFunc.apply(this, arguments);
+        };
+        return origSetMainLoop(wrappedFunc, arg, fps, simulateInfiniteLoop);
+      };
+      wlog('preRun: hooked _emscripten_set_main_loop_arg for pause support');
+    } else {
+      wlog('preRun: _emscripten_set_main_loop_arg not yet defined (will use rAF hook)');
+    }
 
     // Fix Emscripten event target resolution: specialHTMLTargets[0] is initialized
     // to 0 (falsy) by the runtime, so emscripten_set_*_callback(0, ...) calls

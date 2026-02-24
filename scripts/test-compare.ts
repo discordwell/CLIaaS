@@ -1,12 +1,10 @@
 /**
  * Playwright comparison test: TS engine vs WASM original.
  *
- * Captures screenshots from both the TypeScript Red Alert engine
- * and the original C++ WASM build for visual comparison.
- *
- * The WASM test uses a self-capture system embedded in original.html
- * that grabs frames from inside requestAnimationFrame, bypassing
- * Playwright's screenshot mechanism which hangs on WebGL canvases.
+ * Two test modes:
+ * 1. Static Map Comparison — fog off, paused, initial state. Compares terrain,
+ *    units, buildings, ore at the same map regions.
+ * 2. Legacy QA/WASM tests (preserved from original).
  *
  * Run: npx playwright test scripts/test-compare.ts
  */
@@ -19,17 +17,19 @@ const BASE_URL = 'http://localhost:3001';
 const REPORT_DIR = path.join(process.cwd(), 'test-results', 'comparison');
 const TS_DIR = path.join(REPORT_DIR, 'ts-engine');
 const WASM_DIR = path.join(REPORT_DIR, 'wasm-original');
+const STATIC_DIR = path.join(REPORT_DIR, 'static');
 
 function ensureDirs() {
   fs.mkdirSync(TS_DIR, { recursive: true });
   fs.mkdirSync(WASM_DIR, { recursive: true });
+  fs.mkdirSync(STATIC_DIR, { recursive: true });
 }
 
 async function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Save canvas content as PNG via toDataURL (works for WebGL with preserveDrawingBuffer) */
+/** Save canvas content as PNG via toDataURL */
 async function saveCanvas(page: Page, filePath: string): Promise<boolean> {
   try {
     const dataUrl = await page.evaluate(() => {
@@ -60,6 +60,280 @@ function saveDataUrl(dataUrl: string, filePath: string): boolean {
   return true;
 }
 
+/** Try an evaluate with a short timeout */
+async function tryEval<T>(page: Page, fn: () => T, timeoutMs = 5000): Promise<T | null> {
+  try {
+    return await Promise.race([
+      page.evaluate(fn),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+/** Wait until page.evaluate works (game main thread not blocked) */
+async function waitForResponsive(page: Page, maxWaitMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const result = await tryEval(page, () => {
+      return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
+    });
+    if (result !== null) return true;
+    await wait(3000);
+  }
+  return false;
+}
+
+// ────────────────────────────────────────────────────────────────
+
+/** Comparison points for SCA01EA — map regions to capture */
+const COMPARISON_POINTS = [
+  { name: 'player-base',  desc: 'Player start / WP98 area',  wx: 65 * 24 + 12, wy: 65 * 24 + 12 },
+  { name: 'ore-field',    desc: 'Ore field NW of base',       wx: 55 * 24 + 12, wy: 55 * 24 + 12 },
+  { name: 'water-shore',  desc: 'Water/shore SE',             wx: 75 * 24 + 12, wy: 75 * 24 + 12 },
+  { name: 'ant-spawn',    desc: 'Ant spawn area NE',          wx: 80 * 24 + 12, wy: 50 * 24 + 12 },
+];
+
+const TS_LAYERS = ['terrain', 'units', 'buildings', 'overlays', 'full-no-ui'] as const;
+
+// ────────────────────────────────────────────────────────────────
+
+test.describe('Static Map Comparison', () => {
+
+  test('TS Engine: static initial state', async ({ page }) => {
+    ensureDirs();
+
+    const logs: string[] = [];
+    page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
+
+    // Start TS engine in comparison mode: paused, fog off, SCA01EA
+    await page.goto(`${BASE_URL}?anttest=compare&scenario=SCA01EA`, { waitUntil: 'load' });
+    await page.waitForSelector('canvas', { timeout: 30000 });
+    console.log('TS Static: Canvas found, waiting for compare mode...');
+
+    // Wait for comparison mode to be ready
+    try {
+      await page.waitForFunction(
+        () => (window as unknown as { __tsCompareReady?: boolean }).__tsCompareReady === true,
+        { timeout: 120000, polling: 1000 },
+      );
+      console.log('TS Static: Comparison mode ready');
+    } catch {
+      console.log('TS Static: Comparison mode timeout — capturing whatever state we have');
+      await saveCanvas(page, path.join(STATIC_DIR, 'ts-timeout.png'));
+      fs.writeFileSync(path.join(STATIC_DIR, 'ts-console.log'), logs.join('\n'));
+      return;
+    }
+
+    let saved = 0;
+
+    // For each comparison point, set camera and capture all layers
+    for (const point of COMPARISON_POINTS) {
+      console.log(`TS Static: Capturing ${point.name} (${point.desc})...`);
+
+      // Set camera position
+      await page.evaluate(([wx, wy]: [number, number]) => {
+        (window as unknown as { __tsSetCamera: (x: number, y: number) => void }).__tsSetCamera(wx, wy);
+        // Re-render after camera move
+        (window as unknown as { __tsGame: { step: (n: number) => void } }).__tsGame.step(0);
+      }, [point.wx, point.wy] as [number, number]);
+
+      await wait(100); // let render settle
+
+      // Capture each layer
+      for (const layer of TS_LAYERS) {
+        const dataUrl = await page.evaluate((l: string) => {
+          return (window as unknown as { __tsCaptureLayer: (l: string) => string | null }).__tsCaptureLayer(l);
+        }, layer);
+
+        if (dataUrl) {
+          const filename = `ts-${point.name}-${layer}.png`;
+          saveDataUrl(dataUrl, path.join(STATIC_DIR, filename));
+          saved++;
+        }
+      }
+    }
+
+    console.log(`TS Static: ${saved} screenshots saved`);
+    fs.writeFileSync(path.join(STATIC_DIR, 'ts-console.log'), logs.join('\n'));
+  });
+
+  test('WASM Original: static initial state', async ({ page }) => {
+    ensureDirs();
+
+    const logs: string[] = [];
+    page.on('console', msg => {
+      const text = msg.text();
+      logs.push(`[${msg.type()}] ${text}`);
+      if (text.includes('[AUTOPLAY]')) console.log(`WASM Static: ${text}`);
+    });
+    page.on('dialog', async dialog => {
+      console.log(`WASM Static: Dialog: ${dialog.type()} - ${dialog.message()}`);
+      await dialog.accept();
+    });
+
+    // Navigate with autoplay — navigate to gameplay, then pause + capture
+    await page.goto(`${BASE_URL}/ra/original.html?autoplay=ants`, { waitUntil: 'load' });
+    await page.waitForSelector('canvas', { timeout: 30000 });
+    console.log('WASM Static: Canvas found, waiting for WASM load...');
+
+    // Wait for WASM to finish loading
+    try {
+      await page.waitForFunction(
+        () => {
+          const status = document.getElementById('status');
+          return status && (status.style.display === 'none' || status.innerHTML === 'All downloads complete.');
+        },
+        { timeout: 120000, polling: 2000 },
+      );
+      console.log('WASM Static: Loaded');
+    } catch {
+      console.log('WASM Static: Load timeout, continuing anyway');
+    }
+
+    // Wait for content + input readiness
+    console.log('WASM Static: Waiting for content...');
+    await wait(5000);
+
+    const responsive = await waitForResponsive(page, 15000);
+    if (!responsive) {
+      console.log('WASM Static: Not responsive — aborting');
+      fs.writeFileSync(path.join(STATIC_DIR, 'wasm-console.log'), logs.join('\n'));
+      return;
+    }
+
+    // Wait for input injection to be ready
+    let inputReady = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const ready = await tryEval(page, () => {
+        return (window as unknown as { __inputReady: () => boolean }).__inputReady();
+      });
+      if (ready) { inputReady = true; break; }
+      await wait(1000);
+    }
+
+    if (!inputReady) {
+      console.log('WASM Static: Input exports not available — aborting');
+      fs.writeFileSync(path.join(STATIC_DIR, 'wasm-console.log'), logs.join('\n'));
+      return;
+    }
+
+    // Enable autoplay mode
+    await tryEval(page, () => {
+      return (window as unknown as { __setAutoplay: (m: boolean) => boolean }).__setAutoplay(true);
+    });
+
+    // Navigate to gameplay via Enter injection
+    const hashBefore = await tryEval(page, () => {
+      return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
+    });
+
+    await tryEval(page, () => {
+      return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
+    });
+
+    // Wait for gameplay
+    console.log('WASM Static: Waiting for gameplay...');
+    const loadStart = Date.now();
+    let gameReady = false;
+    let enterRetries = 0;
+
+    while (Date.now() - loadStart < 300000) {
+      const renders = await tryEval(page, () => {
+        return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
+      }, 5000);
+
+      const elapsed = Math.round((Date.now() - loadStart) / 1000);
+      if (renders !== null) {
+        const hashNow = await tryEval(page, () => {
+          return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
+        });
+        if (hashNow !== null && hashNow !== hashBefore) {
+          console.log(`WASM Static: Game reached gameplay after ${elapsed}s`);
+          gameReady = true;
+          break;
+        }
+        if (elapsed > 5 && enterRetries < 10) {
+          enterRetries++;
+          await tryEval(page, () => {
+            return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
+          });
+          await wait(2000);
+          continue;
+        }
+      }
+      if (elapsed % 10 === 0) console.log(`WASM Static: Loading... ${elapsed}s`);
+      await wait(3000);
+    }
+
+    if (!gameReady) {
+      console.log('WASM Static: Failed to reach gameplay');
+      await saveCanvas(page, path.join(STATIC_DIR, 'wasm-timeout.png'));
+      fs.writeFileSync(path.join(STATIC_DIR, 'wasm-console.log'), logs.join('\n'));
+      return;
+    }
+
+    // Pause the game
+    await tryEval(page, () => {
+      (window as unknown as { __wasmSetPaused: (p: boolean) => void }).__wasmSetPaused(true);
+    });
+    await wait(500);
+
+    // Capture initial gameplay frame using on-demand capture-on-render
+    let saved = 0;
+
+    for (const point of COMPARISON_POINTS) {
+      console.log(`WASM Static: Capturing ${point.name}...`);
+
+      // Unpause briefly for one render, then re-pause
+      await page.evaluate((key: string) => {
+        const w = window as unknown as {
+          __wasmCaptureOnRender: (k: string) => void;
+          __wasmPaused: boolean;
+        };
+        w.__wasmCaptureOnRender(key);
+        // Briefly unpause to trigger one render cycle
+        w.__wasmPaused = false;
+      }, `wasm-${point.name}-full`);
+
+      // Wait for the capture to complete
+      await wait(500);
+
+      // Re-pause
+      await tryEval(page, () => {
+        (window as unknown as { __wasmPaused: boolean }).__wasmPaused = true;
+      });
+
+      // Extract the captured screenshot
+      const screenshot = await tryEval(page, () => {
+        const w = window as unknown as {
+          __wasmGetLastScreenshot: () => { key: string; dataUrl: string } | null;
+        };
+        return w.__wasmGetLastScreenshot();
+      }, 10000);
+
+      if (screenshot?.dataUrl) {
+        const filename = `wasm-${point.name}-full.png`;
+        if (saveDataUrl(screenshot.dataUrl, path.join(STATIC_DIR, filename))) {
+          saved++;
+          const size = fs.statSync(path.join(STATIC_DIR, filename)).size;
+          console.log(`WASM Static: Saved ${filename} (${size} bytes)`);
+        }
+      }
+    }
+
+    // Also capture one full-canvas screenshot for reference
+    await saveCanvas(page, path.join(STATIC_DIR, 'wasm-full-canvas.png'));
+    saved++;
+
+    console.log(`WASM Static: ${saved} screenshots saved`);
+    fs.writeFileSync(path.join(STATIC_DIR, 'wasm-console.log'), logs.join('\n'));
+  });
+});
+
+// ────────────────────────────────────────────────────────────────
+
 test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
 
   test('TS Engine: QA pipeline screenshots', async ({ page }) => {
@@ -86,7 +360,6 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
 
     await saveCanvas(page, path.join(TS_DIR, '02-final.png'));
 
-    // Extract report metadata (without the massive screenshot data URLs)
     const meta = await page.evaluate(() => {
       const r = (window as unknown as { __qaReport?: {
         summary: { bySeverity: { critical: number; warning: number; info: number } };
@@ -102,7 +375,6 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
     if (meta) {
       console.log(`TS Engine: ${meta.summary.bySeverity.critical} critical, ${meta.summary.bySeverity.warning} warnings, ${meta.summary.bySeverity.info} info`);
 
-      // Extract screenshots in batches of 10 to avoid massive transfers
       const BATCH = 10;
       const total = Math.min(meta.screenshotCount, 30);
       let saved = 0;
@@ -138,26 +410,17 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
     page.on('console', msg => {
       const text = msg.text();
       logs.push(`[${msg.type()}] ${text}`);
-      // Forward AUTOPLAY debug prints from C++ printf to test output
-      if (text.includes('[AUTOPLAY]')) {
-        console.log(`WASM: ${text}`);
-      }
+      if (text.includes('[AUTOPLAY]')) console.log(`WASM: ${text}`);
     });
     page.on('dialog', async dialog => {
       console.log(`WASM: Dialog: ${dialog.type()} - ${dialog.message()}`);
       await dialog.accept();
     });
 
-    // Navigate with ?autoplay=ants — original.html provides screen detection.
-    // Menu navigation uses Playwright CDP keyboard events (trusted).
-    // Dispatched (non-trusted) keyboard events don't work because ASYNCIFY
-    // prevents WASM calls during JS execution windows. Trusted CDP events
-    // are processed by Chrome's input pipeline at a lower level.
     await page.goto(`${BASE_URL}/ra/original.html?autoplay=ants`, { waitUntil: 'load' });
     await page.waitForSelector('canvas', { timeout: 30000 });
     console.log('WASM: Canvas found, waiting for WASM to load...');
 
-    // Wait for WASM to finish loading (gamedata.data is 43MB)
     try {
       await page.waitForFunction(
         () => {
@@ -171,149 +434,26 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
       console.log('WASM: Load detection timed out, continuing anyway');
     }
 
-    /** Try an evaluate with a short timeout, return null on failure */
-    async function tryEval<T>(fn: () => T, timeoutMs = 5000): Promise<T | null> {
-      try {
-        return await Promise.race([
-          page.evaluate(fn),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
-        ]);
-      } catch {
-        return null;
-      }
-    }
-
-    // Helper: wait until evaluate works (game is responsive)
-    async function waitForResponsive(maxWaitMs: number): Promise<boolean> {
-      const start = Date.now();
-      while (Date.now() - start < maxWaitMs) {
-        const result = await tryEval(() => {
-          return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
-        });
-        if (result !== null) return true;
-        await wait(3000);
-      }
-      return false;
-    }
-
-    /**
-     * Wait for the screen to stop changing (e.g. briefing text finished scrolling).
-     * Polls __getScreenHash() and considers the screen stable when the hash
-     * hasn't changed for `stableMs` milliseconds.
-     */
-    async function waitForScreenStability(stableMs = 3000, maxWaitMs = 30000): Promise<boolean> {
-      const start = Date.now();
-      let lastHash = await tryEval(() => {
-        return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
-      });
-      let stableSince = Date.now();
-
-      while (Date.now() - start < maxWaitMs) {
-        await wait(1000);
-        const hash = await tryEval(() => {
-          return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
-        });
-        if (hash === null) continue; // evaluate failed, game busy
-
-        if (hash !== lastHash) {
-          lastHash = hash;
-          stableSince = Date.now();
-        } else if (Date.now() - stableSince >= stableMs) {
-          console.log(`WASM: Screen stable for ${stableMs}ms`);
-          return true;
-        }
-      }
-      console.log(`WASM: Screen stability timeout after ${maxWaitMs}ms`);
-      return false;
-    }
-
-    /**
-     * Click at game coordinates via CDP mouse events.
-     *
-     * Emscripten's fillMouseEventData computes:
-     *   canvasX = clientX - rect.left (where internal getBCR returns {left:0})
-     * So canvasX = viewport clientX directly. Identity transform.
-     *
-     * Both move() and click() have timeouts because CDP calls to the renderer
-     * can block indefinitely when WASM monopolizes the JS thread.
-     */
-    async function clickGame(gx: number, gy: number, label: string): Promise<boolean> {
-      // Identity: game coords = viewport coords (rect.left=0, rect.top=0)
-      console.log(`WASM: Mouse click at (${gx}, ${gy}) — ${label}`);
-      try {
-        // Move with timeout — CDP can block if WASM is in a tight loop
-        const moved = await Promise.race([
-          page.mouse.move(gx, gy).then(() => true),
-          new Promise<boolean>(resolve => setTimeout(() => resolve(false), 10000)),
-        ]);
-        if (!moved) {
-          console.log(`WASM: mouse.move timed out — ${label}`);
-        }
-        await wait(100);
-        // Click with timeout
-        const clicked = await Promise.race([
-          page.mouse.click(gx, gy).then(() => true),
-          new Promise<boolean>(resolve => setTimeout(() => resolve(false), 10000)),
-        ]);
-        if (!clicked) {
-          console.log(`WASM: mouse.click timed out — ${label}`);
-        }
-        return moved || clicked; // at least one CDP event went through
-      } catch {
-        console.log(`WASM: Mouse click failed — ${label}`);
-        return false;
-      }
-    }
-
-    /**
-     * Check if the screen changed after an action by comparing hashes.
-     */
-    async function screenChanged(previousHash: string | null): Promise<boolean> {
-      const hash = await tryEval(() => {
-        return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
-      });
-      return hash !== null && hash !== previousHash;
-    }
-
-    // === Input injection via WASM exports ===
-    //
-    // The WASM binary now exports C functions (via EMSCRIPTEN_KEEPALIVE) that
-    // call Keyboard->Put() directly from C++. This bypasses all SDL event
-    // handling and Asyncify constraints. original.html wraps these as:
-    //   __injectKey(vkCode)                    → key press + release
-    //   __injectMouseClick(gameX, gameY, btn)  → mouse press + release
-    //   __injectMouseMove(gameX, gameY)        → cursor position update
-    //   __inputReady()                         → true when exports available
-    //
-    // VK codes: VK_RETURN=40, VK_ESCAPE=41, VK_SPACE=44,
-    //           VK_LBUTTON=1, VK_RBUTTON=2
-
-    // Wait for initial content
     console.log('WASM: Waiting for content...');
     await wait(5000);
 
-    const initiallyResponsive = await waitForResponsive(15000);
+    const initiallyResponsive = await waitForResponsive(page, 15000);
     if (!initiallyResponsive) {
       console.log('WASM: Game not responsive initially, skipping navigation');
     } else {
       console.log('WASM: Game responsive, waiting for input exports...');
 
-      // Wait for Module._inject_key to be available
       let inputReady = false;
       for (let attempt = 0; attempt < 30; attempt++) {
-        const ready = await tryEval(() => {
+        const ready = await tryEval(page, () => {
           return (window as unknown as { __inputReady: () => boolean }).__inputReady();
         });
-        if (ready) {
-          inputReady = true;
-          break;
-        }
+        if (ready) { inputReady = true; break; }
         await wait(1000);
       }
 
       if (!inputReady) {
         console.log('WASM: Input exports not available after 30s — falling back to CDP');
-        // Fallback: just send CDP Enter presses and hope for the best
         for (let i = 0; i < 5; i++) {
           try {
             await Promise.race([
@@ -322,114 +462,109 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
             ]);
           } catch { break; }
           await wait(3000);
-          await waitForResponsive(30000);
+          await waitForResponsive(page, 30000);
         }
       } else {
-        console.log('WASM: Input injection ready (WASM exports available)');
+        console.log('WASM: Input injection ready');
 
-        // --- Step 0: Enable autoplay mode ---
-        // This sets a C++ flag (g_autoplay_mode) that causes BGMessageBox
-        // to return immediately (as if OK was pressed). This bypasses the
-        // briefing dialog's modal input loop which doesn't yield to Asyncify.
-        const autoplaySet = await tryEval(() => {
+        const autoplaySet = await tryEval(page, () => {
           return (window as unknown as { __setAutoplay: (mode: boolean) => boolean }).__setAutoplay(true);
         });
         console.log(`WASM: Autoplay mode: ${autoplaySet}`);
 
-        // --- Step 1: Navigate past main menu ---
-        // Inject Enter to select "Start New Game" (default highlighted button).
-        // With autoplay mode, the entire chain auto-completes:
-        //   Main Menu → Enter → Fetch_Difficulty (auto: normal) →
-        //   WWMessageBox "Choose your side" (auto: Allies) →
-        //   Start_Scenario → BGMessageBox briefing (auto: OK) → Main game loop
         console.log('WASM: Injecting Enter to start new game...');
 
-        const hashBefore = await tryEval(() => {
+        const hashBefore = await tryEval(page, () => {
           return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
         });
 
-        const enterResult = await tryEval(() => {
+        await tryEval(page, () => {
           return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
         });
-        console.log(`WASM: Enter inject result: ${enterResult}`);
 
-        // --- Step 2: Wait for game to load into gameplay ---
-        // The autoplay bypasses all dialogs. Call_Back() now yields via
-        // emscripten_sleep(0) during heavy computation (scenario loading).
-        // We poll until the game is responsive AND screen changes.
-        console.log('WASM: Waiting up to 5min for game to reach gameplay...');
+        console.log('WASM: Waiting up to 5min for gameplay...');
         const loadingStart = Date.now();
         let gameReady = false;
         let lastLog = 0;
         let enterRetries = 0;
         while (Date.now() - loadingStart < 300000) {
-          const result = await tryEval(() => {
+          const result = await tryEval(page, () => {
             return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
           }, 5000);
 
           const elapsed = Math.round((Date.now() - loadingStart) / 1000);
           if (result !== null) {
-            // Game is responsive — check if screen changed
-            const hashNow = await tryEval(() => {
+            const hashNow = await tryEval(page, () => {
               return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
             });
-
             if (hashNow !== null && hashNow !== hashBefore) {
-              console.log(`WASM: Screen changed after ${elapsed}s — game progressed! (renders=${result})`);
+              console.log(`WASM: Screen changed after ${elapsed}s — gameplay!`);
               gameReady = true;
               break;
             }
-
-            // Responsive but screen unchanged — may need more Enter presses
-            // (e.g. if the first Enter wasn't consumed yet, or a new dialog appeared)
             if (elapsed > 5 && enterRetries < 10) {
               enterRetries++;
-              console.log(`WASM: Responsive but unchanged at ${elapsed}s — injecting Enter #${enterRetries}...`);
-              await tryEval(() => {
+              console.log(`WASM: Injecting Enter #${enterRetries}...`);
+              await tryEval(page, () => {
                 return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
               });
               await wait(2000);
               continue;
             }
           }
-
           if (elapsed - lastLog >= 10) {
-            console.log(`WASM: Loading... ${elapsed}s elapsed (responsive=${result !== null})`);
+            console.log(`WASM: Loading... ${elapsed}s`);
             lastLog = elapsed;
           }
           await wait(3000);
         }
 
         if (gameReady) {
+          // Use on-demand capture for reliable screenshots
+          await tryEval(page, () => {
+            (window as unknown as { __wasmCaptureOnRender: (k: string) => void }).__wasmCaptureOnRender('gameplay-initial');
+          });
+          await wait(500);
           await saveCanvas(page, path.join(WASM_DIR, 'gameplay.png'));
           console.log('WASM: Game reached gameplay!');
         } else {
           await saveCanvas(page, path.join(WASM_DIR, 'timeout-state.png'));
-          console.log('WASM: Game did not reach gameplay within timeout');
+          console.log('WASM: Game did not reach gameplay');
         }
       }
 
-      // Check input system diagnostics
-      const diag = await tryEval(() => {
+      const diag = await tryEval(page, () => {
         return (window as unknown as { __inputDiag: () => Record<string, unknown> }).__inputDiag();
       });
       console.log(`WASM: Input system: ${JSON.stringify(diag)}`);
 
-      // Wait for scenario to finish loading
       console.log('WASM: Waiting 20s for scenario loading...');
       await wait(20000);
-      await waitForResponsive(60000);
+      await waitForResponsive(page, 60000);
+
+      // Use on-demand capture
+      await tryEval(page, () => {
+        (window as unknown as { __wasmCaptureOnRender: (k: string) => void }).__wasmCaptureOnRender('post-menu');
+      });
+      await wait(500);
       await saveCanvas(page, path.join(WASM_DIR, 'post-menu.png'));
     }
 
     console.log('WASM: Menu navigation complete');
 
-    // Let the game run for 30s to accumulate varied screenshots
-    console.log('WASM: Running game for 30s...');
-    await wait(30000);
+    // Capture periodic screenshots using on-demand capture every 5s for 30s
+    console.log('WASM: Running game for 30s with periodic captures...');
+    for (let i = 0; i < 6; i++) {
+      await wait(5000);
+      await tryEval(page, () => {
+        const renderCount = (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount;
+        (window as unknown as { __wasmCaptureOnRender: (k: string) => void })
+          .__wasmCaptureOnRender('gameplay-' + renderCount);
+      });
+    }
 
     // Extract metadata
-    const meta = await tryEval(() => {
+    const meta = await tryEval(page, () => {
       const w = window as unknown as {
         __wasmScreenshots: Array<{ key: string; frame: number }>;
         __wasmFrameCount: number;
@@ -455,15 +590,14 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
     }, 10000);
 
     if (!meta) {
-      console.log('WASM: Could not extract metadata (main thread blocked)');
+      console.log('WASM: Could not extract metadata');
       fs.writeFileSync(path.join(WASM_DIR, 'console.log'), logs.join('\n'));
-      console.log('WASM: Test complete');
       return;
     }
 
-    console.log(`WASM: ${meta.frameCount} rAF, ${meta.renderCount} renders, ${meta.count} screenshots, autoplay=${meta.autoplayState}, screenChanges=${meta.screenChanges}`);
+    console.log(`WASM: ${meta.frameCount} rAF, ${meta.renderCount} renders, ${meta.count} screenshots`);
 
-    // Extract screenshots in batches of 10
+    // Extract screenshots in batches
     const maxScreenshots = Math.min(meta.count, 30);
     let saved = 0;
     const fileSizes: number[] = [];
@@ -472,7 +606,6 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
     for (let batch = 0; batch * BATCH_SIZE < maxScreenshots; batch++) {
       const start = batch * BATCH_SIZE;
       const end = Math.min(start + BATCH_SIZE, maxScreenshots);
-      console.log(`WASM: Extracting screenshots ${start}-${end - 1}...`);
 
       let batchData: Array<{ key: string; dataUrl: string }> | null = null;
       try {
@@ -481,10 +614,8 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
             const w = window as unknown as {
               __wasmScreenshots: Array<{ key: string; dataUrl: string; frame: number }>;
             };
-            const screenshots = w.__wasmScreenshots || [];
-            return screenshots.slice(s, e).map(ss => ({
-              key: ss.key,
-              dataUrl: ss.dataUrl,
+            return (w.__wasmScreenshots || []).slice(s, e).map(ss => ({
+              key: ss.key, dataUrl: ss.dataUrl,
             }));
           }, [start, end] as [number, number]),
           new Promise<null>(resolve => setTimeout(() => resolve(null), 30000)),
@@ -493,13 +624,10 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
         batchData = null;
       }
 
-      if (!batchData) {
-        console.log(`WASM: Batch ${batch} extraction failed, skipping`);
-        continue;
-      }
+      if (!batchData) continue;
 
       for (const ss of batchData) {
-        if (!ss || !ss.dataUrl) continue;
+        if (!ss?.dataUrl) continue;
         const key = ss.key || `unnamed-${saved}`;
         const fileName = key.replace(/[^a-zA-Z0-9._-]/g, '_') + '.png';
         const filePath = path.join(WASM_DIR, fileName);
@@ -512,28 +640,16 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
 
     console.log(`WASM: ${saved} screenshots saved`);
 
-    // Verify screenshots are not all identical
     if (fileSizes.length >= 3) {
       const uniqueSizes = new Set(fileSizes);
       const varied = uniqueSizes.size > 1;
-      console.log(`WASM: Screenshot variance: ${uniqueSizes.size} unique sizes out of ${fileSizes.length} files — ${varied ? 'VARIED (good)' : 'ALL IDENTICAL (bad)'}`);
-      if (!varied) {
-        console.warn('WASM: WARNING — all screenshots are identical, game may not have progressed past menu');
-      }
+      console.log(`WASM: ${uniqueSizes.size} unique sizes — ${varied ? 'VARIED' : 'ALL IDENTICAL'}`);
     }
 
-    // Save logs
     const allLogs = [
-      ...(meta.logs || []),
-      '',
-      '--- Autoplay log ---',
-      ...(meta.autoplayLog || []),
-      '',
-      `--- Diagnostics ---`,
-      JSON.stringify(meta.diag, null, 2),
-      '',
-      '--- Console logs ---',
-      ...logs,
+      ...(meta.logs || []), '', '--- Autoplay ---',
+      ...(meta.autoplayLog || []), '', '--- Diagnostics ---',
+      JSON.stringify(meta.diag, null, 2), '', '--- Console ---', ...logs,
     ];
     fs.writeFileSync(path.join(WASM_DIR, 'console.log'), allLogs.join('\n'));
     console.log('WASM: Test complete');

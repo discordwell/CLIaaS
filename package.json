@@ -32,7 +32,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:db": "DATABASE_URL=${DATABASE_URL_TEST:-postgresql://cliaas:cliaas@localhost:5433/cliaas_test} vitest run src/__tests__/db-integration",
-    "test:qa": "playwright test"
+    "test:qa": "playwright test",
+    "compare": "playwright test scripts/test-compare.ts && tsx scripts/generate-comparison-report.ts",
+    "compare:report": "tsx scripts/generate-comparison-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
