@@ -135,7 +135,14 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
     ensureDirs();
 
     const logs: string[] = [];
-    page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
+    page.on('console', msg => {
+      const text = msg.text();
+      logs.push(`[${msg.type()}] ${text}`);
+      // Forward AUTOPLAY debug prints from C++ printf to test output
+      if (text.includes('[AUTOPLAY]')) {
+        console.log(`WASM: ${text}`);
+      }
+    });
     page.on('dialog', async dialog => {
       console.log(`WASM: Dialog: ${dialog.type()} - ${dialog.message()}`);
       await dialog.accept();
@@ -176,20 +183,6 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
       }
     }
 
-
-    // === Menu navigation strategy ===
-    // Key findings from testing:
-    // 1. Without keyboard input: game renders at ~73fps, evaluate works fine,
-    //    but game stuck at "CHOOSE YOUR SIDE" (screenshots identical).
-    // 2. Page-dispatched (non-trusted) keyboard events BLOCK the main thread
-    //    entirely — even evaluate() stops working for minutes.
-    // 3. Playwright CDP keyboard.press() works initially, but after the first
-    //    Enter the game enters a blocking movie/transition state.
-    //
-    // Approach: Send one CDP Enter at a time. After each, wait for the game
-    // to become responsive again (evaluate succeeds) before sending the next.
-    // This lets us navigate menus without permanently blocking the main thread.
-
     // Helper: wait until evaluate works (game is responsive)
     async function waitForResponsive(maxWaitMs: number): Promise<boolean> {
       const start = Date.now();
@@ -203,66 +196,230 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
       return false;
     }
 
+    /**
+     * Wait for the screen to stop changing (e.g. briefing text finished scrolling).
+     * Polls __getScreenHash() and considers the screen stable when the hash
+     * hasn't changed for `stableMs` milliseconds.
+     */
+    async function waitForScreenStability(stableMs = 3000, maxWaitMs = 30000): Promise<boolean> {
+      const start = Date.now();
+      let lastHash = await tryEval(() => {
+        return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
+      });
+      let stableSince = Date.now();
+
+      while (Date.now() - start < maxWaitMs) {
+        await wait(1000);
+        const hash = await tryEval(() => {
+          return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
+        });
+        if (hash === null) continue; // evaluate failed, game busy
+
+        if (hash !== lastHash) {
+          lastHash = hash;
+          stableSince = Date.now();
+        } else if (Date.now() - stableSince >= stableMs) {
+          console.log(`WASM: Screen stable for ${stableMs}ms`);
+          return true;
+        }
+      }
+      console.log(`WASM: Screen stability timeout after ${maxWaitMs}ms`);
+      return false;
+    }
+
+    /**
+     * Click at game coordinates via CDP mouse events.
+     *
+     * Emscripten's fillMouseEventData computes:
+     *   canvasX = clientX - rect.left (where internal getBCR returns {left:0})
+     * So canvasX = viewport clientX directly. Identity transform.
+     *
+     * Both move() and click() have timeouts because CDP calls to the renderer
+     * can block indefinitely when WASM monopolizes the JS thread.
+     */
+    async function clickGame(gx: number, gy: number, label: string): Promise<boolean> {
+      // Identity: game coords = viewport coords (rect.left=0, rect.top=0)
+      console.log(`WASM: Mouse click at (${gx}, ${gy}) — ${label}`);
+      try {
+        // Move with timeout — CDP can block if WASM is in a tight loop
+        const moved = await Promise.race([
+          page.mouse.move(gx, gy).then(() => true),
+          new Promise<boolean>(resolve => setTimeout(() => resolve(false), 10000)),
+        ]);
+        if (!moved) {
+          console.log(`WASM: mouse.move timed out — ${label}`);
+        }
+        await wait(100);
+        // Click with timeout
+        const clicked = await Promise.race([
+          page.mouse.click(gx, gy).then(() => true),
+          new Promise<boolean>(resolve => setTimeout(() => resolve(false), 10000)),
+        ]);
+        if (!clicked) {
+          console.log(`WASM: mouse.click timed out — ${label}`);
+        }
+        return moved || clicked; // at least one CDP event went through
+      } catch {
+        console.log(`WASM: Mouse click failed — ${label}`);
+        return false;
+      }
+    }
+
+    /**
+     * Check if the screen changed after an action by comparing hashes.
+     */
+    async function screenChanged(previousHash: string | null): Promise<boolean> {
+      const hash = await tryEval(() => {
+        return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
+      });
+      return hash !== null && hash !== previousHash;
+    }
+
+    // === Input injection via WASM exports ===
+    //
+    // The WASM binary now exports C functions (via EMSCRIPTEN_KEEPALIVE) that
+    // call Keyboard->Put() directly from C++. This bypasses all SDL event
+    // handling and Asyncify constraints. original.html wraps these as:
+    //   __injectKey(vkCode)                    → key press + release
+    //   __injectMouseClick(gameX, gameY, btn)  → mouse press + release
+    //   __injectMouseMove(gameX, gameY)        → cursor position update
+    //   __inputReady()                         → true when exports available
+    //
+    // VK codes: VK_RETURN=40, VK_ESCAPE=41, VK_SPACE=44,
+    //           VK_LBUTTON=1, VK_RBUTTON=2
+
     // Wait for initial content
     console.log('WASM: Waiting for content...');
     await wait(5000);
 
     const initiallyResponsive = await waitForResponsive(15000);
     if (!initiallyResponsive) {
-      console.log('WASM: Game not responsive initially, skipping keyboard navigation');
+      console.log('WASM: Game not responsive initially, skipping navigation');
     } else {
-      console.log('WASM: Game responsive, navigating menus via CDP keyboard...');
+      console.log('WASM: Game responsive, waiting for input exports...');
 
-      const keyLabels = [
-        'choose-side',   // Select ALLIES at "CHOOSE YOUR SIDE"
-        'advance-1',     // Skip movie / advance
-        'start-game',    // Start New Game at main menu
-        'briefing-1',    // Continue through briefing
-        'briefing-2',    // More advances (briefing animation takes time)
-        'briefing-3',
-        'advance-4',     // Get past "OK" dialogs
-        'advance-5',
-        'advance-6',     // Additional presses to ensure we reach gameplay
-        'advance-7',
-        'advance-8',
-        'advance-9',
-        'advance-10',
-      ];
-
-      for (const label of keyLabels) {
-        console.log(`WASM: Pressing Enter (${label})...`);
-        let keyOk = false;
-        try {
-          await Promise.race([
-            page.keyboard.press('Enter').then(() => { keyOk = true; }),
-            new Promise<void>(resolve => setTimeout(resolve, 10000)),
-          ]);
-        } catch {
-          console.log(`WASM: Page closed during ${label}`);
+      // Wait for Module._inject_key to be available
+      let inputReady = false;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const ready = await tryEval(() => {
+          return (window as unknown as { __inputReady: () => boolean }).__inputReady();
+        });
+        if (ready) {
+          inputReady = true;
           break;
         }
+        await wait(1000);
+      }
 
-        if (keyOk) {
-          console.log(`WASM: Enter delivered (${label})`);
-        } else {
-          console.log(`WASM: CDP timed out (${label}) — game in transition`);
+      if (!inputReady) {
+        console.log('WASM: Input exports not available after 30s — falling back to CDP');
+        // Fallback: just send CDP Enter presses and hope for the best
+        for (let i = 0; i < 5; i++) {
+          try {
+            await Promise.race([
+              page.keyboard.press('Enter'),
+              new Promise<void>(resolve => setTimeout(resolve, 10000)),
+            ]);
+          } catch { break; }
+          await wait(3000);
+          await waitForResponsive(30000);
+        }
+      } else {
+        console.log('WASM: Input injection ready (WASM exports available)');
+
+        // --- Step 0: Enable autoplay mode ---
+        // This sets a C++ flag (g_autoplay_mode) that causes BGMessageBox
+        // to return immediately (as if OK was pressed). This bypasses the
+        // briefing dialog's modal input loop which doesn't yield to Asyncify.
+        const autoplaySet = await tryEval(() => {
+          return (window as unknown as { __setAutoplay: (mode: boolean) => boolean }).__setAutoplay(true);
+        });
+        console.log(`WASM: Autoplay mode: ${autoplaySet}`);
+
+        // --- Step 1: Navigate past main menu ---
+        // Inject Enter to select "Start New Game" (default highlighted button).
+        // With autoplay mode, the entire chain auto-completes:
+        //   Main Menu → Enter → Fetch_Difficulty (auto: normal) →
+        //   WWMessageBox "Choose your side" (auto: Allies) →
+        //   Start_Scenario → BGMessageBox briefing (auto: OK) → Main game loop
+        console.log('WASM: Injecting Enter to start new game...');
+
+        const hashBefore = await tryEval(() => {
+          return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
+        });
+
+        const enterResult = await tryEval(() => {
+          return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
+        });
+        console.log(`WASM: Enter inject result: ${enterResult}`);
+
+        // --- Step 2: Wait for game to load into gameplay ---
+        // The autoplay bypasses all dialogs. Call_Back() now yields via
+        // emscripten_sleep(0) during heavy computation (scenario loading).
+        // We poll until the game is responsive AND screen changes.
+        console.log('WASM: Waiting up to 5min for game to reach gameplay...');
+        const loadingStart = Date.now();
+        let gameReady = false;
+        let lastLog = 0;
+        let enterRetries = 0;
+        while (Date.now() - loadingStart < 300000) {
+          const result = await tryEval(() => {
+            return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
+          }, 5000);
+
+          const elapsed = Math.round((Date.now() - loadingStart) / 1000);
+          if (result !== null) {
+            // Game is responsive — check if screen changed
+            const hashNow = await tryEval(() => {
+              return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
+            });
+
+            if (hashNow !== null && hashNow !== hashBefore) {
+              console.log(`WASM: Screen changed after ${elapsed}s — game progressed! (renders=${result})`);
+              gameReady = true;
+              break;
+            }
+
+            // Responsive but screen unchanged — may need more Enter presses
+            // (e.g. if the first Enter wasn't consumed yet, or a new dialog appeared)
+            if (elapsed > 5 && enterRetries < 10) {
+              enterRetries++;
+              console.log(`WASM: Responsive but unchanged at ${elapsed}s — injecting Enter #${enterRetries}...`);
+              await tryEval(() => {
+                return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
+              });
+              await wait(2000);
+              continue;
+            }
+          }
+
+          if (elapsed - lastLog >= 10) {
+            console.log(`WASM: Loading... ${elapsed}s elapsed (responsive=${result !== null})`);
+            lastLog = elapsed;
+          }
+          await wait(3000);
         }
 
-        // Wait for game to become responsive again (up to 90s per transition)
-        console.log(`WASM: Waiting for game to recover...`);
-        const recovered = await waitForResponsive(90000);
-        if (recovered) {
-          console.log(`WASM: Game responsive after ${label}`);
-          // Save a screenshot
-          await Promise.race([
-            saveCanvas(page, path.join(WASM_DIR, `screen-${label}.png`)),
-            new Promise<boolean>(resolve => setTimeout(() => resolve(false), 5000)),
-          ]);
+        if (gameReady) {
+          await saveCanvas(page, path.join(WASM_DIR, 'gameplay.png'));
+          console.log('WASM: Game reached gameplay!');
         } else {
-          console.log(`WASM: Game still blocked after 90s — may be permanently stuck`);
-          break;
+          await saveCanvas(page, path.join(WASM_DIR, 'timeout-state.png'));
+          console.log('WASM: Game did not reach gameplay within timeout');
         }
       }
+
+      // Check input system diagnostics
+      const diag = await tryEval(() => {
+        return (window as unknown as { __inputDiag: () => Record<string, unknown> }).__inputDiag();
+      });
+      console.log(`WASM: Input system: ${JSON.stringify(diag)}`);
+
+      // Wait for scenario to finish loading
+      console.log('WASM: Waiting 20s for scenario loading...');
+      await wait(20000);
+      await waitForResponsive(60000);
+      await saveCanvas(page, path.join(WASM_DIR, 'post-menu.png'));
     }
 
     console.log('WASM: Menu navigation complete');

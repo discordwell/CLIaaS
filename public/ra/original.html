@@ -631,9 +631,17 @@ Module.setStatus('Downloading...');
 
 // === Diagnostic: wrap dynCall_iiii to trace mouse callback execution ===
 // The mousedown handler calls dynCall_iiii(callbackfunc, eventType, eventStruct, userData).
-// This wrapper logs mouse-related calls and catches errors.
+// This wrapper logs mouse-related calls with coordinate data from the WASM heap.
+// fillMouseEventData writes: canvasX @ offset 160 (f64), canvasY @ offset 168 (f64),
+// clientX @ offset 192 (f64), clientY @ offset 200 (f64).
 (function() {
   var installed = false;
+  window.__mouseDiag = { calls: [], lastClick: null };
+
+  window.__getMouseDiag = function() {
+    return JSON.parse(JSON.stringify(window.__mouseDiag));
+  };
+
   function tryInstall() {
     if (installed) return;
     if (typeof dynCall_iiii !== 'function') {
@@ -647,22 +655,259 @@ Module.setStatus('Downloading...');
       // Event type IDs: mousedown=5, mouseup=6, mousemove=8, focus=13
       if (a1 >= 5 && a1 <= 8) {
         mouseCallCount++;
+        var asyncState = typeof Asyncify !== 'undefined' ? Asyncify.state : 'N/A';
+        var coords = null;
+        // Read coordinates from the event struct in WASM heap.
+        // EmscriptenMouseEvent struct (wasm32): fields are int32 (HEAP32),
+        // not float64. Dump first 20 int32s to find the right offsets.
+        var rawInts = null;
+        try {
+          if (typeof HEAP32 !== 'undefined' && a2) {
+            rawInts = [];
+            for (var ri = 0; ri < 20; ri++) {
+              rawInts.push(HEAP32[(a2 >> 2) + ri]);
+            }
+            // Exact layout from rasdl.js fillMouseEventData:
+            // HEAPF64[eventStruct>>3] = timeStamp        (offset 0, 8 bytes)
+            // HEAP32[idx+2] = screenX                    (offset 8)
+            // HEAP32[idx+3] = screenY                    (offset 12)
+            // HEAP32[idx+4] = clientX                    (offset 16)
+            // HEAP32[idx+5] = clientY                    (offset 20)
+            // HEAP8[+24..27] = ctrl/shift/alt/meta       (offset 24-27)
+            // HEAP16 = button/buttons                    (offset 28-31)
+            // HEAP32[idx+8] = movementX                  (offset 32)
+            // HEAP32[idx+9] = movementY                  (offset 36)
+            // HEAP32[idx+10] = clientX - rect.left       (offset 40 = canvasX)
+            // HEAP32[idx+11] = clientY - rect.top        (offset 44 = canvasY)
+            coords = {
+              screenX: HEAP32[(a2 + 8) >> 2],
+              screenY: HEAP32[(a2 + 12) >> 2],
+              clientX: HEAP32[(a2 + 16) >> 2],
+              clientY: HEAP32[(a2 + 20) >> 2],
+              canvasX: HEAP32[(a2 + 40) >> 2],
+              canvasY: HEAP32[(a2 + 44) >> 2]
+            };
+          }
+        } catch(e) { /* heap read failed */ }
+
+        var entry = {
+          call: mouseCallCount,
+          func: func,
+          type: a1,
+          asyncState: asyncState,
+          coords: coords,
+          timestamp: Date.now()
+        };
+
+        if (a1 === 5) { // mousedown
+          window.__mouseDiag.lastClick = entry;
+        }
+        if (mouseCallCount <= 50) {
+          window.__mouseDiag.calls.push(entry);
+        }
+
         if (mouseCallCount <= 30) {
-          var asyncState = typeof Asyncify !== 'undefined' ? Asyncify.state : 'N/A';
+          var coordStr = coords ?
+            ' client=(' + coords.clientX + ',' + coords.clientY + ')' +
+            ' target=(' + coords.targetX + ',' + coords.targetY + ')' +
+            ' canvas=(' + coords.canvasX + ',' + coords.canvasY + ')' : '';
+          var rawStr = (rawInts && mouseCallCount <= 5) ? ' RAW=' + JSON.stringify(rawInts) : '';
           console.log('dynCall_iiii MOUSE: func=' + func + ' type=' + a1 +
-                      ' Asyncify.state=' + asyncState);
+                      ' Asyncify.state=' + asyncState + coordStr + rawStr);
         }
       }
+      // CRITICAL: Re-throw Asyncify unwind/rewind exceptions.
+      // Asyncify works by throwing a special exception to unwind the JS stack.
+      // Catching it breaks the unwind/rewind cycle and permanently stalls WASM.
       try {
-        return origDynCall(func, a1, a2, a3);
+        var result = origDynCall(func, a1, a2, a3);
+        if (a1 >= 5 && a1 <= 8 && mouseCallCount <= 30) {
+          console.log('dynCall_iiii MOUSE result=' + result);
+        }
+        return result;
       } catch(e) {
+        // Re-throw Asyncify exceptions (they use a specific marker)
+        if (typeof Asyncify !== 'undefined' && Asyncify.state !== 0) {
+          throw e;
+        }
+        // Only catch non-Asyncify errors
         console.error('dynCall_iiii ERROR: func=' + func + ' type=' + a1 + ' err=' + e.message);
         return 0;
       }
     };
-    console.log('dynCall_iiii wrapper installed (traces mouse events)');
+    console.log('dynCall_iiii wrapper installed (traces mouse events with coordinates)');
   }
   setTimeout(tryInstall, 1000);
+})();
+
+// === Input injection via WASM exports (autoplay only) ===
+// The WASM binary now exports C functions (via EMSCRIPTEN_KEEPALIVE) that
+// call Keyboard->Put() directly from within the C++ code. This bypasses
+// SDL event handling and Asyncify constraints that broke all previous
+// approaches (CDP keyboard, CDP mouse, JS memory injection).
+//
+// Exported functions (accessible as Module._inject_*):
+//   _inject_key(vk_code)                    → key press + release
+//   _inject_key_press(vk_code)              → key press only
+//   _inject_key_release(vk_code)            → key release only
+//   _inject_mouse_click(game_x, game_y, btn) → mouse press + release at coords
+//   _inject_mouse_press(game_x, game_y, btn) → mouse press only
+//   _inject_mouse_release(game_x, game_y, btn) → mouse release only
+//   _inject_mouse_move(game_x, game_y)      → update cursor position
+//   _input_diag()                           → 1 if buffer has data, 0 if empty
+//
+// VK codes (SDL scancode-based, from keyboard.h):
+//   VK_LBUTTON=1, VK_RBUTTON=2, VK_RETURN=40, VK_ESCAPE=41, VK_SPACE=44
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  if (!params.get('autoplay')) return;
+
+  // --- Public API: thin wrappers around Module._inject_* exports ---
+
+  window.__injectKey = function(vkCode) {
+    if (!Module || !Module._inject_key) {
+      console.log('[input-inject] Module._inject_key not available yet');
+      return false;
+    }
+    var result = Module._inject_key(vkCode);
+    console.log('[input-inject] inject_key(' + vkCode + ') → ' + result);
+    return result === 1;
+  };
+
+  window.__injectKeyPress = function(vkCode) {
+    if (!Module || !Module._inject_key_press) return false;
+    return Module._inject_key_press(vkCode) === 1;
+  };
+
+  window.__injectKeyRelease = function(vkCode) {
+    if (!Module || !Module._inject_key_release) return false;
+    return Module._inject_key_release(vkCode) === 1;
+  };
+
+  window.__injectMouseClick = function(gameX, gameY, button) {
+    button = button || 1;
+    if (!Module || !Module._inject_mouse_click) {
+      console.log('[input-inject] Module._inject_mouse_click not available yet');
+      return false;
+    }
+    var result = Module._inject_mouse_click(gameX, gameY, button);
+    console.log('[input-inject] inject_mouse_click(' + gameX + ',' + gameY + ',' + button + ') → ' + result);
+    return result === 1;
+  };
+
+  window.__injectMousePress = function(gameX, gameY, button) {
+    button = button || 1;
+    if (!Module || !Module._inject_mouse_press) return false;
+    return Module._inject_mouse_press(gameX, gameY, button) === 1;
+  };
+
+  window.__injectMouseRelease = function(gameX, gameY, button) {
+    button = button || 1;
+    if (!Module || !Module._inject_mouse_release) return false;
+    return Module._inject_mouse_release(gameX, gameY, button) === 1;
+  };
+
+  window.__injectMouseMove = function(gameX, gameY) {
+    if (!Module || !Module._inject_mouse_move) return false;
+    return Module._inject_mouse_move(gameX, gameY) === 1;
+  };
+
+  // Check if the input injection system is ready (WASM exports available)
+  window.__inputReady = function() {
+    return !!(Module && Module._inject_key);
+  };
+
+  // Enable autoplay mode: BGMessageBox auto-dismisses, movies skip
+  window.__setAutoplay = function(mode) {
+    if (!Module || !Module._set_autoplay) {
+      console.log('[input-inject] Module._set_autoplay not available yet');
+      return false;
+    }
+    var prev = Module._set_autoplay(mode ? 1 : 0);
+    console.log('[input-inject] set_autoplay(' + (mode ? 1 : 0) + ') → prev=' + prev);
+    return true;
+  };
+
+  // Get diagnostic info
+  window.__inputDiag = function() {
+    if (!Module || !Module._input_diag) return { ready: false };
+    return {
+      ready: true,
+      hasData: Module._input_diag()
+    };
+  };
+})();
+
+// === Briefing text suppressor (autoplay only) ===
+// The WASM game's briefing dialog (BGMessageBox) blocks waiting for user input.
+// CDP keyboard/mouse events cannot reliably dismiss it due to Asyncify constraints.
+// Solution: zero out the briefing text in WASM heap memory so Restate_Mission()
+// skips the dialog entirely (it checks strlen(Scen.BriefingText) > 0).
+//
+// The scanner runs periodically during scenario loading. Between Read_Scenario_INI
+// (which fills BriefingText) and Restate_Mission (which displays it), the game
+// yields to the browser via Call_Back()/emscripten_sleep, giving us a window.
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  if (!params.get('autoplay')) return;
+
+  // The briefing text starts with "Rescue Einstein" (ant missions).
+  // We search for it in WASM heap and zero the first byte → strlen returns 0.
+  var MARKER = "Rescue Einstein";
+  var markerBytes = [];
+  for (var i = 0; i < MARKER.length; i++) markerBytes.push(MARKER.charCodeAt(i));
+
+  var patched = false;
+  var scanCount = 0;
+
+  function scanAndPatch() {
+    if (patched || typeof HEAPU8 === 'undefined') {
+      if (!patched) setTimeout(scanAndPatch, 50);
+      return;
+    }
+    scanCount++;
+    var heap = HEAPU8;
+    var patchCount = 0;
+
+    // Search for the marker string in WASM heap.
+    // The briefing text is in Scen.BriefingText (a char[1024] buffer).
+    // It's also in the INI data loaded from MIX, but zeroing BriefingText is enough.
+    // Search from high addresses first (stack/heap data, not code/static).
+    for (var addr = heap.length - MARKER.length; addr >= 0; addr--) {
+      var match = true;
+      for (var j = 0; j < markerBytes.length; j++) {
+        if (heap[addr + j] !== markerBytes[j]) { match = false; break; }
+      }
+      if (match) {
+        // Zero out the first byte — strlen() will return 0
+        heap[addr] = 0;
+        patchCount++;
+        console.log('[briefing-suppress] Zeroed briefing text at heap offset ' + addr + ' (scan #' + scanCount + ')');
+      }
+    }
+
+    if (patchCount > 0) {
+      patched = true;
+      console.log('[briefing-suppress] Patched ' + patchCount + ' briefing text locations');
+    } else if (scanCount < 600) {
+      // Keep scanning for up to 30s (600 * 50ms)
+      setTimeout(scanAndPatch, 50);
+    } else {
+      console.log('[briefing-suppress] Gave up after ' + scanCount + ' scans');
+    }
+  }
+
+  // Start scanning once WASM is loaded
+  var origSetStatus = Module.setStatus;
+  var scanning = false;
+  Module.setStatus = function(text) {
+    origSetStatus.call(Module, text);
+    if (!text && !scanning) {
+      scanning = true;
+      console.log('[briefing-suppress] WASM loaded, starting briefing text scanner');
+      setTimeout(scanAndPatch, 100);
+    }
+  };
 })();
 
 // === Autoplay coordination ===
