@@ -8,13 +8,13 @@ import { freshdeskReply, freshdeskAddNote } from '@cli/connectors/freshdesk';
 import { groovePostMessage } from '@cli/connectors/groove';
 import { messageCreated } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requireScope } from '@/lib/api-auth';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireAuth(request);
+  const authResult = await requireScope(request, 'tickets:write');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;

@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getWebhook, updateWebhook, deleteWebhook } from '@/lib/webhooks';
-import { requireAuth } from '@/lib/api-auth';
+import { requireScope } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireScope(request, 'webhooks:read');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   try {
@@ -30,7 +33,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requireScope(request, 'webhooks:write');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -55,7 +58,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requireScope(request, 'webhooks:write');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

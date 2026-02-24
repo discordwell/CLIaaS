@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getAuthUser, requireAuth, requireRole } from '@/lib/api-auth';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { getAuthUser, requireAuth, requireRole, requireScope, requireScopeAndRole } from '@/lib/api-auth';
 
 function makeRequest(headers: Record<string, string> = {}): Request {
   return new Request('http://localhost:3000/api/test', {
@@ -149,6 +149,231 @@ describe('api-auth', () => {
       if ('user' in result) {
         expect(result.user.role).toBe('admin');
       }
+    });
+  });
+
+  describe('requireScope', () => {
+    beforeEach(() => {
+      process.env.DATABASE_URL = 'postgres://localhost/test';
+    });
+
+    it('session auth always passes scope checks', async () => {
+      const result = await requireScope(makeRequest(ADMIN_HEADERS), 'tickets:read');
+      expect('user' in result).toBe(true);
+      if ('user' in result) {
+        expect(result.user.authType).toBe('session');
+      }
+    });
+
+    it('returns 401 when not authenticated', async () => {
+      const result = await requireScope(makeRequest(), 'tickets:read');
+      expect('error' in result).toBe(true);
+      if ('error' in result) {
+        expect(result.error.status).toBe(401);
+      }
+    });
+
+    it('API key with matching scope passes', async () => {
+      // Mock validateApiKey to return an API key user with specific scopes
+      vi.doMock('@/lib/api-keys', () => ({
+        validateApiKey: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'api@test.com',
+          role: 'admin',
+          workspaceId: 'ws-1',
+          authType: 'api-key',
+          scopes: ['tickets:read', 'tickets:write'],
+        }),
+      }));
+
+      const req = makeRequest({
+        ...ADMIN_HEADERS,
+        'x-auth-type': 'api-key',
+        'authorization': 'Bearer cliaas_test1234_fakekey',
+      });
+      const result = await requireScope(req, 'tickets:read');
+      expect('user' in result).toBe(true);
+      vi.doUnmock('@/lib/api-keys');
+    });
+
+    it('API key without matching scope returns 403', async () => {
+      vi.doMock('@/lib/api-keys', () => ({
+        validateApiKey: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'api@test.com',
+          role: 'admin',
+          workspaceId: 'ws-1',
+          authType: 'api-key',
+          scopes: ['kb:read'],
+        }),
+      }));
+
+      const req = makeRequest({
+        ...ADMIN_HEADERS,
+        'x-auth-type': 'api-key',
+        'authorization': 'Bearer cliaas_test1234_fakekey',
+      });
+      const result = await requireScope(req, 'tickets:read');
+      expect('error' in result).toBe(true);
+      if ('error' in result) {
+        expect(result.error.status).toBe(403);
+        const body = await result.error.json();
+        expect(body.error).toContain('tickets:read');
+      }
+      vi.doUnmock('@/lib/api-keys');
+    });
+
+    it('wildcard * scope passes any scope check', async () => {
+      vi.doMock('@/lib/api-keys', () => ({
+        validateApiKey: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'api@test.com',
+          role: 'admin',
+          workspaceId: 'ws-1',
+          authType: 'api-key',
+          scopes: ['*'],
+        }),
+      }));
+
+      const req = makeRequest({
+        ...ADMIN_HEADERS,
+        'x-auth-type': 'api-key',
+        'authorization': 'Bearer cliaas_test1234_fakekey',
+      });
+      const result = await requireScope(req, 'analytics:read');
+      expect('user' in result).toBe(true);
+      vi.doUnmock('@/lib/api-keys');
+    });
+
+    it('namespace wildcard admin:* matches admin:read', async () => {
+      vi.doMock('@/lib/api-keys', () => ({
+        validateApiKey: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'api@test.com',
+          role: 'admin',
+          workspaceId: 'ws-1',
+          authType: 'api-key',
+          scopes: ['admin:*'],
+        }),
+      }));
+
+      const req = makeRequest({
+        ...ADMIN_HEADERS,
+        'x-auth-type': 'api-key',
+        'authorization': 'Bearer cliaas_test1234_fakekey',
+      });
+      const result = await requireScope(req, 'admin:read');
+      expect('user' in result).toBe(true);
+      vi.doUnmock('@/lib/api-keys');
+    });
+
+    it('passes in demo mode (no DATABASE_URL)', async () => {
+      delete process.env.DATABASE_URL;
+      const result = await requireScope(makeRequest(), 'tickets:read');
+      expect('user' in result).toBe(true);
+    });
+  });
+
+  describe('requireScopeAndRole', () => {
+    beforeEach(() => {
+      process.env.DATABASE_URL = 'postgres://localhost/test';
+    });
+
+    it('passes for session admin with admin-required route', async () => {
+      const result = await requireScopeAndRole(makeRequest(ADMIN_HEADERS), 'analytics:read', 'admin');
+      expect('user' in result).toBe(true);
+    });
+
+    it('returns 403 for session agent on admin-required route', async () => {
+      const result = await requireScopeAndRole(makeRequest(AGENT_HEADERS), 'analytics:read', 'admin');
+      expect('error' in result).toBe(true);
+      if ('error' in result) {
+        expect(result.error.status).toBe(403);
+        const body = await result.error.json();
+        expect(body.error).toMatch(/insufficient permissions/i);
+      }
+    });
+
+    it('returns 401 when not authenticated', async () => {
+      const result = await requireScopeAndRole(makeRequest(), 'analytics:read', 'admin');
+      expect('error' in result).toBe(true);
+      if ('error' in result) {
+        expect(result.error.status).toBe(401);
+      }
+    });
+
+    it('API key with scope+role passes', async () => {
+      vi.doMock('@/lib/api-keys', () => ({
+        validateApiKey: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'api@test.com',
+          role: 'admin',
+          workspaceId: 'ws-1',
+          authType: 'api-key',
+          scopes: ['analytics:read'],
+        }),
+      }));
+
+      const req = makeRequest({
+        ...ADMIN_HEADERS,
+        'x-auth-type': 'api-key',
+        'authorization': 'Bearer cliaas_test1234_fakekey',
+      });
+      const result = await requireScopeAndRole(req, 'analytics:read', 'admin');
+      expect('user' in result).toBe(true);
+      vi.doUnmock('@/lib/api-keys');
+    });
+
+    it('API key with scope but insufficient role returns 403', async () => {
+      vi.doMock('@/lib/api-keys', () => ({
+        validateApiKey: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'api@test.com',
+          role: 'agent',
+          workspaceId: 'ws-1',
+          authType: 'api-key',
+          scopes: ['analytics:read'],
+        }),
+      }));
+
+      const req = makeRequest({
+        ...AGENT_HEADERS,
+        'x-auth-type': 'api-key',
+        'authorization': 'Bearer cliaas_test1234_fakekey',
+      });
+      const result = await requireScopeAndRole(req, 'analytics:read', 'admin');
+      expect('error' in result).toBe(true);
+      if ('error' in result) {
+        expect(result.error.status).toBe(403);
+      }
+      vi.doUnmock('@/lib/api-keys');
+    });
+
+    it('API key without scope returns 403 with scope message', async () => {
+      vi.doMock('@/lib/api-keys', () => ({
+        validateApiKey: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'api@test.com',
+          role: 'admin',
+          workspaceId: 'ws-1',
+          authType: 'api-key',
+          scopes: ['tickets:read'],
+        }),
+      }));
+
+      const req = makeRequest({
+        ...ADMIN_HEADERS,
+        'x-auth-type': 'api-key',
+        'authorization': 'Bearer cliaas_test1234_fakekey',
+      });
+      const result = await requireScopeAndRole(req, 'analytics:read', 'admin');
+      expect('error' in result).toBe(true);
+      if ('error' in result) {
+        expect(result.error.status).toBe(403);
+        const body = await result.error.json();
+        expect(body.error).toContain('analytics:read');
+      }
+      vi.doUnmock('@/lib/api-keys');
     });
   });
 });

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyTotp, decryptSecret, verifyBackupCode, type BackupCode } from '@/lib/auth/totp';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireDatabase, getMfaRecord } from '@/lib/auth/mfa-helpers';
+import { checkRateLimit } from '@/lib/security/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,12 +31,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json(
-        { error: 'MFA requires a database' },
-        { status: 503 },
-      );
-    }
+    const dbError = requireDatabase();
+    if (dbError) return dbError;
 
     const { db } = await import('@/db');
     const { userMfa } = await import('@/db/schema');
@@ -42,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     let userId: string;
     // Store the verified payload to avoid re-verifying (race condition with 5m expiry)
-    let intermediatePayload: { id: string; email: string; name: string; role: string; workspaceId: string; tenantId: string } | null = null;
+    let intermediatePayload: { id: string; email: string; name: string; role: 'owner' | 'admin' | 'agent'; workspaceId: string; tenantId: string } | null = null;
 
     if (intermediateToken) {
       // Login verification flow — validate intermediate token
@@ -64,13 +62,17 @@ export async function POST(request: NextRequest) {
       userId = auth.user.id;
     }
 
-    const rows = await db
-      .select()
-      .from(userMfa)
-      .where(eq(userMfa.userId, userId))
-      .limit(1);
+    // Per-user MFA rate limiting: 5 attempts per 15 minutes (NIST SP 800-63B aligned)
+    const rateResult = checkRateLimit(`mfa:${userId}`, { windowMs: 900_000, maxRequests: 5 });
+    if (!rateResult.allowed) {
+      const retryMinutes = Math.ceil((rateResult.retryAfter ?? 60000) / 60000);
+      return NextResponse.json(
+        { error: `Too many MFA attempts. Try again in ${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}.` },
+        { status: 429 },
+      );
+    }
 
-    const mfaRecord = rows[0];
+    const mfaRecord = await getMfaRecord(userId);
     if (!mfaRecord) {
       return NextResponse.json(
         { error: 'MFA is not configured for this user' },

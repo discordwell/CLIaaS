@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listWebhooks, createWebhook } from '@/lib/webhooks';
 import type { WebhookEventType } from '@/lib/webhooks';
-import { requireAuth } from '@/lib/api-auth';
+import { requireScope } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireScope(request, 'webhooks:read');
+  if ('error' in auth) return auth.error;
+
   try {
     const webhooks = listWebhooks();
     return NextResponse.json({ webhooks });
@@ -20,7 +23,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireScope(request, 'webhooks:write');
   if ('error' in auth) return auth.error;
 
   try {

@@ -7,6 +7,7 @@ import {
   verifyBackupCode,
   encryptSecret,
   decryptSecret,
+  timingSafeEqual,
 } from '@/lib/auth/totp';
 
 describe('TOTP service', () => {
@@ -173,6 +174,30 @@ describe('TOTP service', () => {
       const encrypted = encryptSecret(secret);
       const decrypted = decryptSecret(encrypted);
       expect(decrypted).toBe(secret);
+    });
+  });
+
+  describe('timingSafeEqual', () => {
+    it('returns true for equal strings', () => {
+      expect(timingSafeEqual('123456', '123456')).toBe(true);
+    });
+
+    it('returns false for different strings of same length', () => {
+      expect(timingSafeEqual('123456', '654321')).toBe(false);
+    });
+
+    it('returns false for strings with different lengths', () => {
+      expect(timingSafeEqual('12345', '123456')).toBe(false);
+      expect(timingSafeEqual('1234567', '123456')).toBe(false);
+    });
+
+    it('returns true for empty strings', () => {
+      expect(timingSafeEqual('', '')).toBe(true);
+    });
+
+    it('returns false for empty vs non-empty', () => {
+      expect(timingSafeEqual('', 'a')).toBe(false);
+      expect(timingSafeEqual('a', '')).toBe(false);
     });
   });
 });

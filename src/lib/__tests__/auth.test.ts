@@ -33,7 +33,7 @@ describe('auth', () => {
       id: 'u1',
       email: 'a@b.com',
       name: 'Alice',
-      role: 'admin',
+      role: 'admin' as const,
       workspaceId: 'ws1',
       tenantId: 't1',
     };
@@ -60,7 +60,7 @@ describe('auth', () => {
       id: 'user-42',
       email: 'bob@example.com',
       name: 'Bob',
-      role: 'agent',
+      role: 'agent' as const,
       workspaceId: 'ws-99',
       tenantId: 'ten-1',
     };

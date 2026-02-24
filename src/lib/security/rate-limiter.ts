@@ -106,9 +106,10 @@ export function checkRateLimit(
 
 export function getRateLimitHeaders(
   result: ReturnType<typeof checkRateLimit>,
+  config?: RateLimitConfig,
 ): Record<string, string> {
   const headers: Record<string, string> = {
-    'X-RateLimit-Limit': String(DEFAULT_CONFIG.maxRequests),
+    'X-RateLimit-Limit': String(config?.maxRequests ?? DEFAULT_CONFIG.maxRequests),
     'X-RateLimit-Remaining': String(result.remaining),
     'X-RateLimit-Reset': String(Math.floor(result.resetAt / 1000)),
   };

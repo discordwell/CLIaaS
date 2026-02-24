@@ -57,7 +57,7 @@ export async function handleSsoLogin(user: {
       id: existing.id,
       email: existing.email!,
       name: existing.name,
-      role: existing.role,
+      role: existing.role as 'owner' | 'admin' | 'agent',
       workspaceId: existing.workspaceId,
       tenantId: existing.tenantId,
     });
@@ -90,7 +90,7 @@ export async function handleSsoLogin(user: {
     id: newUser.id,
     email: newUser.email!,
     name: newUser.name,
-    role: newUser.role,
+    role: newUser.role as 'owner' | 'admin' | 'agent',
     workspaceId: ws.id,
     tenantId: ws.tenantId,
   });

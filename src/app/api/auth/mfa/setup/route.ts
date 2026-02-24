@@ -7,6 +7,7 @@ import {
   generateBackupCodes,
   encryptSecret,
 } from '@/lib/auth/totp';
+import { requireDatabase } from '@/lib/auth/mfa-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,12 +21,8 @@ export async function POST(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json(
-        { error: 'MFA requires a database. Set DATABASE_URL to enable.' },
-        { status: 503 },
-      );
-    }
+    const dbError = requireDatabase();
+    if (dbError) return dbError;
 
     const { db } = await import('@/db');
     const { userMfa } = await import('@/db/schema');
@@ -33,7 +30,7 @@ export async function POST(request: NextRequest) {
 
     // Check if MFA is already enabled
     const existing = await db
-      .select({ id: userMfa.id, enabledAt: userMfa.enabledAt })
+      .select({ id: userMfa.id, enabledAt: userMfa.enabledAt, createdAt: userMfa.createdAt })
       .from(userMfa)
       .where(eq(userMfa.userId, auth.user.id))
       .limit(1);
@@ -43,6 +40,19 @@ export async function POST(request: NextRequest) {
         { error: 'MFA is already enabled. Disable it first to reconfigure.' },
         { status: 409 },
       );
+    }
+
+    // Prevent setup hijacking: reject if a pending (non-enabled) MFA record
+    // was created less than 10 minutes ago
+    if (existing[0] && !existing[0].enabledAt && existing[0].createdAt) {
+      const setupAge = Date.now() - new Date(existing[0].createdAt).getTime();
+      const TEN_MINUTES = 10 * 60 * 1000;
+      if (setupAge < TEN_MINUTES) {
+        return NextResponse.json(
+          { error: 'MFA setup already in progress' },
+          { status: 409 },
+        );
+      }
     }
 
     const secret = generateTotpSecret();

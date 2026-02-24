@@ -1,9 +1,11 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
+import type { Role } from '@/lib/api-auth';
+import { trackToken, consumeToken } from '@/lib/auth/mfa-token-store';
 
 let _jwtSecret: Uint8Array | null = null;
 
-function getJwtSecret(): Uint8Array {
+export function getJwtSecret(): Uint8Array {
   if (!_jwtSecret) {
     const secret = process.env.AUTH_SECRET;
     if (!secret && process.env.NODE_ENV === 'production') {
@@ -20,7 +22,7 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: Role;
   workspaceId: string;
   tenantId: string;
 }
@@ -74,10 +76,16 @@ export async function clearSessionCookie() {
 /**
  * Create a short-lived intermediate token for MFA pending state.
  * This token cannot be used for API access — only for completing MFA verification.
+ * Includes a JTI (JWT ID) for single-use enforcement.
  */
 export async function createIntermediateToken(user: SessionUser): Promise<string> {
+  const jti = crypto.randomUUID();
+  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+  trackToken(jti, expiresAt);
+
   return new SignJWT({ ...user, mfaPending: true })
     .setProtectedHeader({ alg: 'HS256' })
+    .setJti(jti)
     .setIssuedAt()
     .setExpirationTime('5m')
     .sign(getJwtSecret());
@@ -85,17 +93,22 @@ export async function createIntermediateToken(user: SessionUser): Promise<string
 
 /**
  * Verify an intermediate MFA token. Returns the user payload only if
- * the token has mfaPending: true and is still valid.
+ * the token has mfaPending: true, is still valid, and has not been used before.
+ * Consumes the JTI to prevent replay attacks.
  */
 export async function verifyIntermediateToken(token: string): Promise<SessionUser | null> {
   try {
     const { payload } = await jwtVerify(token, getJwtSecret());
     if (!payload.mfaPending) return null;
+
+    // Enforce single-use via JTI — reject tokens without a JTI
+    if (!payload.jti || !consumeToken(payload.jti)) return null;
+
     return {
       id: payload.id as string,
       email: payload.email as string,
       name: payload.name as string,
-      role: payload.role as string,
+      role: payload.role as Role,
       workspaceId: payload.workspaceId as string,
       tenantId: payload.tenantId as string,
     };

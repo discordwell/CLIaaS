@@ -52,6 +52,7 @@ describe('auth enforcement', () => {
     { path: '/api/kb', method: 'GET', importPath: '@/app/api/kb/route', handler: 'GET' },
     { path: '/api/customers', method: 'GET', importPath: '@/app/api/customers/route', handler: 'GET' },
     { path: '/api/chat/sessions', method: 'GET', importPath: '@/app/api/chat/sessions/route', handler: 'GET' },
+    { path: '/api/webhooks', method: 'GET', importPath: '@/app/api/webhooks/route', handler: 'GET' },
   ];
 
   // Admin-level routes (requireRole admin)
@@ -109,6 +110,35 @@ describe('auth enforcement', () => {
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.error).toMatch(/insufficient permissions/i);
+    });
+  });
+
+  describe('newly guarded routes return 401 without auth', () => {
+    it('POST /api/webhooks/test returns 401', async () => {
+      const req = unauthenticatedRequest('/api/webhooks/test', 'POST', { url: 'http://example.com' });
+      const { POST } = await import('@/app/api/webhooks/test/route');
+      const res = await POST(req);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
+    });
+
+    it('POST /api/automations/[id]/test returns 401', async () => {
+      const req = unauthenticatedRequest('/api/automations/test-id/test', 'POST', { ticket: { id: 't1' } });
+      const { POST } = await import('@/app/api/automations/[id]/test/route');
+      const res = await POST(req, { params: Promise.resolve({ id: 'test-id' }) });
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
+    });
+
+    it('GET /api/webhooks/[id]/logs returns 401', async () => {
+      const req = unauthenticatedRequest('/api/webhooks/test-id/logs');
+      const { GET } = await import('@/app/api/webhooks/[id]/logs/route');
+      const res = await GET(req, { params: Promise.resolve({ id: 'test-id' }) });
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
     });
   });
 });

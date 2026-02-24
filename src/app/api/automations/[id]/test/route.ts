@@ -4,6 +4,7 @@ import { getAutomationRules } from '@/lib/automation/executor';
 import { evaluateRule } from '@/lib/automation/engine';
 import type { TicketContext } from '@/lib/automation/engine';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const authResult = await requireAuth(request);
+  if ('error' in authResult) return authResult.error;
+
   const { id } = await params;
   const rule = getAutomationRules().find(r => r.id === id);
   if (!rule) {

@@ -20,6 +20,9 @@ export interface AuthUser {
   role: Role;
   workspaceId: string;
   authType?: 'session' | 'api-key';
+  name?: string;
+  tenantId?: string;
+  scopes?: string[];
 }
 
 const DEMO_USER: AuthUser = {
@@ -79,8 +82,8 @@ export async function getAuthUser(request: Request): Promise<AuthUser | null> {
   };
 }
 
-type AuthSuccess = { user: AuthUser };
-type AuthError = { error: NextResponse };
+export type AuthSuccess = { user: AuthUser };
+export type AuthError = { error: NextResponse };
 
 /**
  * Require an authenticated user. Returns the user or a 401 response.
@@ -117,6 +120,108 @@ export async function requireRole(
       error: NextResponse.json(
         { error: 'Insufficient permissions' },
         { status: 403 }
+      ),
+    };
+  }
+
+  return auth;
+}
+
+/**
+ * Valid API key scopes. Used to validate scopes during key creation.
+ */
+export const VALID_SCOPES = [
+  'tickets:read',
+  'tickets:write',
+  'kb:read',
+  'kb:write',
+  'analytics:read',
+  'webhooks:read',
+  'webhooks:write',
+  'admin:*',
+  '*',
+] as const;
+
+/**
+ * Check whether a set of scopes satisfies a required scope.
+ * Supports exact match, wildcard '*', and namespace wildcards like 'admin:*'.
+ */
+function scopeMatches(userScopes: string[], requiredScope: string): boolean {
+  for (const s of userScopes) {
+    if (s === '*') return true;
+    if (s === requiredScope) return true;
+    // Namespace wildcard: 'admin:*' matches 'admin:read', 'admin:write', etc.
+    if (s.endsWith(':*')) {
+      const namespace = s.slice(0, -1); // 'admin:'
+      if (requiredScope.startsWith(namespace)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Require an authenticated user with a specific scope.
+ * Session users always pass (implicit '*').
+ * API key users must have the scope in their scopes array.
+ */
+export async function requireScope(
+  request: Request,
+  scope: string,
+): Promise<AuthSuccess | AuthError> {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth;
+
+  // Session-based auth always passes scope checks (implicit wildcard)
+  if (auth.user.authType !== 'api-key') {
+    return auth;
+  }
+
+  const userScopes = auth.user.scopes ?? [];
+  if (!scopeMatches(userScopes, scope)) {
+    return {
+      error: NextResponse.json(
+        { error: `API key does not have required scope: ${scope}` },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return auth;
+}
+
+/**
+ * Require both a specific scope AND a minimum role in a single auth call.
+ * Avoids the double-auth overhead of calling requireScope + requireRole separately.
+ */
+export async function requireScopeAndRole(
+  request: Request,
+  scope: string,
+  minimumRole: Role,
+): Promise<AuthSuccess | AuthError> {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth;
+
+  // Check scope for API key users
+  if (auth.user.authType === 'api-key') {
+    const userScopes = auth.user.scopes ?? [];
+    if (!scopeMatches(userScopes, scope)) {
+      return {
+        error: NextResponse.json(
+          { error: `API key does not have required scope: ${scope}` },
+          { status: 403 },
+        ),
+      };
+    }
+  }
+
+  // Check role hierarchy
+  const userLevel = ROLE_HIERARCHY[auth.user.role] ?? 0;
+  const requiredLevel = ROLE_HIERARCHY[minimumRole];
+  if (userLevel < requiredLevel) {
+    return {
+      error: NextResponse.json(
+        { error: 'Insufficient permissions' },
+        { status: 403 },
       ),
     };
   }

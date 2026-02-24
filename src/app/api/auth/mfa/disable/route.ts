@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { requireAuth } from '@/lib/api-auth';
 import { verifyTotp, decryptSecret } from '@/lib/auth/totp';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireDatabase, getMfaRecord } from '@/lib/auth/mfa-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,24 +27,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json(
-        { error: 'MFA requires a database' },
-        { status: 503 },
-      );
-    }
+    const dbError = requireDatabase();
+    if (dbError) return dbError;
 
     const { db } = await import('@/db');
     const { userMfa } = await import('@/db/schema');
     const { eq } = await import('drizzle-orm');
 
-    const rows = await db
-      .select()
-      .from(userMfa)
-      .where(eq(userMfa.userId, auth.user.id))
-      .limit(1);
-
-    const mfaRecord = rows[0];
+    const mfaRecord = await getMfaRecord(auth.user.id);
     if (!mfaRecord || !mfaRecord.enabledAt) {
       return NextResponse.json(
         { error: 'MFA is not enabled for this user' },

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { checkRateLimit, clearBucket } from '@/lib/security/rate-limiter';
+import { checkRateLimit, clearBucket, getRateLimitHeaders } from '@/lib/security/rate-limiter';
 
 describe('rate-limiter', () => {
   beforeEach(() => {
@@ -50,5 +50,32 @@ describe('rate-limiter', () => {
     expect(blocked.allowed).toBe(false);
     expect(typeof blocked.retryAfter).toBe('number');
     expect(blocked.retryAfter).toBeGreaterThan(0);
+  });
+
+  describe('getRateLimitHeaders', () => {
+    it('reports default limit (60) when no config provided', () => {
+      const result = checkRateLimit('headers-default', { windowMs: 60000, maxRequests: 60 });
+      const headers = getRateLimitHeaders(result);
+      expect(headers['X-RateLimit-Limit']).toBe('60');
+      expect(headers['X-RateLimit-Remaining']).toBe('59');
+    });
+
+    it('reports custom limit when config is provided', () => {
+      const config = { windowMs: 60000, maxRequests: 120 };
+      const result = checkRateLimit('headers-custom', config);
+      const headers = getRateLimitHeaders(result, config);
+      expect(headers['X-RateLimit-Limit']).toBe('120');
+      expect(headers['X-RateLimit-Remaining']).toBe('119');
+    });
+
+    it('includes Retry-After when blocked', () => {
+      const config = { windowMs: 60000, maxRequests: 1 };
+      checkRateLimit('headers-blocked', config);
+      const blocked = checkRateLimit('headers-blocked', config);
+      const headers = getRateLimitHeaders(blocked, config);
+      expect(headers['X-RateLimit-Limit']).toBe('1');
+      expect(headers['X-RateLimit-Remaining']).toBe('0');
+      expect(headers['Retry-After']).toBeDefined();
+    });
   });
 });

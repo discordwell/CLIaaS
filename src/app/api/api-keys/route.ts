@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requireRole, VALID_SCOPES } from '@/lib/api-auth';
 import { createApiKey, listApiKeys } from '@/lib/api-keys';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
@@ -46,6 +46,35 @@ export async function POST(request: NextRequest) {
         { error: 'name is required' },
         { status: 400 },
       );
+    }
+
+    // Validate expiresAt
+    if (expiresAt) {
+      const date = new Date(expiresAt);
+      if (isNaN(date.getTime())) {
+        return NextResponse.json(
+          { error: 'Invalid date format for expiresAt' },
+          { status: 400 },
+        );
+      }
+      if (date <= new Date()) {
+        return NextResponse.json(
+          { error: 'Expiration date must be in the future' },
+          { status: 400 },
+        );
+      }
+    }
+
+    // Validate scopes
+    if (scopes && scopes.length > 0) {
+      const validSet = new Set<string>(VALID_SCOPES);
+      const invalid = scopes.filter(s => !validSet.has(s));
+      if (invalid.length > 0) {
+        return NextResponse.json(
+          { error: `Invalid scopes: ${invalid.join(', ')}` },
+          { status: 400 },
+        );
+      }
     }
 
     const result = await createApiKey({

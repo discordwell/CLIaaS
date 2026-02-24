@@ -4,23 +4,9 @@ import { jwtVerify } from 'jose';
 import { getSecurityHeaders } from '@/lib/security/headers';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/security/rate-limiter';
 import { createLogger } from '@/lib/logger';
+import { getJwtSecret, COOKIE_NAME } from '@/lib/auth';
 
 const logger = createLogger('middleware');
-
-let _jwtSecret: Uint8Array | null = null;
-
-function getJwtSecret(): Uint8Array {
-  if (!_jwtSecret) {
-    const secret = process.env.AUTH_SECRET;
-    if (!secret && process.env.NODE_ENV === 'production') {
-      throw new Error('AUTH_SECRET environment variable is required in production');
-    }
-    _jwtSecret = new TextEncoder().encode(secret || 'cliaas-dev-secret-change-in-production');
-  }
-  return _jwtSecret;
-}
-
-const COOKIE_NAME = 'cliaas-session';
 
 const PUBLIC_PATHS = [
   '/',
@@ -126,7 +112,7 @@ export async function middleware(request: NextRequest) {
         { error: 'Too many requests', retryAfter: result.retryAfter },
         { status: 429 }
       );
-      const rlHeaders = getRateLimitHeaders(result);
+      const rlHeaders = getRateLimitHeaders(result, rateLimitConfig);
       for (const [key, value] of Object.entries(rlHeaders)) {
         rateLimitResponse.headers.set(key, value);
       }

@@ -9,7 +9,7 @@ import { freshdeskUpdateTicket } from "@cli/connectors/freshdesk";
 import { grooveUpdateTicket } from "@cli/connectors/groove";
 import { ticketUpdated, ticketResolved } from "@/lib/events";
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requireScope } from '@/lib/api-auth';
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireAuth(request);
+  const authResult = await requireScope(request, 'tickets:read');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;
@@ -40,7 +40,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireAuth(request);
+  const authResult = await requireScope(request, 'tickets:write');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;

@@ -10,6 +10,9 @@
 import { randomBytes, createHash } from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import type { AuthUser } from '@/lib/api-auth';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api-keys');
 
 const KEY_PREFIX = 'cliaas_';
 
@@ -156,12 +159,12 @@ export async function validateApiKey(rawKey: string): Promise<AuthUser | null> {
   if (row.revokedAt) return null;
   if (row.expiresAt && row.expiresAt < new Date()) return null;
 
-  // Update lastUsedAt (fire and forget)
+  // Update lastUsedAt (fire and forget with logging)
   db.update(apiKeys)
     .set({ lastUsedAt: new Date() })
     .where(eq(apiKeys.id, row.id))
     .then(() => {})
-    .catch(() => {});
+    .catch((err: unknown) => logger.warn({ err }, 'Failed to update lastUsedAt'));
 
   return {
     id: row.createdBy,
@@ -169,5 +172,6 @@ export async function validateApiKey(rawKey: string): Promise<AuthUser | null> {
     role: (row.userRole as 'owner' | 'admin' | 'agent') ?? 'agent',
     workspaceId: row.workspaceId,
     authType: 'api-key',
+    scopes: row.scopes ?? [],
   };
 }

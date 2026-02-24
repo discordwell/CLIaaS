@@ -7,10 +7,10 @@ import { freshdeskCreateTicket } from '@cli/connectors/freshdesk';
 import { grooveCreateTicket } from '@cli/connectors/groove';
 import { ticketCreated } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requireScope } from '@/lib/api-auth';
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireAuth(request);
+  const authResult = await requireScope(request, 'tickets:write');
   if ('error' in authResult) return authResult.error;
 
   const parsed = await parseJsonBody<{
