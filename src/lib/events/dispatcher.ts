@@ -113,9 +113,19 @@ export function dispatch(
       }
     }),
 
-    // 5. AI resolution queue (only for eligible events)
-    Promise.resolve().then(() => {
+    // 5. AI resolution queue (only for eligible events, with quota check)
+    Promise.resolve().then(async () => {
       if (AI_RESOLUTION_EVENTS.has(event) && data.ticketId) {
+        // Check AI call quota before enqueueing
+        if (data.tenantId) {
+          const { checkQuota, incrementUsage } = await import('../billing/usage');
+          const quota = await checkQuota(data.tenantId as string, 'ai_call');
+          if (!quota.allowed) {
+            logger.info({ channel: 'ai-resolution', event, tenantId: data.tenantId }, 'AI quota exceeded, skipping');
+            return;
+          }
+          void incrementUsage(data.tenantId as string, 'ai_call').catch(() => {});
+        }
         void enqueueAIResolution({
           ticketId: data.ticketId as string,
           event,

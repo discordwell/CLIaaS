@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { hashPassword } from '@/lib/password';
 import { createToken, setSessionCookie } from '@/lib/auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { isFounderEligible } from '@/lib/billing/plans';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,10 +51,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create tenant
+    // Create tenant (founder plan for early signups)
+    const plan = isFounderEligible(new Date()) ? 'founder' : 'free';
     const [tenant] = await db
       .insert(schema.tenants)
-      .values({ name: workspaceName, plan: 'free' })
+      .values({ name: workspaceName, plan })
       .returning({ id: schema.tenants.id });
 
     // Create workspace

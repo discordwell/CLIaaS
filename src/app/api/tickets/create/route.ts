@@ -8,10 +8,23 @@ import { grooveCreateTicket } from '@cli/connectors/groove';
 import { ticketCreated } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { requireScope } from '@/lib/api-auth';
+import { checkQuota, incrementUsage } from '@/lib/billing/usage';
 
 export async function POST(request: NextRequest) {
   const authResult = await requireScope(request, 'tickets:write');
   if ('error' in authResult) return authResult.error;
+
+  // Quota enforcement: check ticket creation limit
+  const tenantId = authResult.user.tenantId;
+  if (tenantId) {
+    const quota = await checkQuota(tenantId, 'ticket');
+    if (!quota.allowed) {
+      return NextResponse.json(
+        { error: 'Ticket quota exceeded', current: quota.current, limit: quota.limit },
+        { status: 429 },
+      );
+    }
+  }
 
   const parsed = await parseJsonBody<{
     source: ConnectorName;
@@ -83,6 +96,10 @@ export async function POST(request: NextRequest) {
     }
 
     ticketCreated({ source, subject, ...result });
+    // Fire-and-forget usage increment
+    if (tenantId) {
+      void incrementUsage(tenantId, 'ticket').catch(() => {});
+    }
     return NextResponse.json({ status: 'ok', ...result });
   } catch (err) {
     return NextResponse.json(

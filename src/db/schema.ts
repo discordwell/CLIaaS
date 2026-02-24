@@ -118,10 +118,16 @@ export const tenants = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
     plan: text('plan').notNull().default('free'),
+    stripeCustomerId: text('stripe_customer_id'),
+    stripeSubscriptionId: text('stripe_subscription_id'),
+    stripeSubscriptionStatus: text('stripe_subscription_status'),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
     tenantsNameIdx: uniqueIndex('tenants_name_idx').on(table.name),
+    tenantsStripeCustomerIdx: uniqueIndex('tenants_stripe_customer_idx').on(table.stripeCustomerId),
   }),
 );
 
@@ -813,5 +819,43 @@ export const userMfa = pgTable(
   },
   table => ({
     userMfaUserIdx: uniqueIndex('user_mfa_user_idx').on(table.userId),
+  }),
+);
+
+// ---- Billing: Usage Metrics ----
+
+export const usageMetrics = pgTable(
+  'usage_metrics',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id),
+    period: text('period').notNull(), // 'YYYY-MM'
+    ticketsCreated: integer('tickets_created').notNull().default(0),
+    aiCallsMade: integer('ai_calls_made').notNull().default(0),
+    apiRequestsMade: integer('api_requests_made').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    usageMetricsTenantPeriodIdx: uniqueIndex('usage_metrics_tenant_period_idx').on(
+      table.tenantId,
+      table.period,
+    ),
+  }),
+);
+
+// ---- Billing: Events ----
+
+export const billingEvents = pgTable(
+  'billing_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').references(() => tenants.id),
+    eventType: text('event_type').notNull(),
+    stripeEventId: text('stripe_event_id'),
+    payload: jsonb('payload'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    billingEventsStripeIdx: uniqueIndex('billing_events_stripe_idx').on(table.stripeEventId),
   }),
 );

@@ -78,6 +78,7 @@ export async function getAuthUser(request: Request): Promise<AuthUser | null> {
     email: request.headers.get('x-user-email') || '',
     role: (request.headers.get('x-user-role') || 'agent') as Role,
     workspaceId,
+    tenantId: request.headers.get('x-tenant-id') || undefined,
     authType: 'session',
   };
 }

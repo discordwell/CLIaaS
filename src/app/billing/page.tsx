@@ -1,0 +1,307 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+interface BillingData {
+  plan: string;
+  planName: string;
+  price: number | null;
+  quotas: {
+    ticketsPerMonth: number;
+    aiCallsPerMonth: number;
+    apiRequestsPerMonth: number;
+  };
+  usage: {
+    ticketsCreated: number;
+    aiCallsMade: number;
+    apiRequestsMade: number;
+    period: string;
+  };
+  subscription: {
+    id: string;
+    status: string;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  } | null;
+}
+
+const PLAN_CARDS = [
+  {
+    id: "starter",
+    name: "Starter",
+    price: "$29",
+    features: ["1,000 tickets/mo", "100 AI calls/mo", "5,000 API requests/mo"],
+  },
+  {
+    id: "pro",
+    name: "Pro",
+    price: "$99",
+    features: [
+      "10,000 tickets/mo",
+      "1,000 AI calls/mo",
+      "25,000 API requests/mo",
+    ],
+  },
+  {
+    id: "enterprise",
+    name: "Enterprise",
+    price: "Custom",
+    features: ["Unlimited everything", "Dedicated support", "SLA guarantees"],
+  },
+];
+
+function UsageMeter({
+  label,
+  current,
+  limit,
+}: {
+  label: string;
+  current: number;
+  limit: number;
+}) {
+  const pct = limit === Infinity ? 0 : Math.min((current / limit) * 100, 100);
+  const isNearLimit = pct >= 80;
+  const displayLimit =
+    limit === Infinity ? "unlimited" : limit.toLocaleString();
+
+  return (
+    <div>
+      <div className="flex items-center justify-between font-mono text-xs uppercase">
+        <span className="font-bold">{label}</span>
+        <span className={isNearLimit ? "text-red-600 font-bold" : "text-zinc-500"}>
+          {current.toLocaleString()} / {displayLimit}
+        </span>
+      </div>
+      <div className="mt-2 h-3 w-full border-2 border-zinc-950 bg-zinc-100">
+        <div
+          className={`h-full transition-all ${
+            isNearLimit ? "bg-red-500" : "bg-zinc-950"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function BillingPage() {
+  const [data, setData] = useState<BillingData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/billing")
+      .then((r) => r.json())
+      .then(setData)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleCheckout = async (planId: string) => {
+    setActionLoading(true);
+    const res = await fetch("/api/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: planId }),
+    });
+    const result = await res.json();
+    if (result.url) {
+      window.location.href = result.url;
+    }
+    setActionLoading(false);
+  };
+
+  const handlePortal = async () => {
+    setActionLoading(true);
+    const res = await fetch("/api/billing/portal", { method: "POST" });
+    const result = await res.json();
+    if (result.url) {
+      window.location.href = result.url;
+    }
+    setActionLoading(false);
+  };
+
+  if (loading) {
+    return (
+      <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
+        <div className="border-2 border-zinc-950 bg-white p-8">
+          <p className="font-mono text-sm text-zinc-500">Loading billing...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!data) {
+    return (
+      <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
+        <div className="border-2 border-zinc-950 bg-white p-8">
+          <p className="font-mono text-sm text-red-600">
+            Failed to load billing data.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  const isFounder = data.plan === "founder";
+  const isFree = data.plan === "free";
+  const isPaid = data.plan === "starter" || data.plan === "pro";
+
+  return (
+    <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
+      {/* Header */}
+      <header className="border-2 border-zinc-950 bg-white p-8 sm:p-12">
+        <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-950">
+          Billing
+        </p>
+        <div className="mt-4 flex items-center gap-4">
+          <h1 className="text-4xl font-bold">{data.planName} Plan</h1>
+          {isFounder && (
+            <span className="border-2 border-amber-500 bg-amber-50 px-3 py-1 font-mono text-xs font-bold uppercase text-amber-700">
+              Founder
+            </span>
+          )}
+        </div>
+        <p className="mt-4 text-lg font-medium text-zinc-600">
+          {isFounder
+            ? "You locked in Pro-level access for free as an early adopter."
+            : data.price === null
+              ? "Custom enterprise pricing."
+              : data.price === 0
+                ? "Free tier — upgrade to unlock more capacity."
+                : `$${data.price}/mo — manage your subscription below.`}
+        </p>
+      </header>
+
+      {/* Usage */}
+      <section className="mt-6 border-2 border-zinc-950 bg-white p-8">
+        <h2 className="font-mono text-xs font-bold uppercase tracking-[0.2em]">
+          Current Usage
+          {data.usage.period && (
+            <span className="ml-3 text-zinc-400">{data.usage.period}</span>
+          )}
+        </h2>
+        <div className="mt-6 space-y-5">
+          <UsageMeter
+            label="Tickets"
+            current={data.usage.ticketsCreated}
+            limit={data.quotas.ticketsPerMonth}
+          />
+          <UsageMeter
+            label="AI Calls"
+            current={data.usage.aiCallsMade}
+            limit={data.quotas.aiCallsPerMonth}
+          />
+          <UsageMeter
+            label="API Requests"
+            current={data.usage.apiRequestsMade}
+            limit={data.quotas.apiRequestsPerMonth}
+          />
+        </div>
+      </section>
+
+      {/* Subscription Management */}
+      {data.subscription && (
+        <section className="mt-6 border-2 border-zinc-950 bg-white p-8">
+          <h2 className="font-mono text-xs font-bold uppercase tracking-[0.2em]">
+            Subscription
+          </h2>
+          <div className="mt-4 space-y-2 font-mono text-sm">
+            <p>
+              <span className="text-zinc-500">Status:</span>{" "}
+              <span className="font-bold">{data.subscription.status}</span>
+            </p>
+            {data.subscription.currentPeriodEnd && (
+              <p>
+                <span className="text-zinc-500">Renews:</span>{" "}
+                {new Date(data.subscription.currentPeriodEnd).toLocaleDateString()}
+              </p>
+            )}
+            {data.subscription.cancelAtPeriodEnd && (
+              <p className="text-red-600 font-bold">
+                Cancels at end of period
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handlePortal}
+            disabled={actionLoading}
+            className="mt-6 border-2 border-zinc-950 bg-zinc-950 px-6 py-3 font-mono text-sm font-bold uppercase text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {actionLoading ? "Loading..." : "Manage Subscription"}
+          </button>
+        </section>
+      )}
+
+      {/* Upgrade Cards (show for free/founder or if no subscription) */}
+      {(isFree || isFounder || !isPaid) && (
+        <section className="mt-6">
+          <h2 className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-950">
+            {isFree ? "Upgrade Your Plan" : "Available Plans"}
+          </h2>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            {PLAN_CARDS.map((plan) => {
+              const isCurrent = data.plan === plan.id;
+              return (
+                <div
+                  key={plan.id}
+                  className={`border-2 bg-white p-6 ${
+                    isCurrent
+                      ? "border-zinc-950 ring-2 ring-zinc-950"
+                      : "border-zinc-300"
+                  }`}
+                >
+                  <h3 className="font-mono text-xs font-bold uppercase tracking-[0.2em]">
+                    {plan.name}
+                  </h3>
+                  <p className="mt-2 text-3xl font-bold">
+                    {plan.price}
+                    {plan.price !== "Custom" && (
+                      <span className="text-sm font-normal text-zinc-500">
+                        /mo
+                      </span>
+                    )}
+                  </p>
+                  <ul className="mt-4 space-y-2">
+                    {plan.features.map((f) => (
+                      <li
+                        key={f}
+                        className="font-mono text-xs text-zinc-600"
+                      >
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  {isCurrent ? (
+                    <p className="mt-6 font-mono text-xs font-bold uppercase text-zinc-400">
+                      Current Plan
+                    </p>
+                  ) : plan.id === "enterprise" ? (
+                    <a
+                      href="mailto:hello@cliaas.com"
+                      className="mt-6 inline-block border-2 border-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase transition-colors hover:bg-zinc-950 hover:text-white"
+                    >
+                      Contact Sales
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => handleCheckout(plan.id)}
+                      disabled={actionLoading || isFounder}
+                      className="mt-6 border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
+                    >
+                      {isFounder
+                        ? "Founder (Pro-level free)"
+                        : actionLoading
+                          ? "Loading..."
+                          : "Upgrade"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}

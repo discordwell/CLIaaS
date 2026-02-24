@@ -1,5 +1,53 @@
 # Session Summaries
 
+## 2026-02-24T17:00Z — Session 35: WASM Comparison Test — Menu Navigation Fix
+- Fixed WASM Red Alert rendering in headless Playwright for visual comparison with TS engine
+- Root cause: `specialHTMLTargets[0]` initialized to 0, preventing Emscripten event registration
+- Key discovery: page-dispatched keyboard events BLOCK the WASM main thread permanently (ASYNCIFY disruption)
+- Solution: Playwright CDP keyboard.press() one at a time, wait for game to become responsive between presses
+- Game navigates: "CHOOSE YOUR SIDE" → Allied movie → mission briefing (stuck at "OK" button needing mouse click)
+- Screenshot variance: 4 unique screens across 30 captures (was ALL IDENTICAL before)
+- Both tests pass in 2.3 minutes, TS engine captures 30 QA screenshots, WASM captures 30 varied screenshots
+- Files: original.html (autoplay coordination, screen detection), test-compare.ts (CDP keyboard navigation)
+
+## 2026-02-25T00:00Z — Session 34: Week 4 Billing — Stripe Integration
+- Implemented full Stripe billing system: 10 new files, ~10 modified files, 31 new tests
+- Phase 1: Added `stripe` SDK (v20.3.1), env placeholders in .env.example
+- Phase 2: Extended tenants table with 5 Stripe fields, added `usage_metrics` + `billing_events` tables
+- Phase 3: Billing library (5 modules): plans.ts, stripe.ts, usage.ts, checkout.ts, index.ts
+- Phase 4: 4 API routes — GET /api/billing, POST checkout/portal, Stripe webhook with signature verification
+- Phase 5: Quota enforcement on ticket creation (429) and AI resolution (skip), usage metering
+- Phase 6: /billing page (brutalist zinc design), founder badge, usage meters, plan cards, AppNav link
+- Founder plan: Pro-level quotas free forever for tenants created before Feb 28 2026 11:59:59 PM PST
+- Signup route updated: `isFounderEligible(new Date()) ? 'founder' : 'free'`
+- 684 tests passing (up from 653), typecheck clean, build passes
+- Updated ARCHITECTURE.md with billing section, 55 DB tables, 30 pages
+
+## 2026-02-24T18:00Z — Session 30: 5-Phase Code Review Hardening + Enterprise Roadmap
+- Implemented 5-phase hardening plan from code review findings (8 new files, +1148/-448 LOC)
+- Phase 1: Automation engine now applies side effects (notifications, webhooks, changes)
+- Phase 2: SCIM hardened — HMAC timing-safe auth, RFC 7644 PatchOp, store consolidation
+- Phase 3: Single connector registry replaces 3 fragmented metadata sources
+- Phase 4: Magic-link cleanup, approval queue dedup, ROI tracker fix
+- Phase 5: All 38 routes migrated to parseJsonBody utility
+- Code review: 0 critical issues, fixed PatchOp validation + SCIM parseJsonBody
+- 533 tests passing (+36 new), typecheck clean, deployed to cliaas.com (commit 0194774)
+- Enterprise readiness assessment: identified 4 non-negotiable blockers (auth, billing, job queue, secrets)
+- Stored 6-week enterprise roadmap in ARCHITECTURE.md
+- **Next**: Week 1 plan — auth enforcement across 101 routes, API key CRUD, MFA/TOTP
+
+## 2026-02-24T15:22Z — Session 29: 6-Phase Platform Activation
+- Implemented full 6-phase plan to activate dormant infrastructure (56 files, +3073 LOC)
+- Phase 0: Fixed 9 lint errors (require→import, any→Record, setState-in-effect, prefer-const)
+- Phase 1: Wired all 10 connectors into web/API/DB (was 4), added 4 providers to DB enum, 21 connector tests
+- Phase 2: Wired automation engine to event dispatcher, created executor/scheduler/4 API routes, 13 tests
+- Phase 3: AI resolution pipeline with confidence routing, approval queue, ROI tracker, 4 API routes, 15 tests
+- Phase 4: Magic-link portal auth, SCIM 2.0 provisioning (Users/Groups), audit evidence export, 17 tests
+- Phase 5: 7 MCP write tools with confirmation pattern, scope controls, audit logging, 8 tests
+- Fixed regex ordering bug in extractExternalId (ky matched before kyc)
+- Code review: 2 HIGH issues (regex order + SCIM PatchOp), 5 MEDIUM, 8 LOW correctness; 13 refactoring findings
+- 497 tests passing, deployed to cliaas.com (commit 259a734)
+
 ## 2026-02-23T12:00Z — Session 28: Full Code Review + ARCHITECTURE.md
 - Implemented 4 enterprise blocker features in previous session: Event Pipeline Wiring, Voice/Phone Channel, PWA/Mobile, Sandbox Environments
 - Fixed 17 code review issues: path traversal in sandbox (CRITICAL), IVR config validation, escapeXml dedup, push.ts global singleton, voice-store load timing, service worker API caching removed, etc.
@@ -18,79 +66,6 @@
 - Non-breaking: all existing synthesis kept intact as fallback; game works identically without extracted audio
 - Added /public/ra/audio/ to .gitignore (generated binary files)
 - Sources: SOUNDS.MIX (23 SFX), SPEECH.MIX (16 EVA voices), Aftermath (ANTBITE, ANTDIE, BUZZY1, TANK01, STAVCMDR/STAVCRSE/STAVMOV/STAVYES)
-
-## 2026-02-24T07:45Z — Session 26: Bug Fixes + RA Soundtrack Implementation
-- Resolved all 6 bugs from Session 25 audit: Bug 5 fixed (HUNT pathfinding stagger), Bugs 1/3/4 already fixed in uncommitted diff, Bugs 2/6 verified as non-bugs
-- Committed 9195b3d: bug audit fixes (pathfinding lag, AREA_GUARD cleanup, artillery vs structures)
-- Downloaded Red Alert soundtrack from Internet Archive (Frank Klepacki, 1996, CC BY-NC-ND 4.0)
-- 15 MP3 tracks, 122MB total, stored in public/ra/music/ (gitignored)
-- Created download script: scripts/download-ra-music.sh
-- Implemented MusicPlayer class in audio.ts: HTML5 Audio streaming, shuffled playlist, crossfade, probe-with-deferred-play
-- Integrated into game lifecycle: auto-start, pause/resume, stop on win/lose, N key skip
-- Track name HUD display: bottom-right, fades after 4s, AUDIO section in F1 help
-- Code reviewed and fixed: crossfade memory leak, probe race condition, volume/mute sync for fading track
-- Committed d9e1f85, pushed
-- **TODO**: Music files need to be on VPS for live site (run download-ra-music.sh on server)
-
-## 2026-02-24T02:00Z — Session 25: Transport Fix + Bug Audit (INTERRUPTED — bugs queued)
-- Committed f506c8a: Fix transport passenger lifecycle (passengers vanished after 3s because alive=false + entity cleanup)
-- Ran 2 independent code reviews + 2 audits, cross-referenced findings
-- **VERIFIED REAL BUGS still needing fixes (prioritized):**
-
-### BUG 1 — CRITICAL: Mission timer ticks 15x too slow
-- `index.ts` ~line 2590: `this.missionTimer--` inside `processTriggers()` which runs every 15 ticks
-- Timer is SET in game ticks (`result.setTimer * TIME_UNIT_TICKS`) but decremented by 1 per 15 ticks
-- **Fix:** Change `this.missionTimer--` to `this.missionTimer -= 15`
-
-### BUG 2 — HIGH: enemyUnitsAlive counts neutral civilians as enemies
-- `index.ts` ~line 3296: `if (e.alive && !e.isPlayerUnit && !e.isCivilian) enemyUnitsAlive++`
-- Wait — this line ALREADY excludes civilians with `!e.isCivilian`. Need to verify if there's a SECOND count elsewhere.
-- Check line ~2575 in updateHunt for a separate count that may NOT exclude civilians.
-
-### BUG 3 — MEDIUM: AREA_GUARD doesn't clear target/targetStructure on retreat
-- `index.ts` ~line 2712: sets `mission=MOVE, moveTarget=origin` but doesn't clear `entity.target` or `entity.targetStructure`
-- **Fix:** Add `entity.target = null; entity.targetStructure = null;` before line 2712
-
-### BUG 4 — MEDIUM: Artillery minRange not enforced vs structures
-- `updateAttackStructure()` at ~line 2739 has no minRange check
-- **Fix:** Add minRange check similar to updateAttack entity version
-
-### BUG 5 — LOW: HUNT pathfinding global recalc causes lag spike
-- `index.ts` ~line 2557: `this.tick % 15 === 0` recalcs ALL hunting units on same tick
-- **Fix:** Change to `(this.tick + entity.id) % 15 === 0` to stagger
-
-### BUG 6 — LOW: Team GUARD/IDLE duration decrements by hardcoded 8
-- `index.ts` ~line 1844: `entity.teamMissionWaiting -= 8` instead of actual elapsed ticks
-- Minor timing inaccuracy, not critical
-
-### FALSE POSITIVES from code reviews (DO NOT FIX):
-- hasTurret missing TRAN/LST: WRONG — entity.ts line 175 already excludes both
-- Dead loop in civilian evacuation: Need to verify — line 376-378 area
-- BUILDING_TYPES ordering: Already validated in session 21 against RA source
-- Semi-persistent trigger playerEntered not reset: Check if this actually matters — triggers with persistence=1 skip when `trigger.fired && persistence <= 1` (line 3307), so playerEntered flag is irrelevant after firing
-- Duplicate TMISSION constants: True but harmless, not a bug
-- Cell trigger per-unit activation: This IS correct behavior — each unit should independently trigger cell triggers
-
-### UNVERIFIED (check before fixing):
-- Civilian flee target can be out-of-bounds (line 1352-1363): Minor, findPath handles it
-- structureTypes in trigger state doesn't distinguish houses: Check if ant scenarios need house-specific building checks
-- TEVENT_DESTROYED only tracks structures not units: Check if any ant scenario attaches triggers to units
-
-## 2026-02-24T00:00Z — Session 23: Visual Fidelity & Combat Polish — Turrets, Retaliation, Audio, Pathfinding
-- GUN/SAM structure turret rotation: 8-dir facing toward targets, BODY_SHAPE frame selection
-- GUN: 128-frame layout (32 rotation x 2 fire x 2 damage), firingFlash muzzle effect
-- SAM: 68-frame layout (34 normal + 34 damaged), turret tracks targets
-- Vehicle death animation fix: freeze at body frame instead of showing turret frames
-- Unit retaliation: idle/unengaged enemies counter-attack when shot (triggerRetaliation)
-- Infantry scatter: 40% chance to dodge away from direct bullet hits (scatterInfantry)
-- Splash damage retaliation: units hit by AOE retarget the attacker
-- 3 missing audio synths: eva_reinforcements, eva_mission_warning, tesla_charge
-- Napalm/Sniper weapon sound/projectile/muzzle color mappings
-- Weapon-aware ant effects: ANT3 shows fire burst with Napalm (not hardcoded tesla)
-- Water crate override wired up in spawnCrate (was dead code)
-- Terrain-aware pathfinding: roads cost less, trees cost more (A* speed multiplier)
-- Structure explosion damage: 2-cell blast radius ~100 damage when buildings destroyed
-- 5 commits pushed, all type check clean, code reviewed
 
 
 # Key Findings

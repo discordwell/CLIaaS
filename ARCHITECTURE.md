@@ -8,7 +8,7 @@
 
 | Metric | Value |
 |--------|-------|
-| Pages | 29 (Next.js App Router) |
+| Pages | 30 (Next.js App Router) |
 | API Routes | 101 |
 | Components | 14 shared React components |
 | Library modules | 58 (`src/lib/`) |
@@ -18,10 +18,10 @@
 | MCP tools | 18 (across 6 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 53 (Drizzle/PostgreSQL) |
-| Tests | 38 files, ~5,300 LOC |
-| Source LOC | ~47,600 (excl. Easter Egg + tests) |
-| Dependencies | 23 prod + 19 dev |
+| DB tables | 55 (Drizzle/PostgreSQL) |
+| Tests | 78 files, ~6,000 LOC |
+| Source LOC | ~49,000 (excl. Easter Egg + tests) |
+| Dependencies | 24 prod + 19 dev |
 
 ---
 
@@ -48,6 +48,7 @@
 │  Tickets │ Webhooks │ Plugins │ SSE │ Channels │ Auth        │
 │  SLA     │ CSAT     │ KB      │ AI  │ Sandbox  │ Audit      │
 │  Events  │ Push     │ SOC2    │ SSO │ Realtime │ Security   │
+│  Billing │ Queue    │ Metrics │     │          │            │
 └────────┬──────────────────┬──────────────────┬──────────────┘
          │                  │                  │
          ▼                  ▼                  ▼
@@ -142,6 +143,9 @@ Each domain has a dedicated store in `src/lib/`:
 ### RAG (2)
 `rag_chunks` (vector(1536)), `rag_import_jobs`
 
+### Billing (2)
+`usage_metrics` (tenant per-period usage counters), `billing_events` (Stripe webhook audit log)
+
 ### Key Indexes
 - `tickets_workspace_status_idx` — queue queries
 - `messages_conversation_idx` — thread ordering
@@ -159,7 +163,7 @@ Ticket handler → dispatch()
                     ├─→ executePluginHook()    (plugin registry, sandboxed execution)
                     ├─→ eventBus.emit()        (SSE pub/sub, real-time UI)
                     ├─→ evaluateAutomation()   (time/event-based rules)
-                    └─→ enqueueAIResolution()  (AI agent queue, ticket.created/message.created)
+                    └─→ enqueueAIResolution()  (AI agent queue, quota-gated, ticket.created/message.created)
 ```
 
 - **Canonical events**: `ticket.created`, `ticket.updated`, `ticket.resolved`, `message.created`, `csat.submitted`, `sla.breached`
@@ -376,6 +380,7 @@ Each connector exports: `verify`, `export`, `create`, `update`, `reply`, `list`.
 | `/channels` | Email, SMS, WhatsApp, Voice, Social config |
 | `/ai` | AI assistant, triage, sentiment |
 | `/analytics` | Charts, CSAT, response times |
+| `/billing` | Plan management, usage meters, Stripe checkout |
 | `/automation` | Rules, triggers, macros |
 | `/sla` | SLA policy management |
 | `/integrations` | Connector configuration |
@@ -521,12 +526,16 @@ See `.env.example` for full reference. Key categories:
 - Database backup: `scripts/db-backup.sh` (pg_dump + 7-day rotation)
 - Health endpoint enhanced with DB/Redis/queue checks
 
-### Week 4: Billing
-- Stripe Checkout integration
-- 3 pricing tiers: Starter, Pro, Enterprise
-- Usage metering (tickets/month, AI calls, API requests)
-- Billing management portal (upgrade, downgrade, invoices)
-- Webhook for payment events (failed charges, subscription changes)
+### Week 4: Billing ✅
+- Stripe Checkout integration (`stripe` SDK, webhook signature verification)
+- 5 plan tiers: Founder (early-adopter promo), Free, Starter ($29), Pro ($99), Enterprise (custom)
+- Founder plan: Pro-level quotas for free, locked in for tenants created before Feb 28 2026
+- Usage metering: tickets/month, AI calls, API requests (`usage_metrics` table, UPSERT with period)
+- Quota enforcement: ticket creation (429 on limit), AI resolution (skipped on limit), API metering
+- Billing management: `/billing` page (usage meters, plan cards, subscription management)
+- Stripe webhook: `checkout.session.completed`, `subscription.updated/deleted`, `invoice.payment_failed`
+- Idempotent event processing via `billing_events.stripe_event_id` unique index
+- Demo-safe: all billing functions no-op when `DATABASE_URL` or `STRIPE_SECRET_KEY` unset
 
 ### Week 5: Compliance & Security
 - PostgreSQL Row-Level Security (RLS) for multi-tenant isolation

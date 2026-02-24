@@ -44,6 +44,8 @@ const PUBLIC_PATHS = [
   '/api/channels/twitter/webhook',
   // Zendesk webhook (has its own ZENDESK_WEBHOOK_SECRET verification)
   '/api/zendesk/webhook',
+  // Stripe webhook (verified via stripe-signature header)
+  '/api/stripe/webhook',
 ];
 
 const API_KEY_PREFIX = 'cliaas_';
@@ -70,7 +72,7 @@ function applySecurityHeaders(response: NextResponse): void {
 }
 
 // Internal headers that must not be set by clients
-const INTERNAL_HEADERS = ['x-auth-type', 'x-user-id', 'x-workspace-id', 'x-user-role', 'x-user-email'];
+const INTERNAL_HEADERS = ['x-auth-type', 'x-user-id', 'x-workspace-id', 'x-user-role', 'x-user-email', 'x-tenant-id'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -197,6 +199,9 @@ export async function middleware(request: NextRequest) {
     requestHeaders.set('x-workspace-id', payload.workspaceId as string);
     requestHeaders.set('x-user-role', (payload.role as string) || '');
     requestHeaders.set('x-user-email', (payload.email as string) || '');
+    if (payload.tenantId) {
+      requestHeaders.set('x-tenant-id', payload.tenantId as string);
+    }
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     applySecurityHeaders(response);
     return response;

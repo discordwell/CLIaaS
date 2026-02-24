@@ -14,6 +14,7 @@ const navLinks = [
   { href: "/integrations", label: "Integrations" },
   { href: "/security", label: "Security" },
   { href: "/enterprise", label: "Enterprise" },
+  { href: "/billing", label: "Billing" },
   { href: "/docs", label: "Docs" },
 ];
 
