@@ -50,7 +50,7 @@ describe('Home page', () => {
 
   it('renders the terminal demo section', () => {
     render(<Home />);
-    expect(screen.getByText('claude code')).toBeInTheDocument();
+    expect(screen.getByText('Claude Code')).toBeInTheDocument();
   });
 
   it('renders the MCP server section', () => {

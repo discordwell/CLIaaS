@@ -174,22 +174,33 @@ function MarketingHome() {
 
       {/* ── Terminal Demo ── */}
       <section className="mt-8 border-2 border-line bg-zinc-950 p-6 text-zinc-100 sm:p-10">
-        <div className="mb-6 flex items-center gap-3 border-b-2 border-zinc-800 pb-4">
-          <div className="flex gap-1.5">
-            <span className="block h-3 w-3 rounded-full bg-zinc-700" />
-            <span className="block h-3 w-3 rounded-full bg-zinc-700" />
-            <span className="block h-3 w-3 rounded-full bg-zinc-700" />
+        {/* Claude Code header — mascot + version + model + dir */}
+        <div className="mb-6 flex items-start gap-3 border-b-2 border-zinc-800 pb-5">
+          {/* Pixel mascot */}
+          <svg viewBox="0 0 16 16" className="mt-0.5 h-8 w-8 shrink-0" aria-hidden="true">
+            <rect x="5" y="0" width="2" height="2" fill="#d97706" />
+            <rect x="9" y="0" width="2" height="2" fill="#d97706" />
+            <rect x="5" y="2" width="6" height="2" fill="#d97706" />
+            <rect x="3" y="4" width="10" height="2" fill="#d97706" />
+            <rect x="3" y="6" width="10" height="4" fill="#b45309" />
+            <rect x="5" y="7" width="2" height="2" fill="#1e1e1e" />
+            <rect x="9" y="7" width="2" height="2" fill="#1e1e1e" />
+            <rect x="3" y="10" width="10" height="4" fill="#d97706" />
+            <rect x="3" y="14" width="4" height="2" fill="#92400e" />
+            <rect x="9" y="14" width="4" height="2" fill="#92400e" />
+          </svg>
+          <div className="font-mono text-xs leading-relaxed">
+            <p><span className="font-bold text-zinc-200">Claude Code</span> <span className="text-zinc-500">v2.1.52</span></p>
+            <p className="text-zinc-500">Opus 4.6 · Claude Max</p>
+            <p className="text-zinc-500">~/Support/Zendesk/FML</p>
           </div>
-          <p className="font-mono text-xs font-bold uppercase tracking-widest text-zinc-500">
-            claude code
-          </p>
         </div>
         <pre className="overflow-x-auto font-mono text-sm leading-[1.8] text-zinc-300">
 {/* ── Turn 1: Install ── */}
-<span className="text-blue-400">{"❯ "}hi Claude, install cliaas</span>{"\n"}
+<span className="text-blue-400">{"● "}hi Claude, install cliaas</span>{"\n"}
 {"\n"}
-{"  "}<span className="text-zinc-500">Explore</span>(<span className="text-zinc-400">Find CLIaaS install method</span>) <span className="text-zinc-600">Haiku 4.5</span>{"\n"}
-{"  "}<span className="text-green-400">Done</span> <span className="text-zinc-600">(14 tool uses · 43.6k tokens · 33s)</span>{"\n"}
+{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Explore</span>(<span className="text-zinc-400">Find CLIaaS install method</span>) <span className="text-zinc-600">Haiku 4.5</span>{"\n"}
+{"  "}<span className="text-green-400">●</span> <span className="text-green-400">Done</span> <span className="text-zinc-600">(14 tool uses · 43.6k tokens · 33s)</span>{"\n"}
 {"\n"}
 {"  "}<span className="text-emerald-400">Bash</span>(<span className="text-zinc-400">npm install -g cliaas</span>){"\n"}
 {"    "}<span className="text-zinc-500">added 1 package in 3s</span>{"\n"}
@@ -199,22 +210,24 @@ function MarketingHome() {
 {"  "}when working in this project.{"\n"}
 {"\n"}
 {/* ── Turn 2: Setup ── */}
-<span className="text-blue-400">{"❯ "}okay now set up byoc locally</span>{"\n"}
+<span className="text-blue-400">{"● "}okay now set up byoc locally</span>{"\n"}
 {"\n"}
-{"  "}<span className="text-emerald-400">Bash</span>(<span className="text-zinc-400">cliaas setup wizard</span>){"\n"}
+{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Read</span>(<span className="text-zinc-400">WIZARD/claude.md</span>){"\n"}
+{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Bash</span>(<span className="text-zinc-400">cliaas setup init</span>){"\n"}
 {"    "}<span className="text-green-400">✓</span> PostgreSQL connected (localhost:5432){"\n"}
 {"    "}<span className="text-green-400">✓</span> Created database &apos;cliaas&apos;{"\n"}
 {"    "}<span className="text-green-400">✓</span> Ran 42 migrations{"\n"}
-{"    "}<span className="text-green-400">✓</span> LLM provider: claude (ANTHROPIC_API_KEY set){"\n"}
+{"    "}<span className="text-green-400">✓</span> LLM provider: openai (OPENAI_API_KEY set){"\n"}
 {"    "}<span className="text-zinc-500">+2 lines (ctrl+e to expand)</span>{"\n"}
 {"\n"}
-{"  "}Your BYOC instance is ready. Database, migrations, and{"\n"}
-{"  "}LLM provider are all configured.{"\n"}
+{"  "}Your BYOC instance is ready. I followed the setup{"\n"}
+{"  "}instructions in WIZARD/claude.md — database, migrations,{"\n"}
+{"  "}and LLM provider are all configured.{"\n"}
 {"\n"}
 {/* ── Turn 3: Sync ── */}
-<span className="text-blue-400">{"❯ "}cool my Zendesk API key is •••••••• download all my tickets</span>{"\n"}
+<span className="text-blue-400">{"● "}cool my Zendesk API key is •••••••• download all my tickets</span>{"\n"}
 {"\n"}
-{"  "}<span className="text-emerald-400">Bash</span>(<span className="text-zinc-400">cliaas sync pull zendesk --full</span>){"\n"}
+{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Bash</span>(<span className="text-zinc-400">cliaas sync pull zendesk --full</span>){"\n"}
 {"    "}<span className="text-green-400">✓</span> 2,847 tickets synced (4.2s){"\n"}
 {"    "}<span className="text-green-400">✓</span> 11,923 messages imported{"\n"}
 {"    "}<span className="text-green-400">✓</span> Next sync: incremental (cursor saved){"\n"}
@@ -428,8 +441,8 @@ function MarketingHome() {
         </div>
 
         <p className="mt-4 text-xs text-muted">
-          * Free forever if you sign up before the Ides of March (March 15, 2026)
-          and either use an integration or process 10+ tickets.
+          * Must sign up, install, and migrate or process at least 10 tickets by
+          March 15, 2026, 11:59 PM PST
         </p>
       </section>
 
