@@ -1,4 +1,5 @@
 import Link from "next/link";
+import FitText from "@/components/FitText";
 
 /**
  * Detect BYOC mode: CLIAAS_MODE=local means self-hosted instance.
@@ -122,12 +123,12 @@ function MarketingHome() {
 
       {/* ── Hero ── */}
       <header className="border-2 border-line bg-panel p-8 sm:p-14">
-        <p className="font-mono text-sm font-bold uppercase tracking-widest text-muted">
-          AI lives in the command line
-        </p>
-        <h1 className="mt-6 max-w-4xl text-4xl font-bold leading-[1.05] sm:text-6xl lg:text-7xl">
-          Now, so does your helpdesk.
-        </h1>
+        <FitText
+          lines={["AI lives in the command line.", "Now, so does your helpdesk."]}
+          maxSize={96}
+          minSize={16}
+          className="mt-2"
+        />
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted">
           Import tickets from Zendesk, Intercom, Freshdesk and more.
           Triage, draft replies, and manage your queue from the CLI, an MCP
