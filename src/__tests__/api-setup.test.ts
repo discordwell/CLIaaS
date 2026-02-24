@@ -17,6 +17,23 @@ describe('Setup API route', () => {
   // ── POST /api/setup ─────────────────────────────────────────────────────
 
   describe('POST /api/setup', () => {
+    it('rejects requests from non-localhost', async () => {
+      const { POST } = await import('@/app/api/setup/route');
+      const req = new Request('https://example.com/api/setup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          host: 'example.com',
+        },
+        body: JSON.stringify({
+          databaseUrl: 'postgresql://localhost/cliaas',
+          llmProvider: 'claude',
+        }),
+      });
+      const res = await POST(req as any);
+      expect(res.status).toBe(403);
+    });
+
     it('returns 400 when body is missing databaseUrl', async () => {
       const { POST } = await import('@/app/api/setup/route');
       const req = buildPostRequest('/api/setup', {

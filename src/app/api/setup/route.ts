@@ -22,8 +22,23 @@ interface SetupPayload {
  * Next.js API routes run in a sandboxed server context. File writes
  * are handled by the CLI install script. This route validates the
  * setup parameters and tests database connectivity.
+ *
+ * SECURITY: This endpoint only accepts connections from localhost to
+ * prevent SSRF attacks via user-supplied database URLs. It is intended
+ * for local BYOC setup only.
  */
 export async function POST(request: NextRequest) {
+  // Gate to localhost only — prevents SSRF via user-supplied database URLs
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  const host = request.headers.get('host') ?? (request.url ? new URL(request.url).host : '');
+  const isLocalhost = host.startsWith('localhost') || host.startsWith('127.0.0.1') || host.startsWith('[::1]');
+  const isForwardedFromRemote = forwardedFor && !['127.0.0.1', '::1', 'localhost'].includes(forwardedFor.split(',')[0].trim());
+  if (!isLocalhost || isForwardedFromRemote) {
+    return NextResponse.json(
+      { error: 'Setup endpoint is only available from localhost' },
+      { status: 403 },
+    );
+  }
   let body: SetupPayload;
 
   try {

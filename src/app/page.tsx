@@ -7,9 +7,8 @@ import Link from "next/link";
  */
 function isByocMode(): boolean {
   const mode = process.env.CLIAAS_MODE;
-  if (mode === 'local') return true;
-  if (!mode && process.env.DATABASE_URL) return true;
-  return false;
+  // Only local mode is BYOC — db/remote/hybrid modes have their own UX
+  return mode === 'local';
 }
 
 function ByocHome() {

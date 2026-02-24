@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-02-25T06:00Z — Session 37: Tier-Aware Architecture Build — ALL 6 PHASES COMPLETE
+- Completed Phases 2-6 (Phase 1 done in Session 36)
+- Phase 2: RemoteProvider with auto-pagination, error handling, `config set-mode` CLI command, 2 new API endpoints, 47 tests
+- Phase 3: Sync engine (cli/sync/engine.ts, worker.ts), CLI commands (sync run/start/status), MCP tools (sync_status, sync_trigger), 10 tests
+- Phase 4: Feature matrix (10 features × 6 tiers), FeatureGate component, 5 premium pages gated, byoc plan, 29 tests
+- Phase 5: HybridProvider (local DB + outbox), sync_outbox/sync_conflicts tables, conflict detection (cli/sync/conflict.ts), hybrid sync ops (pull/push/conflicts/resolve), 3 new MCP tools (sync_pull/push/conflicts), 29 tests
+- Phase 6: install-byoc.sh (interactive wizard), WIZARD/ folder (claude.md, agents.md, TROUBLESHOOTING.md), .mcp.json.example, /setup page + /api/setup route, BYOC mode detection on landing page, 19 tests
+- Final stats: 910 tests passing, 0 failures, TypeScript clean, 30 MCP tools, 59 DB tables
+- Phases 2/3/4 ran as parallel background agents, then 5/6 ran in parallel
+- Landing page rewritten: split into ByocHome (BYOC mode) + MarketingHome (hosted mode)
+
+## 2026-02-25T04:00Z — Session 36: Tier-Aware Architecture Build (Phase 1)
+- Phase 1 COMPLETE: DataProvider interface + factory pattern
+  - `src/lib/data-provider/` — types.ts, jsonl-provider.ts, db-provider.ts, remote-provider.ts (stub), hybrid-provider.ts (stub), index.ts
+  - Rewired `cli/mcp/util.ts` + `src/lib/data.ts` to use DataProvider
+  - Updated all 7 MCP tool files + resources + LLM providers
+  - 14 unit tests, TypeScript clean
+
 ## 2026-02-24T17:00Z — Session 35: WASM Comparison Test — Menu Navigation Fix
 - Fixed WASM Red Alert rendering in headless Playwright for visual comparison with TS engine
 - Root cause: `specialHTMLTargets[0]` initialized to 0, preventing Emscripten event registration
@@ -47,25 +65,6 @@
 - Fixed regex ordering bug in extractExternalId (ky matched before kyc)
 - Code review: 2 HIGH issues (regex order + SCIM PatchOp), 5 MEDIUM, 8 LOW correctness; 13 refactoring findings
 - 497 tests passing, deployed to cliaas.com (commit 259a734)
-
-## 2026-02-23T12:00Z — Session 28: Full Code Review + ARCHITECTURE.md
-- Implemented 4 enterprise blocker features in previous session: Event Pipeline Wiring, Voice/Phone Channel, PWA/Mobile, Sandbox Environments
-- Fixed 17 code review issues: path traversal in sandbox (CRITICAL), IVR config validation, escapeXml dedup, push.ts global singleton, voice-store load timing, service worker API caching removed, etc.
-- All 326 tests passing (+2 new: path traversal, transfer fallback), typecheck clean
-- Deployed to cliaas.com via deploy_vps.sh
-- Full code review via 5 parallel explore agents (frontend, API routes, lib, CLI/MCP, infra)
-- **Code review findings**: 314 TS files, 47,600 LOC, 53 DB tables, 101 API routes, 29 pages, 10 connectors
-- Created ARCHITECTURE.md documenting full system architecture
-- Top refactoring priorities: auth middleware (88% routes unprotected), unsafe JSON parsing (52 routes), connector dedup (4,700 LOC), test coverage gaps (CLI commands untested)
-
-## 2026-02-24T09:00Z — Session 27: Real RA Audio Playback Implementation
-- Wrote Westwood IMA ADPCM decoder (audDecoder.ts): parses AUD headers, decodes chunked 4-bit IMA ADPCM, converts to Web Audio AudioBuffer
-- Created build-time extraction script (scripts/extract-ra-audio.ts): extracts AUDs from SOUNDS.MIX + SPEECH.MIX + Aftermath expansion, decodes to WAV
-- 42 sound effects extracted: weapons (rifle, cannon, tesla, mandible), explosions, ant sounds, EVA voice lines, unit acks, victory/defeat
-- Updated AudioManager: loadSamples() fetches WAVs at runtime, play() tries samples first then synth fallback
-- Non-breaking: all existing synthesis kept intact as fallback; game works identically without extracted audio
-- Added /public/ra/audio/ to .gitignore (generated binary files)
-- Sources: SOUNDS.MIX (23 SFX), SPEECH.MIX (16 EVA voices), Aftermath (ANTBITE, ANTDIE, BUZZY1, TANK01, STAVCMDR/STAVCRSE/STAVMOV/STAVYES)
 
 
 # Key Findings

@@ -225,7 +225,7 @@ export class RemoteProvider implements DataProvider {
     return this.request<{ id: string }>('/api/tickets/create', {
       method: 'POST',
       body: JSON.stringify({
-        source: 'zendesk',
+        source: params.source ?? 'api',
         subject: params.subject,
         message: params.description ?? params.subject,
         priority: params.priority,

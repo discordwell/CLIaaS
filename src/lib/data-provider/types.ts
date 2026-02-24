@@ -92,6 +92,7 @@ export interface TicketCreateParams {
   priority?: string;
   requester?: string;
   tags?: string[];
+  source?: string;
 }
 
 export interface TicketUpdateParams {

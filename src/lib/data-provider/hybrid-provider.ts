@@ -105,14 +105,21 @@ async function insertOutboxEntry(
   if (!ctx) return; // No DB — silently skip outbox (graceful degradation)
 
   const { db, schema, workspaceId } = ctx;
-  await db.insert(schema.syncOutbox).values({
-    workspaceId,
-    operation,
-    entityType,
-    entityId,
-    payload,
-    status: 'pending_push',
-  });
+  try {
+    await db.insert(schema.syncOutbox).values({
+      workspaceId,
+      operation,
+      entityType,
+      entityId,
+      payload,
+      status: 'pending_push',
+    });
+  } catch (err) {
+    // Surface outbox failures instead of silently losing sync records.
+    // This prevents data divergence between local and hosted.
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Outbox insert failed for ${entityType}/${entityId}: ${msg}. Local change was committed but will NOT sync to hosted.`);
+  }
 }
 
 export class HybridProvider implements DataProvider {

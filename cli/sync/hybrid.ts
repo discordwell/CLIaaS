@@ -131,7 +131,7 @@ export async function syncPull(): Promise<PullResult> {
       }
       // Note: we don't insert new tickets from hosted — those would need
       // full requester/workspace setup. For now, pull updates existing only.
-      result.ticketsPulled++;
+      if (existing.length > 0) result.ticketsPulled++;
     }
   } catch (err) {
     result.errors.push(`Ticket pull failed: ${err instanceof Error ? err.message : err}`);
@@ -155,8 +155,8 @@ export async function syncPull(): Promise<PullResult> {
           status: article.status ?? 'published',
           updatedAt: article.updatedAt ? new Date(article.updatedAt) : new Date(),
         }).where(eq(schema.kbArticles.id, article.id));
+        result.articlesPulled++;
       }
-      result.articlesPulled++;
     }
   } catch (err) {
     result.errors.push(`KB article pull failed: ${err instanceof Error ? err.message : err}`);

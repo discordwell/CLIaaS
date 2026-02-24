@@ -1,5 +1,15 @@
 # Archived Session Summaries
 
+## 2026-02-23T12:00Z — Session 28: Full Code Review + ARCHITECTURE.md
+- Implemented 4 enterprise blocker features: Event Pipeline Wiring, Voice/Phone Channel, PWA/Mobile, Sandbox Environments
+- Fixed 17 code review issues: path traversal in sandbox (CRITICAL), IVR config validation, escapeXml dedup, etc.
+- Full code review: 314 TS files, 47,600 LOC, 53 DB tables, 101 API routes, 29 pages, 10 connectors
+- Created ARCHITECTURE.md documenting full system architecture
+
+## 2026-02-24T09:00Z — Session 27: Real RA Audio Playback Implementation
+- Wrote Westwood IMA ADPCM decoder, extracted 42 sound effects from MIX files
+- Updated AudioManager with sample-first/synth-fallback pattern
+
 ## 2026-02-24T07:45Z — Session 26: Bug Fixes + RA Soundtrack Implementation
 - Resolved all 6 bugs from Session 25 audit: Bug 5 fixed (HUNT pathfinding stagger), Bugs 1/3/4 already fixed in uncommitted diff, Bugs 2/6 verified as non-bugs
 - Committed 9195b3d: bug audit fixes (pathfinding lag, AREA_GUARD cleanup, artillery vs structures)
