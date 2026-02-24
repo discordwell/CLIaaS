@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { parseInboundEmail, extractTicketId, extractEmailAddress } from '@/lib/email/parser';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('email:inbound');
 
 export const dynamic = 'force-dynamic';
 
@@ -28,13 +31,7 @@ export async function POST(request: Request) {
     const ticketId = extractTicketId(email.inReplyTo, email.references);
 
     if (!process.env.DATABASE_URL) {
-      // Log the email for demo mode
-      console.log('[email:inbound]', {
-        from: senderEmail,
-        subject: email.subject,
-        isReply: !!ticketId,
-        ticketId,
-      });
+      logger.info({ from: senderEmail, subject: email.subject, isReply: !!ticketId, ticketId }, 'Inbound email (demo mode)');
       return NextResponse.json({
         ok: true,
         action: ticketId ? 'reply_added' : 'ticket_created',

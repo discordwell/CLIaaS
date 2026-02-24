@@ -4,6 +4,9 @@ import { sendMessage } from '@/lib/channels/meta';
 import { addMessage } from '@/lib/channels/social-store';
 import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('channels:instagram:send');
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +43,7 @@ export async function POST(request: NextRequest) {
       messageId: result.messageId,
     });
   } catch (error) {
-    console.error('[Instagram Send] Error:', error);
+    logger.error({ error: error instanceof Error ? error.message : 'Unknown' }, 'Instagram send failed');
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to send message' },
       { status: 500 },

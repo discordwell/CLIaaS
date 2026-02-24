@@ -4,6 +4,9 @@ import { sendDM } from '@/lib/channels/twitter';
 import { addMessage } from '@/lib/channels/social-store';
 import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('channels:twitter:send');
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +43,7 @@ export async function POST(request: NextRequest) {
       id: result.id,
     });
   } catch (error) {
-    console.error('[Twitter Send] Error:', error);
+    logger.error({ error: error instanceof Error ? error.message : 'Unknown' }, 'Twitter send failed');
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to send message' },
       { status: 500 },

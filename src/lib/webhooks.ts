@@ -1,4 +1,9 @@
 import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+import { enqueueWebhookDelivery } from './queue/dispatch';
+import { createLogger } from './logger';
+import * as Sentry from '@sentry/nextjs';
+
+const log = createLogger('webhooks');
 
 // ---- Types ----
 
@@ -364,6 +369,7 @@ async function sendWithRetry(
 
       if (res.ok) return;
     } catch (err) {
+      Sentry.captureException(err, { extra: { webhookId: webhook.id, event: event.type, attempt: attempt + 1 } });
       recordWebhookLog({
         webhookId: webhook.id,
         event: event.type,
@@ -385,7 +391,23 @@ export async function dispatchWebhook(event: WebhookEvent): Promise<void> {
   );
 
   await Promise.allSettled(
-    matching.map((w) => sendWithRetry(w, event))
+    matching.map(async (w) => {
+      // Try queue-first — falls back to inline if Redis unavailable
+      const enqueued = await enqueueWebhookDelivery({
+        webhookId: w.id,
+        url: w.url,
+        secret: w.secret,
+        event: event.type,
+        timestamp: event.timestamp,
+        data: event.data,
+        retryPolicy: w.retryPolicy,
+      });
+
+      if (!enqueued) {
+        log.debug({ webhookId: w.id }, 'Redis unavailable, falling back to inline delivery');
+        await sendWithRetry(w, event);
+      }
+    })
   );
 }
 

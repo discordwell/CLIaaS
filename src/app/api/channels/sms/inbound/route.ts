@@ -11,6 +11,9 @@ import {
   createConversation,
   addMessage,
 } from '@/lib/channels/sms-store';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('channels:sms:inbound');
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +66,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[SMS Inbound] Error processing webhook:', error);
+    logger.error({ error: error instanceof Error ? error.message : 'Unknown' }, 'SMS inbound webhook processing failed');
     // Return empty TwiML on error so Twilio doesn't retry
     return new Response(generateTwiml(), {
       status: 200,

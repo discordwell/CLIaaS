@@ -4,6 +4,9 @@ import { sendMessage as twilioSend } from '@/lib/channels/twilio';
 import { addMessage } from '@/lib/channels/sms-store';
 import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('channels:sms:send');
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +53,7 @@ export async function POST(request: NextRequest) {
       message: result,
     });
   } catch (error) {
-    console.error('[SMS Send] Error:', error);
+    logger.error({ error: error instanceof Error ? error.message : 'Unknown' }, 'SMS send failed');
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to send message' },
       { status: 500 },

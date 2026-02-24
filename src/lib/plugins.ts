@@ -1,4 +1,7 @@
 import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+import { createLogger } from './logger';
+
+const logger = createLogger('plugins');
 
 // ---- Types ----
 
@@ -206,7 +209,7 @@ class PluginRegistryImpl {
       if (!plugin?.enabled) continue;
       promises.push(
         Promise.resolve(handler(context)).catch((err) => {
-          console.error(`Plugin ${pluginId} hook ${hookName} failed:`, err);
+          logger.error({ pluginId, hookName, error: err instanceof Error ? err.message : 'Unknown' }, 'Plugin hook failed');
         })
       );
     }

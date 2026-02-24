@@ -11,6 +11,9 @@ import {
   createConversation,
   addMessage,
 } from '@/lib/channels/social-store';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('channels:twitter:webhook');
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ status: 'ok' });
   } catch (error) {
-    console.error('[Twitter Webhook] Error processing:', error);
+    logger.error({ error: error instanceof Error ? error.message : 'Unknown' }, 'Twitter webhook processing failed');
     return NextResponse.json({ status: 'ok' });
   }
 }

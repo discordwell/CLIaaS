@@ -1,4 +1,8 @@
 import nodemailer from 'nodemailer';
+import { enqueueEmailSend } from '../queue/dispatch';
+import { createLogger } from '../logger';
+
+const logger = createLogger('email:sender');
 
 export interface EmailOptions {
   to: string;
@@ -29,13 +33,19 @@ function getTransport() {
   });
 }
 
-export async function sendEmail(options: EmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
+export async function sendEmail(options: EmailOptions, _skipQueue = false): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  // Try queue-first unless called from the email worker itself
+  if (!_skipQueue) {
+    const enqueued = await enqueueEmailSend(options);
+    if (enqueued) {
+      logger.debug({ to: options.to, subject: options.subject }, 'Email enqueued');
+      return { success: true, messageId: `queued-${Date.now()}` };
+    }
+  }
+
   const transport = getTransport();
   if (!transport) {
-    console.log('[email] SMTP not configured. Would send:', {
-      to: options.to,
-      subject: options.subject,
-    });
+    logger.info({ to: options.to, subject: options.subject }, 'SMTP not configured — mock send');
     return { success: true, messageId: `mock-${Date.now()}` };
   }
 

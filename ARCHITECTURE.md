@@ -21,7 +21,7 @@
 | DB tables | 53 (Drizzle/PostgreSQL) |
 | Tests | 38 files, ~5,300 LOC |
 | Source LOC | ~47,600 (excl. Easter Egg + tests) |
-| Dependencies | 19 prod + 19 dev |
+| Dependencies | 23 prod + 19 dev |
 
 ---
 
@@ -151,20 +151,90 @@ Each domain has a dedicated store in `src/lib/`:
 
 ## Event Pipeline
 
-Three event delivery systems, unified by a dispatcher:
+Five event delivery channels, unified by a dispatcher:
 
 ```
 Ticket handler → dispatch()
-                    ├─→ dispatchWebhook()  (HMAC signatures, retry, SSRF prevention)
-                    ├─→ executePluginHook() (plugin registry, sandboxed execution)
-                    └─→ eventBus.emit()     (SSE pub/sub, real-time UI)
+                    ├─→ dispatchWebhook()     (HMAC signatures, retry, SSRF prevention)
+                    ├─→ executePluginHook()    (plugin registry, sandboxed execution)
+                    ├─→ eventBus.emit()        (SSE pub/sub, real-time UI)
+                    ├─→ evaluateAutomation()   (time/event-based rules)
+                    └─→ enqueueAIResolution()  (AI agent queue, ticket.created/message.created)
 ```
 
 - **Canonical events**: `ticket.created`, `ticket.updated`, `ticket.resolved`, `message.created`, `csat.submitted`, `sla.breached`
-- Fire-and-forget via `Promise.allSettled` — errors isolated per channel
+- Fire-and-forget via `Promise.allSettled` — errors isolated per channel with Sentry capture
 - SSE uses colon-separated names (`ticket:created`); dispatcher translates
 
 **Source:** `src/lib/events/dispatcher.ts`, `src/lib/events/index.ts`
+
+---
+
+## Job Queue Architecture
+
+BullMQ + Redis for reliable background processing with graceful fallback to inline execution.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Queue Module (src/lib/queue/)               │
+│                                                                │
+│  connection.ts  → ioredis singleton (lazy-init, null-safe)    │
+│  queues.ts      → 4 named BullMQ queues                       │
+│  dispatch.ts    → enqueue*() helpers (returns false → inline)  │
+│  stats.ts       → waiting/active/completed/failed counts       │
+│                                                                │
+│  workers/                                                      │
+│  ├── webhook-worker.ts      (concurrency: 5)                  │
+│  ├── automation-worker.ts   (concurrency: 1)                  │
+│  ├── ai-resolution-worker.ts (concurrency: 2)                 │
+│  └── email-worker.ts        (concurrency: 3)                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Queues:**
+| Queue | Job Type | Fallback |
+|-------|----------|----------|
+| `webhook-delivery` | HTTP POST with HMAC | Inline `sendWithRetry()` |
+| `automation-scheduler` | Repeatable tick (60s) | `setInterval` |
+| `ai-resolution` | AI agent pipeline | No-op (skipped) |
+| `email-send` | SMTP via nodemailer | Inline `sendEmail()` |
+
+**Key design:** Every `enqueue*()` returns `boolean`. When `false` (no Redis), callers fall back to existing inline behavior. Zero config change required for demo mode.
+
+---
+
+## Observability Stack
+
+### Error Tracking (Sentry)
+- `@sentry/nextjs` with client/server/edge configs
+- DSN-gated: no-op when `SENTRY_DSN` unset
+- `captureException` in webhook delivery, scheduler ticks, event dispatcher
+- Global error boundary: `src/app/global-error.tsx`
+
+### Metrics (Prometheus)
+- `prom-client` registry at `src/lib/metrics.ts`
+- Endpoint: `GET /api/metrics` (Prometheus text format)
+- Metrics: `http_request_duration_seconds`, `http_requests_total`, `app_errors_total`, `queue_depth`, `queue_active_jobs` + Node.js defaults
+- Queue gauges refreshed on each scrape
+
+### Structured Logging (Pino)
+- Centralized logger: `src/lib/logger.ts`
+- `createLogger(module)` — child logger with module name
+- `createRequestLogger(module, requestId)` — adds correlation ID
+- Request ID: `X-Request-ID` header generated in middleware (`crypto.randomUUID()`)
+- All 11 channel/email routes migrated from `console.log/error` to Pino
+
+### Health Check
+- `GET /api/health` — database connectivity (SELECT 1 + latency), Redis ping, queue stats
+- Response: `{status: "ok"|"degraded", checks: {database, redis, queues}}`
+- `not_configured` = OK (demo mode)
+
+### Database Backup
+- `scripts/db-backup.sh` — pg_dump + gzip + 7-day rotation
+- Reads `DATABASE_URL` from `/opt/cliaas/shared/.env`
+- Stores in `/opt/cliaas/backups/`
+
+**Source:** `src/lib/metrics.ts`, `src/lib/logger.ts`, `sentry.*.config.ts`, `src/instrumentation.ts`
 
 ---
 
@@ -355,7 +425,7 @@ scripts/deploy_vps.sh  →  6-stage pipeline:
 - Manual deploy via `scripts/deploy_vps.sh`
 
 ### Docker (Development)
-- `docker-compose.yml`: pgvector/pgvector:pg16 on port 5433
+- `docker-compose.yml`: pgvector/pgvector:pg16 on port 5433, redis:7-alpine on port 6379
 - `pnpm db:setup`: compose up → migrate → seed
 
 ---
@@ -409,7 +479,6 @@ See `.env.example` for full reference. Key categories:
 
 ### High Priority
 - **Auth middleware gap**: ~88% of API routes lack authentication checks
-- **Unsafe JSON parsing**: ~52 routes use `await request.json()` without try/catch
 - **Connector duplication**: ~4,700 LOC across 10 connectors with repeated auth, pagination, and normalization patterns
 
 ### Medium Priority
@@ -422,3 +491,53 @@ See `.env.example` for full reference. Key categories:
 - **No `--json` CLI output**: Commands can't be piped or scripted
 - **Inconsistent spinner usage**: Some long operations lack progress feedback
 - **4 persistence patterns**: `JsonlStore`, raw `readFileSync`, global singletons, and Drizzle ORM — could consolidate
+
+### Resolved (Session 30)
+- ~~Unsafe JSON parsing~~: All 38 routes migrated to `parseJsonBody` utility (standardized 400 errors)
+- ~~SCIM PatchOp format~~: Corrected to RFC 7644, timing-safe auth, store consolidation
+- ~~Automation side effects gap~~: Engine now propagates notifications/webhooks through full execution chain
+- ~~Connector type fragmentation~~: Single `CONNECTOR_REGISTRY` source of truth created
+- ~~Approval queue duplication~~: Extracted `transitionEntry` helper
+- ~~Magic-link memory leak~~: `cleanupExpiredTokens()` called on each token generation
+
+---
+
+## Enterprise Readiness Roadmap
+
+6-week plan to bring CLIaaS to production-grade enterprise readiness.
+
+### Week 1–2: Auth & API Keys
+- Wire `requireAuth` middleware to all ~101 API routes (currently ~88% unprotected)
+- Build API key CRUD system (create, list, revoke, scoped permissions)
+- Add MFA via TOTP (Time-based One-Time Password)
+- Rate limiting per API key
+- Auth tests covering all protected routes
+
+### Week 3: Job Queue + Observability ✅
+- BullMQ + Redis job queues (4 queues, 4 workers, inline fallback)
+- Sentry error tracking (`@sentry/nextjs`, DSN-gated)
+- Prometheus metrics endpoint (`GET /api/metrics`)
+- Structured logging: 11 files migrated to Pino, request correlation IDs
+- Database backup: `scripts/db-backup.sh` (pg_dump + 7-day rotation)
+- Health endpoint enhanced with DB/Redis/queue checks
+
+### Week 4: Billing
+- Stripe Checkout integration
+- 3 pricing tiers: Starter, Pro, Enterprise
+- Usage metering (tickets/month, AI calls, API requests)
+- Billing management portal (upgrade, downgrade, invoices)
+- Webhook for payment events (failed charges, subscription changes)
+
+### Week 5: Compliance & Security
+- PostgreSQL Row-Level Security (RLS) for multi-tenant isolation
+- GDPR data export and deletion endpoints
+- Secrets management (move from .env to Vault or AWS Secrets Manager)
+- Audit log persistence to database (currently in-memory)
+- Penetration testing prep
+
+### Week 6: Testing & Launch Prep
+- Auth integration tests for all 101 routes
+- Connector integration tests (at least smoke tests per connector)
+- Load testing (k6 or Artillery)
+- SOC 2 documentation finalization
+- Production deployment checklist and runbook

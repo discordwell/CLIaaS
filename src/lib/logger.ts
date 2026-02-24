@@ -12,4 +12,9 @@ export function createLogger(module: string) {
   return logger.child({ module });
 }
 
+/** Create a child logger with module name and request correlation ID. */
+export function createRequestLogger(module: string, requestId: string) {
+  return logger.child({ module, requestId });
+}
+
 export default logger;

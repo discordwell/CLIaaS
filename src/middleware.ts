@@ -16,6 +16,7 @@ const PUBLIC_PATHS = [
   '/demo',
   '/portal',
   '/api/health',
+  '/api/metrics',
   '/api/auth/signin',
   '/api/auth/signup',
   '/api/auth/signout',
@@ -85,7 +86,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  logger.info({ method: request.method, pathname }, 'Incoming request');
+  // Generate/propagate request correlation ID
+  const requestId = request.headers.get('x-request-id') || crypto.randomUUID();
+  requestHeaders.set('x-request-id', requestId);
+
+  // Attach request timing header for downstream duration calculation
+  requestHeaders.set('x-request-start', Date.now().toString());
+
+  logger.info({ method: request.method, pathname, requestId }, 'Incoming request');
 
   // Rate limiting for API routes
   if (pathname.startsWith('/api/')) {

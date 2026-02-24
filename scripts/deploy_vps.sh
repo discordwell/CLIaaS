@@ -67,13 +67,14 @@ APP_USER="$5"
 APP_GROUP="$6"
 
 DATA_DIR="/home/${APP_USER}/cliaas-data"
+BACKUP_DIR="${REMOTE_DIR}/backups"
 
 if [[ -n "$SUDO_CMD" ]]; then
-  $SUDO_CMD mkdir -p "$APP_DIR" "$SHARED_DIR" "$DATA_DIR"
+  $SUDO_CMD mkdir -p "$APP_DIR" "$SHARED_DIR" "$DATA_DIR" "$BACKUP_DIR"
   $SUDO_CMD chown -R "${APP_USER}:${APP_GROUP}" "$REMOTE_DIR"
   $SUDO_CMD chown -R "${APP_USER}:${APP_GROUP}" "$DATA_DIR"
 else
-  mkdir -p "$APP_DIR" "$SHARED_DIR" "$DATA_DIR"
+  mkdir -p "$APP_DIR" "$SHARED_DIR" "$DATA_DIR" "$BACKUP_DIR"
 fi
 CMDS
 
