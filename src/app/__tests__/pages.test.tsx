@@ -19,7 +19,7 @@ describe('Home page', () => {
 
   it('renders the hero headline', () => {
     render(<Home />);
-    expect(screen.getByText(/AI-powered support ops/)).toBeInTheDocument();
+    expect(screen.getByText(/Now, so does your helpdesk/)).toBeInTheDocument();
   });
 
   it('renders the Get Started Free CTA link', () => {

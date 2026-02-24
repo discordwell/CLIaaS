@@ -123,10 +123,10 @@ function MarketingHome() {
       {/* ── Hero ── */}
       <header className="border-2 border-line bg-panel p-8 sm:p-14">
         <p className="font-mono text-sm font-bold uppercase tracking-widest text-muted">
-          Your helpdesk, in your terminal
+          AI lives in the command line
         </p>
         <h1 className="mt-6 max-w-4xl text-4xl font-bold leading-[1.05] sm:text-6xl lg:text-7xl">
-          AI-powered support ops you actually control.
+          Now, so does your helpdesk.
         </h1>
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted">
           Import tickets from Zendesk, Intercom, Freshdesk and more.
@@ -136,7 +136,7 @@ function MarketingHome() {
         <div className="mt-10 flex flex-wrap items-center gap-4">
           <Link
             href="/sign-up"
-            className="border-2 border-line bg-foreground px-8 py-3.5 font-mono text-sm font-bold uppercase text-background transition-opacity hover:opacity-80"
+            className="border-2 border-line bg-foreground px-8 py-3.5 font-mono text-sm font-bold uppercase text-white transition-opacity hover:opacity-80"
           >
             Get Started Free
           </Link>
@@ -327,7 +327,7 @@ function MarketingHome() {
             </ul>
             <Link
               href="/sign-up"
-              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
+              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
             >
               Get Started Free
             </Link>
@@ -354,7 +354,7 @@ function MarketingHome() {
             </ul>
             <Link
               href="/sign-up"
-              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
+              className="mt-6 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-white transition-opacity hover:opacity-80"
             >
               Start Pro Hosted
             </Link>
