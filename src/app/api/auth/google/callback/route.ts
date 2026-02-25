@@ -6,18 +6,27 @@ import { createToken, setSessionCookie, getJwtSecret } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
+/** Resolve the public base URL — respects reverse proxy headers. */
+function publicBase(request: Request): string {
+  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
+  const proto = request.headers.get('x-forwarded-proto') || 'http';
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+  return `${proto}://${host}`;
+}
+
 export async function GET(request: Request) {
+  const base = publicBase(request);
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const state = searchParams.get('state');
   const error = searchParams.get('error');
 
   if (error) {
-    return NextResponse.redirect(new URL('/sign-in?error=google_denied', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=google_denied`);
   }
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/sign-in?error=google_missing_params', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=google_missing_params`);
   }
 
   // Verify state
@@ -26,16 +35,16 @@ export async function GET(request: Request) {
   cookieStore.delete('google-oauth-state');
 
   if (state !== savedState) {
-    return NextResponse.redirect(new URL('/sign-in?error=google_state_mismatch', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=google_state_mismatch`);
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL('/sign-in?error=google_not_configured', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=google_not_configured`);
   }
 
-  const callbackUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/auth/google/callback`;
+  const callbackUrl = `${base}/api/auth/google/callback`;
 
   // Exchange code for tokens
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -51,7 +60,7 @@ export async function GET(request: Request) {
   });
 
   if (!tokenRes.ok) {
-    return NextResponse.redirect(new URL('/sign-in?error=google_token_exchange', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=google_token_exchange`);
   }
 
   const tokenData = await tokenRes.json();
@@ -62,7 +71,7 @@ export async function GET(request: Request) {
   });
 
   if (!userRes.ok) {
-    return NextResponse.redirect(new URL('/sign-in?error=google_userinfo', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=google_userinfo`);
   }
 
   const googleUser = await userRes.json();
@@ -70,12 +79,12 @@ export async function GET(request: Request) {
   const name = (googleUser.name as string) || email.split('@')[0];
 
   if (!email) {
-    return NextResponse.redirect(new URL('/sign-in?error=google_no_email', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=google_no_email`);
   }
 
   // Check if user already exists
   if (!process.env.DATABASE_URL) {
-    return NextResponse.redirect(new URL('/sign-in?error=db_not_configured', request.url));
+    return NextResponse.redirect(`${base}/sign-in?error=db_not_configured`);
   }
 
   const { db } = await import('@/db');
@@ -114,7 +123,7 @@ export async function GET(request: Request) {
     });
 
     await setSessionCookie(token);
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    return NextResponse.redirect(`${base}/dashboard`);
   }
 
   // New user — create a short-lived token and redirect to workspace step
@@ -125,6 +134,6 @@ export async function GET(request: Request) {
     .sign(getJwtSecret());
 
   return NextResponse.redirect(
-    new URL(`/sign-up/workspace?token=${encodeURIComponent(signupToken)}`, request.url)
+    `${base}/sign-up/workspace?token=${encodeURIComponent(signupToken)}`
   );
 }
