@@ -149,15 +149,16 @@ function MarketingHome() {
         {/* Claude Code header — mascot + version + model + dir */}
         <div className="mb-6 flex items-start gap-3 border-b-2 border-zinc-800 pb-5">
           {/* Pixel mascot */}
+          {/* Pixel mascot — eyes high, mouth visible (matches real Claude Code) */}
           <svg viewBox="0 0 16 16" className="mt-0.5 h-8 w-8 shrink-0" aria-hidden="true">
             <rect x="5" y="0" width="2" height="2" fill="#d97706" />
             <rect x="9" y="0" width="2" height="2" fill="#d97706" />
             <rect x="5" y="2" width="6" height="2" fill="#d97706" />
-            <rect x="3" y="4" width="10" height="2" fill="#d97706" />
-            <rect x="3" y="6" width="10" height="4" fill="#b45309" />
-            <rect x="5" y="7" width="2" height="2" fill="#1e1e1e" />
-            <rect x="9" y="7" width="2" height="2" fill="#1e1e1e" />
-            <rect x="3" y="10" width="10" height="4" fill="#d97706" />
+            <rect x="3" y="4" width="10" height="6" fill="#d97706" />
+            <rect x="5" y="5" width="2" height="2" fill="#1e1e1e" />
+            <rect x="9" y="5" width="2" height="2" fill="#1e1e1e" />
+            <rect x="6" y="8" width="4" height="1" fill="#b45309" />
+            <rect x="3" y="10" width="10" height="4" fill="#b45309" />
             <rect x="3" y="14" width="4" height="2" fill="#92400e" />
             <rect x="9" y="14" width="4" height="2" fill="#92400e" />
           </svg>
@@ -169,9 +170,9 @@ function MarketingHome() {
         </div>
         <pre className="overflow-x-auto font-mono text-sm leading-[1.8] text-zinc-300">
 {/* ── Turn 1: Install ── */}
-<span className="text-blue-400">{"● "}hi Claude, install cliaas</span>{"\n"}
+<span className="bg-zinc-800">{/* User text highlight — matches real Claude Code */}<span className="text-zinc-500">{"❯ "}</span><span className="text-zinc-100">hi Claude, install cliaas</span></span>{"\n"}
 {"\n"}
-{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Explore</span>(<span className="text-zinc-400">Find CLIaaS install method</span>) <span className="text-zinc-600">Haiku 4.5</span>{"\n"}
+{"  "}<span className="text-zinc-400">●</span> <span className="text-zinc-500">Explore</span>(<span className="text-zinc-400">Find CLIaaS install method</span>) <span className="text-zinc-600">Haiku 4.5</span>{"\n"}
 {"  "}<span className="text-green-400">●</span> <span className="text-green-400">Done</span> <span className="text-zinc-600">(14 tool uses · 43.6k tokens · 33s)</span>{"\n"}
 {"\n"}
 {"  "}<span className="text-emerald-400">Bash</span>(<span className="text-zinc-400">npm install -g cliaas</span>){"\n"}
@@ -182,10 +183,10 @@ function MarketingHome() {
 {"  "}when working in this project.{"\n"}
 {"\n"}
 {/* ── Turn 2: Setup ── */}
-<span className="text-blue-400">{"● "}okay now set up byoc locally</span>{"\n"}
+<span className="bg-zinc-800"><span className="text-zinc-500">{"❯ "}</span><span className="text-zinc-100">okay now set up byoc locally</span></span>{"\n"}
 {"\n"}
-{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Read</span>(<span className="text-zinc-400">WIZARD/claude.md</span>){"\n"}
-{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Bash</span>(<span className="text-zinc-400">cliaas setup init</span>){"\n"}
+{"  "}<span className="text-zinc-400">●</span> <span className="text-zinc-500">Read</span>(<span className="text-zinc-400">WIZARD/claude.md</span>){"\n"}
+{"  "}<span className="text-zinc-400">●</span> <span className="text-zinc-500">Bash</span>(<span className="text-zinc-400">cliaas setup init</span>){"\n"}
 {"    "}<span className="text-green-400">✓</span> PostgreSQL connected (localhost:5432){"\n"}
 {"    "}<span className="text-green-400">✓</span> Created database &apos;cliaas&apos;{"\n"}
 {"    "}<span className="text-green-400">✓</span> Ran 42 migrations{"\n"}
@@ -197,9 +198,9 @@ function MarketingHome() {
 {"  "}and LLM provider are all configured.{"\n"}
 {"\n"}
 {/* ── Turn 3: Sync ── */}
-<span className="text-blue-400">{"● "}cool my Zendesk API key is •••••••• download all my tickets</span>{"\n"}
+<span className="bg-zinc-800"><span className="text-zinc-500">{"❯ "}</span><span className="text-zinc-100">cool my Zendesk API key is •••••••• download all my tickets</span></span>{"\n"}
 {"\n"}
-{"  "}<span className="text-blue-400">●</span> <span className="text-zinc-500">Bash</span>(<span className="text-zinc-400">cliaas sync pull zendesk --full</span>){"\n"}
+{"  "}<span className="text-zinc-400">●</span> <span className="text-zinc-500">Bash</span>(<span className="text-zinc-400">cliaas sync pull zendesk --full</span>){"\n"}
 {"    "}<span className="text-green-400">✓</span> 2,847 tickets synced (4.2s){"\n"}
 {"    "}<span className="text-green-400">✓</span> 11,923 messages imported{"\n"}
 {"    "}<span className="text-green-400">✓</span> Next sync: incremental (cursor saved){"\n"}
