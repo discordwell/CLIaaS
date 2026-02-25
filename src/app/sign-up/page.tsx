@@ -1,5 +1,8 @@
 "use client";
 
+// Revalidate cached data every 60 seconds
+export const revalidate = 60;
+
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, Suspense } from "react";

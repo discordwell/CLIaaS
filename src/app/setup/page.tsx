@@ -1,5 +1,8 @@
 'use client';
 
+// Revalidate cached data every 60 seconds
+export const revalidate = 60;
+
 import { useState } from 'react';
 
 type Step = 'database' | 'llm' | 'connector' | 'summary';

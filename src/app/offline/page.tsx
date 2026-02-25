@@ -1,5 +1,8 @@
 'use client';
 
+// Revalidate cached data every 60 seconds
+export const revalidate = 60;
+
 export default function OfflinePage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6">
