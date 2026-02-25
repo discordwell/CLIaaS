@@ -1630,9 +1630,9 @@ export class Game {
   /** Map weapon name to projectile visual style */
   private weaponProjectileStyle(name: string): 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade' {
     switch (name) {
-      case 'FireballLauncher': case 'Flamethrower': case 'Napalm': return 'fireball';
-      case 'TankGun': case 'ArtilleryShell': return 'shell';
-      case 'Bazooka': case 'MammothTusk': return 'rocket';
+      case 'FireballLauncher': case 'Flamer': case 'Napalm': return 'fireball';
+      case '75mm': case '90mm': case '105mm': case '120mm': case '155mm': return 'shell';
+      case 'Dragon': case 'RedEye': case 'MammothTusk': return 'rocket';
       case 'Grenade': return 'grenade';
       default: return 'bullet';
     }
@@ -1642,9 +1642,9 @@ export class Game {
   private weaponMuzzleColor(name: string): string {
     switch (name) {
       case 'TeslaZap': return '120,180,255';           // blue electric
-      case 'FireballLauncher': case 'Flamethrower': case 'Napalm': return '255,140,30';  // orange fire
-      case 'TankGun': case 'ArtilleryShell': return '255,220,100';       // warm yellow
-      case 'Bazooka': case 'MammothTusk': return '255,180,60';           // rocket orange
+      case 'FireballLauncher': case 'Flamer': case 'Napalm': return '255,140,30';  // orange fire
+      case '75mm': case '90mm': case '105mm': case '120mm': case '155mm': return '255,220,100'; // warm yellow
+      case 'Dragon': case 'RedEye': case 'MammothTusk': return '255,180,60';    // rocket orange
       case 'Mandible': return '200,255,200';            // green organic
       default: return '255,255,180';                    // standard gunfire white-yellow
     }
@@ -2641,7 +2641,12 @@ export class Game {
 
         // Apply warhead-vs-armor damage multiplier + veterancy bonus
         const mult = this.getWarheadMult(entity.weapon.warhead, entity.target.stats.armor);
-        const damage = Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
+        // If warhead does 0% vs this armor (e.g. Organic vs vehicles), skip entirely
+        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
+        if (damage <= 0) {
+          entity.target = null; // can't hurt this target, give up
+          return;
+        }
 
         if (entity.weapon.projectileSpeed) {
           // Deferred damage: projectile must travel to target
@@ -2768,9 +2773,12 @@ export class Game {
       if (dist2 <= entity.weapon2.range) {
         entity.attackCooldown2 = entity.weapon2.rof;
         const mult2 = this.getWarheadMult(entity.weapon2.warhead, entity.target.stats.armor);
-        const dmg2 = Math.max(1, Math.round(entity.weapon2.damage * mult2 * entity.damageMultiplier));
+        const dmg2 = mult2 <= 0 ? 0 : Math.max(1, Math.round(entity.weapon2.damage * mult2 * entity.damageMultiplier));
 
-        if (entity.weapon2.projectileSpeed) {
+        // Skip secondary weapon if it can't hurt this target
+        if (dmg2 <= 0) {
+          // Still fire cooldown but no damage/effects
+        } else if (entity.weapon2.projectileSpeed) {
           this.launchProjectile(entity, entity.target, entity.weapon2, dmg2,
             entity.target.pos.x, entity.target.pos.y, true);
         } else {
@@ -2796,11 +2804,13 @@ export class Game {
           }
         }
 
-        // Secondary weapon muzzle flash
-        this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
-          frame: 0, maxFrames: 3, size: 3, sprite: 'piff', spriteStart: 0,
-          muzzleColor: this.weaponMuzzleColor(entity.weapon2.name) });
-        this.playSoundAt(this.audio.weaponSound(entity.weapon2.name), entity.pos.x, entity.pos.y);
+        // Secondary weapon muzzle flash (only when damage is dealt)
+        if (dmg2 > 0) {
+          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
+            frame: 0, maxFrames: 3, size: 3, sprite: 'piff', spriteStart: 0,
+            muzzleColor: this.weaponMuzzleColor(entity.weapon2.name) });
+          this.playSoundAt(this.audio.weaponSound(entity.weapon2.name), entity.pos.x, entity.pos.y);
+        }
       }
     }
 
@@ -2892,8 +2902,8 @@ export class Game {
         if (healDist < 1.5) {
           entity.animState = AnimState.ATTACK; // heal animation
           if (entity.attackCooldown <= 0) {
-            healTarget.hp = Math.min(healTarget.maxHp, healTarget.hp + 8);
-            entity.attackCooldown = 20; // heal every ~1.3s (cooldown decremented each tick above)
+            healTarget.hp = Math.min(healTarget.maxHp, healTarget.hp + 50);
+            entity.attackCooldown = 80; // Heal weapon ROF from RULES.INI
             entity.desiredFacing = directionTo(entity.pos, healTarget.pos);
             entity.tickRotation();
             this.playSoundAt('heal', healTarget.pos.x, healTarget.pos.y);
@@ -3433,7 +3443,7 @@ export class Game {
 
   /** Get warhead-vs-armor damage multiplier, respecting per-scenario overrides */
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
-    const armorIdx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'medium' ? 3 : 4;
+    const armorIdx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'heavy' ? 3 : 4;
     const overridden = this.warheadOverrides[warhead];
     if (overridden) return overridden[armorIdx] ?? 1;
     return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
@@ -3602,6 +3612,7 @@ export class Game {
       // Splash damage falls off linearly with distance (100% at center, 25% at edge)
       const falloff = 1 - (dist / splashRange) * 0.75;
       const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
+      if (mult <= 0) continue; // warhead does 0% vs this armor
       const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5));
       const killed = other.takeDamage(splashDmg, weapon.warhead);
 

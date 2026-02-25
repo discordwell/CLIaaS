@@ -55,7 +55,7 @@ export enum UnitType {
   V_1TNK = '1TNK', // Light tank
   V_2TNK = '2TNK', // Medium tank
   V_3TNK = '3TNK', // Heavy/Mammoth tank
-  V_4TNK = '4TNK', // Tesla tank
+  V_4TNK = '4TNK', // Mammoth tank
   V_JEEP = 'JEEP', // Ranger
   V_APC = 'APC',   // APC
   V_ARTY = 'ARTY', // Artillery
@@ -176,9 +176,9 @@ export const ANT_ANIM = {
   deathBase: 104, deathCount: 8,
 };
 
-// === Unit stats from SCA01EA.INI ===
-// Five armor classes (RA original)
-export type ArmorType = 'none' | 'wood' | 'light' | 'medium' | 'heavy';
+// === Unit stats from RULES.INI (Red Alert original) ===
+// Five armor classes from RA source (warhead.cpp): none, wood, light, heavy, concrete
+export type ArmorType = 'none' | 'wood' | 'light' | 'heavy' | 'concrete';
 
 export interface UnitStats {
   type: UnitType;
@@ -197,16 +197,19 @@ export interface UnitStats {
   guardRange?: number;     // max chase distance in cells for guard behavior (default: sight)
 }
 
-// Warhead types from RA (determines damage vs armor class)
-export type WarheadType = 'SA' | 'HE' | 'AP' | 'Fire' | 'Super';
+// Warhead types from RA RULES.INI
+export type WarheadType = 'SA' | 'HE' | 'AP' | 'Fire' | 'HollowPoint' | 'Super' | 'Organic';
 
-// Damage multipliers: warhead vs armor class [none, wood, light, medium, heavy]
+// Damage multipliers: warhead vs armor class [none, wood, light, heavy, concrete]
+// Values from RULES.INI Verses= lines
 export const WARHEAD_VS_ARMOR: Record<WarheadType, [number, number, number, number, number]> = {
-  SA:    [1.0, 0.9, 0.7, 0.4, 0.3],  // Small Arms
-  HE:    [1.0, 0.8, 0.8, 0.6, 0.5],  // High Explosive
-  AP:    [0.6, 0.6, 0.7, 0.9, 1.0],  // Armor Piercing
-  Fire:  [1.0, 1.2, 1.0, 0.5, 0.4],  // Fire
-  Super: [1.0, 1.0, 1.0, 1.0, 1.0],  // Super — equal damage to all
+  SA:         [1.0,  0.5,  0.6,  0.25, 0.25], // Small Arms — good vs infantry, bad vs armor
+  HE:         [0.9,  0.75, 0.6,  0.25, 1.0 ], // High Explosive — good vs concrete/infantry
+  AP:         [0.3,  0.75, 0.75, 1.0,  0.5 ], // Armor Piercing — best vs heavy armor
+  Fire:       [0.9,  1.0,  0.6,  0.25, 0.5 ], // Fire — good vs wood/infantry
+  HollowPoint:[1.0,  0.05, 0.05, 0.05, 0.05], // Hollow Point — anti-infantry only
+  Super:      [1.0,  1.0,  1.0,  1.0,  1.0 ], // Super — equal damage to all
+  Organic:    [1.0,  0.0,  0.0,  0.0,  0.0 ], // Organic — kills unarmored only (dogs)
 };
 
 export interface WeaponStats {
@@ -221,32 +224,35 @@ export interface WeaponStats {
   projectileSpeed?: number; // cells/tick travel speed (undefined = instant hit)
 }
 
-// Unit stat definitions from scenario INI
+// Unit stats from RULES.INI — real Red Alert values
 export const UNIT_STATS: Record<string, UnitStats> = {
+  // Ants (from SCA scenario INI files)
   ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true },
   ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 8, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher', noMovingFire: true },
   ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 7, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap', noMovingFire: true },
-  '1TNK': { type: UnitType.V_1TNK, name: 'Light Tank', image: '1tnk', strength: 300, armor: 'heavy', speed: 7, sight: 4, rot: 5, isInfantry: false, primaryWeapon: 'TankGun' },
-  '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'medium', speed: 6, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'TankGun' },
-  '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 600, armor: 'heavy', speed: 4, sight: 4, rot: 4, isInfantry: false, primaryWeapon: 'MammothTusk', secondaryWeapon: 'MachineGun' },
-  JEEP: { type: UnitType.V_JEEP, name: 'Ranger', image: 'jeep', strength: 150, armor: 'wood', speed: 10, sight: 4, rot: 8, isInfantry: false, primaryWeapon: 'MachineGun' },
-  '4TNK': { type: UnitType.V_4TNK, name: 'Tesla Tank', image: '4tnk', strength: 400, armor: 'heavy', speed: 5, sight: 5, rot: 4, isInfantry: false, primaryWeapon: 'TeslaCannon' },
-  APC: { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 8, sight: 4, rot: 6, isInfantry: false, primaryWeapon: 'MachineGun', passengers: 5 },
-  ARTY: { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'wood', speed: 4, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'ArtilleryShell', noMovingFire: true },
-  HARV: { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'medium', speed: 5, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null },
-  MCV: { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'medium', speed: 4, sight: 4, rot: 3, isInfantry: false, primaryWeapon: null },
-  TRUK: { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'medium', speed: 8, sight: 2, rot: 5, isInfantry: false, primaryWeapon: null },
-  E1: { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Rifle' },
-  E2: { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Grenade' },
-  E3: { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Bazooka' },
-  E4: { type: UnitType.I_E4, name: 'Flamethrower', image: 'e4', strength: 40, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Flamethrower' },
-  E6: { type: UnitType.I_E6, name: 'Engineer', image: 'e6', strength: 25, armor: 'none', speed: 4, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
-  DOG: { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 25, armor: 'none', speed: 8, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw' },
-  SPY: { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null },
-  MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null },
+  // Vehicles (RULES.INI values)
+  '1TNK': { type: UnitType.V_1TNK, name: 'Light Tank', image: '1tnk', strength: 300, armor: 'heavy', speed: 9, sight: 4, rot: 5, isInfantry: false, primaryWeapon: '75mm' },
+  '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'heavy', speed: 8, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '90mm' },
+  '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 400, armor: 'heavy', speed: 7, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '105mm' },
+  '4TNK': { type: UnitType.V_4TNK, name: 'Mammoth Tank', image: '4tnk', strength: 600, armor: 'heavy', speed: 4, sight: 6, rot: 5, isInfantry: false, primaryWeapon: '120mm', secondaryWeapon: 'MammothTusk' },
+  JEEP:   { type: UnitType.V_JEEP, name: 'Ranger', image: 'jeep', strength: 150, armor: 'light', speed: 10, sight: 6, rot: 10, isInfantry: false, primaryWeapon: 'M60mg' },
+  APC:    { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 10, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'M60mg', passengers: 5 },
+  ARTY:   { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 6, sight: 5, rot: 2, isInfantry: false, primaryWeapon: '155mm', noMovingFire: true },
+  HARV:   { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 6, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null },
+  MCV:    { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'light', speed: 6, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null },
+  TRUK:   { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'heavy', speed: 8, sight: 2, rot: 5, isInfantry: false, primaryWeapon: null },
+  // Infantry (RULES.INI values)
+  E1:   { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'M1Carbine' },
+  E2:   { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 5, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Grenade' },
+  E3:   { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 3, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Dragon', secondaryWeapon: 'RedEye' },
+  E4:   { type: UnitType.I_E4, name: 'Flamethrower', image: 'e4', strength: 40, armor: 'none', speed: 3, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Flamer' },
+  E6:   { type: UnitType.I_E6, name: 'Engineer', image: 'e6', strength: 25, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null },
+  DOG:  { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 12, armor: 'none', speed: 4, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw' },
+  SPY:  { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null },
+  MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Heal' },
   GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 100, armor: 'none', speed: 4, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Sniper' },
   CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'e1', strength: 50, armor: 'none', speed: 4, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null },
-  // Civilians (use E1 sprite, no weapon, slow)
+  // Civilians
   C1: { type: UnitType.I_C1, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   C2: { type: UnitType.I_C2, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   C3: { type: UnitType.I_C3, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
@@ -258,26 +264,35 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   C9: { type: UnitType.I_C9, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   C10: { type: UnitType.I_C10, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   // Transport vehicles
-  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'wood', speed: 12, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5 },
-  LST: { type: UnitType.V_LST, name: 'Transport', image: 'truk', strength: 400, armor: 'medium', speed: 6, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8 },
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'light', speed: 12, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5 },
+  LST: { type: UnitType.V_LST, name: 'Transport', image: 'truk', strength: 400, armor: 'heavy', speed: 6, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8 },
 };
 
+// Weapon stats from RULES.INI — real RA values
 export const WEAPON_STATS: Record<string, WeaponStats> = {
-  Mandible: { name: 'Mandible', damage: 50, rof: 15, range: 1.5, warhead: 'Super' },
-  TeslaZap: { name: 'TeslaZap', damage: 60, rof: 25, range: 1.75, warhead: 'Super' },
-  FireballLauncher: { name: 'FireballLauncher', damage: 40, rof: 20, range: 3, warhead: 'Fire', splash: 1.5 , projectileSpeed: 0.8},
-  TankGun: { name: 'TankGun', damage: 25, rof: 50, range: 5, warhead: 'AP' , projectileSpeed: 1.5},
-  MammothTusk: { name: 'MammothTusk', damage: 75, rof: 80, range: 5.5, warhead: 'AP', splash: 1.5 , projectileSpeed: 1.0},
-  MachineGun: { name: 'MachineGun', damage: 10, rof: 15, range: 4, warhead: 'SA' },
-  Rifle: { name: 'Rifle', damage: 15, rof: 20, range: 3, warhead: 'SA' },
-  Bazooka: { name: 'Bazooka', damage: 40, rof: 60, range: 5, warhead: 'AP', splash: 1 , projectileSpeed: 1.0},
-  Grenade: { name: 'Grenade', damage: 35, rof: 40, range: 3.5, warhead: 'HE', splash: 1.5, inaccuracy: 0.5 , projectileSpeed: 0.6},
-  Flamethrower: { name: 'Flamethrower', damage: 35, rof: 20, range: 3, warhead: 'Fire', splash: 1 },
-  DogJaw: { name: 'DogJaw', damage: 100, rof: 10, range: 1.5, warhead: 'Super' },
-  TeslaCannon: { name: 'TeslaCannon', damage: 75, rof: 60, range: 5, warhead: 'Super', splash: 1 },
-  ArtilleryShell: { name: 'ArtilleryShell', damage: 150, rof: 100, range: 8, warhead: 'HE', splash: 2, inaccuracy: 1.5, minRange: 2 , projectileSpeed: 0.8},
-  Sniper: { name: 'Sniper', damage: 125, rof: 40, range: 5, warhead: 'Super' },
-  Napalm: { name: 'Napalm', damage: 60, rof: 25, range: 1.75, warhead: 'Super' },
+  // Infantry weapons
+  M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA' },
+  Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33 },
+  Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67 },
+  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33 },
+  Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8 },
+  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic' },
+  Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic' },
+  Sniper:           { name: 'Sniper',            damage: 125, rof: 40, range: 5.0,  warhead: 'HollowPoint' },
+  // Vehicle weapons
+  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA' },
+  '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67 },
+  '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67 },
+  '105mm':          { name: '105mm',             damage: 30,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67 },
+  '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67 },
+  MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0 },
+  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8 },
+  TeslaCannon:      { name: 'TeslaCannon',       damage: 75,  rof: 60, range: 5.0,  warhead: 'Super', splash: 1.0 },
+  // Ant weapons (from SCA scenario INI files)
+  Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super' },
+  TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super' },
+  FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8 },
+  Napalm:           { name: 'Napalm',            damage: 60,  rof: 25, range: 1.75, warhead: 'Super' },
 };
 
 // === Production data ===

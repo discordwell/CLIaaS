@@ -692,34 +692,43 @@
     "sheetWidth": 384,
     "sheetHeight": 48
   },
-  "ant1": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 112,
-    "columns": 16,
-    "rows": 7,
-    "sheetWidth": 768,
-    "sheetHeight": 336
+  "gold01": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 12,
+    "columns": 12,
+    "rows": 1,
+    "sheetWidth": 288,
+    "sheetHeight": 24
   },
-  "ant2": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 112,
-    "columns": 16,
-    "rows": 7,
-    "sheetWidth": 768,
-    "sheetHeight": 336
+  "gold02": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 12,
+    "columns": 12,
+    "rows": 1,
+    "sheetWidth": 288,
+    "sheetHeight": 24
   },
-  "ant3": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 112,
-    "columns": 16,
-    "rows": 7,
-    "sheetWidth": 768,
-    "sheetHeight": 336
+  "gold03": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 12,
+    "columns": 12,
+    "rows": 1,
+    "sheetWidth": 288,
+    "sheetHeight": 24
   },
-  "lar1": {
+  "gold04": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 12,
+    "columns": 12,
+    "rows": 1,
+    "sheetWidth": 288,
+    "sheetHeight": 24
+  },
+  "gem01": {
     "frameWidth": 24,
     "frameHeight": 24,
     "frameCount": 3,
@@ -728,7 +737,7 @@
     "sheetWidth": 72,
     "sheetHeight": 24
   },
-  "lar2": {
+  "gem02": {
     "frameWidth": 24,
     "frameHeight": 24,
     "frameCount": 3,
@@ -737,22 +746,22 @@
     "sheetWidth": 72,
     "sheetHeight": 24
   },
-  "quee": {
-    "frameWidth": 48,
+  "gem03": {
+    "frameWidth": 24,
     "frameHeight": 24,
-    "frameCount": 20,
-    "columns": 16,
-    "rows": 2,
-    "sheetWidth": 768,
-    "sheetHeight": 48
-  },
-  "antdie": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 8,
-    "columns": 8,
+    "frameCount": 3,
+    "columns": 3,
     "rows": 1,
-    "sheetWidth": 384,
-    "sheetHeight": 48
+    "sheetWidth": 72,
+    "sheetHeight": 24
+  },
+  "gem04": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 3,
+    "columns": 3,
+    "rows": 1,
+    "sheetWidth": 72,
+    "sheetHeight": 24
   }
 }

@@ -114,6 +114,16 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'SBAG.SHP', 'sbag'],    // Sandbags
   ['CONQUER.MIX', 'BARB.SHP', 'barb'],    // Barbed wire
   ['CONQUER.MIX', 'WOOD.SHP', 'wood'],    // Wooden fence
+  // Ore/gem overlays (theater-specific .TEM files, SHP format)
+  // Gold: 12 frames each (density 0-11), Gems: 3 frames each (density 0-2)
+  ['TEMPERAT.MIX', 'GOLD01.TEM', 'gold01'],
+  ['TEMPERAT.MIX', 'GOLD02.TEM', 'gold02'],
+  ['TEMPERAT.MIX', 'GOLD03.TEM', 'gold03'],
+  ['TEMPERAT.MIX', 'GOLD04.TEM', 'gold04'],
+  ['TEMPERAT.MIX', 'GEM01.TEM', 'gem01'],
+  ['TEMPERAT.MIX', 'GEM02.TEM', 'gem02'],
+  ['TEMPERAT.MIX', 'GEM03.TEM', 'gem03'],
+  ['TEMPERAT.MIX', 'GEM04.TEM', 'gem04'],
 ];
 
 function log(msg: string): void {

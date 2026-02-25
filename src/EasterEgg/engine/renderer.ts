@@ -180,7 +180,7 @@ export class Renderer {
 
     this.renderTerrain(camera, map, tick);
     this.renderDecals(camera, map);
-    this.renderOverlays(camera, map, tick);
+    this.renderOverlays(camera, map, tick, assets);
     this.renderStructures(camera, map, structures, assets, tick);
     this.renderCrates(camera, map, tick);
     this.renderCorpses(camera, map, assets);
@@ -264,12 +264,12 @@ export class Renderer {
       case 'overlays':
         ctx.fillStyle = '#222';
         ctx.fillRect(0, 0, this.width, this.height);
-        this.renderOverlays(camera, map, tick);
+        this.renderOverlays(camera, map, tick, assets);
         break;
       case 'full-no-ui':
         this.renderTerrain(camera, map, tick);
         this.renderDecals(camera, map);
-        this.renderOverlays(camera, map, tick);
+        this.renderOverlays(camera, map, tick, assets);
         this.renderStructures(camera, map, structures, assets, tick);
         this.renderCrates(camera, map, tick);
         this.renderCorpses(camera, map, assets);
@@ -804,7 +804,7 @@ export class Renderer {
 
   // ─── Overlays (ore, gems, walls) ────────────────────────
 
-  private renderOverlays(camera: Camera, map: GameMap, tick: number): void {
+  private renderOverlays(camera: Camera, map: GameMap, tick: number, assets: AssetManager): void {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
@@ -821,43 +821,12 @@ export class Renderer {
         const h = cellHash(cx, cy);
 
         if (ovl >= 0x03 && ovl <= 0x0E) {
-          // Gold ore (GOLD01-GOLD12) — layered procedural with gold/amber palette
-          const density = ovl - 0x03; // 0-11
-          const densityRatio = density / 11;
-          // Base dirt ground showing through (semi-transparent ore layer)
-          ctx.fillStyle = this.palColor(PAL_DIRT_START + 4 + (h % 3));
-          ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-          // Ore deposit layer — denser coverage at higher values
-          const coverage = 0.3 + densityRatio * 0.5;
-          for (let py = 0; py < CELL_SIZE; py += 2) {
-            for (let px = 0; px < CELL_SIZE; px += 2) {
-              const ph = cellHash(cx * 24 + px, cy * 24 + py);
-              if ((ph % 100) / 100 < coverage) {
-                // Gold/amber palette variation based on position
-                const shade = (ph % 3);
-                const r = shade === 0 ? 180 + (ph % 40) : shade === 1 ? 200 + (ph % 30) : 160 + (ph % 35);
-                const g = shade === 0 ? 140 + (ph % 30) : shade === 1 ? 160 + (ph % 25) : 120 + (ph % 30);
-                const b = shade === 0 ? 40 + (ph % 20) : shade === 1 ? 60 + (ph % 15) : 30 + (ph % 20);
-                ctx.fillStyle = `rgb(${r},${g},${b})`;
-                const sz = density > 6 ? 2 : 1;
-                ctx.fillRect(screen.x + px, screen.y + py, sz, sz);
-              }
-            }
-          }
-          // Chunky ore nuggets at higher densities
-          const nuggets = Math.floor(density / 2);
-          for (let n = 0; n < nuggets; n++) {
-            const nh = (h + n * 47) & 0xFF;
-            const nx = (nh % 16) + 3, ny = ((nh >> 3) % 14) + 3;
-            const ns = 2 + (nh % 2);
-            ctx.fillStyle = `rgb(${210 + (nh % 30)},${170 + (nh % 20)},${50 + (nh % 20)})`;
-            ctx.fillRect(screen.x + nx, screen.y + ny, ns, ns);
-            // Dark edge for depth
-            ctx.fillStyle = 'rgba(80,60,20,0.4)';
-            ctx.fillRect(screen.x + nx + ns, screen.y + ny + 1, 1, ns);
-            ctx.fillRect(screen.x + nx + 1, screen.y + ny + ns, ns, 1);
-          }
-          // Animated sparkle — one glint cycles per cell at staggered intervals
+          // Gold ore — sprite from GOLD01-04.TEM, 12 density frames each
+          const density = ovl - 0x03; // 0-11 = frame index
+          const variant = (h % 4) + 1; // pick gold01-04
+          const sheetName = `gold0${variant}`;
+          assets.drawFrame(ctx, sheetName, density, screen.x, screen.y);
+          // Animated sparkle overlay
           const sparklePhase = (tick + h * 3) % 40;
           if (sparklePhase < 6) {
             const sparkAlpha = sparklePhase < 3 ? sparklePhase / 3 : (6 - sparklePhase) / 3;
@@ -865,24 +834,17 @@ export class Renderer {
             const sy = screen.y + 4 + ((h * 11) % 14);
             ctx.fillStyle = `rgba(255,255,200,${sparkAlpha * 0.8})`;
             ctx.fillRect(sx, sy, 2, 2);
-            ctx.fillRect(sx - 1, sy + 1, 4, 1); // horizontal glint arm
-            ctx.fillRect(sx + 1, sy - 1, 1, 4); // vertical glint arm
+            ctx.fillRect(sx - 1, sy + 1, 4, 1);
+            ctx.fillRect(sx + 1, sy - 1, 1, 4);
           }
         } else if (ovl >= 0x0F && ovl <= 0x12) {
-          // Gems (GEM01-GEM04) — blue/teal crystalline tones (like original RA)
+          // Gems — sprite from GEM01-04.TEM, 3 density frames each
           const gemDensity = ovl - 0x0F; // 0-3
-          const gemBase = 0.25 + gemDensity * 0.08;
-          ctx.fillStyle = `rgba(40,120,200,${gemBase})`;
-          ctx.fillRect(screen.x + 2, screen.y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-          // Gem facets — brighter crystals at higher density
-          const facetAlpha = 0.4 + gemDensity * 0.15;
-          ctx.fillStyle = `rgba(100,200,255,${facetAlpha})`;
-          ctx.fillRect(screen.x + 5 + (h % 6), screen.y + 5, 4, 4);
-          ctx.fillRect(screen.x + 12 + (h % 4), screen.y + 12, 3, 3);
-          if (gemDensity >= 2) {
-            ctx.fillRect(screen.x + 8 + (h % 3), screen.y + 10, 3, 3);
-          }
-          // Animated gem sparkle — brighter and more frequent than ore
+          const frame = Math.min(gemDensity, 2); // gems have 3 frames (0-2)
+          const variant = (h % 4) + 1; // pick gem01-04
+          const sheetName = `gem0${variant}`;
+          assets.drawFrame(ctx, sheetName, frame, screen.x, screen.y);
+          // Animated gem sparkle
           const gemPhase = (tick + h * 5) % 24;
           if (gemPhase < 6) {
             const sparkAlpha = gemPhase < 3 ? gemPhase / 3 : (6 - gemPhase) / 3;

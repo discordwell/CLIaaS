@@ -968,7 +968,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     if (section.has('GuardRange')) base.guardRange = parseInt(section.get('GuardRange')!);
     if (section.has('Armor')) {
       const a = section.get('Armor')!.toLowerCase();
-      if (a === 'none' || a === 'wood' || a === 'light' || a === 'medium' || a === 'heavy') base.armor = a as ArmorType;
+      if (a === 'none' || a === 'wood' || a === 'light' || a === 'heavy' || a === 'concrete') base.armor = a as ArmorType;
     }
     scenarioUnitStats[typeName] = base;
   }
@@ -991,7 +991,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   }
 
   // Apply warhead Verses overrides (e.g. [Fire] Verses=90%,100%,150%,150%,50%)
-  // RA 5 armor classes: none(0), wood(1), light/aluminum(2), medium/steel(3), heavy(4)
+  // RA 5 armor classes: none(0), wood(1), light(2), heavy(3), concrete(4)
   for (const whName of Object.keys(WARHEAD_VS_ARMOR)) {
     const section = data.rawSections.get(whName);
     if (!section?.has('Verses')) continue;
