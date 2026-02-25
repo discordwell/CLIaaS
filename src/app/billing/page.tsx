@@ -62,20 +62,21 @@ function UsageMeter({
   limit,
 }: {
   label: string;
-  current: number;
-  limit: number;
+  current: number | null | undefined;
+  limit: number | null | undefined;
 }) {
-  const pct = limit === Infinity ? 0 : Math.min((current / limit) * 100, 100);
+  const c = current ?? 0;
+  const l = limit ?? Infinity;
+  const pct = l === Infinity ? 0 : Math.min((c / l) * 100, 100);
   const isNearLimit = pct >= 80;
-  const displayLimit =
-    limit === Infinity ? "unlimited" : limit.toLocaleString();
+  const displayLimit = l === Infinity ? "unlimited" : l.toLocaleString();
 
   return (
     <div>
       <div className="flex items-center justify-between font-mono text-xs uppercase">
         <span className="font-bold">{label}</span>
         <span className={isNearLimit ? "text-red-600 font-bold" : "text-zinc-500"}>
-          {current.toLocaleString()} / {displayLimit}
+          {c.toLocaleString()} / {displayLimit}
         </span>
       </div>
       <div className="mt-2 h-3 w-full border-2 border-zinc-950 bg-zinc-100">
@@ -148,6 +149,9 @@ export default function BillingPage() {
     );
   }
 
+  const usage = data.usage ?? { ticketsCreated: 0, aiCallsMade: 0, apiRequestsMade: 0, period: '' };
+  const quotas = data.quotas ?? { ticketsPerMonth: Infinity, aiCallsPerMonth: Infinity, apiRequestsPerMonth: Infinity };
+
   const BYOC_PLANS = ['byoc', 'basic', 'founder', 'free', 'starter'];
   const isByoc = BYOC_PLANS.includes(data.plan);
   const isPaid = data.plan === 'pro' || data.plan === 'pro_hosted' || data.plan === 'enterprise';
@@ -180,25 +184,25 @@ export default function BillingPage() {
       <section className="mt-6 border-2 border-zinc-950 bg-white p-8">
         <h2 className="font-mono text-xs font-bold uppercase tracking-[0.2em]">
           Current Usage
-          {data.usage.period && (
-            <span className="ml-3 text-zinc-400">{data.usage.period}</span>
+          {usage.period && (
+            <span className="ml-3 text-zinc-400">{usage.period}</span>
           )}
         </h2>
         <div className="mt-6 space-y-5">
           <UsageMeter
             label="Tickets"
-            current={data.usage.ticketsCreated}
-            limit={data.quotas.ticketsPerMonth}
+            current={usage.ticketsCreated}
+            limit={quotas.ticketsPerMonth}
           />
           <UsageMeter
             label="AI Calls"
-            current={data.usage.aiCallsMade}
-            limit={data.quotas.aiCallsPerMonth}
+            current={usage.aiCallsMade}
+            limit={quotas.aiCallsPerMonth}
           />
           <UsageMeter
             label="API Requests"
-            current={data.usage.apiRequestsMade}
-            limit={data.quotas.apiRequestsPerMonth}
+            current={usage.apiRequestsMade}
+            limit={quotas.apiRequestsPerMonth}
           />
         </div>
       </section>
