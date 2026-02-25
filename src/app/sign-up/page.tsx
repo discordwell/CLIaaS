@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, Suspense } from "react";
+import { useState, useMemo, Suspense } from "react";
 import GoogleAuthButton from "@/components/auth/GoogleAuthButton";
+import { PERSONAL_EMAIL_DOMAINS } from "@/lib/auth/personal-domains";
+
+function isPersonalEmailClient(email: string): boolean {
+  const at = email.lastIndexOf("@");
+  if (at === -1) return true; // no domain yet, assume personal
+  const domain = email.slice(at + 1).toLowerCase();
+  if (!domain.includes(".")) return true; // incomplete domain
+  return PERSONAL_EMAIL_DOMAINS.has(domain);
+}
 
 function SignUpForm() {
   const router = useRouter();
@@ -15,6 +24,8 @@ function SignUpForm() {
   const [error, setError] = useState(searchParams.get("error") || "");
   const [loading, setLoading] = useState(false);
 
+  const showWorkspace = useMemo(() => isPersonalEmailClient(email), [email]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -24,7 +35,12 @@ function SignUpForm() {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, name, workspaceName }),
+        body: JSON.stringify({
+          email,
+          password,
+          name,
+          workspaceName: showWorkspace ? workspaceName : undefined,
+        }),
       });
 
       const data = await res.json();
@@ -33,7 +49,12 @@ function SignUpForm() {
         return;
       }
 
-      router.push("/dashboard");
+      // If user joined an existing org, go straight to dashboard
+      if (data.joined) {
+        router.push("/dashboard");
+      } else {
+        router.push("/onboarding");
+      }
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -60,19 +81,6 @@ function SignUpForm() {
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block">
             <span className="mb-2 block font-mono text-xs font-bold uppercase">
-              Workspace name
-            </span>
-            <input
-              type="text"
-              value={workspaceName}
-              onChange={(e) => setWorkspaceName(e.target.value)}
-              required
-              className="w-full border-2 border-zinc-300 px-4 py-3 font-mono text-sm outline-none transition focus:border-zinc-950"
-              placeholder="acme-team"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block font-mono text-xs font-bold uppercase">
               Your name
             </span>
             <input
@@ -97,6 +105,25 @@ function SignUpForm() {
               placeholder="you@company.com"
             />
           </label>
+          {showWorkspace ? (
+            <label className="block">
+              <span className="mb-2 block font-mono text-xs font-bold uppercase">
+                Workspace name
+              </span>
+              <input
+                type="text"
+                value={workspaceName}
+                onChange={(e) => setWorkspaceName(e.target.value)}
+                required
+                className="w-full border-2 border-zinc-300 px-4 py-3 font-mono text-sm outline-none transition focus:border-zinc-950"
+                placeholder="acme-team"
+              />
+            </label>
+          ) : (
+            <p className="font-mono text-xs text-zinc-500">
+              Your workspace will be created from your company domain.
+            </p>
+          )}
           <label className="block">
             <span className="mb-2 block font-mono text-xs font-bold uppercase">
               Password

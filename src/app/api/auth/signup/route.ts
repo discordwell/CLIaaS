@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { hashPassword } from '@/lib/password';
 import { createToken, setSessionCookie } from '@/lib/auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { createAccount, AccountExistsError } from '@/lib/auth/create-account';
+import { createOrJoinAccount, AccountExistsError } from '@/lib/auth/create-account';
+import { isPersonalEmail } from '@/lib/auth/personal-domains';
 
 
 export const dynamic = 'force-dynamic';
@@ -14,9 +15,15 @@ export async function POST(request: Request) {
   try {
     const { email, password, name, workspaceName } = parsed.data;
 
-    if (!email || !password || !name || !workspaceName) {
+    if (!email || !password || !name) {
       return NextResponse.json(
-        { error: 'Email, password, name, and workspace name are required' },
+        { error: 'Email, password, and name are required' },
+        { status: 400 }
+      );
+    }
+    if (isPersonalEmail(email) && !workspaceName) {
+      return NextResponse.json(
+        { error: 'Workspace name is required for personal email addresses' },
         { status: 400 }
       );
     }
@@ -35,7 +42,7 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await hashPassword(password);
-    const result = await createAccount({ email, name, workspaceName, passwordHash });
+    const result = await createOrJoinAccount({ email, name, workspaceName, passwordHash });
 
     const token = await createToken({
       id: result.user.id,
@@ -51,6 +58,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       user: result.user,
       workspaceId: result.workspaceId,
+      joined: result.joined,
+      orgName: result.orgName,
     });
   } catch (err) {
     if (err instanceof AccountExistsError) {

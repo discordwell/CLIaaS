@@ -3,6 +3,9 @@ import { cookies } from 'next/headers';
 import { SignJWT } from 'jose';
 import { eq } from 'drizzle-orm';
 import { createToken, setSessionCookie, getJwtSecret } from '@/lib/auth';
+import { isPersonalEmail, extractDomain } from '@/lib/auth/personal-domains';
+import { findOrgByDomain } from '@/lib/auth/domain-matching';
+import { joinWorkspace } from '@/lib/auth/create-account';
 
 export const dynamic = 'force-dynamic';
 
@@ -126,7 +129,35 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${base}/dashboard`);
   }
 
-  // New user — create a short-lived token and redirect to workspace step
+  // New user with work email: check if their domain has an existing org
+  if (!isPersonalEmail(email)) {
+    const domain = extractDomain(email);
+    const match = await findOrgByDomain(domain);
+    if (match) {
+      // Auto-join the existing workspace as agent
+      const result = await joinWorkspace({
+        email,
+        name,
+        passwordHash: null,
+        workspaceId: match.workspaceId,
+        tenantId: match.tenantId,
+      });
+
+      const token = await createToken({
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name,
+        role: result.user.role as 'owner' | 'admin' | 'agent',
+        workspaceId: result.workspaceId,
+        tenantId: result.tenantId,
+      });
+
+      await setSessionCookie(token);
+      return NextResponse.redirect(`${base}/dashboard`);
+    }
+  }
+
+  // New user (no matching org) — create a short-lived token and redirect to workspace step
   const signupToken = await new SignJWT({ email, name, purpose: 'google-signup' })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()

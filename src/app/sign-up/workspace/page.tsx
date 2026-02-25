@@ -36,7 +36,12 @@ function WorkspaceForm() {
         return;
       }
 
-      router.push("/dashboard");
+      // If user joined an existing org, go straight to dashboard
+      if (data.joined) {
+        router.push("/dashboard");
+      } else {
+        router.push("/onboarding");
+      }
     } catch {
       setError("Network error. Please try again.");
     } finally {

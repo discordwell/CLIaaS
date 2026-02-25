@@ -23,6 +23,7 @@ interface BillingData {
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
   } | null;
+  stripeConfigured: boolean;
 }
 
 const PLAN_CARDS = [
@@ -94,6 +95,7 @@ export default function BillingPage() {
   const [data, setData] = useState<BillingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     fetch("/api/billing")
@@ -104,27 +106,43 @@ export default function BillingPage() {
   }, []);
 
   const handleCheckout = async (planId: string) => {
+    setActionError("");
     setActionLoading(true);
-    const res = await fetch("/api/billing/checkout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan: planId }),
-    });
-    const result = await res.json();
-    if (result.url) {
-      window.location.href = result.url;
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: planId }),
+      });
+      const result = await res.json();
+      if (result.url) {
+        window.location.href = result.url;
+      } else {
+        setActionError(result.error || "Failed to create checkout session. Is Stripe configured?");
+      }
+    } catch {
+      setActionError("Network error. Please try again.");
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   const handlePortal = async () => {
+    setActionError("");
     setActionLoading(true);
-    const res = await fetch("/api/billing/portal", { method: "POST" });
-    const result = await res.json();
-    if (result.url) {
-      window.location.href = result.url;
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const result = await res.json();
+      if (result.url) {
+        window.location.href = result.url;
+      } else {
+        setActionError(result.error || "Failed to open billing portal. Is Stripe configured?");
+      }
+    } catch {
+      setActionError("Network error. Please try again.");
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   if (loading) {
@@ -156,8 +174,25 @@ export default function BillingPage() {
   const isByoc = BYOC_PLANS.includes(data.plan);
   const isPaid = data.plan === 'pro' || data.plan === 'pro_hosted' || data.plan === 'enterprise';
 
+  const stripeConfigured = data.stripeConfigured ?? false;
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
+      {/* Stripe not configured banner */}
+      {!stripeConfigured && (
+        <div className="mb-6 border-2 border-yellow-500 bg-yellow-50 px-6 py-4 font-mono text-xs text-yellow-800">
+          Stripe is not configured. Set STRIPE_SECRET_KEY and related environment
+          variables to enable billing.
+        </div>
+      )}
+
+      {/* Action error */}
+      {actionError && (
+        <div className="mb-6 border-2 border-red-500 bg-red-50 px-6 py-4 font-mono text-xs text-red-700">
+          {actionError}
+        </div>
+      )}
+
       {/* Header */}
       <header className="border-2 border-zinc-950 bg-white p-8 sm:p-12">
         <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-950">
@@ -232,7 +267,7 @@ export default function BillingPage() {
           </div>
           <button
             onClick={handlePortal}
-            disabled={actionLoading}
+            disabled={actionLoading || !stripeConfigured}
             className="mt-6 border-2 border-zinc-950 bg-zinc-950 px-6 py-3 font-mono text-sm font-bold uppercase text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
           >
             {actionLoading ? "Loading..." : "Manage Subscription"}
@@ -297,7 +332,7 @@ export default function BillingPage() {
                   ) : (
                     <button
                       onClick={() => handleCheckout(plan.id)}
-                      disabled={actionLoading}
+                      disabled={actionLoading || !stripeConfigured}
                       className="mt-6 border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
                     >
                       {actionLoading ? "Loading..." : "Upgrade"}

@@ -9,6 +9,8 @@ export async function GET(request: Request) {
   const auth = await requireRole(request, 'admin');
   if ('error' in auth) return auth.error;
 
+  const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+
   // Demo mode: return mock billing data
   if (!process.env.DATABASE_URL) {
     const plan = PLANS.byoc;
@@ -19,6 +21,7 @@ export async function GET(request: Request) {
       quotas: plan.quotas,
       usage: { ticketsCreated: 0, aiCallsMade: 0, apiRequestsMade: 0, period: '' },
       subscription: null,
+      stripeConfigured,
     });
   }
 
@@ -65,5 +68,6 @@ export async function GET(request: Request) {
           cancelAtPeriodEnd: tenant.cancelAtPeriodEnd,
         }
       : null,
+    stripeConfigured,
   });
 }

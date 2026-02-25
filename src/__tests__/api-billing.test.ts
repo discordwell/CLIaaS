@@ -39,6 +39,26 @@ describe('Billing API routes', () => {
       expect(body.plan).toBe('byoc');
       expect(body.price).toBe(0);
     });
+
+    it('returns stripeConfigured: false when STRIPE_SECRET_KEY is not set', async () => {
+      delete process.env.STRIPE_SECRET_KEY;
+      vi.resetModules();
+      const { GET } = await import('@/app/api/billing/route');
+      const req = new NextRequest('http://localhost:3000/api/billing');
+      const res = await GET(req);
+      const body = await res.json();
+      expect(body.stripeConfigured).toBe(false);
+    });
+
+    it('returns stripeConfigured: true when STRIPE_SECRET_KEY is set', async () => {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+      vi.resetModules();
+      const { GET } = await import('@/app/api/billing/route');
+      const req = new NextRequest('http://localhost:3000/api/billing');
+      const res = await GET(req);
+      const body = await res.json();
+      expect(body.stripeConfigured).toBe(true);
+    });
   });
 
   // -- POST /api/billing/checkout --

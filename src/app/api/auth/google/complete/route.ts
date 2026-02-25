@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 import { createToken, setSessionCookie, getJwtSecret } from '@/lib/auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { createAccount, AccountExistsError } from '@/lib/auth/create-account';
+import { createOrJoinAccount, AccountExistsError } from '@/lib/auth/create-account';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,9 +12,9 @@ export async function POST(request: Request) {
 
   const { token, workspaceName } = parsed.data;
 
-  if (!token || !workspaceName) {
+  if (!token) {
     return NextResponse.json(
-      { error: 'Token and workspace name are required' },
+      { error: 'Token is required' },
       { status: 400 }
     );
   }
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await createAccount({ email, name, workspaceName, passwordHash: null });
+    const result = await createOrJoinAccount({ email, name, workspaceName, passwordHash: null });
 
     const sessionToken = await createToken({
       id: result.user.id,
@@ -57,6 +57,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       user: result.user,
       workspaceId: result.workspaceId,
+      joined: result.joined,
+      orgName: result.orgName,
     });
   } catch (err) {
     if (err instanceof AccountExistsError) {
