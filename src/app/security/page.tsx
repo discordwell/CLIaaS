@@ -1,8 +1,5 @@
 "use client";
 
-// Revalidate cached data every 60 seconds
-export const revalidate = 60;
-
 import { useEffect, useState, useCallback } from "react";
 
 // ---- Shared types (mirroring lib interfaces) ----
