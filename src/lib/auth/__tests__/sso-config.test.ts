@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { existsSync, rmSync } from 'fs';
 
 const TEST_DIR = '/tmp/cliaas-sso-test-' + process.pid;
@@ -12,6 +12,9 @@ describe('sso-config', () => {
     const g = globalThis as Record<string, unknown>;
     g.__cliaasSSO = undefined;
     g.__cliaasSSO_loaded = undefined;
+
+    // Force fresh module import so internal providers array is re-created
+    vi.resetModules();
   });
 
   it('createProvider and getProvider round-trip', async () => {
@@ -30,17 +33,25 @@ describe('sso-config', () => {
     expect(fetched?.name).toBe('Test SAML');
   });
 
-  it('getProviders returns all providers', async () => {
+  it('getProviders returns empty array on fresh init (no demo providers)', async () => {
     const mod = await import('@/lib/auth/sso-config');
     const initial = mod.getProviders();
-    // Should have demo providers seeded
-    expect(initial.length).toBeGreaterThanOrEqual(2);
+    // No demo providers — starts empty when no saved data
+    expect(initial).toEqual([]);
   });
 
   it('updateProvider modifies fields', async () => {
     const mod = await import('@/lib/auth/sso-config');
+    // Create a provider first since there are no demo providers
+    mod.createProvider({
+      name: 'Update Me',
+      protocol: 'saml',
+      enabled: true,
+    });
     const providers = mod.getProviders();
     const first = providers[0];
+    // Small delay to ensure updatedAt differs
+    await new Promise((r) => setTimeout(r, 5));
     const updated = mod.updateProvider(first.id, { name: 'Renamed' });
     expect(updated?.name).toBe('Renamed');
     expect(updated?.updatedAt).not.toBe(first.updatedAt);

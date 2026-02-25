@@ -33,7 +33,7 @@ const DEMO_USER: AuthUser = {
   authType: 'session',
 };
 
-const ROLE_HIERARCHY: Record<Role, number> = {
+export const ROLE_HIERARCHY: Record<Role, number> = {
   owner: 3,
   admin: 2,
   agent: 1,

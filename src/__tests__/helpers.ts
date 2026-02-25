@@ -144,6 +144,32 @@ export function buildAuthHeaders(
 }
 
 /**
+ * Build a DELETE Request with optional auth token.
+ */
+export function buildDeleteRequest(
+  path: string,
+  options?: {
+    token?: string;
+    headers?: Record<string, string>;
+  },
+): Request {
+  const url = new URL(path, BASE_URL);
+
+  const headers: Record<string, string> = {
+    ...options?.headers,
+  };
+  if (options?.token) {
+    headers['Authorization'] = `Bearer ${options.token}`;
+    headers['Cookie'] = `cliaas-session=${options.token}`;
+  }
+
+  return new Request(url.toString(), {
+    method: 'DELETE',
+    headers,
+  });
+}
+
+/**
  * Build a POST Request with FormData (for Twilio webhooks, etc.).
  */
 export function buildFormPostRequest(

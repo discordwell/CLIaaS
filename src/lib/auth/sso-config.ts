@@ -46,47 +46,11 @@ function ensureDefaults(): void {
   if (g.__cliaasSSO_loaded) return;
   g.__cliaasSSO_loaded = true;
 
-  // Try loading from persisted JSONL file
+  // Load any saved providers from JSONL; otherwise start empty (no demo providers)
   const saved = readJsonlFile<SSOProvider>(SSO_FILE);
   if (saved.length > 0) {
     providers.push(...saved);
-    return;
   }
-
-  // Seed demo providers
-  const now = new Date().toISOString();
-
-  providers.push(
-    {
-      id: 'sso-saml-demo',
-      name: 'Acme Corp SAML',
-      protocol: 'saml',
-      enabled: true,
-      entityId: 'https://idp.acme-corp.example/saml/metadata',
-      ssoUrl: 'https://idp.acme-corp.example/saml/sso',
-      certificate: 'MIIDpDCCAoygAwIBAgIGAXk...demo-certificate...base64==',
-      domainHint: 'acme-corp.example',
-      createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
-      updatedAt: now,
-    },
-    {
-      id: 'sso-oidc-demo',
-      name: 'Globex OIDC',
-      protocol: 'oidc',
-      enabled: true,
-      clientId: 'cliaas-globex-demo',
-      clientSecret: 'demo-secret-change-in-production',
-      issuer: 'https://auth.globex.example',
-      authorizationUrl: 'https://auth.globex.example/authorize',
-      tokenUrl: 'https://auth.globex.example/oauth/token',
-      userInfoUrl: 'https://auth.globex.example/userinfo',
-      domainHint: 'globex.example',
-      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
-      updatedAt: now,
-    }
-  );
-
-  persistProviders();
 }
 
 // ---- Public API ----

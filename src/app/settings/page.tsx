@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getAllConnectorStatuses } from "@/lib/connector-service";
 import ConnectorCard from "@/components/ConnectorCard";
+import SettingsUserSections from "@/components/settings/SettingsUserSections";
 
 const llmProviders = [
   {
@@ -55,6 +56,9 @@ export default function SettingsPage() {
           each platform. All credentials are stored in environment variables.
         </p>
       </header>
+
+      {/* PROFILE & TEAM (client-side, auth-gated) */}
+      <SettingsUserSections />
 
       {/* CONNECTORS */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-8">

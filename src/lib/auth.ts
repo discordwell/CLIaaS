@@ -57,20 +57,25 @@ export async function getSession(): Promise<SessionUser | null> {
   }
 }
 
+export const INDICATOR_COOKIE = 'cliaas-logged-in';
+
 export async function setSessionCookie(token: string) {
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true,
+  const cookieOpts = {
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: 'lax' as const,
     maxAge: 7 * 24 * 60 * 60,
     path: '/',
-  });
+  };
+  cookieStore.set(COOKIE_NAME, token, { ...cookieOpts, httpOnly: true });
+  // Non-httpOnly indicator so client JS can detect login state
+  cookieStore.set(INDICATOR_COOKIE, '1', { ...cookieOpts, httpOnly: false });
 }
 
 export async function clearSessionCookie() {
   const cookieStore = await cookies();
   cookieStore.delete(COOKIE_NAME);
+  cookieStore.delete(INDICATOR_COOKIE);
 }
 
 /**

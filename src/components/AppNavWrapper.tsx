@@ -13,7 +13,7 @@ const PUBLIC_NAV_PREFIXES = ["/docs"];
 
 function hasSession(): boolean {
   if (typeof document === "undefined") return false;
-  return document.cookie.split(";").some((c) => c.trim().startsWith("cliaas-session="));
+  return document.cookie.split(";").some((c) => c.trim().startsWith("cliaas-logged-in="));
 }
 
 export default function AppNavWrapper() {
