@@ -148,17 +148,22 @@ function MarketingHome() {
       <section className="mt-8 border-2 border-line bg-zinc-950 p-6 text-zinc-100 sm:p-10">
         {/* Claude Code header — mascot + version + model + dir */}
         <div className="mb-6 flex items-start gap-3 border-b-2 border-zinc-800 pb-5">
-          {/* Pixel mascot */}
-          {/* Pixel mascot — eyes high, mouth visible (matches real Claude Code) */}
+          {/* Pixel mascot — matches real Claude Code character */}
           <svg viewBox="0 0 16 16" className="mt-0.5 h-8 w-8 shrink-0" aria-hidden="true">
+            {/* Antennae */}
             <rect x="5" y="0" width="2" height="2" fill="#d97706" />
             <rect x="9" y="0" width="2" height="2" fill="#d97706" />
+            {/* Head bridge */}
             <rect x="5" y="2" width="6" height="2" fill="#d97706" />
+            {/* Face — eyes high, mouth below */}
             <rect x="3" y="4" width="10" height="6" fill="#d97706" />
             <rect x="5" y="5" width="2" height="2" fill="#1e1e1e" />
             <rect x="9" y="5" width="2" height="2" fill="#1e1e1e" />
             <rect x="6" y="8" width="4" height="1" fill="#b45309" />
-            <rect x="3" y="10" width="10" height="4" fill="#b45309" />
+            {/* Body — same orange as head, subtle waist accent */}
+            <rect x="3" y="10" width="10" height="1" fill="#b45309" />
+            <rect x="3" y="11" width="10" height="3" fill="#d97706" />
+            {/* Legs */}
             <rect x="3" y="14" width="4" height="2" fill="#92400e" />
             <rect x="9" y="14" width="4" height="2" fill="#92400e" />
           </svg>
