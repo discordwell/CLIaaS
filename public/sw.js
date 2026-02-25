@@ -1,15 +1,14 @@
-// CLIaaS Service Worker — network-first for API, cache-first for static, push handler
+// CLIaaS Service Worker — network-first for pages, cache-first for assets, push handler
 
-const CACHE_NAME = 'cliaas-v1';
+const CACHE_NAME = 'cliaas-v2';
 const STATIC_ASSETS = [
-  '/',
   '/offline',
   '/manifest.json',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg',
 ];
 
-// Install: pre-cache static assets
+// Install: pre-cache shell assets (not HTML pages — those use network-first)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
@@ -17,7 +16,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate: clean old caches
+// Activate: clean old caches (e.g. cliaas-v1 with stale HTML)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -31,7 +30,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: network-first for API, cache-first for static
+// Fetch handler
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -51,26 +50,48 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first (speed matters)
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request)
+  // Navigation requests (HTML pages): network-first so deploys are picked up immediately
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
         .then((response) => {
-          // Cache successful responses
-          if (response.ok && (url.pathname.endsWith('.js') || url.pathname.endsWith('.css') || url.pathname.endsWith('.svg') || url.pathname === '/')) {
+          // Cache a copy for offline fallback
+          if (response.ok) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           }
           return response;
         })
         .catch(() => {
-          // Offline fallback for navigation requests
-          if (request.mode === 'navigate') {
-            return caches.match('/offline');
+          // Offline: try cached version, then /offline page, then plain text fallback
+          return caches.match(request).then((cached) =>
+            cached || caches.match('/offline').then((offlinePage) =>
+              offlinePage || new Response('Offline', { status: 503 })
+            )
+          );
+        })
+    );
+    return;
+  }
+
+  // Static assets (JS/CSS/SVG/images): cache-first
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) return cached;
+      return fetch(request)
+        .then((response) => {
+          if (response.ok && (
+            url.pathname.startsWith('/_next/static/') ||
+            url.pathname.endsWith('.js') ||
+            url.pathname.endsWith('.css') ||
+            url.pathname.endsWith('.svg')
+          )) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           }
-          return new Response('', { status: 503 });
-        });
+          return response;
+        })
+        .catch(() => new Response('', { status: 503 }));
     })
   );
 });

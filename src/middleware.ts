@@ -82,19 +82,6 @@ function applySecurityHeaders(response: NextResponse): void {
   }
 }
 
-/**
- * Override Next.js's default s-maxage=31536000 on prerendered pages so
- * browsers pick up new deploys quickly instead of serving year-old cache.
- */
-function applyCacheHeaders(response: NextResponse, pathname: string): void {
-  if (!pathname.startsWith('/api/') && !pathname.startsWith('/_next/')) {
-    response.headers.set(
-      'Cache-Control',
-      'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
-    );
-  }
-}
-
 // Internal headers that must not be set by clients
 const INTERNAL_HEADERS = ['x-auth-type', 'x-user-id', 'x-workspace-id', 'x-user-role', 'x-user-email', 'x-tenant-id'];
 
@@ -201,7 +188,6 @@ export async function middleware(request: NextRequest) {
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     applyCors(response);
     applySecurityHeaders(response);
-    applyCacheHeaders(response, pathname);
     return response;
   }
 
@@ -210,7 +196,6 @@ export async function middleware(request: NextRequest) {
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     applyCors(response);
     applySecurityHeaders(response);
-    applyCacheHeaders(response, pathname);
     return response;
   }
 
@@ -277,7 +262,6 @@ export async function middleware(request: NextRequest) {
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     applyCors(response);
     applySecurityHeaders(response);
-    applyCacheHeaders(response, pathname);
     return response;
   } catch {
     // Invalid/expired token

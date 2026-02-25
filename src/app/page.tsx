@@ -2,10 +2,6 @@ import Link from "next/link";
 import FitText from "@/components/FitText";
 import PublicNav from "@/components/PublicNav";
 
-// Revalidate every 60s so deploys are picked up quickly instead of
-// the Next.js default s-maxage=31536000 (1 year) for static pages.
-export const revalidate = 60;
-
 /**
  * Detect BYOC mode: CLIAAS_MODE=local means self-hosted instance.
  * In BYOC mode we show a simplified dashboard hub instead of marketing.
