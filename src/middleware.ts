@@ -46,6 +46,8 @@ const PUBLIC_PATHS = [
   '/api/auth/google/login',
   '/api/auth/google/callback',
   '/api/auth/google/complete',
+  // Google OAuth workspace step (new users pick a workspace name after Google auth)
+  '/sign-up/workspace',
   // Zendesk webhook (has its own ZENDESK_WEBHOOK_SECRET verification)
   '/api/zendesk/webhook',
   // Stripe webhook (verified via stripe-signature header)

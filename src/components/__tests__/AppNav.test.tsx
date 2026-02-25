@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+const mockPush = vi.fn();
 
 vi.mock('next/navigation', () => ({
   usePathname: vi.fn(() => '/'),
+  useRouter: vi.fn(() => ({ push: mockPush })),
 }));
 
 vi.mock('next/link', () => ({
@@ -20,6 +23,8 @@ const mockedUsePathname = vi.mocked(usePathname);
 describe('AppNav', () => {
   beforeEach(() => {
     mockedUsePathname.mockReturnValue('/');
+    mockPush.mockClear();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"ok":true}'));
   });
 
   it('renders the CLIaaS brand link', () => {
@@ -33,7 +38,7 @@ describe('AppNav', () => {
     render(<AppNav />);
     const expectedLabels = [
       'Dashboard', 'Rules', 'Chat', 'Channels', 'AI',
-      'Analytics', 'SLA', 'Integrations', 'Security', 'Enterprise', 'Docs',
+      'Analytics', 'SLA', 'Integrations', 'Security', 'Enterprise', 'Billing', 'Docs',
     ];
     for (const label of expectedLabels) {
       expect(screen.getByText(label)).toBeInTheDocument();
@@ -52,11 +57,18 @@ describe('AppNav', () => {
     expect(docsLink).toHaveAttribute('href', '/docs');
   });
 
-  it('renders a Sign Out link', () => {
+  it('renders a Sign Out button that calls signout API', async () => {
     render(<AppNav />);
     const signOut = screen.getByText('Sign Out');
     expect(signOut).toBeInTheDocument();
-    expect(signOut.closest('a')).toHaveAttribute('href', '/');
+    expect(signOut.tagName).toBe('BUTTON');
+
+    fireEvent.click(signOut);
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/auth/signout', { method: 'POST' });
+      expect(mockPush).toHaveBeenCalledWith('/');
+    });
   });
 
   it('highlights the active nav link when pathname matches exactly', () => {

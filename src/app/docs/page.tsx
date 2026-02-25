@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 
 // ---- OpenAPI Types ----
@@ -116,34 +115,18 @@ export default function DocsPage() {
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
       {/* HEADER */}
       <header className="border-2 border-zinc-950 bg-white p-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
-              Documentation
+        <div>
+          <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
+            Documentation
+          </p>
+          <h1 className="mt-2 text-3xl font-bold">
+            {spec?.info.title ?? "CLIaaS"} Documentation
+          </h1>
+          {spec && (
+            <p className="mt-1 text-sm text-zinc-600">
+              v{spec.info.version}
             </p>
-            <h1 className="mt-2 text-3xl font-bold">
-              {spec?.info.title ?? "CLIaaS"} Documentation
-            </h1>
-            {spec && (
-              <p className="mt-1 text-sm text-zinc-600">
-                v{spec.info.version}
-              </p>
-            )}
-          </div>
-          <div className="flex gap-3">
-            <Link
-              href="/dashboard"
-              className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-            >
-              Dashboard
-            </Link>
-            <Link
-              href="/integrations"
-              className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
-            >
-              Integrations
-            </Link>
-          </div>
+          )}
         </div>
 
         {/* Tab Switcher */}

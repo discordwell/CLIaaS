@@ -2,8 +2,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
+const mockPush = vi.fn();
+
 vi.mock('next/navigation', () => ({
   usePathname: vi.fn(() => '/dashboard'),
+  useRouter: vi.fn(() => ({ push: mockPush })),
 }));
 
 vi.mock('next/link', () => ({
@@ -24,7 +27,8 @@ describe('AppNavWrapper', () => {
 
   it('renders AppNav for normal routes like /dashboard', () => {
     render(<AppNavWrapper />);
-    expect(screen.getByText('CLIaaS')).toBeInTheDocument();
+    // AppNav has Sign Out button; PublicNav has Get Started link
+    expect(screen.getByText('Sign Out')).toBeInTheDocument();
   });
 
   it('returns null on the home page (/)', () => {
@@ -57,9 +61,25 @@ describe('AppNavWrapper', () => {
     expect(container.innerHTML).toBe('');
   });
 
+  it('renders PublicNav for /docs', () => {
+    mockedUsePathname.mockReturnValue('/docs');
+    render(<AppNavWrapper />);
+    // PublicNav has "Get Started" and "Sign In" — no "Sign Out"
+    expect(screen.getByText('Get Started')).toBeInTheDocument();
+    expect(screen.getByText('Sign In')).toBeInTheDocument();
+    expect(screen.queryByText('Sign Out')).not.toBeInTheDocument();
+  });
+
+  it('renders PublicNav for /docs sub-routes', () => {
+    mockedUsePathname.mockReturnValue('/docs/api');
+    render(<AppNavWrapper />);
+    expect(screen.getByText('Get Started')).toBeInTheDocument();
+    expect(screen.queryByText('Sign Out')).not.toBeInTheDocument();
+  });
+
   it('renders AppNav for non-excluded routes like /analytics', () => {
     mockedUsePathname.mockReturnValue('/analytics');
     render(<AppNavWrapper />);
-    expect(screen.getByText('CLIaaS')).toBeInTheDocument();
+    expect(screen.getByText('Sign Out')).toBeInTheDocument();
   });
 });

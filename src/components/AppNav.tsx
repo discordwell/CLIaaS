@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard" },
@@ -20,6 +20,16 @@ const navLinks = [
 
 export default function AppNav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    try {
+      await fetch("/api/auth/signout", { method: "POST" });
+    } catch {
+      // Network error — redirect anyway to clear client state
+    }
+    router.push("/");
+  }
 
   return (
     <nav className="border-2 border-zinc-950 bg-white">
@@ -51,12 +61,12 @@ export default function AppNav() {
             })}
           </div>
         </div>
-        <Link
-          href="/"
+        <button
+          onClick={handleSignOut}
           className="px-2 py-1 font-mono text-xs font-bold uppercase text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950"
         >
           Sign Out
-        </Link>
+        </button>
       </div>
     </nav>
   );

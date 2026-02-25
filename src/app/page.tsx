@@ -1,5 +1,6 @@
 import Link from "next/link";
 import FitText from "@/components/FitText";
+import PublicNav from "@/components/PublicNav";
 
 /**
  * Detect BYOC mode: CLIAAS_MODE=local means self-hosted instance.
@@ -120,40 +121,7 @@ function ByocHome() {
 function MarketingHome() {
   return (
     <>
-      {/* ── Nav Bar ── */}
-      <nav className="sticky top-0 z-50 border-b-2 border-line bg-panel/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3 sm:px-10">
-          <Link href="/" className="font-mono text-sm font-bold uppercase tracking-widest text-foreground">
-            CLIaaS
-          </Link>
-          <div className="flex items-center gap-4">
-            <a
-              href="#pricing"
-              className="hidden font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground sm:block"
-            >
-              Pricing
-            </a>
-            <Link
-              href="/docs"
-              className="hidden font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground sm:block"
-            >
-              Docs
-            </Link>
-            <Link
-              href="/sign-in"
-              className="font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground"
-            >
-              Sign In
-            </Link>
-            <Link
-              href="/sign-up"
-              className="border-2 border-foreground bg-foreground px-4 py-2 font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
-            >
-              Get Started
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <PublicNav />
 
     <main className="mx-auto w-full max-w-6xl px-6 py-16 text-foreground sm:px-10 sm:py-24">
 
@@ -172,7 +140,7 @@ function MarketingHome() {
           So answer a couple of tickets yourself, then tell OpenClaw to handle the rest.
         </p>
         <p className="mt-6 font-mono text-xs text-emerald-600 font-bold uppercase">
-          Sign up by the Ides of March and get <span className="line-through">BYOC</span> claudeus invictus. Free, Forever.
+          Sign up by the Ides of March and get <span className="line-through">BYOC</span> Claudeus Maximus &infin;. Free, Forever.
         </p>
       </header>
 
@@ -399,12 +367,12 @@ function MarketingHome() {
               Early adopter lifetime discount
             </p>
             <ul className="mt-6 flex-1 space-y-2 text-sm text-muted">
-              <li>Everything in BYOC</li>
-              <li className="text-foreground font-medium">10,000 tickets/mo</li>
-              <li className="text-foreground font-medium">Unlimited AI queries</li>
-              <li className="text-foreground font-medium">Full fancy GUI</li>
-              <li className="text-foreground font-medium">We manage your infra</li>
-              <li>Priority support</li>
+              <li className="pl-[18px]">Everything in BYOC</li>
+              <li className="flex items-start gap-3 text-foreground font-medium"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> 10,000 tickets/mo</li>
+              <li className="flex items-start gap-3 text-foreground font-medium"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> Unlimited AI queries</li>
+              <li className="flex items-start gap-3 text-foreground font-medium"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> Full fancy GUI</li>
+              <li className="flex items-start gap-3 text-foreground font-medium"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> We manage your infra</li>
+              <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> Priority support</li>
             </ul>
             <Link
               href="/sign-up"
@@ -426,12 +394,12 @@ function MarketingHome() {
               For teams with &gt;10k tickets/mo
             </p>
             <ul className="mt-6 flex-1 space-y-2 text-sm text-muted">
-              <li>Everything in Pro Hosted</li>
-              <li className="text-foreground font-medium">Unlimited everything</li>
-              <li className="text-foreground font-medium">SSO / SAML / SCIM</li>
-              <li className="text-foreground font-medium">Dedicated support</li>
-              <li>Custom SLA guarantees</li>
-              <li>On-prem or hybrid deploy</li>
+              <li className="pl-[18px]">Everything in Pro Hosted</li>
+              <li className="flex items-start gap-3 text-foreground font-medium"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> Unlimited everything</li>
+              <li className="flex items-start gap-3 text-foreground font-medium"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> SSO / SAML / SCIM</li>
+              <li className="flex items-start gap-3 text-foreground font-medium"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> Dedicated support</li>
+              <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> Custom SLA guarantees</li>
+              <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-current"></span> On-prem deploy integration</li>
             </ul>
             <a
               href="mailto:hello@cliaas.com"
