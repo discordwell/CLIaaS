@@ -515,8 +515,17 @@ export class Renderer {
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
-        const terrain = map.getTerrain(cx, cy);
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
+
+        // Out-of-bounds cells render as black (shroud border)
+        if (cx < map.boundsX || cx >= map.boundsX + map.boundsW ||
+            cy < map.boundsY || cy >= map.boundsY + map.boundsH) {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+          continue;
+        }
+
+        const terrain = map.getTerrain(cx, cy);
         const h = cellHash(cx, cy);
 
         // Use MapPack template data for richer variation when available
@@ -985,19 +994,6 @@ export class Renderer {
 
       const screenX = s.cx * CELL_SIZE - camera.x;
       const screenY = s.cy * CELL_SIZE - camera.y;
-
-      // Structure bib/foundation — concrete slab underneath the building
-      const [bibW, bibH] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      const bibX = screenX - 1;
-      const bibY = screenY + bibH * CELL_SIZE - CELL_SIZE * 0.4;
-      const bibPxW = bibW * CELL_SIZE + 2;
-      const bibPxH = CELL_SIZE * 0.5;
-      if (vis === 1) ctx.globalAlpha = 0.4;
-      ctx.fillStyle = this.palColor(PAL_ROCK_START + 4, -10);
-      ctx.fillRect(bibX, bibY, bibPxW, bibPxH);
-      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2, -5);
-      ctx.fillRect(bibX + 1, bibY + 1, bibPxW - 2, bibPxH - 2);
-      if (vis === 1) ctx.globalAlpha = 1;
 
       // Construction/sell animation: clip building sprite progressively
       const isConstructing = s.buildProgress !== undefined && s.buildProgress < 1;

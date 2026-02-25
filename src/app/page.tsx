@@ -140,7 +140,7 @@ function MarketingHome() {
           So answer a couple of tickets yourself, then tell OpenClaw to handle the rest.
         </p>
         <p className="mt-6 font-mono text-xs text-emerald-600 font-bold uppercase">
-          Sign up by the Ides of March and get <span className="line-through">BYOC</span> Claudeus Maximus &infin;. Free, Forever.
+          Sign up by the Ides of March and get <span className="line-through">BYOC</span> Claudeus Maximus ∞. Free, Forever.
         </p>
       </header>
 

@@ -247,6 +247,7 @@ export default function AntGame({ onExit }: AntGameProps) {
         // Immediately pause and disable fog
         game.pause();
         game.disableFog();
+
         game.step(1); // render one frame so canvas has content
 
         // Expose Playwright-accessible globals

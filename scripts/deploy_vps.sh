@@ -85,6 +85,7 @@ rsync -az --delete -e "$RSYNC_SSH" \
   --exclude 'node_modules' \
   --exclude '.env' \
   --exclude '.env.local' \
+  --exclude 'test-results' \
   "$PROJECT_ROOT/" "$VPS_SSH:$REMOTE_APP_DIR/"
 
 echo "[3/6] Installing dependencies + build on remote host..."

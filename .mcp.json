@@ -3,7 +3,10 @@
     "cliaas": {
       "type": "stdio",
       "command": "npx",
-      "args": ["tsx", "cli/mcp/server.ts"],
+      "args": [
+        "tsx",
+        "cli/mcp/server.ts"
+      ],
       "env": {
         "CLIAAS_DATA_DIR": "${CLIAAS_DATA_DIR}",
         "DATABASE_URL": "${DATABASE_URL}",

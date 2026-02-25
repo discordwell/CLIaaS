@@ -87,12 +87,14 @@ async function waitForResponsive(page: Page, maxWaitMs: number): Promise<boolean
 
 // ────────────────────────────────────────────────────────────────
 
-/** Comparison points for SCA01EA — map regions to capture */
+/** Comparison points for SCA01EA — map regions to capture.
+ *  WP98 (player start) is at cell (43,87). Map bounds (40,40)-(90,90).
+ *  Terrain features (cliffs/roads) cluster around cells (40-50, 81-87). */
 const COMPARISON_POINTS = [
-  { name: 'player-base',  desc: 'Player start / WP98 area',  wx: 65 * 24 + 12, wy: 65 * 24 + 12 },
-  { name: 'ore-field',    desc: 'Ore field NW of base',       wx: 55 * 24 + 12, wy: 55 * 24 + 12 },
-  { name: 'water-shore',  desc: 'Water/shore SE',             wx: 75 * 24 + 12, wy: 75 * 24 + 12 },
-  { name: 'ant-spawn',    desc: 'Ant spawn area NE',          wx: 80 * 24 + 12, wy: 50 * 24 + 12 },
+  { name: 'player-base',  desc: 'Player start / WP98 at (43,87)',  wx: 43 * 24 + 12, wy: 87 * 24 + 12 },
+  { name: 'terrain-sw',   desc: 'Cliffs/roads SW (45,84)',         wx: 45 * 24 + 12, wy: 84 * 24 + 12 },
+  { name: 'map-center',   desc: 'Map center / WP0 at (65,65)',     wx: 65 * 24 + 12, wy: 65 * 24 + 12 },
+  { name: 'ne-corner',    desc: 'NE corner / ant approach (80,45)', wx: 80 * 24 + 12, wy: 45 * 24 + 12 },
 ];
 
 const TS_LAYERS = ['terrain', 'units', 'buildings', 'overlays', 'full-no-ui'] as const;
@@ -192,84 +194,95 @@ test.describe('Static Map Comparison', () => {
       console.log('WASM Static: Load timeout, continuing anyway');
     }
 
-    // Wait for content + input readiness
-    console.log('WASM Static: Waiting for content...');
+    // Wait for game to be responsive at the menu screen
+    console.log('WASM Static: Waiting for game to be responsive...');
     await wait(5000);
 
-    const responsive = await waitForResponsive(page, 15000);
+    const responsive = await waitForResponsive(page, 60000);
     if (!responsive) {
-      console.log('WASM Static: Not responsive — aborting');
+      console.log('WASM Static: Not responsive after 60s — aborting');
+      try { await page.screenshot({ path: path.join(STATIC_DIR, 'wasm-timeout.png'), timeout: 10000 }); } catch { /* */ }
       fs.writeFileSync(path.join(STATIC_DIR, 'wasm-console.log'), logs.join('\n'));
       return;
     }
+    console.log('WASM Static: Game responsive (at menu)');
 
-    // Wait for input injection to be ready
-    let inputReady = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      const ready = await tryEval(page, () => {
-        return (window as unknown as { __inputReady: () => boolean }).__inputReady();
-      });
-      if (ready) { inputReady = true; break; }
-      await wait(1000);
-    }
-
-    if (!inputReady) {
-      console.log('WASM Static: Input exports not available — aborting');
-      fs.writeFileSync(path.join(STATIC_DIR, 'wasm-console.log'), logs.join('\n'));
-      return;
-    }
-
-    // Enable autoplay mode
-    await tryEval(page, () => {
+    // Set autoplay mode — bypasses dialogs, briefings, difficulty selection
+    const autoplaySet = await tryEval(page, () => {
       return (window as unknown as { __setAutoplay: (m: boolean) => boolean }).__setAutoplay(true);
     });
+    console.log(`WASM Static: Autoplay set: ${autoplaySet}`);
 
-    // Navigate to gameplay via Enter injection
+    // Capture initial screen state
     const hashBefore = await tryEval(page, () => {
       return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
     });
-
-    await tryEval(page, () => {
-      return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
+    const rendersBefore = await tryEval(page, () => {
+      return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
     });
+    console.log(`WASM Static: Menu hash=${hashBefore ? hashBefore.length + 'chars' : 'null'}, renders=${rendersBefore}`);
 
-    // Wait for gameplay
-    console.log('WASM Static: Waiting for gameplay...');
+    // Navigate menu using CDP keyboard events (NOT __injectKey — menu uses SDL event polling)
+    // Press Enter to start new game from the main menu
+    console.log('WASM Static: Pressing Enter via CDP to start game...');
+    try {
+      await Promise.race([
+        page.keyboard.press('Enter'),
+        new Promise<void>(resolve => setTimeout(resolve, 10000)),
+      ]);
+    } catch { /* CDP press may time out if page blocks */ }
+    await wait(2000);
+
+    // Wait for gameplay: game loads scenario (may block main thread), then enters main loop.
+    // During loading, page may be unresponsive. We just keep polling.
+    console.log('WASM Static: Waiting for gameplay (scenario loading may block)...');
     const loadStart = Date.now();
     let gameReady = false;
-    let enterRetries = 0;
+    let cdpRetries = 0;
 
-    while (Date.now() - loadStart < 300000) {
+    while (Date.now() - loadStart < 360000) {
+      const elapsed = Math.round((Date.now() - loadStart) / 1000);
+
+      // Try to check renders — will return null if page is blocked
       const renders = await tryEval(page, () => {
         return (window as unknown as { __wasmRenderCount: number }).__wasmRenderCount || 0;
       }, 5000);
 
-      const elapsed = Math.round((Date.now() - loadStart) / 1000);
-      if (renders !== null) {
+      if (renders !== null && renders > (rendersBefore ?? 0) + 5) {
+        // Multiple new renders since menu — check if content changed
         const hashNow = await tryEval(page, () => {
           return (window as unknown as { __getScreenHash: () => string }).__getScreenHash();
         });
         if (hashNow !== null && hashNow !== hashBefore) {
-          console.log(`WASM Static: Game reached gameplay after ${elapsed}s`);
+          console.log(`WASM Static: Gameplay detected at ${elapsed}s (renders=${renders})`);
           gameReady = true;
           break;
         }
-        if (elapsed > 5 && enterRetries < 10) {
-          enterRetries++;
-          await tryEval(page, () => {
-            return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
-          });
-          await wait(2000);
-          continue;
-        }
       }
-      if (elapsed % 10 === 0) console.log(`WASM Static: Loading... ${elapsed}s`);
-      await wait(3000);
+
+      // Periodically retry CDP Enter in case game is at another menu screen
+      if (renders !== null && elapsed > 10 && cdpRetries < 8) {
+        cdpRetries++;
+        console.log(`WASM Static: CDP Enter #${cdpRetries} at ${elapsed}s (renders=${renders})`);
+        try {
+          await Promise.race([
+            page.keyboard.press('Enter'),
+            new Promise<void>(resolve => setTimeout(resolve, 5000)),
+          ]);
+        } catch { /* */ }
+        await wait(3000);
+        continue;
+      }
+
+      if (elapsed % 20 === 0) {
+        console.log(`WASM Static: Waiting... ${elapsed}s (renders=${renders ?? 'blocked'})`);
+      }
+      await wait(5000);
     }
 
     if (!gameReady) {
       console.log('WASM Static: Failed to reach gameplay');
-      await saveCanvas(page, path.join(STATIC_DIR, 'wasm-timeout.png'));
+      try { await page.screenshot({ path: path.join(STATIC_DIR, 'wasm-timeout.png'), timeout: 10000 }); } catch { /* */ }
       fs.writeFileSync(path.join(STATIC_DIR, 'wasm-console.log'), logs.join('\n'));
       return;
     }
@@ -479,7 +492,7 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
         });
 
         await tryEval(page, () => {
-          return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
+          return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(13);
         });
 
         console.log('WASM: Waiting up to 5min for gameplay...');
@@ -506,7 +519,7 @@ test.describe('Visual Comparison: TS Engine vs WASM Original', () => {
               enterRetries++;
               console.log(`WASM: Injecting Enter #${enterRetries}...`);
               await tryEval(page, () => {
-                return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(40);
+                return (window as unknown as { __injectKey: (vk: number) => boolean }).__injectKey(13);
               });
               await wait(2000);
               continue;

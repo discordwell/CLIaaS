@@ -33,10 +33,10 @@ const PLAN_CARDS = [
     period: "/mo",
     note: "Early adopter lifetime discount (was $79)",
     features: [
-      "10,000 tickets/mo",
-      "Unlimited AI queries",
-      "Full fancy GUI",
-      "We manage your infra",
+      "Fully hosted, local interoperability",
+      "Up to 10,000 tickets/mo",
+      "Unlimited queries & AI, never upcharged",
+      "Power user GUI available",
       "Priority support",
     ],
   },
@@ -51,7 +51,7 @@ const PLAN_CARDS = [
       "SSO / SAML / SCIM",
       "Dedicated support",
       "Custom SLA guarantees",
-      "On-prem or hybrid",
+      "On-prem deploy integration",
     ],
   },
 ];
@@ -80,9 +80,8 @@ function UsageMeter({
       </div>
       <div className="mt-2 h-3 w-full border-2 border-zinc-950 bg-zinc-100">
         <div
-          className={`h-full transition-all ${
-            isNearLimit ? "bg-red-500" : "bg-zinc-950"
-          }`}
+          className={`h-full transition-all ${isNearLimit ? "bg-red-500" : "bg-zinc-950"
+            }`}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -99,7 +98,7 @@ export default function BillingPage() {
     fetch("/api/billing")
       .then((r) => r.json())
       .then(setData)
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, []);
 
@@ -249,11 +248,10 @@ export default function BillingPage() {
               return (
                 <div
                   key={plan.id}
-                  className={`flex flex-col border-2 bg-white p-6 ${
-                    isCurrent
-                      ? "border-zinc-950 ring-2 ring-zinc-950"
-                      : "border-zinc-300"
-                  }`}
+                  className={`flex flex-col border-2 bg-white p-6 ${isCurrent
+                    ? "border-zinc-950 ring-2 ring-zinc-950"
+                    : "border-zinc-300"
+                    }`}
                 >
                   <h3 className="font-mono text-xs font-bold uppercase tracking-[0.2em]">
                     {plan.name}
