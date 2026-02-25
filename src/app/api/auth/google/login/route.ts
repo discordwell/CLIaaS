@@ -3,10 +3,14 @@ import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    return NextResponse.json({ error: 'Google auth not configured' }, { status: 503 });
+    // Redirect back to sign-up with a friendly error instead of raw JSON
+    const referer = request.headers.get('referer') || '/sign-up';
+    const target = new URL(referer.includes('/sign-in') ? '/sign-in' : '/sign-up', request.url);
+    target.searchParams.set('error', 'Google sign-in is not configured yet. Use email/password for now.');
+    return NextResponse.redirect(target.toString());
   }
 
   const state = crypto.randomUUID();
@@ -26,7 +30,7 @@ export async function GET() {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 600, // 10 minutes
+    maxAge: 600,
     path: '/',
   });
 

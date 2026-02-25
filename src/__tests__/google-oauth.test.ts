@@ -32,7 +32,8 @@ describe('Google OAuth routes', () => {
       }));
 
       const { GET } = await import('@/app/api/auth/google/login/route');
-      const res = await GET();
+      const req = new Request('http://localhost:3000/api/auth/google/login');
+      const res = await GET(req);
 
       expect(res.status).toBe(307);
       const location = res.headers.get('location') || '';
@@ -41,7 +42,7 @@ describe('Google OAuth routes', () => {
       expect(location).toContain('scope=openid+email+profile');
     });
 
-    it('returns 503 when GOOGLE_CLIENT_ID is not set', async () => {
+    it('redirects back to sign-up when GOOGLE_CLIENT_ID is not set', async () => {
       delete process.env.GOOGLE_CLIENT_ID;
 
       vi.doMock('next/headers', () => ({
@@ -53,11 +54,15 @@ describe('Google OAuth routes', () => {
       }));
 
       const { GET } = await import('@/app/api/auth/google/login/route');
-      const res = await GET();
+      const req = new Request('http://localhost:3000/api/auth/google/login', {
+        headers: { referer: 'http://localhost:3000/sign-up' },
+      });
+      const res = await GET(req);
 
-      expect(res.status).toBe(503);
-      const body = await res.json();
-      expect(body.error).toMatch(/not configured/i);
+      expect(res.status).toBe(307);
+      const location = res.headers.get('location') || '';
+      expect(location).toContain('/sign-up');
+      expect(location).toContain('error=');
     });
   });
 

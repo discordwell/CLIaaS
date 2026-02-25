@@ -1,8 +1,6 @@
 "use client";
 
 export default function GoogleAuthButton() {
-  if (process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED !== "1") return null;
-
   return (
     <>
       <a
