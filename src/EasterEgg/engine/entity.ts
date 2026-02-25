@@ -72,6 +72,12 @@ export class Entity {
   lastAIScan = 0;      // tick when ant AI last scanned
   lastPathRecalc = 0;  // tick when path was last recalculated (for blocked paths)
 
+  // Rotation accumulators (C++ ROT system: accumulate rot per tick, advance facing when >= 32)
+  rotAccumulator = 0;
+  turretRotAccumulator = 0;
+  rotTickedThisFrame = false;       // prevents double-accumulation per game tick
+  turretRotTickedThisFrame = false;  // prevents double-accumulation per game tick
+
   // Combat
   attackCooldown = 0;
   attackCooldown2 = 0;
@@ -319,39 +325,68 @@ export class Entity {
   }
 
   /** Gradually rotate facing toward desiredFacing based on rot speed.
-   *  Returns true if facing matches desiredFacing. */
+   *  C++ RA rotation: ROT accumulates per tick; one facing step when accumulator >= 32.
+   *  Infantry (rot >= 8) snap instantly. Returns true if facing matches desiredFacing. */
   tickRotation(): boolean {
-    if (this.facing === this.desiredFacing) return true;
-    // rot determines how fast we turn: 8=instant (infantry), lower=slower
-    // rot 8 = snap, rot 4 = 2 ticks per step, rot 1 = 8 ticks per step
-    if (this.stats.rot >= 8) {
-      this.facing = this.desiredFacing;
+    if (this.facing === this.desiredFacing) {
+      this.rotAccumulator = 0;
       return true;
     }
-    // Calculate shortest rotation direction (clockwise or counter-clockwise)
-    const diff = (this.desiredFacing - this.facing + 8) % 8;
-    if (diff <= 4) {
-      this.facing = ((this.facing + 1) % 8) as Dir;
-    } else {
-      this.facing = ((this.facing + 7) % 8) as Dir; // -1 mod 8
+    // Guard against double-accumulation in the same game tick
+    if (this.rotTickedThisFrame) return this.facing === this.desiredFacing;
+    this.rotTickedThisFrame = true;
+
+    // Infantry and fast-rotating units snap instantly (rot >= 8)
+    if (this.stats.rot >= 8) {
+      this.facing = this.desiredFacing;
+      this.rotAccumulator = 0;
+      return true;
+    }
+
+    // Accumulate rotation: higher ROT = faster turning
+    // One facing step (of 8) costs 32 accumulator points
+    this.rotAccumulator += this.stats.rot;
+    if (this.rotAccumulator >= 32) {
+      this.rotAccumulator -= 32;
+      // Calculate shortest rotation direction (clockwise or counter-clockwise)
+      const diff = (this.desiredFacing - this.facing + 8) % 8;
+      if (diff <= 4) {
+        this.facing = ((this.facing + 1) % 8) as Dir;
+      } else {
+        this.facing = ((this.facing + 7) % 8) as Dir; // -1 mod 8
+      }
     }
     return this.facing === this.desiredFacing;
   }
 
   /** Gradually rotate turret toward desiredTurretFacing.
-   *  Turret rotation is faster than body (2 steps per tick for most vehicles). */
+   *  C++ RA: turret rotates at 2x body ROT speed (accumulates rot*2 per tick). */
   tickTurretRotation(): boolean {
-    if (this.turretFacing === this.desiredTurretFacing) return true;
-    const diff = (this.desiredTurretFacing - this.turretFacing + 8) % 8;
-    if (diff <= 4) {
-      this.turretFacing = ((this.turretFacing + 1) % 8) as Dir;
-    } else {
-      this.turretFacing = ((this.turretFacing + 7) % 8) as Dir;
+    if (this.turretFacing === this.desiredTurretFacing) {
+      this.turretRotAccumulator = 0;
+      return true;
+    }
+    // Guard against double-accumulation in the same game tick
+    if (this.turretRotTickedThisFrame) return this.turretFacing === this.desiredTurretFacing;
+    this.turretRotTickedThisFrame = true;
+
+    // Turret rotates at 2x body speed
+    this.turretRotAccumulator += this.stats.rot * 2;
+    if (this.turretRotAccumulator >= 32) {
+      this.turretRotAccumulator -= 32;
+      const diff = (this.desiredTurretFacing - this.turretFacing + 8) % 8;
+      if (diff <= 4) {
+        this.turretFacing = ((this.turretFacing + 1) % 8) as Dir;
+      } else {
+        this.turretFacing = ((this.turretFacing + 7) % 8) as Dir;
+      }
     }
     return this.turretFacing === this.desiredTurretFacing;
   }
 
-  /** Move toward a world position at the unit's speed */
+  /** Move toward a world position at the unit's speed.
+   *  C++ RA drive.cpp: vehicles stop, rotate to face destination, THEN move.
+   *  Infantry are nimble and move while rotating. */
   moveToward(target: WorldPos, speed: number): boolean {
     const dx = target.x - this.pos.x;
     const dy = target.y - this.pos.y;
@@ -364,9 +399,53 @@ export class Entity {
     }
 
     this.desiredFacing = directionTo(this.pos, target);
-    this.tickRotation();
+    const facingAligned = this.tickRotation();
+
+    // Vehicles: stop-rotate-move (don't slide sideways while turning)
+    if (!this.stats.isInfantry && !facingAligned) {
+      return false; // still rotating — don't move yet
+    }
+
+    // Infantry move while rotating (nimble), vehicles move once facing is aligned
     this.pos.x += (dx / dist) * speed;
     this.pos.y += (dy / dist) * speed;
     return false;
   }
+}
+
+/** Calculate threat score for guard targeting (inspired by C++ techno.cpp Evaluate_Object).
+ *  Higher score = higher priority target. Pure function for testability.
+ *  @param scanner The unit doing the scanning
+ *  @param target The potential target being evaluated
+ *  @param dist Distance between scanner and target (in cells)
+ *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit */
+export function threatScore(
+  scanner: Entity, target: Entity, dist: number, isTargetAttackingAlly: boolean,
+): number {
+  // Base value by unit class
+  let score: number;
+  if (target.type === UnitType.ANT2) score = 30;        // Fire ants are most dangerous
+  else if (target.type === UnitType.ANT1) score = 20;    // Warrior ants next
+  else if (target.type === UnitType.ANT3) score = 15;    // Scout ants less threatening
+  else if (target.stats.isInfantry) score = 10;
+  else score = 25; // vehicles are high-value
+
+  // Kill count bonus: experienced enemies are more dangerous
+  score += target.kills * 3;
+
+  // Wounded bonus: finish off weakened targets (HP < 50% → 1.5x)
+  if (target.hp < target.maxHp * 0.5) score *= 1.5;
+
+  // Retaliation bonus: enemy currently attacking allies → 2x priority
+  if (isTargetAttackingAlly) {
+    score *= 2;
+  }
+
+  // Inverse distance weighting: closer targets score higher
+  // Avoid division by zero; at dist=0 full score, at max sight range ~0.3x
+  const maxRange = scanner.stats.sight * 1.5;
+  const distFactor = Math.max(0.3, 1 - (dist / maxRange) * 0.7);
+  score *= distFactor;
+
+  return score;
 }

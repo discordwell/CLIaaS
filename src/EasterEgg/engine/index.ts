@@ -15,7 +15,7 @@ import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
-import { Entity, resetEntityIds } from './entity';
+import { Entity, resetEntityIds, threatScore as computeThreatScore } from './entity';
 import { GameMap, Terrain } from './map';
 import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
@@ -501,6 +501,10 @@ export class Game {
 
     // Update all entities
     for (const entity of this.entities) {
+      // Reset per-tick rotation guards (prevents double-accumulation)
+      entity.rotTickedThisFrame = false;
+      entity.turretRotTickedThisFrame = false;
+
       if (!entity.alive) {
         entity.tickAnimation();
         continue;
@@ -2605,7 +2609,7 @@ export class Game {
       // Turreted vehicles: turret tracks target, body may stay still
       if (entity.hasTurret) {
         entity.desiredTurretFacing = directionTo(entity.pos, entity.target.pos);
-        if (!entity.tickTurretRotation()) entity.tickTurretRotation(); // 2 steps/tick
+        entity.tickTurretRotation();
       } else {
         entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
         const facingReady = entity.tickRotation();
@@ -2972,7 +2976,7 @@ export class Game {
       ? Math.min(baseRange, (entity.weapon?.range ?? 2) + 1)
       : baseRange;
     let bestTarget: Entity | null = null;
-    let bestDist = Infinity;
+    let bestScore = -Infinity;
     let bestIsInfantry = false;
     for (const other of this.entities) {
       if (!other.alive) continue;
@@ -2987,14 +2991,18 @@ export class Game {
         // Dogs prioritize infantry (useless vs vehicles)
         const otherIsInf = other.stats.isInfantry;
         if (otherIsInf && !bestIsInfantry) {
-          bestTarget = other; bestDist = dist; bestIsInfantry = true;
-        } else if (otherIsInf === bestIsInfantry && dist < bestDist) {
-          bestTarget = other; bestDist = dist; bestIsInfantry = otherIsInf;
+          bestTarget = other; bestScore = this.threatScore(entity, other, dist); bestIsInfantry = true;
+        } else if (otherIsInf === bestIsInfantry) {
+          const score = this.threatScore(entity, other, dist);
+          if (score > bestScore) {
+            bestTarget = other; bestScore = score; bestIsInfantry = otherIsInf;
+          }
         }
       } else {
-        // Non-dogs: pick closest enemy
-        if (dist < bestDist) {
-          bestTarget = other; bestDist = dist;
+        // Non-dogs: pick highest-threat enemy
+        const score = this.threatScore(entity, other, dist);
+        if (score > bestScore) {
+          bestTarget = other; bestScore = score;
         }
       }
     }
@@ -3039,16 +3047,17 @@ export class Game {
       return;
     }
 
-    // Look for enemies within scan range
+    // Look for enemies within scan range — use threat scoring
     let bestTarget: Entity | null = null;
-    let bestDist = Infinity;
+    let bestScore = -Infinity;
     for (const other of this.entities) {
       if (!other.alive || this.entitiesAllied(entity, other)) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist > scanRange) continue;
       const oc = other.cell;
       if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
-      if (dist < bestDist) { bestDist = dist; bestTarget = other; }
+      const score = this.threatScore(entity, other, dist);
+      if (score > bestScore) { bestScore = score; bestTarget = other; }
     }
 
     if (bestTarget) {
@@ -3442,6 +3451,13 @@ export class Game {
   }
 
   /** Get warhead-vs-armor damage multiplier, respecting per-scenario overrides */
+  /** Calculate threat score for guard targeting — delegates to pure function in entity.ts */
+  private threatScore(scanner: Entity, target: Entity, dist: number): number {
+    const isTargetAttackingAlly = !!(target.target && target.mission === Mission.ATTACK &&
+      this.entitiesAllied(scanner, target.target));
+    return computeThreatScore(scanner, target, dist, isTargetAttackingAlly);
+  }
+
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
     const armorIdx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'heavy' ? 3 : 4;
     const overridden = this.warheadOverrides[warhead];
