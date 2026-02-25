@@ -72,11 +72,19 @@ export class Entity {
   lastAIScan = 0;      // tick when ant AI last scanned
   lastPathRecalc = 0;  // tick when path was last recalculated (for blocked paths)
 
-  // Rotation accumulators (C++ ROT system: accumulate rot per tick, advance facing when >= 32)
+  // Rotation accumulators (C++ ROT system: accumulate rot per tick, advance facing when >= threshold)
   rotAccumulator = 0;
   turretRotAccumulator = 0;
   rotTickedThisFrame = false;       // prevents double-accumulation per game tick
   turretRotTickedThisFrame = false;  // prevents double-accumulation per game tick
+
+  // 32-step visual facing for smooth vehicle rotation (C++ Dir_To_32)
+  // Game logic uses 8-dir `facing`; visual rendering uses 32-step for smooth sprite animation
+  bodyFacing32 = 0;   // 0-31, initialized to facing * 4
+  turretFacing32 = 0; // 0-31, initialized to turretFacing * 4
+
+  // Recoil (C++ unit.cpp:125 Recoil_Adjust — 1-tick visual kickback on fire)
+  isInRecoilState = false;
 
   // Combat
   attackCooldown = 0;
@@ -151,6 +159,9 @@ export class Entity {
     this.weapon2 = this.stats.secondaryWeapon
       ? WEAPON_STATS[this.stats.secondaryWeapon] ?? null
       : null;
+    // Initialize 32-step visual facing from 8-dir facing
+    this.bodyFacing32 = this.facing * 4;
+    this.turretFacing32 = this.turretFacing * 4;
   }
 
   get cell(): CellPos {
@@ -193,8 +204,8 @@ export class Entity {
 
   /** Turret sprite frame (frames 32-63 in the vehicle SHP) */
   get turretFrame(): number {
-    const facingIndex = this.turretFacing * 4; // 8 directions → 32-step index
-    return 32 + BODY_SHAPE[facingIndex];
+    // Use 32-step turretFacing32 for smooth visual turret rotation
+    return 32 + BODY_SHAPE[this.turretFacing32];
   }
 
   get isAnt(): boolean {
@@ -259,8 +270,8 @@ export class Entity {
     }
 
     // --- Vehicles: 32-frame body rotation via BodyShape lookup ---
-    const facingIndex = dir * 4; // 8 directions → 32-step index
-    const bodyFrame = BODY_SHAPE[facingIndex];
+    // Use 32-step bodyFacing32 for smooth visual rotation (C++ Dir_To_32)
+    const bodyFrame = BODY_SHAPE[this.bodyFacing32];
 
     switch (this.animState) {
       case AnimState.WALK:
@@ -325,11 +336,15 @@ export class Entity {
   }
 
   /** Gradually rotate facing toward desiredFacing based on rot speed.
-   *  C++ RA rotation: ROT accumulates per tick; one facing step when accumulator >= 32.
-   *  Infantry (rot >= 8) snap instantly. Returns true if facing matches desiredFacing. */
+   *  C++ RA rotation: 32-step visual rotation. ROT accumulates per tick; one visual step
+   *  when accumulator >= 8 (256 values / 32 steps = 8 per step). Game-logic 8-dir `facing`
+   *  is derived from bodyFacing32. Infantry (rot >= 8) snap instantly.
+   *  Returns true if facing matches desiredFacing. */
   tickRotation(): boolean {
     if (this.facing === this.desiredFacing) {
       this.rotAccumulator = 0;
+      // Snap visual facing to match game-logic facing
+      this.bodyFacing32 = this.facing * 4;
       return true;
     }
     // Guard against double-accumulation in the same game tick
@@ -339,48 +354,56 @@ export class Entity {
     // Infantry and fast-rotating units snap instantly (rot >= 8)
     if (this.stats.rot >= 8) {
       this.facing = this.desiredFacing;
+      this.bodyFacing32 = this.facing * 4;
       this.rotAccumulator = 0;
       return true;
     }
 
-    // Accumulate rotation: higher ROT = faster turning
-    // One facing step (of 8) costs 32 accumulator points
+    // 32-step vehicle rotation: accumulate ROT per tick, advance bodyFacing32 by ±1 when >= 8
+    const desiredFacing32 = this.desiredFacing * 4;
     this.rotAccumulator += this.stats.rot;
-    if (this.rotAccumulator >= 32) {
-      this.rotAccumulator -= 32;
-      // Calculate shortest rotation direction (clockwise or counter-clockwise)
-      const diff = (this.desiredFacing - this.facing + 8) % 8;
-      if (diff <= 4) {
-        this.facing = ((this.facing + 1) % 8) as Dir;
+    if (this.rotAccumulator >= 8) {
+      this.rotAccumulator -= 8;
+      // Shortest path in 32-step ring
+      const diff32 = (desiredFacing32 - this.bodyFacing32 + 32) % 32;
+      if (diff32 <= 16) {
+        this.bodyFacing32 = (this.bodyFacing32 + 1) % 32;
       } else {
-        this.facing = ((this.facing + 7) % 8) as Dir; // -1 mod 8
+        this.bodyFacing32 = (this.bodyFacing32 + 31) % 32; // -1 mod 32
       }
     }
+    // Derive 8-dir facing from bodyFacing32 for game logic compatibility
+    this.facing = Math.floor(this.bodyFacing32 / 4) as Dir;
     return this.facing === this.desiredFacing;
   }
 
   /** Gradually rotate turret toward desiredTurretFacing.
-   *  C++ RA: turret rotates at 2x body ROT speed (accumulates rot*2 per tick). */
+   *  C++ RA: turret rotates at 2x body ROT speed, using 32-step visual facing.
+   *  Accumulates rot*2 per tick; one visual step when accumulator >= 8. */
   tickTurretRotation(): boolean {
     if (this.turretFacing === this.desiredTurretFacing) {
       this.turretRotAccumulator = 0;
+      this.turretFacing32 = this.turretFacing * 4;
       return true;
     }
     // Guard against double-accumulation in the same game tick
     if (this.turretRotTickedThisFrame) return this.turretFacing === this.desiredTurretFacing;
     this.turretRotTickedThisFrame = true;
 
-    // Turret rotates at 2x body speed
+    // 32-step turret rotation at 2x body speed
+    const desiredTurretFacing32 = this.desiredTurretFacing * 4;
     this.turretRotAccumulator += this.stats.rot * 2;
-    if (this.turretRotAccumulator >= 32) {
-      this.turretRotAccumulator -= 32;
-      const diff = (this.desiredTurretFacing - this.turretFacing + 8) % 8;
-      if (diff <= 4) {
-        this.turretFacing = ((this.turretFacing + 1) % 8) as Dir;
+    if (this.turretRotAccumulator >= 8) {
+      this.turretRotAccumulator -= 8;
+      const diff32 = (desiredTurretFacing32 - this.turretFacing32 + 32) % 32;
+      if (diff32 <= 16) {
+        this.turretFacing32 = (this.turretFacing32 + 1) % 32;
       } else {
-        this.turretFacing = ((this.turretFacing + 7) % 8) as Dir;
+        this.turretFacing32 = (this.turretFacing32 + 31) % 32;
       }
     }
+    // Derive 8-dir turretFacing from turretFacing32 for game logic
+    this.turretFacing = Math.floor(this.turretFacing32 / 4) as Dir;
     return this.turretFacing === this.desiredTurretFacing;
   }
 
@@ -412,6 +435,19 @@ export class Entity {
     return false;
   }
 }
+
+/** Recoil pixel offsets per 8-dir facing (C++ unit.cpp Recoil_Adjust, collapsed from 32-entry).
+ *  Pushes turret/body back 1px in the opposite direction of the barrel for 1 tick. */
+export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
+  { dx: 0, dy: 1 },   // N  — barrel points up, body kicks down
+  { dx: -1, dy: 1 },  // NE
+  { dx: -1, dy: 0 },  // E
+  { dx: -1, dy: -1 }, // SE
+  { dx: 0, dy: -1 },  // S
+  { dx: 1, dy: -1 },  // SW
+  { dx: 1, dy: 0 },   // W
+  { dx: 1, dy: 1 },   // NW
+];
 
 /** Calculate threat score for guard targeting (inspired by C++ techno.cpp Evaluate_Object).
  *  Higher score = higher priority target. Pure function for testability.

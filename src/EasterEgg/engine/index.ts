@@ -504,6 +504,8 @@ export class Game {
       // Reset per-tick rotation guards (prevents double-accumulation)
       entity.rotTickedThisFrame = false;
       entity.turretRotTickedThisFrame = false;
+      // Clear recoil from previous tick (C++ techno.cpp:2339 — recoil lasts 1 tick)
+      if (entity.isInRecoilState) entity.isInRecoilState = false;
 
       if (!entity.alive) {
         entity.tickAnimation();
@@ -2626,6 +2628,7 @@ export class Game {
 
       if (entity.attackCooldown <= 0 && entity.weapon) {
         entity.attackCooldown = entity.weapon.rof;
+        entity.isInRecoilState = true; // C++ Recoil_Adjust — 1-tick visual kickback
 
         // Apply weapon inaccuracy — scatter the impact point
         let impactX = entity.target.pos.x;
@@ -3145,6 +3148,7 @@ export class Game {
         const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
+        entity.isInRecoilState = true;
         this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
         // Muzzle + impact effects
         this.effects.push({
@@ -3186,6 +3190,7 @@ export class Game {
 
       if (entity.attackCooldown <= 0 && entity.weapon) {
         entity.attackCooldown = entity.weapon.rof;
+        entity.isInRecoilState = true;
 
         // Apply scatter
         let impactX = target.x;

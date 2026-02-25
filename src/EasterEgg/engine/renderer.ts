@@ -7,7 +7,7 @@
 import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
-import { Entity } from './entity';
+import { Entity, RECOIL_OFFSETS } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -1288,20 +1288,24 @@ export class Renderer {
         ctx.globalAlpha = fadeAlpha;
       }
 
-      // Unit shadow (drawn at ground level before altitude offset)
-      if (entity.alive) {
-        if (entity.isAirUnit && altY > 0) {
-          // Air unit shadow — offset by altitude for parallax
-          ctx.fillStyle = 'rgba(0,0,0,0.25)';
-          ctx.beginPath();
-          ctx.ellipse(screen.x + altY * 0.3, screen.y + spriteH * 0.3, spriteW * 0.3, spriteH * 0.12, 0, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (!entity.stats.isInfantry) {
-          // Ground vehicle shadow — subtle dark ellipse under unit
-          ctx.fillStyle = 'rgba(0,0,0,0.18)';
-          ctx.beginPath();
-          ctx.ellipse(screen.x, screen.y + spriteH * 0.35, spriteW * 0.35, spriteH * 0.12, 0, 0, Math.PI * 2);
-          ctx.fill();
+      // Unit shadow — sprite-shaped silhouette (C++ SHAPE_GHOST + UnitShadow)
+      if (entity.alive && sheet) {
+        const shadowSheet = assets.getShadowSheet(entity.stats.image);
+        if (shadowSheet) {
+          const frame = entity.spriteFrame % sheet.meta.frameCount;
+          if (entity.isAirUnit && altY > 0) {
+            // Air unit shadow at ground level, offset by altitude for parallax
+            ctx.globalAlpha = 0.2;
+            assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
+              screen.x + altY * 0.3 + 2, screen.y + 3, { centerX: true, centerY: true });
+            ctx.globalAlpha = 1.0;
+          } else if (!entity.stats.isInfantry) {
+            // Ground vehicle/ant sprite-shaped shadow
+            ctx.globalAlpha = 0.2;
+            assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
+              screen.x + 2, screen.y + 3, { centerX: true, centerY: true });
+            ctx.globalAlpha = 1.0;
+          }
         }
       }
 
@@ -1330,20 +1334,41 @@ export class Renderer {
         }
       }
 
-      // Draw sprite with house-color tint
+      // Draw sprite with house-color remapping
       if (sheet) {
         const frame = entity.spriteFrame % sheet.meta.frameCount;
-        assets.drawFrame(ctx, entity.stats.image, frame, screen.x, screen.y, {
-          centerX: true,
-          centerY: true,
-        });
+        // Compute recoil offset (C++ Recoil_Adjust — 1px kickback for 1 tick)
+        let recoilDx = 0, recoilDy = 0;
+        if (entity.isInRecoilState && !entity.stats.isInfantry) {
+          const rFacing = entity.hasTurret ? entity.turretFacing : entity.facing;
+          const ro = RECOIL_OFFSETS[rFacing];
+          recoilDx = ro.dx;
+          recoilDy = ro.dy;
+        }
+        // Body: apply recoil only for non-turreted units (artillery, ants)
+        const bodyRecoilDx = entity.hasTurret ? 0 : recoilDx;
+        const bodyRecoilDy = entity.hasTurret ? 0 : recoilDy;
+        // Use house-remapped sheet if available
+        const remapped = assets.getRemappedSheet(entity.stats.image, entity.house);
+        if (remapped) {
+          assets.drawFrameFrom(ctx, remapped, entity.stats.image, frame,
+            screen.x + bodyRecoilDx, screen.y + bodyRecoilDy, { centerX: true, centerY: true });
+        } else {
+          assets.drawFrame(ctx, entity.stats.image, frame,
+            screen.x + bodyRecoilDx, screen.y + bodyRecoilDy, { centerX: true, centerY: true });
+        }
         // Draw turret layer for turreted vehicles (frames 32-63)
         if (entity.hasTurret && sheet.meta.frameCount >= 64) {
           const turretFrame = entity.turretFrame % sheet.meta.frameCount;
-          assets.drawFrame(ctx, entity.stats.image, turretFrame, screen.x, screen.y, {
-            centerX: true,
-            centerY: true,
-          });
+          // JEEP turret y-offset (C++ udata.cpp Turret_Adjust)
+          const turretOffY = entity.type === UnitType.V_JEEP ? -4 : 0;
+          if (remapped) {
+            assets.drawFrameFrom(ctx, remapped, entity.stats.image, turretFrame,
+              screen.x + recoilDx, screen.y + recoilDy + turretOffY, { centerX: true, centerY: true });
+          } else {
+            assets.drawFrame(ctx, entity.stats.image, turretFrame,
+              screen.x + recoilDx, screen.y + recoilDy + turretOffY, { centerX: true, centerY: true });
+          }
         }
         // Air unit rotor animation overlay (spinning rotor blades)
         if (entity.isAirUnit && entity.alive) {
@@ -1361,16 +1386,18 @@ export class Renderer {
           ctx.lineTo(screen.x + Math.cos(ang + Math.PI / 2) * rr, screen.y - spriteH * 0.3 + Math.sin(ang + Math.PI / 2) * rr * 0.4);
           ctx.stroke();
         }
-        // Apply house-color tint as a colored overlay on the sprite area
-        const tint = HOUSE_TINT[entity.house];
-        if (tint && tint !== 'rgba(0,0,0,0)') {
-          ctx.fillStyle = tint;
-          ctx.fillRect(
-            screen.x - spriteW / 2,
-            screen.y - spriteH / 2,
-            spriteW,
-            spriteH,
-          );
+        // House-color tint fallback: only used when remap-colors.json is not available
+        if (!remapped) {
+          const tint = HOUSE_TINT[entity.house];
+          if (tint && tint !== 'rgba(0,0,0,0)') {
+            ctx.fillStyle = tint;
+            ctx.fillRect(
+              screen.x - spriteW / 2,
+              screen.y - spriteH / 2,
+              spriteW,
+              spriteH,
+            );
+          }
         }
         // Harvester harvesting animation: small ore chunks flying into harvester
         if (entity.type === UnitType.V_HARV && entity.harvesterState === 'harvesting') {

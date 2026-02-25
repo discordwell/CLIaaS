@@ -16,6 +16,7 @@ import { extractAllMIX } from './ra-assets/gamedata.js';
 import { parseShp, type ShpFile } from './ra-assets/shp.js';
 import { parsePalette, indexedToRGBA, type Palette } from './ra-assets/palette.js';
 import { encodePNG } from './ra-assets/png.js';
+import { parseCps } from './ra-assets/cps.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -321,6 +322,69 @@ async function main(): Promise<void> {
     }
   } else {
     log('  WARNING: EXPAND.MIX not found');
+  }
+
+  // Extract PALETTE.CPS for house-color remap data (C++ Init_Color_Remaps)
+  log('Extracting house color remap data...');
+  let cpsData: Buffer | null = null;
+  for (const searchMix of ['LORES.MIX', 'CONQUER.MIX', 'LOCAL.MIX']) {
+    const mix = mixParsed.get(searchMix);
+    if (mix) {
+      cpsData = mix.readFile('PALETTE.CPS');
+      if (cpsData) {
+        log(`  Found PALETTE.CPS in ${searchMix} (${cpsData.length} bytes)`);
+        break;
+      }
+    }
+  }
+  if (cpsData && palData) {
+    try {
+      const cps = parseCps(cpsData);
+      // PALETTE.CPS is a 320×200 indexed image. Top-left 16×12 pixel grid encodes remap colors:
+      //   Row 0 (y=0): 16 source palette indices (the default unit gold gradient)
+      //   Rows 1-11 (y=1..11): per-PCOLOR target palette indices
+      // House→PCOLOR mapping from hdata.cpp: Spain=0(GOLD), Greece=1(LTBLUE), USSR=2(RED),
+      //   row3=GREEN, Ukraine=4(ORANGE), Germany=5(GREY), row6=BLUE, row7=BROWN, etc.
+      const HOUSE_PCOLOR: Record<string, number> = {
+        Spain: 0,    // PCOLOR_GOLD
+        Greece: 1,   // PCOLOR_LTBLUE
+        USSR: 2,     // PCOLOR_RED
+        Ukraine: 4,  // PCOLOR_ORANGE
+        Germany: 5,  // PCOLOR_GREY
+        Turkey: 7,   // PCOLOR_BROWN
+      };
+      const sourceIndices: number[] = [];
+      for (let x = 0; x < 16; x++) {
+        sourceIndices.push(cps.pixels[0 * 320 + x]); // row 0
+      }
+      // Resolve source indices through palette to RGBA
+      const sourceColors: number[][] = sourceIndices.map(idx => [
+        palette.colors[idx * 4],
+        palette.colors[idx * 4 + 1],
+        palette.colors[idx * 4 + 2],
+      ]);
+      const houses: Record<string, number[][]> = {};
+      for (const [houseName, pcolorRow] of Object.entries(HOUSE_PCOLOR)) {
+        const rowY = pcolorRow; // Row index in the 16×12 grid (row 0 = source = Spain's own colors)
+        const houseColors: number[][] = [];
+        for (let x = 0; x < 16; x++) {
+          const palIdx = cps.pixels[rowY * 320 + x];
+          houseColors.push([
+            palette.colors[palIdx * 4],
+            palette.colors[palIdx * 4 + 1],
+            palette.colors[palIdx * 4 + 2],
+          ]);
+        }
+        houses[houseName] = houseColors;
+      }
+      const remapJson = { source: sourceColors, houses };
+      writeFileSync(join(OUTPUT_DIR, 'remap-colors.json'), JSON.stringify(remapJson));
+      log(`  Wrote remap-colors.json (${sourceIndices.length} source colors, ${Object.keys(houses).length} houses)`);
+    } catch (e) {
+      log(`  WARNING: Failed to extract remap colors: ${e}`);
+    }
+  } else {
+    log('  WARNING: PALETTE.CPS not found, house color remapping will use fallback tint');
   }
 
   // Write asset manifest

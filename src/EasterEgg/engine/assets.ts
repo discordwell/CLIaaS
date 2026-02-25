@@ -122,13 +122,15 @@ export class AssetManager {
       this._onProgress?.(this._loadedCount, this._totalCount);
     });
 
-    // Load palette, tileset, and ALL sprites in parallel (tileset no longer blocks sprites)
+    // Load palette, tileset, remap colors, and ALL sprites in parallel
     await Promise.all([
       // Palette (optional)
       fetch(`${BASE_URL}/palette.json`)
         .then(r => r.json())
         .then(p => { this.palette = p; })
         .catch(() => {}),
+      // House color remap data (optional — falls back to tint overlay)
+      this.loadRemapColors(),
       // Tileset atlas (optional — renderer falls back to procedural colors)
       Promise.all([
         fetch(`${BASE_URL}/tileset.json`).then(r => r.ok ? r.json() : null),
@@ -156,6 +158,37 @@ export class AssetManager {
     return this.palette;
   }
 
+  /** Internal: draw a frame from any CanvasImageSource using sheet metadata */
+  private drawFrameInternal(
+    ctx: CanvasRenderingContext2D,
+    source: CanvasImageSource,
+    meta: SpriteSheetMeta,
+    frameIndex: number,
+    x: number,
+    y: number,
+    options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
+  ): void {
+    const col = frameIndex % meta.columns;
+    const row = Math.floor(frameIndex / meta.columns);
+    const sx = col * meta.frameWidth;
+    const sy = row * meta.frameHeight;
+    let dx = x;
+    let dy = y;
+    const scale = options?.scale ?? 1;
+    const dw = meta.frameWidth * scale;
+    const dh = meta.frameHeight * scale;
+    if (options?.centerX) dx -= dw / 2;
+    if (options?.centerY) dy -= dh / 2;
+    if (options?.flip) {
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(source, sx, sy, meta.frameWidth, meta.frameHeight, -dx - dw, dy, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(source, sx, sy, meta.frameWidth, meta.frameHeight, dx, dy, dw, dh);
+    }
+  }
+
   /** Draw a single frame from a sprite sheet onto a canvas context */
   drawFrame(
     ctx: CanvasRenderingContext2D,
@@ -163,52 +196,110 @@ export class AssetManager {
     frameIndex: number,
     x: number,
     y: number,
-    options?: {
-      centerX?: boolean;
-      centerY?: boolean;
-      scale?: number;
-      flip?: boolean;
-    }
+    options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
   ): void {
     const sheet = this.sheets.get(sheetName);
     if (!sheet) return;
+    this.drawFrameInternal(ctx, sheet.image, sheet.meta, frameIndex, x, y, options);
+  }
 
-    const { image, meta } = sheet;
-    const col = frameIndex % meta.columns;
-    const row = Math.floor(frameIndex / meta.columns);
-    const sx = col * meta.frameWidth;
-    const sy = row * meta.frameHeight;
-
-    let dx = x;
-    let dy = y;
-    const scale = options?.scale ?? 1;
-    const dw = meta.frameWidth * scale;
-    const dh = meta.frameHeight * scale;
-
-    if (options?.centerX) dx -= dw / 2;
-    if (options?.centerY) dy -= dh / 2;
-
-    if (options?.flip) {
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(
-        image,
-        sx, sy, meta.frameWidth, meta.frameHeight,
-        -dx - dw, dy, dw, dh
-      );
-      ctx.restore();
-    } else {
-      ctx.drawImage(
-        image,
-        sx, sy, meta.frameWidth, meta.frameHeight,
-        dx, dy, dw, dh
-      );
-    }
+  /** Draw a single frame from an arbitrary canvas source using the metadata of a named sheet.
+   *  Used for shadow/remap sheets that share the same frame layout as the original sprite. */
+  drawFrameFrom(
+    ctx: CanvasRenderingContext2D,
+    sourceCanvas: HTMLCanvasElement,
+    sheetName: string,
+    frameIndex: number,
+    x: number,
+    y: number,
+    options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
+  ): void {
+    const sheet = this.sheets.get(sheetName);
+    if (!sheet) return;
+    this.drawFrameInternal(ctx, sourceCanvas, sheet.meta, frameIndex, x, y, options);
   }
 
   /** Check if a sprite sheet exists */
   hasSheet(name: string): boolean {
     return this.sheets.has(name);
+  }
+
+  // === Shadow sheet cache (sprite-shaped silhouettes for C++ SHAPE_GHOST shadow) ===
+  private shadowSheets = new Map<string, HTMLCanvasElement>();
+
+  /** Get a shadow silhouette version of a sprite sheet (all pixels → black, alpha preserved).
+   *  Cached per sheet name. Used for C++-accurate sprite-shaped unit shadows. */
+  getShadowSheet(sheetName: string): HTMLCanvasElement | null {
+    if (this.shadowSheets.has(sheetName)) return this.shadowSheets.get(sheetName)!;
+    const sheet = this.sheets.get(sheetName);
+    if (!sheet) return null;
+    const { image } = sheet;
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const sctx = canvas.getContext('2d')!;
+    sctx.drawImage(image, 0, 0);
+    // Turn all pixels black while preserving alpha (SHAPE_GHOST effect)
+    sctx.globalCompositeOperation = 'source-in';
+    sctx.fillStyle = 'black';
+    sctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.shadowSheets.set(sheetName, canvas);
+    return canvas;
+  }
+
+  // === House color remap cache ===
+  private remapData: { source: number[][]; houses: Record<string, number[][]> } | null = null;
+  private remappedSheets = new Map<string, HTMLCanvasElement>();
+
+  /** Load remap color data (called during loadAll) */
+  private async loadRemapColors(): Promise<void> {
+    try {
+      const res = await fetch(`${BASE_URL}/remap-colors.json`);
+      if (res.ok) this.remapData = await res.json();
+    } catch { /* optional — house tint fallback */ }
+  }
+
+  /** Whether remap color data is available */
+  get hasRemapData(): boolean { return this.remapData !== null; }
+
+  /** Get a house-color-remapped version of a sprite sheet.
+   *  Swaps the 16 default unit colors to house-specific colors (C++ Init_Color_Remaps).
+   *  Cached per (sheetName, house). */
+  getRemappedSheet(sheetName: string, house: string): HTMLCanvasElement | null {
+    if (!this.remapData) return null;
+    const key = `${sheetName}:${house}`;
+    if (this.remappedSheets.has(key)) return this.remappedSheets.get(key)!;
+    const houseColors = this.remapData.houses[house];
+    if (!houseColors) return null;
+    const sheet = this.sheets.get(sheetName);
+    if (!sheet) return null;
+    const { image } = sheet;
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const rctx = canvas.getContext('2d')!;
+    rctx.drawImage(image, 0, 0);
+    const imgData = rctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imgData.data;
+    const srcColors = this.remapData.source;
+    // Scan pixels and remap matching source colors → house colors
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] === 0) continue; // skip transparent
+      const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+      for (let c = 0; c < srcColors.length; c++) {
+        const sr = srcColors[c][0], sg = srcColors[c][1], sb = srcColors[c][2];
+        // Tolerance ±2 per channel for palette quantization differences
+        if (Math.abs(r - sr) <= 2 && Math.abs(g - sg) <= 2 && Math.abs(b - sb) <= 2) {
+          pixels[i] = houseColors[c][0];
+          pixels[i + 1] = houseColors[c][1];
+          pixels[i + 2] = houseColors[c][2];
+          break;
+        }
+      }
+    }
+    rctx.putImageData(imgData, 0, 0);
+    this.remappedSheets.set(key, canvas);
+    return canvas;
   }
 
   /** Get tileset atlas image (null if not loaded) */

@@ -808,6 +808,9 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     entity.facing = Math.floor(u.facing / 32) % 8;
     entity.desiredFacing = entity.facing;
     entity.turretFacing = entity.facing;
+    // Sync 32-step visual facing from 8-dir facing
+    entity.bodyFacing32 = entity.facing * 4;
+    entity.turretFacing32 = entity.turretFacing * 4;
     entity.hp = Math.floor((u.hp / 256) * entity.maxHp);
     applyMission(entity, u.mission);
     entities.push(entity);
@@ -821,6 +824,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     const entity = new Entity(unitType, toHouse(inf.house), world.x, world.y);
     entity.facing = Math.floor(inf.facing / 32) % 8;
     entity.desiredFacing = entity.facing;
+    entity.bodyFacing32 = entity.facing * 4;
     entity.hp = Math.floor((inf.hp / 256) * entity.maxHp);
     entity.subCell = inf.subCell;
     applyMission(entity, inf.mission);
@@ -1415,6 +1419,7 @@ export function executeTriggerAction(
           const offsetY = (Math.random() - 0.5) * 48;
           const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
           entity.facing = Math.floor(Math.random() * 8);
+          entity.bodyFacing32 = entity.facing * 4;
           // Assign team mission script to each member
           if (team.missions.length > 0) {
             entity.teamMissions = team.missions.map(m => ({
