@@ -8,8 +8,13 @@ import PublicNav from "./PublicNav";
 const NO_NAV_PREFIXES = ["/portal", "/sign-in", "/sign-up", "/chat/embed"];
 const NO_NAV_EXACT = ["/"];
 
-/** Public pages that get the lightweight marketing nav instead of the full app nav. */
+/** Public pages — show PublicNav when logged out, AppNav when logged in. */
 const PUBLIC_NAV_PREFIXES = ["/docs"];
+
+function hasSession(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.cookie.split(";").some((c) => c.trim().startsWith("cliaas-session="));
+}
 
 export default function AppNavWrapper() {
   const pathname = usePathname();
@@ -18,7 +23,7 @@ export default function AppNavWrapper() {
   if (NO_NAV_PREFIXES.some((p) => pathname.startsWith(p))) return null;
 
   if (PUBLIC_NAV_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
-    return <PublicNav />;
+    return hasSession() ? <AppNav /> : <PublicNav />;
   }
 
   return <AppNav />;
