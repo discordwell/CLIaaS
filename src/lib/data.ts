@@ -21,6 +21,9 @@ export type {
   Organization,
   RuleRecord,
   CSATRating,
+  SurveyType,
+  SurveyResponse,
+  SurveyConfig,
 } from '@/lib/data-provider/types';
 
 import type { Ticket } from '@/lib/data-provider/types';
@@ -89,6 +92,16 @@ export async function loadRules() {
 export async function loadCSATRatings() {
   const provider = await getDataProvider();
   return provider.loadCSATRatings();
+}
+
+export async function loadSurveyResponses(type?: import('@/lib/data-provider/types').SurveyType) {
+  const provider = await getDataProvider();
+  return provider.loadSurveyResponses(type);
+}
+
+export async function loadSurveyConfigs() {
+  const provider = await getDataProvider();
+  return provider.loadSurveyConfigs();
 }
 
 // ---- Write operations (delegate to DataProvider) ----

@@ -15,6 +15,8 @@ export type WebhookEventType =
   | 'message.created'
   | 'sla.breached'
   | 'csat.submitted'
+  | 'survey.submitted'
+  | 'survey.sent'
   | 'agent.assigned'
   | 'tag.added'
   | 'tag.removed';

@@ -16,6 +16,8 @@ const ALL_WRITE_TOOLS = [
   'rule_create',
   'rule_toggle',
   'ai_resolve',
+  'survey_config',
+  'survey_send',
 ];
 
 export function loadScopes(): MCPScopeConfig {

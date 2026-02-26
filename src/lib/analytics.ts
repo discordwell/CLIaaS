@@ -1,4 +1,4 @@
-import { loadTickets, loadMessages, loadCSATRatings, type Ticket, type Message } from '@/lib/data';
+import { loadTickets, loadMessages, loadCSATRatings, loadSurveyResponses, type Ticket, type Message } from '@/lib/data';
 
 // ---- Types ----
 
@@ -25,6 +25,15 @@ export interface AnalyticsData {
   // Satisfaction
   csatOverall: number;
   csatTrend: { date: string; score: number }[];
+
+  // NPS
+  npsScore: number;
+  npsTrend: { date: string; score: number }[];
+  npsBreakdown: { promoters: number; passives: number; detractors: number };
+
+  // CES
+  cesScore: number;
+  cesTrend: { date: string; score: number }[];
 
   // Tags & categories
   topTags: Array<{ tag: string; count: number }>;
@@ -72,6 +81,8 @@ export async function computeAnalytics(dateRange?: DateRange): Promise<Analytics
   const allTickets = await loadTickets();
   const allMessages = await loadMessages();
   const csatRatings = await loadCSATRatings();
+  const npsResponses = await loadSurveyResponses('nps');
+  const cesResponses = await loadSurveyResponses('ces');
 
   const tickets = filterByDateRange(allTickets, dateRange);
 
@@ -218,6 +229,63 @@ export async function computeAnalytics(dateRange?: DateRange): Promise<Analytics
       score: Math.round((sum / count) * 100) / 100,
     }));
 
+  // ---- NPS ----
+  let npsScore = 0;
+  const npsBreakdown = { promoters: 0, passives: 0, detractors: 0 };
+  const npsByDate = new Map<string, { promoters: number; detractors: number; total: number }>();
+
+  const completedNps = npsResponses.filter(r => r.rating !== null);
+  for (const r of completedNps) {
+    const rating = r.rating!;
+    if (rating >= 9) npsBreakdown.promoters++;
+    else if (rating >= 7) npsBreakdown.passives++;
+    else npsBreakdown.detractors++;
+
+    const key = r.createdAt.slice(0, 10);
+    const day = npsByDate.get(key) ?? { promoters: 0, detractors: 0, total: 0 };
+    day.total++;
+    if (rating >= 9) day.promoters++;
+    else if (rating < 7) day.detractors++;
+    npsByDate.set(key, day);
+  }
+
+  if (completedNps.length > 0) {
+    npsScore = Math.round(((npsBreakdown.promoters - npsBreakdown.detractors) / completedNps.length) * 100);
+  }
+
+  const npsTrend = Array.from(npsByDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, { promoters, detractors, total }]) => ({
+      date,
+      score: Math.round(((promoters - detractors) / total) * 100),
+    }));
+
+  // ---- CES ----
+  let cesScore = 0;
+  const cesByDate = new Map<string, { sum: number; count: number }>();
+
+  const completedCes = cesResponses.filter(r => r.rating !== null);
+  for (const r of completedCes) {
+    const key = r.createdAt.slice(0, 10);
+    const day = cesByDate.get(key) ?? { sum: 0, count: 0 };
+    day.sum += r.rating!;
+    day.count++;
+    cesByDate.set(key, day);
+  }
+
+  if (completedCes.length > 0) {
+    cesScore = Math.round(
+      (completedCes.reduce((a, r) => a + r.rating!, 0) / completedCes.length) * 100,
+    ) / 100;
+  }
+
+  const cesTrend = Array.from(cesByDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, { sum, count }]) => ({
+      date,
+      score: Math.round((sum / count) * 100) / 100,
+    }));
+
   // ---- Agent performance ----
   const agentPerformance = Array.from(agentMap.entries())
     .filter(([name]) => name !== 'unassigned')
@@ -293,6 +361,11 @@ export async function computeAnalytics(dateRange?: DateRange): Promise<Analytics
     agentPerformance,
     csatOverall,
     csatTrend,
+    npsScore,
+    npsTrend,
+    npsBreakdown,
+    cesScore,
+    cesTrend,
     topTags,
     priorityDistribution,
     periodComparison,
@@ -313,6 +386,11 @@ export function analyticsToCSV(data: AnalyticsData): string {
   lines.push(`Summary,Avg Response Time (hours),${data.avgResponseTimeHours}`);
   lines.push(`Summary,Avg Resolution Time (hours),${data.avgResolutionTimeHours}`);
   lines.push(`Summary,CSAT Overall,${data.csatOverall}`);
+  lines.push(`Summary,NPS Score,${data.npsScore}`);
+  lines.push(`Summary,NPS Promoters,${data.npsBreakdown.promoters}`);
+  lines.push(`Summary,NPS Passives,${data.npsBreakdown.passives}`);
+  lines.push(`Summary,NPS Detractors,${data.npsBreakdown.detractors}`);
+  lines.push(`Summary,CES Score,${data.cesScore}`);
   lines.push(`Summary,First Response SLA Met,${data.firstResponseSLA.met}`);
   lines.push(`Summary,First Response SLA Breached,${data.firstResponseSLA.breached}`);
   lines.push(`Summary,Resolution SLA Met,${data.resolutionSLA.met}`);

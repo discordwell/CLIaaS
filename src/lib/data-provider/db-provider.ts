@@ -16,6 +16,11 @@ import type {
   Organization,
   RuleRecord,
   CSATRating,
+  SurveyType,
+  SurveyResponse,
+  SurveyConfig,
+  SurveyResponseCreateParams,
+  SurveyConfigUpdateParams,
   TicketCreateParams,
   TicketUpdateParams,
   MessageCreateParams,
@@ -353,6 +358,112 @@ export class DbProvider implements DataProvider {
       rating: r.rating,
       createdAt: r.createdAt.toISOString(),
     }));
+  }
+
+  async loadSurveyResponses(type?: SurveyType): Promise<SurveyResponse[]> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const conditions = [eq(schema.surveyResponses.workspaceId, workspaceId)];
+    if (type) conditions.push(eq(schema.surveyResponses.surveyType, type));
+
+    const rows = await db
+      .select()
+      .from(schema.surveyResponses)
+      .where(and(...conditions));
+
+    return rows.map((r: {
+      id: string; ticketId: string | null; customerId: string | null;
+      surveyType: string; rating: number | null; comment: string | null;
+      token: string | null; createdAt: Date;
+    }) => ({
+      id: r.id,
+      ticketId: r.ticketId ?? undefined,
+      customerId: r.customerId ?? undefined,
+      surveyType: r.surveyType as SurveyType,
+      rating: r.rating,
+      comment: r.comment ?? undefined,
+      token: r.token ?? undefined,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
+  async loadSurveyConfigs(): Promise<SurveyConfig[]> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const rows = await db
+      .select()
+      .from(schema.surveyConfigs)
+      .where(eq(schema.surveyConfigs.workspaceId, workspaceId));
+
+    return rows.map((r: {
+      id: string; workspaceId: string; surveyType: string; enabled: boolean;
+      trigger: string; delayMinutes: number; question: string | null;
+    }) => ({
+      id: r.id,
+      workspaceId: r.workspaceId,
+      surveyType: r.surveyType as SurveyType,
+      enabled: r.enabled,
+      trigger: r.trigger as SurveyConfig['trigger'],
+      delayMinutes: r.delayMinutes,
+      question: r.question ?? undefined,
+    }));
+  }
+
+  async createSurveyResponse(params: SurveyResponseCreateParams): Promise<{ id: string }> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const [row] = await db
+      .insert(schema.surveyResponses)
+      .values({
+        workspaceId,
+        ticketId: params.ticketId ?? null,
+        customerId: params.customerId ?? null,
+        surveyType: params.surveyType,
+        rating: params.rating ?? null,
+        comment: params.comment ?? null,
+        token: params.token ?? null,
+        createdAt: new Date(),
+      })
+      .returning({ id: schema.surveyResponses.id });
+
+    return { id: row.id };
+  }
+
+  async updateSurveyConfig(params: SurveyConfigUpdateParams): Promise<void> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const existing = await db
+      .select({ id: schema.surveyConfigs.id })
+      .from(schema.surveyConfigs)
+      .where(and(
+        eq(schema.surveyConfigs.workspaceId, workspaceId),
+        eq(schema.surveyConfigs.surveyType, params.surveyType),
+      ))
+      .limit(1);
+
+    if (existing.length > 0) {
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (params.enabled !== undefined) set.enabled = params.enabled;
+      if (params.trigger) set.trigger = params.trigger;
+      if (params.delayMinutes !== undefined) set.delayMinutes = params.delayMinutes;
+      if (params.question !== undefined) set.question = params.question;
+
+      await db
+        .update(schema.surveyConfigs)
+        .set(set)
+        .where(eq(schema.surveyConfigs.id, existing[0].id));
+    } else {
+      await db
+        .insert(schema.surveyConfigs)
+        .values({
+          workspaceId,
+          surveyType: params.surveyType,
+          enabled: params.enabled ?? false,
+          trigger: params.trigger ?? 'ticket_solved',
+          delayMinutes: params.delayMinutes ?? 0,
+          question: params.question ?? null,
+        });
+    }
   }
 
   async createTicket(params: TicketCreateParams): Promise<{ id: string }> {

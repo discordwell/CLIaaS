@@ -29,3 +29,11 @@ export function slaBreached(data: Record<string, unknown>): void {
 export function csatSubmitted(data: Record<string, unknown>): void {
   dispatch('csat.submitted', data);
 }
+
+export function surveySubmitted(data: Record<string, unknown>): void {
+  dispatch('survey.submitted', data);
+}
+
+export function surveySent(data: Record<string, unknown>): void {
+  dispatch('survey.sent', data);
+}

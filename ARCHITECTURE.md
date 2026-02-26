@@ -15,7 +15,7 @@
 | CLI files | 69 (`cli/`) |
 | CLI commands | 32 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 30 (across 8 modules) |
+| MCP tools | 33 (across 9 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
 | DB tables | 59 (Drizzle/PostgreSQL, RLS-enabled) |
@@ -124,6 +124,9 @@ Each domain has a dedicated store in `src/lib/`:
 
 ### CSAT & Time (2)
 `csat_ratings`, `time_entries`
+
+### Surveys — CSAT/NPS/CES (2)
+`survey_responses` (unified survey responses with `survey_type` discriminator: csat/nps/ces, token-based portal access), `survey_configs` (per-workspace survey settings: enable/disable, trigger event, delay, custom question text; unique on workspace+surveyType)
 
 ### Knowledge Base (4)
 `kb_collections` → `kb_categories` → `kb_articles` → `kb_revisions`

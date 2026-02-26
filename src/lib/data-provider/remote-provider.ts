@@ -21,6 +21,11 @@ import type {
   Organization,
   RuleRecord,
   CSATRating,
+  SurveyType,
+  SurveyResponse,
+  SurveyConfig,
+  SurveyResponseCreateParams,
+  SurveyConfigUpdateParams,
   TicketCreateParams,
   TicketUpdateParams,
   MessageCreateParams,
@@ -215,6 +220,41 @@ export class RemoteProvider implements DataProvider {
       // Return empty if the detailed endpoint isn't available.
       return [];
     }
+  }
+
+  async loadSurveyResponses(type?: SurveyType): Promise<SurveyResponse[]> {
+    try {
+      const query = type ? `?type=${type}` : '';
+      const body = await this.request<{ responses: SurveyResponse[] }>(
+        `/api/surveys/responses${query}`,
+      );
+      return body.responses;
+    } catch {
+      return [];
+    }
+  }
+
+  async loadSurveyConfigs(): Promise<SurveyConfig[]> {
+    try {
+      const body = await this.request<{ configs: SurveyConfig[] }>('/api/surveys/config');
+      return body.configs;
+    } catch {
+      return [];
+    }
+  }
+
+  async createSurveyResponse(params: SurveyResponseCreateParams): Promise<{ id: string }> {
+    return this.request<{ id: string }>('/api/surveys', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async updateSurveyConfig(params: SurveyConfigUpdateParams): Promise<void> {
+    await this.request('/api/surveys/config', {
+      method: 'PUT',
+      body: JSON.stringify(params),
+    });
   }
 
   // ---- Writes ----

@@ -20,6 +20,11 @@ import type {
   Organization,
   RuleRecord,
   CSATRating,
+  SurveyType,
+  SurveyResponse,
+  SurveyConfig,
+  SurveyResponseCreateParams,
+  SurveyConfigUpdateParams,
   TicketCreateParams,
   TicketUpdateParams,
   MessageCreateParams,
@@ -30,7 +35,7 @@ import { DbProvider } from './db-provider';
 // ---- Outbox helpers (lazy-loaded to avoid hard dep on schema at import time) ----
 
 type OutboxOperation = 'create' | 'update';
-type OutboxEntityType = 'ticket' | 'message' | 'kb_article';
+type OutboxEntityType = 'ticket' | 'message' | 'kb_article' | 'survey_response';
 
 interface OutboxEntry {
   id: string;
@@ -160,6 +165,24 @@ export class HybridProvider implements DataProvider {
 
   async loadCSATRatings(): Promise<CSATRating[]> {
     return this.local.loadCSATRatings();
+  }
+
+  async loadSurveyResponses(type?: SurveyType): Promise<SurveyResponse[]> {
+    return this.local.loadSurveyResponses(type);
+  }
+
+  async loadSurveyConfigs(): Promise<SurveyConfig[]> {
+    return this.local.loadSurveyConfigs();
+  }
+
+  async createSurveyResponse(params: SurveyResponseCreateParams): Promise<{ id: string }> {
+    const result = await this.local.createSurveyResponse(params);
+    await insertOutboxEntry('create', 'survey_response', result.id, params);
+    return result;
+  }
+
+  async updateSurveyConfig(params: SurveyConfigUpdateParams): Promise<void> {
+    return this.local.updateSurveyConfig(params);
   }
 
   // ---- Writes: local DB + outbox ----

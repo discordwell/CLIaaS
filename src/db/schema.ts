@@ -1010,6 +1010,60 @@ export const syncConflicts = pgTable(
   }),
 );
 
+// ---- Survey System (CSAT/NPS/CES) ----
+
+export const surveyTypeEnum = pgEnum('survey_type', ['csat', 'nps', 'ces']);
+
+export const surveyTriggerEnum = pgEnum('survey_trigger', [
+  'ticket_solved',
+  'ticket_closed',
+  'manual',
+]);
+
+export const surveyResponses = pgTable(
+  'survey_responses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ticketId: uuid('ticket_id').references(() => tickets.id),
+    customerId: uuid('customer_id').references(() => customers.id),
+    surveyType: surveyTypeEnum('survey_type').notNull(),
+    rating: integer('rating'),
+    comment: text('comment'),
+    token: varchar('token', { length: 64 }).unique(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    surveyResponsesWorkspaceIdx: index('survey_responses_workspace_idx').on(
+      table.workspaceId,
+      table.surveyType,
+    ),
+    surveyResponsesTicketIdx: index('survey_responses_ticket_idx').on(table.ticketId),
+    surveyResponsesTokenIdx: uniqueIndex('survey_responses_token_idx').on(table.token),
+  }),
+);
+
+export const surveyConfigs = pgTable(
+  'survey_configs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    surveyType: surveyTypeEnum('survey_type').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    trigger: surveyTriggerEnum('trigger').notNull().default('ticket_solved'),
+    delayMinutes: integer('delay_minutes').notNull().default(0),
+    question: text('question'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    surveyConfigsUniqueIdx: uniqueIndex('survey_configs_workspace_type_idx').on(
+      table.workspaceId,
+      table.surveyType,
+    ),
+  }),
+);
+
 // ---- GDPR Deletion Requests ----
 
 export const gdprDeletionRequests = pgTable(

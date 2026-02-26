@@ -84,6 +84,49 @@ export interface CSATRating {
   createdAt: string;
 }
 
+// ---- Survey types ----
+
+export type SurveyType = 'csat' | 'nps' | 'ces';
+export type SurveyTrigger = 'ticket_solved' | 'ticket_closed' | 'manual';
+
+export interface SurveyResponse {
+  id: string;
+  ticketId?: string;
+  customerId?: string;
+  surveyType: SurveyType;
+  rating: number | null;
+  comment?: string;
+  token?: string;
+  createdAt: string;
+}
+
+export interface SurveyConfig {
+  id: string;
+  workspaceId: string;
+  surveyType: SurveyType;
+  enabled: boolean;
+  trigger: SurveyTrigger;
+  delayMinutes: number;
+  question?: string;
+}
+
+export interface SurveyResponseCreateParams {
+  ticketId?: string;
+  customerId?: string;
+  surveyType: SurveyType;
+  rating?: number;
+  comment?: string;
+  token?: string;
+}
+
+export interface SurveyConfigUpdateParams {
+  surveyType: SurveyType;
+  enabled?: boolean;
+  trigger?: SurveyTrigger;
+  delayMinutes?: number;
+  question?: string;
+}
+
 // ---- Write parameter types ----
 
 export interface TicketCreateParams {
@@ -143,6 +186,12 @@ export interface DataProvider {
   loadOrganizations(): Promise<Organization[]>;
   loadRules(): Promise<RuleRecord[]>;
   loadCSATRatings(): Promise<CSATRating[]>;
+
+  // Surveys
+  loadSurveyResponses(type?: SurveyType): Promise<SurveyResponse[]>;
+  loadSurveyConfigs(): Promise<SurveyConfig[]>;
+  createSurveyResponse(params: SurveyResponseCreateParams): Promise<{ id: string }>;
+  updateSurveyConfig(params: SurveyConfigUpdateParams): Promise<void>;
 
   // Writes (throw if not supported)
   createTicket(params: TicketCreateParams): Promise<{ id: string }>;

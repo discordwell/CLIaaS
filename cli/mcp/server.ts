@@ -11,6 +11,7 @@ import { registerQueueTools } from './tools/queue.js';
 import { registerConfigTools } from './tools/config.js';
 import { registerActionTools } from './tools/actions.js';
 import { registerSyncTools } from './tools/sync.js';
+import { registerSurveyTools } from './tools/surveys.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -28,6 +29,7 @@ registerQueueTools(server);
 registerConfigTools(server);
 registerActionTools(server);
 registerSyncTools(server);
+registerSurveyTools(server);
 
 // Register resources and prompts
 registerResources(server);

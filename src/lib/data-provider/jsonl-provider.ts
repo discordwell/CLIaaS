@@ -15,6 +15,11 @@ import type {
   Organization,
   RuleRecord,
   CSATRating,
+  SurveyType,
+  SurveyResponse,
+  SurveyConfig,
+  SurveyResponseCreateParams,
+  SurveyConfigUpdateParams,
   TicketCreateParams,
   TicketUpdateParams,
   MessageCreateParams,
@@ -111,6 +116,22 @@ export class JsonlProvider implements DataProvider {
 
   async loadCSATRatings(): Promise<CSATRating[]> {
     return [];
+  }
+
+  async loadSurveyResponses(_type?: SurveyType): Promise<SurveyResponse[]> {
+    return [];
+  }
+
+  async loadSurveyConfigs(): Promise<SurveyConfig[]> {
+    return [];
+  }
+
+  async createSurveyResponse(_params: SurveyResponseCreateParams): Promise<{ id: string }> {
+    throw new Error('Write operations require a database. Configure mode: db or hybrid.');
+  }
+
+  async updateSurveyConfig(_params: SurveyConfigUpdateParams): Promise<void> {
+    throw new Error('Write operations require a database. Configure mode: db or hybrid.');
   }
 
   async createTicket(_params: TicketCreateParams): Promise<{ id: string }> {

@@ -22,6 +22,8 @@ export type CanonicalEvent =
   | 'message.created'
   | 'sla.breached'
   | 'csat.submitted'
+  | 'survey.submitted'
+  | 'survey.sent'
   | 'automation.executed';
 
 // Compile-time check: every CanonicalEvent must be assignable to WebhookEventType
@@ -32,6 +34,8 @@ const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
   'message.created': 'message.created',
   'sla.breached': 'sla.breached',
   'csat.submitted': 'csat.submitted',
+  'survey.submitted': 'survey.submitted',
+  'survey.sent': 'survey.sent',
   'automation.executed': 'ticket.updated',
 };
 void _typeCheck;
