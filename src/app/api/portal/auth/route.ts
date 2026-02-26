@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadTickets } from '@/lib/data';
 import { generateToken } from '@/lib/portal/magic-link';
+import { sendMagicLink } from '@/lib/portal/send-magic-link';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
@@ -46,19 +47,24 @@ export async function POST(request: NextRequest) {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
     const verifyUrl = `${baseUrl}/api/portal/auth/verify?token=${token.token}`;
 
+    // Send the magic link (logs in dev, emails in production)
+    await sendMagicLink(normalizedEmail, verifyUrl);
+
     // Check if the email has tickets for the response
     const tickets = await loadTickets();
     const hasTickets = tickets.some(
       (t) => t.requester.toLowerCase() === normalizedEmail
     );
 
+    const isDev = process.env.NODE_ENV !== 'production';
+
     return NextResponse.json({
       ok: true,
       email: normalizedEmail,
       hasTickets,
-      verifyUrl,
-      // Include token in dev mode for easy testing
-      ...(process.env.NODE_ENV !== 'production' && { token: token.token }),
+      // Only expose verifyUrl and token in dev mode
+      ...(isDev && { verifyUrl }),
+      ...(isDev && { token: token.token }),
     });
   } catch (err) {
     return NextResponse.json(

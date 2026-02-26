@@ -16,35 +16,95 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const { searchParams } = new URL(request.url);
+    const scope = searchParams.get('scope'); // 'org' for organization view
+    const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '20', 10)));
+    const offset = (page - 1) * limit;
+
     // Try DB first
     if (process.env.DATABASE_URL) {
       try {
         const { db } = await import('@/db');
         const schema = await import('@/db/schema');
-        const { eq, and } = await import('drizzle-orm');
+        const { eq, and, inArray, desc, sql } = await import('drizzle-orm');
 
         // Find the customer by email
-        const customers = await db
-          .select({ id: schema.customers.id })
+        const customerRows = await db
+          .select({
+            id: schema.customers.id,
+            orgId: schema.customers.orgId,
+            workspaceId: schema.customers.workspaceId,
+            email: schema.customers.email,
+          })
           .from(schema.customers)
           .where(eq(schema.customers.email, email))
           .limit(1);
 
-        if (customers.length > 0) {
-          const customerId = customers[0].id;
+        if (customerRows.length > 0) {
+          const customer = customerRows[0];
+          let requesterFilter: ReturnType<typeof eq>;
 
+          if (scope === 'org' && customer.orgId) {
+            // Get all customer IDs in the same org, scoped to workspace
+            const orgCustomerRows = await db
+              .select({ id: schema.customers.id })
+              .from(schema.customers)
+              .where(and(
+                eq(schema.customers.orgId, customer.orgId),
+                eq(schema.customers.workspaceId, customer.workspaceId),
+              ));
+
+            const orgCustomerIds = orgCustomerRows.map((c) => c.id);
+            requesterFilter = inArray(schema.tickets.requesterId, orgCustomerIds);
+          } else {
+            requesterFilter = eq(schema.tickets.requesterId, customer.id);
+          }
+
+          // Count total
+          const [{ count: total }] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(schema.tickets)
+            .where(requesterFilter);
+
+          // Fetch tickets with optional SLA data
           const rows = await db
             .select({
               id: schema.tickets.id,
               subject: schema.tickets.subject,
               status: schema.tickets.status,
               priority: schema.tickets.priority,
+              customerEmail: schema.tickets.customerEmail,
+              requesterId: schema.tickets.requesterId,
               createdAt: schema.tickets.createdAt,
               updatedAt: schema.tickets.updatedAt,
+              slaDueAt: schema.slaEvents.dueAt,
+              slaBreachedAt: schema.slaEvents.breachedAt,
             })
             .from(schema.tickets)
-            .where(eq(schema.tickets.requesterId, customerId))
-            .orderBy(schema.tickets.updatedAt);
+            .leftJoin(
+              schema.slaEvents,
+              eq(schema.tickets.id, schema.slaEvents.ticketId),
+            )
+            .where(requesterFilter)
+            .orderBy(desc(schema.tickets.updatedAt))
+            .limit(limit)
+            .offset(offset);
+
+          // For org scope, resolve requester emails
+          let requesterEmailMap: Record<string, string> = {};
+          if (scope === 'org') {
+            const requesterIds = [...new Set(rows.map((r) => r.requesterId).filter(Boolean))] as string[];
+            if (requesterIds.length > 0) {
+              const emailRows = await db
+                .select({ id: schema.customers.id, email: schema.customers.email })
+                .from(schema.customers)
+                .where(inArray(schema.customers.id, requesterIds));
+              for (const row of emailRows) {
+                if (row.email) requesterEmailMap[row.id] = row.email;
+              }
+            }
+          }
 
           const tickets = rows.map((row) => ({
             id: row.id,
@@ -53,9 +113,14 @@ export async function GET(request: NextRequest) {
             priority: row.priority,
             createdAt: row.createdAt.toISOString(),
             updatedAt: row.updatedAt.toISOString(),
+            ...(row.slaDueAt && { slaDueAt: row.slaDueAt.toISOString() }),
+            ...(row.slaBreachedAt && { slaBreachedAt: row.slaBreachedAt.toISOString() }),
+            ...(scope === 'org' && row.requesterId && {
+              requesterEmail: requesterEmailMap[row.requesterId],
+            }),
           }));
 
-          return NextResponse.json({ tickets });
+          return NextResponse.json({ tickets, total, page, limit });
         }
       } catch {
         // DB unavailable, fall through
@@ -64,8 +129,16 @@ export async function GET(request: NextRequest) {
 
     // JSONL fallback: filter tickets by requester email
     const allTickets = await loadTickets();
-    const tickets = allTickets
+    const filtered = allTickets
       .filter((t) => t.requester.toLowerCase() === email.toLowerCase())
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+
+    const total = filtered.length;
+    const tickets = filtered
+      .slice(offset, offset + limit)
       .map((t) => ({
         id: t.id,
         subject: t.subject,
@@ -73,13 +146,9 @@ export async function GET(request: NextRequest) {
         priority: t.priority,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
-      }))
-      .sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
+      }));
 
-    return NextResponse.json({ tickets });
+    return NextResponse.json({ tickets, total, page, limit });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to load tickets' },
@@ -204,6 +273,16 @@ export async function POST(request: NextRequest) {
           authorId: customerId,
           body: description.trim(),
           visibility: 'public' as const,
+        });
+
+        // Record ticket opened event
+        await db.insert(schema.ticketEvents).values({
+          ticketId: ticket.id,
+          workspaceId,
+          eventType: 'opened' as const,
+          toStatus: 'open',
+          actorType: 'customer' as const,
+          actorLabel: email,
         });
 
         return NextResponse.json(

@@ -1064,6 +1064,44 @@ export const surveyConfigs = pgTable(
   }),
 );
 
+// ---- Customer-Facing Ticket Events (timeline) ----
+
+export const ticketEventTypeEnum = pgEnum('ticket_event_type', [
+  'opened',
+  'status_changed',
+  'closed',
+  'reopened',
+  'replied',
+]);
+
+export const ticketEventActorEnum = pgEnum('ticket_event_actor', [
+  'customer',
+  'agent',
+  'system',
+]);
+
+export const ticketEvents = pgTable(
+  'ticket_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    eventType: ticketEventTypeEnum('event_type').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status'),
+    actorType: ticketEventActorEnum('actor_type').notNull().default('system'),
+    actorLabel: text('actor_label'),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ticketEventsTicketIdx: index('ticket_events_ticket_idx').on(
+      table.ticketId,
+      table.createdAt,
+    ),
+  }),
+);
+
 // ---- GDPR Deletion Requests ----
 
 export const gdprDeletionRequests = pgTable(

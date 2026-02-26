@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyToken } from '@/lib/portal/magic-link';
+import { sign, PORTAL_COOKIE_NAME } from '@/lib/portal/cookie';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,12 +22,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Set the portal email cookie now that the token is verified
+  // Set the HMAC-signed portal cookie now that the token is verified
   const response = NextResponse.redirect(
     new URL('/portal/tickets', request.url),
   );
 
-  response.cookies.set('cliaas-portal-email', result.email, {
+  response.cookies.set(PORTAL_COOKIE_NAME, sign(result.email), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

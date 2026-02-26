@@ -97,6 +97,33 @@ export async function GET(
             createdAt: m.createdAt.toISOString(),
           }));
 
+          // Load ticket events
+          const eventRows = await db
+            .select({
+              id: schema.ticketEvents.id,
+              eventType: schema.ticketEvents.eventType,
+              fromStatus: schema.ticketEvents.fromStatus,
+              toStatus: schema.ticketEvents.toStatus,
+              actorType: schema.ticketEvents.actorType,
+              actorLabel: schema.ticketEvents.actorLabel,
+              note: schema.ticketEvents.note,
+              createdAt: schema.ticketEvents.createdAt,
+            })
+            .from(schema.ticketEvents)
+            .where(eq(schema.ticketEvents.ticketId, id))
+            .orderBy(schema.ticketEvents.createdAt);
+
+          const events = eventRows.map((e) => ({
+            id: e.id,
+            eventType: e.eventType,
+            fromStatus: e.fromStatus,
+            toStatus: e.toStatus,
+            actorType: e.actorType,
+            actorLabel: e.actorLabel,
+            note: e.note,
+            createdAt: e.createdAt.toISOString(),
+          }));
+
           return NextResponse.json({
             ticket: {
               id: ticket.id,
@@ -107,6 +134,7 @@ export async function GET(
               updatedAt: ticket.updatedAt.toISOString(),
             },
             messages,
+            events,
           });
         }
       } catch {
@@ -155,6 +183,7 @@ export async function GET(
         updatedAt: ticket.updatedAt,
       },
       messages,
+      events: [],
     });
   } catch (err) {
     return NextResponse.json(
@@ -213,7 +242,7 @@ export async function POST(
         const customerId = customers[0].id;
 
         const ticketRows = await db
-          .select({ id: schema.tickets.id })
+          .select({ id: schema.tickets.id, status: schema.tickets.status, workspaceId: schema.tickets.workspaceId })
           .from(schema.tickets)
           .where(
             and(
@@ -256,11 +285,39 @@ export async function POST(
           })
           .returning();
 
+        // Record replied event
+        const ticketData = ticketRows[0];
+        await db.insert(schema.ticketEvents).values({
+          ticketId: id,
+          workspaceId: ticketData.workspaceId,
+          eventType: 'replied' as const,
+          actorType: 'customer' as const,
+          actorLabel: email,
+        });
+
         // Reopen ticket if it was solved/closed
-        await db
-          .update(schema.tickets)
-          .set({ status: 'open' as const, updatedAt: new Date() })
-          .where(eq(schema.tickets.id, id));
+        const oldStatus = ticketData.status;
+        if (oldStatus === 'solved' || oldStatus === 'closed') {
+          await db
+            .update(schema.tickets)
+            .set({ status: 'open' as const, updatedAt: new Date() })
+            .where(eq(schema.tickets.id, id));
+
+          await db.insert(schema.ticketEvents).values({
+            ticketId: id,
+            workspaceId: ticketData.workspaceId,
+            eventType: 'reopened' as const,
+            fromStatus: oldStatus,
+            toStatus: 'open',
+            actorType: 'customer' as const,
+            actorLabel: email,
+          });
+        } else {
+          await db
+            .update(schema.tickets)
+            .set({ updatedAt: new Date() })
+            .where(eq(schema.tickets.id, id));
+        }
 
         return NextResponse.json({
           message: {

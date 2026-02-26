@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import EventMarker from "./EventMarker";
+import { formatRelativeTime } from "@/lib/portal/format-time";
 
 interface PortalTicket {
   id: string;
@@ -21,12 +23,22 @@ interface PortalMessage {
   createdAt: string;
 }
 
-const statusColor: Record<string, string> = {
-  open: "bg-blue-500 text-white",
-  pending: "bg-amber-400 text-black",
-  solved: "bg-emerald-500 text-white",
-  closed: "bg-zinc-500 text-white",
-};
+interface TicketEvent {
+  id: string;
+  eventType: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  actorType: string;
+  actorLabel?: string | null;
+  note?: string | null;
+  createdAt: string;
+}
+
+type TimelineItem =
+  | { kind: "message"; data: PortalMessage }
+  | { kind: "event"; data: TicketEvent };
+
+import { statusColor } from "@/lib/portal/ui";
 
 export default function PortalTicketDetailPage() {
   const params = useParams();
@@ -34,6 +46,7 @@ export default function PortalTicketDetailPage() {
 
   const [ticket, setTicket] = useState<PortalTicket | null>(null);
   const [messages, setMessages] = useState<PortalMessage[]>([]);
+  const [events, setEvents] = useState<TicketEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -56,6 +69,7 @@ export default function PortalTicketDetailPage() {
 
         setTicket(data.ticket);
         setMessages(data.messages ?? []);
+        setEvents(data.events ?? []);
       } catch {
         setError("Network error. Please try again.");
       } finally {
@@ -131,6 +145,16 @@ export default function PortalTicketDetailPage() {
     );
   }
 
+  // Merge messages + events into a unified timeline
+  const timeline: TimelineItem[] = [
+    ...messages.map((m): TimelineItem => ({ kind: "message", data: m })),
+    ...events.map((e): TimelineItem => ({ kind: "event", data: e })),
+  ].sort(
+    (a, b) =>
+      new Date(a.data.createdAt).getTime() -
+      new Date(b.data.createdAt).getTime()
+  );
+
   const isClosed = ticket.status === "closed" || ticket.status === "solved";
 
   return (
@@ -156,8 +180,13 @@ export default function PortalTicketDetailPage() {
           <div>
             <h1 className="text-2xl font-bold">{ticket.subject}</h1>
             <p className="mt-2 font-mono text-xs text-zinc-500">
-              Opened {new Date(ticket.createdAt).toLocaleDateString()} · Updated{" "}
-              {new Date(ticket.updatedAt).toLocaleDateString()}
+              <span title={new Date(ticket.createdAt).toLocaleString()}>
+                Opened {formatRelativeTime(ticket.createdAt)}
+              </span>
+              {" · "}
+              <span title={new Date(ticket.updatedAt).toLocaleString()}>
+                Updated {formatRelativeTime(ticket.updatedAt)}
+              </span>
             </p>
           </div>
           <span
@@ -181,7 +210,7 @@ export default function PortalTicketDetailPage() {
         )}
       </header>
 
-      {/* Conversation */}
+      {/* Timeline (messages + events merged) */}
       <section className="mt-8 border-2 border-zinc-950 bg-white">
         <div className="border-b-2 border-zinc-950 p-6">
           <h2 className="text-lg font-bold">
@@ -190,40 +219,56 @@ export default function PortalTicketDetailPage() {
           </h2>
         </div>
 
-        {messages.length > 0 ? (
+        {timeline.length > 0 ? (
           <div className="divide-y divide-zinc-200">
-            {messages.map((msg, idx) => (
-              <div
-                key={msg.id}
-                className={`p-6 ${msg.isCustomer ? "bg-blue-50/50" : ""}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`flex h-8 w-8 items-center justify-center font-mono text-xs font-bold text-white ${
-                        msg.isCustomer ? "bg-blue-500" : "bg-zinc-950"
-                      }`}
-                    >
-                      {msg.isCustomer ? "Y" : "A"}
+            {(() => {
+              let msgCounter = 0;
+              return timeline.map((item) => {
+                if (item.kind === "event") {
+                  return (
+                    <EventMarker key={`event-${item.data.id}`} event={item.data} />
+                  );
+                }
+
+                msgCounter++;
+                const msg = item.data;
+                return (
+                  <div
+                    key={msg.id}
+                    className={`p-6 ${msg.isCustomer ? "bg-blue-50/50" : ""}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-8 w-8 items-center justify-center font-mono text-xs font-bold text-white ${
+                            msg.isCustomer ? "bg-blue-500" : "bg-zinc-950"
+                          }`}
+                        >
+                          {msg.isCustomer ? "Y" : "A"}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">
+                            {msg.isCustomer ? "You" : "Support Agent"}
+                          </p>
+                          <p
+                            className="font-mono text-xs text-zinc-500"
+                            title={new Date(msg.createdAt).toLocaleString()}
+                          >
+                            {formatRelativeTime(msg.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs text-zinc-400">
+                        #{msgCounter}
+                      </span>
                     </div>
-                    <div>
-                      <p className="text-sm font-bold">
-                        {msg.isCustomer ? "You" : "Support Agent"}
-                      </p>
-                      <p className="font-mono text-xs text-zinc-500">
-                        {new Date(msg.createdAt).toLocaleString()}
-                      </p>
+                    <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+                      {msg.body}
                     </div>
                   </div>
-                  <span className="font-mono text-xs text-zinc-400">
-                    #{idx + 1}
-                  </span>
-                </div>
-                <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
-                  {msg.body}
-                </div>
-              </div>
-            ))}
+                );
+              });
+            })()}
           </div>
         ) : (
           <div className="p-8 text-center text-sm text-zinc-500">
