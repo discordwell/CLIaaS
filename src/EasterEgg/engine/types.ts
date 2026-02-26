@@ -13,6 +13,10 @@ export const LEPTON_SIZE = 256; // leptons per cell
 export const MAP_CELLS = 128; // cells per map side
 export const GAME_TICKS_PER_SEC = 15; // original game ran at ~15 FPS
 
+// TEMPERATE theatre template type ranges (from TEMPERAT.INI)
+export const TEMPLATE_ROAD_MIN = 173;
+export const TEMPLATE_ROAD_MAX = 228;
+
 // === C++ Rule.ini defaults (rules.cpp) ===
 export const MAX_DAMAGE = 1000;          // rules.cpp:227 — max damage per hit
 export const REPAIR_STEP = 5;            // rules.cpp:228 — HP per repair pulse

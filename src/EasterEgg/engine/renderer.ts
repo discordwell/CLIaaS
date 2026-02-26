@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS } from './entity';
@@ -573,7 +573,7 @@ export class Renderer {
               break; // skip TEMPERATE template rendering and grass tufts
             } else if (tmpl > 0 && tmpl !== 0xFF) {
               // Template-aware rendering using palette colors
-              const isRoad = tmpl >= 0x27 && tmpl <= 0x34;
+              const isRoad = tmpl >= TEMPLATE_ROAD_MIN && tmpl <= TEMPLATE_ROAD_MAX;
               const isRough = tmpl >= 0x0D && tmpl <= 0x12;
               const isShoreDirt = tmpl >= 0x06 && tmpl <= 0x0C;
 

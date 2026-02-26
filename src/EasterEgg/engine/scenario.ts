@@ -761,7 +761,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
 
   // Decode MapPack for terrain data
   if (data.mapPack) {
-    decodeMapPack(data.mapPack, map);
+    decodeMapPack(data.mapPack, map, data.theatre);
   }
 
   // Decode OverlayPack for ore/gem/wall overlays
@@ -1122,7 +1122,7 @@ function decodeOverlayPack(base64Data: string, map: GameMap): void {
 // The template type + icon determine the visual appearance of each map cell.
 
 /** Decode MapPack data and apply terrain types to the map */
-function decodeMapPack(base64Data: string, map: GameMap): void {
+function decodeMapPack(base64Data: string, map: GameMap, theatre: string): void {
   try {
     // Decode Base64
     const binary = atob(base64Data);
@@ -1144,6 +1144,12 @@ function decodeMapPack(base64Data: string, map: GameMap): void {
     // Store template data on the map
     map.templateType = templateType;
     map.templateIcon = templateIcon;
+
+    // INTERIOR theatre has completely different template numbering from TEMPERATE.
+    // Without INTERIOR.INI data, applying TEMPERATE ranges would misclassify
+    // corridors as water/rock, trapping units. Skip classification — structures
+    // and terrain features from the INI define the actual wall layout.
+    if (theatre !== 'TEMPERATE') return;
 
     // Use template types to set terrain classification
     // TEMPERATE theater template type IDs (from RA TEMPERAT.INI):

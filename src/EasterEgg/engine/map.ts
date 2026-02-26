@@ -3,7 +3,7 @@
  * The map is 128×128 cells but only a portion (typically 50×50) is playable.
  */
 
-import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass } from './types';
+import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX } from './types';
 
 export enum Terrain {
   CLEAR = 0,
@@ -144,7 +144,7 @@ export class GameMap {
     // FLOAT (ships) can only traverse water
     if (speedClass === SpeedClass.FLOAT) return terrain === Terrain.WATER ? 1.0 : 0.3;
     const tmpl = this.templateType[cy * MAP_CELLS + cx];
-    const isRoad = tmpl >= 166 && tmpl <= 174;
+    const isRoad = tmpl >= TEMPLATE_ROAD_MIN && tmpl <= TEMPLATE_ROAD_MAX;
     if (speedClass === SpeedClass.FOOT) {
       // Infantry: roads give small boost, trees slow significantly
       if (isRoad) return 1.1;
