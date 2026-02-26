@@ -8,7 +8,7 @@ import {
   type AllianceTable, buildDefaultAlliances,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED,
-  Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
+  Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, HOUSE_FIREPOWER_BIAS,
   calcProjectileTravelFrames,
@@ -17,7 +17,7 @@ import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
-import { Entity, resetEntityIds, threatScore as computeThreatScore } from './entity';
+import { Entity, resetEntityIds, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
 import { GameMap, Terrain } from './map';
 import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
@@ -543,6 +543,18 @@ export class Game {
       // Clear recoil from previous tick (C++ techno.cpp:2339 — recoil lasts 1 tick)
       if (entity.isInRecoilState) entity.isInRecoilState = false;
 
+      // Submarine cloaking state machine (SS, MSUB)
+      if (entity.alive && entity.stats.isCloakable) {
+        this.updateSubCloak(entity);
+      }
+      // LST door auto-close timer
+      if (entity.alive && entity.doorOpen && entity.doorTimer > 0) {
+        entity.doorTimer--;
+        if (entity.doorTimer <= 0) entity.doorOpen = false;
+      }
+      // Sonar pulse timer decrement
+      if (entity.sonarPulseTimer > 0) entity.sonarPulseTimer--;
+
       // C++ infantry.cpp:3466-3496 Fear_AI — decay fear, update prone state
       if (entity.stats.isInfantry && entity.fear > 0) {
         entity.fear--;
@@ -932,6 +944,31 @@ export class Game {
       }
     }
     this.map.updateFogOfWar(units);
+
+    // Destroyer sub detection — anti-sub units reveal cloaked subs within sight range
+    this.updateSubDetection();
+  }
+
+  /** Destroyers (isAntiSub) detect and force-reveal cloaked subs within sight range */
+  private updateSubDetection(): void {
+    for (const dd of this.entities) {
+      if (!dd.alive || !dd.stats.isAntiSub) continue;
+      const sight = dd.stats.sight;
+      for (const sub of this.entities) {
+        if (!sub.alive || !sub.stats.isCloakable) continue;
+        if (this.entitiesAllied(dd, sub)) continue;
+        if (sub.cloakState !== CloakState.CLOAKED && sub.cloakState !== CloakState.CLOAKING) continue;
+        const dist = worldDist(dd.pos, sub.pos);
+        if (dist <= sight) {
+          // Force uncloak and set sonar pulse timer to prevent recloak
+          sub.sonarPulseTimer = SONAR_PULSE_DURATION;
+          if (sub.cloakState === CloakState.CLOAKED || sub.cloakState === CloakState.CLOAKING) {
+            sub.cloakState = CloakState.UNCLOAKING;
+            sub.cloakTimer = CLOAK_TRANSITION_FRAMES;
+          }
+        }
+      }
+    }
   }
 
   /** Check if a screen click is on the minimap; if so, scroll camera there */
@@ -1293,7 +1330,7 @@ export class Game {
         unit.moveTarget = { x: goalX, y: goalY };
         unit.target = null;
         unit.moveQueue = [];
-        unit.path = findPath(this.map, unit.cell, worldToCell(goalX, goalY), true);
+        unit.path = findPath(this.map, unit.cell, worldToCell(goalX, goalY), true, unit.isNavalUnit, unit.stats.speedClass);
         unit.pathIndex = 0;
       }
       keys.delete('x');
@@ -1408,7 +1445,7 @@ export class Game {
           unit.mission = Mission.HUNT;
           unit.moveTarget = pos;
           unit.target = null;
-          unit.path = findPath(this.map, unit.cell, worldToCell(pos.x, pos.y), true);
+          unit.path = findPath(this.map, unit.cell, worldToCell(pos.x, pos.y), true, unit.isNavalUnit, unit.stats.speedClass);
           unit.pathIndex = 0;
         }
         if (units.length > 0) {
@@ -1528,7 +1565,7 @@ export class Game {
             u.forceFirePos = null;
             u.teamMissions = [];
             u.teamMissionIndex = 0;
-            u.path = findPath(this.map, u.cell, worldToCell(pos.x, pos.y), true);
+            u.path = findPath(this.map, u.cell, worldToCell(pos.x, pos.y), true, u.isNavalUnit, u.stats.speedClass);
             u.pathIndex = 0;
           }
           if (units.length > 0) {
@@ -1700,7 +1737,9 @@ export class Game {
               this.map,
               unit.cell,
               worldToCell(pos.x, pos.y),
-              true
+              true,
+              unit.isNavalUnit,
+              unit.stats.speedClass
             );
             unit.pathIndex = 0;
           }
@@ -2080,6 +2119,11 @@ export class Game {
             entity.transportRef = other;
             entity.selected = false;
             this.selectedIds.delete(entity.id);
+            // LST door animation on load
+            if (other.type === UnitType.V_LST) {
+              other.doorOpen = true;
+              other.doorTimer = 60; // 4 seconds auto-close
+            }
             // Mark for removal from world (will be re-added on unload)
             entity.mission = Mission.SLEEP;
             this.map.setOccupancy(entity.cell.cx, entity.cell.cy, 0);
@@ -2144,7 +2188,7 @@ export class Game {
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.target = null;
-          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true);
+          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
         } else if (worldDist(entity.pos, target) < 2) {
           // Arrived at waypoint — advance to next mission
@@ -2188,7 +2232,7 @@ export class Game {
           if (worldDist(entity.pos, target) > 3) {
             entity.mission = Mission.MOVE;
             entity.moveTarget = target;
-            entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true);
+            entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
             entity.pathIndex = 0;
           } else {
             // At waypoint with no targets — advance
@@ -2252,6 +2296,11 @@ export class Game {
       case Game.TMISSION_UNLOAD: {
         // Unload passengers at current position
         if (entity.passengers.length > 0) {
+          // LST door animation on unload
+          if (entity.type === UnitType.V_LST) {
+            entity.doorOpen = true;
+            entity.doorTimer = 60;
+          }
           // For naval units, find shore cells to unload onto
           const isNaval = entity.isNavalUnit;
           const shoreCells: Array<{ x: number; y: number; dist: number }> = [];
@@ -2381,7 +2430,7 @@ export class Game {
         if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
-          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true);
+          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
         } else if (worldDist(entity.pos, target) < 2) {
           entity.teamMissionIndex++;
@@ -2733,7 +2782,7 @@ export class Game {
         entity.path = findPath(
           this.map, entity.cell,
           worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-          entity.isNavalUnit
+          entity.isNavalUnit, entity.stats.speedClass
         );
         entity.pathIndex = 0;
         if (entity.path.length === 0) {
@@ -2765,7 +2814,7 @@ export class Game {
           if (entity.moveQueue.length > 0) {
             const next = entity.moveQueue.shift()!;
             entity.moveTarget = next;
-            entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit);
+            entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit, entity.stats.speedClass);
             entity.pathIndex = 0;
           } else {
             entity.mission = this.idleMission(entity);
@@ -2808,7 +2857,7 @@ export class Game {
         entity.savedMoveTarget = null;
         entity.mission = Mission.MOVE;
         entity.moveTarget = { x: saved.x, y: saved.y };
-        entity.path = findPath(this.map, entity.cell, worldToCell(saved.x, saved.y), true);
+        entity.path = findPath(this.map, entity.cell, worldToCell(saved.x, saved.y), true, entity.isNavalUnit, entity.stats.speedClass);
         entity.pathIndex = 0;
         return;
       }
@@ -2818,7 +2867,7 @@ export class Game {
         if (d > CELL_SIZE * 1.5) {
           entity.mission = Mission.MOVE;
           entity.moveTarget = { x: entity.guardOrigin.x, y: entity.guardOrigin.y };
-          entity.path = findPath(this.map, entity.cell, worldToCell(entity.guardOrigin.x, entity.guardOrigin.y), true);
+          entity.path = findPath(this.map, entity.cell, worldToCell(entity.guardOrigin.x, entity.guardOrigin.y), true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
           return;
         }
@@ -2826,6 +2875,45 @@ export class Game {
       entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
       return;
+    }
+
+    // Naval target filtering
+    if (entity.target) {
+      // Submerged subs (cloaked) can only be targeted by weapons with isAntiSub
+      if (entity.target.cloakState === CloakState.CLOAKED || entity.target.cloakState === CloakState.CLOAKING) {
+        const canHitSub = (entity.weapon?.isAntiSub || entity.weapon2?.isAntiSub);
+        if (!canHitSub) {
+          entity.target = null;
+          entity.mission = this.idleMission(entity);
+          entity.animState = AnimState.IDLE;
+          return;
+        }
+      }
+      // Cruisers cannot target infantry (C++ vessel.cpp:1248 — exclude THREAT_INFANTRY)
+      if (entity.type === UnitType.V_CA && entity.target.stats.isInfantry) {
+        entity.target = null;
+        entity.mission = this.idleMission(entity);
+        entity.animState = AnimState.IDLE;
+        return;
+      }
+      // Torpedoes (isSubSurface) can only hit naval units
+      if (entity.weapon?.isSubSurface && !entity.target.isNavalUnit) {
+        // Try secondary weapon if available
+        if (entity.weapon2 && !entity.weapon2.isSubSurface) {
+          // Can use secondary weapon — let selectWeapon handle it
+        } else {
+          entity.target = null;
+          entity.mission = this.idleMission(entity);
+          entity.animState = AnimState.IDLE;
+          return;
+        }
+      }
+    }
+
+    // Force-uncloak submarine when attacking
+    if (entity.stats.isCloakable && (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) && entity.target) {
+      entity.cloakState = CloakState.UNCLOAKING;
+      entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
     }
 
     // Minimum range check: artillery can't fire at point-blank
@@ -3126,6 +3214,7 @@ export class Game {
       let bestScore = -Infinity;
       for (const other of this.entities) {
         if (!other.alive || this.entitiesAllied(entity, other)) continue;
+        if (!this.canTargetNaval(entity, other)) continue;
         const dist = worldDist(entity.pos, other.pos);
         if (dist > huntRange) continue;
         if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
@@ -3157,7 +3246,7 @@ export class Game {
         // No targets found — resume move or return to idle
         if (entity.moveTarget) {
           entity.mission = Mission.MOVE;
-          entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true);
+          entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
         } else {
           entity.mission = this.idleMission(entity);
@@ -3175,7 +3264,7 @@ export class Game {
       const targetCell = worldToCell(entity.target.pos.x, entity.target.pos.y);
       if (entity.path.length === 0 || entity.pathIndex >= entity.path.length ||
           ((this.tick + entity.id) % 15 === 0)) {
-        entity.path = findPath(this.map, entity.cell, targetCell, true);
+        entity.path = findPath(this.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
         entity.pathIndex = 0;
       }
       if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
@@ -3295,6 +3384,8 @@ export class Game {
       if (this.entitiesAllied(entity, other)) continue;
       // M8: Dogs ONLY target infantry (C++ techno.cpp:2017-2026 — THREAT_INFANTRY)
       if (isDog && !other.stats.isInfantry) continue;
+      // Naval combat target filtering
+      if (!this.canTargetNaval(entity, other)) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist >= scanRange) continue;
       // Check line of sight — can't target through walls
@@ -3330,6 +3421,49 @@ export class Game {
         entity.mission = Mission.ATTACK;
         entity.targetStructure = bestStruct;
       }
+    }
+  }
+
+  /** Submarine cloaking state machine — manages cloak transitions for SS/MSUB.
+   *  Auto-cloaks when idle + no enemies within 3 cells + sonarPulseTimer === 0.
+   *  Auto-uncloaks when firing or taking damage (handled in entity.takeDamage). */
+  private updateSubCloak(entity: Entity): void {
+    switch (entity.cloakState) {
+      case CloakState.CLOAKING:
+        entity.cloakTimer--;
+        if (entity.cloakTimer <= 0) {
+          entity.cloakState = CloakState.CLOAKED;
+          entity.cloakTimer = 0;
+        }
+        break;
+      case CloakState.UNCLOAKING:
+        entity.cloakTimer--;
+        if (entity.cloakTimer <= 0) {
+          entity.cloakState = CloakState.UNCLOAKED;
+          entity.cloakTimer = 0;
+        }
+        break;
+      case CloakState.UNCLOAKED:
+        // Auto-cloak when idle, no enemies nearby, and sonar pulse expired
+        if (entity.sonarPulseTimer > 0) break;
+        if (entity.mission === Mission.ATTACK) break; // don't cloak while attacking
+        // Check for enemies within 3 cells
+        let enemyNearby = false;
+        for (const other of this.entities) {
+          if (!other.alive || this.entitiesAllied(entity, other)) continue;
+          if (worldDist(entity.pos, other.pos) <= 3) {
+            enemyNearby = true;
+            break;
+          }
+        }
+        if (!enemyNearby) {
+          entity.cloakState = CloakState.CLOAKING;
+          entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+        }
+        break;
+      case CloakState.CLOAKED:
+        // Uncloak is handled by takeDamage and fire logic
+        break;
     }
   }
 
@@ -3504,7 +3638,7 @@ export class Game {
       entity.moveTarget = { x: origin.x, y: origin.y };
       entity.target = null;
       entity.targetStructure = null;
-      entity.path = findPath(this.map, ec, worldToCell(origin.x, origin.y), true);
+      entity.path = findPath(this.map, ec, worldToCell(origin.x, origin.y), true, entity.isNavalUnit, entity.stats.speedClass);
       entity.pathIndex = 0;
       return;
     }
@@ -3930,6 +4064,22 @@ export class Game {
   // tickOreRegeneration removed — logic moved to GameMap.growOre() for C++ parity
 
   /** Calculate threat score for guard targeting — delegates to pure function in entity.ts */
+  /** Check if scanner can target this entity considering naval combat rules.
+   *  - Cloaked subs need isAntiSub weapon
+   *  - Torpedoes (isSubSurface) only hit naval
+   *  - Cruisers can't target infantry */
+  private canTargetNaval(scanner: Entity, target: Entity): boolean {
+    // Cloaked subs only targetable by isAntiSub weapons
+    if (target.cloakState === CloakState.CLOAKED || target.cloakState === CloakState.CLOAKING) {
+      if (!scanner.weapon?.isAntiSub && !scanner.weapon2?.isAntiSub) return false;
+    }
+    // Cruisers cannot target infantry
+    if (scanner.type === UnitType.V_CA && target.stats.isInfantry) return false;
+    // Torpedo-only units can't target land units
+    if (scanner.weapon?.isSubSurface && !scanner.weapon2 && !target.isNavalUnit) return false;
+    return true;
+  }
+
   private threatScore(scanner: Entity, target: Entity, dist: number): number {
     const isTargetAttackingAlly = !!(target.target && target.mission === Mission.ATTACK &&
       this.entitiesAllied(scanner, target.target));
@@ -4985,10 +5135,21 @@ export class Game {
     if (!factory) return;
 
     const unitType = item.type as UnitType;
+    const unitStats = UNIT_STATS[item.type];
     const [factW, factH] = STRUCTURE_SIZE[factory.type] ?? [3, 2];
-    const spawn = this.findPassableSpawn(factory.cx + 1, factory.cy + 2, factory.cx, factory.cy, factW, factH);
-    const spawnX = spawn.cx * CELL_SIZE + CELL_SIZE / 2;
-    const spawnY = spawn.cy * CELL_SIZE + CELL_SIZE / 2;
+
+    // Naval production: spawn vessel at adjacent water cell
+    let spawnX: number, spawnY: number;
+    if (unitStats?.isVessel) {
+      const waterCell = this.map.findAdjacentWaterCell(factory.cx, factory.cy, factW, factH);
+      if (!waterCell) return; // no water cell found — production stalls
+      spawnX = waterCell.cx * CELL_SIZE + CELL_SIZE / 2;
+      spawnY = waterCell.cy * CELL_SIZE + CELL_SIZE / 2;
+    } else {
+      const spawn = this.findPassableSpawn(factory.cx + 1, factory.cy + 2, factory.cx, factory.cy, factW, factH);
+      spawnX = spawn.cx * CELL_SIZE + CELL_SIZE / 2;
+      spawnY = spawn.cy * CELL_SIZE + CELL_SIZE / 2;
+    }
     const entity = new Entity(unitType, House.Spain, spawnX, spawnY);
     entity.mission = Mission.GUARD;
     this.entities.push(entity);
@@ -5004,7 +5165,7 @@ export class Game {
     if (rally && unitType !== UnitType.V_HARV) {
       entity.mission = Mission.MOVE;
       entity.moveTarget = { x: rally.x, y: rally.y };
-      entity.path = findPath(this.map, entity.cell, worldToCell(rally.x, rally.y), true);
+      entity.path = findPath(this.map, entity.cell, worldToCell(rally.x, rally.y), true, entity.isNavalUnit, entity.stats.speedClass);
       entity.pathIndex = 0;
     }
   }

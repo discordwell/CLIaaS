@@ -112,6 +112,12 @@ export enum UnitType {
   // Transport vehicles
   V_TRAN = 'TRAN', // Chinook transport helicopter
   V_LST = 'LST',   // Landing ship transport
+  // Naval vessels
+  V_SS = 'SS',     // Submarine
+  V_DD = 'DD',     // Destroyer
+  V_CA = 'CA',     // Cruiser
+  V_PT = 'PT',     // Gunboat
+  V_MSUB = 'MSUB', // Missile Submarine (Aftermath)
 }
 
 // === Animation metadata (DoInfoStruct from RA source) ===
@@ -332,6 +338,9 @@ export interface UnitStats {
   scanDelay?: number;      // ticks between guard scans (C++ foot.cpp:589-612, default 15)
   crusher?: boolean;       // C++ DriveClass::Ok_To_Move — heavy tracked vehicles crush infantry on cell entry
   crushable?: boolean;     // C++ infantry.cpp — infantry/ants are killed when a crusher drives over them
+  isVessel?: boolean;      // true for all naval units (rendering + AI category)
+  isCloakable?: boolean;   // true for SS, MSUB (submarine stealth)
+  isAntiSub?: boolean;     // true for DD (can detect/attack submerged subs)
 }
 
 // Warhead types from RA RULES.INI
@@ -380,6 +389,8 @@ export interface WeaponStats {
   burst?: number;      // shots per trigger pull (C++ weapon.cpp:78 Weapon.Burst, default 1)
   isArcing?: boolean;       // C4: ballistic arc trajectory (artillery, grenades) — bullet.cpp:359
   projectileROT?: number;   // C9: homing turn rate deg/tick (0=straight line) — bullet.cpp:368
+  isSubSurface?: boolean;   // travels underwater, only hits naval units (torpedoes)
+  isAntiSub?: boolean;      // can hit submerged submarines (depth charges)
 }
 
 // C6: Warhead splash falloff properties — warhead.cpp:72
@@ -453,7 +464,13 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'truk', strength: 100, armor: 'none', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5 },
-  LST: { type: UnitType.V_LST, name: 'Transport', image: 'truk', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8 },
+  LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8, isVessel: true },
+  // Naval vessels (RULES.INI values — C++ vdata.cpp)
+  SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 3, rot: 4, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true },
+  DD: { type: UnitType.V_DD, name: 'Destroyer', image: 'dd', strength: 400, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 5, rot: 4, isInfantry: false, primaryWeapon: 'Stinger', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
+  CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'Tomahawk', isVessel: true },
+  PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'light', speed: 10, speedClass: SpeedClass.FLOAT, sight: 5, rot: 6, isInfantry: false, primaryWeapon: 'Stinger', isVessel: true },
+  MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 4, rot: 4, isInfantry: false, primaryWeapon: 'SeaSerpent', isVessel: true, isCloakable: true },
 };
 
 // Weapon stats from RULES.INI — real RA values
@@ -482,6 +499,12 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   GoodWrench:       { name: 'GoodWrench',        damage: -30, rof: 60, range: 1.83, warhead: 'Organic', projSpeed: 40 },            // Mechanic (heals vehicles)
   APTusk:           { name: 'APTusk',             damage: 25,  rof: 20, range: 4.5,  warhead: 'SA', projSpeed: 40 },                 // Phase Transport MG
   TTankZap:         { name: 'TTankZap',           damage: 80,  rof: 80, range: 5.0,  warhead: 'Super', splash: 1.0, projSpeed: 40 }, // Tesla Tank
+  // Naval weapons (C++ RULES.INI — vessel.cpp)
+  Stinger:          { name: 'Stinger',          damage: 15,  rof: 20, range: 5.0,  warhead: 'SA', projSpeed: 40 },                                          // DD/PT primary naval gun
+  TorpTube:         { name: 'TorpTube',         damage: 50,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 1.0, isSubSurface: true }, // SS torpedo, underwater travel
+  DepthCharge:      { name: 'DepthCharge',       damage: 40,  rof: 30, range: 3.0,  warhead: 'AP', projSpeed: 12, isAntiSub: true },                         // DD secondary, hits submerged subs
+  Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // CA cruise missile
+  SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // MSUB missiles
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'HollowPoint', projSpeed: 40 }, // C++: Warhead=HollowPoint
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
@@ -527,6 +550,14 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'STNK', name: 'Phase Trns', cost: 1100, buildTime: 160, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
   { type: 'CTNK', name: 'Chrono Tank', cost: 1200, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
   { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK' },
+  // Naval (from SYRD — Allied Shipyard)
+  { type: 'PT', name: 'Gunboat', cost: 500, buildTime: 100, prerequisite: 'SYRD', faction: 'allied' },
+  { type: 'DD', name: 'Destroyer', cost: 1000, buildTime: 160, prerequisite: 'SYRD', faction: 'allied' },
+  { type: 'LST', name: 'Transport', cost: 700, buildTime: 120, prerequisite: 'SYRD', faction: 'both' },
+  { type: 'CA', name: 'Cruiser', cost: 2000, buildTime: 240, prerequisite: 'SYRD', faction: 'allied', techPrereq: 'DOME' },
+  // Naval (from SPEN — Soviet Sub Pen)
+  { type: 'SS', name: 'Submarine', cost: 950, buildTime: 140, prerequisite: 'SPEN', faction: 'soviet' },
+  { type: 'MSUB', name: 'Missile Sub', cost: 1500, buildTime: 200, prerequisite: 'SPEN', faction: 'soviet', techPrereq: 'STEK' },
   // Structures (from FACT) — faction-accurate
   { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true },
   { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'FACT', faction: 'both', isStructure: true },

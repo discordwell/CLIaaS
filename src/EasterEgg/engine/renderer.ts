@@ -7,7 +7,7 @@
 import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
-import { Entity, RECOIL_OFFSETS } from './entity';
+import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -63,6 +63,9 @@ const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: num
   quee: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // queen chamber pulses
   lar1: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // small larva
   lar2: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // large larva
+  // Naval production structures
+  syrd: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Allied Shipyard
+  spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet Sub Pen
 };
 
 // Wall types that use auto-connection sprites
@@ -1363,26 +1366,53 @@ export class Renderer {
         ctx.globalAlpha = fadeAlpha;
       }
 
+      // Submarine cloak rendering
+      if (entity.alive && entity.stats.isCloakable) {
+        if (entity.cloakState === CloakState.CLOAKED) {
+          if (entity.isPlayerUnit) {
+            // Own cloaked subs: barely visible shimmer
+            ctx.globalAlpha = 0.15;
+          } else {
+            // Enemy cloaked subs: invisible unless detected by sonar
+            if (entity.sonarPulseTimer > 0) {
+              ctx.globalAlpha = 0.4; // sonar-detected: partially visible
+            } else {
+              continue; // fully invisible to enemy
+            }
+          }
+        } else if (entity.cloakState === CloakState.CLOAKING) {
+          // Gradually fade out (1.0 → 0.15 over transition)
+          const progress = 1 - (entity.cloakTimer / CLOAK_TRANSITION_FRAMES);
+          ctx.globalAlpha = 1.0 - progress * 0.85;
+        } else if (entity.cloakState === CloakState.UNCLOAKING) {
+          // Gradually fade in (0.15 → 1.0 over transition)
+          const progress = 1 - (entity.cloakTimer / CLOAK_TRANSITION_FRAMES);
+          ctx.globalAlpha = 0.15 + progress * 0.85;
+        }
+      }
+
       // Unit shadow — sprite-shaped silhouette (C++ SHAPE_GHOST + UnitShadow)
+      // Save cloak alpha so shadow doesn't override it
+      const preShadowAlpha = ctx.globalAlpha;
       if (entity.alive && sheet) {
         const shadowSheet = assets.getShadowSheet(entity.stats.image);
         if (shadowSheet) {
           const frame = entity.spriteFrame % sheet.meta.frameCount;
           if (entity.isAirUnit && altY > 0) {
             // Air unit shadow at ground level, offset by altitude for parallax
-            ctx.globalAlpha = 0.2;
+            ctx.globalAlpha = Math.min(0.2, preShadowAlpha);
             assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
               screen.x + altY * 0.3 + 2, screen.y + 3, { centerX: true, centerY: true });
-            ctx.globalAlpha = 1.0;
           } else if (!entity.stats.isInfantry) {
             // Ground vehicle/ant sprite-shaped shadow
-            ctx.globalAlpha = 0.2;
+            ctx.globalAlpha = Math.min(0.2, preShadowAlpha);
             assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
               screen.x + 2, screen.y + 3, { centerX: true, centerY: true });
-            ctx.globalAlpha = 1.0;
           }
         }
       }
+      // Restore cloak alpha for sprite rendering
+      ctx.globalAlpha = preShadowAlpha;
 
       // Apply altitude offset for rendering (sprite drawn higher)
       screen.y -= altY;

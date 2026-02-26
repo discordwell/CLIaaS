@@ -11,6 +11,20 @@ import {
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
 } from './types';
+
+// === Submarine Cloak State Machine ===
+export enum CloakState {
+  UNCLOAKED = 0,
+  CLOAKING = 1,
+  CLOAKED = 2,
+  UNCLOAKING = 3,
+}
+
+/** Frames for cloak/uncloak transition (1 second at 15 FPS) */
+export const CLOAK_TRANSITION_FRAMES = 15;
+
+/** Frames before recloak allowed after sonar detection (10 seconds at 15 FPS) */
+export const SONAR_PULSE_DURATION = 150;
 // Structure reference is typed loosely to avoid circular dependency with scenario.ts
 export interface StructureRef {
   alive: boolean;
@@ -183,6 +197,15 @@ export class Entity {
   // Spy disguise system (Gap #4)
   disguisedAs: House | null = null;  // when disguised, appears as this house's unit
 
+  // Submarine cloak state machine (SS, MSUB)
+  cloakState: CloakState = CloakState.UNCLOAKED;
+  cloakTimer = 0;         // frames remaining in cloaking/uncloaking transition
+  sonarPulseTimer = 0;    // frames remaining before recloak allowed (after detection)
+
+  // LST door state
+  doorOpen = false;
+  doorTimer = 0;          // countdown to auto-close
+
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
     this.stats = UNIT_STATS[type] ?? UNIT_STATS.E1;
@@ -226,7 +249,7 @@ export class Entity {
 
   /** Naval units can traverse water tiles */
   get isNavalUnit(): boolean {
-    return this.type === UnitType.V_LST;
+    return this.stats.isVessel === true;
   }
 
   /** Flight altitude offset (pixels) — visual only, for rendering above ground */
@@ -242,7 +265,9 @@ export class Entity {
       // CS/Aftermath expansion: non-turreted per C++ udata.cpp
       this.type !== UnitType.V_STNK && this.type !== UnitType.V_CTNK &&
       this.type !== UnitType.V_TTNK && this.type !== UnitType.V_QTNK &&
-      this.type !== UnitType.V_DTRK;
+      this.type !== UnitType.V_DTRK &&
+      // Naval: SS, MSUB have no turret; DD, CA, PT do have turrets
+      this.type !== UnitType.V_SS && this.type !== UnitType.V_MSUB;
   }
 
   /** Turret sprite frame (frames 32-63 in the vehicle SHP) */
@@ -348,6 +373,11 @@ export class Entity {
     }
     this.hp -= amount;
     this.damageFlash = 4;
+    // Force-uncloak cloaked subs on damage
+    if (this.stats.isCloakable && (this.cloakState === CloakState.CLOAKED || this.cloakState === CloakState.CLOAKING)) {
+      this.cloakState = CloakState.UNCLOAKING;
+      this.cloakTimer = CLOAK_TRANSITION_FRAMES;
+    }
     // C++ infantry.cpp:442-457 — increase fear on damage
     if (this.stats.isInfantry && amount > 0) {
       if (this.fear < Entity.FEAR_SCARED) {

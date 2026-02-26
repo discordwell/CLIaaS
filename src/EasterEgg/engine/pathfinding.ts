@@ -2,7 +2,7 @@
  * A* pathfinding on the cell grid.
  */
 
-import { type CellPos, MAP_CELLS } from './types';
+import { type CellPos, MAP_CELLS, SpeedClass } from './types';
 import { type GameMap } from './map';
 
 interface AStarNode {
@@ -39,6 +39,7 @@ export function findPath(
   goal: CellPos,
   ignoreOccupancy = false,
   naval = false,
+  speedClass: SpeedClass = SpeedClass.WHEEL,
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
 
@@ -109,7 +110,7 @@ export function findPath(
       }
 
       // Terrain speed modifiers: roads are cheaper, trees are expensive
-      const speedMult = map.getSpeedMultiplier(nx, ny);
+      const speedMult = map.getSpeedMultiplier(nx, ny, speedClass);
       let moveCost = Math.round(((dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST) / speedMult);
       // Occupancy: add soft cost for occupied cells instead of hard blocking
       // This allows routing through tight corridors while preferring empty cells

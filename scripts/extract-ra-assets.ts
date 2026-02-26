@@ -53,6 +53,13 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['LORES.MIX', 'MEDI.SHP', 'medi'],      // Medic
   ['LORES.MIX', 'THF.SHP', 'thf'],        // Thief
   ['LORES.MIX', 'E7.SHP', 'shok'],        // Shock trooper (E7 in LORES)
+  // Naval vessels (CONQUER.MIX — confirmed via BFILE.MAK)
+  ['CONQUER.MIX', 'SS.SHP', 'ss'],          // Submarine
+  ['CONQUER.MIX', 'DD.SHP', 'dd'],          // Destroyer
+  ['CONQUER.MIX', 'CA.SHP', 'ca'],          // Cruiser
+  ['CONQUER.MIX', 'PT.SHP', 'pt'],          // Gunboat
+  ['CONQUER.MIX', 'LST.SHP', 'lst'],        // Landing ship transport
+  ['CONQUER.MIX', 'MSUB.SHP', 'msub'],      // Missile Submarine (Aftermath)
   // Counterstrike expansion — STNK is in base CONQUER.MIX (reused from TD)
   ['CONQUER.MIX', 'STNK.SHP', 'stnk'],    // Phase Transport (stealth tank)
   // NOTE: CTNK, TTNK, QTNK, DTRK, MECH, ANT1-3, QUEE, LAR1-2 are NOT in freeware gamedata.

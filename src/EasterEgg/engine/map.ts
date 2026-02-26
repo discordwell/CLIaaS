@@ -431,6 +431,25 @@ export class GameMap {
     return 0;
   }
 
+  /** Find an adjacent water cell around a structure footprint (for naval production spawn).
+   *  Scans the perimeter of a WxH structure at (cx,cy) for the first water-passable cell.
+   *  Returns null if no water cell found. */
+  findAdjacentWaterCell(cx: number, cy: number, w: number, h: number): CellPos | null {
+    // Scan perimeter cells (1 cell outside the footprint)
+    for (let dy = -1; dy <= h; dy++) {
+      for (let dx = -1; dx <= w; dx++) {
+        // Only check perimeter, not interior
+        if (dx >= 0 && dx < w && dy >= 0 && dy < h) continue;
+        const rx = cx + dx;
+        const ry = cy + dy;
+        if (this.isWaterPassable(rx, ry) && this.getOccupancy(rx, ry) === 0) {
+          return { cx: rx, cy: ry };
+        }
+      }
+    }
+    return null;
+  }
+
   /** Initialize a basic map with impassable borders */
   initDefault(): void {
     // Fill playable area with clear terrain
