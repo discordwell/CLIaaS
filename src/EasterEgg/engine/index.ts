@@ -7,6 +7,7 @@ import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
   type AllianceTable, buildDefaultAlliances,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
+  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED,
   Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, HOUSE_FIREPOWER_BIAS,
@@ -509,6 +510,21 @@ export class Game {
       // Clear recoil from previous tick (C++ techno.cpp:2339 — recoil lasts 1 tick)
       if (entity.isInRecoilState) entity.isInRecoilState = false;
 
+      // C++ infantry.cpp:3466-3496 Fear_AI — decay fear, update prone state
+      if (entity.stats.isInfantry && entity.fear > 0) {
+        entity.fear--;
+        // Go prone when fear >= FEAR_ANXIOUS and not moving
+        // (C++ has crawl animation for prone+moving; we simplify by only proning when stationary)
+        if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS &&
+            entity.animState !== AnimState.WALK) {
+          entity.isProne = true;
+        }
+        // Stand up when fear drops below FEAR_ANXIOUS
+        if (entity.isProne && entity.fear < Entity.FEAR_ANXIOUS) {
+          entity.isProne = false;
+        }
+      }
+
       // C5: Track previous position for moving-platform inaccuracy detection
       // S5: Track wasMoving for NoMovingFire setup time
       const wasMovingBefore = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
@@ -621,7 +637,7 @@ export class Game {
       this.processTriggers();
     }
 
-    // Repair structures being repaired (1 HP per 15 ticks ≈ 1 HP/sec, costs credits)
+    // Repair structures (C++ rules.cpp:228-229 RepairStep, RepairPercent)
     if (this.tick % 15 === 0) {
       for (const idx of this.repairingStructures) {
         const s = this.structures[idx];
@@ -629,17 +645,14 @@ export class Game {
           this.repairingStructures.delete(idx);
           continue;
         }
-        // Repair costs credits: ~25% of build cost to fully repair
         const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
-        const repairCostPerHp = prodItem ? (prodItem.cost * 0.25) / s.maxHp : 0.5;
-        const cost = Math.ceil(repairCostPerHp);
-        if (this.credits < cost) {
-          // Can't afford — stop repairing this structure
+        const repairCostPerStep = prodItem ? Math.ceil((prodItem.cost * REPAIR_PERCENT) / (s.maxHp / REPAIR_STEP)) : 1;
+        if (this.credits < repairCostPerStep) {
           this.repairingStructures.delete(idx);
           continue;
         }
-        this.credits -= cost;
-        s.hp = Math.min(s.maxHp, s.hp + 1);
+        this.credits -= repairCostPerStep;
+        s.hp = Math.min(s.maxHp, s.hp + REPAIR_STEP);
         this.audio.play('repair');
       }
     }
@@ -754,10 +767,11 @@ export class Game {
     this.powerConsumed = 0;
     for (const s of this.structures) {
       if (!s.alive || s.sellProgress !== undefined || (s.house !== House.Spain && s.house !== House.Greece)) continue;
-      // Power production
-      if (s.type === 'FACT') this.powerProduced += 20;       // Construction Yard — base power
-      else if (s.type === 'POWR') this.powerProduced += 100;
-      else if (s.type === 'APWR') this.powerProduced += 200;
+      // Power production — scales with building health (C++ building.cpp:4613 Power_Output)
+      const healthRatio = s.hp / s.maxHp;
+      if (s.type === 'FACT') this.powerProduced += Math.round(20 * healthRatio);
+      else if (s.type === 'POWR') this.powerProduced += Math.round(100 * healthRatio);
+      else if (s.type === 'APWR') this.powerProduced += Math.round(200 * healthRatio);
       // Power consumption
       else if (s.type === 'PROC') this.powerConsumed += 30;
       else if (s.type === 'WEAP') this.powerConsumed += 30;
@@ -2111,8 +2125,8 @@ export class Game {
       }
 
       case Game.TMISSION_LOOP: {
-        // Loop back to first mission
-        entity.teamMissionIndex = 0;
+        // Jump to mission index specified by data (C++ team.cpp:2869 — CurrentMission = Data.Value-1 + IsNextMission)
+        entity.teamMissionIndex = tm.data;
         entity.teamMissionWaiting = 0;
         break;
       }
@@ -2811,13 +2825,11 @@ export class Game {
         const houseBias = HOUSE_FIREPOWER_BIAS[entity.house] ?? 1.0;
         // If warhead does 0% vs this armor (e.g. Organic vs vehicles), skip entirely
         let damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier * houseBias));
-        // C3: MinDamage/MaxDamage rules (C++ combat.cpp:122-127)
-        // MinDamage guarantee: if target is adjacent (within 2 cells), minimum 1 damage regardless
-        // MaxDamage cap: no single hit exceeds target's remaining HP + 50% (prevents excessive overkill)
+        // C3: MinDamage/MaxDamage rules (C++ combat.cpp:122-127, rules.cpp:227)
         if (damage > 0) {
           const targetDist = worldDist(entity.pos, entity.target.pos);
           if (targetDist <= CELL_SIZE * 2) damage = Math.max(damage, 1);
-          damage = Math.min(damage, Math.round(entity.target.hp * 1.5));
+          damage = Math.min(damage, MAX_DAMAGE);
         }
         if (damage <= 0) {
           entity.target = null; // can't hurt this target, give up
@@ -3333,11 +3345,18 @@ export class Game {
     }
 
     if (dist <= range) {
-      // Engineer capture: consume engineer, convert building to player
+      // Engineer capture/damage (C++ infantry.cpp:618 — capture requires ConditionRed)
       if (entity.type === UnitType.I_E6 && entity.isPlayerUnit) {
-        s.house = House.Spain;
-        s.hp = s.maxHp;
-        // Kill the engineer (consumed)
+        if (s.hp / s.maxHp <= CONDITION_RED) {
+          // Capture: building at red health — convert to player
+          s.house = House.Spain;
+          s.hp = s.maxHp;
+        } else {
+          // Damage: deal MaxStrength/3 (capped to Strength-1) (C++ infantry.cpp:631)
+          const engDamage = Math.min(Math.floor(s.maxHp / 3), s.hp - 1);
+          if (engDamage > 0) s.hp -= engDamage;
+        }
+        // Kill the engineer (consumed either way)
         entity.alive = false;
         entity.mission = Mission.DIE;
         entity.targetStructure = null;
@@ -3498,7 +3517,9 @@ export class Game {
       if (this.powerConsumed > this.powerProduced * 1.5 && this.powerProduced > 0 && Game.DEFENSE_TYPES.has(s.type)) {
         continue;
       }
-      if (s.ammo === 0) continue; // out of ammo (e.g. SCA04EA TSLA Ammo=3)
+      // C++ building.cpp:882-883 — ammo instantly reloads to MaxAmmo each AI tick
+      if (s.ammo === 0 && s.maxAmmo > 0) { s.ammo = s.maxAmmo; }
+      if (s.ammo === 0) continue; // out of ammo (shouldn't reach here after reload)
 
       // Turret rotation tick (every frame, independent of cooldown)
       if (Game.TURRETED_STRUCTURES.has(s.type)) {
@@ -4626,6 +4647,7 @@ export class Game {
         weapon: STRUCTURE_WEAPONS[bp.type],
         attackCooldown: 0,
         ammo: -1,
+        maxAmmo: -1,
         buildProgress: 0, // starts with build animation
       });
 
@@ -4713,6 +4735,7 @@ export class Game {
       weapon: STRUCTURE_WEAPONS[item.type],
       attackCooldown: 0,
       ammo: -1,
+      maxAmmo: -1,
       buildProgress: 0, // starts construction animation
     };
     this.structures.push(newStruct);
@@ -4772,6 +4795,7 @@ export class Game {
       rubble: false,
       attackCooldown: 0,
       ammo: -1,
+      maxAmmo: -1,
     };
     this.structures.push(newStruct);
     // Mark 3x3 footprint

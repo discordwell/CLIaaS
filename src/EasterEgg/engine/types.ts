@@ -13,6 +13,14 @@ export const LEPTON_SIZE = 256; // leptons per cell
 export const MAP_CELLS = 128; // cells per map side
 export const GAME_TICKS_PER_SEC = 15; // original game ran at ~15 FPS
 
+// === C++ Rule.ini defaults (rules.cpp) ===
+export const MAX_DAMAGE = 1000;          // rules.cpp:227 — max damage per hit
+export const REPAIR_STEP = 5;            // rules.cpp:228 — HP per repair pulse
+export const REPAIR_PERCENT = 0.25;      // rules.cpp:229 — cost ratio for full repair
+export const CONDITION_RED = 0.25;       // rules.cpp:235 — red health threshold
+export const CONDITION_YELLOW = 0.5;     // rules.cpp:234 — yellow health threshold
+export const PRONE_DAMAGE_BIAS = 0.5;    // rules.cpp:202 — prone infantry damage multiplier
+
 // === Directions ===
 export enum Dir {
   N = 0,

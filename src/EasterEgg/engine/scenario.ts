@@ -671,6 +671,7 @@ export interface MapStructure {
   weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
   attackCooldown: number;    // ticks until next shot
   ammo: number;              // remaining shots (-1 = unlimited)
+  maxAmmo: number;           // max ammo for reload (C++ building.cpp:882-883)
   triggerName?: string;      // attached trigger name (from INI)
   buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
@@ -853,6 +854,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       weapon: STRUCTURE_WEAPONS[s.type],
       attackCooldown: 0,
       ammo: -1,
+      maxAmmo: -1,
       triggerName: trigName,
     });
     // Mark structure footprint cells as impassable (WALL terrain)
@@ -883,6 +885,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       weapon: STRUCTURE_WEAPONS[bs.type],
       attackCooldown: 0,
       ammo: -1,
+      maxAmmo: -1,
     });
     const [fw, fh] = STRUCTURE_SIZE[bs.type] ?? [1, 1];
     for (let dy = 0; dy < fh; dy++) {
@@ -1014,6 +1017,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     if (!section) continue;
     if (section.has('Ammo')) {
       s.ammo = parseInt(section.get('Ammo')!);
+      s.maxAmmo = s.ammo; // C++ building.cpp:882-883 — remember max for reload
     }
     if (section.has('Strength')) {
       const newMax = parseInt(section.get('Strength')!);

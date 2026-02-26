@@ -8,7 +8,7 @@ import {
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE,
   INFANTRY_ANIMS, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
-  WARHEAD_VS_ARMOR,
+  WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
 } from './types';
 // Structure reference is typed loosely to avoid circular dependency with scenario.ts
@@ -165,6 +165,16 @@ export class Entity {
   // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.5)
   speedBias = 1.0;
 
+  // Fear/Prone system (C++ infantry.cpp — FearType 0-255)
+  // Fear increases on damage, decrements 1/tick. IsProne when fear >= FEAR_ANXIOUS (10).
+  // Prone infantry take 50% damage (C++ rules.cpp:202 ProneDamageBias=1/2).
+  fear = 0;
+  isProne = false;
+  static readonly FEAR_ANXIOUS = 10;
+  static readonly FEAR_SCARED = 100;
+  static readonly FEAR_PANIC = 200;
+  static readonly FEAR_MAXIMUM = 255;
+
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
     this.stats = UNIT_STATS[type] ?? UNIT_STATS.E1;
@@ -309,8 +319,24 @@ export class Entity {
   /** Take damage, return true if killed. warhead affects death animation. */
   takeDamage(amount: number, warhead?: string): boolean {
     if (!this.alive) return false;
+    // C++ infantry.cpp:329-330 — prone infantry take 50% damage (ProneDamageBias)
+    if (this.isProne && amount > 0) {
+      amount = Math.max(1, Math.round(amount * PRONE_DAMAGE_BIAS));
+    }
     this.hp -= amount;
     this.damageFlash = 4;
+    // C++ infantry.cpp:442-457 — increase fear on damage
+    if (this.stats.isInfantry && amount > 0) {
+      if (this.fear < Entity.FEAR_SCARED) {
+        this.fear = Entity.FEAR_SCARED;
+      }
+      // Additional fear based on health ratio (C++ infantry.cpp:454-457)
+      let moreFear = Entity.FEAR_ANXIOUS;
+      const hpRatio = this.hp / this.maxHp;
+      if (hpRatio > CONDITION_RED) moreFear = Math.floor(moreFear / 2);
+      if (hpRatio > CONDITION_YELLOW) moreFear = Math.floor(moreFear / 2);
+      this.fear = Math.min(this.fear + moreFear, Entity.FEAR_MAXIMUM);
+    }
     if (this.hp <= 0) {
       this.hp = 0;
       this.alive = false;
