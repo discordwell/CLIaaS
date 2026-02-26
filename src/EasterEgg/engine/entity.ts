@@ -7,7 +7,7 @@ import {
   type WarheadType, type ArmorType,
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE,
-  INFANTRY_ANIMS, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
+  INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
 } from './types';
@@ -271,31 +271,41 @@ export class Entity {
       }
     }
 
-    // --- Infantry: DoControls layout (base + facing*jump + animFrame%count) ---
+    // --- Infantry: C++ Shape_Number (infantry.cpp:479) ---
+    // frame + INFANTRY_SHAPE[dir] * jump + animFrame % count
     if (this.stats.isInfantry) {
       const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
+      const sdir = INFANTRY_SHAPE[dir]; // SHP direction index (C++ HumanShape remap)
       switch (this.animState) {
         case AnimState.WALK: {
-          const d = anim.walk;
-          return d.frame + dir * d.jump + (this.animFrame % d.count);
+          // Prone crawl if isProne and crawl animation exists
+          const d = (this.isProne && anim.crawl) ? anim.crawl : anim.walk;
+          return d.frame + sdir * d.jump + (this.animFrame % Math.max(d.count, 1));
         }
         case AnimState.ATTACK: {
-          const d = anim.fire;
-          return d.frame + dir * d.jump + (this.animFrame % d.count);
+          // Prone fire if isProne and fireProne animation exists
+          const d = (this.isProne && anim.fireProne) ? anim.fireProne : anim.fire;
+          if (!d.count) return 0; // no fire animation (engineer)
+          return d.frame + sdir * d.jump + (this.animFrame % d.count);
         }
         case AnimState.DIE: {
           const d = (this.deathVariant === 1 && anim.die2) ? anim.die2 : anim.die1;
           return d.frame + Math.min(this.animFrame, d.count - 1);
         }
         default: {
-          // Idle: use idle fidget if available after a variable delay (per-unit)
+          // Prone idle
+          if (this.isProne && anim.prone) {
+            const d = anim.prone;
+            return d.frame + sdir * d.jump;
+          }
+          // Idle fidget after a variable delay (per-unit)
           const fidgetDelay = 12 + (this.id * 7) % 20; // 12-31 frames
           if (anim.idle && this.animFrame > fidgetDelay) {
             const d = anim.idle;
             return d.frame + (this.animFrame % d.count);
           }
           const d = anim.ready;
-          return d.frame + dir * d.jump;
+          return d.frame + sdir * d.jump;
         }
       }
     }

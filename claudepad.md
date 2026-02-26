@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-02-26T12:00Z — Session 39: RA Engine C++ Parity — Round 2
+- Completed 3 batches (19 total fixes): S1-S5 Critical, H1-H6 High, M1-M8 Medium
+- All committed + deployed: 6372818, 82cf45d, 5b7b6f1
+- All 6 original sweep agents reported in — findings cross-referenced, all addressed
+- Launched 3 new sweep agents: infantry.cpp, building.cpp, house.cpp+team.cpp
+- Cataloged ~40 remaining unfixed issues from original sweeps (many were already fixed)
+- Key genuine gaps: C++ threat scoring algorithm (cost-based vs heuristic), fog bleed artifacts, camera bounds
+- Currently: waiting for new sweep agents, will organize next fix batch
+
 ## 2026-02-25T06:00Z — Session 37: Tier-Aware Architecture Build — ALL 6 PHASES COMPLETE
 - Completed Phases 2-6 (Phase 1 done in Session 36)
 - Phase 2: RemoteProvider with auto-pagination, error handling, `config set-mode` CLI command, 2 new API endpoints, 47 tests

@@ -513,10 +513,8 @@ export class Game {
       // C++ infantry.cpp:3466-3496 Fear_AI — decay fear, update prone state
       if (entity.stats.isInfantry && entity.fear > 0) {
         entity.fear--;
-        // Go prone when fear >= FEAR_ANXIOUS and not moving
-        // (C++ has crawl animation for prone+moving; we simplify by only proning when stationary)
-        if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS &&
-            entity.animState !== AnimState.WALK) {
+        // Go prone when fear >= FEAR_ANXIOUS (crawl animation handles prone+moving)
+        if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS) {
           entity.isProne = true;
         }
         // Stand up when fear drops below FEAR_ANXIOUS

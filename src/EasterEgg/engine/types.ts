@@ -109,77 +109,158 @@ export interface DoInfo {
 }
 
 export interface InfantryAnim {
-  ready: DoInfo;      // standing idle
-  walk: DoInfo;       // walking
-  fire: DoInfo;       // firing weapon (standing)
-  die1: DoInfo;       // death animation 1
-  die2?: DoInfo;      // death animation 2 (alternative death, e.g. blown up)
-  idle?: DoInfo;      // idle fidget animation (optional)
+  ready: DoInfo;      // DO_STAND_READY — standing idle
+  guard?: DoInfo;     // DO_STAND_GUARD — guard idle (falls back to ready)
+  walk: DoInfo;       // DO_WALK — walking upright
+  fire: DoInfo;       // DO_FIRE_WEAPON — firing while standing
+  prone?: DoInfo;     // DO_PRONE — idle while prone
+  crawl?: DoInfo;     // DO_CRAWL — moving while prone
+  fireProne?: DoInfo; // DO_FIRE_PRONE — firing while prone
+  lieDown?: DoInfo;   // DO_LIE_DOWN — transition to prone
+  getUp?: DoInfo;     // DO_GET_UP — transition from prone
+  die1: DoInfo;       // DO_GUN_DEATH
+  die2?: DoInfo;      // DO_EXPLOSION_DEATH
+  idle?: DoInfo;      // DO_IDLE1
+  idle2?: DoInfo;     // DO_IDLE2
   // Per-type animation rate overrides (C++ MasterDoControls variable timing)
   walkRate?: number;   // ticks per frame for walk (default 3)
   attackRate?: number;  // ticks per frame for attack (default 5)
   idleRate?: number;   // ticks per frame for idle (default 4)
 }
 
-// Infantry animation layouts per type (from idata.cpp DoControls)
+// C++ infantry.cpp:90 — HumanShape maps 8-dir enum to SHP sprite direction order.
+// SHP files store direction sprites as: N(0), NW(1), W(2), SW(3), S(4), SE(5), E(6), NE(7).
+// Our Dir enum is: N(0), NE(1), E(2), SE(3), S(4), SW(5), W(6), NW(7).
+export const INFANTRY_SHAPE: number[] = [0, 7, 6, 5, 4, 3, 2, 1];
+
+// Infantry animation layouts per type — exact C++ idata.cpp DoControls values.
+// Frame formula: frame + INFANTRY_SHAPE[dir] * jump + animFrame % count
 export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
-  E1: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 72, count: 7, jump: 7 },
-    die1:  { frame: 200, count: 8, jump: 0 },
-    die2:  { frame: 208, count: 8, jump: 0 },
-    idle:  { frame: 224, count: 6, jump: 0 },
+  E1: { // E1DoControls (idata.cpp:80)
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 8,   count: 1,  jump: 1 },
+    walk:      { frame: 16,  count: 6,  jump: 6 },
+    fire:      { frame: 64,  count: 8,  jump: 8 },
+    prone:     { frame: 192, count: 1,  jump: 8 },
+    crawl:     { frame: 144, count: 4,  jump: 4 },
+    fireProne: { frame: 192, count: 6,  jump: 8 },
+    lieDown:   { frame: 128, count: 2,  jump: 2 },
+    getUp:     { frame: 176, count: 2,  jump: 2 },
+    die1:      { frame: 288, count: 8,  jump: 0 },  // 382-94
+    die2:      { frame: 304, count: 8,  jump: 0 },  // 398-94
+    idle:      { frame: 256, count: 16, jump: 0 },
+    idle2:     { frame: 272, count: 16, jump: 0 },
   },
-  E2: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 72, count: 10, jump: 10 },
-    die1:  { frame: 312, count: 8, jump: 0 },
-    idle:  { frame: 280, count: 6, jump: 0 },
-    attackRate: 6, // C++ MasterDoControls: slower grenade throw
+  E2: { // E2DoControls (idata.cpp:104) — Grenadier
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 8,   count: 1,  jump: 1 },
+    walk:      { frame: 16,  count: 6,  jump: 6 },
+    fire:      { frame: 64,  count: 20, jump: 20 },
+    prone:     { frame: 288, count: 1,  jump: 12 },
+    crawl:     { frame: 240, count: 4,  jump: 4 },
+    fireProne: { frame: 288, count: 8,  jump: 12 },
+    lieDown:   { frame: 224, count: 2,  jump: 2 },
+    getUp:     { frame: 272, count: 2,  jump: 2 },
+    die1:      { frame: 416, count: 8,  jump: 0 },  // 510-94
+    die2:      { frame: 432, count: 8,  jump: 0 },  // 526-94
+    idle:      { frame: 384, count: 16, jump: 0 },
+    idle2:     { frame: 400, count: 16, jump: 0 },
+    attackRate: 6,
   },
-  E3: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 72, count: 7, jump: 7 },
-    die1:  { frame: 200, count: 8, jump: 0 },
-    idle:  { frame: 224, count: 6, jump: 0 },
+  E3: { // E3DoControls (idata.cpp:128) — Rocket Soldier
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 8,   count: 1,  jump: 1 },
+    walk:      { frame: 16,  count: 6,  jump: 6 },
+    fire:      { frame: 64,  count: 8,  jump: 8 },
+    prone:     { frame: 192, count: 1,  jump: 10 },
+    crawl:     { frame: 144, count: 4,  jump: 4 },
+    fireProne: { frame: 192, count: 10, jump: 10 },
+    lieDown:   { frame: 128, count: 2,  jump: 2 },
+    getUp:     { frame: 176, count: 2,  jump: 2 },
+    die1:      { frame: 304, count: 8,  jump: 0 },  // 398-94
+    die2:      { frame: 320, count: 8,  jump: 0 },  // 414-94
+    idle:      { frame: 272, count: 16, jump: 0 },
+    idle2:     { frame: 288, count: 16, jump: 0 },
   },
-  E4: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 72, count: 10, jump: 10 },
-    die1:  { frame: 312, count: 8, jump: 0 },
-    idle:  { frame: 280, count: 6, jump: 0 },
-    attackRate: 4, // C++ MasterDoControls: faster flame burst
+  E4: { // E4DoControls (idata.cpp:152) — Flamethrower
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 8,   count: 1,  jump: 1 },
+    walk:      { frame: 16,  count: 6,  jump: 6 },
+    fire:      { frame: 64,  count: 16, jump: 16 },
+    prone:     { frame: 256, count: 1,  jump: 16 },
+    crawl:     { frame: 208, count: 4,  jump: 4 },
+    fireProne: { frame: 256, count: 16, jump: 16 },
+    lieDown:   { frame: 192, count: 2,  jump: 2 },
+    getUp:     { frame: 240, count: 2,  jump: 2 },
+    die1:      { frame: 416, count: 8,  jump: 0 },  // 510-94
+    die2:      { frame: 432, count: 8,  jump: 0 },  // 526-94
+    idle:      { frame: 384, count: 16, jump: 0 },
+    idle2:     { frame: 400, count: 16, jump: 0 },
+    attackRate: 4,
   },
-  E6: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 24, count: 6, jump: 6 },  // engineers don't fire, reuse walk
-    die1:  { frame: 200, count: 8, jump: 0 },
+  E6: { // E6DoControls (idata.cpp:176) — Engineer
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 8,   count: 1,  jump: 1 },
+    walk:      { frame: 16,  count: 6,  jump: 6 },
+    fire:      { frame: 0,   count: 0,  jump: 0 },  // engineers don't fire
+    prone:     { frame: 82,  count: 1,  jump: 4 },
+    crawl:     { frame: 82,  count: 4,  jump: 4 },
+    lieDown:   { frame: 67,  count: 2,  jump: 2 },
+    getUp:     { frame: 114, count: 2,  jump: 2 },
+    die1:      { frame: 146, count: 8,  jump: 0 },
+    die2:      { frame: 154, count: 8,  jump: 0 },
+    idle:      { frame: 130, count: 16, jump: 0 },
   },
-  DOG: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 72, count: 4, jump: 4 },
-    die1:  { frame: 200, count: 8, jump: 0 },
-    idle:  { frame: 180, count: 3, jump: 0 },
-    walkRate: 2, // C++ MasterDoControls: dogs run faster
+  DOG: { // DogDoControls (idata.cpp:56) — Attack dog
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    walk:      { frame: 8,   count: 6,  jump: 6 },
+    fire:      { frame: 104, count: 14, jump: 14 },
+    crawl:     { frame: 56,  count: 6,  jump: 6 },
+    die1:      { frame: 235, count: 7,  jump: 0 },
+    die2:      { frame: 242, count: 9,  jump: 0 },
+    idle:      { frame: 216, count: 18, jump: 0 },
+    walkRate: 2,
   },
-  SPY: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 72, count: 7, jump: 7 },
-    die1:  { frame: 200, count: 8, jump: 0 },
-    idle:  { frame: 224, count: 6, jump: 0 },
+  E7: { // E7DoControls (idata.cpp:200) — Shock Trooper
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    walk:      { frame: 8,   count: 6,  jump: 6 },
+    fire:      { frame: 56,  count: 7,  jump: 7 },
+    prone:     { frame: 128, count: 1,  jump: 4 },
+    crawl:     { frame: 128, count: 4,  jump: 4 },
+    fireProne: { frame: 176, count: 7,  jump: 7 },
+    lieDown:   { frame: 113, count: 2,  jump: 2 },
+    getUp:     { frame: 161, count: 2,  jump: 2 },
+    die1:      { frame: 262, count: 8,  jump: 0 },
+    die2:      { frame: 270, count: 8,  jump: 0 },
+    idle:      { frame: 232, count: 17, jump: 0 },
+    idle2:     { frame: 249, count: 13, jump: 0 },
   },
-  MEDI: {
-    ready: { frame: 0, count: 1, jump: 1 },
-    walk:  { frame: 24, count: 6, jump: 6 },
-    fire:  { frame: 72, count: 7, jump: 7 },  // heal animation
-    die1:  { frame: 200, count: 8, jump: 0 },
+  SPY: { // SpyDoControls (idata.cpp:225)
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 8,   count: 1,  jump: 1 },
+    walk:      { frame: 16,  count: 6,  jump: 6 },
+    fire:      { frame: 64,  count: 8,  jump: 8 },
+    prone:     { frame: 144, count: 1,  jump: 4 },
+    crawl:     { frame: 144, count: 4,  jump: 4 },
+    fireProne: { frame: 192, count: 8,  jump: 8 },
+    lieDown:   { frame: 128, count: 2,  jump: 2 },
+    getUp:     { frame: 176, count: 2,  jump: 2 },
+    die1:      { frame: 288, count: 8,  jump: 0 },
+    die2:      { frame: 296, count: 8,  jump: 0 },
+    idle:      { frame: 256, count: 14, jump: 0 },
+    idle2:     { frame: 270, count: 18, jump: 0 },
+  },
+  MEDI: { // MedicDoControls (idata.cpp:273)
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    walk:      { frame: 8,   count: 6,  jump: 6 },
+    fire:      { frame: 56,  count: 28, jump: 0 },  // heal (non-directional)
+    prone:     { frame: 130, count: 1,  jump: 4 },
+    crawl:     { frame: 130, count: 4,  jump: 4 },
+    lieDown:   { frame: 114, count: 2,  jump: 2 },
+    getUp:     { frame: 162, count: 2,  jump: 2 },
+    die1:      { frame: 193, count: 8,  jump: 0 },
+    die2:      { frame: 210, count: 8,  jump: 0 },
+    idle:      { frame: 178, count: 15, jump: 0 },
   },
 };
 
