@@ -35,6 +35,7 @@ Everything that's missing, incomplete, simplified, or different vs the C++ Red A
 - [x] **C8: Firepower house bias** — HOUSE_FIREPOWER_BIAS[house] applied to all damage calcs.
 - [x] **C9: Projectile rotation/tumble** — projectileROT homing with tracking factor proportional to ROT.
 - [x] **C10: Every-other-frame homing** — Homing projectiles update tracking only on even frames.
+- [x] **[VERIFIED] C11: Friendly fire splash damage** — applySplashDamage() hits ALL entities in radius regardless of house/team, matching C++ Explosion_Damage (combat.cpp). No alliance filter. Tested in friendly-fire.test.ts (23 tests).
 
 ## AI / MISSIONS
 
@@ -57,6 +58,7 @@ Everything that's missing, incomplete, simplified, or different vs the C++ Red A
 - [x] **[VERIFIED] E2: Low power production penalty** — Production runs at 25% speed when powerConsumed > powerProduced (index.ts:4535-4552). Uses 0.25 multiplier, not tick-skipping.
 - [x] **[VERIFIED] E3: AI army building** — AI houses produce infantry/vehicles when credits available + barracks/factory present (index.ts:5286-5345). Passive income from refineries.
 - [x] **[VERIFIED] E4: Wall/sandbag placement** — SBAG/FENC/BRIK/BARB production items with 1x1 continuous placement mode. Cost deducted per wall placed.
+- [x] **[VERIFIED] E5: Silo storage capacity** — PROC=2000, SILO=1500 credit storage. Credits capped at capacity on harvest/pickup/refund. Destroying storage recalculates and caps. EVA "silos needed" at 80% capacity (30s throttle). Sidebar shows credits/capacity.
 
 ## TRIGGER SYSTEM
 

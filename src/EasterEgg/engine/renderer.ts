@@ -133,6 +133,7 @@ export class Renderer {
   minimapAlerts: Array<{ cx: number; cy: number; tick: number }> = [];
   // Sidebar data (set by game each frame)
   sidebarCredits = 0;  // animated display credits
+  sidebarSiloCapacity = 0; // silo storage capacity for credits display
   sidebarPowerProduced = 0;
   sidebarPowerConsumed = 0;
   sidebarItems: ProductionItem[] = [];
@@ -2529,11 +2530,13 @@ export class Renderer {
     ctx.lineTo(x, this.height);
     ctx.stroke();
 
-    // Credits
+    // Credits with silo capacity indicator
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, 14);
+    // Flash red when at or near capacity (>=80%)
+    const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
+    ctx.fillStyle = atCapacity ? '#FF4444' : '#FFD700';
+    ctx.fillText(`$${this.sidebarCredits}/${this.sidebarSiloCapacity}`, x + w / 2, 14);
 
     // Power bar with numeric labels + low-power pulse
     const pwrY = 18;

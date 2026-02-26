@@ -654,6 +654,7 @@ export interface StructureWeapon {
   rof: number;       // ticks between shots
   splash?: number;   // AOE radius in cells
   warhead?: string;  // warhead type for damage multiplier (default 'HE')
+  projSpeed?: number; // projectile visual speed in cells/second (C++ BulletClass Speed)
 }
 
 export interface MapStructure {
@@ -680,14 +681,14 @@ export interface MapStructure {
 
 /** Weapon stats for defensive structures */
 export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
-  HBOX:  { damage: 25, range: 5, rof: 15 },             // Camo Pillbox
-  PBOX:  { damage: 25, range: 5, rof: 15 },             // Pillbox
-  GUN:   { damage: 40, range: 6, rof: 20, splash: 0.5 }, // Guard Tower
-  TSLA:  { damage: 80, range: 7, rof: 40, splash: 1, warhead: 'Super' },  // Tesla Coil
-  SAM:   { damage: 50, range: 8, rof: 25 },             // SAM Site
-  AGUN:  { damage: 40, range: 6, rof: 20 },             // Anti-aircraft Gun
-  FTUR:  { damage: 20, range: 5, rof: 10 },             // Flame Tower
-  QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super' },  // Queen Ant (TeslaZap)
+  HBOX:  { damage: 25, range: 5, rof: 15, projSpeed: 40 },             // Camo Pillbox
+  PBOX:  { damage: 25, range: 5, rof: 15, projSpeed: 40 },             // Pillbox
+  GUN:   { damage: 40, range: 6, rof: 20, splash: 0.5, projSpeed: 30 }, // Guard Tower
+  TSLA:  { damage: 80, range: 7, rof: 40, splash: 1, warhead: 'Super', projSpeed: 40 },  // Tesla Coil
+  SAM:   { damage: 50, range: 8, rof: 25, projSpeed: 15 },             // SAM Site (missiles)
+  AGUN:  { damage: 40, range: 6, rof: 20, projSpeed: 40 },             // Anti-aircraft Gun
+  FTUR:  { damage: 20, range: 5, rof: 10, projSpeed: 20 },             // Flame Tower
+  QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 },  // Queen Ant (TeslaZap)
 };
 
 // Building type → sprite image name (only include buildings we have sprites for)

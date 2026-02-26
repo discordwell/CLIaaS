@@ -315,6 +315,74 @@ export class GameMap {
     return count;
   }
 
+  // === Ore/Gem overlay constants (C++ overlay.cpp) ===
+  // Gold ore: 0x03 (GOLD01, min) through 0x0E (GOLD12, max) — 12 density levels
+  // Gems:     0x0F (GEM01, min) through 0x12 (GEM04, max) — 4 density levels
+  // No overlay: 0xFF
+
+  /** Ore regrowth interval in ticks — C++ OverlayClass::AI() runs growth roughly
+   *  every 256 game ticks (~17 seconds at 15 FPS). */
+  static readonly ORE_GROWTH_INTERVAL = 256;
+
+  /** Probability of an existing ore cell increasing one density level per growth cycle.
+   *  C++ behavior: roughly 1 in 2 chance per cell per cycle. */
+  static readonly ORE_DENSITY_CHANCE = 0.5;
+
+  /** Probability of an ore cell spreading to one random adjacent empty cell per cycle.
+   *  C++ behavior: roughly 1 in 4 chance per cell per cycle. */
+  static readonly ORE_SPREAD_CHANCE = 0.25;
+
+  /** Ore regrowth — existing ore cells increase in density and spread to adjacent empty cells.
+   *  Matches C++ OverlayClass::AI() behavior: growth fires every ~256 ticks.
+   *  Fully depleted patches (all cells at 0xFF) never regrow — there must be a seed cell.
+   *  Only spreads to CLEAR terrain cells with no wall and no existing overlay.
+   *  @param tick Current game tick */
+  growOre(tick: number): void {
+    if (tick % GameMap.ORE_GROWTH_INTERVAL !== 0 || tick === 0) return;
+
+    const bx = this.boundsX, by = this.boundsY;
+    const bw = this.boundsW, bh = this.boundsH;
+    // Cardinal directions only (N, E, S, W) — C++ uses adjacent cells
+    const dirs: [number, number][] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
+    for (let cy = by; cy < by + bh; cy++) {
+      for (let cx = bx; cx < bx + bw; cx++) {
+        const idx = cy * MAP_CELLS + cx;
+        const ovl = this.overlay[idx];
+
+        // Skip non-ore/gem cells
+        if (ovl < 0x03 || ovl > 0x12) continue;
+
+        const isGold = ovl >= 0x03 && ovl <= 0x0E;
+        const isGem = ovl >= 0x0F && ovl <= 0x12;
+
+        // Density growth: increase overlay index if not at max
+        if (Math.random() < GameMap.ORE_DENSITY_CHANCE) {
+          if (isGold && ovl < 0x0E) {
+            this.overlay[idx] = ovl + 1;
+          } else if (isGem && ovl < 0x12) {
+            this.overlay[idx] = ovl + 1;
+          }
+        }
+
+        // Spread to one random adjacent empty cell
+        if (Math.random() < GameMap.ORE_SPREAD_CHANCE) {
+          const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
+          const nx = cx + dx, ny = cy + dy;
+          // Must be within map bounds
+          if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
+          const nidx = ny * MAP_CELLS + nx;
+          // Target cell must have no overlay, CLEAR terrain, and no wall
+          if (this.overlay[nidx] !== 0xFF) continue;
+          if (this.cells[nidx] !== Terrain.CLEAR) continue;
+          if (this.wallType[nidx] !== '') continue;
+          // Set to minimum density for the ore type
+          this.overlay[nidx] = isGem ? 0x0F : 0x03;
+        }
+      }
+    }
+  }
+
   /** Find nearest ore/gem cell to a given position (returns null if none) */
   findNearestOre(cx: number, cy: number, maxRange = 20): CellPos | null {
     let bestDist = Infinity;

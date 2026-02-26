@@ -52,6 +52,7 @@ export class Entity {
   mission: Mission = Mission.GUARD;
   stance: Stance = Stance.AGGRESSIVE; // default aggressive (like original RA)
   target: Entity | null = null;
+  healTarget: Entity | null = null;  // medic auto-heal target (C++ infantry.cpp AI)
   targetStructure: StructureRef | null = null; // for attacking buildings
   forceFirePos: WorldPos | null = null; // force-fire ground position (Ctrl+right-click)
   moveTarget: WorldPos | null = null;
@@ -389,10 +390,54 @@ export class Entity {
     return false;
   }
 
-  /** Check if target is in weapon range */
+  /** Check if target is in range of any weapon (primary or secondary) */
   inRange(other: Entity): boolean {
-    if (!this.weapon) return false;
-    return worldDist(this.pos, other.pos) <= this.weapon.range;
+    const dist = worldDist(this.pos, other.pos);
+    if (this.weapon && dist <= this.weapon.range) return true;
+    if (this.weapon2 && dist <= this.weapon2.range) return true;
+    return false;
+  }
+
+  /** Check if target is in range of a specific weapon */
+  inRangeWith(other: Entity, weapon: WeaponStats): boolean {
+    return worldDist(this.pos, other.pos) <= weapon.range;
+  }
+
+  /**
+   * Select the best weapon against a target based on effective damage (C++ TechnoClass::Can_Fire).
+   * Returns the weapon that deals more effective damage considering warhead-vs-armor multipliers.
+   * If one weapon is on cooldown but the other is ready, prefers the ready one.
+   * Never returns both — only one weapon fires per tick (C++ alternating behavior).
+   */
+  selectWeapon(target: Entity, getWarheadMult: (warhead: WarheadType, armor: ArmorType) => number): WeaponStats | null {
+    const dist = worldDist(this.pos, target.pos);
+    const w1 = this.weapon;
+    const w2 = this.weapon2;
+
+    // Single-weapon unit: just return primary
+    if (!w2) return w1;
+    if (!w1) return w2;
+
+    const w1InRange = dist <= w1.range;
+    const w2InRange = dist <= w2.range;
+    const w1Ready = this.attackCooldown <= 0 && w1InRange;
+    const w2Ready = this.attackCooldown2 <= 0 && w2InRange;
+
+    // Neither ready — return null (both on cooldown)
+    if (!w1Ready && !w2Ready) return null;
+
+    // Only one ready — use that one
+    if (w1Ready && !w2Ready) return w1;
+    if (!w1Ready && w2Ready) return w2;
+
+    // Both ready — pick the one with higher effective damage vs target armor
+    const mult1 = getWarheadMult(w1.warhead, target.stats.armor);
+    const mult2 = getWarheadMult(w2.warhead, target.stats.armor);
+    const eff1 = w1.damage * mult1;
+    const eff2 = w2.damage * mult2;
+
+    // Prefer higher effective damage; on tie, prefer primary
+    return eff2 > eff1 ? w2 : w1;
   }
 
   /** Update animation frame — uses per-type rate overrides from C++ MasterDoControls */
