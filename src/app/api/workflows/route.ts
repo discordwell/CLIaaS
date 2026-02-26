@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
   const validation = validateWorkflow(workflow);
   if (!validation.valid) {
     return NextResponse.json(
-      { error: 'Invalid workflow', details: validation.errors },
+      { error: 'Invalid workflow', details: validation.errors.map(e => e.message) },
       { status: 400 },
     );
   }

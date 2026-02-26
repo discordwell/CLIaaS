@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { decomposeWorkflowToRules, validateWorkflow } from '../decomposer';
 import type { Workflow, WorkflowNode, WorkflowTransition } from '../types';
+import { workflowTemplates } from '../templates';
 
 function makeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
   const triggerId = 'trigger-1';
@@ -57,21 +58,22 @@ describe('validateWorkflow', () => {
   it('accepts a valid workflow', () => {
     const result = validateWorkflow(makeWorkflow());
     expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
+    // May have warnings but no errors
+    expect(result.errors.filter(e => e.severity === 'error')).toHaveLength(0);
   });
 
   it('rejects missing entryNodeId', () => {
     const wf = makeWorkflow({ entryNodeId: '' });
     const result = validateWorkflow(wf);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('entryNodeId'))).toBe(true);
+    expect(result.errors.some(e => e.message.includes('entryNodeId'))).toBe(true);
   });
 
   it('rejects invalid entryNodeId reference', () => {
     const wf = makeWorkflow({ entryNodeId: 'nonexistent' });
     const result = validateWorkflow(wf);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('nonexistent'))).toBe(true);
+    expect(result.errors.some(e => e.message.includes('nonexistent'))).toBe(true);
   });
 
   it('rejects transitions with invalid fromNodeId', () => {
@@ -79,7 +81,7 @@ describe('validateWorkflow', () => {
     wf.transitions.push({ id: 'bad', fromNodeId: 'missing', toNodeId: 'state-a' });
     const result = validateWorkflow(wf);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('missing'))).toBe(true);
+    expect(result.errors.some(e => e.message.includes('missing'))).toBe(true);
   });
 
   it('rejects transitions with invalid toNodeId', () => {
@@ -87,7 +89,7 @@ describe('validateWorkflow', () => {
     wf.transitions.push({ id: 'bad2', fromNodeId: 'state-a', toNodeId: 'missing2' });
     const result = validateWorkflow(wf);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('missing2'))).toBe(true);
+    expect(result.errors.some(e => e.message.includes('missing2'))).toBe(true);
   });
 
   it('detects orphan nodes', () => {
@@ -100,15 +102,114 @@ describe('validateWorkflow', () => {
     };
     const result = validateWorkflow(wf);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('orphan'))).toBe(true);
+    expect(result.errors.some(e => e.message.includes('orphan') && e.nodeId === 'orphan')).toBe(true);
   });
 
   it('detects trigger node without outgoing transitions', () => {
     const wf = makeWorkflow({ transitions: [] });
-    // Remove all transitions — trigger has no outgoing
     const result = validateWorkflow(wf);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('outgoing'))).toBe(true);
+    expect(result.errors.some(e => e.message.includes('outgoing'))).toBe(true);
+  });
+
+  it('returns errors with severity and optional nodeId', () => {
+    const wf = makeWorkflow({ entryNodeId: '' });
+    const result = validateWorkflow(wf);
+    for (const err of result.errors) {
+      expect(err).toHaveProperty('message');
+      expect(err).toHaveProperty('severity');
+      expect(['error', 'warning']).toContain(err.severity);
+    }
+  });
+
+  it('warns when workflow has no end node', () => {
+    const wf = makeWorkflow();
+    delete wf.nodes['end-1'];
+    wf.transitions = wf.transitions.filter(t => t.toNodeId !== 'end-1');
+    const result = validateWorkflow(wf);
+    expect(result.errors.some(e => e.message.includes('no end node') && e.severity === 'warning')).toBe(true);
+  });
+
+  it('warns when non-end node has no outgoing transitions', () => {
+    const wf = makeWorkflow();
+    // Remove transitions from state-b so it has no outgoing
+    wf.transitions = wf.transitions.filter(t => t.fromNodeId !== 'state-b');
+    const result = validateWorkflow(wf);
+    expect(result.errors.some(
+      e => e.message.includes('no outgoing') && e.nodeId === 'state-b' && e.severity === 'warning'
+    )).toBe(true);
+  });
+
+  it('warns when condition node has fewer than 2 outgoing branches', () => {
+    const condId = 'cond-1';
+    const wf = makeWorkflow();
+    wf.nodes[condId] = {
+      id: condId,
+      type: 'condition',
+      data: { logic: 'all', conditions: [{ field: 'status', operator: 'is', value: 'open' }] },
+      position: { x: 0, y: 150 },
+    };
+    // Only one outgoing transition from condition
+    wf.transitions.push({ id: 't-cond', fromNodeId: 'state-a', toNodeId: condId });
+    wf.transitions.push({ id: 't-cond-yes', fromNodeId: condId, toNodeId: 'state-b', branchKey: 'yes' });
+    const result = validateWorkflow(wf);
+    expect(result.errors.some(
+      e => e.message.includes('at least 2 branches') && e.nodeId === condId && e.severity === 'warning'
+    )).toBe(true);
+  });
+
+  it('warns when action node has no actions defined', () => {
+    const actionId = 'action-1';
+    const wf = makeWorkflow();
+    wf.nodes[actionId] = {
+      id: actionId,
+      type: 'action',
+      data: { actions: [] },
+      position: { x: 0, y: 150 },
+    };
+    wf.transitions.push({ id: 't-act-in', fromNodeId: 'state-a', toNodeId: actionId });
+    wf.transitions.push({ id: 't-act-out', fromNodeId: actionId, toNodeId: 'state-b' });
+    const result = validateWorkflow(wf);
+    expect(result.errors.some(
+      e => e.message.includes('no actions defined') && e.nodeId === actionId && e.severity === 'warning'
+    )).toBe(true);
+  });
+
+  it('valid=true when only warnings present (no errors)', () => {
+    const wf = makeWorkflow();
+    // Add a condition node with only 1 branch — produces warning but no error
+    const condId = 'cond-1';
+    wf.nodes[condId] = {
+      id: condId,
+      type: 'condition',
+      data: { logic: 'all', conditions: [{ field: 'status', operator: 'is', value: 'open' }] },
+      position: { x: 0, y: 150 },
+    };
+    wf.transitions.push({ id: 't-to-cond', fromNodeId: 'state-a', toNodeId: condId });
+    wf.transitions.push({ id: 't-cond-out', fromNodeId: condId, toNodeId: 'state-b', branchKey: 'yes' });
+    const result = validateWorkflow(wf);
+    expect(result.valid).toBe(true);
+    expect(result.errors.some(e => e.severity === 'warning')).toBe(true);
+  });
+});
+
+// ---- Template meta drift prevention ----
+
+describe('workflowTemplates meta', () => {
+  it('each template meta.nodeCount matches actual node count', () => {
+    for (const tmpl of workflowTemplates) {
+      const wf = tmpl.create();
+      expect(tmpl.meta.nodeCount).toBe(
+        Object.keys(wf.nodes).length,
+      );
+    }
+  });
+
+  it('each template meta.transitionCount matches actual transition count', () => {
+    for (const tmpl of workflowTemplates) {
+      const wf = tmpl.create();
+      expect(tmpl.meta.transitionCount).toBe(wf.transitions.length);
+    }
   });
 });
 

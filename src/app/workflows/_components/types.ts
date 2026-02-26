@@ -55,39 +55,50 @@ export interface Workflow {
 
 export const nodeTypeConfig: Record<
   WorkflowNodeType,
-  { label: string; color: string; icon: string; shape: string }
+  { label: string; color: string; icon: string; shape: string; description: string }
 > = {
   trigger: {
     label: "Trigger",
     color: "bg-amber-500",
     icon: "\u26A1",
     shape: "pill",
+    description: "Starts the workflow when a ticket event occurs",
   },
   state: {
     label: "State",
     color: "bg-blue-500",
     icon: "\u25CB",
     shape: "rect",
+    description: "A stage in the ticket lifecycle (e.g. New, In Progress)",
   },
   condition: {
     label: "Condition",
     color: "bg-amber-400",
     icon: "?",
     shape: "diamond",
+    description: "Branches the flow based on ticket field values",
   },
   action: {
     label: "Action",
     color: "bg-emerald-500",
     icon: "\u2699",
     shape: "rect",
+    description: "Performs actions like tagging, assigning, or notifying",
   },
   delay: {
     label: "Delay",
     color: "bg-purple-500",
     icon: "\u23F1",
     shape: "rect",
+    description: "Waits for a time period or event before continuing",
   },
-  end: { label: "End", color: "bg-red-500", icon: "\u2716", shape: "circle" },
+  end: {
+    label: "End",
+    color: "bg-red-500",
+    icon: "\u2716",
+    shape: "circle",
+    description: "Marks the final state — the ticket leaves the workflow",
+  },
 };
 
 export function getNodeDisplayLabel(node: WorkflowNode): string {

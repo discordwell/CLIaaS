@@ -7,9 +7,11 @@ import type {
   WorkflowNodeType,
   WorkflowTransition,
 } from "./types";
-import { nodeTypeConfig } from "./types";
+import { nodeTypeConfig, getNodeDisplayLabel } from "./types";
 import { NodeEditor } from "./NodeEditors";
 import { TransitionEditor } from "./TransitionEditor";
+import { validateWorkflow } from "@/lib/workflow/decomposer";
+import type { ValidationError } from "@/lib/workflow/decomposer";
 
 const NODE_W = 160;
 const NODE_H = 56;
@@ -51,6 +53,15 @@ export function WorkflowBuilder({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
+  const [hoveredType, setHoveredType] = useState<WorkflowNodeType | null>(null);
+  const [hoveredTargetNodeId, setHoveredTargetNodeId] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    if (typeof window !== "undefined") {
+      return !localStorage.getItem("cliaas-wf-onboarding-dismissed");
+    }
+    return true;
+  });
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // Undo stack
@@ -86,6 +97,45 @@ export function WorkflowBuilder({
     setNodes(last.nodes);
     setTransitions(last.transitions);
     forceUndoRender((n) => n + 1);
+  }
+
+  // Real-time validation
+  const validation = useMemo(() => {
+    const wf: Workflow = {
+      ...workflow,
+      nodes,
+      transitions,
+      entryNodeId,
+    };
+    return validateWorkflow(wf);
+  }, [workflow, nodes, transitions, entryNodeId]);
+
+  const errorCount = validation.errors.filter(e => e.severity === 'error').length;
+  const warningCount = validation.errors.filter(e => e.severity === 'warning').length;
+  const validationColor = errorCount > 0 ? 'bg-red-500' : warningCount > 0 ? 'bg-amber-500' : 'bg-emerald-500';
+
+  // Map nodeId → validation issues for canvas indicators
+  const nodeIssues = useMemo(() => {
+    const map = new Map<string, ValidationError[]>();
+    for (const err of validation.errors) {
+      if (err.nodeId) {
+        const list = map.get(err.nodeId) || [];
+        list.push(err);
+        map.set(err.nodeId, list);
+      }
+    }
+    return map;
+  }, [validation.errors]);
+
+  // Auto-suggest transition label based on target node
+  function suggestTransitionLabel(fromNodeId: string, toNodeId: string): string | undefined {
+    const to = nodes[toNodeId];
+    if (!to) return undefined;
+    if (to.type === 'end') return 'Close';
+    if (to.type === 'state') {
+      return (to.data as { label?: string }).label || undefined;
+    }
+    return undefined;
   }
 
   // Keyboard shortcuts — use refs to avoid stale closures
@@ -231,10 +281,26 @@ export function WorkflowBuilder({
     if (connecting) {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
+      const mx = (e.clientX - rect.left - panOffset.x) / zoom;
+      const my = (e.clientY - rect.top - panOffset.y) / zoom;
+
+      // Track closest target for snap feedback
+      let closestId: string | null = null;
+      for (const node of Object.values(nodes)) {
+        if (node.id === connecting.fromNodeId) continue;
+        const nx = node.position.x + NODE_W / 2;
+        const ny = node.position.y;
+        if (Math.abs(mx - nx) < 30 && Math.abs(my - ny) < 20) {
+          closestId = node.id;
+          break;
+        }
+      }
+      setHoveredTargetNodeId(closestId);
+
       setConnecting({
         ...connecting,
-        mouseX: (e.clientX - rect.left - panOffset.x) / zoom,
-        mouseY: (e.clientY - rect.top - panOffset.y) / zoom,
+        mouseX: closestId ? nodes[closestId].position.x + NODE_W / 2 : mx,
+        mouseY: closestId ? nodes[closestId].position.y : my,
       });
     }
   }
@@ -261,6 +327,7 @@ export function WorkflowBuilder({
               id: crypto.randomUUID(),
               fromNodeId: connecting.fromNodeId,
               toNodeId: node.id,
+              label: suggestTransitionLabel(connecting.fromNodeId, node.id),
             };
             setTransitions((prev) => [...prev, newTransition]);
             break;
@@ -268,6 +335,7 @@ export function WorkflowBuilder({
         }
       }
       setConnecting(null);
+      setHoveredTargetNodeId(null);
     }
   }
 
@@ -383,6 +451,16 @@ export function WorkflowBuilder({
             Export JSON
           </button>
           <button
+            onClick={() => setShowValidation(!showValidation)}
+            className="relative flex items-center gap-1.5 border-2 border-zinc-300 px-3 py-1 font-mono text-xs font-bold uppercase text-zinc-500 hover:border-zinc-950 hover:text-zinc-950"
+            title={`${errorCount} error(s), ${warningCount} warning(s)`}
+          >
+            <span className={`inline-block h-2.5 w-2.5 rounded-full ${validationColor}`} />
+            {errorCount + warningCount > 0 && (
+              <span>{errorCount + warningCount}</span>
+            )}
+          </button>
+          <button
             onClick={handleSave}
             disabled={saving}
             className="border-2 border-zinc-950 bg-zinc-950 px-4 py-1 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
@@ -404,6 +482,9 @@ export function WorkflowBuilder({
                 <button
                   key={type}
                   onClick={() => addNode(type)}
+                  onMouseEnter={() => setHoveredType(type)}
+                  onMouseLeave={() => setHoveredType(null)}
+                  title={cfg.description}
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-xs font-bold hover:bg-zinc-100"
                 >
                   <span
@@ -416,6 +497,11 @@ export function WorkflowBuilder({
               ),
             )}
           </div>
+          {hoveredType && (
+            <p className="mt-2 text-[10px] text-zinc-500">
+              {nodeTypeConfig[hoveredType].description}
+            </p>
+          )}
           <div className="mt-6 border-t border-zinc-200 pt-3">
             <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Controls
@@ -544,22 +630,25 @@ export function WorkflowBuilder({
                 );
               })}
 
-              {/* Connecting line preview */}
-              {connecting && (
-                <line
-                  x1={
-                    nodes[connecting.fromNodeId].position.x + NODE_W / 2
-                  }
-                  y1={
-                    nodes[connecting.fromNodeId].position.y + NODE_H
-                  }
-                  x2={connecting.mouseX}
-                  y2={connecting.mouseY}
-                  stroke="#a1a1aa"
-                  strokeWidth={1.5}
-                  strokeDasharray="5 3"
-                />
-              )}
+              {/* Connecting bezier preview */}
+              {connecting && (() => {
+                const cx1 = nodes[connecting.fromNodeId].position.x + NODE_W / 2;
+                const cy1 = nodes[connecting.fromNodeId].position.y + NODE_H;
+                const cx2 = connecting.mouseX;
+                const cy2 = connecting.mouseY;
+                const cdy = Math.abs(cy2 - cy1);
+                const ccp = Math.max(40, cdy * 0.4);
+                const isSnapped = hoveredTargetNodeId !== null;
+                return (
+                  <path
+                    d={`M ${cx1} ${cy1} C ${cx1} ${cy1 + ccp}, ${cx2} ${cy2 - ccp}, ${cx2} ${cy2}`}
+                    fill="none"
+                    stroke={isSnapped ? "#18181b" : "#a1a1aa"}
+                    strokeWidth={isSnapped ? 2 : 1.5}
+                    strokeDasharray={isSnapped ? "none" : "5 3"}
+                  />
+                );
+              })()}
             </svg>
 
             {/* DOM nodes */}
@@ -628,14 +717,22 @@ export function WorkflowBuilder({
                     </span>
                   )}
 
-                  {/* Input port (top center) */}
+                  {/* Validation dot indicator */}
+                  {nodeIssues.has(node.id) && (
+                    <div
+                      className={`absolute -right-1 -top-1 h-2 w-2 rounded-full ${
+                        nodeIssues.get(node.id)!.some(e => e.severity === 'error')
+                          ? 'bg-red-500'
+                          : 'bg-amber-500'
+                      }`}
+                      title={nodeIssues.get(node.id)!.map(e => e.message).join(', ')}
+                    />
+                  )}
+
+                  {/* Input port (top center) — larger hit area wrapping visual port */}
                   <div
-                    className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-zinc-400 bg-white transition-colors hover:border-zinc-950 hover:bg-zinc-100"
-                    style={{
-                      top: 0,
-                      width: PORT_R * 2,
-                      height: PORT_R * 2,
-                    }}
+                    className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
+                    style={{ top: 0, width: 24, height: 24 }}
                     onMouseUp={(e) => {
                       if (connecting && connecting.fromNodeId !== node.id) {
                         e.stopPropagation();
@@ -644,29 +741,72 @@ export function WorkflowBuilder({
                           id: crypto.randomUUID(),
                           fromNodeId: connecting.fromNodeId,
                           toNodeId: node.id,
+                          label: suggestTransitionLabel(connecting.fromNodeId, node.id),
                         };
                         setTransitions((prev) => [...prev, newTransition]);
                         setConnecting(null);
                       }
                     }}
-                  />
+                  >
+                    <div
+                      className={`rounded-full border-2 transition-colors ${
+                        connecting && connecting.fromNodeId !== node.id
+                          ? hoveredTargetNodeId === node.id
+                            ? "border-zinc-950 bg-zinc-100 shadow-[0_0_6px_rgba(16,185,129,0.4)]"
+                            : "border-emerald-400 bg-white shadow-[0_0_6px_rgba(16,185,129,0.4)]"
+                          : "border-zinc-400 bg-white hover:border-zinc-950 hover:bg-zinc-100"
+                      }`}
+                      style={{
+                        width: PORT_R * 2,
+                        height: PORT_R * 2,
+                      }}
+                    />
+                  </div>
 
-                  {/* Output port (bottom center) */}
+                  {/* Output port (bottom center) — larger hit area wrapping visual port */}
                   <div
-                    className="absolute left-1/2 -translate-x-1/2 translate-y-1/2 cursor-crosshair rounded-full border-2 border-zinc-400 bg-white transition-colors hover:border-zinc-950 hover:bg-zinc-100"
-                    style={{
-                      bottom: 0,
-                      width: PORT_R * 2,
-                      height: PORT_R * 2,
-                    }}
+                    className="absolute left-1/2 -translate-x-1/2 translate-y-1/2 flex cursor-crosshair items-center justify-center"
+                    style={{ bottom: 0, width: 24, height: 24 }}
                     onMouseDown={(e) =>
                       handleNodeMouseDown(e, node.id, true)
                     }
-                  />
+                  >
+                    <div
+                      className="rounded-full border-2 border-zinc-400 bg-white transition-colors hover:border-zinc-950 hover:bg-zinc-100"
+                      style={{
+                        width: PORT_R * 2,
+                        height: PORT_R * 2,
+                      }}
+                    />
+                  </div>
                 </div>
               );
             })}
           </div>
+
+          {/* Onboarding panel */}
+          {showOnboarding && (
+            <div className="absolute bottom-12 right-4 z-20 max-w-xs border-2 border-zinc-950 bg-white p-4 shadow-lg">
+              <p className="font-mono text-xs font-bold uppercase tracking-widest">
+                Getting Started
+              </p>
+              <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-600">
+                <li>Click node types in the left palette to add them to the canvas</li>
+                <li>Drag from a bottom port to a top port to connect nodes</li>
+                <li>Shift+drag or middle-click to pan, scroll to zoom</li>
+                <li>Click a node or transition to edit its properties</li>
+              </ul>
+              <button
+                onClick={() => {
+                  setShowOnboarding(false);
+                  localStorage.setItem("cliaas-wf-onboarding-dismissed", "1");
+                }}
+                className="mt-3 w-full border-2 border-zinc-950 bg-zinc-950 py-1.5 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+              >
+                Got it
+              </button>
+            </div>
+          )}
 
           {/* Zoom indicator */}
           <div className="absolute bottom-3 left-3 rounded bg-white/90 px-2 py-1 font-mono text-[10px] text-zinc-500 shadow-sm">
@@ -674,9 +814,49 @@ export function WorkflowBuilder({
           </div>
         </div>
 
-        {/* Right: Property editor */}
+        {/* Right: Property editor / Validation panel */}
         <div className="w-72 shrink-0 overflow-y-auto border-l-2 border-zinc-950 bg-white p-4">
-          {selectedNode ? (
+          {showValidation ? (
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="font-mono text-xs font-bold uppercase">Validation</p>
+                <button
+                  onClick={() => setShowValidation(false)}
+                  className="font-mono text-[10px] text-zinc-400 hover:text-zinc-950"
+                >
+                  Close
+                </button>
+              </div>
+              {validation.errors.length === 0 ? (
+                <p className="mt-4 text-center text-xs text-emerald-600">All checks passed</p>
+              ) : (
+                <div className="mt-3 space-y-1.5">
+                  {validation.errors.map((err, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        if (err.nodeId) {
+                          setSelectedNodeId(err.nodeId);
+                          setSelectedTransitionId(null);
+                          setShowValidation(false);
+                        }
+                      }}
+                      className={`w-full rounded border p-2 text-left text-[10px] ${
+                        err.severity === 'error'
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : 'border-amber-200 bg-amber-50 text-amber-700'
+                      } ${err.nodeId ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                    >
+                      <span className="font-mono font-bold uppercase">
+                        {err.severity}
+                      </span>{' '}
+                      {err.message}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : selectedNode ? (
             <NodeEditor
               node={selectedNode}
               isEntry={selectedNode.id === entryNodeId}

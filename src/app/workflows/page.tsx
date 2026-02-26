@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Workflow } from "./_components/types";
 import { WorkflowBuilder } from "./_components/WorkflowBuilder";
+import { workflowTemplates } from "@/lib/workflow/templates";
 
 // ---- Main page component ----
 
@@ -229,7 +230,6 @@ function NewWorkflowForm({
           entryNodeId: triggerId,
         };
       } else {
-        // Server-side template creation — no need to duplicate node structures
         body = { name: name.trim(), templateKey: template };
       }
 
@@ -248,7 +248,7 @@ function NewWorkflowForm({
   }
 
   return (
-    <main className="mx-auto max-w-lg px-6 py-12 text-zinc-950">
+    <main className="mx-auto max-w-2xl px-6 py-12 text-zinc-950">
       <div className="border-2 border-zinc-950 bg-white p-8">
         <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
           New Workflow
@@ -270,16 +270,60 @@ function NewWorkflowForm({
             <label className="block font-mono text-xs font-bold uppercase text-zinc-700">
               Template
             </label>
-            <select
-              value={template}
-              onChange={(e) => setTemplate(e.target.value)}
-              className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm focus:border-zinc-950 focus:outline-none"
-            >
-              <option value="blank">Blank canvas</option>
-              <option value="simple-lifecycle">Simple Lifecycle</option>
-              <option value="escalation-pipeline">Escalation Pipeline</option>
-              <option value="sla-driven">SLA-Driven</option>
-            </select>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              {/* Blank canvas card */}
+              <button
+                type="button"
+                onClick={() => setTemplate("blank")}
+                className={`border-2 p-3 text-left transition-colors ${
+                  template === "blank"
+                    ? "border-zinc-950 bg-zinc-50"
+                    : "border-zinc-200 hover:border-zinc-400"
+                }`}
+              >
+                <p className="font-mono text-xs font-bold">Blank Canvas</p>
+                <p className="mt-1 text-[10px] text-zinc-500">
+                  Start from scratch with just a trigger node
+                </p>
+                <div className="mt-2 flex gap-2 font-mono text-[10px] text-zinc-400">
+                  <span>1 node</span>
+                  <span>0 transitions</span>
+                </div>
+              </button>
+
+              {/* Template cards */}
+              {workflowTemplates.map((tmpl) => (
+                <button
+                  key={tmpl.key}
+                  type="button"
+                  onClick={() => setTemplate(tmpl.key)}
+                  className={`border-2 p-3 text-left transition-colors ${
+                    template === tmpl.key
+                      ? "border-zinc-950 bg-zinc-50"
+                      : "border-zinc-200 hover:border-zinc-400"
+                  }`}
+                >
+                  <p className="font-mono text-xs font-bold">{tmpl.label}</p>
+                  <p className="mt-1 text-[10px] text-zinc-500">
+                    {tmpl.description}
+                  </p>
+                  <div className="mt-2 flex gap-2 font-mono text-[10px] text-zinc-400">
+                    <span>{tmpl.meta.nodeCount} nodes</span>
+                    <span>{tmpl.meta.transitionCount} transitions</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {tmpl.meta.keyStates.map((s) => (
+                      <span
+                        key={s}
+                        className="bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px]"
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex gap-3 pt-2">
             <button

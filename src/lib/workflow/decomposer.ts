@@ -26,28 +26,34 @@ import type {
 
 // ---- Validation ----
 
+export interface ValidationError {
+  message: string;
+  nodeId?: string;
+  severity: 'error' | 'warning';
+}
+
 export interface ValidationResult {
   valid: boolean;
-  errors: string[];
+  errors: ValidationError[];
 }
 
 export function validateWorkflow(workflow: Workflow): ValidationResult {
-  const errors: string[] = [];
+  const errors: ValidationError[] = [];
 
   // Entry node must exist
   if (!workflow.entryNodeId) {
-    errors.push('Workflow must have an entryNodeId');
+    errors.push({ message: 'Workflow must have an entryNodeId', severity: 'error' });
   } else if (!workflow.nodes[workflow.entryNodeId]) {
-    errors.push(`entryNodeId "${workflow.entryNodeId}" does not reference a valid node`);
+    errors.push({ message: `entryNodeId "${workflow.entryNodeId}" does not reference a valid node`, severity: 'error' });
   }
 
   // All transition refs must be valid
   for (const t of workflow.transitions) {
     if (!workflow.nodes[t.fromNodeId]) {
-      errors.push(`Transition "${t.id}" references unknown fromNodeId "${t.fromNodeId}"`);
+      errors.push({ message: `Transition "${t.id}" references unknown fromNodeId "${t.fromNodeId}"`, severity: 'error' });
     }
     if (!workflow.nodes[t.toNodeId]) {
-      errors.push(`Transition "${t.id}" references unknown toNodeId "${t.toNodeId}"`);
+      errors.push({ message: `Transition "${t.id}" references unknown toNodeId "${t.toNodeId}"`, severity: 'error' });
     }
   }
 
@@ -60,7 +66,7 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
   }
   for (const nodeId of Object.keys(workflow.nodes)) {
     if (!referenced.has(nodeId)) {
-      errors.push(`Node "${nodeId}" is orphaned (not connected by any transition)`);
+      errors.push({ message: `Node "${nodeId}" is orphaned (not connected by any transition)`, nodeId, severity: 'error' });
     }
   }
 
@@ -70,12 +76,49 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
     if (entryNode.type === 'trigger') {
       const hasOutgoing = workflow.transitions.some(t => t.fromNodeId === workflow.entryNodeId);
       if (!hasOutgoing) {
-        errors.push('Trigger node must have at least one outgoing transition');
+        errors.push({ message: 'Trigger node must have at least one outgoing transition', nodeId: workflow.entryNodeId, severity: 'error' });
       }
     }
   }
 
-  return { valid: errors.length === 0, errors };
+  // Warning: no end node in the workflow
+  const hasEnd = Object.values(workflow.nodes).some(n => n.type === 'end');
+  if (!hasEnd) {
+    errors.push({ message: 'Workflow has no end node — tickets may stay in-progress forever', severity: 'warning' });
+  }
+
+  // Per-node warnings
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const outgoing = workflow.transitions.filter(t => t.fromNodeId === nodeId);
+    const incoming = workflow.transitions.filter(t => t.toNodeId === nodeId);
+
+    // Node with no outgoing (skip end nodes)
+    if (node.type !== 'end' && outgoing.length === 0) {
+      errors.push({ message: `"${getNodeLabel(node)}" has no outgoing transitions`, nodeId, severity: 'warning' });
+    }
+
+    // Node with no incoming (skip entry trigger)
+    if (nodeId !== workflow.entryNodeId && incoming.length === 0) {
+      errors.push({ message: `"${getNodeLabel(node)}" has no incoming transitions`, nodeId, severity: 'warning' });
+    }
+
+    // Condition node with fewer than 2 outgoing
+    if (node.type === 'condition' && outgoing.length < 2) {
+      errors.push({ message: `Condition "${getNodeLabel(node)}" should have at least 2 branches`, nodeId, severity: 'warning' });
+    }
+
+    // Action node with empty actions array
+    if (node.type === 'action') {
+      const actions = (node.data as { actions?: unknown[] }).actions;
+      if (!actions || actions.length === 0) {
+        errors.push({ message: `Action node has no actions defined`, nodeId, severity: 'warning' });
+      }
+    }
+  }
+
+  // valid = no errors (warnings are ok)
+  const hasErrors = errors.some(e => e.severity === 'error');
+  return { valid: !hasErrors, errors };
 }
 
 // ---- Decomposition ----

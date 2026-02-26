@@ -251,9 +251,34 @@ export function slaDriven(): Workflow {
   );
 }
 
+/** Template preview metadata — avoids calling create() just to show stats. */
+export interface TemplateMeta {
+  nodeCount: number;
+  transitionCount: number;
+  keyStates: string[];
+}
+
 /** All available templates. */
 export const workflowTemplates = [
-  { key: 'simple-lifecycle', label: 'Simple Lifecycle', create: simpleLifecycle },
-  { key: 'escalation-pipeline', label: 'Escalation Pipeline', create: escalationPipeline },
-  { key: 'sla-driven', label: 'SLA-Driven', create: slaDriven },
+  {
+    key: 'simple-lifecycle',
+    label: 'Simple Lifecycle',
+    description: 'Standard ticket lifecycle: New → Triage → In Progress → Waiting → Resolved → Closed',
+    meta: { nodeCount: 7, transitionCount: 8, keyStates: ['New', 'Triage', 'In Progress', 'Waiting', 'Resolved'] } as TemplateMeta,
+    create: simpleLifecycle,
+  },
+  {
+    key: 'escalation-pipeline',
+    label: 'Escalation Pipeline',
+    description: 'Route urgent tickets to immediate assignment, others to a queue',
+    meta: { nodeCount: 6, transitionCount: 6, keyStates: ['Urgent Check', 'Immediate', 'Queue', 'In Progress'] } as TemplateMeta,
+    create: escalationPipeline,
+  },
+  {
+    key: 'sla-driven',
+    label: 'SLA-Driven',
+    description: 'Ticket lifecycle with SLA timers: 1h for triage, 4h for resolution',
+    meta: { nodeCount: 5, transitionCount: 5, keyStates: ['New (1h)', 'In Progress (4h)', 'Escalated'] } as TemplateMeta,
+    create: slaDriven,
+  },
 ] as const;

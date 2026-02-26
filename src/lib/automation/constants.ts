@@ -59,3 +59,34 @@ export const TICKET_EVENTS = [
   'status_change',
   'assignment',
 ] as const;
+
+/** Smart defaults: preset values for condition fields. */
+export const FIELD_VALUE_PRESETS: Record<string, string[]> = {
+  status: ['open', 'pending', 'on_hold', 'solved', 'closed'],
+  priority: ['low', 'normal', 'high', 'urgent'],
+  source: ['email', 'web', 'zendesk', 'freshdesk', 'intercom'],
+};
+
+/** Smart defaults: preset values for action types. */
+export const ACTION_VALUE_PRESETS: Record<string, string[]> = {
+  set_status: ['open', 'pending', 'on_hold', 'solved', 'closed'],
+  set_priority: ['low', 'normal', 'high', 'urgent'],
+};
+
+/** Human-readable descriptions for condition operators. */
+export const OPERATOR_DESCRIPTIONS: Record<string, string> = {
+  is: 'Exact match',
+  is_not: 'Does not match',
+  contains: 'Field contains substring',
+  not_contains: 'Field does not contain substring',
+  starts_with: 'Field starts with value',
+  ends_with: 'Field ends with value',
+  greater_than: 'Numeric: greater than',
+  less_than: 'Numeric: less than',
+  is_empty: 'Field has no value',
+  is_not_empty: 'Field has a value',
+  changed: 'Field was modified',
+  changed_to: 'Field was changed to value',
+  in: 'Value is in list',
+  matches: 'Regex pattern match',
+};

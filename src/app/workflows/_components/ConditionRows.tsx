@@ -3,6 +3,8 @@
 import {
   CONDITION_FIELDS,
   CONDITION_OPERATORS,
+  FIELD_VALUE_PRESETS,
+  OPERATOR_DESCRIPTIONS,
 } from "@/lib/automation/constants";
 import type { WorkflowCondition } from "./types";
 
@@ -16,7 +18,9 @@ export function ConditionRows({
   onChange: (conditions: WorkflowCondition[]) => void;
 }) {
   function addRow() {
-    onChange([...conditions, { field: "status", operator: "is", value: "" }]);
+    const defaultField = "status";
+    const defaultValue = FIELD_VALUE_PRESETS[defaultField]?.[0] ?? "";
+    onChange([...conditions, { field: defaultField, operator: "is", value: defaultValue }]);
   }
 
   function updateRow(idx: number, patch: Partial<WorkflowCondition>) {
@@ -62,20 +66,49 @@ export function ConditionRows({
               className="flex-1 border border-zinc-200 px-1 py-0.5 font-mono text-[10px] focus:outline-none"
             >
               {CONDITION_OPERATORS.map((o) => (
-                <option key={o} value={o}>
+                <option key={o} value={o} title={OPERATOR_DESCRIPTIONS[o] || o}>
                   {o}
                 </option>
               ))}
             </select>
           </div>
           <div className="flex gap-1">
-            <input
-              type="text"
-              value={String(c.value ?? "")}
-              onChange={(e) => updateRow(i, { value: e.target.value })}
-              placeholder="value"
-              className="flex-1 border border-zinc-200 px-1 py-0.5 font-mono text-[10px] focus:outline-none"
-            />
+            {FIELD_VALUE_PRESETS[c.field] ? (
+              <select
+                value={FIELD_VALUE_PRESETS[c.field].includes(String(c.value ?? "")) ? String(c.value ?? "") : "__custom__"}
+                onChange={(e) => {
+                  if (e.target.value === "__custom__") {
+                    updateRow(i, { value: "" });
+                  } else {
+                    updateRow(i, { value: e.target.value });
+                  }
+                }}
+                className="flex-1 border border-zinc-200 px-1 py-0.5 font-mono text-[10px] focus:outline-none"
+              >
+                {FIELD_VALUE_PRESETS[c.field].map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+                <option value="__custom__">Custom...</option>
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={String(c.value ?? "")}
+                onChange={(e) => updateRow(i, { value: e.target.value })}
+                placeholder="value"
+                className="flex-1 border border-zinc-200 px-1 py-0.5 font-mono text-[10px] focus:outline-none"
+              />
+            )}
+            {/* Show custom input when "Custom..." is selected on a preset field */}
+            {FIELD_VALUE_PRESETS[c.field] && !FIELD_VALUE_PRESETS[c.field].includes(String(c.value ?? "")) && (
+              <input
+                type="text"
+                value={String(c.value ?? "")}
+                onChange={(e) => updateRow(i, { value: e.target.value })}
+                placeholder="custom value"
+                className="flex-1 border border-zinc-200 px-1 py-0.5 font-mono text-[10px] focus:outline-none"
+              />
+            )}
             <button
               onClick={() => removeRow(i)}
               className="px-1 text-[10px] text-red-400 hover:text-red-600"
