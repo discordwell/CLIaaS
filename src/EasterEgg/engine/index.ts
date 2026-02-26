@@ -58,7 +58,6 @@ interface Crate {
 interface InflightProjectile {
   attackerId: number;
   targetId: number;
-  targetPos: WorldPos;   // position at time of launch (for partial tracking)
   weapon: WeaponStats;
   damage: number;
   speed: number;         // cells per tick
@@ -508,6 +507,8 @@ export class Game {
       if (entity.isInRecoilState) entity.isInRecoilState = false;
 
       // C5: Track previous position for moving-platform inaccuracy detection
+      // S5: Track wasMoving for NoMovingFire setup time
+      const wasMovingBefore = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
       entity.prevPos.x = entity.pos.x;
       entity.prevPos.y = entity.pos.y;
 
@@ -516,6 +517,10 @@ export class Game {
         continue;
       }
       this.updateEntity(entity);
+
+      // S5: Update wasMoving — entity moved this tick if position changed from prevPos
+      const movedThisTick = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
+      entity.wasMoving = wasMovingBefore || movedThisTick;
     }
 
     // Process deferred transport loads (remove loaded passengers from world)
@@ -1941,10 +1946,22 @@ export class Game {
   private static readonly TMISSION_GUARD = 5;
   private static readonly TMISSION_LOOP = 6;
   private static readonly TMISSION_UNLOAD = 8;
-  private static readonly TMISSION_DO = 11;         // set global variable
+  private static readonly TMISSION_DO = 11;          // assign mission to members (C++ Coordinate_Do)
+  private static readonly TMISSION_SET_GLOBAL = 12;  // set global variable (C++ TMission_Set_Global)
   private static readonly TMISSION_IDLE = 13;        // idle at position
   private static readonly TMISSION_LOAD = 14;
   private static readonly TMISSION_PATROL = 16;
+
+  /** Map C++ MissionType enum index to TS Mission enum (C++ defines.h:979-1008) */
+  private static readonly CPP_MISSION_MAP: Record<number, Mission> = {
+    0: Mission.SLEEP,       // MISSION_SLEEP
+    1: Mission.ATTACK,      // MISSION_ATTACK
+    2: Mission.MOVE,        // MISSION_MOVE
+    3: Mission.MOVE,        // MISSION_QMOVE (queued move → treat as MOVE)
+    5: Mission.GUARD,       // MISSION_GUARD
+    10: Mission.AREA_GUARD, // MISSION_GUARD_AREA
+    14: Mission.HUNT,       // MISSION_HUNT
+  };
 
   /** Execute team mission scripts — units follow waypoint patrol routes */
   private updateTeamMission(entity: Entity): void {
@@ -2058,7 +2075,20 @@ export class Game {
       }
 
       case Game.TMISSION_DO: {
-        // Set a global variable (DO in RA source)
+        // Assign mission to entity (C++ team.cpp:1809 Coordinate_Do — "Do guard, sticky, area guard")
+        // tm.data is C++ MissionType enum index
+        const doMission = Game.CPP_MISSION_MAP[tm.data];
+        if (doMission) {
+          entity.mission = doMission;
+          entity.target = null;
+          entity.moveTarget = null;
+        }
+        entity.teamMissionIndex++;
+        break;
+      }
+
+      case Game.TMISSION_SET_GLOBAL: {
+        // Set a global variable (C++ team.cpp:2919 TMission_Set_Global)
         this.globals.add(tm.data);
         entity.teamMissionIndex++;
         break;
@@ -2390,7 +2420,7 @@ export class Game {
         const dist = worldDist(entity.pos, { x: waveCX, y: waveCY });
         if (dist > CELL_SIZE * 2) {
           entity.animState = AnimState.WALK;
-          entity.moveToward({ x: waveCX, y: waveCY }, entity.stats.speed * 0.3);
+          entity.moveToward({ x: waveCX, y: waveCY }, this.movementSpeed(entity, 0.3));
           return;
         }
       }
@@ -2506,7 +2536,7 @@ export class Game {
       if (entity.flightAltitude < Entity.FLIGHT_ALTITUDE) {
         entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 3);
       }
-      if (entity.moveToward(entity.moveTarget, entity.stats.speed * 0.7)) {
+      if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity, 0.7))) {
         entity.moveTarget = null;
         if (entity.moveQueue.length > 0) {
           const next = entity.moveQueue.shift()!;
@@ -2542,10 +2572,7 @@ export class Game {
         y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
       };
       // M1: terrain speed by SpeedClass, M2: damage-based speed reduction
-      const terrainSpeed = entity.stats.speed * 0.5
-        * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
-        * this.damageSpeedFactor(entity);
-      if (entity.moveToward(target, terrainSpeed)) {
+      if (entity.moveToward(target, this.movementSpeed(entity))) {
         entity.pathIndex++;
       }
     } else if (entity.moveTarget) {
@@ -2558,10 +2585,7 @@ export class Game {
         entity.mission = this.idleMission(entity);
         entity.animState = AnimState.IDLE;
       } else {
-        const terrainSpeed2 = entity.stats.speed * 0.5
-          * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
-          * this.damageSpeedFactor(entity);
-        if (entity.moveToward(entity.moveTarget, terrainSpeed2)) {
+        if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
           entity.moveTarget = null;
           // Check for queued waypoints
           if (entity.moveQueue.length > 0) {
@@ -2645,7 +2669,7 @@ export class Game {
         const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
         const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
         const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
-        entity.moveToward({ x: retreatX, y: retreatY }, entity.stats.speed * 0.4);
+        entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity, 0.4));
         return;
       }
     }
@@ -2657,7 +2681,7 @@ export class Game {
       if (!this.map.hasLineOfSight(ec.cx, ec.cy, tc.cx, tc.cy)) {
         // LOS blocked — move toward target to get clear shot
         entity.animState = AnimState.WALK;
-        entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+        entity.moveToward(entity.target.pos, this.movementSpeed(entity));
         if (entity.attackCooldown > 0) entity.attackCooldown--;
         if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
         return;
@@ -2680,6 +2704,16 @@ export class Game {
         }
       }
       entity.animState = AnimState.ATTACK;
+
+      // S5: NoMovingFire setup time (C++ unit.cpp:1760-1764 — Arm = Rearm_Delay(true)/4 when stopping)
+      // When a NoMovingFire unit transitions from moving to stationary, add ROF/4 warmup delay
+      if (entity.stats.noMovingFire && entity.wasMoving && entity.weapon) {
+        const setupTime = Math.floor(entity.weapon.rof / 4);
+        if (entity.attackCooldown < setupTime) {
+          entity.attackCooldown = setupTime;
+        }
+        entity.wasMoving = false; // consume the transition — only apply once
+      }
 
       // C1: Burst fire continuation (C++ weapon.cpp:78 Weapon.Burst)
       // Between burst shots, count down burstDelay instead of using full ROF cooldown
@@ -2862,7 +2896,7 @@ export class Game {
         entity.animState = AnimState.IDLE;
       } else {
         entity.animState = AnimState.WALK;
-        entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+        entity.moveToward(entity.target.pos, this.movementSpeed(entity));
       }
     }
 
@@ -2970,12 +3004,12 @@ export class Game {
           x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
           y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
         };
-        if (entity.moveToward(wp, entity.stats.speed * 0.5)) {
+        if (entity.moveToward(wp, this.movementSpeed(entity))) {
           entity.pathIndex++;
         }
       } else {
         // No path found — move directly
-        entity.moveToward(entity.target.pos, entity.stats.speed * 0.5);
+        entity.moveToward(entity.target.pos, this.movementSpeed(entity));
       }
     }
   }
@@ -3036,7 +3070,7 @@ export class Game {
           }
         } else {
           entity.animState = AnimState.WALK;
-          entity.moveToward(healTarget.pos, entity.stats.speed * 0.5);
+          entity.moveToward(healTarget.pos, this.movementSpeed(entity));
         }
         return;
       }
@@ -3213,7 +3247,7 @@ export class Game {
       const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
       const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
       const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
-      entity.moveToward({ x: retreatX, y: retreatY }, entity.stats.speed * 0.4);
+      entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity, 0.4));
       return;
     }
 
@@ -3293,7 +3327,7 @@ export class Game {
       }
     } else {
       entity.animState = AnimState.WALK;
-      entity.moveToward(structPos, entity.stats.speed * 0.5);
+      entity.moveToward(structPos, this.movementSpeed(entity));
     }
     if (entity.attackCooldown > 0) entity.attackCooldown--;
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
@@ -3364,7 +3398,7 @@ export class Game {
       }
     } else {
       entity.animState = AnimState.WALK;
-      entity.moveToward(target, entity.stats.speed * 0.5);
+      entity.moveToward(target, this.movementSpeed(entity));
     }
     if (entity.attackCooldown > 0) entity.attackCooldown--;
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
@@ -3612,6 +3646,14 @@ export class Game {
     return 1.0;
   }
 
+  /** M1+M2: Compute movement speed with terrain and damage multipliers.
+   *  All moveToward calls should use this instead of flat speed * 0.5. */
+  private movementSpeed(entity: Entity, speedFraction = 0.5): number {
+    return entity.stats.speed * speedFraction
+      * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
+      * this.damageSpeedFactor(entity);
+  }
+
   /** Check if two houses are allied */
   private isAllied(a: House, b: House): boolean {
     return this.alliances.get(a)?.has(b) ?? false;
@@ -3670,7 +3712,6 @@ export class Game {
     this.inflightProjectiles.push({
       attackerId: attacker.id,
       targetId: target?.id ?? -1,
-      targetPos: target ? { x: target.pos.x, y: target.pos.y } : { x: impactX, y: impactY },
       weapon,
       damage,
       speed,
@@ -3703,12 +3744,8 @@ export class Game {
             proj.impactX += (target.pos.x - proj.impactX) * trackFactor;
             proj.impactY += (target.pos.y - proj.impactY) * trackFactor;
           }
-        } else {
-          // Non-homing: weak partial tracking (50% blend over travel time)
-          const t = 0.5;
-          proj.impactX += (target.pos.x - proj.impactX) * t * (1 / proj.travelFrames);
-          proj.impactY += (target.pos.y - proj.impactY) * t * (1 / proj.travelFrames);
         }
+        // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
       }
 
       if (proj.currentFrame >= proj.travelFrames) {
@@ -3788,11 +3825,12 @@ export class Game {
       const dist = worldDist(center, other.pos);
       if (dist > splashRange) continue;
 
-      // C6: SpreadFactor falloff (C++ warhead.cpp:72) — shapes splash damage curve
-      // spreadFactor 1=linear, 2=quadratic (concentrated center), 3=cubic (tight center)
+      // C6: SpreadFactor falloff (C++ combat.cpp:107 — distance /= SpreadFactor * (PIXEL_LEPTON_W/2))
+      // Higher SpreadFactor = divide distance by more = LESS damage reduction = WIDER splash
+      // spreadFactor 1=linear, 2=wider (slower falloff), 3=even wider
       const spreadFactor = WARHEAD_META[weapon.warhead]?.spreadFactor ?? 1;
       const ratio = dist / splashRange;
-      const falloff = Math.pow(1 - ratio, spreadFactor);
+      const falloff = Math.pow(1 - ratio, 1 / spreadFactor);
       const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
       if (mult <= 0) continue; // warhead does 0% vs this armor
       const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5));

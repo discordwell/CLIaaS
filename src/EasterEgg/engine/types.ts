@@ -274,21 +274,21 @@ export interface WeaponStats {
 }
 
 // C6: Warhead splash falloff properties — warhead.cpp:72
-// spreadFactor shapes the splash damage curve: higher = more concentrated center, faster falloff
+// spreadFactor shapes the splash damage curve: higher = wider splash, slower falloff (C++ combat.cpp:107)
 // C7: Wall/wood destruction flags — combat.cpp:244-270
 export interface WarheadMeta {
-  spreadFactor: number;      // 1=linear, 2=quadratic (concentrated), 3=cubic (tight center)
+  spreadFactor: number;      // 1=linear, 2=wider splash (slower falloff), 3=widest splash
   destroysWalls?: boolean;   // can destroy wall structures (FENC, BRIK, SBAG, BARB, WOOD)
   destroysWood?: boolean;    // can destroy trees and wooden overlays
 }
 
 export const WARHEAD_META: Record<WarheadType, WarheadMeta> = {
   SA:          { spreadFactor: 1 },                                           // linear falloff
-  HE:          { spreadFactor: 2, destroysWalls: true, destroysWood: true },  // concentrated center, destroys walls+wood
+  HE:          { spreadFactor: 2, destroysWalls: true, destroysWood: true },  // wider splash, destroys walls+wood
   AP:          { spreadFactor: 1 },                                           // linear falloff
-  Fire:        { spreadFactor: 3, destroysWood: true },                       // tight center, fast falloff; burns wood
+  Fire:        { spreadFactor: 3, destroysWood: true },                       // widest splash, slowest falloff; burns wood
   HollowPoint: { spreadFactor: 1 },                                          // linear falloff
-  Super:       { spreadFactor: 2, destroysWalls: true, destroysWood: true },  // concentrated; destroys walls+wood
+  Super:       { spreadFactor: 2, destroysWalls: true, destroysWood: true },  // wider splash; destroys walls+wood
   Organic:     { spreadFactor: 1 },                                           // linear falloff
 };
 

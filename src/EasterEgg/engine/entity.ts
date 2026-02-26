@@ -88,6 +88,9 @@ export class Entity {
   // Recoil (C++ unit.cpp:125 Recoil_Adjust — 1-tick visual kickback on fire)
   isInRecoilState = false;
 
+  // S5: NoMovingFire setup time (C++ unit.cpp:1760-1764 — Arm = Rearm_Delay(true)/4 when stopping)
+  wasMoving = false;  // tracks movement state for setup time detection
+
   // Combat
   attackCooldown = 0;
   attackCooldown2 = 0;
