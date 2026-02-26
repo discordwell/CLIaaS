@@ -372,6 +372,7 @@ export interface WeaponStats {
   inaccuracy?: number; // scatter radius in cells (0 = perfect aim)
   minRange?: number;   // minimum range in cells (artillery can't fire at close range)
   projectileSpeed?: number; // cells/tick travel speed (undefined = instant hit)
+  projSpeed?: number;  // per-weapon projectile speed in cells/second (C++ BulletClass Speed field)
   burst?: number;      // shots per trigger pull (C++ weapon.cpp:78 Weapon.Burst, default 1)
   isArcing?: boolean;       // C4: ballistic arc trajectory (artillery, grenades) — bullet.cpp:359
   projectileROT?: number;   // C9: homing turn rate deg/tick (0=straight line) — bullet.cpp:368
@@ -450,35 +451,36 @@ export const UNIT_STATS: Record<string, UnitStats> = {
 };
 
 // Weapon stats from RULES.INI — real RA values
+// projSpeed: per-weapon projectile visual speed in cells/second (C++ BulletClass::AI Speed field)
 export const WEAPON_STATS: Record<string, WeaponStats> = {
   // Infantry weapons
-  M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA' },
-  Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true },
-  Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5 },
-  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5 },
-  Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8 },
-  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic' },
-  Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic' },
-  Sniper:           { name: 'Sniper',            damage: 125, rof: 40, range: 5.0,  warhead: 'HollowPoint' },
+  M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 40 },
+  Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 12 },
+  Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 15 },
+  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15 },
+  Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20 },
+  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40 },
+  Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 40 },
+  Sniper:           { name: 'Sniper',            damage: 125, rof: 40, range: 5.0,  warhead: 'HollowPoint', projSpeed: 40 },
   // Vehicle weapons
-  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA' },
-  '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67 },
-  '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67 },
-  '105mm':          { name: '105mm',             damage: 30,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67 },
-  '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67 },
-  MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5 },
-  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true },
-  TeslaCannon:      { name: 'TeslaCannon',       damage: 75,  rof: 60, range: 5.0,  warhead: 'Super', splash: 1.0 },
+  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 40 },
+  '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
+  '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
+  '105mm':          { name: '105mm',             damage: 30,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
+  '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
+  MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 15 },
+  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12 },
+  TeslaCannon:      { name: 'TeslaCannon',       damage: 75,  rof: 60, range: 5.0,  warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
-  PortaTesla:       { name: 'PortaTesla',        damage: 50,  rof: 60, range: 4.0,  warhead: 'Super', splash: 0.5 }, // Shock Trooper
-  GoodWrench:       { name: 'GoodWrench',        damage: -30, rof: 60, range: 1.83, warhead: 'Organic' },            // Mechanic (heals vehicles)
-  APTusk:           { name: 'APTusk',             damage: 25,  rof: 20, range: 4.5,  warhead: 'SA' },                 // Phase Transport MG
-  TTankZap:         { name: 'TTankZap',           damage: 80,  rof: 80, range: 5.0,  warhead: 'Super', splash: 1.0 }, // Tesla Tank
+  PortaTesla:       { name: 'PortaTesla',        damage: 50,  rof: 60, range: 4.0,  warhead: 'Super', splash: 0.5, projSpeed: 40 }, // Shock Trooper
+  GoodWrench:       { name: 'GoodWrench',        damage: -30, rof: 60, range: 1.83, warhead: 'Organic', projSpeed: 40 },            // Mechanic (heals vehicles)
+  APTusk:           { name: 'APTusk',             damage: 25,  rof: 20, range: 4.5,  warhead: 'SA', projSpeed: 40 },                 // Phase Transport MG
+  TTankZap:         { name: 'TTankZap',           damage: 80,  rof: 80, range: 5.0,  warhead: 'Super', splash: 1.0, projSpeed: 40 }, // Tesla Tank
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
-  Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'HollowPoint' }, // C++: Warhead=HollowPoint
-  TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super' },
-  FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8 },
-  Napalm:           { name: 'Napalm',            damage: 60,  rof: 25, range: 1.75, warhead: 'Super' },
+  Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'HollowPoint', projSpeed: 40 }, // C++: Warhead=HollowPoint
+  TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
+  FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8, projSpeed: 15 },
+  Napalm:           { name: 'Napalm',            damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
 };
 
 // === Production data ===
@@ -603,6 +605,29 @@ export function worldToCell(x: number, y: number): CellPos {
     cx: Math.floor(x / CELL_SIZE),
     cy: Math.floor(y / CELL_SIZE),
   };
+}
+
+/** Max visual projectile travel frames cap (~3 seconds at 15 FPS) */
+export const MAX_PROJECTILE_FRAMES = 45;
+
+/** Default visual projectile travel frames when projSpeed is not defined */
+export const DEFAULT_PROJECTILE_FRAMES = 5;
+
+/**
+ * Calculate projectile travel frames based on distance and weapon projSpeed.
+ * Matches C++ BulletClass::AI() per-weapon Speed field behavior.
+ * @param distPixels - distance in pixels between source and target
+ * @param projSpeed - weapon's projectile speed in cells/second (undefined = use default)
+ * @returns number of game ticks for the projectile to travel
+ */
+export function calcProjectileTravelFrames(distPixels: number, projSpeed?: number): number {
+  if (projSpeed === undefined || projSpeed <= 0) {
+    return DEFAULT_PROJECTILE_FRAMES;
+  }
+  // Convert projSpeed (cells/sec) to pixels/tick: projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC
+  const pixelsPerTick = projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
+  const travelTicks = Math.max(1, Math.ceil(distPixels / pixelsPerTick));
+  return Math.min(travelTicks, MAX_PROJECTILE_FRAMES);
 }
 
 // Distance in cells between two world positions

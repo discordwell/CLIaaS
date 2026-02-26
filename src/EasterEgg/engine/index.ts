@@ -11,6 +11,7 @@ import {
   Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, HOUSE_FIREPOWER_BIAS,
+  calcProjectileTravelFrames,
 } from './types';
 import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
@@ -3011,9 +3012,9 @@ export class Game {
           // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
           const projStyle = this.weaponProjectileStyle(entity.weapon.name);
           if (projStyle !== 'bullet' || worldDist(entity.pos, entity.target.pos) > 2) {
-            const travelFrames = projStyle === 'bullet' ? 3
-              : projStyle === 'grenade' ? 10
-              : projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
+            // Per-weapon projectile speed: compute travel frames from distance and projSpeed
+            const projDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
+            const travelFrames = calcProjectileTravelFrames(projDistPx, entity.weapon.projSpeed);
             this.effects.push({
               type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
               startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
@@ -3615,8 +3616,9 @@ export class Game {
           muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
         });
         const projStyle = this.weaponProjectileStyle(entity.weapon.name);
-        const travelFrames = projStyle === 'grenade' ? 10
-          : projStyle === 'shell' || projStyle === 'rocket' ? 8 : 5;
+        // Per-weapon projectile speed: compute travel frames from distance and projSpeed
+        const ffDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
+        const travelFrames = calcProjectileTravelFrames(ffDistPx, entity.weapon.projSpeed);
         this.effects.push({
           type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
           startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
@@ -3731,9 +3733,11 @@ export class Game {
           });
           this.playSoundAt('teslazap', sx, sy);
         } else {
-          // Projectile from structure to target
+          // Projectile from structure to target — per-weapon projectile speed
+          const structDistPx = Math.sqrt((bestTarget.pos.x - sx) ** 2 + (bestTarget.pos.y - sy) ** 2);
+          const structTravelFrames = calcProjectileTravelFrames(structDistPx, s.weapon.projSpeed);
           this.effects.push({
-            type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: 5, size: 3,
+            type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: structTravelFrames, size: 3,
             startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
             projStyle: 'bullet',
           });
