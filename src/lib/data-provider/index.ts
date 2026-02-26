@@ -44,14 +44,14 @@ export function detectDataMode(): DataMode {
  * Get the singleton DataProvider for the current mode.
  * Pass `dir` to override the JSONL export directory (for MCP `dir` param).
  *
- * If `dir` is provided and mode is 'local', returns a fresh (non-cached) provider
- * since the directory override is per-call.
+ * If `dir` is provided, returns a fresh (non-cached) JsonlProvider
+ * regardless of the detected mode, since the directory override is per-call.
  */
 export async function getDataProvider(dir?: string): Promise<DataProvider> {
   const mode = detectDataMode();
 
-  // dir override → always fresh JsonlProvider
-  if (dir && mode === 'local') {
+  // dir override → always fresh JsonlProvider regardless of mode
+  if (dir) {
     return new JsonlProvider(dir);
   }
 
