@@ -36,6 +36,49 @@ const PAL_DIRT_COUNT = 16;
 const PAL_GREEN_HP = 120;     // bright green [0,255,0]
 const PAL_RED_HP = 104;       // red [190,0,0]
 
+// Building frame layout table — maps structure type to idle/damage frame info.
+// Prevents generic halfFrames cycling from treating construction/fill-level frames as animation.
+const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: number; idleAnimCount: number }> = {
+  // Static buildings (construction frames, NOT animation)
+  fact: { idleFrame: 0, damageFrame: 26, idleAnimCount: 0 },   // 52 frames: construction sequence
+  weap: { idleFrame: 0, damageFrame: 16, idleAnimCount: 0 },   // 32 frames: bay door frames
+  barr: { idleFrame: 0, damageFrame: 10, idleAnimCount: 0 },   // 20 frames: door opening
+  tent: { idleFrame: 0, damageFrame: 10, idleAnimCount: 0 },   // 20 frames: door opening
+  silo: { idleFrame: 0, damageFrame: 5, idleAnimCount: 0 },    // 10 frames: fill level
+  proc: { idleFrame: 0, damageFrame: 16, idleAnimCount: 0 },   // 32 frames: conveyor states
+  fix:  { idleFrame: 0, damageFrame: 12, idleAnimCount: 0 },   // 24 frames: repair bay states
+  dome: { idleFrame: 0, damageFrame: 8, idleAnimCount: 0 },    // 16 frames: radar dish
+  powr: { idleFrame: 0, damageFrame: 4, idleAnimCount: 0 },    // 8 frames: power plant
+  hbox: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: pillbox
+  bio:  { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
+  miss: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
+  // Animated buildings (have genuine idle animation loops)
+  hosp: { idleFrame: 0, damageFrame: 4, idleAnimCount: 4 },    // 9 frames: red cross blinks
+  tsla: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: sparking animation
+  gap:  { idleFrame: 0, damageFrame: 32, idleAnimCount: 32 },  // 64 frames: shroud sweep
+  iron: { idleFrame: 0, damageFrame: 11, idleAnimCount: 11 },  // 22 frames: power glow
+  pdox: { idleFrame: 0, damageFrame: 29, idleAnimCount: 29 },  // 58 frames: energy effect
+  atek: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // 16 frames: tech center
+  // Ant structures
+  quee: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // queen chamber pulses
+  lar1: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // small larva
+  lar2: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // large larva
+};
+
+// Wall types that use auto-connection sprites
+const WALL_SPRITE_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
+
+/** Compute NESW connection bitmask for wall auto-connection.
+ *  Checks 4 cardinal neighbors for same-type wall → 4-bit mask (N=1, E=2, S=4, W=8). */
+function wallConnectionMask(map: GameMap, cx: number, cy: number, wallType: string): number {
+  let mask = 0;
+  if (map.getWallType(cx, cy - 1) === wallType) mask |= 1; // N
+  if (map.getWallType(cx + 1, cy) === wallType) mask |= 2; // E
+  if (map.getWallType(cx, cy + 1) === wallType) mask |= 4; // S
+  if (map.getWallType(cx - 1, cy) === wallType) mask |= 8; // W
+  return mask;
+}
+
 export interface Effect {
   type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker' | 'debris' | 'text';
   x: number;
@@ -740,6 +783,8 @@ export class Renderer {
             break;
           }
           case Terrain.WALL: {
+            // Skip gray fill for wall-type structures — they render as sprites in structure pass
+            if (map.getWallType(cx, cy)) break;
             if (this.theatre === 'INTERIOR') {
               // Interior: concrete walls
               const bright = 40 + (h % 6);
@@ -749,7 +794,7 @@ export class Renderer {
               ctx.lineWidth = 1;
               ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
             } else {
-              // Walls using palette gray ramp
+              // Walls using palette gray ramp (non-wall structures like buildings)
               const palIdx = PAL_ROCK_START + 5 + (h % 4);
               ctx.fillStyle = this.palColor(palIdx);
               ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
@@ -978,14 +1023,42 @@ export class Renderer {
           const baseFrame = damaged ? 34 : 0;
           const facingFrame = BODY_SHAPE[(s.turretDir * 4) % 32];
           frame = baseFrame + 2 + facingFrame;
-        } else if (totalFrames > 2) {
-          const halfFrames = Math.floor(totalFrames / 2);
-          const baseFrame = damaged ? halfFrames : 0;
-          // Animate idle loop (every 8 ticks = ~0.5s per frame)
-          const animFrames = damaged ? totalFrames - halfFrames : halfFrames;
-          frame = baseFrame + (Math.floor(tick / 8) % Math.max(1, animFrames));
-        } else if (totalFrames === 2) {
-          frame = damaged ? 1 : 0;
+        // AGUN turret: same 128-frame layout as GUN (32 normal, 32 firing, 32 damaged, 32 damaged-firing)
+        } else if (s.type === 'AGUN' && s.turretDir !== undefined) {
+          const facingFrame = BODY_SHAPE[(s.turretDir * 4) % 32];
+          const baseFrame = damaged ? 64 : 0;
+          const firingOffset = (s.firingFlash && s.firingFlash > 0) ? 32 : 0;
+          frame = baseFrame + firingOffset + facingFrame;
+        // Wall auto-connection: NESW bitmask selects from 16 connection patterns
+        } else if (WALL_SPRITE_TYPES.has(s.type)) {
+          const wt = map.getWallType(s.cx, s.cy) || s.type;
+          const mask = wallConnectionMask(map, s.cx, s.cy, wt);
+          if (s.type === 'BRIK') {
+            // BRIK: 64 frames = [16 normal][16 damaged][16 heavy damage][16 unused]
+            const hpRatio = s.hp / s.maxHp;
+            frame = (damaged ? (hpRatio < 0.25 ? 32 : 16) : 0) + mask;
+          } else {
+            // SBAG/FENC/BARB: 32 frames = [16 normal][16 damaged]
+            frame = (damaged ? 16 : 0) + mask;
+          }
+        } else {
+          // Table-driven building frame selection
+          const tableEntry = BUILDING_FRAME_TABLE[s.image];
+          if (tableEntry) {
+            if (tableEntry.idleAnimCount > 0) {
+              // Animated building — cycle through animation frames
+              const baseFrame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
+              frame = baseFrame + (Math.floor(tick / 8) % tableEntry.idleAnimCount);
+            } else {
+              // Static building — single frame, no cycling
+              frame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
+            }
+          } else if (totalFrames === 2) {
+            frame = damaged ? 1 : 0;
+          } else {
+            // Unknown building type — safe fallback: frame 0 or half (no cycling)
+            frame = damaged ? Math.floor(totalFrames / 2) : 0;
+          }
         }
         // Clamp frame to valid range (prevent overflow for non-standard frame counts)
         frame = Math.min(frame, totalFrames - 1);

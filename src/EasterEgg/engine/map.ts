@@ -38,6 +38,9 @@ export class GameMap {
   /** Overlay types from OverlayPack (0xFF = no overlay) */
   overlay: Uint8Array;
 
+  /** Wall type at each cell ('' = no wall, 'SBAG'/'FENC'/'BARB'/'BRIK' = wall type) */
+  wallType: string[];
+
   /** Terrain decals: scorch marks and craters from explosions (capped at 200) */
   decals: Array<{ cx: number; cy: number; size: number; alpha: number }> = [];
   private static readonly MAX_DECALS = 200;
@@ -70,6 +73,7 @@ export class GameMap {
     this.templateType = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.overlay = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
+    this.wallType = new Array(MAP_CELLS * MAP_CELLS).fill('');
     this.boundsX = 0;
     this.boundsY = 0;
     this.boundsW = MAP_CELLS;
@@ -96,6 +100,26 @@ export class GameMap {
   setTerrain(cx: number, cy: number, terrain: Terrain): void {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
       this.cells[cy * MAP_CELLS + cx] = terrain;
+    }
+  }
+
+  /** Get wall type at a cell ('' if no wall) */
+  getWallType(cx: number, cy: number): string {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return '';
+    return this.wallType[cy * MAP_CELLS + cx];
+  }
+
+  /** Set wall type at a cell */
+  setWallType(cx: number, cy: number, type: string): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      this.wallType[cy * MAP_CELLS + cx] = type;
+    }
+  }
+
+  /** Clear wall type at a cell */
+  clearWallType(cx: number, cy: number): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      this.wallType[cy * MAP_CELLS + cx] = '';
     }
   }
 

@@ -1854,6 +1854,7 @@ export class Game {
     for (let dy = 0; dy < fh; dy++) {
       for (let dx = 0; dx < fw; dx++) {
         this.map.setTerrain(s.cx + dx, s.cy + dy, Terrain.CLEAR);
+        this.map.clearWallType(s.cx + dx, s.cy + dy);
       }
     }
   }
@@ -2452,7 +2453,7 @@ export class Game {
             entity.harvesterState = 'returning';
           } else if (gained === 0) {
             // No more ore at this cell — look for adjacent ore
-            const newOre = this.map.findNearestOre(ec.cx, ec.cy, 5);
+            const newOre = this.map.findNearestOre(ec.cx, ec.cy, 20);
             if (newOre && entity.oreLoad < Entity.ORE_CAPACITY) {
               entity.harvesterState = 'seeking';
               entity.mission = Mission.MOVE;
@@ -2468,6 +2469,16 @@ export class Game {
         break;
       }
       case 'returning': {
+        // Pathfinding timeout: if stuck in MOVE with empty path, fall back to idle after 45 ticks (3s)
+        if (entity.mission === Mission.MOVE && entity.path.length === 0 && entity.pathIndex >= 0) {
+          entity.harvestTick++;
+          if (entity.harvestTick > 45) {
+            entity.harvesterState = 'idle';
+            entity.mission = Mission.GUARD;
+            entity.harvestTick = 0;
+          }
+          break;
+        }
         // When move completes (mission returns to GUARD), transition to unloading or re-seek
         if (entity.mission !== Mission.GUARD) break; // still moving, wait
         // Check if we're near a refinery
@@ -2487,19 +2498,23 @@ export class Game {
           entity.harvesterState = 'idle';
           break;
         }
-        // Check if we're adjacent to the refinery (within 2 cells)
-        const procDist = Math.abs(bestProc.cx + 1 - ec.cx) + Math.abs(bestProc.cy + 1 - ec.cy);
-        if (procDist <= 2) {
+        // Check if we're adjacent to refinery footprint (distance to nearest edge ≤ 1)
+        const [procW, procH] = STRUCTURE_SIZE[bestProc.type] ?? [3, 2];
+        const nearX = Math.max(bestProc.cx, Math.min(ec.cx, bestProc.cx + procW - 1));
+        const nearY = Math.max(bestProc.cy, Math.min(ec.cy, bestProc.cy + procH - 1));
+        const edgeDist = Math.abs(nearX - ec.cx) + Math.abs(nearY - ec.cy);
+        if (edgeDist <= 1) {
           // Arrived at refinery — start unloading
           entity.harvesterState = 'unloading';
           entity.harvestTick = 0;
         } else {
-          // Not there yet — issue move to refinery
-          const target = { cx: bestProc.cx + 1, cy: bestProc.cy + 1 };
+          // Not there yet — move to dock cell below refinery entrance (C++ behavior)
+          const target = { cx: bestProc.cx + 1, cy: bestProc.cy + procH };
           entity.mission = Mission.MOVE;
           entity.moveTarget = { x: target.cx * CELL_SIZE + CELL_SIZE / 2, y: target.cy * CELL_SIZE + CELL_SIZE / 2 };
           entity.path = findPath(this.map, ec, target, true);
           entity.pathIndex = 0;
+          entity.harvestTick = 0;
         }
         break;
       }
@@ -4822,6 +4837,24 @@ export class Game {
     }
   }
 
+  /** Find nearest passable cell near a structure's exit, expanding in rings up to 3 cells out.
+   *  Returns the nudged position, or the original if already passable or no passable cell found. */
+  private findPassableSpawn(initialCX: number, initialCY: number, structCX: number, structCY: number, fw: number, fh: number): { cx: number; cy: number } {
+    if (this.map.isPassable(initialCX, initialCY)) return { cx: initialCX, cy: initialCY };
+    const centerX = structCX + Math.floor(fw / 2);
+    const baseY = structCY + fh;
+    for (let r = 1; r <= 3; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const nx = centerX + dx;
+          const ny = baseY + dy;
+          if (this.map.isPassable(nx, ny)) return { cx: nx, cy: ny };
+        }
+      }
+    }
+    return { cx: initialCX, cy: initialCY };
+  }
+
   /** Spawn a produced unit at its factory */
   private spawnProducedUnit(item: ProductionItem): void {
     const factoryType = item.prerequisite;
@@ -4836,8 +4869,10 @@ export class Game {
     if (!factory) return;
 
     const unitType = item.type as UnitType;
-    const spawnX = (factory.cx + 1) * CELL_SIZE + CELL_SIZE / 2;
-    const spawnY = (factory.cy + 2) * CELL_SIZE + CELL_SIZE / 2;
+    const [factW, factH] = STRUCTURE_SIZE[factory.type] ?? [3, 2];
+    const spawn = this.findPassableSpawn(factory.cx + 1, factory.cy + 2, factory.cx, factory.cy, factW, factH);
+    const spawnX = spawn.cx * CELL_SIZE + CELL_SIZE / 2;
+    const spawnY = spawn.cy * CELL_SIZE + CELL_SIZE / 2;
     const entity = new Entity(unitType, House.Spain, spawnX, spawnY);
     entity.mission = Mission.GUARD;
     this.entities.push(entity);
@@ -4906,6 +4941,10 @@ export class Game {
         this.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
       }
     }
+    // Store wall type for auto-connection sprite rendering
+    if (isWall) {
+      this.map.setWallType(cx, cy, item.type);
+    }
     // For walls: keep pendingPlacement active for continuous placement
     if (isWall) {
       if (this.wallPlacementPrepaid) {
@@ -4929,8 +4968,9 @@ export class Game {
     }
     // Spawn free harvester with refinery
     if (item.type === 'PROC') {
+      const harvSpawn = this.findPassableSpawn(cx + 1, cy + fh, cx, cy, fw, fh);
       const harv = new Entity(UnitType.V_HARV, House.Spain,
-        (cx + 1) * CELL_SIZE + CELL_SIZE / 2, (cy + 2) * CELL_SIZE + CELL_SIZE / 2);
+        harvSpawn.cx * CELL_SIZE + CELL_SIZE / 2, harvSpawn.cy * CELL_SIZE + CELL_SIZE / 2);
       harv.harvesterState = 'idle';
       this.entities.push(harv);
       this.entityById.set(harv.id, harv);

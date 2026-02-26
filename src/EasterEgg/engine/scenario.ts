@@ -864,6 +864,10 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
         map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
       }
     }
+    // Store wall type for auto-connection sprite rendering
+    if (s.type === 'SBAG' || s.type === 'FENC' || s.type === 'BARB' || s.type === 'BRIK') {
+      map.setWallType(pos.cx, pos.cy, s.type);
+    }
   }
 
   // Add base structures from [Base] section (pre-placed buildings)
@@ -892,6 +896,10 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       for (let dx = 0; dx < fw; dx++) {
         map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
       }
+    }
+    // Store wall type for auto-connection sprite rendering
+    if (bs.type === 'SBAG' || bs.type === 'FENC' || bs.type === 'BARB' || bs.type === 'BRIK') {
+      map.setWallType(pos.cx, pos.cy, bs.type);
     }
   }
 
