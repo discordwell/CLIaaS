@@ -1934,6 +1934,19 @@ export class Game {
       this.updateHarvester(entity);
     }
 
+    // M2: Turret returns to body facing when idle (C++ unit.cpp:554-559)
+    // When no target, turret aligns to movement direction (if moving) or body facing (if standing)
+    if (entity.alive && entity.hasTurret && !entity.target?.alive && !entity.targetStructure?.alive) {
+      if (entity.moveTarget || entity.path.length > 0) {
+        // Moving — turret faces movement direction
+        entity.desiredTurretFacing = entity.desiredFacing;
+      } else {
+        // Standing still — turret aligns to body facing
+        entity.desiredTurretFacing = entity.facing;
+      }
+      entity.tickTurretRotation();
+    }
+
     // Vehicle crush: heavy vehicles kill infantry they drive over
     if (entity.alive && !entity.stats.isInfantry && !entity.isAnt &&
         entity.stats.speed > 0 && entity.animState === AnimState.WALK) {
@@ -2766,7 +2779,8 @@ export class Game {
           entity.burstCount = burst - 1; // remaining shots after this one
           if (entity.burstCount > 0) entity.burstDelay = 3;
         }
-        entity.isInRecoilState = true; // C++ Recoil_Adjust — 1-tick visual kickback
+        // M6: C++ techno.cpp:3114-3117 — recoil only for turreted units
+        if (entity.hasTurret) entity.isInRecoilState = true;
 
         // Apply weapon inaccuracy — scatter the impact point
         let impactX = entity.target.pos.x;
@@ -2917,13 +2931,24 @@ export class Game {
 
       }
     } else {
-      // Defensive stance: don't chase, return to guard
+      // M5: Defensive stance: chase if target within weapon range of guard origin (C++ Threat_Range)
+      // Only give up if target is too far from the home position, not current position
       if (entity.stance === Stance.DEFENSIVE) {
-        entity.target = null;
-        entity.forceFirePos = null;
-        entity.targetStructure = null;
-        entity.mission = this.idleMission(entity);
-        entity.animState = AnimState.IDLE;
+        const weaponRange = entity.weapon?.range ?? 2;
+        const origin = entity.guardOrigin ?? entity.pos;
+        const distFromHome = worldDist(origin, entity.target.pos);
+        if (distFromHome > weaponRange + 1) {
+          // Target fled beyond guard perimeter — disengage
+          entity.target = null;
+          entity.forceFirePos = null;
+          entity.targetStructure = null;
+          entity.mission = this.idleMission(entity);
+          entity.animState = AnimState.IDLE;
+        } else {
+          // Target still within guard perimeter — pursue briefly
+          entity.animState = AnimState.WALK;
+          entity.moveToward(entity.target.pos, this.movementSpeed(entity));
+        }
       } else {
         entity.animState = AnimState.WALK;
         entity.moveToward(entity.target.pos, this.movementSpeed(entity));
@@ -3004,6 +3029,24 @@ export class Game {
         // Found a new target — continue hunting
         entity.target = bestTarget;
       } else {
+        // M3: No mobile targets — scan structures (C++ Target_Something_Nearby includes buildings)
+        let bestStruct: MapStructure | null = null;
+        let bestStructDist = huntRange;
+        for (const s of this.structures) {
+          if (!s.alive) continue;
+          if (this.isAllied(entity.house, s.house)) continue;
+          const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+          const dist = worldDist(entity.pos, sPos);
+          if (dist < bestStructDist) {
+            bestStructDist = dist;
+            bestStruct = s;
+          }
+        }
+        if (bestStruct) {
+          entity.mission = Mission.ATTACK;
+          entity.targetStructure = bestStruct;
+          return;
+        }
         // No targets found — resume move or return to idle
         if (entity.moveTarget) {
           entity.mission = Mission.MOVE;
@@ -3158,38 +3201,46 @@ export class Game {
       : baseRange;
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
-    let bestIsInfantry = false;
     for (const other of this.entities) {
       if (!other.alive) continue;
       if (this.entitiesAllied(entity, other)) continue;
+      // M8: Dogs ONLY target infantry (C++ techno.cpp:2017-2026 — THREAT_INFANTRY)
+      if (isDog && !other.stats.isInfantry) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist >= scanRange) continue;
       // Check line of sight — can't target through walls
       const oc = other.cell;
       if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
 
-      if (isDog) {
-        // Dogs prioritize infantry (useless vs vehicles)
-        const otherIsInf = other.stats.isInfantry;
-        if (otherIsInf && !bestIsInfantry) {
-          bestTarget = other; bestScore = this.threatScore(entity, other, dist); bestIsInfantry = true;
-        } else if (otherIsInf === bestIsInfantry) {
-          const score = this.threatScore(entity, other, dist);
-          if (score > bestScore) {
-            bestTarget = other; bestScore = score; bestIsInfantry = otherIsInf;
-          }
-        }
-      } else {
-        // Non-dogs: pick highest-threat enemy
-        const score = this.threatScore(entity, other, dist);
-        if (score > bestScore) {
-          bestTarget = other; bestScore = score;
-        }
+      const score = this.threatScore(entity, other, dist);
+      if (score > bestScore) {
+        bestTarget = other; bestScore = score;
       }
     }
     if (bestTarget) {
       entity.mission = Mission.ATTACK;
       entity.target = bestTarget;
+      return;
+    }
+
+    // M4: No mobile targets — check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
+    if (!isDog && entity.weapon) {
+      let bestStruct: MapStructure | null = null;
+      let bestStructDist = scanRange;
+      for (const s of this.structures) {
+        if (!s.alive) continue;
+        if (this.isAllied(entity.house, s.house)) continue;
+        const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+        const dist = worldDist(entity.pos, sPos);
+        if (dist < bestStructDist) {
+          bestStructDist = dist;
+          bestStruct = s;
+        }
+      }
+      if (bestStruct) {
+        entity.mission = Mission.ATTACK;
+        entity.targetStructure = bestStruct;
+      }
     }
   }
 
@@ -3336,7 +3387,7 @@ export class Game {
         const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale * structHouseBias));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
-        entity.isInRecoilState = true;
+        if (entity.hasTurret) entity.isInRecoilState = true; // M6
         this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
         // Muzzle + impact effects
         this.effects.push({
@@ -3380,7 +3431,7 @@ export class Game {
 
       if (entity.attackCooldown <= 0 && entity.weapon) {
         entity.attackCooldown = entity.weapon.rof;
-        entity.isInRecoilState = true;
+        if (entity.hasTurret) entity.isInRecoilState = true; // M6
 
         // Apply scatter
         let impactX = target.x;
@@ -3671,12 +3722,11 @@ export class Game {
     return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
   }
 
-  /** M2: Damage-based speed reduction (C++ drive.cpp ConditionYellow/Red thresholds).
-   *  50% HP → 75% speed, 25% HP → 50% speed. */
+  /** Damage-based speed reduction (C++ drive.cpp:1159-1161).
+   *  Single tier: <=50% HP = 75% speed (ConditionYellow). */
   private damageSpeedFactor(entity: Entity): number {
     const ratio = entity.hp / entity.maxHp;
-    if (ratio <= 0.25) return 0.5;   // ConditionRed: heavily damaged
-    if (ratio <= 0.5) return 0.75;   // ConditionYellow: damaged
+    if (ratio <= 0.5) return 0.75;   // ConditionYellow: three-quarters speed
     return 1.0;
   }
 

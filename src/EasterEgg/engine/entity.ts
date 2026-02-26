@@ -409,8 +409,8 @@ export class Entity {
   }
 
   /** Gradually rotate turret toward desiredTurretFacing.
-   *  C++ RA: turret rotates at 2x body ROT speed, using 32-step visual facing.
-   *  Accumulates rot*2 per tick; one visual step when accumulator >= 8. */
+   *  C++ RA unit.cpp:542: SecondaryFacing.Rotation_Adjust(Class->ROT+1).
+   *  Turret rotates at ROT+1 (not ROT*2); one visual step when accumulator >= 8. */
   tickTurretRotation(): boolean {
     if (this.turretFacing === this.desiredTurretFacing) {
       this.turretRotAccumulator = 0;
@@ -421,9 +421,9 @@ export class Entity {
     if (this.turretRotTickedThisFrame) return this.turretFacing === this.desiredTurretFacing;
     this.turretRotTickedThisFrame = true;
 
-    // 32-step turret rotation at 2x body speed
+    // 32-step turret rotation at ROT+1 (C++ unit.cpp:542)
     const desiredTurretFacing32 = this.desiredTurretFacing * 4;
-    this.turretRotAccumulator += this.stats.rot * 2;
+    this.turretRotAccumulator += this.stats.rot + 1;
     if (this.turretRotAccumulator >= 8) {
       this.turretRotAccumulator -= 8;
       const diff32 = (desiredTurretFacing32 - this.turretFacing32 + 32) % 32;

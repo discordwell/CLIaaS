@@ -1381,17 +1381,14 @@ export class Renderer {
           recoilDx = ro.dx;
           recoilDy = ro.dy;
         }
-        // Body: apply recoil only for non-turreted units (artillery, ants)
-        const bodyRecoilDx = entity.hasTurret ? 0 : recoilDx;
-        const bodyRecoilDy = entity.hasTurret ? 0 : recoilDy;
         // Use house-remapped sheet if available
         const remapped = assets.getRemappedSheet(entity.stats.image, entity.house);
         if (remapped) {
           assets.drawFrameFrom(ctx, remapped, entity.stats.image, frame,
-            screen.x + bodyRecoilDx, screen.y + bodyRecoilDy, { centerX: true, centerY: true });
+            screen.x, screen.y, { centerX: true, centerY: true });
         } else {
           assets.drawFrame(ctx, entity.stats.image, frame,
-            screen.x + bodyRecoilDx, screen.y + bodyRecoilDy, { centerX: true, centerY: true });
+            screen.x, screen.y, { centerX: true, centerY: true });
         }
         // Draw turret layer for turreted vehicles (frames 32-63)
         if (entity.hasTurret && sheet.meta.frameCount >= 64) {
