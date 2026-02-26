@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import {
+  CONDITION_FIELDS,
+  CONDITION_OPERATORS,
+  ACTION_TYPES,
+} from "@/lib/automation/constants";
 
 interface Rule {
   id: string;
@@ -165,7 +170,7 @@ export default function RulesPage() {
                 onChange={(e) => setFormData({ ...formData, conditionField: e.target.value })}
                 className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
               >
-                {["status", "priority", "subject", "tags", "assignee", "requester", "source", "hours_since_created", "hours_since_updated"].map((f) => (
+                {CONDITION_FIELDS.map((f) => (
                   <option key={f} value={f}>{f}</option>
                 ))}
               </select>
@@ -177,7 +182,7 @@ export default function RulesPage() {
                 onChange={(e) => setFormData({ ...formData, conditionOp: e.target.value })}
                 className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
               >
-                {["is", "is_not", "contains", "not_contains", "starts_with", "greater_than", "less_than", "is_empty", "is_not_empty"].map((o) => (
+                {CONDITION_OPERATORS.map((o) => (
                   <option key={o} value={o}>{o.replace(/_/g, " ")}</option>
                 ))}
               </select>
@@ -199,7 +204,7 @@ export default function RulesPage() {
                 onChange={(e) => setFormData({ ...formData, actionType: e.target.value })}
                 className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
               >
-                {["set_priority", "set_status", "assign_to", "add_tag", "remove_tag", "close", "reopen", "escalate", "add_internal_note", "send_notification"].map((a) => (
+                {ACTION_TYPES.map((a) => (
                   <option key={a} value={a}>{a.replace(/_/g, " ")}</option>
                 ))}
               </select>

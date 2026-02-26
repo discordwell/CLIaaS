@@ -156,6 +156,37 @@ describe('POST /api/workflows', () => {
     expect(data.error).toContain('entryNodeId');
   });
 
+  it('creates from templateKey', async () => {
+    const res = await POST(
+      makeRequest('/api/workflows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'My Lifecycle', templateKey: 'simple-lifecycle' }),
+      }),
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(data.workflow.name).toBe('My Lifecycle');
+    expect(Object.keys(data.workflow.nodes).length).toBeGreaterThan(2);
+    expect(data.workflow.transitions.length).toBeGreaterThan(2);
+    expect(data.workflow.entryNodeId).toBeTruthy();
+    expect(data.workflow.nodes[data.workflow.entryNodeId]).toBeDefined();
+  });
+
+  it('rejects unknown templateKey', async () => {
+    const res = await POST(
+      makeRequest('/api/workflows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Bad', templateKey: 'nonexistent' }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain('nonexistent');
+  });
+
   it('rejects workflow that fails validation', async () => {
     // Trigger node with no outgoing transitions
     const res = await POST(

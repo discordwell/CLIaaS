@@ -7,17 +7,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { textResult, errorResult, safeLoadTickets, findTicket } from '../util.js';
 import { withConfirmation, recordMCPAction } from './confirm.js';
-import { isToolEnabled } from './scopes.js';
+import { scopeGuard } from './scopes.js';
 import { getDataProvider } from '@/lib/data-provider/index.js';
 import type { SurveyType, SurveyTrigger } from '@/lib/data-provider/types.js';
 import { randomBytes } from 'crypto';
-
-function scopeGuard(toolName: string) {
-  if (!isToolEnabled(toolName)) {
-    return errorResult(`Tool "${toolName}" is disabled by scope configuration.`);
-  }
-  return null;
-}
 
 export function registerSurveyTools(server: McpServer): void {
   // ---- survey_stats ----

@@ -1,5 +1,46 @@
 # Session Summaries
 
+## 2026-02-27T08:00Z — Session 43: Visual Workflow Builder — Refactoring
+- Continued from previous session (implemented 8-phase visual workflow builder, applied correctness fixes, committed)
+- Completed 6 refactor items from code review:
+  1. Extracted `tryDb()`/`getDefaultWorkspaceId()` to `src/lib/store-helpers.ts` (shared by chatbot + workflow stores)
+  2. Fixed `WorkflowExport` import type (inline `import()` → static import)
+  3. Extracted `scopeGuard()` to `cli/mcp/tools/scopes.ts` (eliminated 4 local copies)
+  4. Extracted automation constants to `src/lib/automation/constants.ts` (15 fields, 15 operators, 13 actions, 5 events)
+  5. Added `templateKey` support to `POST /api/workflows` — server-side template creation, eliminated ~80 lines of client-side template duplication
+  6. Split `page.tsx` from 1727→303 lines into 6 sub-components in `_components/`: types.ts, ConditionRows.tsx, ActionRows.tsx, NodeEditors.tsx, TransitionEditor.tsx, WorkflowBuilder.tsx
+- All 43 workflow tests + MCP server test passing, typecheck clean
+- Next: entering plan mode to discuss UX simplification
+
+## 2026-02-26T22:50Z — Session 42: Comprehensive API Testing + Live Integration
+- Created `src/__tests__/api-features.test.ts`: **193 unit tests** across 21 sections (auth, tickets, KB, webhooks, automations, custom fields, SLA, analytics, API keys, portal, chat, SCIM, channels, billing, MCP tools, data provider, auth enforcement)
+- Applied correctness review fixes: global state cleanup, guard assertions, tighter status codes, proper type casts
+- Fixed `getDataProvider()` dir override: was ignored when DATABASE_URL set, now always returns fresh JsonlProvider when dir is passed
+- Created `scripts/live-integration-test.ts`: **41 live integration tests** against real Postgres via SSH tunnel
+- Set up VPS Postgres (docker, pgvector, drizzle push), created tenant/workspace/user chain for auth
+- Both reviewers passed: stale JSDoc fixed, timeout protection added, skip logging for unavailable sections, DATABASE_URL guard for auth tests
+- Commits: 0bcc790 (193 unit tests), c7285ee (live integration + data provider fix)
+
+## 2026-02-26T21:00Z — Session 41: HubSpot Connector Activation
+- Created HubSpot private app "CLIaaS" with 6 scopes: crm.objects.{companies,contacts}.{read,write}, crm.objects.owners.read, tickets
+- The `tickets` legacy scope required clicking the `<label>` wrapper via JS (`.closest('label').click()`) — direct checkbox clicks don't trigger React state
+- HubSpot account: ID 245335647, na2 region, private app ID 32404093
+- Created 10 sample tickets via API, exported (10 tickets, 2 contacts, 1 owner, 1 company)
+- Ingested into VPS DB: **142 tickets across 8 connectors** (50 zendesk + 32 freshdesk + 30 groove + 10 helpcrunch + 10 hubspot + 5 intercom + 4 helpscout + 1 zoho-desk)
+- HubSpot token pushed to VPS .env
+
+## 2026-02-26T19:30Z — Session 40: Connector API Keys + Multi-Source Ingest
+- Grabbed API keys via browser automation: Help Scout OAuth (existing app), Zoho Desk OAuth (Self Client JP region)
+- Verified all 6 active connectors: Zendesk, Freshdesk, Groove, Intercom, Help Scout, Zoho Desk
+- Fixed Zoho Desk connector: JP region domain support via `ZOHO_DESK_API_DOMAIN` env var
+- Ran exports for all 5 new connectors (Groove: 30, Freshdesk: 32, Intercom: 5, Help Scout: 4, Zoho Desk: 1)
+- Made ingest engine multi-provider: `provider` param on IngestOptions, ticket source from data, org/user dedup across connectors
+- Added `db ingest` CLI command (generic, any provider) alongside existing `db ingest-zendesk`
+- Ingested all exports into VPS DB: **122 tickets across 6 connectors** (50 zendesk + 32 freshdesk + 30 groove + 5 intercom + 4 helpscout + 1 zoho-desk)
+- All connector keys pushed to VPS .env (not in git)
+- 1099 tests passing (3 Easter Egg pre-existing failures), typecheck clean
+- Skipped: HubSpot (no account), HelpCrunch (0 tickets)
+
 ## 2026-02-26T12:00Z — Session 39: RA Engine C++ Parity — Round 2
 - Completed 3 batches (19 total fixes): S1-S5 Critical, H1-H6 High, M1-M8 Medium
 - All committed + deployed: 6372818, 82cf45d, 5b7b6f1

@@ -11,6 +11,7 @@
 
 import type { Condition } from '@/lib/automation/conditions';
 import type { RuleAction } from '@/lib/automation/actions';
+import type { Rule } from '@/lib/automation/engine';
 
 // Re-export automation types under workflow aliases
 export type WorkflowCondition = Condition;
@@ -101,5 +102,5 @@ export interface WorkflowExport {
   format: 'cliaas-workflow-v1';
   workflow: Workflow;
   exportedAt: string;
-  rules: import('@/lib/automation/engine').Rule[];
+  rules: Rule[];
 }

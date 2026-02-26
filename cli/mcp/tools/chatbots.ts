@@ -5,17 +5,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { textResult, errorResult } from '../util.js';
-import { isToolEnabled } from './scopes.js';
+import { scopeGuard } from './scopes.js';
 import { getChatbots, getChatbot, upsertChatbot, deleteChatbot } from '@/lib/chatbot/store.js';
 import type { ChatbotFlow, ChatbotNode } from '@/lib/chatbot/types.js';
 import { randomUUID } from 'crypto';
-
-function scopeGuard(toolName: string) {
-  if (!isToolEnabled(toolName)) {
-    return errorResult(`Tool "${toolName}" is disabled by scope configuration.`);
-  }
-  return null;
-}
 
 export function registerChatbotTools(server: McpServer): void {
   // ---- chatbot_list ----

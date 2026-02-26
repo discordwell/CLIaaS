@@ -9,14 +9,7 @@ import { z } from 'zod';
 import { textResult, errorResult, safeLoadTickets, findTicket } from '../util.js';
 import type { TicketStatus, TicketPriority } from '@/lib/data-provider/types.js';
 import { withConfirmation, recordMCPAction } from './confirm.js';
-import { isToolEnabled } from './scopes.js';
-
-function scopeGuard(toolName: string) {
-  if (!isToolEnabled(toolName)) {
-    return errorResult(`Tool "${toolName}" is disabled by scope configuration.`);
-  }
-  return null;
-}
+import { scopeGuard } from './scopes.js';
 
 export function registerActionTools(server: McpServer): void {
   // ---- ticket_update ----
