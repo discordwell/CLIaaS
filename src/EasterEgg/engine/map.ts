@@ -3,7 +3,7 @@
  * The map is 128×128 cells but only a portion (typically 50×50) is playable.
  */
 
-import { MAP_CELLS, CELL_SIZE, type CellPos } from './types';
+import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass } from './types';
 
 export enum Terrain {
   CLEAR = 0,
@@ -134,15 +134,25 @@ export class GameMap {
     return false;
   }
 
-  /** Get terrain speed multiplier (1.0 = normal, >1 = faster, <1 = slower).
-   *  Roads (templates 166-174) give +30% speed. Rough terrain gives -15%. */
-  getSpeedMultiplier(cx: number, cy: number): number {
+  /** M1: Get terrain speed multiplier by SpeedClass (C++ drive.cpp Ground[terrain].Cost[speed_class]).
+   *  Defaults to WHEEL if no speedClass provided (backward compat with pathfinding). */
+  getSpeedMultiplier(cx: number, cy: number, speedClass: SpeedClass = SpeedClass.WHEEL): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 1.0;
-    const tmpl = this.templateType[cy * MAP_CELLS + cx];
-    // Road templates (D1-D43 in TEMPERATE = template IDs roughly 166-174)
-    if (tmpl >= 166 && tmpl <= 174) return 1.3;
-    // Rough/beach terrain
+    // WINGED (aircraft) ignores terrain entirely
+    if (speedClass === SpeedClass.WINGED) return 1.0;
     const terrain = this.cells[cy * MAP_CELLS + cx];
+    // FLOAT (ships) can only traverse water
+    if (speedClass === SpeedClass.FLOAT) return terrain === Terrain.WATER ? 1.0 : 0.3;
+    const tmpl = this.templateType[cy * MAP_CELLS + cx];
+    const isRoad = tmpl >= 166 && tmpl <= 174;
+    if (speedClass === SpeedClass.FOOT) {
+      // Infantry: roads give small boost, trees slow significantly
+      if (isRoad) return 1.1;
+      if (terrain === Terrain.TREE) return 0.6;
+      return 1.0;
+    }
+    // WHEEL (all vehicles per udata.cpp:865) and TRACK
+    if (isRoad) return 1.3;
     if (terrain === Terrain.TREE) return 0.85;
     return 1.0;
   }

@@ -4,9 +4,11 @@
 
 import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats,
+  type WarheadType, type ArmorType,
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE,
-  INFANTRY_ANIMS, BODY_SHAPE, ANT_ANIM,
+  INFANTRY_ANIMS, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
+  WARHEAD_VS_ARMOR,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
 } from './types';
 // Structure reference is typed loosely to avoid circular dependency with scenario.ts
@@ -94,6 +96,13 @@ export class Entity {
   kills = 0;      // kills by this unit
   veterancy = 0;  // 0=rookie, 1=veteran, 2=elite
 
+  // Burst fire (C++ weapon.cpp:78 Weapon.Burst — multiple shots per trigger pull)
+  burstCount = 0;   // remaining shots in current burst
+  burstDelay = 0;   // ticks between burst shots (3 ticks between each)
+
+  // Moving-platform tracking (C++ techno.cpp:3106-3108 — units firing while moving get extra inaccuracy)
+  prevPos: WorldPos = { x: 0, y: 0 }; // position from previous tick, for detecting movement
+
   /** Damage multiplier from veterancy (1.0 / 1.25 / 1.5) */
   get damageMultiplier(): number {
     return this.veterancy === 2 ? 1.5 : this.veterancy === 1 ? 1.25 : 1.0;
@@ -132,6 +141,10 @@ export class Entity {
   // Area Guard: remember spawn origin so unit returns if it strays too far
   guardOrigin: WorldPos | null = null; // set when unit spawns with Area Guard mission
 
+  // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
+  // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination
+  savedMoveTarget: WorldPos | null = null;
+
   // Wave coordination: ants from the same trigger share a waveId
   waveId = 0;              // 0 = no wave group
   waveRallyTick = 0;       // tick when wave should start attacking (rally delay)
@@ -145,6 +158,9 @@ export class Entity {
   static readonly ORE_CAPACITY = 700; // max ore value per trip
   harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'unloading' = 'idle';
   harvestTick = 0;                 // ticks spent harvesting current cell
+
+  // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.5)
+  speedBias = 1.0;
 
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
@@ -162,6 +178,8 @@ export class Entity {
     // Initialize 32-step visual facing from 8-dir facing
     this.bodyFacing32 = this.facing * 4;
     this.turretFacing32 = this.turretFacing * 4;
+    // Initialize prevPos to starting position (C5: moving-platform inaccuracy detection)
+    this.prevPos = { x, y };
   }
 
   get cell(): CellPos {
@@ -298,11 +316,15 @@ export class Entity {
       this.animFrame = 0;
       this.animTick = 0;
       this.deathTick = 0;
-      // Fire/Tesla/Super warheads always use die2 (explosive death); others random
-      if (warhead === 'Fire' || warhead === 'Super') {
-        this.deathVariant = 1;
+      // R7: Use warhead's infantryDeath property from C++ warhead.cpp InfantryDeath
+      // 0=normal (die1), 1=fire death (die2), 2=explode (die2)
+      const whProps = warhead ? WARHEAD_PROPS[warhead as WarheadType] : undefined;
+      if (whProps && whProps.infantryDeath > 0) {
+        this.deathVariant = 1; // die2 for fire death (1) and explode (2)
+      } else if (whProps && whProps.infantryDeath === 0) {
+        this.deathVariant = 0; // die1 for normal death
       } else {
-        this.deathVariant = Math.random() < 0.4 ? 1 : 0;
+        this.deathVariant = Math.random() < 0.4 ? 1 : 0; // fallback: random
       }
       // Kill all passengers when transport is destroyed
       for (const p of this.passengers) {
@@ -322,11 +344,17 @@ export class Entity {
     return worldDist(this.pos, other.pos) <= this.weapon.range;
   }
 
-  /** Update animation frame */
+  /** Update animation frame — uses per-type rate overrides from C++ MasterDoControls */
   tickAnimation(): void {
     this.animTick++;
-    const rate = this.animState === AnimState.WALK ? 3 :
-                 this.animState === AnimState.ATTACK ? 5 : 4;
+    // Per-type animation rate overrides (R3: C++ MasterDoControls variable timing)
+    const typeAnim = this.stats.isInfantry ? INFANTRY_ANIMS[this.type] : undefined;
+    const defaultWalk = 3;
+    const defaultAttack = 5;
+    const defaultIdle = 4;
+    const rate = this.animState === AnimState.WALK ? (typeAnim?.walkRate ?? defaultWalk) :
+                 this.animState === AnimState.ATTACK ? (typeAnim?.attackRate ?? defaultAttack) :
+                 (typeAnim?.idleRate ?? defaultIdle);
     if (this.animTick >= rate) {
       this.animTick = 0;
       this.animFrame++;
@@ -409,29 +437,45 @@ export class Entity {
 
   /** Move toward a world position at the unit's speed.
    *  C++ RA drive.cpp: vehicles stop, rotate to face destination, THEN move.
-   *  Infantry are nimble and move while rotating. */
+   *  Infantry are nimble and move while rotating.
+   *  M7: speed is multiplied by speedBias (crate pickup bonus). */
   moveToward(target: WorldPos, speed: number): boolean {
+    // M7: Apply crate speed bias multiplier
+    const effectiveSpeed = speed * this.speedBias;
+
     const dx = target.x - this.pos.x;
     const dy = target.y - this.pos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist <= speed) {
+    if (dist <= effectiveSpeed) {
       this.pos.x = target.x;
       this.pos.y = target.y;
       return true; // arrived
     }
 
+    const oldFacing = this.facing;
     this.desiredFacing = directionTo(this.pos, target);
     const facingAligned = this.tickRotation();
 
     // Vehicles: stop-rotate-move (don't slide sideways while turning)
     if (!this.stats.isInfantry && !facingAligned) {
+      // M5: Three-point turn for JEEP (C++ drive.cpp:339 — wheeled vehicles)
+      // When the JEEP needs a large turn (>= 90 degrees), drift backward slightly
+      // during rotation to simulate a three-point turn maneuver.
+      if (this.type === UnitType.V_JEEP) {
+        const diff8 = (this.desiredFacing - oldFacing + 8) % 8;
+        const absDiff = diff8 <= 4 ? diff8 : 8 - diff8;
+        if (absDiff >= 4) {
+          this.pos.x -= DIR_DX[this.facing] * 0.3;
+          this.pos.y -= DIR_DY[this.facing] * 0.3;
+        }
+      }
       return false; // still rotating — don't move yet
     }
 
     // Infantry move while rotating (nimble), vehicles move once facing is aligned
-    this.pos.x += (dx / dist) * speed;
-    this.pos.y += (dy / dist) * speed;
+    this.pos.x += (dx / dist) * effectiveSpeed;
+    this.pos.y += (dy / dist) * effectiveSpeed;
     return false;
   }
 }
@@ -449,14 +493,27 @@ export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
   { dx: 1, dy: 1 },   // NW
 ];
 
+/** Helper: map ArmorType string to WARHEAD_VS_ARMOR index */
+function armorIndex(armor: ArmorType): number {
+  switch (armor) {
+    case 'none': return 0;
+    case 'wood': return 1;
+    case 'light': return 2;
+    case 'heavy': return 3;
+    case 'concrete': return 4;
+  }
+}
+
 /** Calculate threat score for guard targeting (inspired by C++ techno.cpp Evaluate_Object).
  *  Higher score = higher priority target. Pure function for testability.
  *  @param scanner The unit doing the scanning
  *  @param target The potential target being evaluated
  *  @param dist Distance between scanner and target (in cells)
- *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit */
+ *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit
+ *  @param closingSpeed Rate of distance change (positive = target approaching). A9: zone-aware threat. */
 export function threatScore(
   scanner: Entity, target: Entity, dist: number, isTargetAttackingAlly: boolean,
+  closingSpeed?: number,
 ): number {
   // Base value by unit class
   let score: number;
@@ -476,6 +533,32 @@ export function threatScore(
   if (isTargetAttackingAlly) {
     score *= 2;
   }
+
+  // A9: Zone-aware threat — enemies closing distance get +25% priority
+  // (C++ uses spatial zones; we approximate with closing speed detection)
+  if (closingSpeed !== undefined && closingSpeed > 0) {
+    score *= 1.25;
+  }
+
+  // A11: Warhead effectiveness — prefer targets we can actually damage
+  // (C++ per-weapon-class threat multipliers from techno.cpp)
+  if (scanner.weapon) {
+    const warhead = scanner.weapon.warhead;
+    const verses = WARHEAD_VS_ARMOR[warhead];
+    if (verses) {
+      const mult = verses[armorIndex(target.stats.armor)];
+      if (mult > 1.0) {
+        score *= 1.5;   // scanner's weapon is effective vs this armor → boost
+      } else if (mult < 0.5) {
+        score *= 0.5;   // scanner's weapon is poor vs this armor → deprioritize
+      }
+    }
+  }
+
+  // A12: Target weapon danger — enemies with bigger weapons are more threatening
+  // (C++ techno.cpp evaluates target's weapon damage as part of threat)
+  const weaponDanger = Math.min((target.weapon?.damage ?? 0) * 0.2, 20);
+  score += weaponDanger;
 
   // Inverse distance weighting: closer targets score higher
   // Avoid division by zero; at dist=0 full score, at max sight range ~0.3x

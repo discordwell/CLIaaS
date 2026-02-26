@@ -54,6 +54,7 @@ export interface Effect {
   endX?: number;         // projectile destination
   endY?: number;
   projStyle?: 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade';
+  isArcing?: boolean;  // C4: ballistic arc trajectory — arc height scales with travel distance
   // Marker color (for move/attack command feedback)
   markerColor?: string;
   // Floating text (e.g. "+100" credits)
@@ -1321,6 +1322,41 @@ export class Renderer {
         ctx.beginPath();
         ctx.ellipse(screen.x, screen.y + spriteH * 0.3 + altY, rx, ry, 0, 0, Math.PI * 2);
         ctx.stroke();
+
+        // Selection brackets — 4 white corner L-shapes (C++ techno.cpp:1159-1187)
+        const bx0 = screen.x - spriteW / 2;
+        const by0 = screen.y - spriteH / 2;
+        const bx1 = screen.x + spriteW / 2;
+        const by1 = screen.y + spriteH / 2;
+        const armW = spriteW / 5; // bracket arm length = 1/5 of sprite width
+        const armH = spriteH / 5; // bracket arm length = 1/5 of sprite height
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1;
+        // Top-left corner
+        ctx.beginPath();
+        ctx.moveTo(bx0 + armW, by0);
+        ctx.lineTo(bx0, by0);
+        ctx.lineTo(bx0, by0 + armH);
+        ctx.stroke();
+        // Top-right corner
+        ctx.beginPath();
+        ctx.moveTo(bx1 - armW, by0);
+        ctx.lineTo(bx1, by0);
+        ctx.lineTo(bx1, by0 + armH);
+        ctx.stroke();
+        // Bottom-left corner
+        ctx.beginPath();
+        ctx.moveTo(bx0 + armW, by1);
+        ctx.lineTo(bx0, by1);
+        ctx.lineTo(bx0, by1 - armH);
+        ctx.stroke();
+        // Bottom-right corner
+        ctx.beginPath();
+        ctx.moveTo(bx1 - armW, by1);
+        ctx.lineTo(bx1, by1);
+        ctx.lineTo(bx1, by1 - armH);
+        ctx.stroke();
+
         // Medic heal range circle (dashed green)
         if (entity.type === UnitType.I_MEDI) {
           const healRange = entity.stats.sight * 1.5 * CELL_SIZE;
@@ -1498,7 +1534,8 @@ export class Renderer {
         ctx.fillRect(oreBarX, oreBarY, oreBarW * oreRatio, oreBarH);
       }
 
-      // Health bar (show for damaged units and selected units)
+      // Health bar — C++ techno.cpp:1089-1188: drawn for alive, selected entities
+      // Also shown for damaged units (standard RA behaviour) so player sees HP at a glance
       if (entity.alive && (entity.hp < entity.maxHp || selectedIds.has(entity.id))) {
         this.renderHealthBar(
           screen.x,
@@ -1519,26 +1556,18 @@ export class Renderer {
         ctx.stroke();
       }
 
-      // Veterancy star indicator (above health bar)
-      if (entity.alive && entity.veterancy > 0) {
-        const starY = screen.y - spriteH / 2 - (entity.hp < entity.maxHp || selectedIds.has(entity.id) ? 12 : 5);
-        const starX = screen.x;
-        ctx.fillStyle = entity.veterancy >= 2 ? '#FFD700' : '#C0C0C0'; // gold or silver
-        const starSize = 3;
-        const count = entity.veterancy; // 1 star = veteran, 2 stars = elite
-        for (let i = 0; i < count; i++) {
-          const sx = starX - (count - 1) * 3 + i * 6;
-          // Draw 4-pointed star
+      // Veterancy pips — C++ techno.cpp:1159-1187: colored dots below the unit
+      // Rookie (0): no pips, Veteran (1): 1 yellow pip, Elite (2): 2 yellow pips
+      if (entity.alive && entity.veterancy > 0 && selectedIds.has(entity.id)) {
+        const pipY = screen.y + spriteH / 2 + 4; // below the sprite
+        const pipCount = entity.veterancy;
+        const pipRadius = 2;
+        const pipSpacing = 6;
+        ctx.fillStyle = '#FFD700'; // yellow pips
+        for (let i = 0; i < pipCount; i++) {
+          const px = screen.x - ((pipCount - 1) * pipSpacing) / 2 + i * pipSpacing;
           ctx.beginPath();
-          ctx.moveTo(sx, starY - starSize);
-          ctx.lineTo(sx + starSize * 0.4, starY - starSize * 0.4);
-          ctx.lineTo(sx + starSize, starY);
-          ctx.lineTo(sx + starSize * 0.4, starY + starSize * 0.4);
-          ctx.lineTo(sx, starY + starSize);
-          ctx.lineTo(sx - starSize * 0.4, starY + starSize * 0.4);
-          ctx.lineTo(sx - starSize, starY);
-          ctx.lineTo(sx - starSize * 0.4, starY - starSize * 0.4);
-          ctx.closePath();
+          ctx.arc(px, pipY, pipRadius, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -1576,9 +1605,10 @@ export class Renderer {
     ctx.fillRect(bx, y, barW, barH);
 
     // Health fill with pip segments — palette-accurate green/yellow/red
-    const color = ratio > 0.66 ? this.palColor(PAL_GREEN_HP) :
-                  ratio > 0.33 ? this.palColor(156) :  // palette yellow [255,255,158]
-                                 this.palColor(PAL_RED_HP);
+    // C++ techno.cpp:1089-1188 thresholds: green≥50%, yellow≥25%, red<25%
+    const color = ratio >= 0.50 ? this.palColor(PAL_GREEN_HP) :
+                  ratio >= 0.25 ? this.palColor(156) :  // palette yellow [255,255,158]
+                                  this.palColor(PAL_RED_HP);
     const fillW = barW * ratio;
     ctx.fillStyle = color;
     ctx.fillRect(bx, y, fillW, barH);

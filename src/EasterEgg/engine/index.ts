@@ -8,8 +8,8 @@ import {
   type AllianceTable, buildDefaultAlliances,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   Mission, AnimState, House, UnitType, Stance, worldDist, directionTo, worldToCell,
-  WARHEAD_VS_ARMOR, type WarheadType, UNIT_STATS, WEAPON_STATS,
-  PRODUCTION_ITEMS, type ProductionItem, CursorType,
+  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
+  PRODUCTION_ITEMS, type ProductionItem, CursorType, HOUSE_FIREPOWER_BIAS,
 } from './types';
 import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
@@ -46,7 +46,7 @@ const DIFFICULTY_MODS: Record<Difficulty, { spawnInterval: number; maxAnts: numb
 const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 'AGUN', 'FTUR']);
 
 /** Crate bonus types */
-type CrateType = 'money' | 'heal' | 'veterancy' | 'unit' | 'armor' | 'firepower';
+type CrateType = 'money' | 'heal' | 'veterancy' | 'unit' | 'armor' | 'firepower' | 'speed';
 interface Crate {
   x: number;
   y: number;
@@ -506,6 +506,10 @@ export class Game {
       entity.turretRotTickedThisFrame = false;
       // Clear recoil from previous tick (C++ techno.cpp:2339 — recoil lasts 1 tick)
       if (entity.isInRecoilState) entity.isInRecoilState = false;
+
+      // C5: Track previous position for moving-platform inaccuracy detection
+      entity.prevPos.x = entity.pos.x;
+      entity.prevPos.y = entity.pos.y;
 
       if (!entity.alive) {
         entity.tickAnimation();
@@ -2470,6 +2474,32 @@ export class Game {
 
     entity.animState = AnimState.WALK;
 
+    // A2: AI target acquisition while moving (C++ foot.cpp:492-505)
+    // AI-controlled units scan for enemies every 15 ticks during MOVE and auto-engage
+    if (!entity.isPlayerUnit && entity.weapon &&
+        (this.tick + entity.id) % 15 === 0) {
+      const ec = entity.cell;
+      const scanRange = entity.stats.sight;
+      let bestTarget: Entity | null = null;
+      let bestScore = -Infinity;
+      for (const other of this.entities) {
+        if (!other.alive || this.entitiesAllied(entity, other)) continue;
+        const dist = worldDist(entity.pos, other.pos);
+        if (dist > scanRange) continue;
+        if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
+        const score = this.threatScore(entity, other, dist);
+        if (score > bestScore) { bestScore = score; bestTarget = other; }
+      }
+      if (bestTarget) {
+        // Save current move destination so unit can resume after killing
+        entity.savedMoveTarget = entity.moveTarget ? { x: entity.moveTarget.x, y: entity.moveTarget.y } : null;
+        entity.target = bestTarget;
+        entity.mission = Mission.ATTACK;
+        entity.animState = AnimState.ATTACK;
+        return;
+      }
+    }
+
     // Air units fly directly to destination — no pathfinding, no terrain collision
     if (entity.isAirUnit && entity.moveTarget) {
       // Ascend to flight altitude
@@ -2511,23 +2541,38 @@ export class Game {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
         y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
       };
-      const terrainSpeed = entity.stats.speed * 0.5 * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy);
+      // M1: terrain speed by SpeedClass, M2: damage-based speed reduction
+      const terrainSpeed = entity.stats.speed * 0.5
+        * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
+        * this.damageSpeedFactor(entity);
       if (entity.moveToward(target, terrainSpeed)) {
         entity.pathIndex++;
       }
     } else if (entity.moveTarget) {
-      const terrainSpeed2 = entity.stats.speed * 0.5 * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy);
-      if (entity.moveToward(entity.moveTarget, terrainSpeed2)) {
+      // M3: Close-enough distance (C++ Rule.CloseEnoughDistance ~2.5 cells)
+      // Unit considers itself "arrived" if within 2.5 cells of final destination
+      const closeEnough = CELL_SIZE * 2.5;
+      const distToTarget = worldDist(entity.pos, entity.moveTarget);
+      if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
         entity.moveTarget = null;
-        // Check for queued waypoints
-        if (entity.moveQueue.length > 0) {
-          const next = entity.moveQueue.shift()!;
-          entity.moveTarget = next;
-          entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit);
-          entity.pathIndex = 0;
-        } else {
-          entity.mission = this.idleMission(entity);
-          entity.animState = AnimState.IDLE;
+        entity.mission = this.idleMission(entity);
+        entity.animState = AnimState.IDLE;
+      } else {
+        const terrainSpeed2 = entity.stats.speed * 0.5
+          * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
+          * this.damageSpeedFactor(entity);
+        if (entity.moveToward(entity.moveTarget, terrainSpeed2)) {
+          entity.moveTarget = null;
+          // Check for queued waypoints
+          if (entity.moveQueue.length > 0) {
+            const next = entity.moveQueue.shift()!;
+            entity.moveTarget = next;
+            entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit);
+            entity.pathIndex = 0;
+          } else {
+            entity.mission = this.idleMission(entity);
+            entity.animState = AnimState.IDLE;
+          }
         }
       }
     } else {
@@ -2559,6 +2604,16 @@ export class Game {
     if (!entity.target?.alive) {
       entity.target = null;
       entity.forceFirePos = null;
+      // Resume saved move destination (AI units interrupted MOVE to attack)
+      if (entity.savedMoveTarget) {
+        const saved = entity.savedMoveTarget;
+        entity.savedMoveTarget = null;
+        entity.mission = Mission.MOVE;
+        entity.moveTarget = { x: saved.x, y: saved.y };
+        entity.path = findPath(this.map, entity.cell, worldToCell(saved.x, saved.y), true);
+        entity.pathIndex = 0;
+        return;
+      }
       // Return to guard origin if player unit was auto-engaging (not given explicit attack order)
       if (entity.isPlayerUnit && entity.guardOrigin) {
         const d = worldDist(entity.pos, entity.guardOrigin);
@@ -2626,16 +2681,43 @@ export class Game {
       }
       entity.animState = AnimState.ATTACK;
 
+      // C1: Burst fire continuation (C++ weapon.cpp:78 Weapon.Burst)
+      // Between burst shots, count down burstDelay instead of using full ROF cooldown
+      if (entity.burstCount > 0 && entity.burstDelay > 0) {
+        entity.burstDelay--;
+        if (entity.burstDelay > 0) return; // waiting between burst shots
+        // burstDelay reached 0 — fire next burst shot (fall through to fire logic)
+      }
+
       if (entity.attackCooldown <= 0 && entity.weapon) {
-        entity.attackCooldown = entity.weapon.rof;
+        // C1: Set burst count for multi-shot weapons (e.g. MammothTusk burst: 2)
+        const burst = entity.weapon.burst ?? 1;
+        if (entity.burstCount > 0) {
+          // Continuing burst — decrement
+          entity.burstCount--;
+          entity.burstDelay = 3; // 3 ticks between burst shots (C++ standard)
+        } else {
+          // New burst — set cooldown and burst count
+          entity.attackCooldown = entity.weapon.rof;
+          entity.burstCount = burst - 1; // remaining shots after this one
+          if (entity.burstCount > 0) entity.burstDelay = 3;
+        }
         entity.isInRecoilState = true; // C++ Recoil_Adjust — 1-tick visual kickback
 
         // Apply weapon inaccuracy — scatter the impact point
         let impactX = entity.target.pos.x;
         let impactY = entity.target.pos.y;
         let directHit = true;
-        if (entity.weapon.inaccuracy && entity.weapon.inaccuracy > 0) {
-          const scatter = entity.weapon.inaccuracy * CELL_SIZE;
+        // C5: Moving-platform inaccuracy (C++ techno.cpp:3106-3108)
+        const isMoving = entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
+        const baseInaccuracy = entity.weapon.inaccuracy ?? 0;
+        const effectiveInaccuracy = isMoving ? Math.max(baseInaccuracy, 1.0) : baseInaccuracy;
+        if (effectiveInaccuracy > 0) {
+          // C2: Distance-dependent scatter (C++ bullet.cpp:717-729)
+          // Scatter radius scales with distance — close shots are more accurate
+          const targetDist = worldDist(entity.pos, entity.target.pos);
+          const distFactor = Math.min(1.0, targetDist / entity.weapon.range);
+          const scatter = effectiveInaccuracy * CELL_SIZE * distFactor;
           const angle = Math.random() * Math.PI * 2;
           const dist = Math.random() * scatter;
           impactX += Math.cos(angle) * dist;
@@ -2646,10 +2728,19 @@ export class Game {
           directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
         }
 
-        // Apply warhead-vs-armor damage multiplier + veterancy bonus
+        // Apply warhead-vs-armor damage multiplier + veterancy bonus + house firepower bias (C8)
         const mult = this.getWarheadMult(entity.weapon.warhead, entity.target.stats.armor);
+        const houseBias = HOUSE_FIREPOWER_BIAS[entity.house] ?? 1.0;
         // If warhead does 0% vs this armor (e.g. Organic vs vehicles), skip entirely
-        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier));
+        let damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier * houseBias));
+        // C3: MinDamage/MaxDamage rules (C++ combat.cpp:122-127)
+        // MinDamage guarantee: if target is adjacent (within 2 cells), minimum 1 damage regardless
+        // MaxDamage cap: no single hit exceeds target's remaining HP + 50% (prevents excessive overkill)
+        if (damage > 0) {
+          const targetDist = worldDist(entity.pos, entity.target.pos);
+          if (targetDist <= CELL_SIZE * 2) damage = Math.max(damage, 1);
+          damage = Math.min(damage, Math.round(entity.target.hp * 1.5));
+        }
         if (damage <= 0) {
           entity.target = null; // can't hurt this target, give up
           return;
@@ -2754,9 +2845,10 @@ export class Game {
             });
           }
 
-          // Impact explosion at scattered impact point
+          // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
+          const impactSprite = WARHEAD_PROPS[entity.weapon.warhead]?.explosionSet ?? 'veh-hit1';
           this.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0, maxFrames: 17, size: 8,
-            sprite: 'veh-hit1', spriteStart: 0 });
+            sprite: impactSprite, spriteStart: 0 });
         }
 
       }
@@ -2780,7 +2872,8 @@ export class Game {
       if (dist2 <= entity.weapon2.range) {
         entity.attackCooldown2 = entity.weapon2.rof;
         const mult2 = this.getWarheadMult(entity.weapon2.warhead, entity.target.stats.armor);
-        const dmg2 = mult2 <= 0 ? 0 : Math.max(1, Math.round(entity.weapon2.damage * mult2 * entity.damageMultiplier));
+        const houseBias2 = HOUSE_FIREPOWER_BIAS[entity.house] ?? 1.0;
+        const dmg2 = mult2 <= 0 ? 0 : Math.max(1, Math.round(entity.weapon2.damage * mult2 * entity.damageMultiplier * houseBias2));
 
         // Skip secondary weapon if it can't hurt this target
         if (dmg2 <= 0) {
@@ -2825,19 +2918,38 @@ export class Game {
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
   }
 
-  /** Hunt mode — move toward target and attack */
+  /** Hunt mode — move toward target and attack (C++ foot.cpp:654-703)
+   *  Actively calls Target_Something_Nearby when target is null or dead. */
   private updateHunt(entity: Entity): void {
     if (!entity.target?.alive) {
       entity.target = null;
-      // If we have a pending moveTarget from attack-move, resume moving
-      if (entity.moveTarget) {
-        entity.mission = Mission.MOVE;
-        entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true);
-        entity.pathIndex = 0;
-      } else {
-        entity.mission = this.idleMission(entity);
+      // C++ foot.cpp:654-703 — Hunt actively scans for new targets with extended range
+      const huntRange = entity.stats.sight * 2; // hunt has wider scan than guard
+      const ec = entity.cell;
+      let bestTarget: Entity | null = null;
+      let bestScore = -Infinity;
+      for (const other of this.entities) {
+        if (!other.alive || this.entitiesAllied(entity, other)) continue;
+        const dist = worldDist(entity.pos, other.pos);
+        if (dist > huntRange) continue;
+        if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
+        const score = this.threatScore(entity, other, dist);
+        if (score > bestScore) { bestScore = score; bestTarget = other; }
       }
-      return;
+      if (bestTarget) {
+        // Found a new target — continue hunting
+        entity.target = bestTarget;
+      } else {
+        // No targets found — resume move or return to idle
+        if (entity.moveTarget) {
+          entity.mission = Mission.MOVE;
+          entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true);
+          entity.pathIndex = 0;
+        } else {
+          entity.mission = this.idleMission(entity);
+        }
+        return;
+      }
     }
 
     if (entity.inRange(entity.target)) {
@@ -2882,7 +2994,9 @@ export class Game {
       entity.attackCooldown--;
     }
 
-    if (this.tick - entity.lastGuardScan < 15) return;
+    // A3: Type-specific scan delays (C++ foot.cpp:589-612)
+    const guardScanDelay = entity.stats.scanDelay ?? 15;
+    if (this.tick - entity.lastGuardScan < guardScanDelay) return;
     entity.lastGuardScan = this.tick;
 
     // Medic auto-heal: find most damaged friendly infantry in range
@@ -3018,16 +3132,24 @@ export class Game {
   /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
   private updateAreaGuard(entity: Entity): void {
     entity.animState = AnimState.IDLE;
-    if (this.tick - entity.lastGuardScan < 15) return;
+    // A3: Type-specific scan delays (C++ foot.cpp:589-612)
+    const areaGuardScanDelay = entity.stats.scanDelay ?? 15;
+    if (this.tick - entity.lastGuardScan < areaGuardScanDelay) return;
     entity.lastGuardScan = this.tick;
 
     const origin = entity.guardOrigin ?? entity.pos;
-    const ec = entity.cell;
-    const scanRange = entity.stats.sight * 1.5;
+    // A5: Scan from home position (C++ foot.cpp:967 — temporarily swaps coords)
+    // Use origin position for distance checks so guards defend their post, not where they wandered
+    const scanPos = origin;
+    const scanCell = worldToCell(scanPos.x, scanPos.y);
+    // A4: Area guard configurable range (C++ Threat_Range(1)/2 from origin)
+    const guardRange = entity.stats.guardRange ?? entity.stats.sight;
+    const scanRange = guardRange * 1.5;
 
-    // If too far from origin (>8 cells), return home — but still attack enemies en route
+    // If too far from origin (> guardRange cells), return home — but still attack enemies en route
     const distFromOrigin = worldDist(entity.pos, origin);
-    if (distFromOrigin > 8) {
+    const ec = entity.cell;
+    if (distFromOrigin > guardRange) {
       // Check for enemies while returning
       for (const other of this.entities) {
         if (!other.alive || this.entitiesAllied(entity, other)) continue;
@@ -3050,15 +3172,16 @@ export class Game {
       return;
     }
 
-    // Look for enemies within scan range — use threat scoring
+    // A5: Look for enemies within scan range from HOME position (C++ foot.cpp:967)
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
     for (const other of this.entities) {
       if (!other.alive || this.entitiesAllied(entity, other)) continue;
-      const dist = worldDist(entity.pos, other.pos);
+      // A5: Use scanPos (home) for distance check, not entity's current position
+      const dist = worldDist(scanPos, other.pos);
       if (dist > scanRange) continue;
       const oc = other.cell;
-      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
+      if (!this.map.hasLineOfSight(scanCell.cx, scanCell.cy, oc.cx, oc.cy)) continue;
       const score = this.threatScore(entity, other, dist);
       if (score > bestScore) { bestScore = score; bestTarget = other; }
     }
@@ -3145,7 +3268,8 @@ export class Game {
       if (entity.attackCooldown <= 0 && entity.weapon) {
         // Scale damage: base 0.15× multiplier calibrated for 256-HP structures, scale with maxHp
         const hpScale = s.maxHp / 256;
-        const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale));
+        const structHouseBias = HOUSE_FIREPOWER_BIAS[entity.house] ?? 1.0;
+        const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale * structHouseBias));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
         entity.isInRecoilState = true;
@@ -3156,10 +3280,12 @@ export class Game {
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
           muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
         });
+        // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
+        const structImpactSprite = WARHEAD_PROPS[entity.weapon.warhead]?.explosionSet ?? 'veh-hit1';
         this.effects.push({
           type: 'explosion', x: structPos.x, y: structPos.y,
           frame: 0, maxFrames: 10, size: 8,
-          sprite: 'veh-hit1', spriteStart: 0,
+          sprite: structImpactSprite, spriteStart: 0,
         });
         if (destroyed) {
           if (this.isPlayerControlled(entity)) this.killCount++;
@@ -3227,9 +3353,11 @@ export class Game {
           type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
           startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
         });
+        // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
+        const ffImpactSprite = WARHEAD_PROPS[entity.weapon.warhead]?.explosionSet ?? 'veh-hit1';
         this.effects.push({
           type: 'explosion', x: impactX, y: impactY,
-          frame: 0, maxFrames: 17, size: 8, sprite: 'veh-hit1', spriteStart: 0,
+          frame: 0, maxFrames: 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,
         });
         const tc = worldToCell(impactX, impactY);
         this.map.addDecal(tc.cx, tc.cy, 3, 0.3);
@@ -3336,7 +3464,9 @@ export class Game {
           });
           this.effects.push({
             type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
-            frame: 0, maxFrames: 10, size: 6, sprite: 'veh-hit1', spriteStart: 0,
+            frame: 0, maxFrames: 10, size: 6,
+            // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
+            sprite: WARHEAD_PROPS[wh]?.explosionSet ?? 'veh-hit1', spriteStart: 0,
           });
           this.playSoundAt('machinegun', sx, sy);
         }
@@ -3460,7 +3590,10 @@ export class Game {
   private threatScore(scanner: Entity, target: Entity, dist: number): number {
     const isTargetAttackingAlly = !!(target.target && target.mission === Mission.ATTACK &&
       this.entitiesAllied(scanner, target.target));
-    return computeThreatScore(scanner, target, dist, isTargetAttackingAlly);
+    // A9: Closing speed — positive means target is approaching (approximated via prevPos)
+    const prevDist = worldDist(scanner.pos, target.prevPos);
+    const closingSpeed = prevDist - dist;
+    return computeThreatScore(scanner, target, dist, isTargetAttackingAlly, closingSpeed);
   }
 
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
@@ -3468,6 +3601,15 @@ export class Game {
     const overridden = this.warheadOverrides[warhead];
     if (overridden) return overridden[armorIdx] ?? 1;
     return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
+  }
+
+  /** M2: Damage-based speed reduction (C++ drive.cpp ConditionYellow/Red thresholds).
+   *  50% HP → 75% speed, 25% HP → 50% speed. */
+  private damageSpeedFactor(entity: Entity): number {
+    const ratio = entity.hp / entity.maxHp;
+    if (ratio <= 0.25) return 0.5;   // ConditionRed: heavily damaged
+    if (ratio <= 0.5) return 0.75;   // ConditionYellow: damaged
+    return 1.0;
   }
 
   /** Check if two houses are allied */
@@ -3496,6 +3638,8 @@ export class Game {
     // Don't interrupt scripted team missions (except HUNT which already attacks)
     if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
     victim.target = attacker;
+    victim.mission = Mission.ATTACK;
+    victim.animState = AnimState.ATTACK;
   }
 
   /** Infantry scatter: push infantry slightly away from attacker on direct hit.
@@ -3546,12 +3690,25 @@ export class Game {
     for (const proj of this.inflightProjectiles) {
       proj.currentFrame++;
 
-      // Partial tracking: blend launch target pos with current pos (50% tracking)
+      // C9/C10: Homing projectile tracking (C++ bullet.cpp:368,517)
+      // projectileROT = homing turn rate. C10: homing updates every other frame.
       const target = this.entityById.get(proj.targetId);
       if (target && target.alive) {
-        const t = 0.5; // tracking factor
-        proj.impactX += (target.pos.x - proj.impactX) * t * (1 / proj.travelFrames);
-        proj.impactY += (target.pos.y - proj.impactY) * t * (1 / proj.travelFrames);
+        const rot = proj.weapon.projectileROT ?? 0;
+        if (rot > 0) {
+          // C10: Only update homing every other frame (C++ bullet.cpp:368)
+          if (proj.currentFrame % 2 === 0) {
+            // Homing: strong tracking based on ROT (higher ROT = better tracking)
+            const trackFactor = Math.min(1.0, rot * 0.15);
+            proj.impactX += (target.pos.x - proj.impactX) * trackFactor;
+            proj.impactY += (target.pos.y - proj.impactY) * trackFactor;
+          }
+        } else {
+          // Non-homing: weak partial tracking (50% blend over travel time)
+          const t = 0.5;
+          proj.impactX += (target.pos.x - proj.impactX) * t * (1 / proj.travelFrames);
+          proj.impactY += (target.pos.y - proj.impactY) * t * (1 / proj.travelFrames);
+        }
       }
 
       if (proj.currentFrame >= proj.travelFrames) {
@@ -3608,9 +3765,10 @@ export class Game {
         );
       }
 
-      // Impact explosion effect
+      // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
+      const projImpactSprite = WARHEAD_PROPS[proj.weapon.warhead]?.explosionSet ?? 'veh-hit1';
       this.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
-        frame: 0, maxFrames: 17, size: 8, sprite: 'veh-hit1', spriteStart: 0 });
+        frame: 0, maxFrames: 17, size: 8, sprite: projImpactSprite, spriteStart: 0 });
     }
   }
 
@@ -3630,8 +3788,11 @@ export class Game {
       const dist = worldDist(center, other.pos);
       if (dist > splashRange) continue;
 
-      // Splash damage falls off linearly with distance (100% at center, 25% at edge)
-      const falloff = 1 - (dist / splashRange) * 0.75;
+      // C6: SpreadFactor falloff (C++ warhead.cpp:72) — shapes splash damage curve
+      // spreadFactor 1=linear, 2=quadratic (concentrated center), 3=cubic (tight center)
+      const spreadFactor = WARHEAD_META[weapon.warhead]?.spreadFactor ?? 1;
+      const ratio = dist / splashRange;
+      const falloff = Math.pow(1 - ratio, spreadFactor);
       const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
       if (mult <= 0) continue; // warhead does 0% vs this armor
       const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5));
