@@ -5,15 +5,17 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from './jsonl-store';
+import type { ChatbotSessionState } from './chatbot/types';
 
 // ---- Types ----
 
 export interface ChatMessage {
   id: string;
   sessionId: string;
-  role: 'customer' | 'agent' | 'system';
+  role: 'customer' | 'agent' | 'system' | 'bot';
   body: string;
   timestamp: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ChatSession {
@@ -27,6 +29,7 @@ export interface ChatSession {
   agentTyping: boolean;
   customerTyping: boolean;
   ticketId?: string;
+  botState?: ChatbotSessionState;
 }
 
 // ---- JSONL persistence ----
@@ -122,6 +125,7 @@ export function addMessage(
   sessionId: string,
   role: ChatMessage['role'],
   body: string,
+  metadata?: Record<string, unknown>,
 ): ChatMessage | null {
   const store = getStore();
   const session = store.get(sessionId);
@@ -134,6 +138,7 @@ export function addMessage(
     body,
     timestamp: Date.now(),
   };
+  if (metadata) message.metadata = metadata;
 
   session.messages.push(message);
   session.lastActivity = Date.now();
@@ -153,6 +158,21 @@ export function addMessage(
   store.set(sessionId, session);
   persistSessions(store);
   return message;
+}
+
+// ---- Bot state operations ----
+
+export function setBotState(
+  sessionId: string,
+  botState: ChatbotSessionState | undefined,
+): void {
+  const store = getStore();
+  const session = store.get(sessionId);
+  if (!session) return;
+
+  session.botState = botState;
+  store.set(sessionId, session);
+  persistSessions(store);
 }
 
 export function getMessages(

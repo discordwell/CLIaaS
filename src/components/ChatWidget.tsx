@@ -7,9 +7,15 @@ import { useState, useEffect, useRef, useCallback } from "react";
 interface ChatMessage {
   id: string;
   sessionId: string;
-  role: "customer" | "agent" | "system";
+  role: "customer" | "agent" | "system" | "bot";
   body: string;
   timestamp: number;
+  metadata?: Record<string, unknown>;
+}
+
+interface ButtonOption {
+  label: string;
+  nextNodeId: string;
 }
 
 interface PollResponse {
@@ -145,20 +151,16 @@ export default function ChatWidget() {
     }
   }
 
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    const body = input.trim();
-    if (!body || !sessionId || sending) return;
+  async function sendCustomerMessage(text: string, focusAfter = false) {
+    if (!sessionId || sending) return;
 
     setSending(true);
-    setInput("");
 
-    // Optimistic update
     const optimisticMsg: ChatMessage = {
       id: `temp-${Date.now()}`,
       sessionId,
       role: "customer",
-      body,
+      body: text,
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, optimisticMsg]);
@@ -171,24 +173,40 @@ export default function ChatWidget() {
           action: "message",
           sessionId,
           role: "customer",
-          body,
+          body: text,
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        // Replace optimistic message with server response
         setMessages((prev) =>
           prev.map((m) => (m.id === optimisticMsg.id ? data.message : m)),
         );
         lastTimestampRef.current = data.message.timestamp;
+
+        if (data.botMessage) {
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            if (existingIds.has(data.botMessage.id)) return prev;
+            return [...prev, data.botMessage];
+          });
+          lastTimestampRef.current = data.botMessage.timestamp;
+        }
       }
     } catch {
       // Keep optimistic message, it will be deduplicated on next poll
     } finally {
       setSending(false);
-      inputRef.current?.focus();
+      if (focusAfter) inputRef.current?.focus();
     }
+  }
+
+  async function handleSendMessage(e: React.FormEvent) {
+    e.preventDefault();
+    const body = input.trim();
+    if (!body) return;
+    setInput("");
+    await sendCustomerMessage(body, true);
   }
 
   async function handleCloseChat() {
@@ -209,6 +227,10 @@ export default function ChatWidget() {
     }
 
     setStatus("closed");
+  }
+
+  async function handleSendBotButton(label: string) {
+    await sendCustomerMessage(label);
   }
 
   function handleMinimize() {
@@ -455,17 +477,34 @@ export default function ChatWidget() {
             ) : (
               <>
                 <div className="mb-0.5 font-mono text-[10px] font-bold uppercase text-zinc-400">
-                  {msg.role === "customer" ? "You" : "Agent"}
+                  {msg.role === "customer" ? "You" : msg.role === "bot" ? "Bot" : "Agent"}
                 </div>
                 <div
                   className={`max-w-[85%] border-2 px-3 py-2 text-sm ${
                     msg.role === "customer"
                       ? "border-zinc-950 bg-zinc-950 text-white"
-                      : "border-zinc-300 bg-zinc-50 text-zinc-900"
+                      : msg.role === "bot"
+                        ? "border-indigo-300 bg-indigo-50 text-zinc-900"
+                        : "border-zinc-300 bg-zinc-50 text-zinc-900"
                   }`}
                 >
                   {msg.body}
                 </div>
+                {/* Bot button chips */}
+                {msg.metadata?.buttons && (
+                  <div className="mt-1.5 flex max-w-[85%] flex-wrap gap-1.5">
+                    {(msg.metadata.buttons as ButtonOption[]).map((btn) => (
+                      <button
+                        key={btn.label}
+                        onClick={() => handleSendBotButton(btn.label)}
+                        disabled={sending || status === "closed"}
+                        className="border-2 border-indigo-400 bg-white px-3 py-1 font-mono text-xs font-bold text-indigo-600 transition-colors hover:bg-indigo-50 disabled:opacity-50"
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-0.5 font-mono text-[10px] text-zinc-300">
                   {new Date(msg.timestamp).toLocaleTimeString([], {
                     hour: "2-digit",

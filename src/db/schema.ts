@@ -1102,6 +1102,28 @@ export const ticketEvents = pgTable(
   }),
 );
 
+// ---- Chatbot Flows ----
+
+export const chatbots = pgTable(
+  'chatbots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    flow: jsonb('flow').notNull(), // serialized ChatbotFlow node map + rootNodeId
+    enabled: boolean('enabled').notNull().default(false),
+    greeting: text('greeting'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    chatbotsWorkspaceEnabledIdx: index('chatbots_workspace_enabled_idx').on(
+      table.workspaceId,
+      table.enabled,
+    ),
+  }),
+);
+
 // ---- GDPR Deletion Requests ----
 
 export const gdprDeletionRequests = pgTable(

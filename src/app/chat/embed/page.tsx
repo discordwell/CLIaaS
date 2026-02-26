@@ -7,9 +7,15 @@ import { useState, useEffect, useRef, useCallback } from "react";
 interface ChatMessage {
   id: string;
   sessionId: string;
-  role: "customer" | "agent" | "system";
+  role: "customer" | "agent" | "system" | "bot";
   body: string;
   timestamp: number;
+  metadata?: Record<string, unknown>;
+}
+
+interface ButtonOption {
+  label: string;
+  nextNodeId: string;
 }
 
 interface PollResponse {
@@ -157,19 +163,16 @@ export default function ChatEmbedPage() {
     }
   }
 
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    const body = input.trim();
-    if (!body || !sessionId || sending) return;
+  async function sendCustomerMessage(text: string, focusAfter = false) {
+    if (!sessionId || sending) return;
 
     setSending(true);
-    setInput("");
 
     const optimisticMsg: ChatMessage = {
       id: `temp-${Date.now()}`,
       sessionId,
       role: "customer",
-      body,
+      body: text,
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, optimisticMsg]);
@@ -182,7 +185,7 @@ export default function ChatEmbedPage() {
           action: "message",
           sessionId,
           role: "customer",
-          body,
+          body: text,
         }),
       });
 
@@ -192,13 +195,34 @@ export default function ChatEmbedPage() {
           prev.map((m) => (m.id === optimisticMsg.id ? data.message : m)),
         );
         lastTimestampRef.current = data.message.timestamp;
+
+        if (data.botMessage) {
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            if (existingIds.has(data.botMessage.id)) return prev;
+            return [...prev, data.botMessage];
+          });
+          lastTimestampRef.current = data.botMessage.timestamp;
+        }
       }
     } catch {
       // Keep optimistic
     } finally {
       setSending(false);
-      inputRef.current?.focus();
+      if (focusAfter) inputRef.current?.focus();
     }
+  }
+
+  async function handleSendMessage(e: React.FormEvent) {
+    e.preventDefault();
+    const body = input.trim();
+    if (!body) return;
+    setInput("");
+    await sendCustomerMessage(body, true);
+  }
+
+  async function handleSendBotButton(label: string) {
+    await sendCustomerMessage(label);
   }
 
   async function handleCloseChat() {
@@ -557,6 +581,7 @@ export default function ChatEmbedPage() {
         {messages.map((msg) => {
           const isCustomer = msg.role === "customer";
           const isSystem = msg.role === "system";
+          const isBot = msg.role === "bot";
 
           return (
             <div
@@ -595,14 +620,14 @@ export default function ChatEmbedPage() {
                       color: "#a1a1aa",
                     }}
                   >
-                    {isCustomer ? "You" : "Agent"}
+                    {isCustomer ? "You" : isBot ? "Bot" : "Agent"}
                   </div>
                   <div
                     style={{
                       maxWidth: "85%",
                       border: "2px solid",
-                      borderColor: isCustomer ? "#09090b" : "#d4d4d8",
-                      backgroundColor: isCustomer ? "#09090b" : "#fafafa",
+                      borderColor: isCustomer ? "#09090b" : isBot ? "#a5b4fc" : "#d4d4d8",
+                      backgroundColor: isCustomer ? "#09090b" : isBot ? "#eef2ff" : "#fafafa",
                       color: isCustomer ? "#fff" : "#09090b",
                       padding: "8px 12px",
                       fontSize: "13px",
@@ -610,6 +635,31 @@ export default function ChatEmbedPage() {
                   >
                     {msg.body}
                   </div>
+                  {/* Bot button chips */}
+                  {msg.metadata?.buttons && (
+                    <div style={{ marginTop: "6px", display: "flex", flexWrap: "wrap", gap: "6px", maxWidth: "85%" }}>
+                      {(msg.metadata.buttons as ButtonOption[]).map((btn) => (
+                        <button
+                          key={btn.label}
+                          onClick={() => handleSendBotButton(btn.label)}
+                          disabled={sending || status === "closed"}
+                          style={{
+                            border: "2px solid #818cf8",
+                            backgroundColor: "#fff",
+                            color: "#4f46e5",
+                            padding: "4px 12px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: sending || status === "closed" ? "not-allowed" : "pointer",
+                            fontFamily: "inherit",
+                            opacity: sending || status === "closed" ? 0.5 : 1,
+                          }}
+                        >
+                          {btn.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div
                     style={{
                       marginTop: "2px",
