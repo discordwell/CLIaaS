@@ -18,6 +18,9 @@ const ALL_WRITE_TOOLS = [
   'ai_resolve',
   'survey_config',
   'survey_send',
+  'workflow_create',
+  'workflow_toggle',
+  'workflow_delete',
 ];
 
 export function loadScopes(): MCPScopeConfig {

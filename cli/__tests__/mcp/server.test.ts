@@ -127,7 +127,7 @@ describe('MCP Server', () => {
         expect(toolsResponse.result).toBeDefined();
 
         const tools = toolsResponse.result!.tools ?? [];
-        expect(tools.length).toBe(37);
+        expect(tools.length).toBe(43);
 
         const toolNames = tools.map((t: { name: string }) => t.name).sort();
         expect(toolNames).toEqual([
@@ -168,6 +168,12 @@ describe('MCP Server', () => {
           'tickets_show',
           'triage_batch',
           'triage_ticket',
+          'workflow_create',
+          'workflow_delete',
+          'workflow_export',
+          'workflow_get',
+          'workflow_list',
+          'workflow_toggle',
         ]);
       } finally {
         child.kill();

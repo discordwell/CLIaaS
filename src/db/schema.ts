@@ -1124,6 +1124,29 @@ export const chatbots = pgTable(
   }),
 );
 
+// ---- Workflows (visual blueprint builder) ----
+
+export const workflows = pgTable(
+  'workflows',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    flow: jsonb('flow').notNull(), // serialized { nodes, transitions, entryNodeId }
+    enabled: boolean('enabled').notNull().default(false),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    workflowsWorkspaceEnabledIdx: index('workflows_workspace_enabled_idx').on(
+      table.workspaceId,
+      table.enabled,
+    ),
+  }),
+);
+
 // ---- GDPR Deletion Requests ----
 
 export const gdprDeletionRequests = pgTable(

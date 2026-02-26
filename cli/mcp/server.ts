@@ -13,6 +13,7 @@ import { registerActionTools } from './tools/actions.js';
 import { registerSyncTools } from './tools/sync.js';
 import { registerSurveyTools } from './tools/surveys.js';
 import { registerChatbotTools } from './tools/chatbots.js';
+import { registerWorkflowTools } from './tools/workflows.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -32,6 +33,7 @@ registerActionTools(server);
 registerSyncTools(server);
 registerSurveyTools(server);
 registerChatbotTools(server);
+registerWorkflowTools(server);
 
 // Register resources and prompts
 registerResources(server);
