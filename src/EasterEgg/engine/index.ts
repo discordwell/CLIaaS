@@ -300,6 +300,9 @@ export class Game {
     // Initial fog of war reveal
     this.updateFogOfWar();
 
+    // H5: Clamp camera to playable bounds, not full 128x128 map
+    this.camera.setPlayableBounds(this.map.boundsX, this.map.boundsY, this.map.boundsW, this.map.boundsH);
+
     // Center camera on player start
     const playerUnits = this.entities.filter(e => e.isPlayerUnit);
     if (playerUnits.length > 0) {
@@ -546,6 +549,33 @@ export class Game {
             entity.alive = false;
             entity.mission = Mission.DIE;
             this.unitsLeftMap++;
+          }
+        }
+      }
+    }
+
+    // H6: Infantry scatter from approaching vehicles (C++ techno.cpp)
+    // Every 4 ticks, check if a moving vehicle is in the same cell as idle infantry
+    if (this.tick % 4 === 0) {
+      for (const inf of this.entities) {
+        if (!inf.alive || !inf.stats.isInfantry || inf.isAnt) continue;
+        if (inf.mission !== Mission.GUARD && inf.mission !== Mission.AREA_GUARD) continue;
+        const ic = inf.cell;
+        for (const veh of this.entities) {
+          if (!veh.alive || veh.stats.isInfantry || veh.id === inf.id) continue;
+          if (!veh.moveTarget && veh.mission !== Mission.MOVE && veh.mission !== Mission.HUNT) continue;
+          const vc = veh.cell;
+          if (ic.cx === vc.cx && ic.cy === vc.cy) {
+            // Scatter infantry to adjacent passable cell
+            const angle = Math.atan2(inf.pos.y - veh.pos.y, inf.pos.x - veh.pos.x);
+            const sx = inf.pos.x + Math.cos(angle) * CELL_SIZE * 0.8;
+            const sy = inf.pos.y + Math.sin(angle) * CELL_SIZE * 0.8;
+            const sc = worldToCell(sx, sy);
+            if (this.map.isPassable(sc.cx, sc.cy)) {
+              inf.pos.x = sx;
+              inf.pos.y = sy;
+            }
+            break;
           }
         }
       }
@@ -3463,9 +3493,14 @@ export class Game {
         if (Game.TURRETED_STRUCTURES.has(s.type)) {
           s.desiredTurretDir = directionTo(structPos, bestTarget.pos);
         }
-        s.attackCooldown = s.weapon.rof;
+        // H1: Buildings with Ammo>1 fire rapidly (1-tick rearm) then recharge (C++ techno.cpp:2861)
+        if (s.ammo > 0) {
+          s.ammo--;
+          s.attackCooldown = s.ammo > 0 ? 1 : s.weapon.rof; // rapid-fire until last shot
+        } else {
+          s.attackCooldown = s.weapon.rof; // unlimited ammo (-1) uses normal ROF
+        }
         if (Game.TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
-        if (s.ammo > 0) s.ammo--; // consume ammo (ignores -1 unlimited)
         // Apply warhead-vs-armor multiplier
         const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
         const mult = this.getWarheadMult(wh, bestTarget.stats.armor);
@@ -3619,7 +3654,6 @@ export class Game {
     }
   }
 
-  /** Get warhead-vs-armor damage multiplier, respecting per-scenario overrides */
   /** Calculate threat score for guard targeting — delegates to pure function in entity.ts */
   private threatScore(scanner: Entity, target: Entity, dist: number): number {
     const isTargetAttackingAlly = !!(target.target && target.mission === Mission.ATTACK &&
@@ -3820,8 +3854,8 @@ export class Game {
 
     for (const other of this.entities) {
       if (!other.alive || other.id === primaryTargetId) continue;
+      // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
       const isFriendly = this.isAllied(other.house, attackerHouse);
-      if (isFriendly) continue; // No splash damage to allied units
       const dist = worldDist(center, other.pos);
       if (dist > splashRange) continue;
 
@@ -3833,7 +3867,8 @@ export class Game {
       const falloff = Math.pow(1 - ratio, 1 / spreadFactor);
       const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
       if (mult <= 0) continue; // warhead does 0% vs this armor
-      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff * 0.5));
+      // H3: No 0.5x multiplier — C++ splash uses damage / distance directly
+      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff));
       const killed = other.takeDamage(splashDmg, weapon.warhead);
 
       // Retaliation from splash damage

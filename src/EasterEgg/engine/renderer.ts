@@ -1968,22 +1968,31 @@ export class Renderer {
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
 
         if (vis === 0) {
-          // Shroud — solid black with edge blending
-          ctx.fillStyle = '#000';
-          ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-
-          // Soften edges where shroud meets revealed terrain
-          // Check 4 cardinal neighbors for visibility transitions
+          // H4: Shroud — solid black with soft gradient edges toward revealed terrain
+          // Check which neighbors are revealed to create gradient transitions
           const vN = map.getVisibility(cx, cy - 1);
           const vS = map.getVisibility(cx, cy + 1);
           const vW = map.getVisibility(cx - 1, cy);
           const vE = map.getVisibility(cx + 1, cy);
+          const hasRevealedNeighbor = vN > 0 || vS > 0 || vW > 0 || vE > 0;
 
-          ctx.fillStyle = 'rgba(0,0,0,0.6)';
-          if (vN > 0) ctx.fillRect(screen.x, screen.y - half, CELL_SIZE, half);
-          if (vS > 0) ctx.fillRect(screen.x, screen.y + CELL_SIZE, CELL_SIZE, half);
-          if (vW > 0) ctx.fillRect(screen.x - half, screen.y, half, CELL_SIZE);
-          if (vE > 0) ctx.fillRect(screen.x + CELL_SIZE, screen.y, half, CELL_SIZE);
+          if (!hasRevealedNeighbor) {
+            // Fully surrounded by shroud — solid black
+            ctx.fillStyle = '#000';
+            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+          } else {
+            // Edge cell: fill with softer black, then darken the interior half
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+            // Darken the non-edge halves to near-solid black
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            if (vN > 0) ctx.fillRect(screen.x, screen.y + half, CELL_SIZE, half);
+            else        ctx.fillRect(screen.x, screen.y, CELL_SIZE, half);
+            if (vS > 0) ctx.fillRect(screen.x, screen.y, CELL_SIZE, half);
+            if (vW > 0) ctx.fillRect(screen.x + half, screen.y, half, CELL_SIZE);
+            else        ctx.fillRect(screen.x, screen.y, half, CELL_SIZE);
+            if (vE > 0) ctx.fillRect(screen.x, screen.y, half, CELL_SIZE);
+          }
         } else {
           // Fog — semi-transparent dark overlay
           ctx.fillStyle = 'rgba(0,0,0,0.55)';

@@ -8,8 +8,6 @@ import { CELL_SIZE, MAP_CELLS } from './types';
 
 const EDGE_SCROLL_MARGIN = 12; // pixels from screen edge to trigger scroll
 const SCROLL_SPEED = 12;       // pixels per tick
-const MAP_PIXEL_SIZE = MAP_CELLS * CELL_SIZE;
-
 export class Camera {
   /** Top-left corner of the viewport in world coordinates */
   x = 0;
@@ -19,9 +17,23 @@ export class Camera {
   viewWidth: number;
   viewHeight: number;
 
+  /** H5: Playable area bounds in pixels (defaults to full 128x128 map) */
+  private boundsMinX = 0;
+  private boundsMinY = 0;
+  private boundsMaxX = MAP_CELLS * CELL_SIZE;
+  private boundsMaxY = MAP_CELLS * CELL_SIZE;
+
   constructor(viewWidth: number, viewHeight: number) {
     this.viewWidth = viewWidth;
     this.viewHeight = viewHeight;
+  }
+
+  /** Set playable area bounds (from scenario map bounds) */
+  setPlayableBounds(bx: number, by: number, bw: number, bh: number): void {
+    this.boundsMinX = bx * CELL_SIZE;
+    this.boundsMinY = by * CELL_SIZE;
+    this.boundsMaxX = (bx + bw) * CELL_SIZE;
+    this.boundsMaxY = (by + bh) * CELL_SIZE;
   }
 
   /** Center the camera on a world position */
@@ -81,11 +93,11 @@ export class Camera {
     );
   }
 
-  /** Clamp camera to map bounds */
+  /** Clamp camera to playable area bounds */
   private clamp(): void {
-    const maxX = MAP_PIXEL_SIZE - this.viewWidth;
-    const maxY = MAP_PIXEL_SIZE - this.viewHeight;
-    this.x = Math.max(0, Math.min(maxX, this.x));
-    this.y = Math.max(0, Math.min(maxY, this.y));
+    const maxX = this.boundsMaxX - this.viewWidth;
+    const maxY = this.boundsMaxY - this.viewHeight;
+    this.x = Math.max(this.boundsMinX, Math.min(maxX, this.x));
+    this.y = Math.max(this.boundsMinY, Math.min(maxY, this.y));
   }
 }
