@@ -230,7 +230,11 @@ export class Entity {
       this.type !== UnitType.V_APC && this.type !== UnitType.V_HARV &&
       this.type !== UnitType.V_MCV && this.type !== UnitType.V_ARTY &&
       this.type !== UnitType.V_JEEP && this.type !== UnitType.V_TRUK &&
-      this.type !== UnitType.V_TRAN && this.type !== UnitType.V_LST;
+      this.type !== UnitType.V_TRAN && this.type !== UnitType.V_LST &&
+      // CS/Aftermath expansion: non-turreted per C++ udata.cpp
+      this.type !== UnitType.V_STNK && this.type !== UnitType.V_CTNK &&
+      this.type !== UnitType.V_TTNK && this.type !== UnitType.V_QTNK &&
+      this.type !== UnitType.V_DTRK;
   }
 
   /** Turret sprite frame (frames 32-63 in the vehicle SHP) */

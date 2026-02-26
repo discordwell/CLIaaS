@@ -206,6 +206,15 @@
     "sheetWidth": 800,
     "sheetHeight": 780
   },
+  "stnk": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
   "piff": {
     "frameWidth": 9,
     "frameHeight": 13,

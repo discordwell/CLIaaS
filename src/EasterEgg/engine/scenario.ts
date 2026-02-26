@@ -605,22 +605,8 @@ function toHouse(name: string): House {
 
 /** Map INI unit type name to UnitType enum */
 function toUnitType(name: string): UnitType | null {
-  const map: Record<string, UnitType> = {
-    ANT1: UnitType.ANT1, ANT2: UnitType.ANT2, ANT3: UnitType.ANT3,
-    '1TNK': UnitType.V_1TNK, '2TNK': UnitType.V_2TNK, '3TNK': UnitType.V_3TNK,
-    '4TNK': UnitType.V_4TNK, JEEP: UnitType.V_JEEP, APC: UnitType.V_APC,
-    ARTY: UnitType.V_ARTY, HARV: UnitType.V_HARV, MCV: UnitType.V_MCV, TRUK: UnitType.V_TRUK,
-    E1: UnitType.I_E1, E2: UnitType.I_E2, E3: UnitType.I_E3, E4: UnitType.I_E4,
-    E6: UnitType.I_E6, DOG: UnitType.I_DOG, SPY: UnitType.I_SPY, MEDI: UnitType.I_MEDI, GNRL: UnitType.I_GNRL,
-    // Civilians
-    C1: UnitType.I_C1, C2: UnitType.I_C2, C3: UnitType.I_C3, C4: UnitType.I_C4, C5: UnitType.I_C5,
-    C6: UnitType.I_C6, C7: UnitType.I_C7, C8: UnitType.I_C8, C9: UnitType.I_C9, C10: UnitType.I_C10,
-    // Specialist infantry (CHAN = nest gas specialist in SCA03EA)
-    CHAN: UnitType.I_CHAN,
-    // Transports
-    TRAN: UnitType.V_TRAN, LST: UnitType.V_LST,
-  };
-  return map[name] ?? null;
+  // Derive from UNIT_STATS — any unit with stats defined can be spawned from INI
+  return UNIT_STATS[name]?.type ?? null;
 }
 
 /** Map house ID number to House enum (from RA house numbering) */

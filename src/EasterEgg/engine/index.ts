@@ -4871,8 +4871,13 @@ export class Game {
         this.evaMessages.push({ text: 'UNIT PROMOTED', tick: this.tick });
         break;
       case 'unit': {
-        // Spawn a random infantry unit nearby
-        const types = [UnitType.I_E1, UnitType.I_E2, UnitType.I_E3, UnitType.I_E4];
+        // Spawn a random unit nearby — includes expansion units
+        const types = [
+          UnitType.I_E1, UnitType.I_E2, UnitType.I_E3, UnitType.I_E4,
+          UnitType.I_SHOK, UnitType.I_MECH,          // CS/Aftermath infantry
+          UnitType.V_JEEP, UnitType.V_1TNK,            // base vehicles
+          UnitType.V_STNK, UnitType.V_CTNK,           // CS expansion vehicles
+        ];
         const uType = types[Math.floor(Math.random() * types.length)];
         const bonus = new Entity(uType, House.Spain, crate.x + CELL_SIZE, crate.y);
         bonus.mission = Mission.GUARD;

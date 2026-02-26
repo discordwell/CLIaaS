@@ -96,6 +96,15 @@ export enum UnitType {
   I_C6 = 'C6', I_C7 = 'C7', I_C8 = 'C8', I_C9 = 'C9', I_C10 = 'C10',
   // Specialist infantry
   I_CHAN = 'CHAN',  // Specialist (nest gas infantry for SCA03EA)
+  // Counterstrike/Aftermath expansion infantry
+  I_SHOK = 'SHOK', // Shock Trooper (electric weapon, CS expansion)
+  I_MECH = 'MECH', // Mechanic (repairs vehicles, Aftermath expansion)
+  // Counterstrike/Aftermath expansion vehicles
+  V_STNK = 'STNK', // Phase Transport (stealth APC)
+  V_CTNK = 'CTNK', // Chrono Tank (can teleport)
+  V_TTNK = 'TTNK', // Tesla Tank (electric weapon)
+  V_QTNK = 'QTNK', // M.A.D. Tank (seismic shockwave)
+  V_DTRK = 'DTRK', // Demolition Truck (kamikaze)
   // Transport vehicles
   V_TRAN = 'TRAN', // Chinook transport helicopter
   V_LST = 'LST',   // Landing ship transport
@@ -250,7 +259,7 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     idle:      { frame: 256, count: 14, jump: 0 },
     idle2:     { frame: 270, count: 18, jump: 0 },
   },
-  MEDI: { // MedicDoControls (idata.cpp:273)
+  MECH: { // MedicDoControls (idata.cpp:273) — Mechanic uses same anim set as Medic
     ready:     { frame: 0,   count: 1,  jump: 1 },
     walk:      { frame: 8,   count: 6,  jump: 6 },
     fire:      { frame: 56,  count: 28, jump: 0 },  // heal (non-directional)
@@ -263,6 +272,8 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     idle:      { frame: 178, count: 15, jump: 0 },
   },
 };
+// SHOK uses same sprite/animation as E7 (Shock Trooper = E7 unit type in C++)
+INFANTRY_ANIMS.SHOK = INFANTRY_ANIMS.E7;
 
 // Vehicle body rotation lookup table (BodyShape[32] from RA source)
 // Maps 32-step facing index to sprite frame index
@@ -384,7 +395,7 @@ export const WARHEAD_META: Record<WarheadType, WarheadMeta> = {
 // Unit stats from RULES.INI — real Red Alert values
 export const UNIT_STATS: Record<string, UnitStats> = {
   // Ants (from SCA scenario INI files)
-  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10 },
+  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 2, rot: 5, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10 },
   ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher', noMovingFire: true, scanDelay: 10 },
   ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap', noMovingFire: true, scanDelay: 10 },
   // Vehicles (RULES.INI values)
@@ -420,6 +431,15 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   C8: { type: UnitType.I_C8, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   C9: { type: UnitType.I_C9, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
   C10: { type: UnitType.I_C10, name: 'Civilian', image: 'e1', strength: 5, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null },
+  // Counterstrike/Aftermath expansion infantry
+  SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla' },
+  MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 70, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench' },
+  // Counterstrike/Aftermath expansion vehicles
+  STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 5 },
+  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: '2tnk', strength: 200, armor: 'heavy', speed: 7, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: '90mm' },
+  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: '4tnk', strength: 300, armor: 'heavy', speed: 5, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap' },
+  QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: '2tnk', strength: 200, armor: 'heavy', speed: 6, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null },
+  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'truk', strength: 100, armor: 'none', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5 },
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'truk', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8 },
@@ -445,8 +465,13 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5 },
   '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true },
   TeslaCannon:      { name: 'TeslaCannon',       damage: 75,  rof: 60, range: 5.0,  warhead: 'Super', splash: 1.0 },
-  // Ant weapons (from SCA scenario INI files)
-  Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super' },
+  // Counterstrike/Aftermath expansion weapons
+  PortaTesla:       { name: 'PortaTesla',        damage: 50,  rof: 60, range: 4.0,  warhead: 'Super', splash: 0.5 }, // Shock Trooper
+  GoodWrench:       { name: 'GoodWrench',        damage: -30, rof: 60, range: 1.83, warhead: 'Organic' },            // Mechanic (heals vehicles)
+  APTusk:           { name: 'APTusk',             damage: 25,  rof: 20, range: 4.5,  warhead: 'SA' },                 // Phase Transport MG
+  TTankZap:         { name: 'TTankZap',           damage: 80,  rof: 80, range: 5.0,  warhead: 'Super', splash: 1.0 }, // Tesla Tank
+  // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
+  Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'HollowPoint' }, // C++: Warhead=HollowPoint
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super' },
   FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8 },
   Napalm:           { name: 'Napalm',            damage: 60,  rof: 25, range: 1.75, warhead: 'Super' },
@@ -484,6 +509,12 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'ARTY', name: 'Artillery', cost: 600, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME' },
   { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied' },
   { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both' },
+  // Counterstrike/Aftermath expansion units
+  { type: 'SHOK', name: 'Shock Trpr', cost: 400, buildTime: 80, prerequisite: 'TENT', faction: 'soviet', techPrereq: 'STEK' },
+  { type: 'MECH', name: 'Mechanic', cost: 500, buildTime: 70, prerequisite: 'TENT', faction: 'both', techPrereq: 'FIX' },
+  { type: 'STNK', name: 'Phase Trns', cost: 1100, buildTime: 160, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
+  { type: 'CTNK', name: 'Chrono Tank', cost: 1200, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
+  { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK' },
   // Structures (from FACT) — faction-accurate
   { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true },
   { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'FACT', faction: 'both', isStructure: true },
