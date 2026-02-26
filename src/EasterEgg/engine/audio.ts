@@ -31,6 +31,12 @@ const MUSIC_TRACKS = [
   '15_smash',
 ];
 
+/** Calm tracks: ambient/exploration music (indices into MUSIC_TRACKS) */
+const CALM_TRACKS = new Set([1, 3, 4, 7, 10, 13]); // radio, roll_out, mud, run, workmen, vector
+
+/** Action tracks: combat music (indices into MUSIC_TRACKS) */
+const ACTION_TRACKS = new Set([0, 2, 5, 6, 8, 9, 11, 12, 14]); // hell_march, crush, twin_cannon, face_the_enemy, terminate, big_foot, militant_force, dense, smash
+
 /**
  * Music player — streams MP3 soundtrack files via HTML5 Audio.
  * Features: shuffled playlist, crossfade, volume/mute sync, pause/resume.
@@ -48,6 +54,9 @@ export class MusicPlayer {
   private pendingPlay = false; // play() called before probe completed
   private fadeTimer: ReturnType<typeof setInterval> | null = null;
   private trackName = ''; // current track display name
+  private combatMode = false;
+  private combatCooldown = 0; // ticks since combat ended (for cooldown)
+  private combatModeChangeTime = 0; // timestamp of last mode change
 
   constructor(basePath = '/ra/music') {
     this.basePath = basePath;
@@ -162,11 +171,11 @@ export class MusicPlayer {
   /** Advance to next track in playlist */
   private advance(): void {
     if (!this.playing) return;
-    this.playlistIndex++;
-    if (this.playlistIndex >= this.playlist.length) {
-      this.shuffle(); // reshuffle and loop
-    }
-    this.playTrack(this.playlist[this.playlistIndex]);
+    // In combat mode, pick from ACTION pool; in calm mode, pick from CALM pool
+    const pool = this.combatMode ? ACTION_TRACKS : CALM_TRACKS;
+    const poolArr = [...pool];
+    const trackIdx = poolArr[Math.floor(Math.random() * poolArr.length)];
+    this.playTrack(trackIdx);
   }
 
   /** Skip to next track */
@@ -230,6 +239,40 @@ export class MusicPlayer {
   /** Get current volume */
   getVolume(): number { return this.volume; }
 
+  /** Switch between calm and action music based on combat state */
+  setCombatMode(inCombat: boolean): void {
+    if (!this.available || !this.playing) return;
+    const now = Date.now();
+
+    if (inCombat && !this.combatMode) {
+      // Enter combat — crossfade to action track within 5 seconds
+      if (now - this.combatModeChangeTime < 5000) return; // debounce
+      this.combatMode = true;
+      this.combatModeChangeTime = now;
+      this.combatCooldown = 0;
+      // Find a random action track and switch to it
+      const actionIndices = [...ACTION_TRACKS];
+      const trackIdx = actionIndices[Math.floor(Math.random() * actionIndices.length)];
+      this.playTrack(trackIdx);
+    } else if (!inCombat && this.combatMode) {
+      // Leave combat with 30-second cooldown (called once per tick at 15fps)
+      this.combatCooldown++;
+      if (this.combatCooldown >= 450) { // 450 ticks = 30 seconds at 15fps
+        this.combatMode = false;
+        this.combatModeChangeTime = now;
+        // Switch to calm track
+        const calmIndices = [...CALM_TRACKS];
+        const trackIdx = calmIndices[Math.floor(Math.random() * calmIndices.length)];
+        this.playTrack(trackIdx);
+      }
+    } else if (!inCombat) {
+      this.combatCooldown = 0; // reset cooldown when not in combat mode
+    }
+  }
+
+  /** Whether combat mode is active */
+  get isCombatMode(): boolean { return this.combatMode; }
+
   /** Clean up */
   destroy(): void {
     this.stop();
@@ -251,7 +294,8 @@ export type SoundName =
   | 'eva_new_options' | 'eva_building' | 'repair' | 'sell'
   | 'victory_fanfare' | 'defeat_sting' | 'crate_pickup' | 'eva_mission_accomplished'
   | 'eva_reinforcements' | 'eva_mission_warning' | 'tesla_charge'
-  | 'sniper' | 'building_placed' | 'mammoth_cannon';
+  | 'sniper' | 'building_placed' | 'mammoth_cannon'
+  | 'eva_building_captured' | 'eva_insufficient_funds' | 'eva_silos_needed';
 
 /** Base path for extracted audio WAV files */
 const AUDIO_BASE_URL = '/ra/audio';
@@ -280,6 +324,7 @@ const SAMPLE_SOUND_NAMES: SoundName[] = [
   'eva_construction_complete', 'eva_unit_ready', 'eva_low_power',
   'eva_new_options', 'eva_building', 'eva_mission_accomplished',
   'eva_reinforcements', 'eva_mission_warning',
+  'eva_building_captured', 'eva_insufficient_funds', 'eva_silos_needed',
   // Victory / defeat
   'victory_fanfare', 'defeat_sting',
 ];
@@ -517,6 +562,9 @@ export class AudioManager {
       case 'sniper': this.synthSniper(t, out); break;
       case 'building_placed': this.synthBuildingPlaced(t, out); break;
       case 'mammoth_cannon': this.synthMammothCannon(t, out); break;
+      case 'eva_building_captured': this.synthEvaBuildingCaptured(t, out); break;
+      case 'eva_insufficient_funds': this.synthEvaInsufficientFunds(t, out); break;
+      case 'eva_silos_needed': this.synthEvaSilosNeeded(t, out); break;
     }
   }
 
@@ -1316,5 +1364,49 @@ export class AudioManager {
     ng.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
     n.connect(nf).connect(ng).connect(out);
     n.start(t); n.stop(t + 0.12);
+  }
+
+  private synthEvaBuildingCaptured(t: number, out: AudioNode): void {
+    // "Building captured" — triumphant ascending three-note sequence
+    const notes = [600, 800, 1000];
+    notes.forEach((freq, i) => {
+      const dt = t + i * 0.1;
+      const o = this.osc('square', freq);
+      const g = this.gain(0.12);
+      g.gain.setValueAtTime(0.12, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.1);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.1);
+    });
+  }
+
+  private synthEvaInsufficientFunds(t: number, out: AudioNode): void {
+    // "Insufficient funds" — descending negative two-note
+    const o1 = this.osc('sawtooth', 500);
+    const g1 = this.gain(0.12);
+    g1.gain.setValueAtTime(0.12, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o1.connect(g1).connect(out);
+    o1.start(t); o1.stop(t + 0.15);
+
+    const o2 = this.osc('sawtooth', 300);
+    const g2 = this.gain(0.12);
+    g2.gain.setValueAtTime(0.12, t + 0.18);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o2.connect(g2).connect(out);
+    o2.start(t + 0.18); o2.stop(t + 0.35);
+  }
+
+  private synthEvaSilosNeeded(t: number, out: AudioNode): void {
+    // "Silos needed" — urgent repeating warning tone
+    for (let i = 0; i < 3; i++) {
+      const dt = t + i * 0.12;
+      const o = this.osc('square', 700);
+      const g = this.gain(0.13);
+      g.gain.setValueAtTime(0.13, dt);
+      g.gain.exponentialRampToValueAtTime(0.001, dt + 0.1);
+      o.connect(g).connect(out);
+      o.start(dt); o.stop(dt + 0.1);
+    }
   }
 }

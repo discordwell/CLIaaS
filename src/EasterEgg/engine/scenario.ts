@@ -32,6 +32,13 @@ const TEVENT_GLOBAL_SET = 27;
 const TEVENT_GLOBAL_CLEAR = 28;
 const TEVENT_ALL_BRIDGES_DESTROYED = 31;
 const TEVENT_BUILDING_EXISTS = 32;
+const TEVENT_HOUSE_DISCOVERED = 3;
+const TEVENT_LOW_POWER = 15;
+const TEVENT_THIEVED = 17;
+const TEVENT_CROSS_HORIZONTAL = 21;
+const TEVENT_CROSS_VERTICAL = 22;
+const TEVENT_UNITS_DESTROYED = 26;
+const TEVENT_CREDITS = 30;
 
 // Trigger action types (TActionType — from TACTION.H)
 const TACTION_NONE = 0;
@@ -56,6 +63,11 @@ const TACTION_SET_GLOBAL = 28;
 const TACTION_CLEAR_GLOBAL = 29;
 const TACTION_CREEP_SHADOW = 31;
 const TACTION_DESTROY_OBJECT = 32;
+const TACTION_AIRSTRIKE = 9;
+const TACTION_NUKE = 10;
+const TACTION_REVEAL_MAP = 16;
+const TACTION_CENTER_VIEW = 18;
+const TACTION_CHANGE_HOUSE = 26;
 
 // Team mission types (TeamMissionType — from TEAMTYPE.H, exact numbering from RA source)
 const TMISSION_ATTACK = 0;       // Attack nearest enemy near waypoint
@@ -697,6 +709,8 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
   // Bridge structures (destroyable)
   BARL: [1, 1], BRL3: [1, 1],
+  // Walls (1x1)
+  SBAG: [1, 1], FENC: [1, 1], BARB: [1, 1], BRIK: [1, 1],
 };
 
 // Structure max HP overrides (default is 256)
@@ -1276,6 +1290,8 @@ export interface TriggerGameState {
   destroyedTriggerNames: Set<string>;
   // Per-house alive status (for ALL_DESTROYED — RA house index → has alive units/structures)
   houseAlive: Map<number, boolean>;
+  isLowPower: boolean;        // player is low on power
+  playerCredits: number;      // player's current credits
 }
 
 export function checkTriggerEvent(
@@ -1353,6 +1369,27 @@ export function checkTriggerEvent(
     case TEVENT_LEAVES_MAP:
       // Units have left the map edge (civilian evacuation)
       return state.unitsLeftMap > 0;
+    case TEVENT_HOUSE_DISCOVERED:
+      // Same as DISCOVERED — player has entered an area
+      return state.playerEntered;
+    case TEVENT_LOW_POWER:
+      // Player is low on power
+      return state.isLowPower;
+    case TEVENT_THIEVED:
+      // Spy has infiltrated a building — not implemented for ant missions
+      return false;
+    case TEVENT_CROSS_HORIZONTAL:
+      // Player crossed a horizontal line — use playerEntered flag
+      return state.playerEntered;
+    case TEVENT_CROSS_VERTICAL:
+      // Player crossed a vertical line — use playerEntered flag
+      return state.playerEntered;
+    case TEVENT_UNITS_DESTROYED:
+      // N enemy units have been destroyed (same as NUNITS_DESTROYED)
+      return state.enemyKillCount >= event.data;
+    case TEVENT_CREDITS:
+      // Player has accumulated a certain amount of credits
+      return state.playerCredits >= event.data;
     default:
       return false;
   }
@@ -1376,6 +1413,9 @@ export interface TriggerActionResult {
   destroyTriggeringUnit?: boolean; // kill the unit that triggered this
   playSound?: number;    // play a sound effect (PLAY_SOUND)
   playSpeech?: number;   // play EVA speech (PLAY_SPEECH)
+  airstrike?: boolean;   // call in an airstrike (AIRSTRIKE)
+  nuke?: boolean;        // launch a nuclear missile (NUKE)
+  centerView?: number;   // center camera on waypoint (CENTER_VIEW)
 }
 
 /** Execute a trigger action — returns result with entities and side effects */
@@ -1545,6 +1585,31 @@ export function executeTriggerAction(
     case TACTION_CREEP_SHADOW:
       // Reshroud entire map (used in SCA04EA tunnel darkness)
       result.creepShadow = true;
+      break;
+
+    case TACTION_AIRSTRIKE:
+      // Call in an airstrike at a waypoint
+      result.airstrike = true;
+      break;
+
+    case TACTION_NUKE:
+      // Launch a nuclear missile
+      result.nuke = true;
+      break;
+
+    case TACTION_REVEAL_MAP:
+      // Reveal entire map (same as revealAll)
+      result.revealAll = true;
+      break;
+
+    case TACTION_CENTER_VIEW:
+      // Center camera on waypoint (action.data = waypoint index)
+      result.centerView = action.data;
+      break;
+
+    case TACTION_CHANGE_HOUSE:
+      // Change house ownership — not applicable to ant missions (log warning)
+      console.warn('TACTION_CHANGE_HOUSE triggered but not implemented for ant missions');
       break;
   }
 

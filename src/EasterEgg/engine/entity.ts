@@ -165,6 +165,10 @@ export class Entity {
   // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.5)
   speedBias = 1.0;
 
+  // Crate effect timers
+  cloakTick = 0;    // ticks remaining for cloak invisibility (from crate)
+  invulnTick = 0;   // ticks remaining for invulnerability (from crate)
+
   // Fear/Prone system (C++ infantry.cpp — FearType 0-255)
   // Fear increases on damage, decrements 1/tick. IsProne when fear >= FEAR_ANXIOUS (10).
   // Prone infantry take 50% damage (C++ rules.cpp:202 ProneDamageBias=1/2).
@@ -174,6 +178,9 @@ export class Entity {
   static readonly FEAR_SCARED = 100;
   static readonly FEAR_PANIC = 200;
   static readonly FEAR_MAXIMUM = 255;
+
+  // Spy disguise system (Gap #4)
+  disguisedAs: House | null = null;  // when disguised, appears as this house's unit
 
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
@@ -333,6 +340,7 @@ export class Entity {
   /** Take damage, return true if killed. warhead affects death animation. */
   takeDamage(amount: number, warhead?: string): boolean {
     if (!this.alive) return false;
+    if (this.invulnTick > 0) return false; // invulnerability crate effect
     // C++ infantry.cpp:329-330 — prone infantry take 50% damage (ProneDamageBias)
     if (this.isProne && amount > 0) {
       amount = Math.max(1, Math.round(amount * PRONE_DAMAGE_BIAS));

@@ -1479,6 +1479,24 @@ export class Renderer {
         );
       }
 
+      // Veterancy chevrons — drawn above unit sprite always (not just when selected)
+      if (entity.alive && entity.veterancy > 0) {
+        const chevronX = screen.x;
+        const chevronY = screen.y - spriteH / 2 - 4; // above sprite
+        ctx.save();
+        if (entity.veterancy >= 2) {
+          // Elite: 2 gold chevrons
+          ctx.fillStyle = '#FFD700';
+          this.drawChevron(ctx, chevronX - 3, chevronY);
+          this.drawChevron(ctx, chevronX + 3, chevronY);
+        } else {
+          // Veteran: 1 silver chevron
+          ctx.fillStyle = '#C0C0C0';
+          this.drawChevron(ctx, chevronX, chevronY);
+        }
+        ctx.restore();
+      }
+
       // Movement dust trail for vehicles/ants when walking
       if (entity.alive && !entity.stats.isInfantry && entity.animState === AnimState.WALK) {
         const dustPhase = (tick + entity.id * 5) % 8;
@@ -1582,7 +1600,16 @@ export class Renderer {
     }
   }
 
-  // ─── Health Bars ─────────────────────────────────────────
+  // ─── Health Bars & Veterancy ─────────────────────────────
+
+  private drawChevron(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+    ctx.beginPath();
+    ctx.moveTo(x, y - 3);      // top point
+    ctx.lineTo(x - 2, y + 1);  // bottom-left
+    ctx.lineTo(x + 2, y + 1);  // bottom-right
+    ctx.closePath();
+    ctx.fill();
+  }
 
   private renderHealthBar(
     x: number, y: number, width: number,
@@ -2882,6 +2909,52 @@ export class Renderer {
 
     ctx.font = '10px monospace';
 
+    // Multi-unit selection: portrait grid
+    if (selected.length > 1) {
+      const count = selected.length;
+      const cols = count <= 4 ? 2 : count <= 9 ? 3 : 4;
+      const rows = Math.ceil(count / cols);
+      const portraitSize = Math.min(20, Math.floor((panelH - 20) / rows));
+      const startX = px + 4;
+      const startY = py + 4;
+
+      for (let i = 0; i < Math.min(count, 16); i++) {
+        const entity = selected[i];
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const portraitX = startX + col * (portraitSize + 2);
+        const portraitY = startY + row * (portraitSize + 2);
+
+        // Mini portrait background
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(portraitX, portraitY, portraitSize, portraitSize);
+
+        // HP bar (bottom of portrait)
+        const hpRatio = entity.hp / entity.maxHp;
+        const hpColor = hpRatio > 0.5 ? '#0f0' : hpRatio > 0.25 ? '#ff0' : '#f00';
+        ctx.fillStyle = hpColor;
+        ctx.fillRect(portraitX, portraitY + portraitSize - 2, portraitSize * hpRatio, 2);
+
+        // Unit type icon (first letter as placeholder)
+        ctx.fillStyle = '#fff';
+        ctx.font = `${Math.max(8, portraitSize - 8)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(entity.type.charAt(0), portraitX + portraitSize / 2, portraitY + portraitSize - 5);
+      }
+
+      if (count > 16) {
+        ctx.fillStyle = '#aaa';
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`+${count - 16} more`, startX + 10, startY + rows * (portraitSize + 2) + 10);
+      }
+
+      // Reset text align for other rendering
+      ctx.textAlign = 'left';
+      return; // skip single-unit info
+    }
+
+    // Single unit selected
     if (selected.length === 1) {
       const unit = selected[0];
       // Unit name
@@ -2909,23 +2982,6 @@ export class Renderer {
         ctx.fillRect(barX, barY, barW, barH);
         ctx.fillStyle = oreRatio > 0.5 ? '#c8a030' : '#806020';
         ctx.fillRect(barX, barY, barW * oreRatio, barH);
-      }
-    } else {
-      // Multiple selected — count + type breakdown
-      const typeCounts = new Map<string, number>();
-      for (const u of selected) {
-        const name = u.stats.name;
-        typeCounts.set(name, (typeCounts.get(name) ?? 0) + 1);
-      }
-      ctx.fillStyle = this.palColor(PAL_GREEN_HP);
-      ctx.fillText(`${selected.length} units`, px + 8, py + 14);
-      ctx.font = '9px monospace';
-      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-      let row = 0;
-      for (const [name, count] of typeCounts) {
-        if (row >= 2) { ctx.fillText('...', px + 8, py + 24); break; }
-        ctx.fillText(`${count}x ${name}`, px + 8, py + 24 + row * 10);
-        row++;
       }
     }
   }

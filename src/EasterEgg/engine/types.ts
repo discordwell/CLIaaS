@@ -530,6 +530,11 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'FACT', faction: 'allied', isStructure: true },
   { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
   { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  // Walls (1x1 placement, no prerequisite building needed beyond FACT)
+  { type: 'SBAG', name: 'Sandbag', cost: 10, buildTime: 15, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'FENC', name: 'Chain Link', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'BARB', name: 'Barbed Wire', cost: 20, buildTime: 18, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'BRIK', name: 'Concrete', cost: 50, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true },
 ];
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)
