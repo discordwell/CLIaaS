@@ -14,6 +14,7 @@ import {
   deleteWorkflow,
 } from '@/lib/workflow/store.js';
 import { decomposeWorkflowToRules, validateWorkflow } from '@/lib/workflow/decomposer.js';
+import { syncSingleWorkflow } from '@/lib/workflow/sync.js';
 import type { Workflow, WorkflowNode, WorkflowTransition } from '@/lib/workflow/types.js';
 import { randomUUID } from 'crypto';
 
@@ -165,6 +166,9 @@ export function registerWorkflowTools(server: McpServer): void {
         workflow.updatedAt = new Date().toISOString();
         await upsertWorkflow(workflow);
 
+        // Sync rules into the automation engine
+        await syncSingleWorkflow(id, enabled);
+
         return textResult({
           message: `Workflow "${workflow.name}" ${enabled ? 'enabled' : 'disabled'}`,
           id: workflow.id,
@@ -190,6 +194,10 @@ export function registerWorkflowTools(server: McpServer): void {
       try {
         const deleted = await deleteWorkflow(id);
         if (!deleted) return errorResult(`Workflow "${id}" not found`);
+
+        // Remove workflow rules from the automation engine
+        await syncSingleWorkflow(id, false);
+
         return textResult({ message: `Workflow "${id}" deleted` });
       } catch (err) {
         return errorResult(`Failed to delete workflow: ${err}`);

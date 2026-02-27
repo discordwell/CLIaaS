@@ -12,6 +12,7 @@ export default function WorkflowsPage() {
   const [loading, setLoading] = useState(true);
   const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
+  const [optimizingId, setOptimizingId] = useState<string | null>(null);
 
   const loadWorkflows = useCallback(async () => {
     try {
@@ -56,6 +57,49 @@ export default function WorkflowsPage() {
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  async function handleOptimize(id: string) {
+    setOptimizingId(id);
+    try {
+      const res = await fetch(`/api/workflows/${id}/optimize`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        loadWorkflows();
+      }
+    } finally {
+      setOptimizingId(null);
+    }
+  }
+
+  async function handlePresetEnable(templateKey: string, label: string) {
+    const res = await fetch("/api/workflows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: label,
+        templateKey,
+        enabled: true,
+      }),
+    });
+    if (res.ok) {
+      loadWorkflows();
+    }
+  }
+
+  // Which presets are already instantiated?
+  const instantiatedPresets = new Set(
+    workflows
+      .map((wf) => {
+        const tmpl = workflowTemplates.find((t) => t.label === wf.name);
+        return tmpl?.key;
+      })
+      .filter(Boolean),
+  );
+
+  const availablePresets = workflowTemplates.filter(
+    (t) => !instantiatedPresets.has(t.key),
+  );
 
   // ---- Builder view ----
 
@@ -116,6 +160,48 @@ export default function WorkflowsPage() {
         </div>
       </header>
 
+      {/* Quick-Start Presets */}
+      {availablePresets.length > 0 && (
+        <section className="mt-8 border-2 border-zinc-950 bg-white p-6">
+          <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
+            Quick-Start Presets
+          </p>
+          <p className="mt-1 text-xs text-zinc-600">
+            Enable a preset to start processing tickets immediately. No
+            configuration needed.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {availablePresets.map((tmpl) => (
+              <div
+                key={tmpl.key}
+                className="border-2 border-zinc-200 p-4 transition-colors hover:border-zinc-400"
+              >
+                <p className="font-mono text-xs font-bold">{tmpl.label}</p>
+                <p className="mt-1 text-[10px] text-zinc-500">
+                  {tmpl.description}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {tmpl.meta.keyStates.map((s) => (
+                    <span
+                      key={s}
+                      className="bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px]"
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+                <button
+                  onClick={() => handlePresetEnable(tmpl.key, tmpl.label)}
+                  className="mt-3 w-full border-2 border-emerald-500 bg-emerald-500 py-1.5 font-mono text-xs font-bold uppercase text-white hover:bg-emerald-600"
+                >
+                  Enable
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {loading ? (
         <section className="mt-8 border-2 border-zinc-950 bg-white p-8 text-center">
           <p className="font-mono text-sm text-zinc-500">Loading...</p>
@@ -158,6 +244,13 @@ export default function WorkflowsPage() {
                     }`}
                   >
                     {wf.enabled ? "Active" : "Inactive"}
+                  </button>
+                  <button
+                    onClick={() => handleOptimize(wf.id)}
+                    disabled={optimizingId === wf.id}
+                    className="border-2 border-amber-400 px-3 py-1 font-mono text-xs font-bold uppercase text-amber-600 hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {optimizingId === wf.id ? "..." : "Optimize"}
                   </button>
                   <button
                     onClick={() => setEditingWorkflow(wf)}

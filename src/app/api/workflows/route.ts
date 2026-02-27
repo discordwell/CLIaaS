@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getWorkflows, upsertWorkflow } from '@/lib/workflow/store';
 import { validateWorkflow } from '@/lib/workflow/decomposer';
+import { syncSingleWorkflow } from '@/lib/workflow/sync';
 import { simpleLifecycle, escalationPipeline, slaDriven, workflowTemplates } from '@/lib/workflow/templates';
 import type { Workflow, WorkflowNode, WorkflowTransition } from '@/lib/workflow/types';
 
@@ -123,5 +124,11 @@ export async function POST(request: NextRequest) {
   }
 
   await upsertWorkflow(workflow);
+
+  // Sync rules into the automation engine when created as enabled
+  if (workflow.enabled) {
+    await syncSingleWorkflow(workflow.id, true);
+  }
+
   return NextResponse.json({ workflow }, { status: 201 });
 }

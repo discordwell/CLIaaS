@@ -53,6 +53,11 @@ export function WorkflowBuilder({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizePreview, setOptimizePreview] = useState<{
+    changes: Array<{ type: string; description: string; nodeId?: string }>;
+    workflow: Workflow;
+  } | null>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [hoveredType, setHoveredType] = useState<WorkflowNodeType | null>(null);
   const [hoveredTargetNodeId, setHoveredTargetNodeId] = useState<string | null>(null);
@@ -367,6 +372,35 @@ export function WorkflowBuilder({
     }
   }
 
+  // Optimize (dry-run preview)
+  async function handleOptimizeDryRun() {
+    setOptimizing(true);
+    try {
+      const res = await fetch(`/api/workflows/${workflow.id}/optimize?dryRun=true`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.changes?.length > 0) {
+          setOptimizePreview(data);
+          setShowValidation(true);
+        }
+      }
+    } finally {
+      setOptimizing(false);
+    }
+  }
+
+  // Apply optimization
+  async function handleOptimizeApply() {
+    if (!optimizePreview) return;
+    pushUndo();
+    setNodes(optimizePreview.workflow.nodes);
+    setTransitions(optimizePreview.workflow.transitions);
+    setEntryNodeId(optimizePreview.workflow.entryNodeId);
+    setOptimizePreview(null);
+  }
+
   // Import
   function handleImport() {
     const input = document.createElement("input");
@@ -451,7 +485,7 @@ export function WorkflowBuilder({
             Export JSON
           </button>
           <button
-            onClick={() => setShowValidation(!showValidation)}
+            onClick={() => { setShowValidation(!showValidation); setOptimizePreview(null); }}
             className="relative flex items-center gap-1.5 border-2 border-zinc-300 px-3 py-1 font-mono text-xs font-bold uppercase text-zinc-500 hover:border-zinc-950 hover:text-zinc-950"
             title={`${errorCount} error(s), ${warningCount} warning(s)`}
           >
@@ -459,6 +493,13 @@ export function WorkflowBuilder({
             {errorCount + warningCount > 0 && (
               <span>{errorCount + warningCount}</span>
             )}
+          </button>
+          <button
+            onClick={handleOptimizeDryRun}
+            disabled={optimizing}
+            className="border-2 border-amber-400 px-3 py-1 font-mono text-xs font-bold uppercase text-amber-600 hover:bg-amber-50 disabled:opacity-50"
+          >
+            {optimizing ? "..." : "Optimize"}
           </button>
           <button
             onClick={handleSave}
@@ -816,7 +857,39 @@ export function WorkflowBuilder({
 
         {/* Right: Property editor / Validation panel */}
         <div className="w-72 shrink-0 overflow-y-auto border-l-2 border-zinc-950 bg-white p-4">
-          {showValidation ? (
+          {showValidation && optimizePreview ? (
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="font-mono text-xs font-bold uppercase">Optimize Preview</p>
+                <button
+                  onClick={() => { setShowValidation(false); setOptimizePreview(null); }}
+                  className="font-mono text-[10px] text-zinc-400 hover:text-zinc-950"
+                >
+                  Close
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-500">
+                {optimizePreview.changes.length} fix{optimizePreview.changes.length !== 1 ? "es" : ""} available:
+              </p>
+              <div className="mt-3 space-y-1.5">
+                {optimizePreview.changes.map((c, i) => (
+                  <div
+                    key={i}
+                    className="rounded border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-700"
+                  >
+                    <span className="font-mono font-bold uppercase">{c.type.replace(/_/g, " ")}</span>{" "}
+                    {c.description}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={handleOptimizeApply}
+                className="mt-4 w-full border-2 border-zinc-950 bg-zinc-950 py-1.5 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+              >
+                Apply Changes
+              </button>
+            </div>
+          ) : showValidation ? (
             <div>
               <div className="flex items-center justify-between">
                 <p className="font-mono text-xs font-bold uppercase">Validation</p>

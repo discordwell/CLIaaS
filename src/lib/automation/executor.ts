@@ -5,6 +5,7 @@
 
 import { runRules, type Rule, type TicketContext, type ExecutionResult } from './engine';
 import { buildBaseTicketFromEvent } from './ticket-from-event';
+import { bootstrapWorkflows } from '@/lib/workflow/bootstrap';
 
 // ---- Audit trail (in-memory, singleton) ----
 
@@ -134,6 +135,9 @@ export async function evaluateAutomation(
   data: Record<string, unknown>,
   triggerType: 'trigger' | 'sla',
 ): Promise<void> {
+  // Ensure workflow-generated rules are loaded into the engine
+  await bootstrapWorkflows();
+
   // Build a TicketContext from the event data
   const base = buildBaseTicketFromEvent(data);
   const ticket: TicketContext = {

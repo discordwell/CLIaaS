@@ -123,12 +123,15 @@ export function validateWorkflow(workflow: Workflow): ValidationResult {
 
 // ---- Decomposition ----
 
+/** Prefix for all workflow-generated rule IDs. Used by sync layer to partition rules. */
+export const WF_RULE_PREFIX = 'wf-';
+
 function stateTag(workflowId: string, nodeId: string): string {
   return `wf:${workflowId}:state:${nodeId}`;
 }
 
 function makeRuleId(workflowId: string, suffix: string): string {
-  return `wf-${workflowId}-${suffix}`;
+  return `${WF_RULE_PREFIX}${workflowId}-${suffix}`;
 }
 
 export function decomposeWorkflowToRules(workflow: Workflow): Rule[] {
@@ -324,7 +327,7 @@ function negateOperator(op: string): string {
   return negations[op] || op;
 }
 
-function getNodeLabel(node?: WorkflowNode): string {
+export function getNodeLabel(node?: WorkflowNode): string {
   if (!node) return '(unknown)';
   switch (node.type) {
     case 'trigger': return 'Trigger';

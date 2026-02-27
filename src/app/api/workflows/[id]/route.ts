@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getWorkflow, upsertWorkflow, deleteWorkflow } from '@/lib/workflow/store';
 import { validateWorkflow } from '@/lib/workflow/decomposer';
+import { syncSingleWorkflow } from '@/lib/workflow/sync';
 import type { WorkflowNode, WorkflowTransition } from '@/lib/workflow/types';
 
 export const dynamic = 'force-dynamic';
@@ -79,6 +80,12 @@ export async function PUT(
   }
 
   await upsertWorkflow(updated);
+
+  // Sync rules into the automation engine when enabled/structure changes
+  if (enabled !== undefined || nodes || transitions || entryNodeId) {
+    await syncSingleWorkflow(id, updated.enabled);
+  }
+
   return NextResponse.json({ workflow: updated });
 }
 
@@ -97,6 +104,9 @@ export async function DELETE(
   if (!deleted) {
     return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
   }
+
+  // Remove workflow rules from the automation engine
+  await syncSingleWorkflow(id, false);
 
   return NextResponse.json({ ok: true });
 }
