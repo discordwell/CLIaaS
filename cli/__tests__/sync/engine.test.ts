@@ -3,6 +3,11 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { runSyncCycle, getSyncStatus, listConnectors } from '../../sync/engine.js';
 
+// Mock the zendesk connector so tests never make real HTTP calls
+vi.mock('../../connectors/zendesk.js', () => ({
+  exportZendesk: vi.fn().mockRejectedValue(new Error('Simulated connector failure')),
+}));
+
 const TEST_DIR = join(process.cwd(), 'tmp-test-sync');
 
 beforeEach(() => {
@@ -87,7 +92,7 @@ describe('runSyncCycle', () => {
   });
 
   it('returns error stats when connector export fails', async () => {
-    // Set auth so it gets past validation but the API call will fail
+    // Set auth so it gets past validation; the mocked exportZendesk will reject
     vi.stubEnv('ZENDESK_SUBDOMAIN', 'test-nonexistent-subdomain-xxxxx');
     vi.stubEnv('ZENDESK_EMAIL', 'test@test.com');
     vi.stubEnv('ZENDESK_TOKEN', 'fake-token-for-test');
@@ -99,7 +104,7 @@ describe('runSyncCycle', () => {
 
     // Should return stats with an error rather than throwing
     expect(stats.connector).toBe('zendesk');
-    expect(stats.error).toBeDefined();
+    expect(stats.error).toBe('Simulated connector failure');
     expect(stats.fullSync).toBe(true);
     expect(stats.durationMs).toBeGreaterThanOrEqual(0);
   });
