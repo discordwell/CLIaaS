@@ -295,7 +295,8 @@ export type SoundName =
   | 'victory_fanfare' | 'defeat_sting' | 'crate_pickup' | 'eva_mission_accomplished'
   | 'eva_reinforcements' | 'eva_mission_warning' | 'tesla_charge'
   | 'sniper' | 'building_placed' | 'mammoth_cannon'
-  | 'eva_building_captured' | 'eva_insufficient_funds' | 'eva_silos_needed';
+  | 'eva_building_captured' | 'eva_insufficient_funds' | 'eva_silos_needed'
+  | 'chrono' | 'iron_curtain' | 'nuke_launch' | 'nuke_explode';
 
 /** Base path for extracted audio WAV files */
 const AUDIO_BASE_URL = '/ra/audio';
@@ -565,6 +566,10 @@ export class AudioManager {
       case 'eva_building_captured': this.synthEvaBuildingCaptured(t, out); break;
       case 'eva_insufficient_funds': this.synthEvaInsufficientFunds(t, out); break;
       case 'eva_silos_needed': this.synthEvaSilosNeeded(t, out); break;
+      case 'chrono': this.synthChrono(t, out); break;
+      case 'iron_curtain': this.synthIronCurtain(t, out); break;
+      case 'nuke_launch': this.synthNukeLaunch(t, out); break;
+      case 'nuke_explode': this.synthNukeExplode(t, out); break;
     }
   }
 
@@ -1408,5 +1413,48 @@ export class AudioManager {
       o.connect(g).connect(out);
       o.start(dt); o.stop(dt + 0.1);
     }
+  }
+
+  private synthChrono(t: number, out: AudioNode): void {
+    // Chronosphere teleport — rising sci-fi sweep
+    const o = this.osc('sine', 200);
+    o.frequency.exponentialRampToValueAtTime(2000, t + 0.4);
+    const g = this.gain(0.2);
+    g.gain.setValueAtTime(0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.5);
+  }
+
+  private synthIronCurtain(t: number, out: AudioNode): void {
+    // Iron Curtain — deep resonant hum
+    const o = this.osc('sawtooth', 80);
+    const g = this.gain(0.15);
+    g.gain.setValueAtTime(0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.6);
+  }
+
+  private synthNukeLaunch(t: number, out: AudioNode): void {
+    // Nuke launch — ascending rocket roar
+    const o = this.osc('sawtooth', 100);
+    o.frequency.exponentialRampToValueAtTime(800, t + 1.0);
+    const g = this.gain(0.2);
+    g.gain.setValueAtTime(0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 1.2);
+  }
+
+  private synthNukeExplode(t: number, out: AudioNode): void {
+    // Nuclear explosion — deep rumbling boom
+    const o = this.osc('sawtooth', 40);
+    const g = this.gain(0.3);
+    g.gain.setValueAtTime(0.3, t);
+    g.gain.linearRampToValueAtTime(0.15, t + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 2.0);
   }
 }

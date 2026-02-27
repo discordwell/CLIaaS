@@ -12,6 +12,9 @@ import {
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, HOUSE_FIREPOWER_BIAS,
   calcProjectileTravelFrames,
+  SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
+  IRON_CURTAIN_DURATION, NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
+  NUKE_MIN_FALLOFF, CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
 } from './types';
 import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
@@ -32,6 +35,8 @@ export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } fro
 export type { MissionInfo } from './scenario';
 export { AudioManager } from './audio';
 export { preloadAssets } from './assets';
+
+export type { SuperweaponState } from './types';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -142,6 +147,17 @@ export class Game {
   private rallyPoints = new Map<string, WorldPos>(); // factory type → world position
   /** Deferred transport load removals (entity IDs to remove from entities after iteration) */
   private _pendingTransportLoads: number[] = [];
+
+  // Superweapon system
+  /** Per-house superweapon states keyed by `${house}:${SuperweaponType}` */
+  superweapons = new Map<string, SuperweaponState>();
+  /** Active superweapon cursor mode (player selecting target) */
+  superweaponCursorMode: SuperweaponType | null = null;
+  superweaponCursorHouse: House | null = null;
+  /** Nuke launch sequence tracking */
+  private nukePendingTarget: WorldPos | null = null;
+  private nukePendingTick = 0;
+  private nukePendingSource: WorldPos | null = null;
 
   // Difficulty
   difficulty: Difficulty = 'normal';
@@ -296,6 +312,12 @@ export class Game {
     this.baseDiscovered = false;
     this.productionQueue.clear();
     this.pendingPlacement = null;
+    this.superweapons.clear();
+    this.superweaponCursorMode = null;
+    this.superweaponCursorHouse = null;
+    this.nukePendingTarget = null;
+    this.nukePendingTick = 0;
+    this.nukePendingSource = null;
     this.globals.clear();
     // SCA01EA: Set global 1 at start so ant waves spawn immediately.
     // rvl2 would set it at time 30 anyway, but this ensures action from the start.
@@ -595,6 +617,16 @@ export class Game {
       this._pendingTransportLoads.length = 0;
     }
 
+    // Nuke launch sequence: missile arrives after delay
+    if (this.nukePendingTarget && this.nukePendingTick > 0) {
+      this.nukePendingTick--;
+      if (this.nukePendingTick <= 0) {
+        this.detonateNuke(this.nukePendingTarget);
+        this.nukePendingTarget = null;
+        this.nukePendingSource = null;
+      }
+    }
+
     // Check for units leaving the map edge (civilian evacuation)
     for (const entity of this.entities) {
       if (!entity.alive) continue;
@@ -782,6 +814,8 @@ export class Game {
       if (!e.alive) continue;
       if (e.cloakTick > 0) e.cloakTick--;
       if (e.invulnTick > 0) e.invulnTick--;
+      if (e.ironCurtainTick > 0) e.ironCurtainTick--;
+      if (e.chronoShiftTick > 0) e.chronoShiftTick--;
     }
 
     // Fog re-enable timer (spy DOME infiltration)
@@ -847,6 +881,9 @@ export class Game {
       else if (s.type === 'FIX') this.powerConsumed += 30;
       else if (s.type === 'HPAD') this.powerConsumed += 10;
       else if (s.type === 'AFLD') this.powerConsumed += 30;
+      else if (s.type === 'ATEK' || s.type === 'STEK') this.powerConsumed += 200;
+      else if (s.type === 'PDOX' || s.type === 'IRON') this.powerConsumed += 200;
+      else if (s.type === 'MSLO') this.powerConsumed += 100;
     }
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
@@ -854,6 +891,9 @@ export class Game {
         this.tick % (GAME_TICKS_PER_SEC * 10) === 0) {
       this.audio.play('eva_low_power');
     }
+
+    // Superweapon recharge and auto-fire
+    this.updateSuperweapons();
 
     // Tick structure construction and sell animations
     for (const s of this.structures) {
@@ -1094,6 +1134,10 @@ export class Game {
         }
         this.pendingPlacement = null;
         this.wallPlacementPrepaid = false;
+        keys.delete('Escape');
+      } else if (this.superweaponCursorMode) {
+        this.superweaponCursorMode = null;
+        this.superweaponCursorHouse = null;
         keys.delete('Escape');
       } else if (this.attackMoveMode || this.sellMode || this.repairMode) {
         this.attackMoveMode = false;
@@ -1388,6 +1432,15 @@ export class Game {
         return;
       }
 
+      // Superweapon cursor mode — click to activate superweapon at target
+      if (this.superweaponCursorMode) {
+        const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
+        this.activateSuperweapon(this.superweaponCursorMode, this.superweaponCursorHouse!, world);
+        this.superweaponCursorMode = null;
+        this.superweaponCursorHouse = null;
+        return;
+      }
+
       // Building placement mode — click to place structure
       if (this.pendingPlacement) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
@@ -1517,6 +1570,12 @@ export class Game {
     }
 
     if (rightClick) {
+      // Cancel superweapon cursor mode
+      if (this.superweaponCursorMode) {
+        this.superweaponCursorMode = null;
+        this.superweaponCursorHouse = null;
+        return;
+      }
       // Cancel placement mode
       if (this.pendingPlacement) {
         // Refund the cost (bypasses silo cap — C++ Refund_Money path)
@@ -1798,12 +1857,59 @@ export class Game {
 
   /** Handle clicks on the sidebar production panel */
   private handleSidebarClick(sx: number, sy: number): void {
+    // Check superweapon button clicks (at bottom of sidebar, above minimap)
+    const swClick = this.handleSuperweaponButtonClick(sy);
+    if (swClick) return;
+
     const items = this.getAvailableItems();
     const itemIdx = this.sidebarItemAtY(sy);
     if (itemIdx < 0 || itemIdx >= items.length) return;
     const item = items[itemIdx];
     // startProduction handles both new builds and queueing
     this.startProduction(item);
+  }
+
+  /** Check if a sidebar click hit a superweapon button. Returns true if handled. */
+  private handleSuperweaponButtonClick(sy: number): boolean {
+    // Superweapon buttons are rendered at the bottom of sidebar, above minimap
+    const mmSize = Game.SIDEBAR_W - 8;
+    const mmY = this.canvas.height - mmSize - 6;
+    const btnH = 20;
+    const playerSws = this.getPlayerSuperweapons();
+    if (playerSws.length === 0) return false;
+
+    const buttonsStartY = mmY - playerSws.length * btnH - 4;
+    for (let i = 0; i < playerSws.length; i++) {
+      const btnY = buttonsStartY + i * btnH;
+      if (sy >= btnY && sy < btnY + btnH) {
+        const sw = playerSws[i];
+        if (sw.state.ready) {
+          const def = SUPERWEAPON_DEFS[sw.state.type];
+          if (def.needsTarget) {
+            // Enter target selection cursor mode
+            this.superweaponCursorMode = sw.state.type;
+            this.superweaponCursorHouse = sw.state.house;
+          }
+          // Auto-fire weapons (GPS/Sonar) are handled in updateSuperweapons
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Get player's available superweapons for sidebar display */
+  getPlayerSuperweapons(): Array<{ state: SuperweaponState; def: SuperweaponDef }> {
+    const result: Array<{ state: SuperweaponState; def: SuperweaponDef }> = [];
+    for (const [, state] of this.superweapons) {
+      if (state.house !== House.Spain && state.house !== House.Greece) continue;
+      const def = SUPERWEAPON_DEFS[state.type];
+      if (!def) continue;
+      // Don't show GPS after it's been fired (one-shot)
+      if (state.type === SuperweaponType.GPS_SATELLITE && state.fired) continue;
+      result.push({ state, def });
+    }
+    return result;
   }
 
   /** Map weapon name to projectile visual style */
@@ -5890,6 +5996,315 @@ export class Game {
     }
   }
 
+  // ─── Superweapon System ─────────────────────────────────
+
+  /** Scan structures for superweapon buildings, update charge, auto-fire GPS/Sonar */
+  updateSuperweapons(): void {
+    const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
+    const activeBuildings = new Set<string>(); // track which sw keys have active buildings
+
+    // Scan structures for superweapon buildings
+    for (let i = 0; i < this.structures.length; i++) {
+      const s = this.structures[i];
+      if (!s.alive || (s.buildProgress !== undefined && s.buildProgress < 1)) continue;
+
+      // Check each superweapon def to see if this structure provides it
+      for (const def of Object.values(SUPERWEAPON_DEFS)) {
+        if (s.type !== def.building) continue;
+
+        const key = `${s.house}:${def.type}`;
+        activeBuildings.add(key);
+
+        let state = this.superweapons.get(key);
+        if (!state) {
+          state = {
+            type: def.type,
+            house: s.house,
+            chargeTick: 0,
+            ready: false,
+            structureIndex: i,
+            fired: false,
+          };
+          this.superweapons.set(key, state);
+        }
+        state.structureIndex = i;
+
+        // Charge: increment if building is alive and powered
+        if (!state.ready && !state.fired) {
+          const chargeRate = (def.requiresPower && isLowPower &&
+            (s.house === House.Spain || s.house === House.Greece)) ? 0.25 : 1;
+          state.chargeTick = Math.min(state.chargeTick + chargeRate, def.rechargeTicks);
+          if (state.chargeTick >= def.rechargeTicks) {
+            state.ready = true;
+            // EVA announcement for player
+            if (s.house === House.Spain || s.house === House.Greece) {
+              this.pushEva(`${def.name} ready`);
+            }
+          }
+        }
+
+        // Auto-fire GPS Satellite (one-shot)
+        if (def.type === SuperweaponType.GPS_SATELLITE && state.ready && !state.fired) {
+          this.map.revealAll();
+          state.fired = true;
+          state.ready = false;
+          if (s.house === House.Spain || s.house === House.Greece) {
+            this.pushEva('GPS satellite launched');
+            // GPS sweep visual
+            this.effects.push({
+              type: 'marker', x: this.camera.x + this.camera.viewWidth / 2,
+              y: this.camera.y, frame: 0, maxFrames: 60, size: 2,
+              markerColor: 'rgba(80,200,255,0.3)',
+            });
+          }
+        }
+
+        // Auto-fire Sonar Pulse
+        if (def.type === SuperweaponType.SONAR_PULSE && state.ready) {
+          // Reveal all enemy submarines for 450 ticks
+          for (const e of this.entities) {
+            if (!e.alive || !e.stats.isCloakable) continue;
+            if (this.isAllied(e.house, s.house)) continue;
+            e.sonarPulseTimer = SONAR_REVEAL_TICKS;
+          }
+          state.ready = false;
+          state.chargeTick = 0;
+          if (s.house === House.Spain || s.house === House.Greece) {
+            this.pushEva('Sonar pulse activated');
+          }
+        }
+      }
+    }
+
+    // Remove entries for destroyed buildings
+    for (const [key] of this.superweapons) {
+      if (!activeBuildings.has(key)) {
+        this.superweapons.delete(key);
+      }
+    }
+
+    // AI superweapon usage
+    for (const [, state] of this.superweapons) {
+      if (!state.ready) continue;
+      if (state.house === House.Spain || state.house === House.Greece) continue;
+      const def = SUPERWEAPON_DEFS[state.type];
+      if (!def.needsTarget) continue; // GPS/Sonar auto-fire handled above
+
+      if (state.type === SuperweaponType.NUKE) {
+        // AI nuke: target player's highest-value structure cluster
+        const target = this.findBestNukeTarget(state.house);
+        if (target) {
+          this.activateSuperweapon(SuperweaponType.NUKE, state.house, target);
+        }
+      } else if (state.type === SuperweaponType.IRON_CURTAIN) {
+        // AI Iron Curtain: apply to own unit with most HP
+        const bestUnit = this.entities
+          .filter(e => e.alive && e.house === state.house && !e.stats.isInfantry)
+          .sort((a, b) => b.hp - a.hp)[0];
+        if (bestUnit) {
+          this.activateSuperweapon(SuperweaponType.IRON_CURTAIN, state.house, bestUnit.pos);
+        }
+      }
+      // AI does not use Chronosphere (too complex for basic AI)
+    }
+  }
+
+  /** Activate a superweapon at a target position */
+  activateSuperweapon(type: SuperweaponType, house: House, target: WorldPos): void {
+    const key = `${house}:${type}`;
+    const state = this.superweapons.get(key);
+    if (!state || !state.ready) return;
+
+    const def = SUPERWEAPON_DEFS[type];
+    state.ready = false;
+    state.chargeTick = 0;
+
+    switch (type) {
+      case SuperweaponType.CHRONOSPHERE: {
+        // Teleport first selected player unit to target
+        const selected = this.entities.filter(e =>
+          e.alive && e.selected && e.house === house && !e.stats.isInfantry
+        );
+        const unit = selected[0];
+        if (unit) {
+          const origin = { x: unit.pos.x, y: unit.pos.y };
+          unit.pos.x = target.x;
+          unit.pos.y = target.y;
+          unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
+          // Blue flash effects at origin and destination
+          this.effects.push({
+            type: 'explosion', x: origin.x, y: origin.y,
+            frame: 0, maxFrames: 20, size: 24,
+            sprite: 'litning', spriteStart: 0,
+          });
+          this.effects.push({
+            type: 'explosion', x: target.x, y: target.y,
+            frame: 0, maxFrames: 20, size: 24,
+            sprite: 'litning', spriteStart: 0,
+          });
+          this.audio.play('chrono');
+          if (house === House.Spain || house === House.Greece) {
+            this.pushEva('Chronosphere activated');
+          }
+        }
+        break;
+      }
+      case SuperweaponType.IRON_CURTAIN: {
+        // Find unit or structure nearest to target
+        let bestEntity: Entity | null = null;
+        let bestDist = Infinity;
+        for (const e of this.entities) {
+          if (!e.alive || !this.isAllied(e.house, house)) continue;
+          const d = worldDist(e.pos, target);
+          if (d < bestDist && d < CELL_SIZE * 3) {
+            bestDist = d;
+            bestEntity = e;
+          }
+        }
+        if (bestEntity) {
+          bestEntity.ironCurtainTick = IRON_CURTAIN_DURATION;
+          this.effects.push({
+            type: 'explosion', x: bestEntity.pos.x, y: bestEntity.pos.y,
+            frame: 0, maxFrames: 15, size: 20,
+          });
+          this.audio.play('iron_curtain');
+          if (house === House.Spain || house === House.Greece) {
+            this.pushEva('Iron Curtain activated');
+          }
+        }
+        break;
+      }
+      case SuperweaponType.NUKE: {
+        // Launch missile from MSLO — arrives after 45 ticks
+        const s = this.structures[state.structureIndex];
+        if (s) {
+          this.nukePendingTarget = { x: target.x, y: target.y };
+          this.nukePendingTick = NUKE_FLIGHT_TICKS;
+          this.nukePendingSource = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+          // Rising missile effect from silo
+          this.effects.push({
+            type: 'projectile',
+            x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE,
+            startX: s.cx * CELL_SIZE + CELL_SIZE, startY: s.cy * CELL_SIZE + CELL_SIZE,
+            endX: target.x, endY: target.y,
+            frame: 0, maxFrames: 45, size: 4,
+            projStyle: 'rocket',
+          });
+          this.audio.play('nuke_launch');
+          if (house === House.Spain || house === House.Greece) {
+            this.pushEva('Nuclear warhead launched');
+          } else {
+            // Warn player when enemy launches nuke
+            this.pushEva('Warning: nuclear launch detected');
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  /** Detonate nuclear warhead at target position */
+  private detonateNuke(target: WorldPos): void {
+    // Screen flash
+    this.renderer.screenFlash = 15;
+    this.renderer.screenShake = 20;
+
+    // Apply nuke damage in blast radius using Super warhead
+    const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS;
+    const nukeWeapon = { damage: NUKE_DAMAGE, warhead: 'Super' as WarheadType, splash: blastRadius };
+
+    // Damage entities in splash radius
+    for (const e of this.entities) {
+      if (!e.alive) continue;
+      const dist = worldDist(e.pos, target);
+      if (dist > blastRadius) continue;
+      const falloff = Math.max(NUKE_MIN_FALLOFF, 1 - dist / blastRadius);
+      const mult = this.getWarheadMult('Super', e.stats.armor);
+      const dmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff));
+      const killed = e.takeDamage(dmg, 'Super');
+      if (killed) {
+        if (e.isPlayerUnit) this.lossCount++;
+        else this.killCount++;
+      }
+    }
+
+    // Damage structures in blast radius
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      const sx = s.cx * CELL_SIZE + CELL_SIZE;
+      const sy = s.cy * CELL_SIZE + CELL_SIZE;
+      const dist = worldDist({ x: sx, y: sy }, target);
+      if (dist > blastRadius) continue;
+      const falloff = Math.max(NUKE_MIN_FALLOFF, 1 - dist / blastRadius);
+      const dmg = Math.max(1, Math.round(NUKE_DAMAGE * falloff));
+      s.hp -= dmg;
+      if (s.hp <= 0) {
+        s.hp = 0;
+        s.alive = false;
+        this.effects.push({
+          type: 'explosion', x: sx, y: sy,
+          frame: 0, maxFrames: 20, size: 32,
+          sprite: 'fball1', spriteStart: 0,
+        });
+      }
+    }
+
+    // Mushroom cloud effect (large, long-lasting)
+    this.effects.push({
+      type: 'explosion', x: target.x, y: target.y,
+      frame: 0, maxFrames: 45, size: 48,
+      sprite: 'atomsfx', spriteStart: 0,
+    });
+
+    // Scorched earth at ground zero
+    const tc = worldToCell(target.x, target.y);
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        if (dx * dx + dy * dy > 9) continue;
+        const cx = tc.cx + dx;
+        const cy = tc.cy + dy;
+        if (this.map.inBounds(cx, cy)) {
+          this.map.setTerrain(cx, cy, Terrain.ROCK);
+        }
+      }
+    }
+
+    this.audio.play('nuke_explode');
+  }
+
+  /** Find the best nuke target for an AI house — cluster of player structures */
+  private findBestNukeTarget(aiHouse: House): WorldPos | null {
+    let bestScore = 0;
+    let bestPos: WorldPos | null = null;
+
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      if (this.isAllied(s.house, aiHouse)) continue;
+      // Count nearby structures within 5 cells
+      let score = 0;
+      const sx = s.cx * CELL_SIZE + CELL_SIZE;
+      const sy = s.cy * CELL_SIZE + CELL_SIZE;
+      for (const other of this.structures) {
+        if (!other.alive) continue;
+        if (this.isAllied(other.house, aiHouse)) continue;
+        const ox = other.cx * CELL_SIZE + CELL_SIZE;
+        const oy = other.cy * CELL_SIZE + CELL_SIZE;
+        const dist = worldDist({ x: sx, y: sy }, { x: ox, y: oy });
+        if (dist < CELL_SIZE * 5) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestPos = { x: sx, y: sy };
+      }
+    }
+    return bestPos;
+  }
+
+  /** Push an EVA message */
+  private pushEva(text: string): void {
+    this.evaMessages.push({ text, tick: this.tick });
+  }
+
   /** Render mission name overlay that fades in during first few seconds */
   private renderMissionNameOverlay(): void {
     const ctx = this.canvas.getContext('2d')!;
@@ -5952,6 +6367,9 @@ export class Game {
       this.renderer.selectedStructure = null;
     }
     this.renderer.evaMessages = this.evaMessages;
+    // Superweapon data for sidebar buttons
+    this.renderer.superweapons = this.superweapons;
+    this.renderer.superweaponCursorMode = this.superweaponCursorMode;
     this.renderer.missionTimer = this.missionTimer;
     this.renderer.theatre = this.theatre;
     this.renderer.difficulty = this.difficulty;

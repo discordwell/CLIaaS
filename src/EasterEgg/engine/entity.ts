@@ -184,6 +184,10 @@ export class Entity {
   cloakTick = 0;    // ticks remaining for cloak invisibility (from crate)
   invulnTick = 0;   // ticks remaining for invulnerability (from crate)
 
+  // Superweapon effect timers
+  ironCurtainTick = 0;  // ticks remaining for Iron Curtain invulnerability
+  chronoShiftTick = 0;  // visual effect timer after being chronoshifted
+
   // Fear/Prone system (C++ infantry.cpp — FearType 0-255)
   // Fear increases on damage, decrements 1/tick. IsProne when fear >= FEAR_ANXIOUS (10).
   // Prone infantry take 50% damage (C++ rules.cpp:202 ProneDamageBias=1/2).
@@ -282,6 +286,11 @@ export class Entity {
   /** Naval units can traverse water tiles */
   get isNavalUnit(): boolean {
     return this.stats.isVessel === true;
+  }
+
+  /** Unit is invulnerable (from crate or Iron Curtain superweapon) */
+  get isInvulnerable(): boolean {
+    return this.invulnTick > 0 || this.ironCurtainTick > 0;
   }
 
   /** Flight altitude offset (pixels) — visual only, for rendering above ground */
@@ -398,7 +407,7 @@ export class Entity {
   /** Take damage, return true if killed. warhead affects death animation. */
   takeDamage(amount: number, warhead?: string): boolean {
     if (!this.alive) return false;
-    if (this.invulnTick > 0) return false; // invulnerability crate effect
+    if (this.isInvulnerable) return false; // invulnerability (crate or Iron Curtain)
     // C++ infantry.cpp:329-330 — prone infantry take 50% damage (ProneDamageBias)
     if (this.isProne && amount > 0) {
       amount = Math.max(1, Math.round(amount * PRONE_DAMAGE_BIAS));

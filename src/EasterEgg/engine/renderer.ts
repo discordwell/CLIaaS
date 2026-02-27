@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -59,6 +59,8 @@ const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: num
   iron: { idleFrame: 0, damageFrame: 11, idleAnimCount: 11 },  // 22 frames: power glow
   pdox: { idleFrame: 0, damageFrame: 29, idleAnimCount: 29 },  // 58 frames: energy effect
   atek: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // 16 frames: tech center
+  stek: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet tech center
+  mslo: { idleFrame: 0, damageFrame: 4, idleAnimCount: 4 },    // Missile silo
   // Ant structures
   quee: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // queen chamber pulses
   lar1: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // small larva
@@ -170,6 +172,9 @@ export class Renderer {
   private tilesetReady = false;
   placementValid = false;
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
+  // Superweapon state (set by game each frame)
+  superweapons = new Map<string, SuperweaponState>();
+  superweaponCursorMode: SuperweaponType | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -484,6 +489,80 @@ export class Renderer {
           ctx.stroke();
         }
         break;
+      }
+    }
+
+    // Superweapon targeting cursor overlay (drawn on top of normal cursor)
+    if (this.superweaponCursorMode) {
+      switch (this.superweaponCursorMode) {
+        case SuperweaponType.CHRONOSPHERE: {
+          // Blue crosshair with teleport icon
+          const r = 10;
+          ctx.strokeStyle = '#4488ff';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // Inner cross
+          ctx.beginPath();
+          ctx.moveTo(x - r - 3, y); ctx.lineTo(x - 3, y);
+          ctx.moveTo(x + 3, y); ctx.lineTo(x + r + 3, y);
+          ctx.moveTo(x, y - r - 3); ctx.lineTo(x, y - 3);
+          ctx.moveTo(x, y + 3); ctx.lineTo(x, y + r + 3);
+          ctx.stroke();
+          // Blue pulse
+          const cp = 0.2 + 0.15 * Math.sin(Date.now() * 0.005);
+          ctx.fillStyle = `rgba(80,120,255,${cp})`;
+          ctx.beginPath();
+          ctx.arc(x, y, r + 2, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case SuperweaponType.IRON_CURTAIN: {
+          // Gold targeting reticle
+          const r = 8;
+          ctx.strokeStyle = '#FFD700';
+          ctx.lineWidth = 2;
+          // Rotating dashes
+          const rot = Date.now() * 0.003;
+          for (let i = 0; i < 4; i++) {
+            const a = rot + i * Math.PI / 2;
+            ctx.beginPath();
+            ctx.arc(x, y, r, a, a + Math.PI / 4);
+            ctx.stroke();
+          }
+          // Center dot
+          ctx.fillStyle = '#FFD700';
+          ctx.beginPath();
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case SuperweaponType.NUKE: {
+          // Red targeting circle showing blast radius
+          const r = 10;
+          ctx.strokeStyle = '#ff4444';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // Radiation symbol lines
+          ctx.lineWidth = 1;
+          for (let i = 0; i < 3; i++) {
+            const a = i * Math.PI * 2 / 3 - Math.PI / 2;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+            ctx.stroke();
+          }
+          // Red pulse glow
+          const np = 0.15 + 0.1 * Math.sin(Date.now() * 0.004);
+          ctx.fillStyle = `rgba(255,60,60,${np})`;
+          ctx.beginPath();
+          ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
       }
     }
 
@@ -1581,6 +1660,42 @@ export class Renderer {
           spriteW,
           spriteH,
         );
+      }
+
+      // Iron Curtain gold overlay — invulnerable unit
+      if (entity.alive && entity.ironCurtainTick > 0) {
+        const pulse = 0.25 + 0.15 * Math.sin(tick * 0.3);
+        ctx.fillStyle = `rgba(255,215,0,${pulse})`;
+        ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
+        // Gold glow ring
+        ctx.strokeStyle = `rgba(255,215,0,${0.4 + 0.2 * Math.sin(tick * 0.2)})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(screen.x, screen.y, spriteW * 0.5 + 2, spriteH * 0.4 + 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Chrono Shift blue flash — recently teleported unit
+      if (entity.alive && entity.chronoShiftTick > 0) {
+        const fadeAlpha = entity.chronoShiftTick / CHRONO_SHIFT_VISUAL_TICKS;
+        ctx.fillStyle = `rgba(80,140,255,${fadeAlpha * 0.4})`;
+        ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
+        // Electric sparkle particles
+        for (let sp = 0; sp < 3; sp++) {
+          const angle = ((tick * 0.8 + sp * 2.1) % (Math.PI * 2));
+          const dist = spriteW * 0.3 + Math.sin(tick * 0.5 + sp) * 3;
+          const sx = screen.x + Math.cos(angle) * dist;
+          const sy = screen.y + Math.sin(angle) * dist * 0.6;
+          ctx.fillStyle = `rgba(120,180,255,${fadeAlpha * 0.8})`;
+          ctx.fillRect(sx - 1, sy - 1, 2, 2);
+        }
+      }
+
+      // Crate invulnerability shimmer (existing mechanic — visual indicator)
+      if (entity.alive && entity.invulnTick > 0 && entity.ironCurtainTick <= 0) {
+        const pulse = 0.15 + 0.1 * Math.sin(tick * 0.4);
+        ctx.fillStyle = `rgba(200,200,255,${pulse})`;
+        ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
       }
 
       // Veterancy chevrons — drawn above unit sprite always (not just when selected)
@@ -2720,7 +2835,104 @@ export class Renderer {
       }
     }
 
+    // Superweapon buttons — above minimap
+    this.renderSuperweaponButtons(x, w);
+
     ctx.textAlign = 'left';
+  }
+
+  // ─── Superweapon Buttons ──────────────────────────────────
+
+  private renderSuperweaponButtons(sidebarX: number, sidebarW: number): void {
+    const ctx = this.ctx;
+    const playerSws: Array<{ type: SuperweaponType; def: SuperweaponDef; chargeTick: number; ready: boolean; fired: boolean }> = [];
+
+    for (const [, state] of this.superweapons) {
+      if (state.house !== House.Spain && state.house !== House.Greece) continue;
+      const def = SUPERWEAPON_DEFS[state.type];
+      if (!def) continue;
+      if (state.type === SuperweaponType.GPS_SATELLITE && state.fired) continue;
+      playerSws.push({ type: state.type, def, chargeTick: state.chargeTick, ready: state.ready, fired: state.fired });
+    }
+    if (playerSws.length === 0) return;
+
+    const mmSize = this.sidebarW - 8;
+    const mmY = this.height - mmSize - 6;
+    const btnH = 20;
+    const buttonsStartY = mmY - playerSws.length * btnH - 4;
+
+    for (let i = 0; i < playerSws.length; i++) {
+      const sw = playerSws[i];
+      const btnY = buttonsStartY + i * btnH;
+      const progress = sw.def.rechargeTicks > 0 ? sw.chargeTick / sw.def.rechargeTicks : 0;
+
+      // Button background
+      ctx.fillStyle = sw.ready ? 'rgba(40,80,40,0.9)' : 'rgba(30,30,40,0.9)';
+      ctx.fillRect(sidebarX + 2, btnY, sidebarW - 4, btnH - 2);
+
+      // Charge progress bar
+      if (!sw.ready) {
+        ctx.fillStyle = 'rgba(60,120,200,0.4)';
+        ctx.fillRect(sidebarX + 2, btnY, (sidebarW - 4) * progress, btnH - 2);
+      }
+
+      // Ready glow — pulsing green border
+      if (sw.ready) {
+        const pulse = 0.5 + 0.3 * Math.sin(Date.now() * 0.005);
+        ctx.strokeStyle = `rgba(80,255,80,${pulse})`;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(sidebarX + 2, btnY, sidebarW - 4, btnH - 2);
+      } else {
+        ctx.strokeStyle = 'rgba(80,80,100,0.5)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(sidebarX + 2, btnY, sidebarW - 4, btnH - 2);
+      }
+
+      // Circular charge arc indicator (left side)
+      const arcX = sidebarX + 12;
+      const arcY = btnY + btnH / 2 - 1;
+      const arcR = 5;
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(arcX, arcY, arcR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = sw.ready ? '#4f4' : '#48c';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(arcX, arcY, arcR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+      ctx.stroke();
+
+      // Weapon icon (small colored dot in center of arc)
+      const iconColors: Record<SuperweaponType, string> = {
+        [SuperweaponType.CHRONOSPHERE]: '#88f',
+        [SuperweaponType.IRON_CURTAIN]: '#fd0',
+        [SuperweaponType.NUKE]: '#f44',
+        [SuperweaponType.GPS_SATELLITE]: '#4df',
+        [SuperweaponType.SONAR_PULSE]: '#4fa',
+      };
+      ctx.fillStyle = iconColors[sw.type] ?? '#fff';
+      ctx.beginPath();
+      ctx.arc(arcX, arcY, 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Label text
+      ctx.font = '7px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = sw.ready ? '#4f4' : '#aaa';
+      const label = sw.def.name.length > 10 ? sw.def.name.slice(0, 9) + '.' : sw.def.name;
+      ctx.fillText(label, sidebarX + 22, btnY + 8);
+
+      // Charge percentage or READY
+      ctx.font = 'bold 6px monospace';
+      if (sw.ready) {
+        ctx.fillStyle = '#4f4';
+        ctx.fillText('READY', sidebarX + 22, btnY + 16);
+      } else {
+        ctx.fillStyle = '#888';
+        ctx.fillText(`${Math.floor(progress * 100)}%`, sidebarX + 22, btnY + 16);
+      }
+    }
   }
 
   // ─── Placement Ghost ────────────────────────────────────

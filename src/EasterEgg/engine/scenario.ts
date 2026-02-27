@@ -699,7 +699,7 @@ const STRUCTURE_IMAGES: Record<string, string> = {
   WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
   GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
   GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
-  ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
+  ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', MSLO: 'mslo', KENN: 'kenn',
   FENC: 'fenc', BRIK: 'brik', SBAG: 'sbag', BARB: 'barb', WOOD: 'wood',
   QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
 };
@@ -709,6 +709,7 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
   PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
   GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], HPAD: [2, 2], AFLD: [2, 2],
+  ATEK: [2, 2], STEK: [2, 2], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 2],
   QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
   // Bridge structures (destroyable)
   BARL: [1, 1], BRL3: [1, 1],
@@ -718,6 +719,7 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
 
 // Structure max HP overrides (default is 256)
 export const STRUCTURE_MAX_HP: Record<string, number> = {
+  ATEK: 600, STEK: 600, PDOX: 600, IRON: 600, MSLO: 800,
   QUEE: 800, LAR1: 25, LAR2: 50, TSLA: 500, HPAD: 400, AFLD: 500,
   BARL: 150, BRL3: 150,
 };

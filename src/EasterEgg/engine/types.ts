@@ -533,6 +533,74 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Napalm:           { name: 'Napalm',            damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
 };
 
+// === Superweapon System ===
+export enum SuperweaponType {
+  CHRONOSPHERE = 'CHRONOSPHERE',
+  IRON_CURTAIN = 'IRON_CURTAIN',
+  NUKE = 'NUKE',
+  GPS_SATELLITE = 'GPS_SATELLITE',
+  SONAR_PULSE = 'SONAR_PULSE',
+}
+
+export interface SuperweaponDef {
+  type: SuperweaponType;
+  name: string;
+  building: string;           // structure type that provides it
+  rechargeTicks: number;      // full recharge time in game ticks
+  faction: 'allied' | 'soviet' | 'both';
+  requiresPower: boolean;     // pauses charging when low power
+  needsTarget: boolean;       // requires player to click a target
+  targetMode: 'unit' | 'ground' | 'none';
+}
+
+export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
+  [SuperweaponType.CHRONOSPHERE]: {
+    type: SuperweaponType.CHRONOSPHERE, name: 'Chronosphere',
+    building: 'PDOX', rechargeTicks: 6300, faction: 'allied',
+    requiresPower: true, needsTarget: true, targetMode: 'ground',
+  },
+  [SuperweaponType.IRON_CURTAIN]: {
+    type: SuperweaponType.IRON_CURTAIN, name: 'Iron Curtain',
+    building: 'IRON', rechargeTicks: 6300, faction: 'soviet',
+    requiresPower: true, needsTarget: true, targetMode: 'unit',
+  },
+  [SuperweaponType.NUKE]: {
+    type: SuperweaponType.NUKE, name: 'Nuclear Strike',
+    building: 'MSLO', rechargeTicks: 12600, faction: 'soviet',
+    requiresPower: true, needsTarget: true, targetMode: 'ground',
+  },
+  [SuperweaponType.GPS_SATELLITE]: {
+    type: SuperweaponType.GPS_SATELLITE, name: 'GPS Satellite',
+    building: 'DOME', rechargeTicks: 6300, faction: 'allied',
+    requiresPower: true, needsTarget: false, targetMode: 'none',
+  },
+  [SuperweaponType.SONAR_PULSE]: {
+    type: SuperweaponType.SONAR_PULSE, name: 'Sonar Pulse',
+    building: 'DOME', rechargeTicks: 1800, faction: 'both',
+    requiresPower: true, needsTarget: false, targetMode: 'none',
+  },
+};
+
+// Superweapon gameplay constants
+export const IRON_CURTAIN_DURATION = 900;       // 60 seconds at 15 FPS
+export const NUKE_DAMAGE = 1000;
+export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
+export const NUKE_FLIGHT_TICKS = 45;            // missile travel time
+export const NUKE_MIN_FALLOFF = 0.1;            // minimum damage fraction at edge
+export const CHRONO_SHIFT_VISUAL_TICKS = 30;    // blue flash duration
+export const SONAR_REVEAL_TICKS = 450;          // sonar pulse reveal duration (30s)
+export const IC_TARGET_RANGE = 3;               // Iron Curtain click-to-unit search radius in cells
+
+// === Superweapon state interface ===
+export interface SuperweaponState {
+  type: SuperweaponType;
+  house: House;
+  chargeTick: number;
+  ready: boolean;
+  structureIndex: number;
+  fired: boolean;  // GPS: one-shot flag
+}
+
 // === Production data ===
 export type Faction = 'allied' | 'soviet' | 'both';
 
@@ -598,6 +666,12 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'FACT', faction: 'both', isStructure: true },
   { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'FACT', faction: 'both', isStructure: true },
   { type: 'AFLD', name: 'Airfield', cost: 2000, buildTime: 200, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
+  // Superweapon / tech structures
+  { type: 'ATEK', name: 'Allied Tech', cost: 1500, buildTime: 200, prerequisite: 'POWR', faction: 'allied', isStructure: true },
+  { type: 'STEK', name: 'Soviet Tech', cost: 1500, buildTime: 200, prerequisite: 'POWR', faction: 'soviet', isStructure: true },
+  { type: 'PDOX', name: 'Chronosphere', cost: 2800, buildTime: 300, prerequisite: 'ATEK', faction: 'allied', isStructure: true },
+  { type: 'IRON', name: 'Iron Curtain', cost: 2800, buildTime: 300, prerequisite: 'STEK', faction: 'soviet', isStructure: true },
+  { type: 'MSLO', name: 'Missile Silo', cost: 2500, buildTime: 280, prerequisite: 'STEK', faction: 'soviet', isStructure: true },
   // Walls (1x1 placement, no prerequisite building needed beyond FACT)
   { type: 'SBAG', name: 'Sandbag', cost: 10, buildTime: 15, prerequisite: 'FACT', faction: 'both', isStructure: true },
   { type: 'FENC', name: 'Chain Link', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'both', isStructure: true },
