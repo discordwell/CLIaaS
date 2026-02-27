@@ -56,6 +56,56 @@ const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 
 /** Wall structure types that use 1x1 placement mode */
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
 
+/** AI house strategic state — drives decision-making for non-player houses */
+interface AIHouseState {
+  house: House;
+  phase: 'economy' | 'buildup' | 'attack';
+  // Build order
+  buildQueue: string[];
+  lastBuildTick: number;
+  buildCooldown: number;       // ticks between build attempts
+  // Attack groups
+  attackPool: Set<number>;     // entity IDs staging for attack
+  attackThreshold: number;     // units needed before launching
+  lastAttackTick: number;
+  attackCooldownTicks: number; // min ticks between attacks
+  // Economy cache
+  harvesterCount: number;
+  refineryCount: number;
+  // Defense
+  lastBaseAttackTick: number;
+  underAttack: boolean;
+  // Difficulty modifiers
+  incomeMult: number;
+  buildSpeedMult: number;
+  aggressionMult: number;
+}
+
+/** AI difficulty modifiers — scale economy, build speed, and aggression */
+const AI_DIFFICULTY_MODS: Record<Difficulty, {
+  incomeMult: number;
+  buildSpeedMult: number;
+  attackThreshold: number;
+  attackCooldown: number;
+  productionInterval: number;
+  aggressionMult: number;
+  retreatHpPercent: number;
+}> = {
+  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30 },
+  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25 },
+  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15 },
+};
+
+/** Structure type → sprite image name mapping (shared by base rebuild and AI construction) */
+const STRUCTURE_IMAGES: Record<string, string> = {
+  FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
+  WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
+  GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
+  GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
+  ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
+  QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
+};
+
 /** Crate bonus types */
 type CrateType = 'money' | 'heal' | 'veterancy' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability';
 interface Crate {
@@ -129,6 +179,8 @@ export class Game {
   private lastSiloWarningTick = -450;
   /** AI house credit pools for production (Gap #1) */
   houseCredits = new Map<House, number>();
+  /** Strategic AI state per non-player house (skip ant missions) */
+  private aiStates = new Map<House, AIHouseState>();
   /** Production queue: active build + queued repeats per category (max 5 total) */
   productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
   /** Structure placement: waiting to be placed on map */
@@ -357,6 +409,20 @@ export class Game {
     for (const s of this.structures) {
       if (s.alive && s.type === 'PROC' && s.house !== House.Spain && s.house !== House.Greece) {
         this.houseCredits.set(s.house, (this.houseCredits.get(s.house) ?? 0) + 200);
+      }
+    }
+
+    // Initialize strategic AI states for non-ant missions
+    this.aiStates.clear();
+    if (!scenarioId.startsWith('SCA')) {
+      const aiHousesWithFact = new Set<House>();
+      for (const s of this.structures) {
+        if (s.alive && s.type === 'FACT' && !this.isAllied(s.house, this.playerHouse)) {
+          aiHousesWithFact.add(s.house);
+        }
+      }
+      for (const house of aiHousesWithFact) {
+        this.aiStates.set(house, this.createAIHouseState(house));
       }
     }
 
@@ -794,11 +860,21 @@ export class Game {
       this.updateQueenSpawning();
     }
 
-    // AI army building — produce units for AI houses
+    // AI strategic planner — runs every 150 ticks (skip for ant missions)
+    if (!this.scenarioId.startsWith('SCA')) {
+      this.updateAIStrategicPlanner();
+      this.updateAIConstruction();
+      this.updateAIHarvesters();
+      this.updateAIAttackGroups();
+      this.updateAIDefense();
+      this.updateAIRetreat();
+    }
+
+    // AI army building (works for both ant missions and strategic AI)
     this.updateAIIncome();
     this.updateAIProduction();
 
-    // AI base rebuild — check for missing structures and rebuild
+    // AI base rebuild (existing, still used for ant missions + gap-fill)
     this.updateBaseRebuild();
 
     // Ore regeneration — C++ OverlayClass::AI() fires every ~256 ticks (~17s at 15 FPS)
@@ -2042,6 +2118,12 @@ export class Game {
   private damageStructure(s: MapStructure, damage: number): boolean {
     if (!s.alive) return false;
     s.hp = Math.max(0, s.hp - damage);
+    // Record base attack for AI defense system
+    const aiState = this.aiStates.get(s.house);
+    if (aiState) {
+      aiState.lastBaseAttackTick = this.tick;
+      aiState.underAttack = true;
+    }
     // EVA "base under attack" for player structures (throttled)
     if ((s.house === House.Spain || s.house === House.Greece) &&
         this.tick - this.lastBaseAttackEva > GAME_TICKS_PER_SEC * 5) {
@@ -2694,7 +2776,7 @@ export class Game {
         let bestDist = Infinity;
         for (const s of this.structures) {
           if (!s.alive || s.type !== 'PROC') continue;
-          if (s.house !== House.Spain && s.house !== House.Greece) continue;
+          if (!this.isAllied(s.house, entity.house)) continue;
           const dx = s.cx - ec.cx;
           const dy = s.cy - ec.cy;
           const dist = dx * dx + dy * dy;
@@ -2729,8 +2811,16 @@ export class Game {
         entity.harvestTick++;
         // Unload over 30 ticks (~2 seconds)
         if (entity.harvestTick >= 30) {
-          const added = this.addCredits(entity.oreLoad);
-          this.audio.play('heal'); // credit received sound
+          let added: number;
+          if (this.isPlayerControlled(entity)) {
+            added = this.addCredits(entity.oreLoad);
+            this.audio.play('heal'); // credit received sound
+          } else {
+            // AI harvester — deposit into houseCredits
+            added = entity.oreLoad;
+            const cur = this.houseCredits.get(entity.house) ?? 0;
+            this.houseCredits.set(entity.house, cur + added);
+          }
           // Floating "+N" credits text (show actual amount stored, not raw ore load)
           this.effects.push({
             type: 'text', x: entity.pos.x, y: entity.pos.y - 8,
@@ -5565,15 +5655,6 @@ export class Game {
       if (!aiHousesWithFact.has(bp.house)) return;
 
       const pos = { cx: bp.cell % MAP_CELLS, cy: Math.floor(bp.cell / MAP_CELLS) };
-      const STRUCTURE_IMAGES: Record<string, string> = {
-        FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
-        WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
-        GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
-        GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
-        ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
-        QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
-      };
-
       const image = STRUCTURE_IMAGES[bp.type] ?? bp.type.toLowerCase();
       const maxHp = STRUCTURE_MAX_HP[bp.type] ?? 256;
 
@@ -6513,6 +6594,752 @@ export class Game {
   }
 
 
+  // === Full AI — Strategic Opponent ===
+
+  /** Create initial AIHouseState for a house, applying difficulty modifiers */
+  private createAIHouseState(house: House): AIHouseState {
+    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+    return {
+      house,
+      phase: 'economy',
+      buildQueue: [],
+      lastBuildTick: 0,
+      buildCooldown: 0,
+      attackPool: new Set(),
+      attackThreshold: mods.attackThreshold,
+      lastAttackTick: 0,
+      attackCooldownTicks: mods.attackCooldown,
+      harvesterCount: 0,
+      refineryCount: 0,
+      lastBaseAttackTick: 0,
+      underAttack: false,
+      incomeMult: mods.incomeMult,
+      buildSpeedMult: mods.buildSpeedMult,
+      aggressionMult: mods.aggressionMult,
+    };
+  }
+
+  /** Count alive structures of a given type for a house */
+  private aiCountStructure(house: House, type: string): number {
+    let count = 0;
+    for (const s of this.structures) {
+      if (s.alive && s.house === house && s.type === type) count++;
+    }
+    return count;
+  }
+
+  /** Calculate power produced by a house's structures */
+  private aiPowerProduced(house: House): number {
+    let power = 0;
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== house) continue;
+      if (s.type === 'POWR') power += 100;
+      else if (s.type === 'APWR') power += 200;
+    }
+    return power;
+  }
+
+  /** Calculate power consumed by a house's structures */
+  private aiPowerConsumed(house: House): number {
+    let power = 0;
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== house) continue;
+      // Power consumption by structure type (RA defaults)
+      switch (s.type) {
+        case 'TENT': case 'BARR': power += 20; break;
+        case 'WEAP': power += 30; break;
+        case 'PROC': power += 30; break;
+        case 'DOME': power += 40; break;
+        case 'GUN': power += 20; break;
+        case 'HBOX': power += 10; break;
+        case 'TSLA': power += 150; break;
+        case 'SAM': power += 20; break;
+        case 'AGUN': power += 20; break;
+        case 'ATEK': case 'STEK': power += 50; break;
+        case 'HPAD': power += 10; break;
+        case 'AFLD': power += 20; break;
+        case 'GAP': power += 60; break;
+        case 'FIX': power += 30; break;
+        case 'IRON': case 'PDOX': case 'MSLO': power += 100; break;
+      }
+    }
+    return power;
+  }
+
+  /** Check if AI house has a prerequisite structure */
+  private aiHasPrereq(house: House, prereq: string): boolean {
+    if (prereq === 'TENT') {
+      // Accept either TENT or BARR
+      return this.structures.some(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
+    }
+    return this.structures.some(s => s.alive && s.house === house && s.type === prereq);
+  }
+
+  /** Generate priority-ordered build queue for AI house */
+  private getAIBuildOrder(house: House, _state: AIHouseState): string[] {
+    const queue: string[] = [];
+    const faction = HOUSE_FACTION[house] ?? 'both';
+    const produced = this.aiPowerProduced(house);
+    const consumed = this.aiPowerConsumed(house);
+    const credits = this.houseCredits.get(house) ?? 0;
+
+    // 1. POWR if power deficit
+    if (consumed >= produced) {
+      queue.push('POWR');
+    }
+    // 2. TENT/BARR if none (need infantry production)
+    if (!this.aiHasPrereq(house, 'TENT')) {
+      queue.push('TENT');
+    }
+    // 3. PROC if < 2 refineries (need economy)
+    if (this.aiCountStructure(house, 'PROC') < 2) {
+      queue.push('PROC');
+    }
+    // 4. WEAP if none (need vehicle production)
+    if (this.aiCountStructure(house, 'WEAP') === 0) {
+      queue.push('WEAP');
+    }
+    // 5. POWR if power margin < 100 (preemptive)
+    if (produced - consumed < 100 && !queue.includes('POWR')) {
+      queue.push('POWR');
+    }
+    // 6. DOME if none and credits > 1000 (tech unlock)
+    if (this.aiCountStructure(house, 'DOME') === 0 && credits > 1000) {
+      queue.push('DOME');
+    }
+    // 7. Defense structures (faction-dependent)
+    const defType = faction === 'soviet' ? 'TSLA' : 'GUN';
+    const defType2 = faction === 'soviet' ? 'TSLA' : 'HBOX';
+    const totalDef = this.aiCountStructure(house, defType) + this.aiCountStructure(house, defType2);
+    if (totalDef < 2) {
+      queue.push(defType);
+    }
+    // 8. Tech center if none and has DOME
+    if (this.aiHasPrereq(house, 'DOME')) {
+      const techType = faction === 'soviet' ? 'STEK' : 'ATEK';
+      if (this.aiCountStructure(house, techType) === 0) {
+        queue.push(techType);
+      }
+    }
+    // 9. Air production if has tech center
+    const hasTech = faction === 'soviet'
+      ? this.aiHasPrereq(house, 'STEK')
+      : this.aiHasPrereq(house, 'ATEK');
+    if (hasTech) {
+      const airType = faction === 'soviet' ? 'AFLD' : 'HPAD';
+      if (this.aiCountStructure(house, airType) === 0) {
+        queue.push(airType);
+      }
+    }
+    // 10. Extra PROC if harvester count > refinery count
+    if (_state.harvesterCount > _state.refineryCount) {
+      queue.push('PROC');
+    }
+
+    return queue;
+  }
+
+  /** AI strategic planner — phase transitions every 150 ticks (~10s) */
+  private updateAIStrategicPlanner(): void {
+    if (this.tick % 150 !== 0) return;
+
+    for (const [house, state] of this.aiStates) {
+      // Update economy cache
+      state.harvesterCount = 0;
+      state.refineryCount = 0;
+      for (const e of this.entities) {
+        if (e.alive && e.house === house && (e.type === UnitType.V_HARV)) {
+          state.harvesterCount++;
+        }
+      }
+      for (const s of this.structures) {
+        if (s.alive && s.house === house && s.type === 'PROC') {
+          state.refineryCount++;
+        }
+      }
+
+      // Clear underAttack if no damage in 150 ticks (~10s)
+      if (state.underAttack && this.tick - state.lastBaseAttackTick > 150) {
+        state.underAttack = false;
+      }
+
+      // Phase transitions
+      switch (state.phase) {
+        case 'economy': {
+          const hasBarracks = this.aiHasPrereq(house, 'TENT');
+          const hasWeap = this.aiCountStructure(house, 'WEAP') > 0;
+          const hasPower = this.aiCountStructure(house, 'POWR') + this.aiCountStructure(house, 'APWR') >= 2;
+          if (hasBarracks && hasWeap && hasPower) {
+            state.phase = 'buildup';
+          }
+          break;
+        }
+        case 'buildup': {
+          if (state.attackPool.size >= state.attackThreshold) {
+            state.phase = 'attack';
+          }
+          break;
+        }
+        case 'attack': {
+          // After launch, transition back to buildup
+          if (state.attackPool.size === 0) {
+            state.phase = 'buildup';
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  /** Get centroid of alive structures for an AI house */
+  private aiGetBaseCenter(house: House): { cx: number; cy: number } | null {
+    let sumX = 0, sumY = 0, count = 0;
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== house) continue;
+      const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      sumX += s.cx + w / 2;
+      sumY += s.cy + h / 2;
+      count++;
+    }
+    if (count === 0) return null;
+    return { cx: Math.floor(sumX / count), cy: Math.floor(sumY / count) };
+  }
+
+  /** Check if a cell is a factory exit zone (below WEAP/TENT/BARR/PROC) */
+  private aiIsFactoryExit(cx: number, cy: number, house: House): boolean {
+    const exitTypes = ['WEAP', 'TENT', 'BARR', 'PROC'];
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== house || !exitTypes.includes(s.type)) continue;
+      const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      // Exit row is directly below the structure
+      if (cy === s.cy + h && cx >= s.cx && cx < s.cx + w) return true;
+    }
+    return false;
+  }
+
+  /** Spiral scan outward from base center to find valid placement for a structure */
+  private aiPlaceStructure(house: House, type: string): { cx: number; cy: number } | null {
+    const center = this.aiGetBaseCenter(house);
+    if (!center) return null;
+
+    const [fw, fh] = STRUCTURE_SIZE[type] ?? [1, 1];
+
+    for (let ring = 1; ring <= 6; ring++) {
+      // Scan cells in this ring, preferring perimeter positions for defenses
+      const candidates: { cx: number; cy: number; dist: number }[] = [];
+
+      for (let dy = -ring; dy <= ring; dy++) {
+        for (let dx = -ring; dx <= ring; dx++) {
+          // Only check ring perimeter (not interior, which was already checked)
+          if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue;
+
+          const cx = center.cx + dx;
+          const cy = center.cy + dy;
+
+          // Bounds check
+          if (cx < this.map.boundsX || cy < this.map.boundsY ||
+              cx + fw > this.map.boundsX + this.map.boundsW ||
+              cy + fh > this.map.boundsY + this.map.boundsH) continue;
+
+          // Check all footprint cells are passable
+          let valid = true;
+          for (let fy = 0; fy < fh && valid; fy++) {
+            for (let fx = 0; fx < fw && valid; fx++) {
+              const t = this.map.getTerrain(cx + fx, cy + fy);
+              if (t === Terrain.WALL || t === Terrain.WATER) valid = false;
+              // Check no existing structure overlaps
+              for (const s of this.structures) {
+                if (!s.alive) continue;
+                const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+                if (cx + fx >= s.cx && cx + fx < s.cx + sw &&
+                    cy + fy >= s.cy && cy + fy < s.cy + sh) {
+                  valid = false;
+                  break;
+                }
+              }
+            }
+          }
+          if (!valid) continue;
+
+          // Don't block factory exits
+          let blocksExit = false;
+          for (let fy = 0; fy < fh && !blocksExit; fy++) {
+            for (let fx = 0; fx < fw && !blocksExit; fx++) {
+              if (this.aiIsFactoryExit(cx + fx, cy + fy, house)) blocksExit = true;
+            }
+          }
+          if (blocksExit) continue;
+
+          // Check adjacency to existing house structure (dist ≤ 4 cells)
+          let adjacent = false;
+          for (const s of this.structures) {
+            if (!s.alive || s.house !== house) continue;
+            const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+            const scx = s.cx + sw / 2;
+            const scy = s.cy + sh / 2;
+            const pcx = cx + fw / 2;
+            const pcy = cy + fh / 2;
+            if (Math.abs(pcx - scx) <= 4 && Math.abs(pcy - scy) <= 4) {
+              adjacent = true;
+              break;
+            }
+          }
+          if (!adjacent) continue;
+
+          const dist = dx * dx + dy * dy;
+          candidates.push({ cx, cy, dist });
+        }
+      }
+
+      if (candidates.length > 0) {
+        // For defense structures, prefer perimeter (largest dist); otherwise closest
+        const isDefense = type === 'GUN' || type === 'HBOX' || type === 'TSLA' || type === 'SAM';
+        candidates.sort((a, b) => isDefense ? b.dist - a.dist : a.dist - b.dist);
+        return { cx: candidates[0].cx, cy: candidates[0].cy };
+      }
+    }
+    return null;
+  }
+
+  /** AI base construction — build new structures from build queue */
+  private updateAIConstruction(): void {
+    if (this.tick % 90 !== 0) return; // every 6 seconds
+
+    for (const [house, state] of this.aiStates) {
+      // Need a ConYard
+      if (this.aiCountStructure(house, 'FACT') === 0) continue;
+
+      // Cooldown
+      if (state.buildCooldown > 0) {
+        state.buildCooldown--;
+        continue;
+      }
+
+      const credits = this.houseCredits.get(house) ?? 0;
+      if (credits <= 0) continue;
+
+      // Refresh build queue if empty
+      if (state.buildQueue.length === 0) {
+        state.buildQueue = this.getAIBuildOrder(house, state);
+      }
+      if (state.buildQueue.length === 0) continue;
+
+      const buildType = state.buildQueue[0];
+      const prodItem = PRODUCTION_ITEMS.find(p => p.type === buildType && p.isStructure);
+      if (!prodItem) {
+        state.buildQueue.shift();
+        continue;
+      }
+
+      if (credits < prodItem.cost) continue;
+
+      const pos = this.aiPlaceStructure(house, buildType);
+      if (!pos) {
+        state.buildQueue.shift(); // can't place, skip
+        continue;
+      }
+
+      // Deduct credits
+      this.houseCredits.set(house, credits - prodItem.cost);
+      state.buildQueue.shift();
+
+      // Spawn structure (same pattern as updateBaseRebuild)
+      const image = STRUCTURE_IMAGES[buildType] ?? buildType.toLowerCase();
+      const maxHp = STRUCTURE_MAX_HP[buildType] ?? 256;
+
+      this.structures.push({
+        type: buildType,
+        image,
+        house,
+        cx: pos.cx,
+        cy: pos.cy,
+        hp: maxHp,
+        maxHp,
+        alive: true,
+        rubble: false,
+        weapon: STRUCTURE_WEAPONS[buildType],
+        attackCooldown: 0,
+        ammo: -1,
+        maxAmmo: -1,
+        buildProgress: 0,
+      });
+
+      // Mark footprint as impassable
+      const [fw, fh] = STRUCTURE_SIZE[buildType] ?? [1, 1];
+      for (let dy = 0; dy < fh; dy++) {
+        for (let dx = 0; dx < fw; dx++) {
+          this.map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
+        }
+      }
+
+      // Set cooldown scaled by difficulty
+      const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+      state.buildCooldown = Math.floor(6 * mods.buildSpeedMult); // 6 cycles base × speed mult
+      state.lastBuildTick = this.tick;
+    }
+  }
+
+  /** Get staging area for AI house — base center offset toward nearest enemy */
+  private aiStagingArea(house: House): WorldPos | null {
+    const center = this.aiGetBaseCenter(house);
+    if (!center) return null;
+
+    // Find nearest enemy structure
+    let nearestDist = Infinity;
+    let enemyCx = center.cx;
+    let enemyCy = center.cy;
+    for (const s of this.structures) {
+      if (!s.alive || this.isAllied(s.house, house)) continue;
+      const dx = s.cx - center.cx;
+      const dy = s.cy - center.cy;
+      const dist = dx * dx + dy * dy;
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        enemyCx = s.cx;
+        enemyCy = s.cy;
+      }
+    }
+
+    // Offset 5 cells toward enemy from base center
+    const dx = enemyCx - center.cx;
+    const dy = enemyCy - center.cy;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const stageCx = center.cx + Math.round(dx / len * 5);
+    const stageCy = center.cy + Math.round(dy / len * 5);
+
+    return {
+      x: stageCx * CELL_SIZE + CELL_SIZE / 2,
+      y: stageCy * CELL_SIZE + CELL_SIZE / 2,
+    };
+  }
+
+  /** Weighted production pick based on composition targets */
+  private getAIProductionPick(house: House, category: 'infantry' | 'vehicle'): ProductionItem | null {
+    const faction = HOUSE_FACTION[house] ?? 'both';
+    const prereq = category === 'infantry' ? 'TENT' : 'WEAP';
+
+    const items = PRODUCTION_ITEMS.filter(p =>
+      (p.prerequisite === prereq || (category === 'infantry' && p.prerequisite === 'BARR')) &&
+      !p.isStructure &&
+      (p.faction === 'both' || p.faction === faction) &&
+      // Check tech prereq
+      (!p.techPrereq || this.aiHasPrereq(house, p.techPrereq))
+    );
+
+    if (items.length === 0) return null;
+
+    // Count current composition
+    let antiArmor = 0, infantry = 0, total = 0;
+    for (const e of this.entities) {
+      if (!e.alive || e.house !== house || e.isAnt) continue;
+      total++;
+      if (e.type === UnitType.I_E3 || e.type === UnitType.V_2TNK ||
+          e.type === UnitType.V_3TNK || e.type === UnitType.V_4TNK ||
+          e.type === UnitType.V_1TNK) {
+        antiArmor++;
+      }
+      if (e.type === UnitType.I_E1 || e.type === UnitType.I_E2) {
+        infantry++;
+      }
+    }
+
+    // Weight items based on composition gaps
+    const antiArmorRatio = total > 0 ? antiArmor / total : 0;
+    const infantryRatio = total > 0 ? infantry / total : 0;
+
+    const weighted: { item: ProductionItem; weight: number }[] = items.map(item => {
+      let weight = 1;
+      const isAntiArmor = item.type === 'E3' || item.type === '2TNK' || item.type === '3TNK' ||
+                          item.type === '4TNK' || item.type === '1TNK';
+      const isInfantry = item.type === 'E1' || item.type === 'E2';
+
+      if (isAntiArmor && antiArmorRatio < 0.4) weight = 3;
+      if (isInfantry && infantryRatio < 0.3) weight = 2;
+      // Don't overproduce engineers
+      if (item.type === 'E6') weight = 0.2;
+      // Don't overproduce medics
+      if (item.type === 'MEDI') weight = 0.3;
+      // Prefer harvesters if economy needs it — but that's handled separately
+      if (item.type === 'HARV') weight = 0.1;
+
+      return { item, weight };
+    });
+
+    // Weighted random pick
+    const totalWeight = weighted.reduce((sum, w) => sum + w.weight, 0);
+    if (totalWeight <= 0) return items[0];
+    let roll = Math.random() * totalWeight;
+    for (const w of weighted) {
+      roll -= w.weight;
+      if (roll <= 0) return w.item;
+    }
+    return items[0];
+  }
+
+  /** Update AI harvester counts and force-produce if needed */
+  private updateAIHarvesters(): void {
+    if (this.tick % 60 !== 0) return;
+
+    for (const [house, state] of this.aiStates) {
+      // Count harvesters and refineries
+      state.harvesterCount = 0;
+      for (const e of this.entities) {
+        if (e.alive && e.house === house && e.type === UnitType.V_HARV) {
+          state.harvesterCount++;
+        }
+      }
+      state.refineryCount = this.aiCountStructure(house, 'PROC');
+
+      // If 0 harvesters and has refinery + war factory → force-produce
+      if (state.harvesterCount === 0 && state.refineryCount > 0 &&
+          this.aiCountStructure(house, 'WEAP') > 0) {
+        const credits = this.houseCredits.get(house) ?? 0;
+        const harvItem = PRODUCTION_ITEMS.find(p => p.type === 'HARV');
+        if (harvItem && credits >= harvItem.cost) {
+          const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
+          if (factory) {
+            const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
+            const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
+            const unit = new Entity(UnitType.V_HARV, house, sx, sy + CELL_SIZE);
+            unit.mission = Mission.GUARD;
+            this.entities.push(unit);
+            this.entityById.set(unit.id, unit);
+            this.houseCredits.set(house, credits - harvItem.cost);
+          }
+        }
+      }
+    }
+  }
+
+  /** AI attack group management — accumulate pool and launch coordinated attacks */
+  private updateAIAttackGroups(): void {
+    if (this.tick % 120 !== 0) return; // every 8 seconds
+
+    for (const [house, state] of this.aiStates) {
+      if (state.phase !== 'buildup' && state.phase !== 'attack') continue;
+
+      const staging = this.aiStagingArea(house);
+      if (!staging) continue;
+
+      // Pool accumulation: scan entities with AREA_GUARD near staging area
+      for (const e of this.entities) {
+        if (!e.alive || e.house !== house) continue;
+        if (e.type === UnitType.V_HARV) continue; // never recruit harvesters
+        if (e.mission !== Mission.AREA_GUARD && e.mission !== Mission.GUARD) continue;
+        // Already in pool
+        if (state.attackPool.has(e.id)) continue;
+        // Within 8 cells of staging area
+        const dist = worldDist(e.pos, staging);
+        if (dist < CELL_SIZE * 8) {
+          state.attackPool.add(e.id);
+        }
+      }
+
+      // Prune dead/missing from pool
+      for (const id of state.attackPool) {
+        const e = this.entityById.get(id);
+        if (!e || !e.alive) state.attackPool.delete(id);
+      }
+
+      // Launch check (aggressionMult reduces threshold and cooldown)
+      const effectiveThreshold = Math.max(2, Math.floor(state.attackThreshold / state.aggressionMult));
+      const effectiveCooldown = Math.floor(state.attackCooldownTicks / state.aggressionMult);
+      if (state.attackPool.size >= effectiveThreshold &&
+          this.tick - state.lastAttackTick > effectiveCooldown) {
+        this.launchAIAttack(house, state);
+      }
+    }
+  }
+
+  /** Launch a coordinated AI attack */
+  private launchAIAttack(house: House, state: AIHouseState): void {
+    const target = this.aiPickAttackTarget(house);
+    if (!target) return;
+
+    const waveId = this.nextWaveId++;
+    const rallyTick = this.tick + 30; // 2s rally before advance
+
+    for (const id of state.attackPool) {
+      const e = this.entityById.get(id);
+      if (!e || !e.alive) continue;
+      e.mission = Mission.HUNT;
+      e.moveTarget = target;
+      e.waveId = waveId;
+      e.waveRallyTick = rallyTick;
+    }
+
+    state.lastAttackTick = this.tick;
+    state.attackPool.clear();
+    // Phase transitions back to buildup via strategic planner
+  }
+
+  /** Pick best attack target for AI house */
+  private aiPickAttackTarget(house: House): WorldPos | null {
+    // Priority: FACT > WEAP > PROC > nearest structure > nearest unit cluster
+    const priorities = ['FACT', 'WEAP', 'PROC'];
+    for (const type of priorities) {
+      for (const s of this.structures) {
+        if (!s.alive || this.isAllied(s.house, house)) continue;
+        if (s.type === type) {
+          const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+          return {
+            x: (s.cx + w / 2) * CELL_SIZE,
+            y: (s.cy + h / 2) * CELL_SIZE,
+          };
+        }
+      }
+    }
+
+    // Nearest enemy structure
+    const center = this.aiGetBaseCenter(house);
+    if (!center) return null;
+
+    let bestDist = Infinity;
+    let bestPos: WorldPos | null = null;
+
+    for (const s of this.structures) {
+      if (!s.alive || this.isAllied(s.house, house)) continue;
+      const dx = s.cx - center.cx;
+      const dy = s.cy - center.cy;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+        bestPos = { x: (s.cx + w / 2) * CELL_SIZE, y: (s.cy + h / 2) * CELL_SIZE };
+      }
+    }
+    if (bestPos) return bestPos;
+
+    // Nearest enemy unit
+    for (const e of this.entities) {
+      if (!e.alive || this.isAllied(e.house, house)) continue;
+      const dx = e.pos.x / CELL_SIZE - center.cx;
+      const dy = e.pos.y / CELL_SIZE - center.cy;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPos = { x: e.pos.x, y: e.pos.y };
+      }
+    }
+
+    return bestPos;
+  }
+
+  /** Recall up to half the attack pool as defenders when base is under attack */
+  private aiRecallDefenders(house: House, state: AIHouseState): void {
+    const center = this.aiGetBaseCenter(house);
+    if (!center) return;
+
+    const centerPos = { x: center.cx * CELL_SIZE + CELL_SIZE / 2, y: center.cy * CELL_SIZE + CELL_SIZE / 2 };
+    let recalled = 0;
+    const maxRecall = Math.ceil(state.attackPool.size / 2);
+
+    for (const id of state.attackPool) {
+      if (recalled >= maxRecall) break;
+      const e = this.entityById.get(id);
+      if (!e || !e.alive) continue;
+      e.mission = Mission.HUNT;
+      e.moveTarget = centerPos;
+      state.attackPool.delete(id);
+      recalled++;
+    }
+  }
+
+  /** AI defense — detect base attacks and rally defenders */
+  private updateAIDefense(): void {
+    if (this.tick % 45 !== 0) return; // every 3 seconds
+
+    for (const [house, state] of this.aiStates) {
+      if (!state.underAttack) continue;
+
+      // Recall defenders if attack pool has units
+      if (state.attackPool.size > 0) {
+        this.aiRecallDefenders(house, state);
+      }
+
+      // Rally idle units near base to hunt the attacker
+      const center = this.aiGetBaseCenter(house);
+      if (!center) continue;
+      const centerPos = { x: center.cx * CELL_SIZE + CELL_SIZE / 2, y: center.cy * CELL_SIZE + CELL_SIZE / 2 };
+
+      for (const e of this.entities) {
+        if (!e.alive || e.house !== house) continue;
+        if (e.type === UnitType.V_HARV) continue;
+        if (e.mission !== Mission.AREA_GUARD && e.mission !== Mission.GUARD) continue;
+        // Only rally units close to base (within 10 cells)
+        const dist = worldDist(e.pos, centerPos);
+        if (dist < CELL_SIZE * 10) {
+          // Find nearest enemy near base
+          let nearestEnemy: Entity | null = null;
+          let nearestDist = Infinity;
+          for (const enemy of this.entities) {
+            if (!enemy.alive || this.isAllied(enemy.house, house)) continue;
+            const eDist = worldDist(enemy.pos, centerPos);
+            if (eDist < CELL_SIZE * 12 && eDist < nearestDist) {
+              nearestDist = eDist;
+              nearestEnemy = enemy;
+            }
+          }
+          if (nearestEnemy) {
+            e.mission = Mission.HUNT;
+            e.moveTarget = { x: nearestEnemy.pos.x, y: nearestEnemy.pos.y };
+          }
+        }
+      }
+    }
+  }
+
+  /** AI retreat — damaged units fall back to repair depot or base */
+  private updateAIRetreat(): void {
+    if (this.tick % 30 !== 0) return; // every 2 seconds
+
+    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+    const retreatPercent = mods.retreatHpPercent;
+
+    for (const e of this.entities) {
+      if (!e.alive || this.isPlayerControlled(e)) continue;
+      if (e.type === UnitType.V_HARV) continue; // harvesters don't retreat
+      if (e.isAnt) continue; // ants never retreat
+
+      const state = this.aiStates.get(e.house);
+      if (!state) continue;
+
+      const hpRatio = e.hp / e.maxHp;
+      if (hpRatio >= retreatPercent) continue;
+
+      // Already retreating (MOVE back to base)
+      if (e.mission === Mission.MOVE && e.moveTarget) continue;
+
+      const center = this.aiGetBaseCenter(e.house);
+      if (!center) continue;
+
+      // HP < 25% (scaled): find nearest FIX (depot) first
+      let retreatTarget: WorldPos | null = null;
+      for (const s of this.structures) {
+        if (!s.alive || s.house !== e.house || s.type !== 'FIX') continue;
+        const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+        retreatTarget = {
+          x: (s.cx + w / 2) * CELL_SIZE,
+          y: (s.cy + h / 2) * CELL_SIZE,
+        };
+        break;
+      }
+
+      // No FIX → retreat to base center
+      if (!retreatTarget) {
+        retreatTarget = {
+          x: center.cx * CELL_SIZE + CELL_SIZE / 2,
+          y: center.cy * CELL_SIZE + CELL_SIZE / 2,
+        };
+      }
+
+      e.mission = Mission.MOVE;
+      e.moveTarget = retreatTarget;
+      // Remove from attack pool if in one
+      state.attackPool.delete(e.id);
+    }
+  }
+
   /** AI passive income — AI houses earn credits from refineries */
   private updateAIIncome(): void {
     if (this.tick % 450 !== 0) return; // every 30 seconds
@@ -6520,81 +7347,116 @@ export class Game {
       if (!s.alive || s.type !== 'PROC') continue;
       if (this.isAllied(s.house, this.playerHouse)) continue;
       const current = this.houseCredits.get(s.house) ?? 0;
-      this.houseCredits.set(s.house, current + 100);
+      const aiState = this.aiStates.get(s.house);
+      const incomeMult = aiState ? aiState.incomeMult : 1.0;
+      this.houseCredits.set(s.house, current + Math.floor(100 * incomeMult));
     }
   }
 
   /** AI army building — AI houses produce units when they have credits and barracks/factory.
    *  Faction-aware: AI builds units matching its own faction from PRODUCTION_ITEMS. */
   private updateAIProduction(): void {
-    // Only run every 60 ticks (~4 seconds)
-    if (this.tick % 60 !== 0) return;
+    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+    if (this.tick % mods.productionInterval !== 0) return;
 
-    // Count living ants to respect difficulty cap
-    const diffMods = DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal;
-    const antCount = this.entities.filter(e => e.alive && e.isAnt).length;
-    if (antCount >= diffMods.maxAnts) return;
+    // For ant missions, respect ant cap using old random production
+    if (this.scenarioId.startsWith('SCA')) {
+      const diffMods = DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal;
+      const antCount = this.entities.filter(e => e.alive && e.isAnt).length;
+      if (antCount >= diffMods.maxAnts) return;
+    }
 
     // For each AI house, check if they have production buildings and credits
     for (const [house, credits] of this.houseCredits) {
       if (credits <= 0) continue;
-      // Skip player-allied houses
       if (this.isAllied(house, this.playerHouse)) continue;
 
-      const houseFaction = HOUSE_FACTION[house] ?? 'both';
-
-      const hasTent = this.structures.some(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
+      const state = this.aiStates.get(house);
+      const hasTent = this.aiHasPrereq(house, 'TENT');
       const hasWeap = this.structures.some(s => s.alive && s.house === house && s.type === 'WEAP');
 
+      // Strategic AI: Harvester priority — if harvesterCount < refineryCount
+      if (state && hasWeap && state.harvesterCount < state.refineryCount) {
+        const harvItem = PRODUCTION_ITEMS.find(p => p.type === 'HARV');
+        if (harvItem && credits >= harvItem.cost) {
+          const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
+          if (factory) {
+            const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
+            const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
+            const unit = new Entity(UnitType.V_HARV, house, sx, sy + CELL_SIZE);
+            unit.mission = Mission.GUARD;
+            this.entities.push(unit);
+            this.entityById.set(unit.id, unit);
+            this.houseCredits.set(house, credits - harvItem.cost);
+            continue; // one production per house per tick
+          }
+        }
+      }
+
+      // Staging area for new units (strategic AI) or barracks fallback
+      const staging = state ? this.aiStagingArea(house) : null;
+
       if (hasTent && credits >= 100) {
-        // Filter infantry items by AI's faction
-        const infItems = PRODUCTION_ITEMS.filter(p =>
-          (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
-          !p.isStructure &&
-          (p.faction === 'both' || p.faction === houseFaction)
-        );
-        if (infItems.length > 0) {
-          const pick = infItems[Math.floor(Math.random() * infItems.length)];
-          if (credits >= pick.cost) {
-            const barracks = this.structures.find(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
-            if (barracks) {
-              const sx = barracks.cx * CELL_SIZE + CELL_SIZE;
-              const sy = barracks.cy * CELL_SIZE + CELL_SIZE * 2;
-              const unitType = pick.type as UnitType;
-              const unit = new Entity(unitType, house, sx + (Math.random() - 0.5) * 24, sy);
-              unit.mission = Mission.AREA_GUARD;
-              unit.guardOrigin = { x: sx, y: sy };
-              this.entities.push(unit);
-              this.entityById.set(unit.id, unit);
-              this.houseCredits.set(house, credits - pick.cost);
+        const pick = state
+          ? this.getAIProductionPick(house, 'infantry')
+          : (() => {
+              const houseFaction = HOUSE_FACTION[house] ?? 'both';
+              const infItems = PRODUCTION_ITEMS.filter(p =>
+                (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
+                !p.isStructure &&
+                (p.faction === 'both' || p.faction === houseFaction)
+              );
+              return infItems.length > 0 ? infItems[Math.floor(Math.random() * infItems.length)] : null;
+            })();
+        if (pick && credits >= pick.cost) {
+          const barracks = this.structures.find(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
+          if (barracks) {
+            const sx = barracks.cx * CELL_SIZE + CELL_SIZE;
+            const sy = barracks.cy * CELL_SIZE + CELL_SIZE * 2;
+            const unitType = pick.type as UnitType;
+            const unit = new Entity(unitType, house, sx + (Math.random() - 0.5) * 24, sy);
+            unit.mission = Mission.AREA_GUARD;
+            unit.guardOrigin = staging ?? { x: sx, y: sy };
+            if (staging) {
+              unit.moveTarget = staging;
+              unit.mission = Mission.MOVE;
             }
+            this.entities.push(unit);
+            this.entityById.set(unit.id, unit);
+            this.houseCredits.set(house, credits - pick.cost);
           }
         }
       }
 
       const currentCredits = this.houseCredits.get(house) ?? 0;
       if (hasWeap && currentCredits >= 600) {
-        // Filter vehicle items by AI's faction
-        const vehItems = PRODUCTION_ITEMS.filter(p =>
-          p.prerequisite === 'WEAP' &&
-          !p.isStructure &&
-          (p.faction === 'both' || p.faction === houseFaction)
-        );
-        if (vehItems.length > 0) {
-          const pick = vehItems[Math.floor(Math.random() * vehItems.length)];
-          if (currentCredits >= pick.cost) {
-            const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
-            if (factory) {
-              const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
-              const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
-              const unitType = pick.type as UnitType;
-              const unit = new Entity(unitType, house, sx, sy + CELL_SIZE);
-              unit.mission = Mission.AREA_GUARD;
-              unit.guardOrigin = { x: sx, y: sy };
-              this.entities.push(unit);
-              this.entityById.set(unit.id, unit);
-              this.houseCredits.set(house, (this.houseCredits.get(house) ?? 0) - pick.cost);
+        const pick = state
+          ? this.getAIProductionPick(house, 'vehicle')
+          : (() => {
+              const houseFaction = HOUSE_FACTION[house] ?? 'both';
+              const vehItems = PRODUCTION_ITEMS.filter(p =>
+                p.prerequisite === 'WEAP' &&
+                !p.isStructure &&
+                (p.faction === 'both' || p.faction === houseFaction)
+              );
+              return vehItems.length > 0 ? vehItems[Math.floor(Math.random() * vehItems.length)] : null;
+            })();
+        if (pick && currentCredits >= pick.cost) {
+          const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
+          if (factory) {
+            const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
+            const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
+            const unitType = pick.type as UnitType;
+            const unit = new Entity(unitType, house, sx, sy + CELL_SIZE);
+            unit.mission = Mission.AREA_GUARD;
+            unit.guardOrigin = staging ?? { x: sx, y: sy };
+            if (staging) {
+              unit.moveTarget = staging;
+              unit.mission = Mission.MOVE;
             }
+            this.entities.push(unit);
+            this.entityById.set(unit.id, unit);
+            this.houseCredits.set(house, (this.houseCredits.get(house) ?? 0) - pick.cost);
           }
         }
       }
