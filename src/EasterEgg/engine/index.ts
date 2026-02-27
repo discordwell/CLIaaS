@@ -5655,33 +5655,7 @@ export class Game {
       if (!aiHousesWithFact.has(bp.house)) return;
 
       const pos = { cx: bp.cell % MAP_CELLS, cy: Math.floor(bp.cell / MAP_CELLS) };
-      const image = STRUCTURE_IMAGES[bp.type] ?? bp.type.toLowerCase();
-      const maxHp = STRUCTURE_MAX_HP[bp.type] ?? 256;
-
-      this.structures.push({
-        type: bp.type,
-        image,
-        house: bp.house,
-        cx: pos.cx,
-        cy: pos.cy,
-        hp: maxHp,
-        maxHp,
-        alive: true,
-        rubble: false,
-        weapon: STRUCTURE_WEAPONS[bp.type],
-        attackCooldown: 0,
-        ammo: -1,
-        maxAmmo: -1,
-        buildProgress: 0, // starts with build animation
-      });
-
-      // Mark footprint as impassable
-      const [fw, fh] = STRUCTURE_SIZE[bp.type] ?? [1, 1];
-      for (let dy = 0; dy < fh; dy++) {
-        for (let dx = 0; dx < fw; dx++) {
-          this.map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
-        }
-      }
+      this.spawnAIStructure(bp.type, bp.house, pos.cx, pos.cy);
 
       // Set 30s rebuild cooldown
       this.baseRebuildCooldown = GAME_TICKS_PER_SEC * 30;
@@ -5704,6 +5678,76 @@ export class Game {
       }
     }
     return { cx: initialCX, cy: initialCY };
+  }
+
+  /** Spawn an AI structure: look up image/hp, push to structures[], mark footprint impassable.
+   *  Extracted from updateBaseRebuild and updateAIConstruction to eliminate duplication. */
+  private spawnAIStructure(type: string, house: House, cx: number, cy: number): void {
+    const image = STRUCTURE_IMAGES[type] ?? type.toLowerCase();
+    const maxHp = STRUCTURE_MAX_HP[type] ?? 256;
+
+    this.structures.push({
+      type,
+      image,
+      house,
+      cx,
+      cy,
+      hp: maxHp,
+      maxHp,
+      alive: true,
+      rubble: false,
+      weapon: STRUCTURE_WEAPONS[type],
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      buildProgress: 0,
+    });
+
+    // Mark footprint as impassable
+    const [fw, fh] = STRUCTURE_SIZE[type] ?? [1, 1];
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        this.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
+      }
+    }
+  }
+
+  /** Spawn an AI unit from a factory: find factory, calculate spawn pos, create entity.
+   *  Extracted from updateAIHarvesters and updateAIProduction to eliminate duplication.
+   *  Infantry factories (TENT/BARR) use 2x2 footprint offsets; vehicle factories (WEAP) use 3x2. */
+  private spawnAIUnit(
+    house: House,
+    unitType: UnitType,
+    factoryType: string,
+    mission: Mission = Mission.GUARD,
+    guardOrigin?: WorldPos,
+  ): Entity | null {
+    const isInfantry = factoryType === 'TENT' || factoryType === 'BARR';
+    const factory = this.structures.find(s =>
+      s.alive && s.house === house && (isInfantry ? (s.type === 'TENT' || s.type === 'BARR') : s.type === factoryType)
+    );
+    if (!factory) return null;
+
+    let sx: number;
+    let sy: number;
+    if (isInfantry) {
+      // Infantry: spawn at cx+1 cell, cy+2 cells, with random horizontal scatter
+      sx = factory.cx * CELL_SIZE + CELL_SIZE + (Math.random() - 0.5) * 24;
+      sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
+    } else {
+      // Vehicle: spawn at cx+2 cells, cy+2 cells, offset down by CELL_SIZE
+      sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
+      sy = factory.cy * CELL_SIZE + CELL_SIZE * 2 + CELL_SIZE;
+    }
+
+    const unit = new Entity(unitType, house, sx, sy);
+    unit.mission = mission;
+    if (guardOrigin) {
+      unit.guardOrigin = guardOrigin;
+    }
+    this.entities.push(unit);
+    this.entityById.set(unit.id, unit);
+    return unit;
   }
 
   /** Spawn a produced unit at its factory */
@@ -6943,34 +6987,8 @@ export class Game {
       this.houseCredits.set(house, credits - prodItem.cost);
       state.buildQueue.shift();
 
-      // Spawn structure (same pattern as updateBaseRebuild)
-      const image = STRUCTURE_IMAGES[buildType] ?? buildType.toLowerCase();
-      const maxHp = STRUCTURE_MAX_HP[buildType] ?? 256;
-
-      this.structures.push({
-        type: buildType,
-        image,
-        house,
-        cx: pos.cx,
-        cy: pos.cy,
-        hp: maxHp,
-        maxHp,
-        alive: true,
-        rubble: false,
-        weapon: STRUCTURE_WEAPONS[buildType],
-        attackCooldown: 0,
-        ammo: -1,
-        maxAmmo: -1,
-        buildProgress: 0,
-      });
-
-      // Mark footprint as impassable
-      const [fw, fh] = STRUCTURE_SIZE[buildType] ?? [1, 1];
-      for (let dy = 0; dy < fh; dy++) {
-        for (let dx = 0; dx < fw; dx++) {
-          this.map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
-        }
-      }
+      // Spawn structure
+      this.spawnAIStructure(buildType, house, pos.cx, pos.cy);
 
       // Set cooldown scaled by difficulty
       const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
@@ -7096,14 +7114,8 @@ export class Game {
         const credits = this.houseCredits.get(house) ?? 0;
         const harvItem = PRODUCTION_ITEMS.find(p => p.type === 'HARV');
         if (harvItem && credits >= harvItem.cost) {
-          const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
-          if (factory) {
-            const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
-            const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
-            const unit = new Entity(UnitType.V_HARV, house, sx, sy + CELL_SIZE);
-            unit.mission = Mission.GUARD;
-            this.entities.push(unit);
-            this.entityById.set(unit.id, unit);
+          const unit = this.spawnAIUnit(house, UnitType.V_HARV, 'WEAP');
+          if (unit) {
             this.houseCredits.set(house, credits - harvItem.cost);
           }
         }
@@ -7379,14 +7391,8 @@ export class Game {
       if (state && hasWeap && state.harvesterCount < state.refineryCount) {
         const harvItem = PRODUCTION_ITEMS.find(p => p.type === 'HARV');
         if (harvItem && credits >= harvItem.cost) {
-          const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
-          if (factory) {
-            const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
-            const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
-            const unit = new Entity(UnitType.V_HARV, house, sx, sy + CELL_SIZE);
-            unit.mission = Mission.GUARD;
-            this.entities.push(unit);
-            this.entityById.set(unit.id, unit);
+          const unit = this.spawnAIUnit(house, UnitType.V_HARV, 'WEAP');
+          if (unit) {
             this.houseCredits.set(house, credits - harvItem.cost);
             continue; // one production per house per tick
           }
@@ -7409,20 +7415,17 @@ export class Game {
               return infItems.length > 0 ? infItems[Math.floor(Math.random() * infItems.length)] : null;
             })();
         if (pick && credits >= pick.cost) {
-          const barracks = this.structures.find(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
-          if (barracks) {
-            const sx = barracks.cx * CELL_SIZE + CELL_SIZE;
-            const sy = barracks.cy * CELL_SIZE + CELL_SIZE * 2;
-            const unitType = pick.type as UnitType;
-            const unit = new Entity(unitType, house, sx + (Math.random() - 0.5) * 24, sy);
-            unit.mission = Mission.AREA_GUARD;
-            unit.guardOrigin = staging ?? { x: sx, y: sy };
-            if (staging) {
+          const unitType = pick.type as UnitType;
+          const unit = this.spawnAIUnit(house, unitType, 'TENT', Mission.AREA_GUARD,
+            staging ?? undefined);
+          if (unit) {
+            if (!staging) {
+              // Guard origin defaults to spawn position
+              unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
+            } else {
               unit.moveTarget = staging;
               unit.mission = Mission.MOVE;
             }
-            this.entities.push(unit);
-            this.entityById.set(unit.id, unit);
             this.houseCredits.set(house, credits - pick.cost);
           }
         }
@@ -7442,20 +7445,17 @@ export class Game {
               return vehItems.length > 0 ? vehItems[Math.floor(Math.random() * vehItems.length)] : null;
             })();
         if (pick && currentCredits >= pick.cost) {
-          const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
-          if (factory) {
-            const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
-            const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
-            const unitType = pick.type as UnitType;
-            const unit = new Entity(unitType, house, sx, sy + CELL_SIZE);
-            unit.mission = Mission.AREA_GUARD;
-            unit.guardOrigin = staging ?? { x: sx, y: sy };
-            if (staging) {
+          const unitType = pick.type as UnitType;
+          const unit = this.spawnAIUnit(house, unitType, 'WEAP', Mission.AREA_GUARD,
+            staging ?? undefined);
+          if (unit) {
+            if (!staging) {
+              // Guard origin defaults to spawn position
+              unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
+            } else {
               unit.moveTarget = staging;
               unit.mission = Mission.MOVE;
             }
-            this.entities.push(unit);
-            this.entityById.set(unit.id, unit);
             this.houseCredits.set(house, (this.houseCredits.get(house) ?? 0) - pick.cost);
           }
         }
