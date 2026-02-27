@@ -700,6 +700,15 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'BRIK', name: 'Concrete', cost: 50, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true },
 ];
 
+// === Sidebar Tab Categories ===
+export type SidebarTab = 'infantry' | 'vehicle' | 'structure';
+
+export function getItemCategory(item: ProductionItem): SidebarTab {
+  if (item.isStructure) return 'structure';
+  if (item.prerequisite === 'TENT' || item.prerequisite === 'BARR') return 'infantry';
+  return 'vehicle';
+}
+
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)
 // Pixel offsets from cell center for each sub-position
 export const SUB_CELL_OFFSETS: { x: number; y: number }[] = [

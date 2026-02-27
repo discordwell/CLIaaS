@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type SidebarTab, getItemCategory } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -145,7 +145,10 @@ export class Renderer {
   sidebarQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
   sidebarScroll = 0;
   sidebarW = 100;
+  activeTab: SidebarTab = 'infantry';
+  tabScrollPositions: Record<SidebarTab, number> = { infantry: 0, vehicle: 0, structure: 0 };
   hasRadar = false; // requires DOME building for minimap
+  radarEnabled = true; // player toggle for radar
   radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
   radarStaticCounter = 0;
   crates: Array<{ x: number; y: number; type: string }> = [];
@@ -2300,8 +2303,17 @@ export class Renderer {
     ctx.lineWidth = 1;
     ctx.strokeRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
 
+    // Radar toggle label (clickable area)
+    if (this.hasRadar && this.radarEnabled) {
+      ctx.fillStyle = 'rgba(80,200,80,0.6)';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('RADAR', mmX + mmSize / 2, mmY - 4);
+      ctx.textAlign = 'left';
+    }
+
     // No radar: show static noise instead of map (update every 10 render calls)
-    if (!this.hasRadar) {
+    if (!this.hasRadar || !this.radarEnabled) {
       this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
       if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
         const cells = Math.ceil(mmSize / 3);
@@ -2318,10 +2330,11 @@ export class Renderer {
         ctx.fillStyle = `rgb(${v},${v + 5},${v})`;
         ctx.fillRect(px, py, 3, 3);
       }
-      ctx.fillStyle = '#666';
+      const label = !this.hasRadar ? 'NO RADAR' : 'RADAR OFF';
+      ctx.fillStyle = !this.hasRadar ? '#666' : '#a80';
       ctx.font = '8px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('NO RADAR', mmX + mmSize / 2, mmY + mmSize / 2);
+      ctx.fillText(label, mmX + mmSize / 2, mmY + mmSize / 2);
       ctx.textAlign = 'left';
       return;
     }
@@ -2737,45 +2750,26 @@ export class Renderer {
       }
     }
 
-    // Production items — grouped by category with section headers
+    // Tab bar — INF / VEH / BLD
+    const tabBarY = (this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0) ? 36 : 28;
+    this.renderTabBar(x, w, tabBarY);
+    const tabBarH = 14;
+
+    // Production items — filtered by active tab
     const itemH = 22;
-    const headerH = 12;
-    const itemStartY = (this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0) ? 36 : 28;
+    const itemStartY = tabBarY + tabBarH;
     ctx.font = '9px monospace';
     ctx.textAlign = 'left';
 
-    let currentY = itemStartY - this.sidebarScroll;
-    let lastCategory = '';
+    const filteredItems = this.sidebarItems.filter(it => getItemCategory(it) === this.activeTab);
+    const tabScroll = this.tabScrollPositions[this.activeTab];
+    const catColor = this.activeTab === 'infantry' ? 'rgba(80,200,80,0.15)'
+      : this.activeTab === 'vehicle' ? 'rgba(80,80,200,0.15)' : 'rgba(200,200,80,0.15)';
 
-    for (let i = 0; i < this.sidebarItems.length; i++) {
-      const item = this.sidebarItems[i];
-      const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
-
-      // Category section header when category changes
-      if (category !== lastCategory) {
-        lastCategory = category;
-        if (currentY >= itemStartY - headerH && currentY < this.height) {
-          const headerLabel = category === 'structure' ? 'STRUCTURES'
-            : category === 'infantry' ? 'INFANTRY' : 'VEHICLES';
-          const headerColor = category === 'infantry' ? 'rgba(80,200,80,0.6)'
-            : category === 'vehicle' ? 'rgba(80,120,255,0.6)' : 'rgba(200,180,60,0.6)';
-          ctx.fillStyle = 'rgba(40,40,50,0.9)';
-          ctx.fillRect(x + 1, currentY, w - 2, headerH);
-          ctx.fillStyle = headerColor;
-          ctx.font = 'bold 7px monospace';
-          ctx.fillText(headerLabel, x + 4, currentY + 9);
-          ctx.font = '9px monospace';
-        }
-        currentY += headerH;
-      }
-
-      const iy = currentY;
-      currentY += itemH;
+    for (let i = 0; i < filteredItems.length; i++) {
+      const item = filteredItems[i];
+      const iy = itemStartY + i * itemH - tabScroll;
       if (iy < itemStartY - itemH || iy > this.height) continue;
-
-      // Category color coding
-      const catColor = category === 'infantry' ? 'rgba(80,200,80,0.15)'
-        : category === 'vehicle' ? 'rgba(80,80,200,0.15)' : 'rgba(200,200,80,0.15)';
 
       // Item background
       ctx.fillStyle = catColor;
@@ -2797,6 +2791,7 @@ export class Renderer {
         });
       } else {
         // Fallback: colored rectangle with type abbreviation
+        const category = this.activeTab;
         const fallbackColor = category === 'infantry' ? '#4a6' : category === 'vehicle' ? '#46a' : '#a84';
         ctx.fillStyle = fallbackColor;
         ctx.fillRect(thumbX, iy + 2, thumbSize, thumbSize - 2);
@@ -2810,7 +2805,7 @@ export class Renderer {
       const textX = x + 3 + thumbSize + 2; // text offset after thumbnail
 
       // Check if this category is building
-      const qEntry = this.sidebarQueue.get(category);
+      const qEntry = this.sidebarQueue.get(this.activeTab);
       const isBuilding = qEntry && qEntry.item.type === item.type;
 
       if (isBuilding && qEntry) {
@@ -2835,8 +2830,100 @@ export class Renderer {
       }
     }
 
+    // Sell/Repair buttons — above superweapon buttons / minimap
+    this.renderSellRepairButtons(x, w);
+
     // Superweapon buttons — above minimap
     this.renderSuperweaponButtons(x, w);
+
+    ctx.textAlign = 'left';
+  }
+
+  // ─── Tab Bar ────────────────────────────────────────────────
+
+  private renderTabBar(sidebarX: number, sidebarW: number, y: number): void {
+    const ctx = this.ctx;
+    const tabH = 14;
+    const tabs: Array<{ key: SidebarTab; label: string; color: string }> = [
+      { key: 'infantry', label: 'INF', color: 'rgba(80,200,80,' },
+      { key: 'vehicle', label: 'VEH', color: 'rgba(80,120,255,' },
+      { key: 'structure', label: 'BLD', color: 'rgba(200,180,60,' },
+    ];
+    const margin = 2;
+    const tabW = Math.floor((sidebarW - margin * 2) / 3);
+
+    for (let i = 0; i < tabs.length; i++) {
+      const tab = tabs[i];
+      const tx = sidebarX + margin + i * tabW;
+      const active = this.activeTab === tab.key;
+
+      // Background
+      ctx.fillStyle = active ? tab.color + '0.5)' : 'rgba(30,30,40,0.9)';
+      ctx.fillRect(tx, y, tabW - 1, tabH);
+      // Border
+      ctx.strokeStyle = active ? tab.color + '0.9)' : '#444';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(tx, y, tabW - 1, tabH);
+
+      // Label
+      ctx.font = active ? 'bold 8px monospace' : '8px monospace';
+      ctx.fillStyle = active ? '#fff' : '#888';
+      ctx.textAlign = 'center';
+      ctx.fillText(tab.label, tx + tabW / 2 - 0.5, y + 10);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // ─── Sell / Repair Buttons ──────────────────────────────────
+
+  /** Y position for the sell/repair button row */
+  getSellRepairButtonY(): number {
+    const mmSize = this.sidebarW - 8;
+    const mmY = this.height - mmSize - 6;
+    // Count superweapon buttons to position above them
+    let swCount = 0;
+    for (const [, state] of this.superweapons) {
+      if (state.house !== House.Spain && state.house !== House.Greece) continue;
+      const def = SUPERWEAPON_DEFS[state.type];
+      if (!def) continue;
+      if (state.type === SuperweaponType.GPS_SATELLITE && state.fired) continue;
+      swCount++;
+    }
+    const swHeight = swCount > 0 ? swCount * 20 + 4 : 0;
+    return mmY - swHeight - 18;
+  }
+
+  private renderSellRepairButtons(sidebarX: number, sidebarW: number): void {
+    const ctx = this.ctx;
+    const btnH = 14;
+    const btnY = this.getSellRepairButtonY();
+    const margin = 2;
+    const gap = 4;
+    const btnW = Math.floor((sidebarW - margin * 2 - gap) / 2);
+
+    // Sell button
+    const sellX = sidebarX + margin;
+    ctx.fillStyle = this.sellMode ? 'rgba(255,200,60,0.7)' : 'rgba(40,40,50,0.9)';
+    ctx.fillRect(sellX, btnY, btnW, btnH);
+    ctx.strokeStyle = this.sellMode ? '#FFD700' : '#555';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sellX, btnY, btnW, btnH);
+    ctx.font = 'bold 7px monospace';
+    ctx.fillStyle = this.sellMode ? '#000' : '#ccc';
+    ctx.textAlign = 'center';
+    ctx.fillText('$ SELL', sellX + btnW / 2, btnY + 10);
+
+    // Repair button
+    const fixX = sellX + btnW + gap;
+    ctx.fillStyle = this.repairMode ? 'rgba(80,255,80,0.7)' : 'rgba(40,40,50,0.9)';
+    ctx.fillRect(fixX, btnY, btnW, btnH);
+    ctx.strokeStyle = this.repairMode ? '#4f4' : '#555';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(fixX, btnY, btnW, btnH);
+    ctx.font = 'bold 7px monospace';
+    ctx.fillStyle = this.repairMode ? '#000' : '#ccc';
+    ctx.textAlign = 'center';
+    ctx.fillText('FIX', fixX + btnW / 2, btnY + 10);
 
     ctx.textAlign = 'left';
   }

@@ -10,7 +10,7 @@ import {
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED,
   Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
-  PRODUCTION_ITEMS, type ProductionItem, CursorType,
+  PRODUCTION_ITEMS, type ProductionItem, CursorType, type SidebarTab, getItemCategory,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
@@ -195,6 +195,9 @@ export class Game {
   // Sidebar dimensions
   static readonly SIDEBAR_W = 100;
   sidebarScroll = 0; // scroll offset for sidebar items
+  activeTab: SidebarTab = 'infantry';
+  tabScrollPositions: Record<SidebarTab, number> = { infantry: 0, vehicle: 0, structure: 0 };
+  radarEnabled = true; // player toggle for radar minimap
   private cachedAvailableItems: ProductionItem[] | null = null;
   /** Rally points: produced units auto-move here (per factory type) */
   private rallyPoints = new Map<string, WorldPos>(); // factory type → world position
@@ -1184,11 +1187,16 @@ export class Game {
   private processInput(): void {
     const { leftClick, rightClick, doubleClick, dragBox, ctrlHeld, shiftHeld, keys, scrollDelta } = this.input.state;
 
-    // Sidebar scroll (mouse wheel when cursor is over sidebar)
+    // Sidebar scroll (mouse wheel when cursor is over sidebar) — per-tab
     if (scrollDelta !== 0 && this.input.state.mouseX >= this.canvas.width - Game.SIDEBAR_W) {
       const items = this.cachedAvailableItems ?? this.getAvailableItems();
-      const maxScroll = Math.max(0, items.length * 22 - (this.canvas.height - 80));
-      this.sidebarScroll = Math.max(0, Math.min(maxScroll, this.sidebarScroll + Math.sign(scrollDelta) * 22));
+      const filteredItems = items.filter(it => getItemCategory(it) === this.activeTab);
+      const tabBarH = 14;
+      const itemStartY = (this.powerProduced > 0 || this.powerConsumed > 0) ? 36 + tabBarH : 28 + tabBarH;
+      const maxScroll = Math.max(0, filteredItems.length * 22 - (this.canvas.height - itemStartY - 80));
+      const cur = this.tabScrollPositions[this.activeTab];
+      this.tabScrollPositions[this.activeTab] = Math.max(0, Math.min(maxScroll, cur + Math.sign(scrollDelta) * 22));
+      this.sidebarScroll = this.tabScrollPositions[this.activeTab];
     }
 
     // Minimap drag scroll: while holding left button on minimap, continuously scroll
@@ -1673,7 +1681,7 @@ export class Game {
         const itemIdx = this.sidebarItemAtY(rightClick.y);
         if (itemIdx >= 0 && itemIdx < items.length) {
           const item = items[itemIdx];
-          const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+          const category = getItemCategory(item);
           this.cancelProduction(category);
         }
         return;
@@ -1918,28 +1926,63 @@ export class Game {
   /** Map a sidebar Y coordinate to the item index, accounting for category headers */
   private sidebarItemAtY(sy: number): number {
     const items = this.getAvailableItems();
+    const filteredItems = items.filter(it => getItemCategory(it) === this.activeTab);
     const itemH = 22;
-    const headerH = 12;
-    const itemStartY = (this.powerProduced > 0 || this.powerConsumed > 0) ? 36 : 28;
-    const relY = sy - itemStartY + this.sidebarScroll;
+    const tabBarH = 14;
+    const itemStartY = ((this.powerProduced > 0 || this.powerConsumed > 0) ? 36 : 28) + tabBarH;
+    const tabScroll = this.tabScrollPositions[this.activeTab];
+    const relY = sy - itemStartY + tabScroll;
     if (relY < 0) return -1;
-    let accY = 0;
-    let lastCategory = '';
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
-      if (category !== lastCategory) {
-        lastCategory = category;
-        accY += headerH;
-      }
-      if (relY >= accY && relY < accY + itemH) return i;
-      accY += itemH;
-    }
-    return -1;
+    const filteredIdx = Math.floor(relY / itemH);
+    if (filteredIdx < 0 || filteredIdx >= filteredItems.length) return -1;
+    // Map back to index in the full items array
+    const targetItem = filteredItems[filteredIdx];
+    return items.indexOf(targetItem);
   }
 
   /** Handle clicks on the sidebar production panel */
   private handleSidebarClick(sx: number, sy: number): void {
+    const sidebarX = this.canvas.width - Game.SIDEBAR_W;
+
+    // Tab bar click detection
+    const tabBarY = (this.powerProduced > 0 || this.powerConsumed > 0) ? 36 : 28;
+    const tabBarH = 14;
+    if (sy >= tabBarY && sy < tabBarY + tabBarH) {
+      const margin = 2;
+      const tabW = Math.floor((Game.SIDEBAR_W - margin * 2) / 3);
+      const relX = sx - sidebarX - margin;
+      if (relX >= 0 && relX < tabW) this.activeTab = 'infantry';
+      else if (relX >= tabW && relX < tabW * 2) this.activeTab = 'vehicle';
+      else if (relX >= tabW * 2) this.activeTab = 'structure';
+      return;
+    }
+
+    // Sell/Repair button click detection
+    const sellRepairY = this.renderer.getSellRepairButtonY();
+    const btnH = 14;
+    if (sy >= sellRepairY && sy < sellRepairY + btnH) {
+      const margin = 2;
+      const gap = 4;
+      const btnW = Math.floor((Game.SIDEBAR_W - margin * 2 - gap) / 2);
+      const relX = sx - sidebarX - margin;
+      if (relX >= 0 && relX < btnW) {
+        this.sellMode = !this.sellMode;
+        this.repairMode = false;
+      } else if (relX >= btnW + gap && relX < btnW * 2 + gap) {
+        this.repairMode = !this.repairMode;
+        this.sellMode = false;
+      }
+      return;
+    }
+
+    // Radar toggle — clicking minimap label area
+    const mmSize = Game.SIDEBAR_W - 8;
+    const mmY = this.canvas.height - mmSize - 6;
+    if (this.hasBuilding('DOME') && sy >= mmY - 12 && sy < mmY) {
+      this.radarEnabled = !this.radarEnabled;
+      return;
+    }
+
     // Check superweapon button clicks (at bottom of sidebar, above minimap)
     const swClick = this.handleSuperweaponButtonClick(sy);
     if (swClick) return;
@@ -5500,7 +5543,7 @@ export class Game {
 
   /** Start building an item (called from sidebar click) */
   startProduction(item: ProductionItem): void {
-    const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+    const category = getItemCategory(item);
     const effectiveCost = this.getEffectiveCost(item);
     const existing = this.productionQueue.get(category);
     if (existing) {
@@ -5835,12 +5878,14 @@ export class Game {
         if (!this.map.isPassable(cx + dx, cy + dy)) return false;
       }
     }
-    // Must be adjacent to an existing player structure
+    // Must be adjacent to an existing player structure (footprint-based AABB)
     let adjacent = false;
     for (const s of this.structures) {
       if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
-      const dist = Math.abs(s.cx - cx) + Math.abs(s.cy - cy);
-      if (dist <= 4) { adjacent = true; break; }
+      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
+      const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
+      if (nL < exR && nR > exL && nT < exB && nB > exT) { adjacent = true; break; }
     }
     if (!adjacent) return false;
 
@@ -6493,8 +6538,11 @@ export class Game {
     this.renderer.sidebarPowerConsumed = this.powerConsumed;
     this.renderer.sidebarItems = this.cachedAvailableItems ?? this.getAvailableItems();
     this.renderer.sidebarQueue = this.productionQueue;
-    this.renderer.sidebarScroll = this.sidebarScroll;
+    this.renderer.sidebarScroll = this.tabScrollPositions[this.activeTab];
     this.renderer.sidebarW = Game.SIDEBAR_W;
+    this.renderer.activeTab = this.activeTab;
+    this.renderer.tabScrollPositions = this.tabScrollPositions;
+    this.renderer.radarEnabled = this.radarEnabled;
     // Radar requires DOME and sufficient power
     const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;
@@ -6543,11 +6591,17 @@ export class Game {
           if (!passable) valid = false;
         }
       }
-      // Check adjacency
+      // Check adjacency — footprint-based AABB (expand existing structure by 1 cell, check overlap)
       let adj = false;
       for (const s of this.structures) {
         if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
-        if (Math.abs(s.cx - cx) + Math.abs(s.cy - cy) <= 4) { adj = true; break; }
+        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+        // Existing structure expanded by 1 cell in each direction
+        const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
+        // New building footprint
+        const nL = cx, nT = cy, nR = cx + pfw, nB = cy + pfh;
+        // AABB overlap test
+        if (nL < exR && nR > exL && nT < exB && nB > exT) { adj = true; break; }
       }
       this.renderer.placementValid = valid && adj;
       this.renderer.placementCells = cells;
