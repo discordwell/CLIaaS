@@ -185,8 +185,8 @@ describe('GameInspector', () => {
     });
 
     it('does not fire for fast-rotating ants (rot >= 8)', () => {
-      // ANT1 has rot=8 (instant rotation) — same facing is normal
-      const ant = makeEntity(UnitType.ANT1, House.USSR, 1200, 1200);
+      // ANT3 has rot=9 (instant rotation) — same facing is normal
+      const ant = makeEntity(UnitType.ANT3, House.USSR, 1200, 1200);
       const target = makeEntity(UnitType.I_E1, House.Spain, 1210, 1200);
       ant.mission = Mission.ATTACK;
       ant.target = target;

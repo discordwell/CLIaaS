@@ -160,7 +160,7 @@ describe('tickRotation — 32-step accumulator system', () => {
 });
 
 describe('tickTurretRotation — 2x body speed, 32-step', () => {
-  it('turret rotates at 2x body speed for rot=5 tank', () => {
+  it('turret rotates at ROT+1 speed for rot=5 tank', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     expect(tank.stats.rot).toBe(5);
     tank.turretFacing = Dir.N;
@@ -173,14 +173,15 @@ describe('tickTurretRotation — 2x body speed, 32-step', () => {
       tank.tickTurretRotation();
       ticks++;
     }
-    // Turret: rot*2=10, threshold=8, 4 visual steps
-    // tick1: acc=10→step(acc=2). tick2: acc=12→step(acc=4). tick3: acc=14→step(acc=6). tick4: acc=16→step(acc=8)
-    expect(ticks).toBe(4);
+    // Turret: rot+1=6, threshold=8, 4 visual steps (C++ unit.cpp:542)
+    // tick1: acc=6. tick2: acc=12→step(acc=4). tick3: acc=10→step(acc=2).
+    // tick4: acc=8→step(acc=0). tick5: acc=6. tick6: acc=12→step(acc=4).
+    expect(ticks).toBe(6);
     expect(tank.turretFacing).toBe(Dir.NE);
     expect(tank.turretFacing32).toBe(4);
   });
 
-  it('turret rotation is roughly 2x faster than body for same unit', () => {
+  it('turret rotation is faster than body for same unit (ROT+1 vs ROT)', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
 
     // Body rotation
@@ -205,8 +206,10 @@ describe('tickTurretRotation — 2x body speed, 32-step', () => {
       turretTicks++;
     }
 
+    // C++ unit.cpp:542: turret uses ROT+1 (=6) vs body ROT (=5)
+    // Body: 7 ticks, Turret: 6 ticks. Turret is faster but not 2x.
     expect(turretTicks).toBeLessThan(bodyTicks);
-    expect(bodyTicks / turretTicks).toBeGreaterThanOrEqual(1.5);
+    expect(bodyTicks / turretTicks).toBeGreaterThanOrEqual(1.1);
   });
 
   it('turretFrame uses turretFacing32 through BODY_SHAPE lookup', () => {

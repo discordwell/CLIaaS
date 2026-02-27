@@ -109,25 +109,36 @@ describe('write operations use createClient', () => {
     await helpcrunchPostMessage({ apiKey: 'test-key' }, 123, 'Hello!');
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://api.helpcrunch.com/v1/chats/123/messages',
+      'https://api.helpcrunch.com/v1/messages',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ text: 'Hello!', type: 'message' }),
+        body: JSON.stringify({ chat: 123, text: 'Hello!', type: 'message' }),
         headers: expect.objectContaining({ Authorization: 'Bearer test-key' }),
       }),
     );
   });
 
   it('helpcrunchCreateChat sends POST and returns id', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 999 }));
+    // First call creates the chat, second call posts the initial message
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ id: 999 }))
+      .mockResolvedValueOnce(jsonResponse({}));
 
     const { helpcrunchCreateChat } = await import('../../connectors/helpcrunch.js');
     const result = await helpcrunchCreateChat({ apiKey: 'test-key' }, 42, 'New chat');
 
     expect(result).toEqual({ id: 999 });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(mockFetch).toHaveBeenCalledWith(
       'https://api.helpcrunch.com/v1/chats',
       expect.objectContaining({ method: 'POST' }),
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.helpcrunch.com/v1/messages',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ chat: 999, text: 'New chat', type: 'message' }),
+      }),
     );
   });
 

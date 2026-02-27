@@ -27,6 +27,7 @@ vi.mock('@/lib/data-provider/index', () => ({
 // Mock scopes (enable all tools)
 vi.mock('../scopes', () => ({
   isToolEnabled: vi.fn().mockReturnValue(true),
+  scopeGuard: vi.fn().mockReturnValue(null),
   loadScopes: vi.fn().mockReturnValue({
     enabledTools: new Set([
       'survey_config', 'survey_send',

@@ -694,22 +694,9 @@ export function threatScore(
   // Kill count bonus: experienced enemies are more dangerous
   score += target.kills * 3;
 
-  // Wounded bonus: finish off weakened targets (HP < 50% → 1.5x)
-  if (target.hp < target.maxHp * 0.5) score *= 1.5;
-
-  // Retaliation bonus: enemy currently attacking allies → 2x priority
-  if (isTargetAttackingAlly) {
-    score *= 2;
-  }
-
-  // A9: Zone-aware threat — enemies closing distance get +25% priority
-  // (C++ uses spatial zones; we approximate with closing speed detection)
-  if (closingSpeed !== undefined && closingSpeed > 0) {
-    score *= 1.25;
-  }
-
   // A11: Warhead effectiveness — prefer targets we can actually damage
   // (C++ per-weapon-class threat multipliers from techno.cpp)
+  // Applied early so base class value reflects armor matchup before additive/multiplicative bonuses.
   if (scanner.weapon) {
     const warhead = scanner.weapon.warhead;
     const verses = WARHEAD_VS_ARMOR[warhead];
@@ -725,8 +712,24 @@ export function threatScore(
 
   // A12: Target weapon danger — enemies with bigger weapons are more threatening
   // (C++ techno.cpp evaluates target's weapon damage as part of threat)
+  // Added after A11 (so armor penalty doesn't reduce it) but before wounded/retaliation
+  // so those multipliers scale the full score cleanly.
   const weaponDanger = Math.min((target.weapon?.damage ?? 0) * 0.2, 20);
   score += weaponDanger;
+
+  // Wounded bonus: finish off weakened targets (HP < 50% → 1.5x)
+  if (target.hp < target.maxHp * 0.5) score *= 1.5;
+
+  // Retaliation bonus: enemy currently attacking allies → 2x priority
+  if (isTargetAttackingAlly) {
+    score *= 2;
+  }
+
+  // A9: Zone-aware threat — enemies closing distance get +25% priority
+  // (C++ uses spatial zones; we approximate with closing speed detection)
+  if (closingSpeed !== undefined && closingSpeed > 0) {
+    score *= 1.25;
+  }
 
   // Inverse distance weighting: closer targets score higher
   // Avoid division by zero; at dist=0 full score, at max sight range ~0.3x

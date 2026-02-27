@@ -54,6 +54,13 @@ function authedReq(path: string, headers?: Record<string, string>): NextRequest 
   });
 }
 
+/** Sign an email into a portal auth cookie value (matches lib/portal/cookie.ts sign()) */
+function signPortalCookie(email: string): string {
+  const encoded = Buffer.from(email).toString('base64url');
+  const sig = createHmac('sha256', 'dev-portal-secret').update(encoded).digest('hex').slice(0, 32);
+  return `${encoded}.${sig}`;
+}
+
 // ── Test Suite ───────────────────────────────────────────────────────
 
 describe('Comprehensive API Feature Tests', () => {
@@ -1147,7 +1154,7 @@ describe('Comprehensive API Feature Tests', () => {
       it('returns 200 with tickets for authenticated portal user', async () => {
         const { GET } = await import('@/app/api/portal/tickets/route');
         const req = new NextRequest(`${BASE}/api/portal/tickets`, {
-          headers: { Cookie: 'cliaas-portal-email=test@example.com' },
+          headers: { Cookie: `cliaas-portal-auth=${signPortalCookie('test@example.com')}` },
         });
         const res = await GET(req);
         expect(res.status).toBe(200);
@@ -1169,7 +1176,7 @@ describe('Comprehensive API Feature Tests', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Cookie: 'cliaas-portal-email=test@example.com',
+            Cookie: `cliaas-portal-auth=${signPortalCookie('test@example.com')}`,
           },
           body: JSON.stringify({ description: 'Details here' }),
         });
@@ -1184,7 +1191,7 @@ describe('Comprehensive API Feature Tests', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Cookie: 'cliaas-portal-email=test@example.com',
+            Cookie: `cliaas-portal-auth=${signPortalCookie('test@example.com')}`,
           },
           body: JSON.stringify({ subject: 'Help me', description: 'I have an issue' }),
         });
