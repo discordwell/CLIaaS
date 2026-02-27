@@ -297,6 +297,7 @@ interface ScenarioData {
   smudges: Array<{ type: string; cell: number }>; // [SMUDGE] section scorch/crater marks
   theatre: string; // TEMPERATE, INTERIOR, etc.
   rawSections: Map<string, Map<string, string>>; // all INI sections for per-scenario overrides
+  playerHouse: string; // house name from [Basic] Player= (e.g. 'Spain')
 }
 
 /** Parse an INI-format scenario file */
@@ -594,6 +595,7 @@ export function parseScenarioINI(text: string): ScenarioData {
     smudges,
     theatre,
     rawSections: sections,
+    playerHouse,
   };
 }
 
@@ -747,6 +749,8 @@ export interface ScenarioResult {
   crateOverrides: { silver?: string; wood?: string; water?: string };
   /** AI base blueprint for rebuild system — structures from [Base] section */
   baseBlueprint: Array<{ type: string; cell: number; house: House }>;
+  /** Player's house from scenario INI [Basic] Player= field */
+  playerHouse: House;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -1070,6 +1074,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     warheadOverrides,
     crateOverrides,
     baseBlueprint: data.baseStructures.map(bs => ({ type: bs.type, cell: bs.cell, house: toHouse(bs.house) })),
+    playerHouse: toHouse(data.playerHouse ?? 'Spain'),
   };
 }
 

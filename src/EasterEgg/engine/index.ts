@@ -10,7 +10,8 @@ import {
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED,
   Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
-  PRODUCTION_ITEMS, type ProductionItem, CursorType, HOUSE_FIREPOWER_BIAS,
+  PRODUCTION_ITEMS, type ProductionItem, CursorType,
+  type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
   IRON_CURTAIN_DURATION, NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
@@ -159,6 +160,10 @@ export class Game {
   private nukePendingTick = 0;
   private nukePendingSource: WorldPos | null = null;
 
+  // Player faction (dynamic — set from scenario INI)
+  playerHouse: House = House.Spain;
+  playerFaction: Faction = 'allied';
+
   // Difficulty
   difficulty: Difficulty = 'normal';
 
@@ -290,6 +295,8 @@ export class Game {
     this.teamTypes = scenario.teamTypes;
     this.triggers = scenario.triggers;
     this.credits = scenario.credits;
+    this.playerHouse = scenario.playerHouse;
+    this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
     // Calculate initial silo capacity and cap starting credits (C++ parity)
     this.siloCapacity = this.calculateSiloCapacity();
     if (this.siloCapacity > 0 && this.credits > this.siloCapacity) {
@@ -1128,9 +1135,9 @@ export class Game {
       if (this.pendingPlacement) {
         // Refund: for walls, only refund if first wall not yet placed (prepaid)
         if (WALL_TYPES.has(this.pendingPlacement.type)) {
-          if (this.wallPlacementPrepaid) this.addCredits(this.pendingPlacement.cost, true);
+          if (this.wallPlacementPrepaid) this.addCredits(this.getEffectiveCost(this.pendingPlacement), true);
         } else {
-          this.addCredits(this.pendingPlacement.cost, true);
+          this.addCredits(this.getEffectiveCost(this.pendingPlacement), true);
         }
         this.pendingPlacement = null;
         this.wallPlacementPrepaid = false;
@@ -3161,7 +3168,7 @@ export class Game {
 
         // Apply warhead-vs-armor damage multiplier + veterancy bonus + house firepower bias (C8)
         const mult = this.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
-        const houseBias = HOUSE_FIREPOWER_BIAS[entity.house] ?? 1.0;
+        const houseBias = this.getFirepowerBias(entity.house);
         // If warhead does 0% vs this armor (e.g. Organic vs vehicles), skip entirely
         let damage = mult <= 0 ? 0 : Math.max(1, Math.round(activeWeapon.damage * mult * entity.damageMultiplier * houseBias));
         // C3: MinDamage/MaxDamage rules (C++ combat.cpp:122-127, rules.cpp:227)
@@ -3894,7 +3901,7 @@ export class Game {
       if (entity.attackCooldown <= 0 && entity.weapon) {
         // Scale damage: base 0.15× multiplier calibrated for 256-HP structures, scale with maxHp
         const hpScale = s.maxHp / 256;
-        const structHouseBias = HOUSE_FIREPOWER_BIAS[entity.house] ?? 1.0;
+        const structHouseBias = this.getFirepowerBias(entity.house);
         const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale * structHouseBias));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
@@ -4601,9 +4608,9 @@ export class Game {
     return this.isAllied(a.house, b.house);
   }
 
-  /** Check if an entity is player-controlled (Spain or Greece) */
+  /** Check if an entity is player-controlled (allied to playerHouse) */
   private isPlayerControlled(e: Entity): boolean {
-    return e.house === House.Spain || e.house === House.Greece;
+    return this.isAllied(e.house, this.playerHouse);
   }
 
   /** Trigger retaliation: a damaged unit without a target attacks the shooter.
@@ -5320,7 +5327,7 @@ export class Game {
   /** Check if player has a building of the given type */
   hasBuilding(type: string): boolean {
     return this.structures.some(s => s.alive && s.type === type &&
-      (s.house === House.Spain || s.house === House.Greece));
+      this.isAllied(s.house, this.playerHouse));
   }
 
   /** Calculate total silo storage capacity from alive player structures.
@@ -5328,7 +5335,7 @@ export class Game {
   calculateSiloCapacity(): number {
     let capacity = 0;
     for (const s of this.structures) {
-      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
       if (s.buildProgress !== undefined && s.buildProgress < 1) continue; // under construction
       if (s.type === 'PROC') capacity += 2000;
       else if (s.type === 'SILO') capacity += 1500;
@@ -5370,6 +5377,22 @@ export class Game {
     return added;
   }
 
+  /** Get effective cost for an item, applying country bonus multiplier */
+  getEffectiveCost(item: ProductionItem): number {
+    const bonus = COUNTRY_BONUSES[this.playerHouse] ?? COUNTRY_BONUSES.Neutral;
+    return Math.max(1, Math.round(item.cost * bonus.costMult));
+  }
+
+  /** Get firepower bias for a house, with ant mission overrides.
+   *  In ant missions (SCA*), ant houses use special bias values instead of country bonuses. */
+  getFirepowerBias(house: House): number {
+    if (this.scenarioId.startsWith('SCA') && ANT_HOUSES.has(house)) {
+      const ANT_BIAS: Record<string, number> = { USSR: 1.1, Ukraine: 1.0, Germany: 0.9 };
+      return ANT_BIAS[house] ?? 1.0;
+    }
+    return COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0;
+  }
+
   /** Get buildable items based on current structures + faction + tech prereqs */
   getAvailableItems(): ProductionItem[] {
     // No production until player discovers their base
@@ -5377,8 +5400,8 @@ export class Game {
     return PRODUCTION_ITEMS.filter(item => {
       // Must have primary prerequisite building
       if (!this.hasBuilding(item.prerequisite)) return false;
-      // Faction filter: player is Allied in ant missions
-      if (item.faction === 'soviet') return false;
+      // Faction filter: player only sees items matching their faction or 'both'
+      if (item.faction !== 'both' && item.faction !== this.playerFaction) return false;
       // Tech prerequisite (e.g. Artillery needs Radar Dome)
       if (item.techPrereq && !this.hasBuilding(item.techPrereq)) return false;
       return true;
@@ -5388,24 +5411,25 @@ export class Game {
   /** Start building an item (called from sidebar click) */
   startProduction(item: ProductionItem): void {
     const category = item.isStructure ? 'structure' : item.prerequisite === 'TENT' ? 'infantry' : 'vehicle';
+    const effectiveCost = this.getEffectiveCost(item);
     const existing = this.productionQueue.get(category);
     if (existing) {
       // Already building — queue another of the same item (max 5 total)
       if (existing.item.type === item.type && existing.queueCount < 5) {
-        if (this.credits < item.cost) {
+        if (this.credits < effectiveCost) {
           this.playEva('eva_insufficient_funds');
           return;
         }
-        this.credits -= item.cost;
+        this.credits -= effectiveCost;
         existing.queueCount++;
       }
       return;
     }
-    if (this.credits < item.cost) {
+    if (this.credits < effectiveCost) {
       this.playEva('eva_insufficient_funds');
       return;
     }
-    this.credits -= item.cost;
+    this.credits -= effectiveCost;
     this.productionQueue.set(category, { item, progress: 0, queueCount: 1 });
     this.audio.play('eva_building');
   }
@@ -5414,13 +5438,14 @@ export class Game {
   cancelProduction(category: string): void {
     const entry = this.productionQueue.get(category);
     if (!entry) return;
+    const effectiveCost = this.getEffectiveCost(entry.item);
     if (entry.queueCount > 1) {
       // Dequeue one — refund full cost of queued item
       entry.queueCount--;
-      this.addCredits(entry.item.cost, true);
+      this.addCredits(effectiveCost, true);
     } else {
       // Cancel active build — refund based on remaining progress
-      const refund = Math.floor(entry.item.cost * (1 - entry.progress / entry.item.buildTime));
+      const refund = Math.floor(effectiveCost * (1 - entry.progress / entry.item.buildTime));
       this.addCredits(refund, true);
       this.productionQueue.delete(category);
     }
@@ -5472,7 +5497,7 @@ export class Game {
   private countPlayerBuildings(type: string): number {
     let count = 0;
     for (const s of this.structures) {
-      if (s.alive && s.type === type && (s.house === House.Spain || s.house === House.Greece)) {
+      if (s.alive && s.type === type && this.isAllied(s.house, this.playerHouse)) {
         count++;
       }
     }
@@ -5495,7 +5520,7 @@ export class Game {
     // Find AI houses that have a ConYard (FACT) — required to rebuild
     const aiHousesWithFact = new Set<House>();
     for (const s of this.structures) {
-      if (s.alive && s.type === 'FACT' && s.house !== House.Spain && s.house !== House.Greece) {
+      if (s.alive && s.type === 'FACT' && !this.isAllied(s.house, this.playerHouse)) {
         aiHousesWithFact.add(s.house);
       }
     }
@@ -5606,7 +5631,7 @@ export class Game {
     // Find the factory building
     let factory: MapStructure | null = null;
     for (const s of this.structures) {
-      if (s.alive && s.type === factoryType && (s.house === House.Spain || s.house === House.Greece)) {
+      if (s.alive && s.type === factoryType && this.isAllied(s.house, this.playerHouse)) {
         factory = s;
         break;
       }
@@ -5728,7 +5753,7 @@ export class Game {
       if (this.wallPlacementPrepaid) {
         this.wallPlacementPrepaid = false; // first wall was paid at production start
       } else {
-        this.credits -= item.cost; // subsequent walls deducted on placement
+        this.credits -= this.getEffectiveCost(item); // subsequent walls deducted on placement
       }
     } else {
       this.pendingPlacement = null;
@@ -6493,13 +6518,14 @@ export class Game {
     if (this.tick % 450 !== 0) return; // every 30 seconds
     for (const s of this.structures) {
       if (!s.alive || s.type !== 'PROC') continue;
-      if (s.house === House.Spain || s.house === House.Greece) continue;
+      if (this.isAllied(s.house, this.playerHouse)) continue;
       const current = this.houseCredits.get(s.house) ?? 0;
       this.houseCredits.set(s.house, current + 100);
     }
   }
 
-  /** AI army building — AI houses produce units when they have credits and barracks/factory */
+  /** AI army building — AI houses produce units when they have credits and barracks/factory.
+   *  Faction-aware: AI builds units matching its own faction from PRODUCTION_ITEMS. */
   private updateAIProduction(): void {
     // Only run every 60 ticks (~4 seconds)
     if (this.tick % 60 !== 0) return;
@@ -6512,50 +6538,63 @@ export class Game {
     // For each AI house, check if they have production buildings and credits
     for (const [house, credits] of this.houseCredits) {
       if (credits <= 0) continue;
-      // Skip player houses
-      if (house === House.Spain || house === House.Greece) continue;
+      // Skip player-allied houses
+      if (this.isAllied(house, this.playerHouse)) continue;
+
+      const houseFaction = HOUSE_FACTION[house] ?? 'both';
 
       const hasTent = this.structures.some(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
       const hasWeap = this.structures.some(s => s.alive && s.house === house && s.type === 'WEAP');
 
       if (hasTent && credits >= 100) {
-        // Produce infantry: 60% E1, 20% E3, 10% DOG, 10% E2
-        const roll = Math.random();
-        const infType = roll < 0.6 ? UnitType.I_E1 : roll < 0.8 ? UnitType.I_E3 : roll < 0.9 ? UnitType.I_DOG : UnitType.I_E2;
-        const cost = infType === UnitType.I_E3 ? 300 : infType === UnitType.I_DOG ? 200 : infType === UnitType.I_E2 ? 160 : 100;
-        if (credits >= cost) {
-          // Find spawn point near a barracks
-          const barracks = this.structures.find(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
-          if (barracks) {
-            const sx = barracks.cx * CELL_SIZE + CELL_SIZE;
-            const sy = barracks.cy * CELL_SIZE + CELL_SIZE * 2;
-            const unit = new Entity(infType, house, sx + (Math.random() - 0.5) * 24, sy);
-            unit.mission = Mission.AREA_GUARD;
-            unit.guardOrigin = { x: sx, y: sy };
-            this.entities.push(unit);
-            this.entityById.set(unit.id, unit);
-            this.houseCredits.set(house, credits - cost);
+        // Filter infantry items by AI's faction
+        const infItems = PRODUCTION_ITEMS.filter(p =>
+          (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
+          !p.isStructure &&
+          (p.faction === 'both' || p.faction === houseFaction)
+        );
+        if (infItems.length > 0) {
+          const pick = infItems[Math.floor(Math.random() * infItems.length)];
+          if (credits >= pick.cost) {
+            const barracks = this.structures.find(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
+            if (barracks) {
+              const sx = barracks.cx * CELL_SIZE + CELL_SIZE;
+              const sy = barracks.cy * CELL_SIZE + CELL_SIZE * 2;
+              const unitType = pick.type as UnitType;
+              const unit = new Entity(unitType, house, sx + (Math.random() - 0.5) * 24, sy);
+              unit.mission = Mission.AREA_GUARD;
+              unit.guardOrigin = { x: sx, y: sy };
+              this.entities.push(unit);
+              this.entityById.set(unit.id, unit);
+              this.houseCredits.set(house, credits - pick.cost);
+            }
           }
         }
       }
 
       const currentCredits = this.houseCredits.get(house) ?? 0;
-      if (hasWeap && currentCredits >= 700) {
-        // Produce vehicles: 50% 2TNK, 30% 1TNK, 20% JEEP
-        const roll = Math.random();
-        const vehType = roll < 0.5 ? UnitType.V_2TNK : roll < 0.8 ? UnitType.V_1TNK : UnitType.V_JEEP;
-        const cost = vehType === UnitType.V_2TNK ? 800 : vehType === UnitType.V_1TNK ? 700 : 600;
-        if (currentCredits >= cost) {
-          const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
-          if (factory) {
-            const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
-            const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
-            const unit = new Entity(vehType, house, sx, sy + CELL_SIZE);
-            unit.mission = Mission.AREA_GUARD;
-            unit.guardOrigin = { x: sx, y: sy };
-            this.entities.push(unit);
-            this.entityById.set(unit.id, unit);
-            this.houseCredits.set(house, (this.houseCredits.get(house) ?? 0) - cost);
+      if (hasWeap && currentCredits >= 600) {
+        // Filter vehicle items by AI's faction
+        const vehItems = PRODUCTION_ITEMS.filter(p =>
+          p.prerequisite === 'WEAP' &&
+          !p.isStructure &&
+          (p.faction === 'both' || p.faction === houseFaction)
+        );
+        if (vehItems.length > 0) {
+          const pick = vehItems[Math.floor(Math.random() * vehItems.length)];
+          if (currentCredits >= pick.cost) {
+            const factory = this.structures.find(s => s.alive && s.house === house && s.type === 'WEAP');
+            if (factory) {
+              const sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
+              const sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
+              const unitType = pick.type as UnitType;
+              const unit = new Entity(unitType, house, sx, sy + CELL_SIZE);
+              unit.mission = Mission.AREA_GUARD;
+              unit.guardOrigin = { x: sx, y: sy };
+              this.entities.push(unit);
+              this.entityById.set(unit.id, unit);
+              this.houseCredits.set(house, (this.houseCredits.get(house) ?? 0) - pick.cost);
+            }
           }
         }
       }
@@ -6576,7 +6615,7 @@ export class Game {
 
     const targetHouse = structure.house;
     // Must be enemy structure
-    if (targetHouse === House.Spain || targetHouse === House.Greece) return;
+    if (this.isAllied(targetHouse, this.playerHouse)) return;
 
     switch (structure.type) {
       case 'PROC':

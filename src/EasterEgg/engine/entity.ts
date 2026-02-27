@@ -251,6 +251,8 @@ export class Entity {
     return worldToCell(this.pos.x, this.pos.y);
   }
 
+  /** Hardcoded for ant missions (Spain/Greece). For campaign missions with dynamic
+   *  player houses, use Game.isPlayerControlled() instead. */
   get isPlayerUnit(): boolean {
     return this.house === House.Spain || this.house === House.Greece;
   }

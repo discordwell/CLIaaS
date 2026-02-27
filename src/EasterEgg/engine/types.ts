@@ -57,16 +57,38 @@ export enum House {
 export const PLAYER_HOUSES = new Set([House.Spain, House.Greece]);
 export const ANT_HOUSES = new Set([House.USSR, House.Ukraine, House.Germany]);
 
-// House firepower bias — C++ House->FirepowerBias multiplier per faction
-export const HOUSE_FIREPOWER_BIAS: Record<string, number> = {
-  Spain: 1.0,    // player — normal
-  Greece: 1.0,   // allied — normal
-  USSR: 1.1,     // ant faction — slightly stronger (ants are tough)
-  Ukraine: 1.0,  // ant faction — normal
-  Germany: 0.9,  // ant faction — slightly weaker (scout ants)
-  Turkey: 1.0,   // neutral
-  Neutral: 1.0,
+// Map House → Faction. In RA, Germany is Allied; ant missions repurpose it as enemy.
+export type Faction = 'allied' | 'soviet' | 'both';
+
+export const HOUSE_FACTION: Record<string, Faction> = {
+  Spain: 'allied', Greece: 'allied', England: 'allied', France: 'allied',
+  Germany: 'allied', Turkey: 'allied',
+  USSR: 'soviet', Ukraine: 'soviet',
+  Neutral: 'both',
 };
+
+export interface CountryBonus {
+  costMult: number;        // production cost multiplier (< 1.0 = cheaper)
+  firepowerMult: number;   // outgoing damage multiplier
+  armorMult: number;       // damage resistance multiplier (> 1.0 = tougher)
+}
+
+export const COUNTRY_BONUSES: Record<string, CountryBonus> = {
+  Spain:   { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
+  Greece:  { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
+  England: { costMult: 0.90, firepowerMult: 1.0,  armorMult: 1.0 },  // 10% cheaper
+  France:  { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
+  Germany: { costMult: 0.95, firepowerMult: 1.0,  armorMult: 1.0 },  // 5% cheaper
+  Turkey:  { costMult: 0.80, firepowerMult: 1.0,  armorMult: 1.0 },  // 20% cheaper
+  USSR:    { costMult: 1.0,  firepowerMult: 1.10, armorMult: 1.0 },  // 10% stronger
+  Ukraine: { costMult: 1.0,  firepowerMult: 1.05, armorMult: 1.0 },  // 5% stronger
+  Neutral: { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
+};
+
+// House firepower bias — derived from COUNTRY_BONUSES (C++ House->FirepowerBias)
+export const HOUSE_FIREPOWER_BIAS: Record<string, number> = Object.fromEntries(
+  Object.entries(COUNTRY_BONUSES).map(([k, v]) => [k, v.firepowerMult])
+);
 
 // === Unit Types ===
 export enum UnitType {
@@ -602,7 +624,6 @@ export interface SuperweaponState {
 }
 
 // === Production data ===
-export type Faction = 'allied' | 'soviet' | 'both';
 
 export interface ProductionItem {
   type: string;         // unit type or structure type code
