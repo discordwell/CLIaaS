@@ -92,10 +92,9 @@ function resolveConnectorAuth(connector: string): Record<string, string> | null 
       return { domain, apiKey };
     }
     case 'helpcrunch': {
-      const domain = process.env.HELPCRUNCH_DOMAIN;
       const apiKey = process.env.HELPCRUNCH_API_KEY;
-      if (!domain || !apiKey) return null;
-      return { domain, apiKey };
+      if (!apiKey) return null;
+      return { apiKey };
     }
     case 'groove': {
       const apiKey = process.env.GROOVE_API_KEY;
@@ -132,7 +131,7 @@ function resolveConnectorAuth(connector: string): Record<string, string> | null 
 
 /**
  * Run a single sync cycle for a connector.
- * Currently supports zendesk (incremental cursor), kayako and kayako-classic (full re-export).
+ * Supports all 10 connectors. Zendesk uses incremental cursor; others do full re-export.
  */
 export async function runSyncCycle(
   connectorName: string,
@@ -191,11 +190,65 @@ export async function runSyncCycle(
         );
         break;
       }
+      case 'freshdesk': {
+        const { exportFreshdesk } = await import('../connectors/freshdesk.js');
+        manifest = await exportFreshdesk(
+          { subdomain: auth.domain, apiKey: auth.apiKey },
+          outDir,
+        );
+        break;
+      }
+      case 'helpcrunch': {
+        const { exportHelpcrunch } = await import('../connectors/helpcrunch.js');
+        manifest = await exportHelpcrunch(
+          { apiKey: auth.apiKey },
+          outDir,
+        );
+        break;
+      }
+      case 'groove': {
+        const { exportGroove } = await import('../connectors/groove.js');
+        manifest = await exportGroove(
+          { apiToken: auth.apiKey },
+          outDir,
+        );
+        break;
+      }
+      case 'intercom': {
+        const { exportIntercom } = await import('../connectors/intercom.js');
+        manifest = await exportIntercom(
+          { accessToken: auth.token },
+          outDir,
+        );
+        break;
+      }
+      case 'helpscout': {
+        const { exportHelpScout } = await import('../connectors/helpscout.js');
+        manifest = await exportHelpScout(
+          { appId: auth.appId, appSecret: auth.appSecret },
+          outDir,
+        );
+        break;
+      }
+      case 'zoho-desk': {
+        const { exportZohoDesk } = await import('../connectors/zoho-desk.js');
+        manifest = await exportZohoDesk(
+          { orgId: auth.orgId, accessToken: auth.token, apiDomain: auth.domain },
+          outDir,
+        );
+        break;
+      }
+      case 'hubspot': {
+        const { exportHubSpot } = await import('../connectors/hubspot.js');
+        manifest = await exportHubSpot(
+          { accessToken: auth.token },
+          outDir,
+        );
+        break;
+      }
       default: {
-        // For connectors that follow the same pattern, try dynamic import
-        // Each connector module should export an export<Name> function
         throw new Error(
-          `Connector "${connectorName}" does not yet support sync. Supported: zendesk, kayako, kayako-classic`,
+          `Unknown connector: "${connectorName}". Supported: ${Object.keys(CONNECTOR_DEFAULTS).join(', ')}`,
         );
       }
     }

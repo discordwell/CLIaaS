@@ -3,9 +3,36 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { runSyncCycle, getSyncStatus, listConnectors } from '../../sync/engine.js';
 
-// Mock the zendesk connector so tests never make real HTTP calls
+// Mock all connectors so tests never make real HTTP calls
+const MOCK_MANIFEST = {
+  source: 'test',
+  exportedAt: new Date().toISOString(),
+  counts: { tickets: 5, messages: 10, customers: 3, organizations: 1, kbArticles: 0, rules: 0 },
+};
+
 vi.mock('../../connectors/zendesk.js', () => ({
   exportZendesk: vi.fn().mockRejectedValue(new Error('Simulated connector failure')),
+}));
+vi.mock('../../connectors/freshdesk.js', () => ({
+  exportFreshdesk: vi.fn().mockResolvedValue(MOCK_MANIFEST),
+}));
+vi.mock('../../connectors/helpcrunch.js', () => ({
+  exportHelpcrunch: vi.fn().mockResolvedValue(MOCK_MANIFEST),
+}));
+vi.mock('../../connectors/groove.js', () => ({
+  exportGroove: vi.fn().mockResolvedValue(MOCK_MANIFEST),
+}));
+vi.mock('../../connectors/intercom.js', () => ({
+  exportIntercom: vi.fn().mockResolvedValue(MOCK_MANIFEST),
+}));
+vi.mock('../../connectors/helpscout.js', () => ({
+  exportHelpScout: vi.fn().mockResolvedValue(MOCK_MANIFEST),
+}));
+vi.mock('../../connectors/zoho-desk.js', () => ({
+  exportZohoDesk: vi.fn().mockResolvedValue(MOCK_MANIFEST),
+}));
+vi.mock('../../connectors/hubspot.js', () => ({
+  exportHubSpot: vi.fn().mockResolvedValue(MOCK_MANIFEST),
 }));
 
 const TEST_DIR = join(process.cwd(), 'tmp-test-sync');
@@ -108,4 +135,98 @@ describe('runSyncCycle', () => {
     expect(stats.fullSync).toBe(true);
     expect(stats.durationMs).toBeGreaterThanOrEqual(0);
   });
+
+  // --- Tests for the 7 newly-wired connectors ---
+
+  const connectorEnvMap: Array<{
+    name: string;
+    envVars: Record<string, string>;
+    missingEnvVars: Record<string, string>;
+    expectedAuth: Record<string, string>;
+    mockModule: string;
+    mockFnName: string;
+  }> = [
+    {
+      name: 'freshdesk',
+      envVars: { FRESHDESK_DOMAIN: 'test.freshdesk.com', FRESHDESK_API_KEY: 'fk-test' },
+      missingEnvVars: { FRESHDESK_DOMAIN: '', FRESHDESK_API_KEY: '' },
+      expectedAuth: { subdomain: 'test.freshdesk.com', apiKey: 'fk-test' },
+      mockModule: '../../connectors/freshdesk.js',
+      mockFnName: 'exportFreshdesk',
+    },
+    {
+      name: 'helpcrunch',
+      envVars: { HELPCRUNCH_API_KEY: 'hc-test' },
+      missingEnvVars: { HELPCRUNCH_API_KEY: '' },
+      expectedAuth: { apiKey: 'hc-test' },
+      mockModule: '../../connectors/helpcrunch.js',
+      mockFnName: 'exportHelpcrunch',
+    },
+    {
+      name: 'groove',
+      envVars: { GROOVE_API_KEY: 'gv-test' },
+      missingEnvVars: { GROOVE_API_KEY: '' },
+      expectedAuth: { apiToken: 'gv-test' },
+      mockModule: '../../connectors/groove.js',
+      mockFnName: 'exportGroove',
+    },
+    {
+      name: 'intercom',
+      envVars: { INTERCOM_TOKEN: 'ic-test' },
+      missingEnvVars: { INTERCOM_TOKEN: '' },
+      expectedAuth: { accessToken: 'ic-test' },
+      mockModule: '../../connectors/intercom.js',
+      mockFnName: 'exportIntercom',
+    },
+    {
+      name: 'helpscout',
+      envVars: { HELPSCOUT_APP_ID: 'hs-id', HELPSCOUT_APP_SECRET: 'hs-secret' },
+      missingEnvVars: { HELPSCOUT_APP_ID: '', HELPSCOUT_APP_SECRET: '' },
+      expectedAuth: { appId: 'hs-id', appSecret: 'hs-secret' },
+      mockModule: '../../connectors/helpscout.js',
+      mockFnName: 'exportHelpScout',
+    },
+    {
+      name: 'zoho-desk',
+      envVars: { ZOHO_DESK_DOMAIN: 'desk.zoho.com', ZOHO_DESK_ORG_ID: 'org-123', ZOHO_DESK_TOKEN: 'zd-test' },
+      missingEnvVars: { ZOHO_DESK_DOMAIN: '', ZOHO_DESK_ORG_ID: '', ZOHO_DESK_TOKEN: '' },
+      expectedAuth: { orgId: 'org-123', accessToken: 'zd-test', apiDomain: 'desk.zoho.com' },
+      mockModule: '../../connectors/zoho-desk.js',
+      mockFnName: 'exportZohoDesk',
+    },
+    {
+      name: 'hubspot',
+      envVars: { HUBSPOT_TOKEN: 'hub-test' },
+      missingEnvVars: { HUBSPOT_TOKEN: '' },
+      expectedAuth: { accessToken: 'hub-test' },
+      mockModule: '../../connectors/hubspot.js',
+      mockFnName: 'exportHubSpot',
+    },
+  ];
+
+  it.each(connectorEnvMap)(
+    'syncs $name connector with correct auth mapping',
+    async ({ name, envVars, expectedAuth, mockModule, mockFnName }) => {
+      for (const [k, v] of Object.entries(envVars)) vi.stubEnv(k, v);
+      const stats = await runSyncCycle(name, { outDir: TEST_DIR, fullSync: true });
+      expect(stats.connector).toBe(name);
+      expect(stats.error).toBeUndefined();
+      expect(stats.counts.tickets).toBe(5);
+      expect(stats.fullSync).toBe(true);
+
+      // Verify the connector was called with correctly remapped auth fields
+      const mod = await import(mockModule);
+      expect(mod[mockFnName]).toHaveBeenCalledWith(expectedAuth, TEST_DIR);
+    },
+  );
+
+  it.each(connectorEnvMap)(
+    'throws missing auth for $name when env vars are empty',
+    async ({ name, missingEnvVars }) => {
+      for (const [k, v] of Object.entries(missingEnvVars)) vi.stubEnv(k, v);
+      await expect(
+        runSyncCycle(name, { outDir: TEST_DIR }),
+      ).rejects.toThrow('Missing authentication');
+    },
+  );
 });
