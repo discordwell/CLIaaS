@@ -1507,8 +1507,8 @@ export class Renderer {
               screen.x + recoilDx, screen.y + recoilDy + turretOffY, { centerX: true, centerY: true });
           }
         }
-        // Air unit rotor animation overlay (spinning rotor blades)
-        if (entity.isAirUnit && entity.alive) {
+        // Rotor animation overlay — helicopters only, not fixed-wing aircraft
+        if (entity.isRotorEquipped && entity.alive) {
           const rotorPhase = (tick * 3) % 4; // 4-phase rotor spin
           ctx.strokeStyle = 'rgba(160,160,160,0.6)';
           ctx.lineWidth = 1;
@@ -1639,6 +1639,21 @@ export class Renderer {
       }
 
       ctx.globalAlpha = 1;
+
+      // Aircraft ammo bar (small bar above health bar, only when selected)
+      if (entity.alive && entity.isAirUnit && entity.maxAmmo > 0 && selectedIds.has(entity.id)) {
+        const ammoRatio = entity.ammo / entity.maxAmmo;
+        const ammoBarW = Math.max(spriteW, 18);
+        const ammoBarH = 2;
+        const ammoBarX = screen.x - ammoBarW / 2;
+        const ammoBarY = screen.y - spriteH / 2 - 12;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(ammoBarX - 1, ammoBarY - 1, ammoBarW + 2, ammoBarH + 2);
+        // Color: blue→yellow→red based on ammo
+        const ammoColor = ammoRatio > 0.5 ? '#4488ff' : ammoRatio > 0.25 ? '#cccc30' : '#cc3030';
+        ctx.fillStyle = ammoColor;
+        ctx.fillRect(ammoBarX, ammoBarY, ammoBarW * ammoRatio, ammoBarH);
+      }
 
       // Harvester ore load bar (small gold bar above health bar, only when selected)
       if (entity.alive && entity.type === UnitType.V_HARV && selectedIds.has(entity.id) && entity.oreLoad > 0) {

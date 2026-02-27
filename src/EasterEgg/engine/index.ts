@@ -845,6 +845,8 @@ export class Game {
       else if (s.type === 'HBOX' || s.type === 'PBOX' || s.type === 'GUN') this.powerConsumed += 10;
       else if (s.type === 'SAM' || s.type === 'AGUN') this.powerConsumed += 20;
       else if (s.type === 'FIX') this.powerConsumed += 30;
+      else if (s.type === 'HPAD') this.powerConsumed += 10;
+      else if (s.type === 'AFLD') this.powerConsumed += 30;
     }
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
@@ -2013,8 +2015,16 @@ export class Game {
       }
     }
 
-    // Air units: gradually descend when not moving
-    if (entity.isAirUnit && entity.mission !== Mission.MOVE && entity.flightAltitude > 0) {
+    // Aircraft state machine — intercept before normal mission processing
+    if (entity.isAirUnit && this.updateAircraft(entity)) {
+      return; // aircraft state machine handled this tick
+    }
+
+    // Air units: gradually descend when not in active flight states
+    if (entity.isAirUnit && entity.flightAltitude > 0 &&
+        entity.aircraftState !== 'attacking' && entity.aircraftState !== 'flying' &&
+        entity.aircraftState !== 'returning' && entity.aircraftState !== 'takeoff' &&
+        entity.mission !== Mission.MOVE) {
       entity.flightAltitude = Math.max(0, entity.flightAltitude - 2);
     }
 
@@ -3386,11 +3396,18 @@ export class Game {
       if (isDog && !other.stats.isInfantry) continue;
       // Naval combat target filtering
       if (!this.canTargetNaval(entity, other)) continue;
+      // Air combat target filtering: ground units without AA weapons skip aircraft
+      if (other.isAirUnit && other.flightAltitude > 0) {
+        const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
+        if (!hasAA) continue;
+      }
       const dist = worldDist(entity.pos, other.pos);
       if (dist >= scanRange) continue;
-      // Check line of sight — can't target through walls
-      const oc = other.cell;
-      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
+      // Check line of sight — can't target through walls (aircraft skip LOS check)
+      if (!(other.isAirUnit && other.flightAltitude > 0)) {
+        const oc = other.cell;
+        if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
+      }
 
       const score = this.threatScore(entity, other, dist);
       if (score > bestScore) {
@@ -3877,7 +3894,7 @@ export class Game {
   /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
   /** Turreted structure types (GUN/SAM) — turret rotates to face target */
   private static readonly TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
-  private static readonly DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'PBOX']);
+  private static readonly DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'PBOX', 'SAM', 'AGUN']);
 
   private updateStructureCombat(): void {
     const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
@@ -3927,6 +3944,25 @@ export class Game {
           if (!this.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
           bestTarget = e;
           bestDist = dist;
+        }
+      }
+
+      // AA override: SAM/AGUN prefer airborne aircraft over ground targets
+      if (s.weapon.isAntiAir && bestTarget) {
+        let bestAirTarget: Entity | null = null;
+        let bestAirDist = Infinity;
+        for (const e of this.entities) {
+          if (!e.alive || !e.isAirUnit || e.flightAltitude <= 0) continue;
+          if (this.isAllied(s.house, e.house)) continue;
+          const dist = worldDist(structPos, e.pos);
+          if (dist < range && dist < bestAirDist) {
+            bestAirTarget = e;
+            bestAirDist = dist;
+          }
+        }
+        if (bestAirTarget) {
+          bestTarget = bestAirTarget;
+          bestDist = bestAirDist;
         }
       }
 
@@ -4078,6 +4114,343 @@ export class Game {
     // Torpedo-only units can't target land units
     if (scanner.weapon?.isSubSurface && !scanner.weapon2 && !target.isNavalUnit) return false;
     return true;
+  }
+
+  /** Find a landing pad for this aircraft. Returns structure index or -1. */
+  private findLandingPad(entity: Entity): number {
+    const padType = entity.stats.landingBuilding;
+    if (!padType) return -1;
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < this.structures.length; i++) {
+      const s = this.structures[i];
+      if (!s.alive || s.type !== padType) continue;
+      if (!this.isAllied(entity.house, s.house)) continue;
+      if (s.dockedAircraft !== undefined && s.dockedAircraft > 0) continue; // occupied
+      const sx = s.cx * CELL_SIZE + CELL_SIZE;
+      const sy = s.cy * CELL_SIZE + CELL_SIZE;
+      const dist = worldDist(entity.pos, { x: sx, y: sy });
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
+  /** Get target position for an aircraft's current target (entity or structure) */
+  private getAircraftTargetPos(entity: Entity): WorldPos | null {
+    if (entity.target?.alive) return entity.target.pos;
+    if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
+      const s = entity.targetStructure as MapStructure;
+      return { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+    }
+    return null;
+  }
+
+  /** Aircraft state machine — returns true if aircraft handled this tick (skip normal update) */
+  private updateAircraft(entity: Entity): boolean {
+    // Only process aircraft with active state
+    if (!entity.stats.isAircraft) return false;
+
+    // Decrement attack cooldowns — aircraft skip normal mission processing
+    if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+
+    switch (entity.aircraftState) {
+      case 'landed': {
+        // On pad, flightAltitude=0. Wait for attack/move order
+        entity.flightAltitude = 0;
+        entity.animState = AnimState.IDLE;
+        if (entity.mission === Mission.ATTACK && (entity.target?.alive || entity.targetStructure)) {
+          entity.aircraftState = 'takeoff';
+        } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
+          entity.aircraftState = 'takeoff';
+        }
+        return true;
+      }
+
+      case 'takeoff': {
+        // Ascend 3px/tick until at flight altitude
+        entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 3);
+        entity.animState = AnimState.WALK;
+        // Undock from pad
+        if (entity.landedAtStructure >= 0 && entity.landedAtStructure < this.structures.length) {
+          this.structures[entity.landedAtStructure].dockedAircraft = undefined;
+        }
+        entity.landedAtStructure = -1;
+        if (entity.flightAltitude >= Entity.FLIGHT_ALTITUDE) {
+          entity.aircraftState = 'flying';
+        }
+        return true;
+      }
+
+      case 'flying': {
+        entity.animState = AnimState.WALK;
+        // If we have an attack target, close to weapon range
+        if (entity.mission === Mission.ATTACK) {
+          const targetPos = this.getAircraftTargetPos(entity);
+          if (!targetPos) {
+            // Target lost — RTB
+            entity.aircraftState = 'returning';
+            return true;
+          }
+          const dist = worldDist(entity.pos, targetPos);
+          const weaponRange = entity.weapon?.range ?? 5;
+          if (dist <= weaponRange) {
+            entity.aircraftState = 'attacking';
+            entity.attackRunPhase = 'approach';
+            return true;
+          }
+          // Fly toward target
+          entity.moveToward(targetPos, this.movementSpeed(entity, 0.7));
+        } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
+          // Simple move — fly to destination
+          if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity, 0.7))) {
+            entity.moveTarget = null;
+            if (entity.moveQueue.length > 0) {
+              entity.moveTarget = entity.moveQueue.shift()!;
+            } else {
+              entity.mission = this.idleMission(entity);
+              entity.aircraftState = 'returning';
+            }
+          }
+        } else {
+          // No mission — return to base
+          entity.aircraftState = 'returning';
+        }
+        return true;
+      }
+
+      case 'attacking': {
+        if (entity.isFixedWing) {
+          return this.updateFixedWingAttackRun(entity);
+        } else {
+          return this.updateHelicopterAttack(entity);
+        }
+      }
+
+      case 'returning': {
+        entity.animState = AnimState.WALK;
+        // Find home pad
+        const padIdx = this.findLandingPad(entity);
+        if (padIdx < 0) {
+          // No pad available — orbit in place
+          return true;
+        }
+        const pad = this.structures[padIdx];
+        const [pw, ph] = STRUCTURE_SIZE[pad.type] ?? [2, 2];
+        const padPos = { x: (pad.cx + pw / 2) * CELL_SIZE, y: (pad.cy + ph / 2) * CELL_SIZE };
+        const dist = worldDist(entity.pos, padPos);
+        if (dist <= CELL_SIZE) {
+          entity.pos.x = padPos.x;
+          entity.pos.y = padPos.y;
+          entity.aircraftState = 'landing';
+          entity.landedAtStructure = padIdx;
+          pad.dockedAircraft = entity.id;
+        } else {
+          entity.moveToward(padPos, this.movementSpeed(entity, 0.7));
+        }
+        return true;
+      }
+
+      case 'landing': {
+        // Descend 2px/tick
+        entity.flightAltitude = Math.max(0, entity.flightAltitude - 2);
+        entity.animState = AnimState.IDLE;
+        if (entity.flightAltitude <= 0) {
+          entity.flightAltitude = 0;
+          if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
+            entity.aircraftState = 'rearming';
+            entity.rearmTimer = 30;
+          } else {
+            entity.aircraftState = 'landed';
+          }
+          entity.mission = Mission.GUARD;
+        }
+        return true;
+      }
+
+      case 'rearming': {
+        entity.flightAltitude = 0;
+        entity.animState = AnimState.IDLE;
+        entity.rearmTimer--;
+        if (entity.rearmTimer <= 0) {
+          entity.ammo++;
+          if (entity.ammo >= entity.maxAmmo) {
+            entity.aircraftState = 'landed';
+          } else {
+            entity.rearmTimer = 30; // next ammo tick
+          }
+        }
+        return true;
+      }
+
+      default:
+        return false;
+    }
+  }
+
+  /** Fixed-wing attack run: approach → fire → pullaway → circle back or RTB */
+  private updateFixedWingAttackRun(entity: Entity): boolean {
+    const targetPos = this.getAircraftTargetPos(entity);
+
+    if (!targetPos) {
+      entity.aircraftState = 'returning';
+      entity.mission = Mission.GUARD;
+      return true;
+    }
+
+    const speed = this.movementSpeed(entity, 0.7);
+    const dist = worldDist(entity.pos, targetPos);
+    const weaponRange = entity.weapon?.range ?? 5;
+
+    switch (entity.attackRunPhase) {
+      case 'approach':
+        entity.animState = AnimState.WALK;
+        entity.moveToward(targetPos, speed);
+        if (dist <= weaponRange) {
+          entity.attackRunPhase = 'firing';
+        }
+        break;
+
+      case 'firing':
+        entity.animState = AnimState.ATTACK;
+        // Keep moving forward (fixed-wing can't stop)
+        entity.moveToward(targetPos, speed);
+        // Fire weapon if cooldown ready, then transition to pullaway
+        if (entity.attackCooldown <= 0 && entity.weapon) {
+          if (entity.target?.alive) {
+            this.fireWeaponAt(entity, entity.target, entity.weapon);
+          } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
+            this.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, entity.weapon);
+          }
+          entity.attackCooldown = entity.weapon.rof;
+          if (entity.ammo > 0) entity.ammo--;
+          entity.attackRunPhase = 'pullaway';
+        }
+        break;
+
+      case 'pullaway':
+        entity.animState = AnimState.WALK;
+        // Overshoot ~3 cells past target
+        const overshootDist = 3 * CELL_SIZE;
+        const dx = entity.pos.x - targetPos.x;
+        const dy = entity.pos.y - targetPos.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const overshootPos = {
+          x: targetPos.x + (dx / len) * overshootDist,
+          y: targetPos.y + (dy / len) * overshootDist,
+        };
+        entity.moveToward(overshootPos, speed);
+        if (worldDist(entity.pos, targetPos) > overshootDist * 0.8) {
+          if (entity.ammo > 0 && (entity.target?.alive || entity.targetStructure)) {
+            // Circle back for another pass
+            entity.attackRunPhase = 'approach';
+          } else {
+            // Out of ammo or target dead — RTB
+            entity.aircraftState = 'returning';
+            entity.mission = Mission.GUARD;
+            entity.target = null;
+            entity.targetStructure = null;
+          }
+        }
+        break;
+    }
+    return true;
+  }
+
+  /** Helicopter hover + strafe: close to range, face target, fire, lateral oscillation */
+  private updateHelicopterAttack(entity: Entity): boolean {
+    const targetPos = this.getAircraftTargetPos(entity);
+
+    if (!targetPos) {
+      entity.aircraftState = 'returning';
+      entity.mission = Mission.GUARD;
+      return true;
+    }
+
+    const dist = worldDist(entity.pos, targetPos);
+    const weaponRange = entity.weapon?.range ?? 5;
+
+    if (dist > weaponRange) {
+      // Close to weapon range
+      entity.animState = AnimState.WALK;
+      entity.moveToward(targetPos, this.movementSpeed(entity, 0.7));
+      return true;
+    }
+
+    // In range — hover and fire
+    entity.animState = AnimState.ATTACK;
+    entity.desiredFacing = directionTo(entity.pos, targetPos);
+    entity.tickRotation();
+
+    // Fire on cooldown
+    if (entity.attackCooldown <= 0 && entity.weapon) {
+      if (entity.target?.alive) {
+        this.fireWeaponAt(entity, entity.target, entity.weapon);
+      } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
+        this.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, entity.weapon);
+      }
+      entity.attackCooldown = entity.weapon.rof;
+      if (entity.ammo > 0) entity.ammo--;
+    }
+
+    // Lateral strafe oscillation (±0.5px/tick, flip every 30 ticks)
+    const strafePhase = Math.sin(this.tick * 0.21) * 0.5;
+    const perpDx = -(targetPos.y - entity.pos.y);
+    const perpDy = (targetPos.x - entity.pos.x);
+    const perpLen = Math.sqrt(perpDx * perpDx + perpDy * perpDy) || 1;
+    entity.pos.x += (perpDx / perpLen) * strafePhase;
+    entity.pos.y += (perpDy / perpLen) * strafePhase;
+
+    // Out of ammo — RTB
+    if (entity.ammo === 0) {
+      entity.aircraftState = 'returning';
+      entity.mission = Mission.GUARD;
+      entity.target = null;
+      entity.targetStructure = null;
+    }
+
+    return true;
+  }
+
+  /** Fire weapon at entity target (helper for aircraft) */
+  private fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void {
+    const wh = weapon.warhead as WarheadType;
+    const mult = this.getWarheadMult(wh, target.stats.armor);
+    const damage = Math.max(1, Math.round(weapon.damage * mult * attacker.damageMultiplier));
+    const killed = target.takeDamage(damage, wh);
+    if (killed) {
+      attacker.creditKill();
+    }
+    // Fire effect
+    this.effects.push({
+      type: 'muzzle',
+      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
+      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
+    });
+  }
+
+  /** Fire weapon at structure target (helper for aircraft) */
+  private fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void {
+    const wh = (weapon.warhead ?? 'HE') as WarheadType;
+    const armorIdx = 4; // concrete for structures
+    const overridden = this.warheadOverrides[wh];
+    const mult = overridden ? overridden[armorIdx] ?? 1 : WARHEAD_VS_ARMOR[wh]?.[armorIdx] ?? 1;
+    const damage = Math.max(1, Math.round(weapon.damage * mult * attacker.damageMultiplier));
+    s.hp -= damage;
+    if (s.hp <= 0) {
+      s.hp = 0;
+      s.alive = false;
+      s.rubble = true;
+      attacker.creditKill();
+    }
+    this.effects.push({
+      type: 'muzzle',
+      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
+      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
+    });
   }
 
   private threatScore(scanner: Entity, target: Entity, dist: number): number {
@@ -5138,8 +5511,30 @@ export class Game {
     const unitStats = UNIT_STATS[item.type];
     const [factW, factH] = STRUCTURE_SIZE[factory.type] ?? [3, 2];
 
-    // Naval production: spawn vessel at adjacent water cell
+    // Aircraft production: spawn at pad center, docked
     let spawnX: number, spawnY: number;
+    if (unitStats?.isAircraft) {
+      const [padW, padH] = STRUCTURE_SIZE[factory.type] ?? [2, 2];
+      spawnX = (factory.cx + padW / 2) * CELL_SIZE;
+      spawnY = (factory.cy + padH / 2) * CELL_SIZE;
+      const entity = new Entity(unitType, House.Spain, spawnX, spawnY);
+      entity.mission = Mission.GUARD;
+      entity.aircraftState = 'landed';
+      entity.flightAltitude = 0;
+      // Dock at factory
+      for (let i = 0; i < this.structures.length; i++) {
+        if (this.structures[i] === factory) {
+          entity.landedAtStructure = i;
+          factory.dockedAircraft = entity.id;
+          break;
+        }
+      }
+      this.entities.push(entity);
+      this.entityById.set(entity.id, entity);
+      return;
+    }
+
+    // Naval production: spawn vessel at adjacent water cell
     if (unitStats?.isVessel) {
       const waterCell = this.map.findAdjacentWaterCell(factory.cx, factory.cy, factW, factH);
       if (!waterCell) return; // no water cell found — production stalls

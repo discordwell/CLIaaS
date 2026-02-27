@@ -206,6 +206,14 @@ export class Entity {
   doorOpen = false;
   doorTimer = 0;          // countdown to auto-close
 
+  // Aircraft state machine
+  ammo = -1;                    // -1 = unlimited
+  maxAmmo = -1;
+  landedAtStructure = -1;       // structure index, -1 = airborne
+  aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' = 'idle';
+  rearmTimer = 0;
+  attackRunPhase: 'approach' | 'firing' | 'pullaway' = 'approach';
+
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
     this.stats = UNIT_STATS[type] ?? UNIT_STATS.E1;
@@ -224,6 +232,15 @@ export class Entity {
     this.turretFacing32 = this.turretFacing * 4;
     // Initialize prevPos to starting position (C5: moving-platform inaccuracy detection)
     this.prevPos = { x, y };
+    // Aircraft init: set ammo from stats, start landed
+    if (this.stats.maxAmmo && this.stats.maxAmmo > 0) {
+      this.ammo = this.stats.maxAmmo;
+      this.maxAmmo = this.stats.maxAmmo;
+    }
+    if (this.stats.isAircraft) {
+      this.aircraftState = 'landed';
+      this.flightAltitude = 0;
+    }
   }
 
   get cell(): CellPos {
@@ -244,7 +261,22 @@ export class Entity {
 
   /** Air units fly over terrain, ignoring pathfinding and ground passability */
   get isAirUnit(): boolean {
-    return this.type === UnitType.V_TRAN;
+    return this.stats.isAircraft === true;
+  }
+
+  /** Fixed-wing aircraft — cannot hover, always moves forward */
+  get isFixedWing(): boolean {
+    return this.stats.isFixedWing === true;
+  }
+
+  /** Helicopter — aircraft that can hover in place */
+  get isHelicopter(): boolean {
+    return this.stats.isAircraft === true && !this.stats.isFixedWing;
+  }
+
+  /** Has rotor animation overlay (helicopters only, not fixed-wing) */
+  get isRotorEquipped(): boolean {
+    return this.stats.isRotorEquipped === true;
   }
 
   /** Naval units can traverse water tiles */
@@ -254,14 +286,14 @@ export class Entity {
 
   /** Flight altitude offset (pixels) — visual only, for rendering above ground */
   flightAltitude = 0;
-  static readonly FLIGHT_ALTITUDE = 20; // pixels above ground when airborne
+  static readonly FLIGHT_ALTITUDE = 24; // pixels above ground when airborne (C++ FLIGHT_LEVEL = 24)
 
   get hasTurret(): boolean {
-    return !this.stats.isInfantry && !this.isAnt &&
+    return !this.stats.isInfantry && !this.isAnt && !this.stats.isAircraft &&
       this.type !== UnitType.V_APC && this.type !== UnitType.V_HARV &&
       this.type !== UnitType.V_MCV && this.type !== UnitType.V_ARTY &&
       this.type !== UnitType.V_JEEP && this.type !== UnitType.V_TRUK &&
-      this.type !== UnitType.V_TRAN && this.type !== UnitType.V_LST &&
+      this.type !== UnitType.V_LST &&
       // CS/Aftermath expansion: non-turreted per C++ udata.cpp
       this.type !== UnitType.V_STNK && this.type !== UnitType.V_CTNK &&
       this.type !== UnitType.V_TTNK && this.type !== UnitType.V_QTNK &&
@@ -584,7 +616,8 @@ export class Entity {
     const facingAligned = this.tickRotation();
 
     // Vehicles: stop-rotate-move (don't slide sideways while turning)
-    if (!this.stats.isInfantry && !facingAligned) {
+    // Aircraft always move forward — never stop to rotate in flight
+    if (!this.stats.isInfantry && !this.stats.isAircraft && !facingAligned) {
       // M5: Three-point turn for JEEP (C++ drive.cpp:339 — wheeled vehicles)
       // When the JEEP needs a large turn (>= 90 degrees), drift backward slightly
       // during rotation to simulate a three-point turn maneuver.

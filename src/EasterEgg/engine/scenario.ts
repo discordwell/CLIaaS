@@ -655,6 +655,7 @@ export interface StructureWeapon {
   splash?: number;   // AOE radius in cells
   warhead?: string;  // warhead type for damage multiplier (default 'HE')
   projSpeed?: number; // projectile visual speed in cells/second (C++ BulletClass Speed)
+  isAntiAir?: boolean; // can target airborne aircraft
 }
 
 export interface MapStructure {
@@ -671,6 +672,7 @@ export interface MapStructure {
   attackCooldown: number;    // ticks until next shot
   ammo: number;              // remaining shots (-1 = unlimited)
   maxAmmo: number;           // max ammo for reload (C++ building.cpp:882-883)
+  dockedAircraft?: number;   // entity ID of docked aircraft (-1 or undefined = empty)
   triggerName?: string;      // attached trigger name (from INI)
   buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
@@ -685,8 +687,8 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
   PBOX:  { damage: 25, range: 5, rof: 15, projSpeed: 40 },             // Pillbox
   GUN:   { damage: 40, range: 6, rof: 20, splash: 0.5, projSpeed: 30 }, // Guard Tower
   TSLA:  { damage: 80, range: 7, rof: 40, splash: 1, warhead: 'Super', projSpeed: 40 },  // Tesla Coil
-  SAM:   { damage: 50, range: 8, rof: 25, projSpeed: 15 },             // SAM Site (missiles)
-  AGUN:  { damage: 40, range: 6, rof: 20, projSpeed: 40 },             // Anti-aircraft Gun
+  SAM:   { damage: 50, range: 8, rof: 25, projSpeed: 15, isAntiAir: true },  // SAM Site (missiles)
+  AGUN:  { damage: 40, range: 6, rof: 20, projSpeed: 40, isAntiAir: true }, // Anti-aircraft Gun
   FTUR:  { damage: 20, range: 5, rof: 10, projSpeed: 20 },             // Flame Tower
   QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 },  // Queen Ant (TeslaZap)
 };
@@ -706,7 +708,7 @@ const STRUCTURE_IMAGES: Record<string, string> = {
 export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
   PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
-  GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1],
+  GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], HPAD: [2, 2], AFLD: [2, 2],
   QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
   // Bridge structures (destroyable)
   BARL: [1, 1], BRL3: [1, 1],
@@ -716,7 +718,7 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
 
 // Structure max HP overrides (default is 256)
 export const STRUCTURE_MAX_HP: Record<string, number> = {
-  QUEE: 800, LAR1: 25, LAR2: 50, TSLA: 500,
+  QUEE: 800, LAR1: 25, LAR2: 50, TSLA: 500, HPAD: 400, AFLD: 500,
   BARL: 150, BRL3: 150,
 };
 

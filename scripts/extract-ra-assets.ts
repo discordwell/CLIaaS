@@ -60,6 +60,12 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'PT.SHP', 'pt'],          // Gunboat
   ['CONQUER.MIX', 'LST.SHP', 'lst'],        // Landing ship transport
   ['CONQUER.MIX', 'MSUB.SHP', 'msub'],      // Missile Submarine (Aftermath)
+  // Aircraft (CONQUER.MIX)
+  ['CONQUER.MIX', 'HIND.SHP', 'hind'],      // Hind attack helicopter
+  ['CONQUER.MIX', 'HELI.SHP', 'heli'],      // Longbow helicopter
+  ['CONQUER.MIX', 'TRAN.SHP', 'tran'],      // Chinook transport helicopter
+  ['CONQUER.MIX', 'MIG.SHP', 'mig'],        // MiG-29 fighter
+  ['CONQUER.MIX', 'YAK.SHP', 'yak'],        // Yak attack plane
   // Counterstrike expansion — STNK is in base CONQUER.MIX (reused from TD)
   ['CONQUER.MIX', 'STNK.SHP', 'stnk'],    // Phase Transport (stealth tank)
   // NOTE: CTNK, TTNK, QTNK, DTRK, MECH, ANT1-3, QUEE, LAR1-2 are NOT in freeware gamedata.

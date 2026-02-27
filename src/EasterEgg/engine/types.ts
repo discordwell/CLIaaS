@@ -118,6 +118,11 @@ export enum UnitType {
   V_CA = 'CA',     // Cruiser
   V_PT = 'PT',     // Gunboat
   V_MSUB = 'MSUB', // Missile Submarine (Aftermath)
+  // Aircraft
+  V_MIG = 'MIG',   // MiG-29 fighter (fixed-wing)
+  V_YAK = 'YAK',   // Yak attack plane (fixed-wing)
+  V_HELI = 'HELI', // Longbow helicopter
+  V_HIND = 'HIND', // Hind attack helicopter
 }
 
 // === Animation metadata (DoInfoStruct from RA source) ===
@@ -341,6 +346,11 @@ export interface UnitStats {
   isVessel?: boolean;      // true for all naval units (rendering + AI category)
   isCloakable?: boolean;   // true for SS, MSUB (submarine stealth)
   isAntiSub?: boolean;     // true for DD (can detect/attack submerged subs)
+  isAircraft?: boolean;      // all aircraft (helicopters + fixed-wing)
+  isFixedWing?: boolean;     // cannot hover, always moves forward
+  isRotorEquipped?: boolean; // has rotor animation (helicopters)
+  landingBuilding?: string;  // preferred pad type ('AFLD' or 'HPAD')
+  maxAmmo?: number;          // ammo capacity (rearm at pad)
 }
 
 // Warhead types from RA RULES.INI
@@ -391,6 +401,7 @@ export interface WeaponStats {
   projectileROT?: number;   // C9: homing turn rate deg/tick (0=straight line) — bullet.cpp:368
   isSubSurface?: boolean;   // travels underwater, only hits naval units (torpedoes)
   isAntiSub?: boolean;      // can hit submerged submarines (depth charges)
+  isAntiAir?: boolean;      // can target airborne aircraft (SAM missiles, AA guns)
 }
 
 // C6: Warhead splash falloff properties — warhead.cpp:72
@@ -463,7 +474,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: '2tnk', strength: 200, armor: 'heavy', speed: 6, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
   DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'truk', strength: 100, armor: 'none', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
   // Transport vehicles
-  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'truk', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5 },
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 3, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8, isVessel: true },
   // Naval vessels (RULES.INI values — C++ vdata.cpp)
   SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 3, rot: 4, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true },
@@ -471,6 +482,11 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 4, isInfantry: false, primaryWeapon: 'Tomahawk', isVessel: true },
   PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'light', speed: 10, speedClass: SpeedClass.FLOAT, sight: 5, rot: 6, isInfantry: false, primaryWeapon: 'Stinger', isVessel: true },
   MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 4, rot: 4, isInfantry: false, primaryWeapon: 'SeaSerpent', isVessel: true, isCloakable: true },
+  // Aircraft (C++ aadata.cpp / RULES.INI)
+  MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 60, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 3, rot: 4, isInfantry: false, primaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 2 },
+  YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 50, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 2, rot: 4, isInfantry: false, primaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 1 },
+  HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 100, armor: 'heavy', speed: 10, speedClass: SpeedClass.WINGED, sight: 4, rot: 8, isInfantry: false, primaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 2 },
+  HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 125, armor: 'heavy', speed: 10, speedClass: SpeedClass.WINGED, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 4 },
 };
 
 // Weapon stats from RULES.INI — real RA values
@@ -480,7 +496,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 40 },
   Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 12 },
   Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 15 },
-  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15 },
+  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15, isAntiAir: true },
   Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20 },
   DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40 },
   Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 40 },
@@ -505,6 +521,11 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   DepthCharge:      { name: 'DepthCharge',       damage: 40,  rof: 30, range: 3.0,  warhead: 'AP', projSpeed: 12, isAntiSub: true },                         // DD secondary, hits submerged subs
   Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // CA cruise missile
   SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // MSUB missiles
+  // Aircraft weapons (C++ RULES.INI — aircraft.cpp)
+  Maverick:         { name: 'Maverick',          damage: 60,  rof: 50, range: 5.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Air-to-ground missile (MIG/YAK)
+  Hellfire:         { name: 'Hellfire',           damage: 30,  rof: 40, range: 5.0,  warhead: 'HE', splash: 1.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Helicopter missile (HELI/HIND)
+  ChainGun:         { name: 'ChainGun',           damage: 15,  rof: 10, range: 4.0,  warhead: 'AP', projSpeed: 40 },  // Rapid-fire hitscan (HIND primary)
+  Nike:             { name: 'Nike',               damage: 100, rof: 100, range: 10.0, warhead: 'HE', splash: 1.0, projSpeed: 15, projectileSpeed: 3.0, projectileROT: 5, isAntiAir: true },  // SAM missile
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'HollowPoint', projSpeed: 40 }, // C++: Warhead=HollowPoint
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
@@ -558,6 +579,12 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   // Naval (from SPEN — Soviet Sub Pen)
   { type: 'SS', name: 'Submarine', cost: 950, buildTime: 140, prerequisite: 'SPEN', faction: 'soviet' },
   { type: 'MSUB', name: 'Missile Sub', cost: 1500, buildTime: 200, prerequisite: 'SPEN', faction: 'soviet', techPrereq: 'STEK' },
+  // Aircraft (from HPAD/AFLD)
+  { type: 'TRAN', name: 'Chinook', cost: 700, buildTime: 120, prerequisite: 'HPAD', faction: 'both' },
+  { type: 'HELI', name: 'Longbow', cost: 1500, buildTime: 200, prerequisite: 'HPAD', faction: 'allied', techPrereq: 'ATEK' },
+  { type: 'HIND', name: 'Hind', cost: 1200, buildTime: 180, prerequisite: 'HPAD', faction: 'soviet' },
+  { type: 'MIG', name: 'MiG', cost: 1200, buildTime: 180, prerequisite: 'AFLD', faction: 'soviet' },
+  { type: 'YAK', name: 'Yak', cost: 800, buildTime: 120, prerequisite: 'AFLD', faction: 'soviet' },
   // Structures (from FACT) — faction-accurate
   { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true },
   { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'FACT', faction: 'both', isStructure: true },
@@ -569,6 +596,8 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'FACT', faction: 'allied', isStructure: true },
   { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
   { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'AFLD', name: 'Airfield', cost: 2000, buildTime: 200, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
   // Walls (1x1 placement, no prerequisite building needed beyond FACT)
   { type: 'SBAG', name: 'Sandbag', cost: 10, buildTime: 15, prerequisite: 'FACT', faction: 'both', isStructure: true },
   { type: 'FENC', name: 'Chain Link', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'both', isStructure: true },
