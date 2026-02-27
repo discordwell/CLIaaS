@@ -1586,7 +1586,7 @@ export class Game {
       // Cancel placement mode
       if (this.pendingPlacement) {
         // Refund the cost (bypasses silo cap — C++ Refund_Money path)
-        this.addCredits(this.pendingPlacement.cost, true);
+        this.addCredits(this.getEffectiveCost(this.pendingPlacement), true);
         this.pendingPlacement = null;
         return;
       }
