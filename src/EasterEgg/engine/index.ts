@@ -7,7 +7,7 @@ import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
   type AllianceTable, buildDefaultAlliances,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
-  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED,
+  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
   Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, type SidebarTab, getItemCategory,
@@ -173,7 +173,7 @@ export class Game {
   // Economy
   credits = 0;
   displayCredits = 0; // animated counter shown in sidebar (ticks toward credits)
-  /** Cached silo storage capacity (PROC=2000, SILO=1500 each) — recalculated on structure change */
+  /** Cached silo storage capacity (PROC=1000, SILO=1500 each) — recalculated on structure change */
   siloCapacity = 0;
   /** Tick when last EVA "silos needed" warning played (throttle to 30s = 450 ticks) */
   private lastSiloWarningTick = -450;
@@ -806,8 +806,9 @@ export class Game {
       }
     }
 
-    // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 2 ticks
-    if (this.tick % 2 === 0) {
+    // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 60 ticks (~4 seconds)
+    // C++ building.cpp SelfHealing — same rate as other self-healing buildings (once per slow cycle)
+    if (this.tick % 60 === 0) {
       for (const s of this.structures) {
         if (s.alive && s.type === 'QUEE' && s.hp < s.maxHp) {
           s.hp = Math.min(s.maxHp, s.hp + 1);
@@ -951,13 +952,13 @@ export class Game {
       if (!s.alive || s.sellProgress !== undefined || (s.house !== House.Spain && s.house !== House.Greece)) continue;
       // Power production — scales with building health (C++ building.cpp:4613 Power_Output)
       const healthRatio = s.hp / s.maxHp;
-      if (s.type === 'FACT') this.powerProduced += Math.round(20 * healthRatio);
-      else if (s.type === 'POWR') this.powerProduced += Math.round(100 * healthRatio);
+      // C++ building.cpp: FACT produces 0 power (ConYard is not a power source)
+      if (s.type === 'POWR') this.powerProduced += Math.round(100 * healthRatio);
       else if (s.type === 'APWR') this.powerProduced += Math.round(200 * healthRatio);
-      // Power consumption
+      // Power consumption (C++ rules.ini Power= values)
       else if (s.type === 'PROC') this.powerConsumed += 30;
       else if (s.type === 'WEAP') this.powerConsumed += 30;
-      else if (s.type === 'TENT') this.powerConsumed += 20;
+      else if (s.type === 'TENT') this.powerConsumed += 10; // C++ BARR/TENT Power=10
       else if (s.type === 'DOME') this.powerConsumed += 40;
       else if (s.type === 'TSLA') this.powerConsumed += 100;
       else if (s.type === 'HBOX' || s.type === 'PBOX' || s.type === 'GUN') this.powerConsumed += 10;
@@ -1025,7 +1026,7 @@ export class Game {
             : s.type === 'TENT' ? UnitType.I_E2  // Grenadier from barracks
             : s.type === 'WEAP' || s.type === 'FIX' ? UnitType.I_E3  // Rocket from factory
             : UnitType.I_E1; // Rifleman from everything else
-          const inf = new Entity(sellInfType, House.Spain, wx, wy);
+          const inf = new Entity(sellInfType, s.house, wx, wy);
           inf.mission = Mission.GUARD;
           this.entities.push(inf);
           this.entityById.set(inf.id, inf);
@@ -1611,13 +1612,17 @@ export class Game {
       if (clicked && clicked.isPlayerUnit) {
         this.selectedStructureIdx = -1; // clear structure selection
         if (ctrlHeld) {
-          // Ctrl+click: toggle selection
-          if (this.selectedIds.has(clicked.id)) {
-            this.selectedIds.delete(clicked.id);
-            clicked.selected = false;
-          } else {
-            this.selectedIds.add(clicked.id);
-            clicked.selected = true;
+          // Ctrl+click: select all of same type on screen (C++ RA1 behavior)
+          for (const e of this.entities) e.selected = false;
+          this.selectedIds.clear();
+          const screenBounds = this.camera.getVisibleBounds();
+          for (const e of this.entities) {
+            if (!e.alive || !e.isPlayerUnit || e.type !== clicked.type) continue;
+            if (e.pos.x >= screenBounds.left && e.pos.x <= screenBounds.right &&
+                e.pos.y >= screenBounds.top && e.pos.y <= screenBounds.bottom) {
+              this.selectedIds.add(e.id);
+              e.selected = true;
+            }
           }
         } else {
           this.selectedIds.clear();
@@ -2707,7 +2712,7 @@ export class Game {
     for (const other of this.entities) {
       if (!other.alive || other.id === vehicle.id) continue;
       if (!other.stats.crushable) continue; // only crushable targets (infantry, ants)
-      if (this.entitiesAllied(other, vehicle)) continue; // no friendly crush
+      // C++ drive.cpp: RA1 crushes ALL crushable units including allies (no friendly immunity)
       const oc = other.cell;
       if (oc.cx === vc.cx && oc.cy === vc.cy) {
         other.takeDamage(other.hp + 10, 'Super'); // instant kill, always die2
@@ -3879,11 +3884,14 @@ export class Game {
     // A4: Area guard configurable range (C++ Threat_Range(1)/2 from origin)
     const guardRange = entity.stats.guardRange ?? entity.stats.sight;
     const scanRange = guardRange * 1.5;
+    // C++ foot.cpp leash distance: units return when > guardRange*2 cells from origin
+    // (double the scan range gives more room to chase before snapping back)
+    const leashRange = guardRange * 2;
 
-    // If too far from origin (> guardRange cells), return home — but still attack enemies en route
+    // If too far from origin (> leash range), return home — but still attack enemies en route
     const distFromOrigin = worldDist(entity.pos, origin);
     const ec = entity.cell;
-    if (distFromOrigin > guardRange) {
+    if (distFromOrigin > leashRange) {
       // Check for enemies while returning
       for (const other of this.entities) {
         if (!other.alive || this.entitiesAllied(entity, other)) continue;
@@ -4177,19 +4185,27 @@ export class Game {
       const structPos: WorldPos = { x: sx, y: sy };
       const range = s.weapon.range;
 
-      // Find closest enemy in range
+      // Find highest-threat enemy in range (C++ building.cpp — prioritize dangerous targets, not just closest)
       let bestTarget: Entity | null = null;
-      let bestDist = Infinity;
+      let bestScore = -Infinity;
       for (const e of this.entities) {
         if (!e.alive) continue;
         if (this.isAllied(s.house, e.house)) continue; // don't shoot friendlies
         const dist = worldDist(structPos, e.pos);
-        if (dist < range && dist < bestDist) {
-          // LOS check
-          const ec = e.cell;
-          if (!this.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
+        if (dist >= range) continue;
+        // LOS check
+        const ec = e.cell;
+        if (!this.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
+        // Threat scoring: prioritize dangerous/wounded enemies over merely close ones
+        const isAttackingAlly = e.targetStructure?.alive && this.isAllied(s.house, (e.targetStructure.house as House) ?? House.Neutral);
+        let score = e.stats.isInfantry ? 10 : 25;
+        score += (e.weapon?.damage ?? 0) * 0.2;
+        if (e.hp < e.maxHp * 0.5) score *= 1.5; // wounded bonus
+        if (isAttackingAlly) score *= 2; // retaliation
+        score *= Math.max(0.3, 1 - (dist / range) * 0.7); // distance weighting
+        if (score > bestScore) {
           bestTarget = e;
-          bestDist = dist;
+          bestScore = score;
         }
       }
 
@@ -4208,7 +4224,6 @@ export class Game {
         }
         if (bestAirTarget) {
           bestTarget = bestAirTarget;
-          bestDist = bestAirDist;
         }
       }
 
@@ -4719,7 +4734,8 @@ export class Game {
    *  Single tier: <=50% HP = 75% speed (ConditionYellow). */
   private damageSpeedFactor(entity: Entity): number {
     const ratio = entity.hp / entity.maxHp;
-    if (ratio <= 0.5) return 0.75;   // ConditionYellow: three-quarters speed
+    if (ratio <= CONDITION_RED) return 0.5;   // ConditionRed (25%): half speed (C++ drive.cpp)
+    if (ratio <= CONDITION_YELLOW) return 0.75; // ConditionYellow (50%): three-quarters speed
     return 1.0;
   }
 
@@ -5464,13 +5480,14 @@ export class Game {
   }
 
   /** Calculate total silo storage capacity from alive player structures.
-   *  C++ parity: HouseClass::Adjust_Capacity() — PROC provides 2000, SILO provides 1500. */
+   *  C++ parity: HouseClass::Adjust_Capacity() — PROC provides 1000, SILO provides 1500.
+   *  (C++ building.cpp Capacity(): PROC=1000, SILO=1500) */
   calculateSiloCapacity(): number {
     let capacity = 0;
     for (const s of this.structures) {
       if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
       if (s.buildProgress !== undefined && s.buildProgress < 1) continue; // under construction
-      if (s.type === 'PROC') capacity += 2000;
+      if (s.type === 'PROC') capacity += 1000;
       else if (s.type === 'SILO') capacity += 1500;
     }
     return capacity;
@@ -6741,9 +6758,9 @@ export class Game {
     let power = 0;
     for (const s of this.structures) {
       if (!s.alive || s.house !== house) continue;
-      // Power consumption by structure type (RA defaults)
+      // Power consumption by structure type (C++ rules.ini Power= values)
       switch (s.type) {
-        case 'TENT': case 'BARR': power += 20; break;
+        case 'TENT': case 'BARR': power += 10; break;
         case 'WEAP': power += 30; break;
         case 'PROC': power += 30; break;
         case 'DOME': power += 40; break;

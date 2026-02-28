@@ -30,6 +30,7 @@ export interface StructureRef {
   alive: boolean;
   cx: number;
   cy: number;
+  house?: string; // optional house for defense targeting retaliation check
 }
 
 export interface TeamMissionEntry {

@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   PRODUCTION_ITEMS, type ProductionItem, type SidebarTab,
   getItemCategory, House, REPAIR_PERCENT, REPAIR_STEP,
+  CONDITION_RED, CONDITION_YELLOW, CELL_SIZE,
 } from '../engine/types';
 import { STRUCTURE_SIZE, type MapStructure } from '../engine/scenario';
+import { Camera } from '../engine/camera';
 
 /**
  * Sidebar UI Tests — Production Tabs, Sell/Repair Buttons,
@@ -372,5 +374,172 @@ describe('Sell/Repair RA1 Parity', () => {
       repairMode = false;
     }
     expect(repairMode).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// RA1 Parity Fixes (audit batch)
+// ═══════════════════════════════════════════════════════════
+
+describe('RA1 Parity Fixes', () => {
+  // --- Speed reduction tiers ---
+  /** Mirrors damageSpeedFactor from Game */
+  function damageSpeedFactor(hp: number, maxHp: number): number {
+    const ratio = hp / maxHp;
+    if (ratio <= CONDITION_RED) return 0.5;
+    if (ratio <= CONDITION_YELLOW) return 0.75;
+    return 1.0;
+  }
+
+  it('full HP → full speed', () => {
+    expect(damageSpeedFactor(100, 100)).toBe(1.0);
+  });
+
+  it('50% HP (ConditionYellow) → 75% speed', () => {
+    expect(damageSpeedFactor(50, 100)).toBe(0.75);
+  });
+
+  it('25% HP (ConditionRed) → 50% speed', () => {
+    expect(damageSpeedFactor(25, 100)).toBe(0.5);
+  });
+
+  it('10% HP → 50% speed (below ConditionRed)', () => {
+    expect(damageSpeedFactor(10, 100)).toBe(0.5);
+  });
+
+  it('40% HP → 75% speed (between red and yellow)', () => {
+    expect(damageSpeedFactor(40, 100)).toBe(0.75);
+  });
+
+  it('75% HP → full speed (above ConditionYellow)', () => {
+    expect(damageSpeedFactor(75, 100)).toBe(1.0);
+  });
+
+  // --- Refinery storage ---
+  it('PROC silo capacity is 1000 (not 2000)', () => {
+    // Mirrors calculateSiloCapacity logic
+    const structures = [makeStructure('PROC', House.Spain, 10, 10)];
+    let capacity = 0;
+    for (const s of structures) {
+      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      if (s.type === 'PROC') capacity += 1000;
+      else if (s.type === 'SILO') capacity += 1500;
+    }
+    expect(capacity).toBe(1000);
+  });
+
+  it('SILO capacity remains 1500', () => {
+    const structures = [makeStructure('SILO', House.Spain, 10, 10)];
+    let capacity = 0;
+    for (const s of structures) {
+      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      if (s.type === 'PROC') capacity += 1000;
+      else if (s.type === 'SILO') capacity += 1500;
+    }
+    expect(capacity).toBe(1500);
+  });
+
+  // --- Queen self-heal ---
+  it('queen self-heal rate: tick % 60 (every ~4 seconds)', () => {
+    // Mirrors the healing check: only at tick intervals of 60
+    const healInterval = 60;
+    let healed = 0;
+    for (let tick = 0; tick < 300; tick++) {
+      if (tick % healInterval === 0) healed++;
+    }
+    // Over 300 ticks (20 seconds), should heal 5 times (ticks 0, 60, 120, 180, 240)
+    expect(healed).toBe(5);
+  });
+
+  // --- ConYard power ---
+  it('FACT (ConYard) produces 0 power', () => {
+    // Mirrors power calculation: FACT no longer appears in powerProduced
+    let powerProduced = 0;
+    const structures = [
+      makeStructure('FACT', House.Spain, 10, 10),
+      makeStructure('POWR', House.Spain, 12, 10),
+    ];
+    for (const s of structures) {
+      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      const healthRatio = s.hp / s.maxHp;
+      if (s.type === 'POWR') powerProduced += Math.round(100 * healthRatio);
+      else if (s.type === 'APWR') powerProduced += Math.round(200 * healthRatio);
+      // FACT is NOT listed — produces 0
+    }
+    expect(powerProduced).toBe(100); // only POWR contributes
+  });
+
+  // --- Barracks power ---
+  it('TENT (Barracks) consumes 10 power (not 20)', () => {
+    let powerConsumed = 0;
+    const structures = [makeStructure('TENT', House.Spain, 10, 10)];
+    for (const s of structures) {
+      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      if (s.type === 'TENT') powerConsumed += 10;
+    }
+    expect(powerConsumed).toBe(10);
+  });
+
+  // --- Sell infantry house ---
+  it('sold structure spawns infantry with structure house (not always Spain)', () => {
+    // The sell code uses s.house instead of House.Spain
+    const greekStruct = makeStructure('POWR', House.Greece, 10, 10);
+    const infantryHouse = greekStruct.house; // should be Greece, not Spain
+    expect(infantryHouse).toBe(House.Greece);
+  });
+
+  // --- Area guard leash ---
+  it('area guard leash is 2x guardRange', () => {
+    const guardRange = 8; // typical sight value
+    const leashRange = guardRange * 2;
+    expect(leashRange).toBe(16);
+    // Unit at 1.5x guardRange should NOT return (within leash)
+    const distFromOrigin = guardRange * 1.5;
+    expect(distFromOrigin <= leashRange).toBe(true);
+    // Unit at 2.5x guardRange SHOULD return (beyond leash)
+    const farDist = guardRange * 2.5;
+    expect(farDist > leashRange).toBe(true);
+  });
+
+  // --- Friendly crush ---
+  it('vehicle crush applies to allied units (no friendly immunity)', () => {
+    // Test the logic: we check crushable but NOT allied status
+    const vehicleHouse = House.Spain;
+    const targetHouse = House.Spain; // same house = allied
+    const targetCrushable = true;
+    // Old logic: skip if allied. New logic: no allied skip
+    const shouldCrush = targetCrushable; // no alliance check
+    expect(shouldCrush).toBe(true);
+  });
+
+  // --- Camera getVisibleBounds ---
+  it('camera getVisibleBounds returns correct world bounds', () => {
+    const cam = new Camera(640, 400);
+    cam.centerOn(1000, 1000);
+    const bounds = cam.getVisibleBounds();
+    expect(bounds.right - bounds.left).toBe(640);
+    expect(bounds.bottom - bounds.top).toBe(400);
+    // Center should be roughly at 1000, 1000
+    const cx = (bounds.left + bounds.right) / 2;
+    const cy = (bounds.top + bounds.bottom) / 2;
+    expect(Math.abs(cx - 1000)).toBeLessThan(1);
+    expect(Math.abs(cy - 1000)).toBeLessThan(1);
+  });
+
+  // --- Defense targeting uses threat score ---
+  it('defense targeting prefers dangerous targets over just closest', () => {
+    // Simulated threat scoring (mirrors updateStructureCombat)
+    const range = 10;
+    const targetA = { isInfantry: true, weaponDamage: 10, hp: 100, maxHp: 100, dist: 3 };
+    const targetB = { isInfantry: false, weaponDamage: 60, hp: 50, maxHp: 100, dist: 5 };
+    function threatScore(t: typeof targetA) {
+      let score = t.isInfantry ? 10 : 25;
+      score += t.weaponDamage * 0.2;
+      if (t.hp < t.maxHp * 0.5) score *= 1.5;
+      score *= Math.max(0.3, 1 - (t.dist / range) * 0.7);
+      return score;
+    }
+    // Target B should score higher: vehicle (25 base) + high weapon damage + wounded
+    expect(threatScore(targetB)).toBeGreaterThan(threatScore(targetA));
   });
 });

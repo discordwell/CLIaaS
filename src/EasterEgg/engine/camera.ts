@@ -83,6 +83,11 @@ export class Camera {
     return { x: wx - this.x, y: wy - this.y };
   }
 
+  /** Get the visible world bounds as { left, top, right, bottom } */
+  getVisibleBounds(): { left: number; top: number; right: number; bottom: number } {
+    return { left: this.x, top: this.y, right: this.x + this.viewWidth, bottom: this.y + this.viewHeight };
+  }
+
   /** Check if a world-space rectangle is visible on screen */
   isVisible(wx: number, wy: number, w: number, h: number): boolean {
     return (
