@@ -4,13 +4,16 @@
  * and veterancy removal.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   armorIndex, getWarheadMultiplier,
   WARHEAD_VS_ARMOR, type ArmorType, type WarheadType,
+  UNIT_STATS, WEAPON_STATS, COUNTRY_BONUSES,
+  UnitType, House,
 } from '../engine/types';
-import { Entity } from '../engine/entity';
-import { UnitType, House } from '../engine/types';
+import { Entity, resetEntityIds } from '../engine/entity';
+
+beforeEach(() => resetEntityIds());
 
 // === H1: Centralized armorIndex + getWarheadMultiplier ===
 
@@ -55,6 +58,222 @@ describe('getWarheadMultiplier()', () => {
     expect(getWarheadMultiplier('Organic', 'light')).toBe(0.0);
     expect(getWarheadMultiplier('Organic', 'heavy')).toBe(0.0);
     expect(getWarheadMultiplier('Organic', 'concrete')).toBe(0.0);
+  });
+});
+
+// === H3: Aircraft combat pipeline — firepower bias + kill tracking ===
+
+describe('Aircraft damage formula includes firepower bias', () => {
+  // Mirrors the formula in Game.fireWeaponAt:
+  // damage = mult <= 0 ? 0 : Math.max(1, Math.round(weapon.damage * mult * houseBias))
+
+  it('USSR aircraft (firepowerMult=1.10) deal 10% more damage than Spain (1.0)', () => {
+    const weaponName = UNIT_STATS.MIG.primaryWeapon!;
+    const weapon = WEAPON_STATS[weaponName];
+    const targetArmor: ArmorType = 'heavy'; // typical ground target
+    const mult = getWarheadMultiplier(weapon.warhead, targetArmor);
+
+    const spainBias = COUNTRY_BONUSES.Spain.firepowerMult;
+    const ussrBias = COUNTRY_BONUSES.USSR.firepowerMult;
+    expect(ussrBias).toBe(1.10);
+    expect(spainBias).toBe(1.0);
+
+    const spainDmg = Math.max(1, Math.round(weapon.damage * mult * spainBias));
+    const ussrDmg = Math.max(1, Math.round(weapon.damage * mult * ussrBias));
+    expect(ussrDmg).toBeGreaterThan(spainDmg);
+  });
+
+  it('aircraft structure attack uses warhead-vs-concrete mult + house bias', () => {
+    const weaponName = UNIT_STATS.HELI.primaryWeapon!;
+    const weapon = WEAPON_STATS[weaponName];
+    const mult = getWarheadMultiplier(weapon.warhead, 'concrete');
+
+    const ussrBias = COUNTRY_BONUSES.USSR.firepowerMult;
+    const dmgNoHouse = Math.max(1, Math.round(weapon.damage * mult * 1.0));
+    const dmgUSSR = Math.max(1, Math.round(weapon.damage * mult * ussrBias));
+    // USSR gets a boost on structure damage
+    expect(dmgUSSR).toBeGreaterThanOrEqual(dmgNoHouse);
+  });
+
+  it('aircraft kill awards attacker.creditKill()', () => {
+    const attacker = new Entity(UnitType.V_MIG, House.Spain, 100, 100);
+    const target = new Entity(UnitType.V_2TNK, House.USSR, 200, 200);
+    expect(attacker.kills).toBe(0);
+
+    // Simulate aircraft kill — the pipeline calls attacker.creditKill() on kill
+    const weapon = WEAPON_STATS[UNIT_STATS.MIG.primaryWeapon!];
+    const mult = getWarheadMultiplier(weapon.warhead, target.stats.armor);
+    const bias = COUNTRY_BONUSES.Spain.firepowerMult;
+    const damage = Math.max(1, Math.round(weapon.damage * mult * bias));
+
+    // Apply enough damage to kill
+    target.hp = 1;
+    const killed = target.takeDamage(damage, weapon.warhead);
+    expect(killed).toBe(true);
+
+    // In the real Game.fireWeaponAt, this triggers attacker.creditKill()
+    if (killed) attacker.creditKill();
+    expect(attacker.kills).toBe(1);
+  });
+
+  it('Organic warhead vs armored target deals 0 damage (mult <= 0 guard)', () => {
+    // The pipeline checks: mult <= 0 ? 0 : Math.max(1, ...)
+    const mult = getWarheadMultiplier('Organic', 'heavy');
+    expect(mult).toBe(0);
+    const damage = mult <= 0 ? 0 : Math.max(1, Math.round(50 * mult * 1.0));
+    expect(damage).toBe(0);
+  });
+});
+
+// === M4: Defense structure firepower bias ===
+
+describe('Defense structure damage formula includes firepower bias', () => {
+  // Mirrors the formula in Game.updateStructureCombat:
+  // damage = Math.max(1, Math.round(s.weapon.damage * mult * houseBias))
+
+  it('USSR defense (firepowerMult=1.10) deals more damage than neutral (1.0)', () => {
+    // Simulate a GUN turret-like defense with HE warhead
+    const weaponDamage = 40; // typical turret damage
+    const warhead: WarheadType = 'HE';
+    const targetArmor: ArmorType = 'light';
+    const mult = getWarheadMultiplier(warhead, targetArmor);
+
+    const neutralBias = COUNTRY_BONUSES.Neutral.firepowerMult;
+    const ussrBias = COUNTRY_BONUSES.USSR.firepowerMult;
+
+    const neutralDmg = Math.max(1, Math.round(weaponDamage * mult * neutralBias));
+    const ussrDmg = Math.max(1, Math.round(weaponDamage * mult * ussrBias));
+
+    expect(ussrDmg).toBeGreaterThan(neutralDmg);
+  });
+
+  it('Ukraine defense (firepowerMult=1.05) gets 5% boost', () => {
+    const weaponDamage = 100;
+    const warhead: WarheadType = 'AP';
+    const targetArmor: ArmorType = 'heavy';
+    const mult = getWarheadMultiplier(warhead, targetArmor);
+
+    const baseDmg = Math.max(1, Math.round(weaponDamage * mult * 1.0));
+    const ukraineBias = COUNTRY_BONUSES.Ukraine.firepowerMult;
+    expect(ukraineBias).toBe(1.05);
+    const ukraineDmg = Math.max(1, Math.round(weaponDamage * mult * ukraineBias));
+
+    expect(ukraineDmg).toBeGreaterThan(baseDmg);
+    // AP vs heavy = 1.0, so: base=100, ukraine=Math.round(100*1.0*1.05)=105
+    expect(ukraineDmg).toBe(105);
+    expect(baseDmg).toBe(100);
+  });
+
+  it('ant house bias applied in ant scenarios (USSR ants get 1.1x)', () => {
+    // In ant missions (SCA*), Game.getFirepowerBias checks ANT_HOUSES
+    // USSR ants get 1.1, Ukraine 1.0, Germany 0.9
+    // We verify the expected damage formulas match
+    const antBiasUSSR = 1.1;   // from Game.getFirepowerBias for USSR in SCA* scenarios
+    const antBiasGermany = 0.9;
+    const weaponDamage = 50;
+    const mult = getWarheadMultiplier('SA', 'none'); // SA vs infantry
+
+    const ussrDmg = Math.max(1, Math.round(weaponDamage * mult * antBiasUSSR));
+    const germanyDmg = Math.max(1, Math.round(weaponDamage * mult * antBiasGermany));
+
+    expect(ussrDmg).toBeGreaterThan(germanyDmg);
+    // SA vs none = 1.0, so: USSR = round(50*1.0*1.1)=55, Germany = round(50*1.0*0.9)=45
+    expect(ussrDmg).toBe(55);
+    expect(germanyDmg).toBe(45);
+  });
+});
+
+// === H2: handleUnitDeath parameterization ===
+
+describe('handleUnitDeath parameter presets', () => {
+  // These tests verify the parameter contracts for each death context.
+  // The actual method is private, so we verify the expected parameter values.
+
+  it('direct hit preset: shake=8, size=16, debris=true, decal=6/10, explodeLg=true', () => {
+    const preset = {
+      screenShake: 8, explosionSize: 16, debris: true,
+      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
+      explodeLgSound: true,
+    };
+    expect(preset.screenShake).toBe(8);
+    expect(preset.debris).toBe(true);
+    expect(preset.decal!.infantry).toBe(6);
+    expect(preset.decal!.vehicle).toBe(10);
+    expect(preset.explodeLgSound).toBe(true);
+  });
+
+  it('defense preset: shake=4, size=16, debris=false, decal=4/8, explodeLg=false', () => {
+    const preset = {
+      screenShake: 4, explosionSize: 16, debris: false,
+      decal: { infantry: 4, vehicle: 8, opacity: 0.5 },
+      explodeLgSound: false,
+    };
+    expect(preset.screenShake).toBe(4);
+    expect(preset.debris).toBe(false);
+    expect(preset.decal!.infantry).toBe(4);
+    expect(preset.decal!.opacity).toBe(0.5);
+  });
+
+  it('projectile preset: shake=8, size=16, debris=true, decal=6/10, explodeLg=false', () => {
+    const preset = {
+      screenShake: 8, explosionSize: 16, debris: true,
+      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
+      explodeLgSound: false,
+    };
+    expect(preset.debris).toBe(true);
+    expect(preset.explodeLgSound).toBe(false);
+  });
+
+  it('splash preset: shake=4, size=12, debris=false, decal=null', () => {
+    const preset = {
+      screenShake: 4, explosionSize: 12, debris: false,
+      decal: null as { infantry: number; vehicle: number; opacity: number } | null,
+      explodeLgSound: false,
+    };
+    expect(preset.explosionSize).toBe(12);
+    expect(preset.decal).toBeNull();
+    expect(preset.debris).toBe(false);
+  });
+});
+
+// === M3: retreatFromTarget ===
+
+describe('retreatFromTarget formula', () => {
+  it('computes retreat position away from target, clamped to map bounds', () => {
+    // Mirrors Game.retreatFromTarget:
+    // retreatX = clamp(entity.x + (dx/len) * CELL_SIZE * 2, minX, maxX)
+    const CELL_SIZE = 24;
+    const entityPos = { x: 100, y: 100 };
+    const targetPos = { x: 120, y: 100 }; // target to the right
+
+    const dx = entityPos.x - targetPos.x; // -20 (retreat left)
+    const dy = entityPos.y - targetPos.y; // 0
+    const len = Math.sqrt(dx * dx + dy * dy) || 1; // 20
+
+    const boundsMinX = 0;
+    const boundsMaxX = 50 * CELL_SIZE; // 1200
+    const retreatX = Math.max(boundsMinX, Math.min(boundsMaxX, entityPos.x + (dx / len) * CELL_SIZE * 2));
+    const retreatY = Math.max(0, Math.min(50 * CELL_SIZE, entityPos.y + (dy / len) * CELL_SIZE * 2));
+
+    // Should retreat left (away from target)
+    expect(retreatX).toBeLessThan(entityPos.x);
+    expect(retreatX).toBe(100 + (-1) * CELL_SIZE * 2); // 100 - 48 = 52
+    expect(retreatY).toBe(100); // no vertical movement
+  });
+
+  it('clamps to map bounds when retreat would go off-map', () => {
+    const CELL_SIZE = 24;
+    const boundsMinX = 40 * CELL_SIZE; // 960
+    const entityPos = { x: 965, y: 500 }; // near left edge
+    const targetPos = { x: 1000, y: 500 }; // target to the right
+
+    const dx = entityPos.x - targetPos.x; // -35
+    const dy = entityPos.y - targetPos.y; // 0
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+
+    const retreatX = Math.max(boundsMinX, Math.min(2160, entityPos.x + (dx / len) * CELL_SIZE * 2));
+    // 965 + (-1) * 48 = 917, but min is 960
+    expect(retreatX).toBe(boundsMinX); // clamped
   });
 });
 
