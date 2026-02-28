@@ -816,36 +816,44 @@ export class Game {
       }
     }
 
-    // Elite unit auto-heal: +1 HP every 30 ticks (~2 seconds) for veterancy 2 units
-    if (this.tick % 30 === 0) {
-      for (const e of this.entities) {
-        if (e.alive && e.isPlayerUnit && e.veterancy >= 2 && e.hp < e.maxHp) {
-          e.hp = Math.min(e.maxHp, e.hp + 1);
-        }
-      }
-    }
+    // (RA1 has no veterancy system — elite auto-heal removed for parity)
 
-    // Service Depot (FIX) auto-repair nearby player vehicles (every 3 ticks ≈ 5 HP/sec)
+    // Service Depot (FIX): dock-based repair — one vehicle at a time, costs credits
+    // C++ building.cpp: unit must be on the depot pad. Repair costs proportional to damage.
     if (this.tick % 3 === 0) {
       for (const s of this.structures) {
         if (!s.alive || s.type !== 'FIX') continue;
-        if (s.house !== House.Spain && s.house !== House.Greece) continue;
+        if (!this.isAllied(s.house, this.playerHouse)) continue;
         const sx = s.cx * CELL_SIZE + CELL_SIZE;
         const sy = s.cy * CELL_SIZE + CELL_SIZE;
+        // Find ONE docked vehicle (closest damaged vehicle within 1 cell of depot center)
+        let docked: Entity | null = null;
+        let bestDist = Infinity;
         for (const e of this.entities) {
-          if (!e.alive || !e.isPlayerUnit || e.hp >= e.maxHp) continue;
+          if (!e.alive || !this.isPlayerControlled(e) || e.hp >= e.maxHp) continue;
           if (e.stats.isInfantry) continue; // depot only repairs vehicles
           const dist = worldDist({ x: sx, y: sy }, e.pos);
-          if (dist < 3) {
-            e.hp = Math.min(e.maxHp, e.hp + 2);
+          if (dist < CELL_SIZE * 1.5 && dist < bestDist) {
+            docked = e;
+            bestDist = dist;
+          }
+        }
+        if (docked) {
+          // Repair cost per step: same formula as building repair
+          const unitCost = PRODUCTION_ITEMS.find(p => p.type === docked!.type)?.cost ?? 400;
+          const repairCost = Math.ceil((unitCost * REPAIR_PERCENT) / (docked.maxHp / REPAIR_STEP));
+          if (this.credits >= repairCost) {
+            this.credits -= repairCost;
+            docked.hp = Math.min(docked.maxHp, docked.hp + REPAIR_STEP);
             // Visual spark effect every 15 ticks
             if (this.tick % 15 === 0) {
               this.effects.push({
-                type: 'muzzle', x: e.pos.x, y: e.pos.y - 4,
+                type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
                 frame: 0, maxFrames: 5, size: 3, sprite: 'piff', spriteStart: 0,
               });
             }
           }
+          // Pause if no credits (don't cancel, just wait — RA1 parity)
         }
       }
     }
@@ -2856,27 +2864,31 @@ export class Game {
         break;
       }
       case 'unloading': {
-        entity.harvestTick++;
-        // Unload over 30 ticks (~2 seconds)
-        if (entity.harvestTick >= 30) {
+        // C++ parity: gradual bail-by-bail unload (~50 credits per tick)
+        // Harvester drains incrementally over multiple ticks instead of instant dump
+        const bailAmount = Math.min(50, entity.oreLoad);
+        if (bailAmount > 0) {
           let added: number;
           if (this.isPlayerControlled(entity)) {
-            added = this.addCredits(entity.oreLoad);
-            this.audio.play('heal'); // credit received sound
+            added = this.addCredits(bailAmount);
           } else {
             // AI harvester — deposit into houseCredits
-            added = entity.oreLoad;
+            added = bailAmount;
             const cur = this.houseCredits.get(entity.house) ?? 0;
             this.houseCredits.set(entity.house, cur + added);
           }
-          // Floating "+N" credits text (show actual amount stored, not raw ore load)
-          this.effects.push({
-            type: 'text', x: entity.pos.x, y: entity.pos.y - 8,
-            frame: 0, maxFrames: 30, size: 0,
-            text: `+${added}`, textColor: 'rgba(80,255,80,1)',
-          });
+          entity.oreLoad -= bailAmount;
+          // Credit sound every 5 ticks during unload
+          entity.harvestTick++;
+          if (entity.harvestTick % 5 === 0 && this.isPlayerControlled(entity)) {
+            this.audio.play('heal');
+          }
+        }
+        if (entity.oreLoad <= 0) {
+          // Finished unloading — show total deposited and go idle
           entity.oreLoad = 0;
           entity.harvesterState = 'idle';
+          entity.harvestTick = 0;
         }
         break;
       }
@@ -3304,7 +3316,7 @@ export class Game {
           directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
         }
 
-        // Apply warhead-vs-armor damage multiplier + veterancy bonus + house firepower bias (C8)
+        // Apply warhead-vs-armor damage multiplier + house firepower bias (C8)
         const mult = this.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
         const houseBias = this.getFirepowerBias(entity.house);
         // If warhead does 0% vs this armor (e.g. Organic vs vehicles), skip entirely
@@ -4040,10 +4052,11 @@ export class Game {
       }
       entity.animState = AnimState.ATTACK;
       if (entity.attackCooldown <= 0 && entity.weapon) {
-        // Scale damage: base 0.15× multiplier calibrated for 256-HP structures, scale with maxHp
-        const hpScale = s.maxHp / 256;
+        // C++ parity: use warhead-vs-armor lookup (structures have 'concrete' armor)
+        const wh = entity.weapon.warhead as WarheadType;
+        const mult = this.getWarheadMult(wh, 'concrete');
         const structHouseBias = this.getFirepowerBias(entity.house);
-        const damage = Math.max(1, Math.round(entity.weapon.damage * 0.15 * hpScale * structHouseBias));
+        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier * structHouseBias));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
         if (entity.hasTurret) entity.isInRecoilState = true; // M6
@@ -4918,12 +4931,13 @@ export class Game {
       const dist = worldDist(center, other.pos);
       if (dist > splashRange) continue;
 
-      // C6: SpreadFactor falloff (C++ combat.cpp:107 — distance /= SpreadFactor * (PIXEL_LEPTON_W/2))
-      // Higher SpreadFactor = divide distance by more = LESS damage reduction = WIDER splash
-      // spreadFactor 1=linear, 2=wider (slower falloff), 3=even wider
+      // C6: SpreadFactor falloff (C++ combat.cpp Explosion_Damage — linear division)
+      // C++ formula: damage / (distance / (SpreadFactor * cellScale))
+      // Simplified: damage * (1 - dist / (splashRange * spreadFactor))
+      // Higher SpreadFactor = distance divided by more = LESS damage reduction = WIDER splash
       const spreadFactor = WARHEAD_META[weapon.warhead]?.spreadFactor ?? 1;
-      const ratio = dist / splashRange;
-      const falloff = Math.pow(1 - ratio, 1 / spreadFactor);
+      const effectiveRange = splashRange * spreadFactor;
+      const falloff = Math.max(0, 1 - dist / effectiveRange);
       const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
       if (mult <= 0) continue; // warhead does 0% vs this armor
       // H3: No 0.5x multiplier — C++ splash uses damage / distance directly
@@ -6076,11 +6090,9 @@ export class Game {
         this.evaMessages.push({ text: 'UNIT HEALED', tick: this.tick });
         break;
       case 'veterancy':
-        if (unit.veterancy < 2) {
-          unit.kills = unit.veterancy === 0 ? 3 : 6;
-          unit.creditKill(); // triggers promotion
-        }
-        this.evaMessages.push({ text: 'UNIT PROMOTED', tick: this.tick });
+        // RA1 has no veterancy — treat as a heal crate instead
+        unit.hp = unit.maxHp;
+        this.evaMessages.push({ text: 'UNIT HEALED', tick: this.tick });
         break;
       case 'unit': {
         // Spawn a random unit nearby — includes expansion units
@@ -6105,11 +6117,9 @@ export class Game {
         this.evaMessages.push({ text: 'ARMOR UPGRADE', tick: this.tick });
         break;
       case 'firepower':
-        // Promote to elite (max veterancy — 1.5× damage)
-        if (unit.veterancy < 2) {
-          unit.kills = 6;
-          unit.creditKill();
-        }
+        // RA1: firepower crate heals + gives bonus credits (no veterancy promotion)
+        unit.hp = unit.maxHp;
+        this.addCredits(500, true);
         this.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: this.tick });
         break;
       case 'speed':
@@ -6664,7 +6674,7 @@ export class Game {
       // Build survivors roster for victory screen
       const survivors = this.state === 'won'
         ? this.entities.filter(e => e.alive && e.isPlayerUnit).map(e => ({
-            type: e.type, name: e.stats.name, hp: e.hp, maxHp: e.maxHp, vet: e.veterancy,
+            type: e.type, name: e.stats.name, hp: e.hp, maxHp: e.maxHp, kills: e.kills,
           }))
         : [];
       this.renderer.renderEndScreen(

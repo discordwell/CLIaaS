@@ -1026,8 +1026,7 @@ export class Renderer {
       ctx.stroke();
       // Type indicator dot
       const typeColor = crate.type === 'money' ? '#FFD700'
-        : crate.type === 'heal' ? '#00FF00'
-        : crate.type === 'veterancy' ? '#FF4444'
+        : (crate.type === 'heal' || crate.type === 'veterancy') ? '#00FF00'
         : '#4488FF';
       ctx.fillStyle = typeColor;
       ctx.beginPath();
@@ -1700,23 +1699,7 @@ export class Renderer {
         ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
       }
 
-      // Veterancy chevrons — drawn above unit sprite always (not just when selected)
-      if (entity.alive && entity.veterancy > 0) {
-        const chevronX = screen.x;
-        const chevronY = screen.y - spriteH / 2 - 4; // above sprite
-        ctx.save();
-        if (entity.veterancy >= 2) {
-          // Elite: 2 gold chevrons
-          ctx.fillStyle = '#FFD700';
-          this.drawChevron(ctx, chevronX - 3, chevronY);
-          this.drawChevron(ctx, chevronX + 3, chevronY);
-        } else {
-          // Veteran: 1 silver chevron
-          ctx.fillStyle = '#C0C0C0';
-          this.drawChevron(ctx, chevronX, chevronY);
-        }
-        ctx.restore();
-      }
+      // (RA1 has no veterancy chevrons — removed for parity)
 
       // Movement dust trail for vehicles/ants when walking
       if (entity.alive && !entity.stats.isInfantry && entity.animState === AnimState.WALK) {
@@ -1797,31 +1780,9 @@ export class Renderer {
         );
       }
 
-      // Elite unit golden glow (subtle pulsing outline)
-      if (entity.alive && entity.veterancy >= 2) {
-        const glow = 0.12 + 0.06 * Math.sin(tick * 0.15 + entity.id);
-        ctx.strokeStyle = `rgba(255,215,0,${glow})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.ellipse(screen.x, screen.y + altY, spriteW * 0.55, spriteH * 0.35, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      // (RA1 has no elite glow — removed for parity)
 
-      // Veterancy pips — C++ techno.cpp:1159-1187: colored dots below the unit
-      // Rookie (0): no pips, Veteran (1): 1 yellow pip, Elite (2): 2 yellow pips
-      if (entity.alive && entity.veterancy > 0 && selectedIds.has(entity.id)) {
-        const pipY = screen.y + spriteH / 2 + 4; // below the sprite
-        const pipCount = entity.veterancy;
-        const pipRadius = 2;
-        const pipSpacing = 6;
-        ctx.fillStyle = '#FFD700'; // yellow pips
-        for (let i = 0; i < pipCount; i++) {
-          const px = screen.x - ((pipCount - 1) * pipSpacing) / 2 + i * pipSpacing;
-          ctx.beginPath();
-          ctx.arc(px, pipY, pipRadius, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
+      // (RA1 has no veterancy pips — removed for parity)
 
       // Stance indicator for selected player units (small dot to right of selection circle)
       if (entity.alive && entity.isPlayerUnit && selectedIds.has(entity.id) &&
@@ -1836,7 +1797,7 @@ export class Renderer {
     }
   }
 
-  // ─── Health Bars & Veterancy ─────────────────────────────
+  // ─── Health Bars ─────────────────────────────
 
   private drawChevron(ctx: CanvasRenderingContext2D, x: number, y: number): void {
     ctx.beginPath();
@@ -3075,7 +3036,7 @@ export class Renderer {
     structsBuilt = 0,
     structsLost = 0,
     creditsRemaining = 0,
-    survivors: Array<{ type: string; name: string; hp: number; maxHp: number; vet: number }> = [],
+    survivors: Array<{ type: string; name: string; hp: number; maxHp: number; kills: number }> = [],
   ): void {
     const ctx = this.ctx;
     const w = this.width;
@@ -3207,11 +3168,11 @@ export class Renderer {
       ctx.fillText('SURVIVING FORCES', w / 2, row);
       row += 12;
       // Group by type
-      const typeCounts = new Map<string, { count: number; name: string; vets: number }>();
+      const typeCounts = new Map<string, { count: number; name: string; totalKills: number }>();
       for (const s of survivors) {
-        const entry = typeCounts.get(s.type) ?? { count: 0, name: s.name, vets: 0 };
+        const entry = typeCounts.get(s.type) ?? { count: 0, name: s.name, totalKills: 0 };
         entry.count++;
-        if (s.vet > 0) entry.vets++;
+        entry.totalKills += s.kills;
         typeCounts.set(s.type, entry);
       }
       ctx.font = '9px monospace';
@@ -3221,8 +3182,8 @@ export class Renderer {
         if (tx + 80 > px + panelW) break;
         ctx.textAlign = 'left';
         ctx.fillStyle = '#aaa';
-        const vetStr = info.vets > 0 ? ` (${info.vets}\u2605)` : '';
-        ctx.fillText(`${info.count}x ${info.name}${vetStr}`, tx, row);
+        const killStr = info.totalKills > 0 ? ` (${info.totalKills}K)` : '';
+        ctx.fillText(`${info.count}x ${info.name}${killStr}`, tx, row);
         col++;
         if (col >= 3) { col = 0; row += 11; }
       }

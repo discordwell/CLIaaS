@@ -2,37 +2,28 @@ import { describe, it, expect } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { UnitType, House } from '../engine/types';
 
-describe('Veterancy Chevrons', () => {
-  it('entity with 0 veterancy has no chevrons', () => {
+describe('Kill Tracking (RA1 — no veterancy promotions)', () => {
+  it('entity starts with 0 kills and 0 veterancy', () => {
     const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
+    expect(e.kills).toBe(0);
     expect(e.veterancy).toBe(0);
   });
 
-  it('entity with 3 kills reaches veteran (1 silver chevron)', () => {
+  it('creditKill increments kills but does NOT promote', () => {
     const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     e.kills = 2;
-    e.creditKill(); // 3rd kill → veteran
-    expect(e.veterancy).toBe(1);
+    e.creditKill(); // 3rd kill — would have promoted in RA2
+    expect(e.kills).toBe(3);
+    expect(e.veterancy).toBe(0); // RA1: no promotions
   });
 
-  it('entity with 6 kills reaches elite (2 gold chevrons)', () => {
+  it('damageMultiplier is always 1.0 (RA1 has no veterancy bonuses)', () => {
     const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
-    e.kills = 5;
-    e.creditKill(); // 6th kill → elite
-    expect(e.veterancy).toBe(2);
-  });
+    expect(e.damageMultiplier).toBe(1.0);
 
-  it('veterancy increases damage multiplier', () => {
-    const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
-    expect(e.damageMultiplier).toBe(1.0); // rookie
-
-    e.kills = 2;
-    e.creditKill(); // veteran
-    expect(e.damageMultiplier).toBe(1.25);
-
-    e.kills = 5;
-    e.creditKill(); // elite
-    expect(e.damageMultiplier).toBe(1.5);
+    e.kills = 10;
+    e.creditKill();
+    expect(e.damageMultiplier).toBe(1.0); // still 1.0 regardless of kills
   });
 });
 

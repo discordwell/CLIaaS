@@ -122,28 +122,15 @@ export class Entity {
   // Moving-platform tracking (C++ techno.cpp:3106-3108 — units firing while moving get extra inaccuracy)
   prevPos: WorldPos = { x: 0, y: 0 }; // position from previous tick, for detecting movement
 
-  /** Damage multiplier from veterancy (1.0 / 1.25 / 1.5) */
+  /** Damage multiplier — RA1 has no veterancy system (1.0 always).
+   *  Field kept for save/load compatibility. */
   get damageMultiplier(): number {
-    return this.veterancy === 2 ? 1.5 : this.veterancy === 1 ? 1.25 : 1.0;
+    return 1.0;
   }
 
-  /** Credit a kill and check for promotion */
+  /** Credit a kill (RA1: no promotion system, just tracks kill count) */
   creditKill(): void {
     this.kills++;
-    const oldVet = this.veterancy;
-    if (this.kills >= 6 && this.veterancy < 2) {
-      this.veterancy = 2;
-    } else if (this.kills >= 3 && this.veterancy < 1) {
-      this.veterancy = 1;
-    }
-    // On promotion, scale max HP and heal the bonus amount
-    if (this.veterancy > oldVet) {
-      const hpRatio = this.veterancy === 2 ? 1.5 : 1.25;
-      const newMax = Math.round(this.stats.strength * hpRatio);
-      const bonus = newMax - this.maxHp;
-      this.maxHp = newMax;
-      this.hp = Math.min(this.hp + bonus, this.maxHp);
-    }
   }
 
   // Selection

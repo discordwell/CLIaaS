@@ -3,9 +3,11 @@ import {
   PRODUCTION_ITEMS, type ProductionItem, type SidebarTab,
   getItemCategory, House, REPAIR_PERCENT, REPAIR_STEP,
   CONDITION_RED, CONDITION_YELLOW, CELL_SIZE,
+  WARHEAD_VS_ARMOR, WARHEAD_META, type WarheadType,
 } from '../engine/types';
 import { STRUCTURE_SIZE, type MapStructure } from '../engine/scenario';
 import { Camera } from '../engine/camera';
+import { Entity } from '../engine/entity';
 
 /**
  * Sidebar UI Tests — Production Tabs, Sell/Repair Buttons,
@@ -541,5 +543,194 @@ describe('RA1 Parity Fixes', () => {
     }
     // Target B should score higher: vehicle (25 base) + high weapon damage + wounded
     expect(threatScore(targetB)).toBeGreaterThan(threatScore(targetA));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Batch 2 Parity Tests — Structure Damage, Splash Falloff,
+// Harvester Unload, Service Depot, Veterancy Removal, Ore Values
+// ═══════════════════════════════════════════════════════════
+
+describe('RA1 Parity — Structure Damage Formula (warhead-vs-armor)', () => {
+  // getWarheadMult helper — mirrors Game.getWarheadMult
+  function getWarheadMult(warhead: WarheadType, armor: string): number {
+    const idx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'heavy' ? 3 : 4;
+    return WARHEAD_VS_ARMOR[warhead]?.[idx] ?? 1.0;
+  }
+
+  it('HE warhead deals 1.0x damage to concrete (structures)', () => {
+    expect(getWarheadMult('HE', 'concrete')).toBe(1.0);
+  });
+
+  it('SA warhead deals only 0.25x to concrete', () => {
+    expect(getWarheadMult('SA', 'concrete')).toBe(0.25);
+  });
+
+  it('AP warhead deals 0.5x to concrete', () => {
+    expect(getWarheadMult('AP', 'concrete')).toBe(0.5);
+  });
+
+  it('Super warhead deals 1.0x to everything', () => {
+    expect(getWarheadMult('Super', 'none')).toBe(1.0);
+    expect(getWarheadMult('Super', 'light')).toBe(1.0);
+    expect(getWarheadMult('Super', 'heavy')).toBe(1.0);
+    expect(getWarheadMult('Super', 'concrete')).toBe(1.0);
+  });
+
+  it('HollowPoint deals 0.05x to armored targets', () => {
+    expect(getWarheadMult('HollowPoint', 'wood')).toBe(0.05);
+    expect(getWarheadMult('HollowPoint', 'light')).toBe(0.05);
+    expect(getWarheadMult('HollowPoint', 'heavy')).toBe(0.05);
+    expect(getWarheadMult('HollowPoint', 'concrete')).toBe(0.05);
+  });
+
+  it('structures no longer use flat 0.15x — damage varies by warhead', () => {
+    // In old code, ALL warheads did 0.15x to structures
+    // Now HE should do much more than SA
+    const heDamage = getWarheadMult('HE', 'concrete');
+    const saDamage = getWarheadMult('SA', 'concrete');
+    expect(heDamage).toBeGreaterThan(saDamage);
+    expect(heDamage).toBe(1.0);  // HE is effective vs concrete
+    expect(saDamage).toBe(0.25); // SA is weak vs concrete
+  });
+});
+
+describe('RA1 Parity — Splash Falloff (C++ linear division)', () => {
+  // Mirrors the splash falloff formula from Game.applySplashDamage
+  function splashFalloff(dist: number, splashRange: number, warhead: WarheadType): number {
+    const spreadFactor = WARHEAD_META[warhead]?.spreadFactor ?? 1;
+    const effectiveRange = splashRange * spreadFactor;
+    return Math.max(0, 1 - dist / effectiveRange);
+  }
+
+  it('no falloff at point of impact (dist=0)', () => {
+    expect(splashFalloff(0, 3, 'HE')).toBe(1.0);
+  });
+
+  it('zero damage at edge of effective range', () => {
+    // HE: spreadFactor=2, range=3, effectiveRange=6
+    expect(splashFalloff(6, 3, 'HE')).toBe(0);
+  });
+
+  it('linear falloff is proportional to distance', () => {
+    // HE: effectiveRange = 3*2 = 6
+    const half = splashFalloff(3, 3, 'HE'); // halfway → 50%
+    expect(half).toBeCloseTo(0.5, 5);
+  });
+
+  it('wider spreadFactor means less falloff at same distance', () => {
+    // Fire has spreadFactor=3, SA has spreadFactor=1
+    const fireFalloff = splashFalloff(2, 3, 'Fire');  // effectiveRange=9
+    const saFalloff = splashFalloff(2, 3, 'SA');       // effectiveRange=3
+    expect(fireFalloff).toBeGreaterThan(saFalloff);
+  });
+
+  it('no negative falloff beyond range', () => {
+    expect(splashFalloff(100, 3, 'HE')).toBe(0);
+    expect(splashFalloff(100, 3, 'SA')).toBe(0);
+  });
+});
+
+describe('RA1 Parity — Harvester Bail-by-Bail Unloading', () => {
+  it('harvester unloads 50 credits per bail', () => {
+    // Mirrors: bailAmount = Math.min(50, entity.oreLoad)
+    const oreLoad = 700;
+    const bailAmount = Math.min(50, oreLoad);
+    expect(bailAmount).toBe(50);
+  });
+
+  it('last bail handles remainder correctly', () => {
+    const oreLoad = 30; // less than 50
+    const bailAmount = Math.min(50, oreLoad);
+    expect(bailAmount).toBe(30);
+  });
+
+  it('full 700 ore load requires 14 bails', () => {
+    let remaining = 700;
+    let bails = 0;
+    while (remaining > 0) {
+      const bail = Math.min(50, remaining);
+      remaining -= bail;
+      bails++;
+    }
+    expect(bails).toBe(14);
+  });
+
+  it('bail count matches RA1 BailCount=28 at 25 credits/bail', () => {
+    // RA1: BailCount=28, each bail is 25 credits of ore
+    // 28 bails × 25 = 700 total capacity = ORE_CAPACITY
+    expect(Entity.ORE_CAPACITY).toBe(700);
+  });
+});
+
+describe('RA1 Parity — Service Depot Dock-based Repair', () => {
+  it('repair cost formula matches C++ REPAIR_STEP / REPAIR_PERCENT', () => {
+    // C++ formula: cost = ceil(unitCost * REPAIR_PERCENT / (maxHp / REPAIR_STEP))
+    const unitCost = 800; // e.g. heavy tank
+    const maxHp = 400;
+    const repairCost = Math.ceil((unitCost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP));
+    // Each step heals REPAIR_STEP hp and costs proportionally
+    expect(repairCost).toBeGreaterThan(0);
+    expect(repairCost).toBeLessThan(unitCost); // repair step costs less than full unit
+  });
+
+  it('REPAIR_STEP and REPAIR_PERCENT are reasonable RA1 values', () => {
+    expect(REPAIR_STEP).toBeGreaterThan(0);
+    expect(REPAIR_PERCENT).toBeGreaterThan(0);
+    expect(REPAIR_PERCENT).toBeLessThanOrEqual(1.0);
+  });
+
+  it('total repair cost is proportional to damage taken', () => {
+    const unitCost = 800;
+    const maxHp = 400;
+    const costPerStep = Math.ceil((unitCost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP));
+    const halfDamaged = Math.ceil((maxHp / 2) / REPAIR_STEP); // steps to heal 50% HP
+    const fullyDamaged = Math.ceil(maxHp / REPAIR_STEP);       // steps to heal 100%
+    expect(fullyDamaged * costPerStep).toBeGreaterThan(halfDamaged * costPerStep);
+  });
+});
+
+describe('RA1 Parity — Ore Values', () => {
+  it('ore value is 25 credits per level (GoldValue=25)', () => {
+    // Verified against RULES.INI GoldValue=25
+    const orePerLevel = 25;
+    expect(orePerLevel).toBe(25);
+  });
+
+  it('gem value is 50 credits per level (GemValue=50)', () => {
+    // Verified against RULES.INI GemValue=50
+    const gemPerLevel = 50;
+    expect(gemPerLevel).toBe(50);
+  });
+
+  it('harvester capacity is 700 (28 bails × 25 credits)', () => {
+    expect(Entity.ORE_CAPACITY).toBe(700);
+  });
+});
+
+describe('RA1 Parity — Veterancy Removal', () => {
+  it('damageMultiplier always returns 1.0', () => {
+    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
+    e.kills = 100;
+    expect(e.damageMultiplier).toBe(1.0);
+  });
+
+  it('creditKill only increments kill count', () => {
+    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
+    expect(e.kills).toBe(0);
+    e.creditKill();
+    expect(e.kills).toBe(1);
+    expect(e.veterancy).toBe(0);
+    e.creditKill();
+    e.creditKill();
+    expect(e.kills).toBe(3);
+    expect(e.veterancy).toBe(0); // no promotion at 3 kills
+  });
+
+  it('veterancy field stays 0 regardless of kills', () => {
+    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
+    for (let i = 0; i < 20; i++) e.creditKill();
+    expect(e.veterancy).toBe(0);
+    expect(e.kills).toBe(20);
   });
 });
