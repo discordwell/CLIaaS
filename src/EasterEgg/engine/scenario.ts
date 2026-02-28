@@ -678,6 +678,7 @@ export interface MapStructure {
   triggerName?: string;      // attached trigger name (from INI)
   buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
+  sellHpAtStart?: number;    // HP when sell was initiated (for health-scaled refund)
   turretDir?: number;        // 0-7 facing for turreted structures (GUN/SAM)
   desiredTurretDir?: number; // target turret facing (rotates toward this)
   firingFlash?: number;      // ticks remaining for muzzle flash frame

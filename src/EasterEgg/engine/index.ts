@@ -798,8 +798,7 @@ export class Game {
         const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
         const repairCostPerStep = prodItem ? Math.ceil((prodItem.cost * REPAIR_PERCENT) / (s.maxHp / REPAIR_STEP)) : 1;
         if (this.credits < repairCostPerStep) {
-          this.repairingStructures.delete(idx);
-          continue;
+          continue; // pause repair until credits available (RA1 parity — don't cancel)
         }
         this.credits -= repairCostPerStep;
         s.hp = Math.min(s.maxHp, s.hp + REPAIR_STEP);
@@ -1006,11 +1005,15 @@ export class Game {
           s.alive = false;
           s.sellProgress = undefined;
           this.clearStructureFootprint(s);
-          // Refund 50% of building cost on successful sell completion
+          // Refund: health-scaled 50% of building cost (C++ building.cpp Sell_Back)
           const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
           // Recalculate silo capacity BEFORE adding refund (structure is now dead)
           this.recalculateSiloCapacity();
-          if (prodItem) this.addCredits(Math.floor(prodItem.cost * 0.5), true);
+          if (prodItem) {
+            const hpRatio = (s.sellHpAtStart ?? s.maxHp) / s.maxHp;
+            this.addCredits(Math.floor(prodItem.cost * hpRatio * 0.5), true);
+          }
+          s.sellHpAtStart = undefined;
           const wx = s.cx * CELL_SIZE + CELL_SIZE;
           const wy = s.cy * CELL_SIZE + CELL_SIZE;
           this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
@@ -1543,20 +1546,20 @@ export class Game {
         return;
       }
 
-      // Sell mode: click on player structure to start sell animation
+      // Sell mode: click on player structure to start sell animation (mode persists — RA1 parity)
       if (this.sellMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
         if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) &&
             s.sellProgress === undefined) {
           s.sellProgress = 0; // start sell animation (refund deferred to finalization)
+          s.sellHpAtStart = s.hp; // capture HP for health-scaled refund
           this.audio.play('sell');
         }
-        this.sellMode = false;
         return;
       }
 
-      // Repair mode: click on damaged player structure to toggle repair
+      // Repair mode: click on damaged player structure to toggle repair (mode persists — RA1 parity)
       if (this.repairMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
@@ -1569,7 +1572,6 @@ export class Game {
             this.audio.play('heal');
           }
         }
-        this.repairMode = false;
         return;
       }
 
@@ -1660,6 +1662,13 @@ export class Game {
     }
 
     if (rightClick) {
+      // Cancel sell/repair/attack-move modes on right-click (RA1 parity)
+      if (this.sellMode || this.repairMode || this.attackMoveMode) {
+        this.sellMode = false;
+        this.repairMode = false;
+        this.attackMoveMode = false;
+        return;
+      }
       // Cancel superweapon cursor mode
       if (this.superweaponCursorMode) {
         this.superweaponCursorMode = null;
