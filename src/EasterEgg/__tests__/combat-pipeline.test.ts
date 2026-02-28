@@ -129,7 +129,7 @@ describe('Aircraft damage formula includes firepower bias', () => {
 
 describe('Defense structure damage formula includes firepower bias', () => {
   // Mirrors the formula in Game.updateStructureCombat:
-  // damage = Math.max(1, Math.round(s.weapon.damage * mult * houseBias))
+  // damage = mult <= 0 ? 0 : Math.max(1, Math.round(s.weapon.damage * mult * houseBias))
 
   it('USSR defense (firepowerMult=1.10) deals more damage than neutral (1.0)', () => {
     // Simulate a GUN turret-like defense with HE warhead
@@ -180,59 +180,6 @@ describe('Defense structure damage formula includes firepower bias', () => {
     // SA vs none = 1.0, so: USSR = round(50*1.0*1.1)=55, Germany = round(50*1.0*0.9)=45
     expect(ussrDmg).toBe(55);
     expect(germanyDmg).toBe(45);
-  });
-});
-
-// === H2: handleUnitDeath parameterization ===
-
-describe('handleUnitDeath parameter presets', () => {
-  // These tests verify the parameter contracts for each death context.
-  // The actual method is private, so we verify the expected parameter values.
-
-  it('direct hit preset: shake=8, size=16, debris=true, decal=6/10, explodeLg=true', () => {
-    const preset = {
-      screenShake: 8, explosionSize: 16, debris: true,
-      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
-      explodeLgSound: true,
-    };
-    expect(preset.screenShake).toBe(8);
-    expect(preset.debris).toBe(true);
-    expect(preset.decal!.infantry).toBe(6);
-    expect(preset.decal!.vehicle).toBe(10);
-    expect(preset.explodeLgSound).toBe(true);
-  });
-
-  it('defense preset: shake=4, size=16, debris=false, decal=4/8, explodeLg=false', () => {
-    const preset = {
-      screenShake: 4, explosionSize: 16, debris: false,
-      decal: { infantry: 4, vehicle: 8, opacity: 0.5 },
-      explodeLgSound: false,
-    };
-    expect(preset.screenShake).toBe(4);
-    expect(preset.debris).toBe(false);
-    expect(preset.decal!.infantry).toBe(4);
-    expect(preset.decal!.opacity).toBe(0.5);
-  });
-
-  it('projectile preset: shake=8, size=16, debris=true, decal=6/10, explodeLg=false', () => {
-    const preset = {
-      screenShake: 8, explosionSize: 16, debris: true,
-      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
-      explodeLgSound: false,
-    };
-    expect(preset.debris).toBe(true);
-    expect(preset.explodeLgSound).toBe(false);
-  });
-
-  it('splash preset: shake=4, size=12, debris=false, decal=null', () => {
-    const preset = {
-      screenShake: 4, explosionSize: 12, debris: false,
-      decal: null as { infantry: number; vehicle: number; opacity: number } | null,
-      explodeLgSound: false,
-    };
-    expect(preset.explosionSize).toBe(12);
-    expect(preset.decal).toBeNull();
-    expect(preset.debris).toBe(false);
   });
 });
 

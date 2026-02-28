@@ -1,25 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { Entity, resetEntityIds } from '../engine/entity';
-import { UnitType, House } from '../engine/types';
 
-describe('Kill Tracking (RA1 — no veterancy)', () => {
-  it('entity starts with 0 kills', () => {
-    const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
-    expect(e.kills).toBe(0);
-  });
-
-  it('creditKill increments kills', () => {
-    const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
-    e.kills = 2;
-    e.creditKill();
-    expect(e.kills).toBe(3);
-  });
-
-  it('no veterancy field exists on Entity', () => {
-    const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
-    expect('veterancy' in e).toBe(false);
-  });
-});
+// Veterancy/kill tracking tests: see combat-pipeline.test.ts "Veterancy cleanup"
 
 describe('Multi-Unit Selection Portrait Grid (#15)', () => {
   it('portrait grid calculates correct layout for different unit counts', () => {

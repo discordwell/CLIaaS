@@ -4221,7 +4221,7 @@ export class Game {
         const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
         const mult = this.getWarheadMult(wh, bestTarget.stats.armor);
         const houseBias = this.getFirepowerBias(s.house);
-        const damage = Math.max(1, Math.round(s.weapon.damage * mult * houseBias));
+        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(s.weapon.damage * mult * houseBias));
         const killed = bestTarget.takeDamage(damage, wh);
 
         // Fire effects — color based on structure type

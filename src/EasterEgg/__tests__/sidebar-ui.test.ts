@@ -3,8 +3,7 @@ import {
   PRODUCTION_ITEMS, type ProductionItem, type SidebarTab,
   getItemCategory, House, REPAIR_PERCENT, REPAIR_STEP,
   CONDITION_RED, CONDITION_YELLOW, CELL_SIZE,
-  WARHEAD_VS_ARMOR, WARHEAD_META, type WarheadType, type ArmorType,
-  getWarheadMultiplier,
+  WARHEAD_META, type WarheadType,
 } from '../engine/types';
 import { STRUCTURE_SIZE, type MapStructure } from '../engine/scenario';
 import { Camera } from '../engine/camera';
@@ -552,45 +551,7 @@ describe('RA1 Parity Fixes', () => {
 // Harvester Unload, Service Depot, Veterancy Removal, Ore Values
 // ═══════════════════════════════════════════════════════════
 
-describe('RA1 Parity — Structure Damage Formula (warhead-vs-armor)', () => {
-  const getWarheadMult = (warhead: WarheadType, armor: ArmorType) => getWarheadMultiplier(warhead, armor);
-
-  it('HE warhead deals 1.0x damage to concrete (structures)', () => {
-    expect(getWarheadMult('HE', 'concrete')).toBe(1.0);
-  });
-
-  it('SA warhead deals only 0.25x to concrete', () => {
-    expect(getWarheadMult('SA', 'concrete')).toBe(0.25);
-  });
-
-  it('AP warhead deals 0.5x to concrete', () => {
-    expect(getWarheadMult('AP', 'concrete')).toBe(0.5);
-  });
-
-  it('Super warhead deals 1.0x to everything', () => {
-    expect(getWarheadMult('Super', 'none')).toBe(1.0);
-    expect(getWarheadMult('Super', 'light')).toBe(1.0);
-    expect(getWarheadMult('Super', 'heavy')).toBe(1.0);
-    expect(getWarheadMult('Super', 'concrete')).toBe(1.0);
-  });
-
-  it('HollowPoint deals 0.05x to armored targets', () => {
-    expect(getWarheadMult('HollowPoint', 'wood')).toBe(0.05);
-    expect(getWarheadMult('HollowPoint', 'light')).toBe(0.05);
-    expect(getWarheadMult('HollowPoint', 'heavy')).toBe(0.05);
-    expect(getWarheadMult('HollowPoint', 'concrete')).toBe(0.05);
-  });
-
-  it('structures no longer use flat 0.15x — damage varies by warhead', () => {
-    // In old code, ALL warheads did 0.15x to structures
-    // Now HE should do much more than SA
-    const heDamage = getWarheadMult('HE', 'concrete');
-    const saDamage = getWarheadMult('SA', 'concrete');
-    expect(heDamage).toBeGreaterThan(saDamage);
-    expect(heDamage).toBe(1.0);  // HE is effective vs concrete
-    expect(saDamage).toBe(0.25); // SA is weak vs concrete
-  });
-});
+// Warhead-vs-armor multiplier tests: see combat-pipeline.test.ts "getWarheadMultiplier()"
 
 describe('RA1 Parity — Splash Falloff (C++ linear division)', () => {
   // Mirrors the splash falloff formula from Game.applySplashDamage
@@ -705,24 +666,4 @@ describe('RA1 Parity — Ore Values', () => {
   });
 });
 
-describe('RA1 Parity — Veterancy Removed', () => {
-  it('no veterancy field exists on Entity', () => {
-    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
-    expect('veterancy' in e).toBe(false);
-  });
-
-  it('no damageMultiplier getter exists on Entity', () => {
-    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
-    expect('damageMultiplier' in e).toBe(false);
-  });
-
-  it('creditKill only increments kill count', () => {
-    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
-    expect(e.kills).toBe(0);
-    e.creditKill();
-    expect(e.kills).toBe(1);
-    e.creditKill();
-    e.creditKill();
-    expect(e.kills).toBe(3);
-  });
-});
+// Veterancy removal tests: see combat-pipeline.test.ts "Veterancy cleanup"
