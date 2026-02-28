@@ -816,8 +816,6 @@ export class Game {
       }
     }
 
-    // (RA1 has no veterancy system — elite auto-heal removed for parity)
-
     // Service Depot (FIX): dock-based repair — one vehicle at a time, costs credits
     // C++ building.cpp: unit must be on the depot pad. Repair costs proportional to damage.
     if (this.tick % 3 === 0) {
@@ -6120,7 +6118,7 @@ export class Game {
         // RA1: firepower crate heals + gives bonus credits (no veterancy promotion)
         unit.hp = unit.maxHp;
         this.addCredits(500, true);
-        this.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: this.tick });
+        this.evaMessages.push({ text: 'UNIT REPAIRED', tick: this.tick });
         break;
       case 'speed':
         // 1.5× speed boost (M7 parity)

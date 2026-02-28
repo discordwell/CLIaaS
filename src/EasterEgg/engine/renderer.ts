@@ -1699,8 +1699,6 @@ export class Renderer {
         ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
       }
 
-      // (RA1 has no veterancy chevrons — removed for parity)
-
       // Movement dust trail for vehicles/ants when walking
       if (entity.alive && !entity.stats.isInfantry && entity.animState === AnimState.WALK) {
         const dustPhase = (tick + entity.id * 5) % 8;
@@ -1780,10 +1778,6 @@ export class Renderer {
         );
       }
 
-      // (RA1 has no elite glow — removed for parity)
-
-      // (RA1 has no veterancy pips — removed for parity)
-
       // Stance indicator for selected player units (small dot to right of selection circle)
       if (entity.alive && entity.isPlayerUnit && selectedIds.has(entity.id) &&
           entity.stance !== Stance.AGGRESSIVE) {
@@ -1798,15 +1792,6 @@ export class Renderer {
   }
 
   // ─── Health Bars ─────────────────────────────
-
-  private drawChevron(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-    ctx.beginPath();
-    ctx.moveTo(x, y - 3);      // top point
-    ctx.lineTo(x - 2, y + 1);  // bottom-left
-    ctx.lineTo(x + 2, y + 1);  // bottom-right
-    ctx.closePath();
-    ctx.fill();
-  }
 
   private renderHealthBar(
     x: number, y: number, width: number,
