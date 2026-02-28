@@ -6029,7 +6029,7 @@ export class Game {
   /** Spawn a crate on a random revealed, passable cell */
   private spawnCrate(): void {
     // Build crate distribution — silver crates are common, wood rarer
-    // Default: money×2, heal, veterancy, unit. Overrides from [General] replace silver/wood/water types.
+    // Default: money×2, heal×2, unit. Overrides from [General] replace silver/wood/water types.
     const crateTypes: CrateType[] = [
       'money', 'money', 'heal', 'heal', 'unit',  // common (existing)
       'reveal', 'squad', 'heal_base',                   // medium

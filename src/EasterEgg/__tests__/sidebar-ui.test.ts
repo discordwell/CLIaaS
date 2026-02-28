@@ -3,7 +3,7 @@ import {
   PRODUCTION_ITEMS, type ProductionItem, type SidebarTab,
   getItemCategory, House, REPAIR_PERCENT, REPAIR_STEP,
   CONDITION_RED, CONDITION_YELLOW, CELL_SIZE,
-  WARHEAD_VS_ARMOR, WARHEAD_META, type WarheadType,
+  WARHEAD_VS_ARMOR, WARHEAD_META, type WarheadType, type ArmorType,
   getWarheadMultiplier,
 } from '../engine/types';
 import { STRUCTURE_SIZE, type MapStructure } from '../engine/scenario';
@@ -553,8 +553,7 @@ describe('RA1 Parity Fixes', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('RA1 Parity — Structure Damage Formula (warhead-vs-armor)', () => {
-  // Use centralized getWarheadMultiplier from types.ts
-  const getWarheadMult = getWarheadMultiplier as (warhead: WarheadType, armor: string) => number;
+  const getWarheadMult = (warhead: WarheadType, armor: ArmorType) => getWarheadMultiplier(warhead, armor);
 
   it('HE warhead deals 1.0x damage to concrete (structures)', () => {
     expect(getWarheadMult('HE', 'concrete')).toBe(1.0);
