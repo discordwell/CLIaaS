@@ -285,45 +285,4 @@ describe('Placement Adjacency', () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════
-// Radar Toggle
-// ═══════════════════════════════════════════════════════════
 
-describe('Radar Toggle', () => {
-  it('radar is enabled by default', () => {
-    const radarEnabled = true;
-    expect(radarEnabled).toBe(true);
-  });
-
-  it('toggling radar disables minimap even with DOME', () => {
-    const hasDome = true;
-    const lowPower = false;
-    let radarEnabled = true;
-
-    // hasRadar = hasDome && !lowPower (from render())
-    // effective radar = hasRadar && radarEnabled (from renderer)
-    const hasRadar = hasDome && !lowPower;
-    expect(hasRadar && radarEnabled).toBe(true);
-
-    radarEnabled = false;
-    expect(hasRadar && radarEnabled).toBe(false);
-  });
-
-  it('no DOME → no radar regardless of toggle', () => {
-    const hasDome = false;
-    const lowPower = false;
-    const radarEnabled = true;
-
-    const hasRadar = hasDome && !lowPower;
-    expect(hasRadar && radarEnabled).toBe(false);
-  });
-
-  it('low power disables radar regardless of toggle', () => {
-    const hasDome = true;
-    const lowPower = true;
-    const radarEnabled = true;
-
-    const hasRadar = hasDome && !lowPower;
-    expect(hasRadar && radarEnabled).toBe(false);
-  });
-});

@@ -197,7 +197,6 @@ export class Game {
   sidebarScroll = 0; // scroll offset for sidebar items
   activeTab: SidebarTab = 'infantry';
   tabScrollPositions: Record<SidebarTab, number> = { infantry: 0, vehicle: 0, structure: 0 };
-  radarEnabled = true; // player toggle for radar minimap
   private cachedAvailableItems: ProductionItem[] | null = null;
   /** Rally points: produced units auto-move here (per factory type) */
   private rallyPoints = new Map<string, WorldPos>(); // factory type → world position
@@ -1972,14 +1971,6 @@ export class Game {
         this.repairMode = !this.repairMode;
         this.sellMode = false;
       }
-      return;
-    }
-
-    // Radar toggle — clicking minimap label area
-    const mmSize = Game.SIDEBAR_W - 8;
-    const mmY = this.canvas.height - mmSize - 6;
-    if (this.hasBuilding('DOME') && sy >= mmY - 12 && sy < mmY) {
-      this.radarEnabled = !this.radarEnabled;
       return;
     }
 
@@ -6542,7 +6533,6 @@ export class Game {
     this.renderer.sidebarW = Game.SIDEBAR_W;
     this.renderer.activeTab = this.activeTab;
     this.renderer.tabScrollPositions = this.tabScrollPositions;
-    this.renderer.radarEnabled = this.radarEnabled;
     // Radar requires DOME and sufficient power
     const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;

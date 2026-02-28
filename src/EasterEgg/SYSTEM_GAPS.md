@@ -63,9 +63,9 @@ Missing: bridge destruction + repair (engineer can rebuild), cliff/elevation sys
 Missing: full game state serialization (all entities, structures, triggers, fog state, production queues, credits, tick count), save slot management (8 slots like original), quicksave/quickload keybinds, save file format (JSON), load game menu, autosave between missions
 
 ## 11. FULL SIDEBAR & UI
-**Status: ~90% — Tabs, sell/repair buttons, radar toggle all implemented**
+**Status: ~90% — Tabs, sell/repair buttons, adjacency fix all implemented**
 
-[VERIFIED] Production tabs (INF/VEH/BLD) with per-tab scroll, sell/repair sidebar buttons, radar minimap toggle, double-click select all of type, power bar with low-power effects, team hotkeys (Ctrl+1-9 assign, 1-9 recall), comprehensive hotkeys, superweapon buttons with countdown timers, structure placement preview with green/red per-cell validity, footprint-based adjacency check.
+[VERIFIED] Production tabs (INF/VEH/BLD) with per-tab scroll, sell/repair sidebar buttons, double-click select all of type, power bar with low-power effects, team hotkeys (Ctrl+1-9 assign, 1-9 recall), comprehensive hotkeys, superweapon buttons with countdown timers, structure placement preview with green/red per-cell validity, footprint-based adjacency check.
 
 Remaining: right-click context menu (guard, patrol — out of scope, RA1 didn't have one), diplomacy screen (multiplayer-only, out of scope)
 

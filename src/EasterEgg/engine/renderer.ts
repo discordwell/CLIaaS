@@ -148,7 +148,6 @@ export class Renderer {
   activeTab: SidebarTab = 'infantry';
   tabScrollPositions: Record<SidebarTab, number> = { infantry: 0, vehicle: 0, structure: 0 };
   hasRadar = false; // requires DOME building for minimap
-  radarEnabled = true; // player toggle for radar
   radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
   radarStaticCounter = 0;
   crates: Array<{ x: number; y: number; type: string }> = [];
@@ -2303,17 +2302,8 @@ export class Renderer {
     ctx.lineWidth = 1;
     ctx.strokeRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
 
-    // Radar toggle label (clickable area)
-    if (this.hasRadar && this.radarEnabled) {
-      ctx.fillStyle = 'rgba(80,200,80,0.6)';
-      ctx.font = 'bold 7px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('RADAR', mmX + mmSize / 2, mmY - 4);
-      ctx.textAlign = 'left';
-    }
-
     // No radar: show static noise instead of map (update every 10 render calls)
-    if (!this.hasRadar || !this.radarEnabled) {
+    if (!this.hasRadar) {
       this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
       if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
         const cells = Math.ceil(mmSize / 3);
@@ -2330,11 +2320,10 @@ export class Renderer {
         ctx.fillStyle = `rgb(${v},${v + 5},${v})`;
         ctx.fillRect(px, py, 3, 3);
       }
-      const label = !this.hasRadar ? 'NO RADAR' : 'RADAR OFF';
-      ctx.fillStyle = !this.hasRadar ? '#666' : '#a80';
+      ctx.fillStyle = '#666';
       ctx.font = '8px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(label, mmX + mmSize / 2, mmY + mmSize / 2);
+      ctx.fillText('NO RADAR', mmX + mmSize / 2, mmY + mmSize / 2);
       ctx.textAlign = 'left';
       return;
     }
