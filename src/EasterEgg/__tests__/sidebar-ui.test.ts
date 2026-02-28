@@ -4,6 +4,7 @@ import {
   getItemCategory, House, REPAIR_PERCENT, REPAIR_STEP,
   CONDITION_RED, CONDITION_YELLOW, CELL_SIZE,
   WARHEAD_VS_ARMOR, WARHEAD_META, type WarheadType,
+  getWarheadMultiplier,
 } from '../engine/types';
 import { STRUCTURE_SIZE, type MapStructure } from '../engine/scenario';
 import { Camera } from '../engine/camera';
@@ -552,11 +553,8 @@ describe('RA1 Parity Fixes', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('RA1 Parity — Structure Damage Formula (warhead-vs-armor)', () => {
-  // getWarheadMult helper — mirrors Game.getWarheadMult
-  function getWarheadMult(warhead: WarheadType, armor: string): number {
-    const idx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'heavy' ? 3 : 4;
-    return WARHEAD_VS_ARMOR[warhead]?.[idx] ?? 1.0;
-  }
+  // Use centralized getWarheadMultiplier from types.ts
+  const getWarheadMult = getWarheadMultiplier as (warhead: WarheadType, armor: string) => number;
 
   it('HE warhead deals 1.0x damage to concrete (structures)', () => {
     expect(getWarheadMult('HE', 'concrete')).toBe(1.0);
@@ -708,11 +706,15 @@ describe('RA1 Parity — Ore Values', () => {
   });
 });
 
-describe('RA1 Parity — Veterancy Removal', () => {
-  it('damageMultiplier always returns 1.0', () => {
+describe('RA1 Parity — Veterancy Removed', () => {
+  it('no veterancy field exists on Entity', () => {
     const e = new Entity('2TNK' as any, House.Spain, 100, 100);
-    e.kills = 100;
-    expect(e.damageMultiplier).toBe(1.0);
+    expect('veterancy' in e).toBe(false);
+  });
+
+  it('no damageMultiplier getter exists on Entity', () => {
+    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
+    expect('damageMultiplier' in e).toBe(false);
   });
 
   it('creditKill only increments kill count', () => {
@@ -720,17 +722,8 @@ describe('RA1 Parity — Veterancy Removal', () => {
     expect(e.kills).toBe(0);
     e.creditKill();
     expect(e.kills).toBe(1);
-    expect(e.veterancy).toBe(0);
     e.creditKill();
     e.creditKill();
     expect(e.kills).toBe(3);
-    expect(e.veterancy).toBe(0); // no promotion at 3 kills
-  });
-
-  it('veterancy field stays 0 regardless of kills', () => {
-    const e = new Entity('2TNK' as any, House.Spain, 100, 100);
-    for (let i = 0; i < 20; i++) e.creditKill();
-    expect(e.veterancy).toBe(0);
-    expect(e.kills).toBe(20);
   });
 });

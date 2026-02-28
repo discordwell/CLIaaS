@@ -390,6 +390,22 @@ export const WARHEAD_VS_ARMOR: Record<WarheadType, [number, number, number, numb
   Organic:    [1.0,  0.0,  0.0,  0.0,  0.0 ], // Organic — kills unarmored only (dogs)
 };
 
+/** Map ArmorType string to WARHEAD_VS_ARMOR index */
+export function armorIndex(armor: ArmorType): number {
+  switch (armor) {
+    case 'none': return 0;
+    case 'wood': return 1;
+    case 'light': return 2;
+    case 'heavy': return 3;
+    case 'concrete': return 4;
+  }
+}
+
+/** Lookup warhead-vs-armor damage multiplier from the WARHEAD_VS_ARMOR table */
+export function getWarheadMultiplier(warhead: WarheadType, armor: ArmorType): number {
+  return WARHEAD_VS_ARMOR[warhead]?.[armorIndex(armor)] ?? 1;
+}
+
 // Warhead properties from C++ warhead.cpp — infantryDeath selects death animation,
 // explosionSet picks the visual explosion sprite
 export interface WarheadProps {

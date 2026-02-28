@@ -13,6 +13,7 @@ import {
   WARHEAD_VS_ARMOR, WARHEAD_META,
   worldDist, buildDefaultAlliances,
   type WarheadType, type ArmorType, type WorldPos,
+  getWarheadMultiplier,
 } from '../engine/types';
 
 // --- Helpers ---
@@ -29,11 +30,8 @@ function isAllied(a: House, b: House): boolean {
   return alliances.get(a)?.has(b) ?? false;
 }
 
-/** Mirror of Game.getWarheadMult */
-function getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
-  const armorIdx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'heavy' ? 3 : 4;
-  return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
-}
+/** Alias for centralized warhead multiplier */
+const getWarheadMult = getWarheadMultiplier;
 
 /**
  * Replication of Game.applySplashDamage logic for testing.

@@ -9,15 +9,13 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
   type WeaponStats, type WarheadType, type ArmorType,
+  getWarheadMultiplier,
 } from '../engine/types';
 
 beforeEach(() => resetEntityIds());
 
-/** Simple warhead multiplier function matching Game.getWarheadMult logic */
-function getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
-  const armorIdx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'heavy' ? 3 : 4;
-  return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
-}
+/** Alias for centralized warhead multiplier */
+const getWarheadMult = getWarheadMultiplier;
 
 function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);

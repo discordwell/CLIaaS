@@ -1026,7 +1026,7 @@ export class Renderer {
       ctx.stroke();
       // Type indicator dot
       const typeColor = crate.type === 'money' ? '#FFD700'
-        : (crate.type === 'heal' || crate.type === 'veterancy') ? '#00FF00'
+        : crate.type === 'heal' ? '#00FF00'
         : '#4488FF';
       ctx.fillStyle = typeColor;
       ctx.beginPath();

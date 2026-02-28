@@ -2,28 +2,22 @@ import { describe, it, expect } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { UnitType, House } from '../engine/types';
 
-describe('Kill Tracking (RA1 — no veterancy promotions)', () => {
-  it('entity starts with 0 kills and 0 veterancy', () => {
+describe('Kill Tracking (RA1 — no veterancy)', () => {
+  it('entity starts with 0 kills', () => {
     const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     expect(e.kills).toBe(0);
-    expect(e.veterancy).toBe(0);
   });
 
-  it('creditKill increments kills but does NOT promote', () => {
+  it('creditKill increments kills', () => {
     const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     e.kills = 2;
-    e.creditKill(); // 3rd kill — would have promoted in RA2
+    e.creditKill();
     expect(e.kills).toBe(3);
-    expect(e.veterancy).toBe(0); // RA1: no promotions
   });
 
-  it('damageMultiplier is always 1.0 (RA1 has no veterancy bonuses)', () => {
+  it('no veterancy field exists on Entity', () => {
     const e = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
-    expect(e.damageMultiplier).toBe(1.0);
-
-    e.kills = 10;
-    e.creditKill();
-    expect(e.damageMultiplier).toBe(1.0); // still 1.0 regardless of kills
+    expect('veterancy' in e).toBe(false);
   });
 });
 

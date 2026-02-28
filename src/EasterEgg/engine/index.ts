@@ -9,7 +9,7 @@ import {
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
   Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
-  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS,
+  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, type SidebarTab, getItemCategory,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames,
@@ -107,7 +107,7 @@ const STRUCTURE_IMAGES: Record<string, string> = {
 };
 
 /** Crate bonus types */
-type CrateType = 'money' | 'heal' | 'veterancy' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability';
+type CrateType = 'money' | 'heal' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability';
 interface Crate {
   x: number;
   y: number;
@@ -3189,20 +3189,9 @@ export class Game {
 
     // Minimum range check: artillery can't fire at point-blank
     if (entity.weapon?.minRange && entity.target) {
-      const dist = worldDist(entity.pos, entity.target.pos); // returns cells
+      const dist = worldDist(entity.pos, entity.target.pos);
       if (dist < entity.weapon.minRange) {
-        // Target too close — retreat away from target (clamped to map bounds)
-        entity.animState = AnimState.WALK;
-        const dx = entity.pos.x - entity.target.pos.x;
-        const dy = entity.pos.y - entity.target.pos.y;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        const minX = this.map.boundsX * CELL_SIZE;
-        const maxX = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
-        const minY = this.map.boundsY * CELL_SIZE;
-        const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
-        const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
-        const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
-        entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity, 0.4));
+        this.retreatFromTarget(entity, entity.target.pos);
         return;
       }
     }
@@ -3318,7 +3307,7 @@ export class Game {
         const mult = this.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
         const houseBias = this.getFirepowerBias(entity.house);
         // If warhead does 0% vs this armor (e.g. Organic vs vehicles), skip entirely
-        let damage = mult <= 0 ? 0 : Math.max(1, Math.round(activeWeapon.damage * mult * entity.damageMultiplier * houseBias));
+        let damage = mult <= 0 ? 0 : Math.max(1, Math.round(activeWeapon.damage * mult * houseBias));
         // C3: MinDamage/MaxDamage rules (C++ combat.cpp:122-127, rules.cpp:227)
         if (damage > 0) {
           const targetDist = worldDist(entity.pos, entity.target.pos);
@@ -3360,26 +3349,13 @@ export class Game {
 
           if (killed) {
             entity.creditKill();
-            const ktx = entity.target.pos.x;
-            const kty = entity.target.pos.y;
-            this.effects.push({ type: 'explosion', x: ktx, y: kty, frame: 0, maxFrames: 18, size: 16,
-              sprite: 'fball1', spriteStart: 0 });
-            if (!entity.target.stats.isInfantry) {
-              this.effects.push({ type: 'debris', x: ktx, y: kty, frame: 0, maxFrames: 12, size: 18 });
-            }
-            this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
-            const tc2 = worldToCell(ktx, kty);
-            this.map.addDecal(tc2.cx, tc2.cy, entity.target.stats.isInfantry ? 6 : 10, 0.6);
-            if (entity.target.isAnt) this.playSoundAt('die_ant', ktx, kty);
-            else if (entity.target.stats.isInfantry) this.playSoundAt('die_infantry', ktx, kty);
-            else this.playSoundAt('die_vehicle', ktx, kty);
-            this.playSoundAt('explode_lg', ktx, kty);
-            if (this.isPlayerControlled(entity)) this.killCount++;
-            else if (this.isPlayerControlled(entity.target)) {
-              this.lossCount++;
-              this.playEva('eva_unit_lost');
-              this.minimapAlert(tc2.cx, tc2.cy);
-            }
+            this.handleUnitDeath(entity.target, {
+              screenShake: 8, explosionSize: 16, debris: true,
+              decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
+              explodeLgSound: true,
+              attackerIsPlayer: this.isPlayerControlled(entity),
+              trackLoss: true,
+            });
           }
         }
 
@@ -3955,17 +3931,7 @@ export class Game {
 
     // Minimum range check: artillery can't fire at point-blank structures
     if (entity.weapon?.minRange && dist < entity.weapon.minRange) {
-      entity.animState = AnimState.WALK;
-      const dx = entity.pos.x - structPos.x;
-      const dy = entity.pos.y - structPos.y;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const minX = this.map.boundsX * CELL_SIZE;
-      const maxX = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
-      const minY = this.map.boundsY * CELL_SIZE;
-      const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
-      const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
-      const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
-      entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity, 0.4));
+      this.retreatFromTarget(entity, structPos);
       return;
     }
 
@@ -4054,7 +4020,7 @@ export class Game {
         const wh = entity.weapon.warhead as WarheadType;
         const mult = this.getWarheadMult(wh, 'concrete');
         const structHouseBias = this.getFirepowerBias(entity.house);
-        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * entity.damageMultiplier * structHouseBias));
+        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * structHouseBias));
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
         if (entity.hasTurret) entity.isInRecoilState = true; // M6
@@ -4251,10 +4217,11 @@ export class Game {
           s.attackCooldown = s.weapon.rof; // unlimited ammo (-1) uses normal ROF
         }
         if (Game.TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
-        // Apply warhead-vs-armor multiplier
+        // Apply warhead-vs-armor multiplier + house firepower bias
         const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
         const mult = this.getWarheadMult(wh, bestTarget.stats.armor);
-        const damage = Math.max(1, Math.round(s.weapon.damage * mult));
+        const houseBias = this.getFirepowerBias(s.house);
+        const damage = Math.max(1, Math.round(s.weapon.damage * mult * houseBias));
         const killed = bestTarget.takeDamage(damage, wh);
 
         // Fire effects — color based on structure type
@@ -4302,21 +4269,13 @@ export class Game {
         }
 
         if (killed) {
-          this.effects.push({
-            type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
-            frame: 0, maxFrames: 18, size: 16, sprite: 'fball1', spriteStart: 0,
+          this.handleUnitDeath(bestTarget, {
+            screenShake: 4, explosionSize: 16, debris: false,
+            decal: { infantry: 4, vehicle: 8, opacity: 0.5 },
+            explodeLgSound: false,
+            attackerIsPlayer: s.house === House.Spain || s.house === House.Greece,
+            trackLoss: false,
           });
-          this.renderer.screenShake = Math.max(this.renderer.screenShake, 4);
-          const tc = worldToCell(bestTarget.pos.x, bestTarget.pos.y);
-          this.map.addDecal(tc.cx, tc.cy, bestTarget.stats.isInfantry ? 4 : 8, 0.5);
-          if (s.house === House.Spain || s.house === House.Greece) this.killCount++;
-          if (bestTarget.isAnt) {
-            this.playSoundAt('die_ant', bestTarget.pos.x, bestTarget.pos.y);
-          } else if (bestTarget.stats.isInfantry) {
-            this.playSoundAt('die_infantry', bestTarget.pos.x, bestTarget.pos.y);
-          } else {
-            this.playSoundAt('die_vehicle', bestTarget.pos.x, bestTarget.pos.y);
-          }
         }
       }
     }
@@ -4687,14 +4646,22 @@ export class Game {
     return true;
   }
 
-  /** Fire weapon at entity target (helper for aircraft) */
+  /** Fire weapon at entity target (helper for aircraft) — uses full damage pipeline */
   private fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void {
     const wh = weapon.warhead as WarheadType;
     const mult = this.getWarheadMult(wh, target.stats.armor);
-    const damage = Math.max(1, Math.round(weapon.damage * mult * attacker.damageMultiplier));
+    const houseBias = this.getFirepowerBias(attacker.house);
+    const damage = mult <= 0 ? 0 : Math.max(1, Math.round(weapon.damage * mult * houseBias));
     const killed = target.takeDamage(damage, wh);
     if (killed) {
       attacker.creditKill();
+      this.handleUnitDeath(target, {
+        screenShake: 8, explosionSize: 16, debris: true,
+        decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
+        explodeLgSound: false,
+        attackerIsPlayer: this.isPlayerControlled(attacker),
+        trackLoss: true,
+      });
     }
     // Fire effect
     this.effects.push({
@@ -4704,25 +4671,63 @@ export class Game {
     });
   }
 
-  /** Fire weapon at structure target (helper for aircraft) */
+  /** Fire weapon at structure target (helper for aircraft) — uses full damage pipeline */
   private fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void {
     const wh = (weapon.warhead ?? 'HE') as WarheadType;
-    const armorIdx = 4; // concrete for structures
-    const overridden = this.warheadOverrides[wh];
-    const mult = overridden ? overridden[armorIdx] ?? 1 : WARHEAD_VS_ARMOR[wh]?.[armorIdx] ?? 1;
-    const damage = Math.max(1, Math.round(weapon.damage * mult * attacker.damageMultiplier));
-    s.hp -= damage;
-    if (s.hp <= 0) {
-      s.hp = 0;
-      s.alive = false;
-      s.rubble = true;
-      attacker.creditKill();
-    }
+    const mult = this.getWarheadMult(wh, 'concrete');
+    const houseBias = this.getFirepowerBias(attacker.house);
+    const damage = mult <= 0 ? 0 : Math.max(1, Math.round(weapon.damage * mult * houseBias));
+    const destroyed = this.damageStructure(s, damage);
+    if (destroyed) attacker.creditKill();
     this.effects.push({
       type: 'muzzle',
       x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
       frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
     });
+  }
+
+  /** Shared death aftermath — explosion, debris, decal, sound, kill/loss tracking.
+   *  Parameterized to handle the 4 death contexts (direct, defense, projectile, splash). */
+  private handleUnitDeath(victim: Entity, opts: {
+    screenShake: number;
+    explosionSize: number;
+    debris: boolean;
+    decal: { infantry: number; vehicle: number; opacity: number } | null;
+    explodeLgSound: boolean;
+    attackerIsPlayer: boolean;
+    trackLoss: boolean;
+    friendlyFireLoss?: boolean;
+  }): void {
+    const kx = victim.pos.x;
+    const ky = victim.pos.y;
+    this.effects.push({ type: 'explosion', x: kx, y: ky, frame: 0, maxFrames: 18,
+      size: opts.explosionSize, sprite: 'fball1', spriteStart: 0 });
+    if (opts.debris && !victim.stats.isInfantry) {
+      this.effects.push({ type: 'debris', x: kx, y: ky, frame: 0, maxFrames: 12, size: 18 });
+    }
+    this.renderer.screenShake = Math.max(this.renderer.screenShake, opts.screenShake);
+    if (opts.decal) {
+      const tc = worldToCell(kx, ky);
+      this.map.addDecal(tc.cx, tc.cy,
+        victim.stats.isInfantry ? opts.decal.infantry : opts.decal.vehicle, opts.decal.opacity);
+    }
+    if (victim.isAnt) this.playSoundAt('die_ant', kx, ky);
+    else if (victim.stats.isInfantry) this.playSoundAt('die_infantry', kx, ky);
+    else this.playSoundAt('die_vehicle', kx, ky);
+    if (opts.explodeLgSound) this.playSoundAt('explode_lg', kx, ky);
+    if (opts.attackerIsPlayer) this.killCount++;
+    if (opts.trackLoss && this.isPlayerControlled(victim)) {
+      this.lossCount++;
+      this.playEva('eva_unit_lost');
+      const tc = worldToCell(kx, ky);
+      this.minimapAlert(tc.cx, tc.cy);
+    }
+    if (opts.friendlyFireLoss) {
+      this.lossCount++;
+      this.playEva('eva_unit_lost');
+      const tc = worldToCell(kx, ky);
+      this.minimapAlert(tc.cx, tc.cy);
+    }
   }
 
   private threatScore(scanner: Entity, target: Entity, dist: number): number {
@@ -4735,10 +4740,10 @@ export class Game {
   }
 
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
-    const armorIdx = armor === 'none' ? 0 : armor === 'wood' ? 1 : armor === 'light' ? 2 : armor === 'heavy' ? 3 : 4;
+    const idx = armorIndex(armor);
     const overridden = this.warheadOverrides[warhead];
-    if (overridden) return overridden[armorIdx] ?? 1;
-    return WARHEAD_VS_ARMOR[warhead]?.[armorIdx] ?? 1;
+    if (overridden) return overridden[idx] ?? 1;
+    return WARHEAD_VS_ARMOR[warhead]?.[idx] ?? 1;
   }
 
   /** Damage-based speed reduction (C++ drive.cpp:1159-1161).
@@ -4756,6 +4761,21 @@ export class Game {
     return entity.stats.speed * speedFraction
       * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
       * this.damageSpeedFactor(entity);
+  }
+
+  /** Retreat away from a target position, clamped to map bounds (artillery min-range) */
+  private retreatFromTarget(entity: Entity, targetPos: WorldPos): void {
+    entity.animState = AnimState.WALK;
+    const dx = entity.pos.x - targetPos.x;
+    const dy = entity.pos.y - targetPos.y;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const minX = this.map.boundsX * CELL_SIZE;
+    const maxX = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
+    const minY = this.map.boundsY * CELL_SIZE;
+    const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
+    const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
+    const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
+    entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity, 0.4));
   }
 
   /** Check if two houses are allied */
@@ -4875,24 +4895,13 @@ export class Game {
 
         if (killed) {
           if (attacker) attacker.creditKill();
-          this.effects.push({ type: 'explosion', x: target.pos.x, y: target.pos.y,
-            frame: 0, maxFrames: 18, size: 16, sprite: 'fball1', spriteStart: 0 });
-          if (!target.stats.isInfantry) {
-            this.effects.push({ type: 'debris', x: target.pos.x, y: target.pos.y,
-              frame: 0, maxFrames: 12, size: 18 });
-          }
-          this.renderer.screenShake = Math.max(this.renderer.screenShake, 8);
-          const tc = worldToCell(target.pos.x, target.pos.y);
-          this.map.addDecal(tc.cx, tc.cy, target.stats.isInfantry ? 6 : 10, 0.6);
-          if (target.isAnt) this.playSoundAt('die_ant', target.pos.x, target.pos.y);
-          else if (target.stats.isInfantry) this.playSoundAt('die_infantry', target.pos.x, target.pos.y);
-          else this.playSoundAt('die_vehicle', target.pos.x, target.pos.y);
-          if (proj.attackerIsPlayer) this.killCount++;
-          else if (this.isPlayerControlled(target)) {
-            this.lossCount++;
-            this.playEva('eva_unit_lost');
-            this.minimapAlert(tc.cx, tc.cy);
-          }
+          this.handleUnitDeath(target, {
+            screenShake: 8, explosionSize: 16, debris: true,
+            decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
+            explodeLgSound: false,
+            attackerIsPlayer: proj.attackerIsPlayer,
+            trackLoss: true,
+          });
         }
       }
 
@@ -4962,32 +4971,15 @@ export class Game {
       }
 
       if (killed) {
-        // Credit kill only for enemy kills (not friendly fire)
         if (!isFriendly && attacker) attacker.creditKill();
-        this.effects.push({
-          type: 'explosion', x: other.pos.x, y: other.pos.y,
-          frame: 0, maxFrames: 18, size: 12,
-          sprite: 'fball1', spriteStart: 0,
+        this.handleUnitDeath(other, {
+          screenShake: 4, explosionSize: 12, debris: false,
+          decal: null,
+          explodeLgSound: false,
+          attackerIsPlayer: !isFriendly && attackerIsPlayerControlled,
+          trackLoss: !isFriendly,
+          friendlyFireLoss: isFriendly && attackerIsPlayerControlled,
         });
-        this.renderer.screenShake = Math.max(this.renderer.screenShake, 4);
-        if (other.isAnt) this.playSoundAt('die_ant', other.pos.x, other.pos.y);
-        else if (other.stats.isInfantry) this.playSoundAt('die_infantry', other.pos.x, other.pos.y);
-        else this.playSoundAt('die_vehicle', other.pos.x, other.pos.y);
-        // Track kills/losses from splash
-        if (!isFriendly && attackerIsPlayerControlled) this.killCount++;
-        else if (!isFriendly && this.isPlayerControlled(other)) {
-          this.lossCount++;
-          this.playEva('eva_unit_lost');
-          const oc = other.cell;
-          this.minimapAlert(oc.cx, oc.cy);
-        }
-        // Friendly fire kills still count as losses
-        if (isFriendly && attackerIsPlayerControlled) {
-          this.lossCount++;
-          this.playEva('eva_unit_lost');
-          const oc = other.cell;
-          this.minimapAlert(oc.cx, oc.cy);
-        }
       }
     }
 
@@ -6027,7 +6019,7 @@ export class Game {
 
   /** Map INI crate reward name to our CrateType */
   private static readonly CRATE_NAME_MAP: Record<string, CrateType> = {
-    money: 'money', heal: 'heal', veterancy: 'veterancy', unit: 'unit',
+    money: 'money', heal: 'heal', veterancy: 'heal', unit: 'unit',
     armor: 'armor', firepower: 'firepower', speed: 'speed',
     reveal: 'reveal', darkness: 'darkness', explosion: 'explosion',
     squad: 'squad', heal_base: 'heal_base', napalm: 'napalm',
@@ -6039,7 +6031,7 @@ export class Game {
     // Build crate distribution — silver crates are common, wood rarer
     // Default: money×2, heal, veterancy, unit. Overrides from [General] replace silver/wood/water types.
     const crateTypes: CrateType[] = [
-      'money', 'money', 'heal', 'veterancy', 'unit',  // common (existing)
+      'money', 'money', 'heal', 'heal', 'unit',  // common (existing)
       'reveal', 'squad', 'heal_base',                   // medium
       'speed', 'armor', 'firepower',                     // uncommon
       'explosion', 'napalm', 'darkness',                 // risky
@@ -6084,11 +6076,6 @@ export class Game {
         this.evaMessages.push({ text: 'MONEY CRATE', tick: this.tick });
         break;
       case 'heal':
-        unit.hp = unit.maxHp;
-        this.evaMessages.push({ text: 'UNIT HEALED', tick: this.tick });
-        break;
-      case 'veterancy':
-        // RA1 has no veterancy — treat as a heal crate instead
         unit.hp = unit.maxHp;
         this.evaMessages.push({ text: 'UNIT HEALED', tick: this.tick });
         break;

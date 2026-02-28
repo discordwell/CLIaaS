@@ -10,6 +10,7 @@ import {
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
+  armorIndex,
 } from './types';
 
 // === Submarine Cloak State Machine ===
@@ -113,7 +114,6 @@ export class Entity {
   weapon: WeaponStats | null;
   weapon2: WeaponStats | null = null;
   kills = 0;      // kills by this unit
-  veterancy = 0;  // 0=rookie, 1=veteran, 2=elite
 
   // Burst fire (C++ weapon.cpp:78 Weapon.Burst — multiple shots per trigger pull)
   burstCount = 0;   // remaining shots in current burst
@@ -121,12 +121,6 @@ export class Entity {
 
   // Moving-platform tracking (C++ techno.cpp:3106-3108 — units firing while moving get extra inaccuracy)
   prevPos: WorldPos = { x: 0, y: 0 }; // position from previous tick, for detecting movement
-
-  /** Damage multiplier — RA1 has no veterancy system (1.0 always).
-   *  Field kept for save/load compatibility. */
-  get damageMultiplier(): number {
-    return 1.0;
-  }
 
   /** Credit a kill (RA1: no promotion system, just tracks kill count) */
   creditKill(): void {
@@ -651,16 +645,6 @@ export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
   { dx: 1, dy: 1 },   // NW
 ];
 
-/** Helper: map ArmorType string to WARHEAD_VS_ARMOR index */
-function armorIndex(armor: ArmorType): number {
-  switch (armor) {
-    case 'none': return 0;
-    case 'wood': return 1;
-    case 'light': return 2;
-    case 'heavy': return 3;
-    case 'concrete': return 4;
-  }
-}
 
 /** Calculate threat score for guard targeting (inspired by C++ techno.cpp Evaluate_Object).
  *  Higher score = higher priority target. Pure function for testability.

@@ -219,7 +219,6 @@ interface CarryoverUnit {
   hp: number;
   maxHp: number;
   kills: number;
-  veterancy: number;
 }
 
 export function saveCarryover(entities: Entity[]): void {
@@ -231,7 +230,6 @@ export function saveCarryover(entities: Entity[]): void {
         hp: e.hp,
         maxHp: e.maxHp,
         kills: e.kills,
-        veterancy: e.veterancy,
       }));
     localStorage.setItem(CARRYOVER_KEY, JSON.stringify(alive));
   } catch { /* noop */ }
@@ -963,7 +961,6 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
         entity.hp = cu.hp;
         entity.maxHp = cu.maxHp;
         entity.kills = cu.kills;
-        entity.veterancy = cu.veterancy;
         entities.push(entity);
       }
     }
