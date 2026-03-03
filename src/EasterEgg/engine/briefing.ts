@@ -165,6 +165,86 @@ const BRIEFINGS: Record<string, MissionBriefing> = {
   },
 };
 
+// === Generic Briefing Generator ===
+// Creates a procedural briefing from INI [Briefing] text for missions without custom sequences.
+
+/** Determine campaign faction from scenario ID prefix */
+function getCampaignFaction(scenarioId: string): 'allied' | 'soviet' | 'ant' {
+  const id = scenarioId.toUpperCase();
+  if (id.startsWith('SCA')) return 'ant';
+  if (id.startsWith('SCG')) return 'allied';
+  if (id.startsWith('SCU')) return 'soviet';
+  // Counterstrike: even numbers = soviet, odd = allied (rough heuristic)
+  return 'allied';
+}
+
+/** Word-wrap a long string into lines of maxWidth characters */
+function wrapText(text: string, maxWidth: number): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (current.length + word.length + 1 > maxWidth) {
+      if (current) lines.push(current);
+      current = word;
+    } else {
+      current = current ? current + ' ' + word : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** Generate a generic briefing from INI briefing text */
+function generateGenericBriefing(scenarioId: string, text: string): MissionBriefing {
+  const faction = getCampaignFaction(scenarioId);
+  const lines = wrapText(text, 38); // ~38 chars per line at 640px width
+
+  // Split lines into chunks of ~5 lines for pacing
+  const chunks: string[][] = [];
+  for (let i = 0; i < lines.length; i += 5) {
+    chunks.push(lines.slice(i, i + 5));
+  }
+  if (chunks.length === 0) chunks.push(['Mission briefing unavailable.']);
+
+  // Build briefing label based on faction
+  const factionLabel = faction === 'soviet' ? 'SOVIET HIGH COMMAND'
+    : faction === 'ant' ? 'ALLIED COMMAND — PRIORITY ALPHA'
+    : 'ALLIED COMMAND HQ';
+
+  const steps: BriefingStep[] = [];
+
+  // Opening static burst
+  steps.push({
+    duration: 1.2,
+    text: [],
+    visual: 'static_burst',
+    label: faction === 'soviet' ? 'INCOMING ORDERS' : 'INCOMING TRANSMISSION',
+  });
+
+  // Classified stamp (brief)
+  steps.push({
+    duration: 2.0,
+    text: [],
+    visual: 'classified',
+  });
+
+  // Briefing text chunks with radar visual
+  for (let i = 0; i < chunks.length; i++) {
+    steps.push({
+      duration: Math.max(3.0, chunks[i].length * 0.8),
+      text: chunks[i],
+      visual: 'radar',
+      label: i === 0 ? factionLabel : 'MISSION BRIEFING',
+    });
+  }
+
+  // Fade out
+  steps.push({ duration: 1.0, text: [], visual: 'fade_out' });
+
+  return { steps };
+}
+
 // === Briefing Audio ===
 
 class BriefingAudio {
@@ -465,9 +545,13 @@ export class BriefingRenderer {
     this.audio = new BriefingAudio();
   }
 
-  /** Start a briefing sequence for a given scenario */
-  start(scenarioId: string): void {
-    const briefing = BRIEFINGS[scenarioId];
+  /** Start a briefing sequence for a given scenario.
+   *  If no custom briefing exists in BRIEFINGS, generates a generic one from the INI briefing text. */
+  start(scenarioId: string, iniBriefingText?: string): void {
+    let briefing = BRIEFINGS[scenarioId];
+    if (!briefing && iniBriefingText) {
+      briefing = generateGenericBriefing(scenarioId, iniBriefingText);
+    }
     if (!briefing) {
       // No briefing defined — skip directly
       this.state = 'done';
@@ -516,6 +600,7 @@ export class BriefingRenderer {
     this.state = 'done';
     this.audio.destroy();
   }
+
 
   /** Advance text or skip to next step. Called on click/space. */
   advance(): void {

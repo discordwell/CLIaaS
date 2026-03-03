@@ -16,10 +16,14 @@ import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 const HOUSE_TINT: Record<string, string> = {
   [House.Spain]:   'rgba(255,255,80,0.25)',   // yellow/gold — player allied
   [House.Greece]:  'rgba(80,180,255,0.25)',    // blue — allied
-  [House.USSR]:    'rgba(255,60,60,0.30)',     // red — ant faction
-  [House.Ukraine]: 'rgba(200,80,200,0.25)',    // purple — ant faction
-  [House.Germany]: 'rgba(160,160,160,0.25)',   // gray — ant faction
+  [House.England]: 'rgba(80,200,80,0.25)',    // green — allied (campaign)
+  [House.France]:  'rgba(100,180,255,0.25)',  // light blue — allied (campaign)
+  [House.USSR]:    'rgba(255,60,60,0.30)',     // red — soviet
+  [House.Ukraine]: 'rgba(200,80,200,0.25)',    // purple — soviet ally
+  [House.Germany]: 'rgba(160,160,160,0.25)',   // gray — allied (ant missions: enemy)
   [House.Turkey]:  'rgba(200,200,100,0.25)',   // olive — neutral/scenario
+  [House.GoodGuy]: 'rgba(255,255,80,0.25)',   // yellow — player side
+  [House.BadGuy]:  'rgba(255,60,60,0.30)',     // red — enemy side
   [House.Neutral]: 'rgba(0,0,0,0)',            // no tint
 };
 
@@ -168,12 +172,15 @@ export class Renderer {
   placementCx = 0;
   placementCy = 0;
   private _selectedIds: Set<number> = new Set();
-  // Tileset rendering cache
+  // Tileset rendering cache (theatre-aware)
   private tilesetImage: HTMLImageElement | null = null;
   private tilesetMeta: TilesetMeta | null = null;
   private tilesetReady = false;
+  private tilesetTheatre = ''; // which theatre the cached tileset is for
   placementValid = false;
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
+  // Dynamic player houses (set by game on start, used for sidebar filtering)
+  playerHouses: Set<House> = new Set([House.Spain, House.Greece]);
   // Superweapon state (set by game each frame)
   superweapons = new Map<string, SuperweaponState>();
   superweaponCursorMode: SuperweaponType | null = null;
@@ -214,11 +221,19 @@ export class Renderer {
     // Cache palette reference from assets
     if (!this.pal) this.pal = assets.getPalette();
 
-    // Cache tileset atlas reference from assets (once)
-    if (!this.tilesetReady && assets.hasTileset()) {
-      this.tilesetImage = assets.getTilesetImage();
-      this.tilesetMeta = assets.getTilesetMeta();
-      this.tilesetReady = true;
+    // Cache tileset atlas reference from assets (refresh if theatre changed)
+    if (!this.tilesetReady || this.tilesetTheatre !== this.theatre) {
+      if (assets.hasTileset(this.theatre)) {
+        this.tilesetImage = assets.getTilesetImage(this.theatre);
+        this.tilesetMeta = assets.getTilesetMeta(this.theatre);
+        this.tilesetReady = true;
+        this.tilesetTheatre = this.theatre;
+      } else {
+        this.tilesetImage = null;
+        this.tilesetMeta = null;
+        this.tilesetReady = false;
+        this.tilesetTheatre = '';
+      }
     }
 
     // Apply screen shake
@@ -233,7 +248,7 @@ export class Renderer {
       this.screenShake--;
     }
 
-    this.renderTerrain(camera, map, tick);
+    this.renderTerrain(camera, map, tick, assets);
     this.renderDecals(camera, map);
     this.renderOverlays(camera, map, tick, assets);
     this.renderStructures(camera, map, structures, assets, tick);
@@ -266,9 +281,9 @@ export class Renderer {
     if (this.attackMoveMode) this.renderAttackMoveIndicator(input);
     if (this.sellMode) this.renderModeLabel(input, 'SELL', 'rgba(255,200,60,0.9)');
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
-    this.renderMinimap(map, entities, structures, camera);
     this.renderOffscreenIndicators(camera, entities, selectedIds);
     this.renderSidebar(assets);
+    this.renderMinimap(map, entities, structures, camera);
     this.renderUnitInfo(entities, selectedIds);
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
@@ -292,19 +307,27 @@ export class Renderer {
   ): string | null {
     const ctx = this.ctx;
 
-    // Cache palette + tileset if not yet loaded
+    // Cache palette + tileset if not yet loaded (refresh if theatre changed)
     if (!this.pal) this.pal = assets.getPalette();
-    if (!this.tilesetReady && assets.hasTileset()) {
-      this.tilesetImage = assets.getTilesetImage();
-      this.tilesetMeta = assets.getTilesetMeta();
-      this.tilesetReady = true;
+    if (!this.tilesetReady || this.tilesetTheatre !== this.theatre) {
+      if (assets.hasTileset(this.theatre)) {
+        this.tilesetImage = assets.getTilesetImage(this.theatre);
+        this.tilesetMeta = assets.getTilesetMeta(this.theatre);
+        this.tilesetReady = true;
+        this.tilesetTheatre = this.theatre;
+      } else {
+        this.tilesetImage = null;
+        this.tilesetMeta = null;
+        this.tilesetReady = false;
+        this.tilesetTheatre = '';
+      }
     }
 
     ctx.clearRect(0, 0, this.width, this.height);
 
     switch (layer) {
       case 'terrain':
-        this.renderTerrain(camera, map, tick);
+        this.renderTerrain(camera, map, tick, assets);
         break;
       case 'units':
         ctx.fillStyle = '#222';
@@ -322,7 +345,7 @@ export class Renderer {
         this.renderOverlays(camera, map, tick, assets);
         break;
       case 'full-no-ui':
-        this.renderTerrain(camera, map, tick);
+        this.renderTerrain(camera, map, tick, assets);
         this.renderDecals(camera, map);
         this.renderOverlays(camera, map, tick, assets);
         this.renderStructures(camera, map, structures, assets, tick);
@@ -632,15 +655,15 @@ export class Renderer {
     return true;
   }
 
-  private renderTerrain(camera: Camera, map: GameMap, tick: number): void {
+  private renderTerrain(camera: Camera, map: GameMap, tick: number, assets: AssetManager): void {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
     const endCX = Math.ceil((camera.x + camera.viewWidth) / CELL_SIZE);
     const endCY = Math.ceil((camera.y + camera.viewHeight) / CELL_SIZE);
 
-    // Can we use the real tileset? Only for TEMPERATE theatre.
-    const useTileset = this.tilesetReady && this.theatre === 'TEMPERATE';
+    // Can we use the real tileset? Available for any theatre with extracted tiles.
+    const useTileset = this.tilesetReady && this.tilesetTheatre === this.theatre;
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
@@ -665,7 +688,7 @@ export class Renderer {
         // Try real tileset tile first (skip for INTERIOR theatre)
         // For TREE terrain, draw ground from atlas but still render tree overlay on top
         let atlasDrawn = false;
-        if (useTileset && tmpl > 0 && tmpl !== 0xFF) {
+        if (useTileset && tmpl > 0 && tmpl !== 0xFF && tmpl !== 0xFFFF) {
           if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
             if (terrain !== Terrain.TREE) continue; // Tile drawn from atlas, skip procedural
             atlasDrawn = true; // Fall through to TREE case below
@@ -673,7 +696,7 @@ export class Renderer {
         }
 
         // Also handle clear tiles (type 0 or 0xFF) from tileset — use clear1 (type 255, icon 0)
-        if (useTileset && (tmpl === 0 || tmpl === 0xFF) && terrain === Terrain.CLEAR) {
+        if (useTileset && (tmpl === 0 || tmpl === 0xFF || tmpl === 0xFFFF) && terrain === Terrain.CLEAR) {
           if (this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
             continue;
           }
@@ -699,7 +722,7 @@ export class Renderer {
                 ctx.fillRect(screen.x + 4, screen.y + 4, 16, 12);
               }
               break; // skip TEMPERATE template rendering and grass tufts
-            } else if (tmpl > 0 && tmpl !== 0xFF) {
+            } else if (tmpl > 0 && tmpl !== 0xFF && tmpl !== 0xFFFF) {
               // Template-aware rendering using palette colors
               const isRoad = tmpl >= TEMPLATE_ROAD_MIN && tmpl <= TEMPLATE_ROAD_MAX;
               const isRough = tmpl >= 0x0D && tmpl <= 0x12;
@@ -824,46 +847,56 @@ export class Renderer {
             } else {
               // Ground under tree — skip grass if atlas already drew the ground tile
               if (!atlasDrawn) this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
-              // Tree shadow on ground
-              ctx.fillStyle = 'rgba(0,0,0,0.2)';
-              ctx.beginPath();
-              ctx.ellipse(screen.x + 13, screen.y + 19, 9, 4, 0, 0, Math.PI * 2);
-              ctx.fill();
-              // Trunk — darker brown with highlight
-              const tx = screen.x + 10 + (h % 2);
-              ctx.fillStyle = this.palColor(PAL_DIRT_START + 10);
-              ctx.fillRect(tx, screen.y + 12, 3, 10);
-              ctx.fillStyle = this.palColor(PAL_DIRT_START + 7);
-              ctx.fillRect(tx + 1, screen.y + 13, 1, 8);
-              // Canopy — pixel-art blocky rects (6 hash-based variants)
-              const variant = h % 6;
-              const sx = screen.x, sy = screen.y;
-              // Dark base layer
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 10 + (h % 2));
-              if (variant < 2) {
-                ctx.fillRect(sx + 4, sy + 8, 16, 4);
-                ctx.fillRect(sx + 6, sy + 4, 12, 4);
-                ctx.fillRect(sx + 8, sy + 2, 8, 2);
-                ctx.fillRect(sx + 6, sy + 12, 10, 2);
-              } else if (variant < 4) {
-                ctx.fillRect(sx + 3, sy + 7, 18, 5);
-                ctx.fillRect(sx + 5, sy + 3, 14, 4);
-                ctx.fillRect(sx + 7, sy + 1, 10, 2);
-                ctx.fillRect(sx + 5, sy + 12, 12, 2);
+
+              const treeType = map.getTreeType(cx, cy);
+              if (treeType === '_clump') {
+                // Covered by a nearby clump origin sprite — just show grass
+              } else if (treeType && assets.hasSheet(treeType)) {
+                // Draw real tree sprite from extracted .TEM asset
+                assets.drawFrame(ctx, treeType, 0, screen.x, screen.y);
               } else {
-                ctx.fillRect(sx + 5, sy + 8, 14, 4);
-                ctx.fillRect(sx + 7, sy + 5, 10, 3);
-                ctx.fillRect(sx + 9, sy + 3, 6, 2);
-                ctx.fillRect(sx + 7, sy + 12, 10, 2);
+                // Procedural fallback (MapPack trees or missing sprites)
+                // Tree shadow on ground
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.ellipse(screen.x + 13, screen.y + 19, 9, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // Trunk — darker brown with highlight
+                const tx = screen.x + 10 + (h % 2);
+                ctx.fillStyle = this.palColor(PAL_DIRT_START + 10);
+                ctx.fillRect(tx, screen.y + 12, 3, 10);
+                ctx.fillStyle = this.palColor(PAL_DIRT_START + 7);
+                ctx.fillRect(tx + 1, screen.y + 13, 1, 8);
+                // Canopy — pixel-art blocky rects (6 hash-based variants)
+                const variant = h % 6;
+                const sx = screen.x, sy = screen.y;
+                // Dark base layer
+                ctx.fillStyle = this.palColor(PAL_GRASS_START + 10 + (h % 2));
+                if (variant < 2) {
+                  ctx.fillRect(sx + 4, sy + 8, 16, 4);
+                  ctx.fillRect(sx + 6, sy + 4, 12, 4);
+                  ctx.fillRect(sx + 8, sy + 2, 8, 2);
+                  ctx.fillRect(sx + 6, sy + 12, 10, 2);
+                } else if (variant < 4) {
+                  ctx.fillRect(sx + 3, sy + 7, 18, 5);
+                  ctx.fillRect(sx + 5, sy + 3, 14, 4);
+                  ctx.fillRect(sx + 7, sy + 1, 10, 2);
+                  ctx.fillRect(sx + 5, sy + 12, 12, 2);
+                } else {
+                  ctx.fillRect(sx + 5, sy + 8, 14, 4);
+                  ctx.fillRect(sx + 7, sy + 5, 10, 3);
+                  ctx.fillRect(sx + 9, sy + 3, 6, 2);
+                  ctx.fillRect(sx + 7, sy + 12, 10, 2);
+                }
+                // Mid-tone highlight blocks
+                ctx.fillStyle = this.palColor(PAL_GRASS_START + 7 + (h % 3));
+                ctx.fillRect(sx + 6 + (h % 3), sy + 4, 6, 4);
+                ctx.fillRect(sx + 8 + (h % 2), sy + 8, 4, 3);
+                // Light highlight pixels
+                ctx.fillStyle = this.palColor(PAL_GRASS_START + 4 + (h % 2));
+                ctx.fillRect(sx + 8 + (h % 4), sy + 4, 2, 2);
+                ctx.fillRect(sx + 12 + (h % 2), sy + 6, 2, 1);
               }
-              // Mid-tone highlight blocks
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 7 + (h % 3));
-              ctx.fillRect(sx + 6 + (h % 3), sy + 4, 6, 4);
-              ctx.fillRect(sx + 8 + (h % 2), sy + 8, 4, 3);
-              // Light highlight pixels
-              ctx.fillStyle = this.palColor(PAL_GRASS_START + 4 + (h % 2));
-              ctx.fillRect(sx + 8 + (h % 4), sy + 4, 2, 2);
-              ctx.fillRect(sx + 12 + (h % 2), sy + 6, 2, 1);
             }
             break;
           }
@@ -2234,9 +2267,7 @@ export class Renderer {
 
   private renderMinimap(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera): void {
     const ctx = this.ctx;
-    const mmSize = this.sidebarW - 8;
-    const mmX = this.width - this.sidebarW + 4;
-    const mmY = this.height - mmSize - 6;
+    const { x: mmX, y: mmY, size: mmSize } = this.getMinimapBounds();
     const scale = mmSize / Math.max(map.boundsW, map.boundsH);
     const ox = map.boundsX;
     const oy = map.boundsY;
@@ -2517,12 +2548,13 @@ export class Renderer {
   private renderIdleCount(): void {
     const ctx = this.ctx;
     const text = `Idle: ${this.idleCount}`;
-    const mmBottom = this.height - 6; // below minimap
+    // Show below minimap at top of sidebar
+    const { y: mmY, size: mmSize } = this.getMinimapBounds();
     const x = this.width - this.sidebarW;
-    ctx.font = '9px monospace';
+    ctx.font = '8px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = this.idleCount > 0 ? '#ff8' : '#888';
-    ctx.fillText(text, x + this.sidebarW / 2, mmBottom + 12);
+    ctx.fillText(text, x + this.sidebarW / 2, mmY + mmSize + 12);
     ctx.textAlign = 'left';
   }
 
@@ -2623,14 +2655,58 @@ export class Renderer {
 
   // ─── Sidebar ──────────────────────────────────────────────
 
+  // ─── Sidebar Layout Constants ─────────────────────────────
+  // Minimap at top of sidebar (original RA layout)
+  static readonly MINIMAP_SIZE = 120;  // square minimap inside sidebar frame
+  static readonly MINIMAP_Y = 4;       // top margin
+  // Below minimap: credits, power, tabs, production
+  static readonly CREDITS_Y_OFFSET = 128; // from sidebar top
+  static readonly POWER_Y_OFFSET = 142;   // vertical power bar start
+  static readonly TAB_BAR_Y_OFFSET = 142; // tab bar alongside power bar
+  static readonly PRODUCTION_Y_OFFSET = 158; // production strip start
+  static readonly CAMEO_W = 32;
+  static readonly CAMEO_H = 24;
+  static readonly CAMEO_GAP = 2;
+  // 2-column production: each column = 32px cameo + 2px gap
+  // Power bar takes ~14px on left, leaving 2 columns of 32px + gaps on right
+
+  /** Get minimap bounds for hit-testing (used by game click handlers) */
+  getMinimapBounds(): { x: number; y: number; size: number } {
+    const mmSize = Renderer.MINIMAP_SIZE;
+    const mmX = this.width - this.sidebarW + (this.sidebarW - mmSize) / 2;
+    const mmY = Renderer.MINIMAP_Y;
+    return { x: mmX, y: mmY, size: mmSize };
+  }
+
+  /** Get the Y offset where production items start (for click handling) */
+  getProductionStartY(): number {
+    return Renderer.PRODUCTION_Y_OFFSET;
+  }
+
+  /** Get tab bar Y position */
+  getTabBarY(): number {
+    return Renderer.TAB_BAR_Y_OFFSET;
+  }
+
   private renderSidebar(assets: AssetManager): void {
     const ctx = this.ctx;
     const x = this.width - this.sidebarW;
     const w = this.sidebarW;
 
-    // Background
-    ctx.fillStyle = 'rgba(20,20,25,0.95)';
-    ctx.fillRect(x, 0, w, this.height);
+    // Background — use sidebar.png sprite if available, else dark fill
+    const sidebarSheet = assets.getSheet('sidebar');
+    if (sidebarSheet) {
+      // sidebar.png is 160x123 (2 frames of 80x123) — draw both frames side by side
+      // Then tile vertically to fill full sidebar height
+      for (let ty = 0; ty < this.height; ty += 123) {
+        assets.drawFrame(ctx, 'sidebar', 0, x, ty);
+        assets.drawFrame(ctx, 'sidebar', 1, x + 80, ty);
+      }
+    } else {
+      ctx.fillStyle = 'rgba(20,20,25,0.95)';
+      ctx.fillRect(x, 0, w, this.height);
+    }
+    // Left edge line
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -2638,140 +2714,215 @@ export class Renderer {
     ctx.lineTo(x, this.height);
     ctx.stroke();
 
-    // Credits with silo capacity indicator
-    ctx.font = 'bold 11px monospace';
+    // Credits display — below minimap area
+    const credY = Renderer.CREDITS_Y_OFFSET;
+    ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
-    // Flash red when at or near capacity (>=80%)
     const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
     ctx.fillStyle = atCapacity ? '#FF4444' : '#FFD700';
-    ctx.fillText(`$${this.sidebarCredits}/${this.sidebarSiloCapacity}`, x + w / 2, 14);
-
-    // Power bar with numeric labels + low-power pulse
-    const pwrY = 18;
-    const pwrW = w - 8;
-    const pwrH = 8;
-    const pwrX = x + 4;
-    const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
-    ctx.fillStyle = '#111';
-    ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
-    const pwrRatio = this.sidebarPowerProduced > 0
-      ? Math.min(1, this.sidebarPowerConsumed / this.sidebarPowerProduced) : 1;
-    const pwrColor = lowPower ? '#f44' : pwrRatio > 0.8 ? '#fa0' : '#4f4';
-    ctx.fillStyle = pwrColor;
-    ctx.fillRect(pwrX, pwrY, pwrW * Math.min(1, pwrRatio), pwrH);
-    // Low-power pulsing red glow on the power bar
-    if (lowPower) {
-      const pulse = 0.15 + 0.15 * Math.sin(Date.now() * 0.005);
-      ctx.fillStyle = `rgba(255,40,40,${pulse})`;
-      ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
-    }
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
-    // Power numeric label (only show if player has power structures)
-    if (this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0) {
+    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, credY);
+    if (this.sidebarSiloCapacity > 0) {
       ctx.font = '7px monospace';
-      ctx.fillStyle = lowPower ? '#f88' : '#888';
-      ctx.textAlign = 'center';
-      ctx.fillText(`${this.sidebarPowerConsumed}/${this.sidebarPowerProduced}`, x + w / 2, pwrY + pwrH + 8);
-      // LOW POWER warning text (flashing)
-      if (lowPower) {
-        const flash = Math.sin(Date.now() * 0.006) > 0;
-        if (flash) {
-          ctx.font = 'bold 7px monospace';
-          ctx.fillStyle = '#f44';
-          ctx.fillText('LOW POWER', x + w / 2, pwrY + pwrH + 16);
-        }
-      }
+      ctx.fillStyle = '#888';
+      ctx.fillText(`/${this.sidebarSiloCapacity}`, x + w / 2, credY + 10);
     }
 
-    // Tab bar — INF / VEH / BLD
-    const tabBarY = (this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0) ? 36 : 28;
+    // Vertical power bar (left edge of sidebar, below credits)
+    const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
+    const hasPower = this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0;
+    if (hasPower) {
+      this.renderVerticalPowerBar(assets, x, lowPower);
+    }
+
+    // Tab bar — INF / VEH / BLD (uses sprites if available)
+    const tabBarY = Renderer.TAB_BAR_Y_OFFSET;
     this.renderTabBar(x, w, tabBarY);
     const tabBarH = 14;
 
-    // Production items — filtered by active tab
-    const itemH = 22;
-    const itemStartY = tabBarY + tabBarH;
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'left';
-
+    // Production items — 2-column cameo grid filtered by active tab
+    const prodStartY = Renderer.PRODUCTION_Y_OFFSET;
     const filteredItems = this.sidebarItems.filter(it => getItemCategory(it) === this.activeTab);
     const tabScroll = this.tabScrollPositions[this.activeTab];
-    const catColor = this.activeTab === 'infantry' ? 'rgba(80,200,80,0.15)'
-      : this.activeTab === 'vehicle' ? 'rgba(80,80,200,0.15)' : 'rgba(200,200,80,0.15)';
 
-    for (let i = 0; i < filteredItems.length; i++) {
-      const item = filteredItems[i];
-      const iy = itemStartY + i * itemH - tabScroll;
-      if (iy < itemStartY - itemH || iy > this.height) continue;
+    // Save clip region for production area (prevent overflow into bottom buttons)
+    const bottomReserved = 40; // space for sell/repair + superweapons
+    const prodMaxY = this.height - bottomReserved;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, prodStartY, w, prodMaxY - prodStartY);
+    ctx.clip();
 
-      // Item background
-      ctx.fillStyle = catColor;
-      ctx.fillRect(x + 2, iy, w - 4, itemH - 2);
-      ctx.strokeStyle = 'rgba(100,100,100,0.3)';
-      ctx.strokeRect(x + 2, iy, w - 4, itemH - 2);
+    this.renderProductionStrip(ctx, assets, x, w, prodStartY, filteredItems, tabScroll, lowPower);
 
-      // Sprite thumbnail (18x18 area on left side of item)
-      const thumbSize = 18;
-      const thumbX = x + 3;
-      const thumbCX = thumbX + thumbSize / 2;
-      const thumbCY = iy + (itemH - 2) / 2;
-      const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
-      const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
-      if (thumbSheet && spriteName) {
-        const scale = Math.min(thumbSize / thumbSheet.meta.frameWidth, thumbSize / thumbSheet.meta.frameHeight);
-        assets.drawFrame(ctx, spriteName, 0, thumbCX, thumbCY, {
-          centerX: true, centerY: true, scale,
-        });
-      } else {
-        // Fallback: colored rectangle with type abbreviation
-        const category = this.activeTab;
-        const fallbackColor = category === 'infantry' ? '#4a6' : category === 'vehicle' ? '#46a' : '#a84';
-        ctx.fillStyle = fallbackColor;
-        ctx.fillRect(thumbX, iy + 2, thumbSize, thumbSize - 2);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 6px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(item.type.slice(0, 4), thumbCX, thumbCY + 2);
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'left';
-      }
-      const textX = x + 3 + thumbSize + 2; // text offset after thumbnail
+    ctx.restore();
 
-      // Check if this category is building
-      const qEntry = this.sidebarQueue.get(this.activeTab);
-      const isBuilding = qEntry && qEntry.item.type === item.type;
-
-      if (isBuilding && qEntry) {
-        // Progress bar — red tint when low power is slowing production
-        const progress = qEntry.progress / qEntry.item.buildTime;
-        ctx.fillStyle = lowPower ? 'rgba(255,80,80,0.35)' : 'rgba(80,255,80,0.4)';
-        ctx.fillRect(x + 2, iy, (w - 4) * progress, itemH - 2);
-        // Name + progress %
-        ctx.fillStyle = lowPower ? '#f88' : '#8f8';
-        ctx.fillText(`${item.name}`, textX, iy + 9);
-        const queueText = qEntry.queueCount > 1 ? ` [x${qEntry.queueCount}]` : '';
-        const slowText = lowPower ? ' SLOW' : '';
-        ctx.fillStyle = '#ccc';
-        ctx.fillText(`${Math.floor(progress * 100)}%${queueText}${slowText}`, textX, iy + 18);
-      } else {
-        // Name + cost
-        const canAfford = this.sidebarCredits >= item.cost;
-        ctx.fillStyle = canAfford ? '#ddd' : '#666';
-        ctx.fillText(item.name, textX, iy + 9);
-        ctx.fillStyle = canAfford ? '#FFD700' : '#553';
-        ctx.fillText(`$${item.cost}`, textX, iy + 18);
-      }
-    }
-
-    // Sell/Repair buttons — above superweapon buttons / minimap
+    // Sell/Repair buttons — near bottom
     this.renderSellRepairButtons(x, w);
 
-    // Superweapon buttons — above minimap
+    // Superweapon buttons — below sell/repair at bottom
     this.renderSuperweaponButtons(x, w);
 
     ctx.textAlign = 'left';
+  }
+
+  /** Render vertical power bar on left edge of sidebar (original RA style) */
+  private renderVerticalPowerBar(assets: AssetManager, sidebarX: number, lowPower: boolean): void {
+    const ctx = this.ctx;
+    const pwrX = sidebarX + 3;
+    const pwrY = Renderer.POWER_Y_OFFSET;
+    const pwrW = 10;
+    const pwrH = this.height - pwrY - 44; // extend most of sidebar height
+
+    // Draw powerbar.png frame if available
+    const pwrSheet = assets.getSheet('powerbar');
+    if (pwrSheet) {
+      // Scale powerbar sprite to fill the vertical space
+      ctx.drawImage(pwrSheet.image, 0, 0, 10, 112, pwrX, pwrY, pwrW, pwrH);
+    } else {
+      ctx.fillStyle = '#111';
+      ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
+    }
+
+    // Fill level — green from bottom up, yellow when high, red when over
+    const pwrRatio = this.sidebarPowerProduced > 0
+      ? Math.min(1, this.sidebarPowerConsumed / this.sidebarPowerProduced) : 1;
+    const fillH = pwrH * Math.min(1, pwrRatio);
+    const fillY = pwrY + pwrH - fillH;
+    const pwrColor = lowPower ? '#f44' : pwrRatio > 0.8 ? '#fa0' : '#4f4';
+    ctx.fillStyle = pwrColor;
+    ctx.fillRect(pwrX + 1, fillY, pwrW - 2, fillH);
+
+    // Low-power pulsing glow
+    if (lowPower) {
+      const pulse = 0.15 + 0.15 * Math.sin(Date.now() * 0.005);
+      ctx.fillStyle = `rgba(255,40,40,${pulse})`;
+      ctx.fillRect(pwrX + 1, pwrY, pwrW - 2, pwrH);
+
+      // LOW POWER warning (flashing)
+      const flash = Math.sin(Date.now() * 0.006) > 0;
+      if (flash) {
+        ctx.save();
+        ctx.translate(pwrX + pwrW / 2, pwrY + pwrH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.font = 'bold 6px monospace';
+        ctx.fillStyle = '#f44';
+        ctx.textAlign = 'center';
+        ctx.fillText('LOW POWER', 0, 0);
+        ctx.restore();
+      }
+    }
+
+    // Numeric label at bottom
+    ctx.font = '6px monospace';
+    ctx.fillStyle = lowPower ? '#f88' : '#888';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${this.sidebarPowerConsumed}`, pwrX + pwrW / 2, pwrY + pwrH + 8);
+    ctx.fillText(`${this.sidebarPowerProduced}`, pwrX + pwrW / 2, pwrY + pwrH + 16);
+  }
+
+  /** Render 2-column production strip with cameo icons */
+  private renderProductionStrip(
+    ctx: CanvasRenderingContext2D, assets: AssetManager,
+    sidebarX: number, sidebarW: number,
+    startY: number, items: ProductionItem[], scroll: number, lowPower: boolean,
+  ): void {
+    const camW = Renderer.CAMEO_W;
+    const camH = Renderer.CAMEO_H;
+    const gap = Renderer.CAMEO_GAP;
+    // 2-column layout: offset from power bar area
+    const col0X = sidebarX + 18; // after vertical power bar
+    const col1X = col0X + camW + gap;
+    const rowH = camH + gap;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const ix = col === 0 ? col0X : col1X;
+      const iy = startY + row * rowH - scroll;
+
+      // Cull off-screen items
+      if (iy < startY - rowH || iy > this.height) continue;
+
+      // Draw strip.png background for cameo slot (if available)
+      const stripSheet = assets.getSheet('strip');
+      if (stripSheet) {
+        assets.drawFrame(ctx, 'strip', 0, ix, iy);
+      } else {
+        // Fallback: dark background
+        ctx.fillStyle = 'rgba(30,30,40,0.9)';
+        ctx.fillRect(ix, iy, camW, camH);
+        ctx.strokeStyle = 'rgba(80,80,80,0.5)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(ix, iy, camW, camH);
+      }
+
+      // Draw cameo icon — use {type}icon sprite if available
+      const iconName = item.type.toLowerCase() + 'icon';
+      const iconSheet = assets.getSheet(iconName);
+      if (iconSheet) {
+        assets.drawFrame(ctx, iconName, 0, ix, iy);
+      } else {
+        // Fallback: use unit sprite thumbnail or type abbreviation
+        const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
+        const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
+        if (thumbSheet && spriteName) {
+          const scale = Math.min(camW / thumbSheet.meta.frameWidth, camH / thumbSheet.meta.frameHeight) * 0.85;
+          assets.drawFrame(ctx, spriteName, 0, ix + camW / 2, iy + camH / 2, {
+            centerX: true, centerY: true, scale,
+          });
+        } else {
+          ctx.fillStyle = '#888';
+          ctx.font = 'bold 6px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(item.type.slice(0, 4), ix + camW / 2, iy + camH / 2 + 2);
+          ctx.textAlign = 'left';
+        }
+      }
+
+      // Check if this item is currently building
+      const category = getItemCategory(item);
+      const qEntry = this.sidebarQueue.get(category);
+      const isBuilding = qEntry && qEntry.item.type === item.type;
+
+      if (isBuilding && qEntry) {
+        // Construction progress overlay — darken unbuild portion from top
+        const progress = qEntry.progress / qEntry.item.buildTime;
+        const uncoverH = camH * (1 - progress);
+        ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
+        ctx.fillRect(ix, iy, camW, uncoverH);
+        // Progress % text
+        ctx.font = 'bold 7px monospace';
+        ctx.fillStyle = lowPower ? '#f88' : '#8f8';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.floor(progress * 100)}%`, ix + camW / 2, iy + camH / 2 + 2);
+        // Queue count badge
+        if (qEntry.queueCount > 1) {
+          ctx.font = 'bold 6px monospace';
+          ctx.fillStyle = '#ff0';
+          ctx.fillText(`x${qEntry.queueCount}`, ix + camW - 6, iy + 7);
+        }
+        ctx.textAlign = 'left';
+      }
+
+      // Can't afford overlay
+      if (!isBuilding && this.sidebarCredits < item.cost) {
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(ix, iy, camW, camH);
+      }
+
+      // Cost label at bottom of cameo
+      if (!isBuilding) {
+        ctx.font = '6px monospace';
+        ctx.fillStyle = this.sidebarCredits >= item.cost ? '#FFD700' : '#664';
+        ctx.textAlign = 'center';
+        ctx.fillText(`$${item.cost}`, ix + camW / 2, iy + camH - 1);
+        ctx.textAlign = 'left';
+      }
+    }
   }
 
   // ─── Tab Bar ────────────────────────────────────────────────
@@ -2784,12 +2935,14 @@ export class Renderer {
       { key: 'vehicle', label: 'VEH', color: 'rgba(80,120,255,' },
       { key: 'structure', label: 'BLD', color: 'rgba(200,180,60,' },
     ];
-    const margin = 2;
-    const tabW = Math.floor((sidebarW - margin * 2) / 3);
+    // Offset tabs right of vertical power bar (power bar is ~14px wide)
+    const tabStartX = 16;
+    const tabAreaW = sidebarW - tabStartX - 2;
+    const tabW = Math.floor(tabAreaW / 3);
 
     for (let i = 0; i < tabs.length; i++) {
       const tab = tabs[i];
-      const tx = sidebarX + margin + i * tabW;
+      const tx = sidebarX + tabStartX + i * tabW;
       const active = this.activeTab === tab.key;
 
       // Background
@@ -2813,19 +2966,17 @@ export class Renderer {
 
   /** Y position for the sell/repair button row */
   getSellRepairButtonY(): number {
-    const mmSize = this.sidebarW - 8;
-    const mmY = this.height - mmSize - 6;
-    // Count superweapon buttons to position above them
+    // Sell/Repair at bottom of sidebar, above superweapon buttons
     let swCount = 0;
     for (const [, state] of this.superweapons) {
-      if (state.house !== House.Spain && state.house !== House.Greece) continue;
+      if (!this.playerHouses.has(state.house as House)) continue;
       const def = SUPERWEAPON_DEFS[state.type];
       if (!def) continue;
       if (state.type === SuperweaponType.GPS_SATELLITE && state.fired) continue;
       swCount++;
     }
     const swHeight = swCount > 0 ? swCount * 20 + 4 : 0;
-    return mmY - swHeight - 18;
+    return this.height - swHeight - 18;
   }
 
   private renderSellRepairButtons(sidebarX: number, sidebarW: number): void {
@@ -2870,7 +3021,7 @@ export class Renderer {
     const playerSws: Array<{ type: SuperweaponType; def: SuperweaponDef; chargeTick: number; ready: boolean; fired: boolean }> = [];
 
     for (const [, state] of this.superweapons) {
-      if (state.house !== House.Spain && state.house !== House.Greece) continue;
+      if (!this.playerHouses.has(state.house as House)) continue;
       const def = SUPERWEAPON_DEFS[state.type];
       if (!def) continue;
       if (state.type === SuperweaponType.GPS_SATELLITE && state.fired) continue;
@@ -2878,10 +3029,9 @@ export class Renderer {
     }
     if (playerSws.length === 0) return;
 
-    const mmSize = this.sidebarW - 8;
-    const mmY = this.height - mmSize - 6;
     const btnH = 20;
-    const buttonsStartY = mmY - playerSws.length * btnH - 4;
+    // Position at very bottom of sidebar
+    const buttonsStartY = this.height - playerSws.length * btnH;
 
     for (let i = 0; i < playerSws.length; i++) {
       const sw = playerSws[i];

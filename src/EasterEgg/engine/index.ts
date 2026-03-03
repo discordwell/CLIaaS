@@ -5,7 +5,7 @@
 
 import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
-  type AllianceTable, buildDefaultAlliances,
+  type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
   Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
@@ -21,7 +21,7 @@ import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
-import { Entity, resetEntityIds, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
+import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
 import { GameMap, Terrain } from './map';
 import { Renderer, type Effect } from './renderer';
 import { findPath } from './pathfinding';
@@ -33,7 +33,8 @@ import {
   saveCarryover, TIME_UNIT_TICKS,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
-export type { MissionInfo } from './scenario';
+export { CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, checkMissionExists, loadMissionBriefings, getMissionBriefing } from './scenario';
+export type { MissionInfo, CampaignId, CampaignDef, CampaignMission } from './scenario';
 export { AudioManager } from './audio';
 export { preloadAssets } from './assets';
 
@@ -196,7 +197,7 @@ export class Game {
   powerProduced = 0;
   powerConsumed = 0;
   // Sidebar dimensions
-  static readonly SIDEBAR_W = 100;
+  static readonly SIDEBAR_W = 160;
   /** CF3: Fixed splash damage radius in cells (C++ SPREAD_FACTOR constant) */
   static readonly SPLASH_RADIUS = 1.5;
   sidebarScroll = 0; // scroll offset for sidebar items
@@ -402,7 +403,21 @@ export class Game {
     this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
     this.crates = [];
     this.inflightProjectiles = [];
-    this.alliances = buildDefaultAlliances();
+    // Build alliance table: use scenario INI data if available, otherwise default (ant missions)
+    if (scenario.houseAllies.size > 0) {
+      this.alliances = buildAlliancesFromINI(scenario.houseAllies, this.playerHouse);
+    } else {
+      this.alliances = buildDefaultAlliances();
+    }
+    // Build player house set for Entity.isPlayerUnit — all houses allied with playerHouse
+    const playerHouseSet = new Set<House>();
+    for (const [house, allies] of this.alliances) {
+      if (allies.has(this.playerHouse)) playerHouseSet.add(house);
+    }
+    playerHouseSet.add(this.playerHouse);
+    setPlayerHouses(playerHouseSet);
+    // Sync to renderer
+    this.renderer.playerHouses = playerHouseSet;
     this.allowWin = false;
     this.missionTimer = 0;
     this.missionTimerExpired = false;
@@ -420,7 +435,7 @@ export class Game {
     // Initialize AI house credits from scenario
     this.houseCredits.clear();
     for (const s of this.structures) {
-      if (s.alive && s.type === 'PROC' && s.house !== House.Spain && s.house !== House.Greece) {
+      if (s.alive && s.type === 'PROC' && !this.isAllied(s.house, this.playerHouse)) {
         this.houseCredits.set(s.house, (this.houseCredits.get(s.house) ?? 0) + 200);
       }
     }
@@ -972,26 +987,34 @@ export class Game {
     this.powerProduced = 0;
     this.powerConsumed = 0;
     for (const s of this.structures) {
-      if (!s.alive || s.sellProgress !== undefined || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+      if (!s.alive || s.sellProgress !== undefined || !this.isAllied(s.house, this.playerHouse)) continue;
       // Power production — scales with building health (C++ building.cpp:4613 Power_Output)
       const healthRatio = s.hp / s.maxHp;
       // C++ building.cpp: FACT produces 0 power (ConYard is not a power source)
       if (s.type === 'POWR') this.powerProduced += Math.round(100 * healthRatio);
       else if (s.type === 'APWR') this.powerProduced += Math.round(200 * healthRatio);
-      // Power consumption (C++ rules.ini Power= values)
+      // Power consumption — rules.ini Power= values (negative = consumes)
       else if (s.type === 'PROC') this.powerConsumed += 30;
       else if (s.type === 'WEAP') this.powerConsumed += 30;
-      else if (s.type === 'TENT') this.powerConsumed += 10; // C++ BARR/TENT Power=10
+      else if (s.type === 'TENT' || s.type === 'BARR') this.powerConsumed += 20;
       else if (s.type === 'DOME') this.powerConsumed += 40;
-      else if (s.type === 'TSLA') this.powerConsumed += 100;
-      else if (s.type === 'HBOX' || s.type === 'PBOX' || s.type === 'GUN') this.powerConsumed += 10;
-      else if (s.type === 'SAM' || s.type === 'AGUN') this.powerConsumed += 20;
+      else if (s.type === 'TSLA') this.powerConsumed += 150;
+      else if (s.type === 'PBOX' || s.type === 'HBOX') this.powerConsumed += 15;
+      else if (s.type === 'GUN') this.powerConsumed += 40;
+      else if (s.type === 'SAM') this.powerConsumed += 20;
+      else if (s.type === 'AGUN') this.powerConsumed += 50;
       else if (s.type === 'FIX') this.powerConsumed += 30;
       else if (s.type === 'HPAD') this.powerConsumed += 10;
       else if (s.type === 'AFLD') this.powerConsumed += 30;
-      else if (s.type === 'ATEK' || s.type === 'STEK') this.powerConsumed += 200;
+      else if (s.type === 'ATEK') this.powerConsumed += 200;
+      else if (s.type === 'STEK') this.powerConsumed += 100;
       else if (s.type === 'PDOX' || s.type === 'IRON') this.powerConsumed += 200;
       else if (s.type === 'MSLO') this.powerConsumed += 100;
+      else if (s.type === 'GAP') this.powerConsumed += 60;
+      else if (s.type === 'FTUR') this.powerConsumed += 20;
+      else if (s.type === 'SILO') this.powerConsumed += 10;
+      else if (s.type === 'KENN') this.powerConsumed += 10;
+      else if (s.type === 'SYRD' || s.type === 'SPEN') this.powerConsumed += 30;
     }
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
@@ -1088,7 +1111,7 @@ export class Game {
     // Also apply damaged sight reduction when HP < ConditionRed
     const DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'SAM', 'PBOX', 'GAP', 'AGUN']);
     for (const s of this.structures) {
-      if (s.alive && (s.house === House.Spain || s.house === House.Greece)) {
+      if (s.alive && this.isAllied(s.house, this.playerHouse)) {
         const baseSight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
         const sight = (s.hp / s.maxHp) < CONDITION_RED ? 1 : baseSight;
         const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
@@ -1126,9 +1149,7 @@ export class Game {
 
   /** Check if a screen click is on the minimap; if so, scroll camera there */
   private handleMinimapClick(sx: number, sy: number): boolean {
-    const mmSize = Game.SIDEBAR_W - 8;
-    const mmX = this.canvas.width - Game.SIDEBAR_W + 4;
-    const mmY = this.canvas.height - mmSize - 6;
+    const { x: mmX, y: mmY, size: mmSize } = this.renderer.getMinimapBounds();
     if (sx < mmX || sx > mmX + mmSize || sy < mmY || sy > mmY + mmSize) {
       return false;
     }
@@ -1166,7 +1187,7 @@ export class Game {
       const world = this.camera.screenToWorld(mouseX, mouseY);
       const s = this.findStructureAt(world);
       if (s && s.alive && s.sellProgress === undefined &&
-          (s.house === House.Spain || s.house === House.Greece)) {
+          this.isAllied(s.house, this.playerHouse)) {
         this.cursorType = CursorType.SELL;
       } else {
         this.cursorType = CursorType.NOMOVE;
@@ -1176,7 +1197,7 @@ export class Game {
     if (this.repairMode) {
       const world = this.camera.screenToWorld(mouseX, mouseY);
       const s = this.findStructureAt(world);
-      if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) && s.hp < s.maxHp) {
+      if (s && s.alive && this.isAllied(s.house, this.playerHouse) && s.hp < s.maxHp) {
         this.cursorType = CursorType.REPAIR;
       } else {
         this.cursorType = CursorType.NOMOVE;
@@ -1198,7 +1219,7 @@ export class Game {
     } else {
       const hoveredStruct = this.findStructureAt(world);
       if (hoveredStruct && hoveredStruct.alive &&
-          hoveredStruct.house !== House.Spain && hoveredStruct.house !== House.Greece) {
+          !this.isAllied(hoveredStruct.house, this.playerHouse)) {
         this.cursorType = CursorType.ATTACK;
       } else {
         const cell = worldToCell(world.x, world.y);
@@ -1216,20 +1237,21 @@ export class Game {
     if (scrollDelta !== 0 && this.input.state.mouseX >= this.canvas.width - Game.SIDEBAR_W) {
       const items = this.cachedAvailableItems ?? this.getAvailableItems();
       const filteredItems = items.filter(it => getItemCategory(it) === this.activeTab);
-      const tabBarH = 14;
-      const itemStartY = (this.powerProduced > 0 || this.powerConsumed > 0) ? 36 + tabBarH : 28 + tabBarH;
-      const maxScroll = Math.max(0, filteredItems.length * 22 - (this.canvas.height - itemStartY - 80));
+      // 2-column layout: rows = ceil(items/2), rowH = 26 (cameo 24 + gap 2)
+      const rowH = 26;
+      const rows = Math.ceil(filteredItems.length / 2);
+      const prodStartY = this.renderer.getProductionStartY();
+      const bottomReserved = 40;
+      const maxScroll = Math.max(0, rows * rowH - (this.canvas.height - prodStartY - bottomReserved));
       const cur = this.tabScrollPositions[this.activeTab];
-      this.tabScrollPositions[this.activeTab] = Math.max(0, Math.min(maxScroll, cur + Math.sign(scrollDelta) * 22));
+      this.tabScrollPositions[this.activeTab] = Math.max(0, Math.min(maxScroll, cur + Math.sign(scrollDelta) * rowH));
       this.sidebarScroll = this.tabScrollPositions[this.activeTab];
     }
 
     // Minimap drag scroll: while holding left button on minimap, continuously scroll
     if (this.input.state.mouseDown) {
       const { mouseX, mouseY } = this.input.state;
-      const mmSize = Game.SIDEBAR_W - 8;
-      const mmX = this.canvas.width - Game.SIDEBAR_W + 4;
-      const mmY = this.canvas.height - mmSize - 6;
+      const { x: mmX, y: mmY, size: mmSize } = this.renderer.getMinimapBounds();
       if (mouseX >= mmX && mouseX <= mmX + mmSize &&
           mouseY >= mmY && mouseY <= mmY + mmSize) {
         const scale = mmSize / Math.max(this.map.boundsW, this.map.boundsH);
@@ -1573,7 +1595,7 @@ export class Game {
       if (this.sellMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
-        if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) &&
+        if (s && s.alive && this.isAllied(s.house, this.playerHouse) &&
             s.sellProgress === undefined) {
           // Walls sell instantly — no animation, immediate removal + refund
           if (WALL_TYPES.has(s.type)) {
@@ -1597,7 +1619,7 @@ export class Game {
       if (this.repairMode) {
         const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
         const s = this.findStructureAt(world);
-        if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) && s.hp < s.maxHp) {
+        if (s && s.alive && this.isAllied(s.house, this.playerHouse) && s.hp < s.maxHp) {
           const idx = this.structures.indexOf(s);
           if (this.repairingStructures.has(idx)) {
             this.repairingStructures.delete(idx);
@@ -1672,7 +1694,7 @@ export class Game {
         // Click on player structure: select it for info display
         const clickedStruct = this.findStructureAt(world);
         if (clickedStruct && clickedStruct.alive &&
-            (clickedStruct.house === House.Spain || clickedStruct.house === House.Greece)) {
+            this.isAllied(clickedStruct.house, this.playerHouse)) {
           this.selectedStructureIdx = this.structures.indexOf(clickedStruct);
           this.audio.play('select');
         } else {
@@ -1724,7 +1746,7 @@ export class Game {
       // Cancel production from sidebar via right-click
       if (rightClick.x >= this.canvas.width - Game.SIDEBAR_W) {
         const items = this.getAvailableItems();
-        const itemIdx = this.sidebarItemAtY(rightClick.y);
+        const itemIdx = this.sidebarItemAt(rightClick.x, rightClick.y);
         if (itemIdx >= 0 && itemIdx < items.length) {
           const item = items[itemIdx];
           const category = getItemCategory(item);
@@ -1735,9 +1757,7 @@ export class Game {
 
       // Minimap right-click: move selected units to that world position
       if (this.selectedIds.size > 0) {
-        const mmSize = Game.SIDEBAR_W - 8;
-        const mmX = this.canvas.width - Game.SIDEBAR_W + 4;
-        const mmY = this.canvas.height - mmSize - 6;
+        const { x: mmX, y: mmY, size: mmSize } = this.renderer.getMinimapBounds();
         if (rightClick.x >= mmX && rightClick.x <= mmX + mmSize &&
             rightClick.y >= mmY && rightClick.y <= mmY + mmSize) {
           const scale = mmSize / Math.max(this.map.boundsW, this.map.boundsH);
@@ -1970,16 +1990,31 @@ export class Game {
   }
 
   /** Map a sidebar Y coordinate to the item index, accounting for category headers */
-  private sidebarItemAtY(sy: number): number {
+  /** Hit-test a sidebar click against the 2-column production grid.
+   *  Returns the index in the full items array, or -1 if no hit. */
+  private sidebarItemAt(sx: number, sy: number): number {
     const items = this.getAvailableItems();
     const filteredItems = items.filter(it => getItemCategory(it) === this.activeTab);
-    const itemH = 22;
-    const tabBarH = 14;
-    const itemStartY = ((this.powerProduced > 0 || this.powerConsumed > 0) ? 36 : 28) + tabBarH;
+    const sidebarX = this.canvas.width - Game.SIDEBAR_W;
+    const prodStartY = this.renderer.getProductionStartY();
+    const camW = 32;
+    const camH = 24;
+    const gap = 2;
+    const col0X = sidebarX + 18; // after power bar
+    const col1X = col0X + camW + gap;
+    const rowH = camH + gap;
     const tabScroll = this.tabScrollPositions[this.activeTab];
-    const relY = sy - itemStartY + tabScroll;
+
+    // Determine which column was clicked
+    let col = -1;
+    if (sx >= col0X && sx < col0X + camW) col = 0;
+    else if (sx >= col1X && sx < col1X + camW) col = 1;
+    if (col < 0) return -1;
+
+    const relY = sy - prodStartY + tabScroll;
     if (relY < 0) return -1;
-    const filteredIdx = Math.floor(relY / itemH);
+    const row = Math.floor(relY / rowH);
+    const filteredIdx = row * 2 + col;
     if (filteredIdx < 0 || filteredIdx >= filteredItems.length) return -1;
     // Map back to index in the full items array
     const targetItem = filteredItems[filteredIdx];
@@ -1990,13 +2025,17 @@ export class Game {
   private handleSidebarClick(sx: number, sy: number): void {
     const sidebarX = this.canvas.width - Game.SIDEBAR_W;
 
-    // Tab bar click detection
-    const tabBarY = (this.powerProduced > 0 || this.powerConsumed > 0) ? 36 : 28;
+    // Minimap click — check first since it's at top now
+    if (this.handleMinimapClick(sx, sy)) return;
+
+    // Tab bar click detection (tabs start after power bar at offset 16)
+    const tabBarY = this.renderer.getTabBarY();
     const tabBarH = 14;
     if (sy >= tabBarY && sy < tabBarY + tabBarH) {
-      const margin = 2;
-      const tabW = Math.floor((Game.SIDEBAR_W - margin * 2) / 3);
-      const relX = sx - sidebarX - margin;
+      const tabStartX = 16;
+      const tabAreaW = Game.SIDEBAR_W - tabStartX - 2;
+      const tabW = Math.floor(tabAreaW / 3);
+      const relX = sx - sidebarX - tabStartX;
       if (relX >= 0 && relX < tabW) this.activeTab = 'infantry';
       else if (relX >= tabW && relX < tabW * 2) this.activeTab = 'vehicle';
       else if (relX >= tabW * 2) this.activeTab = 'structure';
@@ -2021,12 +2060,13 @@ export class Game {
       return;
     }
 
-    // Check superweapon button clicks (at bottom of sidebar, above minimap)
+    // Check superweapon button clicks (at bottom of sidebar)
     const swClick = this.handleSuperweaponButtonClick(sy);
     if (swClick) return;
 
+    // Production item click (2-column grid)
     const items = this.getAvailableItems();
-    const itemIdx = this.sidebarItemAtY(sy);
+    const itemIdx = this.sidebarItemAt(sx, sy);
     if (itemIdx < 0 || itemIdx >= items.length) return;
     const item = items[itemIdx];
     // startProduction handles both new builds and queueing
@@ -2035,14 +2075,12 @@ export class Game {
 
   /** Check if a sidebar click hit a superweapon button. Returns true if handled. */
   private handleSuperweaponButtonClick(sy: number): boolean {
-    // Superweapon buttons are rendered at the bottom of sidebar, above minimap
-    const mmSize = Game.SIDEBAR_W - 8;
-    const mmY = this.canvas.height - mmSize - 6;
+    // Superweapon buttons are at the very bottom of sidebar
     const btnH = 20;
     const playerSws = this.getPlayerSuperweapons();
     if (playerSws.length === 0) return false;
 
-    const buttonsStartY = mmY - playerSws.length * btnH - 4;
+    const buttonsStartY = this.canvas.height - playerSws.length * btnH;
     for (let i = 0; i < playerSws.length; i++) {
       const btnY = buttonsStartY + i * btnH;
       if (sy >= btnY && sy < btnY + btnH) {
@@ -2066,7 +2104,7 @@ export class Game {
   getPlayerSuperweapons(): Array<{ state: SuperweaponState; def: SuperweaponDef }> {
     const result: Array<{ state: SuperweaponState; def: SuperweaponDef }> = [];
     for (const [, state] of this.superweapons) {
-      if (state.house !== House.Spain && state.house !== House.Greece) continue;
+      if (!this.isAllied(state.house as House, this.playerHouse)) continue;
       const def = SUPERWEAPON_DEFS[state.type];
       if (!def) continue;
       // Don't show GPS after it's been fired (one-shot)
@@ -2206,7 +2244,7 @@ export class Game {
       aiState.underAttack = true;
     }
     // EVA "base under attack" for player structures (throttled)
-    if ((s.house === House.Spain || s.house === House.Greece) &&
+    if (this.isAllied(s.house, this.playerHouse) &&
         this.tick - this.lastBaseAttackEva > GAME_TICKS_PER_SEC * 5) {
       this.lastBaseAttackEva = this.tick;
       this.audio.play('eva_base_attack');
@@ -2245,7 +2283,7 @@ export class Game {
       this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
       this.renderer.screenFlash = Math.max(this.renderer.screenFlash, 5);
       this.playSoundAt('building_explode', wx, wy);
-      if (s.house === House.Spain || s.house === House.Greece) {
+      if (this.isAllied(s.house, this.playerHouse)) {
         this.structuresLost++;
         this.playEva('eva_unit_lost'); // reuse unit_lost for building destruction
         // C++ parity: recalculate silo capacity when storage structure destroyed
@@ -2991,7 +3029,7 @@ export class Game {
     let bestIsDefense = false;
     for (const s of this.structures) {
       if (!s.alive) continue;
-      if (s.house !== House.Spain && s.house !== House.Greece) continue;
+      if (!this.isAllied(s.house, this.playerHouse)) continue;
       const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
       const dist = worldDist(entity.pos, sPos);
       if (dist > entity.stats.sight * 2) continue;
@@ -3966,7 +4004,7 @@ export class Game {
       // Engineer capture/damage (C++ infantry.cpp:618 — capture requires ConditionRed)
       if (entity.type === UnitType.I_E6 && entity.isPlayerUnit) {
         // EN1: Friendly repair — engineer heals to FULL HP (C++ Renovate() behavior)
-        if ((s.house === House.Spain || s.house === House.Greece) && s.hp < s.maxHp) {
+        if (this.isAllied(s.house, this.playerHouse) && s.hp < s.maxHp) {
           s.hp = s.maxHp;
           // Engineer consumed on repair
           entity.alive = false;
@@ -3983,7 +4021,7 @@ export class Game {
         // Enemy capture/damage (existing logic below)
         if (s.hp / s.maxHp <= CONDITION_RED) {
           // Capture: building at red health — convert to player
-          s.house = House.Spain;
+          s.house = this.playerHouse;
           s.hp = s.maxHp;
           this.playEva('eva_building_captured');
         } else {
@@ -4006,7 +4044,7 @@ export class Game {
 
       // Spy infiltration: spy enters enemy building for special effects
       if (entity.type === UnitType.I_SPY && entity.isPlayerUnit) {
-        if (s.house !== House.Spain && s.house !== House.Greece) {
+        if (!this.isAllied(s.house, this.playerHouse)) {
           this.spyInfiltrate(entity, s);
           return;
         }
@@ -4300,7 +4338,7 @@ export class Game {
             screenShake: 4, explosionSize: 16, debris: false,
             decal: { infantry: 4, vehicle: 8, opacity: 0.5 },
             explodeLgSound: false,
-            attackerIsPlayer: s.house === House.Spain || s.house === House.Greece,
+            attackerIsPlayer: this.isAllied(s.house, this.playerHouse),
             trackLoss: false,
           });
         }
@@ -4314,7 +4352,7 @@ export class Game {
     const mods = DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal;
     for (const s of this.structures) {
       if (!s.alive || s.type !== 'QUEE') continue;
-      if (s.house === House.Spain || s.house === House.Greece) continue; // player queens don't spawn
+      if (this.isAllied(s.house, this.playerHouse)) continue; // player queens don't spawn
       // Don't spawn if too many ants already alive (cap by difficulty)
       const nearbyAnts = this.entities.filter(e =>
         e.alive && e.isAnt && worldDist(e.pos, {
@@ -4796,7 +4834,7 @@ export class Game {
 
   /** M1+M2: Compute movement speed with terrain and damage multipliers.
    *  All moveToward calls should use this instead of flat speed * 0.5. */
-  private movementSpeed(entity: Entity, speedFraction = 0.5): number {
+  private movementSpeed(entity: Entity, speedFraction = 1.0): number {
     return entity.stats.speed * speedFraction
       * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
       * this.damageSpeedFactor(entity);
@@ -4946,7 +4984,7 @@ export class Game {
 
       // Splash damage at impact point
       if (proj.weapon.splash && proj.weapon.splash > 0) {
-        const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? House.Spain : House.USSR);
+        const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? this.playerHouse : House.USSR);
         this.applySplashDamage(
           { x: proj.impactX, y: proj.impactY }, proj.weapon,
           proj.directHit && target ? target.id : -1,
@@ -4968,7 +5006,7 @@ export class Game {
   ): void {
     const splashRange = weapon.splash ?? 0;
     if (splashRange <= 0) return;
-    const attackerIsPlayerControlled = attackerHouse === House.Spain || attackerHouse === House.Greece;
+    const attackerIsPlayerControlled = this.isAllied(attackerHouse, this.playerHouse);
 
     for (const other of this.entities) {
       if (!other.alive || other.id === primaryTargetId) continue;
@@ -5035,6 +5073,7 @@ export class Game {
             // 40% chance to destroy tree per explosion
             if (Math.random() < 0.4) {
               this.map.setTerrain(tx, ty, Terrain.CLEAR);
+              this.map.clearTreeType(tx, ty);
               this.map.addDecal(tx, ty, 6, 0.4); // stump/scorch mark
               this.effects.push({
                 type: 'explosion',
@@ -5077,8 +5116,9 @@ export class Game {
   /** Map our House enum to RA HousesType index (for trigger event checks) */
   private static readonly HOUSE_TO_INDEX: Record<string, number> = {
     [House.Spain]: 0, [House.Greece]: 1, [House.USSR]: 2,
-    [House.Ukraine]: 4, [House.Germany]: 5,
-    [House.Turkey]: 7, [House.Neutral]: 10,
+    [House.England]: 3, [House.Ukraine]: 4, [House.Germany]: 5,
+    [House.France]: 6, [House.Turkey]: 7,
+    [House.GoodGuy]: 8, [House.BadGuy]: 9, [House.Neutral]: 10,
   };
 
   /** Build trigger game state snapshot for event checks (uses precomputed shared state) */
@@ -5136,7 +5176,7 @@ export class Game {
     for (const s of this.structures) {
       if (s.alive) {
         structureTypes.add(s.type);
-        if ((s.house === House.Spain || s.house === House.Greece) &&
+        if (this.isAllied(s.house, this.playerHouse) &&
             (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'TENT')) {
           playerFactories++;
         }
@@ -5292,6 +5332,10 @@ export class Game {
             this.camera.centerOn(wp.cx * CELL_SIZE + CELL_SIZE / 2, wp.cy * CELL_SIZE + CELL_SIZE / 2);
           }
         }
+        // Movie trigger — show as title card EVA message (FMVs not available)
+        if (result.playMovie !== undefined) {
+          this.showEvaMessage(-1, `[Movie: ${result.playMovie}]`);
+        }
         // Sound/speech from triggers
         if (result.playSpeech !== undefined) {
           this.handleTriggerSpeech(result.playSpeech);
@@ -5350,7 +5394,12 @@ export class Game {
   }
 
   /** Display an EVA text message (by trigger data ID) */
-  private showEvaMessage(id: number): void {
+  private showEvaMessage(id: number, customText?: string): void {
+    if (customText) {
+      this.evaMessages.push({ text: customText, tick: this.tick });
+      this.audio.play('eva_acknowledged');
+      return;
+    }
     // Map message IDs to text — from RA tutorial.txt / mission text strings
     const messages: Record<number, string> = {
       0: 'Scouts report movement in the area.',
@@ -5396,7 +5445,7 @@ export class Game {
     for (const e of this.entities) {
       if (!e.alive || !e.isPlayerUnit) continue;
       for (const s of this.structures) {
-        if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+        if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
         const dx = e.pos.x / CELL_SIZE - s.cx;
         const dy = e.pos.y / CELL_SIZE - s.cy;
         if (dx * dx + dy * dy < 25) { // 5-cell radius
@@ -5414,7 +5463,7 @@ export class Game {
   /** Spawn reinforcement infantry near barracks when base is first discovered */
   private spawnBaseReinforcements(): void {
     const barracks = this.structures.find(b =>
-      b.alive && b.type === 'TENT' && (b.house === House.Spain || b.house === House.Greece)
+      b.alive && b.type === 'TENT' && this.isAllied(b.house, this.playerHouse)
     );
     if (!barracks) return;
     const bx = barracks.cx * CELL_SIZE + CELL_SIZE;
@@ -5426,7 +5475,7 @@ export class Game {
     for (let i = 0; i < types.length; i++) {
       const rx = bx + ((i % 3) - 1) * CELL_SIZE;
       const ry = by + Math.floor(i / 3) * CELL_SIZE;
-      const inf = new Entity(types[i], House.Spain, rx, ry);
+      const inf = new Entity(types[i], this.playerHouse, rx, ry);
       inf.mission = Mission.GUARD;
       this.entities.push(inf);
       this.entityById.set(inf.id, inf);
@@ -5507,7 +5556,7 @@ export class Game {
     const ANT_STRUCTURES = new Set(['QUEE', 'LAR1', 'LAR2']);
     const antStructuresAlive = this.structures.some(s =>
       s.alive && ANT_STRUCTURES.has(s.type) &&
-      s.house !== House.Spain && s.house !== House.Greece
+      !this.isAllied(s.house, this.playerHouse)
     );
 
     // If scenario uses ALLOWWIN, gate fallback win on the flag being set
@@ -5523,6 +5572,25 @@ export class Game {
       this.audio.play('victory_fanfare');
       this.audio.play('eva_mission_accomplished');
       this.onStateChange?.('won');
+      return;
+    }
+
+    // Generic fallback for campaign missions: all enemy units & buildings destroyed
+    if (!this.scenarioId.startsWith('SCA')) {
+      const enemyUnitsAlive = this.entities.some(e =>
+        e.alive && !e.isPlayerUnit && !this.isAllied(e.house, this.playerHouse) && e.house !== House.Neutral
+      );
+      const enemyStructuresAlive = this.structures.some(s =>
+        s.alive && !this.isAllied(s.house, this.playerHouse) && s.house !== House.Neutral
+      );
+      if (!enemyUnitsAlive && !enemyStructuresAlive) {
+        if (this.toCarryOver) saveCarryover(this.entities);
+        this.state = 'won';
+        this.audio.music.stop();
+        this.audio.play('victory_fanfare');
+        this.audio.play('eva_mission_accomplished');
+        this.onStateChange?.('won');
+      }
     }
   }
 
@@ -5885,7 +5953,7 @@ export class Game {
       const [padW, padH] = STRUCTURE_SIZE[factory.type] ?? [2, 2];
       spawnX = (factory.cx + padW / 2) * CELL_SIZE;
       spawnY = (factory.cy + padH / 2) * CELL_SIZE;
-      const entity = new Entity(unitType, House.Spain, spawnX, spawnY);
+      const entity = new Entity(unitType, this.playerHouse, spawnX, spawnY);
       entity.mission = Mission.GUARD;
       entity.aircraftState = 'landed';
       entity.flightAltitude = 0;
@@ -5913,7 +5981,7 @@ export class Game {
       spawnX = spawn.cx * CELL_SIZE + CELL_SIZE / 2;
       spawnY = spawn.cy * CELL_SIZE + CELL_SIZE / 2;
     }
-    const entity = new Entity(unitType, House.Spain, spawnX, spawnY);
+    const entity = new Entity(unitType, this.playerHouse, spawnX, spawnY);
     entity.mission = Mission.GUARD;
     this.entities.push(entity);
     this.entityById.set(entity.id, entity);
@@ -5952,7 +6020,7 @@ export class Game {
     if (!isWall) {
       let adjacent = false;
       for (const s of this.structures) {
-        if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+        if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
         const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
         const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
         const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
@@ -5967,7 +6035,7 @@ export class Game {
     const newStruct: MapStructure = {
       type: item.type,
       image,
-      house: House.Spain,
+      house: this.playerHouse,
       cx, cy,
       hp: maxHp,
       maxHp,
@@ -6014,7 +6082,7 @@ export class Game {
     // Spawn free harvester with refinery
     if (item.type === 'PROC') {
       const harvSpawn = this.findPassableSpawn(cx + 1, cy + fh, cx, cy, fw, fh);
-      const harv = new Entity(UnitType.V_HARV, House.Spain,
+      const harv = new Entity(UnitType.V_HARV, this.playerHouse,
         harvSpawn.cx * CELL_SIZE + CELL_SIZE / 2, harvSpawn.cy * CELL_SIZE + CELL_SIZE / 2);
       harv.harvesterState = 'idle';
       this.entities.push(harv);
@@ -6043,7 +6111,7 @@ export class Game {
     const newStruct: MapStructure = {
       type: 'FACT',
       image: 'fact',
-      house: House.Spain,
+      house: this.playerHouse,
       cx, cy,
       hp: factMaxHp,
       maxHp: factMaxHp,
@@ -6156,7 +6224,7 @@ export class Game {
           UnitType.V_STNK, UnitType.V_CTNK,           // CS expansion vehicles
         ];
         const uType = types[Math.floor(Math.random() * types.length)];
-        const bonus = new Entity(uType, House.Spain, crate.x + CELL_SIZE, crate.y);
+        const bonus = new Entity(uType, this.playerHouse, crate.x + CELL_SIZE, crate.y);
         bonus.mission = Mission.GUARD;
         this.entities.push(bonus);
         this.entityById.set(bonus.id, bonus);
@@ -6215,7 +6283,7 @@ export class Game {
           const t = infTypes[Math.floor(Math.random() * infTypes.length)];
           const ox = (Math.random() - 0.5) * CELL_SIZE * 2;
           const oy = (Math.random() - 0.5) * CELL_SIZE * 2;
-          const inf = new Entity(t, House.Spain, crate.x + ox, crate.y + oy);
+          const inf = new Entity(t, this.playerHouse, crate.x + ox, crate.y + oy);
           inf.mission = Mission.GUARD;
           this.entities.push(inf);
           this.entityById.set(inf.id, inf);
@@ -6226,7 +6294,7 @@ export class Game {
       case 'heal_base': {
         // Heal all player structures +20% HP
         for (const s of this.structures) {
-          if (s.alive && (s.house === House.Spain || s.house === House.Greece)) {
+          if (s.alive && this.isAllied(s.house, this.playerHouse)) {
             s.hp = Math.min(s.maxHp, s.hp + Math.ceil(s.maxHp * 0.2));
           }
         }
@@ -6300,12 +6368,12 @@ export class Game {
         // Charge: increment if building is alive and powered
         if (!state.ready && !state.fired) {
           const chargeRate = (def.requiresPower && isLowPower &&
-            (s.house === House.Spain || s.house === House.Greece)) ? 0.25 : 1;
+            this.isAllied(s.house, this.playerHouse)) ? 0.25 : 1;
           state.chargeTick = Math.min(state.chargeTick + chargeRate, def.rechargeTicks);
           if (state.chargeTick >= def.rechargeTicks) {
             state.ready = true;
             // EVA announcement for player
-            if (s.house === House.Spain || s.house === House.Greece) {
+            if (this.isAllied(s.house, this.playerHouse)) {
               this.pushEva(`${def.name} ready`);
             }
           }
@@ -6316,7 +6384,7 @@ export class Game {
           this.map.revealAll();
           state.fired = true;
           state.ready = false;
-          if (s.house === House.Spain || s.house === House.Greece) {
+          if (this.isAllied(s.house, this.playerHouse)) {
             this.pushEva('GPS satellite launched');
             // GPS sweep visual
             this.effects.push({
@@ -6337,7 +6405,7 @@ export class Game {
           }
           state.ready = false;
           state.chargeTick = 0;
-          if (s.house === House.Spain || s.house === House.Greece) {
+          if (this.isAllied(s.house, this.playerHouse)) {
             this.pushEva('Sonar pulse activated');
           }
         }
@@ -6354,7 +6422,7 @@ export class Game {
     // AI superweapon usage
     for (const [, state] of this.superweapons) {
       if (!state.ready) continue;
-      if (state.house === House.Spain || state.house === House.Greece) continue;
+      if (this.isAllied(state.house as House, this.playerHouse)) continue;
       const def = SUPERWEAPON_DEFS[state.type];
       if (!def.needsTarget) continue; // GPS/Sonar auto-fire handled above
 
@@ -6411,7 +6479,7 @@ export class Game {
             sprite: 'litning', spriteStart: 0,
           });
           this.audio.play('chrono');
-          if (house === House.Spain || house === House.Greece) {
+          if (this.isAllied(house, this.playerHouse)) {
             this.pushEva('Chronosphere activated');
           }
         }
@@ -6436,7 +6504,7 @@ export class Game {
             frame: 0, maxFrames: 15, size: 20,
           });
           this.audio.play('iron_curtain');
-          if (house === House.Spain || house === House.Greece) {
+          if (this.isAllied(house, this.playerHouse)) {
             this.pushEva('Iron Curtain activated');
           }
         }
@@ -6459,7 +6527,7 @@ export class Game {
             projStyle: 'rocket',
           });
           this.audio.play('nuke_launch');
-          if (house === House.Spain || house === House.Greece) {
+          if (this.isAllied(house, this.playerHouse)) {
             this.pushEva('Nuclear warhead launched');
           } else {
             // Warn player when enemy launches nuke
@@ -6666,7 +6734,7 @@ export class Game {
       // Check adjacency — footprint-based AABB (expand existing structure by 1 cell, check overlap)
       let adj = false;
       for (const s of this.structures) {
-        if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+        if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
         const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
         // Existing structure expanded by 1 cell in each direction
         const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
@@ -6715,8 +6783,8 @@ export class Game {
 
     // Render end screen overlay when game is over
     if (this.state === 'won' || this.state === 'lost') {
-      const structsBuilt = this.structures.filter(s => s.house === House.Spain || s.house === House.Greece).length;
-      const structsLost = this.structures.filter(s => !s.alive && (s.house === House.Spain || s.house === House.Greece)).length;
+      const structsBuilt = this.structures.filter(s => this.isAllied(s.house, this.playerHouse)).length;
+      const structsLost = this.structures.filter(s => !s.alive && this.isAllied(s.house, this.playerHouse)).length;
       // Build survivors roster for victory screen
       const survivors = this.state === 'won'
         ? this.entities.filter(e => e.alive && e.isPlayerUnit).map(e => ({
@@ -6815,23 +6883,29 @@ export class Game {
     let power = 0;
     for (const s of this.structures) {
       if (!s.alive || s.house !== house) continue;
-      // Power consumption by structure type (C++ rules.ini Power= values)
+      // Power consumption by structure type — rules.ini Power= values
       switch (s.type) {
-        case 'TENT': case 'BARR': power += 10; break;
+        case 'TENT': case 'BARR': power += 20; break;
         case 'WEAP': power += 30; break;
         case 'PROC': power += 30; break;
         case 'DOME': power += 40; break;
-        case 'GUN': power += 20; break;
-        case 'HBOX': power += 10; break;
+        case 'GUN': power += 40; break;
+        case 'PBOX': case 'HBOX': power += 15; break;
         case 'TSLA': power += 150; break;
         case 'SAM': power += 20; break;
-        case 'AGUN': power += 20; break;
-        case 'ATEK': case 'STEK': power += 50; break;
+        case 'AGUN': power += 50; break;
+        case 'ATEK': power += 200; break;
+        case 'STEK': power += 100; break;
         case 'HPAD': power += 10; break;
-        case 'AFLD': power += 20; break;
+        case 'AFLD': power += 30; break;
         case 'GAP': power += 60; break;
         case 'FIX': power += 30; break;
-        case 'IRON': case 'PDOX': case 'MSLO': power += 100; break;
+        case 'FTUR': power += 20; break;
+        case 'SILO': power += 10; break;
+        case 'KENN': power += 10; break;
+        case 'SYRD': case 'SPEN': power += 30; break;
+        case 'IRON': case 'PDOX': power += 200; break;
+        case 'MSLO': power += 100; break;
       }
     }
     return power;

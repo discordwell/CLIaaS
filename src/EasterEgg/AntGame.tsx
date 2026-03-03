@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Game, type GameState, type MissionInfo, type Difficulty,
   MISSIONS, getMissionIndex, loadProgress, saveProgress, DIFFICULTIES,
+  CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, checkMissionExists,
+  loadMissionBriefings, getMissionBriefing,
+  type CampaignId, type CampaignDef, type CampaignMission,
 } from './engine';
 import { TestRunner, type TestLogEntry } from './engine/testRunner';
 import { QATestRunner, type QALogEntry, type QAReport } from './engine/qaTestRunner';
@@ -14,12 +17,13 @@ interface AntGameProps {
   onExit: () => void;
 }
 
-type Screen = 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing';
+type Screen = 'main_menu' | 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing'
+  | 'faction_select' | 'campaign_select';
 
 export default function AntGame({ onExit }: AntGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<Game | null>(null);
-  const [screen, setScreen] = useState<Screen>('select');
+  const [screen, setScreen] = useState<Screen>('main_menu');
   const [loadProgress_, setLoadProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +31,14 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [unlockedMissions, setUnlockedMissions] = useState(loadProgress);
   const [selectedMission, setSelectedMission] = useState<MissionInfo | null>(null);
   const [missionIndex, setMissionIndex] = useState(0);
+  // Campaign state
+  const [activeCampaign, setActiveCampaign] = useState<CampaignDef | null>(null);
+  const [campaignType, setCampaignType] = useState<'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet' | null>(null);
+  const [campaignMissionIndex, setCampaignMissionIndex] = useState(0);
+  const [campaignUnlocked, setCampaignUnlocked] = useState(0);
+  const [pendingFaction, setPendingFaction] = useState<'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet' | null>(null);
+  const [availableMissions, setAvailableMissions] = useState<boolean[]>([]);
+  const [briefingsLoaded, setBriefingsLoaded] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>(() => {
     try {
       const saved = localStorage.getItem('antmissions_settings');
@@ -100,9 +112,15 @@ export default function AntGame({ onExit }: AntGameProps) {
         canvasRef.current?.focus();
       }
       if (state === 'won') {
+        // Ant mission progress
         const idx = getMissionIndex(mission.id);
         if (idx >= 0) saveProgress(idx);
         setUnlockedMissions(loadProgress());
+        // Campaign progress
+        if (activeCampaign) {
+          saveCampaignProgress(activeCampaign.id, campaignMissionIndex);
+          setCampaignUnlocked(loadCampaignProgress(activeCampaign.id));
+        }
       }
     };
 
@@ -119,9 +137,9 @@ export default function AntGame({ onExit }: AntGameProps) {
       } catch { /* ignore */ }
     } catch (e) {
       setError(`Failed to load mission: ${e instanceof Error ? e.message : String(e)}`);
-      setScreen('select');
+      setScreen(activeCampaign ? 'campaign_select' : 'select');
     }
-  }, [difficulty]);
+  }, [difficulty, activeCampaign, campaignMissionIndex]);
 
   /** Start the animated briefing cutscene before launching the mission */
   const startCutscene = useCallback((mission: MissionInfo) => {
@@ -144,7 +162,7 @@ export default function AntGame({ onExit }: AntGameProps) {
         launchMission(mission);
       };
 
-      renderer.start(mission.id);
+      renderer.start(mission.id, mission.briefing);
     });
   }, [launchMission, transitionTo]);
 
@@ -153,32 +171,79 @@ export default function AntGame({ onExit }: AntGameProps) {
     if (!mission) return;
     setMissionIndex(index);
     setSelectedMission(mission);
+    setActiveCampaign(null); // ant missions are not campaigns
+    transitionTo(() => setScreen('briefing'));
+  }, [transitionTo]);
+
+  /** Select a campaign mission and go to briefing */
+  const selectCampaignMission = useCallback((campaign: CampaignDef, index: number) => {
+    const cm = campaign.missions[index];
+    if (!cm) return;
+    setCampaignMissionIndex(index);
+    setActiveCampaign(campaign);
+    // Use real briefing from mission.ini if available
+    const realBriefing = getMissionBriefing(cm.id);
+    const missionInfo: MissionInfo = {
+      id: cm.id,
+      title: cm.title,
+      briefing: realBriefing || cm.briefing,
+      objective: cm.objective,
+    };
+    setSelectedMission(missionInfo);
     transitionTo(() => setScreen('briefing'));
   }, [transitionTo]);
 
   const handleNextMission = useCallback(() => {
-    const nextIdx = missionIndex + 1;
-    if (nextIdx < MISSIONS.length) {
-      // Directly set state instead of calling selectMission (which has its own transitionTo)
-      const mission = MISSIONS[nextIdx];
-      transitionTo(() => {
-        if (mission) {
-          setMissionIndex(nextIdx);
-          setSelectedMission(mission);
+    if (activeCampaign) {
+      // Campaign mode: advance to next campaign mission
+      const nextIdx = campaignMissionIndex + 1;
+      if (nextIdx < activeCampaign.missions.length) {
+        const cm = activeCampaign.missions[nextIdx];
+        transitionTo(() => {
+          setCampaignMissionIndex(nextIdx);
+          const realBriefing = getMissionBriefing(cm.id);
+          const missionInfo: MissionInfo = {
+            id: cm.id,
+            title: cm.title,
+            briefing: realBriefing || cm.briefing,
+            objective: cm.objective,
+          };
+          setSelectedMission(missionInfo);
           setScreen('briefing');
-        }
-      });
+        });
+      } else {
+        // All campaign missions complete
+        transitionTo(() => {
+          if (gameRef.current) {
+            gameRef.current.stop();
+            gameRef.current = null;
+          }
+          setScreen('campaign_select');
+        });
+      }
     } else {
-      // All missions complete — stop game and back to select
-      transitionTo(() => {
-        if (gameRef.current) {
-          gameRef.current.stop();
-          gameRef.current = null;
-        }
-        setScreen('select');
-      });
+      // Ant mission mode
+      const nextIdx = missionIndex + 1;
+      if (nextIdx < MISSIONS.length) {
+        const mission = MISSIONS[nextIdx];
+        transitionTo(() => {
+          if (mission) {
+            setMissionIndex(nextIdx);
+            setSelectedMission(mission);
+            setScreen('briefing');
+          }
+        });
+      } else {
+        transitionTo(() => {
+          if (gameRef.current) {
+            gameRef.current.stop();
+            gameRef.current = null;
+          }
+          setScreen('select');
+        });
+      }
     }
-  }, [missionIndex, selectMission, transitionTo]);
+  }, [missionIndex, activeCampaign, campaignMissionIndex, transitionTo]);
 
   const handleRetry = useCallback(() => {
     if (selectedMission) {
@@ -192,9 +257,9 @@ export default function AntGame({ onExit }: AntGameProps) {
         gameRef.current.stop();
         gameRef.current = null;
       }
-      setScreen('select');
+      setScreen(activeCampaign ? 'campaign_select' : 'select');
     });
-  }, [transitionTo]);
+  }, [transitionTo, activeCampaign]);
 
   // Detect ?anttest= URL param and launch automated test run
   useEffect(() => {
@@ -296,6 +361,11 @@ export default function AntGame({ onExit }: AntGameProps) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load mission briefings from mission.ini on mount
+  useEffect(() => {
+    loadMissionBriefings().then(() => setBriefingsLoaded(true));
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -332,17 +402,21 @@ export default function AntGame({ onExit }: AntGameProps) {
       if (e.key === 'Escape' || e.key === 'F10') {
         e.preventDefault();
         if (screen === 'cutscene') {
-          // Skip the animated briefing cutscene
           if (briefingRef.current) {
             briefingRef.current.skip();
-            // skip() calls onComplete which triggers launchMission
           }
         } else if (screen === 'briefing') {
-          setScreen('select');
+          setScreen(activeCampaign ? 'campaign_select' : 'select');
+        } else if (screen === 'campaign_select') {
+          setScreen('main_menu');
+          setActiveCampaign(null);
+        } else if (screen === 'faction_select') {
+          setScreen('main_menu');
         } else if (screen === 'select') {
+          setScreen('main_menu');
+        } else if (screen === 'main_menu') {
           onExit();
         }
-        // During gameplay, Escape is handled by the game engine (pause toggle)
       }
       if (screen === 'cutscene' && (e.key === ' ' || e.key === 'Enter')) {
         e.preventDefault();
@@ -356,12 +430,14 @@ export default function AntGame({ onExit }: AntGameProps) {
       }
       if (screen === 'briefing' && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
-        if (selectedMission) startCutscene(selectedMission);
+        if (selectedMission) {
+          startCutscene(selectedMission);
+        }
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, onExit]);
+  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, onExit, activeCampaign, campaignMissionIndex]);
 
   // Handle canvas resize
   useEffect(() => {
@@ -503,7 +579,380 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
-      {/* ── Mission Select Screen ── */}
+      {/* ── Main Menu Screen ── */}
+      {!testMode && !qaMode && screen === 'main_menu' && (
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'radial-gradient(ellipse at center, #0a0808 0%, #000000 70%)',
+          zIndex: 100000, fontFamily: 'monospace',
+        }}>
+          <h1 style={{
+            color: '#cc0000',
+            fontSize: '42px',
+            fontWeight: 'bold',
+            textShadow: '0 0 20px #cc0000, 0 0 40px #880000',
+            letterSpacing: '4px',
+            marginBottom: '6px',
+            textAlign: 'center',
+          }}>
+            RED ALERT
+          </h1>
+          <h2 style={{
+            color: '#882200',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            letterSpacing: '6px',
+            textTransform: 'uppercase',
+            marginBottom: '40px',
+          }}>
+            Mission Select
+          </h2>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '340px' }}>
+            {/* Ant Missions */}
+            <button
+              onClick={() => transitionTo(() => setScreen('select'))}
+              style={{
+                background: 'rgba(255,68,0,0.08)',
+                border: '1px solid #553300',
+                color: '#ff6633',
+                padding: '14px 20px',
+                fontFamily: 'monospace',
+                fontSize: '15px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '2px',
+                textAlign: 'left',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,68,0,0.18)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,68,0,0.08)'; }}
+            >
+              ANT MISSIONS
+              <div style={{ fontSize: '10px', color: '#886633', fontWeight: 'normal', marginTop: '2px', letterSpacing: '1px' }}>
+                It Came From Red Alert!
+              </div>
+            </button>
+
+            {/* Original Campaign */}
+            <button
+              onClick={() => {
+                setPendingFaction(null);
+                setCampaignType(null);
+                transitionTo(() => setScreen('faction_select'));
+              }}
+              style={{
+                background: 'rgba(100,0,0,0.08)',
+                border: '1px solid #442222',
+                color: '#cc4444',
+                padding: '14px 20px',
+                fontFamily: 'monospace',
+                fontSize: '15px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '2px',
+                textAlign: 'left',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(100,0,0,0.18)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(100,0,0,0.08)'; }}
+            >
+              ORIGINAL CAMPAIGN
+              <div style={{ fontSize: '10px', color: '#664444', fontWeight: 'normal', marginTop: '2px', letterSpacing: '1px' }}>
+                14 missions per faction
+              </div>
+            </button>
+
+            {/* Counterstrike */}
+            <button
+              onClick={() => {
+                setPendingFaction(null);
+                setCampaignType('counterstrike_allied');
+                transitionTo(() => setScreen('faction_select'));
+              }}
+              style={{
+                background: 'rgba(0,50,100,0.08)',
+                border: '1px solid #223344',
+                color: '#6688aa',
+                padding: '14px 20px',
+                fontFamily: 'monospace',
+                fontSize: '15px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '2px',
+                textAlign: 'left',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,50,100,0.18)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,50,100,0.08)'; }}
+            >
+              COUNTERSTRIKE
+              <div style={{ fontSize: '10px', color: '#445566', fontWeight: 'normal', marginTop: '2px', letterSpacing: '1px' }}>
+                Expansion pack missions
+              </div>
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', gap: '20px', marginTop: '30px', alignItems: 'center' }}>
+            <button
+              onClick={onExit}
+              style={{
+                background: '#222', color: '#888', border: '1px solid #444',
+                padding: '8px 24px', fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer',
+              }}
+            >
+              Return to CLIaaS
+            </button>
+            <span style={{ color: '#444', fontSize: '11px' }}>F10 to exit</span>
+          </div>
+
+          <div style={{
+            position: 'absolute', bottom: '16px',
+            color: '#333', fontSize: '10px', textAlign: 'center',
+          }}>
+            A CLIaaS Easter Egg | C&amp;C Red Alert Engine
+          </div>
+        </div>
+      )}
+
+      {/* ── Faction Select Screen ── */}
+      {!testMode && !qaMode && screen === 'faction_select' && (
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'radial-gradient(ellipse at center, #0a0808 0%, #000000 70%)',
+          zIndex: 100000, fontFamily: 'monospace',
+        }}>
+          <h2 style={{
+            color: '#888',
+            fontSize: '14px',
+            letterSpacing: '6px',
+            textTransform: 'uppercase',
+            marginBottom: '30px',
+          }}>
+            Choose Your Side
+          </h2>
+
+          <div style={{ display: 'flex', gap: '24px' }}>
+            {/* Allied */}
+            <button
+              onClick={() => {
+                const id: CampaignId = campaignType === 'counterstrike_allied' ? 'counterstrike_allied' : 'allied';
+                const campaign = getCampaign(id);
+                if (campaign) {
+                  setActiveCampaign(campaign);
+                  setCampaignUnlocked(loadCampaignProgress(id));
+                  // Probe which missions exist
+                  Promise.all(campaign.missions.map(m => checkMissionExists(m.id)))
+                    .then(results => {
+                      setAvailableMissions(results);
+                      transitionTo(() => setScreen('campaign_select'));
+                    });
+                }
+              }}
+              style={{
+                background: 'rgba(30,60,120,0.15)',
+                border: '2px solid #335588',
+                color: '#88aadd',
+                padding: '30px 40px',
+                fontFamily: 'monospace',
+                fontSize: '20px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '3px',
+                transition: 'background 0.15s, border-color 0.15s',
+                minWidth: '200px',
+                textAlign: 'center',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = 'rgba(30,60,120,0.3)';
+                (e.currentTarget as HTMLElement).style.borderColor = '#5588bb';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = 'rgba(30,60,120,0.15)';
+                (e.currentTarget as HTMLElement).style.borderColor = '#335588';
+              }}
+            >
+              ALLIED
+              <div style={{ fontSize: '10px', color: '#556688', fontWeight: 'normal', marginTop: '6px', letterSpacing: '1px' }}>
+                Blue / Gold
+              </div>
+            </button>
+
+            {/* Soviet */}
+            <button
+              onClick={() => {
+                const id: CampaignId = campaignType === 'counterstrike_allied' ? 'counterstrike_soviet' : 'soviet';
+                const campaign = getCampaign(id);
+                if (campaign) {
+                  setActiveCampaign(campaign);
+                  setCampaignUnlocked(loadCampaignProgress(id));
+                  Promise.all(campaign.missions.map(m => checkMissionExists(m.id)))
+                    .then(results => {
+                      setAvailableMissions(results);
+                      transitionTo(() => setScreen('campaign_select'));
+                    });
+                }
+              }}
+              style={{
+                background: 'rgba(120,20,20,0.15)',
+                border: '2px solid #883333',
+                color: '#dd6666',
+                padding: '30px 40px',
+                fontFamily: 'monospace',
+                fontSize: '20px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '3px',
+                transition: 'background 0.15s, border-color 0.15s',
+                minWidth: '200px',
+                textAlign: 'center',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = 'rgba(120,20,20,0.3)';
+                (e.currentTarget as HTMLElement).style.borderColor = '#bb5555';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = 'rgba(120,20,20,0.15)';
+                (e.currentTarget as HTMLElement).style.borderColor = '#883333';
+              }}
+            >
+              SOVIET
+              <div style={{ fontSize: '10px', color: '#886644', fontWeight: 'normal', marginTop: '6px', letterSpacing: '1px' }}>
+                Red
+              </div>
+            </button>
+          </div>
+
+          <button
+            onClick={() => transitionTo(() => setScreen('main_menu'))}
+            style={{
+              background: '#222', color: '#888', border: '1px solid #444',
+              padding: '8px 24px', fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer',
+              marginTop: '30px',
+            }}
+          >
+            Back
+          </button>
+          <span style={{ color: '#444', fontSize: '11px', marginTop: '8px' }}>
+            ESC to go back
+          </span>
+        </div>
+      )}
+
+      {/* ── Campaign Select Screen ── */}
+      {!testMode && !qaMode && screen === 'campaign_select' && activeCampaign && (
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0, width: '100%', height: '100%',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: `radial-gradient(ellipse at center, ${
+            activeCampaign.faction === 'allied' ? '#000a14' : '#140000'
+          } 0%, #000000 70%)`,
+          zIndex: 100000, fontFamily: 'monospace',
+        }}>
+          <h1 style={{
+            color: activeCampaign.faction === 'allied' ? '#88aadd' : '#dd6666',
+            fontSize: '28px',
+            fontWeight: 'bold',
+            textShadow: `0 0 15px ${activeCampaign.faction === 'allied' ? 'rgba(80,120,200,0.5)' : 'rgba(200,60,60,0.5)'}`,
+            letterSpacing: '3px',
+            marginBottom: '4px',
+          }}>
+            {activeCampaign.title}
+          </h1>
+          <h2 style={{
+            color: '#666',
+            fontSize: '12px',
+            letterSpacing: '4px',
+            textTransform: 'uppercase',
+            marginBottom: '24px',
+          }}>
+            {activeCampaign.faction === 'allied' ? 'Allied' : 'Soviet'} Campaign
+          </h2>
+
+          <div style={{ width: '100%', maxWidth: '520px', maxHeight: '60vh', overflowY: 'auto' }}>
+            {activeCampaign.missions.map((cm, i) => {
+              const unlocked = i <= campaignUnlocked;
+              const completed = i < campaignUnlocked;
+              const exists = availableMissions[i] !== false;
+              const accentColor = activeCampaign.faction === 'allied' ? '#4488cc' : '#cc4444';
+              const accentDim = activeCampaign.faction === 'allied' ? '#223344' : '#442222';
+              return (
+                <button
+                  key={cm.id}
+                  onClick={() => unlocked && exists && selectCampaignMission(activeCampaign, i)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    width: '100%',
+                    padding: '10px 16px',
+                    marginBottom: '6px',
+                    background: unlocked && exists ? `rgba(${activeCampaign.faction === 'allied' ? '40,80,160' : '160,40,40'},0.08)` : 'rgba(40,40,40,0.3)',
+                    border: `1px solid ${unlocked && exists ? accentDim : '#222'}`,
+                    color: unlocked ? '#eee' : '#555',
+                    fontFamily: 'monospace',
+                    fontSize: '13px',
+                    cursor: unlocked && exists ? 'pointer' : 'not-allowed',
+                    textAlign: 'left',
+                    transition: 'background 0.15s',
+                    opacity: exists ? 1 : 0.5,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (unlocked && exists) (e.currentTarget as HTMLElement).style.background = `rgba(${activeCampaign.faction === 'allied' ? '40,80,160' : '160,40,40'},0.18)`;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (unlocked && exists) (e.currentTarget as HTMLElement).style.background = `rgba(${activeCampaign.faction === 'allied' ? '40,80,160' : '160,40,40'},0.08)`;
+                  }}
+                >
+                  <span style={{
+                    fontSize: '16px',
+                    color: completed ? '#44ff44' : unlocked ? accentColor : '#444',
+                    minWidth: '24px',
+                    textAlign: 'center',
+                  }}>
+                    {completed ? '\u2713' : unlocked && exists ? `${i + 1}` : !exists ? '\u2717' : '\u{1F512}'}
+                  </span>
+                  <div>
+                    <div style={{
+                      fontWeight: 'bold',
+                      color: unlocked && exists ? accentColor : '#555',
+                    }}>
+                      Mission {i + 1}: {cm.title}
+                    </div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: unlocked ? '#666' : '#444',
+                      marginTop: '2px',
+                    }}>
+                      {!exists ? 'Mission file not found' : !unlocked ? 'Complete previous mission to unlock' : cm.id}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: 'flex', gap: '16px', marginTop: '20px', alignItems: 'center' }}>
+            <button
+              onClick={() => { setActiveCampaign(null); transitionTo(() => setScreen('main_menu')); }}
+              style={{
+                background: '#222', color: '#888', border: '1px solid #444',
+                padding: '8px 24px', fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer',
+              }}
+            >
+              Back
+            </button>
+            <span style={{ color: '#444', fontSize: '11px' }}>ESC to go back</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Ant Mission Select Screen ── */}
       {!testMode && !qaMode && screen === 'select' && (
         <div style={{
           position: 'absolute',
@@ -686,20 +1135,20 @@ export default function AntGame({ onExit }: AntGameProps) {
           onClick={() => startCutscene(selectedMission)}
         >
           <div style={{
-            color: '#ff4400',
+            color: activeCampaign ? (activeCampaign.faction === 'allied' ? '#4488cc' : '#cc4444') : '#ff4400',
             fontSize: '12px',
             letterSpacing: '6px',
             textTransform: 'uppercase',
             marginBottom: '8px',
           }}>
-            Mission Briefing
+            {activeCampaign ? 'Command Briefing' : 'Mission Briefing'}
           </div>
 
           <h1 style={{
-            color: '#ff6633',
+            color: activeCampaign ? (activeCampaign.faction === 'allied' ? '#88aadd' : '#dd6666') : '#ff6633',
             fontSize: '32px',
             fontWeight: 'bold',
-            textShadow: '0 0 15px rgba(255,68,0,0.5)',
+            textShadow: `0 0 15px ${activeCampaign ? (activeCampaign.faction === 'allied' ? 'rgba(80,120,200,0.5)' : 'rgba(200,60,60,0.5)') : 'rgba(255,68,0,0.5)'}`,
             letterSpacing: '2px',
             marginBottom: '6px',
           }}>
@@ -707,12 +1156,14 @@ export default function AntGame({ onExit }: AntGameProps) {
           </h1>
 
           <div style={{
-            color: '#cc3300',
+            color: activeCampaign ? '#666' : '#cc3300',
             fontSize: '13px',
             letterSpacing: '2px',
             marginBottom: '30px',
           }}>
-            Mission {missionIndex + 1} of {MISSIONS.length}
+            {activeCampaign
+              ? `Mission ${campaignMissionIndex + 1} of ${activeCampaign.missions.length}`
+              : `Mission ${missionIndex + 1} of ${MISSIONS.length}`}
           </div>
 
           <div style={{
@@ -751,7 +1202,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setScreen('select');
+                setScreen(activeCampaign ? 'campaign_select' : 'select');
               }}
               style={{
                 background: '#222',
@@ -900,7 +1351,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             {gameState === 'won' ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED'}
           </div>
 
-          {gameState === 'won' && missionIndex + 1 >= MISSIONS.length && (
+          {gameState === 'won' && !activeCampaign && missionIndex + 1 >= MISSIONS.length && (
             <div style={{
               color: '#ffaa44',
               fontSize: '16px',
@@ -908,6 +1359,16 @@ export default function AntGame({ onExit }: AntGameProps) {
               textShadow: '0 0 10px #ffaa44',
             }}>
               All ant missions complete! The threat has been neutralized.
+            </div>
+          )}
+          {gameState === 'won' && activeCampaign && campaignMissionIndex + 1 >= activeCampaign.missions.length && (
+            <div style={{
+              color: '#ffaa44',
+              fontSize: '16px',
+              marginBottom: '20px',
+              textShadow: '0 0 10px #ffaa44',
+            }}>
+              Campaign complete! All missions accomplished.
             </div>
           )}
 
@@ -948,7 +1409,11 @@ export default function AntGame({ onExit }: AntGameProps) {
           })()}
 
           <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-            {gameState === 'won' && missionIndex + 1 < MISSIONS.length && (
+            {gameState === 'won' && (
+              activeCampaign
+                ? campaignMissionIndex + 1 < activeCampaign.missions.length
+                : missionIndex + 1 < MISSIONS.length
+            ) && (
               <button
                 onClick={handleNextMission}
                 style={{
@@ -1035,7 +1500,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             {error}
           </div>
           <button
-            onClick={() => { setError(null); setScreen('select'); }}
+            onClick={() => { setError(null); setScreen(activeCampaign ? 'campaign_select' : 'select'); }}
             style={{
               background: '#333',
               color: '#fff',

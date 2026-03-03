@@ -1,5 +1,65 @@
 # Session Summaries
 
+## 2026-03-03T18:20Z — Session 52: Unit Behavior, Sidebar Overhaul & FMV Support
+- **Phase 1 — Unit fixes**: Fixed Tanya "jumping around" by reducing moveToward snap threshold from effectiveSpeed (~3px) to 0.5px sub-pixel. Changed movementSpeed default fraction from 0.5 to 1.0 (units now move at full stat speed, matching C++ parity). Verified SCG01EA sidebar gating already correctly prevents production for no-base missions. Investigated Tanya attack mechanics — confirmed Colt45 correctly one-shots infantry (hitscan instant damage, 50dmg vs 50HP).
+- **Phase 2 — Sidebar overhaul**: Changed SIDEBAR_W from 100→160px (original RA). Moved minimap from bottom to top of sidebar. Added sprite-based sidebar background (sidebar.png tiled). Added vertical power bar (powerbar.png). Switched to 2-column production strip with 32x24 cameo icon sprites ({type}icon.png). Added proper tab bar offset past power bar. Updated all minimap position references via renderer.getMinimapBounds(). Updated sidebarItemAt() for 2-column hit testing. Updated sell/repair + superweapon button positioning. Updated scroll wheel calculations.
+- **Phase 3 — Briefing extension**: Added generateGenericBriefing() that creates procedural briefings from INI [Briefing] text for all 61 campaign missions. Faction-aware visual themes (Allied=blue, Soviet=red). BriefingRenderer.start() now accepts optional iniBriefingText fallback. Wired TACTION_PLAY_MOVIE trigger as EVA title card.
+- Code review findings fixed: comment mismatches, tab bar/power bar overlap resolved
+- 11 new tests (unit-behavior-sidebar.test.ts), TypeScript clean, all pass
+- Files: entity.ts, index.ts, renderer.ts, briefing.ts, AntGame.tsx
+
+## 2026-03-03T06:50Z — Session 51: Multi-Theatre Tileset Extraction & MapPack Fix
+- Extracted SNOW and INTERIOR tilesets alongside TEMPERATE (3261 tiles across 3 theatres)
+- Refactored `scripts/extract-ra-tiles.ts` into reusable `extractTheatre(config)` with theatre configs
+- Extended TEMPERATE template map with IDs >255 (bridges 378-383, hill 400, cliffs 401-408, shores 500-508, etc.)
+- Added INTERIOR template map (IDs 253-399): arrows, floors, walls, light walls, stripes, extras
+- Updated AssetManager to load per-theatre tilesets (Map<string, {image, meta}>), backwards-compat TEMPERATE API
+- Renderer now theatre-aware: refreshes tileset cache on theatre change, removed TEMPERATE-only guard
+- Fixed 0xFFFF clear check in renderer (both tileset path and procedural fallback)
+- Added SNOW terrain classification (same ranges as TEMPERATE — was previously blocked)
+- Added INTERIOR terrain classification: walls (329-377) → ROCK, light walls (291-317) → WALL
+- Code review: fixed renderLayer() missing tileset reset branch, procedural 0xFFFF guard, ESM test imports
+- 30 tests pass (multi-theatre-tileset + mappack-uint16), TypeScript clean (only pre-existing error)
+
+## 2026-03-03T06:15Z — Session 50: Campaign Mission Selection System
+- Implemented full campaign mission selection for Red Alert Easter Egg (6 phases)
+- Phase 0: Dynamic Player House refactor — replaced 40+ hardcoded `House.Spain || House.Greece` checks with `this.isAllied()` and dynamic `_playerHouses` Set in entity.ts. Added England, France, GoodGuy, BadGuy to House enum. Added `buildAlliancesFromINI()` for scenario-driven alliances.
+- Phase 1: Extended extract-ra-assets.ts to find 57 campaign mission INIs (Allied 14, Soviet 14, CS Allied 8, CS Soviet 8)
+- Phase 2: Campaign data structures in scenario.ts — CampaignId, CampaignDef, CampaignMission types, CAMPAIGNS array, progress persistence via localStorage
+- Phase 3: New UI screens in AntGame.tsx — main_menu (4 buttons), faction_select (Allied/Soviet), campaign_select (mission grid with linear unlock). Updated briefing/win/lose screens for campaign context.
+- Phase 4: Generic campaign briefing in briefing.ts — `buildGenericBriefing()` auto-generates static_burst → classified → radar/intel_report → fade_out sequence from free-form text
+- Phase 5: Campaign victory conditions — added generic "all enemies destroyed" fallback for non-ant missions in checkVictoryConditions()
+- 20 new tests (campaign-system.test.ts): data structures, progress persistence, dynamic player houses, alliance building, House enum completeness
+- TypeScript clean (only pre-existing renderer.ts:2945 error), all tests pass
+
+## 2026-03-03T05:30Z — Session 49: Aftermath Expansion Content Extraction
+- Extracted EXPAND2.MIX from freeware Aftermath archive (download + DOSBox RTP patch + ccmixar unpack)
+- Updated extract-ra-assets.ts to load EXPAND2.MIX from filesystem, extract 5 new sprites + 2 INI files
+- New sprites: CTNK (32 frames 48x48), QTNK (96 frames 48x48), DTRK (32 frames 24x24), TTNK (64 frames 48x48), MSUB (16 frames 56x56)
+- Updated UNIT_STATS image references: CTNK→ctnk, QTNK→qtnk, DTRK→dtrk, TTNK→ttnk (replaced stand-in sprites)
+- MRLS.SHP not in freeware data — uses v2rl stand-in (similar vehicle silhouette)
+- Verified MRLS combat pipeline: selectWeapon returns Nike for ground+air, isAntiAir flag enables aircraft targeting
+- 26 new tests (aftermath-content.test.ts): sprite refs, MRLS dual-weapon, Mechanic parity, production gating
+- Code review fixes: removed unused import, added SKIP logs, documented DTRK/QTNK non-buildable, Mechanic faction test
+- All 1302 tests pass (46 files), deployed to cliaas.com
+
+## 2026-03-03T02:30Z — Session 48: RA Engine C++ Parity — Multi-Agent Parallel Fix
+- Executed massive 10-agent parallel plan fixing ~150 C++ parity discrepancies in RA TypeScript engine
+- Wave 1 (Agent 0): Fixed all data/stat values in types.ts + scenario.ts (~100 value changes, 113 tests)
+- Wave 2 (9 agents in parallel worktrees): Fixed formulas, algorithms, mechanics across all engine files
+  - Agent 1: Combat formulas (damage falloff, splash, dog kill) — 39 tests
+  - Agent 2: Economy & ore (bail system, gold/gem values, lump-sum unload) — 42 tests
+  - Agent 3: Movement (removed 3-point turns, fixed speed tiers, groundspeedBias) — 14 tests
+  - Agent 4: Spy/engineer/crate (spy rewrite, engineer full repair, weighted crates) — 28 tests
+  - Agent 5: Superweapons & power (Tesla cutoff, power values, ParaBomb/ParaInfantry) — 59 tests
+  - Agent 6: Naval/aircraft/cloaking (cloak timing, takeoff ramping, rearm ROF) — 21 tests
+  - Agent 7: Production/repair/sell (sliding power penalty, multi-factory, flat sell refund) — 51 tests
+  - Agent 8: Triggers/AI/threat (C++ enum indices, cost-proportional threat scoring) — 48 tests
+  - Agent 9: New units (Tanya C4, Thief, V2RL, Minelayer, Gap Generator, Chrono Tank, MAD Tank, Demo Truck, Mechanic) — 45 tests
+- Post-merge reconciliation: fixed 53 test failures from worktree overlap, cleaned up worktrees
+- Final: 1259 tests pass (was 913), 44 test files, build clean
+- New units added: I_TANYA, I_THF, V_V2RL, V_MNLY, V_MRLS + Nuke/Mechanical warheads
+
 ## 2026-02-27T08:00Z — Session 43: Visual Workflow Builder — Refactoring
 - Continued from previous session (implemented 8-phase visual workflow builder, applied correctness fixes, committed)
 - Completed 6 refactor items from code review:

@@ -46,6 +46,22 @@ export function resetEntityIds(): void {
   nextId = 1;
 }
 
+// Dynamic player house set — updated by Game.start() for each scenario.
+// Used by Entity.isPlayerUnit so all existing code that checks isPlayerUnit
+// works correctly for both ant missions and campaign missions.
+let _playerHouses: Set<House> = new Set([House.Spain, House.Greece]);
+
+/** Set the player-controlled houses for the current scenario.
+ *  Called by Game.start() after loading the scenario and building alliances. */
+export function setPlayerHouses(houses: Set<House>): void {
+  _playerHouses = houses;
+}
+
+/** Get the current player houses set (for renderer and other modules) */
+export function getPlayerHouses(): Set<House> {
+  return _playerHouses;
+}
+
 export class Entity {
   id = nextId++;
   type: UnitType;
@@ -255,10 +271,10 @@ export class Entity {
     return worldToCell(this.pos.x, this.pos.y);
   }
 
-  /** Hardcoded for ant missions (Spain/Greece). For campaign missions with dynamic
-   *  player houses, use Game.isPlayerControlled() instead. */
+  /** Dynamic check: true if this entity's house is in the player-controlled set.
+   *  The set is updated by Game.start() via setPlayerHouses() for each scenario. */
   get isPlayerUnit(): boolean {
-    return this.house === House.Spain || this.house === House.Greece;
+    return _playerHouses.has(this.house);
   }
 
   get isTransport(): boolean {
@@ -630,7 +646,7 @@ export class Entity {
     const dy = target.y - this.pos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist <= effectiveSpeed) {
+    if (dist <= 0.5) { // sub-pixel snap — prevents oscillation without visible teleport
       this.pos.x = target.x;
       this.pos.y = target.y;
       return true; // arrived
