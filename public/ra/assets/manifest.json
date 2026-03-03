@@ -251,6 +251,15 @@
     "sheetWidth": 230,
     "sheetHeight": 34
   },
+  "msub": {
+    "frameWidth": 56,
+    "frameHeight": 56,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 896,
+    "sheetHeight": 56
+  },
   "hind": {
     "frameWidth": 56,
     "frameHeight": 56,
@@ -304,6 +313,42 @@
     "rows": 2,
     "sheetWidth": 384,
     "sheetHeight": 48
+  },
+  "ctnk": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 96
+  },
+  "qtnk": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 96,
+    "columns": 16,
+    "rows": 6,
+    "sheetWidth": 768,
+    "sheetHeight": 288
+  },
+  "dtrk": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "ttnk": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 64,
+    "columns": 16,
+    "rows": 4,
+    "sheetWidth": 768,
+    "sheetHeight": 192
   },
   "piff": {
     "frameWidth": 9,

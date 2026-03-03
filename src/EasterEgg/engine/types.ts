@@ -521,10 +521,10 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true },
   // Counterstrike/Aftermath expansion vehicles — crusher for tank variants
   STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 5, crusher: true, isCloakable: true },
-  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: '2tnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true },
-  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: '4tnk', strength: 110, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true },
-  QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: '2tnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
-  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'truk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
+  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true },
+  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true },
+  QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
+  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 30, speedClass: SpeedClass.WINGED, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 400, armor: 'heavy', speed: 10, speedClass: SpeedClass.FLOAT, sight: 4, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8, isVessel: true },
@@ -545,7 +545,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   // Expansion vehicles (V2 Rocket, Minelayer, MRLS)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 6, rot: 3, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700 },
   MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'allied', cost: 800 },
-  MRLS: { type: UnitType.V_MRLS, name: 'MRLS', image: 'mrls', strength: 75, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'Nike', secondaryWeapon: 'Nike', owner: 'allied', cost: 800 },
+  MRLS: { type: UnitType.V_MRLS, name: 'MRLS', image: 'v2rl', strength: 75, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'Nike', secondaryWeapon: 'Nike', owner: 'allied', cost: 800 }, // MRLS.SHP not in freeware data — v2rl stand-in (similar vehicle silhouette)
 };
 
 // Weapon stats from RULES.INI — real RA values
