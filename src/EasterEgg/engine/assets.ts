@@ -243,6 +243,7 @@ export class AssetManager {
     sctx.globalCompositeOperation = 'source-in';
     sctx.fillStyle = 'black';
     sctx.fillRect(0, 0, canvas.width, canvas.height);
+    sctx.globalCompositeOperation = 'source-over'; // Reset to default
     this.shadowSheets.set(sheetName, canvas);
     return canvas;
   }

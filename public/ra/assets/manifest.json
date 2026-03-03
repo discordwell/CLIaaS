@@ -206,6 +206,96 @@
     "sheetWidth": 800,
     "sheetHeight": 780
   },
+  "ss": {
+    "frameWidth": 56,
+    "frameHeight": 56,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 896,
+    "sheetHeight": 56
+  },
+  "dd": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 1152,
+    "sheetHeight": 72
+  },
+  "ca": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 1152,
+    "sheetHeight": 72
+  },
+  "pt": {
+    "frameWidth": 56,
+    "frameHeight": 56,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 896,
+    "sheetHeight": 56
+  },
+  "lst": {
+    "frameWidth": 46,
+    "frameHeight": 34,
+    "frameCount": 5,
+    "columns": 5,
+    "rows": 1,
+    "sheetWidth": 230,
+    "sheetHeight": 34
+  },
+  "hind": {
+    "frameWidth": 56,
+    "frameHeight": 56,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 896,
+    "sheetHeight": 112
+  },
+  "heli": {
+    "frameWidth": 46,
+    "frameHeight": 29,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 736,
+    "sheetHeight": 58
+  },
+  "tran": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 36,
+    "columns": 16,
+    "rows": 3,
+    "sheetWidth": 768,
+    "sheetHeight": 144
+  },
+  "mig": {
+    "frameWidth": 56,
+    "frameHeight": 56,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 896,
+    "sheetHeight": 56
+  },
+  "yak": {
+    "frameWidth": 40,
+    "frameHeight": 40,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 640,
+    "sheetHeight": 40
+  },
   "stnk": {
     "frameWidth": 24,
     "frameHeight": 24,
@@ -765,69 +855,6 @@
     "sheetHeight": 24
   },
   "gem04": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 3,
-    "columns": 3,
-    "rows": 1,
-    "sheetWidth": 72,
-    "sheetHeight": 24
-  },
-  "ant1": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 112,
-    "columns": 16,
-    "rows": 7,
-    "sheetWidth": 768,
-    "sheetHeight": 336
-  },
-  "ant2": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 112,
-    "columns": 16,
-    "rows": 7,
-    "sheetWidth": 768,
-    "sheetHeight": 336
-  },
-  "ant3": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 112,
-    "columns": 16,
-    "rows": 7,
-    "sheetWidth": 768,
-    "sheetHeight": 336
-  },
-  "antdie": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 8,
-    "columns": 8,
-    "rows": 1,
-    "sheetWidth": 384,
-    "sheetHeight": 48
-  },
-  "quee": {
-    "frameWidth": 48,
-    "frameHeight": 24,
-    "frameCount": 20,
-    "columns": 16,
-    "rows": 2,
-    "sheetWidth": 768,
-    "sheetHeight": 48
-  },
-  "lar1": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 3,
-    "columns": 3,
-    "rows": 1,
-    "sheetWidth": 72,
-    "sheetHeight": 24
-  },
-  "lar2": {
     "frameWidth": 24,
     "frameHeight": 24,
     "frameCount": 3,

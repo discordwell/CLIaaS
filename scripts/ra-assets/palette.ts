@@ -21,7 +21,9 @@ export function parsePalette(data: Buffer): Palette {
     colors[i * 4] = (r6 << 2) | (r6 >> 4);
     colors[i * 4 + 1] = (g6 << 2) | (g6 >> 4);
     colors[i * 4 + 2] = (b6 << 2) | (b6 >> 4);
-    colors[i * 4 + 3] = i === 0 ? 0 : 255; // Index 0 is transparent
+    // Index 0 = transparent background, Index 4 = shadow/remap marker in C++ RA
+    // (palette entry 4 is bright green 89,255,85 but used as shadow color, not displayed)
+    colors[i * 4 + 3] = (i === 0 || i === 4) ? 0 : 255;
   }
 
   return { colors };
