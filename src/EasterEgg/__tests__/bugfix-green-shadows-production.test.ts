@@ -62,7 +62,7 @@ describe('Palette index 4 transparency', () => {
 // Production filtering — expansion units need techPrereq
 // ============================================================
 describe('Production items techPrereq for expansion units', () => {
-  const expansionUnits = ['E7', 'THF', 'V2RL', 'MNLY', 'MRLS'];
+  const expansionUnits = ['E7', 'THF', 'V2RL', 'MNLY'];
 
   for (const unitType of expansionUnits) {
     it(`${unitType} has a techPrereq set`, () => {
@@ -90,11 +90,6 @@ describe('Production items techPrereq for expansion units', () => {
 
   it('MNLY (Minelayer) requires ATEK', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MNLY')!;
-    expect(item.techPrereq).toBe('ATEK');
-  });
-
-  it('MRLS requires ATEK', () => {
-    const item = PRODUCTION_ITEMS.find(p => p.type === 'MRLS')!;
     expect(item.techPrereq).toBe('ATEK');
   });
 

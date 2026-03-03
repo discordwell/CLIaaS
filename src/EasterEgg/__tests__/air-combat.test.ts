@@ -125,15 +125,6 @@ describe('Aircraft weapon stats', () => {
     expect(w.projectileROT).toBeUndefined();
   });
 
-  it('Nike is anti-air missile', () => {
-    const w = WEAPON_STATS.Nike;
-    expect(w.damage).toBe(50);
-    expect(w.range).toBe(7.5);
-    expect(w.warhead).toBe('AP');
-    expect(w.isAntiAir).toBe(true);
-    expect(w.splash).toBe(1.0);
-  });
-
   it('RedEye has isAntiAir flag', () => {
     const w = WEAPON_STATS.RedEye;
     expect(w.isAntiAir).toBe(true);
@@ -407,10 +398,6 @@ describe('AA targeting', () => {
 
   it('RedEye weapon has isAntiAir', () => {
     expect(WEAPON_STATS.RedEye.isAntiAir).toBe(true);
-  });
-
-  it('Nike weapon has isAntiAir', () => {
-    expect(WEAPON_STATS.Nike.isAntiAir).toBe(true);
   });
 
   it('Ground-only weapons do not have isAntiAir', () => {

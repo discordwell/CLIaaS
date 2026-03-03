@@ -682,21 +682,13 @@ describe('Phase Transport (STNK) cloaking', () => {
 });
 
 // ============================================================================
-// Bonus: V2 Rocket and MRLS verify weapon data
+// Bonus: V2 Rocket weapon data
 // ============================================================================
-describe('V2 Rocket and MRLS weapon data', () => {
+describe('V2 Rocket weapon data', () => {
   it('V2RL uses SCUD weapon with long range', () => {
     const v2 = makeEntity(UnitType.V_V2RL, House.USSR, 100, 100);
     expect(v2.stats.primaryWeapon).toBe('SCUD');
     expect(v2.weapon).not.toBeNull();
     expect(v2.weapon!.range).toBeGreaterThan(5);
-  });
-
-  it('MRLS uses Nike weapon on both slots', () => {
-    const mrls = makeEntity(UnitType.V_MRLS, House.Spain, 100, 100);
-    expect(mrls.stats.primaryWeapon).toBe('Nike');
-    expect(mrls.stats.secondaryWeapon).toBe('Nike');
-    expect(mrls.weapon).not.toBeNull();
-    expect(mrls.weapon2).not.toBeNull();
   });
 });

@@ -57,7 +57,7 @@ Weapon values verified against RULES.INI. Infantry/vehicle primary weapons mostl
 - [!] **Maverick** — TS: 60/50/5.0. C++: 50/3/6.0. ROF is 17x too slow.
 - [!] **Hellfire** — TS: 30/40/5.0. C++: 40/60/4.0. All three wrong.
 - [!] **ChainGun** — TS: 15/10/4.0/AP. C++: 40/3/5.0/SA. Damage, ROF, range, and warhead all wrong.
-- [!] **Nike (SAM)** — TS: 100/100/10.0. C++: 50/20/7.5. All three wrong.
+- [REMOVED] **Nike (SAM)** — Removed. MRLS was a Tiberian Dawn unit, not in RA. Nike weapon only used by MRLS.
 - [!] **Sniper** — TS: 125/5.0. C++: 100/3.75. Damage and range wrong.
 - [!] **TeslaCannon (building)** — TS: 80/40/7.0. C++: ~100/120/8.5. All wrong.
 
@@ -102,7 +102,7 @@ Weapon values verified against RULES.INI. Infantry/vehicle primary weapons mostl
 - [!] **STNK Phase Transport** — C++ 800cost/crusher. TS 1100cost/no crusher. Missing cloakable flag.
 - [ ] **V2RL V2 Rocket** — Not implemented.
 - [ ] **MNLY Minelayer** — Not implemented. No mine mechanics.
-- [ ] **MRLS** — Not implemented.
+- [REMOVED] **MRLS** — Removed. Tiberian Dawn unit, not in RA Aftermath.
 
 ## UNIT STATS — NAVAL
 
@@ -287,7 +287,6 @@ Nearly every aircraft stat is wrong. C++ aircraft have Sight=0 (rely on ground u
 - [ ] **Thief** — Not implemented (credit theft on entering enemy refinery/silo).
 - [ ] **V2 Rocket Launcher** — Not implemented.
 - [ ] **Minelayer + mines** — Not implemented (AP mine placement, detection, damage, mine limit).
-- [ ] **MRLS** — Not implemented.
 - [!] **Chrono Tank teleport** — Unit type exists as stub. No self-teleport ability.
 - [!] **MAD Tank shockwave** — Unit type exists as stub. No seismic weapon.
 - [!] **Demo Truck kamikaze** — Unit type exists as stub. No self-destruct explosion.

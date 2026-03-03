@@ -68,7 +68,6 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'TRAN.SHP', 'tran'],      // Chinook transport helicopter
   ['CONQUER.MIX', 'MIG.SHP', 'mig'],        // MiG-29 fighter
   ['CONQUER.MIX', 'YAK.SHP', 'yak'],        // Yak attack plane
-  ['CONQUER.MIX', 'MLRS.SHP', 'mlrs'],    // MRLS (file is MLRS.SHP, game code uses MRLS)
   // Counterstrike expansion — STNK is in base CONQUER.MIX (reused from TD)
   ['CONQUER.MIX', 'STNK.SHP', 'stnk'],    // Phase Transport (stealth tank)
   // Aftermath expansion vehicles (from EXPAND2.MIX — extracted via extract-freeware-ant-originals.sh)
@@ -147,6 +146,29 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['TEMPERAT.MIX', 'GEM02.TEM', 'gem02'],
   ['TEMPERAT.MIX', 'GEM03.TEM', 'gem03'],
   ['TEMPERAT.MIX', 'GEM04.TEM', 'gem04'],
+  // Trees (theater-specific .TEM files from TEMPERAT.MIX)
+  // T01-T17 single trees (T04, T09 don't exist in C++ source)
+  ['TEMPERAT.MIX', 'T01.TEM', 't01'],
+  ['TEMPERAT.MIX', 'T02.TEM', 't02'],
+  ['TEMPERAT.MIX', 'T03.TEM', 't03'],
+  ['TEMPERAT.MIX', 'T05.TEM', 't05'],
+  ['TEMPERAT.MIX', 'T06.TEM', 't06'],
+  ['TEMPERAT.MIX', 'T07.TEM', 't07'],
+  ['TEMPERAT.MIX', 'T08.TEM', 't08'],
+  ['TEMPERAT.MIX', 'T10.TEM', 't10'],
+  ['TEMPERAT.MIX', 'T11.TEM', 't11'],
+  ['TEMPERAT.MIX', 'T12.TEM', 't12'],
+  ['TEMPERAT.MIX', 'T13.TEM', 't13'],
+  ['TEMPERAT.MIX', 'T14.TEM', 't14'],
+  ['TEMPERAT.MIX', 'T15.TEM', 't15'],
+  ['TEMPERAT.MIX', 'T16.TEM', 't16'],
+  ['TEMPERAT.MIX', 'T17.TEM', 't17'],
+  // TC01-TC05 tree clumps
+  ['TEMPERAT.MIX', 'TC01.TEM', 'tc01'],
+  ['TEMPERAT.MIX', 'TC02.TEM', 'tc02'],
+  ['TEMPERAT.MIX', 'TC03.TEM', 'tc03'],
+  ['TEMPERAT.MIX', 'TC04.TEM', 'tc04'],
+  ['TEMPERAT.MIX', 'TC05.TEM', 'tc05'],
 ];
 
 function log(msg: string): void {

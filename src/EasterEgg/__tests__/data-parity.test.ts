@@ -265,16 +265,6 @@ describe('UNIT_STATS parity', () => {
       expect(u.owner).toBe('allied');
     });
 
-    it('MRLS — new entry', () => {
-      const u = UNIT_STATS.MRLS;
-      expect(u).toBeDefined();
-      expect(u.strength).toBe(75);
-      expect(u.speed).toBe(9);
-      expect(u.armor).toBe('light');
-      expect(u.primaryWeapon).toBe('Nike');
-      expect(u.secondaryWeapon).toBe('Nike');
-      expect(u.owner).toBe('allied');
-    });
   });
 
   // --- Naval ---
@@ -562,13 +552,6 @@ describe('WEAPON_STATS parity', () => {
     expect(w.warhead).toBe('SA');
   });
 
-  it('Nike — damage=50, rof=20, range=7.5, warhead=AP', () => {
-    const w = WEAPON_STATS.Nike;
-    expect(w.damage).toBe(50);
-    expect(w.rof).toBe(20);
-    expect(w.range).toBe(7.5);
-    expect(w.warhead).toBe('AP');
-  });
 });
 
 // ============================================================
@@ -749,10 +732,4 @@ describe('PRODUCTION_ITEMS cost parity', () => {
     expect(item!.faction).toBe('allied');
   });
 
-  it('MRLS cost = 800, faction = allied', () => {
-    const item = findItem('MRLS');
-    expect(item).toBeDefined();
-    expect(item!.cost).toBe(800);
-    expect(item!.faction).toBe('allied');
-  });
 });

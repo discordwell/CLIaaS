@@ -135,7 +135,6 @@ export enum UnitType {
   V_DTRK = 'DTRK', // Demolition Truck (kamikaze)
   V_V2RL = 'V2RL', // V2 Rocket Launcher
   V_MNLY = 'MNLY', // Minelayer
-  V_MRLS = 'MRLS', // MRLS (Mobile Rocket Launch System)
   // Transport vehicles
   V_TRAN = 'TRAN', // Chinook transport helicopter
   V_LST = 'LST',   // Landing ship transport
@@ -542,10 +541,9 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   // Tanya & Thief (new infantry)
   E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e1', strength: 100, armor: 'none', speed: 6, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: null, crushable: true, owner: 'allied', cost: 1200, canSwim: true },
   THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 6, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500 },
-  // Expansion vehicles (V2 Rocket, Minelayer, MRLS)
+  // Expansion vehicles (V2 Rocket, Minelayer)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 6, rot: 3, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700 },
   MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'allied', cost: 800 },
-  MRLS: { type: UnitType.V_MRLS, name: 'MRLS', image: 'mlrs', strength: 75, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'Nike', secondaryWeapon: 'Nike', owner: 'allied', cost: 800 }, // SHP file is MLRS.SHP (full acronym) in CONQUER.MIX
 };
 
 // Weapon stats from RULES.INI — real RA values
@@ -584,7 +582,6 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Maverick:         { name: 'Maverick',          damage: 50,  rof: 3,  range: 6.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Air-to-ground missile (MIG)
   Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Helicopter missile (HELI)
   ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 40 },  // Rapid-fire hitscan (HIND/YAK)
-  Nike:             { name: 'Nike',               damage: 50,  rof: 20, range: 7.5,  warhead: 'AP', splash: 1.0, projSpeed: 15, projectileSpeed: 3.0, projectileROT: 5, isAntiAir: true },  // SAM missile / MRLS
   // New parity weapons
   '8Inch':          { name: '8Inch',             damage: 500, rof: 120, range: 10.0, warhead: 'AP', projSpeed: 30 },  // Cruiser main gun
   '2Inch':          { name: '2Inch',             damage: 20,  rof: 20, range: 5.0,  warhead: 'SA', projSpeed: 40 },  // Gunboat weapon
@@ -719,7 +716,6 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK' },
   { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK' },
   { type: 'MNLY', name: 'Minelayer', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
-  { type: 'MRLS', name: 'MRLS', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
   // Naval (from SYRD — Allied Shipyard)
   { type: 'PT', name: 'Gunboat', cost: 500, buildTime: 100, prerequisite: 'SYRD', faction: 'allied' },
   { type: 'DD', name: 'Destroyer', cost: 1000, buildTime: 160, prerequisite: 'SYRD', faction: 'allied' },
