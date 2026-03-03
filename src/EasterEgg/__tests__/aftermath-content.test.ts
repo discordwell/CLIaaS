@@ -179,4 +179,15 @@ describe('Aftermath production gating', () => {
       expect(prod!.prerequisite).toBe('WEAP');
     }
   });
+
+  it('DTRK and QTNK are not buildable (scenario-only kamikaze units)', () => {
+    expect(PRODUCTION_ITEMS.find(p => p.type === 'DTRK')).toBeUndefined();
+    expect(PRODUCTION_ITEMS.find(p => p.type === 'QTNK')).toBeUndefined();
+  });
+
+  it('Mechanic is available to both factions', () => {
+    const prod = PRODUCTION_ITEMS.find(p => p.type === 'MECH');
+    expect(prod).toBeDefined();
+    expect(prod!.faction).toBe('both');
+  });
 });

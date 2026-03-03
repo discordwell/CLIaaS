@@ -8,7 +8,7 @@
  * Usage: pnpm extract-assets
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { MixFile } from './ra-assets/mix.js';
@@ -366,6 +366,8 @@ async function main(): Promise<void> {
       if (iniData) {
         writeFileSync(join(OUTPUT_DIR, iniName.toLowerCase()), iniData);
         log(`  ${iniName}: ${iniData.length} bytes`);
+      } else {
+        log(`  SKIP ${iniName}: not found in EXPAND2.MIX`);
       }
     }
   }
