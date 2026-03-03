@@ -419,6 +419,10 @@ export class Entity {
     if (attacker && attacker.alive && attacker.type === UnitType.I_DOG && attacker.target === this) {
       amount = this.hp; // override damage to kill instantly
     }
+    // CR2: Apply armor bias (damage reduction multiplier from crate, default 1.0)
+    if (this.armorBias > 1.0 && amount > 0) {
+      amount = Math.max(1, Math.round(amount / this.armorBias));
+    }
     // C++ infantry.cpp:329-330 — prone infantry take 50% damage (ProneDamageBias)
     if (this.isProne && amount > 0) {
       amount = Math.max(1, Math.round(amount * PRONE_DAMAGE_BIAS));

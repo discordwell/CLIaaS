@@ -102,19 +102,19 @@ describe('Ore Regrowth (C++ parity)', () => {
       vi.restoreAllMocks();
     });
 
-    it('gem at density 0x0F increases to 0x10', () => {
+    it('gem at density 0x0F does NOT increase (EC6: gems never grow)', () => {
       setOverlay(50, 50, 0x0F);
       vi.spyOn(Math, 'random').mockReturnValue(0.1);
       map.growOre(256);
-      expect(getOverlay(50, 50)).toBe(0x10);
+      expect(getOverlay(50, 50)).toBe(0x0F); // EC6: gems skipped entirely
       vi.restoreAllMocks();
     });
 
-    it('gem at density 0x11 increases to 0x12', () => {
+    it('gem at density 0x11 does NOT increase (EC6: gems never grow)', () => {
       setOverlay(50, 50, 0x11);
       vi.spyOn(Math, 'random').mockReturnValue(0.1);
       map.growOre(256);
-      expect(getOverlay(50, 50)).toBe(0x12);
+      expect(getOverlay(50, 50)).toBe(0x11); // EC6: gems skipped entirely
       vi.restoreAllMocks();
     });
 
@@ -138,11 +138,11 @@ describe('Ore Regrowth (C++ parity)', () => {
   });
 
   describe('Ore spreading', () => {
-    it('gold ore spreads to adjacent empty cell with overlay 0x03', () => {
-      setOverlay(50, 50, 0x07); // gold ore cell
+    it('gold ore spreads to adjacent empty cell with overlay 0x03 (EC7: requires density > 6)', () => {
+      setOverlay(50, 50, 0x0C); // gold ore at high density (> 0x09, above spread threshold)
       // First random call: density check (0.6 > 0.5, no density growth)
       // Second random call: spread check (0.1 < 0.25, spread triggers)
-      // Third random call: direction pick (0.0 → index 0 → [0,-1] → north)
+      // Third random call: direction pick (0.0 → index 0 → N [0,-1] → cell (50, 49))
       const mockRandom = vi.spyOn(Math, 'random');
       mockRandom
         .mockReturnValueOnce(0.6)  // density: skip (0.6 >= 0.5)
@@ -152,21 +152,20 @@ describe('Ore Regrowth (C++ parity)', () => {
       // Cell (50, 49) should now have minimum gold ore
       expect(getOverlay(50, 49)).toBe(0x03);
       // Original cell should NOT have changed density (we skipped it)
-      expect(getOverlay(50, 50)).toBe(0x07);
+      expect(getOverlay(50, 50)).toBe(0x0C);
       vi.restoreAllMocks();
     });
 
-    it('gem spreads to adjacent empty cell with overlay 0x0F', () => {
+    it('gem does NOT spread to adjacent empty cell (EC6: gems never spread)', () => {
       setOverlay(50, 50, 0x10); // gem cell
       const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)  // density: skip (source cell)
-        .mockReturnValueOnce(0.1)  // spread: trigger (source cell)
-        .mockReturnValueOnce(0.5)  // direction: index 2 → [0,1] → south → (50, 51)
-        .mockReturnValueOnce(0.9)  // density: skip (spread cell processed in same pass)
-        .mockReturnValueOnce(0.9); // spread: skip (spread cell)
+      mockRandom.mockReturnValue(0); // always trigger everything
       map.growOre(256);
-      expect(getOverlay(50, 51)).toBe(0x0F); // minimum gem density
+      // EC6: gems are completely skipped by growOre — no spread occurs
+      expect(getOverlay(50, 51)).toBe(0xFF);
+      expect(getOverlay(50, 49)).toBe(0xFF);
+      expect(getOverlay(51, 50)).toBe(0xFF);
+      expect(getOverlay(49, 50)).toBe(0xFF);
       vi.restoreAllMocks();
     });
 
@@ -276,9 +275,10 @@ describe('Ore Regrowth (C++ parity)', () => {
       vi.restoreAllMocks();
     });
 
-    it('single remaining ore cell can spread outward', () => {
-      // Only one cell has ore — it serves as a seed
-      setOverlay(50, 50, 0x03); // min gold ore
+    it('single remaining ore cell can spread outward (EC7: requires density > 6)', () => {
+      // Only one cell has ore — it serves as a seed.
+      // EC7: Spread requires density > 6 (overlay > 0x09), so use high-density ore.
+      setOverlay(50, 50, 0x0C); // high gold ore (above spread threshold)
       vi.spyOn(Math, 'random')
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger

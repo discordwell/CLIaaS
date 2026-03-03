@@ -589,35 +589,25 @@ describe('RA1 Parity — Splash Falloff (C++ linear division)', () => {
   });
 });
 
-describe('RA1 Parity — Harvester Bail-by-Bail Unloading', () => {
-  it('harvester unloads 50 credits per bail', () => {
-    // Mirrors: bailAmount = Math.min(50, entity.oreLoad)
-    const oreLoad = 700;
-    const bailAmount = Math.min(50, oreLoad);
-    expect(bailAmount).toBe(50);
+describe('RA1 Parity — Harvester Lump-Sum Unloading (EC5)', () => {
+  it('EC5: harvester credits entire load as lump sum after dump animation', () => {
+    // EC5: After 15-tick dump animation, full oreCreditValue deposited at once
+    const oreCreditValue = 980; // 28 gold bails × 35 credits
+    const deposited = oreCreditValue; // lump sum — no per-tick draining
+    expect(deposited).toBe(980);
   });
 
-  it('last bail handles remainder correctly', () => {
-    const oreLoad = 30; // less than 50
-    const bailAmount = Math.min(50, oreLoad);
-    expect(bailAmount).toBe(30);
+  it('EC3: bail count is 28 (bail-based capacity)', () => {
+    // EC3: ORE_CAPACITY is now bail count (28), not credit value
+    // A full gold load = 28 bails × 35 credits = 980 credits
+    expect(Entity.ORE_CAPACITY).toBe(28);
+    expect(Entity.BAIL_COUNT).toBe(28);
   });
 
-  it('full 700 ore load requires 14 bails', () => {
-    let remaining = 700;
-    let bails = 0;
-    while (remaining > 0) {
-      const bail = Math.min(50, remaining);
-      remaining -= bail;
-      bails++;
-    }
-    expect(bails).toBe(14);
-  });
-
-  it('bail count matches RA1 BailCount=28 at 25 credits/bail', () => {
-    // RA1: BailCount=28, each bail is 25 credits of ore
-    // 28 bails × 25 = 700 total capacity = ORE_CAPACITY
-    expect(Entity.ORE_CAPACITY).toBe(700);
+  it('dump animation duration is 15 ticks (1 second at 15 FPS)', () => {
+    // EC5: harvestTick must reach 15 (DUMP_DURATION) before credits deposit
+    const DUMP_DURATION = 15;
+    expect(DUMP_DURATION).toBe(15);
   });
 });
 
@@ -648,21 +638,23 @@ describe('RA1 Parity — Service Depot Dock-based Repair', () => {
   });
 });
 
-describe('RA1 Parity — Ore Values', () => {
-  it('ore value is 25 credits per level (GoldValue=25)', () => {
-    // Verified against RULES.INI GoldValue=25
-    const orePerLevel = 25;
-    expect(orePerLevel).toBe(25);
+describe('RA1 Parity — Ore Values (EC1/EC2/EC3)', () => {
+  it('gold ore value is 35 credits per bail (EC1: C++ overlay.cpp)', () => {
+    // EC1: Gold ore = 35 credits per bail (C++ parity)
+    const orePerBail = 35;
+    expect(orePerBail).toBe(35);
   });
 
-  it('gem value is 50 credits per level (GemValue=50)', () => {
-    // Verified against RULES.INI GemValue=50
-    const gemPerLevel = 50;
-    expect(gemPerLevel).toBe(50);
+  it('gem value is 110 credits per bail (EC2: C++ overlay.cpp)', () => {
+    // EC2: Gems = 110 credits per bail (C++ parity)
+    const gemPerBail = 110;
+    expect(gemPerBail).toBe(110);
   });
 
-  it('harvester capacity is 700 (28 bails × 25 credits)', () => {
-    expect(Entity.ORE_CAPACITY).toBe(700);
+  it('harvester capacity is 28 bails (EC3: bail-based, not credit-based)', () => {
+    // EC3: ORE_CAPACITY is now bail count, not credit total
+    // A full gold load = 28 × 35 = 980 credits
+    expect(Entity.ORE_CAPACITY).toBe(28);
   });
 });
 

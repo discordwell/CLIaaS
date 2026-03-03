@@ -19,7 +19,8 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 // === 1. Crusher stats are correctly set for heavy tracked vehicles ===
 describe('crusher flag on UNIT_STATS', () => {
   const expectedCrushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'HARV', 'MCV', 'CTNK', 'TTNK', 'QTNK'];
-  const expectedNonCrushers = ['JEEP', 'APC', 'ARTY', 'TRUK', 'STNK', 'DTRK', 'TRAN', 'LST'];
+  const expectedCrushersExpansion = ['STNK']; // Phase Transport has crusher per C++ parity
+  const expectedNonCrushers = ['JEEP', 'APC', 'ARTY', 'TRUK', 'DTRK', 'TRAN', 'LST'];
 
   it.each(expectedCrushers)('%s has crusher=true', (unitKey) => {
     expect(UNIT_STATS[unitKey].crusher).toBe(true);
@@ -171,9 +172,9 @@ describe('non-crusher vehicles do NOT crush', () => {
     expect(truck.stats.crusher).toBeFalsy();
   });
 
-  it('Phase Transport (STNK) should NOT have crusher flag', () => {
+  it('Phase Transport (STNK) should have crusher flag (C++ parity)', () => {
     const stnk = makeEntity(UnitType.V_STNK, House.Spain, 100, 100);
-    expect(stnk.stats.crusher).toBeFalsy();
+    expect(stnk.stats.crusher).toBe(true);
   });
 
   it('Demo Truck (DTRK) should NOT have crusher flag', () => {

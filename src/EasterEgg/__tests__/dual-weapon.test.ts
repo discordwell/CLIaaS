@@ -30,12 +30,12 @@ describe('Dual-weapon unit configuration', () => {
     expect(mammoth.weapon2!.name).toBe('MammothTusk');
   });
 
-  it('Rocket Soldier (E3) has primary (Dragon) and secondary (RedEye)', () => {
+  it('Rocket Soldier (E3) has primary (RedEye) and secondary (Dragon)', () => {
     const rocket = makeEntity(UnitType.I_E3, House.Spain);
     expect(rocket.weapon).not.toBeNull();
-    expect(rocket.weapon!.name).toBe('Dragon');
+    expect(rocket.weapon!.name).toBe('RedEye');
     expect(rocket.weapon2).not.toBeNull();
-    expect(rocket.weapon2!.name).toBe('RedEye');
+    expect(rocket.weapon2!.name).toBe('Dragon');
   });
 
   it('UNIT_STATS correctly defines secondaryWeapon for 4TNK', () => {
@@ -46,8 +46,8 @@ describe('Dual-weapon unit configuration', () => {
 
   it('UNIT_STATS correctly defines secondaryWeapon for E3', () => {
     const stats = UNIT_STATS['E3'];
-    expect(stats.primaryWeapon).toBe('Dragon');
-    expect(stats.secondaryWeapon).toBe('RedEye');
+    expect(stats.primaryWeapon).toBe('RedEye');
+    expect(stats.secondaryWeapon).toBe('Dragon');
   });
 });
 
@@ -112,15 +112,15 @@ describe('Weapon selection based on target armor effectiveness', () => {
     expect(selected).toBe(mammoth.weapon2); // MammothTusk (HE is better vs no armor)
   });
 
-  it('E3 Rocket Soldier selects RedEye when more effective', () => {
+  it('E3 Rocket Soldier selects RedEye (primary) when more effective vs heavy armor', () => {
     const rocket = makeEntity(UnitType.I_E3, House.Spain, 100, 100);
     const heavyTarget = makeEntity(UnitType.V_3TNK, House.USSR, 150, 100);
 
-    // Dragon: AP warhead, 35 damage, vs heavy: 1.0 → eff = 35
-    // RedEye: AP warhead, 50 damage, vs heavy: 1.0 → eff = 50
+    // RedEye (primary): AP warhead, 50 damage, vs heavy: 1.0 → eff = 50
+    // Dragon (secondary): AP warhead, 35 damage, vs heavy: 1.0 → eff = 35
     // RedEye has higher damage with same warhead — should be preferred
     const selected = rocket.selectWeapon(heavyTarget, getWarheadMult);
-    expect(selected).toBe(rocket.weapon2); // RedEye (more raw damage, same warhead)
+    expect(selected).toBe(rocket.weapon); // RedEye (primary, more raw damage)
   });
 });
 
@@ -243,20 +243,16 @@ describe('Damage calculation with dual weapons', () => {
 });
 
 describe('inRange with dual weapons', () => {
-  it('inRange returns true when target is in secondary weapon range but not primary', () => {
-    const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
-    // 120mm range: 4.75 cells, MammothTusk range: 5.0 cells
-    // Place target at ~4.9 cells distance (in primary's range too, but let's test edge)
-    // Actually test with a custom unit where ranges differ significantly
-    // For this test, use the E3 rocket soldier: Dragon range=5.0, RedEye range=7.5
+  it('inRange returns true when target is in primary weapon range but not secondary', () => {
+    // E3 weapons: primary=RedEye (range 7.5), secondary=Dragon (range 5.0)
     const rocket = makeEntity(UnitType.I_E3, House.Spain, 100, 100);
     // Place target at 6 cells away (24px * 6 = 144px from center)
     const target = makeEntity(UnitType.ANT1, House.USSR, 100 + 24 * 6, 100);
 
-    // Dragon range=5.0, RedEye range=7.5
-    // At distance ~6 cells: Dragon can't reach, RedEye can
-    expect(rocket.inRangeWith(target, rocket.weapon!)).toBe(false);
-    expect(rocket.inRangeWith(target, rocket.weapon2!)).toBe(true);
+    // RedEye (primary) range=7.5, Dragon (secondary) range=5.0
+    // At distance ~6 cells: RedEye can reach, Dragon can't
+    expect(rocket.inRangeWith(target, rocket.weapon!)).toBe(true);
+    expect(rocket.inRangeWith(target, rocket.weapon2!)).toBe(false);
     // inRange (combined) should return true
     expect(rocket.inRange(target)).toBe(true);
   });
@@ -271,13 +267,13 @@ describe('inRange with dual weapons', () => {
 });
 
 describe('selectWeapon respects range', () => {
-  it('selects secondary when target is only in secondary weapon range', () => {
+  it('selects primary when target is only in primary weapon range', () => {
     const rocket = makeEntity(UnitType.I_E3, House.Spain, 100, 100);
-    // Target at 6 cells: beyond Dragon (5.0) but within RedEye (7.5)
+    // Target at 6 cells: beyond Dragon/secondary (5.0) but within RedEye/primary (7.5)
     const target = makeEntity(UnitType.ANT1, House.USSR, 100 + 24 * 6, 100);
 
     const selected = rocket.selectWeapon(target, getWarheadMult);
-    expect(selected).toBe(rocket.weapon2); // Only RedEye can reach
+    expect(selected).toBe(rocket.weapon); // Only RedEye (primary) can reach
   });
 
   it('selects primary when target is only in primary weapon range (secondary on cooldown or out of range)', () => {

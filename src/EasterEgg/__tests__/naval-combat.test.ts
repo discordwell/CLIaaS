@@ -78,7 +78,7 @@ describe('Naval vessel type definitions', () => {
     expect(stats.type).toBe(UnitType.V_CA);
     expect(stats.speedClass).toBe(SpeedClass.FLOAT);
     expect(stats.isVessel).toBe(true);
-    expect(stats.primaryWeapon).toBe('Tomahawk');
+    expect(stats.primaryWeapon).toBe('8Inch');
     expect(stats.strength).toBe(700);
     expect(stats.armor).toBe('heavy');
   });
@@ -89,7 +89,7 @@ describe('Naval vessel type definitions', () => {
     expect(stats.type).toBe(UnitType.V_PT);
     expect(stats.speedClass).toBe(SpeedClass.FLOAT);
     expect(stats.isVessel).toBe(true);
-    expect(stats.primaryWeapon).toBe('Stinger');
+    expect(stats.primaryWeapon).toBe('2Inch');
     expect(stats.strength).toBe(200);
   });
 
@@ -131,20 +131,20 @@ describe('Naval vessel type definitions', () => {
 // === Part 2: Naval Weapon Stats ===
 
 describe('Naval weapon stats', () => {
-  it('Stinger (DD/PT primary) has correct values', () => {
+  it('Stinger (DD primary) has correct values', () => {
     const w = WEAPON_STATS['Stinger'];
     expect(w).toBeDefined();
-    expect(w.damage).toBe(15);
-    expect(w.range).toBe(5.0);
-    expect(w.warhead).toBe('SA');
-    expect(w.rof).toBe(20);
+    expect(w.damage).toBe(30);
+    expect(w.range).toBe(9.0);
+    expect(w.warhead).toBe('HE');
+    expect(w.rof).toBe(60);
   });
 
   it('TorpTube (SS torpedo) has isSubSurface flag', () => {
     const w = WEAPON_STATS['TorpTube'];
     expect(w).toBeDefined();
-    expect(w.damage).toBe(50);
-    expect(w.range).toBe(5.0);
+    expect(w.damage).toBe(90);
+    expect(w.range).toBe(9.0);
     expect(w.warhead).toBe('AP');
     expect(w.isSubSurface).toBe(true);
   });
@@ -152,8 +152,8 @@ describe('Naval weapon stats', () => {
   it('DepthCharge (DD secondary) has isAntiSub flag', () => {
     const w = WEAPON_STATS['DepthCharge'];
     expect(w).toBeDefined();
-    expect(w.damage).toBe(40);
-    expect(w.range).toBe(3.0);
+    expect(w.damage).toBe(80);
+    expect(w.range).toBe(5.0);
     expect(w.warhead).toBe('AP');
     expect(w.isAntiSub).toBe(true);
   });
@@ -302,12 +302,12 @@ describe('Submarine cloaking state machine', () => {
     expect(sub.sonarPulseTimer).toBeGreaterThan(0);
   });
 
-  it('SONAR_PULSE_DURATION is 150 frames (10 seconds at 15 FPS)', () => {
-    expect(SONAR_PULSE_DURATION).toBe(150);
+  it('SONAR_PULSE_DURATION is 225 frames (15 seconds at 15 FPS, C++ SONAR_TIME)', () => {
+    expect(SONAR_PULSE_DURATION).toBe(225);
   });
 
-  it('CLOAK_TRANSITION_FRAMES is 15 (1 second at 15 FPS)', () => {
-    expect(CLOAK_TRANSITION_FRAMES).toBe(15);
+  it('CLOAK_TRANSITION_FRAMES is 38 (~2.5 seconds at 15 FPS, C++ CLOAK_STAGES)', () => {
+    expect(CLOAK_TRANSITION_FRAMES).toBe(38);
   });
 });
 

@@ -11,6 +11,10 @@ export enum Terrain {
   ROCK = 2,
   TREE = 3,
   WALL = 4,
+  ORE = 5,
+  BEACH = 6,
+  ROUGH = 7,
+  RIVER = 8,
 }
 
 const PASSABLE = new Set([Terrain.CLEAR]);
@@ -158,8 +162,9 @@ export class GameMap {
     return false;
   }
 
-  /** M1: Get terrain speed multiplier by SpeedClass (C++ drive.cpp Ground[terrain].Cost[speed_class]).
-   *  Defaults to WHEEL if no speedClass provided (backward compat with pathfinding). */
+  /** M1/MV5: Get terrain speed multiplier by SpeedClass (C++ drive.cpp Ground[terrain].Cost[speed_class]).
+   *  Defaults to WHEEL if no speedClass provided (backward compat with pathfinding).
+   *  MV5: All multipliers capped at 1.0 — roads/clear terrain cannot exceed base speed. */
   getSpeedMultiplier(cx: number, cy: number, speedClass: SpeedClass = SpeedClass.WHEEL): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 1.0;
     // WINGED (aircraft) ignores terrain entirely
@@ -169,16 +174,29 @@ export class GameMap {
     if (speedClass === SpeedClass.FLOAT) return terrain === Terrain.WATER ? 1.0 : 0.3;
     const tmpl = this.templateType[cy * MAP_CELLS + cx];
     const isRoad = tmpl >= TEMPLATE_ROAD_MIN && tmpl <= TEMPLATE_ROAD_MAX;
+
+    let mult: number;
     if (speedClass === SpeedClass.FOOT) {
-      // Infantry: roads give small boost, trees slow significantly
-      if (isRoad) return 1.1;
-      if (terrain === Terrain.TREE) return 0.6;
-      return 1.0;
+      // Infantry: roads = base speed (capped at 1.0), trees slow significantly
+      if (terrain === Terrain.RIVER) mult = 0.4;
+      else if (terrain === Terrain.BEACH) mult = 0.6;
+      else if (terrain === Terrain.ROUGH) mult = 0.6;
+      else if (terrain === Terrain.ORE) mult = 0.8;
+      else if (terrain === Terrain.TREE) mult = 0.6;
+      else if (isRoad) mult = 1.0;
+      else mult = 1.0;
+    } else {
+      // WHEEL (all vehicles per udata.cpp:865) and TRACK
+      if (terrain === Terrain.RIVER) mult = 0.4;
+      else if (terrain === Terrain.BEACH) mult = 0.6;
+      else if (terrain === Terrain.ROUGH) mult = 0.6;
+      else if (terrain === Terrain.ORE) mult = 0.8;
+      else if (terrain === Terrain.TREE) mult = 0.85;
+      else if (isRoad) mult = 1.0;
+      else mult = 1.0;
     }
-    // WHEEL (all vehicles per udata.cpp:865) and TRACK
-    if (isRoad) return 1.3;
-    if (terrain === Terrain.TREE) return 0.85;
-    return 1.0;
+    // MV5: Cap all multipliers at 1.0 — no terrain makes units faster than base speed
+    return Math.min(mult, 1.0);
   }
 
   /** Check if cell is within playable bounds */
@@ -332,8 +350,14 @@ export class GameMap {
    *  C++ behavior: roughly 1 in 4 chance per cell per cycle. */
   static readonly ORE_SPREAD_CHANCE = 0.25;
 
-  /** Ore regrowth — existing ore cells increase in density and spread to adjacent empty cells.
+  /** Minimum gold density level required for ore to spread (C++ parity: density > 6 on 0-12 scale).
+   *  Gold overlay range is 0x03 (density 0) to 0x0E (density 11), so density > 6 means overlay > 0x09. */
+  static readonly ORE_SPREAD_MIN_DENSITY = 0x09;
+
+  /** Ore regrowth — existing gold ore cells increase in density and spread to adjacent empty cells.
    *  Matches C++ OverlayClass::AI() behavior: growth fires every ~256 ticks.
+   *  EC6: Only gold overlays grow/spread — gems (0x0F-0x12) never grow or spread.
+   *  EC7: Spread requires density > 6 and uses all 8 directions (N, NE, E, SE, S, SW, W, NW).
    *  Fully depleted patches (all cells at 0xFF) never regrow — there must be a seed cell.
    *  Only spreads to CLEAR terrain cells with no wall and no existing overlay.
    *  @param tick Current game tick */
@@ -342,32 +366,34 @@ export class GameMap {
 
     const bx = this.boundsX, by = this.boundsY;
     const bw = this.boundsW, bh = this.boundsH;
-    // Cardinal directions only (N, E, S, W) — C++ uses adjacent cells
-    const dirs: [number, number][] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    // EC7: All 8 directions (N, NE, E, SE, S, SW, W, NW) for ore spread
+    const dirs: [number, number][] = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ];
 
     for (let cy = by; cy < by + bh; cy++) {
       for (let cx = bx; cx < bx + bw; cx++) {
         const idx = cy * MAP_CELLS + cx;
         const ovl = this.overlay[idx];
 
-        // Skip non-ore/gem cells
-        if (ovl < 0x03 || ovl > 0x12) continue;
-
+        // EC6: Only gold ore grows/spreads — skip gems entirely
         const isGold = ovl >= 0x03 && ovl <= 0x0E;
-        const isGem = ovl >= 0x0F && ovl <= 0x12;
+        if (!isGold) continue;
 
         // Density growth: increase overlay index if not at max
         if (Math.random() < GameMap.ORE_DENSITY_CHANCE) {
-          if (isGold && ovl < 0x0E) {
-            this.overlay[idx] = ovl + 1;
-          } else if (isGem && ovl < 0x12) {
+          if (ovl < 0x0E) {
             this.overlay[idx] = ovl + 1;
           }
         }
 
-        // Spread to one random adjacent empty cell
+        // EC7: Spread requires density > 6 (overlay > 0x09)
+        if (ovl <= GameMap.ORE_SPREAD_MIN_DENSITY) continue;
+
+        // Spread to one random adjacent empty cell (8 directions)
         if (Math.random() < GameMap.ORE_SPREAD_CHANCE) {
-          const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
+          const [dx, dy] = dirs[Math.floor(Math.random() * 8)];
           const nx = cx + dx, ny = cy + dy;
           // Must be within map bounds
           if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
@@ -376,8 +402,8 @@ export class GameMap {
           if (this.overlay[nidx] !== 0xFF) continue;
           if (this.cells[nidx] !== Terrain.CLEAR) continue;
           if (this.wallType[nidx] !== '') continue;
-          // Set to minimum density for the ore type
-          this.overlay[nidx] = isGem ? 0x0F : 0x03;
+          // Gold always spreads as gold (minimum density)
+          this.overlay[nidx] = 0x03;
         }
       }
     }
@@ -406,29 +432,37 @@ export class GameMap {
     return best;
   }
 
-  /** Deplete one level of ore/gem at a cell. Returns credits gained (0 if empty). */
+  /** Deplete one bail of ore/gem at a cell. Returns credit value per bail (0 if empty).
+   *  C++ parity: gold ore = 35 credits/bail (OverlayTypeClass GOLD), gems = 110 credits/bail. */
   depleteOre(cx: number, cy: number): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
     const idx = cy * MAP_CELLS + cx;
     const ovl = this.overlay[idx];
     if (ovl >= 0x03 && ovl <= 0x0E) {
-      // Gold ore (GOLD01-GOLD12) — each level worth ~25 credits
+      // Gold ore (GOLD01-GOLD12) — 35 credits per bail (C++ overlay.cpp)
       if (ovl > 0x03) {
         this.overlay[idx] = ovl - 1;
       } else {
         this.overlay[idx] = 0xFF; // fully depleted
       }
-      return 25;
+      return 35;
     } else if (ovl >= 0x0F && ovl <= 0x12) {
-      // Gems (GEM01-GEM04) — each level worth ~50 credits
+      // Gems (GEM01-GEM04) — 110 credits per bail (C++ overlay.cpp)
       if (ovl > 0x0F) {
         this.overlay[idx] = ovl - 1;
       } else {
         this.overlay[idx] = 0xFF;
       }
-      return 50;
+      return 110;
     }
     return 0;
+  }
+
+  /** Check if overlay at a cell is a gem overlay (0x0F-0x12) */
+  isGemOverlay(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    const ovl = this.overlay[cy * MAP_CELLS + cx];
+    return ovl >= 0x0F && ovl <= 0x12;
   }
 
   /** Find an adjacent water cell around a structure footprint (for naval production spawn).
@@ -448,6 +482,50 @@ export class GameMap {
       }
     }
     return null;
+  }
+
+  // === Agent 9: Gap Generator shroud methods ===
+
+  /** Jammed cells tracking — maps cell index to jam count (allows overlapping GAPs) */
+  jammedCells = new Map<number, number>();
+
+  /** Jam a cell — set visibility to 0 (shrouded) for enemy view.
+   *  Increments jam count so overlapping Gap Generators work correctly. */
+  jamCell(cx: number, cy: number): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    const count = this.jammedCells.get(idx) ?? 0;
+    this.jammedCells.set(idx, count + 1);
+    // Shroud the cell for enemy view
+    if (this.visibility[idx] > 0) {
+      this.visibility[idx] = 0;
+    }
+  }
+
+  /** Unjam a cell — decrements jam count, restores visibility when fully unjammed. */
+  unjamCell(cx: number, cy: number): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    const count = this.jammedCells.get(idx) ?? 0;
+    if (count <= 1) {
+      this.jammedCells.delete(idx);
+      // Restore to fog (explored but not visible) — updateFogOfWar will handle the rest
+      this.visibility[idx] = 1;
+    } else {
+      this.jammedCells.set(idx, count - 1);
+    }
+  }
+
+  /** Unjam all cells in a radius around a position. */
+  unjamRadius(cx: number, cy: number, radius: number): void {
+    const r2 = radius * radius;
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (dx * dx + dy * dy <= r2) {
+          this.unjamCell(cx + dx, cy + dy);
+        }
+      }
+    }
   }
 
   /** Initialize a basic map with impassable borders */
