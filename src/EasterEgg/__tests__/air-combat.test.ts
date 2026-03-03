@@ -29,7 +29,7 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('MiG');
     expect(s.strength).toBe(60);
     expect(s.armor).toBe('light');
-    expect(s.speed).toBe(12);
+    expect(s.speed).toBe(50);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isFixedWing).toBe(true);
@@ -46,7 +46,8 @@ describe('Aircraft type definitions', () => {
     expect(s.isAircraft).toBe(true);
     expect(s.isFixedWing).toBe(true);
     expect(s.landingBuilding).toBe('AFLD');
-    expect(s.maxAmmo).toBe(1);
+    expect(s.maxAmmo).toBe(2);
+    expect(s.primaryWeapon).toBe('ChainGun');
   });
 
   it('HELI has correct stats', () => {
@@ -55,20 +56,20 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('Longbow');
     expect(s.strength).toBe(100);
     expect(s.armor).toBe('heavy');
-    expect(s.speed).toBe(10);
+    expect(s.speed).toBe(40);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);
     expect(s.isFixedWing).toBeUndefined();
     expect(s.landingBuilding).toBe('HPAD');
-    expect(s.maxAmmo).toBe(2);
+    expect(s.maxAmmo).toBe(8);
     expect(s.primaryWeapon).toBe('Hellfire');
   });
 
   it('HIND has correct stats', () => {
     const s = UNIT_STATS.HIND;
     expect(s.type).toBe(UnitType.V_HIND);
-    expect(s.strength).toBe(125);
+    expect(s.strength).toBe(100);
     expect(s.armor).toBe('heavy');
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
@@ -76,7 +77,6 @@ describe('Aircraft type definitions', () => {
     expect(s.landingBuilding).toBe('HPAD');
     expect(s.maxAmmo).toBe(4);
     expect(s.primaryWeapon).toBe('ChainGun');
-    expect(s.secondaryWeapon).toBe('Hellfire');
   });
 
   it('TRAN (Chinook) has aircraft flags', () => {
@@ -99,37 +99,37 @@ describe('Aircraft type definitions', () => {
 describe('Aircraft weapon stats', () => {
   it('Maverick has correct properties', () => {
     const w = WEAPON_STATS.Maverick;
-    expect(w.damage).toBe(60);
-    expect(w.rof).toBe(50);
-    expect(w.range).toBe(5.0);
+    expect(w.damage).toBe(50);
+    expect(w.rof).toBe(3);
+    expect(w.range).toBe(6.0);
     expect(w.warhead).toBe('AP');
     expect(w.projectileROT).toBe(5);
   });
 
   it('Hellfire has splash damage', () => {
     const w = WEAPON_STATS.Hellfire;
-    expect(w.damage).toBe(30);
-    expect(w.rof).toBe(40);
-    expect(w.range).toBe(5.0);
-    expect(w.warhead).toBe('HE');
+    expect(w.damage).toBe(40);
+    expect(w.rof).toBe(60);
+    expect(w.range).toBe(4.0);
+    expect(w.warhead).toBe('AP');
     expect(w.splash).toBe(1.0);
     expect(w.projectileROT).toBe(5);
   });
 
   it('ChainGun is rapid-fire hitscan', () => {
     const w = WEAPON_STATS.ChainGun;
-    expect(w.damage).toBe(15);
-    expect(w.rof).toBe(10);
-    expect(w.range).toBe(4.0);
-    expect(w.warhead).toBe('AP');
+    expect(w.damage).toBe(40);
+    expect(w.rof).toBe(3);
+    expect(w.range).toBe(5.0);
+    expect(w.warhead).toBe('SA');
     expect(w.projectileROT).toBeUndefined();
   });
 
   it('Nike is anti-air missile', () => {
     const w = WEAPON_STATS.Nike;
-    expect(w.damage).toBe(100);
-    expect(w.range).toBe(10.0);
-    expect(w.warhead).toBe('HE');
+    expect(w.damage).toBe(50);
+    expect(w.range).toBe(7.5);
+    expect(w.warhead).toBe('AP');
     expect(w.isAntiAir).toBe(true);
     expect(w.splash).toBe(1.0);
   });
@@ -205,8 +205,8 @@ describe('Ammo system', () => {
     expect(mig.maxAmmo).toBe(2);
 
     const yak = makeEntity(UnitType.V_YAK, House.Spain);
-    expect(yak.ammo).toBe(1);
-    expect(yak.maxAmmo).toBe(1);
+    expect(yak.ammo).toBe(2);
+    expect(yak.maxAmmo).toBe(2);
 
     const hind = makeEntity(UnitType.V_HIND, House.Spain);
     expect(hind.ammo).toBe(4);
@@ -249,7 +249,7 @@ describe('Ammo system', () => {
 
   it('Rearming completes when ammo is full', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
-    heli.ammo = 1; // one short of max (2)
+    heli.ammo = heli.maxAmmo - 1; // one short of max
     heli.aircraftState = 'rearming';
     heli.rearmTimer = 1;
     heli.rearmTimer--;
@@ -261,7 +261,7 @@ describe('Ammo system', () => {
         heli.rearmTimer = 30;
       }
     }
-    expect(heli.ammo).toBe(2);
+    expect(heli.ammo).toBe(heli.maxAmmo);
     expect(heli.aircraftState).toBe('landed');
   });
 });
@@ -428,7 +428,7 @@ describe('Aircraft production items', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'TRAN');
     expect(item).toBeDefined();
     expect(item!.prerequisite).toBe('HPAD');
-    expect(item!.cost).toBe(700);
+    expect(item!.cost).toBe(1200);
     expect(item!.faction).toBe('both');
   });
 
@@ -477,7 +477,7 @@ describe('Aircraft production items', () => {
     expect(item!.isStructure).toBe(true);
     expect(item!.prerequisite).toBe('FACT');
     expect(item!.faction).toBe('soviet');
-    expect(item!.cost).toBe(2000);
+    expect(item!.cost).toBe(600);
   });
 });
 

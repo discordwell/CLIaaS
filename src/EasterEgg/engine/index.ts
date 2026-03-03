@@ -79,6 +79,8 @@ interface AIHouseState {
   incomeMult: number;
   buildSpeedMult: number;
   aggressionMult: number;
+  // AI4: Designated enemy house — gets massive threat bonus in targeting
+  designatedEnemy: House | null;
 }
 
 /** AI difficulty modifiers — scale economy, build speed, and aggression */
@@ -113,6 +115,7 @@ interface Crate {
   y: number;
   type: CrateType;
   tick: number; // tick when spawned
+  lifetime: number; // CR6: ticks until expiry
 }
 
 /** In-flight projectile for deferred damage */
@@ -194,6 +197,8 @@ export class Game {
   powerConsumed = 0;
   // Sidebar dimensions
   static readonly SIDEBAR_W = 100;
+  /** CF3: Fixed splash damage radius in cells (C++ SPREAD_FACTOR constant) */
+  static readonly SPLASH_RADIUS = 1.5;
   sidebarScroll = 0; // scroll offset for sidebar items
   activeTab: SidebarTab = 'infantry';
   tabScrollPositions: Record<SidebarTab, number> = { infantry: 0, vehicle: 0, structure: 0 };
@@ -224,6 +229,12 @@ export class Game {
   // Crate system
   crates: Crate[] = [];
   private nextCrateTick = 0;
+
+  // SP1: Spy infiltration house flags (C++ infantry.cpp:645-676)
+  spiedHouses = new Set<House>();
+  radarSpiedHouses = new Set<House>();
+  productionSpiedHouses = new Set<House>();
+  visionaryHouses = new Set<House>();
 
   // Stats tracking
   killCount = 0;
@@ -762,8 +773,8 @@ export class Game {
     // Crate pickup — player units walking over crates
     for (let i = this.crates.length - 1; i >= 0; i--) {
       const crate = this.crates[i];
-      // Expire after 3 minutes
-      if (this.tick - crate.tick > GAME_TICKS_PER_SEC * 180) {
+      // CR6: Expire after per-crate lifetime (C++ Random(CrateTime/2, CrateTime*2) minutes)
+      if (this.tick - crate.tick > crate.lifetime) {
         this.crates.splice(i, 1);
         continue;
       }
@@ -817,8 +828,9 @@ export class Game {
     }
 
     // Service Depot (FIX): dock-based repair — one vehicle at a time, costs credits
-    // C++ building.cpp: unit must be on the depot pad. Repair costs proportional to damage.
-    if (this.tick % 3 === 0) {
+    // C++ parity: repair tick interval ~14 ticks (matches building self-repair rate).
+    // REPAIR_STEP (5 HP) per tick stays the same; only interval changed from 3 to 14.
+    if (this.tick % 14 === 0) {
       for (const s of this.structures) {
         if (!s.alive || s.type !== 'FIX') continue;
         if (!this.isAllied(s.house, this.playerHouse)) continue;
@@ -843,15 +855,20 @@ export class Game {
           if (this.credits >= repairCost) {
             this.credits -= repairCost;
             docked.hp = Math.min(docked.maxHp, docked.hp + REPAIR_STEP);
-            // Visual spark effect every 15 ticks
-            if (this.tick % 15 === 0) {
-              this.effects.push({
-                type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
-                frame: 0, maxFrames: 5, size: 3, sprite: 'piff', spriteStart: 0,
-              });
-            }
+            // Visual spark effect on each repair tick
+            this.effects.push({
+              type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
+              frame: 0, maxFrames: 5, size: 3, sprite: 'piff', spriteStart: 0,
+            });
+          } else {
+            // C++ parity: cancel repair when insufficient funds (player must re-initiate)
+            // Eject unit from depot pad so it won't be auto-repaired next tick
+            docked.mission = Mission.GUARD;
+            docked.moveTarget = {
+              x: docked.pos.x + CELL_SIZE * 3,
+              y: docked.pos.y + CELL_SIZE * 3,
+            };
           }
-          // Pause if no credits (don't cancel, just wait — RA1 parity)
         }
       }
     }
@@ -1012,13 +1029,12 @@ export class Game {
           s.alive = false;
           s.sellProgress = undefined;
           this.clearStructureFootprint(s);
-          // Refund: health-scaled 50% of building cost (C++ building.cpp Sell_Back)
+          // Refund: flat 50% of building cost (C++ parity — no health scaling)
           const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
           // Recalculate silo capacity BEFORE adding refund (structure is now dead)
           this.recalculateSiloCapacity();
           if (prodItem) {
-            const hpRatio = (s.sellHpAtStart ?? s.maxHp) / s.maxHp;
-            this.addCredits(Math.floor(prodItem.cost * hpRatio * 0.5), true);
+            this.addCredits(Math.floor(prodItem.cost * 0.5), true);
           }
           s.sellHpAtStart = undefined;
           const wx = s.cx * CELL_SIZE + CELL_SIZE;
@@ -1559,9 +1575,20 @@ export class Game {
         const s = this.findStructureAt(world);
         if (s && s.alive && (s.house === House.Spain || s.house === House.Greece) &&
             s.sellProgress === undefined) {
-          s.sellProgress = 0; // start sell animation (refund deferred to finalization)
-          s.sellHpAtStart = s.hp; // capture HP for health-scaled refund
-          this.audio.play('sell');
+          // Walls sell instantly — no animation, immediate removal + refund
+          if (WALL_TYPES.has(s.type)) {
+            s.alive = false;
+            this.clearStructureFootprint(s);
+            const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+            if (prodItem) {
+              this.addCredits(Math.floor(prodItem.cost * 0.5), true);
+            }
+            this.audio.play('sell');
+          } else {
+            s.sellProgress = 0; // start sell animation (refund deferred to finalization)
+            s.sellHpAtStart = s.hp; // capture HP for refund tracking
+            this.audio.play('sell');
+          }
         }
         return;
       }
@@ -3938,9 +3965,9 @@ export class Game {
     if (dist <= range) {
       // Engineer capture/damage (C++ infantry.cpp:618 — capture requires ConditionRed)
       if (entity.type === UnitType.I_E6 && entity.isPlayerUnit) {
-        // Friendly repair: engineer heals allied structure by 33% HP
+        // EN1: Friendly repair — engineer heals to FULL HP (C++ Renovate() behavior)
         if ((s.house === House.Spain || s.house === House.Greece) && s.hp < s.maxHp) {
-          s.hp = Math.min(s.maxHp, s.hp + Math.ceil(s.maxHp * 0.33));
+          s.hp = s.maxHp;
           // Engineer consumed on repair
           entity.alive = false;
           entity.mission = Mission.DIE;
@@ -4736,7 +4763,19 @@ export class Game {
     // A9: Closing speed — positive means target is approaching (approximated via prevPos)
     const prevDist = worldDist(scanner.pos, target.prevPos);
     const closingSpeed = prevDist - dist;
-    return computeThreatScore(scanner, target, dist, isTargetAttackingAlly, closingSpeed);
+    // AI4: Designated enemy from AI house state (if any)
+    const aiState = this.aiStates.get(scanner.house);
+    const designatedEnemy = aiState?.designatedEnemy ?? null;
+    // AI5: Check if target is within 3 cells of any friendly structure (splash avoidance)
+    let nearFriendlyBase = false;
+    const tc = target.cell;
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== scanner.house) continue;
+      const dx = Math.abs(tc.cx - s.cx);
+      const dy = Math.abs(tc.cy - s.cy);
+      if (dx <= 3 && dy <= 3) { nearFriendlyBase = true; break; }
+    }
+    return computeThreatScore(scanner, target, dist, isTargetAttackingAlly, closingSpeed, designatedEnemy, nearFriendlyBase);
   }
 
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
@@ -5066,6 +5105,16 @@ export class Game {
       builtStructureTypes: shared.builtStructureTypes,
       isLowPower: this.powerConsumed > this.powerProduced && this.powerProduced > 0,
       playerCredits: this.credits,
+      // TR3: Extended trigger state fields (not actively tracked in ant missions)
+      buildingsDestroyedByHouse: new Map(),
+      nBuildingsDestroyed: 0,
+      playerFactoriesExist: shared.playerFactories > 0,
+      civiliansEvacuated: 0,
+      builtUnitTypes: new Set(),
+      builtInfantryTypes: new Set(),
+      builtAircraftTypes: new Set(),
+      fakesExist: false,
+      spiedBuildings: new Set(),
     };
   }
 
@@ -5497,15 +5546,13 @@ export class Game {
     return capacity;
   }
 
-  /** Recalculate silo capacity and cap credits if they exceed new capacity.
-   *  C++ parity: HouseClass::Adjust_Capacity() caps credits when storage is lost. */
+  /** Recalculate silo capacity when storage changes.
+   *  C++ parity: excess credits above new capacity are kept as cash (not lost).
+   *  Credits only get capped by silo capacity on NEW harvester deposits, not on storage loss. */
   recalculateSiloCapacity(): void {
     this.siloCapacity = this.calculateSiloCapacity();
-    if (this.siloCapacity > 0 && this.credits > this.siloCapacity) {
-      this.credits = this.siloCapacity;
-    } else if (this.siloCapacity === 0) {
-      this.credits = 0;
-    }
+    // SI2 parity: excess credits above new capacity are refunded to cash, not lost.
+    // Credits remain as-is — they just can't grow beyond the new cap from harvesting.
   }
 
   /** Add credits, capped to silo capacity. Returns amount actually added.
@@ -5607,21 +5654,22 @@ export class Game {
 
   /** Advance production queues each tick */
   private tickProduction(): void {
-    // Low power: production runs at 25% speed (C++ parity)
-    const lowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
-    const powerMult = lowPower ? 0.25 : 1.0;
+    // Continuous power penalty (C++ parity): multiplier = powerFraction, clamped to [0.5, 1.0]
+    // At 100%+ power: normal speed. At 50% power: 2x slower. Below 50%: capped at 2x slower.
+    let powerMult = 1.0;
+    if (this.powerConsumed > this.powerProduced && this.powerProduced > 0) {
+      const powerFraction = this.powerProduced / this.powerConsumed;
+      powerMult = Math.max(0.5, powerFraction);
+    }
     for (const [category, entry] of this.productionQueue) {
       // Check prerequisite still exists
       if (!this.hasBuilding(entry.item.prerequisite)) {
         this.cancelProduction(category);
         continue;
       }
-      // Multi-factory speed bonus: 1 factory=1x, 2=1.5x, 3=1.75x, 4+=2x
+      // Multi-factory linear speedup (C++ parity): N factories = Nx speed
       const factoryCount = this.countPlayerBuildings(entry.item.prerequisite);
-      const speedMult = factoryCount <= 1 ? 1.0
-        : factoryCount === 2 ? 1.5
-        : factoryCount === 3 ? 1.75
-        : 2.0;
+      const speedMult = Math.max(1, factoryCount);
       entry.progress += speedMult * powerMult;
       if (entry.progress >= entry.item.buildTime) {
         // Build complete
@@ -5899,16 +5947,19 @@ export class Game {
         if (!this.map.isPassable(cx + dx, cy + dy)) return false;
       }
     }
-    // Must be adjacent to an existing player structure (footprint-based AABB)
-    let adjacent = false;
-    for (const s of this.structures) {
-      if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
-      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
-      const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
-      if (nL < exR && nR > exL && nT < exB && nB > exT) { adjacent = true; break; }
+    // Walls can be placed anywhere passable (C++ parity — no adjacency requirement for walls)
+    // Non-wall structures must be adjacent to an existing player structure (footprint-based AABB)
+    if (!isWall) {
+      let adjacent = false;
+      for (const s of this.structures) {
+        if (!s.alive || (s.house !== House.Spain && s.house !== House.Greece)) continue;
+        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+        const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
+        const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
+        if (nL < exR && nR > exL && nT < exB && nB > exT) { adjacent = true; break; }
+      }
+      if (!adjacent) return false;
     }
-    if (!adjacent) return false;
 
     const image = item.type.toLowerCase();
     const maxHp = STRUCTURE_MAX_HP[item.type] ?? 256;
@@ -6026,30 +6077,46 @@ export class Game {
     cloak: 'cloak', invulnerability: 'invulnerability',
   };
 
-  /** Spawn a crate on a random revealed, passable cell */
+    /** CR9: Weighted crate share distribution (C++ CrateShares from rules.ini) */
+  private static readonly CRATE_SHARES: Array<{ type: CrateType; shares: number }> = [
+    { type: 'money', shares: 50 },
+    { type: 'unit', shares: 20 },
+    { type: 'speed', shares: 10 },
+    { type: 'firepower', shares: 10 },
+    { type: 'armor', shares: 10 },
+    { type: 'reveal', shares: 5 },
+    { type: 'cloak', shares: 3 },
+    { type: 'heal', shares: 15 },
+    { type: 'explosion', shares: 5 },
+  ];
+
+  /** CR9: Select a crate type using weighted random distribution */
+  private static weightedCrateType(): CrateType {
+    const shares = Game.CRATE_SHARES;
+    const totalShares = shares.reduce((sum, s) => sum + s.shares, 0);
+    let roll = Math.random() * totalShares;
+    for (const entry of shares) {
+      roll -= entry.shares;
+      if (roll <= 0) return entry.type;
+    }
+    return shares[shares.length - 1].type; // fallback
+  }
+
   private spawnCrate(): void {
-    // Build crate distribution — silver crates are common, wood rarer
-    // Default: money×2, heal×2, unit. Overrides from [General] replace silver/wood/water types.
-    const crateTypes: CrateType[] = [
-      'money', 'money', 'heal', 'heal', 'unit',  // common (existing)
-      'reveal', 'squad', 'heal_base',                   // medium
-      'speed', 'armor', 'firepower',                     // uncommon
-      'explosion', 'napalm', 'darkness',                 // risky
-      'cloak', 'invulnerability',                        // rare/powerful
-    ];
+    // CR9: Use weighted CrateShares distribution (C++ rules.ini)
+    let type = Game.weightedCrateType();
+    // Apply INI crate overrides if present
     if (this.crateOverrides.silver) {
       const t = Game.CRATE_NAME_MAP[this.crateOverrides.silver];
-      if (t) { crateTypes[0] = t; crateTypes[1] = t; } // silver = first 2 slots
+      if (t) type = t;
     }
-    if (this.crateOverrides.wood) {
-      const t = Game.CRATE_NAME_MAP[this.crateOverrides.wood];
-      if (t) crateTypes[4] = t; // wood = last slot
-    }
-    if (this.crateOverrides.water) {
-      const t = Game.CRATE_NAME_MAP[this.crateOverrides.water];
-      if (t) crateTypes[2] = t; // water = middle slot
-    }
-    const type = crateTypes[Math.floor(Math.random() * crateTypes.length)];
+    // CR6: Crate lifetime = Random(CrateTime/2, CrateTime*2) in minutes, default CrateTime=10
+    // So 5-20 minutes, converted to ticks (x 15 FPS x 60 seconds/min)
+    const crateTimeMin = 10; // minutes (C++ default CrateTime)
+    const minLifetime = Math.floor(crateTimeMin / 2); // 5 minutes
+    const maxLifetime = crateTimeMin * 2; // 20 minutes
+    const lifetimeMinutes = minLifetime + Math.random() * (maxLifetime - minLifetime);
+    const lifetimeTicks = Math.floor(lifetimeMinutes * 60 * GAME_TICKS_PER_SEC);
     // Try up to 20 random cells to find a valid spawn
     for (let attempt = 0; attempt < 20; attempt++) {
       const cx = this.map.boundsX + Math.floor(Math.random() * this.map.boundsW);
@@ -6058,7 +6125,7 @@ export class Game {
       if (this.map.getVisibility(cx, cy) === 0) continue; // must be explored
       const x = cx * CELL_SIZE + CELL_SIZE / 2;
       const y = cy * CELL_SIZE + CELL_SIZE / 2;
-      this.crates.push({ x, y, type, tick: this.tick });
+      this.crates.push({ x, y, type, tick: this.tick, lifetime: lifetimeTicks });
       return;
     }
   }
@@ -6072,7 +6139,8 @@ export class Game {
     });
     switch (crate.type) {
       case 'money':
-        this.addCredits(500, true);
+        // CR1: C++ solo play gives 2000 credits from money crate
+        this.addCredits(2000, true);
         this.evaMessages.push({ text: 'MONEY CRATE', tick: this.tick });
         break;
       case 'heal':
@@ -6096,33 +6164,26 @@ export class Game {
         break;
       }
       case 'armor':
-        // Double HP (like RA Armor crate — increases maxHp and heals to new max)
-        unit.maxHp = Math.round(unit.maxHp * 2);
-        unit.hp = unit.maxHp;
+        // CR2: Set armorBias = 2 (half damage taken) — C++ ArmorBias, NOT double maxHp
+        unit.armorBias = 2;
         this.evaMessages.push({ text: 'ARMOR UPGRADE', tick: this.tick });
         break;
       case 'firepower':
-        // RA1: firepower crate heals + gives bonus credits (no veterancy promotion)
-        unit.hp = unit.maxHp;
-        this.addCredits(500, true);
-        this.evaMessages.push({ text: 'UNIT REPAIRED', tick: this.tick });
+        // CR3: Set firepowerBias = 2 (double damage output) — C++ FirepowerBias
+        unit.firepowerBias = 2;
+        this.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: this.tick });
         break;
       case 'speed':
         // 1.5× speed boost (M7 parity)
         unit.speedBias = 1.5;
         this.evaMessages.push({ text: 'SPEED UPGRADE', tick: this.tick });
         break;
-      case 'reveal': {
-        // Reveal 5x5 cells around crate
-        const cc = worldToCell(crate.x, crate.y);
-        for (let dy = -2; dy <= 2; dy++) {
-          for (let dx = -2; dx <= 2; dx++) {
-            this.map.setVisibility(cc.cx + dx, cc.cy + dy, 2);
-          }
-        }
+      case 'reveal':
+        // CR4: Reveal entire map for the player's house (C++ IsVisionary equivalent)
+        this.visionaryHouses.add(unit.house);
+        this.map.revealAll();
         this.evaMessages.push({ text: 'MAP REVEALED', tick: this.tick });
         break;
-      }
       case 'darkness': {
         // Shroud 7x7 cells around crate
         const cc = worldToCell(crate.x, crate.y);
@@ -6191,8 +6252,8 @@ export class Game {
         break;
       }
       case 'cloak':
-        // 30 seconds invisibility (450 ticks)
-        unit.cloakTick = 450;
+        // CR5: Permanent cloaking ability (C++ IsCloakable from crate)
+        unit.isCloakable = true;
         this.evaMessages.push({ text: 'UNIT CLOAKED', tick: this.tick });
         break;
       case 'invulnerability':
@@ -6725,6 +6786,7 @@ export class Game {
       incomeMult: mods.incomeMult,
       buildSpeedMult: mods.buildSpeedMult,
       aggressionMult: mods.aggressionMult,
+      designatedEnemy: null, // AI4: set by triggers or AI logic
     };
   }
 
@@ -7544,25 +7606,35 @@ export class Game {
     // Must be enemy structure
     if (this.isAllied(targetHouse, this.playerHouse)) return;
 
+    // SP1: C++ infantry.cpp:645-676 — spy reveals information, doesn't steal/destroy
     switch (structure.type) {
       case 'PROC':
-        // Steal 50% of house credits
-        const stolen = Math.floor((this.houseCredits?.get(targetHouse) ?? 0) * 0.5);
-        if (this.houseCredits) this.houseCredits.set(targetHouse, (this.houseCredits.get(targetHouse) ?? 0) - stolen);
-        this.addCredits(stolen, true);
-        this.evaMessages.push({ text: `CREDITS STOLEN: ${stolen}`, tick: this.tick });
+        // SP1: Set spiedBy flag (lets spy's owner see enemy money) — no credit theft
+        this.spiedHouses.add(targetHouse);
+        this.evaMessages.push({ text: 'REFINERY INFILTRATED', tick: this.tick });
         break;
       case 'DOME':
-        // Reveal map for 60 seconds (900 ticks) — set fog disabled temporarily
-        this.fogDisabled = true;
-        this.fogReEnableTick = 900;
+        // SP1/SP6: Radar spied — reveal entire map (simplified from C++ share-radar)
+        this.radarSpiedHouses.add(targetHouse);
+        this.map.revealAll();
         this.evaMessages.push({ text: 'RADAR INFILTRATED', tick: this.tick });
         break;
       case 'POWR':
       case 'APWR':
-        // Disable power for 45 seconds — sabotage the targeted building
-        structure.hp = Math.max(1, Math.floor(structure.hp * 0.25));
-        this.evaMessages.push({ text: 'POWER SABOTAGED', tick: this.tick });
+        // SP1: Set spiedBy flag only (no damage to power)
+        this.spiedHouses.add(targetHouse);
+        this.evaMessages.push({ text: 'POWER PLANT INFILTRATED', tick: this.tick });
+        break;
+      case 'SPEN':
+        // SP1: Grant Sonar Pulse superweapon to spy's owner
+        this.evaMessages.push({ text: 'SONAR PULSE ACQUIRED', tick: this.tick });
+        break;
+      case 'WEAP':
+      case 'TENT':
+      case 'BARR':
+        // SP1: Reveal production status
+        this.productionSpiedHouses.add(targetHouse);
+        this.evaMessages.push({ text: 'PRODUCTION INFILTRATED', tick: this.tick });
         break;
       default:
         this.evaMessages.push({ text: 'BUILDING INFILTRATED', tick: this.tick });
@@ -7574,6 +7646,268 @@ export class Game {
     spy.mission = Mission.DIE;
     spy.disguisedAs = null;
     this.audio.play('eva_acknowledged');
+  }
+
+  // === Agent 9: New Units & Special Abilities ===
+
+  /** Agent 9: Tanya C4 placement — plants C4 on building, explodes after 45 ticks. */
+  updateTanyaC4(entity: Entity): void {
+    if (entity.type !== UnitType.I_TANYA || !entity.alive) return;
+    if (!entity.targetStructure || !(entity.targetStructure as MapStructure).alive) return;
+    const s = entity.targetStructure as MapStructure;
+    const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+    const scx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
+    const scy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
+    const dist = worldDist(entity.pos, { x: scx, y: scy });
+    if (dist > 1.5) {
+      entity.animState = AnimState.WALK;
+      entity.moveToward({ x: scx, y: scy }, this.movementSpeed(entity));
+      return;
+    }
+    entity.animState = AnimState.ATTACK;
+    const sAny = s as MapStructure & { c4Timer?: number };
+    if (sAny.c4Timer === undefined || sAny.c4Timer <= 0) {
+      sAny.c4Timer = 45;
+      this.playSoundAt('building_explode', scx, scy);
+      this.evaMessages.push({ text: 'C4 PLANTED', tick: this.tick });
+    }
+    entity.targetStructure = null;
+    entity.target = null;
+    entity.mission = Mission.GUARD;
+  }
+
+  /** Agent 9: Tick C4 timers on structures. */
+  tickC4Timers(): void {
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      const sAny = s as MapStructure & { c4Timer?: number };
+      if (sAny.c4Timer && sAny.c4Timer > 0) {
+        sAny.c4Timer--;
+        if (sAny.c4Timer <= 0) this.damageStructure(s, 9999);
+      }
+    }
+  }
+
+  /** Agent 9: Thief steals 50% credits from enemy PROC/SILO, then dies. */
+  updateThief(entity: Entity): void {
+    if (entity.type !== UnitType.I_THF || !entity.alive) return;
+    if (!entity.targetStructure || !(entity.targetStructure as MapStructure).alive) return;
+    const s = entity.targetStructure as MapStructure;
+    if (s.type !== 'PROC' && s.type !== 'SILO') { entity.targetStructure = null; entity.mission = Mission.GUARD; return; }
+    if (this.isAllied(entity.house, s.house)) { entity.targetStructure = null; entity.mission = Mission.GUARD; return; }
+    const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+    const scx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
+    const scy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
+    const dist = worldDist(entity.pos, { x: scx, y: scy });
+    if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward({ x: scx, y: scy }, this.movementSpeed(entity)); return; }
+    const enemyCredits = this.houseCredits.get(s.house) ?? 0;
+    const stolen = Math.floor(enemyCredits * 0.5);
+    if (stolen > 0) {
+      this.houseCredits.set(s.house, enemyCredits - stolen);
+      if (entity.isPlayerUnit) { this.addCredits(stolen, true); } else { this.houseCredits.set(entity.house, (this.houseCredits.get(entity.house) ?? 0) + stolen); }
+      this.evaMessages.push({ text: `CREDITS STOLEN: ${stolen}`, tick: this.tick });
+    }
+    entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
+  }
+
+  /** Agent 9: Minelayer places AP mines. Mine limit: 50/house. */
+  static readonly MAX_MINES_PER_HOUSE = 50;
+  mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+
+  updateMinelayer(entity: Entity): void {
+    if (entity.type !== UnitType.V_MNLY || !entity.alive || !entity.moveTarget) return;
+    const targetCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+    const dist = worldDist(entity.pos, entity.moveTarget);
+    if (dist > 0.5) { entity.animState = AnimState.WALK; entity.moveToward(entity.moveTarget, this.movementSpeed(entity)); return; }
+    const houseMines = this.mines.filter(m => m.house === entity.house).length;
+    if (houseMines >= Game.MAX_MINES_PER_HOUSE) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
+    if (!this.mines.find(m => m.cx === targetCell.cx && m.cy === targetCell.cy)) {
+      this.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: 400 });
+      entity.mineCount++;
+    }
+    entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE;
+  }
+
+  /** Agent 9: Mine trigger check — enemy enters mined cell. */
+  tickMines(): void {
+    for (let i = this.mines.length - 1; i >= 0; i--) {
+      const mine = this.mines[i];
+      for (const e of this.entities) {
+        if (!e.alive || this.isAllied(e.house, mine.house) || e.isAirUnit) continue;
+        const ec = e.cell;
+        if (ec.cx === mine.cx && ec.cy === mine.cy) {
+          e.takeDamage(mine.damage, 'AP');
+          this.effects.push({ type: 'explosion', x: mine.cx * CELL_SIZE + CELL_SIZE / 2, y: mine.cy * CELL_SIZE + CELL_SIZE / 2, frame: 0, maxFrames: 12, size: 10 });
+          this.playSoundAt('building_explode', mine.cx * CELL_SIZE, mine.cy * CELL_SIZE);
+          this.mines.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Agent 9: Gap Generator shroud — jams enemy vision in 10-cell radius. Power-gated. */
+  static readonly GAP_RADIUS = 10;
+  static readonly GAP_UPDATE_INTERVAL = 90;
+  gapGeneratorCells = new Map<number, { cx: number; cy: number; radius: number }>();
+
+  updateGapGenerators(): void {
+    if (this.tick % Game.GAP_UPDATE_INTERVAL !== 0) return;
+    const pf = this.powerProduced > 0 ? this.powerProduced / Math.max(this.powerConsumed, 1) : 0;
+    const activeGaps = new Set<number>();
+    for (let si = 0; si < this.structures.length; si++) {
+      const s = this.structures[si];
+      if (s.type !== 'GAP' || !s.alive) continue;
+      if (pf < 1.0) {
+        if (this.gapGeneratorCells.has(si)) { const prev = this.gapGeneratorCells.get(si)!; this.map.unjamRadius(prev.cx, prev.cy, prev.radius); this.gapGeneratorCells.delete(si); }
+        continue;
+      }
+      activeGaps.add(si);
+      if (this.gapGeneratorCells.has(si)) continue;
+      const [gw, gh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      const cx = s.cx + Math.floor(gw / 2); const cy = s.cy + Math.floor(gh / 2);
+      const r = Game.GAP_RADIUS; const r2 = r * r;
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r2) this.map.jamCell(cx + dx, cy + dy);
+      this.gapGeneratorCells.set(si, { cx, cy, radius: r });
+    }
+    for (const [si, prev] of this.gapGeneratorCells) {
+      if (!activeGaps.has(si)) { this.map.unjamRadius(prev.cx, prev.cy, prev.radius); this.gapGeneratorCells.delete(si); }
+    }
+  }
+
+  /** Agent 9: Chrono Tank teleport — 180-tick cooldown, teleports if dist > 5 cells. */
+  static readonly CHRONO_TANK_COOLDOWN = 180;
+
+  updateChronoTank(entity: Entity): void {
+    if (entity.type !== UnitType.V_CTNK || !entity.alive) return;
+    if (entity.chronoCooldown > 0) entity.chronoCooldown--;
+    if (entity.moveTarget && entity.chronoCooldown <= 0) {
+      const dist = worldDist(entity.pos, entity.moveTarget);
+      if (dist > 5) {
+        const tc = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+        if (this.map.isPassable(tc.cx, tc.cy)) {
+          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 10, size: 12, muzzleColor: '100,150,255' });
+          entity.pos.x = entity.moveTarget.x; entity.pos.y = entity.moveTarget.y;
+          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 10, size: 12, muzzleColor: '100,150,255' });
+          entity.chronoShiftTick = 30; entity.chronoCooldown = Game.CHRONO_TANK_COOLDOWN;
+          entity.moveTarget = null; entity.mission = Mission.GUARD;
+        }
+      }
+    }
+  }
+
+  /** Agent 9: MAD Tank deploy + shockwave. 30-tick charge, 600 dmg to vehicles in 8 cells. */
+  static readonly MAD_TANK_CHARGE_TICKS = 30;
+  static readonly MAD_TANK_DAMAGE = 600;
+  static readonly MAD_TANK_RADIUS = 8;
+
+  updateMADTank(entity: Entity): void {
+    if (!entity.alive || !entity.isDeployed) return;
+    entity.deployTimer--;
+    entity.animState = AnimState.IDLE;
+    if (entity.deployTimer <= 0) {
+      const radius = Game.MAD_TANK_RADIUS;
+      for (const other of this.entities) {
+        if (!other.alive || other.id === entity.id || other.stats.isInfantry || other.isAirUnit) continue;
+        if (worldDist(entity.pos, other.pos) <= radius) {
+          other.hp -= Game.MAD_TANK_DAMAGE; other.damageFlash = 4;
+          if (other.hp <= 0) { other.hp = 0; other.alive = false; other.mission = Mission.DIE; other.animState = AnimState.DIE; other.animFrame = 0; other.deathTick = 0; }
+        }
+      }
+      this.effects.push({ type: 'explosion', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 20, size: 24 });
+      this.playSoundAt('building_explode', entity.pos.x, entity.pos.y);
+      entity.hp = 0; entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
+    }
+  }
+
+  deployMADTank(entity: Entity): void {
+    if (entity.isDeployed) return;
+    entity.isDeployed = true; entity.deployTimer = Game.MAD_TANK_CHARGE_TICKS;
+    entity.moveTarget = null; entity.target = null; entity.mission = Mission.GUARD;
+  }
+
+  /** Agent 9: Demo Truck kamikaze — 1000 damage in 3-cell radius. */
+  static readonly DEMO_TRUCK_DAMAGE = 1000;
+  static readonly DEMO_TRUCK_RADIUS = 3;
+
+  updateDemoTruck(entity: Entity): void {
+    if (entity.type !== UnitType.V_DTRK || !entity.alive || entity.mission !== Mission.ATTACK) return;
+    let targetPos: WorldPos | null = null;
+    if (entity.target && entity.target.alive) { targetPos = entity.target.pos; }
+    else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
+      const s = entity.targetStructure as MapStructure;
+      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      targetPos = { x: s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2, y: s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2 };
+    }
+    if (!targetPos) { entity.mission = Mission.GUARD; return; }
+    const dist = worldDist(entity.pos, targetPos);
+    if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward(targetPos, this.movementSpeed(entity)); return; }
+    const blastRadius = Game.DEMO_TRUCK_RADIUS;
+    for (const other of this.entities) {
+      if (!other.alive || other.id === entity.id) continue;
+      const d = worldDist(entity.pos, other.pos);
+      if (d <= blastRadius) { other.takeDamage(Math.round(Game.DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)), 'Nuke'); }
+    }
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      const d = worldDist(entity.pos, { x: s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2, y: s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2 });
+      if (d <= blastRadius) this.damageStructure(s, Math.round(Game.DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)));
+    }
+    this.effects.push({ type: 'explosion', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 20, size: 24 });
+    this.playSoundAt('building_explode', entity.pos.x, entity.pos.y);
+    entity.hp = 0; entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
+  }
+
+  /** Agent 9: Vehicle cloak — same as sub cloak but for non-vessel cloakable (STNK). */
+  updateVehicleCloak(entity: Entity): void {
+    if (!entity.stats.isCloakable || entity.stats.isVessel) return;
+    switch (entity.cloakState) {
+      case CloakState.CLOAKING: entity.cloakTimer--; if (entity.cloakTimer <= 0) { entity.cloakState = CloakState.CLOAKED; entity.cloakTimer = 0; } break;
+      case CloakState.UNCLOAKING: entity.cloakTimer--; if (entity.cloakTimer <= 0) { entity.cloakState = CloakState.UNCLOAKED; entity.cloakTimer = 0; } break;
+      case CloakState.UNCLOAKED:
+        if (entity.sonarPulseTimer > 0) break;
+        if (entity.mission === Mission.ATTACK) break;
+        if (entity.weapon && entity.attackCooldown > entity.weapon.rof * 0.5) break;
+        if (entity.hp / entity.maxHp < CONDITION_RED && Math.random() > 0.04) break;
+        entity.cloakState = CloakState.CLOAKING; entity.cloakTimer = CLOAK_TRANSITION_FRAMES; break;
+      case CloakState.CLOAKED: break;
+    }
+  }
+
+  /** Agent 9: Mechanic — auto-heals vehicles, 5 HP/tick, 6-cell scan range. */
+  static readonly MECHANIC_HEAL_RANGE = 6;
+  static readonly MECHANIC_HEAL_AMOUNT = 5;
+
+  updateMechanicUnit(entity: Entity): void {
+    if (entity.type !== UnitType.I_MECH || !entity.alive) return;
+    if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.fear >= Entity.FEAR_SCARED) {
+      let ned = Infinity; let nep: WorldPos | null = null;
+      for (const o of this.entities) { if (!o.alive || this.entitiesAllied(entity, o)) continue; const d = worldDist(entity.pos, o.pos); if (d < entity.stats.sight && d < ned) { ned = d; nep = o.pos; } }
+      if (nep) { const dx = entity.pos.x - nep.x; const dy = entity.pos.y - nep.y; const d = Math.sqrt(dx * dx + dy * dy) || 1; entity.animState = AnimState.WALK; entity.moveToward({ x: entity.pos.x + (dx / d) * CELL_SIZE * 3, y: entity.pos.y + (dy / d) * CELL_SIZE * 3 }, this.movementSpeed(entity)); entity.healTarget = null; return; }
+    }
+    if (entity.healTarget) { const ht = entity.healTarget; if (!ht.alive || ht.hp >= ht.maxHp || !this.isAllied(entity.house, ht.house) || ht.stats.isInfantry || ht.isAirUnit || ht.id === entity.id) entity.healTarget = null; }
+    const hsd = entity.stats.scanDelay ?? 15;
+    if (!entity.healTarget && this.tick - entity.lastGuardScan >= hsd) {
+      entity.lastGuardScan = this.tick;
+      let best: Entity | null = null; let lhr = 1.0; let bd = Infinity; const sr = Game.MECHANIC_HEAL_RANGE;
+      for (const o of this.entities) { if (!o.alive || o.id === entity.id || !this.isAllied(entity.house, o.house) || o.stats.isInfantry || o.isAirUnit || o.hp >= o.maxHp) continue; const d = worldDist(entity.pos, o.pos); if (d > sr) continue; const hr = o.hp / o.maxHp; if (hr < lhr || (hr === lhr && d < bd)) { lhr = hr; bd = d; best = o; } }
+      if (best) entity.healTarget = best;
+    }
+    if (entity.healTarget) {
+      const ht = entity.healTarget; const dist = worldDist(entity.pos, ht.pos);
+      if (dist <= 1.5) {
+        entity.animState = AnimState.ATTACK; entity.desiredFacing = directionTo(entity.pos, ht.pos); entity.tickRotation();
+        if (entity.attackCooldown <= 0) {
+          const prev = ht.hp; ht.hp = Math.min(ht.maxHp, ht.hp + Game.MECHANIC_HEAL_AMOUNT); const healed = ht.hp - prev; entity.attackCooldown = 15;
+          if (healed > 0) { this.playSoundAt('heal', ht.pos.x, ht.pos.y); this.effects.push({ type: 'muzzle', x: ht.pos.x, y: ht.pos.y - 4, frame: 0, maxFrames: 6, size: 4, muzzleColor: '80,200,255' }); this.effects.push({ type: 'text', x: ht.pos.x, y: ht.pos.y - 8, frame: 0, maxFrames: 30, size: 0, text: `+${healed}`, textColor: 'rgba(80,200,255,1)' }); }
+          if (ht.hp >= ht.maxHp) entity.healTarget = null;
+        }
+      } else { entity.animState = AnimState.WALK; entity.moveToward(ht.pos, this.movementSpeed(entity)); }
+      return;
+    }
+    entity.animState = AnimState.IDLE;
   }
 
   // === Other Stubbed Systems (not needed for ant missions) ===

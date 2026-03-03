@@ -21,11 +21,11 @@ export enum CloakState {
   UNCLOAKING = 3,
 }
 
-/** Frames for cloak/uncloak transition (1 second at 15 FPS) */
-export const CLOAK_TRANSITION_FRAMES = 15;
+/** Frames for cloak/uncloak transition (~2.5 seconds at 15 FPS, C++ CLOAK_STAGES) */
+export const CLOAK_TRANSITION_FRAMES = 38;
 
-/** Frames before recloak allowed after sonar detection (10 seconds at 15 FPS) */
-export const SONAR_PULSE_DURATION = 150;
+/** Frames before recloak allowed after sonar detection (15 seconds at 15 FPS, C++ SONAR_TIME) */
+export const SONAR_PULSE_DURATION = 225;
 // Structure reference is typed loosely to avoid circular dependency with scenario.ts
 export interface StructureRef {
   alive: boolean;
@@ -153,14 +153,29 @@ export class Entity {
   passengers: Entity[] = [];       // loaded infantry (hidden from entity list)
   transportRef: Entity | null = null; // reference to transport carrying this unit
 
-  // Harvester economy
-  oreLoad = 0;                     // credits worth of ore currently carried
-  static readonly ORE_CAPACITY = 700; // max ore value per trip
+  // Harvester economy (EC3: bail-based capacity — 28 bails max per harvester load)
+  oreLoad = 0;                     // number of bails currently carried
+  oreCreditValue = 0;              // total credit value of carried bails (for lump-sum unload)
+  static readonly BAIL_COUNT = 28; // max bails per trip (C++ UnitTypeClass::Max_Pips)
+  static readonly ORE_CAPACITY = 28; // alias for BAIL_COUNT (backward compat)
   harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'unloading' = 'idle';
   harvestTick = 0;                 // ticks spent harvesting current cell
 
   // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.5)
   speedBias = 1.0;
+
+  // MV9: Ground speed bias — multiplies rotation rate (C++ GroundSpeed affects ROT accumulation)
+  groundspeedBias = 1.0;
+
+  // CR2: Armor crate bias — damage reduction multiplier (C++ ArmorBias, default 1.0, crate sets to 2 = half damage)
+  // Applied in takeDamage: effective damage = damage / armorBias. Agent 1 owns takeDamage integration.
+  armorBias = 1.0;
+
+  // CR3: Firepower crate bias — damage output multiplier (C++ FirepowerBias, default 1.0, crate sets to 2 = double damage)
+  firepowerBias = 1.0;
+
+  // CR5: Crate-granted permanent cloak ability (C++ IsCloakable from crate pickup)
+  isCloakable = false;
 
   // Crate effect timers
   cloakTick = 0;    // ticks remaining for cloak invisibility (from crate)
@@ -191,6 +206,13 @@ export class Entity {
   // LST door state
   doorOpen = false;
   doorTimer = 0;          // countdown to auto-close
+
+  // Agent 9: New unit special ability fields
+  c4Timer = 0;              // C4 countdown on structures (Tanya)
+  mineCount = 0;            // mines placed by this player/house
+  chronoCooldown = 0;       // Chrono Tank teleport cooldown
+  isDeployed = false;       // for MAD Tank deployment state
+  deployTimer = 0;          // deployment charge-up timer
 
   // Aircraft state machine
   ammo = -1;                    // -1 = unlimited
@@ -388,10 +410,15 @@ export class Entity {
     }
   }
 
-  /** Take damage, return true if killed. warhead affects death animation. */
-  takeDamage(amount: number, warhead?: string): boolean {
+  /** Take damage, return true if killed. warhead affects death animation.
+   *  Optional attacker parameter enables DG1: dog instant-kill when attacking its designated target. */
+  takeDamage(amount: number, warhead?: string, attacker?: Entity): boolean {
     if (!this.alive) return false;
     if (this.isInvulnerable) return false; // invulnerability (crate or Iron Curtain)
+    // DG1: Dog instant-kill — if attacker is a living dog and this is the dog's target, instant kill
+    if (attacker && attacker.alive && attacker.type === UnitType.I_DOG && attacker.target === this) {
+      amount = this.hp; // override damage to kill instantly
+    }
     // C++ infantry.cpp:329-330 — prone infantry take 50% damage (ProneDamageBias)
     if (this.isProne && amount > 0) {
       amount = Math.max(1, Math.round(amount * PRONE_DAMAGE_BIAS));
@@ -539,8 +566,9 @@ export class Entity {
     }
 
     // 32-step vehicle rotation: accumulate ROT per tick, advance bodyFacing32 by ±1 when >= 8
+    // MV9: groundspeedBias multiplies rotation rate (C++ GroundSpeed affects ROT accumulation)
     const desiredFacing32 = this.desiredFacing * 4;
-    this.rotAccumulator += this.stats.rot;
+    this.rotAccumulator += this.stats.rot * this.groundspeedBias;
     if (this.rotAccumulator >= 8) {
       this.rotAccumulator -= 8;
       // Shortest path in 32-step ring
@@ -646,50 +674,61 @@ export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
 ];
 
 
-/** Calculate threat score for guard targeting (inspired by C++ techno.cpp Evaluate_Object).
+/** AI2: Calculate threat score for guard targeting (C++ techno.cpp:1449-1763 Evaluate_Object).
  *  Higher score = higher priority target. Pure function for testability.
  *  @param scanner The unit doing the scanning
  *  @param target The potential target being evaluated
  *  @param dist Distance between scanner and target (in cells)
  *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit
- *  @param closingSpeed Rate of distance change (positive = target approaching). A9: zone-aware threat. */
+ *  @param closingSpeed Rate of distance change (positive = target approaching). A9: zone-aware threat.
+ *  @param designatedEnemy AI4: enemy house that gets massive bonus (or null)
+ *  @param nearFriendlyBase AI5: true if target is within 3 cells of any friendly structure */
 export function threatScore(
   scanner: Entity, target: Entity, dist: number, isTargetAttackingAlly: boolean,
   closingSpeed?: number,
+  designatedEnemy?: House | null,
+  nearFriendlyBase?: boolean,
 ): number {
-  // Base value by unit class
-  let score: number;
-  if (target.type === UnitType.ANT2) score = 30;        // Fire ants are most dangerous
-  else if (target.type === UnitType.ANT1) score = 20;    // Warrior ants next
-  else if (target.type === UnitType.ANT3) score = 15;    // Scout ants less threatening
-  else if (target.stats.isInfantry) score = 10;
-  else score = 25; // vehicles are high-value
+  // AI6: Spy target exclusion — spies are not normal targets (except for dogs)
+  if (target.type === UnitType.I_SPY && scanner.type !== UnitType.I_DOG) {
+    return 0;
+  }
+
+  // AI2: Base score = cost-proportional scoring (C++ techno.cpp:1449-1763)
+  // Estimate value from unit properties: HP contributes base, weapon damage adds threat value
+  // (UnitStats doesn't carry cost directly; this approximation tracks C++ behavior)
+  let value = target.stats.strength + (target.weapon?.damage ?? 0) * 5;
 
   // Kill count bonus: experienced enemies are more dangerous
-  score += target.kills * 3;
+  value += target.kills * 50;
 
   // A11: Warhead effectiveness — prefer targets we can actually damage
   // (C++ per-weapon-class threat multipliers from techno.cpp)
-  // Applied early so base class value reflects armor matchup before additive/multiplicative bonuses.
   if (scanner.weapon) {
     const warhead = scanner.weapon.warhead;
     const verses = WARHEAD_VS_ARMOR[warhead];
     if (verses) {
       const mult = verses[armorIndex(target.stats.armor)];
       if (mult > 1.0) {
-        score *= 1.5;   // scanner's weapon is effective vs this armor → boost
+        value = Math.round(value * 1.5);   // scanner's weapon is effective vs this armor
       } else if (mult < 0.5) {
-        score *= 0.5;   // scanner's weapon is poor vs this armor → deprioritize
+        value = Math.round(value * 0.5);   // scanner's weapon is poor vs this armor
       }
     }
   }
 
-  // A12: Target weapon danger — enemies with bigger weapons are more threatening
-  // (C++ techno.cpp evaluates target's weapon damage as part of threat)
-  // Added after A11 (so armor penalty doesn't reduce it) but before wounded/retaliation
-  // so those multipliers scale the full score cleanly.
-  const weaponDanger = Math.min((target.weapon?.damage ?? 0) * 0.2, 20);
-  score += weaponDanger;
+  const weaponDanger = Math.min((target.weapon?.damage ?? 0) * 2, 200);
+  value += weaponDanger;
+
+  // AI4: Designated enemy house bonus — +500 then multiply by 3 (C++ techno.cpp)
+  if (designatedEnemy != null && target.house === designatedEnemy) {
+    value = (value + 500) * 3;
+  }
+
+  // AI2: Hyperbolic distance falloff (C++ techno.cpp)
+  // Convert distance from cells to leptons: dist * 256
+  const distLeptons = dist * 256;
+  let score = (value * 32000) / (distLeptons + 1);
 
   // Wounded bonus: finish off weakened targets (HP < 50% → 1.5x)
   if (target.hp < target.maxHp * 0.5) score *= 1.5;
@@ -700,16 +739,15 @@ export function threatScore(
   }
 
   // A9: Zone-aware threat — enemies closing distance get +25% priority
-  // (C++ uses spatial zones; we approximate with closing speed detection)
   if (closingSpeed !== undefined && closingSpeed > 0) {
     score *= 1.25;
   }
 
-  // Inverse distance weighting: closer targets score higher
-  // Avoid division by zero; at dist=0 full score, at max sight range ~0.3x
-  const maxRange = scanner.stats.sight * 1.5;
-  const distFactor = Math.max(0.3, 1 - (dist / maxRange) * 0.7);
-  score *= distFactor;
+  // AI5: Area modification — reduce threat for targets near friendly buildings
+  // to avoid splash damage to own base (25% reduction)
+  if (nearFriendlyBase) {
+    score *= 0.75;
+  }
 
   return score;
 }

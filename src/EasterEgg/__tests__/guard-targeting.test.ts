@@ -77,15 +77,17 @@ describe('threatScore — threat-weighted targeting', () => {
 
   it('threatening far target beats harmless close target', () => {
     // Key behavioral test: fire ant attacking allies at distance 4
-    // should score higher than idle scout ant at distance 1
+    // should score higher than idle scout ant at distance 2
+    // (C++ hyperbolic falloff makes very close targets dominate, so
+    //  the idle target must be at moderate distance for threat modifiers to win)
     const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
 
-    const closeScout = makeEntity(UnitType.ANT3, House.USSR, 110, 100);
+    const closeScout = makeEntity(UnitType.ANT3, House.USSR, 150, 100);
     const farFireAnt = makeEntity(UnitType.ANT2, House.USSR, 200, 100);
     farFireAnt.kills = 3; // has been killing allies
 
-    const closeScore = threatScore(scanner, closeScout, 0.5, false);
-    // Fire ant is attacking an ally AND has kills
+    const closeScore = threatScore(scanner, closeScout, 2, false);
+    // Fire ant is attacking an ally AND has kills — 2x retaliation bonus
     const farScore = threatScore(scanner, farFireAnt, 4, true);
 
     expect(farScore).toBeGreaterThan(closeScore);

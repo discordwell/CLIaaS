@@ -14,60 +14,79 @@ import { GameMap, Terrain } from './map';
 
 // === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===
 
-// Trigger event types (TEventType — from TEVENT.H)
+// Trigger event types (TEventType — from TEVENT.H:46-83, C++ enum order)
 const TEVENT_NONE = 0;
 const TEVENT_PLAYER_ENTERED = 1;
+const TEVENT_SPIED = 2;                   // TR3/TR5: spy infiltrated building (C++ TEVENT_SPIED)
+const TEVENT_THIEVED = 3;                 // TR5: fixed index (was 17, C++ = 3)
 const TEVENT_DISCOVERED = 4;
+const TEVENT_HOUSE_DISCOVERED = 5;        // TR5: fixed index (was 3, C++ = 5)
 const TEVENT_ATTACKED = 6;
 const TEVENT_DESTROYED = 7;
 const TEVENT_ANY = 8;
+const TEVENT_UNITS_DESTROYED = 9;         // TR5: fixed index (was 26, C++ = 9) — all house's units destroyed
+const TEVENT_BUILDINGS_DESTROYED = 10;    // TR3: all house's buildings destroyed (C++ = 10)
 const TEVENT_ALL_DESTROYED = 11;
+const TEVENT_CREDITS = 12;               // TR5: fixed index (was 30, C++ = 12)
 const TEVENT_TIME = 13;
 const TEVENT_MISSION_TIMER_EXPIRED = 14;
+const TEVENT_NBUILDINGS_DESTROYED = 15;   // TR3/TR5: N buildings destroyed (C++ = 15)
 const TEVENT_NUNITS_DESTROYED = 16;
+const TEVENT_NOFACTORIES = 17;            // TR3/TR5: no factories remaining (C++ = 17)
+const TEVENT_EVAC_CIVILIAN = 18;          // TR3: civilian evacuated
 const TEVENT_BUILD = 19;
+const TEVENT_BUILD_UNIT = 20;             // TR3: specified unit built (C++ TEVENT_BUILD_UNIT)
+const TEVENT_BUILD_INFANTRY = 21;         // TR3/TR5: infantry built (C++ = 21)
+const TEVENT_BUILD_AIRCRAFT = 22;         // TR3/TR5: aircraft built (C++ = 22)
 const TEVENT_LEAVES_MAP = 23;
 const TEVENT_ENTERS_ZONE = 24;
+const TEVENT_CROSS_HORIZONTAL = 25;       // TR5: fixed index (was 21, C++ = 25)
+const TEVENT_CROSS_VERTICAL = 26;         // TR5: fixed index (was 22, C++ = 26)
 const TEVENT_GLOBAL_SET = 27;
 const TEVENT_GLOBAL_CLEAR = 28;
+const TEVENT_FAKES_DESTROYED = 29;        // TR3: all fake structures destroyed
+const TEVENT_LOW_POWER = 30;              // TR5: fixed index (was 15, C++ = 30)
 const TEVENT_ALL_BRIDGES_DESTROYED = 31;
 const TEVENT_BUILDING_EXISTS = 32;
-const TEVENT_HOUSE_DISCOVERED = 3;
-const TEVENT_LOW_POWER = 15;
-const TEVENT_THIEVED = 17;
-const TEVENT_CROSS_HORIZONTAL = 21;
-const TEVENT_CROSS_VERTICAL = 22;
-const TEVENT_UNITS_DESTROYED = 26;
-const TEVENT_CREDITS = 30;
 
-// Trigger action types (TActionType — from TACTION.H)
+// Trigger action types (TActionType — from TACTION.H, C++ enum order)
 const TACTION_NONE = 0;
 const TACTION_WIN = 1;
 const TACTION_LOSE = 2;
 const TACTION_BEGIN_PRODUCTION = 3;
 const TACTION_CREATE_TEAM = 4;
+// 5 = DESTROY_TEAM (unused)
 const TACTION_ALL_HUNT = 6;
 const TACTION_REINFORCEMENTS = 7;
 const TACTION_DZ = 8;
+const TACTION_FIRE_SALE = 9;              // TR4: sell all buildings (C++ TACTION_FIRE_SALE)
+const TACTION_PLAY_MOVIE = 10;            // TR4: play a movie/cutscene (C++ TACTION_PLAY_MOVIE)
 const TACTION_TEXT_TRIGGER = 11;
 const TACTION_DESTROY_TRIGGER = 12;
 const TACTION_AUTOCREATE = 13;
+// 14 = WINLOSE (unused)
 const TACTION_ALLOWWIN = 15;
+const TACTION_REVEAL_MAP = 16;            // C++ TACTION_REVEAL_ALL
 const TACTION_REVEAL_SOME = 17;
+const TACTION_REVEAL_ZONE = 18;           // TR4: reveal all of specified zone (C++ TACTION_REVEAL_ZONE)
 const TACTION_PLAY_SOUND = 19;
+const TACTION_PLAY_MUSIC = 20;            // TR4: play music track (C++ TACTION_PLAY_MUSIC)
 const TACTION_PLAY_SPEECH = 21;
 const TACTION_FORCE_TRIGGER = 22;
-const TACTION_TIMER_EXTEND = 25;
+// 23 = START_TIMER (unused)
+// 24 = STOP_TIMER (unused)
+const TACTION_TIMER_EXTEND = 25;          // C++ TACTION_ADD_TIMER
+// 26 = SUB_TIMER (unused)
 const TACTION_SET_TIMER = 27;
 const TACTION_SET_GLOBAL = 28;
 const TACTION_CLEAR_GLOBAL = 29;
+// 30 = BASE_BUILDING (unused)
 const TACTION_CREEP_SHADOW = 31;
 const TACTION_DESTROY_OBJECT = 32;
-const TACTION_AIRSTRIKE = 9;
-const TACTION_NUKE = 10;
-const TACTION_REVEAL_MAP = 16;
-const TACTION_CENTER_VIEW = 18;
-const TACTION_CHANGE_HOUSE = 26;
+// 33 = 1_SPECIAL (unused)
+// 34 = FULL_SPECIAL (unused)
+const TACTION_PREFERRED_TARGET = 35;      // TR4: designate preferred target for AI house
+const TACTION_LAUNCH_NUKES = 36;          // C++ TACTION_LAUNCH_NUKES — launch fake nukes from all silos
 
 // Team mission types (TeamMissionType — from TEAMTYPE.H, exact numbering from RA source)
 const TMISSION_ATTACK = 0;       // Attack nearest enemy near waypoint
@@ -720,8 +739,12 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
 
 // Structure max HP overrides (default is 256)
 export const STRUCTURE_MAX_HP: Record<string, number> = {
-  ATEK: 600, STEK: 600, PDOX: 600, IRON: 600, MSLO: 800,
-  QUEE: 800, LAR1: 25, LAR2: 50, TSLA: 500, HPAD: 400, AFLD: 500,
+  POWR: 400, APWR: 700, PROC: 900, TENT: 800, BARR: 800,
+  WEAP: 1000, AFLD: 500, HPAD: 400, DOME: 1000,
+  GUN: 400, SAM: 400, TSLA: 500, GAP: 1000,
+  ATEK: 600, STEK: 600, IRON: 600, PDOX: 600, MSLO: 800,
+  FIX: 800, SILO: 300, FACT: 1000, HBOX: 600,
+  QUEE: 800, LAR1: 25, LAR2: 50,
   BARL: 150, BRL3: 150,
 };
 
@@ -1308,6 +1331,16 @@ export interface TriggerGameState {
   houseAlive: Map<number, boolean>;
   isLowPower: boolean;        // player is low on power
   playerCredits: number;      // player's current credits
+  // TR3: new event state fields
+  buildingsDestroyedByHouse: Map<number, boolean>; // per-house: all buildings destroyed?
+  nBuildingsDestroyed: number;   // total count of buildings destroyed
+  playerFactoriesExist: boolean; // does the player still have factories?
+  civiliansEvacuated: number;    // count of civilians evacuated
+  builtUnitTypes: Set<string>;     // unit types player has built
+  builtInfantryTypes: Set<string>; // infantry types player has built
+  builtAircraftTypes: Set<string>; // aircraft types player has built
+  fakesExist: boolean;           // do any fake structures still exist?
+  spiedBuildings: Set<string>;   // trigger names of spied buildings
 }
 
 export function checkTriggerEvent(
@@ -1401,11 +1434,42 @@ export function checkTriggerEvent(
       // Player crossed a vertical line — use playerEntered flag
       return state.playerEntered;
     case TEVENT_UNITS_DESTROYED:
-      // N enemy units have been destroyed (same as NUNITS_DESTROYED)
-      return state.enemyKillCount >= event.data;
+      // All units of a house destroyed (event.data = RA house index)
+      // C++ index 9: "all house's units destroyed" — uses houseAlive check
+      return !(state.houseAlive.get(event.data) ?? false);
     case TEVENT_CREDITS:
       // Player has accumulated a certain amount of credits
       return state.playerCredits >= event.data;
+    // TR3: New trigger events
+    case TEVENT_SPIED:
+      // Spy has infiltrated the attached building
+      return state.spiedBuildings.has(state.triggerName);
+    case TEVENT_BUILDINGS_DESTROYED: {
+      // All buildings of specified house destroyed
+      const bHouseIdx = event.data;
+      return state.buildingsDestroyedByHouse.get(bHouseIdx) ?? false;
+    }
+    case TEVENT_NBUILDINGS_DESTROYED:
+      // N buildings have been destroyed
+      return state.nBuildingsDestroyed >= event.data;
+    case TEVENT_NOFACTORIES:
+      // No factories remaining for player
+      return !state.playerFactoriesExist;
+    case TEVENT_EVAC_CIVILIAN:
+      // A civilian has been evacuated
+      return state.civiliansEvacuated > 0;
+    case TEVENT_BUILD_UNIT:
+      // Specified unit type has been built (event.data = UnitType index)
+      return state.builtUnitTypes.size > 0;
+    case TEVENT_BUILD_INFANTRY:
+      // Specified infantry type has been built
+      return state.builtInfantryTypes.size > 0;
+    case TEVENT_BUILD_AIRCRAFT:
+      // Specified aircraft type has been built
+      return state.builtAircraftTypes.size > 0;
+    case TEVENT_FAKES_DESTROYED:
+      // All fake structures have been destroyed
+      return !state.fakesExist;
     default:
       return false;
   }
@@ -1429,9 +1493,15 @@ export interface TriggerActionResult {
   destroyTriggeringUnit?: boolean; // kill the unit that triggered this
   playSound?: number;    // play a sound effect (PLAY_SOUND)
   playSpeech?: number;   // play EVA speech (PLAY_SPEECH)
-  airstrike?: boolean;   // call in an airstrike (AIRSTRIKE)
-  nuke?: boolean;        // launch a nuclear missile (NUKE)
-  centerView?: number;   // center camera on waypoint (CENTER_VIEW)
+  airstrike?: boolean;   // call in an airstrike (legacy)
+  nuke?: boolean;        // launch a nuclear missile (LAUNCH_NUKES)
+  centerView?: number;   // center camera on waypoint (legacy)
+  // TR4: new action results
+  fireSale?: boolean;             // sell all buildings (FIRE_SALE)
+  playMovie?: number;             // play a movie/cutscene (PLAY_MOVIE)
+  revealZone?: number;            // reveal all of specified zone (REVEAL_ZONE)
+  playMusic?: number;             // play music track (PLAY_MUSIC)
+  preferredTarget?: number;       // set preferred target type for AI (PREFERRED_TARGET)
 }
 
 /** Execute a trigger action — returns result with entities and side effects */
@@ -1603,29 +1673,40 @@ export function executeTriggerAction(
       result.creepShadow = true;
       break;
 
-    case TACTION_AIRSTRIKE:
-      // Call in an airstrike at a waypoint
-      result.airstrike = true;
-      break;
-
-    case TACTION_NUKE:
-      // Launch a nuclear missile
-      result.nuke = true;
-      break;
-
     case TACTION_REVEAL_MAP:
       // Reveal entire map (same as revealAll)
       result.revealAll = true;
       break;
 
-    case TACTION_CENTER_VIEW:
-      // Center camera on waypoint (action.data = waypoint index)
-      result.centerView = action.data;
+    // TR4: New trigger actions (stub implementations)
+    case TACTION_FIRE_SALE:
+      // Sell all buildings and go on rampage
+      result.fireSale = true;
       break;
 
-    case TACTION_CHANGE_HOUSE:
-      // Change house ownership — not applicable to ant missions (log warning)
-      console.warn('TACTION_CHANGE_HOUSE triggered but not implemented for ant missions');
+    case TACTION_PLAY_MOVIE:
+      // Play movie/cutscene (action.data = movie ID)
+      result.playMovie = action.data;
+      break;
+
+    case TACTION_REVEAL_ZONE:
+      // Reveal all of specified zone (action.data = zone waypoint)
+      result.revealZone = action.data;
+      break;
+
+    case TACTION_PLAY_MUSIC:
+      // Play musical score (action.data = theme ID)
+      result.playMusic = action.data;
+      break;
+
+    case TACTION_PREFERRED_TARGET:
+      // Designate preferred target type for AI house (action.data = quarry type)
+      result.preferredTarget = action.data;
+      break;
+
+    case TACTION_LAUNCH_NUKES:
+      // Launch nuclear missiles from all silos
+      result.nuke = true;
       break;
   }
 
