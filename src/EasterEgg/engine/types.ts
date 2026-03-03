@@ -717,9 +717,9 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK' },
   { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK' },
   { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK' },
-  { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'DOME' },
-  { type: 'MNLY', name: 'Minelayer', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME' },
-  { type: 'MRLS', name: 'MRLS', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME' },
+  { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK' },
+  { type: 'MNLY', name: 'Minelayer', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
+  { type: 'MRLS', name: 'MRLS', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK' },
   // Naval (from SYRD — Allied Shipyard)
   { type: 'PT', name: 'Gunboat', cost: 500, buildTime: 100, prerequisite: 'SYRD', faction: 'allied' },
   { type: 'DD', name: 'Destroyer', cost: 1000, buildTime: 160, prerequisite: 'SYRD', faction: 'allied' },

@@ -83,19 +83,19 @@ describe('Production items techPrereq for expansion units', () => {
     expect(item.techPrereq).toBe('ATEK');
   });
 
-  it('V2RL requires DOME', () => {
+  it('V2RL requires STEK (Soviet tech center, not DOME)', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'V2RL')!;
-    expect(item.techPrereq).toBe('DOME');
+    expect(item.techPrereq).toBe('STEK');
   });
 
-  it('MNLY (Minelayer) requires DOME', () => {
+  it('MNLY (Minelayer) requires ATEK', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MNLY')!;
-    expect(item.techPrereq).toBe('DOME');
+    expect(item.techPrereq).toBe('ATEK');
   });
 
-  it('MRLS requires DOME', () => {
+  it('MRLS requires ATEK', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MRLS')!;
-    expect(item.techPrereq).toBe('DOME');
+    expect(item.techPrereq).toBe('ATEK');
   });
 
   // Other expansion units that already had techPrereq should still have them
