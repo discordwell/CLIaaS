@@ -68,6 +68,7 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'TRAN.SHP', 'tran'],      // Chinook transport helicopter
   ['CONQUER.MIX', 'MIG.SHP', 'mig'],        // MiG-29 fighter
   ['CONQUER.MIX', 'YAK.SHP', 'yak'],        // Yak attack plane
+  ['CONQUER.MIX', 'MLRS.SHP', 'mlrs'],    // MRLS (file is MLRS.SHP, game code uses MRLS)
   // Counterstrike expansion — STNK is in base CONQUER.MIX (reused from TD)
   ['CONQUER.MIX', 'STNK.SHP', 'stnk'],    // Phase Transport (stealth tank)
   // Aftermath expansion vehicles (from EXPAND2.MIX — extracted via extract-freeware-ant-originals.sh)

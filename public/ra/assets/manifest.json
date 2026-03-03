@@ -305,6 +305,15 @@
     "sheetWidth": 640,
     "sheetHeight": 40
   },
+  "mlrs": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 128,
+    "columns": 16,
+    "rows": 8,
+    "sheetWidth": 384,
+    "sheetHeight": 192
+  },
   "stnk": {
     "frameWidth": 24,
     "frameHeight": 24,

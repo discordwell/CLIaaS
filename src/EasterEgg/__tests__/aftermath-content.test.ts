@@ -42,8 +42,8 @@ describe('Aftermath sprite references', () => {
     expect(UNIT_STATS.TTNK.image).toBe('ttnk');
   });
 
-  it('MRLS uses v2rl stand-in sprite (MRLS.SHP not in freeware data)', () => {
-    expect(UNIT_STATS.MRLS.image).toBe('v2rl');
+  it('MRLS uses mlrs sprite (SHP file is MLRS.SHP in CONQUER.MIX)', () => {
+    expect(UNIT_STATS.MRLS.image).toBe('mlrs');
   });
 
   it('Mechanic correctly uses medi sprite (shared with Medic per C++ idata.cpp)', () => {

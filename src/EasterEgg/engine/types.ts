@@ -545,7 +545,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   // Expansion vehicles (V2 Rocket, Minelayer, MRLS)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 6, rot: 3, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700 },
   MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'allied', cost: 800 },
-  MRLS: { type: UnitType.V_MRLS, name: 'MRLS', image: 'v2rl', strength: 75, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'Nike', secondaryWeapon: 'Nike', owner: 'allied', cost: 800 }, // MRLS.SHP not in freeware data — v2rl stand-in (similar vehicle silhouette)
+  MRLS: { type: UnitType.V_MRLS, name: 'MRLS', image: 'mlrs', strength: 75, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'Nike', secondaryWeapon: 'Nike', owner: 'allied', cost: 800 }, // SHP file is MLRS.SHP (full acronym) in CONQUER.MIX
 };
 
 // Weapon stats from RULES.INI — real RA values
