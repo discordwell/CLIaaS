@@ -635,6 +635,28 @@ export class Renderer {
     }
   }
 
+  /** Draw a magenta checkerboard stub for atlas-miss tiles. No silent fallbacks. */
+  private renderMissingTileStub(
+    ctx: CanvasRenderingContext2D, sx: number, sy: number,
+    tmpl: number, icon: number,
+  ): void {
+    // Magenta/black checkerboard — classic "missing texture" pattern
+    const half = CELL_SIZE / 2;
+    ctx.fillStyle = '#ff00ff';
+    ctx.fillRect(sx, sy, half, half);
+    ctx.fillRect(sx + half, sy + half, half, half);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(sx + half, sy, half, half);
+    ctx.fillRect(sx, sy + half, half, half);
+    // Label: UNK + template ID so you know exactly what's missing
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('UNK', sx + CELL_SIZE / 2, sy + CELL_SIZE / 2 - 1);
+    ctx.fillText(`${tmpl}:${icon}`, sx + CELL_SIZE / 2, sy + CELL_SIZE / 2 + 7);
+    ctx.textAlign = 'start'; // reset
+  }
+
   /** Try to draw a tile from the tileset atlas. Returns true if drawn. */
   private drawTileFromAtlas(
     ctx: CanvasRenderingContext2D,
@@ -688,21 +710,25 @@ export class Renderer {
         // Try real tileset tile first (skip for INTERIOR theatre)
         // For TREE terrain, draw ground from atlas but still render tree overlay on top
         let atlasDrawn = false;
-        if (useTileset && tmpl > 0 && tmpl !== 0xFF && tmpl !== 0xFFFF) {
+        if (useTileset && tmpl > 0 && tmpl !== 0xFFFF) {
           if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
             if (terrain !== Terrain.TREE) continue; // Tile drawn from atlas, skip procedural
             atlasDrawn = true; // Fall through to TREE case below
+          } else {
+            // ATLAS MISS — magenta checkerboard stub (no silent fallbacks)
+            this.renderMissingTileStub(ctx, screen.x, screen.y, tmpl, icon);
+            if (terrain !== Terrain.TREE) continue;
           }
         }
 
-        // Also handle clear tiles (type 0 or 0xFF) from tileset — use clear1 (type 255, icon 0)
-        if (useTileset && (tmpl === 0 || tmpl === 0xFF || tmpl === 0xFFFF) && terrain === Terrain.CLEAR) {
+        // Also handle clear tiles (type 0 or 0xFFFF) from tileset — use clear1 (type 255, icon 0)
+        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF) && terrain === Terrain.CLEAR) {
           if (this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
             continue;
           }
         }
 
-        // Fallback: procedural rendering
+        // Procedural rendering for base terrain types (type 0, 0xFFFF, or INTERIOR theatre)
         switch (terrain) {
           case Terrain.CLEAR: {
             if (this.theatre === 'INTERIOR') {
@@ -722,7 +748,7 @@ export class Renderer {
                 ctx.fillRect(screen.x + 4, screen.y + 4, 16, 12);
               }
               break; // skip TEMPERATE template rendering and grass tufts
-            } else if (tmpl > 0 && tmpl !== 0xFF && tmpl !== 0xFFFF) {
+            } else if (tmpl > 0 && tmpl !== 0xFFFF) {
               // Template-aware rendering using palette colors
               const isRoad = tmpl >= TEMPLATE_ROAD_MIN && tmpl <= TEMPLATE_ROAD_MAX;
               const isRough = tmpl >= 0x0D && tmpl <= 0x12;
@@ -1505,23 +1531,25 @@ export class Renderer {
       }
 
       // Unit shadow — sprite-shaped silhouette (C++ SHAPE_GHOST + UnitShadow)
-      // Save cloak alpha so shadow doesn't override it
+      // Uses 'multiply' blend: dark gray shadow darkens terrain proportionally
+      // (grass stays dark green, sand stays dark tan — not green-tinted black)
       const preShadowAlpha = ctx.globalAlpha;
       if (entity.alive && sheet) {
         const shadowSheet = assets.getShadowSheet(entity.stats.image);
         if (shadowSheet) {
           const frame = entity.spriteFrame % sheet.meta.frameCount;
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.globalAlpha = Math.min(1.0, preShadowAlpha);
           if (entity.isAirUnit && altY > 0) {
             // Air unit shadow at ground level, offset by altitude for parallax
-            ctx.globalAlpha = Math.min(0.2, preShadowAlpha);
             assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
               screen.x + altY * 0.3 + 2, screen.y + 3, { centerX: true, centerY: true });
           } else if (!entity.stats.isInfantry) {
             // Ground vehicle/ant sprite-shaped shadow
-            ctx.globalAlpha = Math.min(0.2, preShadowAlpha);
             assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
               screen.x + 2, screen.y + 3, { centerX: true, centerY: true });
           }
+          ctx.globalCompositeOperation = 'source-over';
         }
       }
       // Restore cloak alpha for sprite rendering

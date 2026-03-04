@@ -230,6 +230,194 @@ export function saveProgress(completedMission: number): void {
   }
 }
 
+// === Campaign System ===
+
+export type CampaignId = 'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet';
+
+export interface CampaignMission {
+  id: string;        // scenario file ID (e.g. 'SCG01EA')
+  title: string;     // display name
+  briefing: string;  // brief description
+  objective: string; // one-line objective
+}
+
+export interface CampaignDef {
+  id: CampaignId;
+  title: string;
+  faction: 'allied' | 'soviet';
+  missions: CampaignMission[];
+  progressKey: string;
+}
+
+// Allied campaign mission titles (from original RA)
+const ALLIED_MISSIONS: CampaignMission[] = [
+  { id: 'SCG01EA', title: 'In the Thick of It', briefing: 'Rescue Einstein from Soviet forces.', objective: 'Locate and rescue Einstein.' },
+  { id: 'SCG02EA', title: 'Five to One', briefing: 'Hold the line against Soviet assault.', objective: 'Destroy all Soviet forces.' },
+  { id: 'SCG03EA', title: 'Dead End', briefing: 'Escort convoy through hostile territory.', objective: 'Get the convoy safely through.' },
+  { id: 'SCG04EA', title: 'Tanya\'s Tale', briefing: 'Infiltrate enemy base with Tanya.', objective: 'Destroy Soviet installations.' },
+  { id: 'SCG05EA', title: 'Paradox Equation', briefing: 'Stop Soviet nuclear development.', objective: 'Destroy the Soviet tech center.' },
+  { id: 'SCG06EA', title: 'Situation Critical', briefing: 'Defend the Allied base from attack.', objective: 'Protect the Allied base.' },
+  { id: 'SCG07EA', title: 'Sarin Gas 1: Crackdown', briefing: 'Secure a Soviet chemical facility.', objective: 'Capture the facility.' },
+  { id: 'SCG08EA', title: 'Sarin Gas 2: Down Under', briefing: 'Clean out a Soviet submarine pen.', objective: 'Destroy all Soviet units.' },
+  { id: 'SCG09EA', title: 'Sarin Gas 3: Controlled Burn', briefing: 'Eliminate the gas production plant.', objective: 'Destroy the chemical weapons plant.' },
+  { id: 'SCG10EA', title: 'Suspicion', briefing: 'Investigate a suspected spy.', objective: 'Infiltrate with the spy.' },
+  { id: 'SCG11EA', title: 'Aftermath', briefing: 'Counter-attack the Soviet homeland.', objective: 'Destroy the Soviet base.' },
+  { id: 'SCG12EA', title: 'Focused Blast', briefing: 'A precision strike on enemy defenses.', objective: 'Destroy all enemy forces.' },
+  { id: 'SCG13EA', title: 'Negotiations', briefing: 'Negotiate from a position of strength.', objective: 'Capture the Soviet command center.' },
+  { id: 'SCG14EA', title: 'No Remorse', briefing: 'The final push to end the war.', objective: 'Destroy the Iron Curtain.' },
+];
+
+// Soviet campaign mission titles
+const SOVIET_MISSIONS: CampaignMission[] = [
+  { id: 'SCU01EA', title: 'Lesson in Blood', briefing: 'Crush village resistance.', objective: 'Destroy all enemy forces.' },
+  { id: 'SCU02EA', title: 'Tesla\'s Spark', briefing: 'Defend the Tesla coil installation.', objective: 'Protect the Tesla coils.' },
+  { id: 'SCU03EA', title: 'Covert Cleanup', briefing: 'Eliminate witnesses to our operations.', objective: 'Destroy all enemy structures.' },
+  { id: 'SCU04EA', title: 'Behind the Lines', briefing: 'Sabotage enemy supply lines.', objective: 'Destroy the Allied supply depot.' },
+  { id: 'SCU05EA', title: 'Distant Thunder', briefing: 'Secure a forward operating base.', objective: 'Build and hold a Soviet base.' },
+  { id: 'SCU06EA', title: 'Bridge over the River Grotz', briefing: 'Capture a critical bridge crossing.', objective: 'Take the bridge intact.' },
+  { id: 'SCU07EA', title: 'Core of the Matter', briefing: 'Strike at the heart of Allied defenses.', objective: 'Destroy the Allied command center.' },
+  { id: 'SCU08EA', title: 'Elba Island', briefing: 'Storm an island fortress.', objective: 'Destroy all Allied forces.' },
+  { id: 'SCU09EA', title: 'Overseer', briefing: 'Maintain order in occupied territory.', objective: 'Crush the resistance.' },
+  { id: 'SCU10EA', title: 'Wasteland', briefing: 'Advance through contested ground.', objective: 'Destroy all enemy forces.' },
+  { id: 'SCU11EA', title: 'Ground Zero', briefing: 'Prepare the nuclear arsenal.', objective: 'Build the missile silo.' },
+  { id: 'SCU12EA', title: 'Mousetrap', briefing: 'Lure enemies into a trap.', objective: 'Destroy all Allied forces.' },
+  { id: 'SCU13EA', title: 'Legacy of Tesla', briefing: 'Protect Tesla\'s legacy.', objective: 'Defend the Tesla installations.' },
+  { id: 'SCU14EA', title: 'Soviet Supremacy', briefing: 'Crush all remaining resistance.', objective: 'Destroy all Allied forces.' },
+];
+
+// Counterstrike missions
+const CS_ALLIED_MISSIONS: CampaignMission[] = [
+  { id: 'SCG20EA', title: 'Sarin Gas 1', briefing: 'Counterstrike Allied mission 1.', objective: 'Complete the mission objectives.' },
+  { id: 'SCG21EA', title: 'Sarin Gas 2', briefing: 'Counterstrike Allied mission 2.', objective: 'Complete the mission objectives.' },
+  { id: 'SCG22EA', title: 'Sarin Gas 3', briefing: 'Counterstrike Allied mission 3.', objective: 'Complete the mission objectives.' },
+  { id: 'SCG23EA', title: 'Fall of Greece 1', briefing: 'Counterstrike Allied mission 4.', objective: 'Complete the mission objectives.' },
+  { id: 'SCG24EA', title: 'Fall of Greece 2', briefing: 'Counterstrike Allied mission 5.', objective: 'Complete the mission objectives.' },
+  { id: 'SCG26EA', title: 'Proving Grounds', briefing: 'Counterstrike Allied mission 6.', objective: 'Complete the mission objectives.' },
+  { id: 'SCG27EA', title: 'Negotiations', briefing: 'Counterstrike Allied mission 7.', objective: 'Complete the mission objectives.' },
+  { id: 'SCG28EA', title: 'Monster Tank Madness', briefing: 'Counterstrike Allied mission 8.', objective: 'Complete the mission objectives.' },
+];
+
+const CS_SOVIET_MISSIONS: CampaignMission[] = [
+  { id: 'SCU31EA', title: 'Proving Grounds', briefing: 'Counterstrike Soviet mission 1.', objective: 'Complete the mission objectives.' },
+  { id: 'SCU32EA', title: 'Besieged', briefing: 'Counterstrike Soviet mission 2.', objective: 'Complete the mission objectives.' },
+  { id: 'SCU33EA', title: 'Mousetrap', briefing: 'Counterstrike Soviet mission 3.', objective: 'Complete the mission objectives.' },
+  { id: 'SCU34EA', title: 'Legacy of Tesla', briefing: 'Counterstrike Soviet mission 4.', objective: 'Complete the mission objectives.' },
+  { id: 'SCU35EA', title: 'Soviet Soldier Volkov 1', briefing: 'Counterstrike Soviet mission 5.', objective: 'Complete the mission objectives.' },
+  { id: 'SCU36EA', title: 'Soviet Soldier Volkov 2', briefing: 'Counterstrike Soviet mission 6.', objective: 'Complete the mission objectives.' },
+  { id: 'SCU37EA', title: 'Top o\' the World', briefing: 'Counterstrike Soviet mission 7.', objective: 'Complete the mission objectives.' },
+  { id: 'SCU38EA', title: 'Paradox Equation', briefing: 'Counterstrike Soviet mission 8.', objective: 'Complete the mission objectives.' },
+];
+
+/** All campaign definitions */
+export const CAMPAIGNS: CampaignDef[] = [
+  { id: 'allied', title: 'Allied Campaign', faction: 'allied', missions: ALLIED_MISSIONS, progressKey: 'campaign_allied_progress' },
+  { id: 'soviet', title: 'Soviet Campaign', faction: 'soviet', missions: SOVIET_MISSIONS, progressKey: 'campaign_soviet_progress' },
+  { id: 'counterstrike_allied', title: 'Counterstrike (Allied)', faction: 'allied', missions: CS_ALLIED_MISSIONS, progressKey: 'campaign_cs_allied_progress' },
+  { id: 'counterstrike_soviet', title: 'Counterstrike (Soviet)', faction: 'soviet', missions: CS_SOVIET_MISSIONS, progressKey: 'campaign_cs_soviet_progress' },
+];
+
+/** Get a campaign definition by ID */
+export function getCampaign(id: CampaignId): CampaignDef | undefined {
+  return CAMPAIGNS.find(c => c.id === id);
+}
+
+/** Load campaign progress (number of missions completed) */
+export function loadCampaignProgress(campaignId: CampaignId): number {
+  const campaign = getCampaign(campaignId);
+  if (!campaign) return 0;
+  try {
+    const val = localStorage.getItem(campaign.progressKey);
+    return val ? Math.min(parseInt(val, 10) || 0, campaign.missions.length) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Save campaign progress after completing a mission */
+export function saveCampaignProgress(campaignId: CampaignId, completedMissionIndex: number): void {
+  const campaign = getCampaign(campaignId);
+  if (!campaign) return;
+  try {
+    const current = loadCampaignProgress(campaignId);
+    const next = completedMissionIndex + 1;
+    if (next > current) {
+      localStorage.setItem(campaign.progressKey, String(next));
+    }
+  } catch {
+    // localStorage unavailable
+  }
+}
+
+/** Check if a scenario INI file exists by probing fetch */
+export async function checkMissionExists(scenarioId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/ra/assets/${scenarioId}.ini`, { method: 'HEAD' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parse the mission.ini file format.
+ * Sections are like [SCG01EA.INI] with numbered lines 1=..., 2=..., etc.
+ * @ = newline, @@ = paragraph break.
+ * Returns map of scenario ID (e.g. 'SCG01EA') → full briefing text.
+ */
+export function parseMissionINI(text: string): Map<string, string> {
+  const result = new Map<string, string>();
+  let currentSection: string | null = null;
+  const lines: string[] = [];
+
+  const flush = () => {
+    if (currentSection && lines.length > 0) {
+      const raw = lines.join(' ');
+      // Replace @@ with double newline (paragraph break), then @ with newline
+      const cleaned = raw.replace(/@@/g, '\n\n').replace(/@/g, '\n').trim();
+      result.set(currentSection, cleaned);
+    }
+    lines.length = 0;
+  };
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    const sectionMatch = trimmed.match(/^\[(\w+)\.INI\]$/);
+    if (sectionMatch) {
+      flush();
+      currentSection = sectionMatch[1];
+      continue;
+    }
+    const lineMatch = trimmed.match(/^\d+=(.*)$/);
+    if (lineMatch && currentSection) {
+      lines.push(lineMatch[1]);
+    }
+  }
+  flush();
+  return result;
+}
+
+/** Cached mission briefings from mission.ini */
+let _briefingsCache: Map<string, string> | null = null;
+
+/** Fetch and parse mission.ini, returning map of scenario ID → briefing text. Cached after first call. */
+export async function loadMissionBriefings(): Promise<Map<string, string>> {
+  if (_briefingsCache) return _briefingsCache;
+  try {
+    const res = await fetch('/ra/assets/mission.ini');
+    if (!res.ok) return new Map();
+    const text = await res.text();
+    _briefingsCache = parseMissionINI(text);
+    return _briefingsCache;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Get cached briefing for a scenario ID (must call loadMissionBriefings first) */
+export function getMissionBriefing(scenarioId: string): string | undefined {
+  return _briefingsCache?.get(scenarioId);
+}
+
 // --- Mission carry-over: surviving units transfer to next mission ---
 const CARRYOVER_KEY = 'antmissions_carryover';
 
@@ -315,6 +503,8 @@ interface ScenarioData {
   theatre: string; // TEMPERATE, INTERIOR, etc.
   rawSections: Map<string, Map<string, string>>; // all INI sections for per-scenario overrides
   playerHouse: string; // house name from [Basic] Player= (e.g. 'Spain')
+  /** Per-house Allies= fields from scenario INI (house name → list of allied house names) */
+  houseAllies: Map<string, string[]>;
 }
 
 /** Parse an INI-format scenario file */
@@ -590,6 +780,19 @@ export function parseScenarioINI(text: string): ScenarioData {
 
   const theatre = get('Map', 'Theater', 'TEMPERATE').toUpperCase();
 
+  // Parse per-house Allies= fields (C++ house.cpp:Read_INI)
+  // Each house section may have an Allies= field with comma-separated house names
+  const houseAllies = new Map<string, string[]>();
+  const houseNames = ['Spain', 'Greece', 'USSR', 'England', 'Ukraine', 'Germany',
+                      'France', 'Turkey', 'GoodGuy', 'BadGuy', 'Neutral', 'Special'];
+  for (const houseName of houseNames) {
+    const alliesStr = get(houseName, 'Allies', '');
+    if (alliesStr) {
+      const allies = alliesStr.split(',').map(s => s.trim()).filter(Boolean);
+      if (allies.length > 0) houseAllies.set(houseName, allies);
+    }
+  }
+
   return {
     name: get('Basic', 'Name', 'Unknown Mission'),
     briefing,
@@ -613,23 +816,26 @@ export function parseScenarioINI(text: string): ScenarioData {
     theatre,
     rawSections: sections,
     playerHouse,
+    houseAllies,
   };
 }
 
-/** Map INI house name to House enum */
+/** Map INI house name to House enum.
+ *  Campaign missions use the full set of houses (England, France, GoodGuy, BadGuy). */
 function toHouse(name: string): House {
   switch (name.toLowerCase()) {
     case 'spain': return House.Spain;
     case 'greece': return House.Greece;
-    case 'england': return House.Greece;   // England is allied
+    case 'england': return House.England;
+    case 'france': return House.France;
     case 'ussr': return House.USSR;
     case 'ukraine': return House.Ukraine;
     case 'germany': return House.Germany;
-    case 'france': return House.USSR;      // France = ant hive faction (enemy)
-    case 'turkey': return House.Neutral;   // Turkey = neutral
-    case 'goodguy': return House.Spain;    // GoodGuy = player
-    case 'badguy': return House.USSR;      // BadGuy = enemy
-    case 'special': return House.Neutral;  // Special = neutral/scenario
+    case 'turkey': return House.Turkey;
+    case 'goodguy': return House.GoodGuy;
+    case 'badguy': return House.BadGuy;
+    case 'special': return House.Neutral;
+    case 'neutral': return House.Neutral;
     default: return House.Neutral;
   }
 }
@@ -648,14 +854,14 @@ function houseIdToHouse(id: number): House {
     case 0: return House.Spain;
     case 1: return House.Greece;
     case 2: return House.USSR;
-    case 3: return House.Greece;   // England — allied, treat as Greece
+    case 3: return House.England;
     case 4: return House.Ukraine;
     case 5: return House.Germany;
-    case 6: return House.USSR;     // France — enemy in ant missions
-    case 7: return House.Neutral;  // Turkey — neutral
-    case 8: return House.Spain;    // GoodGuy — player
-    case 9: return House.USSR;     // BadGuy — enemy
-    case 10: return House.Neutral; // Neutral
+    case 6: return House.France;
+    case 7: return House.Turkey;
+    case 8: return House.GoodGuy;
+    case 9: return House.BadGuy;
+    case 10: return House.Neutral;
     case 11: return House.Neutral; // Special
     default: return House.Neutral;
   }
@@ -703,14 +909,14 @@ export interface MapStructure {
 
 /** Weapon stats for defensive structures */
 export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
-  HBOX:  { damage: 25, range: 5, rof: 15, projSpeed: 40 },             // Camo Pillbox
-  PBOX:  { damage: 25, range: 5, rof: 15, projSpeed: 40 },             // Pillbox
-  GUN:   { damage: 40, range: 6, rof: 20, splash: 0.5, projSpeed: 30 }, // Guard Tower
-  TSLA:  { damage: 80, range: 7, rof: 40, splash: 1, warhead: 'Super', projSpeed: 40 },  // Tesla Coil
-  SAM:   { damage: 50, range: 8, rof: 25, projSpeed: 15, isAntiAir: true },  // SAM Site (missiles)
-  AGUN:  { damage: 40, range: 6, rof: 20, projSpeed: 40, isAntiAir: true }, // Anti-aircraft Gun
-  FTUR:  { damage: 20, range: 5, rof: 10, projSpeed: 20 },             // Flame Tower
-  QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 },  // Queen Ant (TeslaZap)
+  HBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Camo Pillbox)
+  PBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Pillbox)
+  GUN:   { damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40 },  // TurretGun
+  TSLA:  { damage: 100, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100 }, // TeslaZap
+  SAM:   { damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, isAntiAir: true }, // Nike
+  AGUN:  { damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isAntiAir: true },  // ZSU-23
+  FTUR:  { damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },            // FireballLauncher
+  QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 }, // Queen Ant (TeslaZap)
 };
 
 // Building type → sprite image name (only include buildings we have sprites for)
@@ -740,10 +946,12 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
 // Structure max HP overrides (default is 256)
 export const STRUCTURE_MAX_HP: Record<string, number> = {
   POWR: 400, APWR: 700, PROC: 900, TENT: 800, BARR: 800,
-  WEAP: 1000, AFLD: 500, HPAD: 400, DOME: 1000,
-  GUN: 400, SAM: 400, TSLA: 500, GAP: 1000,
-  ATEK: 600, STEK: 600, IRON: 600, PDOX: 600, MSLO: 800,
-  FIX: 800, SILO: 300, FACT: 1000, HBOX: 600,
+  WEAP: 1000, AFLD: 1000, HPAD: 800, DOME: 1000,
+  GUN: 400, SAM: 400, TSLA: 400, GAP: 1000,
+  PBOX: 400, HBOX: 600, AGUN: 400, FTUR: 400, KENN: 400,
+  ATEK: 400, STEK: 600, IRON: 400, PDOX: 400, MSLO: 400,
+  FIX: 800, SILO: 300, FACT: 1000,
+  SYRD: 1000, SPEN: 1000,
   QUEE: 800, LAR1: 25, LAR2: 50,
   BARL: 150, BRL3: 150,
 };
@@ -773,6 +981,8 @@ export interface ScenarioResult {
   baseBlueprint: Array<{ type: string; cell: number; house: House }>;
   /** Player's house from scenario INI [Basic] Player= field */
   playerHouse: House;
+  /** Per-house alliance data from scenario INI (used for campaign missions) */
+  houseAllies: Map<House, House[]>;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -825,6 +1035,24 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     } else if (/^tc?\d/.test(type)) {
       // T01-T17 = single trees, TC01-TC05 = tree clumps
       map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
+      map.setTreeType(pos.cx, pos.cy, type);
+      // Tree clumps occupy multiple cells (from C++ tdata.cpp occupancy data)
+      if (type.startsWith('tc')) {
+        const CLUMP_OCCUPANCY: Record<string, [number, number][]> = {
+          'tc01': [[1, 0], [0, 1], [1, 1]],
+          'tc02': [[1, 0], [0, 1], [1, 1]],
+          'tc03': [[1, 0], [0, 1], [1, 1]],
+          'tc04': [[0, 1], [1, 1]],
+          'tc05': [[0, 1], [1, 0], [1, 1]],
+        };
+        const extra = CLUMP_OCCUPANCY[type];
+        if (extra) {
+          for (const [dx, dy] of extra) {
+            map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.TREE);
+            map.setTreeType(pos.cx + dx, pos.cy + dy, '_clump');
+          }
+        }
+      }
     }
   }
 
@@ -1096,6 +1324,9 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     crateOverrides,
     baseBlueprint: data.baseStructures.map(bs => ({ type: bs.type, cell: bs.cell, house: toHouse(bs.house) })),
     playerHouse: toHouse(data.playerHouse ?? 'Spain'),
+    houseAllies: new Map(
+      Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.map(toHouse)])
+    ),
   };
 }
 
@@ -1171,7 +1402,7 @@ function decodeOverlayPack(base64Data: string, map: GameMap): void {
 
 // === MapPack Decoder ===
 // MapPack contains Base64-encoded, LCW-compressed terrain template data.
-// Two layers: templateType (128x128) and templateIcon (128x128).
+// Two layers: templateType (128×128 × uint16 = 32768 bytes) and templateIcon (128×128 × uint8 = 16384 bytes).
 // The template type + icon determine the visual appearance of each map cell.
 
 /** Decode MapPack data and apply terrain types to the map */
@@ -1185,11 +1416,18 @@ function decodeMapPack(base64Data: string, map: GameMap, theatre: string): void 
     }
 
     const MAP_SIZE = 128 * 128; // 16384 cells
-    const templateType = new Uint8Array(MAP_SIZE);
+    // Template types are uint16 (2 bytes per cell) — 32768 bytes total
+    const rawTypes = new Uint8Array(MAP_SIZE * 2);
     const templateIcon = new Uint8Array(MAP_SIZE);
 
-    // Decompress two layers from the chunk-header container
-    const offset1 = decompressRASections(bytes, 0, templateType, MAP_SIZE);
+    // Decompress first layer: template types (uint16, 32768 bytes)
+    const offset1 = decompressRASections(bytes, 0, rawTypes, MAP_SIZE * 2);
+    // Convert little-endian byte pairs to Uint16Array
+    const templateType = new Uint16Array(MAP_SIZE);
+    for (let i = 0; i < MAP_SIZE; i++) {
+      templateType[i] = rawTypes[i * 2] | (rawTypes[i * 2 + 1] << 8);
+    }
+    // Decompress second layer: template icons (uint8, 16384 bytes)
     if (offset1 > 0) {
       decompressRASections(bytes, offset1, templateIcon, MAP_SIZE);
     }
@@ -1198,55 +1436,113 @@ function decodeMapPack(base64Data: string, map: GameMap, theatre: string): void 
     map.templateType = templateType;
     map.templateIcon = templateIcon;
 
-    // INTERIOR theatre has completely different template numbering from TEMPERATE.
-    // Without INTERIOR.INI data, applying TEMPERATE ranges would misclassify
-    // corridors as water/rock, trapping units. Skip classification — structures
-    // and terrain features from the INI define the actual wall layout.
-    if (theatre !== 'TEMPERATE') return;
-
-    // Use template types to set terrain classification
-    // TEMPERATE theater template type IDs (from RA TEMPERAT.INI):
-    //   0, 255: Clear/grass (default)
-    //   1-2: Pure water body tiles
-    //   3-56: Shore/beach transitions (mixed water+land — use icon to distinguish)
-    //   57-58, 97-110: Rock debris/formations
-    //   59-96: Water cliff edges
-    //   112-130: River segments and bridges
-    //   131-172: Land cliffs and rock formations
-    //   173-228: Road network tiles (passable)
-    //   229-234: River crossings
-    //   235-252: Bridge structures (passable)
-    for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
-      for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
-        const idx = cy * 128 + cx;
-        const tmpl = templateType[idx];
-
-        if (tmpl === 0xFF || tmpl === 0x00) {
-          // Clear (default)
-        } else if (tmpl >= 1 && tmpl <= 2) {
-          // Pure water body
-          map.setTerrain(cx, cy, Terrain.WATER);
-        } else if (tmpl >= 3 && tmpl <= 56) {
-          // Shore/beach transitions — icon 0-3 are typically water portions
-          const icon = templateIcon[idx];
-          if (icon < 4) {
-            map.setTerrain(cx, cy, Terrain.WATER);
-          }
-          // Other icons are land (shore dirt) — stays CLEAR
-        } else if ((tmpl >= 59 && tmpl <= 96) || (tmpl >= 112 && tmpl <= 130) ||
-                   (tmpl >= 229 && tmpl <= 234)) {
-          // Water cliffs, rivers — treat as water
-          map.setTerrain(cx, cy, Terrain.WATER);
-        } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 97 && tmpl <= 110) ||
-                   (tmpl >= 131 && tmpl <= 172)) {
-          // Rock debris, formations, land cliffs — impassable
-          map.setTerrain(cx, cy, Terrain.ROCK);
-        }
-        // 173-228: roads, 235-252: bridges → stay as CLEAR (passable)
-      }
+    // Apply terrain classification based on theatre
+    if (theatre === 'INTERIOR') {
+      classifyInteriorTerrain(map, templateType);
+    } else {
+      // TEMPERATE and SNOW share the same template ID ranges
+      classifyOutdoorTerrain(map, templateType, templateIcon);
     }
   } catch {
     // MapPack decode failed — terrain stays at default
+  }
+}
+
+/** Classify TEMPERATE/SNOW terrain from MapPack template types.
+ *  Both theatres share identical template ID ranges. */
+function classifyOutdoorTerrain(
+  map: GameMap,
+  templateType: Uint16Array,
+  templateIcon: Uint8Array,
+): void {
+  // TEMPERATE/SNOW template type IDs (from RA TEMPERAT.INI / OpenRA temperat.yaml):
+  //   0, 0xFFFF: Clear/grass (default)
+  //   1-2: Pure water body tiles
+  //   3-56: Shore/beach transitions (mixed water+land — use icon to distinguish)
+  //   57-58, 97-110: Rock debris/formations
+  //   59-96: Water cliff edges
+  //   112-130: River segments and bridges
+  //   131-172: Land cliffs and rock formations
+  //   173-228: Road network tiles (passable)
+  //   229-234: River crossings
+  //   235-252: Bridge structures (passable)
+  //   --- Extended templates (>255, only reachable with uint16 decoding) ---
+  //   378-383: Bridge variants (passable)
+  //   400: Hill (impassable)
+  //   401-404: Land cliff edges (impassable)
+  //   405-408: Water cliff edges (water)
+  //   500-508: Shore debris (impassable)
+  //   519-534: Small bridges (passable)
+  //   550-557: Sea cliff corners (impassable/water)
+  //   580-588: Decay debris (passable)
+  //   590-591: Fjord crossings (passable)
+  for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
+    for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
+      const idx = cy * 128 + cx;
+      const tmpl = templateType[idx];
+
+      if (tmpl === 0xFFFF || tmpl === 0x00) {
+        // Clear (default)
+      } else if (tmpl >= 1 && tmpl <= 2) {
+        map.setTerrain(cx, cy, Terrain.WATER);
+      } else if (tmpl >= 3 && tmpl <= 56) {
+        // Shore/beach transitions — icon 0-3 are typically water portions
+        const icon = templateIcon[idx];
+        if (icon < 4) {
+          map.setTerrain(cx, cy, Terrain.WATER);
+        }
+      } else if ((tmpl >= 59 && tmpl <= 96) || (tmpl >= 112 && tmpl <= 130) ||
+                 (tmpl >= 229 && tmpl <= 234)) {
+        map.setTerrain(cx, cy, Terrain.WATER);
+      } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 97 && tmpl <= 110) ||
+                 (tmpl >= 131 && tmpl <= 172)) {
+        map.setTerrain(cx, cy, Terrain.ROCK);
+      } else if (tmpl === 400 || (tmpl >= 401 && tmpl <= 404) ||
+                 (tmpl >= 500 && tmpl <= 508)) {
+        map.setTerrain(cx, cy, Terrain.ROCK);
+      } else if ((tmpl >= 405 && tmpl <= 408) ||
+                 (tmpl >= 550 && tmpl <= 557)) {
+        map.setTerrain(cx, cy, Terrain.WATER);
+      }
+      // 173-228: roads, 235-252: bridges → stay as CLEAR (passable)
+      // 378-383: bridge variants, 519-534: small bridges → CLEAR
+      // 580-588: decay debris, 590-591: fjord crossings → CLEAR
+    }
+  }
+}
+
+/** Classify INTERIOR terrain from MapPack template types.
+ *  INTERIOR uses IDs 253-399 with completely different semantics. */
+function classifyInteriorTerrain(
+  map: GameMap,
+  templateType: Uint16Array,
+): void {
+  // INTERIOR template type IDs (from OpenRA interior.yaml):
+  //   255/0xFFFF/0: clear floor
+  //   253-267: arro (arrows/markings) — floor, passable
+  //   268-274: flor (floor tiles) — passable
+  //   275-279: gflr (green floor) — passable
+  //   280-290: gstr (grate/stripe) — passable
+  //   291-317: lwal (light wall) — impassable
+  //   318-328: strp (stripe) — passable
+  //   329-377: wall (walls) — impassable
+  //   384-399: xtra (extras) — passable
+  for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
+    for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
+      const idx = cy * 128 + cx;
+      const tmpl = templateType[idx];
+
+      if (tmpl === 0xFFFF || tmpl === 0x00 || tmpl === 255) {
+        // Clear floor (default)
+      } else if (tmpl >= 291 && tmpl <= 317) {
+        // Light walls — impassable
+        map.setTerrain(cx, cy, Terrain.WALL);
+      } else if (tmpl >= 329 && tmpl <= 377) {
+        // Walls — impassable
+        map.setTerrain(cx, cy, Terrain.ROCK);
+      }
+      // 253-290, 318-328, 384-399: floors, arrows, stripes, extras → CLEAR
+    }
   }
 }
 

@@ -27,9 +27,63 @@ const OUTPUT_DIR = join(PROJECT_ROOT, 'public/ra/assets');
 // EXPAND2.MIX: Aftermath expansion data (env var override or default path from extract-freeware-ant-originals.sh)
 const EXPAND2_PATH = process.env.EXPAND2_PATH || '/tmp/ra_ant_extract/am_patch_work/EXPAND2.MIX';
 
+// --- Helper generators for bulk sprite categories ---
+
+/** Building construction animations: {BLDG}MAKE.SHP in CONQUER.MIX */
+function generateMakeAssets(): [string, string, string][] {
+  const buildings = [
+    'FACT', 'POWR', 'APWR', 'BARR', 'TENT', 'WEAP', 'PROC', 'SILO',
+    'DOME', 'FIX', 'GUN', 'SAM', 'TSLA', 'AGUN', 'GAP', 'PBOX',
+    'HPAD', 'AFLD', 'ATEK', 'STEK', 'IRON', 'PDOX', 'KENN',
+    'SYRD', 'SPEN', 'BIO', 'MISS', 'FCOM', 'HOSP',
+  ];
+  const entries: [string, string, string][] = buildings.map(b =>
+    ['CONQUER.MIX', `${b}MAKE.SHP`, `${b.toLowerCase()}make`]
+  );
+  // Theater-specific construction TEM files
+  entries.push(['TEMPERAT.MIX', 'HBOXMAKE.TEM', 'hboxmake']);
+  entries.push(['TEMPERAT.MIX', 'MSLOMAKE.TEM', 'mslomake']);
+  return entries;
+}
+
+/** Sidebar icons: {TYPE}ICON.SHP in LORES.MIX */
+function generateIconAssets(): [string, string, string][] {
+  const types = [
+    // Vehicles
+    '1TNK', '2TNK', '3TNK', '4TNK', 'JEEP', 'APC', 'HARV', 'MCV',
+    'ARTY', 'TRUK', 'MNLY', 'MGG', 'V2RL', 'MLRS', 'FTNK', 'STNK',
+    // Infantry
+    'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'DOG', 'SPY', 'MEDI', 'THF',
+    // Naval
+    'SS', 'DD', 'CA', 'PT', 'LST', 'MSUB',
+    // Aircraft
+    'HIND', 'HELI', 'TRAN', 'MIG', 'YAK', 'BADR', 'U2',
+    // Buildings
+    'FACT', 'POWR', 'APWR', 'BARR', 'TENT', 'WEAP', 'PROC', 'SILO',
+    'DOME', 'FIX', 'GUN', 'SAM', 'HBOX', 'TSLA', 'AGUN', 'GAP', 'PBOX',
+    'HPAD', 'AFLD', 'MSLO', 'ATEK', 'STEK', 'IRON', 'PDOX', 'KENN',
+    'SYRD', 'SPEN', 'BIO', 'MISS', 'FCOM', 'HOSP',
+    // Walls
+    'FENC', 'BRIK', 'SBAG', 'BARB', 'WOOD', 'CYCL',
+  ];
+  return types.map(t =>
+    ['LORES.MIX', `${t}ICON.SHP`, `${t.toLowerCase()}icon`] as [string, string, string]
+  );
+}
+
+/** Smudge/crater templates: SC1-SC6, CR1-CR6 in TEMPERAT.MIX */
+function generateSmudgeAssets(): [string, string, string][] {
+  const entries: [string, string, string][] = [];
+  for (let i = 1; i <= 6; i++) {
+    entries.push(['TEMPERAT.MIX', `SC${i}.TEM`, `sc${i}`]);   // Scorch marks
+    entries.push(['TEMPERAT.MIX', `CR${i}.TEM`, `cr${i}`]);   // Craters
+  }
+  return entries;
+}
+
 // Assets to extract: [mixFile, internalFilename, outputName]
 // Asset locations verified by searching all MIX files
-const SPRITE_ASSETS: [string, string, string][] = [
+const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   // Vehicles (CONQUER.MIX) — RA uses 1TNK/2TNK/3TNK/4TNK naming
   ['CONQUER.MIX', '1TNK.SHP', '1tnk'],    // Light tank
   ['CONQUER.MIX', '2TNK.SHP', '2tnk'],    // Medium tank
@@ -44,17 +98,35 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'MNLY.SHP', 'mnly'],    // Minelayer
   ['CONQUER.MIX', 'MGG.SHP', 'mgg'],      // Mobile gap generator
   ['CONQUER.MIX', 'V2RL.SHP', 'v2rl'],    // V2 rocket launcher
+  ['CONQUER.MIX', 'MLRS.SHP', 'mlrs'],    // Mobile Launcher Rocket System
+  ['CONQUER.MIX', 'FTNK.SHP', 'ftnk'],    // Flame tank
   // Infantry (LORES.MIX — not CONQUER.MIX!)
   ['LORES.MIX', 'E1.SHP', 'e1'],          // Rifle infantry
   ['LORES.MIX', 'E2.SHP', 'e2'],          // Grenadier
   ['LORES.MIX', 'E3.SHP', 'e3'],          // Rocket soldier
   ['LORES.MIX', 'E4.SHP', 'e4'],          // Flamethrower
+  ['LORES.MIX', 'E5.SHP', 'e5'],          // Tanya
   ['LORES.MIX', 'E6.SHP', 'e6'],          // Engineer
   ['LORES.MIX', 'DOG.SHP', 'dog'],        // Attack dog
   ['LORES.MIX', 'SPY.SHP', 'spy'],        // Spy
   ['LORES.MIX', 'MEDI.SHP', 'medi'],      // Medic
   ['LORES.MIX', 'THF.SHP', 'thf'],        // Thief
   ['LORES.MIX', 'E7.SHP', 'shok'],        // Shock trooper (E7 in LORES)
+  ['LORES.MIX', 'C1.SHP', 'c1'],          // Civilian 1
+  ['LORES.MIX', 'C2.SHP', 'c2'],          // Civilian 2
+  ['LORES.MIX', 'C3.SHP', 'c3'],          // Civilian 3
+  ['LORES.MIX', 'C4.SHP', 'c4'],          // Civilian 4
+  ['LORES.MIX', 'C5.SHP', 'c5'],          // Civilian 5
+  ['LORES.MIX', 'C6.SHP', 'c6'],          // Civilian 6
+  ['LORES.MIX', 'C7.SHP', 'c7'],          // Civilian 7
+  ['LORES.MIX', 'C8.SHP', 'c8'],          // Civilian 8
+  ['LORES.MIX', 'C9.SHP', 'c9'],          // Civilian 9
+  ['LORES.MIX', 'C10.SHP', 'c10'],        // Civilian 10
+  ['LORES.MIX', 'CHAN.SHP', 'chan'],       // Civilian Chan
+  ['LORES.MIX', 'DELPHI.SHP', 'delphi'],  // Civilian Delphi
+  ['LORES.MIX', 'EINSTEIN.SHP', 'einstein'], // Einstein
+  ['LORES.MIX', 'GNRL.SHP', 'gnrl'],      // General
+  ['LORES.MIX', 'MECH.SHP', 'mech'],      // Mechanic
   // Naval vessels (CONQUER.MIX — confirmed via BFILE.MAK)
   ['CONQUER.MIX', 'SS.SHP', 'ss'],          // Submarine
   ['CONQUER.MIX', 'DD.SHP', 'dd'],          // Destroyer
@@ -62,12 +134,16 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'PT.SHP', 'pt'],          // Gunboat
   ['CONQUER.MIX', 'LST.SHP', 'lst'],        // Landing ship transport
   ['CONQUER.MIX', 'MSUB.SHP', 'msub'],      // Missile Submarine (Aftermath)
+  ['EXPAND2.MIX', 'CARR.SHP', 'carr'],      // Helicarrier (Aftermath)
   // Aircraft (CONQUER.MIX)
   ['CONQUER.MIX', 'HIND.SHP', 'hind'],      // Hind attack helicopter
   ['CONQUER.MIX', 'HELI.SHP', 'heli'],      // Longbow helicopter
   ['CONQUER.MIX', 'TRAN.SHP', 'tran'],      // Chinook transport helicopter
   ['CONQUER.MIX', 'MIG.SHP', 'mig'],        // MiG-29 fighter
   ['CONQUER.MIX', 'YAK.SHP', 'yak'],        // Yak attack plane
+  ['CONQUER.MIX', 'BADR.SHP', 'badr'],      // Badger bomber
+  ['CONQUER.MIX', 'U2.SHP', 'u2'],          // Spy plane
+  ['CONQUER.MIX', 'ORCA.SHP', 'orca'],      // Orca (TD crossover)
   // Counterstrike expansion — STNK is in base CONQUER.MIX (reused from TD)
   ['CONQUER.MIX', 'STNK.SHP', 'stnk'],    // Phase Transport (stealth tank)
   // Aftermath expansion vehicles (from EXPAND2.MIX — extracted via extract-freeware-ant-originals.sh)
@@ -92,8 +168,19 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'FIRE1.SHP', 'fire1'],           // Structure fire 1
   ['CONQUER.MIX', 'FIRE2.SHP', 'fire2'],           // Structure fire 2
   ['CONQUER.MIX', 'FIRE3.SHP', 'fire3'],           // Small fire
+  ['CONQUER.MIX', 'FIRE4.SHP', 'fire4'],           // Fire variant 4
   ['CONQUER.MIX', 'FRAG1.SHP', 'frag1'],           // Fragmentation
   ['CONQUER.MIX', 'ART-EXP1.SHP', 'art-exp1'],     // Artillery explosion
+  ['CONQUER.MIX', 'SMOKE_M.SHP', 'smoke_m'],       // Medium smoke
+  ['CONQUER.MIX', 'WAKE.SHP', 'wake'],             // Naval wake
+  ['CONQUER.MIX', 'ELECTDOG.SHP', 'electdog'],     // Tesla dog zap
+  ['CONQUER.MIX', 'SAMFIRE.SHP', 'samfire'],        // SAM firing effect
+  ['CONQUER.MIX', 'DRAGON.SHP', 'dragon'],          // Dragon missile trail
+  ['CONQUER.MIX', 'BOMB.SHP', 'bomb'],              // Bomb projectile
+  ['CONQUER.MIX', 'BOMBLET.SHP', 'bomblet'],        // Cluster bomblet
+  ['CONQUER.MIX', 'MISSILE.SHP', 'missile'],        // Missile projectile
+  ['CONQUER.MIX', '120MM.SHP', '120mm'],            // 120mm shell
+  ['CONQUER.MIX', '50CAL.SHP', '50cal'],            // 50 caliber tracer
   // Buildings — production (CONQUER.MIX)
   ['CONQUER.MIX', 'FACT.SHP', 'fact'],    // Construction Yard
   ['CONQUER.MIX', 'POWR.SHP', 'powr'],    // Power Plant
@@ -136,6 +223,18 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['CONQUER.MIX', 'SBAG.SHP', 'sbag'],    // Sandbags
   ['CONQUER.MIX', 'BARB.SHP', 'barb'],    // Barbed wire
   ['CONQUER.MIX', 'WOOD.SHP', 'wood'],    // Wooden fence
+  ['CONQUER.MIX', 'CYCL.SHP', 'cycl'],    // Cyclone fence
+  // Overlays — mines and crates
+  ['CONQUER.MIX', 'MINP.SHP', 'minp'],    // Anti-personnel mine
+  ['CONQUER.MIX', 'MINV.SHP', 'minv'],    // Anti-vehicle mine
+  ['CONQUER.MIX', 'WCRATE.SHP', 'wcrate'], // Wooden crate
+  // UI elements
+  ['LORES.MIX', 'MOUSE.SHP', 'mouse'],       // Mouse cursors
+  ['LORES.MIX', 'SELECT.SHP', 'select'],     // Selection box
+  ['LORES.MIX', 'POWERBAR.SHP', 'powerbar'], // Power bar
+  ['LORES.MIX', 'SIDEBAR.SHP', 'sidebar'],   // Sidebar background
+  ['LORES.MIX', 'STRIP.SHP', 'strip'],       // Sidebar strip
+  ['LORES.MIX', 'TABS.SHP', 'tabs'],         // Sidebar tabs
   // Ore/gem overlays (theater-specific .TEM files, SHP format)
   // Gold: 12 frames each (density 0-11), Gems: 3 frames each (density 0-2)
   ['TEMPERAT.MIX', 'GOLD01.TEM', 'gold01'],
@@ -169,6 +268,14 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ['TEMPERAT.MIX', 'TC03.TEM', 'tc03'],
   ['TEMPERAT.MIX', 'TC04.TEM', 'tc04'],
   ['TEMPERAT.MIX', 'TC05.TEM', 'tc05'],
+];
+
+// Combine manual entries with generated bulk categories
+const SPRITE_ASSETS: [string, string, string][] = [
+  ...SPRITE_ASSETS_MANUAL,
+  ...generateMakeAssets(),
+  ...generateIconAssets(),
+  ...generateSmudgeAssets(),
 ];
 
 function log(msg: string): void {
@@ -363,6 +470,101 @@ async function main(): Promise<void> {
     }
   }
 
+  // --- Non-sprite asset extraction ---
+
+  // Extract additional palettes (SNOW.PAL, INTERIOR.PAL) from LOCAL.MIX
+  log('Extracting additional palettes...');
+  for (const [palName, outName] of [['SNOW.PAL', 'snow-palette.json'], ['INTERIOR.PAL', 'interior-palette.json']] as const) {
+    let extraPalData: Buffer | null = null;
+    for (const searchMix of ['LOCAL.MIX', 'TEMPERAT.MIX', 'CONQUER.MIX']) {
+      const mix = mixParsed.get(searchMix);
+      if (mix) {
+        extraPalData = mix.readFile(palName);
+        if (extraPalData) {
+          log(`  Found ${palName} in ${searchMix} (${extraPalData.length} bytes)`);
+          break;
+        }
+      }
+    }
+    if (extraPalData) {
+      try {
+        const pal = parsePalette(extraPalData);
+        const palJSON = [];
+        for (let i = 0; i < 256; i++) {
+          palJSON.push([pal.colors[i * 4], pal.colors[i * 4 + 1], pal.colors[i * 4 + 2], pal.colors[i * 4 + 3]]);
+        }
+        writeFileSync(join(OUTPUT_DIR, outName), JSON.stringify(palJSON));
+        log(`  Wrote ${outName}`);
+      } catch (e) {
+        log(`  WARNING: Failed to parse ${palName}: ${e}`);
+      }
+    } else {
+      log(`  SKIP ${palName}: not found`);
+    }
+  }
+
+  // Extract CPS background images (TITLE.CPS, PROLOG.CPS) as PNGs
+  log('Extracting CPS backgrounds...');
+  for (const [cpsName, outName] of [['TITLE.CPS', 'title.png'], ['PROLOG.CPS', 'prolog.png']] as const) {
+    let bgCpsData: Buffer | null = null;
+    let bgFoundIn = '';
+    for (const [mName, mix] of mixParsed) {
+      bgCpsData = mix.readFile(cpsName);
+      if (bgCpsData) {
+        bgFoundIn = mName;
+        break;
+      }
+    }
+    if (bgCpsData) {
+      try {
+        const cpsImg = parseCps(bgCpsData);
+        // Use embedded palette if available, otherwise fall back to TEMPERAT.PAL
+        let cpsPalette: Palette;
+        if (cpsImg.palette && cpsImg.palette.length >= 768) {
+          // CPS embedded palette: 256 entries × 3 bytes (RGB), 6-bit VGA values (0-63)
+          const colors = new Uint8Array(256 * 4);
+          for (let i = 0; i < 256; i++) {
+            colors[i * 4]     = Math.min(255, cpsImg.palette[i * 3] * 4);
+            colors[i * 4 + 1] = Math.min(255, cpsImg.palette[i * 3 + 1] * 4);
+            colors[i * 4 + 2] = Math.min(255, cpsImg.palette[i * 3 + 2] * 4);
+            colors[i * 4 + 3] = i === 0 ? 0 : 255;
+          }
+          cpsPalette = { colors };
+          log(`  ${cpsName}: using embedded palette`);
+        } else {
+          cpsPalette = palette;
+          log(`  ${cpsName}: using TEMPERAT.PAL (no embedded palette)`);
+        }
+        const rgba = indexedToRGBA(cpsImg.pixels, cpsPalette, cpsImg.width, cpsImg.height);
+        const png = encodePNG(rgba, cpsImg.width, cpsImg.height);
+        writeFileSync(join(OUTPUT_DIR, outName), png);
+        log(`  Wrote ${outName} (${cpsImg.width}x${cpsImg.height}) from ${bgFoundIn}`);
+      } catch (e) {
+        log(`  WARNING: Failed to extract ${cpsName}: ${e}`);
+      }
+    } else {
+      log(`  SKIP ${cpsName}: not found`);
+    }
+  }
+
+  // Extract RULES.INI from MIX archives
+  log('Extracting RULES.INI...');
+  let rulesData: Buffer | null = null;
+  let rulesFoundIn = '';
+  for (const [mName, mix] of mixParsed) {
+    rulesData = mix.readFile('RULES.INI');
+    if (rulesData) {
+      rulesFoundIn = mName;
+      break;
+    }
+  }
+  if (rulesData) {
+    writeFileSync(join(OUTPUT_DIR, 'rules.ini'), rulesData);
+    log(`  Wrote rules.ini (${rulesData.length} bytes from ${rulesFoundIn})`);
+  } else {
+    log('  SKIP RULES.INI: not found');
+  }
+
   // Extract scenario INI files from EXPAND.MIX
   log('Extracting scenario data...');
   const expandMix = mixParsed.get('EXPAND.MIX');
@@ -380,6 +582,50 @@ async function main(): Promise<void> {
   } else {
     log('  WARNING: EXPAND.MIX not found');
   }
+
+  // Extract campaign mission INIs from all MIX archives
+  log('Extracting campaign mission INIs...');
+  let campaignFound = 0;
+  const campaignScenarios: string[] = [];
+  // Allied campaign: SCG01EA-SCG14EA (+ EB variants for alternate paths)
+  for (let i = 1; i <= 14; i++) {
+    const num = i.toString().padStart(2, '0');
+    campaignScenarios.push(`SCG${num}EA`, `SCG${num}EB`);
+  }
+  // Soviet campaign: SCU01EA-SCU14EA (+ EB variants)
+  for (let i = 1; i <= 14; i++) {
+    const num = i.toString().padStart(2, '0');
+    campaignScenarios.push(`SCU${num}EA`, `SCU${num}EB`);
+  }
+  // Counterstrike: SCG15EA-SCG40EA, SCU15EA-SCU40EA (probe range)
+  for (let i = 15; i <= 40; i++) {
+    const num = i.toString().padStart(2, '0');
+    campaignScenarios.push(`SCG${num}EA`, `SCU${num}EA`);
+  }
+  // Aftermath: SCG41EA-SCG60EA, SCU41EA-SCU60EA (probe range)
+  for (let i = 41; i <= 60; i++) {
+    const num = i.toString().padStart(2, '0');
+    campaignScenarios.push(`SCG${num}EA`, `SCU${num}EA`);
+  }
+  // Search all parsed MIX files for each campaign scenario
+  for (const scenario of campaignScenarios) {
+    const iniName = `${scenario}.INI`;
+    const outPath = join(OUTPUT_DIR, `${scenario}.ini`);
+    if (existsSync(outPath)) continue; // already extracted (e.g. from ant missions)
+    let found = false;
+    for (const [mName, mix] of mixParsed) {
+      const iniData = mix.readFile(iniName);
+      if (iniData) {
+        writeFileSync(outPath, iniData);
+        log(`  ${iniName}: ${iniData.length} bytes (from ${mName})`);
+        campaignFound++;
+        found = true;
+        break;
+      }
+    }
+    // Don't log skips for probed ranges — too noisy
+  }
+  log(`  Found ${campaignFound} campaign mission INIs`);
 
   // Extract Aftermath rules from EXPAND2.MIX (unit overrides, not mission maps)
   const expand2Mix = mixParsed.get('EXPAND2.MIX');

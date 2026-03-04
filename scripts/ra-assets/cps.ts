@@ -11,6 +11,7 @@ export interface CpsImage {
   width: number;   // always 320
   height: number;  // always 200
   pixels: Uint8Array; // 64000 indexed pixels
+  palette?: Uint8Array; // 768 bytes (256 × RGB) if embedded
 }
 
 export function parseCps(data: Buffer): CpsImage {
@@ -20,8 +21,10 @@ export function parseCps(data: Buffer): CpsImage {
   const palFlag = data.readUInt16LE(8);
 
   let offset = 10;
+  let palette: Uint8Array | undefined;
   // palFlag is the size of the embedded palette (768 = 256 × 3 RGB triplets, or 0 if none)
   if (palFlag > 0) {
+    palette = new Uint8Array(data.buffer, data.byteOffset + offset, palFlag);
     offset += palFlag;
   }
 
@@ -29,5 +32,5 @@ export function parseCps(data: Buffer): CpsImage {
   const source = new Uint8Array(data.buffer, data.byteOffset + offset, data.length - offset);
   lcwDecompress(source, pixels, 64000);
 
-  return { width: 320, height: 200, pixels };
+  return { width: 320, height: 200, pixels, palette };
 }

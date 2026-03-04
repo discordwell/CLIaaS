@@ -116,6 +116,24 @@
     "sheetWidth": 640,
     "sheetHeight": 200
   },
+  "mlrs": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 128,
+    "columns": 16,
+    "rows": 8,
+    "sheetWidth": 384,
+    "sheetHeight": 192
+  },
+  "ftnk": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
   "e1": {
     "frameWidth": 50,
     "frameHeight": 39,
@@ -151,6 +169,15 @@
     "rows": 36,
     "sheetWidth": 800,
     "sheetHeight": 1404
+  },
+  "e5": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 660,
+    "columns": 16,
+    "rows": 42,
+    "sheetWidth": 800,
+    "sheetHeight": 1638
   },
   "e6": {
     "frameWidth": 50,
@@ -206,6 +233,60 @@
     "sheetWidth": 800,
     "sheetHeight": 780
   },
+  "c1": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 198,
+    "columns": 16,
+    "rows": 13,
+    "sheetWidth": 800,
+    "sheetHeight": 507
+  },
+  "c2": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 198,
+    "columns": 16,
+    "rows": 13,
+    "sheetWidth": 800,
+    "sheetHeight": 507
+  },
+  "chan": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 165,
+    "columns": 16,
+    "rows": 11,
+    "sheetWidth": 800,
+    "sheetHeight": 429
+  },
+  "delphi": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 375,
+    "columns": 16,
+    "rows": 24,
+    "sheetWidth": 800,
+    "sheetHeight": 936
+  },
+  "einstein": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 165,
+    "columns": 16,
+    "rows": 11,
+    "sheetWidth": 800,
+    "sheetHeight": 429
+  },
+  "gnrl": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 264,
+    "columns": 16,
+    "rows": 17,
+    "sheetWidth": 800,
+    "sheetHeight": 663
+  },
   "ss": {
     "frameWidth": 56,
     "frameHeight": 56,
@@ -260,6 +341,15 @@
     "sheetWidth": 896,
     "sheetHeight": 56
   },
+  "carr": {
+    "frameWidth": 30,
+    "frameHeight": 30,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 300,
+    "sheetHeight": 30
+  },
   "hind": {
     "frameWidth": 56,
     "frameHeight": 56,
@@ -305,14 +395,32 @@
     "sheetWidth": 640,
     "sheetHeight": 40
   },
-  "mlrs": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 128,
+  "badr": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 16,
     "columns": 16,
-    "rows": 8,
-    "sheetWidth": 384,
-    "sheetHeight": 192
+    "rows": 1,
+    "sheetWidth": 1152,
+    "sheetHeight": 72
+  },
+  "u2": {
+    "frameWidth": 56,
+    "frameHeight": 56,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 896,
+    "sheetHeight": 56
+  },
+  "orca": {
+    "frameWidth": 36,
+    "frameHeight": 25,
+    "frameCount": 64,
+    "columns": 16,
+    "rows": 4,
+    "sheetWidth": 576,
+    "sheetHeight": 100
   },
   "stnk": {
     "frameWidth": 24,
@@ -494,6 +602,15 @@
     "sheetWidth": 345,
     "sheetHeight": 23
   },
+  "fire4": {
+    "frameWidth": 7,
+    "frameHeight": 7,
+    "frameCount": 15,
+    "columns": 15,
+    "rows": 1,
+    "sheetWidth": 105,
+    "sheetHeight": 7
+  },
   "frag1": {
     "frameWidth": 45,
     "frameHeight": 33,
@@ -511,6 +628,96 @@
     "rows": 2,
     "sheetWidth": 656,
     "sheetHeight": 70
+  },
+  "smoke_m": {
+    "frameWidth": 23,
+    "frameHeight": 23,
+    "frameCount": 91,
+    "columns": 16,
+    "rows": 6,
+    "sheetWidth": 368,
+    "sheetHeight": 138
+  },
+  "wake": {
+    "frameWidth": 85,
+    "frameHeight": 8,
+    "frameCount": 12,
+    "columns": 12,
+    "rows": 1,
+    "sheetWidth": 1020,
+    "sheetHeight": 8
+  },
+  "electdog": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 17,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 800,
+    "sheetHeight": 78
+  },
+  "samfire": {
+    "frameWidth": 55,
+    "frameHeight": 35,
+    "frameCount": 144,
+    "columns": 16,
+    "rows": 9,
+    "sheetWidth": 880,
+    "sheetHeight": 315
+  },
+  "dragon": {
+    "frameWidth": 15,
+    "frameHeight": 15,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 240,
+    "sheetHeight": 30
+  },
+  "bomb": {
+    "frameWidth": 8,
+    "frameHeight": 8,
+    "frameCount": 8,
+    "columns": 8,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 8
+  },
+  "bomblet": {
+    "frameWidth": 7,
+    "frameHeight": 7,
+    "frameCount": 7,
+    "columns": 7,
+    "rows": 1,
+    "sheetWidth": 49,
+    "sheetHeight": 7
+  },
+  "missile": {
+    "frameWidth": 15,
+    "frameHeight": 15,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 240,
+    "sheetHeight": 30
+  },
+  "120mm": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "50cal": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
   },
   "fact": {
     "frameWidth": 72,
@@ -845,6 +1052,96 @@
     "sheetWidth": 384,
     "sheetHeight": 48
   },
+  "cycl": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 48,
+    "columns": 16,
+    "rows": 3,
+    "sheetWidth": 384,
+    "sheetHeight": 72
+  },
+  "minp": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "minv": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "wcrate": {
+    "frameWidth": 10,
+    "frameHeight": 11,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 10,
+    "sheetHeight": 11
+  },
+  "mouse": {
+    "frameWidth": 1009,
+    "frameHeight": 0,
+    "frameCount": 222,
+    "columns": 16,
+    "rows": 14,
+    "sheetWidth": 16144,
+    "sheetHeight": 0
+  },
+  "select": {
+    "frameWidth": 24,
+    "frameHeight": 21,
+    "frameCount": 4,
+    "columns": 4,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 21
+  },
+  "powerbar": {
+    "frameWidth": 10,
+    "frameHeight": 112,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 10,
+    "sheetHeight": 112
+  },
+  "sidebar": {
+    "frameWidth": 80,
+    "frameHeight": 123,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 160,
+    "sheetHeight": 123
+  },
+  "strip": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 24
+  },
+  "tabs": {
+    "frameWidth": 80,
+    "frameHeight": 7,
+    "frameCount": 7,
+    "columns": 7,
+    "rows": 1,
+    "sheetWidth": 560,
+    "sheetHeight": 7
+  },
   "gold01": {
     "frameWidth": 24,
     "frameHeight": 24,
@@ -915,6 +1212,1140 @@
     "columns": 3,
     "rows": 1,
     "sheetWidth": 72,
+    "sheetHeight": 24
+  },
+  "t01": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t02": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t03": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t05": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t06": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t07": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t08": {
+    "frameWidth": 48,
+    "frameHeight": 24,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 24
+  },
+  "t10": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t11": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 11,
+    "columns": 11,
+    "rows": 1,
+    "sheetWidth": 528,
+    "sheetHeight": 48
+  },
+  "t12": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t13": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t14": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t15": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 11,
+    "columns": 11,
+    "rows": 1,
+    "sheetWidth": 528,
+    "sheetHeight": 48
+  },
+  "t16": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "t17": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 480,
+    "sheetHeight": 48
+  },
+  "tc01": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 720,
+    "sheetHeight": 48
+  },
+  "tc02": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 720,
+    "sheetHeight": 48
+  },
+  "tc03": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 720,
+    "sheetHeight": 48
+  },
+  "tc04": {
+    "frameWidth": 96,
+    "frameHeight": 72,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 960,
+    "sheetHeight": 72
+  },
+  "tc05": {
+    "frameWidth": 96,
+    "frameHeight": 72,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 960,
+    "sheetHeight": 72
+  },
+  "factmake": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 1152,
+    "sheetHeight": 144
+  },
+  "powrmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 624,
+    "sheetHeight": 48
+  },
+  "apwrmake": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 936,
+    "sheetHeight": 72
+  },
+  "barrmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 624,
+    "sheetHeight": 48
+  },
+  "tentmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 624,
+    "sheetHeight": 48
+  },
+  "weapmake": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 15,
+    "columns": 15,
+    "rows": 1,
+    "sheetWidth": 1080,
+    "sheetHeight": 48
+  },
+  "procmake": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 720,
+    "sheetHeight": 72
+  },
+  "silomake": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 336,
+    "sheetHeight": 24
+  },
+  "domemake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 17,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 96
+  },
+  "fixmake": {
+    "frameWidth": 72,
+    "frameHeight": 72,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 1008,
+    "sheetHeight": 72
+  },
+  "gunmake": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 20,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "sammake": {
+    "frameWidth": 48,
+    "frameHeight": 24,
+    "frameCount": 18,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 48
+  },
+  "tslamake": {
+    "frameWidth": 24,
+    "frameHeight": 48,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 312,
+    "sheetHeight": 48
+  },
+  "agunmake": {
+    "frameWidth": 24,
+    "frameHeight": 48,
+    "frameCount": 10,
+    "columns": 10,
+    "rows": 1,
+    "sheetWidth": 240,
+    "sheetHeight": 48
+  },
+  "gapmake": {
+    "frameWidth": 24,
+    "frameHeight": 48,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 312,
+    "sheetHeight": 48
+  },
+  "pboxmake": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 312,
+    "sheetHeight": 24
+  },
+  "hpadmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 20,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 96
+  },
+  "afldmake": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 11,
+    "columns": 11,
+    "rows": 1,
+    "sheetWidth": 792,
+    "sheetHeight": 48
+  },
+  "atekmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 17,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 96
+  },
+  "stekmake": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 20,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 1152,
+    "sheetHeight": 96
+  },
+  "ironmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 672,
+    "sheetHeight": 48
+  },
+  "pdoxmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 18,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 96
+  },
+  "kennmake": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 20,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "syrdmake": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 18,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 1152,
+    "sheetHeight": 96
+  },
+  "spenmake": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 14,
+    "columns": 14,
+    "rows": 1,
+    "sheetWidth": 1008,
+    "sheetHeight": 48
+  },
+  "biomake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 16,
+    "columns": 16,
+    "rows": 1,
+    "sheetWidth": 768,
+    "sheetHeight": 48
+  },
+  "hospmake": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 20,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 768,
+    "sheetHeight": 96
+  },
+  "hboxmake": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 312,
+    "sheetHeight": 24
+  },
+  "mslomake": {
+    "frameWidth": 48,
+    "frameHeight": 24,
+    "frameCount": 15,
+    "columns": 15,
+    "rows": 1,
+    "sheetWidth": 720,
+    "sheetHeight": 24
+  },
+  "1tnkicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "2tnkicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "3tnkicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "4tnkicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "jeepicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "apcicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "harvicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "mcvicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "artyicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "trukicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "mnlyicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "mggicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "v2rlicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "e1icon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "e2icon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "e3icon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "e4icon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "e6icon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "e7icon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "dogicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "spyicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "mediicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "thficon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "ssicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "ddicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "caicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "pticon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "lsticon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "hindicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "heliicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "tranicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "migicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "yakicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "badricon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "u2icon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "facticon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "powricon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "apwricon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "barricon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "tenticon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "weapicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "procicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "siloicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "domeicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "fixicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "gunicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "samicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "hboxicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "tslaicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "agunicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "gapicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "pboxicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "hpadicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "afldicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "msloicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "atekicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "stekicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "ironicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "pdoxicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "kennicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "syrdicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "spenicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "fencicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "brikicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "sbagicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "sc1": {
+    "frameWidth": 24,
+    "frameHeight": 19,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 19
+  },
+  "cr1": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 5,
+    "columns": 5,
+    "rows": 1,
+    "sheetWidth": 120,
+    "sheetHeight": 24
+  },
+  "sc2": {
+    "frameWidth": 15,
+    "frameHeight": 23,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 15,
+    "sheetHeight": 23
+  },
+  "cr2": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 5,
+    "columns": 5,
+    "rows": 1,
+    "sheetWidth": 120,
+    "sheetHeight": 24
+  },
+  "sc3": {
+    "frameWidth": 20,
+    "frameHeight": 10,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 20,
+    "sheetHeight": 10
+  },
+  "cr3": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 5,
+    "columns": 5,
+    "rows": 1,
+    "sheetWidth": 120,
+    "sheetHeight": 24
+  },
+  "sc4": {
+    "frameWidth": 23,
+    "frameHeight": 20,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 23,
+    "sheetHeight": 20
+  },
+  "cr4": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 5,
+    "columns": 5,
+    "rows": 1,
+    "sheetWidth": 120,
+    "sheetHeight": 24
+  },
+  "sc5": {
+    "frameWidth": 21,
+    "frameHeight": 20,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 21,
+    "sheetHeight": 20
+  },
+  "cr5": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 5,
+    "columns": 5,
+    "rows": 1,
+    "sheetWidth": 120,
+    "sheetHeight": 24
+  },
+  "sc6": {
+    "frameWidth": 24,
+    "frameHeight": 21,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 21
+  },
+  "cr6": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 5,
+    "columns": 5,
+    "rows": 1,
+    "sheetWidth": 120,
     "sheetHeight": 24
   }
 }

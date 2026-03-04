@@ -19,8 +19,8 @@ export const TEMPLATE_ROAD_MAX = 228;
 
 // === C++ Rule.ini defaults (rules.cpp) ===
 export const MAX_DAMAGE = 1000;          // rules.cpp:227 — max damage per hit
-export const REPAIR_STEP = 5;            // rules.cpp:228 — HP per repair pulse
-export const REPAIR_PERCENT = 0.25;      // rules.cpp:229 — cost ratio for full repair
+export const REPAIR_STEP = 7;            // rules.ini RepairStep=7 — HP per repair pulse
+export const REPAIR_PERCENT = 0.20;      // rules.ini RepairPercent=20% — cost ratio for full repair
 export const CONDITION_RED = 0.25;       // rules.cpp:235 — red health threshold
 export const CONDITION_YELLOW = 0.5;     // rules.cpp:234 — yellow health threshold
 export const PRONE_DAMAGE_BIAS = 0.5;    // rules.cpp:202 — prone infantry damage multiplier
@@ -46,14 +46,18 @@ export const DIR_DY = [-1, -1, 0, 1, 1, 1, 0, -1];
 export enum House {
   Spain = 'Spain',     // Player (Allied) in ant missions
   Greece = 'Greece',   // Allied ally
-  USSR = 'USSR',       // Ant faction
-  Ukraine = 'Ukraine', // Ant faction ally
-  Germany = 'Germany', // Ant faction ally
+  England = 'England', // Allied (campaign missions)
+  France = 'France',   // Allied (campaign missions)
+  USSR = 'USSR',       // Ant faction / Soviet player in campaign
+  Ukraine = 'Ukraine', // Ant faction ally / Soviet ally
+  Germany = 'Germany', // Ant faction ally (ant missions) / Allied (campaign)
   Turkey = 'Turkey',   // Neutral / scenario-specific
+  GoodGuy = 'GoodGuy', // Meta-house: player side
+  BadGuy = 'BadGuy',   // Meta-house: enemy side
   Neutral = 'Neutral',
 }
 
-// Alliance groups
+// Alliance groups (ant missions only — campaign uses dynamic alliances from scenario INI)
 export const PLAYER_HOUSES = new Set([House.Spain, House.Greece]);
 export const ANT_HOUSES = new Set([House.USSR, House.Ukraine, House.Germany]);
 
@@ -62,27 +66,32 @@ export type Faction = 'allied' | 'soviet' | 'both';
 
 export const HOUSE_FACTION: Record<string, Faction> = {
   Spain: 'allied', Greece: 'allied', England: 'allied', France: 'allied',
-  Germany: 'allied', Turkey: 'allied',
-  USSR: 'soviet', Ukraine: 'soviet',
+  Germany: 'allied', Turkey: 'allied', GoodGuy: 'allied',
+  USSR: 'soviet', Ukraine: 'soviet', BadGuy: 'soviet',
   Neutral: 'both',
 };
 
 export interface CountryBonus {
-  costMult: number;        // production cost multiplier (< 1.0 = cheaper)
-  firepowerMult: number;   // outgoing damage multiplier
-  armorMult: number;       // damage resistance multiplier (> 1.0 = tougher)
+  costMult: number;          // production cost multiplier (< 1.0 = cheaper)
+  firepowerMult: number;     // outgoing damage multiplier
+  armorMult: number;         // damage resistance multiplier (> 1.0 = tougher)
+  groundspeedMult: number;   // ground unit speed multiplier (rules.ini Groundspeed=)
+  rofMult: number;           // rate of fire multiplier (> 1.0 = slower ROF, rules.ini ROF=)
 }
 
+// Country bonuses from rules.ini [CountryName] sections
 export const COUNTRY_BONUSES: Record<string, CountryBonus> = {
-  Spain:   { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
-  Greece:  { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
-  England: { costMult: 0.90, firepowerMult: 1.0,  armorMult: 1.0 },  // 10% cheaper
-  France:  { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
-  Germany: { costMult: 0.95, firepowerMult: 1.0,  armorMult: 1.0 },  // 5% cheaper
-  Turkey:  { costMult: 0.80, firepowerMult: 1.0,  armorMult: 1.0 },  // 20% cheaper
-  USSR:    { costMult: 1.0,  firepowerMult: 1.10, armorMult: 1.0 },  // 10% stronger
-  Ukraine: { costMult: 1.0,  firepowerMult: 1.05, armorMult: 1.0 },  // 5% stronger
-  Neutral: { costMult: 1.0,  firepowerMult: 1.0,  armorMult: 1.0 },
+  Spain:   { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
+  Greece:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
+  England: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.1, groundspeedMult: 1.0, rofMult: 1.0 },  // 10% tougher armor
+  France:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.1 },  // 10% faster ROF
+  Germany: { costMult: 1.0, firepowerMult: 1.1, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },  // 10% more firepower
+  Turkey:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
+  USSR:    { costMult: 0.9, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },  // 10% cheaper
+  Ukraine: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.1, rofMult: 1.0 },  // 10% faster ground
+  GoodGuy: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
+  BadGuy:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
+  Neutral: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
 };
 
 // House firepower bias — derived from COUNTRY_BONUSES (C++ House->FirepowerBias)
@@ -346,6 +355,31 @@ export enum SpeedClass {
   FLOAT = 4,   // Ships (LST)
 }
 
+// === Terrain speed modifiers from rules.ini [Land Characteristics] ===
+// Percentage of full speed for each speed class on each terrain type.
+// Index order: [Foot, Track, Wheel, Winged, Float]
+// Winged is always 100% (aircraft ignore terrain). Track included for completeness
+// even though udata.cpp forces all vehicles to WHEEL class.
+export const TERRAIN_SPEED: Record<string, [number, number, number, number, number]> = {
+  //                     Foot  Track Wheel Winged Float
+  Clear:              [0.90, 0.80, 0.60, 1.0,  0.0 ],
+  Rough:              [0.80, 0.70, 0.40, 1.0,  0.0 ],
+  Road:               [1.00, 1.00, 1.00, 1.0,  0.0 ],
+  Water:              [0.00, 0.00, 0.00, 1.0,  1.0 ],
+  Rock:               [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable cliffs
+  Wall:               [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable walls
+  Ore:                [0.90, 0.70, 0.50, 1.0,  0.0 ],
+  Beach:              [0.80, 0.70, 0.40, 1.0,  0.0 ],
+  River:              [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable riverbed
+};
+
+/** Lookup terrain speed multiplier for a speed class on a terrain type */
+export function getTerrainSpeed(terrain: string, speedClass: SpeedClass): number {
+  const entry = TERRAIN_SPEED[terrain];
+  if (!entry) return 1.0; // unknown terrain defaults to full speed
+  return entry[speedClass] ?? 1.0;
+}
+
 // === Unit stats from RULES.INI (Red Alert original) ===
 // Five armor classes from RA source (warhead.cpp): none, wood, light, heavy, concrete
 export type ArmorType = 'none' | 'wood' | 'light' | 'heavy' | 'concrete';
@@ -395,7 +429,7 @@ export const WARHEAD_VS_ARMOR: Record<WarheadType, [number, number, number, numb
   HollowPoint:[1.0,  0.05, 0.05, 0.05, 0.05], // Hollow Point — anti-infantry only
   Super:      [1.0,  1.0,  1.0,  1.0,  1.0 ], // Super — equal damage to all
   Organic:    [1.0,  0.0,  0.0,  0.0,  0.0 ], // Organic — kills unarmored only (dogs)
-  Nuke:       [1.0,  1.0,  1.0,  1.0,  1.0 ], // Nuke — equal damage to all armor
+  Nuke:       [0.9,  1.0,  0.6,  0.25, 0.5 ], // Nuke — same verses as Fire (rules.ini: 90%,100%,60%,25%,50%)
   Mechanical: [0.0,  0.0,  0.0,  0.0,  0.0 ], // Mechanical — no direct damage (special effects)
 };
 
@@ -418,20 +452,20 @@ export function getWarheadMultiplier(warhead: WarheadType, armor: ArmorType): nu
 // Warhead properties from C++ warhead.cpp — infantryDeath selects death animation,
 // explosionSet picks the visual explosion sprite
 export interface WarheadProps {
-  infantryDeath: number;   // 0=normal (die1), 1=fire death (die2), 2=explode (die2)
+  infantryDeath: number;   // rules.ini InfDeath: 0=instant, 1=twirl, 2=explode, 3=flying, 4=burn, 5=electro
   explosionSet: string;    // sprite name for explosion effect
 }
 
 export const WARHEAD_PROPS: Record<WarheadType, WarheadProps> = {
-  SA:          { infantryDeath: 0, explosionSet: 'piff' },       // Small arms: normal death, small piff
-  HE:          { infantryDeath: 2, explosionSet: 'veh-hit1' },   // High explosive: explode death, vehicle hit
-  AP:          { infantryDeath: 0, explosionSet: 'piff' },       // Armor piercing: normal death, small piff
-  Fire:        { infantryDeath: 1, explosionSet: 'napalm1' },    // Fire: fire death, napalm explosion
-  HollowPoint: { infantryDeath: 0, explosionSet: 'piff' },       // Hollow point: normal death
-  Super:       { infantryDeath: 2, explosionSet: 'atomsfx' },    // Super: explode death, big explosion
-  Organic:     { infantryDeath: 0, explosionSet: 'piff' },       // Organic: normal death
-  Nuke:        { infantryDeath: 2, explosionSet: 'atomsfx' },   // Nuke: explode death, nuke explosion
-  Mechanical:  { infantryDeath: 0, explosionSet: 'piff' },      // Mechanical: no visual (special effects)
+  SA:          { infantryDeath: 1, explosionSet: 'piff' },       // InfDeath=1 (twirl), Explosion=2 (piffs)
+  HE:          { infantryDeath: 2, explosionSet: 'veh-hit1' },   // InfDeath=2 (explode), Explosion=5 (pops)
+  AP:          { infantryDeath: 3, explosionSet: 'piff' },       // InfDeath=3 (flying), Explosion=4 (frags)
+  Fire:        { infantryDeath: 4, explosionSet: 'napalm1' },    // InfDeath=4 (burn), Explosion=3 (fire)
+  HollowPoint: { infantryDeath: 1, explosionSet: 'piff' },       // InfDeath=1 (twirl), Explosion=1 (piff)
+  Super:       { infantryDeath: 5, explosionSet: 'atomsfx' },    // InfDeath=5 (electro), no Explosion
+  Organic:     { infantryDeath: 0, explosionSet: 'piff' },       // InfDeath=0 (instant), no Explosion
+  Nuke:        { infantryDeath: 4, explosionSet: 'atomsfx' },    // InfDeath=4 (burn), Explosion=6 (nuke)
+  Mechanical:  { infantryDeath: 0, explosionSet: 'piff' },       // engine-only (not in rules.ini)
 };
 
 export interface WeaponStats {
@@ -460,18 +494,19 @@ export interface WarheadMeta {
   spreadFactor: number;      // 1=linear, 2=wider splash (slower falloff), 3=widest splash
   destroysWalls?: boolean;   // can destroy wall structures (FENC, BRIK, SBAG, BARB, WOOD)
   destroysWood?: boolean;    // can destroy trees and wooden overlays
+  destroysOre?: boolean;     // can destroy ore overlays (Ore=yes in rules.ini)
 }
 
 export const WARHEAD_META: Record<WarheadType, WarheadMeta> = {
-  SA:          { spreadFactor: 1 },                                           // linear falloff
-  HE:          { spreadFactor: 2, destroysWalls: true, destroysWood: true },  // wider splash, destroys walls+wood
-  AP:          { spreadFactor: 1 },                                           // linear falloff
-  Fire:        { spreadFactor: 3, destroysWood: true },                       // widest splash, slowest falloff; burns wood
-  HollowPoint: { spreadFactor: 1 },                                          // linear falloff
-  Super:       { spreadFactor: 2, destroysWalls: true, destroysWood: true },  // wider splash; destroys walls+wood
-  Organic:     { spreadFactor: 1 },                                           // linear falloff
-  Nuke:        { spreadFactor: 8, destroysWalls: true, destroysWood: true },  // widest splash, destroys everything
-  Mechanical:  { spreadFactor: 0 },                                           // no splash (special effects)
+  SA:          { spreadFactor: 3 },                                                              // Spread=3
+  HE:          { spreadFactor: 6, destroysWalls: true, destroysWood: true },                     // Spread=6, Wall=yes, Wood=yes
+  AP:          { spreadFactor: 3, destroysWalls: true, destroysWood: true },                     // Spread=3, Wall=yes, Wood=yes
+  Fire:        { spreadFactor: 8, destroysWood: true },                                          // Spread=8, Wood=yes
+  HollowPoint: { spreadFactor: 1 },                                                             // Spread=1
+  Super:       { spreadFactor: 1 },                                                              // Spread=1 (no Wall/Wood)
+  Organic:     { spreadFactor: 0 },                                                              // Spread=0
+  Nuke:        { spreadFactor: 6, destroysWalls: true, destroysWood: true, destroysOre: true },  // Spread=6, Wall=yes, Wood=yes, Ore=yes
+  Mechanical:  { spreadFactor: 0 },                                                              // engine-only (not in rules.ini)
 };
 
 // Unit stats from RULES.INI — real Red Alert values
@@ -502,19 +537,19 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   DOG:  { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 12, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw', scanDelay: 8, crushable: true },
   SPY:  { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Heal', crushable: true },
-  GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true },
   CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   // Civilians — crushable
-  C1: { type: UnitType.I_C1, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C2: { type: UnitType.I_C2, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C3: { type: UnitType.I_C3, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C4: { type: UnitType.I_C4, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C5: { type: UnitType.I_C5, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C6: { type: UnitType.I_C6, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C7: { type: UnitType.I_C7, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C8: { type: UnitType.I_C8, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C9: { type: UnitType.I_C9, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C10: { type: UnitType.I_C10, name: 'Civilian', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C1: { type: UnitType.I_C1, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true },
+  C2: { type: UnitType.I_C2, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C3: { type: UnitType.I_C3, name: 'Civilian', image: 'c2', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C4: { type: UnitType.I_C4, name: 'Civilian', image: 'c2', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C5: { type: UnitType.I_C5, name: 'Civilian', image: 'c2', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C6: { type: UnitType.I_C6, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C7: { type: UnitType.I_C7, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true },
+  C8: { type: UnitType.I_C8, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C9: { type: UnitType.I_C9, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  C10: { type: UnitType.I_C10, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   // Counterstrike/Aftermath expansion infantry — crushable
   SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: true },
   MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true },
@@ -525,25 +560,25 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
   DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
   // Transport vehicles
-  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 30, speedClass: SpeedClass.WINGED, sight: 5, rot: 8, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
-  LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 400, armor: 'heavy', speed: 10, speedClass: SpeedClass.FLOAT, sight: 4, rot: 4, isInfantry: false, primaryWeapon: null, passengers: 8, isVessel: true },
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
+  LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true },
   // Naval vessels (RULES.INI values — C++ vdata.cpp)
-  SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 5, rot: 3, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true },
-  DD: { type: UnitType.V_DD, name: 'Destroyer', image: 'dd', strength: 400, armor: 'heavy', speed: 12, speedClass: SpeedClass.FLOAT, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'Stinger', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
-  CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 8, speedClass: SpeedClass.FLOAT, sight: 8, rot: 3, isInfantry: false, primaryWeapon: '8Inch', isVessel: true },
-  PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'light', speed: 14, speedClass: SpeedClass.FLOAT, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '2Inch', isVessel: true },
+  SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true },
+  DD: { type: UnitType.V_DD, name: 'Destroyer', image: 'dd', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'Stinger', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
+  CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 4, speedClass: SpeedClass.FLOAT, sight: 7, rot: 5, isInfantry: false, primaryWeapon: '8Inch', secondaryWeapon: '8Inch', isVessel: true },
+  PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 7, rot: 7, isInfantry: false, primaryWeapon: '2Inch', secondaryWeapon: 'DepthCharge', isVessel: true },
   MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 5, rot: 3, isInfantry: false, primaryWeapon: 'SeaSerpent', isVessel: true, isCloakable: true },
   // Aircraft (C++ aadata.cpp / RULES.INI)
-  MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 60, armor: 'light', speed: 50, speedClass: SpeedClass.WINGED, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 2 },
-  YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 50, armor: 'light', speed: 50, speedClass: SpeedClass.WINGED, sight: 2, rot: 8, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 2 },
-  HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 100, armor: 'heavy', speed: 40, speedClass: SpeedClass.WINGED, sight: 4, rot: 8, isInfantry: false, primaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 8 },
-  HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 100, armor: 'heavy', speed: 40, speedClass: SpeedClass.WINGED, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 4 },
+  MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 50, armor: 'light', speed: 20, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'Maverick', secondaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 3 },
+  YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 15 },
+  HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6 },
+  HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 12 },
   // Tanya & Thief (new infantry)
-  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e1', strength: 100, armor: 'none', speed: 6, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: null, crushable: true, owner: 'allied', cost: 1200, canSwim: true },
-  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 6, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500 },
+  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e1', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'allied', cost: 1200, canSwim: true },
+  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500 },
   // Expansion vehicles (V2 Rocket, Minelayer)
-  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 6, rot: 3, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700 },
-  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'allied', cost: 800 },
+  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true },
+  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'allied', cost: 800 },
 };
 
 // Weapon stats from RULES.INI — real RA values
@@ -557,7 +592,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20 },
   DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40 },
   Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 40 },
-  Sniper:           { name: 'Sniper',            damage: 100, rof: 60, range: 3.75, warhead: 'SA', projSpeed: 40 },
+  Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 40 },
   // Vehicle weapons
   M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 40 },
   '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
@@ -573,7 +608,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   APTusk:           { name: 'APTusk',             damage: 75,  rof: 60, range: 6.0,  warhead: 'AP', projSpeed: 40 },                 // Chrono Tank missile
   TTankZap:         { name: 'TTankZap',           damage: 80,  rof: 80, range: 5.0,  warhead: 'Super', splash: 1.0, projSpeed: 40 }, // Tesla Tank
   // Naval weapons (C++ RULES.INI — vessel.cpp)
-  Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'HE', projSpeed: 40 },                                          // DD primary naval gun
+  Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 40, burst: 2 },                                 // DD primary naval gun
   TorpTube:         { name: 'TorpTube',         damage: 90,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 1.0, isSubSurface: true }, // SS torpedo, underwater travel
   DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 12, isAntiSub: true },                         // DD secondary, hits submerged subs
   Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // CA cruise missile
@@ -583,16 +618,16 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Helicopter missile (HELI)
   ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 40 },  // Rapid-fire hitscan (HIND/YAK)
   // New parity weapons
-  '8Inch':          { name: '8Inch',             damage: 500, rof: 120, range: 10.0, warhead: 'AP', projSpeed: 30 },  // Cruiser main gun
-  '2Inch':          { name: '2Inch',             damage: 20,  rof: 20, range: 5.0,  warhead: 'SA', projSpeed: 40 },  // Gunboat weapon
-  Colt45:           { name: 'Colt45',            damage: 50,  rof: 20, range: 5.0,  warhead: 'SA', projSpeed: 40 },  // Tanya's dual pistols
-  Pistol:           { name: 'Pistol',            damage: 1,   rof: 30, range: 2.0,  warhead: 'SA', projSpeed: 40 },  // Stavros/civilian
-  SCUD:             { name: 'SCUD',              damage: 200, rof: 100, range: 10.0, warhead: 'HE', projSpeed: 15, projectileSpeed: 2.0, splash: 2.0 },  // V2 Rocket
+  '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 30, isArcing: true, inaccuracy: 1.0 },  // Cruiser main gun
+  '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 40 },  // Gunboat weapon
+  Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 40 },  // Tanya's dual pistols
+  Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 40 },  // Stavros/civilian
+  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 15, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5 },  // V2 Rocket
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'HollowPoint', projSpeed: 40 }, // C++: Warhead=HollowPoint
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
   FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8, projSpeed: 15 },
-  Napalm:           { name: 'Napalm',            damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
+  Napalm:           { name: 'Napalm',            damage: 100, rof: 20, range: 4.5,  warhead: 'Fire', projSpeed: 12 },
 };
 
 // === Superweapon System ===
@@ -730,30 +765,42 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'HIND', name: 'Hind', cost: 1200, buildTime: 180, prerequisite: 'HPAD', faction: 'soviet' },
   { type: 'MIG', name: 'MiG', cost: 1200, buildTime: 180, prerequisite: 'AFLD', faction: 'soviet' },
   { type: 'YAK', name: 'Yak', cost: 800, buildTime: 120, prerequisite: 'AFLD', faction: 'soviet' },
-  // Structures (from FACT) — faction-accurate
+  // Structures — rules.ini Prerequisite=, Cost=, Owner= values
   { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'DOME', name: 'Radar Dome', cost: 1000, buildTime: 150, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'HBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'FACT', faction: 'allied', isStructure: true },
-  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'FACT', faction: 'allied', isStructure: true },
-  { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
-  { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'AFLD', name: 'Airfield', cost: 600, buildTime: 200, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
+  { type: 'APWR', name: 'Adv. Power Plant', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', isStructure: true },
+  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', isStructure: true },
+  { type: 'BARR', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', isStructure: true },
+  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'POWR', faction: 'both', isStructure: true },
+  { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'PROC', faction: 'both', isStructure: true },
+  { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'PROC', faction: 'both', isStructure: true },
+  { type: 'DOME', name: 'Radar Dome', cost: 1000, buildTime: 150, prerequisite: 'PROC', faction: 'both', isStructure: true },
+  { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'WEAP', faction: 'both', isStructure: true },
+  { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'DOME', faction: 'both', isStructure: true },
+  { type: 'AFLD', name: 'Airfield', cost: 600, buildTime: 200, prerequisite: 'DOME', faction: 'soviet', isStructure: true },
+  // Defenses
+  { type: 'PBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true },
+  { type: 'HBOX', name: 'Camo Pillbox', cost: 600, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true },
+  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'TENT', faction: 'allied', isStructure: true },
+  { type: 'AGUN', name: 'AA Gun', cost: 600, buildTime: 100, prerequisite: 'DOME', faction: 'allied', isStructure: true },
+  { type: 'GAP', name: 'Gap Generator', cost: 500, buildTime: 120, prerequisite: 'ATEK', faction: 'allied', isStructure: true },
+  { type: 'FTUR', name: 'Flame Tower', cost: 600, buildTime: 100, prerequisite: 'BARR', faction: 'soviet', isStructure: true },
+  { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true },
+  { type: 'SAM', name: 'SAM Site', cost: 750, buildTime: 120, prerequisite: 'DOME', faction: 'soviet', isStructure: true },
+  { type: 'KENN', name: 'Kennel', cost: 200, buildTime: 60, prerequisite: 'BARR', faction: 'soviet', isStructure: true },
+  // Naval
+  { type: 'SYRD', name: 'Ship Yard', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'allied', isStructure: true },
+  { type: 'SPEN', name: 'Sub Pen', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'soviet', isStructure: true },
   // Superweapon / tech structures
-  { type: 'ATEK', name: 'Allied Tech', cost: 1500, buildTime: 200, prerequisite: 'POWR', faction: 'allied', isStructure: true },
-  { type: 'STEK', name: 'Soviet Tech', cost: 1500, buildTime: 200, prerequisite: 'POWR', faction: 'soviet', isStructure: true },
+  { type: 'ATEK', name: 'Allied Tech', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'allied', isStructure: true, techPrereq: 'DOME' },
+  { type: 'STEK', name: 'Soviet Tech', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true, techPrereq: 'DOME' },
   { type: 'PDOX', name: 'Chronosphere', cost: 2800, buildTime: 300, prerequisite: 'ATEK', faction: 'allied', isStructure: true },
   { type: 'IRON', name: 'Iron Curtain', cost: 2800, buildTime: 300, prerequisite: 'STEK', faction: 'soviet', isStructure: true },
   { type: 'MSLO', name: 'Missile Silo', cost: 2500, buildTime: 280, prerequisite: 'STEK', faction: 'soviet', isStructure: true },
-  // Walls (1x1 placement, no prerequisite building needed beyond FACT)
-  { type: 'SBAG', name: 'Sandbag', cost: 10, buildTime: 15, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'FENC', name: 'Chain Link', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'BARB', name: 'Barbed Wire', cost: 20, buildTime: 18, prerequisite: 'FACT', faction: 'both', isStructure: true },
-  { type: 'BRIK', name: 'Concrete', cost: 50, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  // Walls — rules.ini Cost= and Owner= values
+  { type: 'SBAG', name: 'Sandbag', cost: 25, buildTime: 15, prerequisite: 'FACT', faction: 'allied', isStructure: true },
+  { type: 'FENC', name: 'Chain Link', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'soviet', isStructure: true },
+  { type: 'BARB', name: 'Barbed Wire', cost: 25, buildTime: 18, prerequisite: 'FACT', faction: 'both', isStructure: true },
+  { type: 'BRIK', name: 'Concrete', cost: 100, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true },
 ];
 
 // === Sidebar Tab Categories ===
@@ -895,22 +942,49 @@ export enum CursorType {
 // Alliance system — per-house alliance table
 export type AllianceTable = Map<House, Set<House>>;
 
-/** Build default alliances: Spain+Greece allied, USSR+Ukraine+Germany allied */
+/** Build default alliances: Spain+Greece allied, USSR+Ukraine+Germany allied (ant missions) */
 export function buildDefaultAlliances(): AllianceTable {
   const table: AllianceTable = new Map();
   // Each house is always allied with itself
   for (const h of Object.values(House)) {
     table.set(h, new Set([h]));
   }
-  // Spain ↔ Greece
+  // Spain ↔ Greece (player side in ant missions)
   table.get(House.Spain)!.add(House.Greece);
   table.get(House.Greece)!.add(House.Spain);
-  // USSR ↔ Ukraine ↔ Germany (BadGuy)
+  // USSR ↔ Ukraine ↔ Germany (enemy side in ant missions)
   const soviets = [House.USSR, House.Ukraine, House.Germany];
   for (const a of soviets) {
     for (const b of soviets) {
       table.get(a)!.add(b);
     }
   }
+  return table;
+}
+
+/** Build alliance table from scenario INI [Basic] Allies= field.
+ *  C++ house.cpp:Read_INI — each house section has Allies= comma-separated house names.
+ *  Returns modified alliance table. */
+export function buildAlliancesFromINI(
+  alliesMap: Map<House, House[]>,
+  playerHouse: House,
+): AllianceTable {
+  const table: AllianceTable = new Map();
+  // Each house is always allied with itself
+  for (const h of Object.values(House)) {
+    table.set(h, new Set([h]));
+  }
+  // Apply explicit alliances from INI
+  for (const [house, allies] of alliesMap) {
+    const set = table.get(house)!;
+    for (const ally of allies) {
+      set.add(ally);
+      // Alliances are bidirectional
+      table.get(ally)?.add(house);
+    }
+  }
+  // GoodGuy is always allied with the player
+  table.get(House.GoodGuy)?.add(playerHouse);
+  table.get(playerHouse)?.add(House.GoodGuy);
   return table;
 }

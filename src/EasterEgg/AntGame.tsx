@@ -7,6 +7,7 @@ import {
   CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, checkMissionExists,
   loadMissionBriefings, getMissionBriefing,
   type CampaignId, type CampaignDef, type CampaignMission,
+  getMissionMovies, hasFMV, MoviePlayer,
 } from './engine';
 import { TestRunner, type TestLogEntry } from './engine/testRunner';
 import { QATestRunner, type QALogEntry, type QAReport } from './engine/qaTestRunner';
@@ -18,7 +19,8 @@ interface AntGameProps {
 }
 
 type Screen = 'main_menu' | 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing'
-  | 'faction_select' | 'campaign_select';
+  | 'faction_select' | 'campaign_select'
+  | 'fmv_briefing' | 'fmv_action' | 'objectives_interstitial';
 
 export default function AntGame({ onExit }: AntGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,6 +61,8 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [qaReport, setQaReport] = useState<QAReport | null>(null);
   const qaRunnerRef = useRef<QATestRunner | null>(null);
   const briefingRef = useRef<BriefingRenderer | null>(null);
+  const moviePlayerRef = useRef<MoviePlayer | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const transitionTo = useCallback((callback: () => void) => {
     setFadeActive(true);
@@ -151,6 +155,44 @@ export default function AntGame({ onExit }: AntGameProps) {
       briefingRef.current = null;
     }
 
+    const movies = getMissionMovies(mission.id);
+
+    // FMV path: play Brief video for missions with FMV (not ant missions)
+    if (movies?.brief && containerRef.current && !mission.id.toUpperCase().startsWith('SCA')) {
+      transitionTo(() => {
+        setScreen('fmv_briefing');
+
+        // Reuse preloaded player or create new one
+        let player = moviePlayerRef.current;
+        if (!player && containerRef.current) {
+          player = new MoviePlayer(containerRef.current);
+          moviePlayerRef.current = player;
+        }
+        if (!player) return;
+
+        player.onComplete = () => {
+          setScreen('objectives_interstitial');
+        };
+        player.onError = () => {
+          // Fallback to procedural briefing
+          moviePlayerRef.current?.destroy();
+          moviePlayerRef.current = null;
+          setScreen('cutscene');
+          const renderer = new BriefingRenderer(canvasRef.current!);
+          briefingRef.current = renderer;
+          renderer.onComplete = () => {
+            briefingRef.current = null;
+            launchMission(mission);
+          };
+          renderer.start(mission.id, mission.briefing);
+        };
+
+        player.play(movies.brief!);
+      });
+      return;
+    }
+
+    // Procedural path: ant missions, LANDCOM, Counterstrike, etc.
     transitionTo(() => {
       setScreen('cutscene');
 
@@ -165,6 +207,45 @@ export default function AntGame({ onExit }: AntGameProps) {
       renderer.start(mission.id, mission.briefing);
     });
   }, [launchMission, transitionTo]);
+
+  /** Continue from objectives interstitial → play Action FMV or launch directly */
+  const continueFromObjectives = useCallback(() => {
+    if (!selectedMission) return;
+    const movies = getMissionMovies(selectedMission.id);
+
+    if (movies?.action && containerRef.current) {
+      // Clean up previous player
+      if (moviePlayerRef.current) {
+        moviePlayerRef.current.destroy();
+        moviePlayerRef.current = null;
+      }
+
+      const player = new MoviePlayer(containerRef.current);
+      moviePlayerRef.current = player;
+
+      player.onComplete = () => {
+        moviePlayerRef.current?.destroy();
+        moviePlayerRef.current = null;
+        launchMission(selectedMission);
+      };
+      player.onError = () => {
+        // Skip action video on error, just launch
+        moviePlayerRef.current?.destroy();
+        moviePlayerRef.current = null;
+        launchMission(selectedMission);
+      };
+
+      setScreen('fmv_action');
+      player.play(movies.action);
+    } else {
+      // No action movie — launch directly
+      if (moviePlayerRef.current) {
+        moviePlayerRef.current.destroy();
+        moviePlayerRef.current = null;
+      }
+      launchMission(selectedMission);
+    }
+  }, [selectedMission, launchMission]);
 
   const selectMission = useCallback((index: number) => {
     const mission = MISSIONS[index];
@@ -190,6 +271,18 @@ export default function AntGame({ onExit }: AntGameProps) {
       objective: cm.objective,
     };
     setSelectedMission(missionInfo);
+
+    // Preload FMV briefing video while user reads the briefing screen
+    const movies = getMissionMovies(cm.id);
+    if (movies?.brief && containerRef.current) {
+      if (moviePlayerRef.current) {
+        moviePlayerRef.current.destroy();
+      }
+      const player = new MoviePlayer(containerRef.current);
+      player.preload(movies.brief);
+      moviePlayerRef.current = player;
+    }
+
     transitionTo(() => setScreen('briefing'));
   }, [transitionTo]);
 
@@ -373,6 +466,10 @@ export default function AntGame({ onExit }: AntGameProps) {
         briefingRef.current.stop();
         briefingRef.current = null;
       }
+      if (moviePlayerRef.current) {
+        moviePlayerRef.current.destroy();
+        moviePlayerRef.current = null;
+      }
       if (testRunnerRef.current) {
         testRunnerRef.current.stop();
         testRunnerRef.current = null;
@@ -401,7 +498,18 @@ export default function AntGame({ onExit }: AntGameProps) {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'F10') {
         e.preventDefault();
-        if (screen === 'cutscene') {
+        if (screen === 'fmv_briefing' || screen === 'fmv_action') {
+          if (moviePlayerRef.current) {
+            moviePlayerRef.current.skip();
+          }
+        } else if (screen === 'objectives_interstitial') {
+          // Escape on objectives → skip action video, launch directly
+          if (moviePlayerRef.current) {
+            moviePlayerRef.current.destroy();
+            moviePlayerRef.current = null;
+          }
+          if (selectedMission) launchMission(selectedMission);
+        } else if (screen === 'cutscene') {
           if (briefingRef.current) {
             briefingRef.current.skip();
           }
@@ -417,6 +525,18 @@ export default function AntGame({ onExit }: AntGameProps) {
         } else if (screen === 'main_menu') {
           onExit();
         }
+      }
+      // FMV screens: Space/Enter to skip
+      if ((screen === 'fmv_briefing' || screen === 'fmv_action') && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        if (moviePlayerRef.current) {
+          moviePlayerRef.current.skip();
+        }
+      }
+      // Objectives interstitial: Space/Enter to continue
+      if (screen === 'objectives_interstitial' && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        continueFromObjectives();
       }
       if (screen === 'cutscene' && (e.key === ' ' || e.key === 'Enter')) {
         e.preventDefault();
@@ -437,7 +557,7 @@ export default function AntGame({ onExit }: AntGameProps) {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, onExit, activeCampaign, campaignMissionIndex]);
+  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, continueFromObjectives, onExit, activeCampaign, campaignMissionIndex]);
 
   // Handle canvas resize
   useEffect(() => {
@@ -453,7 +573,7 @@ export default function AntGame({ onExit }: AntGameProps) {
   const allComplete = unlockedMissions >= MISSIONS.length;
 
   return (
-    <div style={{
+    <div ref={containerRef} style={{
       position: 'fixed',
       top: 0,
       left: 0,
@@ -1530,6 +1650,110 @@ export default function AntGame({ onExit }: AntGameProps) {
             cursor: 'pointer',
           }}
         />
+      )}
+
+      {/* ── FMV Click Overlay (skip video on click) ── */}
+      {!testMode && !qaMode && (screen === 'fmv_briefing' || screen === 'fmv_action') && (
+        <div
+          onClick={() => { if (moviePlayerRef.current) moviePlayerRef.current.skip(); }}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: 100022,
+            cursor: 'pointer',
+          }}
+        />
+      )}
+
+      {/* ── Objectives Interstitial ── */}
+      {!testMode && !qaMode && screen === 'objectives_interstitial' && selectedMission && (
+        <div
+          onClick={() => continueFromObjectives()}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'radial-gradient(ellipse at center, #0a0a00 0%, #000000 70%)',
+            zIndex: 100020,
+            fontFamily: 'monospace',
+            cursor: 'pointer',
+          }}
+        >
+          <div style={{
+            color: activeCampaign?.faction === 'soviet' ? '#cc4444' : '#4488cc',
+            fontSize: '12px',
+            letterSpacing: '6px',
+            textTransform: 'uppercase',
+            marginBottom: '8px',
+          }}>
+            Mission Objectives
+          </div>
+
+          <h1 style={{
+            color: activeCampaign?.faction === 'soviet' ? '#dd6666' : '#88aadd',
+            fontSize: '28px',
+            fontWeight: 'bold',
+            textShadow: `0 0 15px ${activeCampaign?.faction === 'soviet' ? 'rgba(200,60,60,0.5)' : 'rgba(80,120,200,0.5)'}`,
+            letterSpacing: '2px',
+            marginBottom: '24px',
+          }}>
+            {selectedMission.title}
+          </h1>
+
+          <div style={{
+            maxWidth: '550px',
+            padding: '24px 28px',
+            background: activeCampaign?.faction === 'soviet' ? 'rgba(40,10,10,0.5)' : 'rgba(10,20,40,0.5)',
+            border: `1px solid ${activeCampaign?.faction === 'soviet' ? '#441111' : '#112244'}`,
+            marginBottom: '16px',
+          }}>
+            <div style={{
+              color: '#ccaa88',
+              fontSize: '14px',
+              lineHeight: '1.8',
+              marginBottom: '16px',
+            }}>
+              {selectedMission.briefing}
+            </div>
+            <div style={{
+              borderTop: `1px solid ${activeCampaign?.faction === 'soviet' ? '#331111' : '#112233'}`,
+              paddingTop: '12px',
+            }}>
+              <span style={{
+                color: activeCampaign?.faction === 'soviet' ? '#884444' : '#446688',
+                fontSize: '11px',
+                letterSpacing: '2px',
+                textTransform: 'uppercase',
+              }}>
+                Objective:
+              </span>
+              <span style={{
+                color: activeCampaign?.faction === 'soviet' ? '#ff6666' : '#66aaff',
+                fontSize: '13px',
+                marginLeft: '8px',
+              }}>
+                {selectedMission.objective}
+              </span>
+            </div>
+          </div>
+
+          <div style={{
+            color: '#555',
+            fontSize: '11px',
+            marginTop: '12px',
+          }}>
+            Press ENTER to continue | ESC to skip
+          </div>
+        </div>
       )}
 
       {/* ── Game Canvas ── */}

@@ -674,9 +674,11 @@ export class Entity {
     }
 
     // Infantry move while rotating (nimble), vehicles move once facing is aligned
-    this.pos.x += (dx / dist) * effectiveSpeed;
-    this.pos.y += (dy / dist) * effectiveSpeed;
-    return false;
+    // Clamp movement to remaining distance to prevent overshoot-then-snap oscillation
+    const step = Math.min(effectiveSpeed, dist);
+    this.pos.x += (dx / dist) * step;
+    this.pos.y += (dy / dist) * step;
+    return step >= dist; // arrived if we moved the full remaining distance
   }
 }
 

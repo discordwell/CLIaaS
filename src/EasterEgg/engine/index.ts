@@ -37,6 +37,8 @@ export { CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, che
 export type { MissionInfo, CampaignId, CampaignDef, CampaignMission } from './scenario';
 export { AudioManager } from './audio';
 export { preloadAssets } from './assets';
+export { getMissionMovies, hasFMV, getMovieUrl } from './movies';
+export { MoviePlayer } from './moviePlayer';
 
 export type { SuperweaponState } from './types';
 
@@ -3113,18 +3115,19 @@ export class Game {
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
       const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
       if (occ > 0 && occ !== entity.id && entity.moveTarget &&
-          this.tick - entity.lastPathRecalc > 5) {
+          this.tick - entity.lastPathRecalc > 15) {
         entity.lastPathRecalc = this.tick;
-        entity.path = findPath(
+        const newPath = findPath(
           this.map, entity.cell,
           worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
           entity.isNavalUnit, entity.stats.speedClass
         );
-        entity.pathIndex = 0;
-        if (entity.path.length === 0) {
+        if (newPath.length === 0) {
           // Can't find alternate route — wait a moment
           return;
         }
+        entity.path = newPath;
+        entity.pathIndex = 0;
       }
       const target: WorldPos = {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
@@ -3558,8 +3561,11 @@ export class Game {
         // No targets found — resume move or return to idle
         if (entity.moveTarget) {
           entity.mission = Mission.MOVE;
-          entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true, entity.isNavalUnit, entity.stats.speedClass);
-          entity.pathIndex = 0;
+          // Only recalc path if we don't have a valid one already
+          if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
+            entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true, entity.isNavalUnit, entity.stats.speedClass);
+            entity.pathIndex = 0;
+          }
         } else {
           entity.mission = this.idleMission(entity);
         }
@@ -3572,10 +3578,18 @@ export class Game {
       entity.animState = AnimState.ATTACK;
     } else {
       entity.animState = AnimState.WALK;
-      // Use pathfinding to reach target (recalc periodically, staggered by entity ID)
+      // Use pathfinding to reach target (recalc only when path is exhausted or target moved significantly)
       const targetCell = worldToCell(entity.target.pos.x, entity.target.pos.y);
-      if (entity.path.length === 0 || entity.pathIndex >= entity.path.length ||
-          ((this.tick + entity.id) % 15 === 0)) {
+      const pathExhausted = entity.path.length === 0 || entity.pathIndex >= entity.path.length;
+      // Only recalc on timer if target has moved >3 cells from path endpoint
+      let targetMovedFar = false;
+      if (!pathExhausted && ((this.tick + entity.id) % 15 === 0) && entity.path.length > 0) {
+        const lastWp = entity.path[entity.path.length - 1];
+        const dtx = lastWp.cx - targetCell.cx;
+        const dty = lastWp.cy - targetCell.cy;
+        targetMovedFar = (dtx * dtx + dty * dty) > 9; // >3 cells
+      }
+      if (pathExhausted || targetMovedFar) {
         entity.path = findPath(this.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
         entity.pathIndex = 0;
       }

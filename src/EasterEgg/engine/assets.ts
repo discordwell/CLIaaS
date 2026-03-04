@@ -58,7 +58,9 @@ export class AssetManager {
   private loaded = false;
   private loadPromise: Promise<void> | null = null;
 
-  /** TEMPERATE tileset atlas image and lookup data */
+  /** Tileset atlas images and lookup data per theatre */
+  private tilesets = new Map<string, { image: HTMLImageElement; meta: TilesetMeta }>();
+  /** Legacy single-tileset references (TEMPERATE, for backwards compat) */
   private tilesetImage: HTMLImageElement | null = null;
   private tilesetMeta: TilesetMeta | null = null;
 
@@ -131,16 +133,27 @@ export class AssetManager {
         .catch(() => {}),
       // House color remap data (optional — falls back to tint overlay)
       this.loadRemapColors(),
-      // Tileset atlas (optional — renderer falls back to procedural colors)
-      Promise.all([
-        fetch(`${BASE_URL}/tileset.json`).then(r => r.ok ? r.json() : null),
-        loadImage(`${BASE_URL}/tileset.png`).catch(() => null),
-      ]).then(([meta, img]) => {
-        if (meta && img) {
-          this.tilesetMeta = meta as TilesetMeta;
-          this.tilesetImage = img;
-        }
-      }).catch(() => {}),
+      // Tileset atlases (optional — renderer falls back to procedural colors)
+      // Load TEMPERATE (backwards compat filenames) + SNOW + INTERIOR
+      ...[
+        { theatre: 'TEMPERATE', prefix: '' },
+        { theatre: 'SNOW', prefix: 'snow_' },
+        { theatre: 'INTERIOR', prefix: 'interior_' },
+      ].map(({ theatre, prefix }) =>
+        Promise.all([
+          fetch(`${BASE_URL}/${prefix}tileset.json`).then(r => r.ok ? r.json() : null),
+          loadImage(`${BASE_URL}/${prefix}tileset.png`).catch(() => null),
+        ]).then(([meta, img]) => {
+          if (meta && img) {
+            this.tilesets.set(theatre, { image: img, meta: meta as TilesetMeta });
+            // Backwards compat: set legacy fields for TEMPERATE
+            if (theatre === 'TEMPERATE') {
+              this.tilesetMeta = meta as TilesetMeta;
+              this.tilesetImage = img;
+            }
+          }
+        }).catch(() => {})
+      ),
       // All sprite sheets
       ...spritePromises,
     ]);
@@ -239,9 +252,11 @@ export class AssetManager {
     canvas.height = image.naturalHeight || image.height;
     const sctx = canvas.getContext('2d')!;
     sctx.drawImage(image, 0, 0);
-    // Turn all pixels black while preserving alpha (SHAPE_GHOST effect)
+    // Turn all pixels dark gray while preserving alpha (SHAPE_GHOST effect)
+    // Dark gray (not black) so 'multiply' blend darkens terrain proportionally
+    // rather than zeroing it out — matches C++ palette-index shadow behavior
     sctx.globalCompositeOperation = 'source-in';
-    sctx.fillStyle = 'black';
+    sctx.fillStyle = 'rgb(100,100,100)';
     sctx.fillRect(0, 0, canvas.width, canvas.height);
     sctx.globalCompositeOperation = 'source-over'; // Reset to default
     this.shadowSheets.set(sheetName, canvas);
@@ -303,18 +318,27 @@ export class AssetManager {
     return canvas;
   }
 
-  /** Get tileset atlas image (null if not loaded) */
-  getTilesetImage(): HTMLImageElement | null {
+  /** Get tileset atlas image (null if not loaded). Defaults to TEMPERATE. */
+  getTilesetImage(theatre?: string): HTMLImageElement | null {
+    if (theatre) {
+      return this.tilesets.get(theatre)?.image ?? null;
+    }
     return this.tilesetImage;
   }
 
-  /** Get tileset metadata (null if not loaded) */
-  getTilesetMeta(): TilesetMeta | null {
+  /** Get tileset metadata (null if not loaded). Defaults to TEMPERATE. */
+  getTilesetMeta(theatre?: string): TilesetMeta | null {
+    if (theatre) {
+      return this.tilesets.get(theatre)?.meta ?? null;
+    }
     return this.tilesetMeta;
   }
 
-  /** Check if tileset is available */
-  hasTileset(): boolean {
+  /** Check if tileset is available for a given theatre. Defaults to TEMPERATE. */
+  hasTileset(theatre?: string): boolean {
+    if (theatre) {
+      return this.tilesets.has(theatre);
+    }
     return this.tilesetImage !== null && this.tilesetMeta !== null;
   }
 }

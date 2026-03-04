@@ -35,8 +35,8 @@ export class GameMap {
   /** Fog of war: 0=shroud, 1=fog (explored), 2=visible */
   visibility: Uint8Array;
 
-  /** Terrain template data from MapPack (set by scenario loader) */
-  templateType: Uint8Array;
+  /** Terrain template data from MapPack (set by scenario loader) — uint16 per cell */
+  templateType: Uint16Array;
   templateIcon: Uint8Array;
 
   /** Overlay types from OverlayPack (0xFF = no overlay) */
@@ -44,6 +44,9 @@ export class GameMap {
 
   /** Wall type at each cell ('' = no wall, 'SBAG'/'FENC'/'BARB'/'BRIK' = wall type) */
   wallType: string[];
+
+  /** Tree type at each cell ('' = none, 't01'-'t17'/'tc01'-'tc05' = tree sprite, '_clump' = covered by nearby clump origin) */
+  treeType: string[];
 
   /** Terrain decals: scorch marks and craters from explosions (capped at 200) */
   decals: Array<{ cx: number; cy: number; size: number; alpha: number }> = [];
@@ -74,10 +77,11 @@ export class GameMap {
     this.cells = new Array(MAP_CELLS * MAP_CELLS).fill(Terrain.CLEAR);
     this.occupancy = new Int32Array(MAP_CELLS * MAP_CELLS);
     this.visibility = new Uint8Array(MAP_CELLS * MAP_CELLS);
-    this.templateType = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    this.templateType = new Uint16Array(MAP_CELLS * MAP_CELLS);
     this.templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.overlay = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
     this.wallType = new Array(MAP_CELLS * MAP_CELLS).fill('');
+    this.treeType = new Array(MAP_CELLS * MAP_CELLS).fill('');
     this.boundsX = 0;
     this.boundsY = 0;
     this.boundsW = MAP_CELLS;
@@ -124,6 +128,26 @@ export class GameMap {
   clearWallType(cx: number, cy: number): void {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
       this.wallType[cy * MAP_CELLS + cx] = '';
+    }
+  }
+
+  /** Get tree type at a cell ('' if no tree type stored) */
+  getTreeType(cx: number, cy: number): string {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return '';
+    return this.treeType[cy * MAP_CELLS + cx];
+  }
+
+  /** Set tree type at a cell */
+  setTreeType(cx: number, cy: number, type: string): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      this.treeType[cy * MAP_CELLS + cx] = type;
+    }
+  }
+
+  /** Clear tree type at a cell */
+  clearTreeType(cx: number, cy: number): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      this.treeType[cy * MAP_CELLS + cx] = '';
     }
   }
 
