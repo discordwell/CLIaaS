@@ -1,5 +1,16 @@
 # Session Summaries
 
+## 2026-03-04T03:45Z — Session 54: DRY Connector Refactoring (Remaining 7)
+- Completed the DRY refactoring of all 10 platform connectors in `cli/connectors/`
+- Prior commits (e655f53, 3b961db) had already handled base utilities + freshdesk/groove/helpcrunch
+- This session refactored the remaining 7: HelpScout, HubSpot, Intercom, Kayako, Kayako Classic, Zendesk, Zoho Desk
+- **Base enhancements**: `normalize.ts` (new) with initCounts, fuzzyStatusMatch, fuzzyPriorityMatch, flushCollectedOrgs, epochToISO; `client.ts` gained responseMiddleware + errorHandler hooks; `types.ts` gained ExportCounts, StatusMap, PriorityMap types
+- **Kayako major refactor**: Eliminated 60-line custom kayakoFetch, migrated to createClient with responseMiddleware (session ID capture) and errorHandler (MFA 403). Removed createKayakoFetchFn adapter. kayakoFetch kept as deprecated backward-compat wrapper.
+- Removed 5 duplicate mapStatus/mapPriority functions, 2 local epochToISO, 3 manual org-writing loops, 10 inline counts objects
+- Net result: -73 lines across 7 files, all 124 tests pass (10 live skipped)
+- Commit: efe8219 on branch refactor/dry-connectors, pushed to origin
+- Files: cli/connectors/{helpscout,hubspot,intercom,kayako,kayako-classic,zendesk,zoho-desk}.ts, cli/connectors/base/{normalize.ts,types.ts,client.ts,index.ts}
+
 ## 2026-03-04T06:50Z — Session 53: Animated Hero Demo for Landing Page
 - Replaced static `<pre>` terminal demo on landing page with animated `<video autoplay muted loop>` hero
 - Created `/demo-recording` page with typewriter animation through 5-turn scenario (install → setup → sync → triage → investigation)
