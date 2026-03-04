@@ -1,5 +1,35 @@
 # Session Summaries
 
+## 2026-03-04T17:20Z — Session 59: Campaign Control Harness — 5 Critical Gap Fixes
+- **Gap #2 (EINSTEIN)**: Added `I_EINSTEIN` to UnitType enum, EINSTEIN entry in UNIT_STATS (image='einstein', civilian VIP type)
+- **Gap #3 (Civilian Evacuation)**: Added `civiliansEvacuated` counter to Game class, increments when C1-C10 or EINSTEIN leave map edge, wired into `buildTriggerState` for TEVENT_EVAC_CIVILIAN — SCG01EA now winnable
+- **Gap #1 (AI House Credits)**: parseScenarioINI reads `Credits=` for all non-player houses, stored in `houseCredits` map, applied in `start()` alongside PROC-based credits (×100 multiplier). AI houses now start with proper economy.
+- **Gap #4 (BEGIN_PRODUCTION)**: Implemented TACTION_BEGIN_PRODUCTION — passes trigger house index through result, index.ts creates AIHouseState for the house if not already present, enabling AI strategic planner loop
+- **Gap #5 (Edge= Spawning)**: Parsed `Edge=` per house from INI, stored in houseEdges. Reinforcement spawning with `origin=-1` now computes random position along the house's edge (North/South/East/West) within map bounds
+- **New exports**: `houseIdToHouse()` from scenario.ts, `CIVILIAN_UNIT_TYPES` from types.ts
+- **10 new tests** in campaign-system.test.ts: EINSTEIN stats, civilian detection, AI credits parsing, Edge field parsing, BEGIN_PRODUCTION trigger action, houseIdToHouse mapping
+- All 35 campaign tests pass, 0 TypeScript errors in modified files
+- Files: types.ts, scenario.ts, index.ts, campaign-system.test.ts
+
+## 2026-03-04T06:15Z — Session 58: C++ Combat Parity for Ant Missions
+- **Game-breaking fix**: ANT1 Mandible warhead HollowPoint→Super (0.05x→1.0x vs armor = 20x damage increase)
+- **modifyDamage()** function added to types.ts — mirrors C++ Modify_Damage (combat.cpp:72-129) exactly
+  - SpreadFactor-based inverse distance falloff, MinDamage=1, MaxDamage=1000, houseBias
+- **ANT1 stats fixed**: strength 150→125, armor light→heavy, speed 5→8, rot 5→8, sight 2→3
+- **applySplashDamage**: universal 1.5-cell radius + inverse falloff via modifyDamage (was linear)
+- **damageSpeedFactor**: removed fabricated ConditionRed 0.5x tier (C++ has one tier only)
+- **E2 Grenadier**: production faction both→soviet
+- **42-test parity suite** (ant-combat-parity.test.ts) — all passing
+- **Updated combat-parity.test.ts**: fixed AP spreadFactor (1→3), Nuke→Fire spreadFactor test, pre-existing assertion errors
+- **11 items marked [VERIFIED]** in MISSING_FEATURES.md
+- **Wet test SCA01EA**: Deployed to cliaas.com, Konami code works (WASD), mission loads, combat confirmed working:
+  - ANT3 TeslaZap deals 54 dmg/hit to JEEP (Super warhead, was ~3 with HollowPoint)
+  - E1 M1Carbine deals 9 dmg/hit to ants (SA vs heavy at distance)
+  - ANT2 FireballLauncher splash: 17/34/113 varying by distance — inverse formula confirmed
+  - Fire warhead friendly-fire splash working (ants take self-splash)
+  - 3 ANT3s can kill a 150hp JEEP — ants are now appropriately dangerous
+- Committed (01ff5b0), pushed, deployed
+
 ## 2026-03-04T05:45Z — Session 57: Game Map Visual Fixes (5 Fixes)
 - Fixed 5 visual issues in Easter Egg Ant Mission game map after post-deploy screenshot review
 - **Fix 1**: Generous initial fog reveal (radius 15) around player units — eliminates massive black void at mission start

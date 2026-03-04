@@ -16,6 +16,7 @@ import {
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
   IRON_CURTAIN_DURATION, NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
   NUKE_MIN_FALLOFF, CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
+  CIVILIAN_UNIT_TYPES,
 } from './types';
 import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
@@ -29,7 +30,7 @@ import {
   loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
-  checkTriggerEvent, executeTriggerAction, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
+  checkTriggerEvent, executeTriggerAction, houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
   saveCarryover, TIME_UNIT_TICKS,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
@@ -185,6 +186,8 @@ export class Game {
   private lastSiloWarningTick = -450;
   /** AI house credit pools for production (Gap #1) */
   houseCredits = new Map<House, number>();
+  /** Per-house reinforcement entry edge from scenario INI (Gap #5) */
+  private houseEdges = new Map<House, string>();
   /** Strategic AI state per non-player house (skip ant missions) */
   private aiStates = new Map<House, AIHouseState>();
   /** Production queue: active build + queued repeats per category (max 5 total) */
@@ -274,6 +277,8 @@ export class Game {
   private evaMessages: { text: string; tick: number }[] = [];
   /** Count of units that have left the map (for TEVENT_LEAVES_MAP) */
   private unitsLeftMap = 0;
+  /** Count of civilian units that have been evacuated (for TEVENT_EVAC_CIVILIAN) */
+  private civiliansEvacuated = 0;
   /** Cached bridge cell count (recalculated periodically) */
   private bridgeCellCount = 0;
 
@@ -426,6 +431,7 @@ export class Game {
     this.builtStructureTypes.clear();
     this.evaMessages = [];
     this.unitsLeftMap = 0;
+    this.civiliansEvacuated = 0;
     this.gameSpeed = 1;
     this.turboMultiplier = 1;
     this.structuresBuilt = 0;
@@ -441,6 +447,12 @@ export class Game {
         this.houseCredits.set(s.house, (this.houseCredits.get(s.house) ?? 0) + 200);
       }
     }
+    // Add INI-defined Credits= for AI houses (e.g. [USSR] Credits=25 → 2500)
+    for (const [house, credits] of scenario.houseCredits) {
+      this.houseCredits.set(house, (this.houseCredits.get(house) ?? 0) + credits);
+    }
+    // Store house edges for reinforcement spawning
+    this.houseEdges = scenario.houseEdges;
 
     // Initialize strategic AI states for non-ant missions
     this.aiStates.clear();
@@ -753,6 +765,9 @@ export class Game {
             entity.alive = false;
             entity.mission = Mission.DIE;
             this.unitsLeftMap++;
+            if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
+              this.civiliansEvacuated++;
+            }
           }
         }
       }
@@ -5160,7 +5175,7 @@ export class Game {
       buildingsDestroyedByHouse: new Map(),
       nBuildingsDestroyed: 0,
       playerFactoriesExist: shared.playerFactories > 0,
-      civiliansEvacuated: 0,
+      civiliansEvacuated: this.civiliansEvacuated,
       builtUnitTypes: new Set(),
       builtInfantryTypes: new Set(),
       builtAircraftTypes: new Set(),
@@ -5245,7 +5260,8 @@ export class Game {
       // Execute actions
       const executeAction = (action: typeof trigger.action1) => {
         const result = executeTriggerAction(
-          action, this.teamTypes, this.waypoints, this.globals, this.triggers
+          action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
+          this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH }
         );
         // Handle side effects
         if (result.win && this.state === 'playing') {
@@ -5312,6 +5328,13 @@ export class Game {
         }
         // Autocreate: enable AI auto-spawning (queen spawning + base rebuild)
         if (result.autocreate) this.autocreateEnabled = true;
+        // Begin production: activate AI for the specified house
+        if (result.beginProduction !== undefined) {
+          const bpHouse = houseIdToHouse(result.beginProduction);
+          if (!this.aiStates.has(bpHouse) && !this.isAllied(bpHouse, this.playerHouse)) {
+            this.aiStates.set(bpHouse, this.createAIHouseState(bpHouse));
+          }
+        }
         // Airstrike: explosion + damage at trigger waypoint
         if (result.airstrike) {
           const wp = this.waypoints.get(0);

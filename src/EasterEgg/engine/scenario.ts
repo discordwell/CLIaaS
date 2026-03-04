@@ -505,6 +505,10 @@ interface ScenarioData {
   playerHouse: string; // house name from [Basic] Player= (e.g. 'Spain')
   /** Per-house Allies= fields from scenario INI (house name → list of allied house names) */
   houseAllies: Map<string, string[]>;
+  /** Per-house Credits= from scenario INI (house name → credits value before ×100) */
+  houseCredits: Map<string, number>;
+  /** Per-house Edge= from scenario INI (house name → edge direction string) */
+  houseEdges: Map<string, string>;
 }
 
 /** Parse an INI-format scenario file */
@@ -793,6 +797,20 @@ export function parseScenarioINI(text: string): ScenarioData {
     }
   }
 
+  // Parse per-house Credits= and Edge= fields
+  const houseCreditsMap = new Map<string, number>();
+  const houseEdges = new Map<string, string>();
+  for (const houseName of houseNames) {
+    const hCredits = parseInt(get(houseName, 'Credits', ''));
+    if (!isNaN(hCredits) && hCredits > 0 && houseName !== playerHouse) {
+      houseCreditsMap.set(houseName, hCredits);
+    }
+    const edge = get(houseName, 'Edge', '');
+    if (edge) {
+      houseEdges.set(houseName, edge);
+    }
+  }
+
   return {
     name: get('Basic', 'Name', 'Unknown Mission'),
     briefing,
@@ -817,6 +835,8 @@ export function parseScenarioINI(text: string): ScenarioData {
     rawSections: sections,
     playerHouse,
     houseAllies,
+    houseCredits: houseCreditsMap,
+    houseEdges,
   };
 }
 
@@ -847,7 +867,7 @@ function toUnitType(name: string): UnitType | null {
 }
 
 /** Map house ID number to House enum (from RA house numbering) */
-function houseIdToHouse(id: number): House {
+export function houseIdToHouse(id: number): House {
   // RA house IDs: 0=Spain, 1=Greece, 2=USSR, 3=England, 4=Ukraine, 5=Germany,
   // 6=France, 7=Turkey, 8=GoodGuy, 9=BadGuy, 10=Neutral, 11=Special
   switch (id) {
@@ -983,6 +1003,10 @@ export interface ScenarioResult {
   playerHouse: House;
   /** Per-house alliance data from scenario INI (used for campaign missions) */
   houseAllies: Map<House, House[]>;
+  /** Per-house initial credits from scenario INI (×100 applied) */
+  houseCredits: Map<House, number>;
+  /** Per-house reinforcement edge direction from scenario INI */
+  houseEdges: Map<House, string>;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -1326,6 +1350,12 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     playerHouse: toHouse(data.playerHouse ?? 'Spain'),
     houseAllies: new Map(
       Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.map(toHouse)])
+    ),
+    houseCredits: new Map(
+      Array.from(data.houseCredits.entries()).map(([k, v]) => [toHouse(k), v * 100])
+    ),
+    houseEdges: new Map(
+      Array.from(data.houseEdges.entries()).map(([k, v]) => [toHouse(k), v])
     ),
   };
 }
@@ -1798,6 +1828,7 @@ export interface TriggerActionResult {
   revealZone?: number;            // reveal all of specified zone (REVEAL_ZONE)
   playMusic?: number;             // play music track (PLAY_MUSIC)
   preferredTarget?: number;       // set preferred target type for AI (PREFERRED_TARGET)
+  beginProduction?: number;       // house index that should start AI production (BEGIN_PRODUCTION)
 }
 
 /** Execute a trigger action — returns result with entities and side effects */
@@ -1807,6 +1838,9 @@ export function executeTriggerAction(
   waypoints: Map<number, CellPos>,
   globals: Set<number>,
   triggers: ScenarioTrigger[],
+  triggerHouse?: number,
+  houseEdges?: Map<House, string>,
+  mapBounds?: { x: number; y: number; w: number; h: number },
 ): TriggerActionResult {
   const result: TriggerActionResult = { spawned: [] };
 
@@ -1819,8 +1853,23 @@ export function executeTriggerAction(
       const team = teamTypes[action.team];
       if (!team) break;
 
-      // Find spawn waypoint from team origin
-      const wp = waypoints.get(team.origin);
+      // Find spawn waypoint from team origin, or compute from house Edge if origin=-1
+      let wp = waypoints.get(team.origin);
+      if (!wp && team.origin === -1 && houseEdges && mapBounds) {
+        const teamHouse = houseIdToHouse(team.house);
+        const edge = houseEdges.get(teamHouse)?.toLowerCase();
+        if (edge) {
+          const bx = mapBounds.x, by = mapBounds.y, bw = mapBounds.w, bh = mapBounds.h;
+          const randOffset = Math.floor(Math.random() * Math.max(bw, bh));
+          switch (edge) {
+            case 'north': wp = { cx: bx + (randOffset % bw), cy: by }; break;
+            case 'south': wp = { cx: bx + (randOffset % bw), cy: by + bh - 1 }; break;
+            case 'east':  wp = { cx: bx + bw - 1, cy: by + (randOffset % bh) }; break;
+            case 'west':  wp = { cx: bx, cy: by + (randOffset % bh) }; break;
+            default: console.warn(`Unknown house edge "${edge}" for ${teamHouse}`); break;
+          }
+        }
+      }
       if (!wp) break;
       const world = cellToWorld(wp.cx, wp.cy);
 
@@ -1951,7 +2000,10 @@ export function executeTriggerAction(
       break;
 
     case TACTION_BEGIN_PRODUCTION:
-      // AI production start — not needed for ant missions
+      // AI production start — tells the trigger's house to begin building
+      if (triggerHouse !== undefined && triggerHouse >= 0) {
+        result.beginProduction = triggerHouse;
+      }
       break;
 
     case TACTION_AUTOCREATE:

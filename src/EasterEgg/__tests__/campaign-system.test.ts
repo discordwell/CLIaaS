@@ -10,9 +10,10 @@ import {
 import { Entity, setPlayerHouses, getPlayerHouses } from '../engine/entity';
 import {
   CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress,
-  parseMissionINI,
-  type CampaignId,
+  parseMissionINI, parseScenarioINI, executeTriggerAction, houseIdToHouse,
+  type CampaignId, type TriggerAction, type TeamType,
 } from '../engine/scenario';
+import { UnitType, UNIT_STATS, CIVILIAN_UNIT_TYPES } from '../engine/types';
 
 // Mock localStorage for Node test environment
 const store: Record<string, string> = {};
@@ -249,6 +250,7 @@ describe('parseMissionINI', () => {
     expect(parseMissionINI('').size).toBe(0);
   });
 
+
   it('parses all 28 base campaign missions from real format', () => {
     // Verify we can parse the known section headers
     const text = `[SCG01EA.INI]
@@ -268,5 +270,230 @@ describe('parseMissionINI', () => {
     expect(result.has('SCG14EA')).toBe(true);
     expect(result.has('SCU01EA')).toBe(true);
     expect(result.has('SCU14EA')).toBe(true);
+  });
+});
+
+// ============================================================
+// Campaign Control Harness — Gap Fixes
+// ============================================================
+
+describe('EINSTEIN unit type (Gap #2)', () => {
+  it('EINSTEIN exists in UNIT_STATS', () => {
+    const stats = UNIT_STATS['EINSTEIN'];
+    expect(stats).toBeDefined();
+    expect(stats.type).toBe(UnitType.I_EINSTEIN);
+    expect(stats.name).toBe('Prof. Einstein');
+    expect(stats.image).toBe('einstein');
+    expect(stats.isInfantry).toBe(true);
+    expect(stats.primaryWeapon).toBeNull();
+    expect(stats.crushable).toBe(true);
+  });
+
+  it('UnitType enum has I_EINSTEIN', () => {
+    expect(UnitType.I_EINSTEIN).toBe('EINSTEIN');
+  });
+});
+
+describe('Civilian type detection (Gap #3)', () => {
+  it('CIVILIAN_UNIT_TYPES includes C1-C10 and EINSTEIN', () => {
+    for (let i = 1; i <= 10; i++) {
+      expect(CIVILIAN_UNIT_TYPES.has(`C${i}`), `C${i} should be civilian`).toBe(true);
+    }
+    expect(CIVILIAN_UNIT_TYPES.has('EINSTEIN')).toBe(true);
+  });
+
+  it('non-civilians are not in CIVILIAN_UNIT_TYPES', () => {
+    expect(CIVILIAN_UNIT_TYPES.has('E1')).toBe(false);
+    expect(CIVILIAN_UNIT_TYPES.has('1TNK')).toBe(false);
+    expect(CIVILIAN_UNIT_TYPES.has('ANT1')).toBe(false);
+  });
+});
+
+describe('AI house credits parsing (Gap #1)', () => {
+  it('parses Credits= for non-player houses', () => {
+    const ini = `[Basic]
+Player=Spain
+Name=Test
+
+[Map]
+X=40
+Y=40
+Width=50
+Height=50
+
+[Spain]
+Credits=10
+
+[USSR]
+Credits=25
+
+[Waypoints]
+[MapPack]
+[OverlayPack]
+`;
+    const data = parseScenarioINI(ini);
+    // Player house (Spain) credits should NOT be in houseCredits
+    expect(data.houseCredits.has('Spain')).toBe(false);
+    // AI house credits parsed correctly
+    expect(data.houseCredits.get('USSR')).toBe(25);
+  });
+
+  it('player credits are separate from houseCredits', () => {
+    const ini = `[Basic]
+Player=Greece
+Name=Test
+
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+
+[Greece]
+Credits=50
+
+[USSR]
+Credits=30
+
+[Waypoints]
+[MapPack]
+[OverlayPack]
+`;
+    const data = parseScenarioINI(ini);
+    expect(data.playerCredits).toBe(50);
+    expect(data.houseCredits.get('USSR')).toBe(30);
+    expect(data.houseCredits.has('Greece')).toBe(false);
+  });
+});
+
+describe('Edge field parsing (Gap #5)', () => {
+  it('parses Edge= for houses', () => {
+    const ini = `[Basic]
+Player=Greece
+Name=Test
+
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+
+[Greece]
+Edge=West
+
+[USSR]
+Edge=East
+
+[Waypoints]
+[MapPack]
+[OverlayPack]
+`;
+    const data = parseScenarioINI(ini);
+    expect(data.houseEdges.get('Greece')).toBe('West');
+    expect(data.houseEdges.get('USSR')).toBe('East');
+  });
+
+  it('returns empty map when no Edge= fields', () => {
+    const ini = `[Basic]
+Player=Spain
+Name=Test
+
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+
+[Waypoints]
+[MapPack]
+[OverlayPack]
+`;
+    const data = parseScenarioINI(ini);
+    expect(data.houseEdges.size).toBe(0);
+  });
+});
+
+describe('BEGIN_PRODUCTION trigger action (Gap #4)', () => {
+  it('executeTriggerAction returns beginProduction for TACTION_BEGIN_PRODUCTION', () => {
+    const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 0 };
+    const result = executeTriggerAction(
+      action, [], new Map(), new Set(), [], 2 /* USSR house index */
+    );
+    expect(result.beginProduction).toBe(2);
+  });
+
+  it('houseIdToHouse maps USSR index to House.USSR', () => {
+    expect(houseIdToHouse(2)).toBe('USSR');
+    expect(houseIdToHouse(0)).toBe('Spain');
+    expect(houseIdToHouse(3)).toBe('England');
+  });
+});
+
+// ============================================================
+// Edge-Based Reinforcement Spawning (Gap #5 behavior)
+// ============================================================
+describe('Edge-based reinforcement spawning', () => {
+  const makeTeam = (house: number, origin: number): TeamType => ({
+    name: 'TestTeam',
+    house,
+    flags: 0,
+    origin,
+    members: [{ type: 'E1', count: 1 }],
+    missions: [],
+  });
+
+  const mapBounds = { x: 40, y: 40, w: 50, h: 50 };
+
+  it('spawns units at east edge when origin=-1 and house has Edge=East', () => {
+    const team = makeTeam(2, -1); // USSR = house 2
+    const houseEdges = new Map<House, string>([[House.USSR, 'East']]);
+    const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 }; // TACTION_REINFORCEMENTS
+    const result = executeTriggerAction(
+      action, [team], new Map(), new Set(), [], 2, houseEdges, mapBounds
+    );
+    expect(result.spawned.length).toBeGreaterThan(0);
+    // East edge: cx should be bx + bw - 1 = 89, cellToWorld adds CELL_SIZE/2
+    for (const unit of result.spawned) {
+      // pos.x = cx * 24 + 12 + offsetX; cx=89 → base ~2148, allow spread
+      expect(unit.pos.x).toBeGreaterThanOrEqual(89 * 24);
+      expect(unit.pos.x).toBeLessThan(90 * 24 + 24);
+    }
+  });
+
+  it('spawns units at west edge when origin=-1 and house has Edge=West', () => {
+    const team = makeTeam(0, -1); // Spain = house 0
+    const houseEdges = new Map<House, string>([[House.Spain, 'West']]);
+    const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
+    const result = executeTriggerAction(
+      action, [team], new Map(), new Set(), [], 0, houseEdges, mapBounds
+    );
+    expect(result.spawned.length).toBeGreaterThan(0);
+    // West edge: cx should be bx = 40, cellToWorld adds CELL_SIZE/2
+    for (const unit of result.spawned) {
+      expect(unit.pos.x).toBeGreaterThanOrEqual(40 * 24 - 24);
+      expect(unit.pos.x).toBeLessThan(41 * 24 + 24);
+    }
+  });
+
+  it('does not spawn when origin=-1 and no houseEdges provided', () => {
+    const team = makeTeam(2, -1);
+    const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
+    const result = executeTriggerAction(
+      action, [team], new Map(), new Set(), [], 2
+    );
+    expect(result.spawned.length).toBe(0);
+  });
+
+  it('does not spawn when origin=-1 and edge is unrecognized', () => {
+    const team = makeTeam(2, -1);
+    const houseEdges = new Map<House, string>([[House.USSR, 'NorthEast']]);
+    const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = executeTriggerAction(
+      action, [team], new Map(), new Set(), [], 2, houseEdges, mapBounds
+    );
+    expect(result.spawned.length).toBe(0);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown house edge'));
+    warnSpy.mockRestore();
   });
 });
