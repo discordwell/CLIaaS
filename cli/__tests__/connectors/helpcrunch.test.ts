@@ -101,6 +101,62 @@ describe('helpcrunchVerifyConnection', () => {
   });
 });
 
+describe('exportHelpcrunch message type mapping', () => {
+  it('maps private messages to note type and non-private to reply', async () => {
+    vi.resetModules();
+
+    const chat = {
+      id: 1, status: 2, createdAt: '1700000000', closedAt: null,
+      lastMessageAt: '1700001000', lastMessageText: 'Test chat',
+      customer: { id: 10, name: 'Customer', email: 'c@test.com' },
+      assignee: null, agents: [], department: null,
+    };
+
+    const privateMsg = {
+      id: 101, text: 'Internal note', type: 'private', from: 'agent' as const,
+      createdAt: '1700000100', agent: { id: 5, name: 'Agent', email: 'a@test.com' }, read: true,
+    };
+
+    const publicMsg = {
+      id: 102, text: 'Customer reply', type: 'message', from: 'customer' as const,
+      createdAt: '1700000200', read: true,
+    };
+
+    mockFetch
+      // Chats page 1 (offset=0)
+      .mockResolvedValueOnce(jsonResponse({ data: [chat] }))
+      // Messages for chat 1 page 1 (offset=0)
+      .mockResolvedValueOnce(jsonResponse({ data: [privateMsg, publicMsg] }))
+      // Customers page 1 (offset=0)
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
+      // Agents
+      .mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    const { exportHelpcrunch } = await import('../../connectors/helpcrunch.js');
+    const fs = await import('fs');
+    const tmpDir = `/tmp/helpcrunch-msgtype-test-${Date.now()}`;
+
+    await exportHelpcrunch({ apiKey: 'test-key' }, tmpDir);
+
+    const messagesContent = fs.readFileSync(`${tmpDir}/messages.jsonl`, 'utf-8').trim().split('\n');
+    expect(messagesContent).toHaveLength(2);
+
+    const msg1 = JSON.parse(messagesContent[0]);
+    const msg2 = JSON.parse(messagesContent[1]);
+
+    // Private message should be mapped to 'note'
+    expect(msg1.id).toBe('hc-msg-101');
+    expect(msg1.type).toBe('note');
+
+    // Non-private message should be mapped to 'reply'
+    expect(msg2.id).toBe('hc-msg-102');
+    expect(msg2.type).toBe('reply');
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+});
+
 describe('write operations use createClient', () => {
   it('helpcrunchPostMessage sends POST to correct endpoint', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({}));

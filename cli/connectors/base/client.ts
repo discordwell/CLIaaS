@@ -23,6 +23,8 @@ export function createClient(config: ClientConfig): ConnectorClient {
     preRequestDelayMs,
     extraHeaders = {},
     rateLimitStatuses = [429],
+    responseMiddleware,
+    errorHandler,
   } = config;
 
   async function request<T>(path: string, options?: RequestOptions): Promise<T> {
@@ -59,13 +61,21 @@ export function createClient(config: ClientConfig): ConnectorClient {
 
       if (!res.ok) {
         const errorBody = await res.text().catch(() => '');
+        if (errorHandler) {
+          const customError = errorHandler(res, errorBody);
+          if (customError) throw customError;
+        }
         throw new Error(
           `${sourceName} API error: ${res.status} ${res.statusText} for ${url}${errorBody ? ` — ${errorBody.slice(0, 200)}` : ''}`,
         );
       }
 
       if (res.status === 204) return {} as T;
-      return res.json() as Promise<T>;
+      const json = await res.json() as T;
+      if (responseMiddleware) {
+        responseMiddleware(json, res);
+      }
+      return json;
     }
   }
 

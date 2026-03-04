@@ -3,6 +3,7 @@ import type {
 } from '../schema/types';
 import {
   createClient, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts,
 } from './base/index';
 
 export interface FreshdeskAuth {
@@ -101,7 +102,7 @@ function mapPriority(priority: number): TicketPriority {
 export async function exportFreshdesk(auth: FreshdeskAuth, outDir: string): Promise<ExportManifest> {
   const client = createFreshdeskClient(auth);
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Export tickets (page-based, max 100 per page)
   const ticketSpinner = exportSpinner('Exporting tickets...');
@@ -168,19 +169,27 @@ export async function exportFreshdesk(auth: FreshdeskAuth, outDir: string): Prom
   });
   contactSpinner.succeed(`${counts.customers} contacts exported`);
 
-  // Export agents as customers too
+  // Export agents as customers too (paginated — Freshdesk returns max 100 per page)
   const agentSpinner = exportSpinner('Exporting agents...');
+  let agentCount = 0;
   try {
-    const agents = await client.request<FDAgent[]>('/api/v2/agents?per_page=100');
-    for (const a of agents) {
-      const customer: Customer = {
-        id: `fd-agent-${a.id}`, externalId: `agent-${a.id}`, source: 'freshdesk',
-        name: a.contact.name, email: a.contact.email, phone: a.contact.phone ?? undefined,
-      };
-      appendJsonl(files.customers, customer);
-      counts.customers++;
-    }
-    agentSpinner.succeed(`${agents.length} agents exported`);
+    await paginatePages<FDAgent>({
+      fetch: client.request.bind(client),
+      path: '/api/v2/agents',
+      onPage: (agents) => {
+        for (const a of agents) {
+          const customer: Customer = {
+            id: `fd-agent-${a.id}`, externalId: `agent-${a.id}`, source: 'freshdesk',
+            name: a.contact.name, email: a.contact.email, phone: a.contact.phone ?? undefined,
+          };
+          appendJsonl(files.customers, customer);
+          counts.customers++;
+          agentCount++;
+        }
+        agentSpinner.text = `Exporting agents... ${agentCount} exported`;
+      },
+    });
+    agentSpinner.succeed(`${agentCount} agents exported`);
   } catch (err) {
     agentSpinner.warn(`Agents: ${err instanceof Error ? err.message : 'not available'}`);
   }

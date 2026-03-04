@@ -1,8 +1,9 @@
 import type {
-  Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
+  Ticket, Message, Customer, KBArticle, ExportManifest, TicketStatus, TicketPriority,
 } from '../schema/types';
 import {
   createClient, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts, flushCollectedOrgs,
 } from './base/index';
 
 export interface GrooveAuth {
@@ -108,6 +109,14 @@ function mapState(state: string): TicketStatus {
   return map[state] ?? 'open';
 }
 
+function mapPriority(priority: string | null): TicketPriority {
+  if (!priority) return 'normal';
+  const map: Record<string, TicketPriority> = {
+    low: 'low', normal: 'normal', high: 'high', urgent: 'urgent',
+  };
+  return map[priority.toLowerCase()] ?? 'normal';
+}
+
 function extractIdFromHref(href: string): string {
   // Extract the last segment from href like https://api.groovehq.com/v1/messages/12345
   const parts = href.split('/');
@@ -119,7 +128,7 @@ function extractIdFromHref(href: string): string {
 export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<ExportManifest> {
   const client = createGrooveClient(auth);
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Export tickets (page-based, max 50 per page)
   const ticketSpinner = exportSpinner('Exporting tickets...');
@@ -139,7 +148,7 @@ export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<Ex
           source: 'groove',
           subject: t.title ?? `Ticket #${t.number}`,
           status: mapState(t.state),
-          priority: 'normal', // Groove has priority field but it's often null
+          priority: mapPriority(t.priority),
           assignee: assigneeEmail,
           requester: customerEmail,
           tags: t.tags ?? [],
@@ -233,13 +242,7 @@ export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<Ex
 
   // Write organizations from company names collected during customer export
   const orgSpinner = exportSpinner('Collecting organizations...');
-  for (const name of Array.from(orgNames)) {
-    const org: Organization = {
-      id: `gv-org-${name}`, externalId: name, source: 'groove', name, domains: [],
-    };
-    appendJsonl(files.organizations, org);
-    counts.organizations++;
-  }
+  flushCollectedOrgs(orgNames, 'gv', 'groove', files.organizations, counts);
   orgSpinner.succeed(`${counts.organizations} organizations collected`);
 
   // Export KB articles

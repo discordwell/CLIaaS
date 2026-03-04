@@ -1,8 +1,9 @@
 import type {
-  Ticket, Message, Customer, Organization, ExportManifest, TicketStatus,
+  Ticket, Message, Customer, ExportManifest, TicketStatus,
 } from '../schema/types';
 import {
   createClient, paginateOffset, setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts, epochToISO, flushCollectedOrgs,
 } from './base/index';
 
 export interface HelpcrunchAuth {
@@ -87,19 +88,12 @@ function mapChatStatus(status: number): TicketStatus {
   return map[status] ?? 'open';
 }
 
-function epochToISO(epoch: string | null): string {
-  if (!epoch) return new Date().toISOString();
-  const num = parseInt(epoch, 10);
-  if (isNaN(num)) return new Date().toISOString();
-  return new Date(num * 1000).toISOString();
-}
-
 // ---- Export ----
 
 export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Promise<ExportManifest> {
   const client = createHelpcrunchClient(auth);
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Export chats (= tickets)
   const chatSpinner = exportSpinner('Exporting chats...');
@@ -140,7 +134,7 @@ export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Pr
                   ticketId: `hc-${chat.id}`,
                   author: m.from === 'agent' && m.agent ? String(m.agent.id) : String(chat.customer?.id ?? 'customer'),
                   body: m.text ?? '',
-                  type: 'reply',
+                  type: m.type === 'private' ? 'note' : 'reply',
                   createdAt: epochToISO(m.createdAt),
                 };
                 appendJsonl(files.messages, message);
@@ -207,17 +201,7 @@ export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Pr
 
   // Write organizations from company names collected during customer export
   const orgSpinner = exportSpinner('Collecting organizations...');
-  for (const name of orgNames) {
-    const org: Organization = {
-      id: `hc-org-${name}`,
-      externalId: name,
-      source: 'helpcrunch',
-      name,
-      domains: [],
-    };
-    appendJsonl(files.organizations, org);
-    counts.organizations++;
-  }
+  flushCollectedOrgs(orgNames, 'hc', 'helpcrunch', files.organizations, counts);
   orgSpinner.succeed(`${counts.organizations} organizations collected`);
 
   // No KB or Rules API available
