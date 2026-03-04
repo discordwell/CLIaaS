@@ -239,6 +239,10 @@ export async function querySecureAuditFromDb(
     const { desc, sql, eq, gte, lte, and } = await import('drizzle-orm');
 
     const conditions: unknown[] = [];
+    // Workspace isolation: always filter by workspaceId when provided
+    if (filters.workspaceId) {
+      conditions.push(eq(schema.auditEvents.workspaceId, filters.workspaceId));
+    }
     if (filters.action) {
       conditions.push(eq(schema.auditEvents.action, filters.action));
     }
@@ -306,6 +310,10 @@ export function querySecureAudit(
   ensureDefaults();
   let results = [...getStore()];
 
+  // Workspace isolation: filter by workspaceId when provided
+  if (filters.workspaceId) {
+    results = results.filter((e) => e.workspaceId === filters.workspaceId);
+  }
   if (filters.action) {
     results = results.filter((e) => e.action === filters.action);
   }

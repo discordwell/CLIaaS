@@ -107,7 +107,8 @@ export class AssetManager {
 
   private async doLoadAll(): Promise<void> {
     // Load manifest (required — must complete before we know what sprites to fetch)
-    const manifestRes = await fetch(`${BASE_URL}/manifest.json`);
+    // Cache-bust to prevent stale manifests after deploys
+    const manifestRes = await fetch(`${BASE_URL}/manifest.json?v=${Date.now()}`);
     if (!manifestRes.ok) throw new Error(`Failed to load manifest: ${manifestRes.status}`);
     this.manifest = await manifestRes.json();
     if (!this.manifest) throw new Error('Empty manifest');

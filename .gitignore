@@ -45,6 +45,10 @@ next-env.d.ts
 # generated artifacts
 /exports
 /submission
+*.zip
+
+# claude code
+.claude/
 
 # Easter Egg - Red Alert C++ source (cloned at build time)
 /src/EasterEgg/CnC_and_Red_Alert
