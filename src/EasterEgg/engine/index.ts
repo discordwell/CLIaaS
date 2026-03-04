@@ -37,7 +37,7 @@ export { CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, che
 export type { MissionInfo, CampaignId, CampaignDef, CampaignMission } from './scenario';
 export { AudioManager } from './audio';
 export { preloadAssets } from './assets';
-export { getMissionMovies, hasFMV, getMovieUrl } from './movies';
+export { getMissionMovies, hasFMV, getMovieUrl, CAMPAIGN_END_MOVIES } from './movies';
 export { MoviePlayer } from './moviePlayer';
 
 export type { SuperweaponState } from './types';

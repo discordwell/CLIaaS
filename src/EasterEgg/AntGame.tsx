@@ -7,7 +7,7 @@ import {
   CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, checkMissionExists,
   loadMissionBriefings, getMissionBriefing,
   type CampaignId, type CampaignDef, type CampaignMission,
-  getMissionMovies, hasFMV, MoviePlayer,
+  getMissionMovies, hasFMV, MoviePlayer, CAMPAIGN_END_MOVIES,
 } from './engine';
 import { TestRunner, type TestLogEntry } from './engine/testRunner';
 import { QATestRunner, type QALogEntry, type QAReport } from './engine/qaTestRunner';
@@ -20,7 +20,8 @@ interface AntGameProps {
 
 type Screen = 'main_menu' | 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing'
   | 'faction_select' | 'campaign_select'
-  | 'fmv_briefing' | 'fmv_action' | 'objectives_interstitial';
+  | 'fmv_intro' | 'fmv_briefing' | 'fmv_action' | 'objectives_interstitial'
+  | 'fmv_win' | 'fmv_lose' | 'fmv_campaign_end';
 
 export default function AntGame({ onExit }: AntGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -78,6 +79,63 @@ export default function AntGame({ onExit }: AntGameProps) {
     }, 400);
   }, []);
 
+  /** Check if current campaign mission is the final one */
+  const isFinalCampaignMission = useCallback(() =>
+    !!activeCampaign && campaignMissionIndex + 1 >= activeCampaign.missions.length,
+  [activeCampaign, campaignMissionIndex]);
+
+  /** Get faction of current campaign ('allied' or 'soviet') */
+  const getCampaignFaction = useCallback((): string | null => {
+    if (!activeCampaign?.missions[0]) return null;
+    return activeCampaign.missions[0].id.startsWith('SCG') ? 'allied' : 'soviet';
+  }, [activeCampaign]);
+
+  /** Play a post-mission FMV (win, lose, or campaign ending) */
+  const playPostMissionFMV = useCallback((movieName: string, screenState: Screen, _missionId: string) => {
+    if (!containerRef.current) return;
+
+    // Clean up previous player
+    if (moviePlayerRef.current) {
+      moviePlayerRef.current.destroy();
+      moviePlayerRef.current = null;
+    }
+
+    const player = new MoviePlayer(containerRef.current);
+    moviePlayerRef.current = player;
+
+    player.onComplete = () => {
+      moviePlayerRef.current?.destroy();
+      moviePlayerRef.current = null;
+      // After win FMV, check for campaign ending
+      if (screenState === 'fmv_win' && isFinalCampaignMission()) {
+        const faction = getCampaignFaction();
+        const endMovie = faction ? CAMPAIGN_END_MOVIES[faction] : undefined;
+        if (endMovie && containerRef.current) {
+          playPostMissionFMV(endMovie, 'fmv_campaign_end', _missionId);
+          return;
+        }
+      }
+      setScreen('playing'); // show win/lose overlay
+    };
+    player.onError = () => {
+      moviePlayerRef.current?.destroy();
+      moviePlayerRef.current = null;
+      // Same campaign-end check on error (skip broken video)
+      if (screenState === 'fmv_win' && isFinalCampaignMission()) {
+        const faction = getCampaignFaction();
+        const endMovie = faction ? CAMPAIGN_END_MOVIES[faction] : undefined;
+        if (endMovie && containerRef.current) {
+          playPostMissionFMV(endMovie, 'fmv_campaign_end', _missionId);
+          return;
+        }
+      }
+      setScreen('playing');
+    };
+
+    setScreen(screenState);
+    player.play(movieName);
+  }, [isFinalCampaignMission, getCampaignFaction]);
+
   const launchMission = useCallback(async (mission: MissionInfo) => {
     if (!canvasRef.current) return;
 
@@ -125,6 +183,29 @@ export default function AntGame({ onExit }: AntGameProps) {
           saveCampaignProgress(activeCampaign.id, campaignMissionIndex);
           setCampaignUnlocked(loadCampaignProgress(activeCampaign.id));
         }
+        // Post-mission win FMV
+        const movies = getMissionMovies(mission.id);
+        if (movies?.win && containerRef.current) {
+          playPostMissionFMV(movies.win, 'fmv_win', mission.id);
+          return;
+        }
+        // No win video — check campaign ending
+        if (isFinalCampaignMission()) {
+          const faction = getCampaignFaction();
+          const endMovie = faction ? CAMPAIGN_END_MOVIES[faction] : undefined;
+          if (endMovie && containerRef.current) {
+            playPostMissionFMV(endMovie, 'fmv_campaign_end', mission.id);
+            return;
+          }
+        }
+      }
+      if (state === 'lost') {
+        // Post-mission lose FMV
+        const movies = getMissionMovies(mission.id);
+        if (movies?.lose && containerRef.current) {
+          playPostMissionFMV(movies.lose, 'fmv_lose', mission.id);
+          return;
+        }
       }
     };
 
@@ -143,9 +224,33 @@ export default function AntGame({ onExit }: AntGameProps) {
       setError(`Failed to load mission: ${e instanceof Error ? e.message : String(e)}`);
       setScreen(activeCampaign ? 'campaign_select' : 'select');
     }
-  }, [difficulty, activeCampaign, campaignMissionIndex]);
+  }, [difficulty, activeCampaign, campaignMissionIndex, playPostMissionFMV, isFinalCampaignMission, getCampaignFaction]);
 
-  /** Start the animated briefing cutscene before launching the mission */
+  /** Helper: play an FMV and call onDone when complete (or fallback to procedural) */
+  const playFMV = useCallback((movieName: string, screenState: Screen, mission: MissionInfo, onDone: () => void) => {
+    if (!containerRef.current) { onDone(); return; }
+
+    // Clean up previous player
+    if (moviePlayerRef.current) {
+      moviePlayerRef.current.destroy();
+      moviePlayerRef.current = null;
+    }
+
+    const player = new MoviePlayer(containerRef.current);
+    moviePlayerRef.current = player;
+    player.onComplete = () => onDone();
+    player.onError = () => {
+      moviePlayerRef.current?.destroy();
+      moviePlayerRef.current = null;
+      onDone(); // skip on error
+    };
+    setScreen(screenState);
+    player.play(movieName);
+  }, []);
+
+  /** Start the animated briefing cutscene before launching the mission.
+   *  Flow: Intro → Brief → Objectives → Action → gameplay
+   *  Any missing step is skipped. */
   const startCutscene = useCallback((mission: MissionInfo) => {
     if (!canvasRef.current) return;
 
@@ -157,18 +262,16 @@ export default function AntGame({ onExit }: AntGameProps) {
 
     const movies = getMissionMovies(mission.id);
 
-    // FMV path: play Brief video for missions with FMV (not ant missions)
-    if (movies?.brief && containerRef.current && !mission.id.toUpperCase().startsWith('SCA')) {
-      transitionTo(() => {
-        setScreen('fmv_briefing');
-
+    /** After intro (or if no intro), try to play brief */
+    const afterIntro = () => {
+      if (movies?.brief && containerRef.current) {
         // Reuse preloaded player or create new one
         let player = moviePlayerRef.current;
         if (!player && containerRef.current) {
           player = new MoviePlayer(containerRef.current);
           moviePlayerRef.current = player;
         }
-        if (!player) return;
+        if (!player) { goToObjectivesOrProcedural(); return; }
 
         player.onComplete = () => {
           setScreen('objectives_interstitial');
@@ -177,36 +280,44 @@ export default function AntGame({ onExit }: AntGameProps) {
           // Fallback to procedural briefing
           moviePlayerRef.current?.destroy();
           moviePlayerRef.current = null;
-          setScreen('cutscene');
-          const renderer = new BriefingRenderer(canvasRef.current!);
-          briefingRef.current = renderer;
-          renderer.onComplete = () => {
-            briefingRef.current = null;
-            launchMission(mission);
-          };
-          renderer.start(mission.id, mission.briefing);
+          goToObjectivesOrProcedural();
         };
 
+        setScreen('fmv_briefing');
         player.play(movies.brief!);
-      });
-      return;
-    }
+      } else if (movies?.intro || movies?.action) {
+        // Has intro but no brief (LANDCOM missions, ant missions) — go to objectives
+        setScreen('objectives_interstitial');
+      } else {
+        // No FMV at all — procedural briefing
+        goToObjectivesOrProcedural();
+      }
+    };
 
-    // Procedural path: ant missions, LANDCOM, Counterstrike, etc.
-    transitionTo(() => {
+    /** Fallback to procedural briefing renderer */
+    const goToObjectivesOrProcedural = () => {
       setScreen('cutscene');
-
       const renderer = new BriefingRenderer(canvasRef.current!);
       briefingRef.current = renderer;
-
       renderer.onComplete = () => {
         briefingRef.current = null;
         launchMission(mission);
       };
-
       renderer.start(mission.id, mission.briefing);
-    });
-  }, [launchMission, transitionTo]);
+    };
+
+    // Start the chain: Intro → Brief → Objectives → Action → gameplay
+    if (movies?.intro && containerRef.current) {
+      transitionTo(() => {
+        playFMV(movies.intro!, 'fmv_intro', mission, afterIntro);
+      });
+    } else if (movies?.brief && containerRef.current) {
+      transitionTo(() => afterIntro());
+    } else {
+      // No FMV — procedural path
+      transitionTo(() => goToObjectivesOrProcedural());
+    }
+  }, [launchMission, transitionTo, playFMV]);
 
   /** Continue from objectives interstitial → play Action FMV or launch directly */
   const continueFromObjectives = useCallback(() => {
@@ -498,7 +609,12 @@ export default function AntGame({ onExit }: AntGameProps) {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'F10') {
         e.preventDefault();
-        if (screen === 'fmv_briefing' || screen === 'fmv_action') {
+        if (screen === 'fmv_intro' || screen === 'fmv_briefing' || screen === 'fmv_action') {
+          if (moviePlayerRef.current) {
+            moviePlayerRef.current.skip();
+          }
+        } else if (screen === 'fmv_win' || screen === 'fmv_lose' || screen === 'fmv_campaign_end') {
+          // Skip post-mission FMV → show win/lose overlay
           if (moviePlayerRef.current) {
             moviePlayerRef.current.skip();
           }
@@ -527,7 +643,9 @@ export default function AntGame({ onExit }: AntGameProps) {
         }
       }
       // FMV screens: Space/Enter to skip
-      if ((screen === 'fmv_briefing' || screen === 'fmv_action') && (e.key === ' ' || e.key === 'Enter')) {
+      if ((screen === 'fmv_intro' || screen === 'fmv_briefing' || screen === 'fmv_action'
+        || screen === 'fmv_win' || screen === 'fmv_lose' || screen === 'fmv_campaign_end')
+        && (e.key === ' ' || e.key === 'Enter')) {
         e.preventDefault();
         if (moviePlayerRef.current) {
           moviePlayerRef.current.skip();
@@ -1653,7 +1771,8 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── FMV Click Overlay (skip video on click) ── */}
-      {!testMode && !qaMode && (screen === 'fmv_briefing' || screen === 'fmv_action') && (
+      {!testMode && !qaMode && (screen === 'fmv_intro' || screen === 'fmv_briefing' || screen === 'fmv_action'
+        || screen === 'fmv_win' || screen === 'fmv_lose' || screen === 'fmv_campaign_end') && (
         <div
           onClick={() => { if (moviePlayerRef.current) moviePlayerRef.current.skip(); }}
           style={{
