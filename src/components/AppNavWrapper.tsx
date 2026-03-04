@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import AppNav from "./AppNav";
 import PublicNav from "./PublicNav";
@@ -11,19 +12,22 @@ const NO_NAV_EXACT = ["/"];
 /** Public pages — show PublicNav when logged out, AppNav when logged in. */
 const PUBLIC_NAV_PREFIXES = ["/docs"];
 
-function hasSession(): boolean {
-  if (typeof document === "undefined") return false;
-  return document.cookie.split(";").some((c) => c.trim().startsWith("cliaas-logged-in="));
-}
-
 export default function AppNavWrapper() {
   const pathname = usePathname();
+  // Defer cookie check to useEffect to avoid hydration mismatch (#418)
+  const [loggedIn, setLoggedIn] = useState(false);
+
+  useEffect(() => {
+    setLoggedIn(
+      document.cookie.split(";").some((c) => c.trim().startsWith("cliaas-logged-in="))
+    );
+  }, [pathname]);
 
   if (NO_NAV_EXACT.includes(pathname)) return null;
   if (NO_NAV_PREFIXES.some((p) => pathname.startsWith(p))) return null;
 
   if (PUBLIC_NAV_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
-    return hasSession() ? <AppNav /> : <PublicNav />;
+    return loggedIn ? <AppNav /> : <PublicNav />;
   }
 
   return <AppNav />;

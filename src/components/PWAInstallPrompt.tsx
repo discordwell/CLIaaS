@@ -10,15 +10,14 @@ interface BeforeInstallPromptEvent extends Event {
 export default function PWAInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
-  const [dismissed, setDismissed] = useState(() => {
-    if (typeof window !== "undefined") {
-      return !!localStorage.getItem("cliaas-pwa-dismissed");
-    }
-    return false;
-  });
+  const [dismissed, setDismissed] = useState(false);
 
+  // Read localStorage in useEffect to avoid hydration mismatch (#418)
   useEffect(() => {
-    if (dismissed) return;
+    if (localStorage.getItem("cliaas-pwa-dismissed")) {
+      setDismissed(true);
+      return;
+    }
 
     function handlePrompt(e: Event) {
       e.preventDefault();

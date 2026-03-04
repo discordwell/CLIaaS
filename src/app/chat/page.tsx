@@ -67,6 +67,12 @@ export default function AgentChatDashboard() {
   const [sessionStatus, setSessionStatus] = useState<string>("waiting");
   const [customerTyping, setCustomerTyping] = useState(false);
   const [showClosed, setShowClosed] = useState(false);
+  const [origin, setOrigin] = useState("https://cliaas.com");
+
+  // Read window.location.origin in useEffect to avoid hydration mismatch (#418)
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -543,7 +549,7 @@ export default function AgentChatDashboard() {
           Add this script to your website to enable live chat:
         </p>
         <pre className="mt-4 overflow-x-auto bg-zinc-900 p-4 font-mono text-sm text-emerald-400">
-          {`<script src="${typeof window !== 'undefined' ? window.location.origin : 'https://cliaas.com'}/api/chat/widget.js"></script>`}
+          {`<script src="${origin}/api/chat/widget.js"></script>`}
         </pre>
       </section>
     </main>

@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { verifyPassword } from '@/lib/password';
 import { createToken, createIntermediateToken, setSessionCookie } from '@/lib/auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { validateEmail } from '@/lib/email-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,13 @@ export async function POST(request: Request) {
     if (!email || !password) {
       return NextResponse.json(
         { error: 'Email and password are required' },
+        { status: 400 }
+      );
+    }
+    const emailCheck = validateEmail(email);
+    if (!emailCheck.valid) {
+      return NextResponse.json(
+        { error: emailCheck.reason },
         { status: 400 }
       );
     }

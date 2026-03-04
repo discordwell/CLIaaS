@@ -61,13 +61,15 @@ export function WorkflowBuilder({
   const [showValidation, setShowValidation] = useState(false);
   const [hoveredType, setHoveredType] = useState<WorkflowNodeType | null>(null);
   const [hoveredTargetNodeId, setHoveredTargetNodeId] = useState<string | null>(null);
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    if (typeof window !== "undefined") {
-      return !localStorage.getItem("cliaas-wf-onboarding-dismissed");
-    }
-    return true;
-  });
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Read localStorage in useEffect to avoid hydration mismatch (#418)
+  useEffect(() => {
+    if (!localStorage.getItem("cliaas-wf-onboarding-dismissed")) {
+      setShowOnboarding(true);
+    }
+  }, []);
 
   // Undo stack
   const undoStackRef = useRef<

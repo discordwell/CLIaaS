@@ -4,23 +4,58 @@ import { loadTickets } from '@/lib/data';
 import { generateToken } from '@/lib/portal/magic-link';
 import { sendMagicLink } from '@/lib/portal/send-magic-link';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { validateEmail } from '@/lib/email-validation';
+import { checkRateLimit, getRateLimitHeaders } from '@/lib/security/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
+// Rate limit configs
+const EMAIL_RATE_LIMIT = { windowMs: 5 * 60_000, maxRequests: 3 };
+const IP_RATE_LIMIT = { windowMs: 15 * 60_000, maxRequests: 10 };
+
+/** Extract client IP from proxy headers */
+export function getClientIp(request: NextRequest): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim();
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp) return realIp.trim();
+  return 'unknown';
+}
+
 export async function POST(request: NextRequest) {
   try {
+    // IP-level rate limit (10 requests per 15 min)
+    const clientIp = getClientIp(request);
+    const ipLimit = checkRateLimit(`magic-link:ip:${clientIp}`, IP_RATE_LIMIT);
+    if (!ipLimit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: getRateLimitHeaders(ipLimit, IP_RATE_LIMIT) }
+      );
+    }
+
     const parsed = await parseJsonBody<{ email?: string }>(request);
     if ('error' in parsed) return parsed.error;
     const { email } = parsed.data;
 
-    if (!email || !email.includes('@')) {
+    const emailCheck = validateEmail(email as string);
+    if (!emailCheck.valid) {
       return NextResponse.json(
-        { error: 'A valid email address is required' },
+        { error: emailCheck.reason },
         { status: 400 }
       );
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = (email as string).trim().toLowerCase();
+
+    // Per-email rate limit (3 requests per 5 min)
+    const emailLimit = checkRateLimit(`magic-link:email:${normalizedEmail}`, EMAIL_RATE_LIMIT);
+    if (!emailLimit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests for this email. Please try again later.' },
+        { status: 429, headers: getRateLimitHeaders(emailLimit, EMAIL_RATE_LIMIT) }
+      );
+    }
 
     // Check if the customer exists in the DB
     if (process.env.DATABASE_URL) {

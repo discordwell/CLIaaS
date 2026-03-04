@@ -4,6 +4,7 @@ import { createToken, setSessionCookie } from '@/lib/auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { createOrJoinAccount, AccountExistsError } from '@/lib/auth/create-account';
 import { isPersonalEmail } from '@/lib/auth/personal-domains';
+import { validateEmail } from '@/lib/email-validation';
 
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,13 @@ export async function POST(request: Request) {
     if (!email || !password || !name) {
       return NextResponse.json(
         { error: 'Email, password, and name are required' },
+        { status: 400 }
+      );
+    }
+    const emailCheck = validateEmail(email);
+    if (!emailCheck.valid) {
+      return NextResponse.json(
+        { error: emailCheck.reason },
         { status: 400 }
       );
     }

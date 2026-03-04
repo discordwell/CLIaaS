@@ -75,14 +75,61 @@ function filterByDateRange(tickets: Ticket[], range?: DateRange): Ticket[] {
   });
 }
 
+// ---- Empty analytics helper ----
+
+function emptyAnalytics(dateRange?: DateRange): AnalyticsData {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    ticketsCreated: [],
+    ticketsByChannel: {},
+    ticketsBySource: {},
+    avgResponseTimeHours: 0,
+    avgResolutionTimeHours: 0,
+    firstResponseSLA: { met: 0, breached: 0 },
+    resolutionSLA: { met: 0, breached: 0 },
+    agentPerformance: [],
+    csatOverall: 0,
+    csatTrend: [],
+    npsScore: 0,
+    npsTrend: [],
+    npsBreakdown: { promoters: 0, passives: 0, detractors: 0 },
+    cesScore: 0,
+    cesTrend: [],
+    topTags: [],
+    priorityDistribution: {},
+    periodComparison: {
+      current: { tickets: 0, avgResponseHours: 0, resolved: 0 },
+      previous: { tickets: 0, avgResponseHours: 0, resolved: 0 },
+    },
+    totalTickets: 0,
+    dateRange: {
+      from: dateRange?.from.toISOString().slice(0, 10) ?? today,
+      to: dateRange?.to.toISOString().slice(0, 10) ?? today,
+    },
+  };
+}
+
 // ---- Core computation ----
 
 export async function computeAnalytics(dateRange?: DateRange): Promise<AnalyticsData> {
-  const allTickets = await loadTickets();
-  const allMessages = await loadMessages();
-  const csatRatings = await loadCSATRatings();
-  const npsResponses = await loadSurveyResponses('nps');
-  const cesResponses = await loadSurveyResponses('ces');
+  let allTickets: Ticket[];
+  let allMessages: Message[];
+  let csatRatings: Awaited<ReturnType<typeof loadCSATRatings>>;
+  let npsResponses: Awaited<ReturnType<typeof loadSurveyResponses>>;
+  let cesResponses: Awaited<ReturnType<typeof loadSurveyResponses>>;
+
+  try {
+    [allTickets, allMessages, csatRatings, npsResponses, cesResponses] = await Promise.all([
+      loadTickets(),
+      loadMessages(),
+      loadCSATRatings(),
+      loadSurveyResponses('nps'),
+      loadSurveyResponses('ces'),
+    ]);
+  } catch {
+    // Data source unavailable (empty workspace, no DB, etc.) — return zeroed metrics
+    return emptyAnalytics(dateRange);
+  }
 
   const tickets = filterByDateRange(allTickets, dateRange);
 
