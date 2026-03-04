@@ -36,39 +36,43 @@ describe('CF1: Distance-based damage falloff for direct hits', () => {
   });
 
   it('damage decreases with distance using inverse-proportional formula', () => {
+    // C++ Modify_Damage: distFactor = distPixels * 2 / spreadFactor, clamped to [0,16]
+    // Using HE (spreadFactor=6) for meaningful range
     const baseDamage = 100;
-    const spreadFactor = WARHEAD_META.AP.spreadFactor; // 1
+    const spreadFactor = WARHEAD_META.HE.spreadFactor; // 6
 
-    // At distance = 1 cell = CELL_SIZE pixels
+    // At distance = 1 cell = 24 pixels: distFactor = 24*2/6 = 8, damage = 90/8 = 11.25 → 11
     const dist1 = CELL_SIZE;
-    const distFactor1 = dist1 / (spreadFactor * CELL_SIZE / 2); // 24 / (1 * 12) = 2
-    const dmg1 = Math.floor(baseDamage / Math.max(1, distFactor1)); // 100 / 2 = 50
+    const distFactor1 = Math.min(16, (dist1 * 2) / spreadFactor); // 8
+    const dmg1 = Math.round(baseDamage * 0.9 / Math.max(1, distFactor1)); // 90/8 = 11
 
-    // At distance = 2 cells = 2 * CELL_SIZE pixels
+    // At distance = 2 cells = 48 pixels: distFactor = 48*2/6 = 16, damage = 90/16 = 5.625 → 6
     const dist2 = 2 * CELL_SIZE;
-    const distFactor2 = dist2 / (spreadFactor * CELL_SIZE / 2); // 48 / 12 = 4
-    const dmg2 = Math.floor(baseDamage / Math.max(1, distFactor2)); // 100 / 4 = 25
+    const distFactor2 = Math.min(16, (dist2 * 2) / spreadFactor); // 16
+    const dmg2 = Math.round(baseDamage * 0.9 / Math.max(1, distFactor2)); // 90/16 = 6
 
-    expect(dmg1).toBe(50);
-    expect(dmg2).toBe(25);
+    expect(dmg1).toBe(11);
+    expect(dmg2).toBe(6);
     expect(dmg1).toBeGreaterThan(dmg2);
   });
 
   it('higher spreadFactor reduces falloff (wider effective range)', () => {
+    // C++ Modify_Damage: distFactor = distPixels * 2 / spreadFactor
+    // Higher spreadFactor → smaller distFactor → less damage reduction
     const baseDamage = 100;
-    const dist = 2 * CELL_SIZE; // 2 cells
+    const dist = CELL_SIZE; // 1 cell = 24px
 
-    // AP spreadFactor=1: distFactor = 48/(1*12) = 4, damage = 100/4 = 25
-    const apFactor = dist / (WARHEAD_META.AP.spreadFactor * CELL_SIZE / 2);
-    const apDmg = Math.floor(baseDamage / Math.max(1, apFactor));
+    // AP spreadFactor=3: distFactor = 24*2/3 = 16, vs none (1.0): 100/16 = 6
+    const apFactor = Math.min(16, (dist * 2) / WARHEAD_META.AP.spreadFactor);
+    const apDmg = Math.round(baseDamage / Math.max(1, apFactor));
 
-    // HE spreadFactor=2: distFactor = 48/(2*12) = 2, damage = 100/2 = 50
-    const heFactor = dist / (WARHEAD_META.HE.spreadFactor * CELL_SIZE / 2);
-    const heDmg = Math.floor(baseDamage / Math.max(1, heFactor));
+    // HE spreadFactor=6: distFactor = 24*2/6 = 8, vs none (0.9): 90/8 = 11
+    const heFactor = Math.min(16, (dist * 2) / WARHEAD_META.HE.spreadFactor);
+    const heDmg = Math.round(baseDamage * 0.9 / Math.max(1, heFactor));
 
-    // Fire spreadFactor=3: distFactor = 48/(3*12) = 1.33, damage = 100/1.33 = 75
-    const fireFactor = dist / (WARHEAD_META.Fire.spreadFactor * CELL_SIZE / 2);
-    const fireDmg = Math.floor(baseDamage / Math.max(1, fireFactor));
+    // Fire spreadFactor=8: distFactor = 24*2/8 = 6, vs none (0.9): 90/6 = 15
+    const fireFactor = Math.min(16, (dist * 2) / WARHEAD_META.Fire.spreadFactor);
+    const fireDmg = Math.round(baseDamage * 0.9 / Math.max(1, fireFactor));
 
     expect(heDmg).toBeGreaterThan(apDmg);
     expect(fireDmg).toBeGreaterThan(heDmg);
@@ -126,23 +130,24 @@ describe('CF2: Splash damage uses inverse-proportional falloff', () => {
   });
 
   it('higher spreadFactor means less falloff at same distance', () => {
+    // C++ Modify_Damage: distFactor = distPixels * 2 / spreadFactor
     const weaponDmg = 100;
-    const cellDist = 1.0;
+    const distPx = CELL_SIZE; // 1 cell = 24px
 
-    // SA (spreadFactor=1): fd = 1.0 / (1*0.5) = 2.0, dmg = 100/2 = 50
-    const fdSA = cellDist / (WARHEAD_META.SA.spreadFactor * 0.5);
-    const dmgSA = Math.floor(weaponDmg / Math.max(1, fdSA));
+    // SA (spreadFactor=3): df = 24*2/3 = 16, SA vs none = 1.0: 100/16 = 6
+    const dfSA = Math.min(16, (distPx * 2) / WARHEAD_META.SA.spreadFactor);
+    const dmgSA = Math.round(weaponDmg * 1.0 / Math.max(1, dfSA));
 
-    // HE (spreadFactor=2): fd = 1.0 / (2*0.5) = 1.0, dmg = 100/1 = 100
-    const fdHE = cellDist / (WARHEAD_META.HE.spreadFactor * 0.5);
-    const dmgHE = Math.floor(weaponDmg / Math.max(1, fdHE));
+    // HE (spreadFactor=6): df = 24*2/6 = 8, HE vs none = 0.9: 90/8 = 11
+    const dfHE = Math.min(16, (distPx * 2) / WARHEAD_META.HE.spreadFactor);
+    const dmgHE = Math.round(weaponDmg * 0.9 / Math.max(1, dfHE));
 
-    // Fire (spreadFactor=3): fd = 1.0 / (3*0.5) = 0.667, dmg = 100/max(1,0.667) = 100
-    const fdFire = cellDist / (WARHEAD_META.Fire.spreadFactor * 0.5);
-    const dmgFire = Math.floor(weaponDmg / Math.max(1, fdFire));
+    // Fire (spreadFactor=8): df = 24*2/8 = 6, Fire vs none = 0.9: 90/6 = 15
+    const dfFire = Math.min(16, (distPx * 2) / WARHEAD_META.Fire.spreadFactor);
+    const dmgFire = Math.round(weaponDmg * 0.9 / Math.max(1, dfFire));
 
     expect(dmgHE).toBeGreaterThan(dmgSA);
-    expect(dmgFire).toBeGreaterThanOrEqual(dmgHE);
+    expect(dmgFire).toBeGreaterThan(dmgHE);
   });
 });
 
@@ -226,12 +231,12 @@ describe('CF8: Wall destruction from splash with destroysWalls warheads', () => 
     expect(WARHEAD_META.HE.destroysWood).toBe(true);
   });
 
-  it('AP warhead does NOT have destroysWalls', () => {
-    expect(WARHEAD_META.AP.destroysWalls).toBeUndefined();
+  it('AP warhead has destroysWalls (C++ Wall=yes)', () => {
+    expect(WARHEAD_META.AP.destroysWalls).toBe(true);
   });
 
-  it('Super warhead has destroysWalls', () => {
-    expect(WARHEAD_META.Super.destroysWalls).toBe(true);
+  it('Super warhead does NOT have destroysWalls', () => {
+    expect(WARHEAD_META.Super.destroysWalls).toBeUndefined();
   });
 
   it('fire warhead has destroysWood but NOT destroysWalls', () => {
@@ -278,7 +283,7 @@ describe('CF8: Wall destruction from splash with destroysWalls warheads', () => 
 // =========================================================================
 describe('SC1: AP-vs-infantry forced scatter', () => {
   it('AP warhead exists with known properties', () => {
-    expect(WARHEAD_META.AP.spreadFactor).toBe(1);
+    expect(WARHEAD_META.AP.spreadFactor).toBe(3);
     expect(WARHEAD_VS_ARMOR.AP[armorIndex('none')]).toBe(0.3); // 30% vs infantry
   });
 
@@ -400,8 +405,8 @@ describe('WARHEAD_META data integrity', () => {
     }
   });
 
-  it('Nuke has highest spreadFactor (8)', () => {
-    expect(WARHEAD_META.Nuke.spreadFactor).toBe(8);
+  it('Fire has highest spreadFactor (8)', () => {
+    expect(WARHEAD_META.Fire.spreadFactor).toBe(8);
   });
 
   it('Mechanical has spreadFactor 0 (no splash)', () => {

@@ -12,7 +12,7 @@ import {
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, type SidebarTab, getItemCategory,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
-  calcProjectileTravelFrames,
+  calcProjectileTravelFrames, modifyDamage,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
   IRON_CURTAIN_DURATION, NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
   NUKE_MIN_FALLOFF, CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
@@ -3381,17 +3381,10 @@ export class Game {
           directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
         }
 
-        // Apply warhead-vs-armor damage multiplier + house firepower bias (C8)
-        const mult = this.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
+        // CF1: Apply C++ Modify_Damage formula — direct hit at distance 0 gets full damage
         const houseBias = this.getFirepowerBias(entity.house);
-        // If warhead does 0% vs this armor (e.g. Organic vs vehicles), skip entirely
-        let damage = mult <= 0 ? 0 : Math.max(1, Math.round(activeWeapon.damage * mult * houseBias));
-        // C3: MinDamage/MaxDamage rules (C++ combat.cpp:122-127, rules.cpp:227)
-        if (damage > 0) {
-          const targetDist = worldDist(entity.pos, entity.target.pos);
-          if (targetDist <= CELL_SIZE * 2) damage = Math.max(damage, 1);
-          damage = Math.min(damage, MAX_DAMAGE);
-        }
+        const whMult = this.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
+        let damage = modifyDamage(activeWeapon.damage, activeWeapon.warhead, entity.target.stats.armor, 0, houseBias, whMult);
         if (damage <= 0) {
           // This weapon can't hurt the target. If dual-weapon, don't give up —
           // the other weapon might work. Only give up if neither weapon can damage.
@@ -4306,11 +4299,11 @@ export class Game {
           s.attackCooldown = s.weapon.rof; // unlimited ammo (-1) uses normal ROF
         }
         if (Game.TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
-        // Apply warhead-vs-armor multiplier + house firepower bias
+        // CF1: Apply C++ Modify_Damage — structure direct hit at distance 0
         const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
-        const mult = this.getWarheadMult(wh, bestTarget.stats.armor);
         const houseBias = this.getFirepowerBias(s.house);
-        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(s.weapon.damage * mult * houseBias));
+        const whMult = this.getWarheadMult(wh, bestTarget.stats.armor);
+        const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult);
         const killed = bestTarget.takeDamage(damage, wh);
 
         // Fire effects — color based on structure type
@@ -4737,11 +4730,10 @@ export class Game {
 
   /** Fire weapon at entity target (helper for aircraft) — uses full damage pipeline */
   private fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void {
-    const wh = weapon.warhead as WarheadType;
-    const mult = this.getWarheadMult(wh, target.stats.armor);
     const houseBias = this.getFirepowerBias(attacker.house);
-    const damage = mult <= 0 ? 0 : Math.max(1, Math.round(weapon.damage * mult * houseBias));
-    const killed = target.takeDamage(damage, wh);
+    const whMult = this.getWarheadMult(weapon.warhead, target.stats.armor);
+    const damage = modifyDamage(weapon.damage, weapon.warhead, target.stats.armor, 0, houseBias, whMult);
+    const killed = target.takeDamage(damage, weapon.warhead);
     if (killed) {
       attacker.creditKill();
       this.handleUnitDeath(target, {
@@ -4763,9 +4755,9 @@ export class Game {
   /** Fire weapon at structure target (helper for aircraft) — uses full damage pipeline */
   private fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void {
     const wh = (weapon.warhead ?? 'HE') as WarheadType;
-    const mult = this.getWarheadMult(wh, 'concrete');
     const houseBias = this.getFirepowerBias(attacker.house);
-    const damage = mult <= 0 ? 0 : Math.max(1, Math.round(weapon.damage * mult * houseBias));
+    const whMult = this.getWarheadMult(wh, 'concrete');
+    const damage = modifyDamage(weapon.damage, wh, 'concrete', 0, houseBias, whMult);
     const destroyed = this.damageStructure(s, damage);
     if (destroyed) attacker.creditKill();
     this.effects.push({
@@ -4847,11 +4839,10 @@ export class Game {
     return WARHEAD_VS_ARMOR[warhead]?.[idx] ?? 1;
   }
 
-  /** Damage-based speed reduction (C++ drive.cpp:1159-1161).
-   *  Single tier: <=50% HP = 75% speed (ConditionYellow). */
+  /** Damage-based speed reduction (C++ drive.cpp:1157-1161).
+   *  Single tier only: <=50% HP = 75% speed (ConditionYellow). C++ has no ConditionRed speed tier. */
   private damageSpeedFactor(entity: Entity): number {
     const ratio = entity.hp / entity.maxHp;
-    if (ratio <= CONDITION_RED) return 0.5;   // ConditionRed (25%): half speed (C++ drive.cpp)
     if (ratio <= CONDITION_YELLOW) return 0.75; // ConditionYellow (50%): three-quarters speed
     return 1.0;
   }
@@ -5023,33 +5014,29 @@ export class Game {
     }
   }
 
-  /** Apply AOE splash damage to entities near an impact point */
+  /** Apply AOE splash damage to entities near an impact point.
+   *  CF2/CF3: Uses fixed 1.5-cell radius and C++ inverse-proportional falloff via modifyDamage. */
   private applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
     primaryTargetId: number, attackerHouse: House, attacker?: Entity,
   ): void {
-    const splashRange = weapon.splash ?? 0;
-    if (splashRange <= 0) return;
+    // CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2)
+    const splashRange = Game.SPLASH_RADIUS;
+    const splashRangePixels = splashRange * CELL_SIZE;
     const attackerIsPlayerControlled = this.isAllied(attackerHouse, this.playerHouse);
 
     for (const other of this.entities) {
       if (!other.alive || other.id === primaryTargetId) continue;
       // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
       const isFriendly = this.isAllied(other.house, attackerHouse);
-      const dist = worldDist(center, other.pos);
-      if (dist > splashRange) continue;
+      const distCells = worldDist(center, other.pos);
+      if (distCells > splashRange) continue;
 
-      // C6: SpreadFactor falloff (C++ combat.cpp Explosion_Damage — linear division)
-      // C++ formula: damage / (distance / (SpreadFactor * cellScale))
-      // Simplified: damage * (1 - dist / (splashRange * spreadFactor))
-      // Higher SpreadFactor = distance divided by more = LESS damage reduction = WIDER splash
-      const spreadFactor = WARHEAD_META[weapon.warhead]?.spreadFactor ?? 1;
-      const effectiveRange = splashRange * spreadFactor;
-      const falloff = Math.max(0, 1 - dist / effectiveRange);
-      const mult = this.getWarheadMult(weapon.warhead, other.stats.armor);
-      if (mult <= 0) continue; // warhead does 0% vs this armor
-      // H3: No 0.5x multiplier — C++ splash uses damage / distance directly
-      const splashDmg = Math.max(1, Math.round(weapon.damage * mult * falloff));
+      // CF2: C++ inverse-proportional falloff via modifyDamage (combat.cpp:106-125)
+      const distPixels = distCells * CELL_SIZE;
+      const whMult = this.getWarheadMult(weapon.warhead, other.stats.armor);
+      const splashDmg = modifyDamage(weapon.damage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult);
+      if (splashDmg <= 0) continue;
       const killed = other.takeDamage(splashDmg, weapon.warhead);
 
       // Retaliation from splash damage
@@ -5058,9 +5045,9 @@ export class Game {
       }
 
       // Infantry scatter: push nearby infantry away from explosion
-      if (other.alive && other.stats.isInfantry && dist < splashRange * 0.8) {
+      if (other.alive && other.stats.isInfantry && distCells < splashRange * 0.8) {
         const angle = Math.atan2(other.pos.y - center.y, other.pos.x - center.x);
-        const pushDist = CELL_SIZE * (1 - dist / splashRange);
+        const pushDist = CELL_SIZE * (1 - distCells / splashRange);
         const scatterX = other.pos.x + Math.cos(angle) * pushDist;
         const scatterY = other.pos.y + Math.sin(angle) * pushDist;
         // Only scatter to passable terrain

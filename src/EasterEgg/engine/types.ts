@@ -514,7 +514,7 @@ export const WARHEAD_META: Record<WarheadType, WarheadMeta> = {
 // crushable: C++ infantry.cpp — infantry and ants die when a crusher enters their cell
 export const UNIT_STATS: Record<string, UnitStats> = {
   // Ants (from SCA scenario INI files) — crushable by heavy tanks (core ant mission tactic)
-  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 2, rot: 5, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10, crushable: true },
+  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10, crushable: true },
   ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher', noMovingFire: true, scanDelay: 10, crushable: true },
   ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap', noMovingFire: true, scanDelay: 10, crushable: true },
   // Vehicles (RULES.INI values) — crusher=true for heavy tracked vehicles per C++ udata.cpp Crusher flag
@@ -624,7 +624,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 40 },  // Stavros/civilian
   SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 15, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5 },  // V2 Rocket
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
-  Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'HollowPoint', projSpeed: 40 }, // C++: Warhead=HollowPoint
+  Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super', projSpeed: 40 }, // C++: Warhead=Super (combat.cpp confirms)
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
   FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8, projSpeed: 15 },
   Napalm:           { name: 'Napalm',            damage: 100, rof: 20, range: 4.5,  warhead: 'Fire', projSpeed: 12 },
@@ -726,7 +726,7 @@ export interface ProductionItem {
 export const PRODUCTION_ITEMS: ProductionItem[] = [
   // Infantry (from TENT/BARR) — faction-accurate per RA rules.ini
   { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', faction: 'both' },
-  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'TENT', faction: 'both' },  // Allied in ant missions
+  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'TENT', faction: 'soviet' },
   { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'both' },
   { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'soviet' },
   { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both' },
@@ -901,6 +901,52 @@ export function calcProjectileTravelFrames(distPixels: number, projSpeed?: numbe
   const pixelsPerTick = projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
   const travelTicks = Math.max(1, Math.ceil(distPixels / pixelsPerTick));
   return Math.min(travelTicks, MAX_PROJECTILE_FRAMES);
+}
+
+/** C++ Modify_Damage (combat.cpp:72-129) — compute damage with warhead, armor, and distance falloff.
+ *  Distance is from explosion center to target (0 = point-blank direct hit).
+ *  @param baseDamage - weapon's raw damage value
+ *  @param warhead - warhead type determining armor multiplier and spread
+ *  @param armor - target's armor type
+ *  @param distPixels - distance in pixels from explosion center to target (0 = point-blank)
+ *  @param houseBias - house firepower multiplier (default 1.0)
+ *  @returns final damage value (0 if warhead does 0% vs armor) */
+export function modifyDamage(
+  baseDamage: number, warhead: WarheadType, armor: ArmorType,
+  distPixels: number, houseBias = 1.0, warheadMultOverride?: number,
+): number {
+  // Step 1: Warhead vs armor multiplier (combat.cpp:98)
+  const mult = warheadMultOverride ?? getWarheadMultiplier(warhead, armor);
+  if (mult <= 0) return 0;
+
+  let damage = baseDamage * mult * houseBias;
+
+  // Step 2: Distance-based falloff (combat.cpp:106-125)
+  // C++ converts pixel distance to a factor using SpreadFactor and PIXEL_LEPTON_W.
+  // In pixel space: distFactor = distPixels * 2 / SpreadFactor (for SpreadFactor > 0)
+  //                 distFactor = distPixels * 4               (for SpreadFactor == 0)
+  const spreadFactor = WARHEAD_META[warhead]?.spreadFactor ?? 1;
+  let distFactor: number;
+  if (spreadFactor === 0) {
+    distFactor = distPixels * 4;
+  } else {
+    distFactor = (distPixels * 2) / spreadFactor;
+  }
+  distFactor = Math.max(0, Math.min(16, distFactor)); // combat.cpp:117-118
+
+  if (distFactor > 0) {
+    damage = damage / distFactor; // combat.cpp:120
+  }
+
+  // Step 3: MinDamage threshold — close enough = at least 1 damage (combat.cpp:122-124)
+  if (distFactor < 4) {
+    damage = Math.max(damage, 1);
+  }
+
+  // Step 4: MaxDamage cap (combat.cpp:126)
+  damage = Math.min(damage, MAX_DAMAGE);
+
+  return Math.max(0, Math.round(damage));
 }
 
 // Distance in cells between two world positions

@@ -9,10 +9,10 @@ Last audited: 2026-03-02
 
 ## COMBAT / DAMAGE FORMULA
 
-- [!] **CF1: Distance-based falloff on direct hits** — C++ `Modify_Damage` (combat.cpp:106-125) ALWAYS applies distance-based falloff even for direct hits: `damage / (distance / (SpreadFactor * PIXEL_LEPTON_W/2))`. TS applies zero distance falloff on direct hits — full weapon damage at any range.
-- [!] **CF2: Splash falloff formula** — C++ uses inverse-proportional `damage / distance_factor` (combat.cpp:113-114). TS uses linear `damage * (1 - dist/range)` (index.ts:4947). Completely different damage curves.
-- [!] **CF3: Splash radius** — C++ uses fixed 1.5-cell radius for ALL explosions (combat.cpp:176 `ICON_LEPTON_W + ICON_LEPTON_W/2`). TS uses per-weapon `splash` field (0.5-2.0 cells). C++ range is universal, not weapon-specific.
-- [~] **CF4: MinDamage threshold** — C++ applies MinDamage=1 when lepton-scaled `distance < 4`. TS uses flat `targetDist <= CELL_SIZE * 2` (48px). Approximate but not source-accurate.
+- [x] [VERIFIED] **CF1: Distance-based falloff on direct hits** — Fixed: `modifyDamage()` now applies C++ inverse-proportional distance falloff on all hits via SpreadFactor-scaled distance divisor.
+- [x] [VERIFIED] **CF2: Splash falloff formula** — Fixed: `applySplashDamage()` now uses `modifyDamage()` with C++ inverse formula `damage / distFactor` instead of linear falloff.
+- [x] [VERIFIED] **CF3: Splash radius** — Fixed: Universal `Game.SPLASH_RADIUS = 1.5` cells for all warheads, matching C++ `ICON_LEPTON_W + ICON_LEPTON_W/2`.
+- [x] [VERIFIED] **CF4: MinDamage threshold** — Fixed: `modifyDamage()` applies MinDamage=1 when `distFactor < 4`, matching C++ combat.cpp:126-128.
 - [x] **CF5: MaxDamage cap** — Both cap at 1000. Correct.
 - [x] **CF6: Friendly fire splash** — Both damage all entities regardless of house. Correct.
 - [ ] **CF7: Heal damage guard** — C++ only applies negative (heal) damage if `distance < 0x008 AND armor == ARMOR_NONE` (combat.cpp:86-96). TS has no range/armor check for healing.
@@ -71,8 +71,8 @@ Weapon values verified against RULES.INI. Infantry/vehicle primary weapons mostl
 - [x] **E6 Engineer** — All stats match (25hp/4spd/500cost).
 - [x] **DOG** — All stats match (12hp/4spd/200cost/DogJaw/soviet).
 - [x] **MEDI** — All stats match (80hp/4spd/800cost/Heal/allied).
-- [!] **E2 Grenadier owner** — C++ soviet-only. TS says both factions.
-- [!] **E3 Rocket Soldier weapons swapped** — C++ Primary=RedEye(AA), Secondary=Dragon. TS has them reversed.
+- [x] [VERIFIED] **E2 Grenadier owner** — Fixed: soviet-only in both UNIT_STATS and PRODUCTION_ITEMS.
+- [x] [VERIFIED] **E3 Rocket Soldier weapons** — Primary=RedEye, Secondary=Dragon. Matches C++.
 - [!] **E3 owner** — C++ allies-only. TS says both factions.
 - [~] **SPY sight** — C++ 5. TS 4.
 - [!] **GNRL Stavros** — C++ 80hp/5spd/3sight/Pistol. TS 100hp/4spd/4sight/Sniper. All wrong.
@@ -140,14 +140,14 @@ Nearly every aircraft stat is wrong. C++ aircraft have Sight=0 (rely on ground u
 ## MOVEMENT
 
 - [~] **MV1: Free-form vs track-table movement** — C++ uses pre-computed track tables with lepton accumulators (drive.cpp). TS uses free-form vector movement. Architectural difference — produces different movement curves around corners.
-- [!] **MV2: Damage speed — extra tier invented** — C++ has ONE tier: <=50% HP = 75% speed (drive.cpp:1157-1161). TS adds a second tier: <=25% HP = 50% speed. The ConditionRed speed penalty is fabricated.
+- [x] [VERIFIED] **MV2: Damage speed — single tier** — Fixed: removed fabricated ConditionRed 0.5x tier. Now only one tier: <=50% HP = 0.75x speed, matching C++ drive.cpp:1157-1161.
 - [!] **MV3: Close-enough distance unit bug** — `worldDist()` returns cells but is compared against `CELL_SIZE * 2.5 = 60` (pixels). Creates 60-cell tolerance instead of 2.5. Masked by pathfinding exhausting path first.
 - [!] **MV4: Three-point turns are fabricated** — The C++ three-point turn code is behind `#ifdef TOFIX` and `IsThreePoint=false` — it is NOT COMPILED in the released game (drive.cpp:328-361). The TS 0.3px backward drift for JEEPs has zero C++ basis.
-- [!] **MV5: Terrain multipliers invert C++ behavior** — C++ terrain costs are fractions <=1.0 (can only slow down, never speed up). TS has multipliers >1.0 for roads (1.1 FOOT, 1.3 WHEEL) which make units faster than base speed. C++ `Sub_Saturate` caps at <1.0.
+- [x] [VERIFIED] **MV5: Terrain multipliers capped at 1.0** — All terrain speed multipliers verified ≤1.0. No road speed bonus exceeds base speed.
 - [~] **MV6: Terrain types incomplete** — C++ has 9 LandTypes (Clear, Road, Water, Rock, Wall, Ore, Beach, Rough, River). TS has 5 (Clear, Water, Rock, Tree, Wall). Tree is not a C++ LandType; Beach, Rough, River, Ore are missing.
 - [~] **MV7: Speed values are vibed** — TS speed integers don't map to C++ MPHType (0-255) via any conversion. Ground unit values happen to match raw INI integers but aircraft/naval deviate.
 - [~] **MV8: speedFraction = 0.5 default** — No C++ analog. Appears to be a tuning knob for 15 FPS / 24px cells.
-- [ ] **MV9: House GroundspeedBias on rotation** — C++ applies `ROT * House->GroundspeedBias` for body rotation (drive.cpp:1346). Not in TS.
+- [x] [VERIFIED] **MV9: House GroundspeedBias on rotation** — Already implemented in entity.ts `tickRotation()` — applies `groundspeedBias` to rotation rate.
 
 ## PATHFINDING
 
@@ -206,8 +206,8 @@ Nearly every aircraft stat is wrong. C++ aircraft have Sight=0 (rely on ground u
 
 ## ECONOMY / ORE
 
-- [!] **EC1: Gold value** — C++ `GoldValue = 35` credits per bail (rules.cpp:238). TS returns 25 per depleteOre. Wrong.
-- [!] **EC2: Gem value** — C++ `GemValue = 110` credits per bail (rules.cpp:239). TS returns 50. Wrong.
+- [x] [VERIFIED] **EC1: Gold value** — 35 credits per bail. Matches C++ `GoldValue = 35`.
+- [x] [VERIFIED] **EC2: Gem value** — 110 credits per bail. Matches C++ `GemValue = 110`.
 - [!] **EC3: Ore capacity system** — C++ counts bails (28 max, `BailCount=28`). Full gold load = 28*35 = 980 credits. TS uses credit cap of 700. Different system, wrong values.
 - [ ] **EC4: Gem bonus bails** — C++ gives 2 extra bonus bails per gem harvest action (unit.cpp:2306-2308, worth 220 extra credits). TS has no bonus mechanic.
 - [!] **EC5: Ore unload** — C++ credits full load as lump sum after dump animation completes. TS trickles 50 credits/tick incrementally.
@@ -324,7 +324,7 @@ Nearly every aircraft stat is wrong. C++ aircraft have Sight=0 (rely on ground u
 
 | Category | Correct | Vibed/Approx | Wrong | Missing |
 |----------|---------|-------------|-------|---------|
-| Combat formula | 2 | 2 | 3 | 3 |
+| Combat formula | 6 | 0 | 0 | 3 |
 | Warheads | 2 | 0 | 0 | 3 |
 | Scatter | 0 | 2 | 2 | 1 |
 | Infantry weapons | 14 matched | 0 | 2 | 1 |
@@ -332,13 +332,13 @@ Nearly every aircraft stat is wrong. C++ aircraft have Sight=0 (rely on ground u
 | Naval weapons | 0 | 0 | 5 | 2 |
 | Aircraft weapons | 0 | 0 | 3 | 0 |
 | Structure weapons | 0 | 0 | 3 | 1 |
-| Infantry stats | 5 units OK | 1 | 5 | 2 |
+| Infantry stats | 7 units OK | 1 | 3 | 2 |
 | Vehicle stats | 8 units OK | 0 | 7 | 3 |
 | Naval stats | 0 | 1 | 5 | 0 |
 | Aircraft stats | 0 | 0 | 5 | 0 |
 | Structure stats | 0 | 0 | All HPs | 3 power entries |
-| Movement | 0 | 4 | 5 | 1 |
-| Economy/ore | 0 | 0 | 7 | 1 |
+| Movement | 3 | 4 | 2 | 0 |
+| Economy/ore | 2 | 0 | 5 | 1 |
 | Production | 0 | 1 | 2 | 0 |
 | Repair | 2 | 1 | 2 | 0 |
 | Sell | 0 | 1 | 1 | 1 |
