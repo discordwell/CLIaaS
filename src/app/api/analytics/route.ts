@@ -28,40 +28,21 @@ export async function GET(request: NextRequest) {
     const data = await computeAnalytics(dateRange);
     return NextResponse.json(data);
   } catch {
-    // If computeAnalytics itself throws (shouldn't after the try/catch inside),
-    // return empty analytics rather than a 500
-    const { computeAnalytics: retry } = await import('@/lib/analytics');
-    try {
-      const fallback = await retry(dateRange);
-      return NextResponse.json(fallback);
-    } catch {
-      // Last resort: inline empty response
-      const today = new Date().toISOString().slice(0, 10);
-      return NextResponse.json({
-        totalTickets: 0,
-        ticketsCreated: [],
-        ticketsByChannel: {},
-        ticketsBySource: {},
-        avgResponseTimeHours: 0,
-        avgResolutionTimeHours: 0,
-        firstResponseSLA: { met: 0, breached: 0 },
-        resolutionSLA: { met: 0, breached: 0 },
-        agentPerformance: [],
-        csatOverall: 0,
-        csatTrend: [],
-        npsScore: 0,
-        npsTrend: [],
-        npsBreakdown: { promoters: 0, passives: 0, detractors: 0 },
-        cesScore: 0,
-        cesTrend: [],
-        topTags: [],
-        priorityDistribution: {},
-        periodComparison: {
-          current: { tickets: 0, avgResponseHours: 0, resolved: 0 },
-          previous: { tickets: 0, avgResponseHours: 0, resolved: 0 },
-        },
-        dateRange: { from: today, to: today },
-      });
-    }
+    // computeAnalytics has its own try/catch returning emptyAnalytics(),
+    // so this is a last-resort fallback for unexpected outer errors
+    const today = new Date().toISOString().slice(0, 10);
+    return NextResponse.json({
+      totalTickets: 0, ticketsCreated: [], ticketsByChannel: {}, ticketsBySource: {},
+      avgResponseTimeHours: 0, avgResolutionTimeHours: 0,
+      firstResponseSLA: { met: 0, breached: 0 }, resolutionSLA: { met: 0, breached: 0 },
+      agentPerformance: [], csatOverall: 0, csatTrend: [],
+      npsScore: 0, npsTrend: [], npsBreakdown: { promoters: 0, passives: 0, detractors: 0 },
+      cesScore: 0, cesTrend: [], topTags: [], priorityDistribution: {},
+      periodComparison: {
+        current: { tickets: 0, avgResponseHours: 0, resolved: 0 },
+        previous: { tickets: 0, avgResponseHours: 0, resolved: 0 },
+      },
+      dateRange: { from: today, to: today },
+    });
   }
 }

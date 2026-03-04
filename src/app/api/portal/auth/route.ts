@@ -13,12 +13,17 @@ export const dynamic = 'force-dynamic';
 const EMAIL_RATE_LIMIT = { windowMs: 5 * 60_000, maxRequests: 3 };
 const IP_RATE_LIMIT = { windowMs: 15 * 60_000, maxRequests: 10 };
 
-/** Extract client IP from proxy headers */
+/** Extract client IP from proxy headers.
+ *  Prefers x-real-ip (set by Caddy/Nginx from actual connection).
+ *  Falls back to last entry of x-forwarded-for (appended by trusted proxy). */
 export function getClientIp(request: NextRequest): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
   const realIp = request.headers.get('x-real-ip');
   if (realIp) return realIp.trim();
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) {
+    const parts = forwarded.split(',');
+    return parts[parts.length - 1].trim();
+  }
   return 'unknown';
 }
 
@@ -38,7 +43,14 @@ export async function POST(request: NextRequest) {
     if ('error' in parsed) return parsed.error;
     const { email } = parsed.data;
 
-    const emailCheck = validateEmail(email as string);
+    if (!email) {
+      return NextResponse.json(
+        { error: 'Email is required' },
+        { status: 400 }
+      );
+    }
+
+    const emailCheck = validateEmail(email);
     if (!emailCheck.valid) {
       return NextResponse.json(
         { error: emailCheck.reason },
@@ -46,7 +58,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const normalizedEmail = (email as string).trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
 
     // Per-email rate limit (3 requests per 5 min)
     const emailLimit = checkRateLimit(`magic-link:email:${normalizedEmail}`, EMAIL_RATE_LIMIT);

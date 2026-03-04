@@ -12,20 +12,20 @@ beforeEach(() => {
 });
 
 describe('getClientIp', () => {
-  it('extracts IP from x-forwarded-for header', () => {
+  it('prefers x-real-ip over x-forwarded-for', () => {
+    const req = new NextRequest('http://localhost/api/portal/auth', {
+      method: 'POST',
+      headers: { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': '203.0.113.50, 70.41.3.18' },
+    });
+    expect(getClientIp(req)).toBe('198.51.100.7');
+  });
+
+  it('extracts last IP from x-forwarded-for (trusted proxy appends)', () => {
     const req = new NextRequest('http://localhost/api/portal/auth', {
       method: 'POST',
       headers: { 'x-forwarded-for': '203.0.113.50, 70.41.3.18' },
     });
-    expect(getClientIp(req)).toBe('203.0.113.50');
-  });
-
-  it('extracts IP from x-real-ip when x-forwarded-for is absent', () => {
-    const req = new NextRequest('http://localhost/api/portal/auth', {
-      method: 'POST',
-      headers: { 'x-real-ip': '198.51.100.7' },
-    });
-    expect(getClientIp(req)).toBe('198.51.100.7');
+    expect(getClientIp(req)).toBe('70.41.3.18');
   });
 
   it('falls back to unknown when no IP headers present', () => {
@@ -35,12 +35,21 @@ describe('getClientIp', () => {
     expect(getClientIp(req)).toBe('unknown');
   });
 
-  it('trims whitespace from x-forwarded-for first entry', () => {
+  it('trims whitespace from x-forwarded-for last entry', () => {
     const req = new NextRequest('http://localhost/api/portal/auth', {
       method: 'POST',
-      headers: { 'x-forwarded-for': '  10.0.0.1 , 10.0.0.2' },
+      headers: { 'x-forwarded-for': '10.0.0.1 ,  10.0.0.2 ' },
     });
-    expect(getClientIp(req)).toBe('10.0.0.1');
+    expect(getClientIp(req)).toBe('10.0.0.2');
+  });
+
+  it('rejects spoofed x-forwarded-for when x-real-ip is set', () => {
+    const req = new NextRequest('http://localhost/api/portal/auth', {
+      method: 'POST',
+      headers: { 'x-forwarded-for': '1.2.3.4', 'x-real-ip': '203.0.113.50' },
+    });
+    // x-real-ip (from trusted proxy) takes priority over spoofable x-forwarded-for
+    expect(getClientIp(req)).toBe('203.0.113.50');
   });
 });
 
