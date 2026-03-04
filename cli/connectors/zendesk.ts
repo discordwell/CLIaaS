@@ -8,6 +8,7 @@ import type {
 import {
   createClient, paginateCursor, paginateNextPage,
   setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts,
 } from './base/index';
 
 export interface ZendeskAuth {
@@ -111,11 +112,10 @@ export async function exportZendesk(auth: ZendeskAuth, outDir: string, cursorSta
     }
   }
 
-  const counts = {
-    tickets: 0, messages: 0, attachments: 0, customers: 0, organizations: 0,
-    kbArticles: 0, rules: 0, groups: 0, customFields: 0, views: 0,
+  const counts = initCounts({
+    attachments: 0, groups: 0, customFields: 0, views: 0,
     slaPolicies: 0, ticketForms: 0, brands: 0, auditEvents: 0, csatRatings: 0, timeEntries: 0,
-  };
+  });
   const newCursorState: Record<string, string> = { ...cursorState };
 
   // Export tickets with cursor-based incremental pagination

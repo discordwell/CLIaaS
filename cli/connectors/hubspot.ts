@@ -3,6 +3,7 @@ import type {
 } from '../schema/types';
 import {
   createClient, paginateCursor, setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts,
 } from './base/index';
 
 export interface HubSpotAuth {
@@ -144,7 +145,7 @@ function hsGetNextUrl(basePath: string, properties: string) {
 export async function exportHubSpot(auth: HubSpotAuth, outDir: string): Promise<ExportManifest> {
   const client = createHubSpotClient(auth);
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Export tickets
   const ticketProperties = 'subject,content,hs_pipeline_stage,hs_ticket_priority,hubspot_owner_id,createdate,hs_lastmodifieddate,hs_ticket_category';

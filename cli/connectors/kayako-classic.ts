@@ -1,9 +1,9 @@
 import { createHmac, randomBytes } from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
 import type {
-  Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
+  Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus,
 } from '../schema/types';
-import { setupExport, appendJsonl, writeManifest, exportSpinner } from './base/index';
+import { setupExport, appendJsonl, writeManifest, exportSpinner, initCounts, fuzzyStatusMatch, fuzzyPriorityMatch } from './base/index';
 
 export interface KayakoClassicAuth {
   domain: string; // e.g. "classichelp.kayako.com"
@@ -267,15 +267,6 @@ function mapStatus(label: string): TicketStatus {
   return 'open';
 }
 
-function mapPriority(label: string | null): TicketPriority {
-  if (!label) return 'normal';
-  const lower = label.toLowerCase();
-  if (lower.includes('low')) return 'low';
-  if (lower.includes('high')) return 'high';
-  if (lower.includes('urgent') || lower.includes('critical') || lower.includes('emergency')) return 'urgent';
-  return 'normal';
-}
-
 // ----- Write Operations -----
 
 export async function kayakoClassicVerifyConnection(auth: KayakoClassicAuth): Promise<{
@@ -446,7 +437,7 @@ export async function kayakoClassicCreateTicket(
 
 export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: string): Promise<ExportManifest> {
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Fetch status and priority maps first for label resolution
   const statusMap = await fetchStatusMap(auth);
@@ -488,7 +479,7 @@ export async function exportKayakoClassic(auth: KayakoClassicAuth, outDir: strin
         source: 'kayako-classic',
         subject: getText(t.subject),
         status: mapStatus(statusLabel),
-        priority: mapPriority(priorityLabel),
+        priority: fuzzyPriorityMatch(priorityLabel),
         assignee: getText(t.ownerstaffname) || undefined,
         requester: getText(t.email) || getText(t.fullname) || String(getNumber(t.userid)),
         tags,

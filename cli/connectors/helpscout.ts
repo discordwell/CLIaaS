@@ -1,8 +1,9 @@
 import type {
-  Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
+  Ticket, Message, Customer, KBArticle, ExportManifest, TicketStatus,
 } from '../schema/types';
 import {
   createClient, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts, flushCollectedOrgs,
   type FetchFn,
 } from './base/index';
 
@@ -164,7 +165,7 @@ function mapStatus(status: string): TicketStatus {
 export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Promise<ExportManifest> {
   const client = createHelpScoutClient(auth);
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Export conversations (= tickets)
   const convSpinner = exportSpinner('Exporting conversations...');
@@ -288,13 +289,7 @@ export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Prom
 
   // Write organizations from names collected during customer export
   const orgSpinner = exportSpinner('Collecting organizations...');
-  for (const name of orgNames) {
-    const org: Organization = {
-      id: `hs-org-${name}`, externalId: name, source: 'helpscout', name, domains: [],
-    };
-    appendJsonl(files.organizations, org);
-    counts.organizations++;
-  }
+  flushCollectedOrgs(orgNames, 'hs', 'helpscout', files.organizations, counts);
   orgSpinner.succeed(`${counts.organizations} organizations collected`);
 
   // Export Docs KB articles

@@ -1,8 +1,9 @@
 import type {
-  Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus, TicketPriority,
+  Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
 } from '../schema/types';
 import {
   createClient, paginateOffset, setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts, fuzzyPriorityMatch,
 } from './base/index';
 
 export interface ZohoDeskAuth {
@@ -118,22 +119,12 @@ function mapStatus(status: string): TicketStatus {
   return 'open';
 }
 
-function mapPriority(priority: string | null): TicketPriority {
-  if (!priority) return 'normal';
-  const lower = priority.toLowerCase();
-  if (lower === 'low') return 'low';
-  if (lower === 'medium' || lower === 'normal') return 'normal';
-  if (lower === 'high') return 'high';
-  if (lower === 'urgent') return 'urgent';
-  return 'normal';
-}
-
 // ---- Export ----
 
 export async function exportZohoDesk(auth: ZohoDeskAuth, outDir: string): Promise<ExportManifest> {
   const client = createZohoDeskClient(auth);
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Export tickets (offset-based via "from" param)
   const ticketSpinner = exportSpinner('Exporting tickets...');
@@ -150,7 +141,7 @@ export async function exportZohoDesk(auth: ZohoDeskAuth, outDir: string): Promis
           source: 'zoho-desk',
           subject: t.subject ?? `Ticket #${t.ticketNumber}`,
           status: mapStatus(t.status),
-          priority: mapPriority(t.priority),
+          priority: fuzzyPriorityMatch(t.priority),
           assignee: t.assigneeId ?? undefined,
           requester: t.contactId ?? 'unknown',
           tags: t.tags ?? [],

@@ -3,6 +3,7 @@ import type {
 } from '../schema/types';
 import {
   createClient, paginateCursor, paginatePages, setupExport, appendJsonl, writeManifest, exportSpinner,
+  initCounts, epochToISO,
 } from './base/index';
 
 export interface IntercomAuth {
@@ -115,16 +116,12 @@ function mapPriority(priority: string): TicketPriority {
   return priority === 'priority' ? 'high' : 'normal';
 }
 
-function epochToISO(epoch: number): string {
-  return new Date(epoch * 1000).toISOString();
-}
-
 // ---- Export ----
 
 export async function exportIntercom(auth: IntercomAuth, outDir: string): Promise<ExportManifest> {
   const client = createIntercomClient(auth);
   const files = setupExport(outDir);
-  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+  const counts = initCounts();
 
   // Export conversations (= tickets)
   const convSpinner = exportSpinner('Exporting conversations...');
