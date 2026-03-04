@@ -16,7 +16,8 @@ export async function POST(
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;
-  const rule = getAutomationRules().find(r => r.id === id);
+  // Scope by workspace to prevent cross-workspace data leakage
+  const rule = getAutomationRules(authResult.user.workspaceId).find(r => r.id === id);
   if (!rule) {
     return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
   }

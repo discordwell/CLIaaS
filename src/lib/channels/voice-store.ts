@@ -20,6 +20,7 @@ export interface VoiceCall {
   agentId?: string;
   ticketId?: string;
   ivrPath?: string[];        // digits pressed through IVR
+  workspaceId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -185,8 +186,12 @@ export function getCallBySid(sid: string): VoiceCall | undefined {
   return undefined;
 }
 
-export function getAllCalls(): VoiceCall[] {
-  return Array.from(getCallStore().values()).sort(
+export function getAllCalls(workspaceId?: string): VoiceCall[] {
+  let calls = Array.from(getCallStore().values());
+  if (workspaceId) {
+    calls = calls.filter(c => !c.workspaceId || c.workspaceId === workspaceId);
+  }
+  return calls.sort(
     (a, b) => b.createdAt - a.createdAt,
   );
 }
@@ -205,8 +210,8 @@ export function updateCall(
   return call;
 }
 
-export function getActiveCalls(): VoiceCall[] {
-  return getAllCalls().filter(
+export function getActiveCalls(workspaceId?: string): VoiceCall[] {
+  return getAllCalls(workspaceId).filter(
     (c) => c.status === 'ringing' || c.status === 'in-progress',
   );
 }

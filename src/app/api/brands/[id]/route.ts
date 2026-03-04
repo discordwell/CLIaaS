@@ -14,7 +14,8 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const brands = listBrands();
+  // Scope by workspace to prevent cross-workspace data leakage
+  const brands = listBrands(auth.user.workspaceId);
   const brand = brands.find((b) => b.id === id);
   if (!brand) {
     return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
@@ -32,7 +33,8 @@ export async function PATCH(
   const { id } = await params;
   const parsed = await parseJsonBody(request);
   if ('error' in parsed) return parsed.error;
-  const brand = updateBrand(id, parsed.data);
+  // Scope by workspace to prevent cross-workspace modification
+  const brand = updateBrand(id, parsed.data, auth.user.workspaceId);
   if (!brand) {
     return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
   }
@@ -47,7 +49,8 @@ export async function DELETE(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const deleted = deleteBrand(id);
+  // Scope by workspace to prevent cross-workspace deletion
+  const deleted = deleteBrand(id, auth.user.workspaceId);
   if (!deleted) {
     return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
   }

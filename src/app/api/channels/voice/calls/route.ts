@@ -9,8 +9,9 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if ('error' in auth) return auth.error;
 
-  const all = getAllCalls();
-  const active = getActiveCalls();
+  // Scope by workspace to prevent cross-workspace data leakage
+  const all = getAllCalls(auth.user.workspaceId);
+  const active = getActiveCalls(auth.user.workspaceId);
 
   return NextResponse.json({
     total: all.length,

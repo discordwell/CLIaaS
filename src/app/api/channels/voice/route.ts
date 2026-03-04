@@ -13,9 +13,10 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const config = getIVRConfig();
-  const calls = getAllCalls();
+  // Scope by workspace to prevent cross-workspace data leakage
+  const calls = getAllCalls(auth.user.workspaceId);
   const agents = getAgents();
-  const activeCalls = getActiveCalls();
+  const activeCalls = getActiveCalls(auth.user.workspaceId);
 
   return NextResponse.json({
     demo: isDemoMode(),

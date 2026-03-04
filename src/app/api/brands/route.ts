@@ -11,7 +11,8 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const brands = listBrands();
+    // Scope by workspace to prevent cross-workspace data leakage
+    const brands = listBrands(auth.user.workspaceId);
     return NextResponse.json({ brands });
   } catch (err) {
     return NextResponse.json(
@@ -38,6 +39,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Scope by workspace to prevent cross-workspace data leakage
     const brand = createBrand({
       name,
       subdomain,
@@ -46,7 +48,7 @@ export async function POST(request: NextRequest) {
       portalTitle: portalTitle ?? name,
       kbEnabled: kbEnabled ?? true,
       chatEnabled: chatEnabled ?? false,
-    });
+    }, auth.user.workspaceId);
 
     return NextResponse.json({ brand }, { status: 201 });
   } catch (err) {

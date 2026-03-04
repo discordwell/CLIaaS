@@ -19,6 +19,7 @@ export interface Rule {
   enabled: boolean;
   conditions: RuleConditions;
   actions: RuleAction[];
+  workspaceId?: string;
 }
 
 export interface TicketContext {

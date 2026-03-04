@@ -21,7 +21,8 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const workflow = await getWorkflow(id);
+  // Scope by workspace to prevent cross-workspace data leakage
+  const workflow = await getWorkflow(id, auth.user.workspaceId);
   if (!workflow) {
     return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
   }
@@ -41,7 +42,7 @@ export async function POST(
     return NextResponse.json({ workflow: optimized, changes, dryRun: true });
   }
 
-  await upsertWorkflow(optimized);
+  await upsertWorkflow(optimized, auth.user.workspaceId);
 
   // Sync updated rules into the automation engine
   if (optimized.enabled) {

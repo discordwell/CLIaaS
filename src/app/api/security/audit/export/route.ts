@@ -19,6 +19,8 @@ export async function GET(request: NextRequest) {
       outcome: searchParams.get('outcome') ?? undefined,
       from: searchParams.get('from') ?? undefined,
       to: searchParams.get('to') ?? undefined,
+      // Scope by workspace to prevent cross-workspace data leakage
+      workspaceId: auth.user.workspaceId,
     };
 
     const data = exportSecureAudit(format, filters);

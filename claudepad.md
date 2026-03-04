@@ -1,5 +1,16 @@
 # Session Summaries
 
+## 2026-03-04T07:15Z — Session 55: Cross-Workspace Data Leakage Fix
+- Fixed critical security bug: data from one workspace visible to users in other workspaces
+- Root cause: API routes and data stores were not filtering by `auth.user.workspaceId`
+- **37 files modified**, 1 new test file with 43 tests (all passing)
+- **DB-backed stores fixed** (Drizzle ORM `and()` clauses): rules, KB articles, SLA policies, workflows
+- **In-memory stores fixed** (filter functions): brands, webhooks, automation rules/audit, SMS/social/voice channels
+- **Audit routes fixed**: audit, audit/export, security/audit, security/audit/export
+- **Not fixed (intentional)**: Slack/Teams integrations (global singletons, not per-workspace data)
+- All backward-compatible: workspace parameters are optional
+- Code review: no high-severity issues found
+
 ## 2026-03-04T03:45Z — Session 54: DRY Connector Refactoring (Remaining 7)
 - Completed the DRY refactoring of all 10 platform connectors in `cli/connectors/`
 - Prior commits (e655f53, 3b961db) had already handled base utilities + freshdesk/groove/helpcrunch

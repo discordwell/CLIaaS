@@ -14,7 +14,8 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if ('error' in auth) return auth.error;
 
-  const rules = getAutomationRules();
+  // Scope by workspace to prevent cross-workspace data leakage
+  const rules = getAutomationRules(auth.user.workspaceId);
   return NextResponse.json({ rules });
 }
 
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
       enabled: enabled ?? true,
       conditions: conditions ?? { all: [], any: [] },
       actions: actions ?? [],
+      workspaceId: auth.user.workspaceId,
     };
 
     addAutomationRule(rule);

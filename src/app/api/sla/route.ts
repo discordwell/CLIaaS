@@ -11,7 +11,8 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const policies = await listPolicies();
+    // Scope by workspace to prevent cross-workspace data leakage
+    const policies = await listPolicies(auth.user.workspaceId);
     return NextResponse.json({ policies });
   } catch (err) {
     return NextResponse.json(
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Scope by workspace to prevent cross-workspace data leakage
     const policy = await createPolicy({
       name: name.trim(),
       conditions: conditions ?? {},
@@ -66,7 +68,7 @@ export async function POST(request: NextRequest) {
       },
       escalation: escalation ?? [],
       enabled: enabled ?? true,
-    });
+    }, auth.user.workspaceId);
 
     return NextResponse.json({ policy }, { status: 201 });
   } catch (err) {

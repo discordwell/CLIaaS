@@ -16,11 +16,57 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get('category');
     const status = searchParams.get('status');
 
-    let articles = (await loadKBArticles()).map((a) => ({
-      ...a,
-      status: a.status ?? 'published',
-      updatedAt: a.updatedAt ?? new Date().toISOString(),
-    }));
+    let articles: Array<{
+      id: string;
+      title: string;
+      body: string;
+      categoryPath: string[];
+      status: string;
+      updatedAt: string;
+    }>;
+
+    // In DB mode, query directly with workspace filter from auth
+    if (process.env.DATABASE_URL) {
+      try {
+        const { db } = await import('@/db');
+        const schema = await import('@/db/schema');
+        const { eq } = await import('drizzle-orm');
+
+        const rows = await db
+          .select({
+            id: schema.kbArticles.id,
+            title: schema.kbArticles.title,
+            body: schema.kbArticles.body,
+            categoryPath: schema.kbArticles.categoryPath,
+            status: schema.kbArticles.status,
+            updatedAt: schema.kbArticles.updatedAt,
+          })
+          .from(schema.kbArticles)
+          .where(eq(schema.kbArticles.workspaceId, auth.user.workspaceId));
+
+        articles = rows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          body: r.body,
+          categoryPath: r.categoryPath ?? [],
+          status: r.status ?? 'published',
+          updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
+        }));
+      } catch {
+        // DB unavailable, fall through to JSONL
+        articles = (await loadKBArticles()).map((a) => ({
+          ...a,
+          status: a.status ?? 'published',
+          updatedAt: a.updatedAt ?? new Date().toISOString(),
+        }));
+      }
+    } else {
+      articles = (await loadKBArticles()).map((a) => ({
+        ...a,
+        status: a.status ?? 'published',
+        updatedAt: a.updatedAt ?? new Date().toISOString(),
+      }));
+    }
 
     if (status) {
       articles = articles.filter((a) => a.status === status);

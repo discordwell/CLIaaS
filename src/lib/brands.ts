@@ -11,6 +11,7 @@ export interface Brand {
   portalTitle: string;
   kbEnabled: boolean;
   chatEnabled: boolean;
+  workspaceId?: string;
   createdAt: string;
 }
 
@@ -67,8 +68,11 @@ function ensureDefaults(): void {
 
 // ---- Public API ----
 
-export function listBrands(): Brand[] {
+export function listBrands(workspaceId?: string): Brand[] {
   ensureDefaults();
+  if (workspaceId) {
+    return brands.filter(b => !b.workspaceId || b.workspaceId === workspaceId);
+  }
   return [...brands];
 }
 
@@ -78,12 +82,14 @@ export function getBrandBySubdomain(subdomain: string): Brand | undefined {
 }
 
 export function createBrand(
-  input: Omit<Brand, 'id' | 'createdAt'>
+  input: Omit<Brand, 'id' | 'createdAt'>,
+  workspaceId?: string,
 ): Brand {
   ensureDefaults();
   const brand: Brand = {
     ...input,
     id: `brand-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    workspaceId,
     createdAt: new Date().toISOString(),
   };
   brands.push(brand);
@@ -93,19 +99,20 @@ export function createBrand(
 
 export function updateBrand(
   id: string,
-  updates: Partial<Omit<Brand, 'id' | 'createdAt'>>
+  updates: Partial<Omit<Brand, 'id' | 'createdAt'>>,
+  workspaceId?: string,
 ): Brand | null {
   ensureDefaults();
-  const idx = brands.findIndex((b) => b.id === id);
+  const idx = brands.findIndex((b) => b.id === id && (!workspaceId || !b.workspaceId || b.workspaceId === workspaceId));
   if (idx === -1) return null;
   brands[idx] = { ...brands[idx], ...updates };
   persistBrands();
   return brands[idx];
 }
 
-export function deleteBrand(id: string): boolean {
+export function deleteBrand(id: string, workspaceId?: string): boolean {
   ensureDefaults();
-  const idx = brands.findIndex((b) => b.id === id);
+  const idx = brands.findIndex((b) => b.id === id && (!workspaceId || !b.workspaceId || b.workspaceId === workspaceId));
   if (idx === -1) return false;
   brands.splice(idx, 1);
   persistBrands();

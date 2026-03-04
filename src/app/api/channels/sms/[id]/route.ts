@@ -13,7 +13,8 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const conversation = getConversation(id);
+  // Scope by workspace to prevent cross-workspace data leakage
+  const conversation = getConversation(id, auth.user.workspaceId);
 
   if (!conversation) {
     return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
@@ -30,7 +31,8 @@ export async function PATCH(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const conversation = closeConversation(id);
+  // Scope by workspace to prevent cross-workspace modification
+  const conversation = closeConversation(id, auth.user.workspaceId);
 
   if (!conversation) {
     return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });

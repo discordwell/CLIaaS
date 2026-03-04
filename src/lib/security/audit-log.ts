@@ -41,6 +41,7 @@ export interface SecureAuditFilters {
   to?: string;
   limit?: number;
   offset?: number;
+  workspaceId?: string;
 }
 
 // ---- Global singleton ----
@@ -244,6 +245,9 @@ export async function querySecureAuditFromDb(
     if (filters.actorId) {
       conditions.push(sql`${schema.auditEvents.diff}->>'actor' IS NOT NULL AND ${schema.auditEvents.diff}->'actor'->>'id' = ${filters.actorId}`);
     }
+    if (filters.workspaceId) {
+      conditions.push(eq(schema.auditEvents.workspaceId, filters.workspaceId));
+    }
     if (filters.from) {
       conditions.push(gte(schema.auditEvents.createdAt, new Date(filters.from)));
     }
@@ -313,6 +317,9 @@ export function querySecureAudit(
   }
   if (filters.outcome) {
     results = results.filter((e) => e.outcome === filters.outcome);
+  }
+  if (filters.workspaceId) {
+    results = results.filter((e) => e.workspaceId === filters.workspaceId);
   }
   if (filters.from) {
     const fromTime = new Date(filters.from).getTime();

@@ -10,7 +10,8 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if ('error' in auth) return auth.error;
 
-  const conversations = getAllConversations();
+  // Scope by workspace to prevent cross-workspace data leakage
+  const conversations = getAllConversations(auth.user.workspaceId);
   const config = getConfig();
   const demo = isDemoMode();
 

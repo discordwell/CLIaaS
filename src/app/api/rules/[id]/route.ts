@@ -20,12 +20,13 @@ export async function GET(
 
   const { db } = await import('@/db');
   const schema = await import('@/db/schema');
-  const { eq } = await import('drizzle-orm');
+  const { eq, and } = await import('drizzle-orm');
 
+  // Scope by workspace to prevent cross-workspace data leakage
   const rows = await db
     .select()
     .from(schema.rules)
-    .where(eq(schema.rules.id, id))
+    .where(and(eq(schema.rules.id, id), eq(schema.rules.workspaceId, auth.user.workspaceId)))
     .limit(1);
 
   if (rows.length === 0) {
@@ -53,7 +54,7 @@ export async function PATCH(
 
   const { db } = await import('@/db');
   const schema = await import('@/db/schema');
-  const { eq } = await import('drizzle-orm');
+  const { eq, and } = await import('drizzle-orm');
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (body.name !== undefined) updates.name = body.name;
@@ -61,10 +62,11 @@ export async function PATCH(
   if (body.conditions !== undefined) updates.conditions = body.conditions;
   if (body.actions !== undefined) updates.actions = body.actions;
 
+  // Scope by workspace to prevent cross-workspace modification
   const [updated] = await db
     .update(schema.rules)
     .set(updates)
-    .where(eq(schema.rules.id, id))
+    .where(and(eq(schema.rules.id, id), eq(schema.rules.workspaceId, auth.user.workspaceId)))
     .returning();
 
   if (!updated) {
@@ -89,11 +91,12 @@ export async function DELETE(
 
   const { db } = await import('@/db');
   const schema = await import('@/db/schema');
-  const { eq } = await import('drizzle-orm');
+  const { eq, and } = await import('drizzle-orm');
 
+  // Scope by workspace to prevent cross-workspace deletion
   const [deleted] = await db
     .delete(schema.rules)
-    .where(eq(schema.rules.id, id))
+    .where(and(eq(schema.rules.id, id), eq(schema.rules.workspaceId, auth.user.workspaceId)))
     .returning({ id: schema.rules.id });
 
   if (!deleted) {

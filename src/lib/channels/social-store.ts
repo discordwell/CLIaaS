@@ -25,6 +25,7 @@ export interface SocialConversation {
   status: 'active' | 'closed';
   messages: SocialMessage[];
   ticketId?: string;
+  workspaceId?: string;
   createdAt: number;
   lastActivity: number;
 }
@@ -191,6 +192,7 @@ export function createConversation(
   platform: SocialConversation['platform'],
   externalUserId: string,
   userName?: string,
+  workspaceId?: string,
 ): SocialConversation {
   const store = getStore();
   const conversation: SocialConversation = {
@@ -200,6 +202,7 @@ export function createConversation(
     userName: userName ?? externalUserId,
     status: 'active',
     messages: [],
+    workspaceId,
     createdAt: Date.now(),
     lastActivity: Date.now(),
   };
@@ -209,13 +212,23 @@ export function createConversation(
   return conversation;
 }
 
-export function getConversation(id: string): SocialConversation | undefined {
-  return getStore().get(id);
+export function getConversation(id: string, workspaceId?: string): SocialConversation | undefined {
+  const conv = getStore().get(id);
+  if (!conv) return undefined;
+  // If workspace filtering is requested, verify ownership
+  if (workspaceId && conv.workspaceId && conv.workspaceId !== workspaceId) {
+    return undefined;
+  }
+  return conv;
 }
 
-export function getAllConversations(): SocialConversation[] {
+export function getAllConversations(workspaceId?: string): SocialConversation[] {
   const store = getStore();
-  return Array.from(store.values()).sort(
+  let conversations = Array.from(store.values());
+  if (workspaceId) {
+    conversations = conversations.filter(c => !c.workspaceId || c.workspaceId === workspaceId);
+  }
+  return conversations.sort(
     (a, b) => b.lastActivity - a.lastActivity,
   );
 }
@@ -269,10 +282,14 @@ export function addMessage(
   return message;
 }
 
-export function closeConversation(id: string): SocialConversation | null {
+export function closeConversation(id: string, workspaceId?: string): SocialConversation | null {
   const store = getStore();
   const conversation = store.get(id);
   if (!conversation) return null;
+  // Verify workspace ownership before modifying
+  if (workspaceId && conversation.workspaceId && conversation.workspaceId !== workspaceId) {
+    return null;
+  }
 
   conversation.status = 'closed';
   conversation.lastActivity = Date.now();
