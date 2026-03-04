@@ -10,6 +10,7 @@ interface IngestOptions {
   dir: string;
   tenant: string;
   workspace: string;
+  provider?: 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
 }
 
 function readJsonl<T>(filePath: string): T[] {
@@ -49,9 +50,10 @@ export async function ingestZendeskToDb(opts: IngestOptions): Promise<void> {
   const rulesData = readJsonl<Rule>(join(opts.dir, 'rules.jsonl'));
   const attachmentsCount = messagesData.reduce((sum, msg) => sum + (msg.attachments?.length ?? 0), 0);
 
-  const spinner = ora('Ingesting Zendesk export into Postgres...').start();
+  const providerLabel = opts.provider ?? 'zendesk';
+  const spinner = ora(`Ingesting ${providerLabel} export into Postgres...`).start();
   await ingestZendeskExportDir(opts);
-  spinner.succeed('Zendesk ingest complete.');
+  spinner.succeed(`${providerLabel} ingest complete.`);
 
   console.log(chalk.gray(`  Workspace: ${opts.workspace}`));
   console.log(chalk.gray(`  Tickets:   ${ticketsData.length}`));

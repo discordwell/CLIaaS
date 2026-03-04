@@ -8,6 +8,7 @@ import {
 export interface ZohoDeskAuth {
   orgId: string;
   accessToken: string;
+  apiDomain?: string;
 }
 
 // ---- Zoho Desk API types ----
@@ -86,7 +87,7 @@ interface ZDAgent {
 
 function createZohoDeskClient(auth: ZohoDeskAuth) {
   return createClient({
-    baseUrl: 'https://desk.zoho.com/api/v1',
+    baseUrl: (auth.apiDomain ? auth.apiDomain.replace('www.zohoapis', 'desk.zoho') : 'https://desk.zoho.com') + '/api/v1',
     authHeaders: () => ({
       Authorization: `Zoho-oauthtoken ${auth.accessToken}`,
     }),

@@ -150,6 +150,8 @@ set -euo pipefail
 SUDO_CMD="$1"
 if $SUDO_CMD docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^kamal-proxy$'; then
   echo "kamal"
+elif command -v caddy >/dev/null 2>&1 && $SUDO_CMD systemctl is-active --quiet caddy 2>/dev/null; then
+  echo "caddy"
 elif command -v nginx >/dev/null 2>&1; then
   echo "nginx"
 else
@@ -158,7 +160,14 @@ fi
 CMDS
 )"
 
-  if [[ "$PROXY_MODE" == "kamal" ]]; then
+  if [[ "$PROXY_MODE" == "caddy" ]]; then
+    echo "Caddy detected — unified Caddyfile already configured, reloading..."
+    "${SSH_CMD[@]}" bash -s -- "$SUDO" <<'CMDS'
+set -euo pipefail
+SUDO_CMD="$1"
+$SUDO_CMD systemctl reload caddy
+CMDS
+  elif [[ "$PROXY_MODE" == "kamal" ]]; then
     "${SSH_CMD[@]}" bash -s -- "$SERVICE_NAME" "$DOMAIN" "$APP_PORT" "$SUDO" <<'CMDS'
 set -euo pipefail
 SERVICE_NAME="$1"

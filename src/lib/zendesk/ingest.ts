@@ -47,10 +47,13 @@ import type {
   TimeEntry,
 } from './types';
 
+type ProviderName = 'zendesk' | 'kayako' | 'kayako-classic' | 'helpcrunch' | 'freshdesk' | 'groove' | 'intercom' | 'helpscout' | 'zoho-desk' | 'hubspot';
+
 export interface IngestOptions {
   dir: string;
   tenant: string;
   workspace: string;
+  provider?: ProviderName;
 }
 
 export interface IngestData {
@@ -110,16 +113,16 @@ async function getOrCreateWorkspace(tenantId: string, name: string): Promise<str
   return row.id;
 }
 
-async function getOrCreateIntegration(workspaceId: string): Promise<string> {
+async function getOrCreateIntegration(workspaceId: string, provider: ProviderName = 'zendesk'): Promise<string> {
   const existing = await db
     .select({ id: integrations.id })
     .from(integrations)
-    .where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, 'zendesk')))
+    .where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider)))
     .limit(1);
   if (existing[0]) return existing[0].id;
   const [row] = await db
     .insert(integrations)
-    .values({ workspaceId, provider: 'zendesk', status: 'active' })
+    .values({ workspaceId, provider, status: 'active' })
     .returning({ id: integrations.id });
   return row.id;
 }
@@ -175,10 +178,10 @@ async function upsertRawRecord(
     });
 }
 
-export async function ensureZendeskContext(opts: { tenant: string; workspace: string }): Promise<{ workspaceId: string; integrationId: string }> {
+export async function ensureZendeskContext(opts: { tenant: string; workspace: string; provider?: ProviderName }): Promise<{ workspaceId: string; integrationId: string }> {
   const tenantId = await getOrCreateTenant(opts.tenant);
   const workspaceId = await getOrCreateWorkspace(tenantId, opts.workspace);
-  const integrationId = await getOrCreateIntegration(workspaceId);
+  const integrationId = await getOrCreateIntegration(workspaceId, opts.provider ?? 'zendesk');
   return { workspaceId, integrationId };
 }
 
@@ -206,11 +209,11 @@ export async function ingestZendeskExportDir(opts: IngestOptions): Promise<void>
     timeEntries: readJsonl<TimeEntry>(join(opts.dir, 'time_entries.jsonl')),
   };
 
-  await ingestZendeskData({ tenant: opts.tenant, workspace: opts.workspace, data });
+  await ingestZendeskData({ tenant: opts.tenant, workspace: opts.workspace, data, provider: opts.provider });
 }
 
-export async function ingestZendeskData(opts: { tenant: string; workspace: string; data: IngestData }): Promise<void> {
-  const { workspaceId, integrationId } = await ensureZendeskContext({ tenant: opts.tenant, workspace: opts.workspace });
+export async function ingestZendeskData(opts: { tenant: string; workspace: string; data: IngestData; provider?: ProviderName }): Promise<void> {
+  const { workspaceId, integrationId } = await ensureZendeskContext({ tenant: opts.tenant, workspace: opts.workspace, provider: opts.provider });
 
   const {
     tickets: ticketsData,
@@ -278,6 +281,17 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
       orgIdByExternal.set(org.externalId, existingId);
       continue;
     }
+    // Check if org with same name already exists in this workspace (from another connector)
+    const existingByName = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(and(eq(organizations.workspaceId, workspaceId), eq(organizations.name, org.name)))
+      .limit(1);
+    if (existingByName[0]) {
+      await upsertExternalObject(integrationId, 'organization', org.externalId, existingByName[0].id);
+      orgIdByExternal.set(org.externalId, existingByName[0].id);
+      continue;
+    }
     const [row] = await db
       .insert(organizations)
       .values({
@@ -339,20 +353,35 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
           .where(eq(users.id, existingUserId));
         userIdByExternal.set(customer.externalId, existingUserId);
       } else {
-        const [userRow] = await db
-          .insert(users)
-          .values({
-            workspaceId,
-            name: customer.name,
-            email: customer.email ?? null,
-            role: 'agent',
-            status: 'active',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .returning({ id: users.id });
-        await upsertExternalObject(integrationId, 'user', customer.externalId, userRow.id);
-        userIdByExternal.set(customer.externalId, userRow.id);
+        // Check if user with same email already exists in this workspace (from another connector)
+        let existingUser: { id: string } | undefined;
+        if (customer.email) {
+          const found = await db
+            .select({ id: users.id })
+            .from(users)
+            .where(and(eq(users.workspaceId, workspaceId), eq(users.email, customer.email)))
+            .limit(1);
+          existingUser = found[0];
+        }
+        if (existingUser) {
+          await upsertExternalObject(integrationId, 'user', customer.externalId, existingUser.id);
+          userIdByExternal.set(customer.externalId, existingUser.id);
+        } else {
+          const [userRow] = await db
+            .insert(users)
+            .values({
+              workspaceId,
+              name: customer.name,
+              email: customer.email ?? null,
+              role: 'agent',
+              status: 'active',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .returning({ id: users.id });
+          await upsertExternalObject(integrationId, 'user', customer.externalId, userRow.id);
+          userIdByExternal.set(customer.externalId, userRow.id);
+        }
       }
     }
   }
@@ -538,7 +567,7 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
           brandId,
           ticketFormId,
           customFields: ticket.customFields ?? null,
-          updatedAt: new Date(ticket.updatedAt),
+          updatedAt: new Date(ticket.updatedAt ?? ticket.createdAt),
         })
         .where(eq(tickets.id, existingId));
       ticketIdByCanonical.set(ticket.id, existingId);
@@ -555,10 +584,10 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
           subject: ticket.subject,
           status: ticket.status,
           priority: ticket.priority,
-          source: 'zendesk',
+          source: ticket.source ?? opts.provider ?? 'zendesk',
           customFields: ticket.customFields ?? null,
           createdAt: new Date(ticket.createdAt),
-          updatedAt: new Date(ticket.updatedAt),
+          updatedAt: new Date(ticket.updatedAt ?? ticket.createdAt),
         })
         .returning({ id: tickets.id });
       await upsertExternalObject(integrationId, 'ticket', ticket.externalId, row.id);
@@ -582,7 +611,7 @@ export async function ingestZendeskData(opts: { tenant: string; workspace: strin
           ticketId,
           channelType: 'email',
           startedAt: new Date(ticket.createdAt),
-          lastActivityAt: new Date(ticket.updatedAt),
+          lastActivityAt: new Date(ticket.updatedAt ?? ticket.createdAt),
         })
         .returning({ id: conversations.id });
       conversationIdByTicket.set(ticket.id, convRow.id);

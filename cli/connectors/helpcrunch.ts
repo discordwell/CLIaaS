@@ -282,16 +282,23 @@ export async function helpcrunchUpdateChat(auth: HelpcrunchAuth, chatId: number,
 }
 
 export async function helpcrunchPostMessage(auth: HelpcrunchAuth, chatId: number, body: string): Promise<void> {
-  await createHelpcrunchClient(auth).request(`/chats/${chatId}/messages`, {
+  await createHelpcrunchClient(auth).request('/messages', {
     method: 'POST',
-    body: { text: body, type: 'message' },
+    body: { chat: chatId, text: body, type: 'message' },
   });
 }
 
-export async function helpcrunchCreateChat(auth: HelpcrunchAuth, customerId: number, message: string): Promise<{ id: number }> {
-  const result = await createHelpcrunchClient(auth).request<{ id: number }>('/chats', {
+export async function helpcrunchCreateChat(auth: HelpcrunchAuth, customerId: number, message: string, applicationId = 1): Promise<{ id: number }> {
+  const client = createHelpcrunchClient(auth);
+  // Create the chat first (application is required)
+  const chat = await client.request<{ id: number }>('/chats', {
     method: 'POST',
-    body: { customer: customerId, message: { text: message } },
+    body: { customer: customerId, application: applicationId },
   });
-  return { id: result.id };
+  // Then post the initial message
+  await client.request('/messages', {
+    method: 'POST',
+    body: { chat: chat.id, text: message, type: 'message' },
+  });
+  return { id: chat.id };
 }

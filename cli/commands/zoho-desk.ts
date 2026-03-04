@@ -6,9 +6,10 @@ import type { ZohoDeskAuth } from '../connectors/zoho-desk.js';
 function resolveAuth(opts: { orgId?: string; accessToken?: string }): ZohoDeskAuth {
   const orgId = opts.orgId ?? process.env.ZOHO_DESK_ORG_ID;
   const accessToken = opts.accessToken ?? process.env.ZOHO_DESK_ACCESS_TOKEN;
+  const apiDomain = process.env.ZOHO_DESK_API_DOMAIN;
   if (!orgId) { console.error(chalk.red('Missing --org-id or ZOHO_DESK_ORG_ID env var')); process.exit(1); }
   if (!accessToken) { console.error(chalk.red('Missing --access-token or ZOHO_DESK_ACCESS_TOKEN env var')); process.exit(1); }
-  return { orgId, accessToken };
+  return { orgId, accessToken, apiDomain };
 }
 
 export function registerZohoDeskCommands(program: Command): void {

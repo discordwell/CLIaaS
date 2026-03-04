@@ -116,4 +116,16 @@ describe('zoho-desk connector (migrated to base)', () => {
       expect.any(Object),
     );
   });
+
+  it('zodeskFetch uses JP domain when apiDomain is set', async () => {
+    const jpAuth = { orgId: 'org-jp', accessToken: 'jp-token', apiDomain: 'https://www.zohoapis.jp' };
+    mockFetch.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    await zodeskFetch(jpAuth, '/tickets?from=0&limit=10');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://desk.zoho.jp/api/v1/tickets?from=0&limit=10',
+      expect.any(Object),
+    );
+  });
 });
