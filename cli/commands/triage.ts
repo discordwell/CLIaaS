@@ -1,8 +1,8 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import { loadTickets, loadMessages, getTicketMessages } from '../data.js';
 import { getProvider } from '../providers/index.js';
+import { output, isJsonMode, createSpinner } from '../output.js';
 
 export function registerTriageCommand(program: Command): void {
   program
@@ -21,27 +21,69 @@ export function registerTriageCommand(program: Command): void {
         .slice(0, parseInt(opts.limit, 10));
 
       if (queue.length === 0) {
-        console.log(chalk.yellow(`No ${opts.queue} tickets found.`));
+        if (isJsonMode()) {
+          output({ results: [], queue: opts.queue, provider: provider.name }, () => {});
+        } else {
+          console.log(chalk.yellow(`No ${opts.queue} tickets found.`));
+        }
         return;
       }
 
-      console.log(chalk.cyan(`Triaging ${queue.length} ${opts.queue} tickets with ${provider.name}...\n`));
+      if (!isJsonMode()) {
+        console.log(chalk.cyan(`Triaging ${queue.length} ${opts.queue} tickets with ${provider.name}...\n`));
+      }
+
+      const results: Array<{
+        ticketId: string;
+        externalId: string;
+        subject: string;
+        suggestedPriority: string;
+        suggestedAssignee: string | null;
+        suggestedCategory: string;
+        reasoning: string;
+        error?: string;
+      }> = [];
 
       for (const ticket of queue) {
-        const spinner = ora(`Triaging #${ticket.externalId}: ${ticket.subject.slice(0, 40)}...`).start();
+        const spinner = createSpinner(`Triaging #${ticket.externalId}: ${ticket.subject.slice(0, 40)}...`).start();
         try {
           const messages = getTicketMessages(ticket.id, allMessages);
           const result = await provider.triageTicket(ticket, messages);
+
+          results.push({
+            ticketId: ticket.id,
+            externalId: ticket.externalId,
+            subject: ticket.subject,
+            suggestedPriority: result.suggestedPriority,
+            suggestedAssignee: result.suggestedAssignee ?? null,
+            suggestedCategory: result.suggestedCategory,
+            reasoning: result.reasoning,
+          });
 
           const priColor = result.suggestedPriority === 'urgent' ? chalk.red.bold :
             result.suggestedPriority === 'high' ? chalk.yellow : chalk.white;
 
           spinner.succeed(
-            `#${ticket.externalId} [${priColor(result.suggestedPriority.toUpperCase())}] "${ticket.subject.slice(0, 35)}" → ${result.suggestedAssignee ?? 'unassigned'}, ${chalk.blue(result.suggestedCategory)}`
+            `#${ticket.externalId} [${priColor(result.suggestedPriority.toUpperCase())}] "${ticket.subject.slice(0, 35)}" \u2192 ${result.suggestedAssignee ?? 'unassigned'}, ${chalk.blue(result.suggestedCategory)}`
           );
         } catch (err) {
-          spinner.fail(`#${ticket.externalId}: ${err instanceof Error ? err.message : 'triage failed'}`);
+          const errorMsg = err instanceof Error ? err.message : 'triage failed';
+          results.push({
+            ticketId: ticket.id,
+            externalId: ticket.externalId,
+            subject: ticket.subject,
+            suggestedPriority: 'normal',
+            suggestedAssignee: null,
+            suggestedCategory: 'unknown',
+            reasoning: '',
+            error: errorMsg,
+          });
+          spinner.fail(`#${ticket.externalId}: ${errorMsg}`);
         }
+      }
+
+      if (isJsonMode()) {
+        output({ results, queue: opts.queue, provider: provider.name }, () => {});
       }
     });
 }

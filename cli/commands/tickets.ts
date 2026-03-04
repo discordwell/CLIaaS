@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { loadTickets, loadMessages, getTicketMessages } from '../data.js';
+import { output, outputError, isJsonMode } from '../output.js';
 
 export function registerTicketCommands(program: Command): void {
   const tickets = program
@@ -41,24 +42,49 @@ export function registerTicketCommands(program: Command): void {
       const display = filtered.slice(0, limit);
 
       if (display.length === 0) {
-        console.log(chalk.yellow('No tickets found matching filters.'));
+        if (isJsonMode()) {
+          output({ tickets: [], total: 0 }, () => {});
+        } else {
+          console.log(chalk.yellow('No tickets found matching filters.'));
+        }
         return;
       }
 
-      console.log(chalk.cyan(`Showing ${display.length} of ${filtered.length} tickets\n`));
+      output(
+        {
+          tickets: display.map(t => ({
+            id: t.id,
+            externalId: t.externalId,
+            status: t.status,
+            priority: t.priority,
+            assignee: t.assignee ?? null,
+            subject: t.subject,
+            requester: t.requester,
+            source: t.source,
+            tags: t.tags,
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+          })),
+          total: filtered.length,
+          showing: display.length,
+        },
+        () => {
+          console.log(chalk.cyan(`Showing ${display.length} of ${filtered.length} tickets\n`));
 
-      const header = `${'ID'.padEnd(14)} ${'STATUS'.padEnd(10)} ${'PRI'.padEnd(8)} ${'ASSIGNEE'.padEnd(20)} SUBJECT`;
-      console.log(chalk.bold(header));
-      console.log('─'.repeat(90));
+          const header = `${'ID'.padEnd(14)} ${'STATUS'.padEnd(10)} ${'PRI'.padEnd(8)} ${'ASSIGNEE'.padEnd(20)} SUBJECT`;
+          console.log(chalk.bold(header));
+          console.log('\u2500'.repeat(90));
 
-      for (const t of display) {
-        const priColor = t.priority === 'urgent' ? chalk.red : t.priority === 'high' ? chalk.yellow : chalk.white;
-        const statusColor = t.status === 'open' ? chalk.green : t.status === 'pending' ? chalk.yellow : chalk.gray;
+          for (const t of display) {
+            const priColor = t.priority === 'urgent' ? chalk.red : t.priority === 'high' ? chalk.yellow : chalk.white;
+            const statusColor = t.status === 'open' ? chalk.green : t.status === 'pending' ? chalk.yellow : chalk.gray;
 
-        console.log(
-          `${t.id.padEnd(14)} ${statusColor(t.status.padEnd(10))} ${priColor(t.priority.padEnd(8))} ${(t.assignee ?? '—').padEnd(20)} ${t.subject.slice(0, 40)}`
-        );
-      }
+            console.log(
+              `${t.id.padEnd(14)} ${statusColor(t.status.padEnd(10))} ${priColor(t.priority.padEnd(8))} ${(t.assignee ?? '\u2014').padEnd(20)} ${t.subject.slice(0, 40)}`
+            );
+          }
+        },
+      );
     });
 
   tickets
@@ -93,38 +119,60 @@ export function registerTicketCommands(program: Command): void {
       const combined = [...ticketMatches, ...fromMessages].slice(0, limit);
 
       if (combined.length === 0) {
-        console.log(chalk.yellow(`No results for "${query}"`));
+        if (isJsonMode()) {
+          output({ results: [], query, ticketMatches: 0, messageMatches: 0 }, () => {});
+        } else {
+          console.log(chalk.yellow(`No results for "${query}"`));
+        }
         return;
       }
 
-      console.log(chalk.cyan(`Found ${ticketMatches.length} ticket matches + ${fromMessages.length} message matches for "${query}"\n`));
+      output(
+        {
+          results: combined.map(t => ({
+            id: t.id,
+            externalId: t.externalId,
+            status: t.status,
+            priority: t.priority,
+            matchType: ticketMatches.includes(t) ? 'ticket' : 'message',
+            subject: t.subject,
+            assignee: t.assignee ?? null,
+          })),
+          query,
+          ticketMatches: ticketMatches.length,
+          messageMatches: fromMessages.length,
+        },
+        () => {
+          console.log(chalk.cyan(`Found ${ticketMatches.length} ticket matches + ${fromMessages.length} message matches for "${query}"\n`));
 
-      const header = `${'ID'.padEnd(14)} ${'STATUS'.padEnd(10)} ${'PRI'.padEnd(8)} ${'MATCH'.padEnd(8)} SUBJECT`;
-      console.log(chalk.bold(header));
-      console.log('─'.repeat(80));
+          const header = `${'ID'.padEnd(14)} ${'STATUS'.padEnd(10)} ${'PRI'.padEnd(8)} ${'MATCH'.padEnd(8)} SUBJECT`;
+          console.log(chalk.bold(header));
+          console.log('\u2500'.repeat(80));
 
-      for (const t of combined) {
-        const isDirectMatch = ticketMatches.includes(t);
-        const matchType = isDirectMatch ? chalk.green('ticket') : chalk.blue('msg');
-        const priColor = t.priority === 'urgent' ? chalk.red : t.priority === 'high' ? chalk.yellow : chalk.white;
-        const statusColor = t.status === 'open' ? chalk.green : t.status === 'pending' ? chalk.yellow : chalk.gray;
+          for (const t of combined) {
+            const isDirectMatch = ticketMatches.includes(t);
+            const matchType = isDirectMatch ? chalk.green('ticket') : chalk.blue('msg');
+            const priColor = t.priority === 'urgent' ? chalk.red : t.priority === 'high' ? chalk.yellow : chalk.white;
+            const statusColor = t.status === 'open' ? chalk.green : t.status === 'pending' ? chalk.yellow : chalk.gray;
 
-        console.log(
-          `${t.id.padEnd(14)} ${statusColor(t.status.padEnd(10))} ${priColor(t.priority.padEnd(8))} ${matchType.padEnd(8)} ${t.subject.slice(0, 40)}`
-        );
+            console.log(
+              `${t.id.padEnd(14)} ${statusColor(t.status.padEnd(10))} ${priColor(t.priority.padEnd(8))} ${matchType.padEnd(8)} ${t.subject.slice(0, 40)}`
+            );
 
-        // Show matching message snippet
-        if (!isDirectMatch) {
-          const matchingMsg = messageMatches.find(m => m.ticketId === t.id);
-          if (matchingMsg) {
-            const idx = matchingMsg.body.toLowerCase().indexOf(lower);
-            const start = Math.max(0, idx - 30);
-            const end = Math.min(matchingMsg.body.length, idx + query.length + 30);
-            const snippet = (start > 0 ? '...' : '') + matchingMsg.body.slice(start, end) + (end < matchingMsg.body.length ? '...' : '');
-            console.log(chalk.gray(`  └─ "${snippet.replace(/\n/g, ' ')}"`));
+            // Show matching message snippet
+            if (!isDirectMatch) {
+              const matchingMsg = messageMatches.find(m => m.ticketId === t.id);
+              if (matchingMsg) {
+                const idx = matchingMsg.body.toLowerCase().indexOf(lower);
+                const start = Math.max(0, idx - 30);
+                const end = Math.min(matchingMsg.body.length, idx + query.length + 30);
+                const snippet = (start > 0 ? '...' : '') + matchingMsg.body.slice(start, end) + (end < matchingMsg.body.length ? '...' : '');
+                console.log(chalk.gray(`  \u2514\u2500 "${snippet.replace(/\n/g, ' ')}"`));
+              }
+            }
           }
-        }
-      }
+        },
+      );
     });
 
   tickets
@@ -138,31 +186,59 @@ export function registerTicketCommands(program: Command): void {
 
       const ticket = allTickets.find(t => t.id === id || t.externalId === id);
       if (!ticket) {
-        console.error(chalk.red(`Ticket not found: ${id}`));
+        outputError(`Ticket not found: ${id}`);
         process.exit(1);
       }
 
-      console.log(chalk.cyan.bold(`\n${ticket.subject}`));
-      console.log(chalk.gray('─'.repeat(60)));
-      console.log(`ID:         ${ticket.id} (external: ${ticket.externalId})`);
-      console.log(`Source:     ${ticket.source}`);
-      console.log(`Status:     ${ticket.status}`);
-      console.log(`Priority:   ${ticket.priority}`);
-      console.log(`Requester:  ${ticket.requester}`);
-      console.log(`Assignee:   ${ticket.assignee ?? 'Unassigned'}`);
-      console.log(`Tags:       ${ticket.tags.join(', ') || 'none'}`);
-      console.log(`Created:    ${ticket.createdAt}`);
-      console.log(`Updated:    ${ticket.updatedAt}`);
+      const threadMessages = getTicketMessages(ticket.id, messages)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-      const threadMessages = getTicketMessages(ticket.id, messages);
-      if (threadMessages.length > 0) {
-        console.log(chalk.cyan(`\n--- Conversation (${threadMessages.length} messages) ---\n`));
-        for (const m of threadMessages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())) {
-          const typeTag = m.type === 'note' ? chalk.yellow('[NOTE]') : chalk.blue('[REPLY]');
-          console.log(`${typeTag} ${chalk.bold(m.author)} — ${chalk.gray(m.createdAt)}`);
-          console.log(m.body);
-          console.log(chalk.gray('---'));
-        }
-      }
+      output(
+        {
+          ticket: {
+            id: ticket.id,
+            externalId: ticket.externalId,
+            source: ticket.source,
+            subject: ticket.subject,
+            status: ticket.status,
+            priority: ticket.priority,
+            requester: ticket.requester,
+            assignee: ticket.assignee ?? null,
+            tags: ticket.tags,
+            createdAt: ticket.createdAt,
+            updatedAt: ticket.updatedAt,
+          },
+          messages: threadMessages.map(m => ({
+            id: m.id,
+            author: m.author,
+            type: m.type,
+            body: m.body,
+            createdAt: m.createdAt,
+          })),
+        },
+        () => {
+          console.log(chalk.cyan.bold(`\n${ticket.subject}`));
+          console.log(chalk.gray('\u2500'.repeat(60)));
+          console.log(`ID:         ${ticket.id} (external: ${ticket.externalId})`);
+          console.log(`Source:     ${ticket.source}`);
+          console.log(`Status:     ${ticket.status}`);
+          console.log(`Priority:   ${ticket.priority}`);
+          console.log(`Requester:  ${ticket.requester}`);
+          console.log(`Assignee:   ${ticket.assignee ?? 'Unassigned'}`);
+          console.log(`Tags:       ${ticket.tags.join(', ') || 'none'}`);
+          console.log(`Created:    ${ticket.createdAt}`);
+          console.log(`Updated:    ${ticket.updatedAt}`);
+
+          if (threadMessages.length > 0) {
+            console.log(chalk.cyan(`\n--- Conversation (${threadMessages.length} messages) ---\n`));
+            for (const m of threadMessages) {
+              const typeTag = m.type === 'note' ? chalk.yellow('[NOTE]') : chalk.blue('[REPLY]');
+              console.log(`${typeTag} ${chalk.bold(m.author)} \u2014 ${chalk.gray(m.createdAt)}`);
+              console.log(m.body);
+              console.log(chalk.gray('---'));
+            }
+          }
+        },
+      );
     });
 }

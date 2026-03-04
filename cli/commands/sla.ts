@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { loadTickets, loadMessages, getTicketMessages } from '../data.js';
+import { output, isJsonMode } from '../output.js';
 
 interface SLAPolicy {
   priority: string;
@@ -18,7 +19,7 @@ const DEFAULT_SLAS: SLAPolicy[] = [
 export function registerSLACommand(program: Command): void {
   program
     .command('sla')
-    .description('SLA compliance monitor — shows breach status for open tickets')
+    .description('SLA compliance monitor \u2014 shows breach status for open tickets')
     .option('--dir <dir>', 'Export directory')
     .option('--status <status>', 'Filter by status (default: open,pending)')
     .action((opts: { dir?: string; status?: string }) => {
@@ -29,30 +30,30 @@ export function registerSLACommand(program: Command): void {
       const active = tickets.filter(t => statuses.includes(t.status));
 
       if (active.length === 0) {
-        console.log(chalk.yellow('No active tickets found.'));
+        if (isJsonMode()) {
+          output({ summary: { breached: 0, atRisk: 0, compliant: 0, total: 0 }, tickets: [] }, () => {});
+        } else {
+          console.log(chalk.yellow('No active tickets found.'));
+        }
         return;
       }
-
-      console.log(chalk.bold.cyan('\nSLA Compliance Report\n'));
-
-      // Print SLA policies
-      console.log(chalk.bold('SLA Policies:'));
-      for (const sla of DEFAULT_SLAS) {
-        console.log(chalk.gray(`  ${sla.priority.toUpperCase().padEnd(7)} — First response: ${sla.firstResponseHrs}h, Resolution: ${sla.resolutionHrs}h`));
-      }
-      console.log('');
 
       let breached = 0;
       let atRisk = 0;
       let compliant = 0;
 
       const results: Array<{
-        ticket: typeof active[0];
-        sla: SLAPolicy;
-        firstResponseMs: number | null;
+        ticketId: string;
+        externalId: string;
+        subject: string;
+        priority: string;
+        assignee: string | null;
         ageMs: number;
-        frStatus: 'breached' | 'at-risk' | 'ok';
-        resStatus: 'breached' | 'at-risk' | 'ok';
+        firstResponseMs: number | null;
+        firstResponseStatus: 'breached' | 'at-risk' | 'ok';
+        resolutionStatus: 'breached' | 'at-risk' | 'ok';
+        slaTargetFirstResponseHrs: number;
+        slaTargetResolutionHrs: number;
       }> = [];
 
       for (const ticket of active) {
@@ -87,54 +88,84 @@ export function registerSLACommand(program: Command): void {
         else if (frStatus === 'at-risk' || resStatus === 'at-risk') atRisk++;
         else compliant++;
 
-        results.push({ ticket, sla, firstResponseMs, ageMs, frStatus, resStatus });
+        results.push({
+          ticketId: ticket.id,
+          externalId: ticket.externalId,
+          subject: ticket.subject,
+          priority: ticket.priority,
+          assignee: ticket.assignee ?? null,
+          ageMs,
+          firstResponseMs,
+          firstResponseStatus: frStatus,
+          resolutionStatus: resStatus,
+          slaTargetFirstResponseHrs: sla.firstResponseHrs,
+          slaTargetResolutionHrs: sla.resolutionHrs,
+        });
       }
 
-      // Summary
-      console.log(chalk.bold('Summary:'));
-      console.log(chalk.red(`  Breached: ${breached}`));
-      console.log(chalk.yellow(`  At Risk:  ${atRisk}`));
-      console.log(chalk.green(`  OK:       ${compliant}`));
-      console.log(chalk.gray(`  Total:    ${active.length}`));
-      console.log('');
+      output(
+        {
+          summary: { breached, atRisk, compliant, total: active.length },
+          policies: DEFAULT_SLAS,
+          tickets: results,
+        },
+        () => {
+          console.log(chalk.bold.cyan('\nSLA Compliance Report\n'));
 
-      // Show breached first, then at-risk
-      const showFirst = results
-        .filter(r => r.frStatus === 'breached' || r.resStatus === 'breached')
-        .sort((a, b) => b.ageMs - a.ageMs);
+          // Print SLA policies
+          console.log(chalk.bold('SLA Policies:'));
+          for (const sla of DEFAULT_SLAS) {
+            console.log(chalk.gray(`  ${sla.priority.toUpperCase().padEnd(7)} \u2014 First response: ${sla.firstResponseHrs}h, Resolution: ${sla.resolutionHrs}h`));
+          }
+          console.log('');
 
-      const showRisk = results
-        .filter(r => (r.frStatus === 'at-risk' || r.resStatus === 'at-risk') && r.frStatus !== 'breached' && r.resStatus !== 'breached')
-        .sort((a, b) => b.ageMs - a.ageMs);
+          // Summary
+          console.log(chalk.bold('Summary:'));
+          console.log(chalk.red(`  Breached: ${breached}`));
+          console.log(chalk.yellow(`  At Risk:  ${atRisk}`));
+          console.log(chalk.green(`  OK:       ${compliant}`));
+          console.log(chalk.gray(`  Total:    ${active.length}`));
+          console.log('');
 
-      if (showFirst.length > 0) {
-        console.log(chalk.red.bold('BREACHED:\n'));
-        for (const r of showFirst.slice(0, 10)) {
-          const age = formatDuration(r.ageMs);
-          const fr = r.firstResponseMs !== null ? formatDuration(r.firstResponseMs) : 'NO RESPONSE';
-          console.log(
-            `  ${chalk.red('●')} #${r.ticket.externalId} [${r.ticket.priority.toUpperCase()}] ${r.ticket.subject.slice(0, 40)}`
-          );
-          console.log(
-            `    Age: ${chalk.bold(age)} | FR: ${r.frStatus === 'breached' ? chalk.red(fr) : chalk.green(fr)} | Target: ${r.sla.firstResponseHrs}h/${r.sla.resolutionHrs}h | ${chalk.gray(r.ticket.assignee ?? 'unassigned')}`
-          );
-        }
-        console.log('');
-      }
+          // Show breached first, then at-risk
+          const showFirst = results
+            .filter(r => r.firstResponseStatus === 'breached' || r.resolutionStatus === 'breached')
+            .sort((a, b) => b.ageMs - a.ageMs);
 
-      if (showRisk.length > 0) {
-        console.log(chalk.yellow.bold('AT RISK:\n'));
-        for (const r of showRisk.slice(0, 10)) {
-          const age = formatDuration(r.ageMs);
-          const fr = r.firstResponseMs !== null ? formatDuration(r.firstResponseMs) : 'PENDING';
-          console.log(
-            `  ${chalk.yellow('●')} #${r.ticket.externalId} [${r.ticket.priority.toUpperCase()}] ${r.ticket.subject.slice(0, 40)}`
-          );
-          console.log(
-            `    Age: ${chalk.bold(age)} | FR: ${fr} | Target: ${r.sla.firstResponseHrs}h/${r.sla.resolutionHrs}h | ${chalk.gray(r.ticket.assignee ?? 'unassigned')}`
-          );
-        }
-      }
+          const showRisk = results
+            .filter(r => (r.firstResponseStatus === 'at-risk' || r.resolutionStatus === 'at-risk') && r.firstResponseStatus !== 'breached' && r.resolutionStatus !== 'breached')
+            .sort((a, b) => b.ageMs - a.ageMs);
+
+          if (showFirst.length > 0) {
+            console.log(chalk.red.bold('BREACHED:\n'));
+            for (const r of showFirst.slice(0, 10)) {
+              const age = formatDuration(r.ageMs);
+              const fr = r.firstResponseMs !== null ? formatDuration(r.firstResponseMs) : 'NO RESPONSE';
+              console.log(
+                `  ${chalk.red('\u25CF')} #${r.externalId} [${r.priority.toUpperCase()}] ${r.subject.slice(0, 40)}`
+              );
+              console.log(
+                `    Age: ${chalk.bold(age)} | FR: ${r.firstResponseStatus === 'breached' ? chalk.red(fr) : chalk.green(fr)} | Target: ${r.slaTargetFirstResponseHrs}h/${r.slaTargetResolutionHrs}h | ${chalk.gray(r.assignee ?? 'unassigned')}`
+              );
+            }
+            console.log('');
+          }
+
+          if (showRisk.length > 0) {
+            console.log(chalk.yellow.bold('AT RISK:\n'));
+            for (const r of showRisk.slice(0, 10)) {
+              const age = formatDuration(r.ageMs);
+              const fr = r.firstResponseMs !== null ? formatDuration(r.firstResponseMs) : 'PENDING';
+              console.log(
+                `  ${chalk.yellow('\u25CF')} #${r.externalId} [${r.priority.toUpperCase()}] ${r.subject.slice(0, 40)}`
+              );
+              console.log(
+                `    Age: ${chalk.bold(age)} | FR: ${fr} | Target: ${r.slaTargetFirstResponseHrs}h/${r.slaTargetResolutionHrs}h | ${chalk.gray(r.assignee ?? 'unassigned')}`
+              );
+            }
+          }
+        },
+      );
     });
 }
 
