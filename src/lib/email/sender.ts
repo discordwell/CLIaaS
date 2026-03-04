@@ -1,6 +1,17 @@
-import nodemailer from 'nodemailer';
+/**
+ * High-level email sending functions.
+ *
+ * Uses the unified provider abstraction (provider.ts) which supports
+ * Resend, SendGrid, SMTP, and console fallback.
+ *
+ * Queue integration: when Redis/BullMQ is available, emails are enqueued
+ * first and sent by the email worker. When called from the worker itself
+ * (_skipQueue=true), the provider is invoked directly.
+ */
+
 import { enqueueEmailSend } from '../queue/dispatch';
 import { createLogger } from '../logger';
+import { getProvider, type EmailMessage, type SendResult } from './provider';
 
 const logger = createLogger('email:sender');
 
@@ -15,25 +26,10 @@ export interface EmailOptions {
   from?: string;
 }
 
-function getTransport() {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || '587');
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) {
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  });
-}
-
-export async function sendEmail(options: EmailOptions, _skipQueue = false): Promise<{ success: boolean; messageId?: string; error?: string }> {
+export async function sendEmail(
+  options: EmailOptions,
+  _skipQueue = false,
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
   // Try queue-first unless called from the email worker itself
   if (!_skipQueue) {
     const enqueued = await enqueueEmailSend(options);
@@ -43,35 +39,32 @@ export async function sendEmail(options: EmailOptions, _skipQueue = false): Prom
     }
   }
 
-  const transport = getTransport();
-  if (!transport) {
-    logger.info({ to: options.to, subject: options.subject }, 'SMTP not configured — mock send');
-    return { success: true, messageId: `mock-${Date.now()}` };
+  // Build the provider message, mapping threading headers into the headers bag
+  const headers: Record<string, string> = {};
+  if (options.inReplyTo) headers['In-Reply-To'] = options.inReplyTo;
+  if (options.references) headers['References'] = options.references;
+
+  const msg: EmailMessage = {
+    to: options.to,
+    subject: options.subject,
+    text: options.text,
+    html: options.html,
+    from: options.from,
+    replyTo: options.replyTo,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+  };
+
+  const result: SendResult = await getProvider().send(msg);
+
+  if (!result.success) {
+    logger.warn({ to: options.to, error: result.error, provider: result.provider }, 'Email send failed');
   }
 
-  try {
-    const from = options.from || process.env.SMTP_FROM || `CLIaaS <noreply@${process.env.NEXT_PUBLIC_BASE_URL?.replace(/https?:\/\//, '') || 'cliaas.com'}>`;
-
-    const result = await transport.sendMail({
-      from,
-      to: options.to,
-      subject: options.subject,
-      text: options.text,
-      html: options.html,
-      replyTo: options.replyTo,
-      headers: {
-        ...(options.inReplyTo ? { 'In-Reply-To': options.inReplyTo } : {}),
-        ...(options.references ? { References: options.references } : {}),
-      },
-    });
-
-    return { success: true, messageId: result.messageId };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Send failed',
-    };
-  }
+  return {
+    success: result.success,
+    messageId: result.messageId,
+    error: result.error,
+  };
 }
 
 export async function sendTicketReply(params: {
