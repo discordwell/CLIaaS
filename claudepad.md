@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-04T18:00Z — Session 60: Sprite-Based Fog of War (C++ Parity)
+- **Replaced blocky fillRect fog** with faithful C++ Cell_Shadow sprite-based shroud rendering
+- **Extracted SHADOW.SHP** from CONQUER.MIX: 48 frames, 24x24px each → `public/ra/assets/shadow.png`
+- **New module `engine/shadow.ts`**: 256-entry lookup table (byte-for-byte from C++ display.cpp), 8-neighbor bitmask function with exact C++ bit layout (NW=0x40 N=0x80 NE=0x01 W=0x20 E=0x02 SW=0x10 S=0x08 SE=0x04)
+- **Renderer rewrite**: `ensureShadowOverlay()` pre-processes sprite sheet → semi-transparent black (alpha=166, ~65% matching C++ ShadowTrans), `renderFogOfWar()` computes bitmask per mapped cell, draws sprite frame overlay
+- **Code review**: fixed 3 findings — drawImage source dimensions use sheet metadata (not hardcoded CELL_SIZE), hoisted closure + fillStyle above hot loop
+- **25 new tests** (shadow-table.test.ts): table length, value range, 14 spot checks from C++ source, bitmask function per-direction, bit layout constants
+- Build clean, all tests pass, deployed to cliaas.com
+- Files: shadow.ts (new), renderer.ts (modified), extract-ra-assets.ts (+1 line), shadow-table.test.ts (new), shadow.png (new asset)
+
 ## 2026-03-04T17:20Z — Session 59: Campaign Control Harness — 5 Critical Gap Fixes
 - **Gap #2 (EINSTEIN)**: Added `I_EINSTEIN` to UnitType enum, EINSTEIN entry in UNIT_STATS (image='einstein', civilian VIP type)
 - **Gap #3 (Civilian Evacuation)**: Added `civiliansEvacuated` counter to Game class, increments when C1-C10 or EINSTEIN leave map edge, wired into `buildTriggerState` for TEVENT_EVAC_CIVILIAN — SCG01EA now winnable

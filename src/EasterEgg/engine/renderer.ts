@@ -11,6 +11,7 @@ import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './e
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
+import { SHADOW_TABLE, cellShadowIndex } from './shadow';
 
 // House color tints (used for unit sprite remapping)
 const HOUSE_TINT: Record<string, string> = {
@@ -154,6 +155,8 @@ export class Renderer {
   hasRadar = false; // requires DOME building for minimap
   radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
   radarStaticCounter = 0;
+  /** Pre-processed SHADOW.SHP: all pixels → semi-transparent black (shroud overlay) */
+  private shadowOverlay: HTMLCanvasElement | null = null;
   crates: Array<{ x: number; y: number; type: string }> = [];
   evaMessages: Array<{ text: string; tick: number }> = [];
   selectedStructure: { type: string; hp: number; maxHp: number; name: string } | null = null;
@@ -258,7 +261,7 @@ export class Renderer {
     this.renderTargetLines(camera, entities, selectedIds);
     this.renderWaypoints(camera, entities, selectedIds);
     this.renderEffects(camera, effects, assets);
-    this.renderFogOfWar(camera, map);
+    this.renderFogOfWar(camera, map, assets);
 
     if (shaking) {
       ctx.restore();
@@ -687,6 +690,11 @@ export class Renderer {
     // Can we use the real tileset? Available for any theatre with extracted tiles.
     const useTileset = this.tilesetReady && this.tilesetTheatre === this.theatre;
 
+    // Deferred tree sprite draws — rendered after all ground tiles to prevent
+    // clump sprites (TC01-TC05, 72-96px wide) from being overwritten by
+    // neighboring _clump satellite cells' grass fill.
+    const deferredTrees: { name: string; x: number; y: number }[] = [];
+
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
@@ -723,10 +731,11 @@ export class Renderer {
           }
         }
 
-        // Also handle clear tiles (type 0 or 0xFFFF) from tileset — use clear1 (type 255, icon 0)
-        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF) && terrain === Terrain.CLEAR) {
+        // Clear template cells: draw tileset grass for CLEAR and TREE terrain
+        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE)) {
           if (this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
-            continue;
+            if (terrain === Terrain.CLEAR) continue;
+            atlasDrawn = true; // TREE cells need overlay on top
           }
         }
 
@@ -880,8 +889,8 @@ export class Renderer {
               if (treeType === '_clump') {
                 // Covered by a nearby clump origin sprite — just show grass
               } else if (treeType && assets.hasSheet(treeType)) {
-                // Draw real tree sprite from extracted .TEM asset
-                assets.drawFrame(ctx, treeType, 0, screen.x, screen.y);
+                // Defer tree sprite to second pass (clump sprites span multiple cells)
+                deferredTrees.push({ name: treeType, x: screen.x, y: screen.y });
               } else {
                 // Procedural fallback (MapPack trees or missing sprites)
                 // Tree shadow on ground
@@ -952,6 +961,11 @@ export class Renderer {
           }
         }
       }
+    }
+
+    // Second pass: draw deferred tree sprites on top of all ground tiles
+    for (const dt of deferredTrees) {
+      assets.drawFrame(ctx, dt.name, 0, dt.x, dt.y);
     }
   }
 
@@ -2221,53 +2235,83 @@ export class Renderer {
 
   // ─── Fog of War ──────────────────────────────────────────
 
-  private renderFogOfWar(camera: Camera, map: GameMap): void {
+  /** Lazily build a shadow overlay canvas: all SHADOW.SHP frames repainted as
+   *  semi-transparent black (matching C++ SHAPE_GHOST translucency rendering). */
+  private ensureShadowOverlay(assets: AssetManager): HTMLCanvasElement | null {
+    if (this.shadowOverlay) return this.shadowOverlay;
+    const sheet = assets.getSheet('shadow');
+    if (!sheet) return null;
+
+    const src = sheet.image;
+    const w = sheet.meta.sheetWidth;
+    const h = sheet.meta.sheetHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const octx = canvas.getContext('2d')!;
+
+    // Draw original sprite sheet
+    octx.drawImage(src, 0, 0);
+    // Read pixels and convert: keep alpha mask, set RGB to black
+    const imgData = octx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] > 0) {
+        // Non-transparent pixel → semi-transparent black (C++ shadow translucency ~65%)
+        d[i] = 0;
+        d[i + 1] = 0;
+        d[i + 2] = 0;
+        d[i + 3] = 166; // ~65% opacity matching C++ ShadowTrans
+      }
+    }
+    octx.putImageData(imgData, 0, 0);
+    this.shadowOverlay = canvas;
+    return canvas;
+  }
+
+  /** Sprite-based fog of war — faithful port of C++ DisplayClass::Redraw_Shadow.
+   *  Uses SHADOW.SHP frames + 256-entry lookup table for shroud edge shapes. */
+  private renderFogOfWar(camera: Camera, map: GameMap, assets: AssetManager): void {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
     const endCX = Math.ceil((camera.x + camera.viewWidth) / CELL_SIZE);
     const endCY = Math.ceil((camera.y + camera.viewHeight) / CELL_SIZE);
-    const half = CELL_SIZE / 2;
+
+    const overlay = this.ensureShadowOverlay(assets);
+    const sheet = assets.getSheet('shadow');
+    const getVis = (x: number, y: number) => map.getVisibility(x, y);
+    const fw = sheet?.meta.frameWidth ?? CELL_SIZE;
+    const fh = sheet?.meta.frameHeight ?? CELL_SIZE;
+    ctx.fillStyle = '#000';
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
         const vis = map.getVisibility(cx, cy);
-        if (vis === 2) continue; // fully visible
+        if (vis === 2) continue; // IsVisible — no shadow
 
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
-        screen.x = Math.round(screen.x);
-        screen.y = Math.round(screen.y);
+        const sx = Math.round(screen.x);
+        const sy = Math.round(screen.y);
 
         if (vis === 0) {
-          // H4: Shroud — solid black with soft gradient edges toward revealed terrain
-          // Check which neighbors are revealed to create gradient transitions
-          const vN = map.getVisibility(cx, cy - 1);
-          const vS = map.getVisibility(cx, cy + 1);
-          const vW = map.getVisibility(cx - 1, cy);
-          const vE = map.getVisibility(cx + 1, cy);
-          const hasRevealedNeighbor = vN > 0 || vS > 0 || vW > 0 || vE > 0;
-
-          if (!hasRevealedNeighbor) {
-            // Fully surrounded by shroud — solid black
-            ctx.fillStyle = '#000';
-            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-          } else {
-            // Edge cell: fill with softer black, then darken the interior half
-            ctx.fillStyle = 'rgba(0,0,0,0.7)';
-            ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-            // Darken the non-edge halves to near-solid black
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            if (vN > 0) ctx.fillRect(screen.x, screen.y + half, CELL_SIZE, half);
-            else        ctx.fillRect(screen.x, screen.y, CELL_SIZE, half);
-            if (vS > 0) ctx.fillRect(screen.x, screen.y, CELL_SIZE, half);
-            if (vW > 0) ctx.fillRect(screen.x + half, screen.y, half, CELL_SIZE);
-            else        ctx.fillRect(screen.x, screen.y, half, CELL_SIZE);
-            if (vE > 0) ctx.fillRect(screen.x, screen.y, half, CELL_SIZE);
-          }
+          // Unmapped cell: solid black (C++ !IsMapped → Fill_Rect BLACK)
+          ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
         } else {
-          // Fog — semi-transparent dark overlay
-          ctx.fillStyle = 'rgba(0,0,0,0.55)';
-          ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+          // vis === 1: IsMapped && !IsVisible — compute shadow frame from neighbor bitmask
+          const idx = cellShadowIndex(cx, cy, getVis);
+          const shadow = SHADOW_TABLE[idx];
+
+          if (shadow >= 0 && overlay && sheet) {
+            // Draw shadow sprite frame as semi-transparent black overlay
+            const col = shadow % sheet.meta.columns;
+            const row = Math.floor(shadow / sheet.meta.columns);
+            ctx.drawImage(overlay, col * fw, row * fh, fw, fh, sx, sy, CELL_SIZE, CELL_SIZE);
+          } else if (shadow === -2) {
+            // Solid black (surrounded by unmapped cells)
+            ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
+          }
+          // shadow === -1: no shadow needed (fully surrounded by mapped cells)
         }
       }
     }

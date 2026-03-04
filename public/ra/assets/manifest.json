@@ -1088,6 +1088,24 @@
     "sheetWidth": 10,
     "sheetHeight": 11
   },
+  "shadow": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 48,
+    "columns": 16,
+    "rows": 3,
+    "sheetWidth": 384,
+    "sheetHeight": 72
+  },
+  "mouse": {
+    "frameWidth": 1009,
+    "frameHeight": 0,
+    "frameCount": 222,
+    "columns": 16,
+    "rows": 14,
+    "sheetWidth": 16144,
+    "sheetHeight": 0
+  },
   "select": {
     "frameWidth": 24,
     "frameHeight": 21,

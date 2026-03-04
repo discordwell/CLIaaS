@@ -228,6 +228,8 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'MINP.SHP', 'minp'],    // Anti-personnel mine
   ['CONQUER.MIX', 'MINV.SHP', 'minv'],    // Anti-vehicle mine
   ['CONQUER.MIX', 'WCRATE.SHP', 'wcrate'], // Wooden crate
+  // Fog of war shroud overlays (47 frames, one per edge pattern)
+  ['CONQUER.MIX', 'SHADOW.SHP', 'shadow'],
   // UI elements
   ['LORES.MIX', 'MOUSE.SHP', 'mouse'],       // Mouse cursors
   ['LORES.MIX', 'SELECT.SHP', 'select'],     // Selection box
