@@ -5,7 +5,7 @@ import AppNav from "./AppNav";
 import PublicNav from "./PublicNav";
 
 /** Routes that render NO nav at all (they have their own or need none). */
-const NO_NAV_PREFIXES = ["/portal", "/sign-in", "/sign-up", "/chat/embed"];
+const NO_NAV_PREFIXES = ["/portal", "/sign-in", "/sign-up", "/chat/embed", "/demo-recording"];
 const NO_NAV_EXACT = ["/"];
 
 /** Public pages — show PublicNav when logged out, AppNav when logged in. */

@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-03-04T06:50Z — Session 53: Animated Hero Demo for Landing Page
+- Replaced static `<pre>` terminal demo on landing page with animated `<video autoplay muted loop>` hero
+- Created `/demo-recording` page with typewriter animation through 5-turn scenario (install → setup → sync → triage → investigation)
+- Recorded 235 frames via Puppeteer headless Chrome at 2x resolution, converted with ffmpeg to WebM (371KB) + MP4 (1.3MB)
+- Created `HeroDemo` component with `prefers-reduced-motion` fallback (original static `<pre>` preserved)
+- Created `useReducedMotion` hook, `estimateDuration` utility for scenario timing validation
+- Added `/demo-recording` to AppNavWrapper's NO_NAV_PREFIXES for clean recording
+- Added immutable cache headers for `/demo/:path*` in next.config.ts
+- Code review: fixed video fallback text, added aria-label to static path, documented SSR behavior
+- 13 new tests (7 HeroDemo + 6 scenario), all pass, build clean, deployed to cliaas.com
+- Files: scenario.ts, demo-recording/page.tsx, HeroDemo.tsx, useReducedMotion.ts, page.tsx, next.config.ts, AppNavWrapper.tsx
+
 ## 2026-03-03T18:20Z — Session 52: Unit Behavior, Sidebar Overhaul & FMV Support
 - **Phase 1 — Unit fixes**: Fixed Tanya "jumping around" by reducing moveToward snap threshold from effectiveSpeed (~3px) to 0.5px sub-pixel. Changed movementSpeed default fraction from 0.5 to 1.0 (units now move at full stat speed, matching C++ parity). Verified SCG01EA sidebar gating already correctly prevents production for no-base missions. Investigated Tanya attack mechanics — confirmed Colt45 correctly one-shots infantry (hitscan instant damage, 50dmg vs 50HP).
 - **Phase 2 — Sidebar overhaul**: Changed SIDEBAR_W from 100→160px (original RA). Moved minimap from bottom to top of sidebar. Added sprite-based sidebar background (sidebar.png tiled). Added vertical power bar (powerbar.png). Switched to 2-column production strip with 32x24 cameo icon sprites ({type}icon.png). Added proper tab bar offset past power bar. Updated all minimap position references via renderer.getMinimapBounds(). Updated sidebarItemAt() for 2-column hit testing. Updated sell/repair + superweapon button positioning. Updated scroll wheel calculations.
