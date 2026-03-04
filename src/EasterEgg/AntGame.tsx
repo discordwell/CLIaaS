@@ -227,17 +227,17 @@ export default function AntGame({ onExit }: AntGameProps) {
   }, [difficulty, activeCampaign, campaignMissionIndex, playPostMissionFMV, isFinalCampaignMission, getCampaignFaction]);
 
   /** Helper: play an FMV and call onDone when complete (or fallback to procedural) */
-  const playFMV = useCallback((movieName: string, screenState: Screen, mission: MissionInfo, onDone: () => void) => {
+  const playFMV = useCallback((movieName: string, screenState: Screen, _mission: MissionInfo, onDone: () => void) => {
     if (!containerRef.current) { onDone(); return; }
 
-    // Clean up previous player
-    if (moviePlayerRef.current) {
-      moviePlayerRef.current.destroy();
-      moviePlayerRef.current = null;
+    // Reuse preloaded player or create new one
+    let player = moviePlayerRef.current;
+    if (!player && containerRef.current) {
+      player = new MoviePlayer(containerRef.current);
+      moviePlayerRef.current = player;
     }
+    if (!player) { onDone(); return; }
 
-    const player = new MoviePlayer(containerRef.current);
-    moviePlayerRef.current = player;
     player.onComplete = () => onDone();
     player.onError = () => {
       moviePlayerRef.current?.destroy();
@@ -265,13 +265,13 @@ export default function AntGame({ onExit }: AntGameProps) {
     /** After intro (or if no intro), try to play brief */
     const afterIntro = () => {
       if (movies?.brief && containerRef.current) {
-        // Reuse preloaded player or create new one
-        let player = moviePlayerRef.current;
-        if (!player && containerRef.current) {
-          player = new MoviePlayer(containerRef.current);
-          moviePlayerRef.current = player;
+        // After intro, create fresh player for brief video
+        if (moviePlayerRef.current) {
+          moviePlayerRef.current.destroy();
+          moviePlayerRef.current = null;
         }
-        if (!player) { goToObjectivesOrProcedural(); return; }
+        const player = new MoviePlayer(containerRef.current);
+        moviePlayerRef.current = player;
 
         player.onComplete = () => {
           setScreen('objectives_interstitial');
@@ -364,6 +364,19 @@ export default function AntGame({ onExit }: AntGameProps) {
     setMissionIndex(index);
     setSelectedMission(mission);
     setActiveCampaign(null); // ant missions are not campaigns
+
+    // Preload first FMV video (intro or brief) while user reads the briefing screen
+    const movies = getMissionMovies(mission.id);
+    const firstMovie = movies?.intro || movies?.brief;
+    if (firstMovie && containerRef.current) {
+      if (moviePlayerRef.current) {
+        moviePlayerRef.current.destroy();
+      }
+      const player = new MoviePlayer(containerRef.current);
+      player.preload(firstMovie);
+      moviePlayerRef.current = player;
+    }
+
     transitionTo(() => setScreen('briefing'));
   }, [transitionTo]);
 
@@ -383,14 +396,15 @@ export default function AntGame({ onExit }: AntGameProps) {
     };
     setSelectedMission(missionInfo);
 
-    // Preload FMV briefing video while user reads the briefing screen
+    // Preload first FMV video (intro or brief) while user reads the briefing screen
     const movies = getMissionMovies(cm.id);
-    if (movies?.brief && containerRef.current) {
+    const firstMovie = movies?.intro || movies?.brief;
+    if (firstMovie && containerRef.current) {
       if (moviePlayerRef.current) {
         moviePlayerRef.current.destroy();
       }
       const player = new MoviePlayer(containerRef.current);
-      player.preload(movies.brief);
+      player.preload(firstMovie);
       moviePlayerRef.current = player;
     }
 
