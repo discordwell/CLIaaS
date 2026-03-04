@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import type { SurveyType, SurveyTrigger } from '@/lib/data-provider/types';
+import { requireRole } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,10 @@ const demoConfigs: Map<SurveyType, {
 /**
  * GET /api/surveys/config — list all survey configs
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     if (process.env.DATABASE_URL) {
       try {
@@ -74,6 +78,9 @@ export async function GET() {
  * PUT /api/surveys/config — update a survey config (upsert by surveyType)
  */
 export async function PUT(request: NextRequest) {
+  const auth = await requireRole(request, 'admin');
+  if ('error' in auth) return auth.error;
+
   try {
     const parsed = await parseJsonBody<{
       surveyType?: string;

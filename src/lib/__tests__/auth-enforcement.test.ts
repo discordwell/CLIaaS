@@ -141,4 +141,67 @@ describe('auth enforcement', () => {
       expect(body.error).toMatch(/authentication required/i);
     });
   });
+
+  describe('survey and CSAT routes auth enforcement', () => {
+    it('GET /api/csat returns 401 without auth', async () => {
+      const req = unauthenticatedRequest('/api/csat');
+      const { GET } = await import('@/app/api/csat/route');
+      const res = await GET(req);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
+    });
+
+    it('GET /api/surveys returns 401 without auth', async () => {
+      const req = unauthenticatedRequest('/api/surveys?type=nps');
+      const { GET } = await import('@/app/api/surveys/route');
+      const res = await GET(req);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
+    });
+
+    it('GET /api/surveys/config returns 401 without auth', async () => {
+      const req = unauthenticatedRequest('/api/surveys/config');
+      const { GET } = await import('@/app/api/surveys/config/route');
+      const res = await GET(req);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
+    });
+
+    it('PUT /api/surveys/config returns 401 without auth', async () => {
+      const req = unauthenticatedRequest('/api/surveys/config', 'PUT', { surveyType: 'nps', enabled: true });
+      const { PUT } = await import('@/app/api/surveys/config/route');
+      const res = await PUT(req);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
+    });
+
+    it('GET /api/surveys/config returns 403 for agent role', async () => {
+      const req = new NextRequest('http://localhost:3000/api/surveys/config', {
+        headers: {
+          'x-user-id': 'user-1',
+          'x-workspace-id': 'ws-1',
+          'x-user-role': 'agent',
+          'x-user-email': 'agent@test.com',
+        },
+      });
+      const { GET } = await import('@/app/api/surveys/config/route');
+      const res = await GET(req);
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toMatch(/insufficient permissions/i);
+    });
+
+    it('GET /api/surveys/responses returns 401 without auth', async () => {
+      const req = unauthenticatedRequest('/api/surveys/responses?type=csat');
+      const { GET } = await import('@/app/api/surveys/responses/route');
+      const res = await GET(req);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toMatch(/authentication required/i);
+    });
+  });
 });

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { csatSubmitted } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,7 +129,10 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if ('error' in auth) return auth.error;
+
   try {
     // Try DB
     if (process.env.DATABASE_URL) {
