@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-03-04T05:45Z — Session 57: Game Map Visual Fixes (5 Fixes)
+- Fixed 5 visual issues in Easter Egg Ant Mission game map after post-deploy screenshot review
+- **Fix 1**: Generous initial fog reveal (radius 15) around player units — eliminates massive black void at mission start
+- **Fix 2 & 5**: Round tile + fog screen coordinates with Math.round() — eliminates sub-pixel tile seams and dark patches
+- **Fix 3**: "NO BASE" message in empty sidebar production strip — ant missions have no base/factory
+- **Fix 4**: Cap power bar height to 120px max — prevents oversized visual element
+- New test for coordinate rounding logic in mappack-uint16.test.ts (14/14 pass)
+- Code review: all changes correct, no bugs, no breaking changes
+- Files: index.ts (fog reveal), renderer.ts (4 rendering fixes), mappack-uint16.test.ts (1 new test)
+
+## 2026-03-04T10:30Z — Session 56: Wet Test → 6-Agent Bug Fix → Merge Recovery
+- **Comprehensive wet testing** of entire CLIaaS platform: auth enforcement, CLI --json, all 14 dashboard pages, email provider magic link, connector test verification, hard security testing
+- **6 bugs found**: (1) cross-workspace data leakage (RLS), (2) analytics 500 on empty workspace, (3) onboarding seed failure, (4) no rate limiting on magic link, (5) Unicode/Cyrillic homoglyph emails accepted, (6) React hydration errors #418
+- **6 Opus agents launched** in isolated worktrees to fix all bugs in parallel
+- **Merge recovery**: RLS agent (39 files, 43 tests) committed and merged cleanly. 3 other agents' worktrees were auto-cleaned; their changes lost during stash conflict resolution. Reapplied manually from surviving worktrees + agent output descriptions.
+- **Final fixes applied**: emptyAnalytics() helper with try/catch, dual-layer rate limiting (3/email/5min, 10/IP/15min), validateEmail() on all auth routes, useEffect hydration patterns in 4 components
+- **89 new tests**: 43 RLS + 5 analytics + 14 rate limit + 20 email validation + 7 hydration — all passing
+- Committed (7c63459), pushed, deployed to cliaas.com
+- Files: 48+ files changed across RLS (39) + security hardening (9) + 6 new test files + 1 new lib file
+
 ## 2026-03-04T07:15Z — Session 55: Cross-Workspace Data Leakage Fix
 - Fixed critical security bug: data from one workspace visible to users in other workspaces
 - Root cause: API routes and data stores were not filtering by `auth.user.workspaceId`

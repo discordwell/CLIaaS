@@ -459,6 +459,16 @@ export class Game {
     // Initial fog of war reveal
     this.updateFogOfWar();
 
+    // Generous initial reveal — player should see a wide area at mission start
+    // (C++ reveals all cells the camera can see on mission load)
+    for (const e of this.entities) {
+      if (e.isPlayerUnit) {
+        const cx = Math.floor(e.pos.x / CELL_SIZE);
+        const cy = Math.floor(e.pos.y / CELL_SIZE);
+        this.revealAroundCell(cx, cy, 15);
+      }
+    }
+
     // H5: Clamp camera to playable bounds, not full 128x128 map
     this.camera.setPlayableBounds(this.map.boundsX, this.map.boundsY, this.map.boundsW, this.map.boundsH);
 

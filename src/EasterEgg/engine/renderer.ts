@@ -690,6 +690,8 @@ export class Renderer {
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
+        screen.x = Math.round(screen.x);
+        screen.y = Math.round(screen.y);
 
         // Out-of-bounds cells render as black (shroud border)
         if (cx < map.boundsX || cx >= map.boundsX + map.boundsW ||
@@ -2233,6 +2235,8 @@ export class Renderer {
         if (vis === 2) continue; // fully visible
 
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
+        screen.x = Math.round(screen.x);
+        screen.y = Math.round(screen.y);
 
         if (vis === 0) {
           // H4: Shroud — solid black with soft gradient edges toward revealed terrain
@@ -2799,7 +2803,7 @@ export class Renderer {
     const pwrX = sidebarX + 3;
     const pwrY = Renderer.POWER_Y_OFFSET;
     const pwrW = 10;
-    const pwrH = this.height - pwrY - 44; // extend most of sidebar height
+    const pwrH = Math.min(this.height - pwrY - 44, 120); // cap height for visual balance
 
     // Draw powerbar.png frame if available
     const pwrSheet = assets.getSheet('powerbar');
@@ -2857,6 +2861,15 @@ export class Renderer {
     sidebarX: number, sidebarW: number,
     startY: number, items: ProductionItem[], scroll: number, lowPower: boolean,
   ): void {
+    if (items.length === 0) {
+      ctx.font = '7px monospace';
+      ctx.fillStyle = '#666';
+      ctx.textAlign = 'center';
+      ctx.fillText('NO BASE', sidebarX + sidebarW / 2, startY + 20);
+      ctx.textAlign = 'left';
+      return;
+    }
+
     const camW = Renderer.CAMEO_W;
     const camH = Renderer.CAMEO_H;
     const gap = Renderer.CAMEO_GAP;

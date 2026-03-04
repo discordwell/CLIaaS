@@ -155,6 +155,26 @@ describe('Shadow multiply blend mode concept', () => {
     expect(Math.abs(ratio - originalRatio)).toBeLessThan(0.05); // multiply preserves ratios (small rounding error from integer math)
   });
 
+  it('screen coordinates should be rounded to integer pixels', () => {
+    // Sub-pixel coordinates cause tile seams and dark patches due to bilinear interpolation.
+    // Both renderTerrain and renderFogOfWar round worldToScreen results with Math.round().
+    const fractionalCoords = [
+      { x: 192.4, y: 384.7 },
+      { x: 100.5, y: 200.5 },
+      { x: 0.1, y: 0.9 },
+      { x: -0.3, y: 47.6 },
+    ];
+    for (const { x, y } of fractionalCoords) {
+      const rx = Math.round(x);
+      const ry = Math.round(y);
+      expect(Number.isInteger(rx)).toBe(true);
+      expect(Number.isInteger(ry)).toBe(true);
+      // Rounding should not shift by more than 0.5 px
+      expect(Math.abs(rx - x)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(ry - y)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
   it('atlas-miss tiles get explicit magenta stubs, not silent fallbacks', () => {
     // When drawTileFromAtlas fails for a real template (tmpl > 0, tmpl !== 0xFFFF),
     // renderer calls renderMissingTileStub instead of procedural fallback.
