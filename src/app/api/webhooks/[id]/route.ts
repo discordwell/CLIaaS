@@ -16,7 +16,8 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const webhook = getWebhook(id);
+    // Scope by workspace to prevent cross-workspace data leakage
+    const webhook = getWebhook(id, auth.user.workspaceId);
     if (!webhook) {
       return NextResponse.json({ error: 'Webhook not found' }, { status: 404 });
     }
@@ -41,7 +42,8 @@ export async function PATCH(
   try {
     const parsed = await parseJsonBody<Record<string, unknown>>(request);
     if ('error' in parsed) return parsed.error;
-    const webhook = updateWebhook(id, parsed.data);
+    // Scope by workspace to prevent cross-workspace modification
+    const webhook = updateWebhook(id, parsed.data, auth.user.workspaceId);
     if (!webhook) {
       return NextResponse.json({ error: 'Webhook not found' }, { status: 404 });
     }
@@ -64,7 +66,8 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    const deleted = deleteWebhook(id);
+    // Scope by workspace to prevent cross-workspace deletion
+    const deleted = deleteWebhook(id, auth.user.workspaceId);
     if (!deleted) {
       return NextResponse.json({ error: 'Webhook not found' }, { status: 404 });
     }

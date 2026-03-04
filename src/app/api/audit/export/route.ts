@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
       userId: searchParams.get('userId') ?? undefined,
       from: searchParams.get('from') ?? undefined,
       to: searchParams.get('to') ?? undefined,
+      // Scope by workspace to prevent cross-workspace data leakage
+      workspaceId: auth.user.workspaceId,
     };
 
     const data = await exportAudit(format, filters);

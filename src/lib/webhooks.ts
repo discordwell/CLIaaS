@@ -33,6 +33,7 @@ export interface WebhookConfig {
   secret: string;
   enabled: boolean;
   retryPolicy: RetryPolicy;
+  workspaceId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -241,18 +242,25 @@ export function validateWebhookUrl(url: string): { valid: boolean; error?: strin
 
 // ---- Public API ----
 
-export function listWebhooks(): WebhookConfig[] {
+export function listWebhooks(workspaceId?: string): WebhookConfig[] {
   ensureDefaults();
+  if (workspaceId) {
+    return webhooks.filter(w => !w.workspaceId || w.workspaceId === workspaceId);
+  }
   return [...webhooks];
 }
 
-export function getWebhook(id: string): WebhookConfig | undefined {
+export function getWebhook(id: string, workspaceId?: string): WebhookConfig | undefined {
   ensureDefaults();
-  return webhooks.find((w) => w.id === id);
+  const wh = webhooks.find((w) => w.id === id);
+  if (!wh) return undefined;
+  if (workspaceId && wh.workspaceId && wh.workspaceId !== workspaceId) return undefined;
+  return wh;
 }
 
 export function createWebhook(
-  input: Omit<WebhookConfig, 'id' | 'createdAt' | 'updatedAt'>
+  input: Omit<WebhookConfig, 'id' | 'createdAt' | 'updatedAt'>,
+  workspaceId?: string,
 ): WebhookConfig {
   ensureDefaults();
   const urlCheck = validateWebhookUrl(input.url);
@@ -260,6 +268,7 @@ export function createWebhook(
   const webhook: WebhookConfig = {
     ...input,
     id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    workspaceId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -270,10 +279,11 @@ export function createWebhook(
 
 export function updateWebhook(
   id: string,
-  updates: Partial<Omit<WebhookConfig, 'id' | 'createdAt'>>
+  updates: Partial<Omit<WebhookConfig, 'id' | 'createdAt'>>,
+  workspaceId?: string,
 ): WebhookConfig | null {
   ensureDefaults();
-  const idx = webhooks.findIndex((w) => w.id === id);
+  const idx = webhooks.findIndex((w) => w.id === id && (!workspaceId || !w.workspaceId || w.workspaceId === workspaceId));
   if (idx === -1) return null;
   if (updates.url) {
     const urlCheck = validateWebhookUrl(updates.url);
@@ -288,9 +298,9 @@ export function updateWebhook(
   return webhooks[idx];
 }
 
-export function deleteWebhook(id: string): boolean {
+export function deleteWebhook(id: string, workspaceId?: string): boolean {
   ensureDefaults();
-  const idx = webhooks.findIndex((w) => w.id === id);
+  const idx = webhooks.findIndex((w) => w.id === id && (!workspaceId || !w.workspaceId || w.workspaceId === workspaceId));
   if (idx === -1) return false;
   webhooks.splice(idx, 1);
   webhookLogs.delete(id);

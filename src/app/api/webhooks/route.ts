@@ -12,7 +12,8 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const webhooks = listWebhooks();
+    // Scope by workspace to prevent cross-workspace data leakage
+    const webhooks = listWebhooks(auth.user.workspaceId);
     return NextResponse.json({ webhooks });
   } catch (err) {
     return NextResponse.json(
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
       secret ||
       `whsec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
 
+    // Scope by workspace to prevent cross-workspace data leakage
     const webhook = createWebhook({
       url: url.trim(),
       events,
@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
         maxAttempts: retryPolicy?.maxAttempts ?? 3,
         delaysMs: retryPolicy?.delaysMs ?? [1000, 5000, 30000],
       },
-    });
+    }, auth.user.workspaceId);
 
     return NextResponse.json({ webhook }, { status: 201 });
   } catch (err) {

@@ -111,14 +111,20 @@ function ensureDefaults(): void {
 
 // ---- DB helpers ----
 
-async function loadPoliciesFromDb(): Promise<SLAPolicy[]> {
+async function loadPoliciesFromDb(workspaceId?: string): Promise<SLAPolicy[]> {
   if (!process.env.DATABASE_URL) return [];
   try {
     const { db } = await import('@/db');
     const schema = await import('@/db/schema');
-    const rows = await db
-      .select()
-      .from(schema.slaPolicies);
+
+    let query;
+    if (workspaceId) {
+      const { eq } = await import('drizzle-orm');
+      query = db.select().from(schema.slaPolicies).where(eq(schema.slaPolicies.workspaceId, workspaceId));
+    } else {
+      query = db.select().from(schema.slaPolicies);
+    }
+    const rows = await query;
     return rows.map((r) => {
       const targets = (r.targets as Record<string, number>) ?? {};
       const schedules = (r.schedules as Record<string, unknown>) ?? {};
@@ -142,10 +148,10 @@ async function loadPoliciesFromDb(): Promise<SLAPolicy[]> {
 
 // ---- Public API ----
 
-export async function listPolicies(): Promise<SLAPolicy[]> {
+export async function listPolicies(workspaceId?: string): Promise<SLAPolicy[]> {
   if (process.env.DATABASE_URL) {
     try {
-      const dbPolicies = await loadPoliciesFromDb();
+      const dbPolicies = await loadPoliciesFromDb(workspaceId);
       if (dbPolicies.length > 0) return dbPolicies;
     } catch {
       // fall through
@@ -156,39 +162,42 @@ export async function listPolicies(): Promise<SLAPolicy[]> {
 }
 
 export async function createPolicy(
-  input: Omit<SLAPolicy, 'id' | 'createdAt'>
+  input: Omit<SLAPolicy, 'id' | 'createdAt'>,
+  workspaceId?: string,
 ): Promise<SLAPolicy> {
   if (process.env.DATABASE_URL) {
     try {
       const { db } = await import('@/db');
       const schema = await import('@/db/schema');
-      const { eq } = await import('drizzle-orm');
 
-      // Get workspace
-      const workspaceName = process.env.CLIAAS_WORKSPACE;
-      let workspaceId: string | null = null;
-      if (workspaceName) {
-        const byName = await db
-          .select({ id: schema.workspaces.id })
-          .from(schema.workspaces)
-          .where(eq(schema.workspaces.name, workspaceName))
-          .limit(1);
-        workspaceId = byName[0]?.id ?? null;
-      }
-      if (!workspaceId) {
-        const rows = await db
-          .select({ id: schema.workspaces.id })
-          .from(schema.workspaces)
-          .orderBy(schema.workspaces.createdAt)
-          .limit(1);
-        workspaceId = rows[0]?.id ?? null;
+      // Use the authenticated user's workspace, fall back to env/first workspace
+      let wsId = workspaceId ?? null;
+      if (!wsId) {
+        const { eq } = await import('drizzle-orm');
+        const workspaceName = process.env.CLIAAS_WORKSPACE;
+        if (workspaceName) {
+          const byName = await db
+            .select({ id: schema.workspaces.id })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.name, workspaceName))
+            .limit(1);
+          wsId = byName[0]?.id ?? null;
+        }
+        if (!wsId) {
+          const rows = await db
+            .select({ id: schema.workspaces.id })
+            .from(schema.workspaces)
+            .orderBy(schema.workspaces.createdAt)
+            .limit(1);
+          wsId = rows[0]?.id ?? null;
+        }
       }
 
-      if (workspaceId) {
+      if (wsId) {
         const [row] = await db
           .insert(schema.slaPolicies)
           .values({
-            workspaceId,
+            workspaceId: wsId,
             name: input.name,
             enabled: input.enabled,
             targets: input.targets,

@@ -18,6 +18,7 @@ export interface AuditEntry {
   actions: Record<string, unknown>;
   timestamp: string;
   dryRun: boolean;
+  workspaceId?: string;
 }
 
 declare global {
@@ -27,8 +28,12 @@ declare global {
   var __cliaasAutomationAudit: AuditEntry[] | undefined;
 }
 
-export function getAuditLog(): AuditEntry[] {
-  return global.__cliaasAutomationAudit ?? [];
+export function getAuditLog(workspaceId?: string): AuditEntry[] {
+  const log = global.__cliaasAutomationAudit ?? [];
+  if (workspaceId) {
+    return log.filter(e => e.workspaceId === workspaceId);
+  }
+  return log;
 }
 
 function recordAudit(entry: AuditEntry): void {
@@ -41,8 +46,12 @@ function recordAudit(entry: AuditEntry): void {
 
 // ---- Rule storage (in-memory, loaded from DB when available) ----
 
-export function getAutomationRules(): Rule[] {
-  return global.__cliaasAutomationRules ?? [];
+export function getAutomationRules(workspaceId?: string): Rule[] {
+  const rules = global.__cliaasAutomationRules ?? [];
+  if (workspaceId) {
+    return rules.filter(r => r.workspaceId === workspaceId);
+  }
+  return rules;
 }
 
 export function setAutomationRules(rules: Rule[]): void {
@@ -50,23 +59,23 @@ export function setAutomationRules(rules: Rule[]): void {
 }
 
 export function addAutomationRule(rule: Rule): void {
-  const rules = getAutomationRules();
-  rules.push(rule);
-  global.__cliaasAutomationRules = rules;
+  const all = global.__cliaasAutomationRules ?? [];
+  all.push(rule);
+  global.__cliaasAutomationRules = all;
 }
 
-export function removeAutomationRule(id: string): boolean {
-  const rules = getAutomationRules();
-  const idx = rules.findIndex(r => r.id === id);
+export function removeAutomationRule(id: string, workspaceId?: string): boolean {
+  const rules = global.__cliaasAutomationRules ?? [];
+  const idx = rules.findIndex(r => r.id === id && (!workspaceId || r.workspaceId === workspaceId));
   if (idx === -1) return false;
   rules.splice(idx, 1);
   global.__cliaasAutomationRules = rules;
   return true;
 }
 
-export function updateAutomationRule(id: string, patch: Partial<Rule>): Rule | null {
-  const rules = getAutomationRules();
-  const idx = rules.findIndex(r => r.id === id);
+export function updateAutomationRule(id: string, patch: Partial<Rule>, workspaceId?: string): Rule | null {
+  const rules = global.__cliaasAutomationRules ?? [];
+  const idx = rules.findIndex(r => r.id === id && (!workspaceId || r.workspaceId === workspaceId));
   if (idx === -1) return null;
   rules[idx] = { ...rules[idx], ...patch, id };
   global.__cliaasAutomationRules = rules;

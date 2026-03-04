@@ -22,9 +22,9 @@ export async function GET(request: NextRequest) {
     const schema = await import('@/db/schema');
     const { eq, and } = await import('drizzle-orm');
 
-    const workspaceId = request.headers.get('x-workspace-id');
+    // Always filter by the authenticated user's workspace — never optional
     const conditions = [
-      ...(workspaceId ? [eq(schema.rules.workspaceId, workspaceId)] : []),
+      eq(schema.rules.workspaceId, auth.user.workspaceId),
       ...(type ? [eq(schema.rules.type, type as 'trigger' | 'macro' | 'automation' | 'sla')] : []),
     ];
 
@@ -70,16 +70,8 @@ export async function POST(request: NextRequest) {
     const { db } = await import('@/db');
     const schema = await import('@/db/schema');
 
-    // Get workspace from auth header or first available
-    let workspaceId = request.headers.get('x-workspace-id');
-    if (!workspaceId) {
-      const rows = await db
-        .select({ id: schema.workspaces.id })
-        .from(schema.workspaces)
-        .limit(1);
-      workspaceId = rows[0]?.id;
-    }
-
+    // Always use the authenticated user's workspace
+    const workspaceId = auth.user.workspaceId;
     if (!workspaceId) {
       return NextResponse.json(
         { error: 'No workspace found' },

@@ -23,6 +23,8 @@ export async function GET(request: NextRequest) {
       offset: searchParams.get('offset')
         ? parseInt(searchParams.get('offset')!, 10)
         : undefined,
+      // Scope by workspace to prevent cross-workspace data leakage
+      workspaceId: auth.user.workspaceId,
     };
 
     const result = await queryAudit(filters);

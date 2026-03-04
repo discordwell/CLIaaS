@@ -18,7 +18,8 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const workflow = await getWorkflow(id);
+  // Scope by workspace to prevent cross-workspace data leakage
+  const workflow = await getWorkflow(id, auth.user.workspaceId);
   if (!workflow) {
     return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
   }

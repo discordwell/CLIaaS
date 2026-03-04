@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
   let workflows: Workflow[];
   try {
-    workflows = await getWorkflows();
+    workflows = await getWorkflows(auth.user.workspaceId);
   } catch {
     workflows = getDemoWorkflows();
   }
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  await upsertWorkflow(workflow);
+  await upsertWorkflow(workflow, auth.user.workspaceId);
 
   // Sync rules into the automation engine when created as enabled
   if (workflow.enabled) {

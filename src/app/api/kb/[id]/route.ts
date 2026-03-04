@@ -21,8 +21,9 @@ export async function GET(
       try {
         const { db } = await import('@/db');
         const schema = await import('@/db/schema');
-        const { eq } = await import('drizzle-orm');
+        const { eq, and } = await import('drizzle-orm');
 
+        // Scope by workspace to prevent cross-workspace data leakage
         const rows = await db
           .select({
             id: schema.kbArticles.id,
@@ -33,7 +34,7 @@ export async function GET(
             updatedAt: schema.kbArticles.updatedAt,
           })
           .from(schema.kbArticles)
-          .where(eq(schema.kbArticles.id, id))
+          .where(and(eq(schema.kbArticles.id, id), eq(schema.kbArticles.workspaceId, auth.user.workspaceId)))
           .limit(1);
 
         if (rows.length === 0) {
@@ -120,7 +121,7 @@ export async function PATCH(
 
     const { db } = await import('@/db');
     const schema = await import('@/db/schema');
-    const { eq } = await import('drizzle-orm');
+    const { eq, and } = await import('drizzle-orm');
 
     // Build update object
     const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -129,10 +130,11 @@ export async function PATCH(
     if (categoryPath) updates.categoryPath = categoryPath;
     if (articleStatus) updates.status = articleStatus;
 
+    // Scope by workspace to prevent cross-workspace modification
     const rows = await db
       .update(schema.kbArticles)
       .set(updates)
-      .where(eq(schema.kbArticles.id, id))
+      .where(and(eq(schema.kbArticles.id, id), eq(schema.kbArticles.workspaceId, auth.user.workspaceId)))
       .returning();
 
     if (rows.length === 0) {
@@ -170,16 +172,31 @@ export async function DELETE(
 
     const { db } = await import('@/db');
     const schema = await import('@/db/schema');
-    const { eq } = await import('drizzle-orm');
+    const { eq, and } = await import('drizzle-orm');
 
-    // Delete revisions first
+    // Verify workspace ownership before deleting revisions
+    const [existing] = await db
+      .select({ id: schema.kbArticles.id })
+      .from(schema.kbArticles)
+      .where(and(eq(schema.kbArticles.id, id), eq(schema.kbArticles.workspaceId, auth.user.workspaceId)))
+      .limit(1);
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: 'Article not found' },
+        { status: 404 }
+      );
+    }
+
+    // Delete revisions first (safe because we verified workspace ownership above)
     await db
       .delete(schema.kbRevisions)
       .where(eq(schema.kbRevisions.articleId, id));
 
+    // Scope by workspace to prevent cross-workspace deletion
     const rows = await db
       .delete(schema.kbArticles)
-      .where(eq(schema.kbArticles.id, id))
+      .where(and(eq(schema.kbArticles.id, id), eq(schema.kbArticles.workspaceId, auth.user.workspaceId)))
       .returning({ id: schema.kbArticles.id });
 
     if (rows.length === 0) {

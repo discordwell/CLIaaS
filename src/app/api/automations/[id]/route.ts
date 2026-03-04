@@ -18,7 +18,8 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const rule = getAutomationRules().find(r => r.id === id);
+  // Scope by workspace to prevent cross-workspace data leakage
+  const rule = getAutomationRules(auth.user.workspaceId).find(r => r.id === id);
   if (!rule) {
     return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
   }
@@ -36,7 +37,8 @@ export async function PATCH(
   try {
     const parsed = await parseJsonBody<Record<string, unknown>>(request);
     if ('error' in parsed) return parsed.error;
-    const updated = updateAutomationRule(id, parsed.data);
+    // Scope by workspace to prevent cross-workspace modification
+    const updated = updateAutomationRule(id, parsed.data, auth.user.workspaceId);
     if (!updated) {
       return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
     }
@@ -57,7 +59,8 @@ export async function DELETE(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const removed = removeAutomationRule(id);
+  // Scope by workspace to prevent cross-workspace deletion
+  const removed = removeAutomationRule(id, auth.user.workspaceId);
   if (!removed) {
     return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
   }

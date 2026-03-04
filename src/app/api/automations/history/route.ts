@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if ('error' in auth) return auth.error;
 
-  const entries = getAuditLog();
+  // Scope by workspace to prevent cross-workspace data leakage
+  const entries = getAuditLog(auth.user.workspaceId);
   return NextResponse.json({ entries, total: entries.length });
 }

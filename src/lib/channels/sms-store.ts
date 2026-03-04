@@ -25,6 +25,7 @@ export interface SmsConversation {
   status: 'active' | 'closed';
   messages: SmsMessage[];
   ticketId?: string;
+  workspaceId?: string;
   createdAt: number;
   lastActivity: number;
 }
@@ -162,6 +163,7 @@ export function createConversation(
   phoneNumber: string,
   channel: 'sms' | 'whatsapp',
   customerName?: string,
+  workspaceId?: string,
 ): SmsConversation {
   const store = getStore();
   const conversation: SmsConversation = {
@@ -171,6 +173,7 @@ export function createConversation(
     customerName: customerName ?? phoneNumber,
     status: 'active',
     messages: [],
+    workspaceId,
     createdAt: Date.now(),
     lastActivity: Date.now(),
   };
@@ -180,13 +183,23 @@ export function createConversation(
   return conversation;
 }
 
-export function getConversation(id: string): SmsConversation | undefined {
-  return getStore().get(id);
+export function getConversation(id: string, workspaceId?: string): SmsConversation | undefined {
+  const conv = getStore().get(id);
+  if (!conv) return undefined;
+  // If workspace filtering is requested, verify ownership
+  if (workspaceId && conv.workspaceId && conv.workspaceId !== workspaceId) {
+    return undefined;
+  }
+  return conv;
 }
 
-export function getAllConversations(): SmsConversation[] {
+export function getAllConversations(workspaceId?: string): SmsConversation[] {
   const store = getStore();
-  return Array.from(store.values()).sort(
+  let conversations = Array.from(store.values());
+  if (workspaceId) {
+    conversations = conversations.filter(c => !c.workspaceId || c.workspaceId === workspaceId);
+  }
+  return conversations.sort(
     (a, b) => b.lastActivity - a.lastActivity,
   );
 }
@@ -229,10 +242,14 @@ export function findByPhone(phoneNumber: string): SmsConversation | undefined {
   return undefined;
 }
 
-export function closeConversation(id: string): SmsConversation | null {
+export function closeConversation(id: string, workspaceId?: string): SmsConversation | null {
   const store = getStore();
   const conversation = store.get(id);
   if (!conversation) return null;
+  // Verify workspace ownership before modifying
+  if (workspaceId && conversation.workspaceId && conversation.workspaceId !== workspaceId) {
+    return null;
+  }
 
   conversation.status = 'closed';
   conversation.lastActivity = Date.now();

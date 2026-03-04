@@ -15,7 +15,8 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const webhook = getWebhook(id);
+    // Scope by workspace to prevent cross-workspace data leakage
+    const webhook = getWebhook(id, auth.user.workspaceId);
     if (!webhook) {
       return NextResponse.json({ error: 'Webhook not found' }, { status: 404 });
     }
