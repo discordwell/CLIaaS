@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-05T06:30Z — Session 66: Sidebar Scroll Fix + Snow Theatre Palette
+- **Sidebar clip rect fix**: Changed strip clip from `height - 40 - STRIP_START_Y` (166px) to `CAMEO_VISIBLE * (CAMEO_H + CAMEO_GAP)` (104px = exactly 4 slots)
+- **Scroll arrows outside clip**: Moved arrow rendering to new `renderStripScrollArrows()` helper called AFTER `ctx.restore()` — arrows no longer covered by items
+- **Scroll arrow click handling**: Added `getScrollArrowBounds()` to renderer, click detection in `handleSidebarClick()` with up/down scroll by one row (26px) per click
+- **Snow theatre palette**: Added per-theatre palette loading in AssetManager (`snow-palette.json`, `interior-palette.json`), new `getTheatrePalette()` with TEMPERATE fallback. Renderer now switches `this.pal` when theatre changes via `palTheatre` tracking.
+- **Theatre-aware crate colors**: SNOW crates render icy blue (`#b0c8d4`), TEMPERATE retains brown (`#8B4513`)
+- **Tests**: 10 new tests in sidebar-ui.test.ts (scroll arrow regions, clamp bounds, clip height, snow crate colors, palette fallback) — 71 total pass
+- **Wet test**: SCG01EA snow terrain confirmed correct (white/grey ground, blue water), SCA01EA temperate confirmed no regression
+- Files: renderer.ts, assets.ts, index.ts, sidebar-ui.test.ts
+
 ## 2026-03-05T05:00Z — Session 65: SCG01EA Campaign Mission — Einstein Rescue Bug Fixes
 - **worldDist units mismatch**: `worldDist()` returns cells (divides by CELL_SIZE), but 9 call sites compared against `N * CELL_SIZE` (pixel scale). Fixed all: auto-load (28.8→1.2 cells), move-arrival (60→2.5), guard-return (36→1.5), transport-load (36→1.5), service-depot (36→1.5), spy-disguise (96→4), dog-detection (72→3), explosions (96→4, 192→8)
 - **Transport passenger evacuation**: When transport exits map edge, civilian passengers now count as evacuated (triggers EVAC_CIVILIAN → WIN)

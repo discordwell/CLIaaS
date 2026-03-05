@@ -58,6 +58,9 @@ export class AssetManager {
   private loaded = false;
   private loadPromise: Promise<void> | null = null;
 
+  /** Per-theatre palettes (SNOW, INTERIOR — TEMPERATE uses default palette) */
+  private theatrePalettes = new Map<string, number[][]>();
+
   /** Tileset atlas images and lookup data per theatre */
   private tilesets = new Map<string, { image: HTMLImageElement; meta: TilesetMeta }>();
   /** Legacy single-tileset references (TEMPERATE, for backwards compat) */
@@ -132,6 +135,16 @@ export class AssetManager {
         .then(r => r.json())
         .then(p => { this.palette = p; })
         .catch(() => {}),
+      // Per-theatre palettes (SNOW, INTERIOR)
+      ...[
+        { theatre: 'SNOW', file: 'snow-palette.json' },
+        { theatre: 'INTERIOR', file: 'interior-palette.json' },
+      ].map(({ theatre, file }) =>
+        fetch(`${BASE_URL}/${file}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(p => { if (p) this.theatrePalettes.set(theatre, p); })
+          .catch(() => {})
+      ),
       // House color remap data (optional — falls back to tint overlay)
       this.loadRemapColors(),
       // Tileset atlases (optional — renderer falls back to procedural colors)
@@ -170,6 +183,11 @@ export class AssetManager {
   /** Get the palette */
   getPalette(): number[][] | null {
     return this.palette;
+  }
+
+  /** Get the palette for a specific theatre (falls back to default TEMPERATE palette) */
+  getTheatrePalette(theatre: string): number[][] | null {
+    return this.theatrePalettes.get(theatre) ?? this.palette;
   }
 
   /** Internal: draw a frame from any CanvasImageSource using sheet metadata */

@@ -128,6 +128,7 @@ export class Renderer {
   private width: number;
   private height: number;
   private pal: number[][] | null = null;
+  private palTheatre = ''; // which theatre the current palette is for
   screenShake = 0;      // remaining shake ticks
   screenFlash = 0;      // remaining flash ticks (white flash on big explosions)
   attackMoveMode = false; // show attack-move cursor indicator
@@ -195,7 +196,7 @@ export class Renderer {
     this.ctx.imageSmoothingEnabled = false;
   }
 
-  /** Get an RGB string from the TEMPERATE palette, with optional brightness offset */
+  /** Get an RGB string from the current theatre palette, with optional brightness offset */
   private palColor(idx: number, brightnessOffset = 0): string {
     if (!this.pal) return '#555';
     const c = this.pal[idx];
@@ -221,8 +222,11 @@ export class Renderer {
     ctx.clearRect(0, 0, this.width, this.height);
     this._selectedIds = selectedIds;
 
-    // Cache palette reference from assets
-    if (!this.pal) this.pal = assets.getPalette();
+    // Cache palette reference from assets (refresh if theatre changed)
+    if (!this.pal || this.palTheatre !== this.theatre) {
+      this.pal = assets.getTheatrePalette(this.theatre);
+      this.palTheatre = this.theatre;
+    }
 
     // Cache tileset atlas reference from assets (refresh if theatre changed)
     if (!this.tilesetReady || this.tilesetTheatre !== this.theatre) {
@@ -311,7 +315,10 @@ export class Renderer {
     const ctx = this.ctx;
 
     // Cache palette + tileset if not yet loaded (refresh if theatre changed)
-    if (!this.pal) this.pal = assets.getPalette();
+    if (!this.pal || this.palTheatre !== this.theatre) {
+      this.pal = assets.getTheatrePalette(this.theatre);
+      this.palTheatre = this.theatre;
+    }
     if (!this.tilesetReady || this.tilesetTheatre !== this.theatre) {
       if (assets.hasTileset(this.theatre)) {
         this.tilesetImage = assets.getTilesetImage(this.theatre);
@@ -1083,12 +1090,15 @@ export class Renderer {
       if (map.getVisibility(cx, cy) !== 2) continue; // only show in visible area
       const screen = camera.worldToScreen(crate.x, crate.y);
       if (screen.x < -20 || screen.x > this.width || screen.y < -20 || screen.y > this.height) continue;
-      // Draw a wooden crate icon
+      // Draw a wooden crate icon (theatre-aware colors)
       const sz = 8;
       const bob = Math.sin(tick * 0.15) * 1.5; // gentle bobbing
-      ctx.fillStyle = '#8B4513';
+      const crateColors = this.theatre === 'SNOW'
+        ? { fill: '#b0c8d4', stroke: '#8aa8b8', cross: '#6888a0' }
+        : { fill: '#8B4513', stroke: '#D2691E', cross: '#654321' };
+      ctx.fillStyle = crateColors.fill;
       ctx.fillRect(screen.x - sz, screen.y - sz + bob, sz * 2, sz * 2);
-      ctx.strokeStyle = '#D2691E';
+      ctx.strokeStyle = crateColors.stroke;
       ctx.lineWidth = 1;
       ctx.strokeRect(screen.x - sz, screen.y - sz + bob, sz * 2, sz * 2);
       // Cross lines on crate
@@ -1097,7 +1107,7 @@ export class Renderer {
       ctx.lineTo(screen.x + sz, screen.y + sz + bob);
       ctx.moveTo(screen.x + sz, screen.y - sz + bob);
       ctx.lineTo(screen.x - sz, screen.y + sz + bob);
-      ctx.strokeStyle = '#654321';
+      ctx.strokeStyle = crateColors.cross;
       ctx.stroke();
       // Type indicator dot
       const typeColor = crate.type === 'money' ? '#FFD700'
@@ -2768,6 +2778,23 @@ export class Renderer {
     return Renderer.BUTTON_ROW_Y;
   }
 
+  /** Get scroll arrow hit regions for a production strip.
+   *  Up arrow fits between button row bottom (BUTTON_ROW_Y + BUTTON_H = 192) and strip start (194). */
+  getScrollArrowBounds(strip: StripType): { upY: number; downY: number; x: number; w: number; upH: number; downH: number } {
+    const sidebarX = this.width - this.sidebarW;
+    const xOffset = strip === 'left' ? Renderer.LEFT_STRIP_X_OFFSET : Renderer.RIGHT_STRIP_X_OFFSET;
+    const stripClipH = Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP);
+    const btnRowBottom = Renderer.BUTTON_ROW_Y + Renderer.BUTTON_H; // 192
+    return {
+      x: sidebarX + xOffset,
+      w: Renderer.CAMEO_W,
+      upY: btnRowBottom, // starts right after button row (Y=192)
+      upH: Renderer.STRIP_START_Y - btnRowBottom, // 194-192 = 2px (tight gap)
+      downY: Renderer.STRIP_START_Y + stripClipH,
+      downH: Renderer.SCROLL_ARROW_H,
+    };
+  }
+
   /** Get bounds for a production strip (for hit testing) */
   getStripBounds(strip: StripType): { x: number; y: number; w: number; h: number } {
     const sidebarX = this.width - this.sidebarW;
@@ -2832,11 +2859,11 @@ export class Renderer {
     const leftItems = this.sidebarItems.filter(it => getStripSide(it) === 'left');
     const rightItems = this.sidebarItems.filter(it => getStripSide(it) === 'right');
 
-    // Clip strips to prevent overflow
-    const stripMaxY = this.height - 40;
+    // Clip strips to exactly 4 visible cameo slots (prevents overflow)
+    const stripClipH = Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x, Renderer.STRIP_START_Y, w, stripMaxY - Renderer.STRIP_START_Y);
+    ctx.rect(x, Renderer.STRIP_START_Y, w, stripClipH);
     ctx.clip();
 
     this.renderStrip(ctx, assets, x + Renderer.LEFT_STRIP_X_OFFSET, Renderer.STRIP_START_Y,
@@ -2845,6 +2872,10 @@ export class Renderer {
       rightItems, this.rightStripScroll, lowPower, 'right');
 
     ctx.restore();
+
+    // Scroll arrows rendered OUTSIDE clip region so they're always visible
+    this.renderStripScrollArrows(ctx, x + Renderer.LEFT_STRIP_X_OFFSET, leftItems, this.leftStripScroll);
+    this.renderStripScrollArrows(ctx, x + Renderer.RIGHT_STRIP_X_OFFSET, rightItems, this.rightStripScroll);
 
     // Superweapon buttons at bottom
     this.renderSuperweaponButtons(x, w);
@@ -2923,14 +2954,6 @@ export class Renderer {
     const rowH = camH + gap;
 
     if (items.length === 0) return;
-
-    // Scroll arrow up indicator
-    if (scroll > 0) {
-      ctx.fillStyle = '#aaa';
-      ctx.font = '8px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('\u25B2', stripX + camW / 2, startY - 3);
-    }
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -3026,8 +3049,28 @@ export class Renderer {
       }
     }
 
-    // Scroll arrow down indicator
+  }
+
+  /** Render scroll arrows for a strip (called outside clip region) */
+  private renderStripScrollArrows(
+    ctx: CanvasRenderingContext2D, stripX: number,
+    items: ProductionItem[], scroll: number,
+  ): void {
+    if (items.length === 0) return;
+    const camW = Renderer.CAMEO_W;
+    const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
     const maxVisible = Renderer.CAMEO_VISIBLE;
+    const startY = Renderer.STRIP_START_Y;
+
+    // Up arrow
+    if (scroll > 0) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('\u25B2', stripX + camW / 2, startY - 3);
+    }
+
+    // Down arrow
     if (items.length > maxVisible && scroll < (items.length - maxVisible) * rowH) {
       ctx.fillStyle = '#aaa';
       ctx.font = '8px monospace';

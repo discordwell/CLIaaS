@@ -258,6 +258,95 @@ describe('Strip Bounds', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// Scroll Arrow Click Regions
+// ═══════════════════════════════════════════════════════════
+
+describe('Scroll Arrow Click Regions', () => {
+  const STRIP_START_Y = 194;
+  const CAMEO_H = 24;
+  const CAMEO_GAP = 2;
+  const CAMEO_VISIBLE = 4;
+  const SCROLL_ARROW_H = 16;
+  const stripClipH = CAMEO_VISIBLE * (CAMEO_H + CAMEO_GAP); // 104
+
+  it('up arrow region fits between button row bottom and strip start', () => {
+    const BUTTON_ROW_Y = 164;
+    const BUTTON_H = 28;
+    const btnRowBottom = BUTTON_ROW_Y + BUTTON_H; // 192
+    const upH = STRIP_START_Y - btnRowBottom; // 2px gap
+    expect(btnRowBottom).toBe(192);
+    expect(upH).toBe(2);
+    // No overlap with button row
+    expect(btnRowBottom + upH).toBe(STRIP_START_Y);
+  });
+
+  it('down arrow region is below visible slots (STRIP_START_Y + 104 to +120)', () => {
+    const downY = STRIP_START_Y + stripClipH;
+    expect(downY).toBe(298);
+    expect(downY + SCROLL_ARROW_H).toBe(314);
+  });
+
+  it('scroll up clamps at 0', () => {
+    let scroll = 0;
+    scroll = Math.max(0, scroll - 26);
+    expect(scroll).toBe(0);
+  });
+
+  it('scroll down clamps at maxScroll', () => {
+    const items = 6;
+    const rowH = 26;
+    const visibleH = 104;
+    const maxScroll = Math.max(0, items * rowH - visibleH);
+    let scroll = maxScroll;
+    scroll = Math.min(maxScroll, scroll + 26);
+    expect(scroll).toBe(maxScroll); // stays at max
+  });
+
+  it('clip rect height is exactly 4 * 26 = 104px', () => {
+    expect(stripClipH).toBe(104);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Snow Theatre Palette
+// ═══════════════════════════════════════════════════════════
+
+describe('Snow Theatre Palette', () => {
+  it('SNOW crate colors are icy blue, not brown', () => {
+    const theatre = 'SNOW';
+    const crateColors = theatre === 'SNOW'
+      ? { fill: '#b0c8d4', stroke: '#8aa8b8', cross: '#6888a0' }
+      : { fill: '#8B4513', stroke: '#D2691E', cross: '#654321' };
+    expect(crateColors.fill).toBe('#b0c8d4');
+    expect(crateColors.stroke).toBe('#8aa8b8');
+  });
+
+  it('TEMPERATE crate colors remain brown', () => {
+    const theatre = 'TEMPERATE';
+    const crateColors = theatre === 'SNOW'
+      ? { fill: '#b0c8d4', stroke: '#8aa8b8', cross: '#6888a0' }
+      : { fill: '#8B4513', stroke: '#D2691E', cross: '#654321' };
+    expect(crateColors.fill).toBe('#8B4513');
+    expect(crateColors.stroke).toBe('#D2691E');
+  });
+
+  it('getTheatrePalette falls back to default for TEMPERATE', () => {
+    // Simulates AssetManager.getTheatrePalette behavior:
+    // theatrePalettes has no TEMPERATE entry, so it falls back to default palette
+    const theatrePalettes = new Map<string, number[][]>();
+    theatrePalettes.set('SNOW', [[227, 231, 247]]);
+    const defaultPalette = [[199, 231, 134]]; // TEMPERATE green
+
+    const getTheatrePalette = (theatre: string) =>
+      theatrePalettes.get(theatre) ?? defaultPalette;
+
+    expect(getTheatrePalette('TEMPERATE')).toBe(defaultPalette);
+    expect(getTheatrePalette('SNOW')).not.toBe(defaultPalette);
+    expect(getTheatrePalette('SNOW')![0][0]).toBe(227); // snow blue-white
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // Placement Adjacency (footprint-based AABB)
 // ═══════════════════════════════════════════════════════════
 

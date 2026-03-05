@@ -2095,6 +2095,27 @@ export class Game {
     const swClick = this.handleSuperweaponButtonClick(sy);
     if (swClick) return;
 
+    // Scroll arrow click detection (above/below strip area)
+    for (const strip of ['left', 'right'] as const) {
+      const ab = this.renderer.getScrollArrowBounds(strip);
+      if (sx >= ab.x && sx < ab.x + ab.w) {
+        if (sy >= ab.upY && sy < ab.upY + ab.upH) {
+          // Scroll up
+          this.stripScrollPositions[strip] = Math.max(0, this.stripScrollPositions[strip] - 26);
+          return;
+        }
+        if (sy >= ab.downY && sy < ab.downY + ab.downH) {
+          // Scroll down
+          const items = this.cachedAvailableItems ?? this.getAvailableItems();
+          const filteredItems = items.filter(it => getStripSide(it) === strip);
+          const visibleH = this.renderer.getStripBounds(strip).h;
+          const maxScroll = Math.max(0, filteredItems.length * 26 - visibleH);
+          this.stripScrollPositions[strip] = Math.min(maxScroll, this.stripScrollPositions[strip] + 26);
+          return;
+        }
+      }
+    }
+
     // Production item click (dual strips)
     const items = this.getAvailableItems();
     const itemIdx = this.sidebarItemAt(sx, sy);
