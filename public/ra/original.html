@@ -416,7 +416,50 @@
 })();
 
 // === Pre-create AudioContext so SDL2 doesn't block ===
+// In autoplay mode, suppress audio entirely — silence_callback fires during
+// Asyncify yields and corrupts the WASM stack with "memory access out of bounds".
 (function() {
+  var isAutoplay = new URLSearchParams(window.location.search).get('autoplay');
+  if (isAutoplay) {
+    // Comprehensive AudioContext stub — SDL2 Emscripten calls createBuffer,
+    // createScriptProcessor, createGain, createBufferSource during audio init.
+    // All must return plausible no-op objects to prevent TypeError during Asyncify rewind.
+    function NoopAC() {
+      this.state = 'running';
+      this.sampleRate = 44100;
+      this.currentTime = 0;
+      var noop = function(){};
+      var noopNode = { connect: noop, disconnect: noop };
+      this.destination = Object.assign({ channelCount: 2 }, noopNode);
+    }
+    NoopAC.prototype.createBuffer = function(channels, frames, sampleRate) {
+      var buf = { numberOfChannels: channels, length: frames, sampleRate: sampleRate, duration: frames / sampleRate };
+      buf.getChannelData = function() { return new Float32Array(frames); };
+      return buf;
+    };
+    NoopAC.prototype.createBufferSource = function() {
+      var noop = function(){};
+      return { buffer: null, connect: noop, disconnect: noop, start: noop, stop: noop,
+               loop: false, playbackRate: { value: 1 }, onended: null };
+    };
+    NoopAC.prototype.createScriptProcessor = function(bufSize, inputs, outputs) {
+      return { bufferSize: bufSize || 4096, connect: function(){}, disconnect: function(){}, onaudioprocess: null };
+    };
+    NoopAC.prototype.resume = function() { return Promise.resolve(); };
+    NoopAC.prototype.suspend = function() { return Promise.resolve(); };
+    NoopAC.prototype.close = function() { return Promise.resolve(); };
+    NoopAC.prototype.createGain = function() {
+      return { gain: { value: 0, setValueAtTime: function(){} }, connect: function(){}, disconnect: function(){} };
+    };
+    NoopAC.prototype.decodeAudioData = function(buf, ok, err) {
+      if (err) err(new Error('NoopAC'));
+      return Promise.reject(new Error('NoopAC'));
+    };
+    window.AudioContext = NoopAC;
+    if (window.webkitAudioContext) window.webkitAudioContext = NoopAC;
+    console.log('[AUTOPLAY] Audio suppressed to prevent Asyncify corruption');
+    return;
+  }
   var OrigAC = window.AudioContext || window.webkitAudioContext;
   if (!OrigAC) return;
   try {
@@ -447,32 +490,42 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 window.addEventListener('load', function() {
+  var isAutoplayLoad = new URLSearchParams(window.location.search).get('autoplay');
   // Make canvas focusable and give it focus
   canvasElement.tabIndex = 0;
   canvasElement.focus();
-  setTimeout(function() {
-    canvasElement.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX:320, clientY:200}));
-    canvasElement.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, clientX:320, clientY:200}));
-    canvasElement.dispatchEvent(new MouseEvent('click', {bubbles:true, clientX:320, clientY:200}));
-    canvasElement.focus();
-    if (window.__preAudioCtx) window.__preAudioCtx.resume().catch(function(){});
-  }, 500);
+  // In autoplay mode, skip dispatching events — they trigger Emscripten handlers
+  // that call into WASM during Asyncify yield, corrupting the stack.
+  if (!isAutoplayLoad) {
+    setTimeout(function() {
+      canvasElement.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX:320, clientY:200}));
+      canvasElement.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, clientX:320, clientY:200}));
+      canvasElement.dispatchEvent(new MouseEvent('click', {bubbles:true, clientX:320, clientY:200}));
+      canvasElement.focus();
+      if (window.__preAudioCtx) window.__preAudioCtx.resume().catch(function(){});
+    }, 500);
+  }
 
   // Fallback focus simulation: periodically dispatch focus events on the canvas.
   // The Emscripten SDL2 port registers "focus" event listeners on the canvas via
   // emscripten_set_focus_callback. If those listeners were registered, dispatching
   // a FocusEvent should trigger the C callback that sets GameInFocus = true.
-  var focusAttempts = 0;
-  var focusInterval = setInterval(function() {
-    focusAttempts++;
-    canvasElement.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-    canvasElement.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    canvasElement.focus();
-    // Also dispatch on window/document for SDL2 ports that listen there
-    window.dispatchEvent(new Event('focus'));
-    document.dispatchEvent(new Event('visibilitychange'));
-    if (focusAttempts > 60) clearInterval(focusInterval); // Stop after 30s
-  }, 500);
+  // SKIP in autoplay mode: set_autoplay() already sets GameInFocus=true in C++,
+  // and dispatching events during Asyncify yield corrupts the WASM stack.
+  var isAutoplay = new URLSearchParams(window.location.search).get('autoplay');
+  if (!isAutoplay) {
+    var focusAttempts = 0;
+    var focusInterval = setInterval(function() {
+      focusAttempts++;
+      canvasElement.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+      canvasElement.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      canvasElement.focus();
+      // Also dispatch on window/document for SDL2 ports that listen there
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      if (focusAttempts > 60) clearInterval(focusInterval); // Stop after 30s
+    }, 500);
+  }
 });
 
 var Module = {
@@ -698,6 +751,48 @@ var Module = {
   monitorRunDependencies: function(left) {
     this.totalDependencies = Math.max(this.totalDependencies, left);
     Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+  },
+  // Activate autoplay mode AFTER WASM exports are available but BEFORE main().
+  // onRuntimeInitialized fires at the end of initRuntime(), before callMain().
+  // This is the correct hook because:
+  //   - WASM exports (Module._set_autoplay) are available at this point
+  //   - main() hasn't started yet, so g_autoplay_mode=1 will be set before
+  //     any blocking dialogs (WWMessageBox, BGMessageBox) are reached
+  onRuntimeInitialized: function() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('autoplay')) {
+      if (typeof Module._set_autoplay === 'function') {
+        Module._set_autoplay(1);
+        console.log('[AUTOPLAY] g_autoplay_mode SET TO 1 via onRuntimeInitialized (before main)');
+        document.title = 'RA:AUTOPLAY=ON';
+      } else {
+        console.error('[AUTOPLAY] Module._set_autoplay not available at onRuntimeInitialized');
+        document.title = 'RA:AUTOPLAY=FAIL-NO-EXPORT';
+      }
+    }
+    // SAFE title-based diagnostics: only use JS-side data, NEVER call WASM exports
+    // from setInterval (calling WASM during Asyncify yield corrupts the stack).
+    // Preserve EM_ASM checkpoint titles (don't overwrite unless they use f= format)
+    setInterval(function() {
+      var frame = window.__wasm_frame || 0;
+      var ready = window.__autoplayReady ? 'Y' : 'N';
+      var cur = document.title;
+      // Only overwrite if title is JS-set (f=) or default (Red Alert/New Tab)
+      if (!cur || cur === 'Red Alert' || cur.indexOf('RA:f=') === 0 || cur === 'New Tab') {
+        document.title = 'RA:f=' + frame + ',r=' + ready;
+      }
+      // Append frame count to EM_ASM checkpoint titles
+      else if (cur.indexOf('RA:') === 0 && cur.indexOf(',f=') === -1) {
+        document.title = cur + ',f=' + frame;
+      }
+    }, 3000);
+  },
+  // Cache bust WASM binary to avoid stale binaries after deploys
+  locateFile: function(path, scriptDirectory) {
+    if (path.endsWith('.wasm')) {
+      return scriptDirectory + path + '?v=20260306a';
+    }
+    return scriptDirectory + path;
   }
 };
 Module.setStatus('Downloading...');
@@ -1109,6 +1204,6 @@ Module.setStatus('Downloading...');
 })();
 </script>
 <script src="gamedata.js"></script>
-<script async src="rasdl.js"></script>
+<script async src="rasdl.js?v=20260306a"></script>
 </body>
 </html>

@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-03-06T00:30Z — Session 73: WASM Autoplay Game Loop — Asyncify Breakthrough
+- **Game loop now runs** in `?autoplay=allies` mode — frames advancing (confirmed f=53+ on tab)
+- **Three Asyncify blockers eliminated** in Main_Loop:
+  1. `SDL_Event_Loop()` in `Update_Window_Surface` — skipped `emscripten_sleep(0)` in autoplay (window.cpp)
+  2. `SDL_RenderPresent()` uses internal emscripten_sleep even without VSYNC — skip ALL SDL rendering in autoplay (drawbuff_sdl.cpp)
+  3. `Theme.AI()`/`Sound_Callback()` — SDL audio internals trigger emscripten_sleep — skip in autoplay (conquer.cpp Call_Back)
+- **VSYNC disabled** for Emscripten builds (SDL_CreateRenderer flags=0 instead of SDL_RENDERER_PRESENTVSYNC)
+- **Batch frame optimization**: 100 game frames per browser yield in Sync_Delay (overcomes background tab throttling where each setTimeout(0) takes 1-10s)
+- **Single yield architecture**: Only `emscripten_sleep(0)` in Sync_Delay every 100 frames; init runs fully synchronous
+- **Diagnostic cleanup**: Removed 9 ML checkpoint titles + 3 CB checkpoint titles; kept only `RA:f=N` at yield point + `window.__wasm_frame`
+- Files: conquer.cpp (Call_Back audio skip, Sync_Delay batch, diagnostic cleanup), drawbuff_sdl.cpp (render skip), window.cpp (event loop skip, no VSYNC), original.html (cache busters)
+
 ## 2026-03-05T15:20Z — Session 72: Parity Audit Phase 2 — Superweapon Timing + Test Cleanup
 - **6 code bugs fixed in types.ts**: 5 superweapon recharge times (Chrono 2700→6300, GPS 6300→7200, IronCurtain 6300→9900, Nuke 12600→11700, Sonar 12600→9000) + Iron Curtain duration (450→675 ticks)
 - **~65 hallucinated test assertions fixed** in data-parity.test.ts: naval (15), aircraft (18), infantry (3), weapons (17), structure HP (7), warhead (3), superweapons (6 updated + GPS added)
