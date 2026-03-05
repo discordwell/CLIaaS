@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-03-05T12:00Z — Session 71: Publishable npm Package
+- **Split package structure**: Created `packages/cliaas/` with own package.json, tsup build config, pnpm workspace
+- **tsup bundling**: CLI (index.js) + MCP server (mcp-server.js) built from source, `@/` path alias resolved, all npm deps external
+- **New commands**: `cliaas init` (writes .mcp.json + ~/.claude/CLAUDE.md + demo data), `cliaas setup` (env check with --json), `cliaas mcp serve` (stdio MCP server)
+- **MCP config updated**: `buildMcpConfig()` now generates `cliaas mcp serve` instead of `npx tsx cli/mcp/server.ts`
+- **Demo refactored**: Extracted `generateDemoData()` from demo command for reuse by init
+- **Hero demo fixed**: scenario.ts updated (npm install + cliaas init, cliaas setup, correct sync syntax, 60 tools)
+- **Tool catalog updated**: AGENTS.md, WIZARD/agents.md, WIZARD/claude.md all updated from 18/27 to 60 tools with complete catalog
+- **Code review fixes**: Node 18 compat in postbuild.js, pg client cleanup, `homedir()` instead of `process.env.HOME`, duplicate Write Actions section removed, pg regex broadened
+- **E2E verified**: `npm install -g cliaas` → `cliaas init` → `cliaas mcp test` (60 tools) all working
+- **12 new tests** (init-setup.test.ts), MCP server test passes (60 tools), 221KB packed tarball
+- Files: ~10 new, ~10 modified
+
+## 2026-03-05T11:50Z — Session 70: Code Review Fixes (High + Low Priority)
+- **High-pri fixes** (commit b532c12): Teams SSRF protection (allowlisted Bot Framework domains), forum cascade delete, `time_log` scope guard, SDK tsconfig DOM lib, QA recentReviews sort, campaign CLI rewrite (store-direct vs broken HTTP)
+- **Low-pri fixes** (commit 0b4f301): Slack signature fail-closed (503 when no secret vs silent skip), SDK 24h session TTL + cleanup + 30/min rate limit on init, Customer PATCH enrichment persisted to JSONL overlay store, portal forum rate limiting (120/min per IP)
+- **10 files changed** in low-pri pass, 45 tests pass, build clean
+- Deployed both rounds to cliaas.com
+
 ## 2026-03-05T10:00Z — Session 69: Feature Parity Sprint — 9 Features in One Pass
 - **Complete feature parity sprint**: Built 9 features + Customer 360 enrichment to match competitor platforms (Zendesk, Freshdesk, Intercom, HubSpot, Help Scout, Kayako, Zoho Desk, Jira SM)
 - **Features built**: (1) Customer 360 Enrichment (+10 cols, 4 new tables, timeline/notes/segments/merge), (2) Time Tracking Enhancement (billable hours, customer/group grouping), (3) Community Forums (categories/threads/replies, portal view, thread-to-ticket conversion), (4) QA/Conversation Review (scorecards, manual/auto reviews, dashboard metrics), (5) Proactive/Outbound Messaging (campaigns, recipients, template vars, analytics), (6) Telegram channel (Bot API, webhook, config), (7) Slack as Intake (Events API, slash commands, OAuth, bi-directional sync), (8) MS Teams as Intake (Bot Framework, adaptive cards, manifest), (9) Mobile SDK (@cliaas/sdk package, session management, SSE realtime)

@@ -15,22 +15,22 @@
 
 # CLIaaS MCP Agent Guide
 
-CLIaaS exposes 18 MCP tools, 6 resources, and 4 prompts for AI-powered helpdesk management.
+CLIaaS exposes 60 MCP tools, 6 resources, and 4 prompts for AI-powered helpdesk management.
 
 ## Quick Start
 
 ```bash
-# Generate demo data (if no exports exist)
-pnpm cliaas demo
+# Install globally
+npm install -g cliaas
 
-# Install MCP config for Claude Code auto-discovery
-pnpm cliaas mcp install
+# Initialize in any project (writes .mcp.json + agent instructions + demo data)
+cliaas init
 
-# Verify server starts and lists all tools
-pnpm cliaas mcp test
+# Verify MCP server
+cliaas mcp test
 ```
 
-Or use the guided setup: `pnpm cliaas mcp setup`
+Or for full BYOC setup: `cliaas setup`
 
 ## Tool Catalog
 
@@ -75,6 +75,88 @@ Or use the guided setup: `pnpm cliaas mcp setup`
 |------|-------------|------------|
 | `config_show` | Show current config (keys masked) | (none) |
 | `config_set_provider` | Switch LLM provider | provider: claude\|openai\|openclaw |
+
+### Write Actions (7 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `ticket_update` | Update ticket fields | ticketId, status?, priority?, assignee?, confirm=true |
+| `ticket_reply` | Send reply to ticket | ticketId, body, confirm=true |
+| `ticket_note` | Add internal note | ticketId, body, confirm=true |
+| `ticket_create` | Create new ticket | subject, description?, priority?, confirm=true |
+| `ai_resolve` | AI resolution for ticket | ticketId, confirm=true |
+| `rule_create` | Create automation rule | name, type, conditions?, actions?, confirm=true |
+| `rule_toggle` | Enable/disable rule | ruleId, enabled, confirm=true |
+
+### Sync (8 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `sync_trigger` | Trigger sync for connector | connector, fullSync? |
+| `sync_status` | Check sync status | connector? |
+| `sync_pull` | Pull from hosted to local | (none) |
+| `sync_push` | Push local changes to hosted | (none) |
+| `sync_conflicts` | List sync conflicts | (none) |
+| `upstream_push` | Push changes to source platform | connector? |
+| `upstream_status` | Upstream push status | connector? |
+| `upstream_retry` | Retry failed upstream pushes | connector? |
+
+### Surveys (3 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `survey_config` | Configure CSAT surveys | type, trigger, enabled? |
+| `survey_send` | Send survey to customer | ticketId, confirm=true |
+| `survey_stats` | Survey response statistics | period? |
+
+### Chatbots (4 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `chatbot_list` | List chatbots | (none) |
+| `chatbot_create` | Create chatbot | name, flow, confirm=true |
+| `chatbot_toggle` | Enable/disable chatbot | chatbotId, enabled, confirm=true |
+| `chatbot_delete` | Delete chatbot | chatbotId, confirm=true |
+
+### Workflows (6 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `workflow_list` | List workflows | (none) |
+| `workflow_get` | Get workflow details | workflowId |
+| `workflow_create` | Create workflow | name, nodes, transitions, confirm=true |
+| `workflow_toggle` | Enable/disable workflow | workflowId, enabled, confirm=true |
+| `workflow_delete` | Delete workflow | workflowId, confirm=true |
+| `workflow_export` | Export workflow definition | workflowId |
+
+### Customers (4 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `customer_list` | List customers | limit?, offset? |
+| `customer_show` | Show customer details + timeline | customerId |
+| `customer_search` | Search customers | query |
+| `customer_merge` | Merge duplicate customers | sourceId, targetId, confirm=true |
+
+### Time Tracking (2 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `time_report` | Time tracking report | period?, groupBy? |
+| `time_log` | Log time on ticket | ticketId, minutes, billable?, confirm=true |
+
+### Forums (3 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `forum_categories` | List forum categories | (none) |
+| `forum_threads` | List threads in category | categoryId, limit? |
+| `forum_thread_to_ticket` | Convert thread to ticket | threadId, confirm=true |
+
+### QA (2 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `qa_reviews` | List QA reviews | period?, agent? |
+| `qa_scorecard` | Get QA scorecard metrics | period? |
+
+### Campaigns (3 tools)
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `campaign_list` | List campaigns | status? |
+| `campaign_create` | Create outbound campaign | name, template, recipients, confirm=true |
+| `campaign_stats` | Campaign analytics | campaignId |
 
 ## Resources (6)
 | URI | Description |
@@ -171,7 +253,7 @@ pnpm cliaas rag import source --type tickets
 
 ```
 cli/mcp/
-├── server.ts           # Entry point (stdio transport)
+├── server.ts           # Entry point (stdio transport, `cliaas mcp serve`)
 ├── util.ts             # Safe wrappers, result helpers
 ├── tools/
 │   ├── tickets.ts      # 3 tools: list, show, search
@@ -179,7 +261,17 @@ cli/mcp/
 │   ├── kb.ts           # 2 tools: search, suggest
 │   ├── rag.ts          # 3 tools: search, ask, status
 │   ├── queue.ts        # 2 tools: stats, sla
-│   └── config.ts       # 2 tools: show, set-provider
+│   ├── config.ts       # 2 tools: show, set-provider
+│   ├── actions.ts      # 7 tools: ticket CRUD, rules, ai_resolve
+│   ├── sync.ts         # 8 tools: sync trigger/status/pull/push/conflicts, upstream
+│   ├── surveys.ts      # 3 tools: config, send, stats
+│   ├── chatbots.ts     # 4 tools: list, create, toggle, delete
+│   ├── workflows.ts    # 6 tools: list, get, create, toggle, delete, export
+│   ├── customers.ts    # 4 tools: list, show, search, merge
+│   ├── time.ts         # 2 tools: report, log
+│   ├── forums.ts       # 3 tools: categories, threads, thread_to_ticket
+│   ├── qa.ts           # 2 tools: reviews, scorecard
+│   └── campaigns.ts    # 3 tools: list, create, stats
 ├── resources/
 │   └── index.ts        # 6 resources
 └── prompts/

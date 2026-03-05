@@ -4,15 +4,15 @@ import { writeFileSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { spawn } from 'child_process';
 
-function buildMcpConfig() {
+function buildMcpConfig(dataDir?: string) {
   return {
     mcpServers: {
       cliaas: {
         type: 'stdio',
-        command: 'npx',
-        args: ['tsx', 'cli/mcp/server.ts'],
+        command: 'cliaas',
+        args: ['mcp', 'serve'],
         env: {
-          CLIAAS_DATA_DIR: '${CLIAAS_DATA_DIR}',
+          CLIAAS_DATA_DIR: dataDir ?? '${CLIAAS_DATA_DIR}',
           DATABASE_URL: '${DATABASE_URL}',
           RAG_DATABASE_URL: '${RAG_DATABASE_URL}',
         },
@@ -21,10 +21,21 @@ function buildMcpConfig() {
   };
 }
 
+export { buildMcpConfig };
+
 export function registerMcpCommands(program: Command): void {
   const mcp = program
     .command('mcp')
     .description('MCP (Model Context Protocol) server management');
+
+  mcp
+    .command('serve')
+    .description('Start the MCP server (stdio transport)')
+    .action(async () => {
+      process.env.__CLIAAS_MCP_IMPORTED = '1';
+      const { startMcpServer } = await import('../mcp/server.js');
+      await startMcpServer();
+    });
 
   mcp
     .command('install')
@@ -45,13 +56,31 @@ export function registerMcpCommands(program: Command): void {
     .action(async () => {
       console.log(chalk.cyan('Testing CLIaaS MCP server...\n'));
 
+      // Try the installed binary first, then fall back to npx tsx for dev
       const serverPath = join(process.cwd(), 'cli/mcp/server.ts');
-      if (!existsSync(serverPath)) {
-        console.error(chalk.red(`Server not found at ${serverPath}`));
-        process.exit(1);
+      let cmd: string;
+      let args: string[];
+
+      try {
+        // Check if cliaas binary is available
+        const { execSync } = await import('child_process');
+        execSync('cliaas --version', { stdio: 'ignore' });
+        cmd = 'cliaas';
+        args = ['mcp', 'serve'];
+      } catch {
+        // Fall back to local dev mode
+        if (!existsSync(serverPath)) {
+          console.error(chalk.red('CLIaaS not installed and server not found locally.'));
+          console.error(chalk.gray('Install globally: npm install -g cliaas'));
+          process.exit(1);
+        }
+        cmd = 'npx';
+        args = ['tsx', serverPath];
       }
 
-      const child = spawn('npx', ['tsx', serverPath], {
+      console.log(chalk.gray(`Using: ${cmd} ${args.join(' ')}\n`));
+
+      const child = spawn(cmd, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env },
       });
@@ -155,10 +184,10 @@ export function registerMcpCommands(program: Command): void {
           }
 
           console.log('');
-          if (tools.length >= 18) {
+          if (tools.length >= 50) {
             console.log(chalk.green(`All ${tools.length} tools registered.`));
           } else {
-            console.log(chalk.yellow(`Expected 18 tools, got ${tools.length}.`));
+            console.log(chalk.yellow(`Expected 50+ tools, got ${tools.length}.`));
           }
         }
       } catch (err) {

@@ -11,18 +11,20 @@ The MCP server runs via stdio transport. Configure in `.mcp.json`:
   "mcpServers": {
     "cliaas": {
       "type": "stdio",
-      "command": "npx",
-      "args": ["tsx", "cli/mcp/server.ts"],
+      "command": "cliaas",
+      "args": ["mcp", "serve"],
       "env": {
-        "DATABASE_URL": "postgresql://user:password@localhost:5432/cliaas",
-        "CLIAAS_MODE": "local"
+        "CLIAAS_DATA_DIR": "~/.cliaas/data",
+        "DATABASE_URL": "postgresql://user:password@localhost:5432/cliaas"
       }
     }
   }
 }
 ```
 
-## Complete Tool Catalog (27 Tools)
+Or run `cliaas init` to generate this automatically.
+
+## Complete Tool Catalog (60 Tools)
 
 ### Ticket Management (3 tools)
 
@@ -74,31 +76,99 @@ Requires pgvector database (`RAG_DATABASE_URL` or `DATABASE_URL`).
 | `config_show` | Show current CLIaaS config (API keys masked) | (none) |
 | `config_set_provider` | Switch active LLM provider | `provider` (required: claude/openai/openclaw) |
 
-### Write Actions (5 tools)
+### Write Actions (7 tools)
 
 All write actions require `confirm: true` to execute.
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `ticket_update` | Update ticket status, priority, assignee, tags | `ticketId` (required), `status?`, `priority?`, `assignee?`, `addTags?`, `removeTags?`, `confirm` (required: true) |
-| `ticket_reply` | Send a reply to a ticket | `ticketId` (required), `body` (required), `confirm` (required: true) |
-| `ticket_note` | Add an internal note to a ticket | `ticketId` (required), `body` (required), `confirm` (required: true) |
-| `ticket_create` | Create a new ticket | `subject` (required), `description?`, `priority?`, `requester?`, `tags?`, `confirm` (required: true) |
-| `ai_resolve` | Trigger AI resolution for a ticket | `ticketId` (required), `confirm` (required: true) |
+| `ticket_update` | Update ticket status, priority, assignee, tags | `ticketId`, `status?`, `priority?`, `assignee?`, `addTags?`, `removeTags?`, `confirm` (true) |
+| `ticket_reply` | Send a reply to a ticket | `ticketId`, `body`, `confirm` (true) |
+| `ticket_note` | Add an internal note | `ticketId`, `body`, `confirm` (true) |
+| `ticket_create` | Create a new ticket | `subject`, `description?`, `priority?`, `requester?`, `tags?`, `confirm` (true) |
+| `ai_resolve` | Trigger AI resolution | `ticketId`, `confirm` (true) |
+| `rule_create` | Create an automation rule | `name`, `type` (trigger/macro/automation/sla), `conditions?`, `actions?`, `confirm` (true) |
+| `rule_toggle` | Enable or disable a rule | `ruleId`, `enabled` (boolean), `confirm` (true) |
 
-### Automation (2 tools)
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `rule_create` | Create an automation rule | `name` (required), `type` (trigger/macro/automation/sla), `conditions?`, `actions?`, `confirm` (required: true) |
-| `rule_toggle` | Enable or disable an automation rule | `ruleId` (required), `enabled` (required: boolean), `confirm` (required: true) |
-
-### Sync (2 tools)
+### Sync (8 tools)
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `sync_run` | Run a sync cycle for a connector | `connector` (required), `fullSync?` (boolean) |
-| `sync_status` | Check sync status for connectors | `connector?` |
+| `sync_trigger` | Trigger sync for a connector | `connector`, `fullSync?` |
+| `sync_status` | Check sync status | `connector?` |
+| `sync_pull` | Pull from hosted to local | (none) |
+| `sync_push` | Push local changes to hosted | (none) |
+| `sync_conflicts` | List sync conflicts | (none) |
+| `upstream_push` | Push changes back to source platform | `connector?` |
+| `upstream_status` | Upstream push status | `connector?` |
+| `upstream_retry` | Retry failed upstream pushes | `connector?` |
+
+### Surveys (3 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `survey_config` | Configure CSAT surveys | `type`, `trigger`, `enabled?` |
+| `survey_send` | Send survey to customer | `ticketId`, `confirm` (true) |
+| `survey_stats` | Survey response statistics | `period?` |
+
+### Chatbots (4 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `chatbot_list` | List chatbots | (none) |
+| `chatbot_create` | Create chatbot | `name`, `flow`, `confirm` (true) |
+| `chatbot_toggle` | Enable/disable chatbot | `chatbotId`, `enabled`, `confirm` (true) |
+| `chatbot_delete` | Delete chatbot | `chatbotId`, `confirm` (true) |
+
+### Workflows (6 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `workflow_list` | List workflows | (none) |
+| `workflow_get` | Get workflow details | `workflowId` |
+| `workflow_create` | Create workflow | `name`, `nodes`, `transitions`, `confirm` (true) |
+| `workflow_toggle` | Enable/disable workflow | `workflowId`, `enabled`, `confirm` (true) |
+| `workflow_delete` | Delete workflow | `workflowId`, `confirm` (true) |
+| `workflow_export` | Export workflow definition | `workflowId` |
+
+### Customers (4 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `customer_list` | List customers | `limit?`, `offset?` |
+| `customer_show` | Show customer details + timeline | `customerId` |
+| `customer_search` | Search customers | `query` |
+| `customer_merge` | Merge duplicate customers | `sourceId`, `targetId`, `confirm` (true) |
+
+### Time Tracking (2 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `time_report` | Time tracking report | `period?`, `groupBy?` |
+| `time_log` | Log time on ticket | `ticketId`, `minutes`, `billable?`, `confirm` (true) |
+
+### Forums (3 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `forum_categories` | List forum categories | (none) |
+| `forum_threads` | List threads in category | `categoryId`, `limit?` |
+| `forum_thread_to_ticket` | Convert thread to ticket | `threadId`, `confirm` (true) |
+
+### QA / Conversation Review (2 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `qa_reviews` | List QA reviews | `period?`, `agent?` |
+| `qa_scorecard` | Get QA scorecard metrics | `period?` |
+
+### Campaigns (3 tools)
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `campaign_list` | List campaigns | `status?` |
+| `campaign_create` | Create outbound campaign | `name`, `template`, `recipients`, `confirm` (true) |
+| `campaign_stats` | Campaign analytics | `campaignId` |
 
 ## Resources (6)
 

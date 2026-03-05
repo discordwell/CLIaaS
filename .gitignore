@@ -50,6 +50,11 @@ next-env.d.ts
 # claude code
 .claude/
 
+# CLI package build artifacts
+/packages/cliaas/dist/
+/packages/cliaas/WIZARD/
+/packages/cliaas/node_modules/
+
 # Easter Egg - Red Alert C++ source (cloned at build time)
 /src/EasterEgg/CnC_and_Red_Alert
 

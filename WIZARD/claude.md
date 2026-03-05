@@ -101,7 +101,7 @@ pnpm cliaas mcp test
 pnpm cliaas mcp install
 ```
 
-The `.mcp.json` file in the project root configures the MCP server. After install, AI agents can use all 27 tools (ticket management, AI analysis, KB search, RAG, queue metrics).
+The `.mcp.json` file in the project root configures the MCP server. After install, AI agents can use all 60 tools (ticket management, AI analysis, KB search, RAG, queue metrics, sync, surveys, chatbots, workflows, customers, time tracking, forums, QA, campaigns).
 
 ### 5. Web Dashboard
 

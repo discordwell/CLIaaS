@@ -184,6 +184,129 @@ const RULES: Rule[] = [
   { id: 'rule-6', externalId: 'r6', source: 'zendesk', type: 'trigger', title: 'Tag SSO-related tickets', conditions: { any: [{ field: 'subject', operator: 'contains', value: 'SSO' }, { field: 'subject', operator: 'contains', value: 'Okta' }, { field: 'subject', operator: 'contains', value: 'SAML' }] }, actions: [{ field: 'tag', value: 'sso' }], active: true },
 ];
 
+/** Generate demo data into the given directory (reusable from init command). */
+export async function generateDemoData(outDir: string, numTickets: number): Promise<void> {
+  mkdirSync(outDir, { recursive: true });
+
+  const ticketsFile = join(outDir, 'tickets.jsonl');
+  const messagesFile = join(outDir, 'messages.jsonl');
+  const customersFile = join(outDir, 'customers.jsonl');
+  const orgsFile = join(outDir, 'organizations.jsonl');
+  const kbFile = join(outDir, 'kb_articles.jsonl');
+  const rulesFile = join(outDir, 'rules.jsonl');
+
+  for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
+    writeFileSync(f, '');
+  }
+
+  const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
+
+  const orgs = [
+    { name: 'Acme Corp', domains: ['acmecorp.com'] },
+    { name: 'Globex Industries', domains: ['globex.com', 'globex.io'] },
+    { name: 'Initech Solutions', domains: ['initech.com'] },
+    { name: 'Massive Dynamic', domains: ['massivedynamic.com'] },
+    { name: 'Stark Industries', domains: ['stark.com'] },
+    { name: 'Wayne Enterprises', domains: ['wayne.co'] },
+    { name: 'Cyberdyne Systems', domains: ['cyberdyne.io'] },
+    { name: 'Umbrella Corp', domains: ['umbrella.com'] },
+  ];
+
+  for (const [i, o] of orgs.entries()) {
+    const org: Organization = {
+      id: `demo-org-${i + 1}`,
+      externalId: String(i + 1),
+      source: 'zendesk',
+      name: o.name,
+      domains: o.domains,
+    };
+    appendJsonl(orgsFile, org);
+    counts.organizations++;
+  }
+
+  const customerNames = [
+    'John Doe', 'Jane Smith', 'Alice Johnson', 'Bob Williams', 'Carol Brown',
+    'David Lee', 'Eva Martinez', 'Frank Garcia', 'Grace Kim', 'Henry Patel',
+    'Iris Nakamura', 'Jack Thompson', 'Kate O\'Brien', 'Leo Fernandez', 'Mia Zhang',
+    'Noah Johansson', 'Olivia Dubois', 'Peter Muller', 'Quinn O\'Sullivan', 'Rachel Tanaka',
+  ];
+  const customers: Customer[] = [];
+  for (const [i, name] of customerNames.entries()) {
+    const orgIdx = i % orgs.length;
+    const email = name.toLowerCase().replace(/[' ]/g, '.').replace('..', '.') + '@' + orgs[orgIdx].domains[0];
+    const customer: Customer = {
+      id: `demo-user-${i + 1}`,
+      externalId: String(1000 + i),
+      source: 'zendesk',
+      name,
+      email,
+      orgId: `demo-org-${orgIdx + 1}`,
+    };
+    appendJsonl(customersFile, customer);
+    customers.push(customer);
+    counts.customers++;
+  }
+
+  const statuses: Ticket['status'][] = ['open', 'open', 'open', 'pending', 'pending', 'solved', 'solved', 'closed'];
+
+  for (let i = 0; i < numTickets; i++) {
+    const template = TICKET_TEMPLATES[i % TICKET_TEMPLATES.length];
+    const suffix = i >= TICKET_TEMPLATES.length ? ` (#${Math.floor(i / TICKET_TEMPLATES.length) + 1})` : '';
+    const customer = customers[i % customers.length];
+    const agent = pick(AGENTS);
+    const created = randomDate(30);
+    const updated = randomDate(7);
+    const status = i < 15 ? pick(['open', 'open', 'pending'] as const) : pick(statuses);
+
+    const ticket: Ticket = {
+      id: `demo-${4500 + i}`,
+      externalId: String(4500 + i),
+      source: 'zendesk',
+      subject: template.subject + suffix,
+      status,
+      priority: template.priority,
+      assignee: agent,
+      requester: customer.email,
+      tags: pickN(TAGS_POOL, 2 + Math.floor(Math.random() * 3)),
+      createdAt: created,
+      updatedAt: updated,
+    };
+    appendJsonl(ticketsFile, ticket);
+    counts.tickets++;
+
+    for (const [j, body] of template.messages.entries()) {
+      const isCustomer = j % 2 === 0;
+      const msg: Message = {
+        id: `demo-msg-${i * 10 + j}`,
+        ticketId: ticket.id,
+        author: isCustomer ? customer.name : agent,
+        body,
+        type: 'reply',
+        createdAt: new Date(new Date(created).getTime() + j * 3600000).toISOString(),
+      };
+      appendJsonl(messagesFile, msg);
+      counts.messages++;
+    }
+  }
+
+  for (const article of KB_ARTICLES) {
+    appendJsonl(kbFile, article);
+    counts.kbArticles++;
+  }
+
+  for (const rule of RULES) {
+    appendJsonl(rulesFile, rule);
+    counts.rules++;
+  }
+
+  const manifest: ExportManifest = {
+    source: 'zendesk',
+    exportedAt: new Date().toISOString(),
+    counts,
+  };
+  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+}
+
 export function registerDemoCommand(program: Command): void {
   program
     .command('demo')
@@ -194,144 +317,9 @@ export function registerDemoCommand(program: Command): void {
       const outDir = opts.out;
       const numTickets = Math.min(parseInt(opts.tickets, 10), 500);
 
-      mkdirSync(outDir, { recursive: true });
-
-      const ticketsFile = join(outDir, 'tickets.jsonl');
-      const messagesFile = join(outDir, 'messages.jsonl');
-      const customersFile = join(outDir, 'customers.jsonl');
-      const orgsFile = join(outDir, 'organizations.jsonl');
-      const kbFile = join(outDir, 'kb_articles.jsonl');
-      const rulesFile = join(outDir, 'rules.jsonl');
-
-      for (const f of [ticketsFile, messagesFile, customersFile, orgsFile, kbFile, rulesFile]) {
-        writeFileSync(f, '');
-      }
-
-      const counts = { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 };
-
-      // Generate organizations
-      const orgSpinner = ora('Generating organizations...').start();
-      const orgs = [
-        { name: 'Acme Corp', domains: ['acmecorp.com'] },
-        { name: 'Globex Industries', domains: ['globex.com', 'globex.io'] },
-        { name: 'Initech Solutions', domains: ['initech.com'] },
-        { name: 'Massive Dynamic', domains: ['massivedynamic.com'] },
-        { name: 'Stark Industries', domains: ['stark.com'] },
-        { name: 'Wayne Enterprises', domains: ['wayne.co'] },
-        { name: 'Cyberdyne Systems', domains: ['cyberdyne.io'] },
-        { name: 'Umbrella Corp', domains: ['umbrella.com'] },
-      ];
-
-      for (const [i, o] of orgs.entries()) {
-        const org: Organization = {
-          id: `demo-org-${i + 1}`,
-          externalId: String(i + 1),
-          source: 'zendesk',
-          name: o.name,
-          domains: o.domains,
-        };
-        appendJsonl(orgsFile, org);
-        counts.organizations++;
-      }
-      orgSpinner.succeed(`${counts.organizations} organizations generated`);
-
-      // Generate customers
-      const customerSpinner = ora('Generating customers...').start();
-      const customerNames = [
-        'John Doe', 'Jane Smith', 'Alice Johnson', 'Bob Williams', 'Carol Brown',
-        'David Lee', 'Eva Martinez', 'Frank Garcia', 'Grace Kim', 'Henry Patel',
-        'Iris Nakamura', 'Jack Thompson', 'Kate O\'Brien', 'Leo Fernandez', 'Mia Zhang',
-        'Noah Johansson', 'Olivia Dubois', 'Peter Muller', 'Quinn O\'Sullivan', 'Rachel Tanaka',
-      ];
-      const customers: Customer[] = [];
-      for (const [i, name] of customerNames.entries()) {
-        const orgIdx = i % orgs.length;
-        const email = name.toLowerCase().replace(/[' ]/g, '.').replace('..', '.') + '@' + orgs[orgIdx].domains[0];
-        const customer: Customer = {
-          id: `demo-user-${i + 1}`,
-          externalId: String(1000 + i),
-          source: 'zendesk',
-          name,
-          email,
-          orgId: `demo-org-${orgIdx + 1}`,
-        };
-        appendJsonl(customersFile, customer);
-        customers.push(customer);
-        counts.customers++;
-      }
-      customerSpinner.succeed(`${counts.customers} customers generated`);
-
-      // Generate tickets with realistic conversation threads
-      const ticketSpinner = ora('Generating tickets...').start();
-      const statuses: Ticket['status'][] = ['open', 'open', 'open', 'pending', 'pending', 'solved', 'solved', 'closed'];
-
-      for (let i = 0; i < numTickets; i++) {
-        const template = TICKET_TEMPLATES[i % TICKET_TEMPLATES.length];
-        const suffix = i >= TICKET_TEMPLATES.length ? ` (#${Math.floor(i / TICKET_TEMPLATES.length) + 1})` : '';
-        const customer = customers[i % customers.length];
-        const agent = pick(AGENTS);
-        const created = randomDate(30);
-        const updated = randomDate(7);
-        const status = i < 15 ? pick(['open', 'open', 'pending'] as const) : pick(statuses);
-
-        const ticket: Ticket = {
-          id: `demo-${4500 + i}`,
-          externalId: String(4500 + i),
-          source: 'zendesk',
-          subject: template.subject + suffix,
-          status,
-          priority: template.priority,
-          assignee: agent,
-          requester: customer.email,
-          tags: pickN(TAGS_POOL, 2 + Math.floor(Math.random() * 3)),
-          createdAt: created,
-          updatedAt: updated,
-        };
-        appendJsonl(ticketsFile, ticket);
-        counts.tickets++;
-
-        // Generate messages for this ticket
-        for (const [j, body] of template.messages.entries()) {
-          const isCustomer = j % 2 === 0;
-          const msg: Message = {
-            id: `demo-msg-${i * 10 + j}`,
-            ticketId: ticket.id,
-            author: isCustomer ? customer.name : agent,
-            body,
-            type: 'reply',
-            createdAt: new Date(new Date(created).getTime() + j * 3600000).toISOString(),
-          };
-          appendJsonl(messagesFile, msg);
-          counts.messages++;
-        }
-
-        ticketSpinner.text = `Generating tickets... ${counts.tickets}`;
-      }
-      ticketSpinner.succeed(`${counts.tickets} tickets generated (${counts.messages} messages)`);
-
-      // Write KB articles
-      const kbSpinner = ora('Generating KB articles...').start();
-      for (const article of KB_ARTICLES) {
-        appendJsonl(kbFile, article);
-        counts.kbArticles++;
-      }
-      kbSpinner.succeed(`${counts.kbArticles} KB articles generated`);
-
-      // Write rules
-      const rulesSpinner = ora('Generating business rules...').start();
-      for (const rule of RULES) {
-        appendJsonl(rulesFile, rule);
-        counts.rules++;
-      }
-      rulesSpinner.succeed(`${counts.rules} business rules generated`);
-
-      // Write manifest
-      const manifest: ExportManifest = {
-        source: 'zendesk',
-        exportedAt: new Date().toISOString(),
-        counts,
-      };
-      writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+      const orgSpinner = ora('Generating demo data...').start();
+      await generateDemoData(outDir, numTickets);
+      orgSpinner.succeed('Demo data generated');
 
       console.log(chalk.green(`\nDemo data ready → ${outDir}/`));
       console.log(chalk.cyan('\nTry these commands:'));

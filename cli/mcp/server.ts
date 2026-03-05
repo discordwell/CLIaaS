@@ -50,14 +50,17 @@ registerResources(server);
 registerPrompts(server);
 
 // Connect via stdio
-async function main() {
+export async function startMcpServer() {
   const transport = new StdioServerTransport();
   log('Starting CLIaaS MCP server...');
   await server.connect(transport);
   log('CLIaaS MCP server connected');
 }
 
-main().catch((err) => {
-  process.stderr.write(`[cliaas-mcp] Fatal: ${err}\n`);
-  process.exitCode = 1;
-});
+// Auto-start when run directly (not when imported by CLI serve command)
+if (!process.env.__CLIAAS_MCP_IMPORTED) {
+  startMcpServer().catch((err) => {
+    process.stderr.write(`[cliaas-mcp] Fatal: ${err}\n`);
+    process.exitCode = 1;
+  });
+}
