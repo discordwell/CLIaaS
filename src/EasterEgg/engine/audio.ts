@@ -48,7 +48,7 @@ export class MusicPlayer {
   private current: HTMLAudioElement | null = null;
   private fading: HTMLAudioElement | null = null; // outgoing track during crossfade
   private volume = 0.4;
-  private muted = false;
+  private muted = true; // Sound off by default — human-requested
   private playing = false;
   private available = false; // true once we confirm at least one track loads
   private pendingPlay = false; // play() called before probe completed
@@ -334,7 +334,7 @@ export class AudioManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private volume = 0.35;
-  private muted = false;
+  private muted = true; // Sound off by default — human-requested
   private lastPlayed = new Map<string, number>();
   private readonly MIN_INTERVAL = 40; // ms between same sound
   // Sampled audio system — loaded from extracted WAV files
@@ -358,7 +358,7 @@ export class AudioManager {
     try {
       this.ctx = new AudioContext();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.volume;
+      this.masterGain.gain.value = this.muted ? 0 : this.volume;
       this.masterGain.connect(this.ctx.destination);
     } catch {
       // Web Audio not available

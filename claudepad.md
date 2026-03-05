@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-04T23:10Z — Session 61: Map Tile Fix — TREE Terrain + Deferred Trees
+- **Root cause 1 fixed**: TREE terrain cells with clear templates (tmpl=0/0xFFFF) now use tileset clear tile (255,0) instead of procedural grass — eliminates visible light green blocks
+- **Root cause 2 fixed**: Tree sprite rendering deferred to second pass — clump sprites (TC01-TC05, 72-96px) no longer overwritten by _clump satellite cells' grass fill
+- **Broken asset removed**: mouse.png was degenerate (16144×0 PNG, frameHeight=0) causing mission load failure — removed from manifest.json
+- **10 new tests** (tree-tile-rendering.test.ts): condition logic for TREE/CLEAR atlas path, deferred draw list pattern, _clump satellite recognition
+- Wet tested on cliaas.com: zoomed inspection confirms uniform tileset grass, tree clumps render fully
+- Files: renderer.ts (2 changes in renderTerrain), manifest.json, tree-tile-rendering.test.ts (new)
+
 ## 2026-03-04T18:00Z — Session 60: Sprite-Based Fog of War (C++ Parity)
 - **Replaced blocky fillRect fog** with faithful C++ Cell_Shadow sprite-based shroud rendering
 - **Extracted SHADOW.SHP** from CONQUER.MIX: 48 frames, 24x24px each → `public/ra/assets/shadow.png`
