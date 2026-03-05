@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-05T15:20Z — Session 72: Parity Audit Phase 2 — Superweapon Timing + Test Cleanup
+- **6 code bugs fixed in types.ts**: 5 superweapon recharge times (Chrono 2700→6300, GPS 6300→7200, IronCurtain 6300→9900, Nuke 12600→11700, Sonar 12600→9000) + Iron Curtain duration (450→675 ticks)
+- **~65 hallucinated test assertions fixed** in data-parity.test.ts: naval (15), aircraft (18), infantry (3), weapons (17), structure HP (7), warhead (3), superweapons (6 updated + GPS added)
+- **MISSING_FEATURES.md**: 6 entries marked [VERIFIED] for all superweapon timing
+- All 111 data-parity tests pass, no regressions in EasterEgg tests
+- Files: types.ts, data-parity.test.ts, MISSING_FEATURES.md
+
 ## 2026-03-05T12:00Z — Session 71: Publishable npm Package
 - **Split package structure**: Created `packages/cliaas/` with own package.json, tsup build config, pnpm workspace
 - **tsup bundling**: CLI (index.js) + MCP server (mcp-server.js) built from source, `@/` path alias resolved, all npm deps external

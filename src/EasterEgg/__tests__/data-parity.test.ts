@@ -67,12 +67,12 @@ describe('UNIT_STATS parity', () => {
       expect(u.primaryWeapon).toBe('DogJaw');
     });
 
-    it('GNRL (Stavros) — strength=80, speed=5, sight=3, no weapon', () => {
+    it('GNRL (Stavros) — strength=80, speed=5, sight=3, weapon=Pistol', () => {
       const u = UNIT_STATS.GNRL;
       expect(u.strength).toBe(80);
       expect(u.speed).toBe(5);
       expect(u.sight).toBe(3);
-      expect(u.primaryWeapon).toBeNull();
+      expect(u.primaryWeapon).toBe('Pistol');
     });
 
     it('CHAN (Specialist) — strength=25, speed=5, sight=2', () => {
@@ -110,12 +110,12 @@ describe('UNIT_STATS parity', () => {
       const u = UNIT_STATS.E7;
       expect(u).toBeDefined();
       expect(u.strength).toBe(100);
-      expect(u.speed).toBe(6);
+      expect(u.speed).toBe(5);
       expect(u.armor).toBe('none');
-      expect(u.sight).toBe(5);
+      expect(u.sight).toBe(6);
       expect(u.rot).toBe(8);
       expect(u.primaryWeapon).toBe('Colt45');
-      expect(u.secondaryWeapon).toBeNull();
+      expect(u.secondaryWeapon).toBe('Colt45');
       expect(u.isInfantry).toBe(true);
       expect(u.owner).toBe('allied');
     });
@@ -124,9 +124,9 @@ describe('UNIT_STATS parity', () => {
       const u = UNIT_STATS.THF;
       expect(u).toBeDefined();
       expect(u.strength).toBe(25);
-      expect(u.speed).toBe(6);
+      expect(u.speed).toBe(4);
       expect(u.armor).toBe('none');
-      expect(u.sight).toBe(4);
+      expect(u.sight).toBe(5);
       expect(u.primaryWeapon).toBeNull();
       expect(u.owner).toBe('allied');
     });
@@ -249,8 +249,8 @@ describe('UNIT_STATS parity', () => {
       expect(u.strength).toBe(150);
       expect(u.speed).toBe(7);
       expect(u.armor).toBe('light');
-      expect(u.sight).toBe(6);
-      expect(u.rot).toBe(3);
+      expect(u.sight).toBe(5);
+      expect(u.rot).toBe(5);
       expect(u.primaryWeapon).toBe('SCUD');
       expect(u.owner).toBe('soviet');
     });
@@ -258,42 +258,42 @@ describe('UNIT_STATS parity', () => {
     it('MNLY (Minelayer) — new entry', () => {
       const u = UNIT_STATS.MNLY;
       expect(u).toBeDefined();
-      expect(u.strength).toBe(110);
-      expect(u.speed).toBe(8);
-      expect(u.armor).toBe('light');
+      expect(u.strength).toBe(100);
+      expect(u.speed).toBe(9);
+      expect(u.armor).toBe('heavy');
       expect(u.primaryWeapon).toBeNull();
-      expect(u.owner).toBe('allied');
+      expect(u.owner).toBe('both');
     });
 
   });
 
   // --- Naval ---
   describe('Naval', () => {
-    it('DD (Destroyer) — ROT=5, sight=5, speed=12', () => {
+    it('DD (Destroyer) — ROT=7, sight=6, speed=6', () => {
       const u = UNIT_STATS.DD;
       expect(u.strength).toBe(400);
-      expect(u.speed).toBe(12);
-      expect(u.sight).toBe(5);
-      expect(u.rot).toBe(5);
+      expect(u.speed).toBe(6);
+      expect(u.sight).toBe(6);
+      expect(u.rot).toBe(7);
       expect(u.primaryWeapon).toBe('Stinger');
       expect(u.secondaryWeapon).toBe('DepthCharge');
     });
 
-    it('CA (Cruiser) — ROT=3, sight=8, speed=8, weapon=8Inch', () => {
+    it('CA (Cruiser) — ROT=5, sight=7, speed=4, weapon=8Inch', () => {
       const u = UNIT_STATS.CA;
       expect(u.strength).toBe(700);
-      expect(u.speed).toBe(8);
-      expect(u.sight).toBe(8);
-      expect(u.rot).toBe(3);
+      expect(u.speed).toBe(4);
+      expect(u.sight).toBe(7);
+      expect(u.rot).toBe(5);
       expect(u.primaryWeapon).toBe('8Inch');
     });
 
-    it('SS (Submarine) — ROT=3, sight=5, speed=6', () => {
+    it('SS (Submarine) — ROT=7, sight=6, speed=6', () => {
       const u = UNIT_STATS.SS;
       expect(u.strength).toBe(120);
       expect(u.speed).toBe(6);
-      expect(u.sight).toBe(5);
-      expect(u.rot).toBe(3);
+      expect(u.sight).toBe(6);
+      expect(u.rot).toBe(7);
       expect(u.isCloakable).toBe(true);
     });
 
@@ -305,66 +305,66 @@ describe('UNIT_STATS parity', () => {
       expect(u.rot).toBe(3);
     });
 
-    it('PT (Gunboat) — ROT=5, sight=5, speed=14, weapon=2Inch', () => {
+    it('PT (Gunboat) — ROT=7, sight=7, speed=9, weapon=2Inch', () => {
       const u = UNIT_STATS.PT;
       expect(u.strength).toBe(200);
-      expect(u.speed).toBe(14);
-      expect(u.sight).toBe(5);
-      expect(u.rot).toBe(5);
+      expect(u.speed).toBe(9);
+      expect(u.sight).toBe(7);
+      expect(u.rot).toBe(7);
       expect(u.primaryWeapon).toBe('2Inch');
     });
 
-    it('LST (Transport) — ROT=4, sight=4, speed=10', () => {
+    it('LST (Transport) — ROT=10, sight=6, speed=14', () => {
       const u = UNIT_STATS.LST;
-      expect(u.strength).toBe(400);
-      expect(u.speed).toBe(10);
-      expect(u.sight).toBe(4);
-      expect(u.rot).toBe(4);
+      expect(u.strength).toBe(350);
+      expect(u.speed).toBe(14);
+      expect(u.sight).toBe(6);
+      expect(u.rot).toBe(10);
     });
   });
 
   // --- Aircraft ---
   describe('Aircraft', () => {
-    it('HELI (Longbow) — strength=100, speed=40, ROT=8, maxAmmo=8', () => {
+    it('HELI (Longbow) — strength=225, speed=16, ROT=4, maxAmmo=6', () => {
       const u = UNIT_STATS.HELI;
-      expect(u.strength).toBe(100);
-      expect(u.speed).toBe(40);
-      expect(u.rot).toBe(8);
-      expect(u.maxAmmo).toBe(8);
+      expect(u.strength).toBe(225);
+      expect(u.speed).toBe(16);
+      expect(u.rot).toBe(4);
+      expect(u.maxAmmo).toBe(6);
       expect(u.primaryWeapon).toBe('Hellfire');
     });
 
-    it('HIND — strength=100, speed=40, ROT=8, maxAmmo=4, weapon=ChainGun', () => {
+    it('HIND — strength=225, speed=12, ROT=4, maxAmmo=12, weapon=ChainGun', () => {
       const u = UNIT_STATS.HIND;
-      expect(u.strength).toBe(100);
-      expect(u.speed).toBe(40);
-      expect(u.rot).toBe(8);
-      expect(u.maxAmmo).toBe(4);
+      expect(u.strength).toBe(225);
+      expect(u.speed).toBe(12);
+      expect(u.rot).toBe(4);
+      expect(u.maxAmmo).toBe(12);
       expect(u.primaryWeapon).toBe('ChainGun');
     });
 
-    it('TRAN (Chinook) — strength=90, speed=30, ROT=8', () => {
+    it('TRAN (Chinook) — strength=90, speed=12, ROT=5', () => {
       const u = UNIT_STATS.TRAN;
       expect(u.strength).toBe(90);
-      expect(u.speed).toBe(30);
-      expect(u.rot).toBe(8);
+      expect(u.speed).toBe(12);
+      expect(u.rot).toBe(5);
     });
 
-    it('MIG — strength=60, speed=50, ROT=8, maxAmmo=2, weapon=Maverick', () => {
+    it('MIG — strength=50, speed=20, ROT=5, maxAmmo=3, weapon=Maverick', () => {
       const u = UNIT_STATS.MIG;
-      expect(u.strength).toBe(60);
-      expect(u.speed).toBe(50);
-      expect(u.rot).toBe(8);
-      expect(u.maxAmmo).toBe(2);
+      expect(u.strength).toBe(50);
+      expect(u.speed).toBe(20);
+      expect(u.rot).toBe(5);
+      expect(u.maxAmmo).toBe(3);
       expect(u.primaryWeapon).toBe('Maverick');
     });
 
-    it('YAK — strength=50, speed=50, ROT=8, maxAmmo=2, weapon=ChainGun', () => {
+    it('YAK — strength=60, speed=16, ROT=5, maxAmmo=15, weapon=ChainGun', () => {
       const u = UNIT_STATS.YAK;
-      expect(u.strength).toBe(50);
-      expect(u.speed).toBe(50);
-      expect(u.rot).toBe(8);
-      expect(u.maxAmmo).toBe(2);
+      expect(u.strength).toBe(60);
+      expect(u.speed).toBe(16);
+      expect(u.rot).toBe(5);
+      expect(u.maxAmmo).toBe(15);
       expect(u.primaryWeapon).toBe('ChainGun');
     });
   });
@@ -373,7 +373,7 @@ describe('UNIT_STATS parity', () => {
   describe('Ants', () => {
     it('ANT1 (Warrior)', () => {
       const u = UNIT_STATS.ANT1;
-      expect(u.strength).toBe(150);
+      expect(u.strength).toBe(125);
       expect(u.primaryWeapon).toBe('Mandible');
       expect(u.crushable).toBe(true);
     });
@@ -426,29 +426,29 @@ describe('WEAPON_STATS parity', () => {
     expect(w.isAntiAir).toBe(true);
   });
 
-  it('Sniper — damage=100, rof=60, range=3.75, warhead=SA', () => {
+  it('Sniper — damage=100, rof=5, range=3.75, warhead=HollowPoint', () => {
     const w = WEAPON_STATS.Sniper;
     expect(w.damage).toBe(100);
-    expect(w.rof).toBe(60);
+    expect(w.rof).toBe(5);
     expect(w.range).toBe(3.75);
-    expect(w.warhead).toBe('SA');
+    expect(w.warhead).toBe('HollowPoint');
   });
 
   it('Colt45 (Tanya) — new weapon', () => {
     const w = WEAPON_STATS.Colt45;
     expect(w).toBeDefined();
     expect(w.damage).toBe(50);
-    expect(w.rof).toBe(20);
-    expect(w.range).toBe(5.0);
-    expect(w.warhead).toBe('SA');
+    expect(w.rof).toBe(5);
+    expect(w.range).toBe(5.75);
+    expect(w.warhead).toBe('HollowPoint');
   });
 
   it('Pistol — new weapon', () => {
     const w = WEAPON_STATS.Pistol;
     expect(w).toBeDefined();
     expect(w.damage).toBe(1);
-    expect(w.rof).toBe(30);
-    expect(w.range).toBe(2.0);
+    expect(w.rof).toBe(7);
+    expect(w.range).toBe(1.75);
     expect(w.warhead).toBe('SA');
   });
 
@@ -478,19 +478,19 @@ describe('WEAPON_STATS parity', () => {
   it('SCUD (V2 Rocket) — new weapon', () => {
     const w = WEAPON_STATS.SCUD;
     expect(w).toBeDefined();
-    expect(w.damage).toBe(200);
-    expect(w.rof).toBe(100);
+    expect(w.damage).toBe(600);
+    expect(w.rof).toBe(400);
     expect(w.range).toBe(10.0);
     expect(w.warhead).toBe('HE');
   });
 
   // Naval weapons
-  it('Stinger — damage=30, rof=60, range=9.0, warhead=HE', () => {
+  it('Stinger — damage=30, rof=60, range=9.0, warhead=AP', () => {
     const w = WEAPON_STATS.Stinger;
     expect(w.damage).toBe(30);
     expect(w.rof).toBe(60);
     expect(w.range).toBe(9.0);
-    expect(w.warhead).toBe('HE');
+    expect(w.warhead).toBe('AP');
   });
 
   it('TorpTube — damage=90, rof=60, range=9.0', () => {
@@ -513,18 +513,18 @@ describe('WEAPON_STATS parity', () => {
     const w = WEAPON_STATS['8Inch'];
     expect(w).toBeDefined();
     expect(w.damage).toBe(500);
-    expect(w.rof).toBe(120);
-    expect(w.range).toBe(10.0);
-    expect(w.warhead).toBe('AP');
+    expect(w.rof).toBe(160);
+    expect(w.range).toBe(22.0);
+    expect(w.warhead).toBe('HE');
   });
 
   it('2Inch (Gunboat) — new weapon', () => {
     const w = WEAPON_STATS['2Inch'];
     expect(w).toBeDefined();
-    expect(w.damage).toBe(20);
-    expect(w.rof).toBe(20);
-    expect(w.range).toBe(5.0);
-    expect(w.warhead).toBe('SA');
+    expect(w.damage).toBe(25);
+    expect(w.rof).toBe(60);
+    expect(w.range).toBe(5.5);
+    expect(w.warhead).toBe('AP');
   });
 
   // Aircraft weapons
@@ -571,8 +571,8 @@ describe('WARHEAD_VS_ARMOR parity', () => {
     expect(keys).toContain('Mechanical');
   });
 
-  it('Nuke — equal damage vs all armor', () => {
-    expect(WARHEAD_VS_ARMOR.Nuke).toEqual([1.0, 1.0, 1.0, 1.0, 1.0]);
+  it('Nuke — warhead verses', () => {
+    expect(WARHEAD_VS_ARMOR.Nuke).toEqual([0.9, 1.0, 0.6, 0.25, 0.5]);
   });
 
   it('Mechanical — zero damage vs all armor', () => {
@@ -599,9 +599,9 @@ describe('WARHEAD_VS_ARMOR parity', () => {
 // WARHEAD_PROPS parity (Nuke + Mechanical)
 // ============================================================
 describe('WARHEAD_PROPS parity', () => {
-  it('Nuke entry exists with infantryDeath=2', () => {
+  it('Nuke entry exists with infantryDeath=4', () => {
     expect(WARHEAD_PROPS.Nuke).toBeDefined();
-    expect(WARHEAD_PROPS.Nuke.infantryDeath).toBe(2);
+    expect(WARHEAD_PROPS.Nuke.infantryDeath).toBe(4);
   });
 
   it('Mechanical entry exists with infantryDeath=0', () => {
@@ -614,9 +614,9 @@ describe('WARHEAD_PROPS parity', () => {
 // WARHEAD_META parity (Nuke + Mechanical)
 // ============================================================
 describe('WARHEAD_META parity', () => {
-  it('Nuke — spreadFactor=8, destroys walls and wood', () => {
+  it('Nuke — spreadFactor=6, destroys walls and wood', () => {
     expect(WARHEAD_META.Nuke).toBeDefined();
-    expect(WARHEAD_META.Nuke.spreadFactor).toBe(8);
+    expect(WARHEAD_META.Nuke.spreadFactor).toBe(6);
     expect(WARHEAD_META.Nuke.destroysWalls).toBe(true);
     expect(WARHEAD_META.Nuke.destroysWood).toBe(true);
   });
@@ -633,9 +633,9 @@ describe('WARHEAD_META parity', () => {
 describe('STRUCTURE_MAX_HP parity', () => {
   const expected: Record<string, number> = {
     POWR: 400, APWR: 700, PROC: 900, TENT: 800, BARR: 800,
-    WEAP: 1000, AFLD: 500, HPAD: 400, DOME: 1000,
-    GUN: 400, SAM: 400, TSLA: 500, GAP: 1000,
-    ATEK: 600, STEK: 600, IRON: 600, PDOX: 600, MSLO: 800,
+    WEAP: 1000, AFLD: 1000, HPAD: 800, DOME: 1000,
+    GUN: 400, SAM: 400, TSLA: 400, GAP: 1000,
+    ATEK: 400, STEK: 600, IRON: 400, PDOX: 400, MSLO: 400,
     FIX: 800, SILO: 300, FACT: 1000, HBOX: 600,
   };
 
@@ -650,24 +650,29 @@ describe('STRUCTURE_MAX_HP parity', () => {
 // SUPERWEAPON_DEFS parity
 // ============================================================
 describe('SUPERWEAPON_DEFS parity', () => {
-  it('Chronosphere recharge = 2700 ticks (3 minutes)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE].rechargeTicks).toBe(2700);
+  // rules.ini [Recharge] values × 60 × 15 FPS = ticks
+  it('Chronosphere recharge = 6300 ticks (7 min)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE].rechargeTicks).toBe(6300);
   });
 
-  it('Sonar Pulse recharge = 12600 ticks (14 minutes)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(12600);
+  it('GPS Satellite recharge = 7200 ticks (8 min)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(7200);
   });
 
-  it('Nuke recharge = 12600 ticks', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.NUKE].rechargeTicks).toBe(12600);
+  it('Iron Curtain recharge = 9900 ticks (11 min)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN].rechargeTicks).toBe(9900);
   });
 
-  it('Iron Curtain recharge = 6300 ticks', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN].rechargeTicks).toBe(6300);
+  it('Nuke recharge = 11700 ticks (13 min)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.NUKE].rechargeTicks).toBe(11700);
   });
 
-  it('IRON_CURTAIN_DURATION = 450 (~30s at 15fps)', () => {
-    expect(IRON_CURTAIN_DURATION).toBe(450);
+  it('Sonar Pulse recharge = 9000 ticks (10 min)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(9000);
+  });
+
+  it('IRON_CURTAIN_DURATION = 675 (0.75 min × 60 × 15 = 45s)', () => {
+    expect(IRON_CURTAIN_DURATION).toBe(675);
   });
 });
 

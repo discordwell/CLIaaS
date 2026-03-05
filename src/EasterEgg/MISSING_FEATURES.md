@@ -257,9 +257,12 @@ Nearly every aircraft stat is wrong. C++ aircraft have Sight=0 (rely on ground u
 
 ## SUPERWEAPONS
 
-- [!] **SW1: Chronosphere recharge** — TS 7 minutes. C++ default 3 minutes.
-- [!] **SW2: Sonar Pulse recharge** — TS 2 minutes. C++ default 14 minutes.
-- [!] **SW3: Iron Curtain duration** — TS 60 seconds. C++ ~30 seconds.
+- [x] [VERIFIED] **SW1: Chronosphere recharge** — Fixed: 6300 ticks (7 min × 60 × 15 FPS). Matches rules.ini [Recharge] Chrono=7.
+- [x] [VERIFIED] **SW2: Sonar Pulse recharge** — Fixed: 9000 ticks (10 min × 60 × 15 FPS). Matches rules.ini [Recharge] Sonar=10.
+- [x] [VERIFIED] **SW3: Iron Curtain duration** — Fixed: 675 ticks (0.75 min × 60 × 15 FPS = 45s). Matches rules.ini [General] IronCurtain=.75.
+- [x] [VERIFIED] **SW3b: Iron Curtain recharge** — Fixed: 9900 ticks (11 min × 60 × 15 FPS). Matches rules.ini [Recharge] IronCurtain=11.
+- [x] [VERIFIED] **SW3c: GPS Satellite recharge** — Fixed: 7200 ticks (8 min × 60 × 15 FPS). Matches rules.ini [Recharge] GPSSatellite=8.
+- [x] [VERIFIED] **SW3d: Nuke recharge** — Fixed: 11700 ticks (13 min × 60 × 15 FPS). Matches rules.ini [Recharge] Nuke=13.
 - [!] **SW4: GPS Satellite building** — TS assigns to DOME (Radar). C++ assigns to a separate GPS_SATELLITE building.
 - [!] **SW5: Sonar Pulse building** — TS assigns to DOME. C++ obtains by spying on enemy Sub Pen.
 - [ ] **SW6: Missing superweapons** — ParaBomb, ParaInfantry, SpyMission not implemented.
