@@ -19,7 +19,17 @@ export type WebhookEventType =
   | 'survey.sent'
   | 'agent.assigned'
   | 'tag.added'
-  | 'tag.removed';
+  | 'tag.removed'
+  | 'forum.thread_created'
+  | 'forum.reply_created'
+  | 'forum.thread_converted'
+  | 'qa.review_created'
+  | 'qa.review_completed'
+  | 'campaign.created'
+  | 'campaign.sent'
+  | 'customer.updated'
+  | 'customer.merged'
+  | 'time.entry_created';
 
 export interface RetryPolicy {
   maxAttempts: number;

@@ -62,6 +62,10 @@ export const channelTypeEnum = pgEnum('channel_type', [
   'facebook',
   'instagram',
   'twitter',
+  'slack',
+  'teams',
+  'telegram',
+  'sdk',
   'other',
 ]);
 
@@ -200,6 +204,17 @@ export const customers = pgTable(
     email: varchar('email', { length: 320 }),
     phone: text('phone'),
     orgId: uuid('org_id').references(() => organizations.id),
+    // Customer 360 enrichment fields
+    customAttributes: jsonb('custom_attributes').default({}),
+    avatarUrl: text('avatar_url'),
+    locale: text('locale'),
+    timezone: text('timezone'),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    browser: text('browser'),
+    os: text('os'),
+    ipAddress: inet('ip_address'),
+    signupDate: timestamp('signup_date', { withTimezone: true }),
+    plan: text('plan'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -490,6 +505,9 @@ export const timeEntries = pgTable(
     userId: uuid('user_id').references(() => users.id),
     minutes: integer('minutes').notNull().default(0),
     note: text('note'),
+    billable: boolean('billable').default(true),
+    customerId: uuid('customer_id').references(() => customers.id),
+    groupId: uuid('group_id').references(() => groups.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
@@ -1230,5 +1248,273 @@ export const retentionPolicies = pgTable(
       table.workspaceId,
       table.resource,
     ),
+  }),
+);
+
+// ---- Sprint Feature Enums ----
+
+export const forumThreadStatusEnum = pgEnum('forum_thread_status', ['open', 'closed', 'pinned']);
+export const qaReviewStatusEnum = pgEnum('qa_review_status', ['pending', 'in_progress', 'completed']);
+export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'scheduled', 'sending', 'sent', 'cancelled']);
+export const campaignChannelEnum = pgEnum('campaign_channel', ['email', 'sms', 'whatsapp']);
+export const customerNoteTypeEnum = pgEnum('customer_note_type', ['note', 'call_log', 'meeting']);
+
+// ---- Customer 360 Tables ----
+
+export const customerActivities = pgTable(
+  'customer_activities',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    activityType: text('activity_type').notNull(),
+    entityType: text('entity_type'),
+    entityId: text('entity_id'),
+    metadata: jsonb('metadata').default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customerActivitiesWsCustIdx: index('customer_activities_ws_cust_idx').on(table.workspaceId, table.customerId),
+  }),
+);
+
+export const customerNotes = pgTable(
+  'customer_notes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    authorId: uuid('author_id').references(() => users.id),
+    noteType: customerNoteTypeEnum('note_type').notNull().default('note'),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customerNotesWsCustIdx: index('customer_notes_ws_cust_idx').on(table.workspaceId, table.customerId),
+  }),
+);
+
+export const customerSegments = pgTable(
+  'customer_segments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    query: jsonb('query').notNull().default({}),
+    customerCount: integer('customer_count').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customerSegmentsWsIdx: index('customer_segments_ws_idx').on(table.workspaceId),
+  }),
+);
+
+export const customerMergeLog = pgTable('customer_merge_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+  primaryCustomerId: uuid('primary_customer_id').notNull().references(() => customers.id),
+  mergedCustomerId: uuid('merged_customer_id').notNull(),
+  mergedData: jsonb('merged_data').notNull().default({}),
+  mergedBy: uuid('merged_by').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ---- Community Forum Tables ----
+
+export const forumCategories = pgTable(
+  'forum_categories',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    slug: text('slug').notNull(),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    forumCategoriesWsSlugIdx: uniqueIndex('forum_categories_ws_slug_idx').on(table.workspaceId, table.slug),
+  }),
+);
+
+export const forumThreads = pgTable(
+  'forum_threads',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    categoryId: uuid('category_id').notNull().references(() => forumCategories.id),
+    customerId: uuid('customer_id').references(() => customers.id),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    status: forumThreadStatusEnum('status').notNull().default('open'),
+    isPinned: boolean('is_pinned').notNull().default(false),
+    viewCount: integer('view_count').notNull().default(0),
+    replyCount: integer('reply_count').notNull().default(0),
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).defaultNow().notNull(),
+    convertedTicketId: uuid('converted_ticket_id').references(() => tickets.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    forumThreadsWsCatIdx: index('forum_threads_ws_cat_idx').on(table.workspaceId, table.categoryId),
+  }),
+);
+
+export const forumReplies = pgTable(
+  'forum_replies',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    threadId: uuid('thread_id').notNull().references(() => forumThreads.id),
+    customerId: uuid('customer_id').references(() => customers.id),
+    body: text('body').notNull(),
+    isBestAnswer: boolean('is_best_answer').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    forumRepliesThreadIdx: index('forum_replies_thread_idx').on(table.threadId),
+  }),
+);
+
+// ---- QA / Conversation Review Tables ----
+
+export const qaScorecards = pgTable(
+  'qa_scorecards',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    criteria: jsonb('criteria').notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    qaScorecardsWsIdx: index('qa_scorecards_ws_idx').on(table.workspaceId),
+  }),
+);
+
+export const qaReviews = pgTable(
+  'qa_reviews',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ticketId: uuid('ticket_id').references(() => tickets.id),
+    conversationId: uuid('conversation_id').references(() => conversations.id),
+    scorecardId: uuid('scorecard_id').notNull().references(() => qaScorecards.id),
+    reviewerId: uuid('reviewer_id').references(() => users.id),
+    reviewType: text('review_type').notNull().default('manual'),
+    scores: jsonb('scores').notNull().default({}),
+    totalScore: integer('total_score').notNull().default(0),
+    maxPossibleScore: integer('max_possible_score').notNull().default(0),
+    notes: text('notes'),
+    status: qaReviewStatusEnum('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    qaReviewsWsTicketIdx: index('qa_reviews_ws_ticket_idx').on(table.workspaceId, table.ticketId),
+  }),
+);
+
+// ---- Campaign Tables ----
+
+export const campaigns = pgTable(
+  'campaigns',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    channel: campaignChannelEnum('channel').notNull().default('email'),
+    status: campaignStatusEnum('status').notNull().default('draft'),
+    subject: text('subject'),
+    templateBody: text('template_body'),
+    templateVariables: jsonb('template_variables').default({}),
+    segmentQuery: jsonb('segment_query').default({}),
+    scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    campaignsWsStatusIdx: index('campaigns_ws_status_idx').on(table.workspaceId, table.status),
+  }),
+);
+
+export const campaignRecipients = pgTable(
+  'campaign_recipients',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id').notNull().references(() => campaigns.id),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    customerId: uuid('customer_id').references(() => customers.id),
+    email: text('email'),
+    phone: text('phone'),
+    status: text('status').notNull().default('pending'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
+    clickedAt: timestamp('clicked_at', { withTimezone: true }),
+    error: text('error'),
+  },
+  table => ({
+    campaignRecipientsCampaignIdx: index('campaign_recipients_campaign_idx').on(table.campaignId),
+  }),
+);
+
+// ---- Channel Config Tables ----
+
+export const telegramBotConfigs = pgTable(
+  'telegram_bot_configs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    botToken: text('bot_token').notNull(),
+    botUsername: text('bot_username'),
+    webhookSecret: text('webhook_secret').notNull(),
+    inboxId: uuid('inbox_id').references(() => inboxes.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    telegramBotConfigsWsIdx: uniqueIndex('telegram_bot_configs_ws_idx').on(table.workspaceId),
+  }),
+);
+
+export const slackChannelMappings = pgTable(
+  'slack_channel_mappings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    slackChannelId: text('slack_channel_id').notNull(),
+    slackChannelName: text('slack_channel_name'),
+    inboxId: uuid('inbox_id').references(() => inboxes.id),
+    autoCreateTickets: boolean('auto_create_tickets').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    slackMappingsWsChannelIdx: uniqueIndex('slack_mappings_ws_channel_idx').on(table.workspaceId, table.slackChannelId),
+  }),
+);
+
+export const teamsChannelMappings = pgTable(
+  'teams_channel_mappings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    teamsChannelId: text('teams_channel_id').notNull(),
+    teamsTeamId: text('teams_team_id').notNull(),
+    teamsChannelName: text('teams_channel_name'),
+    inboxId: uuid('inbox_id').references(() => inboxes.id),
+    autoCreateTickets: boolean('auto_create_tickets').notNull().default(true),
+    serviceUrl: text('service_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    teamsMappingsWsChannelIdx: uniqueIndex('teams_mappings_ws_channel_idx').on(table.workspaceId, table.teamsChannelId),
   }),
 );

@@ -60,6 +60,18 @@ export interface Customer {
   email: string;
   source: string;
   createdAt?: string;
+  // Customer 360 enrichment
+  phone?: string;
+  customAttributes?: Record<string, unknown>;
+  avatarUrl?: string;
+  locale?: string;
+  timezone?: string;
+  lastSeenAt?: string;
+  browser?: string;
+  os?: string;
+  ipAddress?: string;
+  signupDate?: string;
+  plan?: string;
 }
 
 export interface Organization {

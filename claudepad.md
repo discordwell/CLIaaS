@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-03-05T10:00Z — Session 69: Feature Parity Sprint — 9 Features in One Pass
+- **Complete feature parity sprint**: Built 9 features + Customer 360 enrichment to match competitor platforms (Zendesk, Freshdesk, Intercom, HubSpot, Help Scout, Kayako, Zoho Desk, Jira SM)
+- **Features built**: (1) Customer 360 Enrichment (+10 cols, 4 new tables, timeline/notes/segments/merge), (2) Time Tracking Enhancement (billable hours, customer/group grouping), (3) Community Forums (categories/threads/replies, portal view, thread-to-ticket conversion), (4) QA/Conversation Review (scorecards, manual/auto reviews, dashboard metrics), (5) Proactive/Outbound Messaging (campaigns, recipients, template vars, analytics), (6) Telegram channel (Bot API, webhook, config), (7) Slack as Intake (Events API, slash commands, OAuth, bi-directional sync), (8) MS Teams as Intake (Bot Framework, adaptive cards, manifest), (9) Mobile SDK (@cliaas/sdk package, session management, SSE realtime)
+- **Shared infrastructure**: 1 SQL migration (14 new tables, 2 ALTER), 10 new canonical events, 3 new feature gates (all tiers), 4 new channel_type enum values
+- **New stats**: 60 MCP tools (+14), 148 API routes (+47), 38 pages (+8), 73 DB tables (+14), 37 CLI command groups (+5)
+- **SDK package**: `sdk/` directory with types, API client, SSE realtime, and unified entry point
+- **Tests**: 45 new sprint feature tests (all passing), MCP server test updated (60 tools), build clean
+- **Parallelized**: 4 sub-agents built features simultaneously, then merged
+- Files: ~110 new, ~15 modified
+
+## 2026-03-05T08:30Z — Session 68: HIRES English Icons + Play Mode Fix
+- **HIRES icon extraction**: Downloaded Allied CD from cnc-comm.com → extracted HIRES.MIX (5.8MB, 162 files) + HIRES1.MIX (Aftermath) from REDALERT.MIX inside CD1_ALLIES.iso
+- **67 icons upgraded**: All sidebar cameo icons switched from LORES.MIX (32×24 DOS pixel art) to HIRES.MIX (64×48 pre-rendered 3D English icons). Icon scaling via ctx.drawImage(src, 0, 0, 64, 48, dst, x, y, 32, 24)
+- **Play mode fix**: `?anttest=play` fell through to default test mode branch, showing E2E test overlay. Added explicit play mode case in AntGame.tsx before default fallback.
+- **Asset pipeline changes**: `scripts/extract-ra-assets.ts` now prefers HIRES.MIX for icons with LORES.MIX fallback. Added HIRES_PATH/HIRES1_PATH env var overrides.
+- **5 new tests**: HIRES icon scaling (3 tests), play mode URL handling (2 tests) — 76 total pass
+- **Wet test confirmed**: SCA01EA shows HIRES icons correctly in both production strips with proper scaling
+- Files: extract-ra-assets.ts, AntGame.tsx, renderer.ts, sidebar-ui.test.ts, 68 icon PNGs, manifest.json
+
+## 2026-03-05T07:55Z — Session 67: Production Data Parity Audit + TechLevel System
+- **Root cause of ARTY bug**: SCA01EA sets playerTechLevel=3, ARTY has TechLevel=8 in rules.ini, but engine never checked TechLevel. Added full TechLevel gating system.
+- **TechLevel pipeline**: Added `techLevel` to ProductionItem interface → piped `playerTechLevel` through ScenarioResult → stored in Game class → filtered in `getAvailableItems()`
+- **13 data fixes**: E3→allied, MNLY→both, DOG→KENN prereq, E4+STEK, V2RL→DOME, MNLY→FIX, 4TNK+STEK, APC+TENT, CA→ATEK, SHOK→TSLA, ARTY remove DOME techPrereq, FENC→"Wire Fence", BARB removed
+- **Building aliases**: TENT↔BARR, SYRD↔SPEN in `hasBuilding()` for cross-faction prereq resolution
+- **TechLevel values**: Every PRODUCTION_ITEMS entry now has techLevel (1-13 for base game, 99 for expansion-only)
+- **Tests**: 6 new test sections (faction, prereqs, walls, techLevel, filtering, aliases) + fixed 40+ pre-existing broken assertions across 5 test files
+- Files: types.ts, scenario.ts, index.ts, production-parity.test.ts, faction-tech-trees.test.ts, wall-placement.test.ts, data-parity.test.ts, bugfix-green-shadows-production.test.ts
+
 ## 2026-03-05T06:30Z — Session 66: Sidebar Scroll Fix + Snow Theatre Palette
 - **Sidebar clip rect fix**: Changed strip clip from `height - 40 - STRIP_START_Y` (166px) to `CAMEO_VISIBLE * (CAMEO_H + CAMEO_GAP)` (104px = exactly 4 slots)
 - **Scroll arrows outside clip**: Moved arrow rendering to new `renderStripScrollArrows()` helper called AFTER `ctx.restore()` — arrows no longer covered by items

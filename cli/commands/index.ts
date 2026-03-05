@@ -31,6 +31,11 @@ import { registerMcpCommands } from './mcp.js';
 import { registerVoiceCommands } from './voice.js';
 import { registerSandboxCommands } from './sandbox.js';
 import { registerSyncCommands } from './sync.js';
+import { registerCustomerCommands } from './customers.js';
+import { registerTimeCommands } from './time.js';
+import { registerForumCommands } from './forums.js';
+import { registerQACommands } from './qa.js';
+import { registerCampaignCommands } from './campaigns.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -65,4 +70,9 @@ export function registerCommands(program: Command): void {
   registerVoiceCommands(program);
   registerSandboxCommands(program);
   registerSyncCommands(program);
+  registerCustomerCommands(program);
+  registerTimeCommands(program);
+  registerForumCommands(program);
+  registerQACommands(program);
+  registerCampaignCommands(program);
 }

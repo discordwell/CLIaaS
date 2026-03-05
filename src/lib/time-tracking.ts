@@ -12,6 +12,8 @@ export interface TimeEntry {
   durationMinutes: number;
   billable: boolean;
   notes: string;
+  customerId?: string;
+  groupId?: string;
 }
 
 export interface TimeReport {
@@ -33,6 +35,16 @@ export interface TimeReport {
     totalMinutes: number;
     billableMinutes: number;
   }>;
+  byCustomer: Array<{
+    customerId: string;
+    totalMinutes: number;
+    billableMinutes: number;
+  }>;
+  byGroup: Array<{
+    groupId: string;
+    totalMinutes: number;
+    billableMinutes: number;
+  }>;
 }
 
 export interface TimeFilters {
@@ -41,6 +53,8 @@ export interface TimeFilters {
   from?: string;
   to?: string;
   billable?: boolean;
+  customerId?: string;
+  groupId?: string;
 }
 
 // ---- JSONL persistence ----
@@ -241,6 +255,12 @@ export function getTimeEntries(filters: TimeFilters = {}): TimeEntry[] {
       (e) => new Date(e.startTime).getTime() <= toTime
     );
   }
+  if (filters.customerId) {
+    results = results.filter((e) => e.customerId === filters.customerId);
+  }
+  if (filters.groupId) {
+    results = results.filter((e) => e.groupId === filters.groupId);
+  }
 
   return results.sort(
     (a, b) =>
@@ -265,6 +285,14 @@ export function getTimeReport(filters: TimeFilters = {}): TimeReport {
     { totalMinutes: number; billableMinutes: number }
   >();
   const dayMap = new Map<
+    string,
+    { totalMinutes: number; billableMinutes: number }
+  >();
+  const customerMap = new Map<
+    string,
+    { totalMinutes: number; billableMinutes: number }
+  >();
+  const groupMap = new Map<
     string,
     { totalMinutes: number; billableMinutes: number }
   >();
@@ -301,6 +329,28 @@ export function getTimeReport(filters: TimeFilters = {}): TimeReport {
     dayData.totalMinutes += entry.durationMinutes;
     if (entry.billable) dayData.billableMinutes += entry.durationMinutes;
     dayMap.set(day, dayData);
+
+    // By customer
+    if (entry.customerId) {
+      const customer = customerMap.get(entry.customerId) ?? {
+        totalMinutes: 0,
+        billableMinutes: 0,
+      };
+      customer.totalMinutes += entry.durationMinutes;
+      if (entry.billable) customer.billableMinutes += entry.durationMinutes;
+      customerMap.set(entry.customerId, customer);
+    }
+
+    // By group
+    if (entry.groupId) {
+      const group = groupMap.get(entry.groupId) ?? {
+        totalMinutes: 0,
+        billableMinutes: 0,
+      };
+      group.totalMinutes += entry.durationMinutes;
+      if (entry.billable) group.billableMinutes += entry.durationMinutes;
+      groupMap.set(entry.groupId, group);
+    }
   }
 
   return {
@@ -317,5 +367,12 @@ export function getTimeReport(filters: TimeFilters = {}): TimeReport {
     byDay: Array.from(dayMap.entries())
       .map(([date, data]) => ({ date, ...data }))
       .sort((a, b) => a.date.localeCompare(b.date)),
+    byCustomer: Array.from(customerMap.entries()).map(
+      ([customerId, data]) => ({ customerId, ...data })
+    ),
+    byGroup: Array.from(groupMap.entries()).map(([groupId, data]) => ({
+      groupId,
+      ...data,
+    })),
   };
 }

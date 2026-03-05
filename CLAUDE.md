@@ -14,8 +14,11 @@
 ## Easter Egg Development
 - When committing Easter Egg changes, also run `scripts/deploy_vps.sh` to deploy to cliaas.com.
 
+## Connectors
+- Kayako and Kayako Classic will remain unconfigured — this is expected (no active accounts).
+
 ## MCP Server
-- MCP server entry point: `cli/mcp/server.ts` (stdio transport, 18 tools, 6 resources, 4 prompts)
+- MCP server entry point: `cli/mcp/server.ts` (stdio transport, 60 tools, 6 resources, 4 prompts)
 - Auto-discovery: `.mcp.json` in project root
 - See `AGENTS.md` for the full tool catalog, domain model, and workflow recipes
 - CLI commands: `cliaas mcp install`, `cliaas mcp setup`, `cliaas mcp test`

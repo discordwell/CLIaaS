@@ -25,6 +25,14 @@ const ALL_WRITE_TOOLS = [
   'workflow_create',
   'workflow_toggle',
   'workflow_delete',
+  'customer_note',
+  'customer_merge',
+  'forum_create',
+  'forum_moderate',
+  'qa_review',
+  'campaign_create',
+  'campaign_send',
+  'time_log',
 ];
 
 export function loadScopes(): MCPScopeConfig {

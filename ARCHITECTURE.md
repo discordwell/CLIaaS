@@ -8,19 +8,19 @@
 
 | Metric | Value |
 |--------|-------|
-| Pages | 30 (Next.js App Router) |
-| API Routes | 101 |
+| Pages | 38 (Next.js App Router) |
+| API Routes | 148 |
 | Components | 14 shared React components |
-| Library modules | 58 (`src/lib/`) |
-| CLI files | 69 (`cli/`) |
-| CLI commands | 32 registered command groups |
+| Library modules | 67 (`src/lib/`) |
+| CLI files | 79 (`cli/`) |
+| CLI commands | 37 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 33 (across 9 modules) |
+| MCP tools | 60 (across 14 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 59 (Drizzle/PostgreSQL, RLS-enabled) |
-| Tests | 88 files, ~7,000 LOC |
-| Source LOC | ~49,000 (excl. Easter Egg + tests) |
+| DB tables | 73 (Drizzle/PostgreSQL, RLS-enabled) |
+| Tests | 89 files, ~7,500 LOC |
+| Source LOC | ~55,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
 
 ---
@@ -36,8 +36,8 @@
          ▼                ▼                   ▼
 ┌─────────────────┐ ┌──────────────┐ ┌──────────────────┐
 │  Next.js App    │ │  Commander   │ │  MCP Server      │
-│  29 pages       │ │  32 commands │ │  30 tools        │
-│  101 API routes │ │  10 connect. │ │  6 resources     │
+│  38 pages       │ │  37 commands │ │  60 tools        │
+│  148 API routes │ │  10 connect. │ │  6 resources     │
 │                 │ │  3 providers │ │  4 prompts       │
 └────────┬────────┘ └──────┬───────┘ └────────┬─────────┘
          │                 │                   │
@@ -54,7 +54,7 @@
          ▼                  ▼                  ▼
 ┌─────────────────┐ ┌──────────────┐ ┌──────────────────┐
 │  PostgreSQL     │ │  JSONL Files │ │  External APIs   │
-│  53 tables      │ │  (demo mode) │ │  Twilio, Meta,   │
+│  73 tables      │ │  (demo mode) │ │  Twilio, Meta,   │
 │  pgvector RAG   │ │  /cliaas-data│ │  Twitter, SMTP   │
 └─────────────────┘ └──────────────┘ └──────────────────┘
 ```
@@ -93,10 +93,24 @@ Each domain has a dedicated store in `src/lib/`:
 | Push Subs | `push.ts` | `global.__cliaaPushSubs` |
 | Voice Calls | `channels/voice-store.ts` | `global.__cliaaVoiceCalls` |
 | SMS Messages | `channels/sms-store.ts` | `global.__cliaaSmsMessages` |
+| Customer Activities | `customers/customer-store.ts` | Module-level arrays |
+| Customer Notes | `customers/customer-store.ts` | Module-level arrays |
+| Customer Segments | `customers/customer-store.ts` | Module-level arrays |
+| Forum Categories | `forums/forum-store.ts` | Module-level arrays |
+| Forum Threads | `forums/forum-store.ts` | Module-level arrays |
+| Forum Replies | `forums/forum-store.ts` | Module-level arrays |
+| QA Scorecards | `qa/qa-store.ts` | Module-level arrays |
+| QA Reviews | `qa/qa-store.ts` | Module-level arrays |
+| Campaigns | `campaigns/campaign-store.ts` | Module-level arrays |
+| Campaign Recipients | `campaigns/campaign-store.ts` | Module-level arrays |
+| Slack Mappings | `channels/slack-intake.ts` | `global.__cliaasSlackMappings` |
+| Slack Conversations | `channels/slack-intake.ts` | `global.__cliaasSlackConvs` |
+| Telegram Configs | `channels/telegram-store.ts` | Module-level arrays |
+| SDK Sessions | `channels/sdk-session.ts` | Module-level Map |
 
 ---
 
-## Database Schema (53 tables)
+## Database Schema (73 tables)
 
 ### Core Multi-Tenancy (3)
 `tenants` → `workspaces` → `users`
@@ -104,11 +118,11 @@ Each domain has a dedicated store in `src/lib/`:
 ### Tickets & Conversations (5)
 `tickets` → `conversations` → `messages` → `attachments`, `groups`
 
-### Customers (2)
-`customers`, `organizations`
+### Customers (6)
+`customers` (+10 enrichment columns), `organizations`, `customer_activities`, `customer_notes`, `customer_segments`, `customer_merge_log`
 
-### Channels (1)
-`inboxes` (email, chat, api, sms, phone, web, whatsapp, facebook, instagram, twitter)
+### Channels (4)
+`inboxes` (email, chat, api, sms, phone, web, whatsapp, facebook, instagram, twitter, slack, teams, telegram, sdk), `telegram_bot_configs`, `slack_channel_mappings`, `teams_channel_mappings`
 
 ### Configuration (4)
 `brands`, `ticket_forms`, `custom_fields`, `custom_field_values`
@@ -123,7 +137,7 @@ Each domain has a dedicated store in `src/lib/`:
 `views`, `tags`, `ticket_tags`
 
 ### CSAT & Time (2)
-`csat_ratings`, `time_entries`
+`csat_ratings`, `time_entries` (+billable, customerId, groupId columns)
 
 ### Surveys — CSAT/NPS/CES (2)
 `survey_responses` (unified survey responses with `survey_type` discriminator: csat/nps/ces, token-based portal access), `survey_configs` (per-workspace survey settings: enable/disable, trigger event, delay, custom question text; unique on workspace+surveyType)
@@ -149,6 +163,15 @@ Each domain has a dedicated store in `src/lib/`:
 ### Billing (2)
 `usage_metrics` (tenant per-period usage counters), `billing_events` (Stripe webhook audit log)
 
+### Community Forums (3)
+`forum_categories`, `forum_threads`, `forum_replies`
+
+### QA / Conversation Review (2)
+`qa_scorecards` (criteria JSONB), `qa_reviews` (scores JSONB)
+
+### Proactive Messaging (2)
+`campaigns`, `campaign_recipients`
+
 ### Key Indexes
 - `tickets_workspace_status_idx` — queue queries
 - `messages_conversation_idx` — thread ordering
@@ -169,7 +192,7 @@ Ticket handler → dispatch()
                     └─→ enqueueAIResolution()  (AI agent queue, quota-gated, ticket.created/message.created)
 ```
 
-- **Canonical events**: `ticket.created`, `ticket.updated`, `ticket.resolved`, `message.created`, `csat.submitted`, `sla.breached`
+- **Canonical events**: `ticket.created`, `ticket.updated`, `ticket.resolved`, `message.created`, `csat.submitted`, `sla.breached`, `forum.thread_created`, `forum.reply_created`, `forum.thread_converted`, `qa.review_created`, `qa.review_completed`, `campaign.created`, `campaign.sent`, `customer.updated`, `customer.merged`, `time.entry_created`
 - Fire-and-forget via `Promise.allSettled` — errors isolated per channel with Sentry capture
 - SSE uses colon-separated names (`ticket:created`); dispatcher translates
 
@@ -273,6 +296,36 @@ BullMQ + Redis for reliable background processing with graceful fallback to inli
 - Embeddable widget: `/api/channels/chat/widget`
 - Real-time via SSE
 
+### Telegram
+- Provider: Telegram Bot API
+- Webhook: `/api/channels/telegram/webhook` (signature verification via webhook secret)
+- Setup: `/api/channels/telegram/setup` (registers webhook with Telegram)
+- Library: `src/lib/channels/telegram.ts` (sendMessage, setWebhook, getMe)
+- Store: `src/lib/channels/telegram-store.ts` (bot configs + conversations)
+
+### Slack as Intake
+- Events API webhook: `/api/channels/slack/events` (signature verification)
+- Slash commands: `/api/channels/slack/commands`
+- Interactive components: `/api/channels/slack/interact`
+- OAuth flow: `/api/channels/slack/oauth` + `/api/channels/slack/oauth/callback`
+- Library: `src/lib/channels/slack-intake.ts` (message-to-ticket, bi-directional sync, JSONL mapping store)
+- Channel mapping: Slack channel → CLIaaS inbox, auto-ticket creation
+
+### MS Teams as Intake
+- Bot Framework endpoint: `/api/channels/teams/messages`
+- Auth config: `/api/channels/teams/auth`
+- App manifest: `/api/channels/teams/manifest`
+- Library: `src/lib/channels/teams-intake.ts` (Bot Framework REST API, adaptive cards)
+- Uses `TEAMS_APP_ID` + `TEAMS_APP_PASSWORD` for authentication
+
+### Mobile SDK
+- Standalone JS package: `sdk/` directory, publishable as `@cliaas/sdk`
+- Init + identify: `/api/sdk/init` (creates/identifies customer session)
+- Messaging: `/api/sdk/messages` (send + poll/SSE)
+- Attachments: `/api/sdk/attachments`
+- Session management: `src/lib/channels/sdk-session.ts` (token-based auth)
+- SDK API: `init()`, `identify()`, `open()`, `close()`, `on()`, `sendMessage()`, `getMessages()`
+
 ---
 
 ## Authentication & Security
@@ -318,6 +371,11 @@ cli/
 │   ├── mcp.ts             # install, setup, test
 │   ├── voice.ts           # record, transcribe
 │   ├── sandbox.ts         # create, diff, promote
+│   ├── customers.ts       # show, timeline, merge
+│   ├── time.ts            # log, report
+│   ├── forums.ts          # list, categories
+│   ├── qa.ts              # review, dashboard
+│   ├── campaigns.ts       # list, create, send
 │   └── ...                # kb, sla, stats, sentiment, etc.
 ├── connectors/
 │   ├── zendesk.ts         # 868 LOC — verify, export, CRUD
@@ -345,7 +403,7 @@ cli/
 └── mcp/
     ├── server.ts          # stdio transport entry point
     ├── util.ts            # Safe wrappers, result helpers
-    ├── tools/             # 8 modules, 30 tools
+    ├── tools/             # 14 modules, 60 tools
     ├── resources/         # 6 resources
     └── prompts/           # 4 workflow prompts
 ```
@@ -420,7 +478,7 @@ The upstream sync layer pushes changes made within CLIaaS back to the originatin
 
 ## Frontend Architecture
 
-### Pages (29)
+### Pages (38)
 
 | Route | Purpose |
 |-------|---------|
@@ -428,8 +486,9 @@ The upstream sync layer pushes changes made within CLIaaS back to the originatin
 | `/dashboard` | Ticket queue with filters |
 | `/tickets` | Ticket list + detail views |
 | `/customers` | Customer directory |
+| `/customers/[id]` | Customer 360 detail (enriched profile, timeline, notes) |
 | `/kb` | Knowledge base management |
-| `/channels` | Email, SMS, WhatsApp, Voice, Social config |
+| `/channels` | Email, SMS, WhatsApp, Voice, Social, Telegram, Slack, Teams config |
 | `/ai` | AI assistant, triage, sentiment |
 | `/analytics` | Charts, CSAT, response times |
 | `/billing` | Plan management, usage meters, Stripe checkout |
@@ -439,7 +498,13 @@ The upstream sync layer pushes changes made within CLIaaS back to the originatin
 | `/settings` | Workspace settings |
 | `/sandbox` | Sandbox environment management |
 | `/compliance` | SOC 2 audit dashboard |
+| `/forums` | Community forum management (gated: `community_forums`) |
+| `/qa` | QA dashboard + review workflow (gated: `qa_reviews`) |
+| `/campaigns` | Campaign builder + list (gated: `proactive_messaging`) |
 | `/portal` | Customer self-service portal |
+| `/portal/forums` | Customer-facing forums |
+| `/portal/forums/[categorySlug]` | Forum category view |
+| `/portal/forums/thread/[id]` | Forum thread detail |
 | `/offline` | PWA offline fallback |
 | ...and more | |
 
@@ -550,7 +615,7 @@ CLIaaS is an AI-native helpdesk platform. The core value proposition: we make it
 
 ### Key Architectural Implications
 
-1. **MCP server is tier-agnostic**: Same 30 tools, same interface, different backends. A customer can start BYOC, upgrade to hosted, and their AI workflows don't change.
+1. **MCP server is tier-agnostic**: Same 60 tools, same interface, different backends. A customer can start BYOC, upgrade to hosted, and their AI workflows don't change.
 2. **Connectors are ongoing sync, not one-time import**: In BYOC/hybrid mode, connectors maintain continuous sync with source helpdesks. Different reliability bar than one-shot migration.
 3. **Data layer must be backend-abstract**: The MCP server and business logic should talk to a DataProvider interface, not directly to Postgres or JSONL. Backends: local-postgres, remote-api, jsonl-file, hybrid-sync.
 4. **GUI feature gating**: Free tier gets functional-but-minimal UI. Paid tier unlocks premium pages/features. Gating at the route/component level.
@@ -581,6 +646,9 @@ Feature matrix summary:
 | sandbox | - | - | - | Y | Y | Y |
 | custom_branding | - | - | - | Y | Y | Y |
 | sso | - | - | - | - | Y | Y |
+| community_forums | Y | Y | Y | Y | Y | Y |
+| qa_reviews | Y | Y | Y | Y | Y | Y |
+| proactive_messaging | Y | Y | Y | Y | Y | Y |
 
 ## Key Design Decisions
 

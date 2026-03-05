@@ -132,7 +132,9 @@ export default async function CustomersPage({
                   className="border-b border-zinc-100 transition-colors hover:bg-zinc-50"
                 >
                   <td className="px-4 py-3 font-medium">
-                    {c.name || "—"}
+                    <Link href={`/customers/${c.id}`} className="hover:underline">
+                      {c.name || "—"}
+                    </Link>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-zinc-600">
                     {c.email || "—"}

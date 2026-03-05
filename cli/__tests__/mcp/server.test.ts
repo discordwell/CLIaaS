@@ -75,7 +75,7 @@ function waitForStderr(child: ReturnType<typeof spawn>, pattern: string, timeout
 
 describe('MCP Server', () => {
   it(
-    'starts, initializes, and lists all 46 tools',
+    'starts, initializes, and lists all 60 tools',
     { timeout: 30000 },
     async () => {
       const child = spawn('npx', ['tsx', SERVER_PATH], {
@@ -127,21 +127,33 @@ describe('MCP Server', () => {
         expect(toolsResponse.result).toBeDefined();
 
         const tools = toolsResponse.result!.tools ?? [];
-        expect(tools.length).toBe(46);
+        expect(tools.length).toBe(60);
 
         const toolNames = tools.map((t: { name: string }) => t.name).sort();
         expect(toolNames).toEqual([
           'ai_resolve',
+          'campaign_create',
+          'campaign_list',
+          'campaign_send',
           'chatbot_create',
           'chatbot_delete',
           'chatbot_list',
           'chatbot_toggle',
           'config_set_provider',
           'config_show',
+          'customer_merge',
+          'customer_note',
+          'customer_show',
+          'customer_timeline',
           'detect_duplicates',
           'draft_reply',
+          'forum_create',
+          'forum_list',
+          'forum_moderate',
           'kb_search',
           'kb_suggest',
+          'qa_dashboard',
+          'qa_review',
           'queue_stats',
           'rag_ask',
           'rag_search',
@@ -166,6 +178,8 @@ describe('MCP Server', () => {
           'tickets_list',
           'tickets_search',
           'tickets_show',
+          'time_log',
+          'time_report',
           'triage_batch',
           'triage_ticket',
           'upstream_push',

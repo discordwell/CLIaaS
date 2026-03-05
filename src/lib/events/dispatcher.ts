@@ -24,7 +24,17 @@ export type CanonicalEvent =
   | 'csat.submitted'
   | 'survey.submitted'
   | 'survey.sent'
-  | 'automation.executed';
+  | 'automation.executed'
+  | 'forum.thread_created'
+  | 'forum.reply_created'
+  | 'forum.thread_converted'
+  | 'qa.review_created'
+  | 'qa.review_completed'
+  | 'campaign.created'
+  | 'campaign.sent'
+  | 'customer.updated'
+  | 'customer.merged'
+  | 'time.entry_created';
 
 // Compile-time check: every CanonicalEvent must be assignable to WebhookEventType
 const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
@@ -37,6 +47,16 @@ const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
   'survey.submitted': 'survey.submitted',
   'survey.sent': 'survey.sent',
   'automation.executed': 'ticket.updated',
+  'forum.thread_created': 'forum.thread_created',
+  'forum.reply_created': 'forum.reply_created',
+  'forum.thread_converted': 'forum.thread_converted',
+  'qa.review_created': 'qa.review_created',
+  'qa.review_completed': 'qa.review_completed',
+  'campaign.created': 'campaign.created',
+  'campaign.sent': 'campaign.sent',
+  'customer.updated': 'customer.updated',
+  'customer.merged': 'customer.merged',
+  'time.entry_created': 'time.entry_created',
 };
 void _typeCheck;
 

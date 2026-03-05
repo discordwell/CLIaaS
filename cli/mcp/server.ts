@@ -14,6 +14,11 @@ import { registerSyncTools } from './tools/sync.js';
 import { registerSurveyTools } from './tools/surveys.js';
 import { registerChatbotTools } from './tools/chatbots.js';
 import { registerWorkflowTools } from './tools/workflows.js';
+import { registerCustomerTools } from './tools/customers.js';
+import { registerTimeTools } from './tools/time.js';
+import { registerForumTools } from './tools/forums.js';
+import { registerQATools } from './tools/qa.js';
+import { registerCampaignTools } from './tools/campaigns.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -34,6 +39,11 @@ registerSyncTools(server);
 registerSurveyTools(server);
 registerChatbotTools(server);
 registerWorkflowTools(server);
+registerCustomerTools(server);
+registerTimeTools(server);
+registerForumTools(server);
+registerQATools(server);
+registerCampaignTools(server);
 
 // Register resources and prompts
 registerResources(server);

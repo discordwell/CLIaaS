@@ -27,7 +27,10 @@ export type Feature =
   | 'voice_channels'
   | 'social_channels'
   | 'sso'
-  | 'custom_branding';
+  | 'custom_branding'
+  | 'community_forums'
+  | 'qa_reviews'
+  | 'proactive_messaging';
 
 /** All tiers (including legacy aliases). */
 export const ALL_TIERS: TierLevel[] = [
@@ -51,6 +54,9 @@ export const FEATURE_MATRIX: Record<Feature, TierLevel[]> = {
   social_channels:     [...ALL_TIERS],
   sso:                 ['enterprise'],
   custom_branding:     [...ALL_TIERS],
+  community_forums:    [...ALL_TIERS],
+  qa_reviews:          [...ALL_TIERS],
+  proactive_messaging: [...ALL_TIERS],
 };
 
 /** Check whether a specific feature is enabled for a given tier. */
@@ -93,6 +99,9 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   social_channels:     'Social Channels',
   sso:                 'Single Sign-On (SSO)',
   custom_branding:     'Custom Branding',
+  community_forums:    'Community Forums',
+  qa_reviews:          'QA & Conversation Review',
+  proactive_messaging: 'Proactive Messaging',
 };
 
 /** Human-readable tier labels. */
