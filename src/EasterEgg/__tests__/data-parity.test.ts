@@ -725,11 +725,11 @@ describe('PRODUCTION_ITEMS cost parity', () => {
     expect(item!.faction).toBe('soviet');
   });
 
-  it('MNLY cost = 800, faction = allied', () => {
+  it('MNLY cost = 800, faction = both', () => {
     const item = findItem('MNLY');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(800);
-    expect(item!.faction).toBe('allied');
+    expect(item!.faction).toBe('both');
   });
 
 });

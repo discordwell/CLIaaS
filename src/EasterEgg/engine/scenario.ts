@@ -1001,6 +1001,8 @@ export interface ScenarioResult {
   baseBlueprint: Array<{ type: string; cell: number; house: House }>;
   /** Player's house from scenario INI [Basic] Player= field */
   playerHouse: House;
+  /** Player tech level from scenario INI [Basic] TechLevel= (gates production items) */
+  playerTechLevel: number;
   /** Per-house alliance data from scenario INI (used for campaign missions) */
   houseAllies: Map<House, House[]>;
   /** Per-house initial credits from scenario INI (×100 applied) */
@@ -1350,6 +1352,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     crateOverrides,
     baseBlueprint: data.baseStructures.map(bs => ({ type: bs.type, cell: bs.cell, house: toHouse(bs.house) })),
     playerHouse: toHouse(data.playerHouse ?? 'Spain'),
+    playerTechLevel: data.playerTechLevel,
     houseAllies: new Map(
       Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.map(toHouse)])
     ),

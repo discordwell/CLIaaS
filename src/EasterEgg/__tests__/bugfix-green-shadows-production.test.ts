@@ -83,20 +83,20 @@ describe('Production items techPrereq for expansion units', () => {
     expect(item.techPrereq).toBe('ATEK');
   });
 
-  it('V2RL requires STEK (Soviet tech center, not DOME)', () => {
+  it('V2RL requires DOME (rules.ini Prerequisite=weap,dome)', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'V2RL')!;
-    expect(item.techPrereq).toBe('STEK');
+    expect(item.techPrereq).toBe('DOME');
   });
 
-  it('MNLY (Minelayer) requires ATEK', () => {
+  it('MNLY (Minelayer) requires FIX (rules.ini Prerequisite=weap,fix)', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MNLY')!;
-    expect(item.techPrereq).toBe('ATEK');
+    expect(item.techPrereq).toBe('FIX');
   });
 
   // Other expansion units that already had techPrereq should still have them
-  it('SHOK still requires STEK', () => {
+  it('SHOK requires TSLA (Tesla Coil gate)', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'SHOK')!;
-    expect(item.techPrereq).toBe('STEK');
+    expect(item.techPrereq).toBe('TSLA');
   });
 
   it('STNK (Phase Transport) still requires ATEK', () => {

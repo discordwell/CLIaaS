@@ -34,24 +34,28 @@ describe('Faction Tech Trees', () => {
 
   // === 2. Country bonuses ===
   describe('Country bonuses', () => {
-    it('England gets 10% cost discount', () => {
-      expect(COUNTRY_BONUSES.England.costMult).toBe(0.90);
+    it('England gets 10% tougher armor', () => {
+      expect(COUNTRY_BONUSES.England.armorMult).toBe(1.1);
+      expect(COUNTRY_BONUSES.England.costMult).toBe(1.0);
     });
 
-    it('Turkey gets 20% cost discount', () => {
-      expect(COUNTRY_BONUSES.Turkey.costMult).toBe(0.80);
+    it('France gets 10% faster ROF', () => {
+      expect(COUNTRY_BONUSES.France.rofMult).toBe(1.1);
     });
 
-    it('Germany gets 5% cost discount', () => {
-      expect(COUNTRY_BONUSES.Germany.costMult).toBe(0.95);
+    it('Germany gets 10% more firepower', () => {
+      expect(COUNTRY_BONUSES.Germany.firepowerMult).toBe(1.1);
+      expect(COUNTRY_BONUSES.Germany.costMult).toBe(1.0);
     });
 
-    it('USSR gets 10% firepower bonus', () => {
-      expect(COUNTRY_BONUSES.USSR.firepowerMult).toBe(1.10);
+    it('USSR gets 10% cost discount', () => {
+      expect(COUNTRY_BONUSES.USSR.costMult).toBe(0.9);
+      expect(COUNTRY_BONUSES.USSR.firepowerMult).toBe(1.0);
     });
 
-    it('Ukraine gets 5% firepower bonus', () => {
-      expect(COUNTRY_BONUSES.Ukraine.firepowerMult).toBe(1.05);
+    it('Ukraine gets 10% faster ground speed', () => {
+      expect(COUNTRY_BONUSES.Ukraine.groundspeedMult).toBe(1.1);
+      expect(COUNTRY_BONUSES.Ukraine.firepowerMult).toBe(1.0);
     });
 
     it('Spain has no bonuses (baseline)', () => {
@@ -62,13 +66,9 @@ describe('Faction Tech Trees', () => {
     });
 
     it('cost calculations apply correctly', () => {
-      // England: 10% cheaper → 700 cost item = 630
+      // USSR: 10% cheaper → 700 cost item = 630
       const item700 = 700;
-      expect(Math.round(item700 * COUNTRY_BONUSES.England.costMult)).toBe(630);
-
-      // Turkey: 20% cheaper → 1000 cost item = 800
-      const item1000 = 1000;
-      expect(Math.round(item1000 * COUNTRY_BONUSES.Turkey.costMult)).toBe(800);
+      expect(Math.round(item700 * COUNTRY_BONUSES.USSR.costMult)).toBe(630);
 
       // Spain: no discount → 700 stays 700
       expect(Math.round(item700 * COUNTRY_BONUSES.Spain.costMult)).toBe(700);
@@ -110,11 +110,11 @@ describe('Faction Tech Trees', () => {
       expect(alliedTypes.has('DOG')).toBe(false);
     });
 
-    it('Allied tech chain: POWR → ATEK → PDOX', () => {
+    it('Allied tech chain: WEAP → ATEK → PDOX', () => {
       const atek = PRODUCTION_ITEMS.find(i => i.type === 'ATEK')!;
       const pdox = PRODUCTION_ITEMS.find(i => i.type === 'PDOX')!;
       expect(atek.faction).toBe('allied');
-      expect(atek.prerequisite).toBe('POWR');
+      expect(atek.prerequisite).toBe('WEAP');
       expect(pdox.faction).toBe('allied');
       expect(pdox.prerequisite).toBe('ATEK');
     });
@@ -164,12 +164,12 @@ describe('Faction Tech Trees', () => {
       expect(sovietTypes.has('HBOX')).toBe(false);
     });
 
-    it('Soviet tech chain: POWR → STEK → IRON/MSLO', () => {
+    it('Soviet tech chain: WEAP → STEK → IRON/MSLO', () => {
       const stek = PRODUCTION_ITEMS.find(i => i.type === 'STEK')!;
       const iron = PRODUCTION_ITEMS.find(i => i.type === 'IRON')!;
       const mslo = PRODUCTION_ITEMS.find(i => i.type === 'MSLO')!;
       expect(stek.faction).toBe('soviet');
-      expect(stek.prerequisite).toBe('POWR');
+      expect(stek.prerequisite).toBe('WEAP');
       expect(iron.faction).toBe('soviet');
       expect(iron.prerequisite).toBe('STEK');
       expect(mslo.faction).toBe('soviet');
@@ -201,21 +201,23 @@ describe('Faction Tech Trees', () => {
   // === 5. AI production faction awareness ===
   describe('AI production faction awareness', () => {
     it('Soviet AI infantry pool includes soviet and both-faction units', () => {
+      const INFANTRY_PREREQS = new Set(['TENT', 'BARR', 'KENN']);
       const sovietInf = PRODUCTION_ITEMS.filter(p =>
-        (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
+        INFANTRY_PREREQS.has(p.prerequisite) &&
         !p.isStructure &&
         (p.faction === 'both' || p.faction === 'soviet')
       );
       const types = sovietInf.map(i => i.type);
       expect(types).toContain('E1');  // both
       expect(types).toContain('E4');  // soviet
-      expect(types).toContain('DOG'); // soviet
+      expect(types).toContain('DOG'); // soviet (prereq KENN)
       expect(types).not.toContain('MEDI'); // allied only
     });
 
     it('Allied AI infantry pool includes allied and both-faction units', () => {
+      const INFANTRY_PREREQS = new Set(['TENT', 'BARR', 'KENN']);
       const alliedInf = PRODUCTION_ITEMS.filter(p =>
-        (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
+        INFANTRY_PREREQS.has(p.prerequisite) &&
         !p.isStructure &&
         (p.faction === 'both' || p.faction === 'allied')
       );
@@ -256,9 +258,10 @@ describe('Faction Tech Trees', () => {
 
   // === 6. Tech prerequisites ===
   describe('Tech prerequisites', () => {
-    it('ARTY needs DOME', () => {
+    it('ARTY has no techPrereq (gated by TechLevel=8)', () => {
       const arty = PRODUCTION_ITEMS.find(i => i.type === 'ARTY')!;
-      expect(arty.techPrereq).toBe('DOME');
+      expect(arty.techPrereq).toBeUndefined();
+      expect(arty.techLevel).toBe(8);
     });
 
     it('STNK (Phase Transport) needs ATEK', () => {
@@ -273,15 +276,15 @@ describe('Faction Tech Trees', () => {
       expect(ttnk.faction).toBe('soviet');
     });
 
-    it('CA (Cruiser) needs DOME', () => {
+    it('CA (Cruiser) needs ATEK', () => {
       const ca = PRODUCTION_ITEMS.find(i => i.type === 'CA')!;
-      expect(ca.techPrereq).toBe('DOME');
+      expect(ca.techPrereq).toBe('ATEK');
       expect(ca.faction).toBe('allied');
     });
 
-    it('SHOK (Shock Trooper) needs STEK', () => {
+    it('SHOK (Shock Trooper) needs TSLA', () => {
       const shok = PRODUCTION_ITEMS.find(i => i.type === 'SHOK')!;
-      expect(shok.techPrereq).toBe('STEK');
+      expect(shok.techPrereq).toBe('TSLA');
       expect(shok.faction).toBe('soviet');
     });
 
@@ -303,9 +306,8 @@ describe('Faction Tech Trees', () => {
     const bothItems = PRODUCTION_ITEMS.filter(i => i.faction === 'both');
     const bothTypes = new Set(bothItems.map(i => i.type));
 
-    it('shared structures: POWR, TENT, WEAP, PROC, SILO, DOME', () => {
+    it('shared structures: POWR, WEAP, PROC, SILO, DOME', () => {
       expect(bothTypes.has('POWR')).toBe(true);
-      expect(bothTypes.has('TENT')).toBe(true);
       expect(bothTypes.has('WEAP')).toBe(true);
       expect(bothTypes.has('PROC')).toBe(true);
       expect(bothTypes.has('SILO')).toBe(true);
@@ -316,18 +318,20 @@ describe('Faction Tech Trees', () => {
       expect(bothTypes.has('HARV')).toBe(true);
     });
 
-    it('basic infantry: E1, E2, E3, E6 are both-faction', () => {
+    it('basic infantry: E1, E6 are both-faction', () => {
       expect(bothTypes.has('E1')).toBe(true);
-      expect(bothTypes.has('E2')).toBe(true);
-      expect(bothTypes.has('E3')).toBe(true);
       expect(bothTypes.has('E6')).toBe(true);
     });
 
-    it('walls are both-faction', () => {
-      expect(bothTypes.has('SBAG')).toBe(true);
-      expect(bothTypes.has('FENC')).toBe(true);
-      expect(bothTypes.has('BARB')).toBe(true);
+    it('E3 (Rocket) is allied-only, E2 (Grenadier) is soviet-only', () => {
+      expect(bothTypes.has('E3')).toBe(false);
+      expect(bothTypes.has('E2')).toBe(false);
+    });
+
+    it('BRIK wall is both-faction, SBAG is allied, FENC is soviet', () => {
       expect(bothTypes.has('BRIK')).toBe(true);
+      expect(bothTypes.has('SBAG')).toBe(false);
+      expect(bothTypes.has('FENC')).toBe(false);
     });
 
     it('TRAN (Chinook) and LST (Transport) are both-faction', () => {

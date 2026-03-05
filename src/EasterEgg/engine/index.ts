@@ -227,6 +227,7 @@ export class Game {
   // Player faction (dynamic — set from scenario INI)
   playerHouse: House = House.Spain;
   playerFaction: Faction = 'allied';
+  playerTechLevel = 10; // default high for skirmish; scenario INI overrides
 
   // Difficulty
   difficulty: Difficulty = 'normal';
@@ -369,6 +370,7 @@ export class Game {
     this.credits = scenario.credits;
     this.playerHouse = scenario.playerHouse;
     this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
+    this.playerTechLevel = scenario.playerTechLevel ?? 10;
     // Calculate initial silo capacity and cap starting credits (C++ parity)
     this.siloCapacity = this.calculateSiloCapacity();
     if (this.siloCapacity > 0 && this.credits > this.siloCapacity) {
@@ -5693,9 +5695,12 @@ export class Game {
     }
   }
 
-  /** Check if player has a building of the given type */
+  /** Check if player has a building of the given type.
+   *  Includes faction-equivalent aliases: TENT↔BARR, SYRD↔SPEN (C++ parity). */
   hasBuilding(type: string): boolean {
-    return this.structures.some(s => s.alive && s.type === type &&
+    const BUILDING_ALIASES: Record<string, string> = { TENT: 'BARR', BARR: 'TENT', SYRD: 'SPEN', SPEN: 'SYRD' };
+    const alt = BUILDING_ALIASES[type];
+    return this.structures.some(s => s.alive && (s.type === type || (alt !== undefined && s.type === alt)) &&
       this.isAllied(s.house, this.playerHouse));
   }
 
@@ -5772,6 +5777,8 @@ export class Game {
       if (item.faction !== 'both' && item.faction !== this.playerFaction) return false;
       // Tech prerequisite (e.g. Artillery needs Radar Dome)
       if (item.techPrereq && !this.hasBuilding(item.techPrereq)) return false;
+      // TechLevel filter: items above player's scenario tech level are hidden
+      if (item.techLevel !== undefined && item.techLevel > this.playerTechLevel) return false;
       return true;
     });
   }

@@ -5,7 +5,7 @@ describe('Wall Placement', () => {
   it('SBAG is in production items', () => {
     const sbag = PRODUCTION_ITEMS.find(p => p.type === 'SBAG');
     expect(sbag).toBeDefined();
-    expect(sbag!.cost).toBe(10);
+    expect(sbag!.cost).toBe(25);
     expect(sbag!.isStructure).toBe(true);
   });
 
@@ -18,23 +18,22 @@ describe('Wall Placement', () => {
   it('BRIK is in production items', () => {
     const brik = PRODUCTION_ITEMS.find(p => p.type === 'BRIK');
     expect(brik).toBeDefined();
-    expect(brik!.cost).toBe(50);
+    expect(brik!.cost).toBe(100);
   });
 
-  it('BARB is in production items', () => {
+  it('BARB is NOT in production items (no Owner in rules.ini)', () => {
     const barb = PRODUCTION_ITEMS.find(p => p.type === 'BARB');
-    expect(barb).toBeDefined();
-    expect(barb!.cost).toBe(20);
+    expect(barb).toBeUndefined();
   });
 
   it('all wall types are structures', () => {
-    const walls = PRODUCTION_ITEMS.filter(p => ['SBAG', 'FENC', 'BARB', 'BRIK'].includes(p.type));
-    expect(walls).toHaveLength(4);
+    const walls = PRODUCTION_ITEMS.filter(p => ['SBAG', 'FENC', 'BRIK'].includes(p.type));
+    expect(walls).toHaveLength(3);
     walls.forEach(w => expect(w.isStructure).toBe(true));
   });
 
   it('all walls require FACT', () => {
-    const walls = PRODUCTION_ITEMS.filter(p => ['SBAG', 'FENC', 'BARB', 'BRIK'].includes(p.type));
+    const walls = PRODUCTION_ITEMS.filter(p => ['SBAG', 'FENC', 'BRIK'].includes(p.type));
     walls.forEach(w => expect(w.prerequisite).toBe('FACT'));
   });
 });
