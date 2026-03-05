@@ -1290,7 +1290,7 @@ export class Game {
       if (targetStrip) {
         const items = this.cachedAvailableItems ?? this.getAvailableItems();
         const filteredItems = items.filter(it => getStripSide(it) === targetStrip);
-        const rowH = 26;
+        const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
         const visibleH = this.renderer.getStripBounds(targetStrip).h;
         const maxScroll = Math.max(0, filteredItems.length * rowH - visibleH);
         const cur = this.stripScrollPositions[targetStrip];
@@ -2055,7 +2055,7 @@ export class Game {
     const filteredItems = items.filter(it => getStripSide(it) === strip);
     const bounds = strip === 'left' ? leftBounds : rightBounds;
     const scroll = this.stripScrollPositions[strip];
-    const rowH = 26; // cameo 24 + gap 2
+    const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
 
     const relY = sy - bounds.y + scroll;
     if (relY < 0) return -1;
@@ -2103,16 +2103,18 @@ export class Game {
       if (sx >= ab.x && sx < ab.x + ab.w) {
         if (sy >= ab.upY && sy < ab.upY + ab.upH) {
           // Scroll up
-          this.stripScrollPositions[strip] = Math.max(0, this.stripScrollPositions[strip] - 26);
+          const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
+          this.stripScrollPositions[strip] = Math.max(0, this.stripScrollPositions[strip] - rowH);
           return;
         }
         if (sy >= ab.downY && sy < ab.downY + ab.downH) {
           // Scroll down
+          const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
           const items = this.cachedAvailableItems ?? this.getAvailableItems();
           const filteredItems = items.filter(it => getStripSide(it) === strip);
           const visibleH = this.renderer.getStripBounds(strip).h;
-          const maxScroll = Math.max(0, filteredItems.length * 26 - visibleH);
-          this.stripScrollPositions[strip] = Math.min(maxScroll, this.stripScrollPositions[strip] + 26);
+          const maxScroll = Math.max(0, filteredItems.length * rowH - visibleH);
+          this.stripScrollPositions[strip] = Math.min(maxScroll, this.stripScrollPositions[strip] + rowH);
           return;
         }
       }

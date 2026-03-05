@@ -2749,14 +2749,14 @@ export class Renderer {
   static readonly BUTTON_ROW_Y = 164; // repair/sell/map icon buttons
   static readonly BUTTON_H = 28;      // button row height
   static readonly STRIP_START_Y = 194; // dual production strips start
-  static readonly CAMEO_W = 32;
-  static readonly CAMEO_H = 24;
-  static readonly CAMEO_VISIBLE = 4;   // visible cameo slots per strip
+  static readonly CAMEO_W = 64;
+  static readonly CAMEO_H = 48;
+  static readonly CAMEO_VISIBLE = 3;   // visible cameo slots per strip
   static readonly SCROLL_ARROW_H = 16;
   static readonly POWER_BAR_W = 10;
   static readonly POWER_BAR_X_OFFSET = 2;
   static readonly LEFT_STRIP_X_OFFSET = 14;  // after power bar
-  static readonly RIGHT_STRIP_X_OFFSET = 50; // after left strip + gap
+  static readonly RIGHT_STRIP_X_OFFSET = 80; // after left strip (14+64+2)
   // Legacy alias
   static readonly CAMEO_GAP = 2;
 

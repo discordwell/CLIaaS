@@ -226,34 +226,34 @@ describe('Strip Bounds', () => {
     expect(LEFT_STRIP_X_OFFSET).toBe(14);
   });
 
-  it('right strip starts at offset 50 from sidebar edge', () => {
-    // Renderer.RIGHT_STRIP_X_OFFSET = 50
-    const RIGHT_STRIP_X_OFFSET = 50;
-    expect(RIGHT_STRIP_X_OFFSET).toBe(50);
+  it('right strip starts at offset 80 from sidebar edge', () => {
+    // Renderer.RIGHT_STRIP_X_OFFSET = 80 (14 + 64 + 2)
+    const RIGHT_STRIP_X_OFFSET = 80;
+    expect(RIGHT_STRIP_X_OFFSET).toBe(80);
   });
 
-  it('each strip shows 4 visible cameo slots', () => {
-    const CAMEO_VISIBLE = 4;
-    const CAMEO_H = 24;
+  it('each strip shows 3 visible cameo slots (HIRES 64x48)', () => {
+    const CAMEO_VISIBLE = 3;
+    const CAMEO_H = 48;
     const GAP = 2;
     const stripVisibleH = CAMEO_VISIBLE * (CAMEO_H + GAP);
-    expect(stripVisibleH).toBe(104); // 4 * 26 = 104px
+    expect(stripVisibleH).toBe(150); // 3 * 50 = 150px
   });
 
   it('strip scroll max is zero when items fit in visible slots', () => {
-    const items = 3; // fewer than CAMEO_VISIBLE (4)
-    const rowH = 26;
-    const visibleH = 104;
+    const items = 2; // fewer than CAMEO_VISIBLE (3)
+    const rowH = 50;
+    const visibleH = 150;
     const maxScroll = Math.max(0, items * rowH - visibleH);
     expect(maxScroll).toBe(0);
   });
 
   it('strip scroll max is positive when items exceed visible slots', () => {
     const items = 8;
-    const rowH = 26;
-    const visibleH = 104;
+    const rowH = 50;
+    const visibleH = 150;
     const maxScroll = Math.max(0, items * rowH - visibleH);
-    expect(maxScroll).toBe(104); // 8*26 - 104 = 104
+    expect(maxScroll).toBe(250); // 8*50 - 150 = 250
   });
 });
 
@@ -263,11 +263,11 @@ describe('Strip Bounds', () => {
 
 describe('Scroll Arrow Click Regions', () => {
   const STRIP_START_Y = 194;
-  const CAMEO_H = 24;
+  const CAMEO_H = 48;
   const CAMEO_GAP = 2;
-  const CAMEO_VISIBLE = 4;
+  const CAMEO_VISIBLE = 3;
   const SCROLL_ARROW_H = 16;
-  const stripClipH = CAMEO_VISIBLE * (CAMEO_H + CAMEO_GAP); // 104
+  const stripClipH = CAMEO_VISIBLE * (CAMEO_H + CAMEO_GAP); // 150
 
   it('up arrow region fits between button row bottom and strip start', () => {
     const BUTTON_ROW_Y = 164;
@@ -280,30 +280,30 @@ describe('Scroll Arrow Click Regions', () => {
     expect(btnRowBottom + upH).toBe(STRIP_START_Y);
   });
 
-  it('down arrow region is below visible slots (STRIP_START_Y + 104 to +120)', () => {
+  it('down arrow region is below visible slots (STRIP_START_Y + 150 to +166)', () => {
     const downY = STRIP_START_Y + stripClipH;
-    expect(downY).toBe(298);
-    expect(downY + SCROLL_ARROW_H).toBe(314);
+    expect(downY).toBe(344);
+    expect(downY + SCROLL_ARROW_H).toBe(360);
   });
 
   it('scroll up clamps at 0', () => {
     let scroll = 0;
-    scroll = Math.max(0, scroll - 26);
+    scroll = Math.max(0, scroll - 50);
     expect(scroll).toBe(0);
   });
 
   it('scroll down clamps at maxScroll', () => {
     const items = 6;
-    const rowH = 26;
-    const visibleH = 104;
+    const rowH = 50;
+    const visibleH = 150;
     const maxScroll = Math.max(0, items * rowH - visibleH);
     let scroll = maxScroll;
-    scroll = Math.min(maxScroll, scroll + 26);
+    scroll = Math.min(maxScroll, scroll + 50);
     expect(scroll).toBe(maxScroll); // stays at max
   });
 
-  it('clip rect height is exactly 4 * 26 = 104px', () => {
-    expect(stripClipH).toBe(104);
+  it('clip rect height is exactly 3 * 50 = 150px', () => {
+    expect(stripClipH).toBe(150);
   });
 });
 
@@ -350,28 +350,28 @@ describe('Snow Theatre Palette', () => {
 // HIRES Icon Scaling
 // ═══════════════════════════════════════════════════════════
 
-describe('HIRES Icon Scaling', () => {
-  const CAMEO_W = 32;
-  const CAMEO_H = 24;
+describe('HIRES Icon Sizing', () => {
+  const CAMEO_W = 64;
+  const CAMEO_H = 48;
 
-  it('HIRES 64x48 icons scale down to fit 32x24 cameo slot', () => {
+  it('HIRES 64x48 icons fit cameo slot at native size (no scaling)', () => {
     const hiresW = 64, hiresH = 48;
     const iconScale = Math.min(CAMEO_W / hiresW, CAMEO_H / hiresH);
-    expect(iconScale).toBe(0.5);
-    // Scaled dimensions match cameo slot exactly
+    expect(iconScale).toBe(1);
+    // No scaling needed — icon matches slot
     expect(hiresW * iconScale).toBe(CAMEO_W);
     expect(hiresH * iconScale).toBe(CAMEO_H);
   });
 
-  it('LORES 32x24 icons need no scaling (scale >= 1)', () => {
+  it('LORES 32x24 icons need no scaling (scale >= 1, drawn via drawFrame)', () => {
     const loresW = 32, loresH = 24;
     const iconScale = Math.min(CAMEO_W / loresW, CAMEO_H / loresH);
     expect(iconScale).toBeGreaterThanOrEqual(1);
   });
 
   it('non-square icons scale correctly to preserve aspect ratio', () => {
-    // Hypothetical 48x36 icon
-    const w = 48, h = 36;
+    // Hypothetical 96x72 icon (larger than slot)
+    const w = 96, h = 72;
     const iconScale = Math.min(CAMEO_W / w, CAMEO_H / h);
     expect(w * iconScale).toBeLessThanOrEqual(CAMEO_W);
     expect(h * iconScale).toBeLessThanOrEqual(CAMEO_H);
