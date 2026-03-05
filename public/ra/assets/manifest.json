@@ -287,6 +287,15 @@
     "sheetWidth": 800,
     "sheetHeight": 663
   },
+  "mech": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 247,
+    "columns": 16,
+    "rows": 16,
+    "sheetWidth": 800,
+    "sheetHeight": 624
+  },
   "ss": {
     "frameWidth": 56,
     "frameHeight": 56,
@@ -1692,589 +1701,607 @@
     "sheetHeight": 24
   },
   "1tnkicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "2tnkicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "3tnkicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "4tnkicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "jeepicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "apcicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "harvicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "mcvicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "artyicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "trukicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "mnlyicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "mggicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "v2rlicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "stnkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "e1icon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "e2icon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "e3icon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "e4icon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "e6icon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "e7icon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "dogicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "spyicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "mediicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "thficon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "ssicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "ddicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "caicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "pticon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "lsticon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "msubicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "hindicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "heliicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "tranicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "migicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "yakicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "badricon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "u2icon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "facticon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "powricon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "apwricon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "barricon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "tenticon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "weapicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "procicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "siloicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "domeicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "fixicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "gunicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "samicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "hboxicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "tslaicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "agunicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "gapicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "pboxicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "hpadicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "afldicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "msloicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "atekicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "stekicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "ironicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "pdoxicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "kennicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "syrdicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "spenicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "fencicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "brikicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "sbagicon": {
-    "frameWidth": 32,
-    "frameHeight": 24,
+    "frameWidth": 64,
+    "frameHeight": 48,
     "frameCount": 1,
     "columns": 1,
     "rows": 1,
-    "sheetWidth": 32,
-    "sheetHeight": 24
+    "sheetWidth": 64,
+    "sheetHeight": 48
   },
   "sc1": {
     "frameWidth": 24,

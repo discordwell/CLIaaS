@@ -26,6 +26,11 @@ const GAMEDATA_JS = join(PROJECT_ROOT, 'public/ra/gamedata.js');
 const OUTPUT_DIR = join(PROJECT_ROOT, 'public/ra/assets');
 // EXPAND2.MIX: Aftermath expansion data (env var override or default path from extract-freeware-ant-originals.sh)
 const EXPAND2_PATH = process.env.EXPAND2_PATH || '/tmp/ra_ant_extract/am_patch_work/EXPAND2.MIX';
+// HIRES.MIX: High-resolution (640x400) sidebar icons — English icons instead of DOS pixel art
+// Extracted from Allied CD: REDALERT.MIX → HIRES.MIX
+const HIRES_PATH = process.env.HIRES_PATH || '/tmp/ra_hires_extract/redalert_unpack/HIRES.MIX';
+// HIRES1.MIX: Aftermath expansion HIRES icons (CTNK, QTNK, DTRK, TTNK, CARR, MSUB, SHOK, MECH, STNK)
+const HIRES1_PATH = process.env.HIRES1_PATH || '/tmp/ra_ant_extract/am_patch_work/HIRES1.MIX';
 
 // --- Helper generators for bulk sprite categories ---
 
@@ -46,7 +51,7 @@ function generateMakeAssets(): [string, string, string][] {
   return entries;
 }
 
-/** Sidebar icons: {TYPE}ICON.SHP in LORES.MIX */
+/** Sidebar icons: {TYPE}ICON.SHP — prefer HIRES.MIX (English) over LORES.MIX (DOS) */
 function generateIconAssets(): [string, string, string][] {
   const types = [
     // Vehicles
@@ -66,8 +71,9 @@ function generateIconAssets(): [string, string, string][] {
     // Walls
     'FENC', 'BRIK', 'SBAG', 'BARB', 'WOOD', 'CYCL',
   ];
+  // Prefer HIRES.MIX (64x48 English icons) — fallback chain handles LORES.MIX
   return types.map(t =>
-    ['LORES.MIX', `${t}ICON.SHP`, `${t.toLowerCase()}icon`] as [string, string, string]
+    ['HIRES.MIX', `${t}ICON.SHP`, `${t.toLowerCase()}icon`] as [string, string, string]
   );
 }
 
@@ -366,6 +372,30 @@ async function main(): Promise<void> {
     }
   } else {
     log(`  NOTE: EXPAND2.MIX not found at ${EXPAND2_PATH} — Aftermath sprites will be skipped`);
+  }
+
+  // Load HIRES.MIX from filesystem if available (English sidebar icons)
+  if (existsSync(HIRES_PATH)) {
+    try {
+      const hires = MixFile.fromFile(HIRES_PATH);
+      mixParsed.set('HIRES.MIX', hires);
+      log(`  Loaded HIRES.MIX from ${HIRES_PATH} (${hires.entryCount} entries) — English icons`);
+    } catch (e) {
+      log(`  WARNING: Failed to parse HIRES.MIX: ${e}`);
+    }
+  } else {
+    log(`  NOTE: HIRES.MIX not found at ${HIRES_PATH} — using LORES (DOS) icons`);
+  }
+
+  // Load HIRES1.MIX from filesystem if available (Aftermath expansion HIRES icons)
+  if (existsSync(HIRES1_PATH)) {
+    try {
+      const hires1 = MixFile.fromFile(HIRES1_PATH);
+      mixParsed.set('HIRES1.MIX', hires1);
+      log(`  Loaded HIRES1.MIX from ${HIRES1_PATH} (${hires1.entryCount} entries) — Aftermath English icons`);
+    } catch (e) {
+      log(`  WARNING: Failed to parse HIRES1.MIX: ${e}`);
+    }
   }
 
   // Also try to parse nested MIX files inside LORES.MIX, EXPAND.MIX etc.

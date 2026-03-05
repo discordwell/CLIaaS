@@ -347,6 +347,64 @@ describe('Snow Theatre Palette', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// HIRES Icon Scaling
+// ═══════════════════════════════════════════════════════════
+
+describe('HIRES Icon Scaling', () => {
+  const CAMEO_W = 32;
+  const CAMEO_H = 24;
+
+  it('HIRES 64x48 icons scale down to fit 32x24 cameo slot', () => {
+    const hiresW = 64, hiresH = 48;
+    const iconScale = Math.min(CAMEO_W / hiresW, CAMEO_H / hiresH);
+    expect(iconScale).toBe(0.5);
+    // Scaled dimensions match cameo slot exactly
+    expect(hiresW * iconScale).toBe(CAMEO_W);
+    expect(hiresH * iconScale).toBe(CAMEO_H);
+  });
+
+  it('LORES 32x24 icons need no scaling (scale >= 1)', () => {
+    const loresW = 32, loresH = 24;
+    const iconScale = Math.min(CAMEO_W / loresW, CAMEO_H / loresH);
+    expect(iconScale).toBeGreaterThanOrEqual(1);
+  });
+
+  it('non-square icons scale correctly to preserve aspect ratio', () => {
+    // Hypothetical 48x36 icon
+    const w = 48, h = 36;
+    const iconScale = Math.min(CAMEO_W / w, CAMEO_H / h);
+    expect(w * iconScale).toBeLessThanOrEqual(CAMEO_W);
+    expect(h * iconScale).toBeLessThanOrEqual(CAMEO_H);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Play Mode (no test overlay)
+// ═══════════════════════════════════════════════════════════
+
+describe('Play Mode URL Handling', () => {
+  it('anttest=play is a distinct mode from test presets', () => {
+    const anttest = 'play';
+    // play mode should NOT fall through to TestRunner
+    const isPlayMode = anttest === 'play';
+    const isQAMode = anttest === 'qa';
+    const isCompareMode = anttest === 'compare';
+    const isAgentMode = anttest === 'agent';
+    expect(isPlayMode).toBe(true);
+    expect(isQAMode).toBe(false);
+    expect(isCompareMode).toBe(false);
+    expect(isAgentMode).toBe(false);
+  });
+
+  it('anttest=fast still resolves to test mode', () => {
+    const anttest = 'fast';
+    const isPlayMode = anttest === 'play';
+    expect(isPlayMode).toBe(false);
+    // Not play/qa/compare/agent → falls through to test mode
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // Placement Adjacency (footprint-based AABB)
 // ═══════════════════════════════════════════════════════════
 

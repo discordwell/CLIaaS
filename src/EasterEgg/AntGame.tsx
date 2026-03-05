@@ -600,6 +600,36 @@ export default function AntGame({ onExit }: AntGameProps) {
       };
     }
 
+    // Play mode: direct launch into a scenario with no test overlay
+    if (anttest === 'play') {
+      setScreen('playing');
+
+      const canvas = canvasRef.current;
+      const game = new Game(canvas);
+      gameRef.current = game;
+
+      game.onLoadProgress = (loaded, total) => {
+        setLoadProgress(Math.round((loaded / total) * 100));
+      };
+      game.onStateChange = (s) => {
+        setStatus(s);
+        setGameState(s);
+      };
+
+      const scenarioId = params.get('scenario') || 'SCA01EA';
+      const diff = (params.get('difficulty') || 'normal') as Difficulty;
+
+      game.start(scenarioId, diff).catch((err) => {
+        console.error('Play mode: game start failed', err);
+        setError(String(err));
+      });
+
+      return () => {
+        game.stop();
+        gameRef.current = null;
+      };
+    }
+
     // Regular test mode
     setTestMode(true);
     setScreen('playing');

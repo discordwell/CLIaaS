@@ -2974,11 +2974,18 @@ export class Renderer {
         ctx.strokeRect(stripX, iy, camW, camH);
       }
 
-      // Draw cameo icon
+      // Draw cameo icon (HIRES icons are 64x48, scale to fit cameo slot)
       const iconName = item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
-        assets.drawFrame(ctx, iconName, 0, stripX, iy);
+        const iconScale = Math.min(camW / iconSheet.meta.frameWidth, camH / iconSheet.meta.frameHeight);
+        if (iconScale < 1) {
+          // HIRES icon — scale to fit, draw from top-left
+          ctx.drawImage(iconSheet.image, 0, 0, iconSheet.meta.frameWidth, iconSheet.meta.frameHeight,
+            stripX, iy, camW, camH);
+        } else {
+          assets.drawFrame(ctx, iconName, 0, stripX, iy);
+        }
       } else {
         const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
         const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
