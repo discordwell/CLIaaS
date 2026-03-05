@@ -131,15 +131,35 @@ describe('UNIT_STATS parity', () => {
       expect(u.owner).toBe('allied');
     });
 
-    it('Civilians (C1-C10) — strength=25, speed=5', () => {
+    it('Civilians (C1-C10) — strength=25, speed=5, sight=2, rot=8, armor=none', () => {
+      const armedCivs = ['C1', 'C7']; // these carry a Pistol
       for (let i = 1; i <= 10; i++) {
         const key = `C${i}`;
         const u = UNIT_STATS[key];
         expect(u, `${key} should exist`).toBeDefined();
         expect(u.strength, `${key}.strength`).toBe(25);
         expect(u.speed, `${key}.speed`).toBe(5);
+        expect(u.sight, `${key}.sight`).toBe(2);
+        expect(u.rot, `${key}.rot`).toBe(8);
+        expect(u.armor, `${key}.armor`).toBe('none');
         expect(u.isInfantry, `${key}.isInfantry`).toBe(true);
+        if (armedCivs.includes(key)) {
+          expect(u.primaryWeapon, `${key}.primaryWeapon`).toBe('Pistol');
+        } else {
+          expect(u.primaryWeapon, `${key}.primaryWeapon`).toBeNull();
+        }
       }
+    });
+
+    it('EINSTEIN (Prof. Einstein) — strength=25, speed=5, sight=2, rot=8, no weapon', () => {
+      const u = UNIT_STATS.EINSTEIN;
+      expect(u).toBeDefined();
+      expect(u.strength).toBe(25);
+      expect(u.armor).toBe('none');
+      expect(u.speed).toBe(5);
+      expect(u.sight).toBe(2);
+      expect(u.rot).toBe(8);
+      expect(u.primaryWeapon).toBeNull();
     });
   });
 
@@ -236,11 +256,41 @@ describe('UNIT_STATS parity', () => {
       expect(u.speed).toBe(8);
     });
 
-    it('STNK (Phase Transport) — has crusher and isCloakable', () => {
+    it('STNK (Phase Transport) — full stats', () => {
       const u = UNIT_STATS.STNK;
       expect(u.strength).toBe(110);
+      expect(u.speed).toBe(10);
+      expect(u.armor).toBe('light');
+      expect(u.sight).toBe(5);
+      expect(u.rot).toBe(5);
+      expect(u.primaryWeapon).toBe('APTusk');
+      expect(u.passengers).toBe(5);
       expect(u.crusher).toBe(true);
       expect(u.isCloakable).toBe(true);
+    });
+
+    it('HARV (Harvester) — strength=600, heavy armor, no weapon, crusher', () => {
+      const u = UNIT_STATS.HARV;
+      expect(u).toBeDefined();
+      expect(u.strength).toBe(600);
+      expect(u.armor).toBe('heavy');
+      expect(u.speed).toBe(6);
+      expect(u.sight).toBe(4);
+      expect(u.rot).toBe(5);
+      expect(u.primaryWeapon).toBeNull();
+      expect(u.crusher).toBe(true);
+    });
+
+    it('MCV — strength=600, light armor, no weapon, crusher', () => {
+      const u = UNIT_STATS.MCV;
+      expect(u).toBeDefined();
+      expect(u.strength).toBe(600);
+      expect(u.armor).toBe('light');
+      expect(u.speed).toBe(6);
+      expect(u.sight).toBe(4);
+      expect(u.rot).toBe(5);
+      expect(u.primaryWeapon).toBeNull();
+      expect(u.crusher).toBe(true);
     });
 
     it('V2RL (V2 Rocket) — new entry', () => {
@@ -550,6 +600,158 @@ describe('WEAPON_STATS parity', () => {
     expect(w.rof).toBe(3);
     expect(w.range).toBe(5.0);
     expect(w.warhead).toBe('SA');
+  });
+
+  // --- Infantry weapons (missing) ---
+  it('Flamer — damage=70, rof=50, range=3.5, warhead=Fire', () => {
+    const w = WEAPON_STATS.Flamer;
+    expect(w.damage).toBe(70);
+    expect(w.rof).toBe(50);
+    expect(w.range).toBe(3.5);
+    expect(w.warhead).toBe('Fire');
+  });
+
+  it('DogJaw — damage=100, rof=10, range=2.2, warhead=Organic', () => {
+    const w = WEAPON_STATS.DogJaw;
+    expect(w.damage).toBe(100);
+    expect(w.rof).toBe(10);
+    expect(w.range).toBe(2.2);
+    expect(w.warhead).toBe('Organic');
+  });
+
+  it('Heal — damage=-50, rof=80, range=1.83, warhead=Organic', () => {
+    const w = WEAPON_STATS.Heal;
+    expect(w.damage).toBe(-50);
+    expect(w.rof).toBe(80);
+    expect(w.range).toBe(1.83);
+    expect(w.warhead).toBe('Organic');
+  });
+
+  // --- Vehicle weapons (missing) ---
+  it('M60mg — damage=15, rof=20, range=4.0, warhead=SA', () => {
+    const w = WEAPON_STATS.M60mg;
+    expect(w.damage).toBe(15);
+    expect(w.rof).toBe(20);
+    expect(w.range).toBe(4.0);
+    expect(w.warhead).toBe('SA');
+  });
+
+  it('75mm — damage=25, rof=40, range=4.0, warhead=AP', () => {
+    const w = WEAPON_STATS['75mm'];
+    expect(w.damage).toBe(25);
+    expect(w.rof).toBe(40);
+    expect(w.range).toBe(4.0);
+    expect(w.warhead).toBe('AP');
+  });
+
+  it('90mm — damage=30, rof=50, range=4.75, warhead=AP', () => {
+    const w = WEAPON_STATS['90mm'];
+    expect(w.damage).toBe(30);
+    expect(w.rof).toBe(50);
+    expect(w.range).toBe(4.75);
+    expect(w.warhead).toBe('AP');
+  });
+
+  it('105mm — damage=30, rof=70, range=4.75, warhead=AP', () => {
+    const w = WEAPON_STATS['105mm'];
+    expect(w.damage).toBe(30);
+    expect(w.rof).toBe(70);
+    expect(w.range).toBe(4.75);
+    expect(w.warhead).toBe('AP');
+  });
+
+  it('MammothTusk — damage=75, rof=80, range=5.0, warhead=HE, burst=2', () => {
+    const w = WEAPON_STATS.MammothTusk;
+    expect(w.damage).toBe(75);
+    expect(w.rof).toBe(80);
+    expect(w.range).toBe(5.0);
+    expect(w.warhead).toBe('HE');
+    expect(w.burst).toBe(2);
+  });
+
+  it('155mm — damage=150, rof=65, range=6.0, warhead=HE', () => {
+    const w = WEAPON_STATS['155mm'];
+    expect(w.damage).toBe(150);
+    expect(w.rof).toBe(65);
+    expect(w.range).toBe(6.0);
+    expect(w.warhead).toBe('HE');
+  });
+
+  // --- Expansion weapons (missing) ---
+  it('PortaTesla — damage=50, rof=60, range=4.0, warhead=Super', () => {
+    const w = WEAPON_STATS.PortaTesla;
+    expect(w.damage).toBe(50);
+    expect(w.rof).toBe(60);
+    expect(w.range).toBe(4.0);
+    expect(w.warhead).toBe('Super');
+  });
+
+  it('GoodWrench — damage=-30, rof=60, range=1.83, warhead=Organic', () => {
+    const w = WEAPON_STATS.GoodWrench;
+    expect(w.damage).toBe(-30);
+    expect(w.rof).toBe(60);
+    expect(w.range).toBe(1.83);
+    expect(w.warhead).toBe('Organic');
+  });
+
+  it('TTankZap — damage=80, rof=80, range=5.0, warhead=Super', () => {
+    const w = WEAPON_STATS.TTankZap;
+    expect(w.damage).toBe(80);
+    expect(w.rof).toBe(80);
+    expect(w.range).toBe(5.0);
+    expect(w.warhead).toBe('Super');
+  });
+
+  // --- Naval weapons (missing) ---
+  it('Tomahawk — damage=50, rof=80, range=10.0, warhead=HE, burst=2', () => {
+    const w = WEAPON_STATS.Tomahawk;
+    expect(w.damage).toBe(50);
+    expect(w.rof).toBe(80);
+    expect(w.range).toBe(10.0);
+    expect(w.warhead).toBe('HE');
+    expect(w.burst).toBe(2);
+  });
+
+  it('SeaSerpent — damage=35, rof=50, range=8.0, warhead=HE, burst=2', () => {
+    const w = WEAPON_STATS.SeaSerpent;
+    expect(w.damage).toBe(35);
+    expect(w.rof).toBe(50);
+    expect(w.range).toBe(8.0);
+    expect(w.warhead).toBe('HE');
+    expect(w.burst).toBe(2);
+  });
+
+  // --- Ant weapons (missing) ---
+  it('Mandible — damage=50, rof=15, range=1.5, warhead=Super', () => {
+    const w = WEAPON_STATS.Mandible;
+    expect(w.damage).toBe(50);
+    expect(w.rof).toBe(15);
+    expect(w.range).toBe(1.5);
+    expect(w.warhead).toBe('Super');
+  });
+
+  it('TeslaZap — damage=60, rof=25, range=1.75, warhead=Super', () => {
+    const w = WEAPON_STATS.TeslaZap;
+    expect(w.damage).toBe(60);
+    expect(w.rof).toBe(25);
+    expect(w.range).toBe(1.75);
+    expect(w.warhead).toBe('Super');
+  });
+
+  it('FireballLauncher — damage=125, rof=50, range=4.0, warhead=Fire', () => {
+    const w = WEAPON_STATS.FireballLauncher;
+    expect(w.damage).toBe(125);
+    expect(w.rof).toBe(50);
+    expect(w.range).toBe(4.0);
+    expect(w.warhead).toBe('Fire');
+  });
+
+  it('Napalm — damage=100, rof=20, range=4.5, warhead=Fire', () => {
+    const w = WEAPON_STATS.Napalm;
+    expect(w.damage).toBe(100);
+    expect(w.rof).toBe(20);
+    expect(w.range).toBe(4.5);
+    expect(w.warhead).toBe('Fire');
   });
 
 });
