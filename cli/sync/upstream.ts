@@ -27,6 +27,8 @@ export interface EnqueueParams {
   workspaceId?: string;
 }
 
+export type DedupeAction = 'enqueued' | 'skipped' | 'merged';
+
 export interface UpstreamPushResult {
   pushed: number;
   skipped: number;
@@ -89,18 +91,73 @@ async function requireDbContext(): Promise<DbContext> {
 // ---- Enqueue ----
 
 /**
- * Insert a pending entry into the upstream_outbox.
+ * Insert a pending entry into the upstream_outbox with dedup protection.
  * No-op if DATABASE_URL is not set (JSONL mode).
+ *
+ * Dedup rules:
+ *  - create_ticket: skip if a pending create already exists for same connector+ticketId
+ *  - update_ticket: merge payload (latest fields overwrite) if a pending update exists
+ *  - create_reply / create_note: skip if a pending entry has identical body; allow otherwise
  */
-export async function enqueueUpstream(params: EnqueueParams): Promise<void> {
-  if (!process.env.DATABASE_URL) return; // JSONL mode — silently skip
+export async function enqueueUpstream(params: EnqueueParams): Promise<DedupeAction> {
+  if (!process.env.DATABASE_URL) return 'skipped'; // JSONL mode — silently skip
 
   try {
     const ctx = await requireDbContext();
     const { db, schema, workspaceId } = ctx;
 
+    // Check for existing pending entry with same (connector, operation, ticketId)
+    const wsId = params.workspaceId ?? workspaceId;
+    const existing = await db
+      .select()
+      .from(schema.upstreamOutbox)
+      .where(
+        and(
+          eq(schema.upstreamOutbox.workspaceId, wsId),
+          eq(schema.upstreamOutbox.connector, params.connector),
+          eq(schema.upstreamOutbox.operation, params.operation),
+          eq(schema.upstreamOutbox.ticketId, params.ticketId),
+          eq(schema.upstreamOutbox.status, 'pending'),
+        ),
+      );
+
+    if (existing.length > 0) {
+      const match = existing[0];
+
+      switch (params.operation) {
+        case 'create_ticket':
+          // Duplicate create — skip silently
+          return 'skipped';
+
+        case 'update_ticket': {
+          // Merge payload — latest fields overwrite
+          const mergedPayload = {
+            ...(match.payload as Record<string, unknown>),
+            ...params.payload,
+          };
+          await db
+            .update(schema.upstreamOutbox)
+            .set({ payload: mergedPayload })
+            .where(eq(schema.upstreamOutbox.id, match.id));
+          return 'merged';
+        }
+
+        case 'create_reply':
+        case 'create_note': {
+          // Skip if body is identical; allow if different
+          const existingBody = (match.payload as Record<string, unknown>)?.body;
+          const newBody = params.payload?.body;
+          if (existingBody === newBody) {
+            return 'skipped';
+          }
+          // Different body — fall through to insert
+          break;
+        }
+      }
+    }
+
     await db.insert(schema.upstreamOutbox).values({
-      workspaceId: params.workspaceId ?? workspaceId,
+      workspaceId: wsId,
       connector: params.connector,
       operation: params.operation,
       ticketId: params.ticketId,
@@ -108,8 +165,10 @@ export async function enqueueUpstream(params: EnqueueParams): Promise<void> {
       payload: params.payload,
       status: 'pending',
     });
+    return 'enqueued';
   } catch {
     // Enqueue is fire-and-forget — don't let it break the action
+    return 'skipped';
   }
 }
 

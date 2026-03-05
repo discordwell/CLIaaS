@@ -1,22 +1,37 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock the DB context so tests don't need a real database
+// ---- Mock helpers ----
+
+// When CLIAAS_WORKSPACE is not set, workspace lookup uses orderBy().limit() (no where call).
+// So the only where() call in enqueueUpstream is the dedup check.
+// dedupResult controls what the dedup select returns.
+let dedupResult: unknown[] = [];
+
+function makeWhereResult(result: unknown[]) {
+  // Object that is both thenable (for dedup `await db.select().from().where()`)
+  // and has .limit() (for workspace lookup `await db.select().from().where().limit()`)
+  return {
+    limit: vi.fn().mockResolvedValue(result),
+    then: (resolve: (v: unknown) => void, reject?: (e: unknown) => void) =>
+      Promise.resolve(result).then(resolve, reject),
+  };
+}
+
 const mockInsert = vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) });
-const mockUpdate = vi.fn().mockReturnValue({
-  set: vi.fn().mockReturnValue({
-    where: vi.fn().mockResolvedValue(undefined),
-  }),
+
+const mockUpdateSet = vi.fn().mockReturnValue({
+  where: vi.fn().mockResolvedValue(undefined),
 });
-const mockSelect = vi.fn().mockReturnValue({
+const mockUpdate = vi.fn().mockReturnValue({ set: mockUpdateSet });
+
+const mockSelect = vi.fn().mockImplementation(() => ({
   from: vi.fn().mockReturnValue({
-    where: vi.fn().mockReturnValue({
-      limit: vi.fn().mockResolvedValue([{ id: 'ws-1' }]),
-    }),
+    where: vi.fn().mockImplementation(() => makeWhereResult(dedupResult)),
     orderBy: vi.fn().mockReturnValue({
       limit: vi.fn().mockResolvedValue([{ id: 'ws-1' }]),
     }),
   }),
-});
+}));
 
 vi.mock('@/db', () => ({
   db: {
@@ -48,16 +63,29 @@ vi.mock('@/db/schema', () => ({
 // Must import after mocks
 import { enqueueUpstream } from '../../sync/upstream.js';
 
+let originalUrl: string | undefined;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  dedupResult = []; // default: no existing pending entry
+  originalUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
+  delete process.env.CLIAAS_WORKSPACE; // ensure workspace lookup uses orderBy path
+});
+
+afterEach(() => {
+  if (originalUrl) {
+    process.env.DATABASE_URL = originalUrl;
+  } else {
+    delete process.env.DATABASE_URL;
+  }
 });
 
 describe('enqueueUpstream', () => {
-  it('is a no-op without DATABASE_URL', async () => {
-    const originalUrl = process.env.DATABASE_URL;
+  it('returns "skipped" without DATABASE_URL', async () => {
     delete process.env.DATABASE_URL;
 
-    await enqueueUpstream({
+    const result = await enqueueUpstream({
       connector: 'zendesk',
       operation: 'update_ticket',
       ticketId: 'tk-1',
@@ -65,18 +93,14 @@ describe('enqueueUpstream', () => {
       payload: { status: 'solved' },
     });
 
-    // Should not have called db.insert
+    expect(result).toBe('skipped');
     expect(mockInsert).not.toHaveBeenCalled();
-
-    // Restore
-    if (originalUrl) process.env.DATABASE_URL = originalUrl;
   });
 
-  it('inserts into upstream_outbox when DATABASE_URL is set', async () => {
-    const originalUrl = process.env.DATABASE_URL;
-    process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
+  it('inserts and returns "enqueued" when no pending duplicate exists', async () => {
+    dedupResult = []; // no match
 
-    await enqueueUpstream({
+    const result = await enqueueUpstream({
       connector: 'zendesk',
       operation: 'update_ticket',
       ticketId: 'tk-1',
@@ -84,38 +108,150 @@ describe('enqueueUpstream', () => {
       payload: { status: 'solved' },
     });
 
+    expect(result).toBe('enqueued');
     expect(mockInsert).toHaveBeenCalled();
-
-    if (originalUrl) {
-      process.env.DATABASE_URL = originalUrl;
-    } else {
-      delete process.env.DATABASE_URL;
-    }
   });
 
   it('silently catches errors (fire-and-forget)', async () => {
-    const originalUrl = process.env.DATABASE_URL;
-    process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
-
-    // Make insert throw
     mockInsert.mockReturnValueOnce({
       values: vi.fn().mockRejectedValue(new Error('DB error')),
     });
 
-    // Should not throw
-    await expect(
-      enqueueUpstream({
-        connector: 'zendesk',
-        operation: 'create_reply',
-        ticketId: 'tk-2',
-        payload: { body: 'hello' },
-      }),
-    ).resolves.toBeUndefined();
+    const result = await enqueueUpstream({
+      connector: 'zendesk',
+      operation: 'create_reply',
+      ticketId: 'tk-2',
+      payload: { body: 'hello' },
+    });
 
-    if (originalUrl) {
-      process.env.DATABASE_URL = originalUrl;
-    } else {
-      delete process.env.DATABASE_URL;
-    }
+    expect(result).toBe('skipped');
+  });
+
+  // ---- Dedup tests ----
+
+  describe('dedup', () => {
+    it('skips duplicate create_ticket', async () => {
+      dedupResult = [{
+        id: 'existing-1',
+        connector: 'zendesk',
+        operation: 'create_ticket',
+        ticketId: 'tk-1',
+        payload: { subject: 'Test' },
+      }];
+
+      const result = await enqueueUpstream({
+        connector: 'zendesk',
+        operation: 'create_ticket',
+        ticketId: 'tk-1',
+        payload: { subject: 'Test' },
+      });
+
+      expect(result).toBe('skipped');
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it('merges payload for duplicate update_ticket', async () => {
+      dedupResult = [{
+        id: 'existing-2',
+        connector: 'freshdesk',
+        operation: 'update_ticket',
+        ticketId: 'tk-5',
+        payload: { status: 'open', priority: 'low' },
+      }];
+
+      const result = await enqueueUpstream({
+        connector: 'freshdesk',
+        operation: 'update_ticket',
+        ticketId: 'tk-5',
+        payload: { priority: 'high', tags: ['urgent'] },
+      });
+
+      expect(result).toBe('merged');
+      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockUpdateSet).toHaveBeenCalledWith({
+        payload: { status: 'open', priority: 'high', tags: ['urgent'] },
+      });
+    });
+
+    it('skips duplicate create_reply with same body', async () => {
+      dedupResult = [{
+        id: 'existing-3',
+        connector: 'groove',
+        operation: 'create_reply',
+        ticketId: 'tk-7',
+        payload: { body: 'Thanks for reaching out!' },
+      }];
+
+      const result = await enqueueUpstream({
+        connector: 'groove',
+        operation: 'create_reply',
+        ticketId: 'tk-7',
+        payload: { body: 'Thanks for reaching out!' },
+      });
+
+      expect(result).toBe('skipped');
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it('allows create_reply with different body', async () => {
+      dedupResult = [{
+        id: 'existing-4',
+        connector: 'groove',
+        operation: 'create_reply',
+        ticketId: 'tk-7',
+        payload: { body: 'Thanks for reaching out!' },
+      }];
+
+      const result = await enqueueUpstream({
+        connector: 'groove',
+        operation: 'create_reply',
+        ticketId: 'tk-7',
+        payload: { body: 'A completely different reply.' },
+      });
+
+      expect(result).toBe('enqueued');
+      expect(mockInsert).toHaveBeenCalled();
+    });
+
+    it('skips duplicate create_note with same body', async () => {
+      dedupResult = [{
+        id: 'existing-5',
+        connector: 'helpscout',
+        operation: 'create_note',
+        ticketId: 'tk-9',
+        payload: { body: 'Internal note text' },
+      }];
+
+      const result = await enqueueUpstream({
+        connector: 'helpscout',
+        operation: 'create_note',
+        ticketId: 'tk-9',
+        payload: { body: 'Internal note text' },
+      });
+
+      expect(result).toBe('skipped');
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it('allows create_note with different body', async () => {
+      dedupResult = [{
+        id: 'existing-6',
+        connector: 'helpscout',
+        operation: 'create_note',
+        ticketId: 'tk-9',
+        payload: { body: 'Original note' },
+      }];
+
+      const result = await enqueueUpstream({
+        connector: 'helpscout',
+        operation: 'create_note',
+        ticketId: 'tk-9',
+        payload: { body: 'Updated note with new info' },
+      });
+
+      expect(result).toBe('enqueued');
+      expect(mockInsert).toHaveBeenCalled();
+    });
   });
 });

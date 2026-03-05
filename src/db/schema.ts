@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   pgTable,
   pgEnum,
@@ -1228,6 +1229,9 @@ export const upstreamOutbox = pgTable(
     upstreamOutboxTicketIdx: index('upstream_outbox_ticket_idx').on(
       table.ticketId,
     ),
+    upstreamOutboxDedupIdx: uniqueIndex('upstream_outbox_dedup_idx')
+      .on(table.workspaceId, table.connector, table.operation, table.ticketId)
+      .where(sql`status = 'pending' AND operation IN ('create_ticket', 'update_ticket')`),
   }),
 );
 
