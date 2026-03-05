@@ -657,27 +657,27 @@ export interface SuperweaponDef {
 export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
   [SuperweaponType.CHRONOSPHERE]: {
     type: SuperweaponType.CHRONOSPHERE, name: 'Chronosphere',
-    building: 'PDOX', rechargeTicks: 2700, faction: 'allied',
+    building: 'PDOX', rechargeTicks: 6300, faction: 'allied',  // 7 min × 60 × 15 FPS
     requiresPower: true, needsTarget: true, targetMode: 'ground',
   },
   [SuperweaponType.IRON_CURTAIN]: {
     type: SuperweaponType.IRON_CURTAIN, name: 'Iron Curtain',
-    building: 'IRON', rechargeTicks: 6300, faction: 'soviet',
+    building: 'IRON', rechargeTicks: 9900, faction: 'soviet',  // 11 min × 60 × 15 FPS
     requiresPower: true, needsTarget: true, targetMode: 'unit',
   },
   [SuperweaponType.NUKE]: {
     type: SuperweaponType.NUKE, name: 'Nuclear Strike',
-    building: 'MSLO', rechargeTicks: 12600, faction: 'soviet',
+    building: 'MSLO', rechargeTicks: 11700, faction: 'soviet',  // 13 min × 60 × 15 FPS
     requiresPower: true, needsTarget: true, targetMode: 'ground',
   },
   [SuperweaponType.GPS_SATELLITE]: {
     type: SuperweaponType.GPS_SATELLITE, name: 'GPS Satellite',
-    building: 'DOME', rechargeTicks: 6300, faction: 'allied',
+    building: 'ATEK', rechargeTicks: 7200, faction: 'allied',  // 8 min × 60 × 15 FPS
     requiresPower: true, needsTarget: false, targetMode: 'none',
   },
   [SuperweaponType.SONAR_PULSE]: {
     type: SuperweaponType.SONAR_PULSE, name: 'Sonar Pulse',
-    building: 'DOME', rechargeTicks: 12600, faction: 'both',
+    building: 'SPEN', rechargeTicks: 9000, faction: 'both',    // 10 min × 60 × 15 FPS
     requiresPower: true, needsTarget: false, targetMode: 'none',
   },
   [SuperweaponType.PARABOMB]: {
@@ -693,7 +693,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
 };
 
 // Superweapon gameplay constants
-export const IRON_CURTAIN_DURATION = 450;       // ~30 seconds at 15 FPS
+export const IRON_CURTAIN_DURATION = 675;       // 0.75 min × 60 × 15 FPS = 45 seconds
 export const NUKE_DAMAGE = 1000;
 export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
 export const NUKE_FLIGHT_TICKS = 45;            // missile travel time
