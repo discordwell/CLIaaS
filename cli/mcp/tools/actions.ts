@@ -10,6 +10,7 @@ import { textResult, errorResult, safeLoadTickets, findTicket } from '../util.js
 import type { TicketStatus, TicketPriority } from '@/lib/data-provider/types.js';
 import { withConfirmation, recordMCPAction } from './confirm.js';
 import { scopeGuard } from './scopes.js';
+import { enqueueUpstream } from '../../sync/upstream.js';
 
 export function registerActionTools(server: McpServer): void {
   // ---- ticket_update ----
@@ -65,6 +66,17 @@ export function registerActionTools(server: McpServer): void {
             timestamp: ticket.updatedAt, result: 'success',
           });
 
+          // Enqueue for upstream push if ticket came from an external platform
+          if (ticket.source && ticket.externalId) {
+            enqueueUpstream({
+              connector: ticket.source,
+              operation: 'update_ticket',
+              ticketId: ticket.id,
+              externalId: ticket.externalId,
+              payload: changes,
+            }).catch(() => {}); // fire-and-forget
+          }
+
           return { updated: true, ticket: { id: ticket.id, subject: ticket.subject, ...changes } };
         },
       });
@@ -102,6 +114,17 @@ export function registerActionTools(server: McpServer): void {
             params: { ticketId: ticket.id, bodyLength: body.length },
             timestamp: now, result: 'success',
           });
+
+          if (ticket.source && ticket.externalId) {
+            enqueueUpstream({
+              connector: ticket.source,
+              operation: 'create_reply',
+              ticketId: ticket.id,
+              externalId: ticket.externalId,
+              payload: { body },
+            }).catch(() => {});
+          }
+
           return { sent: true, ticketId: ticket.id, timestamp: now };
         },
       });
@@ -139,6 +162,17 @@ export function registerActionTools(server: McpServer): void {
             params: { ticketId: ticket.id, bodyLength: body.length },
             timestamp: now, result: 'success',
           });
+
+          if (ticket.source && ticket.externalId) {
+            enqueueUpstream({
+              connector: ticket.source,
+              operation: 'create_note',
+              ticketId: ticket.id,
+              externalId: ticket.externalId,
+              payload: { body },
+            }).catch(() => {});
+          }
+
           return { added: true, ticketId: ticket.id, timestamp: now };
         },
       });
@@ -158,9 +192,10 @@ export function registerActionTools(server: McpServer): void {
       priority: z.string().optional().describe('Priority: low, normal, high, urgent'),
       requester: z.string().optional().describe('Requester email'),
       tags: z.array(z.string()).optional().describe('Tags to apply'),
+      source: z.string().optional().describe('Target platform (zendesk, freshdesk, etc.) for upstream sync'),
       confirm: z.boolean().optional().describe('Must be true to create the ticket'),
     },
-    async ({ subject, description, priority, requester, tags, confirm }) => {
+    async ({ subject, description, priority, requester, tags, source, confirm }) => {
       const guard = scopeGuard('ticket_create');
       if (guard) return guard;
 
@@ -183,6 +218,16 @@ export function registerActionTools(server: McpServer): void {
             params: ticketData,
             timestamp: now, result: 'success',
           });
+
+          if (source) {
+            enqueueUpstream({
+              connector: source,
+              operation: 'create_ticket',
+              ticketId: id,
+              payload: ticketData,
+            }).catch(() => {});
+          }
+
           return { created: true, ticketId: id, ...ticketData, createdAt: now };
         },
       });

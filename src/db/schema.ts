@@ -1169,6 +1169,50 @@ export const gdprDeletionRequests = pgTable(
   }),
 );
 
+// ---- Upstream Outbox (push changes back to source platforms) ----
+
+export const upstreamOperationEnum = pgEnum('upstream_operation', [
+  'create_ticket',
+  'update_ticket',
+  'create_reply',
+  'create_note',
+]);
+
+export const upstreamStatusEnum = pgEnum('upstream_status', [
+  'pending',
+  'pushed',
+  'failed',
+  'skipped',
+]);
+
+export const upstreamOutbox = pgTable(
+  'upstream_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    connector: text('connector').notNull(),
+    operation: upstreamOperationEnum('operation').notNull(),
+    ticketId: text('ticket_id').notNull(),
+    externalId: text('external_id'),
+    payload: jsonb('payload').notNull(),
+    status: upstreamStatusEnum('status').notNull().default('pending'),
+    externalResult: jsonb('external_result'),
+    pushedAt: timestamp('pushed_at', { withTimezone: true }),
+    error: text('error'),
+    retryCount: integer('retry_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    upstreamOutboxStatusIdx: index('upstream_outbox_status_idx').on(
+      table.connector,
+      table.status,
+    ),
+    upstreamOutboxTicketIdx: index('upstream_outbox_ticket_idx').on(
+      table.ticketId,
+    ),
+  }),
+);
+
 // ---- Retention Policies ----
 
 export const retentionPolicies = pgTable(

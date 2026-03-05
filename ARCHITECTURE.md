@@ -377,8 +377,8 @@ The sync engine provides continuous connector sync without Redis or external dep
   - `cliaas sync run --connector <name>` — single cycle
   - `cliaas sync start --connector <name> [--interval <ms>]` — continuous worker with graceful SIGINT/SIGTERM shutdown
   - `cliaas sync status [--connector <name>]` — show cursor state and last sync time per connector
-- **MCP tools** (`cli/mcp/tools/sync.ts`): `sync_status`, `sync_trigger`, `sync_pull`, `sync_push`, `sync_conflicts` for AI agent access.
-- **Auth resolution**: Each connector's credentials are resolved from standard env vars (e.g. `ZENDESK_SUBDOMAIN`, `ZENDESK_EMAIL`, `ZENDESK_TOKEN`).
+- **MCP tools** (`cli/mcp/tools/sync.ts`): `sync_status`, `sync_trigger`, `sync_pull`, `sync_push`, `sync_conflicts`, `upstream_push`, `upstream_status`, `upstream_retry` for AI agent access.
+- **Auth resolution** (`cli/sync/auth.ts`): Shared `resolveConnectorAuth()` resolves each connector's credentials from standard env vars (e.g. `ZENDESK_SUBDOMAIN`, `ZENDESK_EMAIL`, `ZENDESK_TOKEN`). Used by both downstream and upstream engines.
 
 #### Hybrid Sync Layer (Phase 5)
 
@@ -391,6 +391,30 @@ The hybrid sync layer enables the Tier 3 (Hybrid) architecture where a local DB 
 - **CLI commands**: `cliaas sync pull`, `cliaas sync push`, `cliaas sync conflicts`, `cliaas sync resolve <id> --keep local|hosted`
 - **MCP tools**: `sync_pull`, `sync_push`, `sync_conflicts`
 - **Key principle**: Hosted always wins by default. Local-to-hosted push is an explicit user action with conflict warnings. No silent merges.
+
+#### Upstream Sync (Push Changes to Source Platforms)
+
+The upstream sync layer pushes changes made within CLIaaS back to the originating helpdesk platform (Zendesk, Freshdesk, etc.):
+
+- **Outbox table** (`upstream_outbox`): Queues changes for push to source platforms. Fields: connector, operation (`create_ticket`/`update_ticket`/`create_reply`/`create_note`), ticketId, externalId, payload (JSONB), status (`pending`/`pushed`/`failed`/`skipped`), retryCount (max 3).
+- **Adapter interface** (`cli/sync/upstream-adapter.ts`): `ConnectorWriteAdapter` normalizes write functions across all platforms. Each adapter maps CLIaaS statuses/priorities to platform-specific values. Capability flags (`supportsUpdate`, `supportsReply`) prevent unsupported operations.
+- **Adapter implementations** (`cli/sync/upstream-adapters/`): 8 adapters (Zendesk, Freshdesk, Groove, HelpCrunch, Intercom, Help Scout, Zoho Desk, HubSpot). Factory: `getUpstreamAdapter(connector, auth)`.
+- **Engine** (`cli/sync/upstream.ts`): `enqueueUpstream()` inserts into outbox (no-op without DATABASE_URL). `upstreamPush()` processes pending entries by connector group. `upstreamStatus()` returns aggregate counts. `upstreamRetryFailed()` resets failed entries with retryCount < 3.
+- **MCP hooks**: `ticket_update`, `ticket_reply`, `ticket_note` in `cli/mcp/tools/actions.ts` auto-enqueue when the ticket has a `source` and `externalId`. `ticket_create` accepts an optional `source` parameter.
+- **CLI commands**: `cliaas sync upstream push [--connector]`, `cliaas sync upstream status [--connector]`, `cliaas sync upstream retry [--connector]`
+- **MCP tools**: `upstream_push`, `upstream_status`, `upstream_retry`
+- **Key principle**: Explicit push (not automatic). Missing auth → entries marked `skipped`. Unsupported operations → `skipped`. Max 3 retries for failed entries.
+
+| Connector | updateTicket | postReply | postNote | createTicket | Notes |
+|-----------|:-----------:|:---------:|:--------:|:------------:|-------|
+| Zendesk | Y | Y | Y | Y | Reverse status mapping |
+| Freshdesk | Y | Y | Y | Y | Numeric status/priority codes |
+| Groove | Y | Y | Y | Y | Uses `ticketNumber` |
+| HelpCrunch | Y | Y | Y | Y | Chat model, numeric IDs |
+| Intercom | N | Y | Y | Y | Requires `INTERCOM_ADMIN_ID` |
+| Help Scout | N | Y | Y | Y | Requires `HELPSCOUT_MAILBOX_ID` |
+| Zoho Desk | N | Y | Y | Y | No update function |
+| HubSpot | N | N | Y | Y | Most limited |
 
 ---
 

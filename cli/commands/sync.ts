@@ -150,6 +150,128 @@ export function registerSyncCommands(program: Command): void {
       );
     });
 
+  // ---- Upstream sync commands (push changes back to source platforms) ----
+
+  const upstream = sync
+    .command('upstream')
+    .description('Push changes back to source helpdesk platforms');
+
+  upstream
+    .command('push')
+    .description('Push pending upstream changes to source platforms')
+    .option('--connector <name>', 'Filter by connector name')
+    .action(async (opts: { connector?: string }) => {
+      try {
+        if (!isJsonMode()) {
+          console.log(chalk.cyan('\nPushing upstream changes to source platforms...\n'));
+        }
+        const { upstreamPush } = await import('../sync/upstream.js');
+        const result = await upstreamPush(opts.connector);
+
+        output(
+          {
+            pushed: result.pushed,
+            skipped: result.skipped,
+            failed: result.failed,
+            errors: result.errors,
+          },
+          () => {
+            console.log(chalk.green('Upstream push complete:'));
+            console.log(`  Pushed:   ${result.pushed}`);
+            console.log(`  Skipped:  ${result.skipped}`);
+            console.log(`  Failed:   ${result.failed}`);
+
+            if (result.errors.length > 0) {
+              console.log(chalk.yellow('\nErrors:'));
+              for (const err of result.errors) {
+                console.log(chalk.yellow(`  - ${err}`));
+              }
+            }
+          },
+        );
+      } catch (err) {
+        outputError(`Upstream push failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  upstream
+    .command('status')
+    .description('Show upstream outbox counts by connector and status')
+    .option('--connector <name>', 'Filter by connector name')
+    .action(async (opts: { connector?: string }) => {
+      try {
+        const { upstreamStatus } = await import('../sync/upstream.js');
+        const statuses = await upstreamStatus(opts.connector);
+
+        if (statuses.length === 0) {
+          if (isJsonMode()) {
+            output({ connectors: [] }, () => {});
+          } else {
+            console.log(chalk.yellow('\nNo upstream outbox entries.'));
+          }
+          return;
+        }
+
+        output(
+          { connectors: statuses },
+          () => {
+            console.log(chalk.cyan('\nUpstream Outbox Status:\n'));
+            for (const s of statuses) {
+              console.log(`  ${chalk.bold(s.connector)}`);
+              console.log(`    Pending:  ${s.pending}`);
+              console.log(`    Pushed:   ${s.pushed}`);
+              console.log(`    Failed:   ${s.failed}`);
+              console.log(`    Skipped:  ${s.skipped}`);
+              console.log('');
+            }
+          },
+        );
+      } catch (err) {
+        outputError(`Failed to get upstream status: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  upstream
+    .command('retry')
+    .description('Retry failed upstream entries (max 3 retries per entry)')
+    .option('--connector <name>', 'Filter by connector name')
+    .action(async (opts: { connector?: string }) => {
+      try {
+        if (!isJsonMode()) {
+          console.log(chalk.cyan('\nRetrying failed upstream entries...\n'));
+        }
+        const { upstreamRetryFailed } = await import('../sync/upstream.js');
+        const result = await upstreamRetryFailed(opts.connector);
+
+        output(
+          {
+            pushed: result.pushed,
+            skipped: result.skipped,
+            failed: result.failed,
+            errors: result.errors,
+          },
+          () => {
+            console.log(chalk.green('Upstream retry complete:'));
+            console.log(`  Pushed:   ${result.pushed}`);
+            console.log(`  Skipped:  ${result.skipped}`);
+            console.log(`  Failed:   ${result.failed}`);
+
+            if (result.errors.length > 0) {
+              console.log(chalk.yellow('\nErrors:'));
+              for (const err of result.errors) {
+                console.log(chalk.yellow(`  - ${err}`));
+              }
+            }
+          },
+        );
+      } catch (err) {
+        outputError(`Upstream retry failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
   // ---- Hybrid sync commands ----
 
   sync

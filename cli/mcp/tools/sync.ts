@@ -60,6 +60,78 @@ export function registerSyncTools(server: McpServer): void {
     },
   );
 
+  // ---- Upstream sync tools (push changes back to source platforms) ----
+
+  server.tool(
+    'upstream_push',
+    'Push pending upstream changes to source platforms (Zendesk, Freshdesk, etc.)',
+    {
+      connector: z.string().optional().describe('Filter by connector name'),
+    },
+    async ({ connector }) => {
+      try {
+        const { upstreamPush } = await import('../../sync/upstream.js');
+        const result = await upstreamPush(connector);
+
+        return textResult({
+          message: 'Upstream push complete',
+          pushed: result.pushed,
+          skipped: result.skipped,
+          failed: result.failed,
+          errors: result.errors.length > 0 ? result.errors : undefined,
+        });
+      } catch (err) {
+        return errorResult(`Upstream push failed: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
+
+  server.tool(
+    'upstream_status',
+    'Show upstream outbox counts by connector and status',
+    {
+      connector: z.string().optional().describe('Filter by connector name'),
+    },
+    async ({ connector }) => {
+      try {
+        const { upstreamStatus } = await import('../../sync/upstream.js');
+        const statuses = await upstreamStatus(connector);
+
+        if (statuses.length === 0) {
+          return textResult({ message: 'No upstream outbox entries', connectors: [] });
+        }
+
+        return textResult({ connectors: statuses });
+      } catch (err) {
+        return errorResult(`Failed to get upstream status: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
+
+  server.tool(
+    'upstream_retry',
+    'Retry failed upstream entries (max 3 retries per entry)',
+    {
+      connector: z.string().optional().describe('Filter by connector name'),
+    },
+    async ({ connector }) => {
+      try {
+        const { upstreamRetryFailed } = await import('../../sync/upstream.js');
+        const result = await upstreamRetryFailed(connector);
+
+        return textResult({
+          message: 'Upstream retry complete',
+          pushed: result.pushed,
+          skipped: result.skipped,
+          failed: result.failed,
+          errors: result.errors.length > 0 ? result.errors : undefined,
+        });
+      } catch (err) {
+        return errorResult(`Upstream retry failed: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
+
   // ---- Hybrid sync tools ----
 
   server.tool(

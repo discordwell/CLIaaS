@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-03-05T04:00Z — Session 64: Upstream Sync — Push Changes to Source Platforms
+- **New feature**: Push changes made in CLIaaS back to originating helpdesk platforms
+- **10 new/modified files**: auth.ts (extracted shared auth), upstream-adapter.ts (interface), 8 adapter implementations (zendesk, freshdesk, groove, helpcrunch, intercom, helpscout, zoho-desk, hubspot) + factory
+- **upstream.ts engine**: enqueueUpstream (fire-and-forget insert into upstream_outbox), upstreamPush (process pending entries by connector group), upstreamStatus (aggregate counts), upstreamRetryFailed (reset failed entries < 3 retries)
+- **DB**: upstream_outbox table + upstream_operation/upstream_status enums + SQL migration
+- **MCP hooks**: ticket_update/reply/note auto-enqueue when ticket has source+externalId; ticket_create accepts optional `source` param
+- **3 new MCP tools**: upstream_push, upstream_status, upstream_retry (total tools: 46)
+- **3 new CLI commands**: `cliaas sync upstream push/status/retry [--connector]`
+- **Adapter capability matrix**: Zendesk/Freshdesk/Groove/HelpCrunch = full, Intercom/HelpScout/ZohoDesk = no update, HubSpot = notes+create only
+- **64 new tests** across 4 test files (auth: 18, adapters: 35, engine: 3, MCP tools: 8) — all passing
+- **0 regressions**: existing 21 engine tests + full sync/MCP suite (121 tests) all pass
+- Files: cli/sync/{auth,upstream-adapter,upstream}.ts, cli/sync/upstream-adapters/*.ts, cli/mcp/tools/{actions,sync}.ts, cli/commands/sync.ts, src/db/schema.ts, ARCHITECTURE.md
+
 ## 2026-03-05T03:30Z — Session 63: Agent Harness — AI Player Interface
 - **New file `agentHarness.ts`**: State serializer + command processor + window API installer
 - **State serialization** (`__agentState()`): Returns compact JSON with units, enemies, structures, production, economy, map bounds — all in cell coordinates, ~4KB mid-game
