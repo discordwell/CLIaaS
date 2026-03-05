@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-05T05:00Z — Session 65: SCG01EA Campaign Mission — Einstein Rescue Bug Fixes
+- **worldDist units mismatch**: `worldDist()` returns cells (divides by CELL_SIZE), but 9 call sites compared against `N * CELL_SIZE` (pixel scale). Fixed all: auto-load (28.8→1.2 cells), move-arrival (60→2.5), guard-return (36→1.5), transport-load (36→1.5), service-depot (36→1.5), spy-disguise (96→4), dog-detection (72→3), explosions (96→4, 192→8)
+- **Transport passenger evacuation**: When transport exits map edge, civilian passengers now count as evacuated (triggers EVAC_CIVILIAN → WIN)
+- **Aircraft move bypass**: Agent harness move command skips pathfinding for aircraft (isAircraft), sets direct single-hop path
+- **VIP spawn protection**: Civilians spawned via TACTION_REINFORCEMENTS get invulnTick=90 (~6s invulnerability)
+- **TMISSION_HOUND_DOG**: Implemented team mission 10 — move to waypoint then switch to guard mode
+- **SCG01EA won**: Full agent playthrough — kill guards → Einstein spawns → walks to WP0 → loads in Chinook → helicopter evacuates off east edge → MISSION ACCOMPLISHED (score 727, tick 255)
+- 22 agent harness tests passing (1 new: aircraft move)
+- Files: index.ts (8 worldDist fixes + transport evacuation), agentHarness.ts (aircraft move), scenario.ts (VIP protection + comment), entity.ts (debug log cleanup), agent-harness.test.ts
+
 ## 2026-03-05T04:00Z — Session 64: Upstream Sync — Push Changes to Source Platforms
 - **New feature**: Push changes made in CLIaaS back to originating helpdesk platforms
 - **10 new/modified files**: auth.ts (extracted shared auth), upstream-adapter.ts (interface), 8 adapter implementations (zendesk, freshdesk, groove, helpcrunch, intercom, helpscout, zoho-desk, hubspot) + factory

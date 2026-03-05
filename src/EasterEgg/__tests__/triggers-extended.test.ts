@@ -100,6 +100,16 @@ describe('Extended Trigger Events', () => {
     expect(checkTriggerEvent(event, stateDestroyed)).toBe(true);
   });
 
+  it('TEVENT_DESTROYED (7): fires when attached entity triggerName is in destroyedTriggerNames', () => {
+    const event: TriggerEvent = { type: 7, team: -1, data: 0 }; // C++ TEVENT_DESTROYED = 7
+    // Trigger named 'eins' — entity with triggerName='eins' was destroyed
+    const stateNotDestroyed = createState({ triggerName: 'eins', destroyedTriggerNames: new Set() });
+    const stateDestroyed = createState({ triggerName: 'eins', destroyedTriggerNames: new Set(['eins']) });
+
+    expect(checkTriggerEvent(event, stateNotDestroyed)).toBe(false);
+    expect(checkTriggerEvent(event, stateDestroyed)).toBe(true);
+  });
+
   it('TEVENT_CREDITS (12): returns true when playerCredits >= data', () => {
     const event: TriggerEvent = { type: 12, team: -1, data: 1000 }; // C++ TEVENT_CREDITS = 12
     const stateLow = createState({ playerCredits: 500 });

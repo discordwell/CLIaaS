@@ -124,6 +124,9 @@ export class Entity {
   // S5: NoMovingFire setup time (C++ unit.cpp:1760-1764 — Arm = Rearm_Delay(true)/4 when stopping)
   wasMoving = false;  // tracks movement state for setup time detection
 
+  // Trigger attachment (from INI — for TEVENT_DESTROYED on entities)
+  triggerName?: string;
+
   // Combat
   attackCooldown = 0;
   attackCooldown2 = 0;

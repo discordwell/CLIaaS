@@ -734,6 +734,9 @@ export class Game {
     // Process deferred transport loads (remove loaded passengers from world)
     if (this._pendingTransportLoads.length > 0) {
       const loadSet = new Set(this._pendingTransportLoads);
+      for (const id of loadSet) {
+        const e = this.entityById.get(id);
+      }
       this.entities = this.entities.filter(e => !loadSet.has(e.id));
       for (const id of this._pendingTransportLoads) {
         this.entityById.delete(id);
@@ -766,6 +769,17 @@ export class Game {
             this.unitsLeftMap++;
             if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
               this.civiliansEvacuated++;
+            }
+            // Transport passengers: civilians aboard count as evacuated (C++ transport evacuation)
+            if (entity.passengers && entity.passengers.length > 0) {
+              for (const p of entity.passengers) {
+                p.alive = false;
+                this.unitsLeftMap++;
+                if (CIVILIAN_UNIT_TYPES.has(p.type)) {
+                  this.civiliansEvacuated++;
+                }
+              }
+              entity.passengers = [];
             }
           }
         }
@@ -884,7 +898,7 @@ export class Game {
           if (!e.alive || !this.isPlayerControlled(e) || e.hp >= e.maxHp) continue;
           if (e.stats.isInfantry) continue; // depot only repairs vehicles
           const dist = worldDist({ x: sx, y: sy }, e.pos);
-          if (dist < CELL_SIZE * 1.5 && dist < bestDist) {
+          if (dist < 1.5 && dist < bestDist) { // worldDist returns cells
             docked = e;
             bestDist = dist;
           }
@@ -1865,7 +1879,7 @@ export class Game {
           if (target.passengers.length >= target.maxPassengers) break;
           // Move infantry to transport, then load on arrival
           const dist = worldDist(unit.pos, target.pos);
-          if (dist < CELL_SIZE * 1.5) {
+          if (dist < 1.5) { // worldDist returns cells
             // Close enough — load immediately
             target.passengers.push(unit);
             unit.transportRef = target;
@@ -2467,10 +2481,10 @@ export class Game {
         if (!other.alive || other.id === entity.id || !other.isTransport) continue;
         if (!other.isPlayerUnit || other.passengers.length >= other.maxPassengers) continue;
         const dist = worldDist(entity.pos, other.pos);
-        if (dist < CELL_SIZE * 1.2) {
+        if (dist < 1.2) {
           // Close enough — check if move target was the transport
           const tgtDist = worldDist(entity.moveTarget, other.pos);
-          if (tgtDist < CELL_SIZE * 2) {
+          if (tgtDist < 2) {
             other.passengers.push(entity);
             entity.transportRef = other;
             entity.selected = false;
@@ -2501,6 +2515,7 @@ export class Game {
   private static readonly TMISSION_GUARD = 5;
   private static readonly TMISSION_LOOP = 6;
   private static readonly TMISSION_UNLOAD = 8;
+  private static readonly TMISSION_HOUND_DOG = 10;   // move to waypoint then guard (C++ TMission_Hound_Dog)
   private static readonly TMISSION_DO = 11;          // assign mission to members (C++ Coordinate_Do)
   private static readonly TMISSION_SET_GLOBAL = 12;  // set global variable (C++ TMission_Set_Global)
   private static readonly TMISSION_IDLE = 13;        // idle at position
@@ -2789,6 +2804,28 @@ export class Game {
           entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
         } else if (worldDist(entity.pos, target) < 2) {
+          entity.teamMissionIndex++;
+        }
+        break;
+      }
+
+      case Game.TMISSION_HOUND_DOG: {
+        // Hound Dog: move to waypoint then guard (C++ team.cpp TMission_Hound_Dog)
+        // Used by Einstein and other VIP escorts — move to rally point then hold position
+        const wp = this.waypoints.get(tm.data);
+        if (!wp) { entity.teamMissionIndex++; return; }
+        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+
+        if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          entity.mission = Mission.MOVE;
+          entity.moveTarget = target;
+          entity.target = null;
+          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
+          entity.pathIndex = 0;
+        } else if (worldDist(entity.pos, target) < 2) {
+          // Arrived — switch to guard mode and complete mission
+          entity.mission = Mission.GUARD;
+          entity.moveTarget = null;
           entity.teamMissionIndex++;
         }
         break;
@@ -3170,7 +3207,7 @@ export class Game {
     } else if (entity.moveTarget) {
       // M3: Close-enough distance (C++ Rule.CloseEnoughDistance ~2.5 cells)
       // Unit considers itself "arrived" if within 2.5 cells of final destination
-      const closeEnough = CELL_SIZE * 2.5;
+      const closeEnough = 2.5; // worldDist returns cells
       const distToTarget = worldDist(entity.pos, entity.moveTarget);
       if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
         entity.moveTarget = null;
@@ -3233,7 +3270,7 @@ export class Game {
       // Return to guard origin if player unit was auto-engaging (not given explicit attack order)
       if (entity.isPlayerUnit && entity.guardOrigin) {
         const d = worldDist(entity.pos, entity.guardOrigin);
-        if (d > CELL_SIZE * 1.5) {
+        if (d > 1.5) { // worldDist returns cells
           entity.mission = Mission.MOVE;
           entity.moveTarget = { x: entity.guardOrigin.x, y: entity.guardOrigin.y };
           entity.path = findPath(this.map, entity.cell, worldToCell(entity.guardOrigin.x, entity.guardOrigin.y), true, entity.isNavalUnit, entity.stats.speedClass);
@@ -3698,7 +3735,7 @@ export class Game {
     if (entity.type === UnitType.I_SPY && entity.alive && !entity.disguisedAs && entity.isPlayerUnit) {
       for (const other of this.entities) {
         if (!other.alive || this.entitiesAllied(entity, other)) continue;
-        if (worldDist(entity.pos, other.pos) <= 4 * CELL_SIZE) {
+        if (worldDist(entity.pos, other.pos) <= 4) { // worldDist returns cells
           this.spyDisguise(entity, other);
           break;
         }
@@ -3710,7 +3747,7 @@ export class Game {
       for (const other of this.entities) {
         if (!other.alive || other.type !== UnitType.I_SPY) continue;
         if (this.entitiesAllied(entity, other)) continue;
-        if (worldDist(entity.pos, other.pos) <= 3 * CELL_SIZE) {
+        if (worldDist(entity.pos, other.pos) <= 3) { // worldDist returns cells
           entity.target = other;
           entity.mission = Mission.ATTACK;
           return;
@@ -5223,6 +5260,8 @@ export class Game {
       if (e.alive) {
         const hi = Game.HOUSE_TO_INDEX[e.house];
         if (hi !== undefined) houseAlive.set(hi, true);
+      } else if (e.triggerName) {
+        destroyedTriggerNames.add(e.triggerName);
       }
     }
     const shared = { structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories, houseAlive, builtStructureTypes: this.builtStructureTypes };
@@ -5349,7 +5388,7 @@ export class Game {
             this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 20, size: 24, sprite: 'art-exp1', spriteStart: 0 });
             for (const e of this.entities) {
               if (!e.alive) continue;
-              if (worldDist(e.pos, { x: wx, y: wy }) <= 4 * CELL_SIZE) e.takeDamage(200, 'HE');
+              if (worldDist(e.pos, { x: wx, y: wy }) <= 4) e.takeDamage(200, 'HE'); // worldDist returns cells
             }
             this.audio.play('explode_lg');
           }
@@ -5361,7 +5400,7 @@ export class Game {
           this.effects.push({ type: 'explosion', x: cx, y: cy, frame: 0, maxFrames: 30, size: 48, sprite: 'art-exp1', spriteStart: 0 });
           for (const e of this.entities) {
             if (!e.alive) continue;
-            if (worldDist(e.pos, { x: cx, y: cy }) <= 8 * CELL_SIZE) e.takeDamage(500, 'HE');
+            if (worldDist(e.pos, { x: cx, y: cy }) <= 8) e.takeDamage(500, 'HE'); // worldDist returns cells
           }
         }
         // Center camera on waypoint

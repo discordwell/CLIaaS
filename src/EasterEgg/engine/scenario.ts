@@ -7,7 +7,7 @@ import {
   type CellPos, type UnitStats, type WeaponStats, type WarheadType, type ArmorType,
   CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
   House, Mission, UnitType, GAME_TICKS_PER_SEC,
-  UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
+  UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, CIVILIAN_UNIT_TYPES,
 } from './types';
 import { Entity } from './entity';
 import { GameMap, Terrain } from './map';
@@ -99,7 +99,7 @@ const TMISSION_LOOP = 6;         // Loop back to first mission
 // 7 = ATTACKTARCOM (unused)
 const TMISSION_UNLOAD = 8;       // Unload transport passengers
 // 9 = DEPLOY (unused)
-// 10 = HOUND_DOG (unused)
+// 10 = HOUND_DOG (move to waypoint then guard — implemented in index.ts)
 const TMISSION_DO = 11;          // Assign mission to members (C++ Coordinate_Do)
 const TMISSION_SET_GLOBAL = 12;  // Set a global variable (C++ TMission_Set_Global)
 const TMISSION_IDLE = 13;        // Idle (wait at current position)
@@ -1096,6 +1096,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     entity.bodyFacing32 = entity.facing * 4;
     entity.turretFacing32 = entity.turretFacing * 4;
     entity.hp = Math.floor((u.hp / 256) * entity.maxHp);
+    if (u.trigger && u.trigger !== 'None') entity.triggerName = u.trigger;
     applyMission(entity, u.mission);
     entities.push(entity);
   }
@@ -1111,6 +1112,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     entity.bodyFacing32 = entity.facing * 4;
     entity.hp = Math.floor((inf.hp / 256) * entity.maxHp);
     entity.subCell = inf.subCell;
+    if (inf.trigger && inf.trigger !== 'None') entity.triggerName = inf.trigger;
     applyMission(entity, inf.mission);
     entities.push(entity);
   }
@@ -1898,6 +1900,11 @@ export function executeTriggerAction(
           // IsSuicide teams (flags bit 1) fight to the death — use HUNT mission
           if (team.flags & 2) {
             entity.mission = Mission.HUNT;
+          }
+          // VIP spawn protection — civilians/VIPs spawned in hostile zones get brief invulnerability
+          // so they can start moving before being killed (C++ building-exit protection equivalent)
+          if (CIVILIAN_UNIT_TYPES.has(member.type)) {
+            entity.invulnTick = 90; // ~6 seconds at 15 FPS — enough to escape spawn zone
           }
           // Track transports and infantry for auto-loading
           if (entity.isTransport && !transport) {

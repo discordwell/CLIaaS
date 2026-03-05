@@ -192,6 +192,13 @@ export function serializeState(game: Game): AgentState {
 
 // === Command processor ===
 
+/** Clear team mission scripts so agent commands aren't overridden (mirrors player click handler) */
+function clearTeamScripts(e: Entity): void {
+  e.teamMissions = [];
+  e.teamMissionIndex = 0;
+  e.guardOrigin = null;
+}
+
 export function processCommands(game: Game, commands: AgentCommand[]): CommandResult[] {
   const results: CommandResult[] = [];
 
@@ -203,13 +210,20 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
-            const path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
-            if (path.length === 0) { errs.push(`no path for ${id}`); continue; }
+            clearTeamScripts(e);
             e.mission = Mission.MOVE;
             e.target = null;
             e.moveTarget = { x: c.cx * CELL_SIZE + CELL_SIZE / 2, y: c.cy * CELL_SIZE + CELL_SIZE / 2 };
-            e.path = path;
-            e.pathIndex = 0;
+            if (e.stats.isAircraft) {
+              // Aircraft fly directly — no ground pathfinding needed
+              e.path = [{ cx: c.cx, cy: c.cy }];
+              e.pathIndex = 0;
+            } else {
+              const path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
+              if (path.length === 0) { errs.push(`no path for ${id}`); continue; }
+              e.path = path;
+              e.pathIndex = 0;
+            }
           }
           results.push({ cmd: 'move', ok: errs.length === 0, error: errs.length ? errs.join('; ') : undefined });
           break;
@@ -229,6 +243,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
+            clearTeamScripts(e);
             e.mission = Mission.ATTACK;
             e.target = target;
             e.moveTarget = null;
@@ -246,6 +261,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
+            clearTeamScripts(e);
             e.mission = Mission.HUNT;
             e.target = null;
             e.moveTarget = { x: c.cx * CELL_SIZE + CELL_SIZE / 2, y: c.cy * CELL_SIZE + CELL_SIZE / 2 };
@@ -266,6 +282,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
+            clearTeamScripts(e);
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;
@@ -281,6 +298,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) continue;
+            clearTeamScripts(e);
             e.mission = Mission.GUARD;
             e.target = null;
             e.moveTarget = null;
@@ -373,5 +391,22 @@ export function installHarness(game: Game): void {
     const results = commands && Array.isArray(commands) ? processCommands(game, commands) : [];
     game.step(clamped);
     return { results, state: serializeState(game) } satisfies StepResult;
+  };
+
+  w.__agentDebug = () => {
+    game.debugTriggers = true;
+    // Access private triggers via cast
+    const g = game as unknown as { triggers: Array<{ name: string; fired: boolean; forceFirePending: boolean; event1: { type: number; data: number }; action1: { action: number; team: number }; eventControl: number; actionControl: number }> };
+    const triggers = g.triggers.map((t, i) => ({
+      i, name: t.name, fired: t.fired, force: t.forceFirePending,
+      e1: t.event1.type, e1d: t.event1.data,
+      a1: t.action1.action, a1t: t.action1.team,
+      ec: t.eventControl, ac: t.actionControl,
+    }));
+    // Check entity triggerNames
+    const entityTriggers = game.entities
+      .filter(e => e.triggerName)
+      .map(e => ({ id: e.id, type: e.type, alive: e.alive, triggerName: e.triggerName }));
+    return { triggers, entityTriggers };
   };
 }

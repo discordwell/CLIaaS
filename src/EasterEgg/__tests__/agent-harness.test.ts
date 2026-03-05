@@ -218,6 +218,27 @@ describe('processCommands — move', () => {
   });
 });
 
+describe('processCommands — aircraft move', () => {
+  it('aircraft skip pathfinding and get direct path', () => {
+    const game = makeGame();
+    // TRAN is an aircraft — use it for the test
+    const tran = makeEntity(1, UnitType.V_TRAN, House.Spain, 50, 50);
+    addEntity(game, tran);
+
+    // Move to a far cell — aircraft should get direct path without findPath
+    const cmds: AgentCommand[] = [{ cmd: 'move', unitIds: [1], cx: 85, cy: 47 }];
+    const results = processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(results[0].ok).toBe(true);
+    expect(tran.mission).toBe(Mission.MOVE);
+    expect(tran.path).toEqual([{ cx: 85, cy: 47 }]);
+    expect(tran.moveTarget).toEqual({
+      x: 85 * CELL_SIZE + CELL_SIZE / 2,
+      y: 47 * CELL_SIZE + CELL_SIZE / 2,
+    });
+  });
+});
+
 // ═══════════════════════════════════════════════════════════
 // processCommands — attack
 // ═══════════════════════════════════════════════════════════
