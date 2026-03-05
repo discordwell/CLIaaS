@@ -614,6 +614,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       game.onStateChange = (s) => {
         setStatus(s);
         setGameState(s);
+        if (s === 'playing') canvasRef.current?.focus();
       };
 
       const scenarioId = params.get('scenario') || 'SCA01EA';
