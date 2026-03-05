@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { Dir, UnitType, House, CELL_SIZE, UNIT_STATS, PRODUCTION_ITEMS, getItemCategory } from '../engine/types';
+import { Dir, UnitType, House, CELL_SIZE, UNIT_STATS, PRODUCTION_ITEMS, getStripSide } from '../engine/types';
 
 beforeEach(() => resetEntityIds());
 
@@ -109,15 +109,15 @@ describe('sidebar production gating for no-base missions', () => {
     }
   });
 
-  it('getItemCategory returns correct categories', () => {
+  it('getStripSide returns correct strip for production items', () => {
     const e1 = PRODUCTION_ITEMS.find(p => p.type === 'E1')!;
-    expect(getItemCategory(e1)).toBe('infantry');
+    expect(getStripSide(e1)).toBe('right'); // infantry → right strip
 
     const tank = PRODUCTION_ITEMS.find(p => p.type === '1TNK')!;
-    expect(getItemCategory(tank)).toBe('vehicle');
+    expect(getStripSide(tank)).toBe('right'); // vehicles → right strip
 
     const fact = PRODUCTION_ITEMS.find(p => p.type === 'POWR')!;
-    expect(getItemCategory(fact)).toBe('structure');
+    expect(getStripSide(fact)).toBe('left'); // structures → left strip
   });
 
   it('SCG01EA player=Greece has no allied structures (USSR base)', () => {
@@ -148,12 +148,11 @@ describe('generic briefing generation', () => {
 // ── Sidebar layout constants ──────────────────────────────
 
 describe('sidebar layout', () => {
-  it('sidebar width is 160px (original RA)', async () => {
+  it('sidebar layout constants match C++ parity', async () => {
     const mod = await import('../engine/renderer');
-    // Renderer.MINIMAP_SIZE should be defined
-    expect(mod.Renderer.MINIMAP_SIZE).toBe(120);
-    expect(mod.Renderer.MINIMAP_Y).toBe(4);
-    expect(mod.Renderer.PRODUCTION_Y_OFFSET).toBeGreaterThan(150);
+    expect(mod.Renderer.RADAR_SIZE).toBe(140);
+    expect(mod.Renderer.RADAR_Y).toBe(4);
+    expect(mod.Renderer.STRIP_START_Y).toBe(194);
     expect(mod.Renderer.CAMEO_W).toBe(32);
     expect(mod.Renderer.CAMEO_H).toBe(24);
   });

@@ -1,5 +1,29 @@
 # Session Summaries
 
+## 2026-03-05T03:30Z — Session 63: Agent Harness — AI Player Interface
+- **New file `agentHarness.ts`**: State serializer + command processor + window API installer
+- **State serialization** (`__agentState()`): Returns compact JSON with units, enemies, structures, production, economy, map bounds — all in cell coordinates, ~4KB mid-game
+- **Command interface** (`__agentCommand()`): 11 command types (move, attack, attack_move, attack_struct, stop, build, cancel_build, place, sell, repair, deploy). Returns per-command ok/error.
+- **Step control** (`__agentStep(n, commands?)`): Combine commands + N ticks in one call. Default 15 ticks (1 game-second).
+- **Game class additions**: `toggleRepair()`, `sellStructureByIndex()`, `isStructureRepairing()` — public methods wrapping existing private logic
+- **AntGame.tsx**: Added `?anttest=agent` mode following existing `compare` mode pattern. Loads paused, fog disabled, harness installed.
+- **21 unit tests** (agent-harness.test.ts): state serialization, move/attack/build commands, batch processing, structure ops
+- **Wet tested** on cliaas.com: state JSON returns correctly, step advances ticks, move/attack_move/build commands all work, production queue visible
+- URL: `https://cliaas.com?anttest=agent&scenario=SCA01EA&difficulty=normal`
+- Commit: 0cb11e6, pushed, deployed
+- Files: agentHarness.ts (new), agent-harness.test.ts (new), AntGame.tsx, index.ts
+
+## 2026-03-05T01:30Z — Session 62: Sidebar UI — C++ Source Parity Rewrite
+- **Complete sidebar layout rewrite** replacing mock approximation with faithful C++ Red Alert parity
+- **Phase 1 — Sprite extraction**: Added REPAIR.SHP (3×17×14), SELL.SHP (3×17×14), MAP.SHP (3×17×14), CLOCK.SHP (55×32×24) from LORES.MIX
+- **Phase 2 — Type system**: Replaced `SidebarTab` ('infantry'|'vehicle'|'structure') with `StripType` ('left'|'right'), `getItemCategory` → `getStripSide`; deprecated aliases kept
+- **Phase 3 — Renderer rewrite**: New layout constants (RADAR_SIZE=140, CREDITS_Y=148, BUTTON_ROW_Y=164, STRIP_START_Y=194). New `renderStrip()` (single-column per strip, CLOCK.SHP overlay). New `renderButtonRow()` (3 sprite icons). Deleted `renderTabBar()`. Added `getStripBounds()` for hit testing. Credits background fill to prevent text bleed.
+- **Phase 4 — Game logic**: `stripScrollPositions` replacing `activeTab`/`tabScrollPositions`. Per-strip scroll via `getStripBounds()`. Rewrote `sidebarItemAt()` + `handleSidebarClick()` for dual strips. Button row: repair/sell/map. Infantry+vehicles share right strip queue. Added `centerOnBase()` for map button.
+- **Phase 5 — Tests**: 63 tests all passing — dual production strips, C++ parity queues (infantry+vehicle share right), button row, strip bounds + scroll
+- **Bug fix**: mouse.png was degenerate (16144×0 PNG, MOUSE.SHP variable-size frames). Skipped in extraction, removed from manifest. This fixed the persistent "Failed to load image: /ra/assets/mouse.png" mission load error.
+- **Wet test**: Game loads successfully on cliaas.com. Sidebar shows: radar minimap (top), credits, 3 sprite icon buttons (repair/sell/map), power bar (left), dual production strips, superweapons (bottom). No tab bar.
+- Files: extract-ra-assets.ts, types.ts, renderer.ts, index.ts, sidebar-ui.test.ts, manifest.json
+
 ## 2026-03-04T23:10Z — Session 61: Map Tile Fix — TREE Terrain + Deferred Trees
 - **Root cause 1 fixed**: TREE terrain cells with clear templates (tmpl=0/0xFFFF) now use tileset clear tile (255,0) instead of procedural grass — eliminates visible light green blocks
 - **Root cause 2 fixed**: Tree sprite rendering deferred to second pass — clump sprites (TC01-TC05, 72-96px) no longer overwritten by _clump satellite cells' grass fill

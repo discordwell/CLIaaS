@@ -813,10 +813,6 @@ export function getStripSide(item: ProductionItem): StripType {
   return item.isStructure ? 'left' : 'right';
 }
 
-// Deprecated aliases for compilation compatibility during transition
-export type SidebarTab = StripType;
-export const getItemCategory = getStripSide;
-
 /** Unit types that count as civilian evacuation — C++ _Counts_As_Civ_Evac() VIPs + IsCivilian types */
 export const CIVILIAN_UNIT_TYPES = new Set<string>([
   'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10',

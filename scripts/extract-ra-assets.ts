@@ -231,12 +231,16 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   // Fog of war shroud overlays (47 frames, one per edge pattern)
   ['CONQUER.MIX', 'SHADOW.SHP', 'shadow'],
   // UI elements
-  ['LORES.MIX', 'MOUSE.SHP', 'mouse'],       // Mouse cursors
+  // ['LORES.MIX', 'MOUSE.SHP', 'mouse'],    // Skipped: variable-size frames produce 0-height sheet
   ['LORES.MIX', 'SELECT.SHP', 'select'],     // Selection box
   ['LORES.MIX', 'POWERBAR.SHP', 'powerbar'], // Power bar
   ['LORES.MIX', 'SIDEBAR.SHP', 'sidebar'],   // Sidebar background
   ['LORES.MIX', 'STRIP.SHP', 'strip'],       // Sidebar strip
   ['LORES.MIX', 'TABS.SHP', 'tabs'],         // Sidebar tabs
+  ['LORES.MIX', 'REPAIR.SHP', 'repair'],     // Repair button icon
+  ['LORES.MIX', 'SELL.SHP', 'sell'],         // Sell button icon
+  ['LORES.MIX', 'MAP.SHP', 'map_btn'],       // Map button icon
+  ['LORES.MIX', 'CLOCK.SHP', 'clock'],       // Clock overlay for build progress
   // Ore/gem overlays (theater-specific .TEM files, SHP format)
   // Gold: 12 frames each (density 0-11), Gems: 3 frames each (density 0-2)
   ['TEMPERAT.MIX', 'GOLD01.TEM', 'gold01'],
