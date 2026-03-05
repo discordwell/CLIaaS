@@ -583,6 +583,9 @@ export default function AntGame({ onExit }: AntGameProps) {
           game.disableFog();
           game.step(1);
           installHarness(game);
+        }).catch((err) => {
+          console.error('Agent harness: game start failed', err);
+          setError(String(err));
         });
       });
 

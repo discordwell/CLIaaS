@@ -369,8 +369,9 @@ export function installHarness(game: Game): void {
   w.__agentCommand = (commands: AgentCommand[]) => processCommands(game, commands);
 
   w.__agentStep = (n = 15, commands?: AgentCommand[]) => {
-    const results = commands ? processCommands(game, commands) : [];
-    game.step(n);
+    const clamped = Math.max(0, Math.min(n, 900)); // cap at 1 minute of game time
+    const results = commands && Array.isArray(commands) ? processCommands(game, commands) : [];
+    game.step(clamped);
     return { results, state: serializeState(game) } satisfies StepResult;
   };
 }

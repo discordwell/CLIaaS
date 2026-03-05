@@ -561,7 +561,7 @@ export class Game {
       this.update();
     }
     this.render();
-    if (wasPaused) this.state = 'paused';
+    if (wasPaused && this.state === 'playing') this.state = 'paused';
   }
 
   /** Disable fog of war (reveal entire map) */
@@ -2023,7 +2023,6 @@ export class Game {
     }
   }
 
-  /** Map a sidebar Y coordinate to the item index, accounting for category headers */
   /** Hit-test a sidebar click against the dual production strips.
    *  Returns the index in the full items array, or -1 if no hit. */
   private sidebarItemAt(sx: number, sy: number): number {
