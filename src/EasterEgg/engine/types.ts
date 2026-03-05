@@ -805,14 +805,17 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'BRIK', name: 'Concrete', cost: 100, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true },
 ];
 
-// === Sidebar Tab Categories ===
-export type SidebarTab = 'infantry' | 'vehicle' | 'structure';
+// === Sidebar Strip Categories (C++ parity: two production strips) ===
+export type StripType = 'left' | 'right';
 
-export function getItemCategory(item: ProductionItem): SidebarTab {
-  if (item.isStructure) return 'structure';
-  if (item.prerequisite === 'TENT' || item.prerequisite === 'BARR') return 'infantry';
-  return 'vehicle';
+/** C++ parity: left strip = structures, right strip = all units (infantry + vehicles share queue) */
+export function getStripSide(item: ProductionItem): StripType {
+  return item.isStructure ? 'left' : 'right';
 }
+
+// Deprecated aliases for compilation compatibility during transition
+export type SidebarTab = StripType;
+export const getItemCategory = getStripSide;
 
 /** Unit types that count as civilian evacuation — C++ _Counts_As_Civ_Evac() VIPs + IsCivilian types */
 export const CIVILIAN_UNIT_TYPES = new Set<string>([

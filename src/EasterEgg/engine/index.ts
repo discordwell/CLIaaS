@@ -10,7 +10,7 @@ import {
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
   Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
-  PRODUCTION_ITEMS, type ProductionItem, CursorType, type SidebarTab, getItemCategory,
+  PRODUCTION_ITEMS, type ProductionItem, CursorType, type StripType, getStripSide,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames, modifyDamage,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
@@ -206,8 +206,7 @@ export class Game {
   /** CF3: Fixed splash damage radius in cells (C++ SPREAD_FACTOR constant) */
   static readonly SPLASH_RADIUS = 1.5;
   sidebarScroll = 0; // scroll offset for sidebar items
-  activeTab: SidebarTab = 'infantry';
-  tabScrollPositions: Record<SidebarTab, number> = { infantry: 0, vehicle: 0, structure: 0 };
+  stripScrollPositions: Record<StripType, number> = { left: 0, right: 0 };
   private cachedAvailableItems: ProductionItem[] | null = null;
   /** Rally points: produced units auto-move here (per factory type) */
   private rallyPoints = new Map<string, WorldPos>(); // factory type → world position
@@ -1260,19 +1259,27 @@ export class Game {
   private processInput(): void {
     const { leftClick, rightClick, doubleClick, dragBox, ctrlHeld, shiftHeld, keys, scrollDelta } = this.input.state;
 
-    // Sidebar scroll (mouse wheel when cursor is over sidebar) — per-tab
+    // Sidebar scroll (mouse wheel when cursor is over sidebar) — per-strip
     if (scrollDelta !== 0 && this.input.state.mouseX >= this.canvas.width - Game.SIDEBAR_W) {
-      const items = this.cachedAvailableItems ?? this.getAvailableItems();
-      const filteredItems = items.filter(it => getItemCategory(it) === this.activeTab);
-      // 2-column layout: rows = ceil(items/2), rowH = 26 (cameo 24 + gap 2)
-      const rowH = 26;
-      const rows = Math.ceil(filteredItems.length / 2);
-      const prodStartY = this.renderer.getProductionStartY();
-      const bottomReserved = 40;
-      const maxScroll = Math.max(0, rows * rowH - (this.canvas.height - prodStartY - bottomReserved));
-      const cur = this.tabScrollPositions[this.activeTab];
-      this.tabScrollPositions[this.activeTab] = Math.max(0, Math.min(maxScroll, cur + Math.sign(scrollDelta) * rowH));
-      this.sidebarScroll = this.tabScrollPositions[this.activeTab];
+      const mouseX = this.input.state.mouseX;
+      const sidebarX = this.canvas.width - Game.SIDEBAR_W;
+      // Determine which strip mouse is over
+      const leftBounds = this.renderer.getStripBounds('left');
+      const rightBounds = this.renderer.getStripBounds('right');
+      let targetStrip: StripType | null = null;
+      if (mouseX >= leftBounds.x && mouseX < leftBounds.x + leftBounds.w) targetStrip = 'left';
+      else if (mouseX >= rightBounds.x && mouseX < rightBounds.x + rightBounds.w) targetStrip = 'right';
+      else targetStrip = mouseX < sidebarX + Game.SIDEBAR_W / 2 ? 'left' : 'right';
+
+      if (targetStrip) {
+        const items = this.cachedAvailableItems ?? this.getAvailableItems();
+        const filteredItems = items.filter(it => getStripSide(it) === targetStrip);
+        const rowH = 26;
+        const visibleH = this.renderer.getStripBounds(targetStrip).h;
+        const maxScroll = Math.max(0, filteredItems.length * rowH - visibleH);
+        const cur = this.stripScrollPositions[targetStrip];
+        this.stripScrollPositions[targetStrip] = Math.max(0, Math.min(maxScroll, cur + Math.sign(scrollDelta) * rowH));
+      }
     }
 
     // Minimap drag scroll: while holding left button on minimap, continuously scroll
@@ -1776,8 +1783,8 @@ export class Game {
         const itemIdx = this.sidebarItemAt(rightClick.x, rightClick.y);
         if (itemIdx >= 0 && itemIdx < items.length) {
           const item = items[itemIdx];
-          const category = getItemCategory(item);
-          this.cancelProduction(category);
+          const strip = getStripSide(item);
+          this.cancelProduction(strip);
         }
         return;
       }
@@ -2017,34 +2024,29 @@ export class Game {
   }
 
   /** Map a sidebar Y coordinate to the item index, accounting for category headers */
-  /** Hit-test a sidebar click against the 2-column production grid.
+  /** Hit-test a sidebar click against the dual production strips.
    *  Returns the index in the full items array, or -1 if no hit. */
   private sidebarItemAt(sx: number, sy: number): number {
     const items = this.getAvailableItems();
-    const filteredItems = items.filter(it => getItemCategory(it) === this.activeTab);
-    const sidebarX = this.canvas.width - Game.SIDEBAR_W;
-    const prodStartY = this.renderer.getProductionStartY();
-    const camW = 32;
-    const camH = 24;
-    const gap = 2;
-    const col0X = sidebarX + 18; // after power bar
-    const col1X = col0X + camW + gap;
-    const rowH = camH + gap;
-    const tabScroll = this.tabScrollPositions[this.activeTab];
 
-    // Determine which column was clicked
-    let col = -1;
-    if (sx >= col0X && sx < col0X + camW) col = 0;
-    else if (sx >= col1X && sx < col1X + camW) col = 1;
-    if (col < 0) return -1;
+    // Determine which strip was clicked
+    let strip: StripType | null = null;
+    const leftBounds = this.renderer.getStripBounds('left');
+    const rightBounds = this.renderer.getStripBounds('right');
+    if (sx >= leftBounds.x && sx < leftBounds.x + leftBounds.w) strip = 'left';
+    else if (sx >= rightBounds.x && sx < rightBounds.x + rightBounds.w) strip = 'right';
+    if (!strip) return -1;
 
-    const relY = sy - prodStartY + tabScroll;
+    const filteredItems = items.filter(it => getStripSide(it) === strip);
+    const bounds = strip === 'left' ? leftBounds : rightBounds;
+    const scroll = this.stripScrollPositions[strip];
+    const rowH = 26; // cameo 24 + gap 2
+
+    const relY = sy - bounds.y + scroll;
     if (relY < 0) return -1;
-    const row = Math.floor(relY / rowH);
-    const filteredIdx = row * 2 + col;
-    if (filteredIdx < 0 || filteredIdx >= filteredItems.length) return -1;
-    // Map back to index in the full items array
-    const targetItem = filteredItems[filteredIdx];
+    const idx = Math.floor(relY / rowH);
+    if (idx < 0 || idx >= filteredItems.length) return -1;
+    const targetItem = filteredItems[idx];
     return items.indexOf(targetItem);
   }
 
@@ -2055,34 +2057,23 @@ export class Game {
     // Minimap click — check first since it's at top now
     if (this.handleMinimapClick(sx, sy)) return;
 
-    // Tab bar click detection (tabs start after power bar at offset 16)
-    const tabBarY = this.renderer.getTabBarY();
-    const tabBarH = 14;
-    if (sy >= tabBarY && sy < tabBarY + tabBarH) {
-      const tabStartX = 16;
-      const tabAreaW = Game.SIDEBAR_W - tabStartX - 2;
-      const tabW = Math.floor(tabAreaW / 3);
-      const relX = sx - sidebarX - tabStartX;
-      if (relX >= 0 && relX < tabW) this.activeTab = 'infantry';
-      else if (relX >= tabW && relX < tabW * 2) this.activeTab = 'vehicle';
-      else if (relX >= tabW * 2) this.activeTab = 'structure';
-      return;
-    }
-
-    // Sell/Repair button click detection
-    const sellRepairY = this.renderer.getSellRepairButtonY();
-    const btnH = 14;
-    if (sy >= sellRepairY && sy < sellRepairY + btnH) {
-      const margin = 2;
-      const gap = 4;
-      const btnW = Math.floor((Game.SIDEBAR_W - margin * 2 - gap) / 2);
-      const relX = sx - sidebarX - margin;
+    // Button row click detection (repair / sell / map)
+    const btnRowY = this.renderer.getButtonRowY();
+    const btnH = 28; // Renderer.BUTTON_H
+    if (sy >= btnRowY && sy < btnRowY + btnH) {
+      const btnW = Math.floor(Game.SIDEBAR_W / 3);
+      const relX = sx - sidebarX;
       if (relX >= 0 && relX < btnW) {
-        this.sellMode = !this.sellMode;
-        this.repairMode = false;
-      } else if (relX >= btnW + gap && relX < btnW * 2 + gap) {
+        // Repair button
         this.repairMode = !this.repairMode;
         this.sellMode = false;
+      } else if (relX >= btnW && relX < btnW * 2) {
+        // Sell button
+        this.sellMode = !this.sellMode;
+        this.repairMode = false;
+      } else if (relX >= btnW * 2) {
+        // Map button — center camera on base
+        this.centerOnBase();
       }
       return;
     }
@@ -2091,13 +2082,28 @@ export class Game {
     const swClick = this.handleSuperweaponButtonClick(sy);
     if (swClick) return;
 
-    // Production item click (2-column grid)
+    // Production item click (dual strips)
     const items = this.getAvailableItems();
     const itemIdx = this.sidebarItemAt(sx, sy);
     if (itemIdx < 0 || itemIdx >= items.length) return;
     const item = items[itemIdx];
-    // startProduction handles both new builds and queueing
     this.startProduction(item);
+  }
+
+  /** Center camera on the player's construction yard or first building */
+  private centerOnBase(): void {
+    for (const s of this.structures) {
+      if (s.alive && this.isAllied(s.house, this.playerHouse) && s.type === 'FACT') {
+        this.camera.centerOn(s.cx * CELL_SIZE + CELL_SIZE, s.cy * CELL_SIZE + CELL_SIZE);
+        return;
+      }
+    }
+    for (const s of this.structures) {
+      if (s.alive && this.isAllied(s.house, this.playerHouse)) {
+        this.camera.centerOn(s.cx * CELL_SIZE + CELL_SIZE, s.cy * CELL_SIZE + CELL_SIZE);
+        return;
+      }
+    }
   }
 
   /** Check if a sidebar click hit a superweapon button. Returns true if handled. */
@@ -5713,7 +5719,7 @@ export class Game {
 
   /** Start building an item (called from sidebar click) */
   startProduction(item: ProductionItem): void {
-    const category = getItemCategory(item);
+    const category = getStripSide(item);
     const effectiveCost = this.getEffectiveCost(item);
     const existing = this.productionQueue.get(category);
     if (existing) {
@@ -6713,10 +6719,9 @@ export class Game {
     this.renderer.sidebarPowerConsumed = this.powerConsumed;
     this.renderer.sidebarItems = this.cachedAvailableItems ?? this.getAvailableItems();
     this.renderer.sidebarQueue = this.productionQueue;
-    this.renderer.sidebarScroll = this.tabScrollPositions[this.activeTab];
     this.renderer.sidebarW = Game.SIDEBAR_W;
-    this.renderer.activeTab = this.activeTab;
-    this.renderer.tabScrollPositions = this.tabScrollPositions;
+    this.renderer.leftStripScroll = this.stripScrollPositions.left;
+    this.renderer.rightStripScroll = this.stripScrollPositions.right;
     // Radar requires DOME and sufficient power
     const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;
@@ -8034,4 +8039,43 @@ export class Game {
   // AFTERMATH SOUNDS: ANTBITE.AUD, ANTDIE.AUD, BUZZY1.AUD, TANK01.AUD, etc.
   // Extracted to WAV by scripts/extract-ra-audio.ts -> public/ra/audio/.
   // AudioManager.loadSamples() loads them at runtime; synth fallback if unavailable.
+
+  // === Agent Harness API (public methods for programmatic control) ===
+
+  /** Toggle repair on a structure by index. Returns true if repair is now active. */
+  toggleRepair(idx: number): boolean {
+    const s = this.structures[idx];
+    if (!s || !s.alive || !this.isAllied(s.house, this.playerHouse)) return false;
+    if (this.repairingStructures.has(idx)) {
+      this.repairingStructures.delete(idx);
+      return false;
+    }
+    if (s.hp < s.maxHp) {
+      this.repairingStructures.add(idx);
+      return true;
+    }
+    return false;
+  }
+
+  /** Initiate sell on a structure by index. Returns true if sell started. */
+  sellStructureByIndex(idx: number): boolean {
+    const s = this.structures[idx];
+    if (!s || !s.alive || s.sellProgress !== undefined) return false;
+    if (!this.isAllied(s.house, this.playerHouse)) return false;
+    if (WALL_TYPES.has(s.type)) {
+      s.alive = false;
+      this.clearStructureFootprint(s);
+      const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+      if (prodItem) this.addCredits(Math.floor(prodItem.cost * 0.5), true);
+      return true;
+    }
+    s.sellProgress = 0;
+    s.sellHpAtStart = s.hp;
+    return true;
+  }
+
+  /** Check if a structure is currently being repaired. */
+  isStructureRepairing(idx: number): boolean {
+    return this.repairingStructures.has(idx);
+  }
 }

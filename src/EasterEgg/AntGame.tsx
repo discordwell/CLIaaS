@@ -559,6 +559,44 @@ export default function AntGame({ onExit }: AntGameProps) {
       };
     }
 
+    // Agent mode: pause-step harness for Claude Code AI player
+    if (anttest === 'agent') {
+      setTestMode(true);
+      setScreen('playing');
+
+      const canvas = canvasRef.current;
+      const game = new Game(canvas);
+      gameRef.current = game;
+      game.fogDisabled = true;
+
+      game.onLoadProgress = (loaded, total) => {
+        setLoadProgress(Math.round((loaded / total) * 100));
+      };
+      game.onStateChange = (s) => setStatus(s);
+
+      const scenarioId = params.get('scenario') || 'SCA01EA';
+      const diff = (params.get('difficulty') || 'normal') as Difficulty;
+
+      import('./engine/agentHarness').then(({ installHarness }) => {
+        game.start(scenarioId, diff).then(() => {
+          game.pause();
+          game.disableFog();
+          game.step(1);
+          installHarness(game);
+        });
+      });
+
+      return () => {
+        game.stop();
+        gameRef.current = null;
+        const w = window as unknown as Record<string, unknown>;
+        delete w.__agentReady;
+        delete w.__agentState;
+        delete w.__agentCommand;
+        delete w.__agentStep;
+      };
+    }
+
     // Regular test mode
     setTestMode(true);
     setScreen('playing');

@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type SidebarTab, getItemCategory } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -149,9 +149,9 @@ export class Renderer {
   sidebarItems: ProductionItem[] = [];
   sidebarQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
   sidebarScroll = 0;
-  sidebarW = 100;
-  activeTab: SidebarTab = 'infantry';
-  tabScrollPositions: Record<SidebarTab, number> = { infantry: 0, vehicle: 0, structure: 0 };
+  sidebarW = 160;
+  leftStripScroll = 0;
+  rightStripScroll = 0;
   hasRadar = false; // requires DOME building for minimap
   radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
   radarStaticCounter = 0;
@@ -2731,37 +2731,53 @@ export class Renderer {
 
   // ─── Sidebar ──────────────────────────────────────────────
 
-  // ─── Sidebar Layout Constants ─────────────────────────────
-  // Minimap at top of sidebar (original RA layout)
-  static readonly MINIMAP_SIZE = 120;  // square minimap inside sidebar frame
-  static readonly MINIMAP_Y = 4;       // top margin
-  // Below minimap: credits, power, tabs, production
-  static readonly CREDITS_Y_OFFSET = 128; // from sidebar top
-  static readonly POWER_Y_OFFSET = 142;   // vertical power bar start
-  static readonly TAB_BAR_Y_OFFSET = 142; // tab bar alongside power bar
-  static readonly PRODUCTION_Y_OFFSET = 158; // production strip start
+  // ─── Sidebar Layout Constants (C++ parity: dual production strips) ────
+  static readonly RADAR_SIZE = 140;    // square radar minimap
+  static readonly RADAR_Y = 4;        // top margin
+  static readonly CREDITS_Y = 148;    // credits strip below radar
+  static readonly CREDITS_H = 14;
+  static readonly BUTTON_ROW_Y = 164; // repair/sell/map icon buttons
+  static readonly BUTTON_H = 28;      // button row height
+  static readonly STRIP_START_Y = 194; // dual production strips start
   static readonly CAMEO_W = 32;
   static readonly CAMEO_H = 24;
+  static readonly CAMEO_VISIBLE = 4;   // visible cameo slots per strip
+  static readonly SCROLL_ARROW_H = 16;
+  static readonly POWER_BAR_W = 10;
+  static readonly POWER_BAR_X_OFFSET = 2;
+  static readonly LEFT_STRIP_X_OFFSET = 14;  // after power bar
+  static readonly RIGHT_STRIP_X_OFFSET = 50; // after left strip + gap
+  // Legacy alias
   static readonly CAMEO_GAP = 2;
-  // 2-column production: each column = 32px cameo + 2px gap
-  // Power bar takes ~14px on left, leaving 2 columns of 32px + gaps on right
 
   /** Get minimap bounds for hit-testing (used by game click handlers) */
   getMinimapBounds(): { x: number; y: number; size: number } {
-    const mmSize = Renderer.MINIMAP_SIZE;
+    const mmSize = Renderer.RADAR_SIZE;
     const mmX = this.width - this.sidebarW + (this.sidebarW - mmSize) / 2;
-    const mmY = Renderer.MINIMAP_Y;
+    const mmY = Renderer.RADAR_Y;
     return { x: mmX, y: mmY, size: mmSize };
   }
 
-  /** Get the Y offset where production items start (for click handling) */
+  /** Get the Y offset where production strips start (for click handling) */
   getProductionStartY(): number {
-    return Renderer.PRODUCTION_Y_OFFSET;
+    return Renderer.STRIP_START_Y;
   }
 
-  /** Get tab bar Y position */
-  getTabBarY(): number {
-    return Renderer.TAB_BAR_Y_OFFSET;
+  /** Get button row Y position (repair/sell/map) */
+  getButtonRowY(): number {
+    return Renderer.BUTTON_ROW_Y;
+  }
+
+  /** Get bounds for a production strip (for hit testing) */
+  getStripBounds(strip: StripType): { x: number; y: number; w: number; h: number } {
+    const sidebarX = this.width - this.sidebarW;
+    const xOffset = strip === 'left' ? Renderer.LEFT_STRIP_X_OFFSET : Renderer.RIGHT_STRIP_X_OFFSET;
+    return {
+      x: sidebarX + xOffset,
+      y: Renderer.STRIP_START_Y,
+      w: Renderer.CAMEO_W,
+      h: Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP),
+    };
   }
 
   private renderSidebar(assets: AssetManager): void {
@@ -2772,8 +2788,6 @@ export class Renderer {
     // Background — use sidebar.png sprite if available, else dark fill
     const sidebarSheet = assets.getSheet('sidebar');
     if (sidebarSheet) {
-      // sidebar.png is 160x123 (2 frames of 80x123) — draw both frames side by side
-      // Then tile vertically to fill full sidebar height
       for (let ty = 0; ty < this.height; ty += 123) {
         assets.drawFrame(ctx, 'sidebar', 0, x, ty);
         assets.drawFrame(ctx, 'sidebar', 1, x + 80, ty);
@@ -2782,7 +2796,6 @@ export class Renderer {
       ctx.fillStyle = 'rgba(20,20,25,0.95)';
       ctx.fillRect(x, 0, w, this.height);
     }
-    // Left edge line
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -2790,52 +2803,50 @@ export class Renderer {
     ctx.lineTo(x, this.height);
     ctx.stroke();
 
-    // Credits display — below minimap area
-    const credY = Renderer.CREDITS_Y_OFFSET;
+    // Credits strip below radar — dark background to prevent text bleed-through
+    const credY = Renderer.CREDITS_Y;
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(x + 1, credY, w - 1, Renderer.CREDITS_H);
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
     const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
     ctx.fillStyle = atCapacity ? '#FF4444' : '#FFD700';
-    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, credY);
+    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, credY + 10);
     if (this.sidebarSiloCapacity > 0) {
       ctx.font = '7px monospace';
       ctx.fillStyle = '#888';
-      ctx.fillText(`/${this.sidebarSiloCapacity}`, x + w / 2, credY + 10);
+      ctx.fillText(`/${this.sidebarSiloCapacity}`, x + w / 2, credY + 20);
     }
 
-    // Vertical power bar (left edge of sidebar, below credits)
+    // Button row: repair / sell / map icons
+    this.renderButtonRow(x, w, assets);
+
+    // Power bar on far left edge (full height of strip area)
     const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
     const hasPower = this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0;
     if (hasPower) {
       this.renderVerticalPowerBar(assets, x, lowPower);
     }
 
-    // Tab bar — INF / VEH / BLD (uses sprites if available)
-    const tabBarY = Renderer.TAB_BAR_Y_OFFSET;
-    this.renderTabBar(x, w, tabBarY);
-    const tabBarH = 14;
+    // Dual production strips
+    const leftItems = this.sidebarItems.filter(it => getStripSide(it) === 'left');
+    const rightItems = this.sidebarItems.filter(it => getStripSide(it) === 'right');
 
-    // Production items — 2-column cameo grid filtered by active tab
-    const prodStartY = Renderer.PRODUCTION_Y_OFFSET;
-    const filteredItems = this.sidebarItems.filter(it => getItemCategory(it) === this.activeTab);
-    const tabScroll = this.tabScrollPositions[this.activeTab];
-
-    // Save clip region for production area (prevent overflow into bottom buttons)
-    const bottomReserved = 40; // space for sell/repair + superweapons
-    const prodMaxY = this.height - bottomReserved;
+    // Clip strips to prevent overflow
+    const stripMaxY = this.height - 40;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x, prodStartY, w, prodMaxY - prodStartY);
+    ctx.rect(x, Renderer.STRIP_START_Y, w, stripMaxY - Renderer.STRIP_START_Y);
     ctx.clip();
 
-    this.renderProductionStrip(ctx, assets, x, w, prodStartY, filteredItems, tabScroll, lowPower);
+    this.renderStrip(ctx, assets, x + Renderer.LEFT_STRIP_X_OFFSET, Renderer.STRIP_START_Y,
+      leftItems, this.leftStripScroll, lowPower, 'left');
+    this.renderStrip(ctx, assets, x + Renderer.RIGHT_STRIP_X_OFFSET, Renderer.STRIP_START_Y,
+      rightItems, this.rightStripScroll, lowPower, 'right');
 
     ctx.restore();
 
-    // Sell/Repair buttons — near bottom
-    this.renderSellRepairButtons(x, w);
-
-    // Superweapon buttons — below sell/repair at bottom
+    // Superweapon buttons at bottom
     this.renderSuperweaponButtons(x, w);
 
     ctx.textAlign = 'left';
@@ -2844,10 +2855,10 @@ export class Renderer {
   /** Render vertical power bar on left edge of sidebar (original RA style) */
   private renderVerticalPowerBar(assets: AssetManager, sidebarX: number, lowPower: boolean): void {
     const ctx = this.ctx;
-    const pwrX = sidebarX + 3;
-    const pwrY = Renderer.POWER_Y_OFFSET;
-    const pwrW = 10;
-    const pwrH = Math.min(this.height - pwrY - 44, 120); // cap height for visual balance
+    const pwrX = sidebarX + Renderer.POWER_BAR_X_OFFSET;
+    const pwrY = Renderer.STRIP_START_Y;
+    const pwrW = Renderer.POWER_BAR_W;
+    const pwrH = Math.min(this.height - pwrY - 44, Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP));
 
     // Draw powerbar.png frame if available
     const pwrSheet = assets.getSheet('powerbar');
@@ -2899,104 +2910,110 @@ export class Renderer {
     ctx.fillText(`${this.sidebarPowerProduced}`, pwrX + pwrW / 2, pwrY + pwrH + 16);
   }
 
-  /** Render 2-column production strip with cameo icons */
-  private renderProductionStrip(
+  /** Render a single production strip (C++ parity: 1-column, 4 visible slots, clock overlay) */
+  private renderStrip(
     ctx: CanvasRenderingContext2D, assets: AssetManager,
-    sidebarX: number, sidebarW: number,
-    startY: number, items: ProductionItem[], scroll: number, lowPower: boolean,
+    stripX: number, startY: number,
+    items: ProductionItem[], scroll: number, lowPower: boolean,
+    strip: StripType,
   ): void {
-    if (items.length === 0) {
-      ctx.font = '7px monospace';
-      ctx.fillStyle = '#666';
-      ctx.textAlign = 'center';
-      ctx.fillText('NO BASE', sidebarX + sidebarW / 2, startY + 20);
-      ctx.textAlign = 'left';
-      return;
-    }
-
     const camW = Renderer.CAMEO_W;
     const camH = Renderer.CAMEO_H;
     const gap = Renderer.CAMEO_GAP;
-    // 2-column layout: offset from power bar area
-    const col0X = sidebarX + 18; // after vertical power bar
-    const col1X = col0X + camW + gap;
     const rowH = camH + gap;
+
+    if (items.length === 0) return;
+
+    // Scroll arrow up indicator
+    if (scroll > 0) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('\u25B2', stripX + camW / 2, startY - 3);
+    }
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const ix = col === 0 ? col0X : col1X;
-      const iy = startY + row * rowH - scroll;
+      const iy = startY + i * rowH - scroll;
 
       // Cull off-screen items
       if (iy < startY - rowH || iy > this.height) continue;
 
-      // Draw strip.png background for cameo slot (if available)
+      // Draw strip.png background for cameo slot
       const stripSheet = assets.getSheet('strip');
       if (stripSheet) {
-        assets.drawFrame(ctx, 'strip', 0, ix, iy);
+        assets.drawFrame(ctx, 'strip', 0, stripX, iy);
       } else {
-        // Fallback: dark background
         ctx.fillStyle = 'rgba(30,30,40,0.9)';
-        ctx.fillRect(ix, iy, camW, camH);
+        ctx.fillRect(stripX, iy, camW, camH);
         ctx.strokeStyle = 'rgba(80,80,80,0.5)';
         ctx.lineWidth = 0.5;
-        ctx.strokeRect(ix, iy, camW, camH);
+        ctx.strokeRect(stripX, iy, camW, camH);
       }
 
-      // Draw cameo icon — use {type}icon sprite if available
+      // Draw cameo icon
       const iconName = item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
-        assets.drawFrame(ctx, iconName, 0, ix, iy);
+        assets.drawFrame(ctx, iconName, 0, stripX, iy);
       } else {
-        // Fallback: use unit sprite thumbnail or type abbreviation
         const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
         const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
         if (thumbSheet && spriteName) {
           const scale = Math.min(camW / thumbSheet.meta.frameWidth, camH / thumbSheet.meta.frameHeight) * 0.85;
-          assets.drawFrame(ctx, spriteName, 0, ix + camW / 2, iy + camH / 2, {
+          assets.drawFrame(ctx, spriteName, 0, stripX + camW / 2, iy + camH / 2, {
             centerX: true, centerY: true, scale,
           });
         } else {
           ctx.fillStyle = '#888';
           ctx.font = 'bold 6px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(item.type.slice(0, 4), ix + camW / 2, iy + camH / 2 + 2);
+          ctx.fillText(item.type.slice(0, 4), stripX + camW / 2, iy + camH / 2 + 2);
           ctx.textAlign = 'left';
         }
       }
 
       // Check if this item is currently building
-      const category = getItemCategory(item);
-      const qEntry = this.sidebarQueue.get(category);
+      const stripSide = getStripSide(item);
+      const qEntry = this.sidebarQueue.get(stripSide);
       const isBuilding = qEntry && qEntry.item.type === item.type;
 
       if (isBuilding && qEntry) {
-        // Construction progress overlay — darken unbuild portion from top
         const progress = qEntry.progress / qEntry.item.buildTime;
-        const uncoverH = camH * (1 - progress);
-        ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
-        ctx.fillRect(ix, iy, camW, uncoverH);
-        // Progress % text
-        ctx.font = 'bold 7px monospace';
-        ctx.fillStyle = lowPower ? '#f88' : '#8f8';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${Math.floor(progress * 100)}%`, ix + camW / 2, iy + camH / 2 + 2);
+        // Clock overlay — use CLOCK.SHP frames (55 frames = build progress stages)
+        const clockSheet = assets.getSheet('clock');
+        if (clockSheet) {
+          const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)), clockSheet.meta.frameCount - 1);
+          // Darken the cameo first
+          ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.35)' : 'rgba(0,0,0,0.35)';
+          ctx.fillRect(stripX, iy, camW, camH);
+          // Draw clock overlay
+          assets.drawFrame(ctx, 'clock', clockFrame, stripX, iy);
+        } else {
+          // Fallback: darken + percentage text
+          const uncoverH = camH * (1 - progress);
+          ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
+          ctx.fillRect(stripX, iy, camW, uncoverH);
+          ctx.font = 'bold 7px monospace';
+          ctx.fillStyle = lowPower ? '#f88' : '#8f8';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${Math.floor(progress * 100)}%`, stripX + camW / 2, iy + camH / 2 + 2);
+          ctx.textAlign = 'left';
+        }
         // Queue count badge
         if (qEntry.queueCount > 1) {
           ctx.font = 'bold 6px monospace';
           ctx.fillStyle = '#ff0';
-          ctx.fillText(`x${qEntry.queueCount}`, ix + camW - 6, iy + 7);
+          ctx.textAlign = 'center';
+          ctx.fillText(`x${qEntry.queueCount}`, stripX + camW - 6, iy + 7);
+          ctx.textAlign = 'left';
         }
-        ctx.textAlign = 'left';
       }
 
       // Can't afford overlay
       if (!isBuilding && this.sidebarCredits < item.cost) {
         ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(ix, iy, camW, camH);
+        ctx.fillRect(stripX, iy, camW, camH);
       }
 
       // Cost label at bottom of cameo
@@ -3004,99 +3021,65 @@ export class Renderer {
         ctx.font = '6px monospace';
         ctx.fillStyle = this.sidebarCredits >= item.cost ? '#FFD700' : '#664';
         ctx.textAlign = 'center';
-        ctx.fillText(`$${item.cost}`, ix + camW / 2, iy + camH - 1);
+        ctx.fillText(`$${item.cost}`, stripX + camW / 2, iy + camH - 1);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    // Scroll arrow down indicator
+    const maxVisible = Renderer.CAMEO_VISIBLE;
+    if (items.length > maxVisible && scroll < (items.length - maxVisible) * rowH) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('\u25BC', stripX + camW / 2, startY + maxVisible * rowH + 10);
+    }
+  }
+
+  // ─── Button Row (Repair / Sell / Map — sprite icons) ──────
+
+  /** Render the 3-icon button row: repair, sell, map */
+  private renderButtonRow(sidebarX: number, sidebarW: number, assets: AssetManager): void {
+    const ctx = this.ctx;
+    const btnY = Renderer.BUTTON_ROW_Y;
+    const btnH = Renderer.BUTTON_H;
+    const btnW = Math.floor(sidebarW / 3);
+    const buttons: Array<{ name: string; sprite: string; active: boolean; label: string }> = [
+      { name: 'repair', sprite: 'repair', active: this.repairMode, label: 'FIX' },
+      { name: 'sell', sprite: 'sell', active: this.sellMode, label: 'SELL' },
+      { name: 'map', sprite: 'map_btn', active: false, label: 'MAP' },
+    ];
+
+    for (let i = 0; i < buttons.length; i++) {
+      const btn = buttons[i];
+      const bx = sidebarX + i * btnW;
+
+      // Background
+      ctx.fillStyle = btn.active ? 'rgba(255,200,60,0.5)' : 'rgba(30,30,40,0.9)';
+      ctx.fillRect(bx, btnY, btnW - 1, btnH);
+      ctx.strokeStyle = btn.active ? '#FFD700' : '#444';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, btnY, btnW - 1, btnH);
+
+      // Sprite icon (frame 0=normal, 1=hover, 2=active)
+      const spriteSheet = assets.getSheet(btn.sprite);
+      if (spriteSheet) {
+        const frame = btn.active ? 2 : 0;
+        assets.drawFrame(ctx, btn.sprite, frame, bx + (btnW - 17) / 2, btnY + (btnH - 14) / 2);
+      } else {
+        // Fallback: text label
+        ctx.font = 'bold 7px monospace';
+        ctx.fillStyle = btn.active ? '#000' : '#ccc';
+        ctx.textAlign = 'center';
+        ctx.fillText(btn.label, bx + btnW / 2, btnY + btnH / 2 + 3);
         ctx.textAlign = 'left';
       }
     }
   }
 
-  // ─── Tab Bar ────────────────────────────────────────────────
-
-  private renderTabBar(sidebarX: number, sidebarW: number, y: number): void {
-    const ctx = this.ctx;
-    const tabH = 14;
-    const tabs: Array<{ key: SidebarTab; label: string; color: string }> = [
-      { key: 'infantry', label: 'INF', color: 'rgba(80,200,80,' },
-      { key: 'vehicle', label: 'VEH', color: 'rgba(80,120,255,' },
-      { key: 'structure', label: 'BLD', color: 'rgba(200,180,60,' },
-    ];
-    // Offset tabs right of vertical power bar (power bar is ~14px wide)
-    const tabStartX = 16;
-    const tabAreaW = sidebarW - tabStartX - 2;
-    const tabW = Math.floor(tabAreaW / 3);
-
-    for (let i = 0; i < tabs.length; i++) {
-      const tab = tabs[i];
-      const tx = sidebarX + tabStartX + i * tabW;
-      const active = this.activeTab === tab.key;
-
-      // Background
-      ctx.fillStyle = active ? tab.color + '0.5)' : 'rgba(30,30,40,0.9)';
-      ctx.fillRect(tx, y, tabW - 1, tabH);
-      // Border
-      ctx.strokeStyle = active ? tab.color + '0.9)' : '#444';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(tx, y, tabW - 1, tabH);
-
-      // Label
-      ctx.font = active ? 'bold 8px monospace' : '8px monospace';
-      ctx.fillStyle = active ? '#fff' : '#888';
-      ctx.textAlign = 'center';
-      ctx.fillText(tab.label, tx + tabW / 2 - 0.5, y + 10);
-    }
-    ctx.textAlign = 'left';
-  }
-
-  // ─── Sell / Repair Buttons ──────────────────────────────────
-
-  /** Y position for the sell/repair button row */
+  /** Get button row Y position */
   getSellRepairButtonY(): number {
-    // Sell/Repair at bottom of sidebar, above superweapon buttons
-    let swCount = 0;
-    for (const [, state] of this.superweapons) {
-      if (!this.playerHouses.has(state.house as House)) continue;
-      const def = SUPERWEAPON_DEFS[state.type];
-      if (!def) continue;
-      if (state.type === SuperweaponType.GPS_SATELLITE && state.fired) continue;
-      swCount++;
-    }
-    const swHeight = swCount > 0 ? swCount * 20 + 4 : 0;
-    return this.height - swHeight - 18;
-  }
-
-  private renderSellRepairButtons(sidebarX: number, sidebarW: number): void {
-    const ctx = this.ctx;
-    const btnH = 14;
-    const btnY = this.getSellRepairButtonY();
-    const margin = 2;
-    const gap = 4;
-    const btnW = Math.floor((sidebarW - margin * 2 - gap) / 2);
-
-    // Sell button
-    const sellX = sidebarX + margin;
-    ctx.fillStyle = this.sellMode ? 'rgba(255,200,60,0.7)' : 'rgba(40,40,50,0.9)';
-    ctx.fillRect(sellX, btnY, btnW, btnH);
-    ctx.strokeStyle = this.sellMode ? '#FFD700' : '#555';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(sellX, btnY, btnW, btnH);
-    ctx.font = 'bold 7px monospace';
-    ctx.fillStyle = this.sellMode ? '#000' : '#ccc';
-    ctx.textAlign = 'center';
-    ctx.fillText('$ SELL', sellX + btnW / 2, btnY + 10);
-
-    // Repair button
-    const fixX = sellX + btnW + gap;
-    ctx.fillStyle = this.repairMode ? 'rgba(80,255,80,0.7)' : 'rgba(40,40,50,0.9)';
-    ctx.fillRect(fixX, btnY, btnW, btnH);
-    ctx.strokeStyle = this.repairMode ? '#4f4' : '#555';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(fixX, btnY, btnW, btnH);
-    ctx.font = 'bold 7px monospace';
-    ctx.fillStyle = this.repairMode ? '#000' : '#ccc';
-    ctx.textAlign = 'center';
-    ctx.fillText('FIX', fixX + btnW / 2, btnY + 10);
-
-    ctx.textAlign = 'left';
+    return Renderer.BUTTON_ROW_Y;
   }
 
   // ─── Superweapon Buttons ──────────────────────────────────
