@@ -551,7 +551,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   C8: { type: UnitType.I_C8, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C9: { type: UnitType.I_C9, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C10: { type: UnitType.I_C10, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  EINSTEIN: { type: UnitType.I_EINSTEIN, name: 'Prof. Einstein', image: 'einstein', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
+  EINSTEIN: { type: UnitType.I_EINSTEIN, name: 'Prof. Einstein', image: 'einstein', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   // Counterstrike/Aftermath expansion infantry — crushable
   SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: true },
   MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true },
@@ -814,9 +814,10 @@ export function getItemCategory(item: ProductionItem): SidebarTab {
   return 'vehicle';
 }
 
-/** Civilian unit types — used for TEVENT_EVAC_CIVILIAN trigger checks */
+/** Unit types that count as civilian evacuation — C++ _Counts_As_Civ_Evac() VIPs + IsCivilian types */
 export const CIVILIAN_UNIT_TYPES = new Set<string>([
-  'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'EINSTEIN',
+  'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10',
+  'EINSTEIN', 'GNRL', 'CHAN', // VIPs always evacuate per C++ aircraft.cpp:116-159
 ]);
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)

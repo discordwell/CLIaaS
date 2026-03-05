@@ -295,11 +295,13 @@ describe('EINSTEIN unit type (Gap #2)', () => {
 });
 
 describe('Civilian type detection (Gap #3)', () => {
-  it('CIVILIAN_UNIT_TYPES includes C1-C10 and EINSTEIN', () => {
+  it('CIVILIAN_UNIT_TYPES includes C1-C10 and VIPs per C++ _Counts_As_Civ_Evac', () => {
     for (let i = 1; i <= 10; i++) {
       expect(CIVILIAN_UNIT_TYPES.has(`C${i}`), `C${i} should be civilian`).toBe(true);
     }
     expect(CIVILIAN_UNIT_TYPES.has('EINSTEIN')).toBe(true);
+    expect(CIVILIAN_UNIT_TYPES.has('GNRL')).toBe(true);
+    expect(CIVILIAN_UNIT_TYPES.has('CHAN')).toBe(true);
   });
 
   it('non-civilians are not in CIVILIAN_UNIT_TYPES', () => {
