@@ -2962,10 +2962,11 @@ export class Renderer {
       // Cull off-screen items
       if (iy < startY - rowH || iy > this.height) continue;
 
-      // Draw strip.png background for cameo slot
+      // Draw strip.png background for cameo slot (scale LORES 32x24 → HIRES 64x48)
       const stripSheet = assets.getSheet('strip');
       if (stripSheet) {
-        assets.drawFrame(ctx, 'strip', 0, stripX, iy);
+        const stripScale = camW / stripSheet.meta.frameWidth;
+        assets.drawFrame(ctx, 'strip', 0, stripX, iy, { scale: stripScale });
       } else {
         ctx.fillStyle = 'rgba(30,30,40,0.9)';
         ctx.fillRect(stripX, iy, camW, camH);
@@ -3017,8 +3018,9 @@ export class Renderer {
           // Darken the cameo first
           ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.35)' : 'rgba(0,0,0,0.35)';
           ctx.fillRect(stripX, iy, camW, camH);
-          // Draw clock overlay
-          assets.drawFrame(ctx, 'clock', clockFrame, stripX, iy);
+          // Draw clock overlay (scale LORES 32x24 → HIRES 64x48)
+          const clockScale = camW / clockSheet.meta.frameWidth;
+          assets.drawFrame(ctx, 'clock', clockFrame, stripX, iy, { scale: clockScale });
         } else {
           // Fallback: darken + percentage text
           const uncoverH = camH * (1 - progress);
@@ -3111,11 +3113,14 @@ export class Renderer {
       ctx.lineWidth = 1;
       ctx.strokeRect(bx, btnY, btnW - 1, btnH);
 
-      // Sprite icon (frame 0=normal, 1=hover, 2=active)
+      // Sprite icon (frame 0=normal, 1=hover, 2=active) — scale LORES 17x14 to fill button
       const spriteSheet = assets.getSheet(btn.sprite);
       if (spriteSheet) {
         const frame = btn.active ? 2 : 0;
-        assets.drawFrame(ctx, btn.sprite, frame, bx + (btnW - 17) / 2, btnY + (btnH - 14) / 2);
+        const btnScale = Math.min((btnW - 2) / spriteSheet.meta.frameWidth, (btnH - 2) / spriteSheet.meta.frameHeight);
+        const sw = spriteSheet.meta.frameWidth * btnScale;
+        const sh = spriteSheet.meta.frameHeight * btnScale;
+        assets.drawFrame(ctx, btn.sprite, frame, bx + (btnW - sw) / 2, btnY + (btnH - sh) / 2, { scale: btnScale });
       } else {
         // Fallback: text label
         ctx.font = 'bold 7px monospace';
