@@ -1,7 +1,11 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
-
-const BASE_URL = () => process.env.CLIAAS_API_URL || 'http://localhost:3000';
+import {
+  getCampaigns,
+  getCampaign,
+  createCampaign,
+  sendCampaign,
+} from '../../src/lib/campaigns/campaign-store';
 
 export function registerCampaignCommands(program: Command): void {
   const campaigns = program
@@ -16,24 +20,16 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (opts: { status?: string; channel?: string; json?: boolean }) => {
       try {
-        const baseUrl = BASE_URL();
-        const params = new URLSearchParams();
-        if (opts.status) params.set('status', opts.status);
-        if (opts.channel) params.set('channel', opts.channel);
-
-        const res = await fetch(`${baseUrl}/api/campaigns?${params}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const list = getCampaigns(opts.status, opts.channel);
 
         if (opts.json) {
-          console.log(JSON.stringify(data, null, 2));
+          console.log(JSON.stringify({ campaigns: list }, null, 2));
           return;
         }
 
-        const campaigns = data.campaigns ?? [];
-        console.log(chalk.bold.cyan(`\n${campaigns.length} campaign(s)\n`));
+        console.log(chalk.bold.cyan(`\n${list.length} campaign(s)\n`));
 
-        for (const c of campaigns) {
+        for (const c of list) {
           const statusColor =
             c.status === 'sent' ? chalk.green :
             c.status === 'draft' ? chalk.gray :
@@ -73,26 +69,19 @@ export function registerCampaignCommands(program: Command): void {
       json?: boolean;
     }) => {
       try {
-        const baseUrl = BASE_URL();
-        const res = await fetch(`${baseUrl}/api/campaigns`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: opts.name,
-            channel: opts.channel,
-            subject: opts.subject,
-            templateBody: opts.body,
-          }),
+        const c = createCampaign({
+          name: opts.name,
+          channel: opts.channel as 'email' | 'sms' | 'whatsapp',
+          status: 'draft',
+          subject: opts.subject,
+          templateBody: opts.body,
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
 
         if (opts.json) {
-          console.log(JSON.stringify(data, null, 2));
+          console.log(JSON.stringify({ campaign: c }, null, 2));
           return;
         }
 
-        const c = data.campaign;
         console.log(chalk.bold.green(`\nCampaign created: ${c.name}`));
         console.log(`  ID:      ${c.id}`);
         console.log(`  Channel: ${c.channel}`);
@@ -113,22 +102,21 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (id: string, opts: { json?: boolean }) => {
       try {
-        const baseUrl = BASE_URL();
-        const res = await fetch(`${baseUrl}/api/campaigns/${id}/send`, {
-          method: 'POST',
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || `HTTP ${res.status}`);
+        const existing = getCampaign(id);
+        if (!existing) {
+          throw new Error(`Campaign not found: ${id}`);
         }
-        const data = await res.json();
+
+        const c = sendCampaign(id);
+        if (!c) {
+          throw new Error(`Failed to send campaign ${id} (may already be sent)`);
+        }
 
         if (opts.json) {
-          console.log(JSON.stringify(data, null, 2));
+          console.log(JSON.stringify({ campaign: c }, null, 2));
           return;
         }
 
-        const c = data.campaign;
         console.log(chalk.bold.green(`\nCampaign sent: ${c.name}`));
         console.log(`  ID:      ${c.id}`);
         console.log(`  Status:  ${c.status}`);

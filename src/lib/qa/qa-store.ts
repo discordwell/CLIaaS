@@ -291,7 +291,9 @@ export function getQADashboard(): QADashboardMetrics {
     averageScore,
     averagePercentage,
     scorecardCount: scorecards.length,
-    recentReviews: reviews.slice(0, 10),
+    recentReviews: [...reviews].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    ).slice(0, 10),
     byScorecard,
   };
 }

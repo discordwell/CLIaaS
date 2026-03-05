@@ -71,16 +71,20 @@ export function registerTimeTools(server: McpServer): void {
     {
       ticketId: z.string().optional().describe('Filter by ticket ID'),
       userId: z.string().optional().describe('Filter by user/agent ID'),
+      customerId: z.string().optional().describe('Filter by customer ID'),
+      groupId: z.string().optional().describe('Filter by group/team ID'),
       from: z.string().optional().describe('Start date (ISO 8601)'),
       to: z.string().optional().describe('End date (ISO 8601)'),
       billable: z.boolean().optional().describe('Filter by billable status'),
     },
-    async ({ ticketId, userId, from, to, billable }) => {
+    async ({ ticketId, userId, customerId, groupId, from, to, billable }) => {
       try {
         const { getTimeReport } = await import('@/lib/time-tracking');
         const filters = {
           ...(ticketId ? { ticketId } : {}),
           ...(userId ? { userId } : {}),
+          ...(customerId ? { customerId } : {}),
+          ...(groupId ? { groupId } : {}),
           ...(from ? { from } : {}),
           ...(to ? { to } : {}),
           ...(billable !== undefined ? { billable } : {}),
