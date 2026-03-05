@@ -1,16 +1,30 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getCategories, getThreads } from '@/lib/forums/forum-store';
+import { checkRateLimit, getRateLimitHeaders } from '@/lib/security/rate-limiter';
 
 export const dynamic = 'force-dynamic';
+
+const PORTAL_RATE_LIMIT = { windowMs: 60_000, maxRequests: 120 };
 
 /**
  * GET /api/portal/forums/:categorySlug — public listing of threads for a category
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ categorySlug: string }> },
 ) {
+  const clientIp = request.headers.get('x-real-ip')
+    || request.headers.get('x-forwarded-for')?.split(',').pop()?.trim()
+    || 'unknown';
+  const rateResult = checkRateLimit(`portal-forums:${clientIp}`, PORTAL_RATE_LIMIT);
+  if (!rateResult.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests' },
+      { status: 429, headers: getRateLimitHeaders(rateResult, PORTAL_RATE_LIMIT) },
+    );
+  }
+
   const { categorySlug } = await params;
 
   const categories = getCategories();

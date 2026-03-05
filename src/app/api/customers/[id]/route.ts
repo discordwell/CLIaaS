@@ -6,6 +6,8 @@ import { loadCustomers } from '@/lib/data';
 import {
   getCustomerActivities,
   getCustomerNotes,
+  getCustomerEnrichment,
+  updateCustomerEnrichment,
 } from '@/lib/customers/customer-store';
 
 export const dynamic = 'force-dynamic';
@@ -31,10 +33,12 @@ export async function GET(
 
     const activities = getCustomerActivities(customer.id);
     const notes = getCustomerNotes(customer.id);
+    const enrichment = getCustomerEnrichment(customer.id);
 
     return NextResponse.json({
       customer: {
         ...customer,
+        ...(enrichment ?? {}),
         activityCount: activities.length,
         noteCount: notes.length,
       },
@@ -90,8 +94,9 @@ export async function PATCH(
       }
     }
 
-    // Merge updates into customer (in-memory only for demo)
-    const enriched = { ...customer, ...updates };
+    // Persist enrichment to JSONL overlay store
+    const enrichment = updateCustomerEnrichment(customer.id, updates);
+    const enriched = { ...customer, ...enrichment };
 
     return NextResponse.json({ customer: enriched });
   } catch (err) {

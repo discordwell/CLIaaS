@@ -9,6 +9,9 @@ import crypto from 'crypto';
 
 const logger = createLogger('channels:sdk');
 
+// Session TTL: 24 hours of inactivity
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
 // ---- Types ----
 
 interface SDKSession {
@@ -94,7 +97,8 @@ export function createSession(workspaceId: string, customerId: string): SDKSessi
 }
 
 /**
- * Validate a session token. Returns the session if valid, null otherwise.
+ * Validate a session token. Returns the session if valid and not expired, null otherwise.
+ * Sessions expire after 24 hours of inactivity.
  */
 export function validateSession(token: string): SDKSession | null {
   const tokenIndex = getTokenIndex();
@@ -102,7 +106,46 @@ export function validateSession(token: string): SDKSession | null {
   if (!sessionId) return null;
 
   const store = getStore();
-  return store.get(sessionId) ?? null;
+  const session = store.get(sessionId);
+  if (!session) return null;
+
+  // Check TTL — expire sessions inactive for >24h
+  const lastActivity = new Date(session.lastActivityAt).getTime();
+  if (Date.now() - lastActivity > SESSION_TTL_MS) {
+    store.delete(sessionId);
+    tokenIndex.delete(token);
+    persistSessions(store);
+    logger.info({ sessionId }, 'SDK session expired (TTL)');
+    return null;
+  }
+
+  return session;
+}
+
+/**
+ * Clean up expired sessions. Called periodically or on demand.
+ */
+export function cleanupExpiredSessions(): number {
+  const store = getStore();
+  const tokenIndex = getTokenIndex();
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [id, session] of store) {
+    const lastActivity = new Date(session.lastActivityAt).getTime();
+    if (now - lastActivity > SESSION_TTL_MS) {
+      store.delete(id);
+      tokenIndex.delete(session.token);
+      cleaned++;
+    }
+  }
+
+  if (cleaned > 0) {
+    persistSessions(store);
+    logger.info({ cleaned }, 'Cleaned up expired SDK sessions');
+  }
+
+  return cleaned;
 }
 
 /**

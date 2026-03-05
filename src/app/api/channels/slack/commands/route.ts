@@ -12,14 +12,19 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const signingSecret = getSlackSigningSecret();
 
-  // Verify Slack signature (skip in demo mode when no secret is configured)
-  if (signingSecret) {
-    const signature = request.headers.get('x-slack-signature') ?? '';
-    const timestamp = request.headers.get('x-slack-request-timestamp') ?? '';
+  // Verify Slack signature — fail closed when no signing secret is configured
+  if (!signingSecret) {
+    return NextResponse.json(
+      { error: 'Slack signing secret not configured' },
+      { status: 503 },
+    );
+  }
 
-    if (!verifySlackSignature(signingSecret, signature, timestamp, rawBody)) {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-    }
+  const signature = request.headers.get('x-slack-signature') ?? '';
+  const timestamp = request.headers.get('x-slack-request-timestamp') ?? '';
+
+  if (!verifySlackSignature(signingSecret, signature, timestamp, rawBody)) {
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
   // Parse form-encoded body (Slack slash commands use application/x-www-form-urlencoded)

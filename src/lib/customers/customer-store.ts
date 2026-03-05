@@ -65,6 +65,7 @@ const ACTIVITIES_FILE = 'customer-activities.jsonl';
 const NOTES_FILE = 'customer-notes.jsonl';
 const SEGMENTS_FILE = 'customer-segments.jsonl';
 const MERGE_LOG_FILE = 'customer-merge-log.jsonl';
+const ENRICHMENT_FILE = 'customer-enrichment.jsonl';
 
 function persistActivities(): void {
   writeJsonlFile(ACTIVITIES_FILE, activities);
@@ -318,4 +319,55 @@ export function mergeCustomers(
 export function getMergeLog(): CustomerMergeEntry[] {
   ensureDefaults();
   return [...mergeLog];
+}
+
+// ---- Public API: Enrichment overlay ----
+
+interface EnrichmentRecord {
+  customerId: string;
+  data: CustomerEnrichment;
+  updatedAt: string;
+}
+
+let enrichmentLoaded = false;
+const enrichmentMap = new Map<string, EnrichmentRecord>();
+
+function loadEnrichment(): void {
+  if (enrichmentLoaded) return;
+  enrichmentLoaded = true;
+  const saved = readJsonlFile<EnrichmentRecord>(ENRICHMENT_FILE);
+  for (const rec of saved) {
+    enrichmentMap.set(rec.customerId, rec);
+  }
+}
+
+function persistEnrichment(): void {
+  writeJsonlFile(ENRICHMENT_FILE, Array.from(enrichmentMap.values()));
+}
+
+/**
+ * Get enrichment data for a customer (overlay on top of base customer data).
+ */
+export function getCustomerEnrichment(customerId: string): CustomerEnrichment | null {
+  loadEnrichment();
+  return enrichmentMap.get(customerId)?.data ?? null;
+}
+
+/**
+ * Update enrichment data for a customer. Merges with existing enrichment.
+ */
+export function updateCustomerEnrichment(
+  customerId: string,
+  updates: Partial<CustomerEnrichment>,
+): CustomerEnrichment {
+  loadEnrichment();
+  const existing = enrichmentMap.get(customerId)?.data ?? {};
+  const merged = { ...existing, ...updates };
+  enrichmentMap.set(customerId, {
+    customerId,
+    data: merged,
+    updatedAt: new Date().toISOString(),
+  });
+  persistEnrichment();
+  return merged;
 }
