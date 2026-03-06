@@ -1,6 +1,13 @@
 /**
  * Smart ticket routing: skills-based assignment with round-robin,
  * capacity limits, and priority weighting.
+ *
+ * @deprecated Use src/lib/routing/engine.ts instead. This file contains
+ * hardcoded demo agents (Alice/Bob/Carol/Dan) that are not suitable for
+ * production. The routing engine in engine.ts reads agents from the
+ * routing store (DB or JSONL) and supports queues, rules, overflow, and
+ * SLA-aware routing. This module is retained only for backward
+ * compatibility and LLM-enhanced routing helpers.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -42,6 +49,8 @@ export interface RoutingResult {
 
 // ---------------------------------------------------------------------------
 // Default config
+// @deprecated — Hardcoded demo agents. Use routing/engine.ts + routing/store.ts
+// which reads real agents from DB/JSONL.
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {

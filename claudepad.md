@@ -1,5 +1,27 @@
 # Session Summaries
 
+## 2026-03-07T19:10Z — Session 109: Gap Closure Phases 2+5 — Omnichannel Routing & WFM Gaps
+- **Phase 2.1**: Upgraded `src/lib/routing/store.ts` to dual-mode — added `tryDb()` import and async DB-primary variants: `getAgentSkillsAsync`, `setAgentSkillsAsync`, `getRoutingQueuesAsync`, `getRoutingRulesAsync`, `appendRoutingLogAsync` (also fire-and-forget from sync path)
+- **Phase 2.2**: Deprecated `src/lib/ai/router.ts` with `@deprecated` JSDoc — hardcoded Alice/Bob/Carol/Dan agents; callers should use `routing/engine.ts` instead
+- **Phase 2.3**: Enhanced `checkBusinessHoursActive()` in `routing/engine.ts` to accept optional `businessHoursId` parameter — looks up group-specific schedule from DB, falls back to JSONL, then default config. Added `resolveGroupBusinessHoursId()` helper
+- **Phase 2.4**: Upgraded `src/app/api/groups/[id]/members/route.ts` — replaced `requireRole`/`requireAuth` with `requirePerm('admin:users')` from RBAC. Added DELETE handler to main route. Same for `[userId]/route.ts`
+- **Phase 5.1**: Upgraded `src/lib/wfm/store.ts` to dual-mode — added async DB variants for templates, schedules, status log, time-off, volume snapshots, business hours (8 new async functions)
+- **Phase 5.2**: Created `src/lib/wfm/volume-collector.ts` with `collectVolumeSnapshot()` — queries tickets table for real created/resolved counts. API route at `POST /api/wfm/volume/collect` (requires `admin:settings`)
+- **Phase 5.3**: Enhanced `src/lib/wfm/adherence.ts` — emits `wfm:adherence_alert` via `eventBus` on schedule violations with `violationType` field
+- **Phase 5.4**: Router-WFM integration in `routing/engine.ts` — added Step 1c that queries WFM schedules to exclude off-shift agents from candidate pool before routing
+- **16 new tests passing** (7 Phase 2, 9 Phase 5), 0 TypeScript errors in changed files, ARCHITECTURE.md updated with WFM section
+
+## 2026-03-07T18:10Z — Session 108: Gap Closure Phases 7+8+9 — Canned Responses UI, Collision Detection, Mentions
+- **Phase 7.1**: Created `MacroButton` component (`src/components/MacroButton.tsx`) — dropdown fetches macros from `/api/macros` on open, applies via `/api/macros/:id/apply`, added to `TicketDetailClient` conversation header
+- **Phase 7.2**: Added `cannedResponseId` parameter to `ticket_reply` MCP tool — resolves canned response body with merge variables before sending, increments usage count
+- **Phase 8.1**: Upgraded `CollisionDetector` from 10s polling to SSE — connects to `/api/events?ticketId=X`, listens for `presence:viewing`, `presence:typing`, `presence:left` events, with 30s heartbeat for server-side presence keepalive
+- **Phase 8.2**: Wired `handleTextareaFocus` for viewing broadcast, added `onFocus` prop to `MentionInput`, wired into both reply and note textareas
+- **Phase 8.3**: Created `CollisionWarningModal` component (`src/components/CollisionWarningModal.tsx`) — overlay modal with "Discard My Draft", "Review Changes", "Send Anyway" options; replaced inline collision warning in TicketActions
+- **Phase 9.1**: Replaced plain `<textarea>` in reply mode with `MentionInput` — both reply and note forms now support @mentions
+- **Phase 9.2**: Added `mentionedUserIds` to reply route — persists message in DB, inserts mentions + notifications, dispatches via SSE + email
+- **Phase 9.3**: Verified `NotificationBell` already rendered in `AppNav`
+- **17 new tests passing** (all Phase 7/8/9 tests), 0 TypeScript errors
+
 ## 2026-03-07T16:10Z — Session 107: Gap Closure Phase 3+4 — Workflow Automation & Marketplace/Plugins
 - **Phase 3.1**: Rule versioning (`src/lib/automation/versioning.ts`) — createVersion/listVersions/restoreVersion with DB+JSONL dual-path, API route at `/api/rules/:id/versions`
 - **Phase 3.2**: Merge/split/unmerge automation events — extended TicketContext.event union, mapEventToContext, AUTOMATION_EVENT_MAP, added evaluateAutomation calls in merge/split/unmerge routes

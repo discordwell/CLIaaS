@@ -267,6 +267,22 @@ Ticket arrives → extractCategories() → evaluateRules() → matchQueue()
 
 ---
 
+## Workforce Management (WFM)
+
+Schedule management, real-time adherence tracking, forecasting, and staffing recommendations.
+
+**Dual-Mode Store:** `src/lib/wfm/store.ts` exposes async DB-primary variants (`getTemplatesAsync`, `getSchedulesAsync`, `getStatusLogAsync`, `getTimeOffAsync`, `getVolumeSnapshotsAsync`, `addVolumeSnapshotAsync`, `getBHConfigsAsync`, `addStatusEntryAsync`) that try Postgres first and fall back to JSONL.
+
+**Volume Collection:** `src/lib/wfm/volume-collector.ts` queries the tickets table for real created/resolved counts in the last hour. Triggered via `POST /api/wfm/volume/collect` (requires `admin:settings`).
+
+**Real-Time Adherence:** `src/lib/wfm/adherence.ts` emits `wfm:adherence_alert` events via SSE `eventBus` on schedule violations (e.g., agent offline during scheduled work). Violation types: `not_working`, `wrong_activity`.
+
+**Source:** `src/lib/wfm/` (store, adherence, schedules, business-hours, holidays, forecast, utilization, agent-status, volume-tracker, volume-collector, types)
+**API:** `/api/wfm/` (adherence, agent-status, business-hours, dashboard, forecast, schedules, templates, time-off, utilization, volume/collect)
+**Migration:** `src/db/migrations/0007_wfm.sql`
+
+---
+
 ## Job Queue Architecture
 
 BullMQ + Redis for reliable background processing with graceful fallback to inline execution.

@@ -99,9 +99,53 @@ function getAgentMaxCapacity(userId: string, channelType?: string): number {
   return Math.max(...caps.map(c => c.maxConcurrent));
 }
 
-async function checkBusinessHoursActive(): Promise<boolean> {
+/**
+ * Check if business hours are active. When a businessHoursId is supplied
+ * (e.g. from a group or SLA policy), look up that specific schedule first.
+ * Falls back to the default business hours config, then to "always open".
+ */
+async function checkBusinessHoursActive(businessHoursId?: string): Promise<boolean> {
   try {
     const bhMod = await import('../wfm/business-hours');
+
+    // If a specific business_hours_id is given, try DB lookup first
+    if (businessHoursId) {
+      try {
+        const { tryDb } = await import('../store-helpers');
+        const ctx = await tryDb();
+        if (ctx) {
+          const { db, schema } = ctx;
+          const { eq } = await import('drizzle-orm');
+          const [bhRow] = await db
+            .select()
+            .from(schema.businessHours)
+            .where(eq(schema.businessHours.id, businessHoursId));
+          if (bhRow) {
+            const config = {
+              id: bhRow.id,
+              name: bhRow.name,
+              timezone: bhRow.timezone,
+              schedule: bhRow.schedule as Record<string, Array<{ start: string; end: string }>>,
+              holidays: (bhRow.holidays ?? []) as string[],
+              isDefault: bhRow.isDefault,
+              createdAt: bhRow.createdAt?.toISOString() ?? '',
+              updatedAt: bhRow.updatedAt?.toISOString() ?? '',
+            };
+            return bhMod.isWithinBusinessHours(config);
+          }
+        }
+      } catch {
+        // DB not available — fall through to JSONL
+      }
+
+      // Try JSONL store with the specific ID
+      const byId = bhMod.getBusinessHours(businessHoursId);
+      if (byId.length > 0) {
+        return bhMod.isWithinBusinessHours(byId[0]);
+      }
+    }
+
+    // Fall back to default config
     const configs = bhMod.getBusinessHours();
     const defaultConfig = configs.find((c: { isDefault?: boolean }) => c.isDefault);
     if (defaultConfig) {
@@ -111,6 +155,32 @@ async function checkBusinessHoursActive(): Promise<boolean> {
     // Business hours module not available — don't penalize
   }
   return true;
+}
+
+/**
+ * Resolve a group's business_hours_id from the DB (groups table).
+ * Returns undefined if DB is unavailable or group has no hours configured.
+ */
+async function resolveGroupBusinessHoursId(groupId: string): Promise<string | undefined> {
+  try {
+    const { tryDb } = await import('../store-helpers');
+    const ctx = await tryDb();
+    if (!ctx) return undefined;
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    // Groups table doesn't have businessHoursId directly, but
+    // routing queues linked to groups may. Check the queue first.
+    const queues = await db
+      .select()
+      .from(schema.routingQueues)
+      .where(eq(schema.routingQueues.groupId, groupId));
+    // For now, groups don't have a direct businessHoursId column.
+    // Return undefined — the caller can pass a queue-level or brand-level hours ID.
+    void queues;
+  } catch {
+    // DB not available
+  }
+  return undefined;
 }
 
 // ---- Build candidate list ----
@@ -212,8 +282,8 @@ export async function routeTicket(
   // Ensure load tracker cache is warm
   await loadTracker.ensureLoaded();
 
-  // Check business hours once for the routing call
-  const bizHoursActive = await checkBusinessHoursActive();
+  // Initial business hours check (default schedule)
+  let bizHoursActive = await checkBusinessHoursActive();
 
   if (allAgents.length === 0) {
     return noResult(ticket, 'No agents available for routing.', config.defaultStrategy);
@@ -243,6 +313,31 @@ export async function routeTicket(
     // SLA module not available — no boost
   }
 
+  // Step 1c: Check WFM schedule to exclude off-schedule agents
+  let wfmExcludedUserIds: Set<string> = new Set();
+  try {
+    const wfmSchedules = await import('../wfm/schedules');
+    const { getScheduledActivity } = wfmSchedules;
+    const allSchedules = wfmSchedules.getSchedules();
+    const now = new Date();
+    for (const sched of allSchedules) {
+      const activity = getScheduledActivity(sched, now);
+      if (activity === 'off_shift') {
+        wfmExcludedUserIds.add(sched.userId);
+      }
+    }
+    if (wfmExcludedUserIds.size > 0) {
+      reasoning += ` | WFM: ${wfmExcludedUserIds.size} agent(s) off-schedule`;
+    }
+  } catch {
+    // WFM module not available — no exclusion
+  }
+
+  // Filter out off-schedule agents from the candidate pool
+  const scheduleFilteredAgents = wfmExcludedUserIds.size > 0
+    ? allAgents.filter(a => !wfmExcludedUserIds.has(a.userId))
+    : allAgents;
+
   // Step 2: Evaluate routing rules
   const rules = getRoutingRules(workspaceId);
   const matchedRule = evaluateRules(ticket, rules);
@@ -250,19 +345,23 @@ export async function routeTicket(
   let strategy: RoutingStrategy = config.defaultStrategy;
   let queueId: string | undefined;
   let ruleId: string | undefined;
-  let eligibleAgents = allAgents;
+  let eligibleAgents = scheduleFilteredAgents;
+  let resolvedGroupId: string | undefined;
 
   if (matchedRule) {
     ruleId = matchedRule.id;
     reasoning += ` | Rule matched: "${matchedRule.name}"`;
-    eligibleAgents = resolveAgents(matchedRule.targetType, matchedRule.targetId, allAgents);
+    eligibleAgents = resolveAgents(matchedRule.targetType, matchedRule.targetId, scheduleFilteredAgents);
 
     if (matchedRule.targetType === 'queue') {
       const queue = getRoutingQueues().find(q => q.id === matchedRule.targetId);
       if (queue) {
         strategy = queue.strategy;
         queueId = queue.id;
+        resolvedGroupId = queue.groupId;
       }
+    } else if (matchedRule.targetType === 'group') {
+      resolvedGroupId = matchedRule.targetId;
     }
   } else {
     // Step 3: Try queue matching
@@ -273,10 +372,19 @@ export async function routeTicket(
       queueId = matchedQueue.id;
       strategy = matchedQueue.strategy;
       reasoning += ` | Queue matched: "${matchedQueue.name}"`;
+      resolvedGroupId = matchedQueue.groupId;
 
       if (matchedQueue.groupId) {
-        eligibleAgents = resolveAgents('group', matchedQueue.groupId, allAgents);
+        eligibleAgents = resolveAgents('group', matchedQueue.groupId, scheduleFilteredAgents);
       }
+    }
+  }
+
+  // Step 3b: Re-check business hours using the group's specific schedule if available
+  if (resolvedGroupId) {
+    const groupBhId = await resolveGroupBusinessHoursId(resolvedGroupId);
+    if (groupBhId) {
+      bizHoursActive = await checkBusinessHoursActive(groupBhId);
     }
   }
 

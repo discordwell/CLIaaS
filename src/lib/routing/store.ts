@@ -1,9 +1,10 @@
 /**
- * Dual-mode store for routing data (JSONL + DB).
- * Follows the pattern from src/lib/webhooks.ts / src/lib/sla.ts.
+ * Dual-mode store for routing data (DB primary, JSONL fallback).
+ * Uses tryDb() from store-helpers to prefer Postgres when available.
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { tryDb } from '../store-helpers';
 import type {
   AgentSkill,
   AgentCapacity,
@@ -30,11 +31,31 @@ function genId(): string {
   return `rt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// ---- Agent Skills ----
+// ---- Agent Skills (dual-mode) ----
 
 export function getAgentSkills(userId?: string): AgentSkill[] {
+  // Synchronous JSONL path — async DB path available via getAgentSkillsAsync
   const all = readJsonlFile<AgentSkill>(FILES.skills);
   return userId ? all.filter(s => s.userId === userId) : all;
+}
+
+export async function getAgentSkillsAsync(userId?: string): Promise<AgentSkill[]> {
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    const rows = userId
+      ? await db.select().from(schema.agentSkills).where(eq(schema.agentSkills.userId, userId))
+      : await db.select().from(schema.agentSkills);
+    return rows.map(r => ({
+      id: r.id,
+      workspaceId: r.workspaceId,
+      userId: r.userId,
+      skillName: r.skillName,
+      proficiency: (r.proficiency ?? 100) / 100, // DB stores 0-100, type uses 0-1
+    }));
+  }
+  return getAgentSkills(userId);
 }
 
 export function setAgentSkills(userId: string, workspaceId: string, skills: Array<{ skillName: string; proficiency?: number }>): AgentSkill[] {
@@ -49,6 +70,40 @@ export function setAgentSkills(userId: string, workspaceId: string, skills: Arra
   const updated = [...all, ...newSkills];
   writeJsonlFile(FILES.skills, updated);
   return newSkills;
+}
+
+export async function setAgentSkillsAsync(
+  userId: string,
+  workspaceId: string,
+  skills: Array<{ skillName: string; proficiency?: number }>,
+): Promise<AgentSkill[]> {
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    // Delete existing skills for this user
+    await db.delete(schema.agentSkills).where(eq(schema.agentSkills.userId, userId));
+    // Insert new skills
+    if (skills.length > 0) {
+      const rows = await db.insert(schema.agentSkills).values(
+        skills.map(s => ({
+          workspaceId,
+          userId,
+          skillName: s.skillName,
+          proficiency: Math.round((s.proficiency ?? 1) * 100), // Convert 0-1 to 0-100
+        })),
+      ).returning();
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        userId: r.userId,
+        skillName: r.skillName,
+        proficiency: (r.proficiency ?? 100) / 100,
+      }));
+    }
+    return [];
+  }
+  return setAgentSkills(userId, workspaceId, skills);
 }
 
 // ---- Agent Capacity ----
@@ -97,11 +152,36 @@ export function removeGroupMember(groupId: string, userId: string): boolean {
   return true;
 }
 
-// ---- Routing Queues ----
+// ---- Routing Queues (dual-mode) ----
 
 export function getRoutingQueues(workspaceId?: string): RoutingQueue[] {
   const all = readJsonlFile<RoutingQueue>(FILES.queues);
   return workspaceId ? all.filter(q => q.workspaceId === workspaceId) : all;
+}
+
+export async function getRoutingQueuesAsync(workspaceId?: string): Promise<RoutingQueue[]> {
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    const rows = workspaceId
+      ? await db.select().from(schema.routingQueues).where(eq(schema.routingQueues.workspaceId, workspaceId))
+      : await db.select().from(schema.routingQueues);
+    return rows.map(r => ({
+      id: r.id,
+      workspaceId: r.workspaceId,
+      name: r.name,
+      description: r.description ?? undefined,
+      priority: r.priority,
+      conditions: (r.conditions ?? {}) as RoutingQueue['conditions'],
+      strategy: r.strategy as RoutingQueue['strategy'],
+      groupId: r.groupId ?? undefined,
+      overflowQueueId: r.overflowQueueId ?? undefined,
+      overflowTimeoutSecs: r.overflowTimeoutSecs ?? undefined,
+      enabled: r.enabled,
+    }));
+  }
+  return getRoutingQueues(workspaceId);
 }
 
 export function getRoutingQueue(id: string): RoutingQueue | undefined {
@@ -133,11 +213,33 @@ export function deleteRoutingQueue(id: string): boolean {
   return true;
 }
 
-// ---- Routing Rules ----
+// ---- Routing Rules (dual-mode) ----
 
 export function getRoutingRules(workspaceId?: string): RoutingRule[] {
   const all = readJsonlFile<RoutingRule>(FILES.rules);
   return workspaceId ? all.filter(r => r.workspaceId === workspaceId) : all;
+}
+
+export async function getRoutingRulesAsync(workspaceId?: string): Promise<RoutingRule[]> {
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    const rows = workspaceId
+      ? await db.select().from(schema.routingRules).where(eq(schema.routingRules.workspaceId, workspaceId))
+      : await db.select().from(schema.routingRules);
+    return rows.map(r => ({
+      id: r.id,
+      workspaceId: r.workspaceId,
+      name: r.name,
+      priority: r.priority,
+      conditions: (r.conditions ?? {}) as RoutingRule['conditions'],
+      targetType: r.targetType as RoutingRule['targetType'],
+      targetId: r.targetId,
+      enabled: r.enabled,
+    }));
+  }
+  return getRoutingRules(workspaceId);
 }
 
 export function getRoutingRule(id: string): RoutingRule | undefined {
@@ -184,7 +286,44 @@ export function appendRoutingLog(entry: Omit<RoutingLogEntry, 'id'>): RoutingLog
   // Keep only last 1000 entries
   const trimmed = all.length > 1000 ? all.slice(-1000) : all;
   writeJsonlFile(FILES.log, trimmed);
+  // Fire-and-forget DB write
+  void appendRoutingLogAsync(entry).catch(() => {});
   return created;
+}
+
+export async function appendRoutingLogAsync(entry: Omit<RoutingLogEntry, 'id'>): Promise<RoutingLogEntry> {
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const [row] = await db.insert(schema.routingLog).values({
+      workspaceId: entry.workspaceId,
+      ticketId: entry.ticketId || null,
+      queueId: entry.queueId || null,
+      ruleId: entry.ruleId || null,
+      assignedUserId: entry.assignedUserId || null,
+      strategy: entry.strategy,
+      matchedSkills: entry.matchedSkills,
+      scores: entry.scores,
+      reasoning: entry.reasoning,
+      durationMs: entry.durationMs,
+    }).returning();
+    return {
+      id: row.id,
+      workspaceId: row.workspaceId,
+      ticketId: row.ticketId ?? '',
+      queueId: row.queueId ?? undefined,
+      ruleId: row.ruleId ?? undefined,
+      assignedUserId: row.assignedUserId ?? undefined,
+      strategy: row.strategy as RoutingLogEntry['strategy'],
+      matchedSkills: (row.matchedSkills ?? []) as string[],
+      scores: (row.scores ?? {}) as Record<string, number>,
+      reasoning: row.reasoning ?? '',
+      durationMs: row.durationMs ?? 0,
+      createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
+    };
+  }
+  // Fallback to JSONL (already done synchronously by the caller)
+  return { id: genId(), ...entry };
 }
 
 // ---- Routing Config ----

@@ -1,9 +1,11 @@
 /**
  * Real-time schedule adherence tracking.
+ * Emits 'wfm:adherence_alert' via eventBus on violations.
  */
 
 import type { AgentSchedule, AgentCurrentStatus, AdherenceRecord } from './types';
 import { getScheduledActivity } from './schedules';
+import { eventBus } from '@/lib/realtime/events';
 
 export function getCurrentAdherence(
   schedules: AgentSchedule[],
@@ -37,14 +39,32 @@ export function getCurrentAdherence(
         break;
     }
 
-    records.push({
+    const record: AdherenceRecord = {
       userId: schedule.userId,
       userName: schedule.userName,
       scheduledActivity: scheduled,
       actualStatus: actual,
       adherent,
       since: agentStatus.since,
-    });
+    };
+
+    records.push(record);
+
+    // Emit adherence violation alert via SSE eventBus
+    if (!adherent) {
+      eventBus.emit({
+        type: 'wfm:adherence_alert',
+        data: {
+          userId: record.userId,
+          userName: record.userName,
+          scheduledActivity: record.scheduledActivity,
+          actualStatus: record.actualStatus,
+          since: record.since,
+          violationType: scheduled === 'work' ? 'not_working' : 'wrong_activity',
+        },
+        timestamp: Date.now(),
+      });
+    }
   }
 
   return records;
