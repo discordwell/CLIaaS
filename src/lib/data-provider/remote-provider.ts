@@ -30,6 +30,8 @@ import type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  KBArticleFeedbackParams,
+  KBArticleFeedbackRecord,
   TicketMergeParams,
   TicketMergeResult,
   TicketSplitParams,
@@ -317,6 +319,24 @@ export class RemoteProvider implements DataProvider {
       body: JSON.stringify(params),
     });
     return { id: body.article.id };
+  }
+
+  async loadKBArticleTranslations(articleId: string): Promise<KBArticle[]> {
+    const body = await this.request<{ translations: KBArticle[] }>(`/api/kb/${articleId}/translations`);
+    return body.translations;
+  }
+
+  async createKBArticleFeedback(params: KBArticleFeedbackParams): Promise<{ id: string }> {
+    const body = await this.request<{ id: string }>(`/api/kb/${params.articleId}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+    return body;
+  }
+
+  async loadKBArticleFeedback(articleId: string): Promise<KBArticleFeedbackRecord[]> {
+    const body = await this.request<{ feedback: KBArticleFeedbackRecord[] }>(`/api/kb/${articleId}/feedback`);
+    return body.feedback;
   }
 
   async mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult> {

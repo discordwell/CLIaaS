@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TicketMergeBar from "./TicketMergeBar";
+import BulkActions from "./BulkActions";
 
 interface TicketRow {
   id: string;
@@ -173,6 +174,13 @@ export default function TicketListClient({ tickets }: { tickets: TicketRow[] }) 
         </div>
       </section>
 
+      {selected.size >= 1 && (
+        <BulkActions
+          selectedIds={selected}
+          onClearSelection={() => setSelected(new Set())}
+          onRefresh={() => router.refresh()}
+        />
+      )}
       {selected.size >= 2 && (
         <TicketMergeBar
           selectedIds={Array.from(selected)}

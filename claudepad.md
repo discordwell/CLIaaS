@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-06T09:05Z — Session 94: Slice 11 Code Review Fixes (Round 2)
+- Fixed 4 remaining code review issues from Slice 11 (Views/Tags):
+  - **C1 (HIGH)**: Wrapped tag mutations in `db.transaction()` in db-provider.ts; also wrapped tag DELETE in `/api/tags/[id]` route
+  - **C3 (MEDIUM)**: Date comparison in executor.ts — `greater_than`/`less_than` now use `Date.parse()` with NaN guard, falling back to string comparison for non-date fields
+  - **S8 (LOW)**: Added 200-ticket cap to bulk tag operations endpoint
+  - **MEDIUM (new)**: Moved ticket metadata update inside transaction when tags are present (was outside, allowing partial commits)
+  - **MEDIUM (new)**: Added ticketIds deduplication via `new Set()` in bulk tags route
+- Code review of fixes: all clean, one pre-existing workspace guard noted (not a regression)
+- 15/15 executor tests pass, 0 TS errors
+
 ## 2026-03-06T08:45Z — Session 93: Code Review Fixes — 18 Findings (Sandbox/SSRF/Auth/Bugs)
 - **Phase 1 (CRITICAL)**: Sandbox async timeout bypass — wrapped `runInContext` in `Promise.race` with 5s timeout. SSRF hardening — new shared `src/lib/plugins/url-safety.ts` with DNS resolution, octal/hex/decimal IP normalization, cloud metadata blocking. Applied to `sdk-context.ts` (async assertSafeUrl + safeFetch with 10s timeout + 5MB size limit), `sandbox.ts` (webhook SSRF), and `webhooks.ts` (replaced inline patterns).
 - **Phase 2 (HIGH)**: Auth guards on 15 routing/agents/groups API routes (requireScope routing:read/write, requireAuth, requireRole admin). Body validation with try/catch on all POST/PUT. Strategy enum validation on queue POST. Limit caps (200) on log/agents routes. Added routing:read + routing:write to VALID_SCOPES.

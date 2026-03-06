@@ -2,7 +2,7 @@
  * DbProvider — reads/writes via Drizzle + Postgres. Hosted or local DB backend.
  */
 
-import { and, eq, gt, inArray } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import type {
   DataProvider,
   ProviderCapabilities,
@@ -25,6 +25,8 @@ import type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  KBArticleFeedbackParams,
+  KBArticleFeedbackRecord,
   TicketMergeParams,
   TicketMergeResult,
   TicketSplitParams,
@@ -294,10 +296,7 @@ export class DbProvider implements DataProvider {
   async loadKBArticles(): Promise<KBArticle[]> {
     const { db, schema, workspaceId } = await requireDb();
 
-    const rows: Array<{
-      id: string; title: string; body: string; categoryPath: string[] | null;
-      status: string; updatedAt: Date;
-    }> = await db
+    const rows = await db
       .select({
         id: schema.kbArticles.id,
         title: schema.kbArticles.title,
@@ -305,6 +304,19 @@ export class DbProvider implements DataProvider {
         categoryPath: schema.kbArticles.categoryPath,
         status: schema.kbArticles.status,
         updatedAt: schema.kbArticles.updatedAt,
+        locale: schema.kbArticles.locale,
+        parentArticleId: schema.kbArticles.parentArticleId,
+        brandId: schema.kbArticles.brandId,
+        visibility: schema.kbArticles.visibility,
+        slug: schema.kbArticles.slug,
+        metaTitle: schema.kbArticles.metaTitle,
+        metaDescription: schema.kbArticles.metaDescription,
+        seoKeywords: schema.kbArticles.seoKeywords,
+        position: schema.kbArticles.position,
+        helpfulCount: schema.kbArticles.helpfulCount,
+        notHelpfulCount: schema.kbArticles.notHelpfulCount,
+        viewCount: schema.kbArticles.viewCount,
+        createdAt: schema.kbArticles.createdAt,
       })
       .from(schema.kbArticles)
       .where(eq(schema.kbArticles.workspaceId, workspaceId));
@@ -316,6 +328,19 @@ export class DbProvider implements DataProvider {
       categoryPath: row.categoryPath ?? [],
       status: row.status,
       updatedAt: row.updatedAt.toISOString(),
+      locale: row.locale ?? 'en',
+      parentArticleId: row.parentArticleId ?? undefined,
+      brandId: row.brandId ?? undefined,
+      visibility: (row.visibility as KBArticle['visibility']) ?? 'public',
+      slug: row.slug ?? undefined,
+      metaTitle: row.metaTitle ?? undefined,
+      metaDescription: row.metaDescription ?? undefined,
+      seoKeywords: row.seoKeywords ?? undefined,
+      position: row.position ?? 0,
+      helpfulCount: row.helpfulCount ?? 0,
+      notHelpfulCount: row.notHelpfulCount ?? 0,
+      viewCount: row.viewCount ?? 0,
+      createdAt: row.createdAt.toISOString(),
     }));
   }
 
@@ -540,64 +565,67 @@ export class DbProvider implements DataProvider {
     if (params.priority !== undefined) set.priority = params.priority;
     if (params.subject !== undefined) set.subject = params.subject;
 
-    await db.update(schema.tickets).set(set).where(eq(schema.tickets.id, ticketId));
+    const hasTags = (params.addTags && params.addTags.length > 0) || (params.removeTags && params.removeTags.length > 0);
 
-    // Handle addTags: upsert into tags table, insert into ticket_tags, sync tickets.tags array
-    if (params.addTags && params.addTags.length > 0) {
-      for (const tagName of params.addTags) {
-        // Upsert tag
-        const existing = await db
-          .select({ id: schema.tags.id })
-          .from(schema.tags)
-          .where(and(eq(schema.tags.workspaceId, workspaceId), eq(schema.tags.name, tagName)))
-          .limit(1);
+    if (hasTags) {
+      // Wrap metadata + tag mutations in one transaction
+      await db.transaction(async (tx) => {
+        await tx.update(schema.tickets).set(set).where(eq(schema.tickets.id, ticketId));
 
-        let tagId: string;
-        if (existing[0]) {
-          tagId = existing[0].id;
-        } else {
-          const [row] = await db
-            .insert(schema.tags)
-            .values({ workspaceId, name: tagName })
-            .returning({ id: schema.tags.id });
-          tagId = row.id;
+        if (params.addTags && params.addTags.length > 0) {
+          for (const tagName of params.addTags) {
+            const existing = await tx
+              .select({ id: schema.tags.id })
+              .from(schema.tags)
+              .where(and(eq(schema.tags.workspaceId, workspaceId), eq(schema.tags.name, tagName)))
+              .limit(1);
+
+            let tagId: string;
+            if (existing[0]) {
+              tagId = existing[0].id;
+            } else {
+              const [row] = await tx
+                .insert(schema.tags)
+                .values({ workspaceId, name: tagName })
+                .returning({ id: schema.tags.id });
+              tagId = row.id;
+            }
+
+            await tx
+              .insert(schema.ticketTags)
+              .values({ ticketId, tagId, workspaceId })
+              .onConflictDoNothing();
+          }
         }
 
-        // Insert ticket_tag (ignore conflict)
-        await db
-          .insert(schema.ticketTags)
-          .values({ ticketId, tagId, workspaceId })
-          .onConflictDoNothing();
-      }
-    }
+        if (params.removeTags && params.removeTags.length > 0) {
+          const tagRows = await tx
+            .select({ id: schema.tags.id })
+            .from(schema.tags)
+            .where(and(eq(schema.tags.workspaceId, workspaceId), inArray(schema.tags.name, params.removeTags)));
 
-    // Handle removeTags: delete from ticket_tags
-    if (params.removeTags && params.removeTags.length > 0) {
-      const tagRows = await db
-        .select({ id: schema.tags.id })
-        .from(schema.tags)
-        .where(and(eq(schema.tags.workspaceId, workspaceId), inArray(schema.tags.name, params.removeTags)));
+          if (tagRows.length > 0) {
+            const tagIds = tagRows.map(r => r.id);
+            await tx
+              .delete(schema.ticketTags)
+              .where(and(eq(schema.ticketTags.ticketId, ticketId), inArray(schema.ticketTags.tagId, tagIds)));
+          }
+        }
 
-      if (tagRows.length > 0) {
-        const tagIds = tagRows.map(r => r.id);
-        await db
-          .delete(schema.ticketTags)
-          .where(and(eq(schema.ticketTags.ticketId, ticketId), inArray(schema.ticketTags.tagId, tagIds)));
-      }
-    }
+        // Sync tickets.tags text array
+        const currentTags = await tx
+          .select({ name: schema.tags.name })
+          .from(schema.ticketTags)
+          .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
+          .where(eq(schema.ticketTags.ticketId, ticketId));
 
-    // Sync tickets.tags text array from ticket_tags join
-    if ((params.addTags && params.addTags.length > 0) || (params.removeTags && params.removeTags.length > 0)) {
-      const currentTags = await db
-        .select({ name: schema.tags.name })
-        .from(schema.ticketTags)
-        .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
-        .where(eq(schema.ticketTags.ticketId, ticketId));
-
-      await db
-        .update(schema.tickets)
-        .set({ tags: currentTags.map((r: { name: string }) => r.name) })
-        .where(eq(schema.tickets.id, ticketId));
+        await tx
+          .update(schema.tickets)
+          .set({ tags: currentTags.map((r: { name: string }) => r.name) })
+          .where(eq(schema.tickets.id, ticketId));
+      });
+    } else {
+      await db.update(schema.tickets).set(set).where(eq(schema.tickets.id, ticketId));
     }
   }
 
@@ -650,10 +678,115 @@ export class DbProvider implements DataProvider {
         body: params.body.trim(),
         categoryPath: params.categoryPath ?? [],
         status: params.status ?? 'published',
+        locale: params.locale ?? 'en',
+        parentArticleId: params.parentArticleId,
+        brandId: params.brandId,
+        visibility: params.visibility ?? 'public',
+        slug: params.slug,
+        metaTitle: params.metaTitle,
+        metaDescription: params.metaDescription,
       })
       .returning({ id: schema.kbArticles.id });
 
     return { id: row.id };
+  }
+
+  async loadKBArticleTranslations(articleId: string): Promise<KBArticle[]> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const rows = await db
+      .select({
+        id: schema.kbArticles.id,
+        title: schema.kbArticles.title,
+        body: schema.kbArticles.body,
+        categoryPath: schema.kbArticles.categoryPath,
+        status: schema.kbArticles.status,
+        updatedAt: schema.kbArticles.updatedAt,
+        locale: schema.kbArticles.locale,
+        parentArticleId: schema.kbArticles.parentArticleId,
+        brandId: schema.kbArticles.brandId,
+        visibility: schema.kbArticles.visibility,
+        slug: schema.kbArticles.slug,
+        createdAt: schema.kbArticles.createdAt,
+      })
+      .from(schema.kbArticles)
+      .where(and(
+        eq(schema.kbArticles.workspaceId, workspaceId),
+        eq(schema.kbArticles.parentArticleId, articleId),
+      ));
+
+    return rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      body: row.body,
+      categoryPath: row.categoryPath ?? [],
+      status: row.status,
+      updatedAt: row.updatedAt.toISOString(),
+      locale: row.locale ?? 'en',
+      parentArticleId: row.parentArticleId ?? undefined,
+      brandId: row.brandId ?? undefined,
+      visibility: (row.visibility as KBArticle['visibility']) ?? 'public',
+      slug: row.slug ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  async createKBArticleFeedback(params: KBArticleFeedbackParams): Promise<{ id: string }> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const [row] = await db
+      .insert(schema.kbArticleFeedback)
+      .values({
+        workspaceId,
+        articleId: params.articleId,
+        helpful: params.helpful,
+        sessionId: params.sessionId,
+        customerId: params.customerId,
+        comment: params.comment,
+      })
+      .returning({ id: schema.kbArticleFeedback.id });
+
+    // Update article counters
+    const counterCol = params.helpful
+      ? schema.kbArticles.helpfulCount
+      : schema.kbArticles.notHelpfulCount;
+
+    await db
+      .update(schema.kbArticles)
+      .set({ [params.helpful ? 'helpfulCount' : 'notHelpfulCount']: sql`${counterCol} + 1` })
+      .where(eq(schema.kbArticles.id, params.articleId));
+
+    return { id: row.id };
+  }
+
+  async loadKBArticleFeedback(articleId: string): Promise<KBArticleFeedbackRecord[]> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const rows = await db
+      .select({
+        id: schema.kbArticleFeedback.id,
+        articleId: schema.kbArticleFeedback.articleId,
+        helpful: schema.kbArticleFeedback.helpful,
+        comment: schema.kbArticleFeedback.comment,
+        sessionId: schema.kbArticleFeedback.sessionId,
+        customerId: schema.kbArticleFeedback.customerId,
+        createdAt: schema.kbArticleFeedback.createdAt,
+      })
+      .from(schema.kbArticleFeedback)
+      .where(and(
+        eq(schema.kbArticleFeedback.workspaceId, workspaceId),
+        eq(schema.kbArticleFeedback.articleId, articleId),
+      ));
+
+    return rows.map(row => ({
+      id: row.id,
+      articleId: row.articleId,
+      helpful: row.helpful,
+      comment: row.comment ?? undefined,
+      sessionId: row.sessionId ?? undefined,
+      customerId: row.customerId ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+    }));
   }
 
   async mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult> {

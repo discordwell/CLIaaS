@@ -29,6 +29,8 @@ import type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  KBArticleFeedbackParams,
+  KBArticleFeedbackRecord,
   TicketMergeParams,
   TicketMergeResult,
   TicketSplitParams,
@@ -214,6 +216,21 @@ export class HybridProvider implements DataProvider {
     const result = await this.local.createKBArticle(params);
     await insertOutboxEntry('create', 'kb_article', result.id, params);
     return result;
+  }
+
+  async loadKBArticleTranslations(articleId: string): Promise<KBArticle[]> {
+    return this.local.loadKBArticleTranslations?.(articleId) ?? [];
+  }
+
+  async createKBArticleFeedback(params: KBArticleFeedbackParams): Promise<{ id: string }> {
+    if (!this.local.createKBArticleFeedback) {
+      throw new Error('Feedback requires a database. Configure mode: db or hybrid.');
+    }
+    return this.local.createKBArticleFeedback(params);
+  }
+
+  async loadKBArticleFeedback(articleId: string): Promise<KBArticleFeedbackRecord[]> {
+    return this.local.loadKBArticleFeedback?.(articleId) ?? [];
   }
 
   async mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult> {

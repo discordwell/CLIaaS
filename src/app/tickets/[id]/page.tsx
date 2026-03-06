@@ -5,6 +5,7 @@ import TicketActions from "@/components/TicketActions";
 import CollisionDetector from "@/components/CollisionDetector";
 import TicketDetailClient from "@/components/TicketDetailClient";
 import SideConversationPanel from "@/components/SideConversationPanel";
+import TagPicker from "@/components/TagPicker";
 import MacroDropdown from "./_components/MacroDropdown";
 import ReRouteButton from "./_components/ReRouteButton";
 import { getRoutingLog } from "@/lib/routing/store";
@@ -116,19 +117,8 @@ export default async function TicketDetailPage({
             <p className="font-mono text-xs font-bold uppercase text-zinc-500">
               Tags
             </p>
-            <div className="mt-1 flex flex-wrap gap-1">
-              {ticket.tags.length > 0 ? (
-                ticket.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="border border-zinc-300 bg-zinc-100 px-2 py-0.5 font-mono text-xs"
-                  >
-                    {tag}
-                  </span>
-                ))
-              ) : (
-                <span className="text-sm text-zinc-400">none</span>
-              )}
+            <div className="mt-1">
+              <TagPicker ticketId={ticket.id} currentTags={ticket.tags} />
             </div>
           </div>
         </div>

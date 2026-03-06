@@ -46,6 +46,8 @@ export interface Message {
   createdAt: string;
 }
 
+export type KBVisibility = 'public' | 'internal' | 'draft';
+
 export interface KBArticle {
   id: string;
   externalId?: string;
@@ -55,6 +57,19 @@ export interface KBArticle {
   categoryPath: string[];
   status?: string;
   updatedAt?: string;
+  locale?: string;
+  parentArticleId?: string;
+  brandId?: string;
+  visibility?: KBVisibility;
+  slug?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  seoKeywords?: string[];
+  position?: number;
+  helpfulCount?: number;
+  notHelpfulCount?: number;
+  viewCount?: number;
+  createdAt?: string;
 }
 
 export interface Customer {
@@ -175,6 +190,31 @@ export interface KBArticleCreateParams {
   body: string;
   categoryPath?: string[];
   status?: string;
+  locale?: string;
+  parentArticleId?: string;
+  brandId?: string;
+  visibility?: KBVisibility;
+  slug?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+}
+
+export interface KBArticleFeedbackParams {
+  articleId: string;
+  helpful: boolean;
+  sessionId?: string;
+  customerId?: string;
+  comment?: string;
+}
+
+export interface KBArticleFeedbackRecord {
+  id: string;
+  articleId: string;
+  helpful: boolean;
+  comment?: string;
+  sessionId?: string;
+  customerId?: string;
+  createdAt: string;
 }
 
 // ---- Ticket Merge & Split types ----
@@ -262,6 +302,11 @@ export interface DataProvider {
   updateTicket(ticketId: string, params: TicketUpdateParams): Promise<void>;
   createMessage(params: MessageCreateParams): Promise<{ id: string }>;
   createKBArticle(params: KBArticleCreateParams): Promise<{ id: string }>;
+
+  // KB i18n & Feedback
+  loadKBArticleTranslations?(articleId: string): Promise<KBArticle[]>;
+  createKBArticleFeedback?(params: KBArticleFeedbackParams): Promise<{ id: string }>;
+  loadKBArticleFeedback?(articleId: string): Promise<KBArticleFeedbackRecord[]>;
 
   // Merge & Split
   mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult>;

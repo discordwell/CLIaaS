@@ -1,13 +1,39 @@
 import Link from "next/link";
 import { loadTickets, computeStats } from "@/lib/data";
 import TicketListClient from "@/components/TicketListClient";
+import ViewSelector from "@/components/ViewSelector";
+import { executeViewQuery } from "@/lib/views/executor";
+import type { ViewQuery } from "@/lib/views/types";
 
 export const dynamic = "force-dynamic";
+
+async function getViewQuery(viewId: string): Promise<ViewQuery | null> {
+  try {
+    const { tryDb } = await import("@/lib/store-helpers");
+    const conn = await tryDb();
+
+    if (conn) {
+      const { eq } = await import("drizzle-orm");
+      const [row] = await conn.db
+        .select({ query: conn.schema.views.query })
+        .from(conn.schema.views)
+        .where(eq(conn.schema.views.id, viewId))
+        .limit(1);
+      return (row?.query as ViewQuery) ?? null;
+    }
+
+    const { getView } = await import("@/lib/views/store");
+    const view = getView(viewId);
+    return view?.query ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export default async function TicketsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; priority?: string; q?: string; source?: string }>;
+  searchParams: Promise<{ status?: string; priority?: string; q?: string; source?: string; view?: string; tag?: string }>;
 }) {
   const params = await searchParams;
   let tickets = await loadTickets();
@@ -16,6 +42,17 @@ export default async function TicketsPage({
   // Collect unique sources for filter chips
   const allSources = [...new Set(tickets.map(t => t.source))];
 
+  // Apply view query if present
+  let activeViewName: string | null = null;
+  if (params.view) {
+    const viewQuery = await getViewQuery(params.view);
+    if (viewQuery) {
+      tickets = executeViewQuery(viewQuery, tickets);
+      activeViewName = params.view;
+    }
+  }
+
+  // Apply manual filters (these stack on top of view)
   if (params.source) {
     tickets = tickets.filter((t) => t.source === params.source);
   }
@@ -24,6 +61,9 @@ export default async function TicketsPage({
   }
   if (params.priority) {
     tickets = tickets.filter((t) => t.priority === params.priority);
+  }
+  if (params.tag) {
+    tickets = tickets.filter((t) => t.tags.includes(params.tag!));
   }
   if (params.q) {
     const q = params.q.toLowerCase();
@@ -35,10 +75,16 @@ export default async function TicketsPage({
     );
   }
 
-  tickets.sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  // Default sort if no view sort applied
+  if (!params.view) {
+    tickets.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  // Collect unique tags for tag filter chips
+  const allTags = [...new Set(tickets.flatMap(t => t.tags))].sort().slice(0, 20);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
@@ -58,6 +104,7 @@ export default async function TicketsPage({
             </h1>
           </div>
           <div className="flex gap-3">
+            <ViewSelector />
             <Link
               href="/dashboard"
               className="border-2 border-zinc-950 bg-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-zinc-100"
@@ -78,7 +125,7 @@ export default async function TicketsPage({
           {["open", "pending", "solved", "closed"].map((s) => (
             <Link
               key={s}
-              href={`/tickets?status=${s}`}
+              href={`/tickets?status=${s}${activeViewName ? `&view=${activeViewName}` : ""}`}
               className={`border px-3 py-1 font-mono text-xs font-bold uppercase transition-colors ${
                 params.status === s
                   ? "border-zinc-950 bg-zinc-950 text-white"
@@ -92,7 +139,7 @@ export default async function TicketsPage({
           {allSources.map((src) => (
             <Link
               key={src}
-              href={`/tickets?source=${src}`}
+              href={`/tickets?source=${src}${activeViewName ? `&view=${activeViewName}` : ""}`}
               className={`border px-3 py-1 font-mono text-xs font-bold uppercase transition-colors ${
                 params.source === src
                   ? "border-zinc-950 bg-zinc-950 text-white"
@@ -106,7 +153,7 @@ export default async function TicketsPage({
           {["urgent", "high", "normal", "low"].map((p) => (
             <Link
               key={p}
-              href={`/tickets?priority=${p}`}
+              href={`/tickets?priority=${p}${activeViewName ? `&view=${activeViewName}` : ""}`}
               className={`border px-3 py-1 font-mono text-xs font-bold uppercase transition-colors ${
                 params.priority === p
                   ? "border-zinc-950 bg-zinc-950 text-white"
@@ -117,6 +164,26 @@ export default async function TicketsPage({
             </Link>
           ))}
         </div>
+
+        {/* Tag filter chips */}
+        {allTags.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1">
+            <span className="mr-1 self-center font-mono text-[10px] font-bold uppercase text-zinc-400">Tags:</span>
+            {allTags.map((tag) => (
+              <Link
+                key={tag}
+                href={`/tickets?tag=${encodeURIComponent(tag)}${activeViewName ? `&view=${activeViewName}` : ""}`}
+                className={`border px-2 py-0.5 font-mono text-[10px] transition-colors ${
+                  params.tag === tag
+                    ? "border-zinc-950 bg-zinc-950 text-white"
+                    : "border-zinc-300 bg-zinc-100 text-zinc-600 hover:border-zinc-950"
+                }`}
+              >
+                {tag}
+              </Link>
+            ))}
+          </div>
+        )}
       </header>
 
       {/* TICKET TABLE */}

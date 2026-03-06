@@ -66,7 +66,7 @@ export default function SettingsPage() {
         <p className="mt-2 text-sm font-medium text-zinc-600">
           Manage canned responses, macros, and email signatures.
         </p>
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-4">
           <Link href="/settings/canned-responses"
             className="block border-2 border-zinc-200 p-5 hover:border-zinc-950 transition-colors">
             <p className="text-lg font-bold">Canned Responses</p>
@@ -81,6 +81,11 @@ export default function SettingsPage() {
             className="block border-2 border-zinc-200 p-5 hover:border-zinc-950 transition-colors">
             <p className="text-lg font-bold">Email Signatures</p>
             <p className="mt-1 text-sm text-zinc-600">Agent signatures for outgoing replies</p>
+          </Link>
+          <Link href="/settings/tags"
+            className="block border-2 border-zinc-200 p-5 hover:border-zinc-950 transition-colors">
+            <p className="text-lg font-bold">Tags</p>
+            <p className="mt-1 text-sm text-zinc-600">Manage tags, colors, and usage</p>
           </Link>
         </div>
       </section>

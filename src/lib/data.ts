@@ -109,7 +109,10 @@ export async function loadSurveyConfigs() {
 
 export async function updateTicket(
   ticketId: string,
-  updates: Partial<Pick<Ticket, 'status' | 'priority' | 'subject'>>,
+  updates: Partial<Pick<Ticket, 'status' | 'priority' | 'subject'>> & {
+    addTags?: string[];
+    removeTags?: string[];
+  },
 ): Promise<void> {
   const provider = await getDataProvider();
   return provider.updateTicket(ticketId, updates);

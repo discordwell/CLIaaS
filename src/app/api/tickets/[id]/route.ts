@@ -44,14 +44,19 @@ export async function PATCH(
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;
-  const parsed = await parseJsonBody<{ status?: string; priority?: string }>(request);
+  const parsed = await parseJsonBody<{
+    status?: string;
+    priority?: string;
+    addTags?: string[];
+    removeTags?: string[];
+  }>(request);
   if ('error' in parsed) return parsed.error;
-  const { status, priority } = parsed.data;
+  const { status, priority, addTags, removeTags } = parsed.data;
 
-  const VALID_STATUSES = ['open', 'pending', 'solved', 'closed'];
+  const VALID_STATUSES = ['open', 'pending', 'on_hold', 'solved', 'closed'];
   const VALID_PRIORITIES = ['urgent', 'high', 'normal', 'low'];
 
-  if (!status && !priority) {
+  if (!status && !priority && !addTags?.length && !removeTags?.length) {
     return NextResponse.json({ error: "No updates provided" }, { status: 400 });
   }
   if (status && !VALID_STATUSES.includes(status)) {
@@ -61,6 +66,27 @@ export async function PATCH(
     return NextResponse.json({ error: `Invalid priority: ${priority}` }, { status: 400 });
   }
 
+  // Try DataProvider path first (works for DB mode and JSONL mode)
+  try {
+    const { updateTicket } = await import("@/lib/data");
+    await updateTicket(id, { status, priority, addTags, removeTags });
+
+    const updates: Record<string, unknown> = {};
+    if (status) updates.status = status;
+    if (priority) updates.priority = priority;
+    if (addTags?.length) updates.addTags = addTags;
+    if (removeTags?.length) updates.removeTags = removeTags;
+
+    ticketUpdated({ ticketId: id, ...updates });
+    if (status === 'solved' || status === 'closed') {
+      ticketResolved({ ticketId: id, status: status as string });
+    }
+    return NextResponse.json({ status: 'ok', updated: updates });
+  } catch {
+    // DataProvider not available — fall through to connector path
+  }
+
+  // Connector-based path (external platforms)
   const source = resolveSource(id);
   if (!source) {
     return NextResponse.json({ error: "Cannot determine source from ticket ID" }, { status: 400 });
