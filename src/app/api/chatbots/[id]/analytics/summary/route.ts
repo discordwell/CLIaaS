@@ -13,7 +13,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const days = parseInt(request.nextUrl.searchParams.get('days') ?? '30', 10);
+  const days = Math.max(1, parseInt(request.nextUrl.searchParams.get('days') ?? '30', 10) || 30);
   const summary = await getFlowSummary(id, days);
 
   return NextResponse.json({ summary });

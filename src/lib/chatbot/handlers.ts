@@ -31,7 +31,7 @@ export async function handleAiResponse(
 
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: req.maxTokens ?? 300,
+      max_tokens: Math.min(req.maxTokens ?? 300, 2000),
       system: systemPrompt,
       messages: [{ role: 'user', content: context.customerMessage || 'Hello' }],
     });
@@ -89,12 +89,13 @@ export async function handleWebhook(
       return { responseData: '', success: false };
     }
 
-    // Interpolate variables into body template
+    // Interpolate variables into body template (JSON-escape values to prevent injection)
     let body: string | undefined;
     if (req.bodyTemplate) {
       body = req.bodyTemplate;
       for (const [key, val] of Object.entries(variables)) {
-        body = body.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), val);
+        const safeVal = JSON.stringify(val).slice(1, -1); // strip outer quotes, keep escape sequences
+        body = body.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), safeVal);
       }
     }
 
@@ -108,6 +109,7 @@ export async function handleWebhook(
       headers,
       body: req.method !== 'GET' ? body : undefined,
       signal: AbortSignal.timeout(10000),
+      redirect: 'error',
     });
 
     const responseData = await response.text();
@@ -120,14 +122,16 @@ export async function handleWebhook(
 /**
  * Process async node results and update session state.
  */
+import type { BotResponse } from './types';
+
 export async function processAsyncNode(
-  result: ReturnType<typeof import('./runtime').evaluateBotResponse>,
+  result: BotResponse,
   customerMessage: string,
 ): Promise<{ text?: string; newState: ChatbotSessionState }> {
-  const state = (await result).newState;
+  const state = result.newState;
 
-  if ((await result).aiRequest) {
-    const aiResult = await handleAiResponse((await result).aiRequest!, {
+  if (result.aiRequest) {
+    const aiResult = await handleAiResponse(result.aiRequest, {
       customerMessage,
       variables: state.variables,
     });
@@ -137,36 +141,37 @@ export async function processAsyncNode(
     }
 
     // Fallback if AI fails
-    const fallbackId = (await result).aiRequest!.fallbackNodeId;
+    const fallbackId = result.aiRequest.fallbackNodeId;
     if (fallbackId) {
       state.currentNodeId = fallbackId;
     }
     return { text: 'I\'m having trouble generating a response. Let me connect you with an agent.', newState: state };
   }
 
-  if ((await result).articleRequest) {
-    const articleResult = await handleArticleSuggest((await result).articleRequest!);
+  if (result.articleRequest) {
+    const articleResult = await handleArticleSuggest(result.articleRequest);
     if (articleResult) {
       return { text: articleResult.text, newState: state };
     }
 
     // No results: go to noResultsNodeId if set
-    const noResultsId = (await result).articleRequest!.noResultsNodeId;
+    const noResultsId = result.articleRequest.noResultsNodeId;
     if (noResultsId) {
       state.currentNodeId = noResultsId;
     }
     return { text: 'I couldn\'t find any relevant articles. Let me connect you with an agent.', newState: state };
   }
 
-  if ((await result).webhookRequest) {
-    const webhookResult = await handleWebhook((await result).webhookRequest!, state.variables);
+  if (result.webhookRequest) {
+    const webhookResult = await handleWebhook(result.webhookRequest, state.variables);
 
-    if (webhookResult.success && (await result).webhookRequest!.responseVariable) {
-      state.variables[(await result).webhookRequest!.responseVariable!] = webhookResult.responseData;
+    if (webhookResult.success && result.webhookRequest.responseVariable) {
+      // Truncate response to prevent session bloat
+      state.variables[result.webhookRequest.responseVariable] = webhookResult.responseData.slice(0, 10240);
     }
 
     if (!webhookResult.success) {
-      const failureId = (await result).webhookRequest!.failureNodeId;
+      const failureId = result.webhookRequest.failureNodeId;
       if (failureId) {
         state.currentNodeId = failureId;
       }

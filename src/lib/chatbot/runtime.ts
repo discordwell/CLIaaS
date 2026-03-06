@@ -308,7 +308,9 @@ function evaluateBranchCondition(op: string, fieldValue: string, condValue: stri
       return a.endsWith(b);
     case 'matches': {
       try {
-        return new RegExp(condValue, 'i').test(fieldValue);
+        // Guard against catastrophic backtracking: reject nested quantifiers
+        if (/(\+\+|\*\*|\+\*|\*\+|\{\d+,?\}\+|\{\d+,?\}\*)/.test(condValue)) return false;
+        return new RegExp(condValue, 'i').test(fieldValue.slice(0, 1000));
       } catch {
         return false;
       }

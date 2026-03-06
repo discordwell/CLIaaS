@@ -91,14 +91,15 @@ export function generateStandaloneWidgetScript(origin: string): string {
     }
 
     // Chat view
+    function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
     var msgsHtml = state.messages.map(function(m) {
       var cls = m.role === 'customer' ? 'cliaas-msg cliaas-msg-customer' : 'cliaas-msg cliaas-msg-bot';
       var label = m.role === 'customer' ? 'You' : 'Bot';
       var btns = '';
       if (m.buttons) {
-        btns = '<div class="cliaas-buttons">' + m.buttons.map(function(b) { return '<button class="cliaas-btn-option" data-label="' + b.label.replace(/"/g,'&quot;') + '">' + b.label + '</button>'; }).join('') + '</div>';
+        btns = '<div class="cliaas-buttons">' + m.buttons.map(function(b) { return '<button class="cliaas-btn-option" data-label="' + esc(b.label) + '">' + esc(b.label) + '</button>'; }).join('') + '</div>';
       }
-      return '<div class="' + cls + '"><div class="cliaas-msg-label">' + label + '</div><div class="cliaas-msg-bubble">' + m.body + '</div>' + btns + '</div>';
+      return '<div class="' + cls + '"><div class="cliaas-msg-label">' + label + '</div><div class="cliaas-msg-bubble">' + esc(m.body) + '</div>' + btns + '</div>';
     }).join('');
 
     container.innerHTML = '<div class="cliaas-container cliaas-chat"><div class="cliaas-header"><span class="cliaas-header-label">Live Chat</span><button class="cliaas-close">&minus;</button></div><div class="cliaas-messages">' + msgsHtml + '</div><div class="cliaas-input-row"><input class="cliaas-input" placeholder="Type a message..." id="cliaas-input"><button class="cliaas-send" id="cliaas-send">Send</button></div></div>';
