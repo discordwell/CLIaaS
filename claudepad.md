@@ -1,5 +1,16 @@
 # Session Summaries
 
+## 2026-03-06T05:05Z — Session 82: Agent Collision Detection (Plan 08)
+- **Presence API auth fix**: Extracts userId/userName from `auth.user` instead of trusting request body; POST returns `currentUserId` + `viewers`
+- **PresenceTracker**: Reduced stale threshold from 60s to 30s
+- **CollisionDetector**: Removed userId/userName props, reads `currentUserId` from POST response; added avatar pills with initials, eye/pen icons for viewing/typing
+- **TicketActions**: Typing broadcast (debounced 3s), composingStartedAt tracking, pre-submit collision check via `/api/tickets/{id}/collision-check`, inline collision warning with "Review/Send Anyway/Cancel", SSE-based new reply banner
+- **SSE endpoint**: Added optional `?ticketId=X` filtering for events
+- **Collision-check API**: `GET /api/tickets/{id}/collision-check?since=ISO` returns `hasNewReplies`, `newReplies[]`, `activeViewers[]`
+- **MCP tools**: `ticket_presence` (show viewers), `ticket_collision_check` (check replies since timestamp), collision-aware `ticket_reply`/`ticket_note` with `since`/`forceSubmit` params
+- **Tests**: 16 tests (12 PresenceTracker unit tests, 4 MCP presence logic tests), all passing
+- **Files**: 4 new, 7 modified, 2 test files
+
 ## 2026-03-06T05:02Z — Session 81: Connector Write-Depth (Plan 06, Phase 1)
 - **Kayako upstream adapter**: New `cli/sync/upstream-adapters/kayako.ts` wrapping existing kayakoUpdateCase/PostReply/PostNote/CreateCase
 - **Kayako Classic upstream adapter**: New `cli/sync/upstream-adapters/kayako-classic.ts` with status/priority string→numeric ID mapping, KAYAKO_CLASSIC_DEPARTMENT_ID env var required for createTicket

@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { loadTickets, loadMessages } from "@/lib/data";
+import { loadTickets, loadMessages, loadMergeHistory } from "@/lib/data";
 import TicketActions from "@/components/TicketActions";
 import CollisionDetector from "@/components/CollisionDetector";
+import TicketDetailClient from "@/components/TicketDetailClient";
 import MacroDropdown from "./_components/MacroDropdown";
 import ReRouteButton from "./_components/ReRouteButton";
 import { getRoutingLog } from "@/lib/routing/store";
@@ -37,10 +38,12 @@ export default async function TicketDetailPage({
   const routingLog = getRoutingLog().filter((l) => l.ticketId === ticket.id);
   const lastRoute = routingLog.length > 0 ? routingLog[routingLog.length - 1] : null;
 
-  const messages = (await loadMessages(ticket.id)).sort(
-    (a, b) =>
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
+  const [messages, mergeHistory] = await Promise.all([
+    loadMessages(ticket.id).then((msgs) =>
+      msgs.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    ),
+    loadMergeHistory(ticket.id).catch(() => []),
+  ]);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-4xl px-6 py-12 text-zinc-950">

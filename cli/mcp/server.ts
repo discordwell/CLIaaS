@@ -22,6 +22,8 @@ import { registerCampaignTools } from './tools/campaigns.js';
 import { registerPluginTools } from './tools/plugins.js';
 import { registerRoutingTools } from './tools/routing.js';
 import { registerWfmTools } from './tools/wfm.js';
+import { registerPresenceTools } from './tools/presence.js';
+import { registerCannedTools } from './tools/canned.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -50,6 +52,8 @@ registerCampaignTools(server);
 registerPluginTools(server);
 registerRoutingTools(server);
 registerWfmTools(server);
+registerPresenceTools(server);
+registerCannedTools(server);
 
 // Register resources and prompts
 registerResources(server);

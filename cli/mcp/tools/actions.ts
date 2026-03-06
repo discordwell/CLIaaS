@@ -89,20 +89,46 @@ export function registerActionTools(server: McpServer): void {
   // ---- ticket_reply ----
   server.tool(
     'ticket_reply',
-    'Send a reply to a ticket (requires confirm=true)',
+    'Send a reply to a ticket (requires confirm=true). Use "since" to check for collisions before sending.',
     {
       ticketId: z.string().describe('Ticket ID or external ID'),
       body: z.string().describe('Reply body text'),
+      since: z.string().optional().describe('ISO timestamp — if provided, checks for new replies since this time before sending'),
+      forceSubmit: z.boolean().optional().describe('Set true to send despite detected collisions'),
       confirm: z.boolean().optional().describe('Must be true to send the reply'),
       dir: z.string().optional().describe('Export directory override'),
     },
-    async ({ ticketId, body, confirm, dir }) => {
+    async ({ ticketId, body, since, forceSubmit, confirm, dir }) => {
       const guard = scopeGuard('ticket_reply');
       if (guard) return guard;
 
       const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
+
+      // Collision check: if `since` is provided, check for new replies
+      if (since && !forceSubmit) {
+        try {
+          const sinceDate = new Date(since);
+          if (!isNaN(sinceDate.getTime())) {
+            const { getDataProvider } = await import('@/lib/data-provider/index.js');
+            const provider = await getDataProvider(dir);
+            const messages = await provider.loadMessages(ticket.id);
+            const newReplies = messages.filter(
+              (m) => new Date(m.createdAt).getTime() > sinceDate.getTime()
+            );
+            if (newReplies.length > 0) {
+              return textResult({
+                collision: true,
+                message: `${newReplies.length} new reply(s) since ${since}. Set forceSubmit=true to send anyway.`,
+                newReplies: newReplies.map((m) => ({
+                  author: m.author, body: m.body.slice(0, 200), createdAt: m.createdAt,
+                })),
+              });
+            }
+          }
+        } catch { /* collision check failed — proceed */ }
+      }
 
       const result = withConfirmation(confirm, {
         description: `Reply to ticket ${ticket.id}`,
@@ -137,20 +163,46 @@ export function registerActionTools(server: McpServer): void {
   // ---- ticket_note ----
   server.tool(
     'ticket_note',
-    'Add an internal note to a ticket (requires confirm=true)',
+    'Add an internal note to a ticket (requires confirm=true). Use "since" to check for collisions before adding.',
     {
       ticketId: z.string().describe('Ticket ID or external ID'),
       body: z.string().describe('Note body text'),
+      since: z.string().optional().describe('ISO timestamp — if provided, checks for new replies since this time'),
+      forceSubmit: z.boolean().optional().describe('Set true to add note despite detected collisions'),
       confirm: z.boolean().optional().describe('Must be true to add the note'),
       dir: z.string().optional().describe('Export directory override'),
     },
-    async ({ ticketId, body, confirm, dir }) => {
+    async ({ ticketId, body, since, forceSubmit, confirm, dir }) => {
       const guard = scopeGuard('ticket_note');
       if (guard) return guard;
 
       const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
+
+      // Collision check
+      if (since && !forceSubmit) {
+        try {
+          const sinceDate = new Date(since);
+          if (!isNaN(sinceDate.getTime())) {
+            const { getDataProvider } = await import('@/lib/data-provider/index.js');
+            const provider = await getDataProvider(dir);
+            const messages = await provider.loadMessages(ticket.id);
+            const newReplies = messages.filter(
+              (m) => new Date(m.createdAt).getTime() > sinceDate.getTime()
+            );
+            if (newReplies.length > 0) {
+              return textResult({
+                collision: true,
+                message: `${newReplies.length} new reply(s) since ${since}. Set forceSubmit=true to add note anyway.`,
+                newReplies: newReplies.map((m) => ({
+                  author: m.author, body: m.body.slice(0, 200), createdAt: m.createdAt,
+                })),
+              });
+            }
+          }
+        } catch { /* collision check failed — proceed */ }
+      }
 
       const result = withConfirmation(confirm, {
         description: `Add internal note to ticket ${ticket.id}`,
@@ -733,6 +785,118 @@ export function registerActionTools(server: McpServer): void {
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to query executions');
       }
+    },
+  );
+
+  // ---- ticket_merge ----
+  server.tool(
+    'ticket_merge',
+    'Merge duplicate tickets into a primary ticket (requires confirm=true)',
+    {
+      primaryTicketId: z.string().describe('Primary ticket ID to merge into'),
+      mergedTicketIds: z.array(z.string()).describe('Ticket IDs to merge into the primary'),
+      confirm: z.boolean().optional().describe('Must be true to execute the merge'),
+      dir: z.string().optional().describe('Export directory override'),
+    },
+    async ({ primaryTicketId, mergedTicketIds, confirm, dir }) => {
+      const guard = scopeGuard('ticket_merge');
+      if (guard) return guard;
+
+      const tickets = await safeLoadTickets(dir);
+      const primary = findTicket(tickets, primaryTicketId);
+      if (!primary) return errorResult(`Primary ticket "${primaryTicketId}" not found.`);
+
+      for (const id of mergedTicketIds) {
+        if (!findTicket(tickets, id)) return errorResult(`Ticket "${id}" not found.`);
+      }
+
+      const result = withConfirmation(confirm, {
+        description: `Merge ${mergedTicketIds.length} ticket(s) into ${primary.id}`,
+        preview: {
+          primaryTicketId: primary.id,
+          primarySubject: primary.subject,
+          mergedTicketIds,
+          mergedSubjects: mergedTicketIds.map(id => findTicket(tickets, id)?.subject),
+        },
+        execute: async () => {
+          try {
+            const { getDataProvider } = await import('@/lib/data-provider/index.js');
+            const provider = await getDataProvider();
+            const mergeResult = await provider.mergeTickets({
+              primaryTicketId: primary.id,
+              mergedTicketIds: mergedTicketIds.map(id => findTicket(tickets, id)?.id ?? id),
+            });
+
+            recordMCPAction({
+              tool: 'ticket_merge', action: 'merge',
+              params: { primaryTicketId: primary.id, mergedTicketIds },
+              timestamp: new Date().toISOString(), result: 'success',
+            });
+
+            return mergeResult;
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : 'Merge failed' };
+          }
+        },
+      });
+
+      if (result.needsConfirmation) return result.result;
+      return textResult(await result.value);
+    },
+  );
+
+  // ---- ticket_split ----
+  server.tool(
+    'ticket_split',
+    'Split messages from a ticket into a new ticket (requires confirm=true)',
+    {
+      ticketId: z.string().describe('Source ticket ID'),
+      messageIds: z.array(z.string()).describe('Message IDs to move to the new ticket'),
+      newSubject: z.string().optional().describe('Subject for the new ticket'),
+      confirm: z.boolean().optional().describe('Must be true to execute the split'),
+      dir: z.string().optional().describe('Export directory override'),
+    },
+    async ({ ticketId, messageIds, newSubject, confirm, dir }) => {
+      const guard = scopeGuard('ticket_split');
+      if (guard) return guard;
+
+      const tickets = await safeLoadTickets(dir);
+      const ticket = findTicket(tickets, ticketId);
+      if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
+
+      const result = withConfirmation(confirm, {
+        description: `Split ${messageIds.length} message(s) from ticket ${ticket.id}`,
+        preview: {
+          ticketId: ticket.id,
+          subject: ticket.subject,
+          messageCount: messageIds.length,
+          newSubject: newSubject ?? `Split from: ${ticket.subject}`,
+        },
+        execute: async () => {
+          try {
+            const { getDataProvider } = await import('@/lib/data-provider/index.js');
+            const provider = await getDataProvider();
+            const splitResult = await provider.splitTicket({
+              ticketId: ticket.id,
+              messageIds,
+              newSubject,
+            });
+
+            recordMCPAction({
+              tool: 'ticket_split', action: 'split',
+              params: { ticketId: ticket.id, messageCount: messageIds.length },
+              timestamp: new Date().toISOString(), result: 'success',
+            });
+
+            return splitResult;
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : 'Split failed' };
+          }
+        },
+      });
+
+      if (result.needsConfirmation) return result.result;
+      return textResult(await result.value);
     },
   );
 

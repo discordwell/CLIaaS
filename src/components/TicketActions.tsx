@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import CannedResponsePicker from "./CannedResponsePicker";
 
 interface TicketActionsProps {
   ticketId: string;
@@ -310,6 +311,10 @@ export default function TicketActions({
               Internal note (not visible to customer)
             </label>
             <div className="flex items-center gap-3">
+              <CannedResponsePicker
+                ticketId={ticketId}
+                onInsert={(text) => setReplyBody((prev) => prev ? prev + "\n" + text : text)}
+              />
               {replyMsg && (
                 <span className={`font-mono text-xs ${replyState === "error" ? "text-red-600" : "text-emerald-600"}`}>
                   {replyMsg}
