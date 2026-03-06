@@ -3,7 +3,7 @@
  * Uses DB when available, falls back to in-memory.
  */
 
-import { tryDb } from '@/lib/store-helpers';
+import { tryDb, withRls } from '@/lib/store-helpers';
 import type { AuditEntry } from './executor';
 
 export interface PersistentAuditEntry extends AuditEntry {

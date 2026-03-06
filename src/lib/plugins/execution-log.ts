@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'crypto';
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
-import { tryDb } from '../store-helpers';
+import { tryDb, withRls } from '../store-helpers';
 import type { PluginExecutionLog } from './types';
 
 const EXEC_LOGS_FILE = 'plugin-execution-logs.jsonl';

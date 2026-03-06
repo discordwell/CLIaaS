@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'crypto';
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
-import { tryDb, getDefaultWorkspaceId } from '../store-helpers';
+import { tryDb, getDefaultWorkspaceId, withRls } from '../store-helpers';
 import type { PluginInstallation } from './types';
 
 const INSTALLATIONS_FILE = 'plugin-installations.jsonl';

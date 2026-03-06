@@ -4,7 +4,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
-import { tryDb, getDefaultWorkspaceId } from '../store-helpers';
+import { tryDb, getDefaultWorkspaceId, withRls } from '../store-helpers';
 import type { Workflow, WorkflowNode, WorkflowTransition } from './types';
 
 const WORKFLOWS_FILE = 'workflows.jsonl';
@@ -22,18 +22,16 @@ function writeAll(workflows: Workflow[]): void {
 // ---- Public API ----
 
 export async function getWorkflows(workspaceId?: string): Promise<Workflow[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.workflows).orderBy(schema.workflows.createdAt);
+      return rows.map(rowToWorkflow);
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
-    if (workspaceId) {
-      const { eq } = await import('drizzle-orm');
-      const rows = await db
-        .select()
-        .from(schema.workflows)
-        .where(eq(schema.workflows.workspaceId, workspaceId))
-        .orderBy(schema.workflows.createdAt);
-      return rows.map(rowToWorkflow);
-    }
     const rows = await db.select().from(schema.workflows).orderBy(schema.workflows.createdAt);
     return rows.map(rowToWorkflow);
   }
@@ -41,51 +39,80 @@ export async function getWorkflows(workspaceId?: string): Promise<Workflow[]> {
 }
 
 export async function getWorkflow(id: string, workspaceId?: string): Promise<Workflow | null> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db.select().from(schema.workflows).where(eq(schema.workflows.id, id));
+      return row ? rowToWorkflow(row) : null;
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
-    const { eq, and } = await import('drizzle-orm');
-    const conditions = workspaceId
-      ? and(eq(schema.workflows.id, id), eq(schema.workflows.workspaceId, workspaceId))
-      : eq(schema.workflows.id, id);
-    const [row] = await db.select().from(schema.workflows).where(conditions);
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db.select().from(schema.workflows).where(eq(schema.workflows.id, id));
     return row ? rowToWorkflow(row) : null;
   }
   return readAll().find((w) => w.id === id) ?? null;
 }
 
 export async function getActiveWorkflows(workspaceId?: string): Promise<Workflow[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.workflows).where(eq(schema.workflows.enabled, true));
+      return rows.map(rowToWorkflow);
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
-    const { eq, and } = await import('drizzle-orm');
-    const conditions = workspaceId
-      ? and(eq(schema.workflows.enabled, true), eq(schema.workflows.workspaceId, workspaceId))
-      : eq(schema.workflows.enabled, true);
-    const rows = await db
-      .select()
-      .from(schema.workflows)
-      .where(conditions);
+    const { eq } = await import('drizzle-orm');
+    const rows = await db.select().from(schema.workflows).where(eq(schema.workflows.enabled, true));
     return rows.map(rowToWorkflow);
   }
   return readAll().filter((w) => w.enabled);
 }
 
 export async function upsertWorkflow(workflow: Workflow, workspaceId?: string): Promise<Workflow> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [existing] = await db
+        .select({ id: schema.workflows.id })
+        .from(schema.workflows)
+        .where(eq(schema.workflows.id, workflow.id));
+
+      const values = {
+        name: workflow.name,
+        description: workflow.description ?? null,
+        flow: { nodes: workflow.nodes, transitions: workflow.transitions, entryNodeId: workflow.entryNodeId },
+        enabled: workflow.enabled,
+        version: workflow.version,
+        updatedAt: new Date(),
+      };
+
+      if (existing) {
+        await db.update(schema.workflows).set(values).where(eq(schema.workflows.id, workflow.id));
+      } else {
+        await db.insert(schema.workflows).values({ id: workflow.id, workspaceId, ...values });
+      }
+      return workflow;
+    });
+    if (result !== null) return result;
+  }
+
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
-    const { eq, and } = await import('drizzle-orm');
-
-    // When updating, scope by workspace to prevent cross-workspace overwrites
-    const findCondition = workspaceId
-      ? and(eq(schema.workflows.id, workflow.id), eq(schema.workflows.workspaceId, workspaceId))
-      : eq(schema.workflows.id, workflow.id);
+    const { eq } = await import('drizzle-orm');
 
     const [existing] = await db
       .select({ id: schema.workflows.id })
       .from(schema.workflows)
-      .where(findCondition);
+      .where(eq(schema.workflows.id, workflow.id));
 
     const values = {
       name: workflow.name,
@@ -101,12 +128,9 @@ export async function upsertWorkflow(workflow: Workflow, workspaceId?: string): 
     };
 
     if (existing) {
-      const updateCondition = workspaceId
-        ? and(eq(schema.workflows.id, workflow.id), eq(schema.workflows.workspaceId, workspaceId))
-        : eq(schema.workflows.id, workflow.id);
-      await db.update(schema.workflows).set(values).where(updateCondition);
+      await db.update(schema.workflows).set(values).where(eq(schema.workflows.id, workflow.id));
     } else {
-      const wsId = workspaceId ?? await getDefaultWorkspaceId(db, schema);
+      const wsId = await getDefaultWorkspaceId(db, schema);
       await db.insert(schema.workflows).values({
         id: workflow.id,
         workspaceId: wsId,
@@ -130,15 +154,19 @@ export async function upsertWorkflow(workflow: Workflow, workspaceId?: string): 
 }
 
 export async function deleteWorkflow(id: string, workspaceId?: string): Promise<boolean> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const r = await db.delete(schema.workflows).where(eq(schema.workflows.id, id));
+      return (r.rowCount ?? 0) > 0;
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
-    const { eq, and } = await import('drizzle-orm');
-    // Scope delete by workspace to prevent cross-workspace deletion
-    const condition = workspaceId
-      ? and(eq(schema.workflows.id, id), eq(schema.workflows.workspaceId, workspaceId))
-      : eq(schema.workflows.id, id);
-    const result = await db.delete(schema.workflows).where(condition);
+    const { eq } = await import('drizzle-orm');
+    const result = await db.delete(schema.workflows).where(eq(schema.workflows.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

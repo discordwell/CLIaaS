@@ -4,7 +4,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
-import { tryDb } from '../store-helpers';
+import { tryDb, withRls } from '../store-helpers';
 import type {
   AgentSkill,
   AgentCapacity,

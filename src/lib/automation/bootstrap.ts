@@ -6,7 +6,7 @@
  * non-workflow rules are replaced from the DB.
  */
 
-import { tryDb } from '@/lib/store-helpers';
+import { tryDb, withRls } from '@/lib/store-helpers';
 import { getAutomationRules, setAutomationRules } from './executor';
 import type { Rule } from './engine';
 import type { RuleConditions } from './conditions';

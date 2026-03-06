@@ -3,6 +3,7 @@
  * Used when DATABASE_URL is not set (BYOC/demo mode).
  */
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { withRls } from '../store-helpers';
 
 // ---- Types ----
 

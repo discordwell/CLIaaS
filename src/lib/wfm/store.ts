@@ -4,7 +4,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '@/lib/jsonl-store';
-import { tryDb } from '@/lib/store-helpers';
+import { tryDb, withRls } from '@/lib/store-helpers';
 import type {
   ScheduleTemplate, AgentSchedule, AgentStatusEntry,
   TimeOffRequest, VolumeSnapshot, BusinessHoursConfig,

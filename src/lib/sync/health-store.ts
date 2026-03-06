@@ -4,7 +4,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
-import { tryDb, getDefaultWorkspaceId } from '../store-helpers';
+import { tryDb, getDefaultWorkspaceId, withRls } from '../store-helpers';
 
 const SYNC_HEALTH_FILE = 'sync-health.jsonl';
 

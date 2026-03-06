@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-03-06T20:15:06.874Z",
+  "baseUrl": "http://localhost:3001",
+  "serverStartedByScript": false,
+  "status": "blocked",
+  "blockers": [
+    "WASM page never became responsive"
+  ],
+  "checkpoints": [],
+  "totals": {
+    "diffCount": 0,
+    "checkpointsWithDiffs": 0
+  }
+}

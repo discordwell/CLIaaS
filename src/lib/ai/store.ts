@@ -3,6 +3,8 @@
  * Dual mode: DB primary, in-memory fallback for JSONL/demo.
  */
 
+import { withRls } from '@/lib/store-helpers';
+
 export interface AIResolutionRecord {
   id: string;
   workspaceId: string;
