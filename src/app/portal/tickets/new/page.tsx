@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import DeflectionPanel from "@/components/DeflectionPanel";
 
 export default function PortalNewTicketPage() {
   const router = useRouter();
@@ -12,6 +13,12 @@ export default function PortalNewTicketPage() {
   const [priority, setPriority] = useState("normal");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Combined query for deflection panel
+  const deflectionQuery = useMemo(
+    () => [subject, description].filter(Boolean).join(" "),
+    [subject, description],
+  );
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,6 +145,9 @@ export default function PortalNewTicketPage() {
               required
             />
           </div>
+
+          {/* KB Deflection — suggest articles before submission */}
+          <DeflectionPanel query={deflectionQuery} />
 
           {/* Priority */}
           <div>

@@ -13,6 +13,16 @@ export interface Brand {
   chatEnabled: boolean;
   workspaceId?: string;
   createdAt: string;
+  // Phase 2 KB enhancements — all optional for backward compatibility
+  accentColor?: string;
+  faviconUrl?: string;
+  headerHtml?: string;
+  footerHtml?: string;
+  customCss?: string;
+  helpCenterEnabled?: boolean;
+  helpCenterTitle?: string;
+  defaultLocale?: string;
+  supportedLocales?: string[];
 }
 
 // ---- JSONL persistence ----
@@ -51,6 +61,15 @@ function ensureDefaults(): void {
       kbEnabled: true,
       chatEnabled: true,
       createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+      accentColor: '#3b82f6',
+      faviconUrl: '/favicon.ico',
+      headerHtml: '',
+      footerHtml: '',
+      customCss: '',
+      helpCenterEnabled: true,
+      helpCenterTitle: 'Help Center',
+      defaultLocale: 'en',
+      supportedLocales: ['en'],
     },
     {
       id: 'brand-enterprise',
@@ -62,6 +81,15 @@ function ensureDefaults(): void {
       kbEnabled: true,
       chatEnabled: false,
       createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
+      accentColor: '#2563eb',
+      faviconUrl: '/favicon.ico',
+      headerHtml: '',
+      footerHtml: '',
+      customCss: '',
+      helpCenterEnabled: true,
+      helpCenterTitle: 'Enterprise Knowledge Base',
+      defaultLocale: 'en',
+      supportedLocales: ['en', 'fr', 'de'],
     }
   );
 }
@@ -74,6 +102,13 @@ export function listBrands(workspaceId?: string): Brand[] {
     return brands.filter(b => !b.workspaceId || b.workspaceId === workspaceId);
   }
   return [...brands];
+}
+
+export function getBrandById(id: string, workspaceId?: string): Brand | undefined {
+  ensureDefaults();
+  return brands.find(
+    (b) => b.id === id && (!workspaceId || !b.workspaceId || b.workspaceId === workspaceId),
+  );
 }
 
 export function getBrandBySubdomain(subdomain: string): Brand | undefined {

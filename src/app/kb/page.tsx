@@ -1,18 +1,123 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { loadKBArticles } from "@/lib/data";
 
-export const dynamic = "force-dynamic";
+interface KBArticle {
+  id: string;
+  title: string;
+  body: string;
+  categoryPath: string[];
+  status: string;
+  updatedAt: string;
+  locale?: string;
+  brandId?: string;
+  visibility?: string;
+  slug?: string;
+  parentArticleId?: string;
+  helpfulCount?: number;
+  notHelpfulCount?: number;
+  viewCount?: number;
+}
 
-export default async function KBPage() {
-  const articles = await loadKBArticles();
+const LOCALE_OPTIONS = [
+  { value: "", label: "All Locales" },
+  { value: "en", label: "English" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "pt", label: "Portuguese" },
+  { value: "ja", label: "Japanese" },
+  { value: "zh", label: "Chinese" },
+];
+
+const VISIBILITY_OPTIONS = [
+  { value: "", label: "All Visibility" },
+  { value: "public", label: "Public" },
+  { value: "internal", label: "Internal" },
+  { value: "draft", label: "Draft" },
+];
+
+export default function KBPage() {
+  const [articles, setArticles] = useState<KBArticle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [locale, setLocale] = useState("");
+  const [brandId, setBrandId] = useState("");
+  const [visibility, setVisibility] = useState("");
+  const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([]);
+
+  const loadArticles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (locale) params.set("locale", locale);
+      if (brandId) params.set("brandId", brandId);
+      if (visibility) params.set("visibility", visibility);
+
+      const res = await fetch(`/api/kb?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setArticles(data.articles ?? []);
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setLoading(false);
+    }
+  }, [locale, brandId, visibility]);
+
+  useEffect(() => {
+    loadArticles();
+  }, [loadArticles]);
+
+  // Load brands for filter
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/brands");
+        if (res.ok) {
+          const data = await res.json();
+          setBrands(data.brands ?? []);
+        }
+      } catch {
+        // No brands available
+      }
+    })();
+  }, []);
 
   // Group by top-level category
-  const categories: Record<string, typeof articles> = {};
+  const categories: Record<string, KBArticle[]> = {};
   for (const article of articles) {
-    const cat = article.categoryPath[0] ?? "Uncategorized";
+    const cat = article.categoryPath?.[0] ?? "Uncategorized";
     if (!categories[cat]) categories[cat] = [];
     categories[cat].push(article);
   }
+
+  // Collect all locales present in articles
+  const articleLocales = new Set(articles.map((a) => a.locale).filter(Boolean));
+
+  // Translation status helper
+  const getTranslationBadge = (article: KBArticle) => {
+    if (article.parentArticleId) {
+      return (
+        <span className="border border-blue-400 bg-blue-50 px-2 py-0.5 font-mono text-xs font-bold uppercase text-blue-600">
+          translation
+        </span>
+      );
+    }
+    // Check if there are translations for this article
+    const translations = articles.filter(
+      (a) => a.parentArticleId === article.id
+    );
+    if (translations.length > 0) {
+      return (
+        <span className="border border-green-400 bg-green-50 px-2 py-0.5 font-mono text-xs font-bold uppercase text-green-700">
+          {translations.length} translation{translations.length !== 1 ? "s" : ""}
+        </span>
+      );
+    }
+    return null;
+  };
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-6 py-12 text-zinc-950">
@@ -35,16 +140,105 @@ export default async function KBPage() {
           </code>{" "}
           to surface relevant articles for a ticket.
         </p>
+
+        {/* Filters */}
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          {/* Locale filter */}
+          <select
+            value={locale}
+            onChange={(e) => setLocale(e.target.value)}
+            className="border-2 border-zinc-950 px-3 py-1.5 font-mono text-xs focus:outline-none"
+          >
+            {LOCALE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Brand filter */}
+          {brands.length > 0 && (
+            <select
+              value={brandId}
+              onChange={(e) => setBrandId(e.target.value)}
+              className="border-2 border-zinc-950 px-3 py-1.5 font-mono text-xs focus:outline-none"
+            >
+              <option value="">All Brands</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Visibility filter */}
+          <select
+            value={visibility}
+            onChange={(e) => setVisibility(e.target.value)}
+            className="border-2 border-zinc-950 px-3 py-1.5 font-mono text-xs focus:outline-none"
+          >
+            {VISIBILITY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Locale badges showing present locales */}
+          {articleLocales.size > 1 && (
+            <div className="ml-auto flex gap-1">
+              {Array.from(articleLocales)
+                .sort()
+                .map((l) => (
+                  <span
+                    key={l}
+                    className="border border-zinc-300 px-2 py-0.5 font-mono text-xs uppercase text-zinc-500"
+                  >
+                    {l}
+                  </span>
+                ))}
+            </div>
+          )}
+        </div>
+
+        {/* Navigation links */}
+        <div className="mt-4 flex gap-4">
+          <Link
+            href="/kb/content-gaps"
+            className="font-mono text-xs font-bold uppercase text-zinc-600 underline hover:text-zinc-950"
+          >
+            Content Gaps
+          </Link>
+          <Link
+            href="/kb/analytics"
+            className="font-mono text-xs font-bold uppercase text-zinc-600 underline hover:text-zinc-950"
+          >
+            Analytics
+          </Link>
+        </div>
       </header>
 
-      {articles.length === 0 ? (
+      {loading ? (
+        <section className="mt-8 border-2 border-zinc-950 bg-white p-8 text-center">
+          <p className="font-mono text-sm text-zinc-500">
+            Loading articles...
+          </p>
+        </section>
+      ) : articles.length === 0 ? (
         <section className="mt-8 border-2 border-zinc-950 bg-white p-8 text-center">
           <p className="text-lg font-bold">No KB articles found</p>
           <p className="mt-2 text-sm text-zinc-600">
-            Generate demo data:{" "}
-            <code className="bg-zinc-100 px-2 py-1 font-mono text-xs">
-              cliaas demo --tickets 50
-            </code>
+            {locale || brandId || visibility
+              ? "Try adjusting your filters."
+              : (
+                  <>
+                    Generate demo data:{" "}
+                    <code className="bg-zinc-100 px-2 py-1 font-mono text-xs">
+                      cliaas demo --tickets 50
+                    </code>
+                  </>
+                )}
           </p>
         </section>
       ) : (
@@ -66,9 +260,22 @@ export default async function KBPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="text-lg font-bold">{article.title}</h3>
-                      <p className="mt-1 font-mono text-xs text-zinc-500">
-                        {article.categoryPath.join(" / ")}
-                      </p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="font-mono text-xs text-zinc-500">
+                          {article.categoryPath?.join(" / ")}
+                        </span>
+                        {article.locale && (
+                          <span className="border border-zinc-300 px-1.5 py-0.5 font-mono text-xs uppercase text-zinc-500">
+                            {article.locale}
+                          </span>
+                        )}
+                        {article.visibility && article.visibility !== "public" && (
+                          <span className="border border-amber-400 bg-amber-50 px-1.5 py-0.5 font-mono text-xs font-bold uppercase text-amber-700">
+                            {article.visibility}
+                          </span>
+                        )}
+                        {getTranslationBadge(article)}
+                      </div>
                     </div>
                     <span className="shrink-0 font-mono text-xs text-zinc-400">
                       {article.id}

@@ -32,6 +32,7 @@ const PUBLIC_PATHS = [
   '/api/csat',
   '/api/docs',
   '/api/chat/widget.js',
+  '/help',
   '/api/scim/v2',
   // SMS/WhatsApp webhook (Twilio)
   '/api/channels/sms/inbound',
@@ -83,7 +84,7 @@ function applySecurityHeaders(response: NextResponse): void {
 }
 
 // Internal headers that must not be set by clients
-const INTERNAL_HEADERS = ['x-auth-type', 'x-user-id', 'x-workspace-id', 'x-user-role', 'x-user-email', 'x-tenant-id'];
+const INTERNAL_HEADERS = ['x-auth-type', 'x-user-id', 'x-workspace-id', 'x-user-role', 'x-user-email', 'x-tenant-id', 'x-user-permissions'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -97,6 +98,19 @@ export async function middleware(request: NextRequest) {
   // Always allow static assets
   if (isStaticAsset(pathname)) {
     return NextResponse.next();
+  }
+
+  // Subdomain-based help center routing: help.cliaas.com → /help/[brandSlug]
+  const host = request.headers.get('host') ?? '';
+  const baseDomain = (process.env.NEXT_PUBLIC_BASE_DOMAIN ?? 'cliaas.com').replace(/^www\./, '');
+  if (host !== baseDomain && host !== `www.${baseDomain}` && host.endsWith(`.${baseDomain}`)) {
+    const subdomain = host.replace(`.${baseDomain}`, '');
+    // Only rewrite if not already on a /help/ path and not an API/static route
+    if (!pathname.startsWith('/help/') && !pathname.startsWith('/api/') && !pathname.startsWith('/_next')) {
+      const url = request.nextUrl.clone();
+      url.pathname = `/help/${subdomain}${pathname}`;
+      return NextResponse.rewrite(url, { headers: requestHeaders });
+    }
   }
 
   // Generate/propagate request correlation ID
@@ -258,6 +272,10 @@ export async function middleware(request: NextRequest) {
     requestHeaders.set('x-user-email', (payload.email as string) || '');
     if (payload.tenantId) {
       requestHeaders.set('x-tenant-id', payload.tenantId as string);
+    }
+    // Propagate RBAC permissions bitfield from JWT
+    if (payload.p) {
+      requestHeaders.set('x-user-permissions', payload.p as string);
     }
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     applyCors(response);

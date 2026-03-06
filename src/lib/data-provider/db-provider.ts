@@ -321,7 +321,8 @@ export class DbProvider implements DataProvider {
       .from(schema.kbArticles)
       .where(eq(schema.kbArticles.workspaceId, workspaceId));
 
-    return rows.map(row => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((row: any) => ({
       id: row.id,
       title: row.title,
       body: row.body,
@@ -569,7 +570,7 @@ export class DbProvider implements DataProvider {
 
     if (hasTags) {
       // Wrap metadata + tag mutations in one transaction
-      await db.transaction(async (tx) => {
+      await db.transaction(async (tx: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         await tx.update(schema.tickets).set(set).where(eq(schema.tickets.id, ticketId));
 
         if (params.addTags && params.addTags.length > 0) {
@@ -605,7 +606,7 @@ export class DbProvider implements DataProvider {
             .where(and(eq(schema.tags.workspaceId, workspaceId), inArray(schema.tags.name, params.removeTags)));
 
           if (tagRows.length > 0) {
-            const tagIds = tagRows.map(r => r.id);
+            const tagIds = tagRows.map((r: any) => r.id); // eslint-disable-line @typescript-eslint/no-explicit-any
             await tx
               .delete(schema.ticketTags)
               .where(and(eq(schema.ticketTags.ticketId, ticketId), inArray(schema.ticketTags.tagId, tagIds)));
@@ -715,7 +716,8 @@ export class DbProvider implements DataProvider {
         eq(schema.kbArticles.parentArticleId, articleId),
       ));
 
-    return rows.map(row => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((row: any) => ({
       id: row.id,
       title: row.title,
       body: row.body,
@@ -778,7 +780,8 @@ export class DbProvider implements DataProvider {
         eq(schema.kbArticleFeedback.articleId, articleId),
       ));
 
-    return rows.map(row => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((row: any) => ({
       id: row.id,
       articleId: row.articleId,
       helpful: row.helpful,

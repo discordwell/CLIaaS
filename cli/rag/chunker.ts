@@ -58,9 +58,10 @@ export function chunkText(
 export function chunkKBArticle(
   title: string,
   body: string,
-  opts?: { chunkSize?: number; chunkOverlap?: number },
+  opts?: { chunkSize?: number; chunkOverlap?: number; locale?: string },
 ): TextChunk[] {
-  const prefix = `[KB Article: ${title}]\n\n`;
+  const localeTag = opts?.locale && opts.locale !== 'en' ? ` (${opts.locale})` : '';
+  const prefix = `[KB Article${localeTag}: ${title}]\n\n`;
   const prefixTokens = estimateTokenCount(prefix);
   const effectiveChunkSize = (opts?.chunkSize ?? RAG_DEFAULTS.chunkSize) - prefixTokens;
 

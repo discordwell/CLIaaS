@@ -8,6 +8,7 @@ interface RetrieveOpts {
   hybridWeight?: number;
   workspaceId?: string;
   sourceType?: string;
+  locale?: string;
 }
 
 /**
@@ -27,18 +28,23 @@ export async function retrieve(opts: RetrieveOpts): Promise<RagSearchResult[]> {
   const [queryEmbedding] = await provider.embed([opts.query]);
   const vecStr = `[${queryEmbedding.join(',')}]`;
 
-  // Build parameterized queries with source type filter
-  const vecParams = opts.sourceType
-    ? [vecStr, workspaceId, opts.sourceType, fetchLimit]
-    : [vecStr, workspaceId, fetchLimit];
-  const vecLimitParam = opts.sourceType ? '$4' : '$3';
-  const vecSourceFilter = opts.sourceType ? 'AND source_type = $3' : '';
+  // Build parameterized queries with source type and locale filters
+  const vecParams: (string | number)[] = [vecStr, workspaceId];
+  let vecFilterSql = '';
+  if (opts.sourceType) { vecParams.push(opts.sourceType); vecFilterSql += ` AND source_type = $${vecParams.length}`; }
+  if (opts.locale) { vecParams.push(opts.locale); vecFilterSql += ` AND locale = $${vecParams.length}`; }
+  vecParams.push(fetchLimit);
+  const vecLimitParam = `$${vecParams.length}`;
 
-  const textParams = opts.sourceType
-    ? [opts.query, workspaceId, opts.sourceType, fetchLimit]
-    : [opts.query, workspaceId, fetchLimit];
-  const textLimitParam = opts.sourceType ? '$4' : '$3';
-  const textSourceFilter = opts.sourceType ? 'AND source_type = $3' : '';
+  const textParams: (string | number)[] = [opts.query, workspaceId];
+  let textFilterSql = '';
+  if (opts.sourceType) { textParams.push(opts.sourceType); textFilterSql += ` AND source_type = $${textParams.length}`; }
+  if (opts.locale) { textParams.push(opts.locale); textFilterSql += ` AND locale = $${textParams.length}`; }
+  textParams.push(fetchLimit);
+  const textLimitParam = `$${textParams.length}`;
+
+  const vecSourceFilter = vecFilterSql;
+  const textSourceFilter = textFilterSql;
 
   // Run vector search and full-text search in parallel
   const [vectorResults, textResults] = await Promise.all([

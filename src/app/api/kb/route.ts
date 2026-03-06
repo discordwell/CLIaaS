@@ -15,6 +15,9 @@ export async function GET(request: NextRequest) {
     const query = searchParams.get('q')?.toLowerCase();
     const category = searchParams.get('category');
     const status = searchParams.get('status');
+    const locale = searchParams.get('locale');
+    const brandId = searchParams.get('brandId');
+    const visibility = searchParams.get('visibility');
 
     let articles: Array<{
       id: string;
@@ -23,6 +26,15 @@ export async function GET(request: NextRequest) {
       categoryPath: string[];
       status: string;
       updatedAt: string;
+      locale?: string;
+      brandId?: string;
+      visibility?: string;
+      slug?: string;
+      parentArticleId?: string;
+      helpfulCount?: number;
+      notHelpfulCount?: number;
+      viewCount?: number;
+      position?: number;
     }>;
 
     // In DB mode, query directly with workspace filter from auth
@@ -30,7 +42,12 @@ export async function GET(request: NextRequest) {
       try {
         const { db } = await import('@/db');
         const schema = await import('@/db/schema');
-        const { eq } = await import('drizzle-orm');
+        const { eq, and } = await import('drizzle-orm');
+
+        const conditions = [eq(schema.kbArticles.workspaceId, auth.user.workspaceId)];
+        if (locale) conditions.push(eq(schema.kbArticles.locale, locale));
+        if (brandId) conditions.push(eq(schema.kbArticles.brandId, brandId));
+        if (visibility) conditions.push(eq(schema.kbArticles.visibility, visibility));
 
         const rows = await db
           .select({
@@ -40,9 +57,18 @@ export async function GET(request: NextRequest) {
             categoryPath: schema.kbArticles.categoryPath,
             status: schema.kbArticles.status,
             updatedAt: schema.kbArticles.updatedAt,
+            locale: schema.kbArticles.locale,
+            brandId: schema.kbArticles.brandId,
+            visibility: schema.kbArticles.visibility,
+            slug: schema.kbArticles.slug,
+            parentArticleId: schema.kbArticles.parentArticleId,
+            helpfulCount: schema.kbArticles.helpfulCount,
+            notHelpfulCount: schema.kbArticles.notHelpfulCount,
+            viewCount: schema.kbArticles.viewCount,
+            position: schema.kbArticles.position,
           })
           .from(schema.kbArticles)
-          .where(eq(schema.kbArticles.workspaceId, auth.user.workspaceId));
+          .where(and(...conditions));
 
         articles = rows.map((r) => ({
           id: r.id,
@@ -51,6 +77,15 @@ export async function GET(request: NextRequest) {
           categoryPath: r.categoryPath ?? [],
           status: r.status ?? 'published',
           updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
+          locale: r.locale ?? 'en',
+          brandId: r.brandId ?? undefined,
+          visibility: r.visibility ?? 'public',
+          slug: r.slug ?? undefined,
+          parentArticleId: r.parentArticleId ?? undefined,
+          helpfulCount: r.helpfulCount ?? 0,
+          notHelpfulCount: r.notHelpfulCount ?? 0,
+          viewCount: r.viewCount ?? 0,
+          position: r.position ?? 0,
         }));
       } catch {
         // DB unavailable, fall through to JSONL
@@ -107,9 +142,19 @@ export async function POST(request: NextRequest) {
       body?: string;
       categoryPath?: string[];
       status?: string;
+      locale?: string;
+      parentArticleId?: string;
+      brandId?: string;
+      visibility?: string;
+      slug?: string;
+      metaTitle?: string;
+      metaDescription?: string;
     }>(request);
     if ('error' in parsed) return parsed.error;
-    const { title, body: articleBody, categoryPath, status: articleStatus } = parsed.data;
+    const {
+      title, body: articleBody, categoryPath, status: articleStatus,
+      locale, parentArticleId, brandId, visibility, slug, metaTitle, metaDescription,
+    } = parsed.data;
 
     if (!title?.trim() || !articleBody?.trim()) {
       return NextResponse.json(
@@ -123,6 +168,13 @@ export async function POST(request: NextRequest) {
       body: articleBody,
       categoryPath,
       status: articleStatus,
+      locale,
+      parentArticleId,
+      brandId,
+      visibility: visibility as 'public' | 'internal' | 'draft' | undefined,
+      slug,
+      metaTitle,
+      metaDescription,
     });
 
     return NextResponse.json({ article }, { status: 201 });

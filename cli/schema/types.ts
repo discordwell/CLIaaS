@@ -70,6 +70,17 @@ export interface KBArticle {
   title: string;
   body: string;
   categoryPath: string[];
+  locale?: string;
+  parentArticleId?: string;
+  brandId?: string;
+  visibility?: 'public' | 'internal' | 'draft';
+  slug?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  status?: string;
+  helpfulCount?: number;
+  notHelpfulCount?: number;
+  viewCount?: number;
 }
 
 export interface Group {

@@ -123,6 +123,13 @@ export async function createKBArticle(article: {
   body: string;
   categoryPath?: string[];
   status?: string;
+  locale?: string;
+  parentArticleId?: string;
+  brandId?: string;
+  visibility?: 'public' | 'internal' | 'draft';
+  slug?: string;
+  metaTitle?: string;
+  metaDescription?: string;
 }): Promise<{ id: string }> {
   const provider = await getDataProvider();
   return provider.createKBArticle(article);
