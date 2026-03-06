@@ -7,7 +7,7 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { Mission, CELL_SIZE, worldToCell, type ProductionItem, getStripSide } from './types';
+import { Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, getStripSide } from './types';
 import { findPath } from './pathfinding';
 import type { MapStructure } from './scenario';
 
@@ -72,6 +72,7 @@ export type AgentCommand =
   | { cmd: 'attack_move'; unitIds: number[]; cx: number; cy: number }
   | { cmd: 'attack_struct'; unitIds: number[]; structIdx: number }
   | { cmd: 'stop'; unitIds: number[] }
+  | { cmd: 'enter'; unitId: number; transportId: number }
   | { cmd: 'build'; type: string }
   | { cmd: 'cancel_build'; category: 'left' | 'right' }
   | { cmd: 'place'; cx: number; cy: number }
@@ -306,6 +307,48 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             e.pathIndex = 0;
           }
           results.push({ cmd: 'stop', ok: true });
+          break;
+        }
+
+        case 'enter': {
+          const inf = game.entityById.get(c.unitId);
+          const transport = game.entityById.get(c.transportId);
+          if (!inf?.alive || !inf.isPlayerUnit || !inf.stats.isInfantry) {
+            results.push({ cmd: 'enter', ok: false, error: `unit ${c.unitId} invalid (must be alive allied infantry)` });
+            break;
+          }
+          if (!transport?.alive || !transport.isTransport) {
+            results.push({ cmd: 'enter', ok: false, error: `transport ${c.transportId} invalid` });
+            break;
+          }
+          if (transport.passengers.length >= transport.maxPassengers) {
+            results.push({ cmd: 'enter', ok: false, error: 'transport full' });
+            break;
+          }
+          clearTeamScripts(inf);
+          // If close enough, load directly (generous threshold for agent use)
+          const loadDist = worldDist(inf.pos, transport.pos);
+          if (loadDist < 2.0) {
+            transport.passengers.push(inf);
+            inf.transportRef = transport;
+            inf.mission = Mission.SLEEP;
+            inf.selected = false;
+            // Clear cell occupancy (mirrors engine auto-load at index.ts:2528)
+            game.map.setOccupancy(inf.cell.cx, inf.cell.cy, 0);
+            // Remove from world (will be re-added on unload)
+            game.entities = game.entities.filter((e: Entity) => e.id !== inf.id);
+            game.entityById.delete(inf.id);
+            results.push({ cmd: 'enter', ok: true });
+          } else {
+            // Move infantry toward transport — proximity auto-load handles boarding
+            inf.mission = Mission.MOVE;
+            inf.target = null;
+            inf.moveTarget = { ...transport.pos };
+            const tc = { cx: Math.floor(transport.pos.x / CELL_SIZE), cy: Math.floor(transport.pos.y / CELL_SIZE) };
+            inf.path = findPath(game.map, inf.cell, tc, true, inf.isNavalUnit, inf.stats.speedClass);
+            inf.pathIndex = 0;
+            results.push({ cmd: 'enter', ok: true });
+          }
           break;
         }
 

@@ -281,6 +281,8 @@ export class Game {
   private civiliansEvacuated = 0;
   /** Cached bridge cell count (recalculated periodically) */
   private bridgeCellCount = 0;
+  /** Persistent set of trigger names whose attached entities/structures were destroyed */
+  private destroyedTriggerNames = new Set<string>();
 
   // Turbo mode (for E2E test runner)
   turboMultiplier = 1;
@@ -993,6 +995,8 @@ export class Game {
     const before = this.entities.length;
     for (const e of this.entities) {
       if (!e.alive && e.deathTick >= 45) {
+        // Persist trigger name before entity is removed from array
+        if (e.triggerName) this.destroyedTriggerNames.add(e.triggerName);
         // Save as persistent corpse
         if (this.corpses.length >= Game.MAX_CORPSES) this.corpses.shift();
         this.corpses.push({
@@ -4600,8 +4604,53 @@ export class Game {
           // Fly toward target
           entity.moveToward(targetPos, this.movementSpeed(entity, 0.7));
         } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
+          // Check if aircraft is at map edge with out-of-bounds target — exit map
+          const ec = entity.cell;
+          const tc = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+          if (!this.map.inBounds(tc.cx, tc.cy) &&
+              (ec.cx <= this.map.boundsX || ec.cx >= this.map.boundsX + this.map.boundsW - 1 ||
+               ec.cy <= this.map.boundsY || ec.cy >= this.map.boundsY + this.map.boundsH - 1)) {
+            entity.alive = false;
+            entity.mission = Mission.DIE;
+            this.unitsLeftMap++;
+            if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
+              this.civiliansEvacuated++;
+            }
+            if (entity.passengers && entity.passengers.length > 0) {
+              for (const p of entity.passengers) {
+                p.alive = false;
+                this.unitsLeftMap++;
+                if (CIVILIAN_UNIT_TYPES.has(p.type)) {
+                  this.civiliansEvacuated++;
+                }
+              }
+              entity.passengers = [];
+            }
+            return true;
+          }
           // Simple move — fly to destination
           if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity, 0.7))) {
+            // Arrived — check if destination was out of bounds (aircraft map exit)
+            const arrCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+            if (!this.map.inBounds(arrCell.cx, arrCell.cy)) {
+              entity.alive = false;
+              entity.mission = Mission.DIE;
+              this.unitsLeftMap++;
+              if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
+                this.civiliansEvacuated++;
+              }
+              if (entity.passengers && entity.passengers.length > 0) {
+                for (const p of entity.passengers) {
+                  p.alive = false;
+                  this.unitsLeftMap++;
+                  if (CIVILIAN_UNIT_TYPES.has(p.type)) {
+                    this.civiliansEvacuated++;
+                  }
+                }
+                entity.passengers = [];
+              }
+              return true;
+            }
             entity.moveTarget = null;
             if (entity.moveQueue.length > 0) {
               entity.moveTarget = entity.moveQueue.shift()!;
@@ -4626,6 +4675,12 @@ export class Game {
       }
 
       case 'returning': {
+        // Check for new orders — break out of return-to-base
+        if ((entity.mission === Mission.MOVE && entity.moveTarget) ||
+            (entity.mission === Mission.ATTACK && (entity.target?.alive || entity.targetStructure))) {
+          entity.aircraftState = 'flying';
+          return true;
+        }
         entity.animState = AnimState.WALK;
         // Find home pad
         const padIdx = this.findLandingPad(entity);
@@ -5263,7 +5318,8 @@ export class Game {
 
     // Precompute shared state once for all triggers (avoids O(N*M) recomputation)
     const structureTypes = new Set<string>();
-    const destroyedTriggerNames = new Set<string>();
+    // Start with persistent destroyed trigger names, then add currently-dead entities/structures
+    const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
     const houseAlive = new Map<number, boolean>();
     let playerFactories = 0;
     for (const s of this.structures) {

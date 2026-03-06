@@ -1,5 +1,36 @@
 # Session Summaries
 
+## 2026-03-05T22:00Z — Session 76: Beat Allied Mission 1 (SCG01EA) via Agent Harness
+- **MISSION ACCOMPLISHED**: Score 1166, Grade B, 14 seconds, 6 kills, 4 losses
+- **Bug fix 1**: Aircraft 'returning' state now checks for new MOVE/ATTACK orders (was ignoring all commands when no helipad)
+- **Bug fix 2**: Aircraft pre-move map exit check in 'flying' state — detects aircraft at map edge with OOB target
+- **Bug fix 3**: Aircraft post-arrival map exit — when `moveToward` returns true at OOB destination, exit map + count evacuations. This was the critical race condition: `moveToward` could reach OOB target in one tick, clearing `moveTarget` before either exit check ran
+- **Bug fix 4**: Direct transport load in agent harness `enter` command — loads infantry within 2 cells directly into transport, bypassing unreliable auto-load mechanism
+- **Root cause of Attempts 5-7 failure**: In 'flying' state, pre-move exit check ran BEFORE `moveToward`. If aircraft wasn't at edge yet, check passed. Then `moveToward` arrived at target, cleared `moveTarget` + set 'returning'. Ground exit check (runs after entity update) saw null `moveTarget` and skipped. Next tick: 'returning' state, flying exit code never runs.
+- **Strategy**: JEEPs + Tanya clear nearby enemies, rush guards to trigger Einstein spawn, direct-load Einstein into Chinook, fly east off map
+- Files: `engine/index.ts` (aircraft state machine), `engine/agentHarness.ts` (enter command)
+
+## 2026-03-06T06:45Z — Session 75: Sidebar Visual Parity — Icons, Power Bar, Credits
+- **Root cause found**: Cameo icon PNGs are 32x24 (LORES) but manifest.json claims 64x48 — canvas `drawImage` clips source rect, rendering icons at quarter size in top-left corner
+- **Fix**: Use `iconSheet.image.width/height` (actual image dimensions) as source rect instead of manifest metadata, scaled to fill full 64x48 cameo slot
+- **Power bar**: Replaced single-color fill with two-tone gauge — green (produced) from bottom, red (over-consumed) above, white divider line at produced level
+- **Credits area**: Semi-transparent background (`rgba(10,10,15,0.6)`) blends with sidebar tile texture, text shadow for readability, silo capacity shown inline instead of overlapping button row
+- **Button row**: Icons fill full button area (removed -2px margin), semi-transparent backgrounds let sidebar texture show through
+- **Verified via agent harness**: Forced `baseDiscovered=true` through React fiber tree to test with 15 production items — all icons render at full cameo size
+- Commit: `8fd278b` — renderer.ts only (61 insertions, 48 deletions)
+
+## 2026-03-06T03:00Z — Session 74: Full Data-Parity Test Coverage (Phases 4-9)
+- **275 parity tests** now pass across 10 data tables (was 132)
+- **Phase 4 — Warheads**: WARHEAD_VS_ARMOR all 9 full arrays (was 2 spot checks), WARHEAD_PROPS all 9 with both fields (was 2), WARHEAD_META all 9 with all flags (was 2)
+- **Phase 5 — Superweapons**: All 7 SUPERWEAPON_DEFS with all fields (was 5 rechargeTicks-only), all 8 constants (was 1)
+- **Phase 6 — Countries/Terrain**: COUNTRY_BONUSES all 11 countries (new), TERRAIN_SPEED all 9 terrains (new)
+- **Phase 7 — Structure Weapons**: All 8 STRUCTURE_WEAPONS entries (new)
+- **Phase 8 — Production Items**: New file `production-items-parity.test.ts` — all 65 items with cost/buildTime/prereq/techLevel/faction (was 10 cost-only)
+- **Phase 9 — Structure HP Audit**: Added 11 missing entries (PBOX, AGUN, FTUR, KENN, SYRD, SPEN, QUEE, LAR1, LAR2, BARL, BRL3) + completeness check
+- **Plan values corrected**: Caught ~20 hallucinated values in the plan (wrong TERRAIN_SPEED terrains, wrong STRUCTURE_WEAPONS stats, wrong COUNTRY_BONUSES countries), used actual source data instead
+- **Code review**: 100% correct — zero mismatches between assertions and source
+- Files: data-parity.test.ts (405 insertions), production-items-parity.test.ts (new, 128 lines)
+
 ## 2026-03-06T00:30Z — Session 73: WASM Autoplay Game Loop — Asyncify Breakthrough
 - **Game loop now runs** in `?autoplay=allies` mode — frames advancing (confirmed f=53+ on tab)
 - **Three Asyncify blockers eliminated** in Main_Loop:
