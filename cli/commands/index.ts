@@ -51,6 +51,9 @@ import { registerReportsCommands } from './reports.js';
 import { registerRoleCommands } from './roles.js';
 import { registerAICommands } from './ai.js';
 import { registerComplianceCommands } from './compliance.js';
+import { registerJiraCommands, registerLinearCommands } from './engineering.js';
+import { registerCrmCommands } from './crm.js';
+import { registerCustomObjectCommands } from './custom-objects.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -105,4 +108,8 @@ export function registerCommands(program: Command): void {
   registerRoleCommands(program);
   registerAICommands(program);
   registerComplianceCommands(program);
+  registerJiraCommands(program);
+  registerLinearCommands(program);
+  registerCrmCommands(program);
+  registerCustomObjectCommands(program);
 }

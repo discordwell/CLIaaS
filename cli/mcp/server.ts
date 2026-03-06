@@ -32,6 +32,9 @@ import { registerReportTools } from './tools/reports.js';
 import { registerRoleTools } from './tools/roles.js';
 import { registerAITools } from './tools/ai.js';
 import { registerComplianceTools } from './tools/compliance.js';
+import { registerEngineeringTools } from './tools/engineering.js';
+import { registerCrmTools } from './tools/crm.js';
+import { registerCustomObjectTools } from './tools/custom-objects.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -70,6 +73,9 @@ registerReportTools(server);
 registerRoleTools(server);
 registerAITools(server);
 registerComplianceTools(server);
+registerEngineeringTools(server);
+registerCrmTools(server);
+registerCustomObjectTools(server);
 
 // Register resources and prompts
 registerResources(server);

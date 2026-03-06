@@ -71,6 +71,20 @@ const ALL_WRITE_TOOLS = [
   'pii_redact',
   'pii_rules',
   'retroactive_scan',
+  'campaign_step_add',
+  'campaign_step_update',
+  'campaign_step_remove',
+  'campaign_activate',
+  'campaign_pause',
+  'campaign_resume',
+  'tour_create',
+  'tour_update',
+  'tour_step_add',
+  'tour_step_update',
+  'tour_toggle',
+  'message_create',
+  'message_update',
+  'message_toggle',
 ];
 
 export function loadScopes(): MCPScopeConfig {

@@ -186,9 +186,13 @@ export function getReviews(filters?: {
   ticketId?: string;
   scorecardId?: string;
   status?: string;
+  workspaceId?: string;
 }): QAReview[] {
   ensureDefaults();
   let result = [...reviews];
+  if (filters?.workspaceId) {
+    result = result.filter((r) => r.workspaceId === filters.workspaceId);
+  }
   if (filters?.ticketId) {
     result = result.filter((r) => r.ticketId === filters.ticketId);
   }

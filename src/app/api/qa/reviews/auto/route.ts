@@ -2,15 +2,14 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { getScorecards, createReview } from '@/lib/qa/qa-store';
+import { runAutoQA } from '@/lib/ai/autoqa';
+import { loadTickets, loadMessages } from '@/lib/data';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/qa/reviews/auto — trigger an auto-review for a ticket
- *
- * Uses the first enabled scorecard and generates random scores for demo purposes.
- * In production, this would call an LLM to evaluate the conversation.
+ * POST /api/qa/reviews/auto — trigger AutoQA on a specific ticket.
+ * Uses real LLM/heuristic scoring instead of random scores.
  */
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -22,50 +21,41 @@ export async function POST(request: NextRequest) {
   }>(request);
   if ('error' in parsed) return parsed.error;
 
-  const { ticketId, conversationId } = parsed.data;
+  const { ticketId } = parsed.data;
 
-  if (!ticketId && !conversationId) {
+  if (!ticketId) {
     return NextResponse.json(
-      { error: 'Either ticketId or conversationId is required' },
+      { error: 'ticketId is required' },
       { status: 400 },
     );
   }
 
-  const scorecards = getScorecards();
-  const activeScorecard = scorecards.find((s) => s.enabled);
-
-  if (!activeScorecard) {
-    return NextResponse.json(
-      { error: 'No active scorecard found. Create and enable a scorecard first.' },
-      { status: 400 },
-    );
+  const tickets = await loadTickets();
+  const ticket = tickets.find(t => t.id === ticketId);
+  if (!ticket) {
+    return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
   }
 
-  // Generate scores (demo: random within maxScore range)
-  const scores: Record<string, number> = {};
-  let maxPossibleScore = 0;
+  const messages = await loadMessages(ticketId);
+  const agentReplies = messages.filter(m => m.type === 'reply' && m.author !== ticket.requester);
+  const responseText = agentReplies.length > 0
+    ? agentReplies[agentReplies.length - 1].body
+    : messages.length > 0 ? messages[messages.length - 1].body : '';
 
-  for (const criterion of activeScorecard.criteria) {
-    const score = Math.floor(Math.random() * criterion.maxScore) + 1;
-    scores[criterion.name] = score;
-    maxPossibleScore += criterion.maxScore;
-  }
-
-  const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
-
-  const review = createReview({
+  const result = await runAutoQA(
     ticketId,
-    conversationId,
-    scorecardId: activeScorecard.id,
-    reviewerId: 'auto',
-    reviewType: 'auto',
-    scores,
-    totalScore,
-    maxPossibleScore,
-    notes: 'Auto-generated review based on conversation analysis.',
-    status: 'completed',
-    workspaceId: auth.user.workspaceId,
-  });
+    auth.user.workspaceId ?? 'default',
+    { ticket, messages, responseText },
+    { skipSampling: true },
+  );
 
-  return NextResponse.json({ review }, { status: 201 });
+  if (result.skipped) {
+    return NextResponse.json({ error: result.skipReason }, { status: 400 });
+  }
+
+  return NextResponse.json({
+    review: result.review,
+    flags: result.flagsCreated,
+    csatPrediction: result.csatPrediction,
+  }, { status: 201 });
 }

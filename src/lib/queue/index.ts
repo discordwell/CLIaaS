@@ -1,9 +1,9 @@
 /** Queue module barrel export */
 
 export { getRedis, isRedisAvailable, closeRedis, getRedisConnectionOpts } from './connection';
-export { getQueue, closeAllQueues, getWebhookQueue, getAutomationQueue, getAIResolutionQueue, getEmailQueue, getReportExportQueue } from './queues';
-export { enqueueWebhookDelivery, enqueueEmailSend, enqueueAIResolution, enqueueAutomationTick, enqueueReportExport } from './dispatch';
+export { getQueue, closeAllQueues, getWebhookQueue, getAutomationQueue, getAIResolutionQueue, getEmailQueue, getReportExportQueue, getAutoQAQueue } from './queues';
+export { enqueueWebhookDelivery, enqueueEmailSend, enqueueAIResolution, enqueueAutomationTick, enqueueReportExport, enqueueAutoQA } from './dispatch';
 export { getQueueStats, getAllQueueStats } from './stats';
 export { QUEUE_NAMES } from './types';
-export type { WebhookDeliveryJob, EmailSendJob, AIResolutionJob, AutomationSchedulerJob, ReportExportJob, QueueName } from './types';
+export type { WebhookDeliveryJob, EmailSendJob, AIResolutionJob, AutomationSchedulerJob, ReportExportJob, AutoQAScoringJob, QueueName } from './types';
 export type { QueueStats } from './stats';
