@@ -146,8 +146,8 @@ describe('Community Forums', () => {
     forums = await import('../lib/forums/forum-store');
   });
 
-  it('getCategories returns demo categories', () => {
-    const categories = forums.getCategories();
+  it('getCategories returns demo categories', async () => {
+    const categories = await forums.getCategories();
     expect(categories.length).toBeGreaterThan(0);
     expect(categories[0]).toHaveProperty('name');
     expect(categories[0]).toHaveProperty('slug');
@@ -163,8 +163,8 @@ describe('Community Forums', () => {
     expect(cat.slug).toBe('bug-reports');
   });
 
-  it('createThread creates thread with correct fields', () => {
-    const categories = forums.getCategories();
+  it('createThread creates thread with correct fields', async () => {
+    const categories = await forums.getCategories();
     const thread = forums.createThread({
       categoryId: categories[0].id,
       title: 'Test Thread',
@@ -178,8 +178,8 @@ describe('Community Forums', () => {
     expect(thread.replyCount).toBe(0);
   });
 
-  it('createReply increments thread replyCount', () => {
-    const threads = forums.getThreads();
+  it('createReply increments thread replyCount', async () => {
+    const threads = await forums.getThreads();
     const threadId = threads[0].id;
     const initialCount = threads[0].replyCount;
 
@@ -192,16 +192,16 @@ describe('Community Forums', () => {
     expect(updated!.replyCount).toBe(initialCount + 1);
   });
 
-  it('moderateThread closes thread', () => {
-    const threads = forums.getThreads();
+  it('moderateThread closes thread', async () => {
+    const threads = await forums.getThreads();
     const threadId = threads[0].id;
     forums.moderateThread(threadId, 'close');
     const updated = forums.getThread(threadId);
     expect(updated!.status).toBe('closed');
   });
 
-  it('convertToTicket sets convertedTicketId', () => {
-    const threads = forums.getThreads();
+  it('convertToTicket sets convertedTicketId', async () => {
+    const threads = await forums.getThreads();
     const threadId = threads[0].id;
     forums.convertToTicket(threadId, 'tkt-converted-1');
     const updated = forums.getThread(threadId);

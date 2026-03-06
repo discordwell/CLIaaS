@@ -6,6 +6,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { withRls } from '../store-helpers';
 
 // ---- Types ----
 
@@ -206,7 +207,22 @@ function ensureDefaults(): void {
 
 // ---- Category CRUD ----
 
-export function getCategories(): ForumCategory[] {
+export async function getCategories(workspaceId?: string): Promise<ForumCategory[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.forumCategories);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        description: r.description ?? undefined,
+        slug: r.slug,
+        position: r.position,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    });
+    if (result !== null) return result.sort((a, b) => a.position - b.position);
+  }
   ensureDefaults();
   return [...categories].sort((a, b) => a.position - b.position);
 }
@@ -260,7 +276,37 @@ export function deleteCategory(id: string): boolean {
 
 // ---- Thread CRUD ----
 
-export function getThreads(categoryId?: string): ForumThread[] {
+export async function getThreads(categoryId?: string, workspaceId?: string): Promise<ForumThread[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.forumThreads);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        categoryId: r.categoryId,
+        customerId: r.customerId ?? undefined,
+        title: r.title,
+        body: r.body,
+        status: r.status as ForumThread['status'],
+        isPinned: r.isPinned,
+        viewCount: r.viewCount,
+        replyCount: r.replyCount,
+        lastActivityAt: r.lastActivityAt.toISOString(),
+        convertedTicketId: r.convertedTicketId ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) {
+      let filtered = result;
+      if (categoryId) filtered = filtered.filter((t) => t.categoryId === categoryId);
+      return filtered.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+      });
+    }
+  }
   ensureDefaults();
   let result = [...threads];
   if (categoryId) {
@@ -343,7 +389,26 @@ export function convertToTicket(
 
 // ---- Reply CRUD ----
 
-export function getReplies(threadId: string): ForumReply[] {
+export async function getReplies(threadId: string, workspaceId?: string): Promise<ForumReply[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.forumReplies).where(eq(schema.forumReplies.threadId, threadId));
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        threadId: r.threadId,
+        customerId: r.customerId ?? undefined,
+        body: r.body,
+        isBestAnswer: r.isBestAnswer,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) {
+      return result.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    }
+  }
   ensureDefaults();
   return replies
     .filter((r) => r.threadId === threadId)

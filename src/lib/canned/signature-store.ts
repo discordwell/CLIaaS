@@ -3,6 +3,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { withRls } from '../store-helpers';
 
 export interface AgentSignature {
   id: string;
@@ -63,9 +64,30 @@ function ensureDefaults(): void {
 
 // ---- Public API ----
 
-export function getSignatures(filters?: {
+export async function getSignatures(filters?: {
   userId?: string;
-}): AgentSignature[] {
+}, workspaceId?: string): Promise<AgentSignature[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.agentSignatures);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        userId: r.userId ?? undefined,
+        name: r.name,
+        bodyHtml: r.bodyHtml,
+        bodyText: r.bodyText,
+        isDefault: r.isDefault,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) {
+      let filtered = result;
+      if (filters?.userId) filtered = filtered.filter(s => !s.userId || s.userId === filters.userId);
+      return filtered.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+    }
+  }
   ensureDefaults();
   let result = [...signatures];
   if (filters?.userId) {

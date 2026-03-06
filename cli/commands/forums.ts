@@ -12,8 +12,8 @@ export function registerForumCommands(program: Command): void {
   forums
     .command('list')
     .description('List forum categories with thread counts')
-    .action(() => {
-      const categories = getCategories();
+    .action(async () => {
+      const categories = await getCategories();
 
       if (categories.length === 0) {
         if (isJsonMode()) {
@@ -24,8 +24,8 @@ export function registerForumCommands(program: Command): void {
         return;
       }
 
-      const data = categories.map((cat) => {
-        const threads = getThreads(cat.id);
+      const data = await Promise.all(categories.map(async (cat) => {
+        const threads = await getThreads(cat.id);
         return {
           id: cat.id,
           name: cat.name,
@@ -33,7 +33,7 @@ export function registerForumCommands(program: Command): void {
           description: cat.description,
           threadCount: threads.length,
         };
-      });
+      }));
 
       output(
         { categories: data, total: data.length },
@@ -58,8 +58,8 @@ export function registerForumCommands(program: Command): void {
   forums
     .command('categories')
     .description('List just forum categories')
-    .action(() => {
-      const categories = getCategories();
+    .action(async () => {
+      const categories = await getCategories();
 
       if (categories.length === 0) {
         if (isJsonMode()) {

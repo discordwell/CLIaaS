@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ cannedResponses: rows });
     }
 
-    const responses = getCannedResponses({ category, scope, search });
+    const responses = await getCannedResponses({ category, scope, search });
     return NextResponse.json({ cannedResponses: responses });
   } catch (err) {
     return NextResponse.json(

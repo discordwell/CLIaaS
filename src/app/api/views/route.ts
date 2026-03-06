@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 
     // Fallback to in-memory store
     const { listViews } = await import('@/lib/views/store');
-    return NextResponse.json({ views: listViews(authResult.user.id) });
+    return NextResponse.json({ views: await listViews(authResult.user.id) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to load views' },

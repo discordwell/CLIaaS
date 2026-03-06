@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     }
 
     // JSONL fallback
-    const macros = getMacros({
+    const macros = await getMacros({
       scope: scope ?? undefined,
       enabled: enabled !== null ? enabled !== 'false' : undefined,
     });

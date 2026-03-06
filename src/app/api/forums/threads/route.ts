@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const categoryId = request.nextUrl.searchParams.get('categoryId') ?? undefined;
-  const threads = getThreads(categoryId);
+  const threads = await getThreads(categoryId);
 
   return NextResponse.json({ threads });
 }

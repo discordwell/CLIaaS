@@ -3,6 +3,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { withRls } from '../store-helpers';
 
 export type MacroActionType =
   | 'set_status'
@@ -111,11 +112,37 @@ function ensureDefaults(): void {
 
 // ---- Public API ----
 
-export function getMacros(filters?: {
+export async function getMacros(filters?: {
   scope?: 'personal' | 'shared';
   enabled?: boolean;
   createdBy?: string;
-}): Macro[] {
+}, workspaceId?: string): Promise<Macro[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.nativeMacros);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        createdBy: r.createdBy ?? undefined,
+        name: r.name,
+        description: r.description ?? undefined,
+        actions: r.actions as MacroAction[],
+        scope: r.scope as 'personal' | 'shared',
+        enabled: r.enabled,
+        usageCount: r.usageCount,
+        position: r.position ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) {
+      let filtered = result;
+      if (filters?.scope) filtered = filtered.filter(m => m.scope === filters.scope);
+      if (filters?.enabled !== undefined) filtered = filtered.filter(m => m.enabled === filters.enabled);
+      if (filters?.createdBy) filtered = filtered.filter(m => m.scope === 'shared' || m.createdBy === filters.createdBy);
+      return filtered.sort((a, b) => (a.position ?? 999) - (b.position ?? 999));
+    }
+  }
   ensureDefaults();
   let result = [...macros];
   if (filters?.scope) {

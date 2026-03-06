@@ -22,10 +22,10 @@ export async function GET(request: NextRequest) {
       { status: 429, headers: getRateLimitHeaders(rateResult, PORTAL_RATE_LIMIT) },
     );
   }
-  const categories = getCategories();
+  const categories = await getCategories();
 
-  const result = categories.map((cat) => {
-    const threads = getThreads(cat.id);
+  const result = await Promise.all(categories.map(async (cat) => {
+    const threads = await getThreads(cat.id);
     return {
       id: cat.id,
       name: cat.name,
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       slug: cat.slug,
       threadCount: threads.length,
     };
-  });
+  }));
 
   return NextResponse.json({ categories: result });
 }

@@ -4,6 +4,7 @@
  */
 
 import type { View, ViewQuery } from './types';
+import { withRls } from '../store-helpers';
 
 const SYSTEM_VIEWS: View[] = [
   {
@@ -73,7 +74,29 @@ const SYSTEM_VIEWS: View[] = [
 
 let views: View[] = [...SYSTEM_VIEWS];
 
-export function listViews(userId?: string): View[] {
+export async function listViews(userId?: string, workspaceId?: string): Promise<View[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.views);
+      return rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description ?? undefined,
+        query: r.query as ViewQuery,
+        viewType: r.viewType as View['viewType'],
+        userId: r.userId ?? undefined,
+        active: r.active,
+        position: r.position,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) {
+      return result.filter(
+        (v) => v.active && (v.viewType !== 'personal' || v.userId === userId),
+      );
+    }
+  }
   return views.filter(
     (v) => v.active && (v.viewType !== 'personal' || v.userId === userId),
   );

@@ -30,7 +30,7 @@ export function registerViewTools(server: McpServer): void {
         }
 
         const { listViews } = await import('@/lib/views/store.js');
-        const all = listViews();
+        const all = await listViews();
         return textResult({
           count: all.length,
           views: all.map(v => ({ id: v.id, name: v.name, viewType: v.viewType, description: v.description })),

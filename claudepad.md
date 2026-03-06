@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-03-06T23:35Z — Session 112: Plan 19 — PostgreSQL RLS Big-Bang Workspace Scoping
+- **Phase 1**: `withRls()` helper added to `src/lib/store-helpers.ts` — transaction-scoped `SET LOCAL app.current_workspace_id`, null fallback for JSONL mode
+- **Phase 2**: Migration `0026_rls_big_bang.sql` — 135 CREATE POLICY, 107 ENABLE RLS, 143 FORCE RLS statements
+  - 2a: Fixed 16 broken policies (wrong `app.workspace_id` → `app.current_workspace_id`)
+  - 2b: Fixed 8 policies missing `true` default param
+  - 2c: Added FORCE RLS to all 35 tables missing it
+  - 2d: Added RLS to 70+ tables with zero policies
+  - 2e: Denormalized `workspace_id` into 8 child tables (chatbot_versions/analytics, schedule_shifts, holiday_entries, dashboard_widgets, report_cache, qa_calibration_entries, custom_role_permissions)
+  - 2f: Updated Drizzle schema.ts with new workspaceId columns + indexes
+- **Phase 3**: Store updates — `withRls()` wired into chatbot (store/versions/analytics), workflow, routing, wfm, plugins, ai, automation, sync, canned, macro, signature, views, forums, qa, campaigns, customers, tours, messages, integrations, predictions stores
+- **Phase 6**: Tests — 22 new tests (rls-withRls + cross-workspace-isolation), all pass. 4659/4660 total (1 pre-existing Easter Egg FP)
+- **Build**: Zero type errors, migration verified
+
 ## 2026-03-08T18:25Z — Session 111: 20-Plan Completeness Audit & Final Gap Closure
 - **Full audit**: Analyzed all 20 feature plans with 6 sub-agents (3 verification + 3 spot-checks)
 - **Result**: All 20 plans verified COMPLETE with production-ready code (no stubs)

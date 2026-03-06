@@ -28,7 +28,7 @@ export function registerForumTools(server: McpServer): void {
     async ({ categoryId }) => {
       try {
         if (categoryId) {
-          const threads = getThreads(categoryId);
+          const threads = await getThreads(categoryId);
           return textResult({
             categoryId,
             threadCount: threads.length,
@@ -44,11 +44,11 @@ export function registerForumTools(server: McpServer): void {
           });
         }
 
-        const categories = getCategories();
+        const categories = await getCategories();
         return textResult({
           categoryCount: categories.length,
-          categories: categories.map((c) => {
-            const threads = getThreads(c.id);
+          categories: await Promise.all(categories.map(async (c) => {
+            const threads = await getThreads(c.id);
             return {
               id: c.id,
               name: c.name,
@@ -56,7 +56,7 @@ export function registerForumTools(server: McpServer): void {
               description: c.description,
               threadCount: threads.length,
             };
-          }),
+          })),
         });
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to list forums');

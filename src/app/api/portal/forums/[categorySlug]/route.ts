@@ -27,14 +27,14 @@ export async function GET(
 
   const { categorySlug } = await params;
 
-  const categories = getCategories();
+  const categories = await getCategories();
   const category = categories.find((c) => c.slug === categorySlug);
 
   if (!category) {
     return NextResponse.json({ error: 'Category not found' }, { status: 404 });
   }
 
-  const threads = getThreads(category.id);
+  const threads = await getThreads(category.id);
 
   return NextResponse.json({
     category: {

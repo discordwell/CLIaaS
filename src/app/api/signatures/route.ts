@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ signatures: rows });
     }
 
-    const sigs = getSignatures({ userId });
+    const sigs = await getSignatures({ userId });
     return NextResponse.json({ signatures: sigs });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });

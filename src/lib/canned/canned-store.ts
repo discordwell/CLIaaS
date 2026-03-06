@@ -102,12 +102,41 @@ function ensureDefaults(): void {
 
 // ---- Public API ----
 
-export function getCannedResponses(filters?: {
+export async function getCannedResponses(filters?: {
   category?: string;
   scope?: 'personal' | 'shared';
   search?: string;
   createdBy?: string;
-}): CannedResponse[] {
+}, workspaceId?: string): Promise<CannedResponse[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.cannedResponses);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        createdBy: r.createdBy ?? undefined,
+        title: r.title,
+        body: r.body,
+        category: r.category ?? undefined,
+        scope: r.scope as 'personal' | 'shared',
+        shortcut: r.shortcut ?? undefined,
+        usageCount: r.usageCount,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) {
+      let filtered = result;
+      if (filters?.category) filtered = filtered.filter(r => r.category === filters.category);
+      if (filters?.scope) filtered = filtered.filter(r => r.scope === filters.scope);
+      if (filters?.createdBy) filtered = filtered.filter(r => r.scope === 'shared' || r.createdBy === filters.createdBy);
+      if (filters?.search) {
+        const q = filters.search.toLowerCase();
+        filtered = filtered.filter(r => r.title.toLowerCase().includes(q) || r.body.toLowerCase().includes(q));
+      }
+      return filtered.sort((a, b) => b.usageCount - a.usageCount);
+    }
+  }
   ensureDefaults();
   let result = [...responses];
   if (filters?.category) {

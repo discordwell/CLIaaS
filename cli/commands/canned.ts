@@ -38,7 +38,7 @@ export function registerCannedCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (opts: { category?: string; scope?: string; search?: string; json?: boolean }) => {
       try {
-        const responses = getCannedResponses({
+        const responses = await getCannedResponses({
           category: opts.category,
           scope: opts.scope as 'personal' | 'shared' | undefined,
           search: opts.search,
@@ -176,7 +176,7 @@ export function registerCannedCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (opts: { scope?: string; json?: boolean }) => {
       try {
-        const macros = getMacros({ scope: opts.scope as 'personal' | 'shared' | undefined });
+        const macros = await getMacros({ scope: opts.scope as 'personal' | 'shared' | undefined });
         if (opts.json) {
           console.log(JSON.stringify({ macros }, null, 2));
           return;
@@ -302,7 +302,7 @@ export function registerCannedCommands(program: Command): void {
     .option('--user <userId>', 'Filter by user')
     .option('--json', 'Output as JSON')
     .action(async (opts: { user?: string; json?: boolean }) => {
-      const sigs = getSignatures({ userId: opts.user });
+      const sigs = await getSignatures({ userId: opts.user });
       if (opts.json) {
         console.log(JSON.stringify({ signatures: sigs }, null, 2));
         return;

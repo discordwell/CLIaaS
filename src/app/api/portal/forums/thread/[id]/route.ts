@@ -32,7 +32,7 @@ export async function GET(
     return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
   }
 
-  const replies = getReplies(id);
+  const replies = await getReplies(id);
 
   return NextResponse.json({
     thread: {

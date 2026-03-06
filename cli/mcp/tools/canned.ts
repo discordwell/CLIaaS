@@ -41,7 +41,7 @@ export function registerCannedTools(server: McpServer): void {
     },
     async ({ query, category, scope, limit }) => {
       try {
-        let responses = getCannedResponses({ search: query, category, scope });
+        let responses = await getCannedResponses({ search: query, category, scope });
         if (limit) responses = responses.slice(0, limit);
         return textResult({
           count: responses.length,
@@ -221,7 +221,7 @@ export function registerCannedTools(server: McpServer): void {
     },
     async ({ scope, enabled }) => {
       try {
-        const macros = getMacros({ scope, enabled });
+        const macros = await getMacros({ scope, enabled });
         return textResult({
           count: macros.length,
           macros: macros.map(m => ({

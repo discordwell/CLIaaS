@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const auth = await requirePerm(request, 'forums:view');
   if ('error' in auth) return auth.error;
 
-  const categories = getCategories();
+  const categories = await getCategories();
   return NextResponse.json({ categories });
 }
 

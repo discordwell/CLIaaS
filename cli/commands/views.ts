@@ -27,7 +27,7 @@ export function registerViewCommands(program: Command): void {
           }
         } else {
           const { listViews } = await import('@/lib/views/store.js');
-          const all = listViews();
+          const all = await listViews();
           console.log(`\n  Views (${all.length}):\n`);
           for (const v of all) {
             console.log(`  [${v.viewType}] ${v.name} (${v.id.slice(0, 8)})`);

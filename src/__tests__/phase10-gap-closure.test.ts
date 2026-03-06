@@ -45,13 +45,13 @@ describe('10.1: View store personal scoping', () => {
     });
 
     // Agent A should see: system views + shared views + their own personal view
-    const agentAViews = listViews('agent-a');
+    const agentAViews = await listViews('agent-a');
     const personalForA = agentAViews.filter((v) => v.viewType === 'personal');
     expect(personalForA.length).toBe(1);
     expect(personalForA[0].name).toBe('Agent A View');
 
     // Agent B should see their own personal view, not Agent A's
-    const agentBViews = listViews('agent-b');
+    const agentBViews = await listViews('agent-b');
     const personalForB = agentBViews.filter((v) => v.viewType === 'personal');
     expect(personalForB.length).toBe(1);
     expect(personalForB[0].name).toBe('Agent B View');
@@ -61,14 +61,14 @@ describe('10.1: View store personal scoping', () => {
     expect(agentBViews.some((v) => v.name === 'Shared VIP View')).toBe(true);
 
     // No userId -> should not see personal views
-    const anonViews = listViews();
+    const anonViews = await listViews();
     const personalForAnon = anonViews.filter((v) => v.viewType === 'personal');
     expect(personalForAnon.length).toBe(0);
   });
 
   it('system views cannot be deleted or updated', async () => {
     const { listViews, deleteView, updateView } = await import('@/lib/views/store');
-    const systemView = listViews().find((v) => v.viewType === 'system');
+    const systemView = (await listViews()).find((v) => v.viewType === 'system');
     expect(systemView).toBeTruthy();
 
     const deleteResult = deleteView(systemView!.id);
