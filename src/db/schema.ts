@@ -1291,6 +1291,12 @@ export const chatbots = pgTable(
     flow: jsonb('flow').notNull(), // serialized ChatbotFlow node map + rootNodeId
     enabled: boolean('enabled').notNull().default(false),
     greeting: text('greeting'),
+    version: integer('version').notNull().default(1),
+    status: text('status').notNull().default('published'),
+    publishedFlow: jsonb('published_flow'),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    channels: jsonb('channels').default(sql`'["web"]'::jsonb`),
+    description: text('description'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -1298,6 +1304,66 @@ export const chatbots = pgTable(
     chatbotsWorkspaceEnabledIdx: index('chatbots_workspace_enabled_idx').on(
       table.workspaceId,
       table.enabled,
+    ),
+  }),
+);
+
+export const chatbotVersions = pgTable(
+  'chatbot_versions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    chatbotId: uuid('chatbot_id').notNull().references(() => chatbots.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    flow: jsonb('flow').notNull(),
+    summary: text('summary'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    chatbotVersionsChatbotIdx: index('chatbot_versions_chatbot_idx').on(
+      table.chatbotId,
+      table.version,
+    ),
+  }),
+);
+
+export const chatbotSessions = pgTable(
+  'chatbot_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    chatbotId: uuid('chatbot_id').notNull().references(() => chatbots.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    chatSessionId: text('chat_session_id'),
+    state: jsonb('state').notNull(),
+    channel: text('channel').default('web'),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    outcome: text('outcome'),
+  },
+  table => ({
+    chatbotSessionsChatbotIdx: index('chatbot_sessions_chatbot_idx').on(
+      table.chatbotId,
+      table.startedAt,
+    ),
+  }),
+);
+
+export const chatbotAnalytics = pgTable(
+  'chatbot_analytics',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    chatbotId: uuid('chatbot_id').notNull().references(() => chatbots.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id').notNull(),
+    date: date('date').notNull(),
+    entries: integer('entries').notNull().default(0),
+    exits: integer('exits').notNull().default(0),
+    dropOffs: integer('drop_offs').notNull().default(0),
+    avgTimeSeconds: real('avg_time_seconds'),
+  },
+  table => ({
+    chatbotAnalyticsChatbotDateIdx: index('chatbot_analytics_chatbot_date_idx').on(
+      table.chatbotId,
+      table.date,
     ),
   }),
 );
@@ -3204,5 +3270,58 @@ export const inAppMessageImpressions = pgTable(
   table => ({
     inAppMsgImpressionsMsgCustIdx: index('in_app_msg_impressions_msg_cust_idx').on(table.messageId, table.customerId),
     inAppMsgImpressionsCustIdx: index('in_app_msg_impressions_cust_idx').on(table.customerId),
+  }),
+);
+
+// ── Gap Closure (0025) ────────────────────────────────────────
+
+export const aiProcedures = pgTable('ai_procedures', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+  name: text('name').notNull(),
+  description: text('description'),
+  steps: jsonb('steps').notNull().default([]),
+  triggerTopics: text('trigger_topics').array().default([]),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const ruleVersions = pgTable(
+  'rule_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ruleId: uuid('rule_id').notNull().references(() => rules.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    versionNumber: integer('version_number').notNull(),
+    name: text('name').notNull(),
+    conditions: jsonb('conditions').notNull().default({}),
+    actions: jsonb('actions').notNull().default([]),
+    description: text('description'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    ruleVersionUniqueIdx: uniqueIndex('rule_versions_rule_version_idx').on(table.ruleId, table.versionNumber),
+  }),
+);
+
+export const syncHealth = pgTable(
+  'sync_health',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    connector: text('connector').notNull(),
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    cursorState: jsonb('cursor_state').default({}),
+    recordsSynced: integer('records_synced').default(0),
+    status: text('status').notNull().default('idle'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    syncHealthUniqueIdx: uniqueIndex('sync_health_workspace_connector_idx').on(table.workspaceId, table.connector),
   }),
 );

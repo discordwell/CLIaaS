@@ -8,19 +8,21 @@
 
 | Metric | Value |
 |--------|-------|
-| Pages | 41 (Next.js App Router) |
-| API Routes | 176 |
-| Components | 15 shared React components |
-| Library modules | 71 (`src/lib/`) |
-| CLI files | 81 (`cli/`) |
-| CLI commands | 40 registered command groups |
+| Pages | 43 (Next.js App Router) |
+| API Routes | 191 |
+| Components | 18 shared React components |
+| Library modules | 78 (`src/lib/`) |
+| CLI files | 84 (`cli/`) |
+| CLI commands | 44 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 91 (across 18 modules) |
+| Engineering integrations | 2 (Jira Cloud, Linear) |
+| CRM integrations | 2 (Salesforce, HubSpot) |
+| MCP tools | 110 (across 21 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 76 (Drizzle/PostgreSQL, RLS-enabled) |
-| Tests | 91 files, ~7,700 LOC |
-| Source LOC | ~57,000 (excl. Easter Egg + tests) |
+| DB tables | 83 (Drizzle/PostgreSQL, RLS-enabled) |
+| Tests | 92 files, ~8,000 LOC |
+| Source LOC | ~61,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
 
 ---
@@ -866,3 +868,73 @@ Automated PII detection with regex-based scanning (10 PII types), sensitivity ru
 ### UI (`/compliance`)
 - 8-tab dashboard: Overview, PII Detections, Redaction Log, Sensitivity Rules, Retention, GDPR, HIPAA, Access Log
 - 6 reusable components: PiiDetectionTable, PiiRedactionBadge, MaskedField, PiiScanProgress, HipaaChecklist, SensitivityRuleEditor
+
+## Integrations: Engineering, CRM & Custom Objects (Plan 20)
+
+### Overview
+Deep bidirectional integrations with engineering tools (Jira Cloud, Linear), CRM systems (Salesforce, HubSpot), and a user-definable custom objects engine. All features are tier-agnostic (available on all plans) and work with both PostgreSQL and JSONL fallback stores.
+
+### DB Schema (Migration 0023)
+- **7 new tables**: `integration_credentials`, `ticket_external_links`, `external_link_comments`, `crm_links`, `custom_object_types`, `custom_object_records`, `custom_object_relationships`
+- All tables have RLS policies for workspace isolation
+- JSONL fallback stores mirror all 7 tables for BYOC/demo mode
+
+### Engineering Integrations (Jira & Linear)
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| Jira Client | `src/lib/integrations/jira-client.ts` | REST v3 client — CRUD issues, transitions, comments, search |
+| Linear Client | `src/lib/integrations/linear-client.ts` | GraphQL client — CRUD issues, state transitions, comments, teams |
+| Engineering Sync | `src/lib/integrations/engineering-sync.ts` | Bidirectional sync: create/link issues, push comments/status, pull updates |
+| Status Mapper | `src/lib/integrations/status-mapper.ts` | Bidirectional status mapping (Jira/Linear/GitHub ↔ CLIaaS) |
+| Webhook Receivers | `src/app/api/webhooks/jira/`, `linear/` | Inbound webhook processing for real-time sync |
+
+**Sync Flow**: Ticket → Create/Link Issue → Bidirectional status & comment sync → Webhook-driven inbound updates
+
+### CRM Integrations (Salesforce & HubSpot)
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| Salesforce Client | `src/lib/integrations/salesforce-client.ts` | REST API — contacts, accounts, opportunities, SOQL, search |
+| HubSpot Client | `src/lib/integrations/hubspot-crm-client.ts` | CRM v3 API — contacts, companies, deals, associations, search |
+| CRM Sync Engine | `src/lib/integrations/crm-sync.ts` | Email-matched sync, deal/opportunity enrichment |
+
+**Sync Flow**: Customer email → Match CRM contact → Pull account/company + deals → Cache in crm_links → Display on customer detail
+
+### Custom Objects Engine
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| Custom Objects Store | `src/lib/custom-objects.ts` | Full CRUD for types, records, relationships with schema validation |
+
+- **Type definitions**: Field schema with 10 types (text, number, boolean, date, select, multiselect, url, email, currency, relation)
+- **Validation**: Required fields, type checking, select option validation
+- **Relationships**: Many-to-many between any entity types (tickets, customers, custom objects)
+- **Cascade deletes**: Record deletion removes relationships; type deletion removes all records
+
+### API Routes (15 new)
+- Engineering config: GET/POST/DELETE `/api/integrations/engineering`
+- CRM config: GET/POST `/api/integrations/crm`
+- External links: CRUD `/api/tickets/[id]/external-links/[linkId]`, sync endpoint
+- CRM links: CRUD `/api/customers/[id]/crm-links/[linkId]`
+- Custom objects: CRUD `/api/custom-objects/types/[typeId]/records/[recordId]`, relationships
+- Webhooks: `/api/webhooks/jira`, `/api/webhooks/linear`
+
+### CLI Commands (4 new groups)
+- `cliaas jira` — configure, create, link, sync, status
+- `cliaas linear` — configure, create, link, sync, status
+- `cliaas crm` — configure, show, link, status
+- `cliaas objects` — types, create-type, records, create, show, update, delete, link
+
+### MCP Tools (19 new)
+- Engineering: `jira_create_issue`, `jira_link_issue`, `jira_sync`, `linear_create_issue`, `linear_link_issue`, `linear_sync`, `ticket_external_links`
+- CRM: `crm_customer_data`, `crm_link_record`, `crm_sync`, `crm_search`
+- Custom Objects: `custom_object_types`, `custom_object_create_type`, `custom_object_create`, `custom_object_search`, `custom_object_show`, `custom_object_update`, `custom_object_link`, `custom_object_relationships`
+
+### UI Components
+- `EngineeringLinksPanel` — ticket detail section for Jira/Linear issue management
+- `CrmPanel` — customer detail section showing CRM profiles and deals
+- `RelatedObjectsPanel` — reusable entity relationship viewer (tickets + customers)
+- `/custom-objects` — type management page with dynamic field schema builder
+- `/custom-objects/[typeKey]` — record CRUD with type-aware form generation
+- Integrations Hub "Engineering & CRM" tab — configure Jira/Linear/Salesforce/HubSpot

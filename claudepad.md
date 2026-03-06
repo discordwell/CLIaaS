@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-07T13:50Z — Session 104: Plan 20 — Integrations (Jira/Linear, CRM, Custom Objects)
+- **All 5 phases complete**: Foundation → Engineering → CRM → Custom Objects → Polish
+- **Phase 1**: Migration 0023 (7 tables + RLS), Drizzle schema, JSONL stores, feature gates, status mapper
+- **Phase 2**: Jira Cloud REST v3 client, Linear GraphQL client, engineering sync engine, webhook receivers, API routes, CLI commands, 7 MCP tools, `EngineeringLinksPanel` UI component
+- **Phase 3**: Salesforce REST client, HubSpot CRM v3 client, CRM sync engine, API routes, CLI commands, 4 MCP tools, `CrmPanel` UI component
+- **Phase 4**: Custom objects CRUD (types + records + relationships), schema validation (10 field types), API routes, CLI commands, 8 MCP tools, `/custom-objects` pages, `RelatedObjectsPanel`
+- **Phase 5**: 17 integration tests passing, "Engineering & CRM" tab in integrations hub, ARCHITECTURE.md updated, code review
+- **Key files**: `src/lib/integrations/` (7 modules), `src/lib/custom-objects.ts`, 15 API routes, 4 CLI command groups, 19 MCP tools, 5 UI components/pages
+- **Stats delta**: +15 API routes, +19 MCP tools, +7 DB tables, +4 CLI groups, +3 components, +2 pages
+
 ## 2026-03-07T01:28Z — Session 103: PII Masking Code Review Fixes (HIGH+MEDIUM)
 - Fixed **4 HIGH** severity issues from code review:
   - **#5**: AES-256 key length validation — `getEncryptionKey()` now rejects non-32-byte keys

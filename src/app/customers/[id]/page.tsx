@@ -4,6 +4,8 @@ import {
   getCustomerActivities,
   getCustomerNotes,
 } from "@/lib/customers/customer-store";
+import CrmPanel from "@/components/CrmPanel";
+import RelatedObjectsPanel from "@/components/RelatedObjectsPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -204,6 +206,12 @@ export default async function CustomerDetailPage({
           </div>
         )}
       </section>
+
+      {/* CRM PROFILES */}
+      <CrmPanel customerId={customer.id} customerEmail={customer.email} />
+
+      {/* RELATED OBJECTS */}
+      <RelatedObjectsPanel entityType="customer" entityId={customer.id} />
     </main>
   );
 }

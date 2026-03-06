@@ -8,6 +8,8 @@ import SideConversationPanel from "@/components/SideConversationPanel";
 import TagPicker from "@/components/TagPicker";
 import MacroDropdown from "./_components/MacroDropdown";
 import ReRouteButton from "./_components/ReRouteButton";
+import EngineeringLinksPanel from "@/components/EngineeringLinksPanel";
+import RelatedObjectsPanel from "@/components/RelatedObjectsPanel";
 import { getRoutingLog } from "@/lib/routing/store";
 
 const priorityColor: Record<string, string> = {
@@ -157,6 +159,12 @@ export default async function TicketDetailPage({
 
       {/* SIDE CONVERSATIONS */}
       <SideConversationPanel ticketId={ticket.id} />
+
+      {/* ENGINEERING LINKS */}
+      <EngineeringLinksPanel ticketId={ticket.id} ticketSubject={ticket.subject} />
+
+      {/* RELATED OBJECTS */}
+      <RelatedObjectsPanel entityType="ticket" entityId={ticket.id} />
 
       {/* ROUTING */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-6">

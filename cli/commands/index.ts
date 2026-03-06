@@ -36,6 +36,8 @@ import { registerTimeCommands } from './time.js';
 import { registerForumCommands } from './forums.js';
 import { registerQACommands } from './qa.js';
 import { registerCampaignCommands } from './campaigns.js';
+import { registerTourCommands } from './tours.js';
+import { registerMessageCommands } from './messages.js';
 import { registerPluginCommands } from './plugins.js';
 import { registerInitCommand } from './init.js';
 import { registerSetupCommand } from './setup.js';
@@ -54,6 +56,7 @@ import { registerComplianceCommands } from './compliance.js';
 import { registerJiraCommands, registerLinearCommands } from './engineering.js';
 import { registerCrmCommands } from './crm.js';
 import { registerCustomObjectCommands } from './custom-objects.js';
+import { registerChatbotCommands } from './chatbot.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -93,6 +96,8 @@ export function registerCommands(program: Command): void {
   registerForumCommands(program);
   registerQACommands(program);
   registerCampaignCommands(program);
+  registerTourCommands(program);
+  registerMessageCommands(program);
   registerPluginCommands(program);
   registerInitCommand(program);
   registerSetupCommand(program);
@@ -112,4 +117,5 @@ export function registerCommands(program: Command): void {
   registerLinearCommands(program);
   registerCrmCommands(program);
   registerCustomObjectCommands(program);
+  registerChatbotCommands(program);
 }

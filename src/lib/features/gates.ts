@@ -42,7 +42,8 @@ export type Feature =
   | 'hipaa_compliance'
   | 'engineering_integrations'
   | 'crm_integrations'
-  | 'custom_objects';
+  | 'custom_objects'
+  | 'chatbot_builder';
 
 /** All tiers (including legacy aliases). */
 export const ALL_TIERS: TierLevel[] = [
@@ -81,6 +82,7 @@ export const FEATURE_MATRIX: Record<Feature, TierLevel[]> = {
   engineering_integrations: [...ALL_TIERS],
   crm_integrations:         [...ALL_TIERS],
   custom_objects:            [...ALL_TIERS],
+  chatbot_builder:           [...ALL_TIERS],
 };
 
 /** Check whether a specific feature is enabled for a given tier. */
@@ -138,6 +140,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   engineering_integrations: 'Jira/Linear Integration',
   crm_integrations:         'CRM Sync (Salesforce/HubSpot)',
   custom_objects:            'Custom Objects',
+  chatbot_builder:           'Visual Chatbot Builder',
 };
 
 /** Human-readable tier labels. */

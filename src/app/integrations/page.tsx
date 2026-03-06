@@ -73,7 +73,17 @@ const statusColors: Record<string, string> = {
   pending: "bg-amber-400 text-black",
 };
 
-type TabKey = "webhooks" | "slack-teams" | "plugins" | "api";
+interface EngineeringConfig {
+  jira: { configured: boolean; baseUrl: string | null; email: string | null };
+  linear: { configured: boolean };
+}
+
+interface CrmConfig {
+  salesforce: { configured: boolean };
+  hubspot: { configured: boolean };
+}
+
+type TabKey = "webhooks" | "slack-teams" | "plugins" | "api" | "engineering-crm";
 
 export default function IntegrationsPage() {
   const [tab, setTab] = useState<TabKey>("webhooks");
@@ -104,6 +114,19 @@ export default function IntegrationsPage() {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [pluginLoading, setPluginLoading] = useState(true);
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
+
+  // Engineering & CRM state
+  const [engConfig, setEngConfig] = useState<EngineeringConfig | null>(null);
+  const [crmConfig, setCrmConfig] = useState<CrmConfig | null>(null);
+  const [engCrmLoading, setEngCrmLoading] = useState(true);
+  const [showEngForm, setShowEngForm] = useState<"jira" | "linear" | null>(null);
+  const [showCrmForm, setShowCrmForm] = useState<"salesforce" | "hubspot" | null>(null);
+  const [engForm, setEngForm] = useState({ baseUrl: "", email: "", apiToken: "", apiKey: "" });
+  const [crmForm, setCrmForm] = useState({ instanceUrl: "", accessToken: "" });
+  const [savingEng, setSavingEng] = useState(false);
+  const [savingCrm, setSavingCrm] = useState(false);
+  const [engResult, setEngResult] = useState<string | null>(null);
+  const [crmResult, setCrmResult] = useState<string | null>(null);
 
   // ---- Data loading ----
 
@@ -146,11 +169,28 @@ export default function IntegrationsPage() {
     }
   }, []);
 
+  const loadEngCrm = useCallback(async () => {
+    setEngCrmLoading(true);
+    try {
+      const [engRes, crmRes] = await Promise.all([
+        fetch("/api/integrations/engineering"),
+        fetch("/api/integrations/crm"),
+      ]);
+      if (engRes.ok) setEngConfig(await engRes.json());
+      if (crmRes.ok) setCrmConfig(await crmRes.json());
+    } catch {
+      // silent
+    } finally {
+      setEngCrmLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadWebhooks();
     loadSlackTeams();
     loadPlugins();
-  }, [loadWebhooks, loadSlackTeams, loadPlugins]);
+    loadEngCrm();
+  }, [loadWebhooks, loadSlackTeams, loadPlugins, loadEngCrm]);
 
   // ---- Webhook handlers ----
 
@@ -276,11 +316,77 @@ export default function IntegrationsPage() {
     loadPlugins();
   }
 
+  // ---- Engineering & CRM handlers ----
+
+  async function saveEngineering(provider: "jira" | "linear") {
+    setSavingEng(true);
+    setEngResult(null);
+    try {
+      const body =
+        provider === "jira"
+          ? { provider: "jira", baseUrl: engForm.baseUrl, email: engForm.email, apiToken: engForm.apiToken }
+          : { provider: "linear", apiKey: engForm.apiKey };
+      const res = await fetch("/api/integrations/engineering", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEngResult(`Connected ${provider}`);
+        setShowEngForm(null);
+        setEngForm({ baseUrl: "", email: "", apiToken: "", apiKey: "" });
+        loadEngCrm();
+      } else {
+        setEngResult(data.error || "Failed");
+      }
+    } catch {
+      setEngResult("Connection failed");
+    } finally {
+      setSavingEng(false);
+    }
+  }
+
+  async function saveCrm(provider: "salesforce" | "hubspot") {
+    setSavingCrm(true);
+    setCrmResult(null);
+    try {
+      const body =
+        provider === "salesforce"
+          ? { provider: "salesforce", instanceUrl: crmForm.instanceUrl, accessToken: crmForm.accessToken }
+          : { provider: "hubspot-crm", accessToken: crmForm.accessToken };
+      const res = await fetch("/api/integrations/crm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCrmResult(`Connected ${provider}`);
+        setShowCrmForm(null);
+        setCrmForm({ instanceUrl: "", accessToken: "" });
+        loadEngCrm();
+      } else {
+        setCrmResult(data.error || "Failed");
+      }
+    } catch {
+      setCrmResult("Connection failed");
+    } finally {
+      setSavingCrm(false);
+    }
+  }
+
+  async function disconnectEng(provider: string) {
+    await fetch(`/api/integrations/engineering?provider=${provider}`, { method: "DELETE" });
+    loadEngCrm();
+  }
+
   // ---- Tab definitions ----
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "webhooks", label: "Webhooks" },
     { key: "slack-teams", label: "Slack & Teams" },
+    { key: "engineering-crm", label: "Engineering & CRM" },
     { key: "plugins", label: "Plugins" },
     { key: "api", label: "API" },
   ];
@@ -934,6 +1040,350 @@ export default function IntegrationsPage() {
             </section>
           )}
         </>
+      )}
+
+      {/* ============ ENGINEERING & CRM TAB ============ */}
+      {tab === "engineering-crm" && (
+        <div className="mt-4 space-y-6">
+          {engCrmLoading ? (
+            <section className="border-2 border-zinc-950 bg-white p-8 text-center">
+              <p className="font-mono text-sm text-zinc-500">Loading configuration...</p>
+            </section>
+          ) : (
+            <>
+              {/* Engineering Integrations */}
+              <section className="border-2 border-zinc-950 bg-white p-6">
+                <h2 className="text-lg font-bold">Engineering Integrations</h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Connect Jira or Linear to create and track engineering issues from tickets.
+                </p>
+
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  {/* Jira card */}
+                  <div className="border-2 border-zinc-300 p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-block bg-blue-600 px-2 py-0.5 font-mono text-xs font-bold uppercase text-white">
+                          JIRA
+                        </span>
+                        <span className="font-bold">Jira Cloud</span>
+                      </div>
+                      <span
+                        className={`font-mono text-xs font-bold uppercase ${
+                          engConfig?.jira.configured ? "text-emerald-600" : "text-zinc-400"
+                        }`}
+                      >
+                        {engConfig?.jira.configured ? "Connected" : "Not configured"}
+                      </span>
+                    </div>
+                    {engConfig?.jira.configured && (
+                      <div className="mt-3 space-y-1">
+                        <p className="font-mono text-xs text-zinc-500">
+                          URL: {engConfig.jira.baseUrl}
+                        </p>
+                        <p className="font-mono text-xs text-zinc-500">
+                          User: {engConfig.jira.email}
+                        </p>
+                      </div>
+                    )}
+                    <div className="mt-4 flex gap-2">
+                      {engConfig?.jira.configured ? (
+                        <button
+                          onClick={() => disconnectEng("jira")}
+                          className="font-mono text-xs font-bold uppercase text-red-500 hover:text-red-700"
+                        >
+                          Disconnect
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setShowEngForm(showEngForm === "jira" ? null : "jira")}
+                          className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+                        >
+                          Configure
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Linear card */}
+                  <div className="border-2 border-zinc-300 p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-block bg-violet-600 px-2 py-0.5 font-mono text-xs font-bold uppercase text-white">
+                          LINEAR
+                        </span>
+                        <span className="font-bold">Linear</span>
+                      </div>
+                      <span
+                        className={`font-mono text-xs font-bold uppercase ${
+                          engConfig?.linear.configured ? "text-emerald-600" : "text-zinc-400"
+                        }`}
+                      >
+                        {engConfig?.linear.configured ? "Connected" : "Not configured"}
+                      </span>
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      {engConfig?.linear.configured ? (
+                        <button
+                          onClick={() => disconnectEng("linear")}
+                          className="font-mono text-xs font-bold uppercase text-red-500 hover:text-red-700"
+                        >
+                          Disconnect
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setShowEngForm(showEngForm === "linear" ? null : "linear")}
+                          className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+                        >
+                          Configure
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Jira config form */}
+                {showEngForm === "jira" && (
+                  <div className="mt-4 border-2 border-zinc-300 bg-zinc-50 p-5">
+                    <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">Configure Jira</h3>
+                    <div className="mt-3 space-y-3">
+                      <label className="block">
+                        <span className="font-mono text-xs font-bold uppercase">Base URL</span>
+                        <input
+                          value={engForm.baseUrl}
+                          onChange={(e) => setEngForm({ ...engForm, baseUrl: e.target.value })}
+                          className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                          placeholder="https://yourcompany.atlassian.net"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="font-mono text-xs font-bold uppercase">Email</span>
+                        <input
+                          value={engForm.email}
+                          onChange={(e) => setEngForm({ ...engForm, email: e.target.value })}
+                          className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                          placeholder="you@company.com"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="font-mono text-xs font-bold uppercase">API Token</span>
+                        <input
+                          type="password"
+                          value={engForm.apiToken}
+                          onChange={(e) => setEngForm({ ...engForm, apiToken: e.target.value })}
+                          className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                          placeholder="Jira API token"
+                        />
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => saveEngineering("jira")}
+                          disabled={savingEng}
+                          className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
+                        >
+                          {savingEng ? "Connecting..." : "Connect & Verify"}
+                        </button>
+                        <button
+                          onClick={() => setShowEngForm(null)}
+                          className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-900"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Linear config form */}
+                {showEngForm === "linear" && (
+                  <div className="mt-4 border-2 border-zinc-300 bg-zinc-50 p-5">
+                    <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">Configure Linear</h3>
+                    <div className="mt-3 space-y-3">
+                      <label className="block">
+                        <span className="font-mono text-xs font-bold uppercase">API Key</span>
+                        <input
+                          type="password"
+                          value={engForm.apiKey}
+                          onChange={(e) => setEngForm({ ...engForm, apiKey: e.target.value })}
+                          className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                          placeholder="lin_api_..."
+                        />
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => saveEngineering("linear")}
+                          disabled={savingEng}
+                          className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
+                        >
+                          {savingEng ? "Connecting..." : "Connect & Verify"}
+                        </button>
+                        <button
+                          onClick={() => setShowEngForm(null)}
+                          className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-900"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {engResult && (
+                  <p className={`mt-3 font-mono text-xs font-bold ${engResult.startsWith("Connected") ? "text-emerald-600" : "text-red-500"}`}>
+                    {engResult}
+                  </p>
+                )}
+              </section>
+
+              {/* CRM Integrations */}
+              <section className="border-2 border-zinc-950 bg-white p-6">
+                <h2 className="text-lg font-bold">CRM Integrations</h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Connect Salesforce or HubSpot to sync customer data and see CRM context on tickets.
+                </p>
+
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  {/* Salesforce card */}
+                  <div className="border-2 border-zinc-300 p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-block bg-sky-500 px-2 py-0.5 font-mono text-xs font-bold uppercase text-white">
+                          SF
+                        </span>
+                        <span className="font-bold">Salesforce</span>
+                      </div>
+                      <span
+                        className={`font-mono text-xs font-bold uppercase ${
+                          crmConfig?.salesforce.configured ? "text-emerald-600" : "text-zinc-400"
+                        }`}
+                      >
+                        {crmConfig?.salesforce.configured ? "Connected" : "Not configured"}
+                      </span>
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        onClick={() => setShowCrmForm(showCrmForm === "salesforce" ? null : "salesforce")}
+                        className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+                      >
+                        {crmConfig?.salesforce.configured ? "Reconfigure" : "Configure"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* HubSpot card */}
+                  <div className="border-2 border-zinc-300 p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-block bg-orange-500 px-2 py-0.5 font-mono text-xs font-bold uppercase text-white">
+                          HS
+                        </span>
+                        <span className="font-bold">HubSpot</span>
+                      </div>
+                      <span
+                        className={`font-mono text-xs font-bold uppercase ${
+                          crmConfig?.hubspot.configured ? "text-emerald-600" : "text-zinc-400"
+                        }`}
+                      >
+                        {crmConfig?.hubspot.configured ? "Connected" : "Not configured"}
+                      </span>
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        onClick={() => setShowCrmForm(showCrmForm === "hubspot" ? null : "hubspot")}
+                        className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+                      >
+                        {crmConfig?.hubspot.configured ? "Reconfigure" : "Configure"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Salesforce config form */}
+                {showCrmForm === "salesforce" && (
+                  <div className="mt-4 border-2 border-zinc-300 bg-zinc-50 p-5">
+                    <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">Configure Salesforce</h3>
+                    <div className="mt-3 space-y-3">
+                      <label className="block">
+                        <span className="font-mono text-xs font-bold uppercase">Instance URL</span>
+                        <input
+                          value={crmForm.instanceUrl}
+                          onChange={(e) => setCrmForm({ ...crmForm, instanceUrl: e.target.value })}
+                          className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                          placeholder="https://yourcompany.salesforce.com"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="font-mono text-xs font-bold uppercase">Access Token</span>
+                        <input
+                          type="password"
+                          value={crmForm.accessToken}
+                          onChange={(e) => setCrmForm({ ...crmForm, accessToken: e.target.value })}
+                          className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                          placeholder="OAuth access token"
+                        />
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => saveCrm("salesforce")}
+                          disabled={savingCrm}
+                          className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
+                        >
+                          {savingCrm ? "Connecting..." : "Connect & Verify"}
+                        </button>
+                        <button
+                          onClick={() => setShowCrmForm(null)}
+                          className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-900"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* HubSpot config form */}
+                {showCrmForm === "hubspot" && (
+                  <div className="mt-4 border-2 border-zinc-300 bg-zinc-50 p-5">
+                    <h3 className="font-mono text-xs font-bold uppercase text-zinc-500">Configure HubSpot</h3>
+                    <div className="mt-3 space-y-3">
+                      <label className="block">
+                        <span className="font-mono text-xs font-bold uppercase">Access Token</span>
+                        <input
+                          type="password"
+                          value={crmForm.accessToken}
+                          onChange={(e) => setCrmForm({ ...crmForm, accessToken: e.target.value })}
+                          className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                          placeholder="HubSpot private app token"
+                        />
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => saveCrm("hubspot")}
+                          disabled={savingCrm}
+                          className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
+                        >
+                          {savingCrm ? "Connecting..." : "Connect & Verify"}
+                        </button>
+                        <button
+                          onClick={() => setShowCrmForm(null)}
+                          className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-900"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {crmResult && (
+                  <p className={`mt-3 font-mono text-xs font-bold ${crmResult.startsWith("Connected") ? "text-emerald-600" : "text-red-500"}`}>
+                    {crmResult}
+                  </p>
+                )}
+              </section>
+            </>
+          )}
+        </div>
       )}
 
       {/* ============ API TAB ============ */}
