@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, HOUSE_FACTION } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -189,11 +189,99 @@ export class Renderer {
   superweapons = new Map<string, SuperweaponState>();
   superweaponCursorMode: SuperweaponType | null = null;
 
+  // Power bar animation state (C++ power.cpp parity)
+  private powerHeight = 0;          // current animated height (px)
+  private drainHeight = 0;          // current animated height (px)
+  private desiredPowerHeight = 0;   // target height
+  private desiredDrainHeight = 0;   // target height
+  private powerDir = 0;             // animation direction: -1, 0, 1
+  private drainDir = 0;
+  private powerBounce = 0;          // bounce counter (12→0)
+  private drainBounce = 0;
+  private recordedPower = 0;        // last known power value (detect changes)
+  private recordedDrain = 0;
+  private powerFlashTimer = 0;      // ticks remaining for flash effect
+
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
     this.width = canvas.width;
     this.height = canvas.height;
     this.ctx.imageSmoothingEnabled = false;
+  }
+
+  /** C++ Power_Height() — logarithmic scale for power bar (power.cpp:394-417) */
+  static powerBarHeight(value: number): number {
+    const POWER_HEIGHT = Renderer.POWER_HEIGHT;
+    const STEP_LEVEL = Renderer.POWER_STEP_LEVEL;
+    const STEP_FACTOR = Renderer.POWER_STEP_FACTOR;
+    let num = Math.floor(value / STEP_LEVEL);
+    let retval = 0;
+    let remaining = value;
+    for (let lp = 0; lp < num; lp++) {
+      retval = retval + Math.floor(((POWER_HEIGHT - 2) - retval) / STEP_FACTOR);
+      remaining -= STEP_LEVEL;
+    }
+    if (remaining > 0) {
+      retval = retval + Math.floor((Math.floor(((POWER_HEIGHT - 2) - retval) / STEP_FACTOR) * remaining) / STEP_LEVEL);
+    }
+    return Math.max(0, Math.min(POWER_HEIGHT - 2, retval));
+  }
+
+  /** Update power bar bounce animation — call once per game tick (C++ PowerClass::AI) */
+  updatePowerAnimation(): void {
+    const produced = this.sidebarPowerProduced;
+    const consumed = this.sidebarPowerConsumed;
+
+    // Detect power change
+    if (produced !== this.recordedPower) {
+      this.desiredPowerHeight = Renderer.powerBarHeight(produced);
+      this.recordedPower = produced;
+      this.powerBounce = 12;
+      if (this.powerHeight > this.desiredPowerHeight) this.powerDir = -1;
+      else if (this.powerHeight < this.desiredPowerHeight) this.powerDir = 1;
+      else this.powerBounce = 0;
+    }
+
+    // Detect drain change
+    if (consumed !== this.recordedDrain) {
+      this.desiredDrainHeight = Renderer.powerBarHeight(consumed);
+      this.recordedDrain = consumed;
+      this.drainBounce = 12;
+      if (this.drainHeight > this.desiredDrainHeight) this.drainDir = -1;
+      else if (this.drainHeight < this.desiredDrainHeight) this.drainDir = 1;
+      else this.drainBounce = 0;
+    }
+
+    // Animate drain height
+    if (this.drainBounce > 0 && this.drainHeight === this.desiredDrainHeight) {
+      this.drainBounce--;
+    } else if (this.drainHeight !== this.desiredDrainHeight) {
+      this.drainHeight += this.drainDir;
+    }
+
+    // Animate power height
+    if (this.powerBounce > 0 && this.powerHeight === this.desiredPowerHeight) {
+      this.powerBounce--;
+    } else if (this.powerHeight !== this.desiredPowerHeight) {
+      this.powerHeight += this.powerDir;
+    }
+
+    // Flash timer countdown
+    if (this.powerFlashTimer > 0) this.powerFlashTimer--;
+
+    // Trigger flash when drain exceeds power
+    if (consumed > produced && produced > 0 && this.powerFlashTimer === 0) {
+      this.powerFlashTimer = 30; // flash for 2 seconds
+    }
+  }
+
+  /** Is the player faction allied? (for house-specific sidebar art) */
+  private isPlayerAllied(): boolean {
+    for (const h of this.playerHouses) {
+      const f = HOUSE_FACTION[h];
+      if (f === 'soviet') return false;
+    }
+    return true;
   }
 
   /** Get an RGB string from the current theatre palette, with optional brightness offset */
@@ -2741,24 +2829,60 @@ export class Renderer {
 
   // ─── Sidebar ──────────────────────────────────────────────
 
-  // ─── Sidebar Layout Constants (C++ parity: dual production strips) ────
-  static readonly RADAR_SIZE = 140;    // square radar minimap
-  static readonly RADAR_Y = 4;        // top margin
-  static readonly CREDITS_Y = 148;    // credits strip below radar
+  // ─── Sidebar Layout Constants (C++ sidebar.h / power.h, RESFACTOR=2 HIRES) ────
+  static readonly RADAR_SIZE = 140;    // square radar minimap (custom)
+  static readonly RADAR_Y = 4;        // top margin (custom)
+  static readonly CREDITS_Y = 148;    // credits strip below radar (custom)
   static readonly CREDITS_H = 14;
-  static readonly BUTTON_ROW_Y = 164; // repair/sell/map icon buttons
-  static readonly BUTTON_H = 28;      // button row height
-  static readonly STRIP_START_Y = 194; // dual production strips start
-  static readonly CAMEO_W = 64;
-  static readonly CAMEO_H = 48;
-  static readonly CAMEO_VISIBLE = 3;   // visible cameo slots per strip
-  static readonly SCROLL_ARROW_H = 16;
+
+  // Button row — C++ English layout (sidebar.h BUTTON_ONE/TWO/THREE)
+  static readonly BUTTON_ROW_Y = 162;  // right after credits strip
+  static readonly BUTTON_H = 18;       // (9×2) C++ BUTTON_HEIGHT
+  static readonly BUTTON_ONE_X = 4;    // (242-240)×2 — repair (wide)
+  static readonly BUTTON_ONE_W = 64;   // (32×2)
+  static readonly BUTTON_TWO_X = 72;   // (276-240)×2 — sell (narrow)
+  static readonly BUTTON_TWO_W = 40;   // (20×2)
+  static readonly BUTTON_THREE_X = 116; // (298-240)×2 — map (narrow)
+  static readonly BUTTON_THREE_W = 40;  // (20×2)
+
+  // Strip columns (C++ StripClass, sidebar.h)
+  static readonly STRIP_START_Y = 180;  // (90×2) COLUMN_ONE_Y
+  static readonly CAMEO_W = 64;         // (32×2) OBJECT_WIDTH
+  static readonly CAMEO_H = 48;         // (24×2) OBJECT_HEIGHT
+  static readonly CAMEO_VISIBLE = 4;    // MAX_VISIBLE (C++ = 4!)
+  static readonly CAMEO_GAP = 0;        // C++ has no gap between cameos
+  static readonly LEFT_STRIP_X_OFFSET = 16;  // (248-240)×2 = COLUMN_ONE relative
+  static readonly RIGHT_STRIP_X_OFFSET = 86; // (283-240)×2 = COLUMN_TWO relative
+
+  // Scroll buttons — both below strip, side-by-side (C++ sidebar.h)
+  static readonly SCROLL_RATE = 12;     // px/step (WIN32)
+  static readonly UP_X_OFFSET = 4;      // (2×2) from column X — left scroll btn
+  static readonly DOWN_X_OFFSET = 36;   // (18×2) from column X — right scroll btn
+  static readonly SBUTTON_W = 32;       // (16×2) scroll button width
+  static readonly SBUTTON_H = 24;       // (12×2) scroll button height
+  static readonly SCROLL_BTN_Y_OFFSET = 194; // (97×2) from column Y
+
+  // Power bar (C++ power.h)
+  static readonly POWER_Y = 176;         // (88×2) absolute Y
+  static readonly POWER_HEIGHT = 153;    // (76×2+1) HIRES bar height
   static readonly POWER_BAR_W = 10;
   static readonly POWER_BAR_X_OFFSET = 2;
-  static readonly LEFT_STRIP_X_OFFSET = 14;  // after power bar
-  static readonly RIGHT_STRIP_X_OFFSET = 80; // after left strip (14+64+2)
-  // Legacy alias
-  static readonly CAMEO_GAP = 2;
+
+  // Sidebar background shape Y positions (absolute, for house-specific art)
+  static readonly SIDEBAR_BG_TOP_Y = 16;   // (8×2) side1na/us
+  static readonly SIDEBAR_BG_MID_Y = 176;  // (88×2) side2na/us
+  static readonly SIDEBAR_BG_BOT_Y = 276;  // (138×2) side3na/us
+
+  // Power bar color palette indices (C++ power.cpp)
+  static readonly POWER_COLOR_NORMAL: [string, string] = ['#004400', '#008800'];  // pal[3]/[4] green
+  static readonly POWER_COLOR_LOW: [string, string] = ['#CC8800', '#AA6600'];     // pal[214]/[211] orange
+  static readonly POWER_COLOR_CRITICAL: [string, string] = ['#CC0000', '#880000']; // pal[235]/[230] red
+
+  // Bounce animation modtable (C++ power.cpp:166)
+  static readonly POWER_MODTABLE = [0, -1, 0, 1, 0, -1, -2, -1, 0, 1, 2, 1, 0];
+  // Power height step function (C++ POWER_STEP_LEVEL / POWER_STEP_FACTOR)
+  static readonly POWER_STEP_LEVEL = 100;
+  static readonly POWER_STEP_FACTOR = 5;
 
   /** Get minimap bounds for hit-testing (used by game click handlers) */
   getMinimapBounds(): { x: number; y: number; size: number } {
@@ -2779,19 +2903,21 @@ export class Renderer {
   }
 
   /** Get scroll arrow hit regions for a production strip.
-   *  Up arrow fits between button row bottom (BUTTON_ROW_Y + BUTTON_H = 192) and strip start (194). */
-  getScrollArrowBounds(strip: StripType): { upY: number; downY: number; x: number; w: number; upH: number; downH: number } {
+   *  C++ layout: both scroll buttons are side-by-side below the strip cameos. */
+  getScrollArrowBounds(strip: StripType): { upX: number; upY: number; upW: number; upH: number; downX: number; downY: number; downW: number; downH: number } {
     const sidebarX = this.width - this.sidebarW;
     const xOffset = strip === 'left' ? Renderer.LEFT_STRIP_X_OFFSET : Renderer.RIGHT_STRIP_X_OFFSET;
-    const stripClipH = Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP);
-    const btnRowBottom = Renderer.BUTTON_ROW_Y + Renderer.BUTTON_H; // 192
+    const colX = sidebarX + xOffset;
+    const btnY = Renderer.STRIP_START_Y + Renderer.SCROLL_BTN_Y_OFFSET;
     return {
-      x: sidebarX + xOffset,
-      w: Renderer.CAMEO_W,
-      upY: btnRowBottom, // starts right after button row (Y=192)
-      upH: Renderer.STRIP_START_Y - btnRowBottom, // 194-192 = 2px (tight gap)
-      downY: Renderer.STRIP_START_Y + stripClipH,
-      downH: Renderer.SCROLL_ARROW_H,
+      upX: colX + Renderer.UP_X_OFFSET,
+      upY: btnY,
+      upW: Renderer.SBUTTON_W,
+      upH: Renderer.SBUTTON_H,
+      downX: colX + Renderer.DOWN_X_OFFSET,
+      downY: btnY,
+      downW: Renderer.SBUTTON_W,
+      downH: Renderer.SBUTTON_H,
     };
   }
 
@@ -2812,16 +2938,29 @@ export class Renderer {
     const x = this.width - this.sidebarW;
     const w = this.sidebarW;
 
-    // Background — use sidebar.png sprite if available, else dark fill
-    const sidebarSheet = assets.getSheet('sidebar');
-    if (sidebarSheet) {
-      for (let ty = 0; ty < this.height; ty += 123) {
-        assets.drawFrame(ctx, 'sidebar', 0, x, ty);
-        assets.drawFrame(ctx, 'sidebar', 1, x + 80, ty);
-      }
+    // Background — house-specific 3-section shapes (C++ SidebarClass::Draw_It)
+    const isAllied = this.isPlayerAllied();
+    const bgTop = assets.getSheet(isAllied ? 'side1na' : 'side1us');
+    const bgMid = assets.getSheet(isAllied ? 'side2na' : 'side2us');
+    const bgBot = assets.getSheet(isAllied ? 'side3na' : 'side3us');
+    if (bgTop && bgMid && bgBot) {
+      // LORES shapes drawn at 2× scale to fill HIRES sidebar
+      const scale = w / bgTop.meta.frameWidth;
+      assets.drawFrame(ctx, isAllied ? 'side1na' : 'side1us', 0, x, Renderer.SIDEBAR_BG_TOP_Y, { scale });
+      assets.drawFrame(ctx, isAllied ? 'side2na' : 'side2us', 0, x, Renderer.SIDEBAR_BG_MID_Y, { scale });
+      assets.drawFrame(ctx, isAllied ? 'side3na' : 'side3us', 0, x, Renderer.SIDEBAR_BG_BOT_Y, { scale });
     } else {
-      ctx.fillStyle = 'rgba(20,20,25,0.95)';
-      ctx.fillRect(x, 0, w, this.height);
+      // Fallback: tile sidebar.png or dark fill
+      const sidebarSheet = assets.getSheet('sidebar');
+      if (sidebarSheet) {
+        for (let ty = 0; ty < this.height; ty += 123) {
+          assets.drawFrame(ctx, 'sidebar', 0, x, ty);
+          assets.drawFrame(ctx, 'sidebar', 1, x + 80, ty);
+        }
+      } else {
+        ctx.fillStyle = 'rgba(20,20,25,0.95)';
+        ctx.fillRect(x, 0, w, this.height);
+      }
     }
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 1;
@@ -2830,14 +2969,13 @@ export class Renderer {
     ctx.lineTo(x, this.height);
     ctx.stroke();
 
-    // Credits strip below radar — semi-transparent to blend with sidebar texture
+    // Credits strip below radar
     const credY = Renderer.CREDITS_Y;
     ctx.fillStyle = 'rgba(10,10,15,0.6)';
     ctx.fillRect(x + 1, credY, w - 1, Renderer.CREDITS_H);
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
     const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
-    // Text shadow for readability on textured background
     ctx.fillStyle = '#000';
     ctx.fillText(`$${this.sidebarCredits}`, x + w / 2 + 1, credY + 11);
     ctx.fillStyle = atCapacity ? '#FF4444' : '#FFD700';
@@ -2848,10 +2986,10 @@ export class Renderer {
       ctx.fillText(`/${this.sidebarSiloCapacity}`, x + w / 2 + 24, credY + 10);
     }
 
-    // Button row: repair / sell / map icons
+    // Button row: repair / sell / map (C++ English layout)
     this.renderButtonRow(x, w, assets);
 
-    // Power bar on far left edge (full height of strip area)
+    // Power bar (C++ PowerClass::Draw_It)
     const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
     const hasPower = this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0;
     if (hasPower) {
@@ -2862,8 +3000,19 @@ export class Renderer {
     const leftItems = this.sidebarItems.filter(it => getStripSide(it) === 'left');
     const rightItems = this.sidebarItems.filter(it => getStripSide(it) === 'right');
 
-    // Clip strips to exactly 4 visible cameo slots (prevents overflow)
-    const stripClipH = Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP);
+    // Strip column backgrounds (C++ StripClass::Draw_It — draw when fewer items than MAX_VISIBLE)
+    for (const [items, xOff] of [[leftItems, Renderer.LEFT_STRIP_X_OFFSET], [rightItems, Renderer.RIGHT_STRIP_X_OFFSET]] as const) {
+      if (items.length < Renderer.CAMEO_VISIBLE) {
+        const stripBg = assets.getSheet(isAllied ? 'stripna' : 'stripus');
+        if (stripBg) {
+          const stripScale = Renderer.CAMEO_W / stripBg.meta.frameWidth;
+          assets.drawFrame(ctx, isAllied ? 'stripna' : 'stripus', 0, x + xOff, Renderer.STRIP_START_Y, { scale: stripScale });
+        }
+      }
+    }
+
+    // Clip strips to visible cameo area
+    const stripClipH = Renderer.CAMEO_VISIBLE * Renderer.CAMEO_H;
     ctx.save();
     ctx.beginPath();
     ctx.rect(x, Renderer.STRIP_START_Y, w, stripClipH);
@@ -2876,9 +3025,9 @@ export class Renderer {
 
     ctx.restore();
 
-    // Scroll arrows rendered OUTSIDE clip region so they're always visible
-    this.renderStripScrollArrows(ctx, x + Renderer.LEFT_STRIP_X_OFFSET, leftItems, this.leftStripScroll);
-    this.renderStripScrollArrows(ctx, x + Renderer.RIGHT_STRIP_X_OFFSET, rightItems, this.rightStripScroll);
+    // Scroll buttons below strips (C++ layout: side-by-side)
+    this.renderStripScrollArrows(ctx, assets, x + Renderer.LEFT_STRIP_X_OFFSET, leftItems, this.leftStripScroll);
+    this.renderStripScrollArrows(ctx, assets, x + Renderer.RIGHT_STRIP_X_OFFSET, rightItems, this.rightStripScroll);
 
     // Superweapon buttons at bottom
     this.renderSuperweaponButtons(x, w);
@@ -2886,20 +3035,25 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
-  /** Render vertical power bar on left edge of sidebar (original RA two-tone gauge) */
+  /** Render vertical power bar (C++ PowerClass::Draw_It — bounce animation, palette colors) */
   private renderVerticalPowerBar(assets: AssetManager, sidebarX: number, lowPower: boolean): void {
     const ctx = this.ctx;
     const pwrX = sidebarX + Renderer.POWER_BAR_X_OFFSET;
-    const pwrY = Renderer.STRIP_START_Y;
+    const pwrY = Renderer.POWER_Y;
     const pwrW = Renderer.POWER_BAR_W;
-    const pwrH = Math.min(this.height - pwrY - 44, Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP));
+    const pwrH = Renderer.POWER_HEIGHT;
     const produced = this.sidebarPowerProduced;
     const consumed = this.sidebarPowerConsumed;
 
-    // Draw powerbar.png frame if available, else dark background
+    // Draw powerbar shape (C++: 2 frames stacked vertically for HIRES)
     const pwrSheet = assets.getSheet('powerbar');
     if (pwrSheet) {
-      ctx.drawImage(pwrSheet.image, 0, 0, 10, 112, pwrX, pwrY, pwrW, pwrH);
+      const frameH = pwrSheet.meta.frameHeight;
+      // Frame 0 = top half, frame 1 = bottom half
+      assets.drawFrame(ctx, 'powerbar', 0, pwrX, pwrY, { scale: 2 });
+      if (pwrSheet.meta.frameCount > 1) {
+        assets.drawFrame(ctx, 'powerbar', 1, pwrX, pwrY + frameH * 2, { scale: 2 });
+      }
     } else {
       ctx.fillStyle = '#111';
       ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
@@ -2908,49 +3062,67 @@ export class Renderer {
       ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
     }
 
-    // Two-tone gauge: green (produced) from bottom, red (over-consumed) above
-    const maxPwr = Math.max(produced, consumed, 100);
-    const consumedH = (consumed / maxPwr) * pwrH;
-    const producedH = (produced / maxPwr) * pwrH;
+    // C++ bounce animation: apply modtable when at target height
+    const modtable = Renderer.POWER_MODTABLE;
+    let ph = this.powerHeight;
+    let dh = this.drainHeight;
+    if (this.powerBounce > 0 && ph === this.desiredPowerHeight) {
+      ph += modtable[this.powerBounce] * this.powerDir;
+    }
+    if (this.drainBounce > 0 && dh === this.desiredDrainHeight) {
+      dh += modtable[this.drainBounce] * this.drainDir;
+    }
+    ph = Math.max(0, Math.min(pwrH - 2, ph));
+    dh = Math.max(0, Math.min(pwrH - 2, dh));
 
-    // Always draw produced power as green from bottom
-    if (produced > 0) {
-      ctx.fillStyle = '#4c4';
-      ctx.fillRect(pwrX + 1, pwrY + pwrH - producedH, pwrW - 2, producedH);
+    // Rescale heights for HIRES bar (C++: power_height * 153 / 107)
+    const hiresScale = (76 * 2 + 1) / (53 * 2 + 1);
+    ph = Math.round(ph * hiresScale);
+    dh = Math.round(dh * hiresScale);
+    ph = Math.max(0, Math.min(pwrH - 2, ph));
+    dh = Math.max(0, Math.min(pwrH - 2, dh));
+
+    const bottom = pwrY + pwrH - 1;
+
+    // Choose color based on drain vs power ratio (C++ power.cpp)
+    let colors: [string, string];
+    if (consumed > produced * 2) {
+      colors = Renderer.POWER_COLOR_CRITICAL; // red
+    } else if (consumed > produced) {
+      colors = Renderer.POWER_COLOR_LOW; // orange
+    } else {
+      colors = Renderer.POWER_COLOR_NORMAL; // green
     }
 
-    // Over-consumed: red section from produced level up to consumed level
-    if (consumed > produced) {
-      const overH = consumedH - producedH;
-      const overY = pwrY + pwrH - consumedH;
-      ctx.fillStyle = '#d33';
-      ctx.fillRect(pwrX + 1, overY, pwrW - 2, overH);
-    } else if (consumed > 0 && produced > 0 && consumed / produced > 0.7) {
-      // Near capacity: semi-transparent yellow tint over consumed portion (preserves green underneath)
-      ctx.fillStyle = 'rgba(200,170,0,0.4)';
-      ctx.fillRect(pwrX + 1, pwrY + pwrH - consumedH, pwrW - 2, consumedH);
+    // Draw 2-pixel-wide power bars from bottom up (C++ Fill_Rect pairs)
+    if (ph > 0) {
+      // Flash effect: alternate red when flashing
+      const flashing = this.powerFlashTimer > 1 && ((this.powerFlashTimer % 3) & 1) !== 0;
+      const c1 = flashing ? '#CC0000' : colors[0];
+      const c2 = flashing ? '#880000' : colors[1];
+
+      ctx.fillStyle = c2;
+      ctx.fillRect(pwrX + 2, bottom - ph, 2, ph);
+      ctx.fillStyle = c1;
+      ctx.fillRect(pwrX + 4, bottom - ph, 2, ph);
     }
 
-    // Divider line at produced level (only when consumed > 0 so the line separates something)
-    if (produced > 0 && consumed > 0) {
-      const divY = pwrY + pwrH - producedH;
+    // Draw drain marker shape at drain height
+    const markerSheet = assets.getSheet('power_marker');
+    if (markerSheet && dh > 0) {
+      const markerY = bottom - dh - markerSheet.meta.frameHeight;
+      assets.drawFrame(ctx, 'power_marker', 0, pwrX, markerY, { scale: 2 });
+    } else if (dh > 0) {
+      // Fallback: white divider line at drain level
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(pwrX, divY);
-      ctx.lineTo(pwrX + pwrW, divY);
+      ctx.moveTo(pwrX, bottom - dh);
+      ctx.lineTo(pwrX + pwrW, bottom - dh);
       ctx.stroke();
     }
 
-    // Low-power pulsing glow (subtle, only on over-consumed section)
-    if (lowPower) {
-      const pulse = 0.06 + 0.06 * Math.sin(Date.now() * 0.005);
-      ctx.fillStyle = `rgba(255,40,40,${pulse})`;
-      const overY = pwrY + pwrH - consumedH;
-      ctx.fillRect(pwrX + 1, overY, pwrW - 2, consumedH - producedH);
-    }
-
-    // Numeric labels at bottom
+    // Numeric labels
     ctx.font = '6px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = lowPower ? '#f88' : '#8f8';
@@ -2959,7 +3131,7 @@ export class Renderer {
     ctx.fillText(`${consumed}`, pwrX + pwrW / 2, pwrY + pwrH + 16);
   }
 
-  /** Render a single production strip (C++ parity: 1-column, 4 visible slots, clock overlay) */
+  /** Render a single production strip (C++ StripClass::Draw_It) */
   private renderStrip(
     ctx: CanvasRenderingContext2D, assets: AssetManager,
     stripX: number, startY: number,
@@ -2968,8 +3140,7 @@ export class Renderer {
   ): void {
     const camW = Renderer.CAMEO_W;
     const camH = Renderer.CAMEO_H;
-    const gap = Renderer.CAMEO_GAP;
-    const rowH = camH + gap;
+    const rowH = camH; // CAMEO_GAP = 0
 
     if (items.length === 0) return;
 
@@ -2980,7 +3151,7 @@ export class Renderer {
       // Cull off-screen items
       if (iy < startY - rowH || iy > this.height) continue;
 
-      // Draw strip.png background for cameo slot (scale LORES 32x24 → HIRES 64x48)
+      // Draw strip.png background for cameo slot (scale LORES → HIRES)
       const stripSheet = assets.getSheet('strip');
       if (stripSheet) {
         const stripScale = camW / stripSheet.meta.frameWidth;
@@ -2993,11 +3164,10 @@ export class Renderer {
         ctx.strokeRect(stripX, iy, camW, camH);
       }
 
-      // Draw cameo icon — use actual image dimensions (manifest may not match PNG)
+      // Draw cameo icon
       const iconName = item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
-        // Draw icon scaled to fill full cameo slot, using actual image dimensions as source
         ctx.drawImage(iconSheet.image, 0, 0, iconSheet.image.naturalWidth, iconSheet.image.naturalHeight,
           stripX, iy, camW, camH);
       } else {
@@ -3017,33 +3187,58 @@ export class Renderer {
         }
       }
 
-      // Check if this item is currently building
+      // Check production state
       const stripSide = getStripSide(item);
       const qEntry = this.sidebarQueue.get(stripSide);
       const isBuilding = qEntry && qEntry.item.type === item.type;
 
       if (isBuilding && qEntry) {
         const progress = qEntry.progress / qEntry.item.buildTime;
-        // Clock overlay — use CLOCK.SHP frames (55 frames = build progress stages)
-        const clockSheet = assets.getSheet('clock');
-        if (clockSheet) {
-          const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)), clockSheet.meta.frameCount - 1);
-          // Darken the cameo first
-          ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.35)' : 'rgba(0,0,0,0.35)';
-          ctx.fillRect(stripX, iy, camW, camH);
-          // Draw clock overlay (scale LORES 32x24 → HIRES 64x48)
-          const clockScale = camW / clockSheet.meta.frameWidth;
-          assets.drawFrame(ctx, 'clock', clockFrame, stripX, iy, { scale: clockScale });
+        const completed = progress >= 1;
+        const paused = !completed && qEntry.progress > 0 && (qEntry as { paused?: boolean }).paused;
+
+        if (completed) {
+          // Draw "READY" pip (C++ PipShapes frame 3)
+          const pipsSheet = assets.getSheet('pips');
+          if (pipsSheet) {
+            const pipScale = camW / pipsSheet.meta.frameWidth;
+            assets.drawFrame(ctx, 'pips', 3, stripX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
+          } else {
+            ctx.font = 'bold 8px monospace';
+            ctx.fillStyle = '#0f0';
+            ctx.textAlign = 'center';
+            ctx.fillText('READY', stripX + camW / 2, iy + camH / 2 + 3);
+            ctx.textAlign = 'left';
+          }
         } else {
-          // Fallback: darken + percentage text
-          const uncoverH = camH * (1 - progress);
-          ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
-          ctx.fillRect(stripX, iy, camW, uncoverH);
-          ctx.font = 'bold 7px monospace';
-          ctx.fillStyle = lowPower ? '#f88' : '#8f8';
-          ctx.textAlign = 'center';
-          ctx.fillText(`${Math.floor(progress * 100)}%`, stripX + camW / 2, iy + camH / 2 + 2);
-          ctx.textAlign = 'left';
+          // Clock overlay (C++ ClockShapes with SHAPE_GHOST)
+          const clockSheet = assets.getSheet('clock');
+          if (clockSheet) {
+            const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)), clockSheet.meta.frameCount - 1);
+            // Darken cameo (approximates SHAPE_GHOST translucent table)
+            ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.35)' : 'rgba(0,0,0,0.35)';
+            ctx.fillRect(stripX, iy, camW, camH);
+            const clockScale = camW / clockSheet.meta.frameWidth;
+            assets.drawFrame(ctx, 'clock', clockFrame, stripX, iy, { scale: clockScale });
+          } else {
+            const uncoverH = camH * (1 - progress);
+            ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
+            ctx.fillRect(stripX, iy, camW, uncoverH);
+            ctx.font = 'bold 7px monospace';
+            ctx.fillStyle = lowPower ? '#f88' : '#8f8';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${Math.floor(progress * 100)}%`, stripX + camW / 2, iy + camH / 2 + 2);
+            ctx.textAlign = 'left';
+          }
+
+          // Paused: draw "HOLDING" pip (frame 4)
+          if (paused) {
+            const pipsSheet = assets.getSheet('pips');
+            if (pipsSheet) {
+              const pipScale = camW / pipsSheet.meta.frameWidth;
+              assets.drawFrame(ctx, 'pips', 4, stripX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
+            }
+          }
         }
         // Queue count badge
         if (qEntry.queueCount > 1) {
@@ -3053,16 +3248,22 @@ export class Renderer {
           ctx.fillText(`x${qEntry.queueCount}`, stripX + camW - 6, iy + 7);
           ctx.textAlign = 'left';
         }
-      }
+      } else {
+        // Not building: darken if can't afford (C++ SHAPE_GHOST on unavailable)
+        if (this.sidebarCredits < item.cost) {
+          const clockSheet = assets.getSheet('clock');
+          if (clockSheet) {
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.fillRect(stripX, iy, camW, camH);
+            const clockScale = camW / clockSheet.meta.frameWidth;
+            assets.drawFrame(ctx, 'clock', 0, stripX, iy, { scale: clockScale });
+          } else {
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(stripX, iy, camW, camH);
+          }
+        }
 
-      // Can't afford overlay
-      if (!isBuilding && this.sidebarCredits < item.cost) {
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(stripX, iy, camW, camH);
-      }
-
-      // Cost label at bottom of cameo
-      if (!isBuilding) {
+        // Cost label at bottom of cameo
         ctx.font = '6px monospace';
         ctx.fillStyle = this.sidebarCredits >= item.cost ? '#FFD700' : '#664';
         ctx.textAlign = 'center';
@@ -3070,76 +3271,82 @@ export class Renderer {
         ctx.textAlign = 'left';
       }
     }
-
   }
 
-  /** Render scroll arrows for a strip (called outside clip region) */
+  /** Render scroll buttons below strip (C++ sprite-based, side-by-side) */
   private renderStripScrollArrows(
-    ctx: CanvasRenderingContext2D, stripX: number,
-    items: ProductionItem[], scroll: number,
+    ctx: CanvasRenderingContext2D, assets: AssetManager,
+    stripX: number, items: ProductionItem[], scroll: number,
   ): void {
     if (items.length === 0) return;
-    const camW = Renderer.CAMEO_W;
-    const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
+    const rowH = Renderer.CAMEO_H;
     const maxVisible = Renderer.CAMEO_VISIBLE;
-    const startY = Renderer.STRIP_START_Y;
+    const maxScroll = Math.max(0, (items.length - maxVisible) * rowH);
+    const btnY = Renderer.STRIP_START_Y + Renderer.SCROLL_BTN_Y_OFFSET;
 
-    // Up arrow
-    if (scroll > 0) {
-      ctx.fillStyle = '#aaa';
-      ctx.font = '8px monospace';
+    // Up arrow (left button)
+    const upDisabled = scroll <= 0;
+    const upSheet = assets.getSheet('stripup');
+    if (upSheet) {
+      const frame = upDisabled ? 2 : 0; // frame 0=enabled, 2=disabled
+      assets.drawFrame(ctx, 'stripup', frame, stripX + Renderer.UP_X_OFFSET, btnY, { scale: 2 });
+    } else {
+      ctx.fillStyle = upDisabled ? '#444' : '#aaa';
+      ctx.font = '10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('\u25B2', stripX + camW / 2, startY - 3);
+      ctx.fillText('\u25B2', stripX + Renderer.UP_X_OFFSET + Renderer.SBUTTON_W / 2, btnY + Renderer.SBUTTON_H / 2 + 3);
     }
 
-    // Down arrow
-    if (items.length > maxVisible && scroll < (items.length - maxVisible) * rowH) {
-      ctx.fillStyle = '#aaa';
-      ctx.font = '8px monospace';
+    // Down arrow (right button)
+    const downDisabled = scroll >= maxScroll;
+    const dnSheet = assets.getSheet('stripdn');
+    if (dnSheet) {
+      const frame = downDisabled ? 2 : 0;
+      assets.drawFrame(ctx, 'stripdn', frame, stripX + Renderer.DOWN_X_OFFSET, btnY, { scale: 2 });
+    } else {
+      ctx.fillStyle = downDisabled ? '#444' : '#aaa';
+      ctx.font = '10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('\u25BC', stripX + camW / 2, startY + maxVisible * rowH + 10);
+      ctx.fillText('\u25BC', stripX + Renderer.DOWN_X_OFFSET + Renderer.SBUTTON_W / 2, btnY + Renderer.SBUTTON_H / 2 + 3);
     }
   }
 
-  // ─── Button Row (Repair / Sell / Map — sprite icons) ──────
+  // ─── Button Row (Repair / Sell / Map — C++ English layout, SHP sprites) ──────
 
-  /** Render the 3-icon button row: repair, sell, map */
-  private renderButtonRow(sidebarX: number, sidebarW: number, assets: AssetManager): void {
+  /** Render the 3-icon button row with C++ positions: repair (64px wide), sell (40px), map (40px) */
+  private renderButtonRow(sidebarX: number, _sidebarW: number, assets: AssetManager): void {
     const ctx = this.ctx;
     const btnY = Renderer.BUTTON_ROW_Y;
     const btnH = Renderer.BUTTON_H;
-    const btnW = Math.floor(sidebarW / 3);
-    const buttons: Array<{ name: string; sprite: string; active: boolean; label: string }> = [
-      { name: 'repair', sprite: 'repair', active: this.repairMode, label: 'FIX' },
-      { name: 'sell', sprite: 'sell', active: this.sellMode, label: 'SELL' },
-      { name: 'map', sprite: 'map_btn', active: false, label: 'MAP' },
+    const buttons: Array<{ sprite: string; active: boolean; label: string; x: number; w: number }> = [
+      { sprite: 'repair', active: this.repairMode, label: 'FIX', x: Renderer.BUTTON_ONE_X, w: Renderer.BUTTON_ONE_W },
+      { sprite: 'sell', active: this.sellMode, label: 'SELL', x: Renderer.BUTTON_TWO_X, w: Renderer.BUTTON_TWO_W },
+      { sprite: 'map_btn', active: false, label: 'MAP', x: Renderer.BUTTON_THREE_X, w: Renderer.BUTTON_THREE_W },
     ];
 
-    for (let i = 0; i < buttons.length; i++) {
-      const btn = buttons[i];
-      const bx = sidebarX + i * btnW;
+    for (const btn of buttons) {
+      const bx = sidebarX + btn.x;
 
-      // Background — semi-transparent to let sidebar texture show through
-      ctx.fillStyle = btn.active ? 'rgba(255,200,60,0.45)' : 'rgba(20,20,28,0.55)';
-      ctx.fillRect(bx, btnY, btnW - 1, btnH);
-      ctx.strokeStyle = btn.active ? '#FFD700' : '#555';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(bx, btnY, btnW - 1, btnH);
-
-      // Sprite icon (frame 0=normal, 1=hover, 2=active) — scale to fill full button
+      // Sprite icon (C++ ShapeButtonClass::Draw_Me — frame 0=unpressed, 1=pressed, 2=disabled)
       const spriteSheet = assets.getSheet(btn.sprite);
       if (spriteSheet) {
-        const frame = btn.active ? 2 : 0;
-        const btnScale = Math.min((btnW - 1) / spriteSheet.meta.frameWidth, btnH / spriteSheet.meta.frameHeight);
+        const frame = btn.active ? 1 : 0;
+        // Scale LORES shape to fill button area
+        const btnScale = Math.min(btn.w / spriteSheet.meta.frameWidth, btnH / spriteSheet.meta.frameHeight);
         const sw = spriteSheet.meta.frameWidth * btnScale;
         const sh = spriteSheet.meta.frameHeight * btnScale;
-        assets.drawFrame(ctx, btn.sprite, frame, bx + (btnW - sw) / 2, btnY + (btnH - sh) / 2, { scale: btnScale });
+        assets.drawFrame(ctx, btn.sprite, frame, bx + (btn.w - sw) / 2, btnY + (btnH - sh) / 2, { scale: btnScale });
       } else {
-        // Fallback: text label
+        // Fallback: semi-transparent button with text
+        ctx.fillStyle = btn.active ? 'rgba(255,200,60,0.45)' : 'rgba(20,20,28,0.55)';
+        ctx.fillRect(bx, btnY, btn.w, btnH);
+        ctx.strokeStyle = btn.active ? '#FFD700' : '#555';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx, btnY, btn.w, btnH);
         ctx.font = 'bold 7px monospace';
         ctx.fillStyle = btn.active ? '#000' : '#ccc';
         ctx.textAlign = 'center';
-        ctx.fillText(btn.label, bx + btnW / 2, btnY + btnH / 2 + 3);
+        ctx.fillText(btn.label, bx + btn.w / 2, btnY + btnH / 2 + 3);
         ctx.textAlign = 'left';
       }
     }

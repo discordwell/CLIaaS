@@ -37,9 +37,30 @@ export function registerSyncTools(server: McpServer): void {
     {
       connector: z.string().describe('Connector name (e.g. zendesk, kayako, kayako-classic)'),
       fullSync: z.boolean().optional().describe('Force full sync, ignoring existing cursor'),
+      ingest: z.boolean().optional().describe('Ingest exported data into Postgres after sync'),
     },
-    async ({ connector, fullSync }) => {
+    async ({ connector, fullSync, ingest }) => {
       try {
+        if (ingest) {
+          const { syncAndIngest } = await import('../../sync/pull.js');
+          const result = await syncAndIngest(connector, { fullSync, ingest: true });
+
+          if (result.error) {
+            return errorResult(`Sync failed: ${result.error}`);
+          }
+
+          return textResult({
+            message: `Sync cycle complete for ${connector}`,
+            mode: result.fullSync ? 'full' : 'incremental',
+            durationMs: result.durationMs,
+            counts: result.counts,
+            cursorsUpdated: result.cursorState ? Object.keys(result.cursorState).length : 0,
+            ingested: result.ingested,
+            ingestSkipped: result.ingestSkipped,
+            ingestError: result.ingestError,
+          });
+        }
+
         const { runSyncCycle } = await import('../../sync/engine.js');
         const stats = await runSyncCycle(connector, { fullSync });
 
@@ -56,6 +77,37 @@ export function registerSyncTools(server: McpServer): void {
         });
       } catch (err) {
         return errorResult(`Sync trigger failed: ${err instanceof Error ? err.message : err}`);
+      }
+    },
+  );
+
+  server.tool(
+    'connector_capabilities',
+    'Show read/write capability matrix for all connectors',
+    {
+      connector: z.string().optional().describe('Filter by connector name'),
+    },
+    async ({ connector }) => {
+      try {
+        const { getAllCapabilities, getCapabilities, getSyncTier } = await import('../../sync/capabilities.js');
+
+        if (connector) {
+          const cap = getCapabilities(connector);
+          if (!cap) {
+            return errorResult(`Unknown connector: ${connector}`);
+          }
+          return textResult({ connector, capabilities: cap, tier: getSyncTier(cap) });
+        }
+
+        const all = getAllCapabilities();
+        const result = Object.entries(all).map(([name, cap]) => ({
+          connector: name,
+          ...cap,
+          tier: getSyncTier(cap),
+        }));
+        return textResult({ connectors: result });
+      } catch (err) {
+        return errorResult(`Failed to get capabilities: ${err instanceof Error ? err.message : err}`);
       }
     },
   );

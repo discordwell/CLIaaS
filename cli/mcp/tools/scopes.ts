@@ -37,6 +37,11 @@ const ALL_WRITE_TOOLS = [
   'plugin_uninstall',
   'plugin_toggle',
   'plugin_config',
+  'wfm_schedule_create',
+  'wfm_template_create',
+  'wfm_agent_status_set',
+  'wfm_time_off_request',
+  'wfm_time_off_decide',
 ];
 
 export function loadScopes(): MCPScopeConfig {

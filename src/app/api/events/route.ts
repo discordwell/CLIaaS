@@ -6,10 +6,14 @@ export const dynamic = 'force-dynamic';
 /**
  * Server-Sent Events endpoint for real-time updates.
  * Clients connect via EventSource and receive ticket/presence events.
+ * Optional ?ticketId=X parameter filters events to a specific ticket.
  */
 export async function GET(request: Request) {
   const auth = await requireAuth(request);
   if ('error' in auth) return auth.error;
+
+  const url = new URL(request.url);
+  const filterTicketId = url.searchParams.get('ticketId');
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
@@ -22,6 +26,10 @@ export async function GET(request: Request) {
       // Subscribe to all events
       unsubscribe = eventBus.onAny((event: AppEvent) => {
         try {
+          // Filter by ticketId if specified
+          if (filterTicketId && event.data?.ticketId && event.data.ticketId !== filterTicketId) {
+            return;
+          }
           const data = JSON.stringify(event);
           controller.enqueue(
             encoder.encode(`event: ${event.type}\ndata: ${data}\n\n`)

@@ -16,7 +16,11 @@ export type EventType =
   | 'presence:typing'
   | 'presence:left'
   | 'rule:executed'
-  | 'notification';
+  | 'notification'
+  | 'wfm:status_changed'
+  | 'wfm:adherence_alert'
+  | 'wfm:time_off_requested'
+  | 'wfm:time_off_decided';
 
 export interface AppEvent {
   type: EventType;

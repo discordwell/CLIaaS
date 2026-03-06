@@ -32,6 +32,8 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
   customFields?: Record<string, unknown>;
+  mergedIntoTicketId?: string;
+  splitFromTicketId?: string;
 }
 
 export interface Message {
@@ -174,6 +176,53 @@ export interface KBArticleCreateParams {
   status?: string;
 }
 
+// ---- Ticket Merge & Split types ----
+
+export interface TicketMergeParams {
+  primaryTicketId: string;
+  mergedTicketIds: string[];
+  mergedBy?: string;
+}
+
+export interface TicketMergeResult {
+  primaryTicketId: string;
+  mergedCount: number;
+  movedMessageCount: number;
+  mergedTags: string[];
+  mergeLogIds: string[];
+}
+
+export interface TicketSplitParams {
+  ticketId: string;
+  messageIds: string[];
+  newSubject?: string;
+  splitBy?: string;
+}
+
+export interface TicketSplitResult {
+  sourceTicketId: string;
+  newTicketId: string;
+  movedMessageCount: number;
+  splitLogId: string;
+}
+
+export interface TicketUnmergeParams {
+  mergeLogId: string;
+  unmergedBy?: string;
+}
+
+export interface MergeHistoryEntry {
+  id: string;
+  type: 'merge' | 'split';
+  primaryTicketId?: string;
+  mergedTicketId?: string;
+  sourceTicketId?: string;
+  newTicketId?: string;
+  movedMessageIds: string[];
+  undone: boolean;
+  createdAt: string;
+}
+
 // ---- Provider mode & capabilities ----
 
 export type DataMode = 'local' | 'db' | 'remote' | 'hybrid';
@@ -210,4 +259,10 @@ export interface DataProvider {
   updateTicket(ticketId: string, params: TicketUpdateParams): Promise<void>;
   createMessage(params: MessageCreateParams): Promise<{ id: string }>;
   createKBArticle(params: KBArticleCreateParams): Promise<{ id: string }>;
+
+  // Merge & Split
+  mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult>;
+  splitTicket(params: TicketSplitParams): Promise<TicketSplitResult>;
+  unmergeTicket(params: TicketUnmergeParams): Promise<void>;
+  getMergeHistory(ticketId: string): Promise<MergeHistoryEntry[]>;
 }

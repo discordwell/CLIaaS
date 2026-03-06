@@ -55,6 +55,16 @@ export async function POST(
 
   const outDir = EXPORT_DIRS[connectorName];
 
+  let ingestRequested = false;
+  try {
+    const body = await request.json().catch(() => null);
+    if (body && typeof body === 'object' && body.ingest === true) {
+      ingestRequested = true;
+    }
+  } catch {
+    // No body or invalid JSON — that's fine, ingest stays false
+  }
+
   try {
     let manifest;
 
@@ -93,7 +103,32 @@ export async function POST(
         return NextResponse.json({ error: 'Unknown connector' }, { status: 404 });
     }
 
-    return NextResponse.json({ status: 'ok', manifest });
+    let ingestResult: { ingested: boolean; skipped?: boolean; error?: string } = { ingested: false };
+
+    if (ingestRequested) {
+      try {
+        const { isDatabaseAvailable } = await import('@/db/index');
+        if (isDatabaseAvailable()) {
+          const { ingestZendeskExportDir } = await import('@/lib/zendesk/ingest');
+          await ingestZendeskExportDir({
+            dir: outDir,
+            tenant: 'default',
+            workspace: 'default',
+            provider: connectorName,
+          });
+          ingestResult = { ingested: true };
+        } else {
+          ingestResult = { ingested: false, skipped: true };
+        }
+      } catch (err) {
+        ingestResult = {
+          ingested: false,
+          error: err instanceof Error ? err.message : 'Ingest failed',
+        };
+      }
+    }
+
+    return NextResponse.json({ status: 'ok', manifest, ingest: ingestResult });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Export failed' },

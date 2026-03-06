@@ -8,6 +8,7 @@ import {
 import { STRUCTURE_SIZE, type MapStructure } from '../engine/scenario';
 import { Camera } from '../engine/camera';
 import { Entity } from '../engine/entity';
+import { Renderer } from '../engine/renderer';
 
 /**
  * Sidebar UI Tests — Dual Production Strips (C++ parity),
@@ -45,19 +46,15 @@ function checkPlacementAdjacency(
   return false;
 }
 
-/** Simulate button row click (repair/sell/map — 3 equal-width buttons) */
+/** Simulate button row click (C++ English layout: repair=64px, sell=40px, map=40px) */
 function buttonRowClick(
-  relX: number, sellMode: boolean, repairMode: boolean, sidebarW: number = 160,
+  relX: number, sellMode: boolean, repairMode: boolean,
 ): { sellMode: boolean; repairMode: boolean; mapClicked: boolean } {
-  const btnW = Math.floor(sidebarW / 3);
-  if (relX >= 0 && relX < btnW) {
-    // Repair button
+  if (relX >= Renderer.BUTTON_ONE_X && relX < Renderer.BUTTON_ONE_X + Renderer.BUTTON_ONE_W) {
     return { repairMode: !repairMode, sellMode: false, mapClicked: false };
-  } else if (relX >= btnW && relX < btnW * 2) {
-    // Sell button
+  } else if (relX >= Renderer.BUTTON_TWO_X && relX < Renderer.BUTTON_TWO_X + Renderer.BUTTON_TWO_W) {
     return { sellMode: !sellMode, repairMode: false, mapClicked: false };
-  } else if (relX >= btnW * 2) {
-    // Map button
+  } else if (relX >= Renderer.BUTTON_THREE_X && relX < Renderer.BUTTON_THREE_X + Renderer.BUTTON_THREE_W) {
     return { sellMode, repairMode, mapClicked: true };
   }
   return { sellMode, repairMode, mapClicked: false };
@@ -165,7 +162,7 @@ describe('Production Queue — C++ Parity', () => {
 // Button Row (Repair / Sell / Map)
 // ═══════════════════════════════════════════════════════════
 
-describe('Button Row', () => {
+describe('Button Row — C++ English Layout', () => {
   it('repair button toggles repairMode', () => {
     const r1 = buttonRowClick(10, false, false);
     expect(r1.repairMode).toBe(true);
@@ -175,10 +172,10 @@ describe('Button Row', () => {
   });
 
   it('sell button toggles sellMode', () => {
-    const r1 = buttonRowClick(60, false, false);
+    const r1 = buttonRowClick(80, false, false);
     expect(r1.sellMode).toBe(true);
     expect(r1.repairMode).toBe(false);
-    const r2 = buttonRowClick(60, true, false);
+    const r2 = buttonRowClick(80, true, false);
     expect(r2.sellMode).toBe(false);
   });
 
@@ -189,7 +186,7 @@ describe('Button Row', () => {
   });
 
   it('activating sell deactivates repair', () => {
-    const r = buttonRowClick(60, false, true);
+    const r = buttonRowClick(80, false, true);
     expect(r.sellMode).toBe(true);
     expect(r.repairMode).toBe(false);
   });
@@ -201,17 +198,25 @@ describe('Button Row', () => {
     expect(r.mapClicked).toBe(true);
   });
 
-  it('button positions: 3 equal-width in 160px sidebar', () => {
-    const sidebarW = 160;
-    const btnW = Math.floor(sidebarW / 3); // 53px each
-    expect(btnW).toBe(53);
-    // Repair: [0, 53), Sell: [53, 106), Map: [106, 160)
-    expect(buttonRowClick(0, false, false).repairMode).toBe(true);
-    expect(buttonRowClick(52, false, false).repairMode).toBe(true);
-    expect(buttonRowClick(53, false, false).sellMode).toBe(true);
-    expect(buttonRowClick(105, false, false).sellMode).toBe(true);
-    expect(buttonRowClick(106, false, false).mapClicked).toBe(true);
-    expect(buttonRowClick(159, false, false).mapClicked).toBe(true);
+  it('button positions match C++ English layout (64, 40, 40)', () => {
+    // Repair: [4, 68), Sell: [72, 112), Map: [116, 156)
+    expect(Renderer.BUTTON_ONE_X).toBe(4);
+    expect(Renderer.BUTTON_ONE_W).toBe(64);
+    expect(Renderer.BUTTON_TWO_X).toBe(72);
+    expect(Renderer.BUTTON_TWO_W).toBe(40);
+    expect(Renderer.BUTTON_THREE_X).toBe(116);
+    expect(Renderer.BUTTON_THREE_W).toBe(40);
+
+    expect(buttonRowClick(4, false, false).repairMode).toBe(true);   // left edge of repair
+    expect(buttonRowClick(67, false, false).repairMode).toBe(true);  // right edge of repair
+    expect(buttonRowClick(72, false, false).sellMode).toBe(true);    // left edge of sell
+    expect(buttonRowClick(111, false, false).sellMode).toBe(true);   // right edge of sell
+    expect(buttonRowClick(116, false, false).mapClicked).toBe(true); // left edge of map
+    expect(buttonRowClick(155, false, false).mapClicked).toBe(true); // right edge of map
+  });
+
+  it('button height matches C++ BUTTON_HEIGHT ×2', () => {
+    expect(Renderer.BUTTON_H).toBe(18); // 9×2
   });
 });
 
@@ -219,41 +224,46 @@ describe('Button Row', () => {
 // Strip Bounds and Scroll
 // ═══════════════════════════════════════════════════════════
 
-describe('Strip Bounds', () => {
-  it('left strip starts at offset 14 from sidebar edge', () => {
-    // Renderer.LEFT_STRIP_X_OFFSET = 14
-    const LEFT_STRIP_X_OFFSET = 14;
-    expect(LEFT_STRIP_X_OFFSET).toBe(14);
+describe('Strip Bounds — C++ HIRES Layout', () => {
+  it('left strip at C++ COLUMN_ONE offset (248-240)×2 = 16', () => {
+    expect(Renderer.LEFT_STRIP_X_OFFSET).toBe(16);
   });
 
-  it('right strip starts at offset 80 from sidebar edge', () => {
-    // Renderer.RIGHT_STRIP_X_OFFSET = 80 (14 + 64 + 2)
-    const RIGHT_STRIP_X_OFFSET = 80;
-    expect(RIGHT_STRIP_X_OFFSET).toBe(80);
+  it('right strip at C++ COLUMN_TWO offset (283-240)×2 = 86', () => {
+    expect(Renderer.RIGHT_STRIP_X_OFFSET).toBe(86);
   });
 
-  it('each strip shows 3 visible cameo slots (HIRES 64x48)', () => {
-    const CAMEO_VISIBLE = 3;
-    const CAMEO_H = 48;
-    const GAP = 2;
-    const stripVisibleH = CAMEO_VISIBLE * (CAMEO_H + GAP);
-    expect(stripVisibleH).toBe(150); // 3 * 50 = 150px
+  it('MAX_VISIBLE = 4 (C++ value, not 3)', () => {
+    expect(Renderer.CAMEO_VISIBLE).toBe(4);
+  });
+
+  it('CAMEO_GAP = 0 (C++ has no gap between cameos)', () => {
+    expect(Renderer.CAMEO_GAP).toBe(0);
+  });
+
+  it('each strip shows 4 visible cameo slots at 48px = 192px total', () => {
+    const stripVisibleH = Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP);
+    expect(stripVisibleH).toBe(192); // 4 * 48 = 192px
   });
 
   it('strip scroll max is zero when items fit in visible slots', () => {
-    const items = 2; // fewer than CAMEO_VISIBLE (3)
-    const rowH = 50;
-    const visibleH = 150;
+    const items = 3; // fewer than CAMEO_VISIBLE (4)
+    const rowH = Renderer.CAMEO_H;
+    const visibleH = Renderer.CAMEO_VISIBLE * rowH;
     const maxScroll = Math.max(0, items * rowH - visibleH);
     expect(maxScroll).toBe(0);
   });
 
   it('strip scroll max is positive when items exceed visible slots', () => {
     const items = 8;
-    const rowH = 50;
-    const visibleH = 150;
+    const rowH = Renderer.CAMEO_H;
+    const visibleH = Renderer.CAMEO_VISIBLE * rowH;
     const maxScroll = Math.max(0, items * rowH - visibleH);
-    expect(maxScroll).toBe(250); // 8*50 - 150 = 250
+    expect(maxScroll).toBe(192); // 8*48 - 192 = 192
+  });
+
+  it('strips start at Y=180 (C++ COLUMN_ONE_Y = 90×2)', () => {
+    expect(Renderer.STRIP_START_Y).toBe(180);
   });
 });
 

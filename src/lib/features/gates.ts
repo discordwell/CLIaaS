@@ -30,7 +30,8 @@ export type Feature =
   | 'custom_branding'
   | 'community_forums'
   | 'qa_reviews'
-  | 'proactive_messaging';
+  | 'proactive_messaging'
+  | 'workforce_management';
 
 /** All tiers (including legacy aliases). */
 export const ALL_TIERS: TierLevel[] = [
@@ -57,6 +58,7 @@ export const FEATURE_MATRIX: Record<Feature, TierLevel[]> = {
   community_forums:    [...ALL_TIERS],
   qa_reviews:          [...ALL_TIERS],
   proactive_messaging: [...ALL_TIERS],
+  workforce_management: [...ALL_TIERS],
 };
 
 /** Check whether a specific feature is enabled for a given tier. */
@@ -102,6 +104,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   community_forums:    'Community Forums',
   qa_reviews:          'QA & Conversation Review',
   proactive_messaging: 'Proactive Messaging',
+  workforce_management: 'Workforce Management',
 };
 
 /** Human-readable tier labels. */

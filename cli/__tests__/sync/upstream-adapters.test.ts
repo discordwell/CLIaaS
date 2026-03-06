@@ -25,6 +25,7 @@ vi.mock('../../connectors/helpcrunch.js', () => ({
   helpcrunchCreateChat: vi.fn().mockResolvedValue({ id: 401 }),
   helpcrunchUpdateChat: vi.fn().mockResolvedValue(undefined),
   helpcrunchPostMessage: vi.fn().mockResolvedValue(undefined),
+  helpcrunchSearchCustomers: vi.fn().mockResolvedValue([{ id: 42, name: 'Test', email: 'test@example.com' }]),
 }));
 
 vi.mock('../../connectors/intercom.js', () => ({
@@ -48,6 +49,22 @@ vi.mock('../../connectors/zoho-desk.js', () => ({
 vi.mock('../../connectors/hubspot.js', () => ({
   hubspotCreateTicket: vi.fn().mockResolvedValue({ id: 'hub-801' }),
   hubspotCreateNote: vi.fn().mockResolvedValue({ id: 'note-801' }),
+  hubspotUpdateTicket: vi.fn().mockResolvedValue(undefined),
+  hubspotPostReply: vi.fn().mockResolvedValue({ id: 'email-801' }),
+}));
+
+vi.mock('../../connectors/kayako.js', () => ({
+  kayakoUpdateCase: vi.fn().mockResolvedValue(undefined),
+  kayakoPostReply: vi.fn().mockResolvedValue(undefined),
+  kayakoPostNote: vi.fn().mockResolvedValue(undefined),
+  kayakoCreateCase: vi.fn().mockResolvedValue({ id: 901 }),
+}));
+
+vi.mock('../../connectors/kayako-classic.js', () => ({
+  kayakoClassicUpdateTicket: vi.fn().mockResolvedValue(undefined),
+  kayakoClassicPostReply: vi.fn().mockResolvedValue(undefined),
+  kayakoClassicPostNote: vi.fn().mockResolvedValue(undefined),
+  kayakoClassicCreateTicket: vi.fn().mockResolvedValue({ id: 1001, displayId: 'KYC-1001' }),
 }));
 
 describe('getUpstreamAdapter factory', () => {
@@ -55,15 +72,7 @@ describe('getUpstreamAdapter factory', () => {
     expect(getUpstreamAdapter('nonexistent', {})).toBeNull();
   });
 
-  it('returns null for kayako', () => {
-    expect(getUpstreamAdapter('kayako', {})).toBeNull();
-  });
-
-  it('returns null for kayako-classic', () => {
-    expect(getUpstreamAdapter('kayako-classic', {})).toBeNull();
-  });
-
-  const connectors = ['zendesk', 'freshdesk', 'groove', 'helpcrunch', 'intercom', 'helpscout', 'zoho-desk', 'hubspot'];
+  const connectors = ['zendesk', 'freshdesk', 'groove', 'helpcrunch', 'intercom', 'helpscout', 'zoho-desk', 'hubspot', 'kayako', 'kayako-classic'];
 
   it.each(connectors)('returns an adapter for %s', (name) => {
     const adapter = getUpstreamAdapter(name, { token: 'test', subdomain: 'test', email: 'test', apiKey: 'test', appId: 'test', appSecret: 'test', domain: 'test', orgId: 'test' });
@@ -227,17 +236,29 @@ describe('Zoho Desk adapter', () => {
 describe('HubSpot adapter', () => {
   const adapter = getUpstreamAdapter('hubspot', { token: 'hub-tok' })!;
 
-  it('supports neither update nor reply', () => {
-    expect(adapter.supportsUpdate).toBe(false);
-    expect(adapter.supportsReply).toBe(false);
+  it('supports update and reply', () => {
+    expect(adapter.supportsUpdate).toBe(true);
+    expect(adapter.supportsReply).toBe(true);
   });
 
-  it('throws on updateTicket', async () => {
-    await expect(adapter.updateTicket('1', {})).rejects.toThrow('does not support');
+  it('updates a ticket', async () => {
+    await adapter.updateTicket('hub-99', { status: 'open', priority: 'high' });
+    const { hubspotUpdateTicket } = await import('../../connectors/hubspot.js');
+    expect(hubspotUpdateTicket).toHaveBeenCalledWith(
+      { accessToken: 'hub-tok' },
+      'hub-99',
+      { status: 'open', priority: 'high' },
+    );
   });
 
-  it('throws on postReply', async () => {
-    await expect(adapter.postReply('1', { body: 'hi' })).rejects.toThrow('does not support');
+  it('posts a reply', async () => {
+    await adapter.postReply('hub-99', { body: 'Reply text' });
+    const { hubspotPostReply } = await import('../../connectors/hubspot.js');
+    expect(hubspotPostReply).toHaveBeenCalledWith(
+      { accessToken: 'hub-tok' },
+      'hub-99',
+      'Reply text',
+    );
   });
 
   it('posts a note', async () => {
@@ -253,5 +274,91 @@ describe('HubSpot adapter', () => {
   it('creates a ticket', async () => {
     const result = await adapter.createTicket({ subject: 'Test', description: 'Body' });
     expect(result.externalId).toBe('hub-801');
+  });
+});
+
+describe('Kayako adapter', () => {
+  const adapter = getUpstreamAdapter('kayako', { domain: 'acme.kayako.com', email: 'a@b.com', password: 'pass' })!;
+
+  it('supports update and reply', () => {
+    expect(adapter.supportsUpdate).toBe(true);
+    expect(adapter.supportsReply).toBe(true);
+  });
+
+  it('updates a case', async () => {
+    await adapter.updateTicket('42', { status: 'open' });
+    const { kayakoUpdateCase } = await import('../../connectors/kayako.js');
+    expect(kayakoUpdateCase).toHaveBeenCalledWith(
+      { domain: 'acme.kayako.com', email: 'a@b.com', password: 'pass' },
+      42,
+      { status: 'open' },
+    );
+  });
+
+  it('posts a reply', async () => {
+    await adapter.postReply('42', { body: 'Reply' });
+    const { kayakoPostReply } = await import('../../connectors/kayako.js');
+    expect(kayakoPostReply).toHaveBeenCalledWith(
+      { domain: 'acme.kayako.com', email: 'a@b.com', password: 'pass' },
+      42,
+      'Reply',
+    );
+  });
+
+  it('posts a note', async () => {
+    await adapter.postNote('42', { body: 'Note' });
+    const { kayakoPostNote } = await import('../../connectors/kayako.js');
+    expect(kayakoPostNote).toHaveBeenCalledWith(
+      { domain: 'acme.kayako.com', email: 'a@b.com', password: 'pass' },
+      42,
+      'Note',
+    );
+  });
+
+  it('creates a case', async () => {
+    const result = await adapter.createTicket({ subject: 'Test', description: 'Body' });
+    expect(result.externalId).toBe('901');
+  });
+});
+
+describe('Kayako Classic adapter', () => {
+  const adapter = getUpstreamAdapter('kayako-classic', { domain: 'classic.kayako.com', apiKey: 'key', secretKey: 'sec' })!;
+
+  it('supports update and reply', () => {
+    expect(adapter.supportsUpdate).toBe(true);
+    expect(adapter.supportsReply).toBe(true);
+  });
+
+  it('posts a reply', async () => {
+    await adapter.postReply('55', { body: 'Classic reply' });
+    const { kayakoClassicPostReply } = await import('../../connectors/kayako-classic.js');
+    expect(kayakoClassicPostReply).toHaveBeenCalledWith(
+      { domain: 'classic.kayako.com', apiKey: 'key', secretKey: 'sec' },
+      55,
+      'Classic reply',
+    );
+  });
+
+  it('posts a note', async () => {
+    await adapter.postNote('55', { body: 'Classic note' });
+    const { kayakoClassicPostNote } = await import('../../connectors/kayako-classic.js');
+    expect(kayakoClassicPostNote).toHaveBeenCalledWith(
+      { domain: 'classic.kayako.com', apiKey: 'key', secretKey: 'sec' },
+      55,
+      'Classic note',
+    );
+  });
+
+  it('throws on createTicket without KAYAKO_CLASSIC_DEPARTMENT_ID', async () => {
+    delete process.env.KAYAKO_CLASSIC_DEPARTMENT_ID;
+    await expect(adapter.createTicket({ subject: 'Test', description: 'Body' }))
+      .rejects.toThrow('KAYAKO_CLASSIC_DEPARTMENT_ID');
+  });
+
+  it('creates a ticket with KAYAKO_CLASSIC_DEPARTMENT_ID', async () => {
+    process.env.KAYAKO_CLASSIC_DEPARTMENT_ID = '5';
+    const result = await adapter.createTicket({ subject: 'Test', description: 'Body' });
+    expect(result.externalId).toBe('1001');
+    delete process.env.KAYAKO_CLASSIC_DEPARTMENT_ID;
   });
 });

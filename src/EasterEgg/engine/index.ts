@@ -2076,21 +2076,20 @@ export class Game {
     // Minimap click — check first since it's at top now
     if (this.handleMinimapClick(sx, sy)) return;
 
-    // Button row click detection (repair / sell / map)
+    // Button row click detection — C++ English layout (repair=wide, sell/map=narrow)
     const btnRowY = this.renderer.getButtonRowY();
-    const btnH = 28; // Renderer.BUTTON_H
+    const btnH = Renderer.BUTTON_H;
     if (sy >= btnRowY && sy < btnRowY + btnH) {
-      const btnW = Math.floor(Game.SIDEBAR_W / 3);
       const relX = sx - sidebarX;
-      if (relX >= 0 && relX < btnW) {
+      if (relX >= Renderer.BUTTON_ONE_X && relX < Renderer.BUTTON_ONE_X + Renderer.BUTTON_ONE_W) {
         // Repair button
         this.repairMode = !this.repairMode;
         this.sellMode = false;
-      } else if (relX >= btnW && relX < btnW * 2) {
+      } else if (relX >= Renderer.BUTTON_TWO_X && relX < Renderer.BUTTON_TWO_X + Renderer.BUTTON_TWO_W) {
         // Sell button
         this.sellMode = !this.sellMode;
         this.repairMode = false;
-      } else if (relX >= btnW * 2) {
+      } else if (relX >= Renderer.BUTTON_THREE_X && relX < Renderer.BUTTON_THREE_X + Renderer.BUTTON_THREE_W) {
         // Map button — center camera on base
         this.centerOnBase();
       }
@@ -2101,26 +2100,23 @@ export class Game {
     const swClick = this.handleSuperweaponButtonClick(sy);
     if (swClick) return;
 
-    // Scroll arrow click detection (above/below strip area)
+    // Scroll arrow click detection — C++ layout: both buttons side-by-side below strip
     for (const strip of ['left', 'right'] as const) {
       const ab = this.renderer.getScrollArrowBounds(strip);
-      if (sx >= ab.x && sx < ab.x + ab.w) {
-        if (sy >= ab.upY && sy < ab.upY + ab.upH) {
-          // Scroll up
-          const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
-          this.stripScrollPositions[strip] = Math.max(0, this.stripScrollPositions[strip] - rowH);
-          return;
-        }
-        if (sy >= ab.downY && sy < ab.downY + ab.downH) {
-          // Scroll down
-          const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
-          const items = this.cachedAvailableItems ?? this.getAvailableItems();
-          const filteredItems = items.filter(it => getStripSide(it) === strip);
-          const visibleH = this.renderer.getStripBounds(strip).h;
-          const maxScroll = Math.max(0, filteredItems.length * rowH - visibleH);
-          this.stripScrollPositions[strip] = Math.min(maxScroll, this.stripScrollPositions[strip] + rowH);
-          return;
-        }
+      const rowH = Renderer.CAMEO_H; // CAMEO_GAP = 0
+      // Up button (left)
+      if (sx >= ab.upX && sx < ab.upX + ab.upW && sy >= ab.upY && sy < ab.upY + ab.upH) {
+        this.stripScrollPositions[strip] = Math.max(0, this.stripScrollPositions[strip] - rowH);
+        return;
+      }
+      // Down button (right)
+      if (sx >= ab.downX && sx < ab.downX + ab.downW && sy >= ab.downY && sy < ab.downY + ab.downH) {
+        const items = this.cachedAvailableItems ?? this.getAvailableItems();
+        const filteredItems = items.filter(it => getStripSide(it) === strip);
+        const visibleH = this.renderer.getStripBounds(strip).h;
+        const maxScroll = Math.max(0, filteredItems.length * rowH - visibleH);
+        this.stripScrollPositions[strip] = Math.min(maxScroll, this.stripScrollPositions[strip] + rowH);
+        return;
       }
     }
 
@@ -6846,6 +6842,8 @@ export class Game {
     this.renderer.sidebarW = Game.SIDEBAR_W;
     this.renderer.leftStripScroll = this.stripScrollPositions.left;
     this.renderer.rightStripScroll = this.stripScrollPositions.right;
+    // Power bar bounce animation (C++ PowerClass::AI — runs each tick)
+    this.renderer.updatePowerAnimation();
     // Radar requires DOME and sufficient power
     const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;

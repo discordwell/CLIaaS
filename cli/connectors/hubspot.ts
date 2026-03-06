@@ -348,6 +348,49 @@ export async function hubspotCreateTicket(auth: HubSpotAuth, subject: string, co
   return { id: result.id };
 }
 
+export async function hubspotUpdateTicket(auth: HubSpotAuth, ticketId: string, updates: {
+  status?: string;
+  priority?: string;
+  assignee?: string;
+}): Promise<void> {
+  const properties: Record<string, unknown> = {};
+  if (updates.status) properties.hs_pipeline_stage = updates.status;
+  if (updates.priority) properties.hs_ticket_priority = updates.priority;
+  if (updates.assignee) properties.hubspot_owner_id = updates.assignee;
+
+  await createHubSpotClient(auth).request(`/crm/v3/objects/tickets/${ticketId}`, {
+    method: 'PATCH',
+    body: { properties },
+  });
+}
+
+export async function hubspotPostReply(auth: HubSpotAuth, ticketId: string, body: string, options?: {
+  ownerId?: string;
+}): Promise<{ id: string }> {
+  const client = createHubSpotClient(auth);
+  const properties: Record<string, unknown> = {
+    hs_email_direction: 'EMAIL',
+    hs_email_status: 'SENT',
+    hs_email_subject: 'Reply',
+    hs_email_text: body,
+    hs_timestamp: new Date().toISOString(),
+  };
+  if (options?.ownerId) properties.hubspot_owner_id = options.ownerId;
+
+  const email = await client.request<{ id: string }>('/crm/v3/objects/emails', {
+    method: 'POST',
+    body: { properties },
+  });
+
+  // Associate email with ticket
+  await client.request(`/crm/v4/objects/emails/${email.id}/associations/tickets/${ticketId}`, {
+    method: 'PUT',
+    body: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 26 }],
+  });
+
+  return { id: email.id };
+}
+
 export async function hubspotCreateNote(auth: HubSpotAuth, ticketId: string, body: string, options?: {
   ownerId?: string;
 }): Promise<{ id: string }> {

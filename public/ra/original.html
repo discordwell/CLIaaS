@@ -770,6 +770,11 @@ var Module = {
         document.title = 'RA:AUTOPLAY=FAIL-NO-EXPORT';
       }
     }
+    // Agent harness ready once WASM exports are available
+    if (typeof Module._agent_get_state === 'function') {
+      window.__agentReady = true;
+      console.log('[AGENT] Agent harness ready');
+    }
     // SAFE title-based diagnostics: only use JS-side data, NEVER call WASM exports
     // from setInterval (calling WASM during Asyncify yield corrupts the stack).
     // Preserve EM_ASM checkpoint titles (don't overwrite unless they use f= format)
@@ -790,7 +795,7 @@ var Module = {
   // Cache bust WASM binary to avoid stale binaries after deploys
   locateFile: function(path, scriptDirectory) {
     if (path.endsWith('.wasm')) {
-      return scriptDirectory + path + '?v=20260306a';
+      return scriptDirectory + path + '?v=20260306b';
     }
     return scriptDirectory + path;
   }
@@ -1202,8 +1207,45 @@ Module.setStatus('Downloading...');
     }
   }, 30000);
 })();
+
+// === Agent Harness (AI Player Interface) ===
+// Mirrors the TS engine's agentHarness.ts window API for WASM.
+// IDs are per-step only — heap compaction can shift indices after deaths.
+(function() {
+  window.__agentReady = false;
+
+  window.__agentState = function() {
+    if (!Module || !Module._agent_get_state) return {error: 'not ready'};
+    var ptr = Module._agent_get_state();
+    if (!ptr) return {error: 'null result'};
+    var str = UTF8ToString(ptr);
+    try { return JSON.parse(str); } catch(e) { return {error: e.message, raw: str.substring(0, 200)}; }
+  };
+
+  window.__agentCommand = function(commands) {
+    if (!Module || !Module._agent_command) return {error: 'not ready'};
+    var json = JSON.stringify(commands);
+    var buf = allocateUTF8(json);
+    var ptr = Module._agent_command(buf);
+    _free(buf);
+    if (!ptr) return {error: 'null result'};
+    var str = UTF8ToString(ptr);
+    try { return JSON.parse(str); } catch(e) { return {error: e.message}; }
+  };
+
+  window.__agentStep = function(n, commands) {
+    if (!Module || !Module._agent_step) return {error: 'not ready'};
+    var cmdJson = commands ? JSON.stringify(commands) : '';
+    var cmdBuf = cmdJson ? allocateUTF8(cmdJson) : 0;
+    var ptr = Module._agent_step(n || 15, cmdBuf);
+    if (cmdBuf) _free(cmdBuf);
+    if (!ptr) return {error: 'null result'};
+    var str = UTF8ToString(ptr);
+    try { return JSON.parse(str); } catch(e) { return {error: e.message, raw: str.substring(0, 200)}; }
+  };
+})();
 </script>
 <script src="gamedata.js"></script>
-<script async src="rasdl.js?v=20260306a"></script>
+<script async src="rasdl.js?v=20260306b"></script>
 </body>
 </html>

@@ -15,6 +15,7 @@ const navLinks = [
   { href: "/sla", label: "SLA" },
   { href: "/settings/routing", label: "Routing" },
   { href: "/integrations", label: "Integrations" },
+  { href: "/wfm", label: "WFM" },
   { href: "/marketplace", label: "Marketplace" },
   { href: "/security", label: "Security" },
   { href: "/enterprise", label: "Enterprise" },

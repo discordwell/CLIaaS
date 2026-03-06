@@ -12,15 +12,21 @@ export function createHubspotAdapter(auth: Record<string, string>): ConnectorWri
 
   return {
     name: 'hubspot',
-    supportsUpdate: false,
-    supportsReply: false,
+    supportsUpdate: true,
+    supportsReply: true,
 
-    async updateTicket(): Promise<void> {
-      throw new Error('HubSpot adapter does not support updateTicket');
+    async updateTicket(externalId: string, updates: UpstreamTicketUpdate): Promise<void> {
+      const { hubspotUpdateTicket } = await import('../../connectors/hubspot.js');
+      const mapped: { status?: string; priority?: string; assignee?: string } = {};
+      if (updates.status) mapped.status = updates.status;
+      if (updates.priority) mapped.priority = updates.priority;
+      if (updates.assignee) mapped.assignee = updates.assignee;
+      await hubspotUpdateTicket(hbAuth, externalId, mapped);
     },
 
-    async postReply(): Promise<void> {
-      throw new Error('HubSpot adapter does not support postReply');
+    async postReply(externalId: string, reply: UpstreamReply): Promise<void> {
+      const { hubspotPostReply } = await import('../../connectors/hubspot.js');
+      await hubspotPostReply(hbAuth, externalId, reply.body);
     },
 
     async postNote(externalId: string, note: UpstreamNote): Promise<void> {

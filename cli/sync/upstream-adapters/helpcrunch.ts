@@ -43,9 +43,18 @@ export function createHelpcrunchAdapter(auth: Record<string, string>): Connector
     },
 
     async createTicket(ticket: UpstreamTicketCreate): Promise<UpstreamCreateResult> {
-      const { helpcrunchCreateChat } = await import('../../connectors/helpcrunch.js');
-      // HelpCrunch requires a customerId — use 0 as placeholder when not available
-      const result = await helpcrunchCreateChat(hcAuth, 0, ticket.description);
+      const { helpcrunchCreateChat, helpcrunchSearchCustomers } = await import('../../connectors/helpcrunch.js');
+      let customerId: number | undefined;
+      if (ticket.requester) {
+        const customers = await helpcrunchSearchCustomers(hcAuth, ticket.requester);
+        if (customers.length > 0) {
+          customerId = customers[0].id;
+        }
+      }
+      if (customerId === undefined) {
+        throw new Error('HelpCrunch createTicket requires a valid requester email that matches an existing customer');
+      }
+      const result = await helpcrunchCreateChat(hcAuth, customerId, ticket.description);
       return { externalId: String(result.id) };
     },
   };

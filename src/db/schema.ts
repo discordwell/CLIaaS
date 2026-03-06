@@ -16,6 +16,8 @@ import {
   index,
   inet,
   customType,
+  date,
+  time,
 } from 'drizzle-orm/pg-core';
 
 export const providerEnum = pgEnum('provider', [
@@ -52,6 +54,8 @@ export const ruleTypeEnum = pgEnum('rule_type', [
   'automation',
   'sla',
 ]);
+
+export const templateScopeEnum = pgEnum('template_scope', ['personal', 'shared']);
 
 export const channelTypeEnum = pgEnum('channel_type', [
   'email',
@@ -307,6 +311,8 @@ export const tickets = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    mergedIntoTicketId: uuid('merged_into_ticket_id'),
+    splitFromTicketId: uuid('split_from_ticket_id'),
   },
   table => ({
     ticketsWorkspaceStatusIdx: index('tickets_workspace_status_idx').on(
@@ -318,6 +324,8 @@ export const tickets = pgTable(
       table.workspaceId,
       table.customerEmail,
     ),
+    ticketsMergedIntoIdx: index('tickets_merged_into_idx').on(table.mergedIntoTicketId),
+    ticketsSplitFromIdx: index('tickets_split_from_idx').on(table.splitFromTicketId),
   }),
 );
 
@@ -1664,6 +1672,7 @@ export const agentAvailabilityEnum = pgEnum('agent_availability', [
   'online',
   'away',
   'offline',
+  'on_break',
 ]);
 
 export const routingTargetTypeEnum = pgEnum('routing_target_type', [
@@ -1797,5 +1806,265 @@ export const routingLog = pgTable(
       table.createdAt,
     ),
     routingLogTicketIdx: index('routing_log_ticket_idx').on(table.ticketId),
+  }),
+);
+
+// ---- Workforce Management (WFM) ----
+
+export const timeOffStatusEnum = pgEnum('time_off_status', [
+  'pending',
+  'approved',
+  'denied',
+]);
+
+export const scheduleTemplates = pgTable(
+  'schedule_templates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    shifts: jsonb('shifts').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    scheduleTemplatesWorkspaceIdx: index('schedule_templates_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const agentSchedules = pgTable(
+  'agent_schedules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    templateId: uuid('template_id').references(() => scheduleTemplates.id),
+    effectiveFrom: date('effective_from').notNull(),
+    effectiveTo: date('effective_to'),
+    timezone: text('timezone').notNull().default('UTC'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    agentSchedulesWorkspaceUserIdx: index('agent_schedules_workspace_user_idx').on(
+      table.workspaceId,
+      table.userId,
+    ),
+    agentSchedulesEffectiveIdx: index('agent_schedules_effective_idx').on(
+      table.userId,
+      table.effectiveFrom,
+      table.effectiveTo,
+    ),
+  }),
+);
+
+export const scheduleShifts = pgTable(
+  'schedule_shifts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    scheduleId: uuid('schedule_id').notNull().references(() => agentSchedules.id, { onDelete: 'cascade' }),
+    dayOfWeek: integer('day_of_week').notNull(),
+    startTime: time('start_time').notNull(),
+    endTime: time('end_time').notNull(),
+    activity: text('activity').notNull().default('work'),
+    label: text('label'),
+  },
+  table => ({
+    scheduleShiftsScheduleIdx: index('schedule_shifts_schedule_idx').on(table.scheduleId),
+  }),
+);
+
+export const timeOffRequests = pgTable(
+  'time_off_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    reason: text('reason'),
+    status: timeOffStatusEnum('status').notNull().default('pending'),
+    approvedBy: uuid('approved_by').references(() => users.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    timeOffRequestsWorkspaceStatusIdx: index('time_off_requests_workspace_status_idx').on(
+      table.workspaceId,
+      table.status,
+    ),
+    timeOffRequestsUserIdx: index('time_off_requests_user_idx').on(table.userId),
+  }),
+);
+
+export const agentStatusLog = pgTable(
+  'agent_status_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    status: agentAvailabilityEnum('status').notNull(),
+    reason: text('reason'),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    agentStatusLogWorkspaceUserIdx: index('agent_status_log_workspace_user_idx').on(
+      table.workspaceId,
+      table.userId,
+      table.startedAt,
+    ),
+  }),
+);
+
+export const volumeSnapshots = pgTable(
+  'volume_snapshots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    snapshotHour: timestamp('snapshot_hour', { withTimezone: true }).notNull(),
+    channel: text('channel'),
+    ticketsCreated: integer('tickets_created').notNull().default(0),
+    ticketsResolved: integer('tickets_resolved').notNull().default(0),
+  },
+  table => ({
+    volumeSnapshotsUniqueIdx: uniqueIndex('volume_snapshots_ws_hour_channel_idx').on(
+      table.workspaceId,
+      table.snapshotHour,
+      table.channel,
+    ),
+    volumeSnapshotsWorkspaceHourIdx: index('volume_snapshots_workspace_hour_idx').on(
+      table.workspaceId,
+      table.snapshotHour,
+    ),
+  }),
+);
+
+export const businessHours = pgTable(
+  'business_hours',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    timezone: text('timezone').notNull().default('UTC'),
+    schedule: jsonb('schedule').notNull().default({}),
+    holidays: jsonb('holidays').notNull().default([]),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    businessHoursWorkspaceIdx: index('business_hours_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+// ---- Canned Responses, Macros & Agent Signatures (Plan 07) ----
+
+export const cannedResponses = pgTable(
+  'canned_responses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    category: text('category'),
+    scope: templateScopeEnum('scope').notNull().default('personal'),
+    shortcut: text('shortcut'),
+    usageCount: integer('usage_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    cannedResponsesWorkspaceIdx: index('canned_responses_workspace_idx').on(table.workspaceId),
+    cannedResponsesCategoryIdx: index('canned_responses_category_idx').on(table.workspaceId, table.category),
+    cannedResponsesCreatedByIdx: index('canned_responses_created_by_idx').on(table.createdBy),
+  }),
+);
+
+export const nativeMacros = pgTable(
+  'macros',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    actions: jsonb('actions').notNull().default([]),
+    scope: templateScopeEnum('scope').notNull().default('shared'),
+    enabled: boolean('enabled').notNull().default(true),
+    usageCount: integer('usage_count').notNull().default(0),
+    position: integer('position'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    macrosWorkspaceIdx: index('macros_workspace_idx').on(table.workspaceId),
+    macrosCreatedByIdx: index('macros_created_by_idx').on(table.createdBy),
+  }),
+);
+
+export const agentSignatures = pgTable(
+  'agent_signatures',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').references(() => users.id),
+    name: text('name').notNull(),
+    bodyHtml: text('body_html').notNull(),
+    bodyText: text('body_text').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    agentSignaturesWorkspaceIdx: index('agent_signatures_workspace_idx').on(table.workspaceId),
+    agentSignaturesUserIdx: index('agent_signatures_user_idx').on(table.userId),
+    agentSignaturesUserDefaultIdx: uniqueIndex('agent_signatures_user_default_idx')
+      .on(table.userId)
+      .where(sql`is_default = true`),
+  }),
+);
+
+// ---- Ticket Merge & Split Logs ----
+
+export const ticketMergeLog = pgTable(
+  'ticket_merge_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    primaryTicketId: uuid('primary_ticket_id').notNull().references(() => tickets.id),
+    mergedTicketId: uuid('merged_ticket_id').notNull().references(() => tickets.id),
+    mergedBy: uuid('merged_by').references(() => users.id),
+    mergedTicketSnapshot: jsonb('merged_ticket_snapshot').notNull(),
+    movedMessageIds: uuid('moved_message_ids').array().notNull().default([]),
+    movedAttachmentIds: uuid('moved_attachment_ids').array().notNull().default([]),
+    mergedTags: text('merged_tags').array().notNull().default([]),
+    undone: boolean('undone').notNull().default(false),
+    undoneAt: timestamp('undone_at', { withTimezone: true }),
+    undoneBy: uuid('undone_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ticketMergeLogWorkspaceIdx: index('ticket_merge_log_workspace_idx').on(table.workspaceId),
+    ticketMergeLogPrimaryIdx: index('ticket_merge_log_primary_idx').on(table.primaryTicketId),
+    ticketMergeLogMergedIdx: index('ticket_merge_log_merged_idx').on(table.mergedTicketId),
+  }),
+);
+
+export const ticketSplitLog = pgTable(
+  'ticket_split_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    sourceTicketId: uuid('source_ticket_id').notNull().references(() => tickets.id),
+    newTicketId: uuid('new_ticket_id').notNull().references(() => tickets.id),
+    splitBy: uuid('split_by').references(() => users.id),
+    movedMessageIds: uuid('moved_message_ids').array().notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ticketSplitLogWorkspaceIdx: index('ticket_split_log_workspace_idx').on(table.workspaceId),
+    ticketSplitLogSourceIdx: index('ticket_split_log_source_idx').on(table.sourceTicketId),
+    ticketSplitLogNewIdx: index('ticket_split_log_new_idx').on(table.newTicketId),
   }),
 );

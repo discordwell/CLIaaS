@@ -272,6 +272,15 @@ export async function helpcrunchPostMessage(auth: HelpcrunchAuth, chatId: number
   });
 }
 
+export async function helpcrunchSearchCustomers(auth: HelpcrunchAuth, email: string): Promise<Array<{ id: number; name: string | null; email: string | null }>> {
+  const client = createHelpcrunchClient(auth);
+  const result = await client.request<{ data: HCCustomer[] }>('/customers', {
+    method: 'POST',
+    body: { filter: [{ field: 'email', operator: 'is', value: email }] },
+  });
+  return (result.data ?? []).map(c => ({ id: c.id, name: c.name, email: c.email }));
+}
+
 export async function helpcrunchCreateChat(auth: HelpcrunchAuth, customerId: number, message: string, applicationId = 1): Promise<{ id: number }> {
   const client = createHelpcrunchClient(auth);
   // Create the chat first (application is required)

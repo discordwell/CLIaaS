@@ -13,8 +13,11 @@ export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if ('error' in auth) return auth.error;
 
+  const userId = auth.user.id;
+  const userName = auth.user.name || auth.user.email || 'Agent';
+
   try {
-    const { userId, userName, ticketId, activity, action } = await request.json();
+    const { ticketId, activity, action } = await request.json();
 
     if (!ticketId) {
       return NextResponse.json({ error: 'ticketId required' }, { status: 400 });
@@ -24,14 +27,15 @@ export async function POST(request: NextRequest) {
       presence.leave(userId, ticketId);
     } else {
       presence.update(
-        userId || 'anonymous',
-        userName || 'Anonymous',
+        userId,
+        userName,
         ticketId,
         activity || 'viewing'
       );
     }
 
-    return NextResponse.json({ ok: true });
+    const viewers = presence.getViewers(ticketId);
+    return NextResponse.json({ ok: true, currentUserId: userId, viewers });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Presence update failed' },
@@ -50,5 +54,5 @@ export async function GET(request: NextRequest) {
   }
 
   const viewers = presence.getViewers(ticketId);
-  return NextResponse.json({ viewers });
+  return NextResponse.json({ currentUserId: auth.user.id, viewers });
 }

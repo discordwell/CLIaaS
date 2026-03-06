@@ -2,7 +2,7 @@
  * Upstream adapter factory.
  *
  * Returns the appropriate ConnectorWriteAdapter for a given connector name,
- * or null for unsupported/unconfigured connectors (kayako, kayako-classic).
+ * or null for unknown connector names.
  */
 
 import type { ConnectorWriteAdapter } from '../upstream-adapter.js';
@@ -15,12 +15,13 @@ import { createIntercomAdapter } from './intercom.js';
 import { createHelpscoutAdapter } from './helpscout.js';
 import { createZohoDeskAdapter } from './zoho-desk.js';
 import { createHubspotAdapter } from './hubspot.js';
+import { createKayakoAdapter } from './kayako.js';
+import { createKayakoClassicAdapter } from './kayako-classic.js';
 
 /**
  * Get an upstream write adapter for the given connector.
  *
- * Returns null for kayako/kayako-classic (intentionally unconfigured)
- * and for any unknown connector names.
+ * Returns null for unknown connector names.
  */
 export function getUpstreamAdapter(
   connector: string,
@@ -43,6 +44,10 @@ export function getUpstreamAdapter(
       return createZohoDeskAdapter(auth);
     case 'hubspot':
       return createHubspotAdapter(auth);
+    case 'kayako':
+      return createKayakoAdapter(auth);
+    case 'kayako-classic':
+      return createKayakoClassicAdapter(auth);
     default:
       return null;
   }

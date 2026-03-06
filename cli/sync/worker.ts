@@ -11,7 +11,7 @@ const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 export interface WorkerOptions {
   intervalMs?: number;
   outDir?: string;
-  onCycle?: (stats: SyncStats) => void;
+  onCycle?: (stats: SyncStats) => void | Promise<void>;
   onError?: (error: Error) => void;
 }
 
@@ -52,7 +52,7 @@ export function startSyncWorker(
         log(
           `Cycle complete: ${stats.counts.tickets} tickets, ${stats.counts.messages} messages (${stats.durationMs}ms)`,
         );
-        opts?.onCycle?.(stats);
+        await opts?.onCycle?.(stats);
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));

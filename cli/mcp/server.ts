@@ -21,6 +21,7 @@ import { registerQATools } from './tools/qa.js';
 import { registerCampaignTools } from './tools/campaigns.js';
 import { registerPluginTools } from './tools/plugins.js';
 import { registerRoutingTools } from './tools/routing.js';
+import { registerWfmTools } from './tools/wfm.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -48,6 +49,7 @@ registerQATools(server);
 registerCampaignTools(server);
 registerPluginTools(server);
 registerRoutingTools(server);
+registerWfmTools(server);
 
 // Register resources and prompts
 registerResources(server);

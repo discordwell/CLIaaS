@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadTickets, loadMessages } from "@/lib/data";
 import TicketActions from "@/components/TicketActions";
+import CollisionDetector from "@/components/CollisionDetector";
 import MacroDropdown from "./_components/MacroDropdown";
 import ReRouteButton from "./_components/ReRouteButton";
 import { getRoutingLog } from "@/lib/routing/store";
@@ -55,6 +56,9 @@ export default async function TicketDetailPage({
         <span>/</span>
         <span className="font-bold text-zinc-950">#{ticket.externalId}</span>
       </nav>
+
+      {/* COLLISION DETECTION */}
+      <CollisionDetector ticketId={ticket.id} />
 
       {/* TICKET HEADER */}
       <header className="border-2 border-zinc-950 bg-white p-8">

@@ -78,7 +78,7 @@ class PresenceTracker {
   }
 
   private cleanup(): void {
-    const staleThreshold = Date.now() - 60_000; // 60s timeout
+    const staleThreshold = Date.now() - 30_000; // 30s timeout
     for (const [key, entry] of this.entries) {
       if (entry.lastSeen < staleThreshold) {
         this.entries.delete(key);

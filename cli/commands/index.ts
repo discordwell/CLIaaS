@@ -40,6 +40,7 @@ import { registerPluginCommands } from './plugins.js';
 import { registerInitCommand } from './init.js';
 import { registerSetupCommand } from './setup.js';
 import { registerRoutingCommands } from './routing.js';
+import { registerWfmCommands } from './wfm.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -83,4 +84,5 @@ export function registerCommands(program: Command): void {
   registerInitCommand(program);
   registerSetupCommand(program);
   registerRoutingCommands(program);
+  registerWfmCommands(program);
 }

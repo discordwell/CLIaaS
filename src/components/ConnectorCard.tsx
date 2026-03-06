@@ -3,6 +3,21 @@
 import { useState } from "react";
 import type { ConnectorMeta } from "@/lib/connector-service";
 
+function capabilityBadge(connector: ConnectorMeta) {
+  const cap = connector.capabilities;
+  if (!cap) return { label: "read only", color: "bg-zinc-400 text-white" };
+  const allWrite = cap.update && cap.reply && cap.note && cap.create;
+  const someWrite = cap.update || cap.reply || cap.note || cap.create;
+  if (allWrite) return { label: "full sync", color: "bg-emerald-600 text-white" };
+  if (someWrite) {
+    const missing = [];
+    if (!cap.update) missing.push("no update");
+    if (!cap.reply) missing.push("no reply");
+    return { label: `read + write${missing.length ? ` (${missing.join(", ")})` : ""}`, color: "bg-blue-600 text-white" };
+  }
+  return { label: "read only", color: "bg-zinc-400 text-white" };
+}
+
 export default function ConnectorCard({ connector }: { connector: ConnectorMeta }) {
   const [verifyState, setVerifyState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [exportState, setExportState] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -33,19 +48,24 @@ export default function ConnectorCard({ connector }: { connector: ConnectorMeta 
     setExportState("loading");
     setExportMsg("");
     try {
-      const res = await fetch(`/api/connectors/${connector.id}/export`, { method: "POST" });
+      const res = await fetch(`/api/connectors/${connector.id}/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ingest: true }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Export failed");
       const counts = data.manifest?.counts;
+      const ingestStatus = data.ingest?.ingested ? " — ingested to DB" : "";
       if (counts) {
         const parts = [];
         if (counts.tickets) parts.push(`${counts.tickets} tickets`);
         if (counts.messages) parts.push(`${counts.messages} messages`);
         if (counts.customers) parts.push(`${counts.customers} customers`);
         if (counts.kbArticles) parts.push(`${counts.kbArticles} KB articles`);
-        setExportMsg(parts.join(", ") || "Export complete");
+        setExportMsg((parts.join(", ") || "Export complete") + ingestStatus);
       } else {
-        setExportMsg("Export complete");
+        setExportMsg("Export complete" + ingestStatus);
       }
       setExportState("success");
     } catch (err) {
@@ -62,8 +82,8 @@ export default function ConnectorCard({ connector }: { connector: ConnectorMeta 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <p className="text-lg font-bold">{connector.name}</p>
-          <span className="bg-zinc-950 px-2 py-0.5 font-mono text-xs font-bold uppercase text-white">
-            bidirectional
+          <span className={`${capabilityBadge(connector).color} px-2 py-0.5 font-mono text-xs font-bold uppercase`}>
+            {capabilityBadge(connector).label}
           </span>
         </div>
         <span

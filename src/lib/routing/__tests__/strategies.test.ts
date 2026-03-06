@@ -30,9 +30,10 @@ describe('applyStrategy', () => {
 
   it('round_robin rotates through candidates', () => {
     const candidates = makeCandidates();
-    const r1 = applyStrategy('round_robin', candidates, { queueId: 'q1' });
-    const r2 = applyStrategy('round_robin', candidates, { queueId: 'q1' });
-    const r3 = applyStrategy('round_robin', candidates, { queueId: 'q1' });
+    const qid = `strat-rr-${Date.now()}`;
+    const r1 = applyStrategy('round_robin', candidates, { queueId: qid });
+    const r2 = applyStrategy('round_robin', candidates, { queueId: qid });
+    const r3 = applyStrategy('round_robin', candidates, { queueId: qid });
 
     expect(r1?.userId).toBe('a1');
     expect(r2?.userId).toBe('a2');

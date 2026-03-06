@@ -7,6 +7,28 @@ export type { ConnectorId } from './connector-registry';
 
 import { CONNECTOR_REGISTRY, ALL_CONNECTOR_IDS, type ConnectorId } from './connector-registry';
 
+const CAPABILITIES: Record<string, ConnectorCapabilities> = {
+  zendesk:           { read: true, incrementalSync: true,  update: true,  reply: true,  note: true,  create: true  },
+  freshdesk:         { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+  groove:            { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+  helpcrunch:        { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+  intercom:          { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
+  helpscout:         { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
+  'zoho-desk':       { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
+  hubspot:           { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+  kayako:            { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+  'kayako-classic':  { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+};
+
+export interface ConnectorCapabilities {
+  read: boolean;
+  incrementalSync: boolean;
+  update: boolean;
+  reply: boolean;
+  note: boolean;
+  create: boolean;
+}
+
 export interface ConnectorMeta {
   id: ConnectorId;
   name: string;
@@ -19,6 +41,7 @@ export interface ConnectorMeta {
   customerCount: number;
   kbArticleCount: number;
   lastExport: string | null;
+  capabilities: ConnectorCapabilities;
 }
 
 interface ManifestCounts {
@@ -71,6 +94,7 @@ export function getConnectorStatus(id: ConnectorId): ConnectorMeta {
     customerCount: manifest?.counts.customers ?? 0,
     kbArticleCount: manifest?.counts.kbArticles ?? 0,
     lastExport: manifest?.exportedAt ?? null,
+    capabilities: CAPABILITIES[id] ?? { read: true, incrementalSync: false, update: false, reply: false, note: false, create: false },
   };
 }
 

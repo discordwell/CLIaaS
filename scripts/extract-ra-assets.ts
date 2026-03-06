@@ -247,6 +247,19 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['LORES.MIX', 'SELL.SHP', 'sell'],         // Sell button icon
   ['LORES.MIX', 'MAP.SHP', 'map_btn'],       // Map button icon
   ['LORES.MIX', 'CLOCK.SHP', 'clock'],       // Clock overlay for build progress
+  // Sidebar chrome — scroll arrows, house-specific backgrounds, pip indicators
+  ['LORES.MIX', 'STRIPUP.SHP', 'stripup'],   // Scroll up arrow (3 frames: up/down/disabled)
+  ['LORES.MIX', 'STRIPDN.SHP', 'stripdn'],   // Scroll down arrow (3 frames)
+  ['LORES.MIX', 'POWER.SHP', 'power_marker'], // Power bar drain level marker
+  ['HIRES.MIX', 'SIDE1NA.SHP', 'side1na'],   // Allied sidebar top section
+  ['HIRES.MIX', 'SIDE2NA.SHP', 'side2na'],   // Allied sidebar middle section
+  ['HIRES.MIX', 'SIDE3NA.SHP', 'side3na'],   // Allied sidebar bottom section
+  ['HIRES.MIX', 'SIDE1US.SHP', 'side1us'],   // Soviet sidebar top section
+  ['HIRES.MIX', 'SIDE2US.SHP', 'side2us'],   // Soviet sidebar middle section
+  ['HIRES.MIX', 'SIDE3US.SHP', 'side3us'],   // Soviet sidebar bottom section
+  ['HIRES.MIX', 'STRIPNA.SHP', 'stripna'],   // Allied strip column background
+  ['HIRES.MIX', 'STRIPUS.SHP', 'stripus'],   // Soviet strip column background
+  ['LORES.MIX', 'PIPS.SHP', 'pips'],         // Pip indicators (frame 3=Ready, frame 4=Holding)
   // Ore/gem overlays (theater-specific .TEM files, SHP format)
   // Gold: 12 frames each (density 0-11), Gems: 3 frames each (density 0-2)
   ['TEMPERAT.MIX', 'GOLD01.TEM', 'gold01'],
