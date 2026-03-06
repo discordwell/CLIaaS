@@ -195,7 +195,23 @@ export function dispatch(
       }
     }),
 
-    // 6. AI resolution queue (only for eligible events, with quota check; skip internal notes)
+    // 6. CSAT → AI resolution link (tag AI resolutions with CSAT score)
+    Promise.resolve().then(async () => {
+      if (event === 'csat.submitted' && data.ticketId) {
+        try {
+          const { linkCSATToResolution } = await import('../ai/csat-link');
+          await linkCSATToResolution({
+            ticketId: data.ticketId as string,
+            rating: data.rating as number,
+            comment: data.comment as string | undefined,
+          });
+        } catch (err) {
+          logger.error({ channel: 'csat-ai-link', event, error: err instanceof Error ? err.message : 'Unknown' }, 'CSAT→AI link failed');
+        }
+      }
+    }),
+
+    // 7. AI resolution queue (only for eligible events, with quota check; skip internal notes)
     Promise.resolve().then(async () => {
       if (AI_RESOLUTION_EVENTS.has(event) && data.ticketId && !data.isNote && data.visibility !== 'internal') {
         // Check AI call quota before enqueueing

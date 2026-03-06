@@ -16,10 +16,10 @@ export default function ReRouteButton({ ticketId }: { ticketId: string }) {
         body: JSON.stringify({ ticketId }),
       });
       const data = await res.json();
-      if (data.assignedTo) {
-        setResult(`Routed to ${data.assignedTo}`);
+      if (data.suggestedAgentName) {
+        setResult(`Routed to ${data.suggestedAgentName}`);
       } else {
-        setResult(data.reason ?? "No eligible agent found");
+        setResult(data.reasoning ?? "No eligible agent found");
       }
     } catch {
       setResult("Routing failed");

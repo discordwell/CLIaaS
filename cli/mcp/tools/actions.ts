@@ -547,24 +547,48 @@ export function registerActionTools(server: McpServer): void {
       const result = withConfirmation(confirm, {
         description: `Trigger AI resolution for ticket ${ticket.id}`,
         preview: { ticketId: ticket.id, subject: ticket.subject, status: ticket.status },
-        execute: () => {
+        execute: async () => {
           const now = new Date().toISOString();
+
+          // Load messages and KB articles
+          const { getDataProvider } = await import('@/lib/data-provider/index.js');
+          const provider = await getDataProvider(dir);
+          const messages = await provider.loadMessages(ticket.id);
+          let kbArticles: Awaited<ReturnType<typeof provider.loadKBArticles>> = [];
+          try { kbArticles = await provider.loadKBArticles(); } catch { /* no KB */ }
+
+          // Load AI config
+          const { getAgentConfig } = await import('@/lib/ai/store.js');
+          const config = await getAgentConfig('default');
+
+          // Run the pipeline
+          const { resolveTicket } = await import('@/lib/ai/resolution-pipeline.js');
+          const outcome = await resolveTicket(ticket, messages, kbArticles, {
+            configOverride: config,
+            workspaceId: 'default',
+          });
+
           recordMCPAction({
             tool: 'ai_resolve', action: 'trigger',
             params: { ticketId: ticket.id },
             timestamp: now, result: 'success',
           });
+
           return {
             triggered: true,
             ticketId: ticket.id,
-            message: 'AI resolution pipeline invoked. Check /api/ai/queue for results.',
+            action: outcome.action,
+            resolutionId: outcome.resolutionId,
+            confidence: outcome.result.confidence,
+            suggestedReply: outcome.result.suggestedReply?.slice(0, 200),
+            reasoning: outcome.result.reasoning,
             timestamp: now,
           };
         },
       });
 
       if (result.needsConfirmation) return result.result;
-      return textResult(result.value);
+      return textResult(await result.value);
     },
   );
 

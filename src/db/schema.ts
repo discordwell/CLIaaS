@@ -18,6 +18,8 @@ import {
   customType,
   date,
   time,
+  real,
+  smallint,
 } from 'drizzle-orm/pg-core';
 
 export const providerEnum = pgEnum('provider', [
@@ -2515,5 +2517,73 @@ export const customRolePermissions = pgTable(
   table => ({
     customRolePermissionsUniqueIdx: uniqueIndex('custom_role_permissions_unique_idx').on(table.customRoleId, table.permissionKey),
     customRolePermissionsRoleIdx: index('custom_role_permissions_role_idx').on(table.customRoleId),
+  }),
+);
+
+// ---- AI Resolution ----
+
+export const aiResolutionStatusEnum = pgEnum('ai_resolution_status', [
+  'pending', 'auto_resolved', 'approved', 'rejected', 'edited', 'escalated', 'error',
+]);
+
+export const aiModeEnum = pgEnum('ai_mode', ['suggest', 'approve', 'auto']);
+
+export const aiResolutions = pgTable(
+  'ai_resolutions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ticketId: text('ticket_id').notNull(),
+    confidence: real('confidence').notNull(),
+    suggestedReply: text('suggested_reply').notNull().default(''),
+    reasoning: text('reasoning'),
+    kbArticlesUsed: text('kb_articles_used').array().notNull().default([]),
+    status: aiResolutionStatusEnum('status').notNull().default('pending'),
+    finalReply: text('final_reply'),
+    actionsTaken: jsonb('actions_taken'),
+    escalationReason: text('escalation_reason'),
+    errorMessage: text('error_message'),
+    provider: text('provider'),
+    model: text('model'),
+    promptTokens: integer('prompt_tokens'),
+    completionTokens: integer('completion_tokens'),
+    costCents: real('cost_cents'),
+    latencyMs: integer('latency_ms'),
+    reviewedBy: text('reviewed_by'),
+    reviewedAt: text('reviewed_at'),
+    csatScore: smallint('csat_score'),
+    csatComment: text('csat_comment'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    aiResolutionsTicketIdx: index('ai_resolutions_ticket_idx').on(table.ticketId),
+    aiResolutionsWorkspaceStatusIdx: index('ai_resolutions_workspace_status_idx').on(table.workspaceId, table.status),
+    aiResolutionsCreatedAtIdx: index('ai_resolutions_created_at_idx').on(table.createdAt),
+  }),
+);
+
+export const aiAgentConfigs = pgTable(
+  'ai_agent_configs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id'),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    enabled: boolean('enabled').notNull().default(false),
+    mode: aiModeEnum('mode').notNull().default('suggest'),
+    confidenceThreshold: real('confidence_threshold').notNull().default(0.7),
+    provider: text('provider').notNull().default('claude'),
+    model: text('model'),
+    maxTokens: integer('max_tokens').notNull().default(1024),
+    excludedTopics: text('excluded_topics').array(),
+    kbContext: boolean('kb_context').notNull().default(true),
+    piiDetection: boolean('pii_detection').notNull().default(true),
+    maxAutoResolvesPerHour: integer('max_auto_resolves_per_hour').notNull().default(50),
+    requireKbCitation: boolean('require_kb_citation').notNull().default(false),
+    channels: text('channels').array(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    aiAgentConfigsUniqueIdx: uniqueIndex('ai_agent_configs_unique_idx').on(table.tenantId, table.workspaceId),
   }),
 );

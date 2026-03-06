@@ -5,8 +5,9 @@
  */
 
 import { runAgent, DEFAULT_AGENT_CONFIG, type AIAgentConfig, type AIAgentResult } from './agent';
-import { enqueueApproval, type ApprovalEntry } from './approval-queue';
 import { recordResolution } from './roi-tracker';
+import { saveResolution, type AIAgentConfigRecord } from './store';
+import { sendAIReply } from './reply-sender';
 import type { Ticket, Message, KBArticle } from '@/lib/data';
 import { buildBaseTicketFromEvent } from '@/lib/automation/ticket-from-event';
 
@@ -45,68 +46,93 @@ export interface ResolutionOutcome {
   ticketId: string;
   action: 'auto_sent' | 'queued_for_approval' | 'escalated';
   result: AIAgentResult;
-  approvalId?: string;
+  resolutionId?: string;
+}
+
+export interface ResolveTicketOptions {
+  configOverride?: AIAgentConfigRecord;
+  workspaceId?: string;
 }
 
 export async function resolveTicket(
   ticket: Ticket,
   messages: Message[],
   kbArticles: KBArticle[] = [],
+  options?: ResolveTicketOptions,
 ): Promise<ResolutionOutcome> {
-  const config = getPipelineConfig();
+  // Build effective config: DB config override > global singleton
+  const dbConfig = options?.configOverride;
+  const globalConfig = getPipelineConfig();
+
+  const config: PipelineConfig = dbConfig ? {
+    enabled: dbConfig.enabled,
+    confidenceThreshold: dbConfig.confidenceThreshold,
+    maxTokens: dbConfig.maxTokens,
+    provider: dbConfig.provider as AIAgentConfig['provider'],
+    model: dbConfig.model,
+    excludeTopics: dbConfig.excludedTopics,
+    kbContext: dbConfig.kbContext,
+    autoSend: dbConfig.mode === 'auto',
+    approvalTimeoutMs: 0,
+  } : globalConfig;
+
+  const workspaceId = options?.workspaceId ?? 'default';
 
   if (!config.enabled) {
-    return {
+    const result: AIAgentResult = {
       ticketId: ticket.id,
-      action: 'escalated',
-      result: {
-        ticketId: ticket.id,
-        resolved: false,
-        confidence: 0,
-        suggestedReply: '',
-        reasoning: 'AI pipeline is disabled',
-        escalated: true,
-        escalationReason: 'Pipeline disabled',
-        kbArticlesUsed: [],
-      },
+      resolved: false,
+      confidence: 0,
+      suggestedReply: '',
+      reasoning: 'AI pipeline is disabled',
+      escalated: true,
+      escalationReason: 'Pipeline disabled',
+      kbArticlesUsed: [],
     };
-  }
-
-  const result = await runAgent({ ticket, messages, kbArticles, config });
-
-  // Record for ROI tracking
-  recordResolution(result);
-
-  // Route based on confidence and config
-  if (result.escalated || result.confidence < config.confidenceThreshold) {
     return { ticketId: ticket.id, action: 'escalated', result };
   }
 
-  if (config.autoSend) {
-    return { ticketId: ticket.id, action: 'auto_sent', result };
-  }
+  const startTime = Date.now();
+  const result = await runAgent({ ticket, messages, kbArticles, config });
+  const latencyMs = Date.now() - startTime;
 
-  // Queue for approval
-  const entry: ApprovalEntry = {
-    id: crypto.randomUUID(),
+  // Record for legacy ROI tracking
+  recordResolution(result);
+
+  // Determine action
+  const escalated = result.escalated || result.confidence < config.confidenceThreshold;
+  const action: ResolutionOutcome['action'] = escalated
+    ? 'escalated'
+    : config.autoSend ? 'auto_sent' : 'queued_for_approval';
+
+  const status = escalated ? 'escalated' as const
+    : config.autoSend ? 'auto_resolved' as const
+    : 'pending' as const;
+
+  // Persist resolution to DB/in-memory store
+  const resolutionId = crypto.randomUUID();
+  const record = await saveResolution({
+    id: resolutionId,
+    workspaceId,
     ticketId: ticket.id,
-    ticketSubject: ticket.subject,
-    draftReply: result.suggestedReply,
     confidence: result.confidence,
+    suggestedReply: result.suggestedReply,
     reasoning: result.reasoning,
     kbArticlesUsed: result.kbArticlesUsed,
-    status: 'pending',
+    status,
+    escalationReason: result.escalationReason,
+    provider: config.provider,
+    model: config.model,
+    latencyMs,
     createdAt: new Date().toISOString(),
-  };
+  });
 
-  enqueueApproval(entry);
+  // For auto_sent, actually send the reply
+  if (action === 'auto_sent' && dbConfig) {
+    await sendAIReply(record, dbConfig);
+  }
 
-  return {
-    ticketId: ticket.id,
-    action: 'queued_for_approval',
-    result,
-    approvalId: entry.id,
-  };
+  return { ticketId: ticket.id, action, result, resolutionId };
 }
 
 // ---- Event handler integration ----

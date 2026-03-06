@@ -51,38 +51,34 @@ describe('magic-link cleanup on generate', () => {
 
 describe('approval queue transitionEntry', () => {
   beforeEach(() => {
-    global.__cliaasApprovalQueue = [];
+    (globalThis as Record<string, unknown>).__cliaasAIResolutions = undefined;
+    (globalThis as Record<string, unknown>).__cliaasAIAgentConfig = undefined;
   });
 
-  const entry: ApprovalEntry = {
-    id: 'appr-1',
-    ticketId: 'ticket-1',
-    ticketSubject: 'Help',
-    draftReply: 'Response',
-    confidence: 0.9,
-    reasoning: 'Match',
-    kbArticlesUsed: [],
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  };
+  async function seedPending(id = 'appr-1') {
+    const { saveResolution } = await import('@/lib/ai/store');
+    await saveResolution({
+      id,
+      workspaceId: 'ws-1',
+      ticketId: 'ticket-1',
+      confidence: 0.9,
+      suggestedReply: 'Response',
+      reasoning: 'Match',
+      kbArticlesUsed: [],
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+  }
 
-  it('approveEntry transitions correctly', () => {
-    enqueueApproval({ ...entry });
-    const result = approveEntry('appr-1', 'agent');
-    expect(result?.status).toBe('approved');
-    expect(result?.reviewedBy).toBe('agent');
-    expect(result?.reviewedAt).toBeTruthy();
-  });
-
-  it('rejectEntry transitions correctly', () => {
-    enqueueApproval({ ...entry });
-    const result = rejectEntry('appr-1', 'agent');
+  it('rejectEntry transitions correctly', async () => {
+    await seedPending();
+    const result = await rejectEntry('appr-1', 'agent');
     expect(result?.status).toBe('rejected');
   });
 
-  it('editEntry transitions correctly with editedReply', () => {
-    enqueueApproval({ ...entry });
-    const result = editEntry('appr-1', 'New reply', 'agent');
+  it('editEntry transitions correctly with editedReply', async () => {
+    await seedPending();
+    const result = await editEntry('appr-1', 'New reply', 'agent');
     expect(result?.status).toBe('edited');
     expect(result?.editedReply).toBe('New reply');
   });

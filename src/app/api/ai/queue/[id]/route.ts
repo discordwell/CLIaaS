@@ -1,36 +1,34 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import {
-  getApproval,
-  approveEntry,
-  rejectEntry,
-  editEntry,
-} from '@/lib/ai/approval-queue';
+import { requireScope } from '@/lib/api-auth';
+import { getResolution } from '@/lib/ai/store';
+import { approveEntry, rejectEntry, editEntry } from '@/lib/ai/approval-queue';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
+/** @deprecated Use /api/ai/resolutions/[id] instead */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requireScope(request, 'ai:read');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const entry = getApproval(id);
+  const entry = await getResolution(id);
   if (!entry) {
-    return NextResponse.json({ error: 'Approval entry not found' }, { status: 404 });
+    return NextResponse.json({ error: 'Resolution not found' }, { status: 404 });
   }
   return NextResponse.json({ entry });
 }
 
+/** @deprecated Use /api/ai/resolutions/[id]/approve or /reject instead */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requireScope(request, 'ai:write');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -43,21 +41,21 @@ export async function PATCH(
     if ('error' in parsed) return parsed.error;
     const { action, editedReply, reviewedBy } = parsed.data;
 
-    const reviewer = reviewedBy ?? 'agent';
+    const reviewer = reviewedBy ?? auth.user.id;
 
     let result;
     switch (action) {
       case 'approve':
-        result = approveEntry(id, reviewer);
+        result = await approveEntry(id, reviewer);
         break;
       case 'reject':
-        result = rejectEntry(id, reviewer);
+        result = await rejectEntry(id, reviewer);
         break;
       case 'edit':
         if (!editedReply) {
           return NextResponse.json({ error: 'editedReply is required for edit action' }, { status: 400 });
         }
-        result = editEntry(id, editedReply, reviewer);
+        result = await editEntry(id, editedReply, reviewer);
         break;
       default:
         return NextResponse.json({ error: 'action must be approve, reject, or edit' }, { status: 400 });

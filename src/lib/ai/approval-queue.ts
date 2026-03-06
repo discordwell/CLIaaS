@@ -1,8 +1,18 @@
 /**
- * AI resolution approval queue. Stores pending AI-generated responses
- * for human review before sending to customers.
+ * AI resolution approval queue. DB-backed with in-memory fallback.
+ * Approval/rejection now persists via the ai_resolutions store.
  */
 
+import {
+  getResolution,
+  listResolutions,
+  updateResolutionStatus,
+  type AIResolutionRecord,
+} from './store';
+import { sendAIReply } from './reply-sender';
+import { getAgentConfig } from './store';
+
+// Legacy type kept for backward compat with any existing callers
 export interface ApprovalEntry {
   id: string;
   ticketId: string;
@@ -18,54 +28,86 @@ export interface ApprovalEntry {
   createdAt: string;
 }
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __cliaasApprovalQueue: ApprovalEntry[] | undefined;
+function recordToEntry(r: AIResolutionRecord): ApprovalEntry {
+  return {
+    id: r.id,
+    ticketId: r.ticketId,
+    ticketSubject: '',
+    draftReply: r.suggestedReply,
+    confidence: r.confidence,
+    reasoning: r.reasoning ?? '',
+    kbArticlesUsed: r.kbArticlesUsed,
+    status: r.status === 'auto_resolved' ? 'approved'
+      : r.status === 'escalated' || r.status === 'error' ? 'rejected'
+      : r.status as ApprovalEntry['status'],
+    editedReply: r.finalReply !== r.suggestedReply ? r.finalReply : undefined,
+    reviewedBy: r.reviewedBy,
+    reviewedAt: r.reviewedAt,
+    createdAt: r.createdAt,
+  };
 }
 
-export function getApprovalQueue(): ApprovalEntry[] {
-  return global.__cliaasApprovalQueue ?? [];
+export async function getApprovalQueue(): Promise<ApprovalEntry[]> {
+  const { records } = await listResolutions({ limit: 200 });
+  return records.map(recordToEntry);
 }
 
-export function enqueueApproval(entry: ApprovalEntry): void {
-  const queue = global.__cliaasApprovalQueue ?? [];
-  queue.unshift(entry);
-  // Keep last 200
-  if (queue.length > 200) queue.length = 200;
-  global.__cliaasApprovalQueue = queue;
+export async function enqueueApproval(_entry: ApprovalEntry): Promise<void> {
+  // No-op: resolutions are now persisted via saveResolution() in the pipeline
 }
 
-export function getApproval(id: string): ApprovalEntry | undefined {
-  return getApprovalQueue().find(e => e.id === id);
+export async function getApproval(id: string): Promise<ApprovalEntry | undefined> {
+  const record = await getResolution(id);
+  return record ? recordToEntry(record) : undefined;
 }
 
-export function getPendingApprovals(): ApprovalEntry[] {
-  return getApprovalQueue().filter(e => e.status === 'pending');
+export async function getPendingApprovals(): Promise<ApprovalEntry[]> {
+  const { records } = await listResolutions({ status: 'pending', limit: 200 });
+  return records.map(recordToEntry);
 }
 
-function transitionEntry(
-  id: string,
-  status: 'approved' | 'rejected' | 'edited',
-  reviewedBy: string,
-  extra?: Partial<ApprovalEntry>,
-): ApprovalEntry | null {
-  const entry = getApproval(id);
-  if (!entry || entry.status !== 'pending') return null;
-  entry.status = status;
-  entry.reviewedBy = reviewedBy;
-  entry.reviewedAt = new Date().toISOString();
-  if (extra) Object.assign(entry, extra);
-  return entry;
+export async function approveEntry(id: string, reviewedBy: string): Promise<ApprovalEntry | null> {
+  const record = await getResolution(id);
+  if (!record || record.status !== 'pending') return null;
+
+  const now = new Date().toISOString();
+
+  // Send the reply
+  const config = await getAgentConfig(record.workspaceId);
+  const sendResult = await sendAIReply(record, config);
+
+  if (sendResult.piiBlocked) {
+    return recordToEntry((await getResolution(id))!);
+  }
+
+  // Mark as approved regardless of email send success
+  const updated = await updateResolutionStatus(id, 'approved', {
+    reviewedBy,
+    reviewedAt: now,
+    finalReply: record.suggestedReply,
+  });
+  return updated ? recordToEntry(updated) : null;
 }
 
-export function approveEntry(id: string, reviewedBy: string): ApprovalEntry | null {
-  return transitionEntry(id, 'approved', reviewedBy);
+export async function rejectEntry(id: string, reviewedBy: string): Promise<ApprovalEntry | null> {
+  const record = await getResolution(id);
+  if (!record || record.status !== 'pending') return null;
+
+  const updated = await updateResolutionStatus(id, 'rejected', {
+    reviewedBy,
+    reviewedAt: new Date().toISOString(),
+  });
+  return updated ? recordToEntry(updated) : null;
 }
 
-export function rejectEntry(id: string, reviewedBy: string): ApprovalEntry | null {
-  return transitionEntry(id, 'rejected', reviewedBy);
-}
+export async function editEntry(id: string, editedReply: string, reviewedBy: string): Promise<ApprovalEntry | null> {
+  const record = await getResolution(id);
+  if (!record || record.status !== 'pending') return null;
 
-export function editEntry(id: string, editedReply: string, reviewedBy: string): ApprovalEntry | null {
-  return transitionEntry(id, 'edited', reviewedBy, { editedReply });
+  const updated = await updateResolutionStatus(id, 'edited', {
+    reviewedBy,
+    reviewedAt: new Date().toISOString(),
+    finalReply: editedReply,
+  });
+  return updated ? recordToEntry(updated) : null;
 }

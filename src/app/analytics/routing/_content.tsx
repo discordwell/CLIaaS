@@ -4,7 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 
 interface RoutingAnalytics {
+  range: string;
   avgAssignmentTimeMs: number;
+  avgQueueWaitTimeMs: number;
   totalRoutedToday: number;
   overflowCount: number;
   utilization: number;
@@ -36,12 +38,13 @@ export default function RoutingAnalyticsContent() {
   const [data, setData] = useState<RoutingAnalytics | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState("24h");
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [analyticsRes, logRes] = await Promise.all([
-        fetch("/api/routing/analytics"),
+        fetch(`/api/routing/analytics?range=${range}`),
         fetch("/api/routing/log?limit=50"),
       ]);
       setData(await analyticsRes.json());
@@ -51,7 +54,7 @@ export default function RoutingAnalyticsContent() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [range]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -74,18 +77,38 @@ export default function RoutingAnalyticsContent() {
           <span>/</span>
           <span className="font-bold text-zinc-950">Routing</span>
         </nav>
-        <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
-          Routing Analytics
-        </p>
-        <h1 className="mt-2 text-3xl font-bold">Routing Performance</h1>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
+              Routing Analytics
+            </p>
+            <h1 className="mt-2 text-3xl font-bold">Routing Performance</h1>
+          </div>
+          <div className="flex gap-1">
+            {(["24h", "7d", "30d", "all"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={`border-2 px-3 py-1.5 font-mono text-xs font-bold uppercase ${
+                  range === r
+                    ? "border-zinc-950 bg-zinc-950 text-white"
+                    : "border-zinc-300 text-zinc-500 hover:border-zinc-950 hover:text-zinc-950"
+                }`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
       </header>
 
       {data && (
         <>
           {/* STAT CARDS */}
-          <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <StatCard label="Avg Assignment Time" value={`${data.avgAssignmentTimeMs}ms`} />
-            <StatCard label="Routed Today" value={String(data.totalRoutedToday)} />
+            <StatCard label="Avg Queue Wait" value={`${data.avgQueueWaitTimeMs}ms`} />
+            <StatCard label={range === "24h" ? "Routed Today" : `Routed (${range})`} value={String(data.totalRoutedToday)} />
             <StatCard
               label="Overflow Count"
               value={String(data.overflowCount)}

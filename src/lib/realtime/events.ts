@@ -28,7 +28,8 @@ export type EventType =
   | 'mention:created'
   | 'side_conversation:created'
   | 'side_conversation:replied'
-  | 'metric:updated';
+  | 'metric:updated'
+  | 'ai:resolution_ready';
 
 export interface AppEvent {
   type: EventType;

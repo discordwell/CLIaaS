@@ -13,7 +13,8 @@ export async function GET(request: NextRequest) {
 
   const roi = getROIMetrics();
   const agent = getAgentStats();
-  const pendingCount = getPendingApprovals().length;
+  const pending = await getPendingApprovals();
+  const pendingCount = pending.length;
 
   return NextResponse.json({
     roi,

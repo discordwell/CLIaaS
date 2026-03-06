@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-03-06T18:40Z — Session 100: Slice 2 — Omnichannel Routing Gap Closure (All 4 Phases)
+- **Phase 1 (Critical Stubs)**: Fixed 3 non-functional stubs in `engine.ts`: (1) `getAgentLoad()` now uses `LoadTracker` singleton that counts open/pending tickets per assignee via data provider with 5-min TTL + event invalidation; (2) `isInBusinessHours()` now uses async dynamic import of WFM business-hours module (fallback true); (3) `scoreAgentSkills()` now weights by proficiency (score = coverage * avgProficiency)
+- **Phase 2 (Migration + Heartbeat + Fix)**: SQL migration `0020_routing_tables.sql` (6 tables, 2 enums, 3 ALTER TABLE extensions). Heartbeat endpoint `POST /api/agents/:id/heartbeat`. ReRouteButton fixed (`data.assignedTo` -> `data.suggestedAgentName`, `data.reason` -> `data.reasoning`)
+- **Phase 3 (SLA + Condition Builder)**: SLA-aware routing boost (+0.15 warning, +0.30 breached) via dynamic import of `checkTicketSLA`. Routing constants (`constants.ts` — 9 fields, 7 operators, 4 preset maps). `RoutingConditionBuilder` component (ALL/ANY condition groups). Settings UI wired with condition builder for queue + rule creation (replaces empty `conditions: {}`)
+- **Phase 4 (Analytics + Overflow)**: Analytics API supports `range` param (24h/7d/30d/all) + `avgQueueWaitTimeMs` metric. Analytics UI has range selector buttons + "Avg Queue Wait" stat card. Overflow timeout enforcement in engine (checks `ticket.createdAt` vs `overflowTimeoutSecs`, redirects to overflow queue)
+- **Tests**: 45 tests across 7 files all pass (engine: 12, store: 10, strategies: 5, queue-manager: 11, availability: 1, load-tracker: 4, heartbeat: 2). Build clean.
+- **Files**: 7 created, 7 modified. ARCHITECTURE.md updated with routing engine section.
+
+## 2026-03-06T16:30Z — Session 99: Slice 1 — Autonomous AI Resolution (Complete Pipeline)
+- **Full end-to-end AI resolution pipeline wired**: events → BullMQ worker → pipeline → store → reply sender
+- **Phase A (Schema + Persistence)**: Migration `0019_ai_resolution.sql` (2 tables: ai_resolutions + ai_agent_configs, 2 enums), Drizzle schema (`aiResolutions`, `aiAgentConfigs` + `aiResolutionStatusEnum`, `aiModeEnum`), dual-mode store (`src/lib/ai/store.ts` — DB primary, in-memory fallback), added `real`/`smallint` to drizzle imports
+- **Phase B (Wire Pipeline)**: PII detector (`pii-detector.ts` — SSN, CC with Luhn, phone, API keys), Reply sender (`reply-sender.ts` — bot message, email, PII block, SSE event), Pipeline rewrite (`resolution-pipeline.ts` — configOverride, DB persist via saveResolution, sendAIReply for auto_sent), Worker replacement (`ai-resolution-worker.ts` — config loading, rate limiting, duplicate prevention, full pipeline execution), Approval queue rewrite (`approval-queue.ts` — DB-backed via store, approveEntry calls sendAIReply), CSAT link (`csat-link.ts` — tags AI resolutions with CSAT scores), Dispatcher channel 6 for CSAT→AI link
+- **Phase C (MCP/CLI/API/Tests)**: Config API (GET/PUT), Resolutions API (list, detail, approve, reject, stats — 6 routes), MCP tools (`ai_config`, `ai_stats`, `ai_approve`, `ai_reject`), CLI commands (`ai config`, `ai resolve`, `ai resolutions`, `ai stats`, `ai approve`, `ai reject`), `ai_resolve` MCP tool rewired to actually call pipeline, `ai:read`/`ai:write` scopes added
+- **Tests**: 56 tests across 9 files all passing (pii-detector: 12, store: 12, reply-sender: 3, approval-queue: 8, resolution-pipeline: 3, phase4-fixes: 5, api-ai-resolution: 5, worker: 4, MCP server: 1)
+- **Linter revert battle**: Formatter repeatedly reverted ~12 files mid-session; had to re-apply changes across 2 context windows
+- **TS type fixes**: Removed `String()` wrappers for Drizzle `real` columns, fixed `reviewedAt` (text not Date), fixed `kbContext` (boolean not text in schema)
+- **Files**: ~17 new, ~12 modified. 0 TS errors in AI files. 4277/4298 tests pass (3 pre-existing routing failures).
+
+## 2026-03-06T14:30Z — Session 98: Code Review Fixes — Slice 13 Custom Reports (25 issues)
+- **4 CRITICAL**: (1) Report export worker passed `reportId` as `metric` — now looks up report def from DB; (2) `median_first_response_time` fell through to `computeAvgResolutionTime` — added dedicated `computeMedianFirstResponseTime`; (3) HTML XSS in export emails — added `escapeHtml()` for all interpolated values; (4) CSV formula injection — prefix `=+\-@\t\r` with single quote
+- **5 HIGH**: (5-6) Auth scopes on report POST/PUT/DELETE changed from `analytics:read` to `reports:write`; (7) `handlePreview` now deletes temp report after execution; (8) Dashboard widget replace wrapped in `db.transaction()`; (9) DashboardWidget/report detail sends `{ dateRange: { from, to } }` instead of flat `{ from, to }`
+- **5 MEDIUM**: (10) Cache capped at 500 entries with LRU eviction; (11-12) Monthly schedule date rollover fixed (set date=1 before advancing month); (13) Schedule API validates hourUtc/dayOfWeek/dayOfMonth ranges; (14) Share tokens generated server-side; (15) Scope naming noted (analytics:read vs reports:read — deferred)
+- **3 MEDIUM (metric)**: `agent_avg_resolution` now computes avg resolution time per agent (was counting); `csat_response_rate` computes response ratio (was computing score)
+- **4 LOW**: Removed unused `area` prop from LineChart, no-op `setPreviousSnapshot`, dead code cleanup
+- **15 files changed** (+276, -77). 77/77 tests pass, 0 TS errors. Committed `d49c806`, pushed, deploying.
+
 ## 2026-03-06T10:00Z — Session 97: Slice 14 — KB Enhancements (All 5 Phases)
 - **All 5 phases implemented**: i18n/multilingual, branded help centers, answer bot deflection, article feedback + content gaps, SEO + language detection
 - **Phase 1 (Schema + Core i18n)**: Migration `0014_kb_enhancements.sql` (3 new tables: kb_article_feedback, kb_deflections, kb_content_gaps; 2 enums: kb_visibility, kb_gap_status; 5 ALTERed tables: brands +12 cols, kb_articles +13 cols, kb_categories +6 cols, kb_collections +3 cols, rag_chunks +locale). Drizzle schema updated. DataProvider types extended (KBArticle, KBArticleFeedbackParams/Record, 3 new provider methods). All 4 provider implementations updated. API routes for kb CRUD updated with locale/brand/visibility params. New translations API. RAG chunker locale prefix, retriever locale filter. 14/14 tests pass.

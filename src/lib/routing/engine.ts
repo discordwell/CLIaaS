@@ -23,6 +23,7 @@ import {
 import { availability } from './availability';
 import { evaluateRules, matchQueue, getOverflowQueue } from './queue-manager';
 import { applyStrategy } from './strategies';
+import { loadTracker } from './load-tracker';
 
 // ---- Category extraction (from existing router.ts) ----
 
@@ -64,24 +65,27 @@ function scoreAgentSkills(
     return { score: 0, matchedSkills: [] };
   }
 
-  const matched: string[] = [];
+  const matched: Array<{ name: string; proficiency: number }> = [];
   for (const skill of skills) {
     if (categories.some(c =>
       skill.skillName.toLowerCase().includes(c.toLowerCase()) ||
       c.toLowerCase().includes(skill.skillName.toLowerCase()),
     )) {
-      matched.push(skill.skillName);
+      matched.push({ name: skill.skillName, proficiency: skill.proficiency ?? 1 });
     }
   }
 
-  const score = categories.length > 0 ? matched.length / categories.length : 0;
-  return { score: Math.min(1, score), matchedSkills: matched };
+  if (matched.length === 0) return { score: 0, matchedSkills: [] };
+
+  const coverage = matched.length / categories.length;
+  const avgProficiency = matched.reduce((sum, m) => sum + m.proficiency, 0) / matched.length;
+  const score = coverage * avgProficiency;
+
+  return { score: Math.min(1, score), matchedSkills: matched.map(m => m.name) };
 }
 
-function getAgentLoad(userId: string, _channelType?: string): number {
-  // In JSONL mode, we can't easily count open tickets per agent.
-  // Return 0 by default; the capacity check still works as a filter.
-  return 0;
+function getAgentLoad(userName: string): number {
+  return loadTracker.getLoad(userName);
 }
 
 function getAgentMaxCapacity(userId: string, channelType?: string): number {
@@ -95,9 +99,17 @@ function getAgentMaxCapacity(userId: string, channelType?: string): number {
   return Math.max(...caps.map(c => c.maxConcurrent));
 }
 
-function isInBusinessHours(userId: string): boolean {
-  // Placeholder business hours check — penalize agents outside 8am-6pm in their timezone
-  // Full implementation deferred to Agent 12
+async function checkBusinessHoursActive(): Promise<boolean> {
+  try {
+    const bhMod = await import('../wfm/business-hours');
+    const configs = bhMod.getBusinessHours();
+    const defaultConfig = configs.find((c: { isDefault?: boolean }) => c.isDefault);
+    if (defaultConfig) {
+      return bhMod.isWithinBusinessHours(defaultConfig);
+    }
+  } catch {
+    // Business hours module not available — don't penalize
+  }
   return true;
 }
 
@@ -112,6 +124,8 @@ function buildCandidates(
   agents: AgentInfo[],
   categories: string[],
   channelType?: string,
+  slaBoost: number = 0,
+  bizHoursActive: boolean = true,
 ): ScoredAgent[] {
   const candidates: ScoredAgent[] = [];
 
@@ -119,7 +133,7 @@ function buildCandidates(
     // Filter by availability
     if (!availability.isAvailableForRouting(agent.userId)) continue;
 
-    const load = getAgentLoad(agent.userId, channelType);
+    const load = getAgentLoad(agent.userName);
     const capacity = getAgentMaxCapacity(agent.userId, channelType);
 
     // Filter by capacity
@@ -128,7 +142,7 @@ function buildCandidates(
     const { score, matchedSkills } = scoreAgentSkills(agent.userId, categories);
 
     // Business hours penalty
-    const bizHoursFactor = isInBusinessHours(agent.userId) ? 1 : 0.7;
+    const bizHoursFactor = bizHoursActive ? 1 : 0.7;
 
     // Capacity penalty
     const capRatio = capacity > 0 ? load / capacity : 0;
@@ -137,7 +151,7 @@ function buildCandidates(
     candidates.push({
       userId: agent.userId,
       userName: agent.userName,
-      score: Math.max(0, Math.min(1, score * bizHoursFactor + capPenalty)),
+      score: Math.max(0, Math.min(1, score * bizHoursFactor + capPenalty + slaBoost)),
       matchedSkills,
       load,
       capacity,
@@ -195,6 +209,12 @@ export async function routeTicket(
   const messages = options.messages ?? [];
   const allAgents = options.allAgents;
 
+  // Ensure load tracker cache is warm
+  await loadTracker.ensureLoaded();
+
+  // Check business hours once for the routing call
+  const bizHoursActive = await checkBusinessHoursActive();
+
   if (allAgents.length === 0) {
     return noResult(ticket, 'No agents available for routing.', config.defaultStrategy);
   }
@@ -202,6 +222,26 @@ export async function routeTicket(
   // Step 1: Extract categories from ticket content
   const categories = extractCategories(ticket, messages);
   let reasoning = `Categories: ${categories.join(', ')}`;
+
+  // Step 1b: SLA priority boost
+  let slaBoost = 0;
+  try {
+    const { checkTicketSLA } = await import('../sla');
+    const slaResults = await checkTicketSLA({ ticket });
+    for (const result of slaResults) {
+      const frStatus = result.firstResponse.status;
+      const resStatus = result.resolution.status;
+      if (frStatus === 'breached' || resStatus === 'breached') {
+        slaBoost = Math.max(slaBoost, 0.3);
+        reasoning += ` | SLA breached (+0.3 boost)`;
+      } else if (frStatus === 'warning' || resStatus === 'warning') {
+        slaBoost = Math.max(slaBoost, 0.15);
+        reasoning += ` | SLA warning (+0.15 boost)`;
+      }
+    }
+  } catch {
+    // SLA module not available — no boost
+  }
 
   // Step 2: Evaluate routing rules
   const rules = getRoutingRules(workspaceId);
@@ -240,8 +280,36 @@ export async function routeTicket(
     }
   }
 
-  // Step 4: Build and score candidates
-  const candidates = buildCandidates(eligibleAgents, categories, options.channelType);
+  // Step 4a: Overflow timeout enforcement
+  if (queueId) {
+    const allQueues = getRoutingQueues();
+    const currentQueue = allQueues.find(q => q.id === queueId);
+    if (currentQueue?.overflowTimeoutSecs && currentQueue.overflowQueueId) {
+      const ticketAgeMs = Date.now() - new Date(ticket.createdAt).getTime();
+      if (ticketAgeMs > currentQueue.overflowTimeoutSecs * 1000) {
+        const overflow = getOverflowQueue(currentQueue, allQueues);
+        if (overflow) {
+          reasoning += ` | Overflow timeout (${currentQueue.overflowTimeoutSecs}s exceeded)`;
+          const overflowAgents = overflow.groupId
+            ? resolveAgents('group', overflow.groupId, allAgents)
+            : allAgents;
+          const overflowCandidates = buildCandidates(overflowAgents, categories, options.channelType, slaBoost, bizHoursActive);
+          if (overflowCandidates.length > 0) {
+            const selected = applyStrategy(overflow.strategy, overflowCandidates, {
+              queueId: overflow.id,
+              ticketPriority: ticket.priority,
+            });
+            if (selected) {
+              return logAndReturn(ticket, selected, overflowCandidates, reasoning, overflow.strategy, overflow.id, ruleId, startMs, workspaceId);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Step 4b: Build and score candidates
+  const candidates = buildCandidates(eligibleAgents, categories, options.channelType, slaBoost, bizHoursActive);
 
   if (candidates.length === 0) {
     // Try overflow queue
@@ -255,7 +323,7 @@ export async function routeTicket(
           const overflowAgents = overflow.groupId
             ? resolveAgents('group', overflow.groupId, allAgents)
             : allAgents;
-          const overflowCandidates = buildCandidates(overflowAgents, categories, options.channelType);
+          const overflowCandidates = buildCandidates(overflowAgents, categories, options.channelType, slaBoost, bizHoursActive);
           if (overflowCandidates.length > 0) {
             const selected = applyStrategy(overflow.strategy, overflowCandidates, {
               queueId: overflow.id,

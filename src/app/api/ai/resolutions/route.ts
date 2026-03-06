@@ -5,19 +5,23 @@ import { listResolutions } from '@/lib/ai/store';
 
 export const dynamic = 'force-dynamic';
 
-/** @deprecated Use /api/ai/resolutions instead */
 export async function GET(request: NextRequest) {
   const auth = await requireScope(request, 'ai:read');
   if ('error' in auth) return auth.error;
 
   const { searchParams } = new URL(request.url);
-  const status = searchParams.get('status');
+  const status = searchParams.get('status') ?? undefined;
+  const ticketId = searchParams.get('ticketId') ?? undefined;
+  const limit = parseInt(searchParams.get('limit') ?? '50', 10);
+  const offset = parseInt(searchParams.get('offset') ?? '0', 10);
 
   const { records, total } = await listResolutions({
     workspaceId: auth.user.workspaceId,
-    status: status && status !== 'all' ? status : undefined,
-    limit: 50,
+    status,
+    ticketId,
+    limit: Math.min(limit, 200),
+    offset,
   });
 
-  return NextResponse.json({ entries: records, total });
+  return NextResponse.json({ resolutions: records, total, limit, offset });
 }

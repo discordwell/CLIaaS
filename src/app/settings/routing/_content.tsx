@@ -5,6 +5,7 @@ import Link from "next/link";
 import AgentAvailabilityIndicator from "@/components/routing/AgentAvailabilityIndicator";
 import AgentSkillBadges from "@/components/routing/AgentSkillBadges";
 import RoutingQueueCard from "@/components/routing/RoutingQueueCard";
+import RoutingConditionBuilder, { type RoutingConditions } from "@/components/routing/RoutingConditionBuilder";
 
 interface RoutingConfig {
   defaultStrategy: string;
@@ -63,11 +64,13 @@ export default function RoutingSettingsContent() {
   // Queue creation form
   const [newQueueName, setNewQueueName] = useState("");
   const [newQueueStrategy, setNewQueueStrategy] = useState("skill_match");
+  const [newQueueConditions, setNewQueueConditions] = useState<RoutingConditions>({ all: [], any: [] });
 
   // Rule creation form
   const [newRuleName, setNewRuleName] = useState("");
   const [newRuleTargetType, setNewRuleTargetType] = useState("queue");
   const [newRuleTargetId, setNewRuleTargetId] = useState("");
+  const [newRuleConditions, setNewRuleConditions] = useState<RoutingConditions>({ all: [], any: [] });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -106,6 +109,9 @@ export default function RoutingSettingsContent() {
 
   async function createQueue() {
     if (!newQueueName.trim()) return;
+    const conditions: Record<string, unknown> = {};
+    if (newQueueConditions.all.length > 0) conditions.all = newQueueConditions.all;
+    if (newQueueConditions.any.length > 0) conditions.any = newQueueConditions.any;
     const res = await fetch("/api/routing/queues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -113,13 +119,14 @@ export default function RoutingSettingsContent() {
         name: newQueueName,
         strategy: newQueueStrategy,
         priority: 0,
-        conditions: {},
+        conditions,
         enabled: true,
       }),
     });
     const queue = await res.json();
     setQueues([...queues, queue]);
     setNewQueueName("");
+    setNewQueueConditions({ all: [], any: [] });
   }
 
   async function deleteQueue(id: string) {
@@ -129,13 +136,16 @@ export default function RoutingSettingsContent() {
 
   async function createRule() {
     if (!newRuleName.trim() || !newRuleTargetId.trim()) return;
+    const conditions: Record<string, unknown> = {};
+    if (newRuleConditions.all.length > 0) conditions.all = newRuleConditions.all;
+    if (newRuleConditions.any.length > 0) conditions.any = newRuleConditions.any;
     const res = await fetch("/api/routing/rules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: newRuleName,
         priority: 0,
-        conditions: {},
+        conditions,
         targetType: newRuleTargetType,
         targetId: newRuleTargetId,
         enabled: true,
@@ -145,6 +155,7 @@ export default function RoutingSettingsContent() {
     setRules([...rules, rule]);
     setNewRuleName("");
     setNewRuleTargetId("");
+    setNewRuleConditions({ all: [], any: [] });
   }
 
   async function deleteRule(id: string) {
@@ -227,17 +238,28 @@ export default function RoutingSettingsContent() {
       <section className="mt-8 border-2 border-zinc-950 bg-white p-8">
         <h2 className="text-2xl font-bold">Routing Queues</h2>
         <div className="mt-6 space-y-4">
-          {queues.map((q) => (
-            <div key={q.id} className="flex items-center justify-between">
-              <RoutingQueueCard name={q.name} strategy={q.strategy} enabled={q.enabled} totalRouted={0} />
-              <button
-                onClick={() => deleteQueue(q.id)}
-                className="ml-4 border-2 border-red-300 px-3 py-1 font-mono text-xs font-bold uppercase text-red-600 hover:bg-red-50"
-              >
-                Delete
-              </button>
-            </div>
-          ))}
+          {queues.map((q) => {
+            const conds = q.conditions as { all?: unknown[]; any?: unknown[] };
+            const condCount = (conds.all?.length ?? 0) + (conds.any?.length ?? 0);
+            return (
+              <div key={q.id} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <RoutingQueueCard name={q.name} strategy={q.strategy} enabled={q.enabled} totalRouted={0} />
+                  {condCount > 0 && (
+                    <span className="border border-zinc-300 bg-zinc-100 px-2 py-0.5 font-mono text-[10px] font-bold text-zinc-500">
+                      {condCount} condition{condCount !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => deleteQueue(q.id)}
+                  className="ml-4 border-2 border-red-300 px-3 py-1 font-mono text-xs font-bold uppercase text-red-600 hover:bg-red-50"
+                >
+                  Delete
+                </button>
+              </div>
+            );
+          })}
           {queues.length === 0 && (
             <p className="font-mono text-sm text-zinc-500">No queues configured.</p>
           )}
@@ -266,19 +288,28 @@ export default function RoutingSettingsContent() {
             Add Queue
           </button>
         </div>
+        <RoutingConditionBuilder conditions={newQueueConditions} onChange={setNewQueueConditions} />
       </section>
 
       {/* RULES */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-8">
         <h2 className="text-2xl font-bold">Routing Rules</h2>
         <div className="mt-6 space-y-3">
-          {rules.map((r) => (
+          {rules.map((r) => {
+            const rc = (r as unknown as { conditions?: { all?: unknown[]; any?: unknown[] } }).conditions;
+            const rCondCount = (rc?.all?.length ?? 0) + (rc?.any?.length ?? 0);
+            return (
             <div key={r.id} className="flex items-center justify-between border border-zinc-200 p-3">
               <div>
                 <span className="font-bold">{r.name}</span>
                 <span className="ml-3 font-mono text-xs text-zinc-500">
                   {r.targetType}:{r.targetId.slice(0, 8)}
                 </span>
+                {rCondCount > 0 && (
+                  <span className="ml-2 border border-zinc-300 bg-zinc-100 px-2 py-0.5 font-mono text-[10px] font-bold text-zinc-500">
+                    {rCondCount} condition{rCondCount !== 1 ? "s" : ""}
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => deleteRule(r.id)}
@@ -287,7 +318,8 @@ export default function RoutingSettingsContent() {
                 Delete
               </button>
             </div>
-          ))}
+            );
+          })}
           {rules.length === 0 && (
             <p className="font-mono text-sm text-zinc-500">No routing rules configured.</p>
           )}
@@ -323,6 +355,7 @@ export default function RoutingSettingsContent() {
             Add Rule
           </button>
         </div>
+        <RoutingConditionBuilder conditions={newRuleConditions} onChange={setNewRuleConditions} />
       </section>
 
       {/* AGENT MANAGEMENT */}

@@ -216,6 +216,43 @@ Ticket handler → dispatch()
 
 ---
 
+## Omnichannel Routing Engine
+
+Skill-based, capacity-aware routing with 4 strategies, queue matching, rule evaluation, SLA-aware priority, and overflow timeout enforcement.
+
+```
+Ticket arrives → extractCategories() → evaluateRules() → matchQueue()
+                                                            ↓
+                                              checkBusinessHours()
+                                              checkSLA() → slaBoost
+                                              loadTracker.getLoad()
+                                                            ↓
+                                              buildCandidates() → applyStrategy()
+                                                            ↓
+                                              Overflow timeout? → overflow queue
+                                              No candidates? → overflow queue
+                                                            ↓
+                                              logAndReturn() → RoutingResult
+```
+
+**Strategies:** `round_robin`, `load_balanced`, `skill_match`, `priority_weighted`
+
+**Scoring:** `score = (matchedSkills/categories) * avgProficiency * bizHoursFactor + capPenalty + slaBoost`
+- `bizHoursFactor`: 1.0 during business hours, 0.7 outside (via WFM module)
+- `capPenalty`: -0.2 when agent load exceeds 80% capacity
+- `slaBoost`: +0.15 for SLA warning, +0.30 for SLA breach
+
+**Load Tracking:** `LoadTracker` singleton counts open/pending/on_hold tickets per assignee via data provider, 5-minute TTL cache, invalidated by `ticket:routed`/`ticket:updated` events.
+
+**Overflow Timeout:** Queues with `overflowTimeoutSecs` redirect to overflow queue when ticket age exceeds threshold.
+
+**Source:** `src/lib/routing/` (engine, store, queue-manager, strategies, availability, load-tracker, types, constants)
+**API:** `/api/routing/` (route-ticket, queues, rules, config, analytics, log)
+**UI:** `/settings/routing`, `/analytics/routing`
+**Migration:** `src/db/migrations/0020_routing_tables.sql`
+
+---
+
 ## Job Queue Architecture
 
 BullMQ + Redis for reliable background processing with graceful fallback to inline execution.

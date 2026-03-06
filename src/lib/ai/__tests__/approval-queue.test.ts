@@ -1,85 +1,84 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getApprovalQueue,
-  enqueueApproval,
   getApproval,
   getPendingApprovals,
   approveEntry,
   rejectEntry,
   editEntry,
-  type ApprovalEntry,
 } from '../approval-queue';
-
-const sampleEntry: ApprovalEntry = {
-  id: 'appr-1',
-  ticketId: 'ticket-1',
-  ticketSubject: 'Help needed',
-  draftReply: 'Here is a suggested response.',
-  confidence: 0.85,
-  reasoning: 'KB match found',
-  kbArticlesUsed: ['kb-1'],
-  status: 'pending',
-  createdAt: new Date().toISOString(),
-};
+import { saveResolution } from '../store';
 
 beforeEach(() => {
-  global.__cliaasApprovalQueue = [];
+  (globalThis as Record<string, unknown>).__cliaasAIResolutions = undefined;
+  (globalThis as Record<string, unknown>).__cliaasAIAgentConfig = undefined;
 });
 
-function freshEntry(): ApprovalEntry {
-  return { ...sampleEntry };
+async function seedEntry(id = 'appr-1') {
+  await saveResolution({
+    id,
+    workspaceId: 'ws-1',
+    ticketId: 'ticket-1',
+    confidence: 0.85,
+    suggestedReply: 'Here is a suggested response.',
+    reasoning: 'KB match found',
+    kbArticlesUsed: ['kb-1'],
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  });
 }
 
 describe('approval queue CRUD', () => {
-  it('starts empty', () => {
-    expect(getApprovalQueue()).toEqual([]);
+  it('starts empty', async () => {
+    expect(await getApprovalQueue()).toEqual([]);
   });
 
-  it('enqueues and retrieves entries', () => {
-    enqueueApproval(freshEntry());
-    expect(getApprovalQueue()).toHaveLength(1);
-    expect(getApproval('appr-1')?.ticketId).toBe('ticket-1');
+  it('enqueues and retrieves entries', async () => {
+    await seedEntry();
+    expect(await getApprovalQueue()).toHaveLength(1);
+    const entry = await getApproval('appr-1');
+    expect(entry?.ticketId).toBe('ticket-1');
   });
 
-  it('getPendingApprovals filters by status', () => {
-    enqueueApproval(freshEntry());
-    enqueueApproval({ ...freshEntry(), id: 'appr-2' });
-    expect(getPendingApprovals()).toHaveLength(2);
+  it('getPendingApprovals filters by status', async () => {
+    await seedEntry('appr-1');
+    await seedEntry('appr-2');
+    expect(await getPendingApprovals()).toHaveLength(2);
 
-    approveEntry('appr-1', 'agent');
-    expect(getPendingApprovals()).toHaveLength(1);
+    await approveEntry('appr-1', 'agent');
+    expect(await getPendingApprovals()).toHaveLength(1);
   });
 });
 
 describe('approve/reject/edit', () => {
-  it('approves a pending entry', () => {
-    enqueueApproval(freshEntry());
-    const result = approveEntry('appr-1', 'agent-1');
+  it('approves a pending entry', async () => {
+    await seedEntry();
+    const result = await approveEntry('appr-1', 'agent-1');
     expect(result?.status).toBe('approved');
     expect(result?.reviewedBy).toBe('agent-1');
     expect(result?.reviewedAt).toBeTruthy();
   });
 
-  it('rejects a pending entry', () => {
-    enqueueApproval(freshEntry());
-    const result = rejectEntry('appr-1', 'agent-1');
+  it('rejects a pending entry', async () => {
+    await seedEntry();
+    const result = await rejectEntry('appr-1', 'agent-1');
     expect(result?.status).toBe('rejected');
   });
 
-  it('edits a pending entry', () => {
-    enqueueApproval(freshEntry());
-    const result = editEntry('appr-1', 'Revised reply text', 'agent-1');
+  it('edits a pending entry', async () => {
+    await seedEntry();
+    const result = await editEntry('appr-1', 'Revised reply text', 'agent-1');
     expect(result?.status).toBe('edited');
     expect(result?.editedReply).toBe('Revised reply text');
   });
 
-  it('returns null for non-existent entry', () => {
-    expect(approveEntry('nope', 'agent')).toBeNull();
+  it('returns null for non-existent entry', async () => {
+    expect(await approveEntry('nope', 'agent')).toBeNull();
   });
 
-  it('returns null for already-processed entry', () => {
-    enqueueApproval(freshEntry());
-    approveEntry('appr-1', 'agent');
-    expect(approveEntry('appr-1', 'agent')).toBeNull();
+  it('returns null for already-processed entry', async () => {
+    await seedEntry();
+    await rejectEntry('appr-1', 'agent');
+    expect(await approveEntry('appr-1', 'agent')).toBeNull();
   });
 });

@@ -180,7 +180,7 @@ export interface TicketUpdateParams {
 export interface MessageCreateParams {
   ticketId: string;
   body: string;
-  authorType?: 'user' | 'customer' | 'system';
+  authorType?: 'user' | 'customer' | 'system' | 'bot';
   authorId?: string;
   visibility?: 'public' | 'internal';
 }

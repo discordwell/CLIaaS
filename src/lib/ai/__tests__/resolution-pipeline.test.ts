@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { setPipelineConfig, getPipelineConfig, DEFAULT_PIPELINE_CONFIG } from '../resolution-pipeline';
 
 beforeEach(() => {
-  global.__cliaasAIPipelineConfig = undefined;
-  global.__cliaasApprovalQueue = [];
-  global.__cliaasROIMetrics = undefined;
+  (globalThis as Record<string, unknown>).__cliaasAIPipelineConfig = undefined;
+  (globalThis as Record<string, unknown>).__cliaasAIResolutions = undefined;
+  (globalThis as Record<string, unknown>).__cliaasAIAgentConfig = undefined;
+  (globalThis as Record<string, unknown>).__cliaasROIMetrics = undefined;
 });
 
 describe('pipeline config', () => {

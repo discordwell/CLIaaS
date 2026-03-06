@@ -147,6 +147,8 @@ export const VALID_SCOPES = [
   'reports:read',
   'reports:write',
   'reports:export',
+  'ai:read',
+  'ai:write',
   'admin:*',
   '*',
 ] as const;

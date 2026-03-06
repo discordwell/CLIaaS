@@ -58,6 +58,15 @@ const ALL_WRITE_TOOLS = [
   'business_hours_delete',
   'holiday_calendar_create',
   'holiday_add_date',
+  'roles_assign',
+  'group_add_member',
+  'group_remove_member',
+  'ticket_add_collaborator',
+  'ticket_remove_collaborator',
+  'ai_config',
+  'ai_stats',
+  'ai_approve',
+  'ai_reject',
 ];
 
 export function loadScopes(): MCPScopeConfig {
