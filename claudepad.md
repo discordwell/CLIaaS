@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-03-06T05:20Z — Session 86: Ticket Merge & Split (Plan 10)
+- **Migration**: `0009_ticket_merge_split.sql` — 2 ALTER TABLE (merged_into_ticket_id, split_from_ticket_id), 2 new tables (ticket_merge_log, ticket_split_log), partial indexes, RLS
+- **Drizzle schema**: Added mergedIntoTicketId + splitFromTicketId to tickets, ticketMergeLog + ticketSplitLog table defs
+- **Types**: TicketMergeParams, TicketMergeResult, TicketSplitParams, TicketSplitResult, TicketUnmergeParams, MergeHistoryEntry added to DataProvider interface
+- **Business logic**: `src/lib/tickets/merge-split.ts` — mergeTickets (move messages, union tags, close secondary, snapshot, log), splitTicket (new ticket+conversation, move messages, log), unmergeTicket (restore from snapshot, undo window), getMergeHistory
+- **DbProvider**: 4 new methods delegating to merge-split.ts; loadTickets now returns mergedIntoTicketId/splitFromTicketId
+- **JsonlProvider**: Stub throws for merge/split/unmerge; returns [] for getMergeHistory
+- **HybridProvider**: Delegates to DbProvider + outbox entries
+- **Events**: ticketMerged, ticketSplit, ticketUnmerged dispatch helpers; ticket:merged + ticket:split EventType
+- **API routes**: POST /api/tickets/merge, POST /api/tickets/[id]/split, POST /api/tickets/merge/undo, GET /api/tickets/[id]/merge-history
+- **CLI**: `tickets merge` + `tickets split` subcommands with --dry-run; `duplicates --merge --yes`
+- **MCP**: ticket_merge + ticket_split tools with withConfirmation + scopeGuard; detect_duplicates autoMerge+confirm
+- **UI**: TicketListClient (multi-select + merge bar), TicketMergeBar (primary selector, confirm modal), TicketSplitBar (subject input, confirm modal), TicketDetailClient (lineage banners, message checkboxes, merge history)
+- **Tests**: 6 unit tests in merge-split.test.ts (validation edge cases + type checks)
+- **Files**: 12 new, 14 modified
+
 ## 2026-03-06T05:12Z — Session 85: Workforce Management (WFM) — Plan 05
 - **Types**: `src/lib/wfm/types.ts` — 16 interfaces/types (ShiftBlock, ScheduleTemplate, AgentSchedule, AgentAvailability, AgentStatusEntry, AgentCurrentStatus, TimeOffRequest, VolumeSnapshot, ForecastPoint, StaffingRecommendation, BusinessHoursConfig, AdherenceRecord, UtilizationRecord, WfmDashboardData, ScheduledActivity)
 - **Store**: `src/lib/wfm/store.ts` — JSONL persistence for 6 collections with demo data seeding + compatibility aliases

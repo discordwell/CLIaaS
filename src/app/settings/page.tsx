@@ -60,6 +60,31 @@ export default function SettingsPage() {
       {/* PROFILE & TEAM (client-side, auth-gated) */}
       <SettingsUserSections />
 
+      {/* TEMPLATES & MACROS */}
+      <section className="mt-8 border-2 border-zinc-950 bg-white p-8">
+        <h2 className="text-2xl font-bold">Templates & Macros</h2>
+        <p className="mt-2 text-sm font-medium text-zinc-600">
+          Manage canned responses, macros, and email signatures.
+        </p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          <Link href="/settings/canned-responses"
+            className="block border-2 border-zinc-200 p-5 hover:border-zinc-950 transition-colors">
+            <p className="text-lg font-bold">Canned Responses</p>
+            <p className="mt-1 text-sm text-zinc-600">Reusable reply templates with merge variables</p>
+          </Link>
+          <Link href="/settings/macros"
+            className="block border-2 border-zinc-200 p-5 hover:border-zinc-950 transition-colors">
+            <p className="text-lg font-bold">Macros</p>
+            <p className="mt-1 text-sm text-zinc-600">One-click multi-action bundles</p>
+          </Link>
+          <Link href="/settings/signatures"
+            className="block border-2 border-zinc-200 p-5 hover:border-zinc-950 transition-colors">
+            <p className="text-lg font-bold">Email Signatures</p>
+            <p className="mt-1 text-sm text-zinc-600">Agent signatures for outgoing replies</p>
+          </Link>
+        </div>
+      </section>
+
       {/* CONNECTORS */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-8">
         <h2 className="text-2xl font-bold">Helpdesk Connectors</h2>

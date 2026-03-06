@@ -8,19 +8,19 @@
 
 | Metric | Value |
 |--------|-------|
-| Pages | 38 (Next.js App Router) |
-| API Routes | 148 |
-| Components | 14 shared React components |
-| Library modules | 67 (`src/lib/`) |
-| CLI files | 79 (`cli/`) |
-| CLI commands | 37 registered command groups |
+| Pages | 41 (Next.js App Router) |
+| API Routes | 166 |
+| Components | 15 shared React components |
+| Library modules | 71 (`src/lib/`) |
+| CLI files | 81 (`cli/`) |
+| CLI commands | 40 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 60 (across 14 modules) |
+| MCP tools | 70 (across 15 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 73 (Drizzle/PostgreSQL, RLS-enabled) |
-| Tests | 89 files, ~7,500 LOC |
-| Source LOC | ~55,000 (excl. Easter Egg + tests) |
+| DB tables | 76 (Drizzle/PostgreSQL, RLS-enabled) |
+| Tests | 91 files, ~7,700 LOC |
+| Source LOC | ~57,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
 
 ---
@@ -107,10 +107,13 @@ Each domain has a dedicated store in `src/lib/`:
 | Slack Conversations | `channels/slack-intake.ts` | `global.__cliaasSlackConvs` |
 | Telegram Configs | `channels/telegram-store.ts` | Module-level arrays |
 | SDK Sessions | `channels/sdk-session.ts` | Module-level Map |
+| Canned Responses | `canned/canned-store.ts` | Module-level arrays |
+| Macros | `canned/macro-store.ts` | Module-level arrays |
+| Agent Signatures | `canned/signature-store.ts` | Module-level arrays |
 
 ---
 
-## Database Schema (73 tables)
+## Database Schema (76 tables)
 
 ### Core Multi-Tenancy (3)
 `tenants` → `workspaces` → `users`
@@ -129,6 +132,9 @@ Each domain has a dedicated store in `src/lib/`:
 
 ### Rules & Automation (3)
 `rules` (macros, triggers, automations, SLA), `automation_rules`, `sla_policies`
+
+### Canned Responses & Macros (3)
+`canned_responses` (reusable reply templates with merge variables, categories, shortcuts), `macros` (native one-click multi-action bundles with structured actions JSONB), `agent_signatures` (per-agent HTML/text email signatures with default flag)
 
 ### SLA Tracking (1)
 `sla_events` (breach detection)
@@ -649,6 +655,7 @@ Feature matrix summary:
 | community_forums | Y | Y | Y | Y | Y | Y |
 | qa_reviews | Y | Y | Y | Y | Y | Y |
 | proactive_messaging | Y | Y | Y | Y | Y | Y |
+| canned_responses | Y | Y | Y | Y | Y | Y |
 
 ## Key Design Decisions
 

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { getMacro, updateMacro, deleteMacro } from '@/lib/canned/macro-store';
+import { getMacro, updateMacro, deleteMacro, type MacroAction } from '@/lib/canned/macro-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,7 +69,10 @@ export async function PATCH(
       return NextResponse.json({ macro: row });
     }
 
-    const updated = updateMacro(id, parsed.data);
+    const updated = updateMacro(id, {
+      ...parsed.data,
+      actions: parsed.data.actions as MacroAction[] | undefined,
+    });
     if (!updated) return NextResponse.json({ error: 'Macro not found' }, { status: 404 });
     return NextResponse.json({ macro: updated });
   } catch (err) {

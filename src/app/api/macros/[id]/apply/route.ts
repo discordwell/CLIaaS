@@ -57,7 +57,7 @@ export async function POST(
         id: ticketRow.id,
         status: ticketRow.status ?? 'open',
         priority: ticketRow.priority ?? 'normal',
-        assignee: ticketRow.assignee ?? null,
+        assignee: ticketRow.assigneeId ?? null,
         tags: (ticketRow.tags as string[]) ?? [],
       };
 

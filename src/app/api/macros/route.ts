@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireAuth } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { getMacros, createMacro } from '@/lib/canned/macro-store';
+import { getMacros, createMacro, type MacroAction } from '@/lib/canned/macro-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ macro: row }, { status: 201 });
     }
 
-    const macro = createMacro({ name, description, actions, scope, createdBy: auth.user.id });
+    const macro = createMacro({ name, description, actions: actions as MacroAction[], scope, createdBy: auth.user.id });
     return NextResponse.json({ macro }, { status: 201 });
   } catch (err) {
     return NextResponse.json(

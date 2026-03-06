@@ -39,7 +39,7 @@ export function resolveMergeVariables(template: string, context: MergeContext): 
   });
 }
 
-function resolvePathValue(obj: Record<string, unknown>, path: string): string | undefined {
+function resolvePathValue(obj: object, path: string): string | undefined {
   const parts = path.split('.');
   let current: unknown = obj;
   for (const part of parts) {
