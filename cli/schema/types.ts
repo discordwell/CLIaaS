@@ -30,6 +30,7 @@ export interface Message {
   body: string;
   bodyHtml?: string;
   type: MessageType;
+  visibility?: 'public' | 'internal';
   createdAt: string;
   attachments?: Attachment[];
 }

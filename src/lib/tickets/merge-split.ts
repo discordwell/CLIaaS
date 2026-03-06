@@ -3,7 +3,7 @@
  * All functions operate within DB transactions via the passed db/schema context.
  */
 
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, or, inArray } from 'drizzle-orm';
 import type {
   TicketMergeParams,
   TicketMergeResult,
@@ -34,143 +34,150 @@ export async function mergeTickets(
     throw new Error('At least one ticket to merge is required.');
   }
 
-  const allIds = [primaryTicketId, ...mergedTicketIds];
-  const ticketRows = await db
-    .select()
-    .from(schema.tickets)
-    .where(and(
-      eq(schema.tickets.workspaceId, workspaceId),
-      inArray(schema.tickets.id, allIds),
-    ));
+  return db.transaction(async (tx: typeof db) => {
+    const allIds = [primaryTicketId, ...mergedTicketIds];
+    const ticketRows = await tx
+      .select()
+      .from(schema.tickets)
+      .where(and(
+        eq(schema.tickets.workspaceId, workspaceId),
+        inArray(schema.tickets.id, allIds),
+      ));
 
-  if (ticketRows.length !== allIds.length) {
-    throw new Error('One or more tickets not found in this workspace.');
-  }
-
-  const primaryTicket = ticketRows.find((t: { id: string }) => t.id === primaryTicketId);
-  if (!primaryTicket) throw new Error('Primary ticket not found.');
-
-  // Check none of the merged tickets are already merged
-  for (const t of ticketRows) {
-    if (t.id !== primaryTicketId && t.mergedIntoTicketId) {
-      throw new Error(`Ticket ${t.id} is already merged into another ticket.`);
+    if (ticketRows.length !== allIds.length) {
+      throw new Error('One or more tickets not found in this workspace.');
     }
-  }
 
-  // Get the primary ticket's conversation
-  const [primaryConv] = await db
-    .select({ id: schema.conversations.id })
-    .from(schema.conversations)
-    .where(eq(schema.conversations.ticketId, primaryTicketId))
-    .limit(1);
+    const primaryTicket = ticketRows.find((t: { id: string }) => t.id === primaryTicketId);
+    if (!primaryTicket) throw new Error('Primary ticket not found.');
 
-  if (!primaryConv) throw new Error('Primary ticket has no conversation.');
+    // Check primary ticket is not already merged
+    if (primaryTicket.mergedIntoTicketId) {
+      throw new Error('Primary ticket is already merged into another ticket.');
+    }
 
-  const mergeLogIds: string[] = [];
-  let totalMovedMessages = 0;
-  const allMergedTags: Set<string> = new Set();
-
-  for (const mergedId of mergedTicketIds) {
-    const mergedTicket = ticketRows.find((t: { id: string }) => t.id === mergedId);
-
-    // Get the merged ticket's conversation
-    const [mergedConv] = await db
-      .select({ id: schema.conversations.id })
-      .from(schema.conversations)
-      .where(eq(schema.conversations.ticketId, mergedId))
-      .limit(1);
-
-    // Find messages to move
-    let movedMessageIds: string[] = [];
-    if (mergedConv) {
-      const messagesToMove = await db
-        .select({ id: schema.messages.id })
-        .from(schema.messages)
-        .where(eq(schema.messages.conversationId, mergedConv.id));
-
-      movedMessageIds = messagesToMove.map((m: { id: string }) => m.id);
-
-      // Move messages to primary conversation
-      if (movedMessageIds.length > 0) {
-        await db
-          .update(schema.messages)
-          .set({ conversationId: primaryConv.id })
-          .where(inArray(schema.messages.id, movedMessageIds));
+    // Check none of the merged tickets are already merged
+    for (const t of ticketRows) {
+      if (t.id !== primaryTicketId && t.mergedIntoTicketId) {
+        throw new Error(`Ticket ${t.id} is already merged into another ticket.`);
       }
     }
 
-    totalMovedMessages += movedMessageIds.length;
+    // Get the primary ticket's conversation
+    const [primaryConv] = await tx
+      .select({ id: schema.conversations.id })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.ticketId, primaryTicketId))
+      .limit(1);
 
-    // Union tags
-    const mergedTags: string[] = mergedTicket.tags ?? [];
-    for (const tag of mergedTags) {
-      allMergedTags.add(tag);
+    if (!primaryConv) throw new Error('Primary ticket has no conversation.');
+
+    const mergeLogIds: string[] = [];
+    let totalMovedMessages = 0;
+    const allMergedTags: Set<string> = new Set();
+
+    for (const mergedId of mergedTicketIds) {
+      const mergedTicket = ticketRows.find((t: { id: string }) => t.id === mergedId);
+
+      // Get the merged ticket's conversation
+      const [mergedConv] = await tx
+        .select({ id: schema.conversations.id })
+        .from(schema.conversations)
+        .where(eq(schema.conversations.ticketId, mergedId))
+        .limit(1);
+
+      // Find messages to move
+      let movedMessageIds: string[] = [];
+      if (mergedConv) {
+        const messagesToMove = await tx
+          .select({ id: schema.messages.id })
+          .from(schema.messages)
+          .where(eq(schema.messages.conversationId, mergedConv.id));
+
+        movedMessageIds = messagesToMove.map((m: { id: string }) => m.id);
+
+        // Move messages to primary conversation
+        if (movedMessageIds.length > 0) {
+          await tx
+            .update(schema.messages)
+            .set({ conversationId: primaryConv.id })
+            .where(inArray(schema.messages.id, movedMessageIds));
+        }
+      }
+
+      totalMovedMessages += movedMessageIds.length;
+
+      // Union tags
+      const mergedTags: string[] = mergedTicket.tags ?? [];
+      for (const tag of mergedTags) {
+        allMergedTags.add(tag);
+      }
+
+      // Snapshot the merged ticket before closing
+      const snapshot = {
+        id: mergedTicket.id,
+        subject: mergedTicket.subject,
+        status: mergedTicket.status,
+        priority: mergedTicket.priority,
+        tags: mergedTicket.tags,
+        assigneeId: mergedTicket.assigneeId,
+        requesterId: mergedTicket.requesterId,
+        description: mergedTicket.description,
+      };
+
+      // Close the merged ticket and set merged_into
+      await tx
+        .update(schema.tickets)
+        .set({
+          mergedIntoTicketId: primaryTicketId,
+          status: 'closed',
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.tickets.id, mergedId));
+
+      // Write merge log
+      const [logRow] = await tx
+        .insert(schema.ticketMergeLog)
+        .values({
+          workspaceId,
+          primaryTicketId,
+          mergedTicketId: mergedId,
+          mergedBy: mergedBy ?? null,
+          mergedTicketSnapshot: snapshot,
+          movedMessageIds,
+          movedAttachmentIds: [],
+          mergedTags,
+        })
+        .returning({ id: schema.ticketMergeLog.id });
+
+      mergeLogIds.push(logRow.id);
+
+      // Add system message to primary ticket
+      await tx.insert(schema.messages).values({
+        conversationId: primaryConv.id,
+        authorType: 'system',
+        body: `Ticket #${mergedTicket.subject} was merged into this ticket. ${movedMessageIds.length} message(s) moved.`,
+        visibility: 'public',
+        createdAt: new Date(),
+      });
     }
 
-    // Snapshot the merged ticket before closing
-    const snapshot = {
-      id: mergedTicket.id,
-      subject: mergedTicket.subject,
-      status: mergedTicket.status,
-      priority: mergedTicket.priority,
-      tags: mergedTicket.tags,
-      assigneeId: mergedTicket.assigneeId,
-      requesterId: mergedTicket.requesterId,
-      description: mergedTicket.description,
-    };
-
-    // Close the merged ticket and set merged_into
-    await db
+    // Update primary ticket tags (union)
+    const primaryTags: string[] = primaryTicket.tags ?? [];
+    const uniqueTags = [...new Set([...primaryTags, ...allMergedTags])];
+    await tx
       .update(schema.tickets)
-      .set({
-        mergedIntoTicketId: primaryTicketId,
-        status: 'closed',
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.tickets.id, mergedId));
+      .set({ tags: uniqueTags, updatedAt: new Date() })
+      .where(eq(schema.tickets.id, primaryTicketId));
 
-    // Write merge log
-    const [logRow] = await db
-      .insert(schema.ticketMergeLog)
-      .values({
-        workspaceId,
-        primaryTicketId,
-        mergedTicketId: mergedId,
-        mergedBy: mergedBy ?? null,
-        mergedTicketSnapshot: snapshot,
-        movedMessageIds,
-        movedAttachmentIds: [],
-        mergedTags,
-      })
-      .returning({ id: schema.ticketMergeLog.id });
-
-    mergeLogIds.push(logRow.id);
-
-    // Add system message to primary ticket
-    await db.insert(schema.messages).values({
-      conversationId: primaryConv.id,
-      authorType: 'system',
-      body: `Ticket #${mergedTicket.subject} was merged into this ticket. ${movedMessageIds.length} message(s) moved.`,
-      visibility: 'public',
-      createdAt: new Date(),
-    });
-  }
-
-  // Update primary ticket tags (union)
-  const primaryTags: string[] = primaryTicket.tags ?? [];
-  const uniqueTags = [...new Set([...primaryTags, ...allMergedTags])];
-  await db
-    .update(schema.tickets)
-    .set({ tags: uniqueTags, updatedAt: new Date() })
-    .where(eq(schema.tickets.id, primaryTicketId));
-
-  return {
-    primaryTicketId,
-    mergedCount: mergedTicketIds.length,
-    movedMessageCount: totalMovedMessages,
-    mergedTags: [...allMergedTags],
-    mergeLogIds,
-  };
+    return {
+      primaryTicketId,
+      mergedCount: mergedTicketIds.length,
+      movedMessageCount: totalMovedMessages,
+      mergedTags: [...allMergedTags],
+      mergeLogIds,
+    };
+  });
 }
 
 export async function splitTicket(

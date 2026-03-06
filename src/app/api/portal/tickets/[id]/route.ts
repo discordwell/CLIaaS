@@ -84,7 +84,8 @@ export async function GET(
             .where(
               and(
                 eq(schema.conversations.ticketId, id),
-                eq(schema.messages.visibility, 'public')
+                eq(schema.messages.visibility, 'public'),
+                eq(schema.conversations.kind, 'primary')
               )
             )
             .orderBy(schema.messages.createdAt);

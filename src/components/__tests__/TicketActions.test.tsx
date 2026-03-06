@@ -3,6 +3,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import TicketActions from '../TicketActions';
 
+// Mock EventSource for SSE presence features
+class MockEventSource {
+  onmessage: ((ev: MessageEvent) => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+  close() {}
+  addEventListener() {}
+  removeEventListener() {}
+}
+(globalThis as Record<string, unknown>).EventSource = MockEventSource;
+
 describe('TicketActions', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -15,7 +25,8 @@ describe('TicketActions', () => {
 
   it('renders the Reply section', () => {
     render(<TicketActions ticketId="t1" currentStatus="open" currentPriority="normal" />);
-    expect(screen.getByText('Reply')).toBeInTheDocument();
+    // Heading + toggle button both say "Reply" — use getAllByText
+    expect(screen.getAllByText('Reply').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders status select with current value', () => {
@@ -54,10 +65,11 @@ describe('TicketActions', () => {
     expect(screen.getByText('Send Reply')).toBeInTheDocument();
   });
 
-  it('changes button text to "Add Note" when internal note checkbox is checked', () => {
+  it('changes button text to "Add Note" when Note toggle is clicked', () => {
     render(<TicketActions ticketId="t1" currentStatus="open" currentPriority="normal" />);
-    const checkbox = screen.getByRole('checkbox');
-    fireEvent.click(checkbox);
+    // Internal note is now a toggle button, not a checkbox
+    const noteToggle = screen.getByText('Note');
+    fireEvent.click(noteToggle);
     expect(screen.getByText('Add Note')).toBeInTheDocument();
   });
 
@@ -76,9 +88,10 @@ describe('TicketActions', () => {
   });
 
   it('sends reply and shows success message', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+    // Mock all fetches — CannedResponsePicker, presence, and the actual reply
+    vi.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ success: true }),
+      json: () => Promise.resolve({ success: true, responses: [] }),
     } as Response);
 
     render(<TicketActions ticketId="t1" currentStatus="open" currentPriority="normal" />);
@@ -92,9 +105,9 @@ describe('TicketActions', () => {
   });
 
   it('calls PATCH endpoint and shows success when saving changes', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+    vi.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ success: true }),
+      json: () => Promise.resolve({ success: true, responses: [] }),
     } as Response);
 
     render(<TicketActions ticketId="t1" currentStatus="open" currentPriority="normal" />);

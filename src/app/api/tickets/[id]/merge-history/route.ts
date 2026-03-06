@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { requireScope } from '@/lib/api-auth';
 import { getDataProvider } from '@/lib/data-provider';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const authResult = await requireScope(request, 'tickets:read');
+  if ('error' in authResult) return authResult.error;
+
   try {
     const { id } = await params;
     const provider = await getDataProvider();

@@ -118,8 +118,11 @@ Each domain has a dedicated store in `src/lib/`:
 ### Core Multi-Tenancy (3)
 `tenants` → `workspaces` → `users`
 
-### Tickets & Conversations (5)
-`tickets` → `conversations` → `messages` → `attachments`, `groups`
+### Tickets & Conversations (5 + 2)
+`tickets` → `conversations` (primary/side, with subject, external_email, status) → `messages` (with visibility, mentioned_user_ids) → `attachments`, `groups`
+
+### Notifications & Mentions (2)
+`notifications` (per-user, type=mention/side_conversation_reply/assignment/escalation, resource linking), `mentions` (message-level @mention tracking with read state)
 
 ### Customers (6)
 `customers` (+10 enrichment columns), `organizations`, `customer_activities`, `customer_notes`, `customer_segments`, `customer_merge_log`
@@ -198,7 +201,8 @@ Ticket handler → dispatch()
                     └─→ enqueueAIResolution()  (AI agent queue, quota-gated, ticket.created/message.created)
 ```
 
-- **Canonical events**: `ticket.created`, `ticket.updated`, `ticket.resolved`, `message.created`, `csat.submitted`, `sla.breached`, `forum.thread_created`, `forum.reply_created`, `forum.thread_converted`, `qa.review_created`, `qa.review_completed`, `campaign.created`, `campaign.sent`, `customer.updated`, `customer.merged`, `time.entry_created`
+- **Canonical events**: `ticket.created`, `ticket.updated`, `ticket.resolved`, `message.created`, `csat.submitted`, `sla.breached`, `forum.thread_created`, `forum.reply_created`, `forum.thread_converted`, `qa.review_created`, `qa.review_completed`, `campaign.created`, `campaign.sent`, `customer.updated`, `customer.merged`, `time.entry_created`, `side_conversation.created`, `side_conversation.replied`
+- **Internal note safety**: When `data.isNote=true` or `data.visibility='internal'`, AI resolution queue is skipped (no auto-reply on notes), customer emails are never sent
 - Fire-and-forget via `Promise.allSettled` — errors isolated per channel with Sentry capture
 - SSE uses colon-separated names (`ticket:created`); dispatcher translates
 

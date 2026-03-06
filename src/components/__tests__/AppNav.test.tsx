@@ -2,6 +2,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
+// Mock EventSource for SSE features (NotificationBell)
+if (typeof globalThis.EventSource === 'undefined') {
+  (globalThis as Record<string, unknown>).EventSource = class {
+    onmessage = null;
+    onerror = null;
+    close() {}
+    addEventListener() {}
+    removeEventListener() {}
+  };
+}
+
 const mockPush = vi.fn();
 
 vi.mock('next/navigation', () => ({

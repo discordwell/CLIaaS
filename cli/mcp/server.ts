@@ -24,6 +24,7 @@ import { registerRoutingTools } from './tools/routing.js';
 import { registerWfmTools } from './tools/wfm.js';
 import { registerPresenceTools } from './tools/presence.js';
 import { registerCannedTools } from './tools/canned.js';
+import { registerSideConversationTools } from './tools/side-conversations.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -54,6 +55,7 @@ registerRoutingTools(server);
 registerWfmTools(server);
 registerPresenceTools(server);
 registerCannedTools(server);
+registerSideConversationTools(server);
 
 // Register resources and prompts
 registerResources(server);

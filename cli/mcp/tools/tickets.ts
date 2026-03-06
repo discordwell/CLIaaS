@@ -89,6 +89,7 @@ export function registerTicketTools(server: McpServer): void {
           id: m.id,
           author: m.author,
           type: m.type,
+          visibility: (m as { visibility?: string }).visibility ?? (m.type === 'note' ? 'internal' : 'public'),
           body: m.body,
           createdAt: m.createdAt,
         })),

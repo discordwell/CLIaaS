@@ -29,7 +29,9 @@ export type WebhookEventType =
   | 'campaign.sent'
   | 'customer.updated'
   | 'customer.merged'
-  | 'time.entry_created';
+  | 'time.entry_created'
+  | 'side_conversation.created'
+  | 'side_conversation.replied';
 
 export interface RetryPolicy {
   maxAttempts: number;

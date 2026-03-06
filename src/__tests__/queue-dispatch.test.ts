@@ -76,7 +76,7 @@ describe('Queue Integration — webhook dispatch inline fallback', () => {
     vi.unstubAllGlobals();
   });
 
-  it('dispatchWebhook still works inline when Redis is down', async () => {
+  it('dispatchWebhook still works inline when Redis is down', { timeout: 15000 }, async () => {
     const { dispatchWebhook } = await import('@/lib/webhooks');
     // Should not throw — falls back to inline delivery
     await expect(

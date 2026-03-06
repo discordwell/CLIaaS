@@ -84,7 +84,12 @@ export async function POST(
         break;
     }
 
-    messageCreated({ ticketId: id, source, isNote: !!isNote });
+    messageCreated({
+      ticketId: id,
+      source,
+      isNote: !!isNote,
+      visibility: isNote ? 'internal' : 'public',
+    });
     return NextResponse.json({ status: 'ok' });
   } catch (err) {
     return NextResponse.json(

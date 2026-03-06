@@ -102,7 +102,9 @@ describe('RemoteProvider', () => {
     it('throws when CLIAAS_HOSTED_URL is not set and no config fallback', async () => {
       vi.stubEnv('CLIAAS_HOSTED_URL', '');
       vi.stubEnv('CLIAAS_HOSTED_API_KEY', '');
-      await expect(createProvider()).rejects.toThrow('requires a hosted API URL');
+      // Constructor succeeds (lazy init), but first operation throws
+      const provider = await createProvider();
+      await expect(provider.loadTickets()).rejects.toThrow('requires a hosted API URL');
     });
 
     it('creates successfully with env vars', async () => {

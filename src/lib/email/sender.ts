@@ -102,6 +102,7 @@ export async function sendNotification(params: {
     sla_breach: `[CLIaaS] SLA breach: ${params.data.subject || 'Unknown'}`,
     assignment: `[CLIaaS] Ticket assigned to you: ${params.data.subject || 'Unknown'}`,
     new_ticket: `[CLIaaS] New ticket: ${params.data.subject || 'Unknown'}`,
+    mention: `[CLIaaS] ${params.data.authorName || 'Someone'} ${params.data.subject || 'mentioned you'}`,
   };
 
   return sendEmail({

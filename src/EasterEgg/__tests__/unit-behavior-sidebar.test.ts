@@ -152,7 +152,7 @@ describe('sidebar layout', () => {
     const mod = await import('../engine/renderer');
     expect(mod.Renderer.RADAR_SIZE).toBe(140);
     expect(mod.Renderer.RADAR_Y).toBe(4);
-    expect(mod.Renderer.STRIP_START_Y).toBe(194);
+    expect(mod.Renderer.STRIP_START_Y).toBe(180);
     expect(mod.Renderer.CAMEO_W).toBe(64);
     expect(mod.Renderer.CAMEO_H).toBe(48);
   });

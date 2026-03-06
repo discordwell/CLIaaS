@@ -34,7 +34,9 @@ export type CanonicalEvent =
   | 'campaign.sent'
   | 'customer.updated'
   | 'customer.merged'
-  | 'time.entry_created';
+  | 'time.entry_created'
+  | 'side_conversation.created'
+  | 'side_conversation.replied';
 
 // Compile-time check: every CanonicalEvent must be assignable to WebhookEventType
 const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
@@ -57,6 +59,8 @@ const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
   'customer.updated': 'customer.updated',
   'customer.merged': 'customer.merged',
   'time.entry_created': 'time.entry_created',
+  'side_conversation.created': 'side_conversation.created',
+  'side_conversation.replied': 'side_conversation.replied',
 };
 void _typeCheck;
 
@@ -67,6 +71,8 @@ const SSE_EVENT_MAP: Partial<Record<CanonicalEvent, SSEEventType>> = {
   'ticket.updated': 'ticket:updated',
   'ticket.resolved': 'ticket:status_changed',
   'message.created': 'ticket:reply',
+  'side_conversation.created': 'side_conversation:created',
+  'side_conversation.replied': 'side_conversation:replied',
 };
 
 // ---- Automation event type mapping ----
@@ -78,6 +84,7 @@ const AUTOMATION_EVENT_MAP: Partial<Record<CanonicalEvent, AutomationTriggerType
   'ticket.updated': 'trigger',
   'message.created': 'trigger',
   'sla.breached': 'sla',
+  'side_conversation.replied': 'trigger',
 };
 
 // ---- AI resolution eligible events ----
@@ -179,9 +186,9 @@ export function dispatch(
       }
     }),
 
-    // 6. AI resolution queue (only for eligible events, with quota check)
+    // 6. AI resolution queue (only for eligible events, with quota check; skip internal notes)
     Promise.resolve().then(async () => {
-      if (AI_RESOLUTION_EVENTS.has(event) && data.ticketId) {
+      if (AI_RESOLUTION_EVENTS.has(event) && data.ticketId && !data.isNote && data.visibility !== 'internal') {
         // Check AI call quota before enqueueing
         if (data.tenantId) {
           const { checkQuota, incrementUsage } = await import('../billing/usage');

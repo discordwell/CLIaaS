@@ -23,6 +23,7 @@ export type EventType =
   | 'wfm:time_off_decided'
   | 'ticket:merged'
   | 'ticket:split'
+  | 'ticket:unmerged'
   | 'note:created'
   | 'mention:created'
   | 'side_conversation:created'
