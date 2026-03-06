@@ -9,8 +9,15 @@ import {
   PRODUCTION_ITEMS, UnitType, COUNTRY_BONUSES, TERRAIN_SPEED,
   NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS, NUKE_MIN_FALLOFF,
   CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
+  BODY_SHAPE, DIR_DX, DIR_DY, ANT_ANIM, HOUSE_FACTION,
+  SUB_CELL_OFFSETS, CIVILIAN_UNIT_TYPES,
+  CELL_SIZE, LEPTON_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
+  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
+  PRONE_DAMAGE_BIAS, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX,
+  MAX_PROJECTILE_FRAMES, DEFAULT_PROJECTILE_FRAMES,
 } from '../engine/types';
-import { STRUCTURE_MAX_HP, STRUCTURE_WEAPONS } from '../engine/scenario';
+import { STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from '../engine/scenario';
+import { CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, RECOIL_OFFSETS } from '../engine/entity';
 
 // ============================================================
 // UNIT_STATS parity
@@ -1300,5 +1307,232 @@ describe('STRUCTURE_WEAPONS parity', () => {
     expect(w.splash).toBe(1);
     expect(w.warhead).toBe('Super');
     expect(w.projSpeed).toBe(40);
+  });
+});
+
+// ============================================================
+// BODY_SHAPE parity (32-entry vehicle rotation lookup)
+// ============================================================
+describe('BODY_SHAPE parity', () => {
+  it('has 32 entries', () => {
+    expect(BODY_SHAPE).toHaveLength(32);
+  });
+
+  it('full array matches C++ BodyShape[32]', () => {
+    expect(BODY_SHAPE).toEqual([
+      0, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17,
+      16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
+    ]);
+  });
+
+  it('index 0 = frame 0 (north facing)', () => {
+    expect(BODY_SHAPE[0]).toBe(0);
+  });
+
+  it('index 16 = frame 16 (south facing)', () => {
+    expect(BODY_SHAPE[16]).toBe(16);
+  });
+});
+
+// ============================================================
+// DIR_DX / DIR_DY parity (8-direction vectors)
+// ============================================================
+describe('DIR_DX / DIR_DY parity', () => {
+  it('DIR_DX has 8 entries', () => {
+    expect(DIR_DX).toHaveLength(8);
+  });
+
+  it('DIR_DY has 8 entries', () => {
+    expect(DIR_DY).toHaveLength(8);
+  });
+
+  it('DIR_DX — [0, 1, 1, 1, 0, -1, -1, -1]', () => {
+    expect(DIR_DX).toEqual([0, 1, 1, 1, 0, -1, -1, -1]);
+  });
+
+  it('DIR_DY — [-1, -1, 0, 1, 1, 1, 0, -1]', () => {
+    expect(DIR_DY).toEqual([-1, -1, 0, 1, 1, 1, 0, -1]);
+  });
+
+  it('N direction = (0, -1)', () => {
+    expect(DIR_DX[0]).toBe(0);
+    expect(DIR_DY[0]).toBe(-1);
+  });
+
+  it('S direction = (0, 1)', () => {
+    expect(DIR_DX[4]).toBe(0);
+    expect(DIR_DY[4]).toBe(1);
+  });
+});
+
+// ============================================================
+// ANT_ANIM parity
+// ============================================================
+describe('ANT_ANIM parity', () => {
+  it('standBase = 0', () => expect(ANT_ANIM.standBase).toBe(0));
+  it('walkBase = 8, walkCount = 8', () => {
+    expect(ANT_ANIM.walkBase).toBe(8);
+    expect(ANT_ANIM.walkCount).toBe(8);
+  });
+  it('attackBase = 72, attackCount = 4', () => {
+    expect(ANT_ANIM.attackBase).toBe(72);
+    expect(ANT_ANIM.attackCount).toBe(4);
+  });
+  it('deathBase = 104, deathCount = 8', () => {
+    expect(ANT_ANIM.deathBase).toBe(104);
+    expect(ANT_ANIM.deathCount).toBe(8);
+  });
+  it('has exactly 7 fields', () => {
+    expect(Object.keys(ANT_ANIM)).toHaveLength(7);
+  });
+});
+
+// ============================================================
+// HOUSE_FACTION parity (11 houses)
+// ============================================================
+describe('HOUSE_FACTION parity', () => {
+  it('has 11 houses', () => {
+    expect(Object.keys(HOUSE_FACTION)).toHaveLength(11);
+  });
+
+  const expected: Record<string, string> = {
+    Spain: 'allied', Greece: 'allied', England: 'allied', France: 'allied',
+    Germany: 'allied', Turkey: 'allied', GoodGuy: 'allied',
+    USSR: 'soviet', Ukraine: 'soviet', BadGuy: 'soviet',
+    Neutral: 'both',
+  };
+
+  for (const [house, faction] of Object.entries(expected)) {
+    it(`${house} = ${faction}`, () => {
+      expect(HOUSE_FACTION[house]).toBe(faction);
+    });
+  }
+
+  it('test covers every key', () => {
+    expect(Object.keys(expected).sort()).toEqual(Object.keys(HOUSE_FACTION).sort());
+  });
+});
+
+// ============================================================
+// SUB_CELL_OFFSETS parity (5 positions)
+// ============================================================
+describe('SUB_CELL_OFFSETS parity', () => {
+  it('has 5 entries', () => {
+    expect(SUB_CELL_OFFSETS).toHaveLength(5);
+  });
+
+  it('0: center (0, 0)', () => {
+    expect(SUB_CELL_OFFSETS[0]).toEqual({ x: 0, y: 0 });
+  });
+
+  it('1: top-left (-7, -7)', () => {
+    expect(SUB_CELL_OFFSETS[1]).toEqual({ x: -7, y: -7 });
+  });
+
+  it('2: top-right (7, -7)', () => {
+    expect(SUB_CELL_OFFSETS[2]).toEqual({ x: 7, y: -7 });
+  });
+
+  it('3: bottom-left (-7, 7)', () => {
+    expect(SUB_CELL_OFFSETS[3]).toEqual({ x: -7, y: 7 });
+  });
+
+  it('4: bottom-right (7, 7)', () => {
+    expect(SUB_CELL_OFFSETS[4]).toEqual({ x: 7, y: 7 });
+  });
+});
+
+// ============================================================
+// CIVILIAN_UNIT_TYPES parity (13 types)
+// ============================================================
+describe('CIVILIAN_UNIT_TYPES parity', () => {
+  it('has 13 entries', () => {
+    expect(CIVILIAN_UNIT_TYPES.size).toBe(13);
+  });
+
+  const expected = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'EINSTEIN', 'GNRL', 'CHAN'];
+  for (const type of expected) {
+    it(`includes ${type}`, () => {
+      expect(CIVILIAN_UNIT_TYPES.has(type)).toBe(true);
+    });
+  }
+
+  it('no extra types', () => {
+    expect([...CIVILIAN_UNIT_TYPES].sort()).toEqual(expected.sort());
+  });
+});
+
+// ============================================================
+// STRUCTURE_SIZE parity
+// ============================================================
+describe('STRUCTURE_SIZE parity', () => {
+  const expected: Record<string, [number, number]> = {
+    FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
+    PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
+    GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], HPAD: [2, 2], AFLD: [2, 2],
+    ATEK: [2, 2], STEK: [2, 2], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 2],
+    QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
+    BARL: [1, 1], BRL3: [1, 1],
+    SBAG: [1, 1], FENC: [1, 1], BARB: [1, 1], BRIK: [1, 1],
+  };
+
+  for (const [type, size] of Object.entries(expected)) {
+    it(`${type} = [${size[0]}, ${size[1]}]`, () => {
+      expect(STRUCTURE_SIZE[type]).toEqual(size);
+    });
+  }
+
+  it('test covers every key in STRUCTURE_SIZE', () => {
+    expect(Object.keys(expected).sort()).toEqual(Object.keys(STRUCTURE_SIZE).sort());
+  });
+});
+
+// ============================================================
+// Scalar constants parity (C++ rules.ini defaults)
+// ============================================================
+describe('Scalar constants parity', () => {
+  it('CELL_SIZE = 24', () => expect(CELL_SIZE).toBe(24));
+  it('LEPTON_SIZE = 256', () => expect(LEPTON_SIZE).toBe(256));
+  it('MAP_CELLS = 128', () => expect(MAP_CELLS).toBe(128));
+  it('GAME_TICKS_PER_SEC = 15', () => expect(GAME_TICKS_PER_SEC).toBe(15));
+  it('MAX_DAMAGE = 1000', () => expect(MAX_DAMAGE).toBe(1000));
+  it('REPAIR_STEP = 7', () => expect(REPAIR_STEP).toBe(7));
+  it('REPAIR_PERCENT = 0.20', () => expect(REPAIR_PERCENT).toBe(0.20));
+  it('CONDITION_RED = 0.25', () => expect(CONDITION_RED).toBe(0.25));
+  it('CONDITION_YELLOW = 0.5', () => expect(CONDITION_YELLOW).toBe(0.5));
+  it('PRONE_DAMAGE_BIAS = 0.5', () => expect(PRONE_DAMAGE_BIAS).toBe(0.5));
+  it('TEMPLATE_ROAD_MIN = 173', () => expect(TEMPLATE_ROAD_MIN).toBe(173));
+  it('TEMPLATE_ROAD_MAX = 228', () => expect(TEMPLATE_ROAD_MAX).toBe(228));
+  it('MAX_PROJECTILE_FRAMES = 45', () => expect(MAX_PROJECTILE_FRAMES).toBe(45));
+  it('DEFAULT_PROJECTILE_FRAMES = 5', () => expect(DEFAULT_PROJECTILE_FRAMES).toBe(5));
+});
+
+// ============================================================
+// Entity constants parity (entity.ts)
+// ============================================================
+describe('Entity constants parity', () => {
+  it('CLOAK_TRANSITION_FRAMES = 38', () => expect(CLOAK_TRANSITION_FRAMES).toBe(38));
+  it('SONAR_PULSE_DURATION = 225', () => expect(SONAR_PULSE_DURATION).toBe(225));
+});
+
+// ============================================================
+// RECOIL_OFFSETS parity (8 directions)
+// ============================================================
+describe('RECOIL_OFFSETS parity', () => {
+  it('has 8 entries', () => {
+    expect(RECOIL_OFFSETS).toHaveLength(8);
+  });
+
+  it('full array matches C++ Recoil_Adjust', () => {
+    expect(RECOIL_OFFSETS).toEqual([
+      { dx: 0, dy: 1 },   // N — kicks down
+      { dx: -1, dy: 1 },  // NE
+      { dx: -1, dy: 0 },  // E
+      { dx: -1, dy: -1 }, // SE
+      { dx: 0, dy: -1 },  // S
+      { dx: 1, dy: -1 },  // SW
+      { dx: 1, dy: 0 },   // W
+      { dx: 1, dy: 1 },   // NW
+    ]);
   });
 });
