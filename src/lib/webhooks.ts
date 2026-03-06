@@ -34,7 +34,17 @@ export type WebhookEventType =
   | 'side_conversation.replied'
   | 'ticket.merged'
   | 'ticket.split'
-  | 'ticket.unmerged';
+  | 'ticket.unmerged'
+  | 'campaign.activated'
+  | 'campaign.paused'
+  | 'campaign.step_executed'
+  | 'campaign.enrollment_completed'
+  | 'tour.started'
+  | 'tour.completed'
+  | 'tour.dismissed'
+  | 'message.displayed'
+  | 'message.clicked'
+  | 'message.dismissed';
 
 export interface RetryPolicy {
   maxAttempts: number;

@@ -5,7 +5,14 @@ import {
   getCampaign,
   createCampaign,
   sendCampaign,
+  getCampaignSteps,
+  addCampaignStep,
+  removeCampaignStep,
+  getCampaignFunnel,
+  type Campaign,
+  type CampaignStepType,
 } from '../../src/lib/campaigns/campaign-store';
+import { enrollCampaign, pauseCampaign, resumeCampaign } from '../../src/lib/campaigns/orchestration';
 
 export function registerCampaignCommands(program: Command): void {
   const campaigns = program
@@ -20,7 +27,7 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (opts: { status?: string; channel?: string; json?: boolean }) => {
       try {
-        const list = getCampaigns(opts.status, opts.channel);
+        const list = getCampaigns({ status: opts.status as Campaign['status'], channel: opts.channel as Campaign['channel'] });
 
         if (opts.json) {
           console.log(JSON.stringify({ campaigns: list }, null, 2));
@@ -71,8 +78,7 @@ export function registerCampaignCommands(program: Command): void {
       try {
         const c = createCampaign({
           name: opts.name,
-          channel: opts.channel as 'email' | 'sms' | 'whatsapp',
-          status: 'draft',
+          channel: opts.channel as Campaign['channel'],
           subject: opts.subject,
           templateBody: opts.body,
         });
@@ -126,6 +132,116 @@ export function registerCampaignCommands(program: Command): void {
         console.error(
           chalk.red(`Failed to send campaign: ${err instanceof Error ? err.message : 'Unknown error'}`),
         );
+        process.exitCode = 1;
+      }
+    });
+
+  campaigns
+    .command('steps <campaignId>')
+    .description('List steps in a campaign')
+    .option('--json', 'Output as JSON')
+    .action(async (campaignId: string, opts: { json?: boolean }) => {
+      try {
+        const list = getCampaignSteps(campaignId);
+        if (opts.json) { console.log(JSON.stringify({ steps: list }, null, 2)); return; }
+        console.log(chalk.bold.cyan(`\n${list.length} step(s) for campaign ${campaignId}\n`));
+        for (const s of list) {
+          console.log(`  ${chalk.dim(`${s.position + 1}.`)} [${s.stepType}] ${s.name}`);
+          console.log(`    ${chalk.dim(`ID: ${s.id}`)}`);
+        }
+        console.log('');
+      } catch (err) {
+        console.error(chalk.red(`Failed: ${err instanceof Error ? err.message : 'Unknown'}`));
+        process.exitCode = 1;
+      }
+    });
+
+  campaigns
+    .command('add-step <campaignId>')
+    .description('Add a step to a campaign')
+    .requiredOption('--type <type>', 'Step type (send_email, send_sms, wait_delay, condition, webhook, etc.)')
+    .requiredOption('--name <name>', 'Step name')
+    .option('--delay <seconds>', 'Delay in seconds (for wait_delay)')
+    .option('--json', 'Output as JSON')
+    .action(async (campaignId: string, opts: { type: string; name: string; delay?: string; json?: boolean }) => {
+      try {
+        const step = addCampaignStep({
+          campaignId,
+          stepType: opts.type as CampaignStepType,
+          name: opts.name,
+          delaySeconds: opts.delay ? parseInt(opts.delay) : undefined,
+        });
+        if (opts.json) { console.log(JSON.stringify({ step }, null, 2)); return; }
+        console.log(chalk.bold.green(`\nStep added: ${step.name} (${step.stepType})`));
+        console.log(`  ID: ${step.id}`);
+        console.log('');
+      } catch (err) {
+        console.error(chalk.red(`Failed: ${err instanceof Error ? err.message : 'Unknown'}`));
+        process.exitCode = 1;
+      }
+    });
+
+  campaigns
+    .command('remove-step <stepId>')
+    .description('Remove a step from a campaign')
+    .action(async (stepId: string) => {
+      const removed = removeCampaignStep(stepId);
+      if (removed) console.log(chalk.green(`Step ${stepId} removed`));
+      else { console.error(chalk.red('Step not found')); process.exitCode = 1; }
+    });
+
+  campaigns
+    .command('activate <campaignId>')
+    .description('Activate a campaign and enroll matching customers')
+    .option('--json', 'Output as JSON')
+    .action(async (campaignId: string, opts: { json?: boolean }) => {
+      try {
+        const result = enrollCampaign(campaignId, []);
+        if (!result.campaign) throw new Error('Campaign not found');
+        if (opts.json) { console.log(JSON.stringify(result, null, 2)); return; }
+        console.log(chalk.bold.green(`\nCampaign activated: ${result.campaign.name}`));
+        console.log(`  Enrolled: ${result.enrolled} customer(s)`);
+        console.log('');
+      } catch (err) {
+        console.error(chalk.red(`Failed: ${err instanceof Error ? err.message : 'Unknown'}`));
+        process.exitCode = 1;
+      }
+    });
+
+  campaigns
+    .command('pause <campaignId>')
+    .description('Pause an active campaign')
+    .action(async (campaignId: string) => {
+      const c = pauseCampaign(campaignId);
+      if (c) console.log(chalk.yellow(`Campaign paused: ${c.name}`));
+      else { console.error(chalk.red('Campaign not found or not active')); process.exitCode = 1; }
+    });
+
+  campaigns
+    .command('resume <campaignId>')
+    .description('Resume a paused campaign')
+    .action(async (campaignId: string) => {
+      const c = resumeCampaign(campaignId);
+      if (c) console.log(chalk.green(`Campaign resumed: ${c.name}`));
+      else { console.error(chalk.red('Campaign not found or not paused')); process.exitCode = 1; }
+    });
+
+  campaigns
+    .command('funnel <campaignId>')
+    .description('Show step-by-step funnel analytics')
+    .option('--json', 'Output as JSON')
+    .action(async (campaignId: string, opts: { json?: boolean }) => {
+      try {
+        const funnel = getCampaignFunnel(campaignId);
+        if (opts.json) { console.log(JSON.stringify({ funnel }, null, 2)); return; }
+        console.log(chalk.bold.cyan(`\nFunnel for campaign ${campaignId}\n`));
+        for (const entry of funnel) {
+          console.log(`  ${entry.position + 1}. ${entry.stepName} (${entry.stepType})`);
+          console.log(`     Executed: ${entry.executed} | Completed: ${entry.completed} | Failed: ${entry.failed} | Skipped: ${entry.skipped}`);
+        }
+        console.log('');
+      } catch (err) {
+        console.error(chalk.red(`Failed: ${err instanceof Error ? err.message : 'Unknown'}`));
         process.exitCode = 1;
       }
     });

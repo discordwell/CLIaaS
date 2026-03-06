@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 
 // ---- Types ----
 
 interface Campaign {
   id: string;
   name: string;
-  channel: "email" | "sms" | "whatsapp";
-  status: "draft" | "scheduled" | "sending" | "sent" | "cancelled";
+  channel: "email" | "sms" | "whatsapp" | "in_app" | "push";
+  status: "draft" | "scheduled" | "sending" | "sent" | "cancelled" | "active" | "paused" | "completed";
   subject?: string;
   templateBody?: string;
+  entryStepId?: string;
   scheduledAt?: string;
   sentAt?: string;
   createdBy?: string;
@@ -52,6 +54,12 @@ function statusColor(status: Campaign["status"]): string {
       return "bg-emerald-100 text-emerald-700";
     case "cancelled":
       return "bg-red-100 text-red-700";
+    case "active":
+      return "bg-emerald-100 text-emerald-700";
+    case "paused":
+      return "bg-amber-100 text-amber-700";
+    case "completed":
+      return "bg-blue-100 text-blue-700";
     default:
       return "bg-zinc-200 text-zinc-600";
   }
@@ -65,7 +73,7 @@ export default function CampaignsPageContent() {
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({
     name: "",
-    channel: "email" as "email" | "sms" | "whatsapp",
+    channel: "email" as Campaign["channel"],
     subject: "",
     templateBody: "",
   });
@@ -197,7 +205,7 @@ export default function CampaignsPageContent() {
                 onChange={(e) =>
                   setCreateForm({
                     ...createForm,
-                    channel: e.target.value as "email" | "sms" | "whatsapp",
+                    channel: e.target.value as Campaign["channel"],
                   })
                 }
                 className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
@@ -205,6 +213,8 @@ export default function CampaignsPageContent() {
                 <option value="email">Email</option>
                 <option value="sms">SMS</option>
                 <option value="whatsapp">WhatsApp</option>
+                <option value="in_app">In-App</option>
+                <option value="push">Push</option>
               </select>
             </label>
             <label className="block sm:col-span-2">
@@ -332,6 +342,12 @@ export default function CampaignsPageContent() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
+                        <Link
+                          href={`/campaigns/${c.id}`}
+                          className="font-mono text-xs font-bold uppercase text-zinc-600 hover:text-zinc-950"
+                        >
+                          Edit
+                        </Link>
                         <button
                           onClick={() => loadAnalytics(c.id)}
                           className="font-mono text-xs font-bold uppercase text-blue-600 hover:text-blue-800"

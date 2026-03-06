@@ -85,6 +85,8 @@ const ALL_WRITE_TOOLS = [
   'message_create',
   'message_update',
   'message_toggle',
+  'tour_delete',
+  'message_delete',
 ];
 
 export function loadScopes(): MCPScopeConfig {

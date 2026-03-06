@@ -61,6 +61,11 @@ export interface AutoQAScoringJob {
   requestedAt: string;
 }
 
+export interface CampaignOrchestrationJob {
+  tick: number;
+  scheduledAt: string;
+}
+
 /** Queue name constants */
 export const QUEUE_NAMES = {
   WEBHOOK_DELIVERY: 'webhook-delivery',
@@ -70,6 +75,7 @@ export const QUEUE_NAMES = {
   REPORT_EXPORT: 'report-export',
   PII_SCAN: 'pii-scan',
   AUTOQA_SCORING: 'autoqa-scoring',
+  CAMPAIGN_ORCHESTRATION: 'campaign-orchestration',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

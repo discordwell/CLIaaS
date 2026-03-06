@@ -39,7 +39,17 @@ export type CanonicalEvent =
   | 'side_conversation.replied'
   | 'ticket.merged'
   | 'ticket.split'
-  | 'ticket.unmerged';
+  | 'ticket.unmerged'
+  | 'campaign.activated'
+  | 'campaign.paused'
+  | 'campaign.step_executed'
+  | 'campaign.enrollment_completed'
+  | 'tour.started'
+  | 'tour.completed'
+  | 'tour.dismissed'
+  | 'message.displayed'
+  | 'message.clicked'
+  | 'message.dismissed';
 
 // Compile-time check: every CanonicalEvent must be assignable to WebhookEventType
 const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
@@ -67,6 +77,16 @@ const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
   'ticket.merged': 'ticket.merged',
   'ticket.split': 'ticket.split',
   'ticket.unmerged': 'ticket.unmerged',
+  'campaign.activated': 'campaign.activated',
+  'campaign.paused': 'campaign.paused',
+  'campaign.step_executed': 'campaign.step_executed',
+  'campaign.enrollment_completed': 'campaign.enrollment_completed',
+  'tour.started': 'tour.started',
+  'tour.completed': 'tour.completed',
+  'tour.dismissed': 'tour.dismissed',
+  'message.displayed': 'message.displayed',
+  'message.clicked': 'message.clicked',
+  'message.dismissed': 'message.dismissed',
 };
 void _typeCheck;
 
