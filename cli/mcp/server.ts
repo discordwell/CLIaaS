@@ -25,6 +25,9 @@ import { registerWfmTools } from './tools/wfm.js';
 import { registerPresenceTools } from './tools/presence.js';
 import { registerCannedTools } from './tools/canned.js';
 import { registerSideConversationTools } from './tools/side-conversations.js';
+import { registerViewTools } from './tools/views.js';
+import { registerTagTools } from './tools/tags.js';
+import { registerBusinessHoursTools } from './tools/business-hours.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -56,6 +59,9 @@ registerWfmTools(server);
 registerPresenceTools(server);
 registerCannedTools(server);
 registerSideConversationTools(server);
+registerViewTools(server);
+registerTagTools(server);
+registerBusinessHoursTools(server);
 
 // Register resources and prompts
 registerResources(server);

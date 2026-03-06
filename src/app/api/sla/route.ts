@@ -32,10 +32,11 @@ export async function POST(request: NextRequest) {
       conditions?: { priority?: string[]; tags?: string[]; source?: string[] };
       targets?: { firstResponse?: number; resolution?: number };
       escalation?: Array<{ afterMinutes: number; action: 'notify' | 'escalate' | 'reassign'; to?: string }>;
+      businessHoursId?: string;
       enabled?: boolean;
     }>(request);
     if ('error' in parsed) return parsed.error;
-    const { name, conditions, targets, escalation, enabled } = parsed.data;
+    const { name, conditions, targets, escalation, businessHoursId, enabled } = parsed.data;
 
     if (!name || !name.trim()) {
       return NextResponse.json(
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
         resolution: targets.resolution,
       },
       escalation: escalation ?? [],
+      businessHoursId: businessHoursId || undefined,
       enabled: enabled ?? true,
     }, auth.user.workspaceId);
 

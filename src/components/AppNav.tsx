@@ -6,6 +6,7 @@ import NotificationBell from "./NotificationBell";
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/tickets", label: "Tickets" },
   { href: "/rules", label: "Rules" },
   { href: "/workflows", label: "Workflows" },
   { href: "/chat", label: "Chat" },
@@ -14,6 +15,7 @@ const navLinks = [
   { href: "/ai", label: "AI" },
   { href: "/analytics", label: "Analytics" },
   { href: "/sla", label: "SLA" },
+  { href: "/business-hours", label: "Hours" },
   { href: "/settings/routing", label: "Routing" },
   { href: "/integrations", label: "Integrations" },
   { href: "/wfm", label: "WFM" },

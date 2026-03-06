@@ -104,6 +104,19 @@ export const sideConversationStatusEnum = pgEnum('side_conversation_status', [
   'closed',
 ]);
 
+export const kbVisibilityEnum = pgEnum('kb_visibility', [
+  'public',
+  'internal',
+  'draft',
+]);
+
+export const kbGapStatusEnum = pgEnum('kb_gap_status', [
+  'open',
+  'accepted',
+  'dismissed',
+  'created',
+]);
+
 export const ssoProtocolEnum = pgEnum('sso_protocol', [
   'saml',
   'oidc',
@@ -294,6 +307,19 @@ export const brands = pgTable(
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     name: text('name').notNull(),
     raw: jsonb('raw'),
+    businessHoursId: uuid('business_hours_id').references(() => businessHours.id),
+    subdomain: varchar('subdomain', { length: 63 }),
+    logoUrl: text('logo_url'),
+    faviconUrl: text('favicon_url'),
+    primaryColor: varchar('primary_color', { length: 7 }).default('#000000'),
+    accentColor: varchar('accent_color', { length: 7 }).default('#3b82f6'),
+    headerHtml: text('header_html'),
+    footerHtml: text('footer_html'),
+    customCss: text('custom_css'),
+    helpCenterEnabled: boolean('help_center_enabled').default(false),
+    helpCenterTitle: text('help_center_title'),
+    defaultLocale: varchar('default_locale', { length: 10 }).default('en'),
+    supportedLocales: text('supported_locales').array().default(['en']),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -302,6 +328,7 @@ export const brands = pgTable(
       table.workspaceId,
       table.name,
     ),
+    brandsSubdomainIdx: uniqueIndex('brands_subdomain_idx').on(table.subdomain),
   }),
 );
 
@@ -450,6 +477,8 @@ export const tags = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     name: text('name').notNull(),
+    color: text('color').default('#71717a'),
+    description: text('description'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
@@ -554,6 +583,7 @@ export const slaPolicies = pgTable('sla_policies', {
   enabled: boolean('enabled').notNull().default(true),
   targets: jsonb('targets'),
   schedules: jsonb('schedules'),
+  businessHoursId: uuid('business_hours_id').references(() => businessHours.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -577,10 +607,15 @@ export const slaEvents = pgTable(
 export const views = pgTable('views', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+  userId: uuid('user_id').references(() => users.id),
   name: text('name').notNull(),
+  description: text('description'),
   query: jsonb('query').notNull(),
+  viewType: text('view_type').notNull().default('shared'),
   active: boolean('active').notNull().default(true),
+  position: integer('position').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const csatRatings = pgTable(
@@ -621,6 +656,9 @@ export const kbCollections = pgTable('kb_collections', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
   name: text('name').notNull(),
+  brandId: uuid('brand_id').references(() => brands.id),
+  description: text('description'),
+  locale: varchar('locale', { length: 10 }).default('en'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -632,6 +670,12 @@ export const kbCategories = pgTable(
     workspaceId: uuid('workspace_id').references(() => workspaces.id),
     name: text('name').notNull(),
     parentId: uuid('parent_id'),
+    locale: varchar('locale', { length: 10 }).default('en'),
+    brandId: uuid('brand_id').references(() => brands.id),
+    slug: varchar('slug', { length: 255 }),
+    description: text('description'),
+    position: integer('position').default(0),
+    icon: text('icon'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
@@ -639,19 +683,43 @@ export const kbCategories = pgTable(
   }),
 );
 
-export const kbArticles = pgTable('kb_articles', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-  collectionId: uuid('collection_id').references(() => kbCollections.id),
-  categoryId: uuid('category_id').references(() => kbCategories.id),
-  categoryPath: text('category_path').array(),
-  title: text('title').notNull(),
-  body: text('body').notNull(),
-  status: text('status').notNull().default('published'),
-  authorId: uuid('author_id').references(() => users.id),
-  source: providerEnum('source').default('zendesk'),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const kbArticles = pgTable(
+  'kb_articles',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    collectionId: uuid('collection_id').references(() => kbCollections.id),
+    categoryId: uuid('category_id').references(() => kbCategories.id),
+    categoryPath: text('category_path').array(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    status: text('status').notNull().default('published'),
+    authorId: uuid('author_id').references(() => users.id),
+    source: providerEnum('source').default('zendesk'),
+    locale: varchar('locale', { length: 10 }).default('en'),
+    parentArticleId: uuid('parent_article_id'),
+    brandId: uuid('brand_id').references(() => brands.id),
+    visibility: varchar('visibility', { length: 10 }).default('public'),
+    slug: varchar('slug', { length: 255 }),
+    metaTitle: text('meta_title'),
+    metaDescription: text('meta_description'),
+    seoKeywords: text('seo_keywords').array(),
+    position: integer('position').default(0),
+    helpfulCount: integer('helpful_count').default(0),
+    notHelpfulCount: integer('not_helpful_count').default(0),
+    viewCount: integer('view_count').default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    kbArticlesLocaleIdx: index('kb_articles_locale_idx').on(table.locale),
+    kbArticlesParentIdx: index('kb_articles_parent_idx').on(table.parentArticleId),
+    kbArticlesBrandIdx: index('kb_articles_brand_idx').on(table.brandId),
+    kbArticlesSlugIdx: index('kb_articles_slug_idx').on(table.workspaceId, table.slug),
+    kbArticlesTranslationUniqueIdx: uniqueIndex('kb_articles_translation_unique_idx')
+      .on(table.parentArticleId, table.locale),
+  }),
+);
 
 export const kbRevisions = pgTable(
   'kb_revisions',
@@ -921,10 +989,12 @@ export const ragChunks = pgTable(
     contentHash: varchar('content_hash', { length: 64 }).notNull(),
     metadata: jsonb('metadata').notNull().default({}),
     embedding: vector('embedding'),
+    locale: varchar('locale', { length: 10 }).default('en'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
+    ragChunksLocaleIdx: index('rag_chunks_locale_idx').on(table.locale),
     ragChunksWorkspaceSourceIdx: index('rag_chunks_workspace_source_idx').on(
       table.workspaceId,
       table.sourceType,
@@ -2126,5 +2196,242 @@ export const ticketSplitLog = pgTable(
     ticketSplitLogWorkspaceIdx: index('ticket_split_log_workspace_idx').on(table.workspaceId),
     ticketSplitLogSourceIdx: index('ticket_split_log_source_idx').on(table.sourceTicketId),
     ticketSplitLogNewIdx: index('ticket_split_log_new_idx').on(table.newTicketId),
+  }),
+);
+
+// ---- Holiday Calendars & Business Hours Enhancements (Plan 12) ----
+
+export const holidayCalendars = pgTable(
+  'holiday_calendars',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    holidayCalendarsWorkspaceIdx: index('holiday_calendars_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const holidayEntries = pgTable(
+  'holiday_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    calendarId: uuid('calendar_id').notNull().references(() => holidayCalendars.id),
+    name: text('name').notNull(),
+    date: date('date').notNull(),
+    recurring: boolean('recurring').notNull().default(false),
+    startTime: time('start_time'),
+    endTime: time('end_time'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    holidayEntriesCalendarIdx: index('holiday_entries_calendar_idx').on(table.calendarId),
+  }),
+);
+
+export const businessHoursHolidayLinks = pgTable(
+  'business_hours_holiday_links',
+  {
+    businessHoursId: uuid('business_hours_id').notNull().references(() => businessHours.id),
+    holidayCalendarId: uuid('holiday_calendar_id').notNull().references(() => holidayCalendars.id),
+  },
+  table => ({
+    pk: primaryKey({ columns: [table.businessHoursId, table.holidayCalendarId] }),
+  }),
+);
+
+// ---- Custom Reports & Analytics (Slice 13) ----
+
+export const reports = pgTable(
+  'reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    metric: text('metric').notNull(),
+    groupBy: text('group_by').array().default([]),
+    filters: jsonb('filters').default({}),
+    dateRange: jsonb('date_range'),
+    visualization: text('visualization').notNull().default('bar'),
+    formula: text('formula'),
+    isTemplate: boolean('is_template').notNull().default(false),
+    shareToken: varchar('share_token', { length: 64 }).unique(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    reportsWorkspaceIdx: index('reports_workspace_idx').on(table.workspaceId),
+    reportsTemplateIdx: index('reports_template_idx').on(table.isTemplate),
+  }),
+);
+
+export const dashboards = pgTable(
+  'dashboards',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    isDefault: boolean('is_default').notNull().default(false),
+    layout: jsonb('layout').default({}),
+    shareToken: varchar('share_token', { length: 64 }).unique(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    dashboardsWorkspaceIdx: index('dashboards_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const dashboardWidgets = pgTable(
+  'dashboard_widgets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    dashboardId: uuid('dashboard_id').notNull().references(() => dashboards.id, { onDelete: 'cascade' }),
+    reportId: uuid('report_id').notNull().references(() => reports.id, { onDelete: 'cascade' }),
+    gridX: integer('grid_x').notNull().default(0),
+    gridY: integer('grid_y').notNull().default(0),
+    gridW: integer('grid_w').notNull().default(4),
+    gridH: integer('grid_h').notNull().default(3),
+    overrides: jsonb('overrides').default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    dashboardWidgetsDashboardIdx: index('dashboard_widgets_dashboard_idx').on(table.dashboardId),
+    dashboardWidgetsReportIdx: index('dashboard_widgets_report_idx').on(table.reportId),
+  }),
+);
+
+export const reportSchedules = pgTable(
+  'report_schedules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    reportId: uuid('report_id').notNull().references(() => reports.id, { onDelete: 'cascade' }),
+    frequency: text('frequency').notNull().default('weekly'),
+    dayOfWeek: integer('day_of_week'),
+    dayOfMonth: integer('day_of_month'),
+    hourUtc: integer('hour_utc').notNull().default(9),
+    format: text('format').notNull().default('csv'),
+    recipients: text('recipients').array().notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    reportSchedulesWorkspaceIdx: index('report_schedules_workspace_idx').on(table.workspaceId),
+    reportSchedulesNextRunIdx: index('report_schedules_next_run_idx').on(table.nextRunAt),
+  }),
+);
+
+export const reportCache = pgTable(
+  'report_cache',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reportId: uuid('report_id').notNull().references(() => reports.id, { onDelete: 'cascade' }),
+    filterHash: varchar('filter_hash', { length: 64 }).notNull(),
+    resultData: jsonb('result_data').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    reportCacheLookupIdx: index('report_cache_lookup_idx').on(table.reportId, table.filterHash),
+    reportCacheExpiryIdx: index('report_cache_expiry_idx').on(table.expiresAt),
+  }),
+);
+
+export const metricSnapshots = pgTable(
+  'metric_snapshots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    metricName: text('metric_name').notNull(),
+    metricValue: numeric('metric_value', { precision: 20, scale: 4 }).notNull().default('0'),
+    dimensions: jsonb('dimensions').default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    metricSnapshotsWorkspaceMetricIdx: index('metric_snapshots_workspace_metric_idx').on(
+      table.workspaceId,
+      table.metricName,
+      table.createdAt,
+    ),
+    metricSnapshotsCreatedIdx: index('metric_snapshots_created_idx').on(table.createdAt),
+  }),
+);
+
+// ---- KB Article Feedback ----
+
+export const kbArticleFeedback = pgTable(
+  'kb_article_feedback',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    articleId: uuid('article_id').notNull().references(() => kbArticles.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id'),
+    customerId: uuid('customer_id').references(() => customers.id),
+    helpful: boolean('helpful').notNull(),
+    comment: text('comment'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    kbArticleFeedbackArticleIdx: index('kb_article_feedback_article_idx').on(table.articleId),
+    kbArticleFeedbackWorkspaceIdx: index('kb_article_feedback_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+// ---- KB Deflections ----
+
+export const kbDeflections = pgTable(
+  'kb_deflections',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    articleId: uuid('article_id').references(() => kbArticles.id, { onDelete: 'set null' }),
+    brandId: uuid('brand_id').references(() => brands.id),
+    source: varchar('source', { length: 20 }).notNull().default('portal'),
+    query: text('query').notNull(),
+    customerId: uuid('customer_id').references(() => customers.id),
+    sessionId: text('session_id'),
+    deflected: boolean('deflected').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    kbDeflectionsWorkspaceIdx: index('kb_deflections_workspace_idx').on(table.workspaceId, table.createdAt),
+    kbDeflectionsArticleIdx: index('kb_deflections_article_idx').on(table.articleId),
+  }),
+);
+
+// ---- KB Content Gaps ----
+
+export const kbContentGaps = pgTable(
+  'kb_content_gaps',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    topic: text('topic').notNull(),
+    ticketCount: integer('ticket_count').notNull().default(0),
+    sampleTicketIds: text('sample_ticket_ids').array(),
+    suggestedTitle: text('suggested_title'),
+    suggestedOutline: text('suggested_outline'),
+    status: varchar('status', { length: 20 }).notNull().default('open'),
+    createdArticleId: uuid('created_article_id').references(() => kbArticles.id),
+    brandId: uuid('brand_id').references(() => brands.id),
+    locale: varchar('locale', { length: 10 }).default('en'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    kbContentGapsWorkspaceIdx: index('kb_content_gaps_workspace_idx').on(table.workspaceId, table.status),
   }),
 );

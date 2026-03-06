@@ -8,7 +8,7 @@
  * - Record<string, Array<{ start, end }>> keyed by dayOfWeek number
  */
 
-import type { BusinessHoursConfig } from './types';
+import type { BusinessHoursConfig, HolidayEntry } from './types';
 import { getBHConfigs, addBHConfig, updateBHConfig, removeBHConfig, genId } from './store';
 
 // ---- Helpers ----
@@ -25,6 +25,7 @@ function getTimeInZone(timezone: string, date: Date): { dayOfWeek: number; hours
     minute: 'numeric',
     weekday: 'short',
     hour12: false,
+    hourCycle: 'h23',
   });
   const parts = fmt.formatToParts(date);
   const weekday = parts.find(p => p.type === 'weekday')?.value ?? '';
@@ -74,11 +75,34 @@ function getWindowsForDay(config: BusinessHoursConfig, dayOfWeek: number): TimeW
 
 /**
  * Check if a date string is a holiday in the config.
- * Handles holidays as string[] or as { date: string }[].
+ * Handles holidays as string[], HolidayEntry[], or mixed.
+ * Returns false (not holiday), true (full-day holiday), or
+ * { partial: true, startTime, endTime } for partial-day holidays.
  */
-function isHoliday(config: BusinessHoursConfig, dateStr: string): boolean {
+function isHoliday(
+  config: BusinessHoursConfig,
+  dateStr: string,
+): boolean | { partial: true; startTime: string; endTime: string } {
   if (!config.holidays || config.holidays.length === 0) return false;
-  return config.holidays.includes(dateStr);
+  const mmdd = dateStr.slice(5); // "MM-DD"
+
+  for (const h of config.holidays) {
+    if (typeof h === 'string') {
+      if (h === dateStr) return true;
+    } else {
+      const entry = h as HolidayEntry;
+      const matches = entry.recurring
+        ? entry.date.slice(5) === mmdd
+        : entry.date === dateStr;
+      if (matches) {
+        if (entry.startTime && entry.endTime) {
+          return { partial: true, startTime: entry.startTime, endTime: entry.endTime };
+        }
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // ---- Public API ----
@@ -116,16 +140,24 @@ export function isWithinBusinessHours(config: BusinessHoursConfig, timestamp?: D
   const { dayOfWeek, hours, minutes } = getTimeInZone(config.timezone, date);
 
   const dateStr = getDateInZone(config.timezone, date);
-  if (isHoliday(config, dateStr)) return false;
+  const holiday = isHoliday(config, dateStr);
+  if (holiday === true) return false;
 
   const windows = getWindowsForDay(config, dayOfWeek);
   if (windows.length === 0) return false;
 
   const currentMinutes = hours * 60 + minutes;
+
+  // For partial-day holidays, exclude the blocked range
+  const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
+  const blockedEnd = typeof holiday === 'object' ? timeToMinutes(holiday.endTime) : -1;
+
   return windows.some(w => {
     const start = timeToMinutes(w.start);
     const end = timeToMinutes(w.end);
-    return currentMinutes >= start && currentMinutes < end;
+    if (currentMinutes < start || currentMinutes >= end) return false;
+    if (blockedStart >= 0 && currentMinutes >= blockedStart && currentMinutes < blockedEnd) return false;
+    return true;
   });
 }
 
@@ -147,7 +179,8 @@ export function getElapsedBusinessMinutes(
     const { dayOfWeek, hours, minutes: mins } = getTimeInZone(config.timezone, cursor);
     const dateStr = getDateInZone(config.timezone, cursor);
 
-    if (isHoliday(config, dateStr)) {
+    const holiday = isHoliday(config, dateStr);
+    if (holiday === true) {
       cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - mins * 60000);
       continue;
     }
@@ -159,6 +192,8 @@ export function getElapsedBusinessMinutes(
     }
 
     const currentDayMinutes = hours * 60 + mins;
+    const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
+    const blockedEnd = typeof holiday === 'object' ? timeToMinutes(holiday.endTime) : -1;
 
     for (const window of windows) {
       const winStart = timeToMinutes(window.start);
@@ -171,7 +206,18 @@ export function getElapsedBusinessMinutes(
       const overlapEnd = Math.min(end.getTime(), windowEndAbs.getTime());
 
       if (overlapEnd > overlapStart) {
-        totalMinutes += (overlapEnd - overlapStart) / 60000;
+        let overlap = (overlapEnd - overlapStart) / 60000;
+
+        // Subtract partial-day holiday blocked range if it overlaps this window
+        if (blockedStart >= 0) {
+          const blockedStartAbs = new Date(dayStartAbsolute.getTime() + blockedStart * 60000);
+          const blockedEndAbs = new Date(dayStartAbsolute.getTime() + blockedEnd * 60000);
+          const bStart = Math.max(overlapStart, blockedStartAbs.getTime());
+          const bEnd = Math.min(overlapEnd, blockedEndAbs.getTime());
+          if (bEnd > bStart) overlap -= (bEnd - bStart) / 60000;
+        }
+
+        totalMinutes += overlap;
       }
     }
 
@@ -194,7 +240,8 @@ export function nextBusinessHourStart(config: BusinessHoursConfig, from?: Date):
     const { dayOfWeek, hours, minutes } = getTimeInZone(config.timezone, cursor);
     const dateStr = getDateInZone(config.timezone, cursor);
 
-    if (isHoliday(config, dateStr)) {
+    const holiday = isHoliday(config, dateStr);
+    if (holiday === true) {
       cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - minutes * 60000);
       continue;
     }
@@ -206,15 +253,32 @@ export function nextBusinessHourStart(config: BusinessHoursConfig, from?: Date):
     }
 
     const currentMinutes = hours * 60 + minutes;
+    const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
+    const blockedEnd = typeof holiday === 'object' ? timeToMinutes(holiday.endTime) : -1;
     const sorted = [...windows].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
     for (const window of sorted) {
       const winStart = timeToMinutes(window.start);
+      const winEnd = timeToMinutes(window.end);
+
       if (currentMinutes < winStart) {
+        // If the window start is inside blocked range, skip past it
+        if (blockedStart >= 0 && winStart >= blockedStart && winStart < blockedEnd) {
+          if (blockedEnd < winEnd) {
+            return new Date(cursor.getTime() + (blockedEnd - currentMinutes) * 60000);
+          }
+          continue;
+        }
         return new Date(cursor.getTime() + (winStart - currentMinutes) * 60000);
       }
-      const winEnd = timeToMinutes(window.end);
       if (currentMinutes >= winStart && currentMinutes < winEnd) {
+        // Inside window — but are we in a blocked range?
+        if (blockedStart >= 0 && currentMinutes >= blockedStart && currentMinutes < blockedEnd) {
+          if (blockedEnd < winEnd) {
+            return new Date(cursor.getTime() + (blockedEnd - currentMinutes) * 60000);
+          }
+          continue;
+        }
         return cursor;
       }
     }
@@ -223,4 +287,67 @@ export function nextBusinessHourStart(config: BusinessHoursConfig, from?: Date):
   }
 
   return new Date(start.getTime() + 7 * 86400000);
+}
+
+/**
+ * Find the next time the current business window closes, from a given timestamp.
+ * If outside business hours, returns the current time.
+ */
+export function nextBusinessHourClose(config: BusinessHoursConfig, from?: Date): Date {
+  const date = from ?? new Date();
+  if (!isWithinBusinessHours(config, date)) return date;
+
+  const { dayOfWeek, hours, minutes } = getTimeInZone(config.timezone, date);
+  const dateStr = getDateInZone(config.timezone, date);
+  const holiday = isHoliday(config, dateStr);
+  const windows = getWindowsForDay(config, dayOfWeek);
+  const currentMinutes = hours * 60 + minutes;
+  const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
+
+  const sorted = [...windows].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+  for (const w of sorted) {
+    const winStart = timeToMinutes(w.start);
+    const winEnd = timeToMinutes(w.end);
+    if (currentMinutes >= winStart && currentMinutes < winEnd) {
+      // If a partial-day holiday starts before window end, that's the effective close
+      const effectiveEnd = (blockedStart >= 0 && blockedStart > currentMinutes && blockedStart < winEnd)
+        ? blockedStart : winEnd;
+      return new Date(date.getTime() + (effectiveEnd - currentMinutes) * 60000);
+    }
+  }
+  return date;
+}
+
+/**
+ * Add a given number of business minutes to a starting timestamp.
+ * Walks forward through business windows, skipping non-business time and holidays.
+ */
+export function addBusinessMinutes(config: BusinessHoursConfig, from: Date, minutesToAdd: number): Date {
+  if (minutesToAdd <= 0) return from;
+
+  let remaining = minutesToAdd;
+  let cursor = nextBusinessHourStart(config, from);
+
+  for (let safety = 0; safety < 365 * 24 && remaining > 0; safety++) {
+    const closeTime = nextBusinessHourClose(config, cursor);
+    const availableMs = closeTime.getTime() - cursor.getTime();
+    const availableMinutes = availableMs / 60000;
+
+    if (availableMinutes <= 0) {
+      // Degenerate window — advance past it to prevent infinite loop
+      cursor = nextBusinessHourStart(config, new Date(closeTime.getTime() + 60000));
+      continue;
+    }
+
+    if (remaining <= availableMinutes) {
+      return new Date(cursor.getTime() + remaining * 60000);
+    }
+
+    remaining -= availableMinutes;
+    // Advance past the close and find next open
+    cursor = nextBusinessHourStart(config, new Date(closeTime.getTime() + 60000));
+  }
+
+  // Fallback: shouldn't happen with valid schedules
+  return new Date(from.getTime() + minutesToAdd * 60000);
 }

@@ -97,13 +97,39 @@ export interface StaffingRecommendation {
 
 // ---- Business Hours ----
 
+export interface HolidayEntry {
+  date: string;        // YYYY-MM-DD
+  name?: string;
+  recurring?: boolean; // match month-day every year
+  startTime?: string;  // partial-day holiday start (HH:MM)
+  endTime?: string;    // partial-day holiday end (HH:MM)
+}
+
 export interface BusinessHoursConfig {
   id: string;
   name: string;
   timezone: string;
   schedule: Record<string, Array<{ start: string; end: string }>>;
-  holidays: string[];
+  holidays: string[] | HolidayEntry[];
   isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HolidayCalendarEntry {
+  id: string;
+  name: string;
+  date: string;
+  recurring?: boolean;
+  startTime?: string;
+  endTime?: string;
+}
+
+export interface HolidayCalendar {
+  id: string;
+  name: string;
+  description?: string;
+  entries: HolidayCalendarEntry[];
   createdAt: string;
   updatedAt: string;
 }

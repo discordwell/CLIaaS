@@ -9,13 +9,13 @@
 | Metric | Value |
 |--------|-------|
 | Pages | 41 (Next.js App Router) |
-| API Routes | 166 |
+| API Routes | 176 |
 | Components | 15 shared React components |
 | Library modules | 71 (`src/lib/`) |
 | CLI files | 81 (`cli/`) |
 | CLI commands | 40 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 70 (across 15 modules) |
+| MCP tools | 80 (across 17 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
 | DB tables | 76 (Drizzle/PostgreSQL, RLS-enabled) |
@@ -140,10 +140,13 @@ Each domain has a dedicated store in `src/lib/`:
 `canned_responses` (reusable reply templates with merge variables, categories, shortcuts), `macros` (native one-click multi-action bundles with structured actions JSONB), `agent_signatures` (per-agent HTML/text email signatures with default flag)
 
 ### SLA Tracking (1)
-`sla_events` (breach detection)
+`sla_events` (breach detection). SLA policies support `businessHoursId` for schedule-aware elapsed time calculation.
+
+### Business Hours & Holidays (3)
+`holiday_calendars` (named collections of holidays with descriptions), `holiday_entries` (individual dates with recurring/partial-day support), `business_hours_holiday_links` (M2M join linking schedules to calendars). Holiday presets available: US Federal, UK Bank, Canada Statutory, Australia Public. Core engine in `src/lib/wfm/business-hours.ts` provides `addBusinessMinutes()`, `getElapsedBusinessMinutes()`, `isWithinBusinessHours()`, `nextBusinessHourStart/Close()`. UI at `/business-hours` with weekly grid editor + holiday calendar management.
 
 ### Views & Tags (3)
-`views`, `tags`, `ticket_tags`
+`views` (saved ticket filters with query JSONB, view_type: system/shared/personal, position ordering, user ownership), `tags` (workspace-scoped with color + description), `ticket_tags` (many-to-many junction, synced to tickets.tags array)
 
 ### CSAT & Time (2)
 `csat_ratings`, `time_entries` (+billable, customerId, groupId columns)
@@ -504,6 +507,7 @@ The upstream sync layer pushes changes made within CLIaaS back to the originatin
 | `/billing` | Plan management, usage meters, Stripe checkout |
 | `/automation` | Rules, triggers, macros |
 | `/sla` | SLA policy management |
+| `/business-hours` | Business hours schedules & holiday calendars (gated: `sla_management`) |
 | `/integrations` | Connector configuration |
 | `/settings` | Workspace settings |
 | `/sandbox` | Sandbox environment management |

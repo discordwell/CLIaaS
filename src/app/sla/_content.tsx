@@ -75,6 +75,9 @@ export default function SLAPageContent() {
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
 
+  // Business hours schedules for the dropdown
+  const [bhSchedules, setBhSchedules] = useState<Array<{ id: string; name: string }>>([]);
+
   // Form state
   const [formData, setFormData] = useState({
     name: "",
@@ -83,6 +86,7 @@ export default function SLAPageContent() {
     firstResponseMinutes: 60,
     resolutionMinutes: 1440,
     escalations: [] as Array<{ afterMinutes: number; action: string; to: string }>,
+    businessHoursId: "",
   });
 
   const loadPolicies = useCallback(async () => {
@@ -99,6 +103,10 @@ export default function SLAPageContent() {
 
   useEffect(() => {
     loadPolicies();
+    fetch("/api/business-hours")
+      .then((r) => r.json())
+      .then((d) => setBhSchedules((d.businessHours || []).map((bh: { id: string; name: string }) => ({ id: bh.id, name: bh.name }))))
+      .catch(() => {});
   }, [loadPolicies]);
 
   async function createPolicy(e: React.FormEvent) {
@@ -128,6 +136,7 @@ export default function SLAPageContent() {
             action: esc.action,
             to: esc.to || undefined,
           })),
+          businessHoursId: formData.businessHoursId || undefined,
           enabled: true,
         }),
       });
@@ -139,6 +148,7 @@ export default function SLAPageContent() {
         firstResponseMinutes: 60,
         resolutionMinutes: 1440,
         escalations: [],
+        businessHoursId: "",
       });
       loadPolicies();
     } finally {
@@ -313,6 +323,28 @@ export default function SLAPageContent() {
                 </span>
               </label>
             </div>
+
+            {/* Business Hours Schedule */}
+            {bhSchedules.length > 0 && (
+              <label className="block">
+                <span className="font-mono text-xs font-bold uppercase">Business Hours Schedule</span>
+                <select
+                  value={formData.businessHoursId}
+                  onChange={(e) => setFormData({ ...formData, businessHoursId: e.target.value })}
+                  className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                >
+                  <option value="">Calendar time (no schedule)</option>
+                  {bhSchedules.map((bh) => (
+                    <option key={bh.id} value={bh.id}>
+                      {bh.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block font-mono text-xs text-zinc-400">
+                  SLA elapsed time will be calculated using this schedule
+                </span>
+              </label>
+            )}
 
             {/* Escalations */}
             <div>
@@ -490,6 +522,7 @@ export default function SLAPageContent() {
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Conditions</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">First Response</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Resolution</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Schedule</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Escalations</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Status</th>
                 </tr>
@@ -520,6 +553,11 @@ export default function SLAPageContent() {
                     </td>
                     <td className="px-4 py-3 font-mono text-sm font-bold">
                       {formatMinutes(policy.targets.resolution)}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-600">
+                      {(policy as SLAPolicy & { businessHoursId?: string }).businessHoursId
+                        ? bhSchedules.find((b) => b.id === (policy as SLAPolicy & { businessHoursId?: string }).businessHoursId)?.name ?? "Custom"
+                        : "Calendar"}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-zinc-600">
                       {policy.escalation.length} rule{policy.escalation.length !== 1 ? "s" : ""}

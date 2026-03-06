@@ -7,6 +7,7 @@ import { readJsonlFile, writeJsonlFile } from '@/lib/jsonl-store';
 import type {
   ScheduleTemplate, AgentSchedule, AgentStatusEntry,
   TimeOffRequest, VolumeSnapshot, BusinessHoursConfig,
+  HolidayCalendar, HolidayCalendarEntry,
 } from './types';
 
 const TEMPLATES_FILE = 'wfm-templates.jsonl';
@@ -15,18 +16,20 @@ const STATUS_FILE = 'wfm-agent-status.jsonl';
 const TIMEOFF_FILE = 'wfm-time-off.jsonl';
 const VOLUME_FILE = 'wfm-volume-snapshots.jsonl';
 const BH_FILE = 'wfm-business-hours.jsonl';
+const HC_FILE = 'wfm-holiday-calendars.jsonl';
 
 export function genId(prefix = 'wfm'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-let tL = false, sL = false, stL = false, toL = false, vL = false, bL = false;
+let tL = false, sL = false, stL = false, toL = false, vL = false, bL = false, hcL = false;
 const templates: ScheduleTemplate[] = [];
 const schedules: AgentSchedule[] = [];
 const statusEntries: AgentStatusEntry[] = [];
 const timeOffReqs: TimeOffRequest[] = [];
 const volSnaps: VolumeSnapshot[] = [];
 const bhConfigs: BusinessHoursConfig[] = [];
+const hcConfigs: HolidayCalendar[] = [];
 
 function ensT(): void {
   if (tL) return; tL = true;
@@ -138,6 +141,17 @@ export function getBHConfigs(id?: string): BusinessHoursConfig[] { ensB(); retur
 export function addBHConfig(c: BusinessHoursConfig): void { ensB(); bhConfigs.push(c); writeJsonlFile(BH_FILE, bhConfigs); }
 export function updateBHConfig(id: string, u: Partial<BusinessHoursConfig>): BusinessHoursConfig|null { ensB(); const i=bhConfigs.findIndex(c=>c.id===id); if(i<0) return null; bhConfigs[i]={...bhConfigs[i],...u,updatedAt:new Date().toISOString()}; writeJsonlFile(BH_FILE,bhConfigs); return bhConfigs[i]; }
 export function removeBHConfig(id: string): boolean { ensB(); const i=bhConfigs.findIndex(c=>c.id===id); if(i<0) return false; bhConfigs.splice(i,1); writeJsonlFile(BH_FILE,bhConfigs); return true; }
+
+// Holiday Calendars
+function ensHC(): void {
+  if (hcL) return; hcL = true;
+  const s = readJsonlFile<HolidayCalendar>(HC_FILE);
+  if (s.length > 0) { hcConfigs.push(...s); }
+}
+export function getHolidayCalendars(id?: string): HolidayCalendar[] { ensHC(); return id ? hcConfigs.filter(c=>c.id===id) : [...hcConfigs]; }
+export function addHolidayCalendar(c: HolidayCalendar): void { ensHC(); hcConfigs.push(c); writeJsonlFile(HC_FILE, hcConfigs); }
+export function updateHolidayCalendar(id: string, u: Partial<HolidayCalendar>): HolidayCalendar|null { ensHC(); const i=hcConfigs.findIndex(c=>c.id===id); if(i<0) return null; hcConfigs[i]={...hcConfigs[i],...u,updatedAt:new Date().toISOString()}; writeJsonlFile(HC_FILE,hcConfigs); return hcConfigs[i]; }
+export function removeHolidayCalendar(id: string): boolean { ensHC(); const i=hcConfigs.findIndex(c=>c.id===id); if(i<0) return false; hcConfigs.splice(i,1); writeJsonlFile(HC_FILE,hcConfigs); return true; }
 
 // ---- Compatibility aliases ----
 // Re-export under names expected by agent-status.ts, business-hours.ts, time-off.ts, etc.

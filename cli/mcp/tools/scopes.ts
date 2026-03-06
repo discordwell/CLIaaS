@@ -47,6 +47,17 @@ const ALL_WRITE_TOOLS = [
   'side_conversation_list',
   'side_conversation_create',
   'side_conversation_reply',
+  'view_create',
+  'view_delete',
+  'tag_create',
+  'tag_add',
+  'tag_remove',
+  'tag_delete',
+  'business_hours_create',
+  'business_hours_update',
+  'business_hours_delete',
+  'holiday_calendar_create',
+  'holiday_add_date',
 ];
 
 export function loadScopes(): MCPScopeConfig {

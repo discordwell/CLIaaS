@@ -44,6 +44,9 @@ import { registerWfmCommands } from './wfm.js';
 import { registerCannedCommands } from './canned.js';
 import { registerNotificationCommands } from './notifications.js';
 import { registerSideConversationCommands } from './side-conversations.js';
+import { registerViewCommands } from './views.js';
+import { registerTagCommands } from './tags.js';
+import { registerBusinessHoursCommands } from './business-hours.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -91,4 +94,7 @@ export function registerCommands(program: Command): void {
   registerCannedCommands(program);
   registerNotificationCommands(program);
   registerSideConversationCommands(program);
+  registerViewCommands(program);
+  registerTagCommands(program);
+  registerBusinessHoursCommands(program);
 }

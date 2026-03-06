@@ -19,6 +19,7 @@ export interface SLAPolicy {
     action: 'notify' | 'escalate' | 'reassign';
     to?: string;
   }>;
+  businessHoursId?: string;
   enabled: boolean;
   createdAt: string;
 }
@@ -27,17 +28,24 @@ export interface SLACheckResult {
   ticketId: string;
   policyId: string;
   policyName: string;
+  businessHoursId?: string;
   firstResponse: {
     targetMinutes: number;
     elapsedMinutes: number;
+    calendarElapsedMinutes?: number;
+    businessElapsedMinutes?: number;
     remainingMinutes: number;
+    dueAt?: string;
     status: 'ok' | 'warning' | 'breached';
     breachedAt?: string;
   };
   resolution: {
     targetMinutes: number;
     elapsedMinutes: number;
+    calendarElapsedMinutes?: number;
+    businessElapsedMinutes?: number;
     remainingMinutes: number;
+    dueAt?: string;
     status: 'ok' | 'warning' | 'breached';
     breachedAt?: string;
   };
@@ -137,6 +145,7 @@ async function loadPoliciesFromDb(workspaceId?: string): Promise<SLAPolicy[]> {
           resolution: targets.resolution ?? 1440,
         },
         escalation: ((schedules.escalation as SLAPolicy['escalation']) ?? []),
+        businessHoursId: r.businessHoursId ?? undefined,
         enabled: r.enabled,
         createdAt: r.createdAt.toISOString(),
       };
@@ -205,6 +214,7 @@ export async function createPolicy(
               conditions: input.conditions,
               escalation: input.escalation,
             },
+            businessHoursId: input.businessHoursId ?? null,
           })
           .returning();
 
@@ -214,6 +224,7 @@ export async function createPolicy(
           conditions: input.conditions,
           targets: input.targets,
           escalation: input.escalation,
+          businessHoursId: row.businessHoursId ?? undefined,
           enabled: row.enabled,
           createdAt: row.createdAt.toISOString(),
         };
@@ -266,35 +277,84 @@ export async function checkTicketSLA(input: CheckTicketInput): Promise<SLACheckR
   const results: SLACheckResult[] = [];
   const now = new Date();
 
+  // Lazy-load business hours helpers
+  let bhCache: Map<string, import('./wfm/types').BusinessHoursConfig> | null = null;
+  async function loadBHConfig(bhId: string) {
+    if (!bhCache) bhCache = new Map();
+    if (bhCache.has(bhId)) return bhCache.get(bhId)!;
+    const { getBusinessHours } = await import('./wfm/business-hours');
+    const configs = getBusinessHours(bhId);
+    const config = configs[0] ?? null;
+    if (config) bhCache.set(bhId, config);
+    return config;
+  }
+
   for (const policy of enabledPolicies) {
     if (!ticketMatchesPolicy(input.ticket, policy)) continue;
 
     const createdAt = new Date(input.ticket.createdAt);
 
+    // Load business hours config if policy references one
+    let bhConfig: import('./wfm/types').BusinessHoursConfig | null = null;
+    if (policy.businessHoursId) {
+      bhConfig = await loadBHConfig(policy.businessHoursId);
+    }
+
+    // Load business hours calculation functions if needed
+    let bhCalc: { getElapsedBusinessMinutes: typeof import('./wfm/business-hours').getElapsedBusinessMinutes; addBusinessMinutes: typeof import('./wfm/business-hours').addBusinessMinutes } | null = null;
+    if (bhConfig) {
+      bhCalc = await import('./wfm/business-hours');
+    }
+
+    // Helper: compute elapsed minutes (business or calendar)
+    function computeElapsed(fromDate: Date, toDate: Date): { elapsed: number; calendarElapsed: number; businessElapsed?: number } {
+      const calendarMs = toDate.getTime() - fromDate.getTime();
+      const calendarMin = calendarMs / 60000;
+      if (!bhConfig || !bhCalc) return { elapsed: calendarMin, calendarElapsed: calendarMin };
+      const bizMin = bhCalc.getElapsedBusinessMinutes(bhConfig, fromDate, toDate);
+      return { elapsed: bizMin, calendarElapsed: calendarMin, businessElapsed: bizMin };
+    }
+
+    // Helper: compute SLA due date
+    function computeDueAt(fromDate: Date, targetMinutes: number): string | undefined {
+      if (!bhConfig || !bhCalc) return undefined;
+      return bhCalc.addBusinessMinutes(bhConfig, fromDate, targetMinutes).toISOString();
+    }
+
     // First response check
-    const frTargetMs = policy.targets.firstResponse * 60 * 1000;
-    let frElapsedMs: number;
+    const frTargetMin = policy.targets.firstResponse;
+    const frTargetMs = frTargetMin * 60 * 1000;
+    let frElapsedMin: number;
+    let frCalendarElapsed: number | undefined;
+    let frBusinessElapsed: number | undefined;
     let frStatus: 'ok' | 'warning' | 'breached';
     let frBreachedAt: string | undefined;
+    const frDueAt = computeDueAt(createdAt, frTargetMin);
 
     if (input.firstReplyAt) {
-      // Already replied
-      frElapsedMs = new Date(input.firstReplyAt).getTime() - createdAt.getTime();
-      frStatus = frElapsedMs > frTargetMs ? 'breached' : 'ok';
+      const e = computeElapsed(createdAt, new Date(input.firstReplyAt));
+      frElapsedMin = e.elapsed;
+      frCalendarElapsed = e.calendarElapsed;
+      frBusinessElapsed = e.businessElapsed;
+      frStatus = frElapsedMin > frTargetMin ? 'breached' : 'ok';
       if (frStatus === 'breached') {
-        frBreachedAt = new Date(createdAt.getTime() + frTargetMs).toISOString();
+        frBreachedAt = frDueAt ?? new Date(createdAt.getTime() + frTargetMs).toISOString();
       }
     } else if (input.ticket.status === 'solved' || input.ticket.status === 'closed') {
-      // Resolved without tracked first reply
-      frElapsedMs = new Date(input.ticket.updatedAt).getTime() - createdAt.getTime();
-      frStatus = frElapsedMs > frTargetMs ? 'breached' : 'ok';
+      const e = computeElapsed(createdAt, new Date(input.ticket.updatedAt));
+      frElapsedMin = e.elapsed;
+      frCalendarElapsed = e.calendarElapsed;
+      frBusinessElapsed = e.businessElapsed;
+      frStatus = frElapsedMin > frTargetMin ? 'breached' : 'ok';
     } else {
-      // Still waiting for first response
-      frElapsedMs = now.getTime() - createdAt.getTime();
-      if (frElapsedMs > frTargetMs) {
+      const e = computeElapsed(createdAt, now);
+      frElapsedMin = e.elapsed;
+      frCalendarElapsed = e.calendarElapsed;
+      frBusinessElapsed = e.businessElapsed;
+      if (frElapsedMin > frTargetMin) {
         frStatus = 'breached';
-        frBreachedAt = new Date(createdAt.getTime() + frTargetMs).toISOString();
-      } else if (frElapsedMs > frTargetMs * 0.75) {
+        frBreachedAt = frDueAt ?? new Date(createdAt.getTime() + frTargetMs).toISOString();
+      } else if (frElapsedMin > frTargetMin * 0.75) {
         frStatus = 'warning';
       } else {
         frStatus = 'ok';
@@ -302,35 +362,44 @@ export async function checkTicketSLA(input: CheckTicketInput): Promise<SLACheckR
     }
 
     // Resolution check
-    const resTargetMs = policy.targets.resolution * 60 * 1000;
-    let resElapsedMs: number;
+    const resTargetMin = policy.targets.resolution;
+    const resTargetMs = resTargetMin * 60 * 1000;
+    let resElapsedMin: number;
+    let resCalendarElapsed: number | undefined;
+    let resBusinessElapsed: number | undefined;
     let resStatus: 'ok' | 'warning' | 'breached';
     let resBreachedAt: string | undefined;
+    const resDueAt = computeDueAt(createdAt, resTargetMin);
 
     if (input.resolvedAt || input.ticket.status === 'solved' || input.ticket.status === 'closed') {
-      const resolvedTime = input.resolvedAt
-        ? new Date(input.resolvedAt).getTime()
-        : new Date(input.ticket.updatedAt).getTime();
-      resElapsedMs = resolvedTime - createdAt.getTime();
-      resStatus = resElapsedMs > resTargetMs ? 'breached' : 'ok';
+      const resolvedDate = input.resolvedAt
+        ? new Date(input.resolvedAt)
+        : new Date(input.ticket.updatedAt);
+      const e = computeElapsed(createdAt, resolvedDate);
+      resElapsedMin = e.elapsed;
+      resCalendarElapsed = e.calendarElapsed;
+      resBusinessElapsed = e.businessElapsed;
+      resStatus = resElapsedMin > resTargetMin ? 'breached' : 'ok';
       if (resStatus === 'breached') {
-        resBreachedAt = new Date(createdAt.getTime() + resTargetMs).toISOString();
+        resBreachedAt = resDueAt ?? new Date(createdAt.getTime() + resTargetMs).toISOString();
       }
     } else {
-      resElapsedMs = now.getTime() - createdAt.getTime();
-      if (resElapsedMs > resTargetMs) {
+      const e = computeElapsed(createdAt, now);
+      resElapsedMin = e.elapsed;
+      resCalendarElapsed = e.calendarElapsed;
+      resBusinessElapsed = e.businessElapsed;
+      if (resElapsedMin > resTargetMin) {
         resStatus = 'breached';
-        resBreachedAt = new Date(createdAt.getTime() + resTargetMs).toISOString();
-      } else if (resElapsedMs > resTargetMs * 0.75) {
+        resBreachedAt = resDueAt ?? new Date(createdAt.getTime() + resTargetMs).toISOString();
+      } else if (resElapsedMin > resTargetMin * 0.75) {
         resStatus = 'warning';
       } else {
         resStatus = 'ok';
       }
     }
 
-    // Escalation checks
-    const maxElapsedMs = Math.max(frElapsedMs, resElapsedMs);
-    const maxElapsedMinutes = maxElapsedMs / (60 * 1000);
+    // Escalation checks — use business elapsed if available
+    const maxElapsedMinutes = Math.max(frElapsedMin, resElapsedMin);
     const escalations = policy.escalation.map((esc) => ({
       ...esc,
       triggered: maxElapsedMinutes >= esc.afterMinutes,
@@ -340,17 +409,24 @@ export async function checkTicketSLA(input: CheckTicketInput): Promise<SLACheckR
       ticketId: input.ticket.id,
       policyId: policy.id,
       policyName: policy.name,
+      businessHoursId: policy.businessHoursId,
       firstResponse: {
-        targetMinutes: policy.targets.firstResponse,
-        elapsedMinutes: Math.round(frElapsedMs / (60 * 1000)),
-        remainingMinutes: Math.max(0, Math.round((frTargetMs - frElapsedMs) / (60 * 1000))),
+        targetMinutes: frTargetMin,
+        elapsedMinutes: Math.round(frElapsedMin),
+        calendarElapsedMinutes: frCalendarElapsed != null ? Math.round(frCalendarElapsed) : undefined,
+        businessElapsedMinutes: frBusinessElapsed != null ? Math.round(frBusinessElapsed) : undefined,
+        remainingMinutes: Math.max(0, Math.round(frTargetMin - frElapsedMin)),
+        dueAt: frDueAt,
         status: frStatus,
         breachedAt: frBreachedAt,
       },
       resolution: {
-        targetMinutes: policy.targets.resolution,
-        elapsedMinutes: Math.round(resElapsedMs / (60 * 1000)),
-        remainingMinutes: Math.max(0, Math.round((resTargetMs - resElapsedMs) / (60 * 1000))),
+        targetMinutes: resTargetMin,
+        elapsedMinutes: Math.round(resElapsedMin),
+        calendarElapsedMinutes: resCalendarElapsed != null ? Math.round(resCalendarElapsed) : undefined,
+        businessElapsedMinutes: resBusinessElapsed != null ? Math.round(resBusinessElapsed) : undefined,
+        remainingMinutes: Math.max(0, Math.round(resTargetMin - resElapsedMin)),
+        dueAt: resDueAt,
         status: resStatus,
         breachedAt: resBreachedAt,
       },
