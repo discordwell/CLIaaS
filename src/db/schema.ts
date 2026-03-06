@@ -2584,6 +2584,6 @@ export const aiAgentConfigs = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
-    aiAgentConfigsUniqueIdx: uniqueIndex('ai_agent_configs_unique_idx').on(table.tenantId, table.workspaceId),
+    aiAgentConfigsUniqueIdx: uniqueIndex('ai_agent_configs_unique_idx').on(table.workspaceId),
   }),
 );

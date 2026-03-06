@@ -14,7 +14,7 @@ export async function GET(
 
   const { id } = await params;
   const resolution = await getResolution(id);
-  if (!resolution) {
+  if (!resolution || resolution.workspaceId !== auth.user.workspaceId) {
     return NextResponse.json({ error: 'Resolution not found' }, { status: 404 });
   }
 

@@ -1,5 +1,5 @@
 -- AI Resolution: autonomous AI ticket resolution pipeline
--- Migration 0016
+-- Migration 0019
 
 -- Enums
 DO $$ BEGIN
@@ -18,8 +18,8 @@ END $$;
 CREATE TABLE IF NOT EXISTS ai_resolutions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id),
-  ticket_id UUID NOT NULL REFERENCES tickets(id),
-  confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
+  ticket_id TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0,
   suggested_reply TEXT NOT NULL DEFAULT '',
   reasoning TEXT,
   kb_articles_used TEXT[] DEFAULT '{}',
@@ -32,10 +32,10 @@ CREATE TABLE IF NOT EXISTS ai_resolutions (
   model TEXT,
   prompt_tokens INTEGER,
   completion_tokens INTEGER,
-  cost_cents NUMERIC(10,4),
+  cost_cents REAL,
   latency_ms INTEGER,
-  reviewed_by UUID REFERENCES users(id),
-  reviewed_at TIMESTAMPTZ,
+  reviewed_by TEXT,
+  reviewed_at TEXT,
   csat_score SMALLINT,
   csat_comment TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS ai_agent_configs (
   workspace_id UUID NOT NULL REFERENCES workspaces(id),
   enabled BOOLEAN NOT NULL DEFAULT false,
   mode ai_mode NOT NULL DEFAULT 'suggest',
-  confidence_threshold NUMERIC(4,3) NOT NULL DEFAULT 0.700,
+  confidence_threshold REAL NOT NULL DEFAULT 0.7,
   provider TEXT NOT NULL DEFAULT 'claude',
   model TEXT,
   max_tokens INTEGER NOT NULL DEFAULT 1024,
@@ -64,5 +64,5 @@ CREATE TABLE IF NOT EXISTS ai_agent_configs (
   channels TEXT[] DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(tenant_id, workspace_id)
+  UNIQUE(workspace_id)
 );
