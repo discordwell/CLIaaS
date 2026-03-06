@@ -62,4 +62,11 @@ describe('resolveMergeVariables', () => {
   it('handles template with only variables', () => {
     expect(resolveMergeVariables('{{customer.name}}', fullContext)).toBe('Alice Smith');
   });
+
+  it('blocks prototype-chain property access', () => {
+    expect(resolveMergeVariables('{{constructor.name}}', fullContext)).toBe('');
+    expect(resolveMergeVariables('{{__proto__}}', fullContext)).toBe('');
+    expect(resolveMergeVariables('{{prototype}}', fullContext)).toBe('');
+    expect(resolveMergeVariables('{{toString}}', fullContext)).toBe('');
+  });
 });

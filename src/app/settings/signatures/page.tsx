@@ -124,7 +124,13 @@ export default function SignaturesPage() {
           {bodyHtml && (
             <div className="mt-4">
               <label className="block font-mono text-xs font-bold uppercase text-zinc-500">Preview</label>
-              <div className="mt-1 border-2 border-zinc-200 bg-zinc-50 p-4" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+              <iframe
+                srcDoc={bodyHtml}
+                sandbox=""
+                className="mt-1 w-full border-2 border-zinc-200 bg-zinc-50"
+                style={{ minHeight: 80 }}
+                title="Signature preview"
+              />
             </div>
           )}
           <div className="mt-4">

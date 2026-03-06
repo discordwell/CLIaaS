@@ -5,7 +5,7 @@ import { requireAuth } from '@/lib/api-auth';
 import { getMacro, incrementMacroUsage, type MacroAction } from '@/lib/canned/macro-store';
 import { executeMacroActions } from '@/lib/canned/macro-executor';
 import type { MergeContext } from '@/lib/canned/merge';
-import { loadTickets, loadMessages } from '@/lib/data';
+import { loadTickets } from '@/lib/data';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,7 +68,7 @@ export async function POST(
         const updates: Record<string, unknown> = { updatedAt: new Date() };
         if (result.changes.status) updates.status = result.changes.status;
         if (result.changes.priority) updates.priority = result.changes.priority;
-        if (result.changes.assignee !== undefined) updates.assignee = result.changes.assignee;
+        if (result.changes.assignee !== undefined) updates.assigneeId = result.changes.assignee;
         if (result.changes.addTags || result.changes.removeTags) updates.tags = ticketCtx.tags;
         await db.update(schema.tickets).set(updates).where(eq(schema.tickets.id, ticketId));
       }

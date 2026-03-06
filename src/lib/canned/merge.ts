@@ -39,11 +39,15 @@ export function resolveMergeVariables(template: string, context: MergeContext): 
   });
 }
 
+const BLOCKED_KEYS = new Set(['constructor', 'prototype', '__proto__', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__']);
+
 function resolvePathValue(obj: object, path: string): string | undefined {
   const parts = path.split('.');
   let current: unknown = obj;
   for (const part of parts) {
+    if (BLOCKED_KEYS.has(part)) return undefined;
     if (current == null || typeof current !== 'object') return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, part)) return undefined;
     current = (current as Record<string, unknown>)[part];
   }
   if (current == null) return undefined;

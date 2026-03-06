@@ -13,7 +13,8 @@ export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
     const category = url.searchParams.get('category') ?? undefined;
-    const scope = url.searchParams.get('scope') as 'personal' | 'shared' | undefined;
+    const rawScope = url.searchParams.get('scope');
+    const scope = rawScope === 'personal' || rawScope === 'shared' ? rawScope : undefined;
     const search = url.searchParams.get('search') ?? undefined;
 
     if (process.env.DATABASE_URL) {
@@ -25,22 +26,22 @@ export async function GET(request: NextRequest) {
       if (category) conditions.push(eq(schema.cannedResponses.category, category));
       if (scope) conditions.push(eq(schema.cannedResponses.scope, scope));
 
-      let query = db.select().from(schema.cannedResponses).where(and(...conditions));
-
       if (search) {
+        const escaped = search.replace(/[%_\\]/g, '\\$&');
         const rows = await db.select().from(schema.cannedResponses)
           .where(and(
             ...conditions,
             or(
-              ilike(schema.cannedResponses.title, `%${search}%`),
-              ilike(schema.cannedResponses.body, `%${search}%`),
+              ilike(schema.cannedResponses.title, `%${escaped}%`),
+              ilike(schema.cannedResponses.body, `%${escaped}%`),
             ),
           ))
           .orderBy(desc(schema.cannedResponses.usageCount));
         return NextResponse.json({ cannedResponses: rows });
       }
 
-      const rows = await query.orderBy(desc(schema.cannedResponses.usageCount));
+      const rows = await db.select().from(schema.cannedResponses).where(and(...conditions))
+        .orderBy(desc(schema.cannedResponses.usageCount));
       return NextResponse.json({ cannedResponses: rows });
     }
 

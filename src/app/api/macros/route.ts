@@ -12,7 +12,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const url = new URL(request.url);
-    const scope = url.searchParams.get('scope') as 'personal' | 'shared' | null;
+    const rawScope = url.searchParams.get('scope');
+    const scope = rawScope === 'personal' || rawScope === 'shared' ? rawScope : null;
     const enabled = url.searchParams.get('enabled');
 
     // Try DB first
