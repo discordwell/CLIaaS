@@ -53,7 +53,10 @@ export async function POST(
     const dateRange = parsed.data.dateRange;
 
     // Check cache
-    const cacheKey = computeCacheKey(id, reportDef.filters, dateRange);
+    const mergedFilters = parsed.data.overrides
+      ? { ...reportDef.filters, ...parsed.data.overrides }
+      : reportDef.filters;
+    const cacheKey = computeCacheKey(id, mergedFilters, dateRange);
     const cached = getCached(cacheKey);
     if (cached) {
       return NextResponse.json({ result: cached, cached: true });
