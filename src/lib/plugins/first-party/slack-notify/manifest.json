@@ -1,0 +1,58 @@
+{
+  "id": "slack-notify",
+  "name": "Slack Notifications",
+  "version": "1.0.0",
+  "description": "Post notifications to Slack when tickets are created, resolved, or SLA is breached. Keep your team in the loop with real-time alerts.",
+  "author": "CLIaaS",
+  "hooks": [
+    "ticket.created",
+    "ticket.resolved",
+    "sla.breached"
+  ],
+  "permissions": [
+    "tickets:read",
+    "oauth:external"
+  ],
+  "actions": [
+    {
+      "id": "send-notification",
+      "name": "Send Slack Notification",
+      "description": "Manually send a notification about this ticket to Slack"
+    }
+  ],
+  "uiSlots": [],
+  "oauthRequirements": [
+    {
+      "provider": "slack",
+      "scopes": ["chat:write", "channels:read"]
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "channel": {
+        "type": "string",
+        "description": "Slack channel to post to (e.g. #support-alerts)"
+      },
+      "notifyOnCreate": {
+        "type": "boolean",
+        "description": "Notify when a ticket is created",
+        "default": true
+      },
+      "notifyOnResolve": {
+        "type": "boolean",
+        "description": "Notify when a ticket is resolved",
+        "default": true
+      },
+      "notifyOnBreach": {
+        "type": "boolean",
+        "description": "Notify when SLA is breached",
+        "default": true
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { event, data } = context;\nconst cfg = cliaas.config;\nif (event === 'ticket.created' && !cfg.notifyOnCreate) return;\nif (event === 'ticket.resolved' && !cfg.notifyOnResolve) return;\nif (event === 'sla.breached' && !cfg.notifyOnBreach) return;\nconst channel = cfg.channel || '#general';\ncliaas.log.info(`Would post to ${channel}: [${event}] ${data.subject || data.ticketId}`);",
+  "category": "Communication",
+  "icon": "slack"
+}

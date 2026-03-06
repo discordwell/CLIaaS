@@ -1,0 +1,70 @@
+{
+  "id": "jira-sync",
+  "name": "Jira Sync",
+  "version": "1.0.0",
+  "description": "Create and link Jira issues from support tickets. Automatically sync status changes bi-directionally between CLIaaS and Jira.",
+  "author": "CLIaaS",
+  "hooks": [
+    "ticket.created",
+    "ticket.updated",
+    "ticket.resolved"
+  ],
+  "permissions": [
+    "tickets:read",
+    "tickets:write",
+    "oauth:external"
+  ],
+  "actions": [
+    {
+      "id": "create-jira-issue",
+      "name": "Create Jira Issue",
+      "description": "Creates a new Jira issue linked to this ticket"
+    },
+    {
+      "id": "link-jira-issue",
+      "name": "Link Existing Issue",
+      "description": "Link an existing Jira issue to this ticket"
+    }
+  ],
+  "uiSlots": [
+    {
+      "location": "ticket.sidebar",
+      "component": "JiraIssuePanel"
+    }
+  ],
+  "oauthRequirements": [
+    {
+      "provider": "atlassian",
+      "scopes": ["read:jira-work", "write:jira-work"]
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "projectKey": {
+        "type": "string",
+        "description": "Jira project key (e.g. SUP)"
+      },
+      "issueType": {
+        "type": "string",
+        "description": "Issue type to create",
+        "enum": ["Bug", "Task", "Story", "Support"],
+        "default": "Task"
+      },
+      "autoCreate": {
+        "type": "boolean",
+        "description": "Automatically create Jira issues for new tickets",
+        "default": false
+      },
+      "syncStatus": {
+        "type": "boolean",
+        "description": "Sync status changes to Jira",
+        "default": true
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { event, data } = context;\nconst cfg = cliaas.config;\nif (event === 'ticket.created' && cfg.autoCreate) {\n  cliaas.log.info(`Would create Jira issue in ${cfg.projectKey}: ${data.subject}`);\n}\nif (event === 'ticket.resolved' && cfg.syncStatus) {\n  cliaas.log.info(`Would transition Jira issue to Done`);\n}",
+  "category": "Developer Tools",
+  "icon": "jira"
+}

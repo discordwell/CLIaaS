@@ -261,6 +261,15 @@ export default function IntegrationsPage() {
 
   // ---- Plugin handlers ----
 
+  async function togglePluginEnabled(id: string, currentlyEnabled: boolean) {
+    await fetch(`/api/plugins/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !currentlyEnabled }),
+    });
+    loadPlugins();
+  }
+
   async function deletePlugin(id: string) {
     await fetch(`/api/plugins/${id}`, { method: "DELETE" });
     if (expandedPlugin === id) setExpandedPlugin(null);
@@ -752,6 +761,22 @@ export default function IntegrationsPage() {
       {/* ============ PLUGINS TAB ============ */}
       {tab === "plugins" && (
         <>
+          {/* Browse Marketplace CTA */}
+          <section className="mt-4 flex items-center justify-between border-2 border-zinc-950 bg-white p-4">
+            <div>
+              <p className="font-bold">Extend CLIaaS with plugins</p>
+              <p className="text-sm text-zinc-600">
+                Browse the marketplace to discover integrations and automations.
+              </p>
+            </div>
+            <Link
+              href="/marketplace"
+              className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+            >
+              Browse Marketplace
+            </Link>
+          </section>
+
           {pluginLoading ? (
             <section className="mt-4 border-2 border-zinc-950 bg-white p-8 text-center">
               <p className="font-mono text-sm text-zinc-500">
@@ -781,15 +806,19 @@ export default function IntegrationsPage() {
                           <span className="font-mono text-xs text-zinc-400">
                             v{plugin.version}
                           </span>
-                          <span
-                            className={`font-mono text-xs font-bold uppercase ${
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              togglePluginEnabled(plugin.id, plugin.enabled);
+                            }}
+                            className={`border px-2 py-0.5 font-mono text-xs font-bold uppercase transition-colors ${
                               plugin.enabled
-                                ? "text-emerald-600"
-                                : "text-zinc-400"
+                                ? "border-emerald-600 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                : "border-zinc-300 bg-zinc-50 text-zinc-400 hover:bg-zinc-100"
                             }`}
                           >
                             {plugin.enabled ? "Active" : "Disabled"}
-                          </span>
+                          </button>
                         </div>
                         <p className="mt-1 text-sm text-zinc-600">
                           {plugin.description}
@@ -869,7 +898,14 @@ export default function IntegrationsPage() {
                           </div>
                         )}
 
-                        <div className="mt-4 flex justify-end">
+                        <div className="mt-4 flex items-center justify-between">
+                          <Link
+                            href={`/api/plugins/${plugin.id}/logs`}
+                            target="_blank"
+                            className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-950"
+                          >
+                            View Logs
+                          </Link>
                           <button
                             onClick={() => deletePlugin(plugin.id)}
                             className="font-mono text-xs font-bold uppercase text-red-500 hover:text-red-700"
@@ -887,8 +923,14 @@ export default function IntegrationsPage() {
             <section className="mt-4 border-2 border-zinc-950 bg-white p-8 text-center">
               <p className="text-lg font-bold">No plugins installed</p>
               <p className="mt-2 text-sm text-zinc-600">
-                Register plugins via the API to extend CLIaaS functionality.
+                Browse the marketplace to discover and install plugins.
               </p>
+              <Link
+                href="/marketplace"
+                className="mt-4 inline-block border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+              >
+                Browse Marketplace
+              </Link>
             </section>
           )}
         </>

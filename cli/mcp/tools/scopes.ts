@@ -33,6 +33,10 @@ const ALL_WRITE_TOOLS = [
   'campaign_create',
   'campaign_send',
   'time_log',
+  'plugin_install',
+  'plugin_uninstall',
+  'plugin_toggle',
+  'plugin_config',
 ];
 
 export function loadScopes(): MCPScopeConfig {

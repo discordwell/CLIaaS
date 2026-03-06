@@ -1,0 +1,64 @@
+{
+  "id": "stripe-context",
+  "name": "Stripe Context",
+  "version": "1.0.0",
+  "description": "Enrich tickets with Stripe customer data. See subscription status, payment history, and MRR right in the ticket sidebar.",
+  "author": "CLIaaS",
+  "hooks": [
+    "ticket.created"
+  ],
+  "permissions": [
+    "tickets:read",
+    "customers:read",
+    "oauth:external"
+  ],
+  "actions": [
+    {
+      "id": "lookup-stripe",
+      "name": "Lookup Stripe Customer",
+      "description": "Fetch Stripe customer data for the ticket requester"
+    },
+    {
+      "id": "view-invoices",
+      "name": "View Invoices",
+      "description": "Show recent invoices for the customer"
+    }
+  ],
+  "uiSlots": [
+    {
+      "location": "ticket.sidebar",
+      "component": "StripeCustomerCard"
+    }
+  ],
+  "oauthRequirements": [
+    {
+      "provider": "stripe",
+      "scopes": ["read"]
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "lookupBy": {
+        "type": "string",
+        "description": "How to match customers",
+        "enum": ["email", "external_id"],
+        "default": "email"
+      },
+      "showMRR": {
+        "type": "boolean",
+        "description": "Show Monthly Recurring Revenue",
+        "default": true
+      },
+      "invoiceLimit": {
+        "type": "integer",
+        "description": "Number of recent invoices to display",
+        "default": 5
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { data } = context;\nconst cfg = cliaas.config;\nconst lookupBy = cfg.lookupBy || 'email';\ncliaas.log.info(`Would lookup Stripe customer by ${lookupBy}: ${data.requesterEmail || data.customerId}`);",
+  "category": "CRM",
+  "icon": "stripe"
+}

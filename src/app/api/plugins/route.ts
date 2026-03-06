@@ -1,13 +1,23 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { PluginRegistry } from '@/lib/plugins';
+import { PluginRegistry, getInstallations } from '@/lib/plugins';
 import { requireRole } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const source = searchParams.get('source');
+
+    // New store-backed installations
+    if (source === 'installations') {
+      const installations = await getInstallations();
+      return NextResponse.json({ installations });
+    }
+
+    // Legacy plugin registry (backward compat)
     const plugins = PluginRegistry.list();
     return NextResponse.json({ plugins });
   } catch (err) {
@@ -45,7 +55,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicate
     if (PluginRegistry.getPlugin(id)) {
       return NextResponse.json(
         { error: `Plugin "${id}" is already registered` },
