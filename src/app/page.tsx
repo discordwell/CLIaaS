@@ -140,9 +140,18 @@ function MarketingHome() {
           Our tooling and data is designed, ground-up, for full AI interoperability.
           So answer a couple of tickets yourself, then tell OpenClaw to handle the rest.
         </p>
-        <p className="mt-6 font-mono text-xs text-emerald-600 font-bold uppercase">
-          Sign up by the Ides of March and get <span className="line-through">BYOC</span> Claudeus Maximus ∞. Free, Forever.
-        </p>
+        {/* human-requested: crossed-out Ides of March, extended to Parilia with Caesar overlay */}
+        <div className="mt-6 flex items-center gap-4">
+          <p className="font-mono text-xs text-emerald-600 font-bold uppercase">
+            Sign up by <span className="line-through text-muted">the Ides of March</span>{" "}
+            the Birthday of Rome (April 21) and get <span className="line-through">BYOC</span> Claudeus Maximus ∞. Free, Forever.
+          </p>
+          <img
+            src="/caesar-brutus.png"
+            alt="Cartoon Julius Caesar saying Not today, Brutus!"
+            className="hidden sm:block w-24 shrink-0 -my-6"
+          />
+        </div>
       </header>
 
       {/* ── Terminal Demo (animated video / static fallback) ── */}
@@ -351,7 +360,7 @@ function MarketingHome() {
 
         <p className="mt-4 text-xs text-muted">
           * Must sign up, install, and migrate or process at least 10 tickets by
-          March 15, 2026, 11:59 PM PST
+          April 21, 2026, 11:59 PM PST (Parilia — Birthday of Rome)
         </p>
       </section>
 
