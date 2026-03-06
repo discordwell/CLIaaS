@@ -42,18 +42,23 @@ export class RemoteProvider implements DataProvider {
 
   private baseUrl: string;
   private apiKey: string;
+  private initialized = false;
 
   constructor() {
     this.baseUrl = process.env.CLIAAS_HOSTED_URL ?? '';
     this.apiKey = process.env.CLIAAS_HOSTED_API_KEY ?? '';
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+    this.initialized = true;
 
     // Fallback to CLI config if env vars are not set
     if (!this.baseUrl || !this.apiKey) {
       try {
-        // Dynamic require to avoid hard dependency — config module may not be
+        // Dynamic import to avoid hard dependency — config module may not be
         // available in all environments (e.g. browser builds).
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { loadConfig } = require('../../../cli/config.js') as typeof import('../../../cli/config.js');
+        const { loadConfig } = await import(/* webpackIgnore: true */ '../../../cli/config.js') as typeof import('../../../cli/config.js');
         const cfg = loadConfig();
         if (!this.baseUrl && cfg.hostedApiUrl) this.baseUrl = cfg.hostedApiUrl;
         if (!this.apiKey && cfg.hostedApiKey) this.apiKey = cfg.hostedApiKey;
@@ -72,6 +77,7 @@ export class RemoteProvider implements DataProvider {
   // ---- Internal HTTP layer ----
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    await this.ensureInitialized();
     const url = `${this.baseUrl.replace(/\/$/, '')}${path}`;
 
     let res: Response;
