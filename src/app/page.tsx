@@ -162,7 +162,7 @@ function MarketingHome() {
           <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted">02</p>
           <h2 className="mt-3 text-xl font-bold">MCP Server</h2>
           <p className="mt-3 text-sm leading-relaxed text-muted">
-            30 tools that plug into Claude Code, Cursor, Windsurf, or any MCP
+            60 tools that plug into Claude Code, Cursor, Windsurf, or any MCP
             client. Your helpdesk becomes a tool your AI assistant can use.
           </p>
         </div>
@@ -228,7 +228,7 @@ function MarketingHome() {
       {/* ── MCP Highlight ── */}
       <section className="mt-8 border-2 border-line bg-zinc-950 p-8 text-zinc-100 sm:p-10">
         <p className="font-mono text-xs font-bold uppercase tracking-widest text-zinc-500">
-          MCP Server — 30 Tools
+          MCP Server — 60 Tools
         </p>
         <h2 className="mt-4 text-2xl font-bold text-white sm:text-3xl">
           Your helpdesk is now an AI tool.
@@ -236,7 +236,7 @@ function MarketingHome() {
         <p className="mt-4 max-w-2xl text-sm leading-relaxed text-zinc-400">
           CLIaaS ships an MCP server that exposes your entire support queue to
           any AI assistant. Ask Claude to triage your inbox. Let Cursor draft
-          replies while you code. The same 30 tools work across every tier and
+          replies while you code. The same 60 tools work across every tier and
           deployment mode.
         </p>
         <div className="mt-6 grid gap-3 font-mono text-xs sm:grid-cols-2 lg:grid-cols-3">
@@ -249,7 +249,7 @@ function MarketingHome() {
           ].map((tool) => (
             <span key={tool} className="text-emerald-400">{tool}</span>
           ))}
-          <span className="text-zinc-600">+ 15 more</span>
+          <span className="text-zinc-600">+ 45 more</span>
         </div>
       </section>
 
@@ -286,10 +286,10 @@ function MarketingHome() {
               <li className="flex items-start gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-muted"></span> Bring your own AI models</li>
             </ul>
             <Link
-              href="/sign-up"
+              href="/docs#install"
               className="mt-8 block border-2 border-line bg-foreground py-3 text-center font-mono text-xs font-bold uppercase text-background transition-opacity hover:opacity-80"
             >
-              Get Started Free
+              npm install -g cliaas
             </Link>
           </div>
 
@@ -361,19 +361,33 @@ function MarketingHome() {
           <div>
             <h2 className="text-2xl font-bold">Open source. Ship it yourself.</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-              CLIaaS is MIT-licensed. Clone the repo, point it at your Postgres,
-              add your LLM key, and you have a fully functional helpdesk in
-              under five minutes. No vendor lock-in. No data leaves your machine.
+              CLIaaS is MIT-licensed. One command to install, one command to set up.
+              Point it at your Postgres, add your LLM key, and you have a fully
+              functional helpdesk in under five minutes. No vendor lock-in.
             </p>
+            {/* human-requested: npm install command block */}
+            <pre className="mt-4 border-2 border-line bg-zinc-950 px-4 py-3 font-mono text-sm text-emerald-400">
+              npm install -g cliaas && cliaas init
+            </pre>
           </div>
-          <a
-            href="https://github.com/discordwell/CLIaaS"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 border-2 border-line px-8 py-3 font-mono text-sm font-bold uppercase text-foreground transition-colors hover:bg-accent-soft"
-          >
-            View on GitHub
-          </a>
+          <div className="flex shrink-0 flex-col gap-3">
+            <a
+              href="https://www.npmjs.com/package/cliaas"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border-2 border-line bg-foreground px-8 py-3 text-center font-mono text-sm font-bold uppercase text-background transition-opacity hover:opacity-80"
+            >
+              npm
+            </a>
+            <a
+              href="https://github.com/discordwell/CLIaaS"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border-2 border-line px-8 py-3 text-center font-mono text-sm font-bold uppercase text-foreground transition-colors hover:bg-accent-soft"
+            >
+              GitHub
+            </a>
+          </div>
         </div>
       </section>
 

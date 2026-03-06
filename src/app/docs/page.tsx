@@ -67,6 +67,11 @@ export default function DocsPage() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [filterTag, setFilterTag] = useState("");
 
+  // Auto-switch to CLI tab if #install hash is present
+  useEffect(() => {
+    if (window.location.hash === "#install") setTab("cli");
+  }, []);
+
   const loadSpec = useCallback(async () => {
     try {
       const res = await fetch("/api/docs");
@@ -360,7 +365,7 @@ export default function DocsPage() {
       {/* CLI TAB */}
       {tab === "cli" && (
         <>
-          <section className="mt-4 border-2 border-zinc-950 bg-white">
+          <section id="install" className="mt-4 border-2 border-zinc-950 bg-white">
             <div className="border-b-2 border-zinc-950 p-6">
               <h2 className="text-2xl font-bold">CLI Commands</h2>
               <p className="mt-1 text-sm text-zinc-600">
@@ -368,9 +373,9 @@ export default function DocsPage() {
                 <code className="bg-zinc-100 px-2 py-1 font-mono text-xs">
                   npm install -g cliaas
                 </code>{" "}
-                or run with{" "}
+                then:{" "}
                 <code className="bg-zinc-100 px-2 py-1 font-mono text-xs">
-                  pnpm cliaas
+                  cliaas init
                 </code>
               </p>
             </div>
