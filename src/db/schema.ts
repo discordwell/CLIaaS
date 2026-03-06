@@ -1313,6 +1313,7 @@ export const chatbotVersions = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     chatbotId: uuid('chatbot_id').notNull().references(() => chatbots.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     version: integer('version').notNull(),
     flow: jsonb('flow').notNull(),
     summary: text('summary'),
@@ -1324,6 +1325,7 @@ export const chatbotVersions = pgTable(
       table.chatbotId,
       table.version,
     ),
+    chatbotVersionsWorkspaceIdx: index('chatbot_versions_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -1353,6 +1355,7 @@ export const chatbotAnalytics = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     chatbotId: uuid('chatbot_id').notNull().references(() => chatbots.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     nodeId: text('node_id').notNull(),
     date: date('date').notNull(),
     entries: integer('entries').notNull().default(0),
@@ -1370,6 +1373,7 @@ export const chatbotAnalytics = pgTable(
       table.chatbotId,
       table.date,
     ),
+    chatbotAnalyticsWorkspaceIdx: index('chatbot_analytics_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -1784,6 +1788,7 @@ export const qaCalibrationEntries = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     sessionId: uuid('session_id').notNull().references(() => qaCalibrationSessions.id),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     autoReviewId: uuid('auto_review_id').notNull().references(() => qaReviews.id),
     manualReviewId: uuid('manual_review_id').references(() => qaReviews.id),
     scoreDelta: numeric('score_delta', { precision: 4, scale: 2 }),
@@ -1792,6 +1797,7 @@ export const qaCalibrationEntries = pgTable(
   },
   table => ({
     qaCalibrationEntriesSessionIdx: index('qa_calibration_entries_session_idx').on(table.sessionId),
+    qaCalibrationEntriesWorkspaceIdx: index('qa_calibration_entries_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -2199,6 +2205,7 @@ export const scheduleShifts = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     scheduleId: uuid('schedule_id').notNull().references(() => agentSchedules.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     dayOfWeek: integer('day_of_week').notNull(),
     startTime: time('start_time').notNull(),
     endTime: time('end_time').notNull(),
@@ -2207,6 +2214,7 @@ export const scheduleShifts = pgTable(
   },
   table => ({
     scheduleShiftsScheduleIdx: index('schedule_shifts_schedule_idx').on(table.scheduleId),
+    scheduleShiftsWorkspaceIdx: index('schedule_shifts_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -2427,6 +2435,7 @@ export const holidayEntries = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     calendarId: uuid('calendar_id').notNull().references(() => holidayCalendars.id),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     name: text('name').notNull(),
     date: date('date').notNull(),
     recurring: boolean('recurring').notNull().default(false),
@@ -2436,6 +2445,7 @@ export const holidayEntries = pgTable(
   },
   table => ({
     holidayEntriesCalendarIdx: index('holiday_entries_calendar_idx').on(table.calendarId),
+    holidayEntriesWorkspaceIdx: index('holiday_entries_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -2501,6 +2511,7 @@ export const dashboardWidgets = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     dashboardId: uuid('dashboard_id').notNull().references(() => dashboards.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     reportId: uuid('report_id').notNull().references(() => reports.id, { onDelete: 'cascade' }),
     gridX: integer('grid_x').notNull().default(0),
     gridY: integer('grid_y').notNull().default(0),
@@ -2512,6 +2523,7 @@ export const dashboardWidgets = pgTable(
   table => ({
     dashboardWidgetsDashboardIdx: index('dashboard_widgets_dashboard_idx').on(table.dashboardId),
     dashboardWidgetsReportIdx: index('dashboard_widgets_report_idx').on(table.reportId),
+    dashboardWidgetsWorkspaceIdx: index('dashboard_widgets_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -2545,6 +2557,7 @@ export const reportCache = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     reportId: uuid('report_id').notNull().references(() => reports.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     filterHash: varchar('filter_hash', { length: 64 }).notNull(),
     resultData: jsonb('result_data').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -2553,6 +2566,7 @@ export const reportCache = pgTable(
   table => ({
     reportCacheLookupIdx: index('report_cache_lookup_idx').on(table.reportId, table.filterHash),
     reportCacheExpiryIdx: index('report_cache_expiry_idx').on(table.expiresAt),
+    reportCacheWorkspaceIdx: index('report_cache_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -2730,12 +2744,14 @@ export const customRolePermissions = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     customRoleId: uuid('custom_role_id').notNull().references(() => customRoles.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
     permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
     granted: boolean('granted').notNull().default(true),
   },
   table => ({
     customRolePermissionsUniqueIdx: uniqueIndex('custom_role_permissions_unique_idx').on(table.customRoleId, table.permissionKey),
     customRolePermissionsRoleIdx: index('custom_role_permissions_role_idx').on(table.customRoleId),
+    customRolePermissionsWorkspaceIdx: index('custom_role_permissions_workspace_idx').on(table.workspaceId),
   }),
 );
 
@@ -3308,6 +3324,26 @@ export const ruleVersions = pgTable(
   },
   table => ({
     ruleVersionUniqueIdx: uniqueIndex('rule_versions_rule_version_idx').on(table.ruleId, table.versionNumber),
+  }),
+);
+
+export const connectorCapabilities = pgTable(
+  'connector_capabilities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    connector: text('connector').notNull(),
+    supportsRead: boolean('supports_read').notNull().default(true),
+    supportsIncrementalSync: boolean('supports_incremental_sync').notNull().default(false),
+    supportsUpdate: boolean('supports_update').notNull().default(false),
+    supportsReply: boolean('supports_reply').notNull().default(false),
+    supportsNote: boolean('supports_note').notNull().default(false),
+    supportsCreate: boolean('supports_create').notNull().default(false),
+    lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+  },
+  table => ({
+    connectorCapabilitiesUniqueIdx: uniqueIndex('connector_capabilities_unique_idx')
+      .on(table.workspaceId, table.connector),
   }),
 );
 

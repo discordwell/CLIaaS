@@ -2,7 +2,7 @@
  * Chatbot version management: publish, rollback, version history.
  */
 
-import { tryDb } from '../store-helpers';
+import { tryDb, withRls } from '../store-helpers';
 import { getChatbot, upsertChatbot } from './store';
 import type { ChatbotFlow, ChatbotVersion } from './types';
 
@@ -10,8 +10,9 @@ export async function publishChatbot(
   id: string,
   userId?: string,
   summary?: string,
+  workspaceId?: string,
 ): Promise<{ version: number } | null> {
-  const flow = await getChatbot(id);
+  const flow = await getChatbot(id, workspaceId);
   if (!flow) return null;
 
   const newVersion = (flow.version ?? 0) + 1;
@@ -22,6 +23,7 @@ export async function publishChatbot(
     // Save snapshot to chatbot_versions
     await db.insert(schema.chatbotVersions).values({
       chatbotId: id,
+      workspaceId: workspaceId ?? (await import('../store-helpers').then(m => m.getDefaultWorkspaceId(db, schema))),
       version: newVersion,
       flow: { nodes: flow.nodes, rootNodeId: flow.rootNodeId },
       summary: summary ?? null,
@@ -90,7 +92,27 @@ export async function rollbackChatbot(
   return getChatbot(id);
 }
 
-export async function getChatbotVersions(id: string): Promise<ChatbotVersion[]> {
+export async function getChatbotVersions(id: string, workspaceId?: string): Promise<ChatbotVersion[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq, desc } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(schema.chatbotVersions)
+        .where(eq(schema.chatbotVersions.chatbotId, id))
+        .orderBy(desc(schema.chatbotVersions.version));
+      return rows.map((r) => ({
+        id: r.id,
+        chatbotId: r.chatbotId,
+        version: r.version,
+        flow: r.flow as ChatbotVersion['flow'],
+        summary: r.summary ?? undefined,
+        createdBy: r.createdBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (!ctx) return [];
 

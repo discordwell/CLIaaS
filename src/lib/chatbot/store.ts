@@ -4,7 +4,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
-import { tryDb, getDefaultWorkspaceId } from '../store-helpers';
+import { tryDb, getDefaultWorkspaceId, withRls } from '../store-helpers';
 import type { ChatbotFlow } from './types';
 
 const CHATBOTS_FILE = 'chatbots.jsonl';
@@ -21,7 +21,14 @@ function writeAll(flows: ChatbotFlow[]): void {
 
 // ---- Public API ----
 
-export async function getChatbots(): Promise<ChatbotFlow[]> {
+export async function getChatbots(workspaceId?: string): Promise<ChatbotFlow[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.chatbots).orderBy(schema.chatbots.createdAt);
+      return rows.map(rowToFlow);
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -31,7 +38,15 @@ export async function getChatbots(): Promise<ChatbotFlow[]> {
   return readAll();
 }
 
-export async function getChatbot(id: string): Promise<ChatbotFlow | null> {
+export async function getChatbot(id: string, workspaceId?: string): Promise<ChatbotFlow | null> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db.select().from(schema.chatbots).where(eq(schema.chatbots.id, id));
+      return row ? rowToFlow(row) : null;
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -42,7 +57,19 @@ export async function getChatbot(id: string): Promise<ChatbotFlow | null> {
   return readAll().find((f) => f.id === id) ?? null;
 }
 
-export async function getActiveChatbot(): Promise<ChatbotFlow | null> {
+export async function getActiveChatbot(workspaceId?: string): Promise<ChatbotFlow | null> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(schema.chatbots)
+        .where(eq(schema.chatbots.enabled, true))
+        .limit(1);
+      return row ? rowToFlow(row) : null;
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -57,7 +84,37 @@ export async function getActiveChatbot(): Promise<ChatbotFlow | null> {
   return readAll().find((f) => f.enabled) ?? null;
 }
 
-export async function upsertChatbot(flow: ChatbotFlow): Promise<ChatbotFlow> {
+export async function upsertChatbot(flow: ChatbotFlow, workspaceId?: string): Promise<ChatbotFlow> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [existing] = await db
+        .select({ id: schema.chatbots.id })
+        .from(schema.chatbots)
+        .where(eq(schema.chatbots.id, flow.id));
+
+      const values = {
+        name: flow.name,
+        flow: { nodes: flow.nodes, rootNodeId: flow.rootNodeId },
+        enabled: flow.enabled,
+        greeting: flow.greeting ?? null,
+        version: flow.version ?? 1,
+        status: flow.status ?? 'published',
+        channels: flow.channels ?? ['web'],
+        description: flow.description ?? null,
+        updatedAt: new Date(),
+      };
+
+      if (existing) {
+        await db.update(schema.chatbots).set(values).where(eq(schema.chatbots.id, flow.id));
+      } else {
+        await db.insert(schema.chatbots).values({ id: flow.id, workspaceId, ...values });
+      }
+      return flow;
+    });
+    if (result !== null) return result;
+  }
+
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -106,7 +163,15 @@ export async function upsertChatbot(flow: ChatbotFlow): Promise<ChatbotFlow> {
   return flow;
 }
 
-export async function deleteChatbot(id: string): Promise<boolean> {
+export async function deleteChatbot(id: string, workspaceId?: string): Promise<boolean> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const r = await db.delete(schema.chatbots).where(eq(schema.chatbots.id, id));
+      return (r.rowCount ?? 0) > 0;
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;

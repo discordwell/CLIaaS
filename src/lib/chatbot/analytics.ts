@@ -2,9 +2,22 @@
  * Chatbot analytics: per-node metrics and session tracking.
  */
 
-import { tryDb } from '../store-helpers';
+import { tryDb, withRls } from '../store-helpers';
 
-export async function recordNodeEntry(chatbotId: string, nodeId: string): Promise<void> {
+export async function recordNodeEntry(chatbotId: string, nodeId: string, workspaceId?: string): Promise<void> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const today = new Date().toISOString().split('T')[0];
+      await db
+        .insert(schema.chatbotAnalytics)
+        .values({ chatbotId, workspaceId, nodeId, date: today, entries: 1, exits: 0, dropOffs: 0 })
+        .onConflictDoUpdate({
+          target: [schema.chatbotAnalytics.chatbotId, schema.chatbotAnalytics.nodeId, schema.chatbotAnalytics.date],
+          set: { entries: (await import('drizzle-orm')).sql`${schema.chatbotAnalytics.entries} + 1` },
+        });
+    });
+    if (result !== null) return;
+  }
   const ctx = await tryDb();
   if (!ctx) return;
 
@@ -13,7 +26,7 @@ export async function recordNodeEntry(chatbotId: string, nodeId: string): Promis
 
   await db
     .insert(schema.chatbotAnalytics)
-    .values({ chatbotId, nodeId, date: today, entries: 1, exits: 0, dropOffs: 0 })
+    .values({ chatbotId, workspaceId: workspaceId ?? '', nodeId, date: today, entries: 1, exits: 0, dropOffs: 0 })
     .onConflictDoUpdate({
       target: [schema.chatbotAnalytics.chatbotId, schema.chatbotAnalytics.nodeId, schema.chatbotAnalytics.date],
       set: {
@@ -22,7 +35,20 @@ export async function recordNodeEntry(chatbotId: string, nodeId: string): Promis
     });
 }
 
-export async function recordNodeExit(chatbotId: string, nodeId: string): Promise<void> {
+export async function recordNodeExit(chatbotId: string, nodeId: string, workspaceId?: string): Promise<void> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const today = new Date().toISOString().split('T')[0];
+      await db
+        .insert(schema.chatbotAnalytics)
+        .values({ chatbotId, workspaceId, nodeId, date: today, entries: 0, exits: 1, dropOffs: 0 })
+        .onConflictDoUpdate({
+          target: [schema.chatbotAnalytics.chatbotId, schema.chatbotAnalytics.nodeId, schema.chatbotAnalytics.date],
+          set: { exits: (await import('drizzle-orm')).sql`${schema.chatbotAnalytics.exits} + 1` },
+        });
+    });
+    if (result !== null) return;
+  }
   const ctx = await tryDb();
   if (!ctx) return;
 
@@ -31,7 +57,7 @@ export async function recordNodeExit(chatbotId: string, nodeId: string): Promise
 
   await db
     .insert(schema.chatbotAnalytics)
-    .values({ chatbotId, nodeId, date: today, entries: 0, exits: 1, dropOffs: 0 })
+    .values({ chatbotId, workspaceId: workspaceId ?? '', nodeId, date: today, entries: 0, exits: 1, dropOffs: 0 })
     .onConflictDoUpdate({
       target: [schema.chatbotAnalytics.chatbotId, schema.chatbotAnalytics.nodeId, schema.chatbotAnalytics.date],
       set: {
@@ -40,7 +66,20 @@ export async function recordNodeExit(chatbotId: string, nodeId: string): Promise
     });
 }
 
-export async function recordDropOff(chatbotId: string, nodeId: string): Promise<void> {
+export async function recordDropOff(chatbotId: string, nodeId: string, workspaceId?: string): Promise<void> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const today = new Date().toISOString().split('T')[0];
+      await db
+        .insert(schema.chatbotAnalytics)
+        .values({ chatbotId, workspaceId, nodeId, date: today, entries: 0, exits: 0, dropOffs: 1 })
+        .onConflictDoUpdate({
+          target: [schema.chatbotAnalytics.chatbotId, schema.chatbotAnalytics.nodeId, schema.chatbotAnalytics.date],
+          set: { dropOffs: (await import('drizzle-orm')).sql`${schema.chatbotAnalytics.dropOffs} + 1` },
+        });
+    });
+    if (result !== null) return;
+  }
   const ctx = await tryDb();
   if (!ctx) return;
 
@@ -49,7 +88,7 @@ export async function recordDropOff(chatbotId: string, nodeId: string): Promise<
 
   await db
     .insert(schema.chatbotAnalytics)
-    .values({ chatbotId, nodeId, date: today, entries: 0, exits: 0, dropOffs: 1 })
+    .values({ chatbotId, workspaceId: workspaceId ?? '', nodeId, date: today, entries: 0, exits: 0, dropOffs: 1 })
     .onConflictDoUpdate({
       target: [schema.chatbotAnalytics.chatbotId, schema.chatbotAnalytics.nodeId, schema.chatbotAnalytics.date],
       set: {
@@ -69,7 +108,22 @@ export interface FlowAnalyticsRow {
 export async function getFlowAnalytics(
   chatbotId: string,
   days = 30,
+  workspaceId?: string,
 ): Promise<FlowAnalyticsRow[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq, gte, and } = await import('drizzle-orm');
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      const sinceStr = since.toISOString().split('T')[0];
+      const rows = await db
+        .select()
+        .from(schema.chatbotAnalytics)
+        .where(and(eq(schema.chatbotAnalytics.chatbotId, chatbotId), gte(schema.chatbotAnalytics.date, sinceStr)));
+      return rows.map((r) => ({ nodeId: r.nodeId, date: r.date, entries: r.entries, exits: r.exits, dropOffs: r.dropOffs }));
+    });
+    if (result !== null) return result;
+  }
   const ctx = await tryDb();
   if (!ctx) return [];
 

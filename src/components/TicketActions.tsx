@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import CannedResponsePicker from "./CannedResponsePicker";
+import MacroButton from "./MacroButton";
 import MentionInput from "./MentionInput";
 import CollisionWarningModal from "./CollisionWarningModal";
 
@@ -183,7 +184,10 @@ export default function TicketActions({
     <>
       {/* STATUS & PRIORITY UPDATE */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-6">
-        <h3 className="text-lg font-bold">Update Ticket</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold">Update Ticket</h3>
+          <MacroButton ticketId={ticketId} />
+        </div>
         <div className="mt-4 flex flex-wrap items-end gap-4">
           <div>
             <label className="block font-mono text-xs font-bold uppercase text-zinc-500">
