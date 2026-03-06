@@ -4,25 +4,35 @@
 
 import type { PluginPermission } from './types';
 import { createLogger } from '../logger';
+import { isPrivateUrl, isObviouslyPrivateUrl } from './url-safety';
 
 const logger = createLogger('plugins:sdk');
 
-// SSRF prevention for plugin HTTP requests
-const BLOCKED_HOSTNAMES = new Set([
-  'localhost', '127.0.0.1', '0.0.0.0', '::1', 'metadata.google.internal',
-  '169.254.169.254',
-]);
+const FETCH_TIMEOUT_MS = 10_000;
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024; // 5 MB
 
-function assertSafeUrl(url: string): void {
-  try {
-    const parsed = new URL(url);
-    if (BLOCKED_HOSTNAMES.has(parsed.hostname)) {
-      throw new Error(`Blocked URL: ${parsed.hostname} is not allowed`);
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('Blocked URL:')) throw err;
-    throw new Error('Invalid URL');
+async function assertSafeUrl(url: string): Promise<void> {
+  // Fast sync check first
+  if (isObviouslyPrivateUrl(url)) {
+    throw new Error(`Blocked URL: target is not allowed`);
   }
+  // Full async check with DNS resolution
+  if (await isPrivateUrl(url)) {
+    throw new Error(`Blocked URL: target resolves to a private address`);
+  }
+}
+
+async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  // Check Content-Length header early
+  const cl = res.headers.get('content-length');
+  if (cl && parseInt(cl, 10) > MAX_RESPONSE_BYTES) {
+    throw new Error('Response too large');
+  }
+  return res;
 }
 
 export interface PluginSDK {
@@ -101,14 +111,14 @@ export function createPluginSDK(
     http: {
       async get(url: string, headers?: Record<string, string>) {
         if (!perms.has('oauth:external')) denied('oauth:external');
-        assertSafeUrl(url);
-        const res = await fetch(url, { headers });
+        await assertSafeUrl(url);
+        const res = await safeFetch(url, { headers });
         return res.json();
       },
       async post(url: string, body: unknown, headers?: Record<string, string>) {
         if (!perms.has('oauth:external')) denied('oauth:external');
-        assertSafeUrl(url);
-        const res = await fetch(url, {
+        await assertSafeUrl(url);
+        const res = await safeFetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
           body: JSON.stringify(body),

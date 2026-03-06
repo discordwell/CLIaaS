@@ -39,9 +39,8 @@ class AvailabilityTracker {
 
     if (!prev || prev.status !== status) {
       eventBus.emit({
-        type: 'ticket:updated', // reuse existing event type for SSE
+        type: 'agent:availability_changed',
         data: {
-          _routingEvent: 'agent:availability_changed',
           userId,
           userName,
           status,
@@ -75,9 +74,28 @@ class AvailabilityTracker {
     }
   }
 
-  isAvailableForRouting(userId: string): boolean {
+  isAvailableForRouting(userId: string, groupId?: string): boolean {
     const status = this.getAvailability(userId);
-    return status === 'online' || status === 'away';
+    if (status !== 'online' && status !== 'away') return false;
+
+    // If groupId is provided, check if the group's business hours are currently active
+    if (groupId) {
+      try {
+        const bhMod = require('../wfm/business-hours') as {
+          getBusinessHours: (id?: string) => Array<{ id: string; isDefault?: boolean }>;
+          isWithinBusinessHours: (config: unknown) => boolean;
+        };
+        const configs = bhMod.getBusinessHours();
+        const defaultConfig = configs.find(c => c.isDefault);
+        if (defaultConfig && !bhMod.isWithinBusinessHours(defaultConfig)) {
+          return false;
+        }
+      } catch {
+        // Business hours module not available — don't block routing
+      }
+    }
+
+    return true;
   }
 
   private cleanup(): void {

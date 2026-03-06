@@ -139,6 +139,8 @@ export const VALID_SCOPES = [
   'analytics:read',
   'webhooks:read',
   'webhooks:write',
+  'routing:read',
+  'routing:write',
   'admin:*',
   '*',
 ] as const;

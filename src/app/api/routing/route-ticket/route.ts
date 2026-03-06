@@ -3,9 +3,18 @@ import { routeTicket } from '@/lib/routing/engine';
 import { getDataProvider } from '@/lib/data-provider/index';
 import { availability } from '@/lib/routing/availability';
 import { eventBus } from '@/lib/realtime/events';
+import { requireScope } from '@/lib/api-auth';
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
+  const auth = await requireScope(request, 'routing:write');
+  if ('error' in auth) return auth.error;
+
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
   const ticketId = body.ticketId;
 
   if (!ticketId) {

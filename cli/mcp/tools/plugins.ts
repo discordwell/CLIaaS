@@ -64,7 +64,14 @@ export function registerPluginTools(server: McpServer): void {
         const listing = await getListing(pluginId);
         if (!listing) return errorResult(`Plugin "${pluginId}" not found in marketplace`);
 
-        const parsedConfig = config ? JSON.parse(config) : {};
+        let parsedConfig = {};
+        if (config) {
+          try {
+            parsedConfig = JSON.parse(config);
+          } catch {
+            return errorResult(`Invalid JSON in config parameter: ${config.slice(0, 100)}`);
+          }
+        }
         const installation = await installPlugin({
           pluginId,
           version: listing.manifest.version,
@@ -154,7 +161,13 @@ export function registerPluginTools(server: McpServer): void {
           return textResult({ pluginId, config: installation.config });
         }
 
-        const newConfig = { ...installation.config, ...JSON.parse(config) };
+        let configUpdate: Record<string, unknown>;
+        try {
+          configUpdate = JSON.parse(config);
+        } catch {
+          return errorResult(`Invalid JSON in config parameter: ${config.slice(0, 100)}`);
+        }
+        const newConfig = { ...installation.config, ...configUpdate };
         await updateInstallation(installation.id, { config: newConfig });
         return textResult({ message: `Config updated for "${pluginId}"`, config: newConfig });
       } catch (err) {

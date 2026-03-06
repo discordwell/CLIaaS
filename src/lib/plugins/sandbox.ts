@@ -5,25 +5,10 @@
 import { createContext, runInContext } from 'node:vm';
 import { createHmac } from 'node:crypto';
 import type { PluginHookContext, PluginHandlerResult } from './types';
+import { isPrivateUrl, isObviouslyPrivateUrl } from './url-safety';
 
 const SANDBOX_TIMEOUT_MS = 5000;
 const WEBHOOK_TIMEOUT_MS = 10000;
-
-// ---- SSRF prevention (reuse from webhooks.ts patterns) ----
-
-const BLOCKED_HOSTNAMES = new Set([
-  'localhost', '127.0.0.1', '0.0.0.0', '::1', 'metadata.google.internal',
-  '169.254.169.254',
-]);
-
-function isBlockedUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return BLOCKED_HOSTNAMES.has(parsed.hostname);
-  } catch {
-    return true;
-  }
-}
 
 // ---- Node VM Sandbox ----
 
@@ -80,10 +65,16 @@ export async function executeSandboxed(
       })()
     `;
 
-    const result = await runInContext(wrappedCode, sandbox, {
-      timeout: SANDBOX_TIMEOUT_MS,
-      filename: `plugin-${context.pluginId ?? 'unknown'}.js`,
-    });
+    // Promise.race to enforce timeout on async code (vm timeout only covers sync)
+    const result = await Promise.race([
+      runInContext(wrappedCode, sandbox, {
+        timeout: SANDBOX_TIMEOUT_MS,
+        filename: `plugin-${context.pluginId ?? 'unknown'}.js`,
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Plugin execution timed out')), SANDBOX_TIMEOUT_MS)
+      ),
+    ]);
 
     return { ok: true, data: result ?? {} };
   } catch (err) {
@@ -102,7 +93,7 @@ export async function executeWebhook(
   context: PluginHookContext,
   secret: string,
 ): Promise<PluginHandlerResult> {
-  if (isBlockedUrl(webhookUrl)) {
+  if (isObviouslyPrivateUrl(webhookUrl) || await isPrivateUrl(webhookUrl)) {
     return { ok: false, error: 'Webhook URL blocked by SSRF policy' };
   }
 

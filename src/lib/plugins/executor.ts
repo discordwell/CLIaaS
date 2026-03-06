@@ -8,7 +8,7 @@ import { getListing } from './marketplace-store';
 import { logExecution } from './execution-log';
 import { executeSandboxed, executeWebhook } from './sandbox';
 import { createPluginSDK } from './sdk-context';
-import type { PluginHookContext, PluginHandlerResult, PluginManifestV2 } from './types';
+import type { PluginHookContext, PluginHandlerResult } from './types';
 
 const logger = createLogger('plugins:executor');
 
@@ -49,7 +49,7 @@ export async function executePluginHook(
           result = await executeWebhook(
             manifest.webhookUrl,
             { ...context, pluginId: installation.pluginId, config: installation.config },
-            installation.config._webhookSecret as string ?? installation.pluginId,
+            (installation.config?._webhookSecret ?? installation.pluginId) as string,
           );
         } else if (manifest.runtime === 'node' && manifest.entrypoint) {
           // Sandboxed execution

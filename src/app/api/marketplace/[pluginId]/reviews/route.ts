@@ -57,8 +57,8 @@ export async function POST(
 
     const review = await upsertReview({
       listingId: listing.id,
-      workspaceId: 'default',
-      userId: 'system',
+      workspaceId: auth.user.workspaceId,
+      userId: auth.user.id,
       rating,
       title,
       body,

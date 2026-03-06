@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRoutingLog, getRoutingQueues } from '@/lib/routing/store';
 import { availability } from '@/lib/routing/availability';
+import { requireScope } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
+  const auth = await requireScope(request, 'routing:read');
+  if ('error' in auth) return auth.error;
+
   const { searchParams } = new URL(request.url);
   const workspaceId = searchParams.get('workspaceId') ?? undefined;
   const log = getRoutingLog(workspaceId, 1000);

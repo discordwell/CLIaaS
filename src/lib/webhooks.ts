@@ -221,14 +221,7 @@ async function computeHmacSignature(
 
 // ---- URL Validation (SSRF prevention) ----
 
-const BLOCKED_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]', '0.0.0.0'];
-const PRIVATE_IP_PATTERNS = [
-  /^10\./,             // 10.0.0.0/8
-  /^172\.(1[6-9]|2\d|3[01])\./,  // 172.16.0.0/12
-  /^192\.168\./,       // 192.168.0.0/16
-  /^169\.254\./,       // link-local
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // CGNAT 100.64.0.0/10
-];
+import { isObviouslyPrivateUrl } from './plugins/url-safety';
 
 export function validateWebhookUrl(url: string): { valid: boolean; error?: string } {
   let parsed: URL;
@@ -242,13 +235,7 @@ export function validateWebhookUrl(url: string): { valid: boolean; error?: strin
     return { valid: false, error: 'Webhook URLs must use HTTPS' };
   }
 
-  const hostname = parsed.hostname.toLowerCase();
-
-  if (BLOCKED_HOSTNAMES.includes(hostname)) {
-    return { valid: false, error: 'Webhook URLs cannot target localhost' };
-  }
-
-  if (PRIVATE_IP_PATTERNS.some((p) => p.test(hostname))) {
+  if (isObviouslyPrivateUrl(url)) {
     return { valid: false, error: 'Webhook URLs cannot target private/internal IPs' };
   }
 

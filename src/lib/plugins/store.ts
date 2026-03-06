@@ -101,10 +101,10 @@ export async function getEnabledInstallationsForHook(
     return rows.map(rowToInstallation);
   }
 
-  // JSONL path: filter installations by enabled + hook in manifest
+  // JSONL path: read listings once, then filter installations
   const all = readAllInstallations().filter(i => i.enabled);
+  const listings = readJsonlFile<{ pluginId: string; manifest: { hooks?: string[] } }>('marketplace-listings.jsonl');
   return all.filter(i => {
-    const listings = readJsonlFile<{ pluginId: string; manifest: { hooks?: string[] } }>('marketplace-listings.jsonl');
     const listing = listings.find(l => l.pluginId === i.pluginId);
     return listing?.manifest?.hooks?.includes(hookName);
   });
