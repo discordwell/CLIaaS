@@ -114,12 +114,12 @@ export default function SideConversationPanel({
         },
       );
       if (!res.ok) throw new Error("Failed to create");
-      setCreateState("success");
       setNewSubject("");
       setNewEmail("");
       setNewBody("");
       setSendEmail(false);
       setShowCreate(false);
+      setCreateState("idle");
       fetchConversations();
     } catch {
       setCreateState("error");
@@ -142,9 +142,9 @@ export default function SideConversationPanel({
         },
       );
       if (!res.ok) throw new Error("Failed to reply");
-      setReplyState("success");
       setReplyBody("");
       setReplySendEmail(false);
+      setReplyState("idle");
       loadMessages(expandedId);
     } catch {
       setReplyState("error");

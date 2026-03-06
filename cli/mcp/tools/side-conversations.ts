@@ -68,7 +68,7 @@ export function registerSideConversationTools(server: McpServer): void {
               body,
               externalEmail,
               authorId: 'mcp-agent',
-              workspaceId: '',
+              workspaceId: 'default',
               sendEmail,
             });
 

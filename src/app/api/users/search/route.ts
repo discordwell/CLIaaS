@@ -28,14 +28,18 @@ export async function GET(request: NextRequest) {
   try {
     const { db } = await import('@/db');
     const schema = await import('@/db/schema');
-    const { or, ilike, eq } = await import('drizzle-orm');
+    const { or, ilike, eq, and } = await import('drizzle-orm');
 
     const workspaceId = authResult.user?.workspaceId;
     if (!workspaceId) {
       return NextResponse.json({ users: [] });
     }
 
-    const rows = await db
+    // Escape ILIKE wildcards in user input
+    const escapeLike = (s: string) => s.replace(/[%_\\]/g, '\\$&');
+    const pattern = `%${escapeLike(q)}%`;
+
+    const filtered = await db
       .select({
         id: schema.users.id,
         name: schema.users.name,
@@ -43,23 +47,15 @@ export async function GET(request: NextRequest) {
       })
       .from(schema.users)
       .where(
-        eq(schema.users.workspaceId, workspaceId),
+        and(
+          eq(schema.users.workspaceId, workspaceId),
+          or(
+            ilike(schema.users.name, pattern),
+            ilike(schema.users.email, pattern),
+          ),
+        ),
       )
-      .limit(100);
-
-    // Filter by query in-app (ILIKE on both name and email)
-    const lowerQ = q.toLowerCase();
-    const filtered = rows
-      .filter((r: { name: string; email: string | null }) =>
-        r.name.toLowerCase().includes(lowerQ) ||
-        (r.email && r.email.toLowerCase().includes(lowerQ))
-      )
-      .slice(0, 10)
-      .map((r: { id: string; name: string; email: string | null }) => ({
-        id: r.id,
-        name: r.name,
-        email: r.email,
-      }));
+      .limit(10);
 
     return NextResponse.json({ users: filtered });
   } catch (err) {

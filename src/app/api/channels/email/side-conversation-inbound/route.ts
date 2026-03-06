@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('channels:email:side-conversation-inbound');
 
 export const dynamic = 'force-dynamic';
 
@@ -8,8 +11,23 @@ export const dynamic = 'force-dynamic';
  * Inbound email handler for side conversation replies.
  * Parses In-Reply-To header to match `sc-{conversationId}` pattern
  * and adds the reply to the correct side conversation.
+ *
+ * Auth: requires X-Webhook-Secret header matching INBOUND_EMAIL_SECRET env var.
  */
 export async function POST(request: NextRequest) {
+  // Authenticate inbound webhook via shared secret
+  const secret = process.env.INBOUND_EMAIL_SECRET;
+  if (secret) {
+    const provided = request.headers.get('x-webhook-secret') ?? '';
+    if (provided !== secret) {
+      logger.warn('Unauthorized inbound email attempt');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  } else {
+    logger.warn('INBOUND_EMAIL_SECRET not set — rejecting inbound email for safety');
+    return NextResponse.json({ error: 'Inbound email not configured' }, { status: 503 });
+  }
+
   const parsed = await parseJsonBody<{
     from: string;
     body: string;

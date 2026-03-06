@@ -31,7 +31,10 @@ export type WebhookEventType =
   | 'customer.merged'
   | 'time.entry_created'
   | 'side_conversation.created'
-  | 'side_conversation.replied';
+  | 'side_conversation.replied'
+  | 'ticket.merged'
+  | 'ticket.split'
+  | 'ticket.unmerged';
 
 export interface RetryPolicy {
   maxAttempts: number;

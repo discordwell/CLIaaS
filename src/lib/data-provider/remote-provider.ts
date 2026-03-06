@@ -30,6 +30,12 @@ import type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  TicketMergeParams,
+  TicketMergeResult,
+  TicketSplitParams,
+  TicketSplitResult,
+  TicketUnmergeParams,
+  MergeHistoryEntry,
 } from './types';
 
 export class RemoteProvider implements DataProvider {
@@ -311,5 +317,31 @@ export class RemoteProvider implements DataProvider {
       body: JSON.stringify(params),
     });
     return { id: body.article.id };
+  }
+
+  async mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult> {
+    return this.request<TicketMergeResult>('/api/tickets/merge', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async splitTicket(params: TicketSplitParams): Promise<TicketSplitResult> {
+    return this.request<TicketSplitResult>(`/api/tickets/${params.ticketId}/split`, {
+      method: 'POST',
+      body: JSON.stringify({ messageIds: params.messageIds, newSubject: params.newSubject, splitBy: params.splitBy }),
+    });
+  }
+
+  async unmergeTicket(params: TicketUnmergeParams): Promise<void> {
+    await this.request('/api/tickets/merge/undo', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async getMergeHistory(ticketId: string): Promise<MergeHistoryEntry[]> {
+    const body = await this.request<{ history: MergeHistoryEntry[] }>(`/api/tickets/${ticketId}/merge-history`);
+    return body.history;
   }
 }

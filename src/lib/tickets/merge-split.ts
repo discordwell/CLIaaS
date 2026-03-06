@@ -191,119 +191,121 @@ export async function splitTicket(
     throw new Error('At least one message must be selected for the split.');
   }
 
-  // Load source ticket
-  const [sourceTicket] = await db
-    .select()
-    .from(schema.tickets)
-    .where(and(
-      eq(schema.tickets.id, ticketId),
-      eq(schema.tickets.workspaceId, workspaceId),
-    ))
-    .limit(1);
+  return db.transaction(async (tx: typeof db) => {
+    // Load source ticket
+    const [sourceTicket] = await tx
+      .select()
+      .from(schema.tickets)
+      .where(and(
+        eq(schema.tickets.id, ticketId),
+        eq(schema.tickets.workspaceId, workspaceId),
+      ))
+      .limit(1);
 
-  if (!sourceTicket) throw new Error('Source ticket not found.');
+    if (!sourceTicket) throw new Error('Source ticket not found.');
 
-  // Get source conversation
-  const [sourceConv] = await db
-    .select({ id: schema.conversations.id })
-    .from(schema.conversations)
-    .where(eq(schema.conversations.ticketId, ticketId))
-    .limit(1);
+    // Get source conversation
+    const [sourceConv] = await tx
+      .select({ id: schema.conversations.id })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.ticketId, ticketId))
+      .limit(1);
 
-  if (!sourceConv) throw new Error('Source ticket has no conversation.');
+    if (!sourceConv) throw new Error('Source ticket has no conversation.');
 
-  // Validate messages belong to this conversation
-  const sourceMessages = await db
-    .select({ id: schema.messages.id })
-    .from(schema.messages)
-    .where(eq(schema.messages.conversationId, sourceConv.id));
+    // Validate messages belong to this conversation
+    const sourceMessages = await tx
+      .select({ id: schema.messages.id })
+      .from(schema.messages)
+      .where(eq(schema.messages.conversationId, sourceConv.id));
 
-  const sourceMessageIds = new Set(sourceMessages.map((m: { id: string }) => m.id));
-  for (const msgId of messageIds) {
-    if (!sourceMessageIds.has(msgId)) {
-      throw new Error(`Message ${msgId} does not belong to ticket ${ticketId}.`);
+    const sourceMessageIds = new Set(sourceMessages.map((m: { id: string }) => m.id));
+    for (const msgId of messageIds) {
+      if (!sourceMessageIds.has(msgId)) {
+        throw new Error(`Message ${msgId} does not belong to ticket ${ticketId}.`);
+      }
     }
-  }
 
-  // Must leave at least one message in the source
-  const remainingCount = sourceMessages.length - messageIds.length;
-  if (remainingCount < 1) {
-    throw new Error('At least one message must remain in the source ticket.');
-  }
+    // Must leave at least one message in the source
+    const remainingCount = sourceMessages.length - messageIds.length;
+    if (remainingCount < 1) {
+      throw new Error('At least one message must remain in the source ticket.');
+    }
 
-  // Create new ticket
-  const subject = newSubject ?? `Split from: ${sourceTicket.subject}`;
-  const [newTicket] = await db
-    .insert(schema.tickets)
-    .values({
-      workspaceId,
-      tenantId: sourceTicket.tenantId,
-      requesterId: sourceTicket.requesterId,
-      subject,
-      description: '',
-      status: 'open',
-      priority: sourceTicket.priority,
-      source: sourceTicket.source,
-      tags: sourceTicket.tags ?? [],
-      splitFromTicketId: ticketId,
+    // Create new ticket
+    const subject = newSubject ?? `Split from: ${sourceTicket.subject}`;
+    const [newTicket] = await tx
+      .insert(schema.tickets)
+      .values({
+        workspaceId,
+        tenantId: sourceTicket.tenantId,
+        requesterId: sourceTicket.requesterId,
+        subject,
+        description: '',
+        status: 'open',
+        priority: sourceTicket.priority,
+        source: sourceTicket.source,
+        tags: sourceTicket.tags ?? [],
+        splitFromTicketId: ticketId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning({ id: schema.tickets.id });
+
+    // Create conversation for new ticket
+    const [newConv] = await tx
+      .insert(schema.conversations)
+      .values({
+        ticketId: newTicket.id,
+        workspaceId,
+        channelType: 'email',
+        startedAt: new Date(),
+        lastActivityAt: new Date(),
+      })
+      .returning({ id: schema.conversations.id });
+
+    // Move selected messages to new conversation
+    await tx
+      .update(schema.messages)
+      .set({ conversationId: newConv.id })
+      .where(inArray(schema.messages.id, messageIds));
+
+    // Write split log
+    const [splitLog] = await tx
+      .insert(schema.ticketSplitLog)
+      .values({
+        workspaceId,
+        sourceTicketId: ticketId,
+        newTicketId: newTicket.id,
+        splitBy: splitBy ?? null,
+        movedMessageIds: messageIds,
+      })
+      .returning({ id: schema.ticketSplitLog.id });
+
+    // Add system messages
+    await tx.insert(schema.messages).values({
+      conversationId: sourceConv.id,
+      authorType: 'system',
+      body: `${messageIds.length} message(s) split into new ticket "${subject}".`,
+      visibility: 'public',
       createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .returning({ id: schema.tickets.id });
+    });
 
-  // Create conversation for new ticket
-  const [newConv] = await db
-    .insert(schema.conversations)
-    .values({
-      ticketId: newTicket.id,
-      workspaceId,
-      channelType: 'email',
-      startedAt: new Date(),
-      lastActivityAt: new Date(),
-    })
-    .returning({ id: schema.conversations.id });
+    await tx.insert(schema.messages).values({
+      conversationId: newConv.id,
+      authorType: 'system',
+      body: `This ticket was split from "${sourceTicket.subject}". ${messageIds.length} message(s) moved.`,
+      visibility: 'public',
+      createdAt: new Date(),
+    });
 
-  // Move selected messages to new conversation
-  await db
-    .update(schema.messages)
-    .set({ conversationId: newConv.id })
-    .where(inArray(schema.messages.id, messageIds));
-
-  // Write split log
-  const [splitLog] = await db
-    .insert(schema.ticketSplitLog)
-    .values({
-      workspaceId,
+    return {
       sourceTicketId: ticketId,
       newTicketId: newTicket.id,
-      splitBy: splitBy ?? null,
-      movedMessageIds: messageIds,
-    })
-    .returning({ id: schema.ticketSplitLog.id });
-
-  // Add system messages
-  await db.insert(schema.messages).values({
-    conversationId: sourceConv.id,
-    authorType: 'system',
-    body: `${messageIds.length} message(s) split into new ticket "${subject}".`,
-    visibility: 'public',
-    createdAt: new Date(),
+      movedMessageCount: messageIds.length,
+      splitLogId: splitLog.id,
+    };
   });
-
-  await db.insert(schema.messages).values({
-    conversationId: newConv.id,
-    authorType: 'system',
-    body: `This ticket was split from "${sourceTicket.subject}". ${messageIds.length} message(s) moved.`,
-    visibility: 'public',
-    createdAt: new Date(),
-  });
-
-  return {
-    sourceTicketId: ticketId,
-    newTicketId: newTicket.id,
-    movedMessageCount: messageIds.length,
-    splitLogId: splitLog.id,
-  };
 }
 
 export async function unmergeTicket(
@@ -313,7 +315,7 @@ export async function unmergeTicket(
   const { db, schema, workspaceId } = ctx;
   const { mergeLogId, unmergedBy } = params;
 
-  // Load merge log entry
+  // Load and validate outside transaction (read-only checks)
   const [logEntry] = await db
     .select()
     .from(schema.ticketMergeLog)
@@ -345,62 +347,64 @@ export async function unmergeTicket(
     description: string | null;
   };
 
-  // Get the merged ticket's conversation
-  const [mergedConv] = await db
-    .select({ id: schema.conversations.id })
-    .from(schema.conversations)
-    .where(eq(schema.conversations.ticketId, logEntry.mergedTicketId))
-    .limit(1);
+  await db.transaction(async (tx: typeof db) => {
+    // Get the merged ticket's conversation
+    const [mergedConv] = await tx
+      .select({ id: schema.conversations.id })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.ticketId, logEntry.mergedTicketId))
+      .limit(1);
 
-  if (!mergedConv) throw new Error('Merged ticket conversation not found.');
+    if (!mergedConv) throw new Error('Merged ticket conversation not found.');
 
-  // Move messages back
-  const movedIds: string[] = logEntry.movedMessageIds ?? [];
-  if (movedIds.length > 0) {
-    await db
-      .update(schema.messages)
-      .set({ conversationId: mergedConv.id })
-      .where(inArray(schema.messages.id, movedIds));
-  }
+    // Move messages back
+    const movedIds: string[] = logEntry.movedMessageIds ?? [];
+    if (movedIds.length > 0) {
+      await tx
+        .update(schema.messages)
+        .set({ conversationId: mergedConv.id })
+        .where(inArray(schema.messages.id, movedIds));
+    }
 
-  // Restore the merged ticket from snapshot
-  await db
-    .update(schema.tickets)
-    .set({
-      mergedIntoTicketId: null,
-      status: snapshot.status,
-      priority: snapshot.priority,
-      tags: snapshot.tags,
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.tickets.id, logEntry.mergedTicketId));
+    // Restore the merged ticket from snapshot
+    await tx
+      .update(schema.tickets)
+      .set({
+        mergedIntoTicketId: null,
+        status: snapshot.status,
+        priority: snapshot.priority,
+        tags: snapshot.tags,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.tickets.id, logEntry.mergedTicketId));
 
-  // Mark merge log as undone
-  await db
-    .update(schema.ticketMergeLog)
-    .set({
-      undone: true,
-      undoneAt: new Date(),
-      undoneBy: unmergedBy ?? null,
-    })
-    .where(eq(schema.ticketMergeLog.id, mergeLogId));
+    // Mark merge log as undone
+    await tx
+      .update(schema.ticketMergeLog)
+      .set({
+        undone: true,
+        undoneAt: new Date(),
+        undoneBy: unmergedBy ?? null,
+      })
+      .where(eq(schema.ticketMergeLog.id, mergeLogId));
 
-  // Add system message to primary
-  const [primaryConv] = await db
-    .select({ id: schema.conversations.id })
-    .from(schema.conversations)
-    .where(eq(schema.conversations.ticketId, logEntry.primaryTicketId))
-    .limit(1);
+    // Add system message to primary
+    const [primaryConv] = await tx
+      .select({ id: schema.conversations.id })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.ticketId, logEntry.primaryTicketId))
+      .limit(1);
 
-  if (primaryConv) {
-    await db.insert(schema.messages).values({
-      conversationId: primaryConv.id,
-      authorType: 'system',
-      body: `Merge of ticket "${snapshot.subject}" was undone. ${movedIds.length} message(s) moved back.`,
-      visibility: 'public',
-      createdAt: new Date(),
-    });
-  }
+    if (primaryConv) {
+      await tx.insert(schema.messages).values({
+        conversationId: primaryConv.id,
+        authorType: 'system',
+        body: `Merge of ticket "${snapshot.subject}" was undone. ${movedIds.length} message(s) moved back.`,
+        visibility: 'public',
+        createdAt: new Date(),
+      });
+    }
+  });
 }
 
 export async function getMergeHistory(
@@ -410,46 +414,52 @@ export async function getMergeHistory(
   const { db, schema, workspaceId } = ctx;
   const entries: MergeHistoryEntry[] = [];
 
-  // Get merge log entries where this ticket is primary or merged
+  // Filter in SQL: ticket is primary OR merged
   const mergeRows = await db
     .select()
     .from(schema.ticketMergeLog)
     .where(and(
       eq(schema.ticketMergeLog.workspaceId, workspaceId),
+      or(
+        eq(schema.ticketMergeLog.primaryTicketId, ticketId),
+        eq(schema.ticketMergeLog.mergedTicketId, ticketId),
+      ),
     ));
 
   for (const row of mergeRows) {
-    if (row.primaryTicketId === ticketId || row.mergedTicketId === ticketId) {
-      entries.push({
-        id: row.id,
-        type: 'merge',
-        primaryTicketId: row.primaryTicketId,
-        mergedTicketId: row.mergedTicketId,
-        movedMessageIds: row.movedMessageIds ?? [],
-        undone: row.undone,
-        createdAt: new Date(row.createdAt).toISOString(),
-      });
-    }
+    entries.push({
+      id: row.id,
+      type: 'merge',
+      primaryTicketId: row.primaryTicketId,
+      mergedTicketId: row.mergedTicketId,
+      movedMessageIds: row.movedMessageIds ?? [],
+      undone: row.undone,
+      createdAt: new Date(row.createdAt).toISOString(),
+    });
   }
 
-  // Get split log entries where this ticket is source or new
+  // Filter in SQL: ticket is source OR new
   const splitRows = await db
     .select()
     .from(schema.ticketSplitLog)
-    .where(eq(schema.ticketSplitLog.workspaceId, workspaceId));
+    .where(and(
+      eq(schema.ticketSplitLog.workspaceId, workspaceId),
+      or(
+        eq(schema.ticketSplitLog.sourceTicketId, ticketId),
+        eq(schema.ticketSplitLog.newTicketId, ticketId),
+      ),
+    ));
 
   for (const row of splitRows) {
-    if (row.sourceTicketId === ticketId || row.newTicketId === ticketId) {
-      entries.push({
-        id: row.id,
-        type: 'split',
-        sourceTicketId: row.sourceTicketId,
-        newTicketId: row.newTicketId,
-        movedMessageIds: row.movedMessageIds ?? [],
-        undone: false,
-        createdAt: new Date(row.createdAt).toISOString(),
-      });
-    }
+    entries.push({
+      id: row.id,
+      type: 'split',
+      sourceTicketId: row.sourceTicketId,
+      newTicketId: row.newTicketId,
+      movedMessageIds: row.movedMessageIds ?? [],
+      undone: false,
+      createdAt: new Date(row.createdAt).toISOString(),
+    });
   }
 
   entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

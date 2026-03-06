@@ -1,5 +1,38 @@
 # Session Summaries
 
+## 2026-03-06T10:30Z — Session 89: Code Review Fixes for Plan 09
+- **Fixed 8 issues** from code review of Internal Notes & Side Conversations:
+  1. CRITICAL: Added auth via `X-Webhook-Secret` header (requires `INBOUND_EMAIL_SECRET` env var) to inbound email endpoint. Rejects if not configured.
+  2. MEDIUM: Escaped ILIKE wildcards (`%`, `_`, `\`) in `mentions.ts` `resolveMentions`
+  3. MEDIUM: HTML-escaped side conversation email bodies in `side-conversations.ts` (both create + reply)
+  4. MEDIUM: Replaced JS-side filtering with proper ILIKE DB query in user search endpoint
+  5. MEDIUM: Wrapped side conversation create (conversation + message inserts) in `db.transaction`
+  6. LOW: Changed empty `workspaceId: ''` to `'default'` in MCP side_conversation_create
+  7. LOW: Added mention resolution + notification dispatch to MCP `ticket_note` using the `mentions` param
+  8. LOW: Reset `createState`/`replyState` to `idle` after success in SideConversationPanel
+- All 17 internal-notes tests pass. No new TS errors introduced.
+
+## 2026-03-06T09:45Z — Session 88: Test Fixes, Code Review & Deploy
+- **Test fixes**: 19 failures → 0 (in isolation), remaining ~8 are parallel JSONL contamination (pre-existing)
+  - EventSource mock for SSE in TicketActions, AppNav, AppNavWrapper tests
+  - TicketActions: Reply/Note toggle (was checkbox), multiple "Reply" elements, fetch mock for CannedResponsePicker
+  - MCP server test: 81→112 tools
+  - Remote-provider: lazy init means constructor doesn't throw, test checks first operation instead
+  - Sidebar layout: STRIP_START_Y 194→180
+  - Routing strategies: unique queue ID to prevent parallel contamination
+- **Build**: passes (3 warnings: ioredis, remote-provider cli/config.js)
+- **Committed**: `1ad0386` — internal notes, side conversations, @mentions, notifications + test fixes
+- **Deployed** to cliaas.com
+
+## 2026-03-06T08:30Z — Session 87: WASM Agent Harness for C++ Red Alert Engine
+- **Created** `agent_harness.cpp` (508 lines): 3 EMSCRIPTEN_KEEPALIVE exports — `agent_get_state` (JSON state serializer), `agent_command` (hand-rolled JSON parser + command processor), `agent_step` (combined command+tick+state). Static 64KB buffer, ID encoding `(RTTI<<16)|heap_index`.
+- **Modified** `CMakeLists.txt`: Added source file + 3 exports to EXPORTED_FUNCTIONS
+- **Modified** `original.html`: JS bridge via `Module.ccall` — `__agentState()`, `__agentCommand()`, `__agentStep()`, `__agentReady` flag
+- **Fixes during wet test**: (1) Cache-bust version bump for stale WASM, (2) `allocateUTF8` → `Module.ccall` for string marshaling, (3) `agent_step` returning Promise — force `g_autoplay_mode=1` + `{async:true}` ccall, (4) `buf_cat` truncation bug (found in code review)
+- **Git workaround**: Removed nested `.git` in CnC_and_Red_Alert, updated `.gitignore` to `/**` glob with negation rules for custom files
+- **Verified**: All 3 exports callable from JS, state/command JSON round-trips work at menu screen. Full gameplay test deferred (Chrome extension instability with autoplay tabs).
+- **Deployed** to cliaas.com, committed as `e5e4065`
+
 ## 2026-03-06T05:20Z — Session 86: Ticket Merge & Split (Plan 10)
 - **Migration**: `0009_ticket_merge_split.sql` — 2 ALTER TABLE (merged_into_ticket_id, split_from_ticket_id), 2 new tables (ticket_merge_log, ticket_split_log), partial indexes, RLS
 - **Drizzle schema**: Added mergedIntoTicketId + splitFromTicketId to tickets, ticketMergeLog + ticketSplitLog table defs

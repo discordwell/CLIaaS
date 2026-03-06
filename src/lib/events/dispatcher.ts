@@ -36,7 +36,10 @@ export type CanonicalEvent =
   | 'customer.merged'
   | 'time.entry_created'
   | 'side_conversation.created'
-  | 'side_conversation.replied';
+  | 'side_conversation.replied'
+  | 'ticket.merged'
+  | 'ticket.split'
+  | 'ticket.unmerged';
 
 // Compile-time check: every CanonicalEvent must be assignable to WebhookEventType
 const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
@@ -61,6 +64,9 @@ const _typeCheck: Record<CanonicalEvent, WebhookEventType> = {
   'time.entry_created': 'time.entry_created',
   'side_conversation.created': 'side_conversation.created',
   'side_conversation.replied': 'side_conversation.replied',
+  'ticket.merged': 'ticket.merged',
+  'ticket.split': 'ticket.split',
+  'ticket.unmerged': 'ticket.unmerged',
 };
 void _typeCheck;
 
@@ -73,6 +79,9 @@ const SSE_EVENT_MAP: Partial<Record<CanonicalEvent, SSEEventType>> = {
   'message.created': 'ticket:reply',
   'side_conversation.created': 'side_conversation:created',
   'side_conversation.replied': 'side_conversation:replied',
+  'ticket.merged': 'ticket:merged',
+  'ticket.split': 'ticket:split',
+  'ticket.unmerged': 'ticket:unmerged',
 };
 
 // ---- Automation event type mapping ----

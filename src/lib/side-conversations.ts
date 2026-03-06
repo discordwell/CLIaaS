@@ -40,35 +40,38 @@ export async function createSideConversation(params: {
   const { db } = await import('@/db');
   const schema = await import('@/db/schema');
 
-  // Create the side conversation
-  const [conv] = await db
-    .insert(schema.conversations)
-    .values({
-      ticketId: params.ticketId,
-      workspaceId: params.workspaceId,
-      channelType: 'email',
-      kind: 'side' as const,
-      subject: params.subject,
-      externalEmail: params.externalEmail ?? null,
-      createdById: params.authorId,
-      status: 'open' as const,
-      startedAt: new Date(),
-      lastActivityAt: new Date(),
-    })
-    .returning({ id: schema.conversations.id });
+  // Create conversation + first message in a transaction
+  const { conv, msg } = await db.transaction(async (tx) => {
+    const [convRow] = await tx
+      .insert(schema.conversations)
+      .values({
+        ticketId: params.ticketId,
+        workspaceId: params.workspaceId,
+        channelType: 'email',
+        kind: 'side' as const,
+        subject: params.subject,
+        externalEmail: params.externalEmail ?? null,
+        createdById: params.authorId,
+        status: 'open' as const,
+        startedAt: new Date(),
+        lastActivityAt: new Date(),
+      })
+      .returning({ id: schema.conversations.id });
 
-  // Add the first message
-  const [msg] = await db
-    .insert(schema.messages)
-    .values({
-      conversationId: conv.id,
-      workspaceId: params.workspaceId,
-      authorType: 'user' as const,
-      authorId: params.authorId,
-      body: params.body,
-      visibility: 'internal' as const,
-    })
-    .returning({ id: schema.messages.id });
+    const [msgRow] = await tx
+      .insert(schema.messages)
+      .values({
+        conversationId: convRow.id,
+        workspaceId: params.workspaceId,
+        authorType: 'user' as const,
+        authorId: params.authorId,
+        body: params.body,
+        visibility: 'internal' as const,
+      })
+      .returning({ id: schema.messages.id });
+
+    return { conv: convRow, msg: msgRow };
+  });
 
   // Send email if requested and external email provided
   if (params.sendEmail && params.externalEmail) {
@@ -77,11 +80,15 @@ export async function createSideConversation(params: {
       const domain = process.env.NEXT_PUBLIC_BASE_URL?.replace(/https?:\/\//, '') || 'cliaas.com';
       const threadId = `<sc-${conv.id}@${domain}>`;
 
+      // Escape HTML to prevent injection
+      const escapeHtml = (s: string) =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
       await sendEmail({
         to: params.externalEmail,
         subject: params.subject,
         text: params.body,
-        html: `<div>${params.body.replace(/\n/g, '<br>')}</div>`,
+        html: `<div>${escapeHtml(params.body).replace(/\n/g, '<br>')}</div>`,
         inReplyTo: threadId,
         references: threadId,
       });
@@ -139,11 +146,14 @@ export async function replySideConversation(params: {
       const domain = process.env.NEXT_PUBLIC_BASE_URL?.replace(/https?:\/\//, '') || 'cliaas.com';
       const threadId = `<sc-${conv.id}@${domain}>`;
 
+      const escapeHtml = (s: string) =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
       await sendEmail({
         to: conv.externalEmail,
         subject: conv.subject ? `Re: ${conv.subject}` : 'Re: Side conversation',
         text: params.body,
-        html: `<div>${params.body.replace(/\n/g, '<br>')}</div>`,
+        html: `<div>${escapeHtml(params.body).replace(/\n/g, '<br>')}</div>`,
         inReplyTo: threadId,
         references: threadId,
       });

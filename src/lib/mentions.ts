@@ -31,16 +31,19 @@ export async function resolveMentions(
     const schema = await import('@/db/schema');
     const { eq, or, ilike } = await import('drizzle-orm');
 
+    // Escape ILIKE wildcard characters in user input
+    const escapeLike = (s: string) => s.replace(/[%_\\]/g, '\\$&');
+
     const conditions = mentions.flatMap((m) => {
       // If it looks like an email, match on email
       if (m.includes('@')) {
-        return [ilike(schema.users.email, m)];
+        return [ilike(schema.users.email, escapeLike(m))];
       }
       // Otherwise match name (dot → space) or email prefix
-      const nameLike = m.replace(/\./g, ' ');
+      const nameLike = escapeLike(m.replace(/\./g, ' '));
       return [
         ilike(schema.users.name, `%${nameLike}%`),
-        ilike(schema.users.email, `${m}%`),
+        ilike(schema.users.email, `${escapeLike(m)}%`),
       ];
     });
 

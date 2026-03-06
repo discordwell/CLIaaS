@@ -281,8 +281,10 @@ Return ONLY the JSON object, no other text.`;
           const mergeResults = [];
 
           for (const group of result.groups) {
-            // Sort by ticket ID as proxy for age (oldest first)
-            const sorted = [...group.tickets].sort((a, b) => a.id.localeCompare(b.id));
+            // Sort by creation date (oldest first)
+            const sorted = [...group.tickets].sort((a, b) =>
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            );
             const primaryId = sorted[0].id;
             const mergedIds = sorted.slice(1).map(t => t.id);
 

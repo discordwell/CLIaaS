@@ -216,14 +216,33 @@ export function registerActionTools(server: McpServer): void {
           try {
             const { getDataProvider } = await import('@/lib/data-provider/index.js');
             const provider = await getDataProvider(dir);
-            const result = await provider.createMessage({
+            const createResult = await provider.createMessage({
               ticketId: ticket.id,
               body,
               authorType: 'user',
               visibility: 'internal',
             });
-            messageId = result.id;
+            messageId = createResult.id;
           } catch { /* DB unavailable — note persisted in log only */ }
+
+          // Resolve and dispatch mention notifications if mentions provided
+          if (mentions && mentions.length > 0 && messageId) {
+            try {
+              const { resolveMentions } = await import('@/lib/mentions.js');
+              const { dispatchMentionNotifications } = await import('@/lib/notifications.js');
+              const resolved = await resolveMentions(mentions, 'default');
+              if (resolved.length > 0) {
+                await dispatchMentionNotifications({
+                  messageId,
+                  ticketId: ticket.id,
+                  mentionedUserIds: resolved.map((u) => u.id),
+                  authorName: 'MCP Agent',
+                  notePreview: body.slice(0, 200),
+                  workspaceId: 'default',
+                });
+              }
+            } catch { /* mention dispatch failed — non-critical */ }
+          }
 
           recordMCPAction({
             tool: 'ticket_note', action: 'add_note',
