@@ -235,7 +235,7 @@ export function registerSyncCommands(program: Command): void {
       }
 
       const all = getAllCapabilities();
-      const rows = Object.entries(all).map(([name, cap]: [string, any]) => ({
+      const rows = Object.entries(all).map(([name, cap]) => ({
         connector: name,
         tier: getSyncTier(cap),
         ...cap,

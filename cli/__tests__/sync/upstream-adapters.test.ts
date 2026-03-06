@@ -329,6 +329,16 @@ describe('Kayako Classic adapter', () => {
     expect(adapter.supportsReply).toBe(true);
   });
 
+  it('updates a ticket with status/priority mapping', async () => {
+    await adapter.updateTicket('55', { status: 'open', priority: 'high' });
+    const { kayakoClassicUpdateTicket } = await import('../../connectors/kayako-classic.js');
+    expect(kayakoClassicUpdateTicket).toHaveBeenCalledWith(
+      { domain: 'classic.kayako.com', apiKey: 'key', secretKey: 'sec' },
+      55,
+      { statusid: 1, priorityid: 2 },
+    );
+  });
+
   it('posts a reply', async () => {
     await adapter.postReply('55', { body: 'Classic reply' });
     const { kayakoClassicPostReply } = await import('../../connectors/kayako-classic.js');

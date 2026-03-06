@@ -74,6 +74,7 @@ export default function ConnectorCard({ connector }: { connector: ConnectorMeta 
     }
   };
 
+  const badge = capabilityBadge(connector);
   const envKeys = Object.keys(connector.envVars);
   const allSet = envKeys.every(k => !!connector.envVars[k]);
 
@@ -82,8 +83,8 @@ export default function ConnectorCard({ connector }: { connector: ConnectorMeta 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <p className="text-lg font-bold">{connector.name}</p>
-          <span className={`${capabilityBadge(connector).color} px-2 py-0.5 font-mono text-xs font-bold uppercase`}>
-            {capabilityBadge(connector).label}
+          <span className={`${badge.color} px-2 py-0.5 font-mono text-xs font-bold uppercase`}>
+            {badge.label}
           </span>
         </div>
         <span

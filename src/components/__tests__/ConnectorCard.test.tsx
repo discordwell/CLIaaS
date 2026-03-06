@@ -21,6 +21,7 @@ function makeConnector(overrides: Partial<ConnectorMeta> = {}): ConnectorMeta {
     customerCount: 10,
     kbArticleCount: 5,
     lastExport: '2026-01-15T10:30:00Z',
+    capabilities: { read: true, incrementalSync: true, update: true, reply: true, note: true, create: true },
     ...overrides,
   };
 }
@@ -33,6 +34,18 @@ describe('ConnectorCard', () => {
   it('renders the connector name', () => {
     render(<ConnectorCard connector={makeConnector()} />);
     expect(screen.getByText('Zendesk')).toBeInTheDocument();
+  });
+
+  it('shows "full sync" badge for full-capability connector', () => {
+    render(<ConnectorCard connector={makeConnector()} />);
+    expect(screen.getByText('full sync')).toBeInTheDocument();
+  });
+
+  it('shows "read + write" badge for partial-capability connector', () => {
+    render(<ConnectorCard connector={makeConnector({
+      capabilities: { read: true, incrementalSync: false, update: false, reply: true, note: true, create: true },
+    })} />);
+    expect(screen.getByText(/read \+ write/)).toBeInTheDocument();
   });
 
   it('shows "configured" badge when configured', () => {

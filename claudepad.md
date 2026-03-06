@@ -1,5 +1,16 @@
 # Session Summaries
 
+## 2026-03-06T05:02Z — Session 81: Connector Write-Depth (Plan 06, Phase 1)
+- **Kayako upstream adapter**: New `cli/sync/upstream-adapters/kayako.ts` wrapping existing kayakoUpdateCase/PostReply/PostNote/CreateCase
+- **Kayako Classic upstream adapter**: New `cli/sync/upstream-adapters/kayako-classic.ts` with status/priority string→numeric ID mapping, KAYAKO_CLASSIC_DEPARTMENT_ID env var required for createTicket
+- **HelpCrunch customerId fix**: Added `helpcrunchSearchCustomers()` to connector, adapter now resolves requester email to customerId instead of hardcoding 0
+- **HubSpot update+reply**: Added `hubspotUpdateTicket()` (PATCH ticket properties) and `hubspotPostReply()` (create email engagement + associate) to connector; adapter now supports both
+- **Capability matrix**: New `cli/sync/capabilities.ts` with static ConnectorCapability map for all 10 connectors, getSyncTier() classification
+- **MCP tool**: `connector_capabilities` in sync tools, CLI `cliaas sync capabilities` command, GET `/api/connectors/capabilities` endpoint
+- **Dynamic UI badges**: ConnectorCard shows "full sync" (green), "read + write" (blue), or "read only" (gray) based on actual capabilities instead of hardcoded "bidirectional"
+- **Tests**: 67 tests across 3 files (46 upstream adapter tests, 9 capability tests, 12 ConnectorCard tests)
+- Code review caught Kayako Classic NaN bug (string status→Number("open")=NaN), fixed with proper mapping tables
+
 ## 2026-03-06T06:30Z — Session 80: Marketplace & Plugin Platform
 - **9-phase implementation** replacing demo-grade plugin system with production plugin platform:
   1. **Types & Schema**: `src/lib/plugins/types.ts` (PluginManifestV2, 24 hooks, 11 permissions, node|webhook runtime), 5 DB tables (marketplace_listings, plugin_installations, plugin_hook_registrations, plugin_execution_logs, plugin_reviews), migration 0006
