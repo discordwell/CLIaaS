@@ -151,7 +151,7 @@ function buildCandidates(
     candidates.push({
       userId: agent.userId,
       userName: agent.userName,
-      score: Math.max(0, Math.min(1, score * bizHoursFactor + capPenalty + slaBoost)),
+      score: Math.max(0, Math.min(1, score * bizHoursFactor + capPenalty + (score > 0 ? slaBoost : 0))),
       matchedSkills,
       load,
       capacity,
@@ -285,7 +285,9 @@ export async function routeTicket(
     const allQueues = getRoutingQueues();
     const currentQueue = allQueues.find(q => q.id === queueId);
     if (currentQueue?.overflowTimeoutSecs && currentQueue.overflowQueueId) {
-      const ticketAgeMs = Date.now() - new Date(ticket.createdAt).getTime();
+      // Prefer routedAt (time ticket entered queue) over createdAt (ticket age)
+      const queueEntryTime = (ticket as unknown as Record<string, unknown>).routedAt as string | undefined;
+      const ticketAgeMs = Date.now() - new Date(queueEntryTime ?? ticket.createdAt).getTime();
       if (ticketAgeMs > currentQueue.overflowTimeoutSecs * 1000) {
         const overflow = getOverflowQueue(currentQueue, allQueues);
         if (overflow) {

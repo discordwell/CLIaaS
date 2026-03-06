@@ -236,6 +236,35 @@ describe('routeTicket', () => {
     vi.doUnmock('../../sla');
   });
 
+  it('SLA boost does not inflate score for agents with no skill match', async () => {
+    // Agent-1 has matching skills, Agent-2 has none
+    setAgentSkills('agent-1', 'ws-1', [{ skillName: 'technical' }]);
+    setAgentSkills('agent-2', 'ws-1', [{ skillName: 'unrelated' }]);
+
+    vi.doMock('../../sla', () => ({
+      checkTicketSLA: vi.fn().mockResolvedValue([{
+        ticketId: 'ticket-1',
+        policyId: 'sla-high',
+        policyName: 'High Priority',
+        firstResponse: { status: 'breached', targetMinutes: 60, elapsedMinutes: 120, remainingMinutes: 0 },
+        resolution: { status: 'ok', targetMinutes: 480, elapsedMinutes: 120, remainingMinutes: 360 },
+        escalations: [],
+      }]),
+    }));
+
+    const result = await routeTicket(makeTicket(), { allAgents: makeAgents() });
+
+    // Agent-1 should be preferred (has skills), not Agent-2 (no skills but would have SLA boost)
+    expect(result.suggestedAgentId).toBe('agent-1');
+    // Agents with 0 skill score should still have 0 score even with SLA boost
+    const noSkillAlternate = result.alternateAgents?.find(a => a.agentId === 'agent-2');
+    if (noSkillAlternate) {
+      expect(noSkillAlternate.score).toBe(0);
+    }
+
+    vi.doUnmock('../../sla');
+  });
+
   // ---- Phase 4: Overflow timeout ----
 
   it('ticket older than overflow timeout routes to overflow queue', async () => {

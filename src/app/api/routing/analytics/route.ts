@@ -41,19 +41,9 @@ export async function GET(request: NextRequest) {
     if (entry.reasoning?.includes('Overflow')) overflowCount++;
   }
 
-  // Queue wait time: time between ticket creation and routing log entry
-  let avgQueueWaitTimeMs = 0;
-  const waitTimes: number[] = [];
-  for (const entry of todayLog) {
-    if (entry.createdAt) {
-      // durationMs is the routing computation time, not wait time
-      // Wait time is approximated by durationMs since we route on creation
-      waitTimes.push(entry.durationMs ?? 0);
-    }
-  }
-  if (waitTimes.length > 0) {
-    avgQueueWaitTimeMs = Math.round(waitTimes.reduce((a, b) => a + b, 0) / waitTimes.length);
-  }
+  // Note: true queue wait time requires tracking when a ticket entered the queue
+  // vs when it was assigned. For now we omit this metric rather than report
+  // routing computation time as "queue wait time" which would be misleading.
 
   const onlineCount = allAvail.filter(a => a.status === 'online').length;
   const awayCount = allAvail.filter(a => a.status === 'away').length;
@@ -64,7 +54,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     range,
     avgAssignmentTimeMs: Math.round(avgDurationMs),
-    avgQueueWaitTimeMs,
     totalRoutedToday: todayLog.length,
     overflowCount,
     utilization,

@@ -10,6 +10,12 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
+
+  // Prevent IDOR: agents can only heartbeat themselves
+  if (auth.user.id !== id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   availability.heartbeat(id);
 
   return NextResponse.json({ ok: true });

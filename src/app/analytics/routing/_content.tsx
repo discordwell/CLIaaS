@@ -6,7 +6,6 @@ import Link from "next/link";
 interface RoutingAnalytics {
   range: string;
   avgAssignmentTimeMs: number;
-  avgQueueWaitTimeMs: number;
   totalRoutedToday: number;
   overflowCount: number;
   utilization: number;
@@ -105,9 +104,8 @@ export default function RoutingAnalyticsContent() {
       {data && (
         <>
           {/* STAT CARDS */}
-          <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard label="Avg Assignment Time" value={`${data.avgAssignmentTimeMs}ms`} />
-            <StatCard label="Avg Queue Wait" value={`${data.avgQueueWaitTimeMs}ms`} />
             <StatCard label={range === "24h" ? "Routed Today" : `Routed (${range})`} value={String(data.totalRoutedToday)} />
             <StatCard
               label="Overflow Count"
