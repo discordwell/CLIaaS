@@ -58,8 +58,9 @@ export default function ReportDetailContent({ id }: { id: string }) {
     setExecuting(true);
     try {
       const body: Record<string, unknown> = {};
-      if (from) body.from = from;
-      if (to) body.to = to;
+      if (from || to) {
+        body.dateRange = { from, to };
+      }
 
       const res = await fetch(`/api/reports/${id}/execute`, {
         method: "POST",
@@ -104,7 +105,7 @@ export default function ReportDetailContent({ id }: { id: string }) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shareToken: enabled ? crypto.randomUUID() : null,
+          enableSharing: enabled,
         }),
       });
       if (res.ok) {

@@ -18,7 +18,9 @@ export function formatCSV(result: ReportResult): string {
     const cells = result.columns.map(col => {
       const val = row[col];
       if (val === null || val === undefined) return '';
-      const str = String(val);
+      let str = String(val);
+      // Prevent CSV formula injection
+      if (/^[=+\-@\t\r]/.test(str)) str = `'${str}`;
       // Escape CSV fields containing commas, quotes, or newlines
       if (str.includes(',') || str.includes('"') || str.includes('\n')) {
         return `"${str.replace(/"/g, '""')}"`;

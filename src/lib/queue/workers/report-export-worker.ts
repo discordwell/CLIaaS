@@ -23,10 +23,25 @@ export function createReportExportWorker(): Worker | null {
       const { scheduleId, reportId, format, recipients, dateRange } = job.data;
       logger.info({ scheduleId, reportId, format, recipients }, 'Processing report export');
 
-      // Execute the report
+      // Look up the report definition to get the actual metric/groupBy/filters
       const { executeReport } = await import('../../reports/engine');
+      let reportDef: { metric: string; groupBy?: string[]; filters?: Record<string, unknown> } = { metric: 'ticket_volume' };
+      if (process.env.DATABASE_URL) {
+        try {
+          const { db } = await import('@/db');
+          const schemaMod = await import('@/db/schema');
+          const { eq } = await import('drizzle-orm');
+          const [row] = await db.select().from(schemaMod.reports).where(eq(schemaMod.reports.id, reportId)).limit(1);
+          if (row) {
+            reportDef = { metric: row.metric, groupBy: (row.groupBy as string[]) ?? [], filters: (row.filters as Record<string, unknown>) ?? {} };
+          }
+        } catch (dbErr) {
+          logger.warn({ error: dbErr instanceof Error ? dbErr.message : String(dbErr) }, 'Failed to look up report def');
+        }
+      }
+
       const result = await executeReport(
-        { metric: reportId },
+        reportDef,
         dateRange ? { from: dateRange.from, to: dateRange.to } : undefined,
       );
 
@@ -34,6 +49,9 @@ export function createReportExportWorker(): Worker | null {
       const { formatCSV, formatJSON } = await import('../../reports/formatters');
       const content = format === 'json' ? formatJSON(result) : formatCSV(result);
       const ext = format === 'json' ? 'json' : 'csv';
+
+      // HTML-escape helper to prevent XSS in email bodies
+      const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
       // Send to each recipient via email
       try {
@@ -53,10 +71,10 @@ export function createReportExportWorker(): Worker | null {
               content,
             ].filter(Boolean).join('\n'),
             html: [
-              `<h2>Scheduled Report: ${result.metric}</h2>`,
+              `<h2>Scheduled Report: ${esc(result.metric)}</h2>`,
               `<p>Format: ${format.toUpperCase()} | Rows: ${result.rows.length}</p>`,
-              dateRange ? `<p>Date range: ${dateRange.from} to ${dateRange.to}</p>` : '',
-              `<pre style="background:#f4f4f5;padding:16px;font-size:12px;overflow:auto">${content}</pre>`,
+              dateRange ? `<p>Date range: ${esc(dateRange.from)} to ${esc(dateRange.to)}</p>` : '',
+              `<pre style="background:#f4f4f5;padding:16px;font-size:12px;overflow:auto">${esc(content)}</pre>`,
             ].filter(Boolean).join('\n'),
           }, true); // _skipQueue=true since we're already in a worker
         }

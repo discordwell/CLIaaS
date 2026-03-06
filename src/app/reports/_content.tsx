@@ -106,8 +106,9 @@ export default function ReportsPageContent() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.report?.id) {
-          const execRes = await fetch(`/api/reports/${data.report.id}/execute`, {
+        const tempId = data.report?.id;
+        if (tempId) {
+          const execRes = await fetch(`/api/reports/${tempId}/execute`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
@@ -116,6 +117,8 @@ export default function ReportsPageContent() {
             const execData = await execRes.json();
             setPreview(execData.result);
           }
+          // Clean up the temporary report
+          fetch(`/api/reports/${tempId}`, { method: "DELETE" }).catch(() => {});
         }
       }
     } catch { /* ignore */ }

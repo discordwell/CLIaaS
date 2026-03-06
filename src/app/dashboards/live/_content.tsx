@@ -34,7 +34,6 @@ export default function LiveDashboardContent() {
   const sseFailedRef = useRef(false);
 
   const handleSnapshot = useCallback((data: LiveSnapshot) => {
-    setPreviousSnapshot(prev => prev ?? null);
     setSnapshot(current => {
       setPreviousSnapshot(current);
       return data;

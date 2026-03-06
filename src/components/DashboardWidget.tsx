@@ -55,8 +55,9 @@ export default function DashboardWidget({
 
       // Execute report with overrides
       const body: Record<string, unknown> = {};
-      if (overrides.from) body.from = overrides.from;
-      if (overrides.to) body.to = overrides.to;
+      if (overrides.from || overrides.to) {
+        body.dateRange = { from: overrides.from, to: overrides.to };
+      }
 
       const execRes = await fetch(`/api/reports/${reportId}/execute`, {
         method: "POST",

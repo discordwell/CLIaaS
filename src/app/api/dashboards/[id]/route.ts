@@ -62,7 +62,7 @@ export async function PUT(
     description?: string | null;
     layout?: Record<string, unknown>;
     isDefault?: boolean;
-    shareToken?: string | null;
+    enableSharing?: boolean;
     widgets?: Array<{
       id?: string;
       reportId: string;
@@ -88,7 +88,9 @@ export async function PUT(
       if (d.description !== undefined) updates.description = d.description;
       if (d.layout !== undefined) updates.layout = d.layout;
       if (d.isDefault !== undefined) updates.isDefault = d.isDefault;
-      if (d.shareToken !== undefined) updates.shareToken = d.shareToken;
+      if (d.enableSharing !== undefined) {
+        updates.shareToken = d.enableSharing ? crypto.randomUUID() : null;
+      }
 
       const [row] = await db
         .update(schema.dashboards)
@@ -103,25 +105,27 @@ export async function PUT(
         return NextResponse.json({ error: 'Dashboard not found' }, { status: 404 });
       }
 
-      // If widgets array provided, replace all widgets
+      // If widgets array provided, replace all widgets in a transaction
       if (d.widgets !== undefined) {
-        await db
-          .delete(schema.dashboardWidgets)
-          .where(eq(schema.dashboardWidgets.dashboardId, id));
+        await db.transaction(async (tx) => {
+          await tx
+            .delete(schema.dashboardWidgets)
+            .where(eq(schema.dashboardWidgets.dashboardId, id));
 
-        if (d.widgets.length > 0) {
-          await db.insert(schema.dashboardWidgets).values(
-            d.widgets.map((w) => ({
-              dashboardId: id,
-              reportId: w.reportId,
-              gridX: w.gridX,
-              gridY: w.gridY,
-              gridW: w.gridW,
-              gridH: w.gridH,
-              overrides: w.overrides ?? {},
-            })),
-          );
-        }
+          if (d.widgets!.length > 0) {
+            await tx.insert(schema.dashboardWidgets).values(
+              d.widgets!.map((w) => ({
+                dashboardId: id,
+                reportId: w.reportId,
+                gridX: w.gridX,
+                gridY: w.gridY,
+                gridW: w.gridW,
+                gridH: w.gridH,
+                overrides: w.overrides ?? {},
+              })),
+            );
+          }
+        });
 
         const widgets = await db
           .select()

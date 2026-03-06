@@ -19,8 +19,11 @@ function computeNextRun(frequency: string, hourUtc: number, dayOfWeek?: number, 
   if (frequency === 'weekly' && dayOfWeek !== undefined) {
     while (next.getUTCDay() !== dayOfWeek) next.setUTCDate(next.getUTCDate() + 1);
   } else if (frequency === 'monthly' && dayOfMonth !== undefined) {
-    next.setUTCDate(dayOfMonth);
+    // Set date to 1 first to prevent rollover, then advance month, then clamp
+    next.setUTCDate(1);
     if (next <= now) next.setUTCMonth(next.getUTCMonth() + 1);
+    const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
+    next.setUTCDate(Math.min(dayOfMonth, lastDay));
   }
 
   return next;
@@ -78,6 +81,15 @@ export async function POST(request: NextRequest) {
   }
 
   const hour = hourUtc ?? 9;
+  if (hour < 0 || hour > 23) {
+    return NextResponse.json({ error: 'hourUtc must be 0-23' }, { status: 400 });
+  }
+  if (dayOfWeek !== undefined && (dayOfWeek < 0 || dayOfWeek > 6)) {
+    return NextResponse.json({ error: 'dayOfWeek must be 0-6 (Sun-Sat)' }, { status: 400 });
+  }
+  if (dayOfMonth !== undefined && (dayOfMonth < 1 || dayOfMonth > 31)) {
+    return NextResponse.json({ error: 'dayOfMonth must be 1-31' }, { status: 400 });
+  }
   const nextRunAt = computeNextRun(frequency, hour, dayOfWeek, dayOfMonth);
 
   try {

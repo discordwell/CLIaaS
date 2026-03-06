@@ -39,7 +39,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireScope(request, 'analytics:read');
+  const auth = await requireScope(request, 'reports:write');
   if ('error' in auth) return auth.error;
   const { id } = await params;
 
@@ -52,6 +52,7 @@ export async function PUT(
     dateRange?: { from: string; to: string } | null;
     visualization?: string;
     formula?: string | null;
+    enableSharing?: boolean;
   }>(request);
   if ('error' in parsed) return parsed.error;
 
@@ -71,6 +72,9 @@ export async function PUT(
       if (d.dateRange !== undefined) updates.dateRange = d.dateRange;
       if (d.visualization !== undefined) updates.visualization = d.visualization;
       if (d.formula !== undefined) updates.formula = d.formula;
+      if (d.enableSharing !== undefined) {
+        updates.shareToken = d.enableSharing ? crypto.randomUUID() : null;
+      }
 
       const [row] = await db.update(schema.reports)
         .set(updates)
@@ -94,7 +98,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireScope(request, 'analytics:read');
+  const auth = await requireScope(request, 'reports:write');
   if ('error' in auth) return auth.error;
   const { id } = await params;
 

@@ -50,10 +50,16 @@ function computeNextRun(frequency: string, hourUtc: number, dayOfWeek?: number, 
         next.setUTCDate(next.getUTCDate() + 7);
       }
       break;
-    case 'monthly':
+    case 'monthly': {
+      // Set date to 1 first to prevent rollover (e.g., Jan 31 + 1 month = Mar 3)
+      const targetDay = dayOfMonth ?? next.getUTCDate();
+      next.setUTCDate(1);
       next.setUTCMonth(next.getUTCMonth() + 1);
-      if (dayOfMonth !== undefined) next.setUTCDate(dayOfMonth);
+      // Clamp to last day of the target month
+      const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
+      next.setUTCDate(Math.min(targetDay, lastDay));
       break;
+    }
     default:
       next.setUTCDate(next.getUTCDate() + 1);
   }

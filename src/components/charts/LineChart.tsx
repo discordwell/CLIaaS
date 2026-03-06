@@ -6,7 +6,6 @@ interface LineChartProps {
   data: Array<Record<string, unknown>>;
   xKey: string;
   yKey: string;
-  area?: boolean;
 }
 
 export default function LineChart({ data, xKey, yKey }: LineChartProps) {

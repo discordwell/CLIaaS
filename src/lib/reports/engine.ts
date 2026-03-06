@@ -110,6 +110,59 @@ function groupTickets(tickets: Ticket[], groupBy: string): Map<string, Ticket[]>
   return groups;
 }
 
+function median(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 100) / 100
+    : Math.round(sorted[mid] * 100) / 100;
+}
+
+/** Build a map of ticketId -> first-response hours for metrics that need it */
+function computeFirstResponseTimes(
+  tickets: Ticket[],
+  messages: Message[],
+): Array<{ ticket: Ticket; hours: number }> {
+  const messagesByTicket = new Map<string, Message[]>();
+  for (const m of messages) {
+    const existing = messagesByTicket.get(m.ticketId) ?? [];
+    existing.push(m);
+    messagesByTicket.set(m.ticketId, existing);
+  }
+
+  const result: Array<{ ticket: Ticket; hours: number }> = [];
+  for (const t of tickets) {
+    const msgs = (messagesByTicket.get(t.id) ?? [])
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const firstReply = msgs.find(m => m.type === 'reply' && m.author !== t.requester);
+    if (firstReply) {
+      result.push({ ticket: t, hours: hoursBetween(t.createdAt, firstReply.createdAt) });
+    }
+  }
+  return result;
+}
+
+function groupResponseTimes(
+  data: Array<{ ticket: Ticket; hours: number }>,
+  primaryGroup: string,
+): Map<string, number[]> {
+  const grouped = new Map<string, number[]>();
+  for (const { ticket, hours } of data) {
+    let key: string;
+    switch (primaryGroup) {
+      case 'date': key = toDateKey(new Date(ticket.createdAt)); break;
+      case 'priority': key = ticket.priority; break;
+      case 'assignee': key = ticket.assignee ?? 'unassigned'; break;
+      default: key = 'all';
+    }
+    const existing = grouped.get(key) ?? [];
+    existing.push(hours);
+    grouped.set(key, existing);
+  }
+  return grouped;
+}
+
 // ---- Metric computation functions ----
 
 function computeTicketVolume(
@@ -161,38 +214,9 @@ function computeAvgFirstResponseTime(
   messages: Message[],
   groupBy: string[],
 ): ReportResult {
-  const messagesByTicket = new Map<string, Message[]>();
-  for (const m of messages) {
-    const existing = messagesByTicket.get(m.ticketId) ?? [];
-    existing.push(m);
-    messagesByTicket.set(m.ticketId, existing);
-  }
-
-  const ticketResponseTimes: Array<{ ticket: Ticket; hours: number }> = [];
-  for (const t of tickets) {
-    const msgs = (messagesByTicket.get(t.id) ?? [])
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    const firstReply = msgs.find(m => m.type === 'reply' && m.author !== t.requester);
-    if (firstReply) {
-      ticketResponseTimes.push({ ticket: t, hours: hoursBetween(t.createdAt, firstReply.createdAt) });
-    }
-  }
-
+  const ticketResponseTimes = computeFirstResponseTimes(tickets, messages);
   const primaryGroup = groupBy[0] ?? 'all';
-  const groupedTimes = new Map<string, number[]>();
-
-  for (const { ticket, hours } of ticketResponseTimes) {
-    let key: string;
-    switch (primaryGroup) {
-      case 'date': key = toDateKey(new Date(ticket.createdAt)); break;
-      case 'priority': key = ticket.priority; break;
-      case 'assignee': key = ticket.assignee ?? 'unassigned'; break;
-      default: key = 'all';
-    }
-    const existing = groupedTimes.get(key) ?? [];
-    existing.push(hours);
-    groupedTimes.set(key, existing);
-  }
+  const groupedTimes = groupResponseTimes(ticketResponseTimes, primaryGroup);
 
   const rows = Array.from(groupedTimes.entries())
     .map(([key, times]) => ({
@@ -212,6 +236,33 @@ function computeAvgFirstResponseTime(
     rows,
     summary: { avg_hours: overallAvg, sample_size: allTimes.length },
     metric: 'avg_first_response_time',
+  };
+}
+
+function computeMedianFirstResponseTime(
+  tickets: Ticket[],
+  messages: Message[],
+  groupBy: string[],
+): ReportResult {
+  const ticketResponseTimes = computeFirstResponseTimes(tickets, messages);
+  const primaryGroup = groupBy[0] ?? 'all';
+  const groupedTimes = groupResponseTimes(ticketResponseTimes, primaryGroup);
+
+  const rows = Array.from(groupedTimes.entries())
+    .map(([key, times]) => ({
+      [primaryGroup]: key,
+      median_hours: median(times),
+      count: times.length,
+    }))
+    .sort((a, b) => primaryGroup === 'date' ? String(a[primaryGroup]).localeCompare(String(b[primaryGroup])) : a.median_hours - b.median_hours);
+
+  const allTimes = ticketResponseTimes.map(t => t.hours);
+
+  return {
+    columns: [primaryGroup, 'median_hours', 'count'],
+    rows,
+    summary: { median_hours: median(allTimes), sample_size: allTimes.length },
+    metric: 'median_first_response_time',
   };
 }
 
@@ -259,6 +310,44 @@ function computeAvgResolutionTime(
     rows,
     summary: { avg_hours: overallAvg, sample_size: allTimes.length },
     metric: 'avg_resolution_time',
+  };
+}
+
+function computeAgentAvgResolution(
+  tickets: Ticket[],
+  _messages: Message[],
+  groupBy: string[],
+): ReportResult {
+  const resolved = tickets.filter(t => t.status === 'solved' || t.status === 'closed');
+  const primaryGroup = groupBy.length ? groupBy[0] : 'assignee';
+  const groupedTimes = new Map<string, number[]>();
+
+  for (const t of resolved) {
+    const key = primaryGroup === 'assignee' ? (t.assignee ?? 'unassigned') : 'all';
+    const hours = hoursBetween(t.createdAt, t.updatedAt);
+    const existing = groupedTimes.get(key) ?? [];
+    existing.push(hours);
+    groupedTimes.set(key, existing);
+  }
+
+  const rows = Array.from(groupedTimes.entries())
+    .map(([key, times]) => ({
+      [primaryGroup]: key,
+      avg_hours: Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 100) / 100,
+      count: times.length,
+    }))
+    .sort((a, b) => a.avg_hours - b.avg_hours);
+
+  const allTimes = resolved.map(t => hoursBetween(t.createdAt, t.updatedAt));
+  const overallAvg = allTimes.length > 0
+    ? Math.round((allTimes.reduce((a, b) => a + b, 0) / allTimes.length) * 100) / 100
+    : 0;
+
+  return {
+    columns: [primaryGroup, 'avg_hours', 'count'],
+    rows,
+    summary: { avg_hours: overallAvg, sample_size: allTimes.length },
+    metric: 'agent_avg_resolution',
   };
 }
 
@@ -380,6 +469,48 @@ function computeCsatScore(
   };
 }
 
+function computeCsatResponseRate(
+  tickets: Ticket[],
+  _messages: Message[],
+  groupBy: string[],
+  csatRatings: Array<{ ticketId: string; rating: number; createdAt: string }>,
+): ReportResult {
+  const ticketIdsWithCsat = new Set(csatRatings.map(c => c.ticketId));
+  const resolved = tickets.filter(t => t.status === 'solved' || t.status === 'closed');
+  const withResponse = resolved.filter(t => ticketIdsWithCsat.has(t.id));
+  const rate = resolved.length > 0
+    ? Math.round((withResponse.length / resolved.length) * 10000) / 100
+    : 0;
+
+  const primaryGroup = groupBy[0] ?? 'all';
+  if (primaryGroup === 'all') {
+    return {
+      columns: ['metric', 'value'],
+      rows: [{ metric: 'CSAT Response Rate', value: rate }],
+      summary: { rate, responded: withResponse.length, total_resolved: resolved.length },
+      metric: 'csat_response_rate',
+    };
+  }
+
+  const groups = groupTickets(resolved, primaryGroup);
+  const rows = Array.from(groups.entries()).map(([key, tix]) => {
+    const responded = tix.filter(t => ticketIdsWithCsat.has(t.id)).length;
+    return {
+      [primaryGroup]: key,
+      responded,
+      total: tix.length,
+      rate: tix.length > 0 ? Math.round((responded / tix.length) * 10000) / 100 : 0,
+    };
+  });
+
+  return {
+    columns: [primaryGroup, 'responded', 'total', 'rate'],
+    rows,
+    summary: { rate, responded: withResponse.length, total_resolved: resolved.length },
+    metric: 'csat_response_rate',
+  };
+}
+
 function computeGenericCount(
   tickets: Ticket[],
   _messages: Message[],
@@ -451,17 +582,23 @@ export async function executeReport(
       result = computeAvgFirstResponseTime(filtered, allMessages, groupBy);
       break;
     case 'avg_resolution_time':
-    case 'median_first_response_time':
       result = computeAvgResolutionTime(filtered, allMessages, groupBy);
+      break;
+    case 'median_first_response_time':
+      result = computeMedianFirstResponseTime(filtered, allMessages, groupBy);
       break;
     case 'sla_compliance_rate':
     case 'sla_breaches':
       result = computeSlaCompliance(filtered, allMessages, groupBy);
       break;
-    case 'csat_score':
-    case 'csat_response_rate': {
+    case 'csat_score': {
       const csatRatings = await provider.loadCSATRatings();
       result = computeCsatScore(filtered, allMessages, groupBy, csatRatings);
+      break;
+    }
+    case 'csat_response_rate': {
+      const csatRatings = await provider.loadCSATRatings();
+      result = computeCsatResponseRate(filtered, allMessages, groupBy, csatRatings);
       break;
     }
     case 'nps_score': {
@@ -496,8 +633,10 @@ export async function executeReport(
       break;
     }
     case 'agent_tickets_handled':
-    case 'agent_avg_resolution':
       result = computeGenericCount(filtered, allMessages, groupBy.length ? groupBy : ['assignee'], def.metric);
+      break;
+    case 'agent_avg_resolution':
+      result = computeAgentAvgResolution(filtered, allMessages, groupBy);
       break;
     case 'channel_breakdown':
       result = computeGenericCount(filtered, allMessages, ['channel'], 'channel_breakdown');

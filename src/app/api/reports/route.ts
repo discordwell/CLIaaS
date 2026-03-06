@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireScope(request, 'analytics:read');
+  const auth = await requireScope(request, 'reports:write');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

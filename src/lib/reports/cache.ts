@@ -16,6 +16,7 @@ const cache = new Map<string, CacheEntry>();
 
 const LIVE_TTL_MS = 5 * 60 * 1000;       // 5 minutes
 const HISTORICAL_TTL_MS = 60 * 60 * 1000; // 1 hour
+const MAX_CACHE_ENTRIES = 500;
 
 /**
  * Generate a cache key from report ID + filters + date range.
@@ -56,6 +57,16 @@ export function setCache(
     : false;
 
   const ttl = isHistorical ? HISTORICAL_TTL_MS : LIVE_TTL_MS;
+
+  // Evict oldest entries if at capacity
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    evictExpired();
+    // If still over limit after evicting expired, drop oldest entries
+    if (cache.size >= MAX_CACHE_ENTRIES) {
+      const keysToDelete = Array.from(cache.keys()).slice(0, Math.floor(MAX_CACHE_ENTRIES / 4));
+      for (const k of keysToDelete) cache.delete(k);
+    }
+  }
 
   cache.set(cacheKey, {
     result,

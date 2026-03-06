@@ -184,7 +184,7 @@ export default function DashboardDetailContent({ id }: { id: string }) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shareToken: enabled ? crypto.randomUUID() : null,
+          enableSharing: enabled,
         }),
       });
       if (res.ok) {
