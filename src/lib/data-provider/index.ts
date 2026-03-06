@@ -20,6 +20,12 @@ export type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  TicketMergeParams,
+  TicketMergeResult,
+  TicketSplitParams,
+  TicketSplitResult,
+  TicketUnmergeParams,
+  MergeHistoryEntry,
 } from './types';
 
 import type { DataProvider, DataMode } from './types';

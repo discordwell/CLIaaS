@@ -12,7 +12,9 @@ export function registerDuplicatesCommand(program: Command): void {
     .option('--threshold <n>', 'Similarity threshold 0-100', '70')
     .option('--status <status>', 'Filter by status')
     .option('--limit <n>', 'Max duplicate groups to show', '20')
-    .action((opts: { dir?: string; threshold: string; status?: string; limit: string }) => {
+    .option('--merge', 'Automatically merge each duplicate group (oldest as primary)')
+    .option('--yes', 'Skip confirmation prompt when using --merge')
+    .action(async (opts: { dir?: string; threshold: string; status?: string; limit: string; merge?: boolean; yes?: boolean }) => {
       const spinner = ora('Scanning for duplicate tickets...').start();
       let tickets = loadTickets(opts.dir);
 
@@ -83,6 +85,49 @@ export function registerDuplicatesCommand(program: Command): void {
       }
 
       console.log(chalk.gray(`Threshold: ${opts.threshold}% | Total groups: ${groups.length}`));
+
+      // Auto-merge if requested
+      if (opts.merge && limited.length > 0) {
+        if (!opts.yes) {
+          const readline = await import('readline');
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await new Promise<string>(resolve => {
+            rl.question(chalk.yellow(`\nMerge ${limited.length} group(s)? [y/N] `), resolve);
+          });
+          rl.close();
+          if (answer.toLowerCase() !== 'y') {
+            console.log(chalk.gray('Merge cancelled.'));
+            return;
+          }
+        }
+
+        try {
+          const { getDataProvider } = await import('@/lib/data-provider/index.js');
+          const provider = await getDataProvider();
+
+          for (let g = 0; g < limited.length; g++) {
+            const group = limited[g];
+            // Sort by createdAt ascending — oldest becomes primary
+            const sorted = [...group.tickets].sort(
+              (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+            );
+            const primaryId = sorted[0].id;
+            const mergedIds = sorted.slice(1).map(t => t.id);
+
+            const result = await provider.mergeTickets({
+              primaryTicketId: primaryId,
+              mergedTicketIds: mergedIds,
+            });
+            console.log(
+              chalk.green(`  Group ${g + 1}: merged ${result.mergedCount} ticket(s) into #${sorted[0].externalId}`)
+            );
+          }
+
+          console.log(chalk.green(`\nDone. ${limited.length} group(s) merged.`));
+        } catch (err) {
+          console.error(chalk.red(`Merge failed: ${err instanceof Error ? err.message : err}`));
+        }
+      }
     });
 }
 

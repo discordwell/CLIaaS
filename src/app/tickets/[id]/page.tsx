@@ -4,6 +4,7 @@ import { loadTickets, loadMessages, loadMergeHistory } from "@/lib/data";
 import TicketActions from "@/components/TicketActions";
 import CollisionDetector from "@/components/CollisionDetector";
 import TicketDetailClient from "@/components/TicketDetailClient";
+import SideConversationPanel from "@/components/SideConversationPanel";
 import MacroDropdown from "./_components/MacroDropdown";
 import ReRouteButton from "./_components/ReRouteButton";
 import { getRoutingLog } from "@/lib/routing/store";
@@ -133,54 +134,23 @@ export default async function TicketDetailPage({
         </div>
       </header>
 
-      {/* CONVERSATION THREAD */}
-      <section className="mt-8 border-2 border-zinc-950 bg-white">
-        <div className="border-b-2 border-zinc-950 p-6">
-          <h2 className="text-lg font-bold">
-            Conversation ({messages.length} message
-            {messages.length !== 1 ? "s" : ""})
-          </h2>
-        </div>
-
-        {messages.length > 0 ? (
-          <div className="divide-y divide-zinc-200">
-            {messages.map((msg, idx) => (
-              <div key={msg.id} className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center bg-zinc-950 font-mono text-xs font-bold text-white">
-                      {msg.author.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold">{msg.author}</p>
-                      <p className="font-mono text-xs text-zinc-500">
-                        {new Date(msg.createdAt).toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-zinc-400">
-                      #{idx + 1}
-                    </span>
-                    {msg.type === "note" && (
-                      <span className="bg-amber-100 px-2 py-0.5 font-mono text-xs font-bold text-amber-700">
-                        Internal Note
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
-                  {msg.body}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="p-8 text-center text-sm text-zinc-500">
-            No messages in this ticket thread.
-          </div>
-        )}
-      </section>
+      {/* CONVERSATION THREAD + MERGE/SPLIT (client component) */}
+      <div className="mt-8">
+        <TicketDetailClient
+          ticketId={ticket.id}
+          ticketSubject={ticket.subject}
+          messages={messages.map((msg) => ({
+            id: msg.id,
+            author: msg.author,
+            type: msg.type,
+            body: msg.body,
+            createdAt: msg.createdAt,
+          }))}
+          mergedIntoTicketId={ticket.mergedIntoTicketId}
+          splitFromTicketId={ticket.splitFromTicketId}
+          mergeHistory={mergeHistory}
+        />
+      </div>
 
       {/* MACRO / TICKET ACTIONS */}
       <div className="mt-8 flex items-center justify-between">
@@ -194,6 +164,9 @@ export default async function TicketDetailPage({
         currentStatus={ticket.status}
         currentPriority={ticket.priority}
       />
+
+      {/* SIDE CONVERSATIONS */}
+      <SideConversationPanel ticketId={ticket.id} />
 
       {/* ROUTING */}
       <section className="mt-8 border-2 border-zinc-950 bg-white p-6">

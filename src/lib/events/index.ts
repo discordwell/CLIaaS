@@ -37,3 +37,23 @@ export function surveySubmitted(data: Record<string, unknown>): void {
 export function surveySent(data: Record<string, unknown>): void {
   dispatch('survey.sent', data);
 }
+
+export function ticketMerged(data: Record<string, unknown>): void {
+  dispatch('ticket.merged', data);
+}
+
+export function ticketSplit(data: Record<string, unknown>): void {
+  dispatch('ticket.split', data);
+}
+
+export function ticketUnmerged(data: Record<string, unknown>): void {
+  dispatch('ticket.unmerged', data);
+}
+
+export function sideConversationCreated(data: Record<string, unknown>): void {
+  dispatch('side_conversation.created', data);
+}
+
+export function sideConversationReplied(data: Record<string, unknown>): void {
+  dispatch('side_conversation.replied', data);
+}

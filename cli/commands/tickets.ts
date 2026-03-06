@@ -241,4 +241,140 @@ export function registerTicketCommands(program: Command): void {
         },
       );
     });
+
+  tickets
+    .command('merge')
+    .description('Merge duplicate tickets into one primary ticket')
+    .requiredOption('--ids <ids>', 'Comma-separated ticket IDs to merge')
+    .option('--primary <id>', 'Primary ticket ID (default: oldest)')
+    .option('--dry-run', 'Show what would be merged without executing')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { ids: string; primary?: string; dryRun?: boolean; json?: boolean }) => {
+      const allIds = opts.ids.split(',').map(id => id.trim()).filter(Boolean);
+      if (allIds.length < 2) {
+        outputError('At least 2 ticket IDs are required for merge.');
+        process.exit(1);
+      }
+
+      const allTickets = loadTickets();
+      const matched = allIds.map(id => allTickets.find(t => t.id === id || t.externalId === id));
+      const missing = allIds.filter((_, i) => !matched[i]);
+      if (missing.length > 0) {
+        outputError(`Tickets not found: ${missing.join(', ')}`);
+        process.exit(1);
+      }
+
+      // Determine primary (oldest by default)
+      const tickets = matched.filter(Boolean) as typeof allTickets;
+      let primaryId = opts.primary;
+      if (!primaryId) {
+        tickets.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        primaryId = tickets[0].id;
+      }
+
+      const mergedIds = tickets.filter(t => t.id !== primaryId).map(t => t.id);
+      const primary = tickets.find(t => t.id === primaryId)!;
+
+      if (opts.dryRun) {
+        const preview = {
+          action: 'merge',
+          primaryTicket: { id: primary.id, externalId: primary.externalId, subject: primary.subject },
+          merging: mergedIds.map(id => {
+            const t = tickets.find(tt => tt.id === id)!;
+            return { id: t.id, externalId: t.externalId, subject: t.subject };
+          }),
+        };
+
+        if (opts.json || isJsonMode()) {
+          output(preview, () => {});
+        } else {
+          console.log(chalk.cyan('DRY RUN — Merge Preview'));
+          console.log(`Primary: #${primary.externalId} — ${primary.subject}`);
+          for (const id of mergedIds) {
+            const t = tickets.find(tt => tt.id === id)!;
+            console.log(`  Merge: #${t.externalId} — ${t.subject}`);
+          }
+        }
+        return;
+      }
+
+      try {
+        const { getDataProvider } = await import('@/lib/data-provider/index.js');
+        const provider = await getDataProvider();
+        const result = await provider.mergeTickets({
+          primaryTicketId: primaryId,
+          mergedTicketIds: mergedIds,
+        });
+
+        output(result, () => {
+          console.log(chalk.green(`Merged ${result.mergedCount} ticket(s) into #${primary.externalId}`));
+          console.log(`Messages moved: ${result.movedMessageCount}`);
+          if (result.mergedTags.length > 0) {
+            console.log(`Tags merged: ${result.mergedTags.join(', ')}`);
+          }
+        });
+      } catch (err) {
+        outputError(err instanceof Error ? err.message : 'Merge failed');
+        process.exit(1);
+      }
+    });
+
+  tickets
+    .command('split')
+    .description('Split messages from a ticket into a new ticket')
+    .requiredOption('--ticket <id>', 'Source ticket ID')
+    .requiredOption('--messages <ids>', 'Comma-separated message IDs to move')
+    .option('--subject <subject>', 'Subject for the new ticket')
+    .option('--dry-run', 'Show what would be split without executing')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { ticket: string; messages: string; subject?: string; dryRun?: boolean; json?: boolean }) => {
+      const messageIds = opts.messages.split(',').map(id => id.trim()).filter(Boolean);
+      if (messageIds.length === 0) {
+        outputError('At least one message ID is required for split.');
+        process.exit(1);
+      }
+
+      const allTickets = loadTickets();
+      const ticket = allTickets.find(t => t.id === opts.ticket || t.externalId === opts.ticket);
+      if (!ticket) {
+        outputError(`Ticket not found: ${opts.ticket}`);
+        process.exit(1);
+      }
+
+      if (opts.dryRun) {
+        const preview = {
+          action: 'split',
+          sourceTicket: { id: ticket.id, externalId: ticket.externalId, subject: ticket.subject },
+          messageCount: messageIds.length,
+          newSubject: opts.subject ?? `Split from: ${ticket.subject}`,
+        };
+
+        if (opts.json || isJsonMode()) {
+          output(preview, () => {});
+        } else {
+          console.log(chalk.cyan('DRY RUN — Split Preview'));
+          console.log(`Source: #${ticket.externalId} — ${ticket.subject}`);
+          console.log(`Messages to split: ${messageIds.length}`);
+          console.log(`New subject: ${opts.subject ?? `Split from: ${ticket.subject}`}`);
+        }
+        return;
+      }
+
+      try {
+        const { getDataProvider } = await import('@/lib/data-provider/index.js');
+        const provider = await getDataProvider();
+        const result = await provider.splitTicket({
+          ticketId: ticket.id,
+          messageIds,
+          newSubject: opts.subject,
+        });
+
+        output(result, () => {
+          console.log(chalk.green(`Split ${result.movedMessageCount} message(s) into new ticket ${result.newTicketId}`));
+        });
+      } catch (err) {
+        outputError(err instanceof Error ? err.message : 'Split failed');
+        process.exit(1);
+      }
+    });
 }

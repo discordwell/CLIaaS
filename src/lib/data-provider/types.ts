@@ -42,6 +42,7 @@ export interface Message {
   author: string;
   body: string;
   type: 'reply' | 'note' | 'system';
+  visibility?: 'public' | 'internal';
   createdAt: string;
 }
 

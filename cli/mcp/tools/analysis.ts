@@ -217,9 +217,11 @@ Return ONLY the JSON object, no other text.`;
       threshold: z.number().default(70).describe('Similarity threshold 0-100'),
       status: z.string().optional().describe('Filter by status'),
       limit: z.number().default(20).describe('Max duplicate groups'),
+      autoMerge: z.boolean().optional().describe('Auto-merge each detected group (oldest as primary)'),
+      confirm: z.boolean().optional().describe('Must be true with autoMerge to execute'),
       dir: z.string().optional().describe('Export directory override'),
     },
-    async ({ threshold, status, limit, dir }) => {
+    async ({ threshold, status, limit, autoMerge, confirm, dir }) => {
       let tickets = await safeLoadTickets(dir);
       if (status) tickets = tickets.filter(t => t.status === status);
       if (tickets.length === 0) return errorResult('No tickets found.');
@@ -265,11 +267,53 @@ Return ONLY the JSON object, no other text.`;
 
       groups.sort((a, b) => b.similarity - a.similarity);
 
-      return textResult({
+      const result = {
         totalGroups: groups.length,
         showing: Math.min(groups.length, limit),
         groups: groups.slice(0, limit),
-      });
+      };
+
+      // Auto-merge if requested
+      if (autoMerge && confirm && result.groups.length > 0) {
+        try {
+          const { getDataProvider } = await import('@/lib/data-provider/index.js');
+          const provider = await getDataProvider();
+          const mergeResults = [];
+
+          for (const group of result.groups) {
+            // Sort by ticket ID as proxy for age (oldest first)
+            const sorted = [...group.tickets].sort((a, b) => a.id.localeCompare(b.id));
+            const primaryId = sorted[0].id;
+            const mergedIds = sorted.slice(1).map(t => t.id);
+
+            const mergeResult = await provider.mergeTickets({
+              primaryTicketId: primaryId,
+              mergedTicketIds: mergedIds,
+            });
+            mergeResults.push({
+              primaryTicketId: primaryId,
+              mergedCount: mergeResult.mergedCount,
+            });
+          }
+
+          return textResult({ ...result, autoMerged: true, mergeResults });
+        } catch (err) {
+          return textResult({
+            ...result,
+            autoMergeError: err instanceof Error ? err.message : 'Auto-merge failed',
+          });
+        }
+      }
+
+      if (autoMerge && !confirm) {
+        return textResult({
+          ...result,
+          confirmation_required: true,
+          message: 'Set confirm=true to auto-merge detected groups.',
+        });
+      }
+
+      return textResult(result);
     },
   );
 

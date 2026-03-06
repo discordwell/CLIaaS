@@ -24,7 +24,9 @@ export type EventType =
   | 'ticket:merged'
   | 'ticket:split'
   | 'note:created'
-  | 'mention:created';
+  | 'mention:created'
+  | 'side_conversation:created'
+  | 'side_conversation:replied';
 
 export interface AppEvent {
   type: EventType;

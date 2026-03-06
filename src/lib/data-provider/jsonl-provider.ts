@@ -24,6 +24,12 @@ import type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  TicketMergeParams,
+  TicketMergeResult,
+  TicketSplitParams,
+  TicketSplitResult,
+  TicketUnmergeParams,
+  MergeHistoryEntry,
 } from './types';
 
 const EXPORT_DIRS = [
@@ -148,5 +154,21 @@ export class JsonlProvider implements DataProvider {
 
   async createKBArticle(_params: KBArticleCreateParams): Promise<{ id: string }> {
     throw new Error('Write operations require a database. Configure mode: db or hybrid.');
+  }
+
+  async mergeTickets(_params: TicketMergeParams): Promise<TicketMergeResult> {
+    throw new Error('Merge operations require a database. Configure mode: db or hybrid.');
+  }
+
+  async splitTicket(_params: TicketSplitParams): Promise<TicketSplitResult> {
+    throw new Error('Split operations require a database. Configure mode: db or hybrid.');
+  }
+
+  async unmergeTicket(_params: TicketUnmergeParams): Promise<void> {
+    throw new Error('Unmerge operations require a database. Configure mode: db or hybrid.');
+  }
+
+  async getMergeHistory(_ticketId: string): Promise<MergeHistoryEntry[]> {
+    return [];
   }
 }

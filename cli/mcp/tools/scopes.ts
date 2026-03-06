@@ -44,6 +44,9 @@ const ALL_WRITE_TOOLS = [
   'wfm_time_off_decide',
   'ticket_merge',
   'ticket_split',
+  'side_conversation_list',
+  'side_conversation_create',
+  'side_conversation_reply',
 ];
 
 export function loadScopes(): MCPScopeConfig {

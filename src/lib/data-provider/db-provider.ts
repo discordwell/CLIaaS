@@ -25,6 +25,12 @@ import type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  TicketMergeParams,
+  TicketMergeResult,
+  TicketSplitParams,
+  TicketSplitResult,
+  TicketUnmergeParams,
+  MergeHistoryEntry,
 } from './types';
 
 type DbContext = {
@@ -100,6 +106,7 @@ export class DbProvider implements DataProvider {
       source: string | null; createdAt: Date; updatedAt: Date;
       assigneeName: string | null; assigneeEmail: string | null;
       requesterName: string | null; requesterEmail: string | null;
+      mergedIntoTicketId: string | null; splitFromTicketId: string | null;
     }> = await db
       .select({
         id: schema.tickets.id,
@@ -113,6 +120,8 @@ export class DbProvider implements DataProvider {
         assigneeEmail: schema.users.email,
         requesterName: schema.customers.name,
         requesterEmail: schema.customers.email,
+        mergedIntoTicketId: schema.tickets.mergedIntoTicketId,
+        splitFromTicketId: schema.tickets.splitFromTicketId,
       })
       .from(schema.tickets)
       .leftJoin(schema.users, eq(schema.users.id, schema.tickets.assigneeId))
@@ -167,6 +176,8 @@ export class DbProvider implements DataProvider {
       tags: tagsByTicket.get(row.id) ?? [],
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      mergedIntoTicketId: row.mergedIntoTicketId ?? undefined,
+      splitFromTicketId: row.splitFromTicketId ?? undefined,
     }));
   }
 
@@ -241,7 +252,9 @@ export class DbProvider implements DataProvider {
           ? 'note' as const
           : 'reply' as const;
 
-      return { id: row.id, ticketId: row.ticketId, author, body: row.body, type, createdAt: row.createdAt.toISOString() };
+      const visibility = row.visibility === 'internal' ? 'internal' as const : 'public' as const;
+
+      return { id: row.id, ticketId: row.ticketId, author, body: row.body, type, visibility, createdAt: row.createdAt.toISOString() };
     });
   }
 
@@ -550,5 +563,29 @@ export class DbProvider implements DataProvider {
       .returning({ id: schema.kbArticles.id });
 
     return { id: row.id };
+  }
+
+  async mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult> {
+    const ctx = await requireDb();
+    const { mergeTickets: merge } = await import('@/lib/tickets/merge-split');
+    return merge(ctx, params);
+  }
+
+  async splitTicket(params: TicketSplitParams): Promise<TicketSplitResult> {
+    const ctx = await requireDb();
+    const { splitTicket: split } = await import('@/lib/tickets/merge-split');
+    return split(ctx, params);
+  }
+
+  async unmergeTicket(params: TicketUnmergeParams): Promise<void> {
+    const ctx = await requireDb();
+    const { unmergeTicket: unmerge } = await import('@/lib/tickets/merge-split');
+    return unmerge(ctx, params);
+  }
+
+  async getMergeHistory(ticketId: string): Promise<MergeHistoryEntry[]> {
+    const ctx = await requireDb();
+    const { getMergeHistory: getHistory } = await import('@/lib/tickets/merge-split');
+    return getHistory(ctx, ticketId);
   }
 }

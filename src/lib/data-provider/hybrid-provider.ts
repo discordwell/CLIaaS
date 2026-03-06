@@ -29,6 +29,12 @@ import type {
   TicketUpdateParams,
   MessageCreateParams,
   KBArticleCreateParams,
+  TicketMergeParams,
+  TicketMergeResult,
+  TicketSplitParams,
+  TicketSplitResult,
+  TicketUnmergeParams,
+  MergeHistoryEntry,
 } from './types';
 import { DbProvider } from './db-provider';
 
@@ -208,6 +214,27 @@ export class HybridProvider implements DataProvider {
     const result = await this.local.createKBArticle(params);
     await insertOutboxEntry('create', 'kb_article', result.id, params);
     return result;
+  }
+
+  async mergeTickets(params: TicketMergeParams): Promise<TicketMergeResult> {
+    const result = await this.local.mergeTickets(params);
+    await insertOutboxEntry('update', 'ticket', result.primaryTicketId, { operation: 'merge', ...params });
+    return result;
+  }
+
+  async splitTicket(params: TicketSplitParams): Promise<TicketSplitResult> {
+    const result = await this.local.splitTicket(params);
+    await insertOutboxEntry('create', 'ticket', result.newTicketId, { operation: 'split', ...params });
+    return result;
+  }
+
+  async unmergeTicket(params: TicketUnmergeParams): Promise<void> {
+    await this.local.unmergeTicket(params);
+    await insertOutboxEntry('update', 'ticket', params.mergeLogId, { operation: 'unmerge', ...params });
+  }
+
+  async getMergeHistory(ticketId: string): Promise<MergeHistoryEntry[]> {
+    return this.local.getMergeHistory(ticketId);
   }
 }
 

@@ -1,0 +1,21 @@
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { getDataProvider } from '@/lib/data-provider';
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const provider = await getDataProvider();
+    const history = await provider.getMergeHistory(id);
+
+    return NextResponse.json({ ticketId: id, history });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load merge history' },
+      { status: 500 },
+    );
+  }
+}

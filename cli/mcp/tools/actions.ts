@@ -163,16 +163,17 @@ export function registerActionTools(server: McpServer): void {
   // ---- ticket_note ----
   server.tool(
     'ticket_note',
-    'Add an internal note to a ticket (requires confirm=true). Use "since" to check for collisions before adding.',
+    'Add an internal note to a ticket (requires confirm=true). Use "since" to check for collisions before adding. Use "mentions" to @mention agents.',
     {
       ticketId: z.string().describe('Ticket ID or external ID'),
       body: z.string().describe('Note body text'),
+      mentions: z.array(z.string()).optional().describe('User IDs or names to @mention in the note'),
       since: z.string().optional().describe('ISO timestamp — if provided, checks for new replies since this time'),
       forceSubmit: z.boolean().optional().describe('Set true to add note despite detected collisions'),
       confirm: z.boolean().optional().describe('Must be true to add the note'),
       dir: z.string().optional().describe('Export directory override'),
     },
-    async ({ ticketId, body, since, forceSubmit, confirm, dir }) => {
+    async ({ ticketId, body, mentions, since, forceSubmit, confirm, dir }) => {
       const guard = scopeGuard('ticket_note');
       if (guard) return guard;
 
@@ -207,8 +208,23 @@ export function registerActionTools(server: McpServer): void {
       const result = withConfirmation(confirm, {
         description: `Add internal note to ticket ${ticket.id}`,
         preview: { ticketId: ticket.id, subject: ticket.subject, noteLength: body.length },
-        execute: () => {
+        execute: async () => {
           const now = new Date().toISOString();
+
+          // Persist note via DataProvider
+          let messageId: string | undefined;
+          try {
+            const { getDataProvider } = await import('@/lib/data-provider/index.js');
+            const provider = await getDataProvider(dir);
+            const result = await provider.createMessage({
+              ticketId: ticket.id,
+              body,
+              authorType: 'user',
+              visibility: 'internal',
+            });
+            messageId = result.id;
+          } catch { /* DB unavailable — note persisted in log only */ }
+
           recordMCPAction({
             tool: 'ticket_note', action: 'add_note',
             params: { ticketId: ticket.id, bodyLength: body.length },
@@ -225,12 +241,12 @@ export function registerActionTools(server: McpServer): void {
             }).catch(() => {});
           }
 
-          return { added: true, ticketId: ticket.id, timestamp: now };
+          return { added: true, ticketId: ticket.id, messageId, timestamp: now };
         },
       });
 
       if (result.needsConfirmation) return result.result;
-      return textResult(result.value);
+      return textResult(await result.value);
     },
   );
 

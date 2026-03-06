@@ -24,6 +24,7 @@ export type {
   SurveyType,
   SurveyResponse,
   SurveyConfig,
+  MergeHistoryEntry,
 } from '@/lib/data-provider/types';
 
 import type { Ticket } from '@/lib/data-provider/types';
@@ -133,6 +134,11 @@ export async function createMessage(message: {
 }): Promise<{ id: string }> {
   const provider = await getDataProvider();
   return provider.createMessage(message);
+}
+
+export async function loadMergeHistory(ticketId: string) {
+  const provider = await getDataProvider();
+  return provider.getMergeHistory(ticketId);
 }
 
 // ---- Stats (pure computation, backend-agnostic) ----
