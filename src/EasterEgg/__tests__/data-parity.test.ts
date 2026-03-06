@@ -6,9 +6,11 @@ import { describe, it, expect } from 'vitest';
 import {
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META,
   SUPERWEAPON_DEFS, SuperweaponType, IRON_CURTAIN_DURATION,
-  PRODUCTION_ITEMS, UnitType,
+  PRODUCTION_ITEMS, UnitType, COUNTRY_BONUSES, TERRAIN_SPEED,
+  NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS, NUKE_MIN_FALLOFF,
+  CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
 } from '../engine/types';
-import { STRUCTURE_MAX_HP } from '../engine/scenario';
+import { STRUCTURE_MAX_HP, STRUCTURE_WEAPONS } from '../engine/scenario';
 
 // ============================================================
 // UNIT_STATS parity
@@ -762,6 +764,7 @@ describe('WEAPON_STATS parity', () => {
 describe('WARHEAD_VS_ARMOR parity', () => {
   it('has all 9 warhead types', () => {
     const keys = Object.keys(WARHEAD_VS_ARMOR);
+    expect(keys).toHaveLength(9);
     expect(keys).toContain('SA');
     expect(keys).toContain('HE');
     expect(keys).toContain('AP');
@@ -773,27 +776,47 @@ describe('WARHEAD_VS_ARMOR parity', () => {
     expect(keys).toContain('Mechanical');
   });
 
-  it('Nuke — warhead verses', () => {
-    expect(WARHEAD_VS_ARMOR.Nuke).toEqual([0.9, 1.0, 0.6, 0.25, 0.5]);
-  });
-
-  it('Mechanical — zero damage vs all armor', () => {
-    expect(WARHEAD_VS_ARMOR.Mechanical).toEqual([0.0, 0.0, 0.0, 0.0, 0.0]);
-  });
-
-  it('SA (Small Arms) — good vs none, bad vs heavy', () => {
-    expect(WARHEAD_VS_ARMOR.SA[0]).toBe(1.0);   // none
-    expect(WARHEAD_VS_ARMOR.SA[3]).toBe(0.25);   // heavy
-  });
-
-  it('AP (Armor Piercing) — best vs heavy', () => {
-    expect(WARHEAD_VS_ARMOR.AP[3]).toBe(1.0);    // heavy
-  });
-
   it('each row has 5 entries', () => {
     for (const [key, row] of Object.entries(WARHEAD_VS_ARMOR)) {
       expect(row, `${key} should have 5 entries`).toHaveLength(5);
     }
+  });
+
+  // Full array assertions for all 9 warhead types [none, wood, light, heavy, concrete]
+  it('SA — [1.0, 0.5, 0.6, 0.25, 0.25]', () => {
+    expect(WARHEAD_VS_ARMOR.SA).toEqual([1.0, 0.5, 0.6, 0.25, 0.25]);
+  });
+
+  it('HE — [0.9, 0.75, 0.6, 0.25, 1.0]', () => {
+    expect(WARHEAD_VS_ARMOR.HE).toEqual([0.9, 0.75, 0.6, 0.25, 1.0]);
+  });
+
+  it('AP — [0.3, 0.75, 0.75, 1.0, 0.5]', () => {
+    expect(WARHEAD_VS_ARMOR.AP).toEqual([0.3, 0.75, 0.75, 1.0, 0.5]);
+  });
+
+  it('Fire — [0.9, 1.0, 0.6, 0.25, 0.5]', () => {
+    expect(WARHEAD_VS_ARMOR.Fire).toEqual([0.9, 1.0, 0.6, 0.25, 0.5]);
+  });
+
+  it('HollowPoint — [1.0, 0.05, 0.05, 0.05, 0.05]', () => {
+    expect(WARHEAD_VS_ARMOR.HollowPoint).toEqual([1.0, 0.05, 0.05, 0.05, 0.05]);
+  });
+
+  it('Super — [1.0, 1.0, 1.0, 1.0, 1.0]', () => {
+    expect(WARHEAD_VS_ARMOR.Super).toEqual([1.0, 1.0, 1.0, 1.0, 1.0]);
+  });
+
+  it('Organic — [1.0, 0.0, 0.0, 0.0, 0.0]', () => {
+    expect(WARHEAD_VS_ARMOR.Organic).toEqual([1.0, 0.0, 0.0, 0.0, 0.0]);
+  });
+
+  it('Nuke — [0.9, 1.0, 0.6, 0.25, 0.5]', () => {
+    expect(WARHEAD_VS_ARMOR.Nuke).toEqual([0.9, 1.0, 0.6, 0.25, 0.5]);
+  });
+
+  it('Mechanical — [0.0, 0.0, 0.0, 0.0, 0.0]', () => {
+    expect(WARHEAD_VS_ARMOR.Mechanical).toEqual([0.0, 0.0, 0.0, 0.0, 0.0]);
   });
 });
 
@@ -801,14 +824,44 @@ describe('WARHEAD_VS_ARMOR parity', () => {
 // WARHEAD_PROPS parity (Nuke + Mechanical)
 // ============================================================
 describe('WARHEAD_PROPS parity', () => {
-  it('Nuke entry exists with infantryDeath=4', () => {
-    expect(WARHEAD_PROPS.Nuke).toBeDefined();
-    expect(WARHEAD_PROPS.Nuke.infantryDeath).toBe(4);
+  it('has all 9 warhead types', () => {
+    expect(Object.keys(WARHEAD_PROPS)).toHaveLength(9);
   });
 
-  it('Mechanical entry exists with infantryDeath=0', () => {
-    expect(WARHEAD_PROPS.Mechanical).toBeDefined();
-    expect(WARHEAD_PROPS.Mechanical.infantryDeath).toBe(0);
+  it('SA — infantryDeath=1, explosionSet=piff', () => {
+    expect(WARHEAD_PROPS.SA).toEqual({ infantryDeath: 1, explosionSet: 'piff' });
+  });
+
+  it('HE — infantryDeath=2, explosionSet=veh-hit1', () => {
+    expect(WARHEAD_PROPS.HE).toEqual({ infantryDeath: 2, explosionSet: 'veh-hit1' });
+  });
+
+  it('AP — infantryDeath=3, explosionSet=piff', () => {
+    expect(WARHEAD_PROPS.AP).toEqual({ infantryDeath: 3, explosionSet: 'piff' });
+  });
+
+  it('Fire — infantryDeath=4, explosionSet=napalm1', () => {
+    expect(WARHEAD_PROPS.Fire).toEqual({ infantryDeath: 4, explosionSet: 'napalm1' });
+  });
+
+  it('HollowPoint — infantryDeath=1, explosionSet=piff', () => {
+    expect(WARHEAD_PROPS.HollowPoint).toEqual({ infantryDeath: 1, explosionSet: 'piff' });
+  });
+
+  it('Super — infantryDeath=5, explosionSet=atomsfx', () => {
+    expect(WARHEAD_PROPS.Super).toEqual({ infantryDeath: 5, explosionSet: 'atomsfx' });
+  });
+
+  it('Organic — infantryDeath=0, explosionSet=piff', () => {
+    expect(WARHEAD_PROPS.Organic).toEqual({ infantryDeath: 0, explosionSet: 'piff' });
+  });
+
+  it('Nuke — infantryDeath=4, explosionSet=atomsfx', () => {
+    expect(WARHEAD_PROPS.Nuke).toEqual({ infantryDeath: 4, explosionSet: 'atomsfx' });
+  });
+
+  it('Mechanical — infantryDeath=0, explosionSet=piff', () => {
+    expect(WARHEAD_PROPS.Mechanical).toEqual({ infantryDeath: 0, explosionSet: 'piff' });
   });
 });
 
@@ -816,16 +869,44 @@ describe('WARHEAD_PROPS parity', () => {
 // WARHEAD_META parity (Nuke + Mechanical)
 // ============================================================
 describe('WARHEAD_META parity', () => {
-  it('Nuke — spreadFactor=6, destroys walls and wood', () => {
-    expect(WARHEAD_META.Nuke).toBeDefined();
-    expect(WARHEAD_META.Nuke.spreadFactor).toBe(6);
-    expect(WARHEAD_META.Nuke.destroysWalls).toBe(true);
-    expect(WARHEAD_META.Nuke.destroysWood).toBe(true);
+  it('has all 9 warhead types', () => {
+    expect(Object.keys(WARHEAD_META)).toHaveLength(9);
   });
 
-  it('Mechanical — spreadFactor=0, no destruction', () => {
-    expect(WARHEAD_META.Mechanical).toBeDefined();
-    expect(WARHEAD_META.Mechanical.spreadFactor).toBe(0);
+  it('SA — spreadFactor=3', () => {
+    expect(WARHEAD_META.SA).toEqual({ spreadFactor: 3 });
+  });
+
+  it('HE — spreadFactor=6, destroysWalls, destroysWood', () => {
+    expect(WARHEAD_META.HE).toEqual({ spreadFactor: 6, destroysWalls: true, destroysWood: true });
+  });
+
+  it('AP — spreadFactor=3, destroysWalls, destroysWood', () => {
+    expect(WARHEAD_META.AP).toEqual({ spreadFactor: 3, destroysWalls: true, destroysWood: true });
+  });
+
+  it('Fire — spreadFactor=8, destroysWood', () => {
+    expect(WARHEAD_META.Fire).toEqual({ spreadFactor: 8, destroysWood: true });
+  });
+
+  it('HollowPoint — spreadFactor=1', () => {
+    expect(WARHEAD_META.HollowPoint).toEqual({ spreadFactor: 1 });
+  });
+
+  it('Super — spreadFactor=1', () => {
+    expect(WARHEAD_META.Super).toEqual({ spreadFactor: 1 });
+  });
+
+  it('Organic — spreadFactor=0', () => {
+    expect(WARHEAD_META.Organic).toEqual({ spreadFactor: 0 });
+  });
+
+  it('Nuke — spreadFactor=6, destroysWalls, destroysWood, destroysOre', () => {
+    expect(WARHEAD_META.Nuke).toEqual({ spreadFactor: 6, destroysWalls: true, destroysWood: true, destroysOre: true });
+  });
+
+  it('Mechanical — spreadFactor=0', () => {
+    expect(WARHEAD_META.Mechanical).toEqual({ spreadFactor: 0 });
   });
 });
 
@@ -837,8 +918,12 @@ describe('STRUCTURE_MAX_HP parity', () => {
     POWR: 400, APWR: 700, PROC: 900, TENT: 800, BARR: 800,
     WEAP: 1000, AFLD: 1000, HPAD: 800, DOME: 1000,
     GUN: 400, SAM: 400, TSLA: 400, GAP: 1000,
+    PBOX: 400, HBOX: 600, AGUN: 400, FTUR: 400, KENN: 400,
     ATEK: 400, STEK: 600, IRON: 400, PDOX: 400, MSLO: 400,
-    FIX: 800, SILO: 300, FACT: 1000, HBOX: 600,
+    FIX: 800, SILO: 300, FACT: 1000,
+    SYRD: 1000, SPEN: 1000,
+    QUEE: 800, LAR1: 25, LAR2: 50,
+    BARL: 150, BRL3: 150,
   };
 
   for (const [type, hp] of Object.entries(expected)) {
@@ -846,35 +931,123 @@ describe('STRUCTURE_MAX_HP parity', () => {
       expect(STRUCTURE_MAX_HP[type], `${type} HP`).toBe(hp);
     });
   }
+
+  it('test covers every key in STRUCTURE_MAX_HP', () => {
+    const sourceKeys = Object.keys(STRUCTURE_MAX_HP).sort();
+    const testedKeys = Object.keys(expected).sort();
+    expect(testedKeys).toEqual(sourceKeys);
+  });
 });
 
 // ============================================================
 // SUPERWEAPON_DEFS parity
 // ============================================================
 describe('SUPERWEAPON_DEFS parity', () => {
-  // rules.ini [Recharge] values × 60 × 15 FPS = ticks
-  it('Chronosphere recharge = 6300 ticks (7 min)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE].rechargeTicks).toBe(6300);
+  it('covers all 7 superweapon types', () => {
+    expect(Object.keys(SUPERWEAPON_DEFS)).toHaveLength(7);
   });
 
-  it('GPS Satellite recharge = 7200 ticks (8 min)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(7200);
+  it('CHRONOSPHERE — all fields', () => {
+    const d = SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE];
+    expect(d.building).toBe('PDOX');
+    expect(d.rechargeTicks).toBe(6300);
+    expect(d.faction).toBe('allied');
+    expect(d.requiresPower).toBe(true);
+    expect(d.needsTarget).toBe(true);
+    expect(d.targetMode).toBe('ground');
   });
 
-  it('Iron Curtain recharge = 9900 ticks (11 min)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN].rechargeTicks).toBe(9900);
+  it('IRON_CURTAIN — all fields', () => {
+    const d = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
+    expect(d.building).toBe('IRON');
+    expect(d.rechargeTicks).toBe(9900);
+    expect(d.faction).toBe('soviet');
+    expect(d.requiresPower).toBe(true);
+    expect(d.needsTarget).toBe(true);
+    expect(d.targetMode).toBe('unit');
   });
 
-  it('Nuke recharge = 11700 ticks (13 min)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.NUKE].rechargeTicks).toBe(11700);
+  it('NUKE — all fields', () => {
+    const d = SUPERWEAPON_DEFS[SuperweaponType.NUKE];
+    expect(d.building).toBe('MSLO');
+    expect(d.rechargeTicks).toBe(11700);
+    expect(d.faction).toBe('soviet');
+    expect(d.requiresPower).toBe(true);
+    expect(d.needsTarget).toBe(true);
+    expect(d.targetMode).toBe('ground');
   });
 
-  it('Sonar Pulse recharge = 9000 ticks (10 min)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(9000);
+  it('GPS_SATELLITE — all fields', () => {
+    const d = SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE];
+    expect(d.building).toBe('ATEK');
+    expect(d.rechargeTicks).toBe(7200);
+    expect(d.faction).toBe('allied');
+    expect(d.requiresPower).toBe(true);
+    expect(d.needsTarget).toBe(false);
+    expect(d.targetMode).toBe('none');
   });
 
-  it('IRON_CURTAIN_DURATION = 675 (0.75 min × 60 × 15 = 45s)', () => {
+  it('SONAR_PULSE — all fields', () => {
+    const d = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
+    expect(d.building).toBe('SPEN');
+    expect(d.rechargeTicks).toBe(9000);
+    expect(d.faction).toBe('both');
+    expect(d.requiresPower).toBe(true);
+    expect(d.needsTarget).toBe(false);
+    expect(d.targetMode).toBe('none');
+  });
+
+  it('PARABOMB — all fields', () => {
+    const d = SUPERWEAPON_DEFS[SuperweaponType.PARABOMB];
+    expect(d.building).toBe('AFLD');
+    expect(d.rechargeTicks).toBe(9000);
+    expect(d.faction).toBe('soviet');
+    expect(d.requiresPower).toBe(true);
+    expect(d.needsTarget).toBe(true);
+    expect(d.targetMode).toBe('ground');
+  });
+
+  it('PARAINFANTRY — all fields', () => {
+    const d = SUPERWEAPON_DEFS[SuperweaponType.PARAINFANTRY];
+    expect(d.building).toBe('AFLD');
+    expect(d.rechargeTicks).toBe(9000);
+    expect(d.faction).toBe('soviet');
+    expect(d.requiresPower).toBe(true);
+    expect(d.needsTarget).toBe(true);
+    expect(d.targetMode).toBe('ground');
+  });
+
+  // Superweapon constants
+  it('IRON_CURTAIN_DURATION = 675 (45s)', () => {
     expect(IRON_CURTAIN_DURATION).toBe(675);
+  });
+
+  it('NUKE_DAMAGE = 1000', () => {
+    expect(NUKE_DAMAGE).toBe(1000);
+  });
+
+  it('NUKE_BLAST_CELLS = 10', () => {
+    expect(NUKE_BLAST_CELLS).toBe(10);
+  });
+
+  it('NUKE_FLIGHT_TICKS = 45', () => {
+    expect(NUKE_FLIGHT_TICKS).toBe(45);
+  });
+
+  it('NUKE_MIN_FALLOFF = 0.1', () => {
+    expect(NUKE_MIN_FALLOFF).toBe(0.1);
+  });
+
+  it('CHRONO_SHIFT_VISUAL_TICKS = 30', () => {
+    expect(CHRONO_SHIFT_VISUAL_TICKS).toBe(30);
+  });
+
+  it('SONAR_REVEAL_TICKS = 450', () => {
+    expect(SONAR_REVEAL_TICKS).toBe(450);
+  });
+
+  it('IC_TARGET_RANGE = 3', () => {
+    expect(IC_TARGET_RANGE).toBe(3);
   });
 });
 
@@ -939,4 +1112,193 @@ describe('PRODUCTION_ITEMS cost parity', () => {
     expect(item!.faction).toBe('both');
   });
 
+});
+
+// ============================================================
+// COUNTRY_BONUSES parity
+// ============================================================
+describe('COUNTRY_BONUSES parity', () => {
+  const allCountries = ['Spain', 'Greece', 'England', 'France', 'Germany',
+    'Turkey', 'USSR', 'Ukraine', 'GoodGuy', 'BadGuy', 'Neutral'];
+
+  it('has all 11 countries', () => {
+    expect(Object.keys(COUNTRY_BONUSES).sort()).toEqual(allCountries.sort());
+  });
+
+  // Countries with non-default bonuses
+  it('England — armorMult=1.1', () => {
+    const b = COUNTRY_BONUSES.England;
+    expect(b.costMult).toBe(1.0);
+    expect(b.firepowerMult).toBe(1.0);
+    expect(b.armorMult).toBe(1.1);
+    expect(b.groundspeedMult).toBe(1.0);
+    expect(b.rofMult).toBe(1.0);
+  });
+
+  it('France — rofMult=1.1', () => {
+    const b = COUNTRY_BONUSES.France;
+    expect(b.costMult).toBe(1.0);
+    expect(b.firepowerMult).toBe(1.0);
+    expect(b.armorMult).toBe(1.0);
+    expect(b.groundspeedMult).toBe(1.0);
+    expect(b.rofMult).toBe(1.1);
+  });
+
+  it('Germany — firepowerMult=1.1', () => {
+    const b = COUNTRY_BONUSES.Germany;
+    expect(b.costMult).toBe(1.0);
+    expect(b.firepowerMult).toBe(1.1);
+    expect(b.armorMult).toBe(1.0);
+    expect(b.groundspeedMult).toBe(1.0);
+    expect(b.rofMult).toBe(1.0);
+  });
+
+  it('USSR — costMult=0.9', () => {
+    const b = COUNTRY_BONUSES.USSR;
+    expect(b.costMult).toBe(0.9);
+    expect(b.firepowerMult).toBe(1.0);
+    expect(b.armorMult).toBe(1.0);
+    expect(b.groundspeedMult).toBe(1.0);
+    expect(b.rofMult).toBe(1.0);
+  });
+
+  it('Ukraine — groundspeedMult=1.1', () => {
+    const b = COUNTRY_BONUSES.Ukraine;
+    expect(b.costMult).toBe(1.0);
+    expect(b.firepowerMult).toBe(1.0);
+    expect(b.armorMult).toBe(1.0);
+    expect(b.groundspeedMult).toBe(1.1);
+    expect(b.rofMult).toBe(1.0);
+  });
+
+  // Countries with all-default bonuses
+  const defaultCountries = ['Spain', 'Greece', 'Turkey', 'GoodGuy', 'BadGuy', 'Neutral'];
+  for (const name of defaultCountries) {
+    it(`${name} — all multipliers are 1.0`, () => {
+      const b = COUNTRY_BONUSES[name];
+      expect(b.costMult, `${name}.costMult`).toBe(1.0);
+      expect(b.firepowerMult, `${name}.firepowerMult`).toBe(1.0);
+      expect(b.armorMult, `${name}.armorMult`).toBe(1.0);
+      expect(b.groundspeedMult, `${name}.groundspeedMult`).toBe(1.0);
+      expect(b.rofMult, `${name}.rofMult`).toBe(1.0);
+    });
+  }
+});
+
+// ============================================================
+// TERRAIN_SPEED parity
+// ============================================================
+describe('TERRAIN_SPEED parity', () => {
+  it('has 9 terrain types', () => {
+    expect(Object.keys(TERRAIN_SPEED)).toHaveLength(9);
+  });
+
+  // Full array assertions: [Foot, Track, Wheel, Winged, Float]
+  const expected: Record<string, [number, number, number, number, number]> = {
+    Clear:  [0.90, 0.80, 0.60, 1.0, 0.0],
+    Rough:  [0.80, 0.70, 0.40, 1.0, 0.0],
+    Road:   [1.00, 1.00, 1.00, 1.0, 0.0],
+    Water:  [0.00, 0.00, 0.00, 1.0, 1.0],
+    Rock:   [0.00, 0.00, 0.00, 1.0, 0.0],
+    Wall:   [0.00, 0.00, 0.00, 1.0, 0.0],
+    Ore:    [0.90, 0.70, 0.50, 1.0, 0.0],
+    Beach:  [0.80, 0.70, 0.40, 1.0, 0.0],
+    River:  [0.00, 0.00, 0.00, 1.0, 0.0],
+  };
+
+  for (const [terrain, speeds] of Object.entries(expected)) {
+    it(`${terrain} — [${speeds.join(', ')}]`, () => {
+      expect(TERRAIN_SPEED[terrain]).toEqual(speeds);
+    });
+  }
+
+  it('test covers every key in TERRAIN_SPEED', () => {
+    expect(Object.keys(expected).sort()).toEqual(Object.keys(TERRAIN_SPEED).sort());
+  });
+});
+
+// ============================================================
+// STRUCTURE_WEAPONS parity
+// ============================================================
+describe('STRUCTURE_WEAPONS parity', () => {
+  it('has 8 entries', () => {
+    expect(Object.keys(STRUCTURE_WEAPONS)).toHaveLength(8);
+  });
+
+  it('HBOX — damage=40, range=5, rof=40, warhead=SA, projSpeed=100', () => {
+    const w = STRUCTURE_WEAPONS.HBOX;
+    expect(w.damage).toBe(40);
+    expect(w.range).toBe(5);
+    expect(w.rof).toBe(40);
+    expect(w.warhead).toBe('SA');
+    expect(w.projSpeed).toBe(100);
+  });
+
+  it('PBOX — damage=40, range=5, rof=40, warhead=SA, projSpeed=100', () => {
+    const w = STRUCTURE_WEAPONS.PBOX;
+    expect(w.damage).toBe(40);
+    expect(w.range).toBe(5);
+    expect(w.rof).toBe(40);
+    expect(w.warhead).toBe('SA');
+    expect(w.projSpeed).toBe(100);
+  });
+
+  it('GUN — damage=40, range=6, rof=50, warhead=AP, splash=0.5, projSpeed=40', () => {
+    const w = STRUCTURE_WEAPONS.GUN;
+    expect(w.damage).toBe(40);
+    expect(w.range).toBe(6);
+    expect(w.rof).toBe(50);
+    expect(w.warhead).toBe('AP');
+    expect(w.splash).toBe(0.5);
+    expect(w.projSpeed).toBe(40);
+  });
+
+  it('TSLA — damage=100, range=8.5, rof=120, warhead=Super, splash=1, projSpeed=100', () => {
+    const w = STRUCTURE_WEAPONS.TSLA;
+    expect(w.damage).toBe(100);
+    expect(w.range).toBe(8.5);
+    expect(w.rof).toBe(120);
+    expect(w.warhead).toBe('Super');
+    expect(w.splash).toBe(1);
+    expect(w.projSpeed).toBe(100);
+  });
+
+  it('SAM — damage=50, range=7.5, rof=20, warhead=AP, projSpeed=50, isAntiAir', () => {
+    const w = STRUCTURE_WEAPONS.SAM;
+    expect(w.damage).toBe(50);
+    expect(w.range).toBe(7.5);
+    expect(w.rof).toBe(20);
+    expect(w.warhead).toBe('AP');
+    expect(w.projSpeed).toBe(50);
+    expect(w.isAntiAir).toBe(true);
+  });
+
+  it('AGUN — damage=25, range=6, rof=10, warhead=AP, projSpeed=100, isAntiAir', () => {
+    const w = STRUCTURE_WEAPONS.AGUN;
+    expect(w.damage).toBe(25);
+    expect(w.range).toBe(6);
+    expect(w.rof).toBe(10);
+    expect(w.warhead).toBe('AP');
+    expect(w.projSpeed).toBe(100);
+    expect(w.isAntiAir).toBe(true);
+  });
+
+  it('FTUR — damage=125, range=4, rof=50, warhead=Fire, projSpeed=12', () => {
+    const w = STRUCTURE_WEAPONS.FTUR;
+    expect(w.damage).toBe(125);
+    expect(w.range).toBe(4);
+    expect(w.rof).toBe(50);
+    expect(w.warhead).toBe('Fire');
+    expect(w.projSpeed).toBe(12);
+  });
+
+  it('QUEE — damage=60, range=5, rof=30, splash=1, warhead=Super, projSpeed=40', () => {
+    const w = STRUCTURE_WEAPONS.QUEE;
+    expect(w.damage).toBe(60);
+    expect(w.range).toBe(5);
+    expect(w.rof).toBe(30);
+    expect(w.splash).toBe(1);
+    expect(w.warhead).toBe('Super');
+    expect(w.projSpeed).toBe(40);
+  });
 });
