@@ -1,6 +1,27 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  type Node,
+  type Edge,
+  type Connection,
+  type NodeTypes,
+  Handle,
+  Position,
+  type NodeProps,
+  BackgroundVariant,
+  Panel,
+  ReactFlowProvider,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
 import type {
   Workflow,
   WorkflowNode,
@@ -13,13 +34,137 @@ import { TransitionEditor } from "./TransitionEditor";
 import { validateWorkflow } from "@/lib/workflow/decomposer";
 import type { ValidationError } from "@/lib/workflow/decomposer";
 
-const NODE_W = 160;
-const NODE_H = 56;
-const PORT_R = 6;
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 2;
+// ---- Custom Node Component ----
 
-export function WorkflowBuilder({
+function WorkflowNodeComponent({ data, selected }: NodeProps) {
+  const type = data.nodeType as WorkflowNodeType;
+  const cfg = nodeTypeConfig[type];
+  const label = data.displayLabel as string || cfg?.label || type;
+  const isEntry = data.isEntry as boolean;
+  const hasError = data.hasError as boolean;
+  const hasWarning = data.hasWarning as boolean;
+  const customColor = data.customColor as string | undefined;
+
+  return (
+    <div
+      className={`flex items-center gap-2 border-2 bg-white shadow-sm transition-shadow ${
+        selected ? "border-zinc-950 shadow-md" : "border-zinc-300 hover:border-zinc-400"
+      } ${type === "trigger" || type === "end" ? "rounded-full" : "rounded"}`}
+      style={{ width: 160, height: 56 }}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!h-2.5 !w-2.5 !border-2 !border-zinc-950 !bg-white"
+      />
+
+      <div
+        className={`h-full w-2 shrink-0 ${customColor || cfg?.color || "bg-zinc-500"} ${
+          type === "trigger" || type === "end" ? "rounded-l-full" : "rounded-l-sm"
+        }`}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col px-1 py-1">
+        <span className="truncate font-mono text-[10px] font-bold uppercase text-zinc-500">
+          {cfg?.label || type}
+        </span>
+        <span className="truncate text-xs font-bold">{label}</span>
+      </div>
+
+      {isEntry && (
+        <span className="mr-2 rounded bg-amber-100 px-1 py-0.5 text-[8px] font-bold text-amber-700">
+          ENTRY
+        </span>
+      )}
+
+      {(hasError || hasWarning) && (
+        <div
+          className={`absolute -right-1 -top-1 h-2 w-2 rounded-full ${
+            hasError ? "bg-red-500" : "bg-amber-500"
+          }`}
+        />
+      )}
+
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!h-2.5 !w-2.5 !border-2 !border-zinc-950 !bg-zinc-950"
+      />
+    </div>
+  );
+}
+
+const workflowNodeTypes: NodeTypes = {
+  workflowNode: WorkflowNodeComponent,
+};
+
+// ---- Conversion helpers ----
+
+function workflowToReactFlow(
+  nodes: Record<string, WorkflowNode>,
+  transitions: WorkflowTransition[],
+  entryNodeId: string,
+  nodeIssues: Map<string, ValidationError[]>,
+): { rfNodes: Node[]; rfEdges: Edge[] } {
+  const rfNodes: Node[] = Object.values(nodes).map((n) => ({
+    id: n.id,
+    type: "workflowNode",
+    position: n.position,
+    data: {
+      nodeType: n.type,
+      displayLabel: getNodeDisplayLabel(n),
+      isEntry: n.id === entryNodeId,
+      hasError: nodeIssues.get(n.id)?.some((e) => e.severity === "error") ?? false,
+      hasWarning: nodeIssues.get(n.id)?.some((e) => e.severity === "warning") ?? false,
+      customColor: n.type === "state" ? (n.data as { color?: string }).color : undefined,
+      ...n.data,
+    },
+  }));
+
+  const rfEdges: Edge[] = transitions.map((t) => ({
+    id: t.id,
+    source: t.fromNodeId,
+    target: t.toNodeId,
+    label: t.label,
+    type: "smoothstep",
+    style: { strokeWidth: 2, stroke: "#71717a" },
+    data: { transitionData: t },
+  }));
+
+  return { rfNodes, rfEdges };
+}
+
+function reactFlowToWorkflow(
+  rfNodes: Node[],
+  rfEdges: Edge[],
+): { nodes: Record<string, WorkflowNode>; transitions: WorkflowTransition[] } {
+  const nodes: Record<string, WorkflowNode> = {};
+  for (const n of rfNodes) {
+    const { nodeType, displayLabel, isEntry, hasError, hasWarning, customColor, ...data } = n.data as Record<string, unknown>;
+    nodes[n.id] = {
+      id: n.id,
+      type: nodeType as WorkflowNodeType,
+      data: data as Record<string, unknown>,
+      position: n.position,
+    };
+  }
+
+  const transitions: WorkflowTransition[] = rfEdges.map((e) => {
+    const td = (e.data as Record<string, unknown>)?.transitionData as WorkflowTransition | undefined;
+    return td ?? {
+      id: e.id,
+      fromNodeId: e.source,
+      toNodeId: e.target,
+      label: e.label as string | undefined,
+    };
+  });
+
+  return { nodes, transitions };
+}
+
+// ---- Main component (inner) ----
+
+function WorkflowBuilderInner({
   workflow,
   onSave,
   onCancel,
@@ -30,28 +175,11 @@ export function WorkflowBuilder({
   onCancel: () => void;
   onExport: () => void;
 }) {
-  const [nodes, setNodes] = useState<Record<string, WorkflowNode>>(
-    workflow.nodes,
-  );
-  const [transitions, setTransitions] = useState<WorkflowTransition[]>(
-    workflow.transitions,
-  );
+  const [wfNodes, setWfNodes] = useState(workflow.nodes);
+  const [wfTransitions, setWfTransitions] = useState(workflow.transitions);
   const [entryNodeId, setEntryNodeId] = useState(workflow.entryNodeId);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedTransitionId, setSelectedTransitionId] = useState<
-    string | null
-  >(null);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [connecting, setConnecting] = useState<{
-    fromNodeId: string;
-    mouseX: number;
-    mouseY: number;
-  } | null>(null);
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
   const [optimizePreview, setOptimizePreview] = useState<{
@@ -59,12 +187,9 @@ export function WorkflowBuilder({
     workflow: Workflow;
   } | null>(null);
   const [showValidation, setShowValidation] = useState(false);
-  const [hoveredType, setHoveredType] = useState<WorkflowNodeType | null>(null);
-  const [hoveredTargetNodeId, setHoveredTargetNodeId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const canvasRef = useRef<HTMLDivElement>(null);
+  const [hoveredType, setHoveredType] = useState<WorkflowNodeType | null>(null);
 
-  // Read localStorage in useEffect to avoid hydration mismatch (#418)
   useEffect(() => {
     if (!localStorage.getItem("cliaas-wf-onboarding-dismissed")) {
       setShowOnboarding(true);
@@ -73,25 +198,20 @@ export function WorkflowBuilder({
 
   // Undo stack
   const undoStackRef = useRef<
-    Array<{
-      nodes: Record<string, WorkflowNode>;
-      transitions: WorkflowTransition[];
-    }>
+    Array<{ nodes: Record<string, WorkflowNode>; transitions: WorkflowTransition[] }>
   >([]);
-  const [, forceUndoRender] = useState(0);
 
-  // Use refs for undo so keyboard handler always has current state
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  const transitionsRef = useRef(transitions);
-  transitionsRef.current = transitions;
+  const wfNodesRef = useRef(wfNodes);
+  wfNodesRef.current = wfNodes;
+  const wfTransitionsRef = useRef(wfTransitions);
+  wfTransitionsRef.current = wfTransitions;
 
   function pushUndo() {
     undoStackRef.current = [
       ...undoStackRef.current.slice(-19),
       {
-        nodes: JSON.parse(JSON.stringify(nodesRef.current)),
-        transitions: JSON.parse(JSON.stringify(transitionsRef.current)),
+        nodes: JSON.parse(JSON.stringify(wfNodesRef.current)),
+        transitions: JSON.parse(JSON.stringify(wfTransitionsRef.current)),
       },
     ];
   }
@@ -101,27 +221,20 @@ export function WorkflowBuilder({
     if (stack.length === 0) return;
     const last = stack[stack.length - 1];
     undoStackRef.current = stack.slice(0, -1);
-    setNodes(last.nodes);
-    setTransitions(last.transitions);
-    forceUndoRender((n) => n + 1);
+    setWfNodes(last.nodes);
+    setWfTransitions(last.transitions);
   }
 
-  // Real-time validation
+  // Validation
   const validation = useMemo(() => {
-    const wf: Workflow = {
-      ...workflow,
-      nodes,
-      transitions,
-      entryNodeId,
-    };
+    const wf: Workflow = { ...workflow, nodes: wfNodes, transitions: wfTransitions, entryNodeId };
     return validateWorkflow(wf);
-  }, [workflow, nodes, transitions, entryNodeId]);
+  }, [workflow, wfNodes, wfTransitions, entryNodeId]);
 
-  const errorCount = validation.errors.filter(e => e.severity === 'error').length;
-  const warningCount = validation.errors.filter(e => e.severity === 'warning').length;
-  const validationColor = errorCount > 0 ? 'bg-red-500' : warningCount > 0 ? 'bg-amber-500' : 'bg-emerald-500';
+  const errorCount = validation.errors.filter((e) => e.severity === "error").length;
+  const warningCount = validation.errors.filter((e) => e.severity === "warning").length;
+  const validationColor = errorCount > 0 ? "bg-red-500" : warningCount > 0 ? "bg-amber-500" : "bg-emerald-500";
 
-  // Map nodeId → validation issues for canvas indicators
   const nodeIssues = useMemo(() => {
     const map = new Map<string, ValidationError[]>();
     for (const err of validation.errors) {
@@ -134,59 +247,107 @@ export function WorkflowBuilder({
     return map;
   }, [validation.errors]);
 
-  // Auto-suggest transition label based on target node
+  // Convert to React Flow format
+  const { rfNodes: initialNodes, rfEdges: initialEdges } = useMemo(
+    () => workflowToReactFlow(wfNodes, wfTransitions, entryNodeId, nodeIssues),
+    [wfNodes, wfTransitions, entryNodeId, nodeIssues],
+  );
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // Sync React Flow state back when wfNodes/wfTransitions change
+  useEffect(() => {
+    const { rfNodes, rfEdges } = workflowToReactFlow(wfNodes, wfTransitions, entryNodeId, nodeIssues);
+    setNodes(rfNodes);
+    setEdges(rfEdges);
+  }, [wfNodes, wfTransitions, entryNodeId, nodeIssues, setNodes, setEdges]);
+
+  // Sync position changes from React Flow back to workflow state
+  const onNodeDragStop = useCallback(
+    (_: unknown, node: Node) => {
+      setWfNodes((prev) => ({
+        ...prev,
+        [node.id]: { ...prev[node.id], position: node.position },
+      }));
+    },
+    [],
+  );
+
   function suggestTransitionLabel(fromNodeId: string, toNodeId: string): string | undefined {
-    const to = nodes[toNodeId];
+    const to = wfNodes[toNodeId];
     if (!to) return undefined;
-    if (to.type === 'end') return 'Close';
-    if (to.type === 'state') {
-      return (to.data as { label?: string }).label || undefined;
-    }
+    if (to.type === "end") return "Close";
+    if (to.type === "state") return (to.data as { label?: string }).label || undefined;
     return undefined;
   }
 
-  // Keyboard shortcuts — use refs to avoid stale closures
-  const selectedNodeIdRef = useRef(selectedNodeId);
-  selectedNodeIdRef.current = selectedNodeId;
-  const selectedTransitionIdRef = useRef(selectedTransitionId);
-  selectedTransitionIdRef.current = selectedTransitionId;
+  const onConnect = useCallback(
+    (params: Connection) => {
+      pushUndo();
+      const newTransition: WorkflowTransition = {
+        id: crypto.randomUUID(),
+        fromNodeId: params.source!,
+        toNodeId: params.target!,
+        label: suggestTransitionLabel(params.source!, params.target!),
+      };
+      setWfTransitions((prev) => [...prev, newTransition]);
+    },
+    [wfNodes],
+  );
 
+  // Add node from palette
+  function addNode(type: WorkflowNodeType) {
+    pushUndo();
+    const id = crypto.randomUUID();
+    const defaultData: Record<WorkflowNodeType, Record<string, unknown>> = {
+      trigger: { event: "create" },
+      state: { label: "New State", color: "bg-blue-500" },
+      condition: { logic: "all", conditions: [{ field: "status", operator: "is", value: "open" }] },
+      action: { actions: [{ type: "add_tag", value: "processed" }] },
+      delay: { type: "time", minutes: 60 },
+      end: { label: "End" },
+    };
+    const newNode: WorkflowNode = {
+      id,
+      type,
+      data: defaultData[type],
+      position: { x: 300, y: 200 },
+    };
+    setWfNodes((prev) => ({ ...prev, [id]: newNode }));
+    setSelectedNodeId(id);
+    setSelectedTransitionId(null);
+  }
+
+  // Delete handler
+  const onDelete = useCallback(
+    ({ nodes: deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }) => {
+      pushUndo();
+      if (deletedNodes.length > 0) {
+        const ids = new Set(deletedNodes.map((n) => n.id));
+        setWfNodes((prev) => {
+          const next = { ...prev };
+          for (const id of ids) delete next[id];
+          return next;
+        });
+        setWfTransitions((prev) => prev.filter((t) => !ids.has(t.fromNodeId) && !ids.has(t.toNodeId)));
+        if (selectedNodeId && ids.has(selectedNodeId)) setSelectedNodeId(null);
+      }
+      if (deletedEdges.length > 0) {
+        const ids = new Set(deletedEdges.map((e) => e.id));
+        setWfTransitions((prev) => prev.filter((t) => !ids.has(t.id)));
+        if (selectedTransitionId && ids.has(selectedTransitionId)) setSelectedTransitionId(null);
+      }
+    },
+    [selectedNodeId, selectedTransitionId],
+  );
+
+  // Keyboard shortcuts
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Delete" || e.key === "Backspace") {
-        if (
-          document.activeElement?.tagName === "INPUT" ||
-          document.activeElement?.tagName === "SELECT" ||
-          document.activeElement?.tagName === "TEXTAREA"
-        )
-          return;
-        const nodeId = selectedNodeIdRef.current;
-        const transId = selectedTransitionIdRef.current;
-        if (nodeId) {
-          pushUndo();
-          setNodes((prev) => {
-            const next = { ...prev };
-            delete next[nodeId];
-            return next;
-          });
-          setTransitions((prev) =>
-            prev.filter(
-              (t) => t.fromNodeId !== nodeId && t.toNodeId !== nodeId,
-            ),
-          );
-          setSelectedNodeId(null);
-        } else if (transId) {
-          pushUndo();
-          setTransitions((prev) =>
-            prev.filter((t) => t.id !== transId),
-          );
-          setSelectedTransitionId(null);
-        }
-      }
       if (e.key === "Escape") {
         setSelectedNodeId(null);
         setSelectedTransitionId(null);
-        setConnecting(null);
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "z") {
         e.preventDefault();
@@ -197,190 +358,21 @@ export function WorkflowBuilder({
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
-  // Add node from palette
-  function addNode(type: WorkflowNodeType) {
-    pushUndo();
-    const id = crypto.randomUUID();
-    const defaultData: Record<WorkflowNodeType, Record<string, unknown>> = {
-      trigger: { event: "create" },
-      state: { label: "New State", color: "bg-blue-500" },
-      condition: {
-        logic: "all",
-        conditions: [{ field: "status", operator: "is", value: "open" }],
-      },
-      action: { actions: [{ type: "add_tag", value: "processed" }] },
-      delay: { type: "time", minutes: 60 },
-      end: { label: "End" },
-    };
-    const newNode: WorkflowNode = {
-      id,
-      type,
-      data: defaultData[type],
-      position: { x: 300 - panOffset.x / zoom, y: 200 - panOffset.y / zoom },
-    };
-    setNodes((prev) => ({ ...prev, [id]: newNode }));
-    setSelectedNodeId(id);
-    setSelectedTransitionId(null);
-  }
-
-  // Node drag
-  function handleNodeMouseDown(
-    e: React.MouseEvent,
-    nodeId: string,
-    isPort: boolean,
-  ) {
-    e.stopPropagation();
-    if (isPort) {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setConnecting({
-        fromNodeId: nodeId,
-        mouseX: (e.clientX - rect.left - panOffset.x) / zoom,
-        mouseY: (e.clientY - rect.top - panOffset.y) / zoom,
-      });
-      return;
-    }
-    pushUndo(); // Capture pre-drag state for undo
-    setDraggingNodeId(nodeId);
-    setDragStart({ x: e.clientX, y: e.clientY });
-    setSelectedNodeId(nodeId);
-    setSelectedTransitionId(null);
-  }
-
-  // Canvas mouse handling
-  function handleCanvasMouseDown(e: React.MouseEvent) {
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
-      setIsPanning(true);
-      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
-      e.preventDefault();
-    } else if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === "svg") {
-      setSelectedNodeId(null);
-      setSelectedTransitionId(null);
-    }
-  }
-
-  function handleCanvasMouseMove(e: React.MouseEvent) {
-    if (isPanning) {
-      setPanOffset({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
-      });
-      return;
-    }
-
-    if (draggingNodeId) {
-      const dx = (e.clientX - dragStart.x) / zoom;
-      const dy = (e.clientY - dragStart.y) / zoom;
-      setNodes((prev) => ({
-        ...prev,
-        [draggingNodeId]: {
-          ...prev[draggingNodeId],
-          position: {
-            x: prev[draggingNodeId].position.x + dx,
-            y: prev[draggingNodeId].position.y + dy,
-          },
-        },
-      }));
-      setDragStart({ x: e.clientX, y: e.clientY });
-      return;
-    }
-
-    if (connecting) {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const mx = (e.clientX - rect.left - panOffset.x) / zoom;
-      const my = (e.clientY - rect.top - panOffset.y) / zoom;
-
-      // Track closest target for snap feedback
-      let closestId: string | null = null;
-      for (const node of Object.values(nodes)) {
-        if (node.id === connecting.fromNodeId) continue;
-        const nx = node.position.x + NODE_W / 2;
-        const ny = node.position.y;
-        if (Math.abs(mx - nx) < 30 && Math.abs(my - ny) < 20) {
-          closestId = node.id;
-          break;
-        }
-      }
-      setHoveredTargetNodeId(closestId);
-
-      setConnecting({
-        ...connecting,
-        mouseX: closestId ? nodes[closestId].position.x + NODE_W / 2 : mx,
-        mouseY: closestId ? nodes[closestId].position.y : my,
-      });
-    }
-  }
-
-  function handleCanvasMouseUp(e: React.MouseEvent) {
-    if (draggingNodeId) {
-      setDraggingNodeId(null);
-    }
-    setIsPanning(false);
-
-    if (connecting) {
-      // Check if dropped on a node's input port
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (rect) {
-        const mx = (e.clientX - rect.left - panOffset.x) / zoom;
-        const my = (e.clientY - rect.top - panOffset.y) / zoom;
-        for (const node of Object.values(nodes)) {
-          if (node.id === connecting.fromNodeId) continue;
-          const nx = node.position.x + NODE_W / 2;
-          const ny = node.position.y;
-          if (Math.abs(mx - nx) < 30 && Math.abs(my - ny) < 20) {
-            pushUndo();
-            const newTransition: WorkflowTransition = {
-              id: crypto.randomUUID(),
-              fromNodeId: connecting.fromNodeId,
-              toNodeId: node.id,
-              label: suggestTransitionLabel(connecting.fromNodeId, node.id),
-            };
-            setTransitions((prev) => [...prev, newTransition]);
-            break;
-          }
-        }
-      }
-      setConnecting(null);
-      setHoveredTargetNodeId(null);
-    }
-  }
-
-  // Wheel zoom — register as non-passive to allow preventDefault
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    function onWheel(e: WheelEvent) {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      setZoom((prev) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev + delta)));
-    }
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
   // Save
   async function handleSave() {
     setSaving(true);
     try {
-      await onSave({
-        ...workflow,
-        nodes,
-        transitions,
-        entryNodeId,
-      });
+      await onSave({ ...workflow, nodes: wfNodes, transitions: wfTransitions, entryNodeId });
     } finally {
       setSaving(false);
     }
   }
 
-  // Optimize (dry-run preview)
+  // Optimize
   async function handleOptimizeDryRun() {
     setOptimizing(true);
     try {
-      const res = await fetch(`/api/workflows/${workflow.id}/optimize?dryRun=true`, {
-        method: "POST",
-      });
+      const res = await fetch(`/api/workflows/${workflow.id}/optimize?dryRun=true`, { method: "POST" });
       if (res.ok) {
         const data = await res.json();
         if (data.changes?.length > 0) {
@@ -393,12 +385,11 @@ export function WorkflowBuilder({
     }
   }
 
-  // Apply optimization
-  async function handleOptimizeApply() {
+  function handleOptimizeApply() {
     if (!optimizePreview) return;
     pushUndo();
-    setNodes(optimizePreview.workflow.nodes);
-    setTransitions(optimizePreview.workflow.transitions);
+    setWfNodes(optimizePreview.workflow.nodes);
+    setWfTransitions(optimizePreview.workflow.transitions);
     setEntryNodeId(optimizePreview.workflow.entryNodeId);
     setOptimizePreview(null);
   }
@@ -417,8 +408,8 @@ export function WorkflowBuilder({
         const wf = data.workflow || data;
         if (wf.nodes && wf.transitions && wf.entryNodeId) {
           pushUndo();
-          setNodes(wf.nodes);
-          setTransitions(wf.transitions);
+          setWfNodes(wf.nodes);
+          setWfTransitions(wf.transitions);
           setEntryNodeId(wf.entryNodeId);
         }
       } catch {
@@ -428,32 +419,9 @@ export function WorkflowBuilder({
     input.click();
   }
 
-  // SVG transition paths
-  const transitionPaths = useMemo(() => {
-    return transitions.map((t) => {
-      const from = nodes[t.fromNodeId];
-      const to = nodes[t.toNodeId];
-      if (!from || !to) return null;
-
-      const x1 = from.position.x + NODE_W / 2;
-      const y1 = from.position.y + NODE_H;
-      const x2 = to.position.x + NODE_W / 2;
-      const y2 = to.position.y;
-
-      const dy = Math.abs(y2 - y1);
-      const cp = Math.max(40, dy * 0.4);
-
-      const d = `M ${x1} ${y1} C ${x1} ${y1 + cp}, ${x2} ${y2 - cp}, ${x2} ${y2}`;
-      const midX = (x1 + x2) / 2;
-      const midY = (y1 + y2) / 2;
-
-      return { ...t, d, midX, midY, x1, y1, x2, y2 };
-    });
-  }, [transitions, nodes]);
-
-  const selectedNode = selectedNodeId ? nodes[selectedNodeId] : null;
+  const selectedNode = selectedNodeId ? wfNodes[selectedNodeId] : null;
   const selectedTransition = selectedTransitionId
-    ? transitions.find((t) => t.id === selectedTransitionId)
+    ? wfTransitions.find((t) => t.id === selectedTransitionId)
     : null;
 
   return (
@@ -461,29 +429,18 @@ export function WorkflowBuilder({
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b-2 border-zinc-950 bg-white px-4 py-2">
         <div className="flex items-center gap-4">
-          <button
-            onClick={onCancel}
-            className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-950"
-          >
+          <button onClick={onCancel} className="font-mono text-xs font-bold uppercase text-zinc-500 hover:text-zinc-950">
             &larr; Back
           </button>
           <span className="font-mono text-xs text-zinc-400">|</span>
           <span className="font-mono text-sm font-bold">{workflow.name}</span>
-          <span className="font-mono text-xs text-zinc-400">
-            v{workflow.version}
-          </span>
+          <span className="font-mono text-xs text-zinc-400">v{workflow.version}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleImport}
-            className="border-2 border-zinc-300 px-3 py-1 font-mono text-xs font-bold uppercase text-zinc-500 hover:border-zinc-950 hover:text-zinc-950"
-          >
+          <button onClick={handleImport} className="border-2 border-zinc-300 px-3 py-1 font-mono text-xs font-bold uppercase text-zinc-500 hover:border-zinc-950 hover:text-zinc-950">
             Import
           </button>
-          <button
-            onClick={onExport}
-            className="border-2 border-zinc-300 px-3 py-1 font-mono text-xs font-bold uppercase text-zinc-500 hover:border-zinc-950 hover:text-zinc-950"
-          >
+          <button onClick={onExport} className="border-2 border-zinc-300 px-3 py-1 font-mono text-xs font-bold uppercase text-zinc-500 hover:border-zinc-950 hover:text-zinc-950">
             Export JSON
           </button>
           <button
@@ -492,9 +449,7 @@ export function WorkflowBuilder({
             title={`${errorCount} error(s), ${warningCount} warning(s)`}
           >
             <span className={`inline-block h-2.5 w-2.5 rounded-full ${validationColor}`} />
-            {errorCount + warningCount > 0 && (
-              <span>{errorCount + warningCount}</span>
-            )}
+            {errorCount + warningCount > 0 && <span>{errorCount + warningCount}</span>}
           </button>
           <button
             onClick={handleOptimizeDryRun}
@@ -516,9 +471,7 @@ export function WorkflowBuilder({
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Node palette */}
         <div className="w-48 shrink-0 border-r-2 border-zinc-950 bg-white p-3">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-            Add Node
-          </p>
+          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-zinc-400">Add Node</p>
           <div className="mt-3 space-y-1.5">
             {(Object.entries(nodeTypeConfig) as [WorkflowNodeType, typeof nodeTypeConfig[WorkflowNodeType]][]).map(
               ([type, cfg]) => (
@@ -530,9 +483,7 @@ export function WorkflowBuilder({
                   title={cfg.description}
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-xs font-bold hover:bg-zinc-100"
                 >
-                  <span
-                    className={`flex h-5 w-5 items-center justify-center rounded text-[10px] text-white ${cfg.color}`}
-                  >
+                  <span className={`flex h-5 w-5 items-center justify-center rounded text-[10px] text-white ${cfg.color}`}>
                     {cfg.icon}
                   </span>
                   <span className="uppercase">{cfg.label}</span>
@@ -541,303 +492,63 @@ export function WorkflowBuilder({
             )}
           </div>
           {hoveredType && (
-            <p className="mt-2 text-[10px] text-zinc-500">
-              {nodeTypeConfig[hoveredType].description}
-            </p>
+            <p className="mt-2 text-[10px] text-zinc-500">{nodeTypeConfig[hoveredType].description}</p>
           )}
           <div className="mt-6 border-t border-zinc-200 pt-3">
-            <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-              Controls
-            </p>
-            <p className="mt-2 text-[10px] text-zinc-500">
-              Shift+Drag to pan
-            </p>
-            <p className="text-[10px] text-zinc-500">Scroll to zoom</p>
-            <p className="text-[10px] text-zinc-500">
-              Drag from bottom port to connect
-            </p>
-            <p className="text-[10px] text-zinc-500">
-              Delete/Backspace to remove
-            </p>
+            <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-zinc-400">Controls</p>
+            <p className="mt-2 text-[10px] text-zinc-500">Drag nodes to position</p>
+            <p className="text-[10px] text-zinc-500">Drag from port to connect</p>
+            <p className="text-[10px] text-zinc-500">Delete/Backspace to remove</p>
             <p className="text-[10px] text-zinc-500">Ctrl+Z to undo</p>
           </div>
         </div>
 
         {/* Center: Canvas */}
-        <div
-          ref={canvasRef}
-          className="relative flex-1 cursor-crosshair overflow-hidden"
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          style={{ userSelect: "none" }}
-        >
-          {/* Grid background */}
-          <div
-            className="absolute inset-0"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle, #d4d4d8 1px, transparent 1px)",
-              backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
-              backgroundPosition: `${panOffset.x}px ${panOffset.y}px`,
-            }}
-          />
-
-          {/* Transform container */}
-          <div
-            style={{
-              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
-              transformOrigin: "0 0",
-              position: "absolute",
-              top: 0,
-              left: 0,
+        <div className="relative flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeDragStop={onNodeDragStop}
+            nodeTypes={workflowNodeTypes}
+            onNodeClick={(_, node) => { setSelectedNodeId(node.id); setSelectedTransitionId(null); }}
+            onEdgeClick={(_, edge) => { setSelectedTransitionId(edge.id); setSelectedNodeId(null); }}
+            onPaneClick={() => { setSelectedNodeId(null); setSelectedTransitionId(null); }}
+            onDelete={onDelete}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            snapToGrid
+            snapGrid={[10, 10]}
+            deleteKeyCode={["Delete", "Backspace"]}
+            minZoom={0.25}
+            maxZoom={2}
+            defaultEdgeOptions={{
+              type: "smoothstep",
+              style: { strokeWidth: 2, stroke: "#71717a" },
+              markerEnd: { type: "arrowclosed" as unknown as string, color: "#71717a" },
             }}
           >
-            {/* SVG layer for transitions */}
-            <svg
-              className="pointer-events-none absolute left-0 top-0"
-              style={{ width: 9999, height: 9999, overflow: "visible" }}
-            >
-              <defs>
-                <marker
-                  id="arrowhead"
-                  markerWidth="8"
-                  markerHeight="6"
-                  refX="8"
-                  refY="3"
-                  orient="auto"
-                >
-                  <polygon points="0 0, 8 3, 0 6" fill="#71717a" />
-                </marker>
-                <marker
-                  id="arrowhead-selected"
-                  markerWidth="8"
-                  markerHeight="6"
-                  refX="8"
-                  refY="3"
-                  orient="auto"
-                >
-                  <polygon points="0 0, 8 3, 0 6" fill="#18181b" />
-                </marker>
-              </defs>
-
-              {/* Transition curves */}
-              {transitionPaths.map((tp) => {
-                if (!tp) return null;
-                const isSelected = tp.id === selectedTransitionId;
-                return (
-                  <g key={tp.id}>
-                    {/* Hit area (wider invisible path) */}
-                    <path
-                      d={tp.d}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth={16}
-                      className="pointer-events-auto cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedTransitionId(tp.id);
-                        setSelectedNodeId(null);
-                      }}
-                    />
-                    {/* Visible path */}
-                    <path
-                      d={tp.d}
-                      fill="none"
-                      stroke={isSelected ? "#18181b" : "#71717a"}
-                      strokeWidth={isSelected ? 2.5 : 1.5}
-                      strokeDasharray={isSelected ? "none" : "none"}
-                      markerEnd={
-                        isSelected
-                          ? "url(#arrowhead-selected)"
-                          : "url(#arrowhead)"
-                      }
-                    />
-                    {/* Label */}
-                    {tp.label && (
-                      <text
-                        x={tp.midX}
-                        y={tp.midY - 6}
-                        textAnchor="middle"
-                        className="pointer-events-none fill-zinc-600"
-                        style={{
-                          fontSize: 10,
-                          fontFamily: "monospace",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {tp.label}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-
-              {/* Connecting bezier preview */}
-              {connecting && (() => {
-                const cx1 = nodes[connecting.fromNodeId].position.x + NODE_W / 2;
-                const cy1 = nodes[connecting.fromNodeId].position.y + NODE_H;
-                const cx2 = connecting.mouseX;
-                const cy2 = connecting.mouseY;
-                const cdy = Math.abs(cy2 - cy1);
-                const ccp = Math.max(40, cdy * 0.4);
-                const isSnapped = hoveredTargetNodeId !== null;
-                return (
-                  <path
-                    d={`M ${cx1} ${cy1} C ${cx1} ${cy1 + ccp}, ${cx2} ${cy2 - ccp}, ${cx2} ${cy2}`}
-                    fill="none"
-                    stroke={isSnapped ? "#18181b" : "#a1a1aa"}
-                    strokeWidth={isSnapped ? 2 : 1.5}
-                    strokeDasharray={isSnapped ? "none" : "5 3"}
-                  />
-                );
-              })()}
-            </svg>
-
-            {/* DOM nodes */}
-            {Object.values(nodes).map((node) => {
-              const cfg = nodeTypeConfig[node.type];
-              const isSelected = node.id === selectedNodeId;
-              const isEntry = node.id === entryNodeId;
-              const label =
-                node.type === "state"
-                  ? (node.data as { label?: string }).label || "State"
-                  : node.type === "end"
-                    ? (node.data as { label?: string }).label || "End"
-                    : cfg.label;
-
-              const customColor =
-                node.type === "state"
-                  ? (node.data as { color?: string }).color
-                  : undefined;
-
-              return (
-                <div
-                  key={node.id}
-                  className={`group absolute flex items-center gap-2 border-2 bg-white shadow-sm transition-shadow ${
-                    isSelected
-                      ? "border-zinc-950 shadow-md"
-                      : "border-zinc-300 hover:border-zinc-400"
-                  } ${
-                    node.type === "condition"
-                      ? "rotate-0"
-                      : node.type === "trigger"
-                        ? "rounded-full"
-                        : node.type === "end"
-                          ? "rounded-full"
-                          : "rounded"
-                  }`}
-                  style={{
-                    left: node.position.x,
-                    top: node.position.y,
-                    width: NODE_W,
-                    height: NODE_H,
-                    cursor: draggingNodeId === node.id ? "grabbing" : "grab",
-                  }}
-                  onMouseDown={(e) => handleNodeMouseDown(e, node.id, false)}
-                >
-                  {/* Color bar */}
-                  <div
-                    className={`h-full w-2 shrink-0 ${customColor || cfg.color} ${
-                      node.type === "trigger" || node.type === "end"
-                        ? "rounded-l-full"
-                        : "rounded-l-sm"
-                    }`}
-                  />
-
-                  <div className="flex min-w-0 flex-1 flex-col px-1 py-1">
-                    <span className="truncate font-mono text-[10px] font-bold uppercase text-zinc-500">
-                      {cfg.label}
-                    </span>
-                    <span className="truncate text-xs font-bold">
-                      {label}
-                    </span>
-                  </div>
-
-                  {isEntry && (
-                    <span className="mr-2 rounded bg-amber-100 px-1 py-0.5 text-[8px] font-bold text-amber-700">
-                      ENTRY
-                    </span>
-                  )}
-
-                  {/* Validation dot indicator */}
-                  {nodeIssues.has(node.id) && (
-                    <div
-                      className={`absolute -right-1 -top-1 h-2 w-2 rounded-full ${
-                        nodeIssues.get(node.id)!.some(e => e.severity === 'error')
-                          ? 'bg-red-500'
-                          : 'bg-amber-500'
-                      }`}
-                      title={nodeIssues.get(node.id)!.map(e => e.message).join(', ')}
-                    />
-                  )}
-
-                  {/* Input port (top center) — larger hit area wrapping visual port */}
-                  <div
-                    className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center"
-                    style={{ top: 0, width: 24, height: 24 }}
-                    onMouseUp={(e) => {
-                      if (connecting && connecting.fromNodeId !== node.id) {
-                        e.stopPropagation();
-                        pushUndo();
-                        const newTransition: WorkflowTransition = {
-                          id: crypto.randomUUID(),
-                          fromNodeId: connecting.fromNodeId,
-                          toNodeId: node.id,
-                          label: suggestTransitionLabel(connecting.fromNodeId, node.id),
-                        };
-                        setTransitions((prev) => [...prev, newTransition]);
-                        setConnecting(null);
-                      }
-                    }}
-                  >
-                    <div
-                      className={`rounded-full border-2 transition-colors ${
-                        connecting && connecting.fromNodeId !== node.id
-                          ? hoveredTargetNodeId === node.id
-                            ? "border-zinc-950 bg-zinc-100 shadow-[0_0_6px_rgba(16,185,129,0.4)]"
-                            : "border-emerald-400 bg-white shadow-[0_0_6px_rgba(16,185,129,0.4)]"
-                          : "border-zinc-400 bg-white hover:border-zinc-950 hover:bg-zinc-100"
-                      }`}
-                      style={{
-                        width: PORT_R * 2,
-                        height: PORT_R * 2,
-                      }}
-                    />
-                  </div>
-
-                  {/* Output port (bottom center) — larger hit area wrapping visual port */}
-                  <div
-                    className="absolute left-1/2 -translate-x-1/2 translate-y-1/2 flex cursor-crosshair items-center justify-center"
-                    style={{ bottom: 0, width: 24, height: 24 }}
-                    onMouseDown={(e) =>
-                      handleNodeMouseDown(e, node.id, true)
-                    }
-                  >
-                    <div
-                      className="rounded-full border-2 border-zinc-400 bg-white transition-colors hover:border-zinc-950 hover:bg-zinc-100"
-                      style={{
-                        width: PORT_R * 2,
-                        height: PORT_R * 2,
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#d4d4d8" />
+            <Controls showInteractive={false} />
+            <MiniMap
+              zoomable
+              pannable
+              style={{ border: "2px solid #09090b", borderRadius: 0 }}
+              maskColor="rgba(9,9,11,0.08)"
+            />
+          </ReactFlow>
 
           {/* Onboarding panel */}
           {showOnboarding && (
             <div className="absolute bottom-12 right-4 z-20 max-w-xs border-2 border-zinc-950 bg-white p-4 shadow-lg">
-              <p className="font-mono text-xs font-bold uppercase tracking-widest">
-                Getting Started
-              </p>
+              <p className="font-mono text-xs font-bold uppercase tracking-widest">Getting Started</p>
               <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-600">
-                <li>Click node types in the left palette to add them to the canvas</li>
-                <li>Drag from a bottom port to a top port to connect nodes</li>
-                <li>Shift+drag or middle-click to pan, scroll to zoom</li>
-                <li>Click a node or transition to edit its properties</li>
+                <li>Click node types in the left palette to add them</li>
+                <li>Drag from a port to connect nodes</li>
+                <li>Scroll to zoom, drag canvas to pan</li>
+                <li>Click a node or edge to edit its properties</li>
               </ul>
               <button
                 onClick={() => {
@@ -850,11 +561,6 @@ export function WorkflowBuilder({
               </button>
             </div>
           )}
-
-          {/* Zoom indicator */}
-          <div className="absolute bottom-3 left-3 rounded bg-white/90 px-2 py-1 font-mono text-[10px] text-zinc-500 shadow-sm">
-            {Math.round(zoom * 100)}%
-          </div>
         </div>
 
         {/* Right: Property editor / Validation panel */}
@@ -863,31 +569,19 @@ export function WorkflowBuilder({
             <div>
               <div className="flex items-center justify-between">
                 <p className="font-mono text-xs font-bold uppercase">Optimize Preview</p>
-                <button
-                  onClick={() => { setShowValidation(false); setOptimizePreview(null); }}
-                  className="font-mono text-[10px] text-zinc-400 hover:text-zinc-950"
-                >
-                  Close
-                </button>
+                <button onClick={() => { setShowValidation(false); setOptimizePreview(null); }} className="font-mono text-[10px] text-zinc-400 hover:text-zinc-950">Close</button>
               </div>
               <p className="mt-2 text-[10px] text-zinc-500">
                 {optimizePreview.changes.length} fix{optimizePreview.changes.length !== 1 ? "es" : ""} available:
               </p>
               <div className="mt-3 space-y-1.5">
                 {optimizePreview.changes.map((c, i) => (
-                  <div
-                    key={i}
-                    className="rounded border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-700"
-                  >
-                    <span className="font-mono font-bold uppercase">{c.type.replace(/_/g, " ")}</span>{" "}
-                    {c.description}
+                  <div key={i} className="rounded border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-700">
+                    <span className="font-mono font-bold uppercase">{c.type.replace(/_/g, " ")}</span> {c.description}
                   </div>
                 ))}
               </div>
-              <button
-                onClick={handleOptimizeApply}
-                className="mt-4 w-full border-2 border-zinc-950 bg-zinc-950 py-1.5 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
-              >
+              <button onClick={handleOptimizeApply} className="mt-4 w-full border-2 border-zinc-950 bg-zinc-950 py-1.5 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800">
                 Apply Changes
               </button>
             </div>
@@ -895,12 +589,7 @@ export function WorkflowBuilder({
             <div>
               <div className="flex items-center justify-between">
                 <p className="font-mono text-xs font-bold uppercase">Validation</p>
-                <button
-                  onClick={() => setShowValidation(false)}
-                  className="font-mono text-[10px] text-zinc-400 hover:text-zinc-950"
-                >
-                  Close
-                </button>
+                <button onClick={() => setShowValidation(false)} className="font-mono text-[10px] text-zinc-400 hover:text-zinc-950">Close</button>
               </div>
               {validation.errors.length === 0 ? (
                 <p className="mt-4 text-center text-xs text-emerald-600">All checks passed</p>
@@ -917,15 +606,10 @@ export function WorkflowBuilder({
                         }
                       }}
                       className={`w-full rounded border p-2 text-left text-[10px] ${
-                        err.severity === 'error'
-                          ? 'border-red-200 bg-red-50 text-red-700'
-                          : 'border-amber-200 bg-amber-50 text-amber-700'
-                      } ${err.nodeId ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                        err.severity === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700"
+                      } ${err.nodeId ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
                     >
-                      <span className="font-mono font-bold uppercase">
-                        {err.severity}
-                      </span>{' '}
-                      {err.message}
+                      <span className="font-mono font-bold uppercase">{err.severity}</span> {err.message}
                     </button>
                   ))}
                 </div>
@@ -937,31 +621,42 @@ export function WorkflowBuilder({
               isEntry={selectedNode.id === entryNodeId}
               onChange={(updated) => {
                 pushUndo();
-                setNodes((prev) => ({ ...prev, [updated.id]: updated }));
+                setWfNodes((prev) => ({ ...prev, [updated.id]: updated }));
               }}
               onSetEntry={() => setEntryNodeId(selectedNode.id)}
             />
           ) : selectedTransition ? (
             <TransitionEditor
               transition={selectedTransition}
-              nodes={nodes}
+              nodes={wfNodes}
               onChange={(updated) => {
                 pushUndo();
-                setTransitions((prev) =>
-                  prev.map((t) => (t.id === updated.id ? updated : t)),
-                );
+                setWfTransitions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
               }}
             />
           ) : (
             <div className="text-center text-sm text-zinc-400">
-              <p className="font-mono text-xs font-bold uppercase">
-                Properties
-              </p>
+              <p className="font-mono text-xs font-bold uppercase">Properties</p>
               <p className="mt-4">Select a node or transition to edit</p>
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+// ---- Exported wrapper with ReactFlowProvider ----
+
+export function WorkflowBuilder(props: {
+  workflow: Workflow;
+  onSave: (updated: Workflow) => void;
+  onCancel: () => void;
+  onExport: () => void;
+}) {
+  return (
+    <ReactFlowProvider>
+      <WorkflowBuilderInner {...props} />
+    </ReactFlowProvider>
   );
 }

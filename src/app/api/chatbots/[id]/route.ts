@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getChatbot, upsertChatbot, deleteChatbot } from '@/lib/chatbot/store';
 import type { ChatbotNode } from '@/lib/chatbot/types';
@@ -14,7 +14,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -33,7 +33,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -84,7 +84,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

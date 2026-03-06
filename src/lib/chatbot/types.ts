@@ -8,7 +8,17 @@
 
 // ---- Node types ----
 
-export type ChatbotNodeType = 'message' | 'buttons' | 'branch' | 'action' | 'handoff';
+export type ChatbotNodeType =
+  | 'message'
+  | 'buttons'
+  | 'branch'
+  | 'action'
+  | 'handoff'
+  | 'ai_response'
+  | 'article_suggest'
+  | 'collect_input'
+  | 'webhook'
+  | 'delay';
 
 export interface MessageNodeData {
   text: string;
@@ -31,7 +41,7 @@ export interface BranchCondition {
 }
 
 export interface BranchNodeData {
-  field: 'message' | 'email' | 'name';
+  field: 'message' | 'email' | 'name' | string;
   conditions: BranchCondition[];
   fallbackNodeId?: string;
 }
@@ -47,12 +57,51 @@ export interface HandoffNodeData {
   message: string;
 }
 
+export interface AiResponseNodeData {
+  systemPrompt: string;
+  useRag?: boolean;
+  ragCollections?: string[];
+  maxTokens?: number;
+  fallbackNodeId?: string;
+}
+
+export interface ArticleSuggestNodeData {
+  query?: string;
+  maxArticles?: number;
+  noResultsNodeId?: string;
+}
+
+export interface CollectInputNodeData {
+  prompt: string;
+  variable: string;
+  validation?: 'email' | 'phone' | 'number' | 'none';
+  errorMessage?: string;
+}
+
+export interface WebhookNodeData {
+  url: string;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH';
+  headers?: Record<string, string>;
+  bodyTemplate?: string;
+  responseVariable?: string;
+  failureNodeId?: string;
+}
+
+export interface DelayNodeData {
+  seconds: number;
+}
+
 export type ChatbotNodeData =
   | MessageNodeData
   | ButtonsNodeData
   | BranchNodeData
   | ActionNodeData
-  | HandoffNodeData;
+  | HandoffNodeData
+  | AiResponseNodeData
+  | ArticleSuggestNodeData
+  | CollectInputNodeData
+  | WebhookNodeData
+  | DelayNodeData;
 
 export interface ChatbotNode {
   id: string;
@@ -60,9 +109,14 @@ export interface ChatbotNode {
   data: ChatbotNodeData;
   /** For message/action nodes: the next node to advance to. */
   children?: string[];
+  /** Visual position in the flow canvas. */
+  position?: { x: number; y: number };
 }
 
 // ---- Flow ----
+
+export type ChatbotStatus = 'draft' | 'published' | 'archived';
+export type ChatbotChannel = 'web' | 'email' | 'api' | 'sdk';
 
 export interface ChatbotFlow {
   id: string;
@@ -74,6 +128,20 @@ export interface ChatbotFlow {
   greeting?: string;
   createdAt: string;
   updatedAt: string;
+  version?: number;
+  status?: ChatbotStatus;
+  channels?: ChatbotChannel[];
+  description?: string;
+}
+
+export interface ChatbotVersion {
+  id: string;
+  chatbotId: string;
+  version: number;
+  flow: { nodes: ChatbotFlow['nodes']; rootNodeId: string };
+  summary?: string;
+  createdBy?: string;
+  createdAt: string;
 }
 
 // ---- Runtime state (stored on ChatSession) ----
@@ -94,6 +162,36 @@ export interface BotAction {
   value?: string;
 }
 
+export interface AiResponseRequest {
+  systemPrompt: string;
+  useRag?: boolean;
+  ragCollections?: string[];
+  maxTokens?: number;
+  fallbackNodeId?: string;
+}
+
+export interface ArticleSuggestRequest {
+  query: string;
+  maxArticles: number;
+  noResultsNodeId?: string;
+}
+
+export interface WebhookRequest {
+  url: string;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH';
+  headers?: Record<string, string>;
+  bodyTemplate?: string;
+  responseVariable?: string;
+  failureNodeId?: string;
+}
+
+export interface CollectInputRequest {
+  prompt: string;
+  variable: string;
+  validation?: 'email' | 'phone' | 'number' | 'none';
+  errorMessage?: string;
+}
+
 export interface BotResponse {
   /** Text message to send to the customer. */
   text?: string;
@@ -105,4 +203,14 @@ export interface BotResponse {
   actions: BotAction[];
   /** Updated session state. */
   newState: ChatbotSessionState;
+  /** Delay in seconds before auto-advancing. */
+  delay?: number;
+  /** AI response request (fulfilled by API route). */
+  aiRequest?: AiResponseRequest;
+  /** Article suggestion request (fulfilled by API route). */
+  articleRequest?: ArticleSuggestRequest;
+  /** Webhook request (fulfilled by API route). */
+  webhookRequest?: WebhookRequest;
+  /** Collect input request (waiting for validated user input). */
+  collectInput?: CollectInputRequest;
 }

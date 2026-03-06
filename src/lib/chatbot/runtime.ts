@@ -18,6 +18,11 @@ import type {
   BranchNodeData,
   ActionNodeData,
   HandoffNodeData,
+  CollectInputNodeData,
+  DelayNodeData,
+  AiResponseNodeData,
+  ArticleSuggestNodeData,
+  WebhookNodeData,
 } from './types';
 
 const MAX_CHAIN_DEPTH = 20;
@@ -62,8 +67,8 @@ export function evaluateBotResponse(
     if (!node) break;
 
     // Loop detection
-    if (result.newState.visitedNodes.includes(currentNodeId) && node.type !== 'buttons') {
-      // Allow revisiting buttons nodes (user might circle back), but not others
+    if (result.newState.visitedNodes.includes(currentNodeId) && node.type !== 'buttons' && node.type !== 'collect_input') {
+      // Allow revisiting buttons/collect_input nodes (user might circle back), but not others
       break;
     }
     result.newState.visitedNodes.push(currentNodeId);
@@ -157,6 +162,96 @@ export function evaluateBotResponse(
         return result;
       }
 
+      case 'collect_input': {
+        const data = node.data as CollectInputNodeData;
+        const isWaitingForInput = state.currentNodeId === currentNodeId;
+
+        if (!isWaitingForInput) {
+          // First arrival: show prompt and wait
+          result.text = result.text ? `${result.text}\n\n${data.prompt}` : data.prompt;
+          result.collectInput = {
+            prompt: data.prompt,
+            variable: data.variable,
+            validation: data.validation,
+            errorMessage: data.errorMessage,
+          };
+          result.newState.currentNodeId = currentNodeId;
+          return result;
+        }
+
+        // Re-evaluating: validate and store
+        if (data.validation && data.validation !== 'none') {
+          if (!validateInput(customerMessage, data.validation)) {
+            result.text = data.errorMessage ?? `Please enter a valid ${data.validation}.`;
+            result.collectInput = {
+              prompt: data.prompt,
+              variable: data.variable,
+              validation: data.validation,
+              errorMessage: data.errorMessage,
+            };
+            result.newState.currentNodeId = currentNodeId;
+            return result;
+          }
+        }
+
+        result.newState.variables[data.variable] = customerMessage;
+        currentNodeId = node.children?.[0] ?? '';
+        if (!currentNodeId) {
+          result.newState.currentNodeId = '';
+        }
+        continue;
+      }
+
+      case 'delay': {
+        const data = node.data as DelayNodeData;
+        result.delay = data.seconds;
+        // Auto-advance to first child
+        currentNodeId = node.children?.[0] ?? '';
+        result.newState.currentNodeId = currentNodeId || '';
+        return result;
+      }
+
+      case 'ai_response': {
+        const data = node.data as AiResponseNodeData;
+        result.aiRequest = {
+          systemPrompt: data.systemPrompt,
+          useRag: data.useRag,
+          ragCollections: data.ragCollections,
+          maxTokens: data.maxTokens,
+          fallbackNodeId: data.fallbackNodeId,
+        };
+        // After AI responds, advance to first child
+        result.newState.currentNodeId = node.children?.[0] ?? '';
+        return result;
+      }
+
+      case 'article_suggest': {
+        const data = node.data as ArticleSuggestNodeData;
+        // Use stored variables to build query if not set
+        const query = data.query || customerMessage || result.newState.variables['lastMessage'] || '';
+        result.articleRequest = {
+          query,
+          maxArticles: data.maxArticles ?? 3,
+          noResultsNodeId: data.noResultsNodeId,
+        };
+        result.newState.currentNodeId = node.children?.[0] ?? '';
+        return result;
+      }
+
+      case 'webhook': {
+        const data = node.data as WebhookNodeData;
+        result.webhookRequest = {
+          url: data.url,
+          method: data.method,
+          headers: data.headers,
+          bodyTemplate: data.bodyTemplate,
+          responseVariable: data.responseVariable,
+          failureNodeId: data.failureNodeId,
+        };
+        result.newState.currentNodeId = node.children?.[0] ?? '';
+        return result;
+      }
+
       default:
         break;
     }
@@ -220,5 +315,18 @@ function evaluateBranchCondition(op: string, fieldValue: string, condValue: stri
     }
     default:
       return false;
+  }
+}
+
+function validateInput(value: string, validation: string): boolean {
+  switch (validation) {
+    case 'email':
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    case 'phone':
+      return /^[+]?[\d\s()-]{7,20}$/.test(value);
+    case 'number':
+      return /^-?\d+(\.\d+)?$/.test(value.trim());
+    default:
+      return true;
   }
 }

@@ -31,6 +31,9 @@ interface PollResponse {
   agentTyping: boolean;
   customerTyping: boolean;
   messages: ChatMessage[];
+  chatbotFlowName?: string;
+  chatbotNodeId?: string;
+  chatbotVariables?: Record<string, string>;
 }
 
 // ---- Constants ----
@@ -68,10 +71,19 @@ export default function AgentChatDashboard() {
   const [customerTyping, setCustomerTyping] = useState(false);
   const [showClosed, setShowClosed] = useState(false);
   const [origin, setOrigin] = useState("https://cliaas.com");
+  const [chatbotFlowName, setChatbotFlowName] = useState<string | undefined>();
+  const [chatbotNodeId, setChatbotNodeId] = useState<string | undefined>();
+  const [chatbotVariables, setChatbotVariables] = useState<Record<string, string>>({});
+  const [chatbots, setChatbots] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedChatbotId, setSelectedChatbotId] = useState("");
 
   // Read window.location.origin in useEffect to avoid hydration mismatch (#418)
   useEffect(() => {
     setOrigin(window.location.origin);
+    // Fetch available chatbots for embed snippet selector
+    fetch("/api/chatbots").then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.chatbots) setChatbots(data.chatbots.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name })));
+    }).catch(() => {});
   }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -119,6 +131,9 @@ export default function AgentChatDashboard() {
       const data: PollResponse = await res.json();
       setSessionStatus(data.status);
       setCustomerTyping(data.customerTyping);
+      if (data.chatbotFlowName) setChatbotFlowName(data.chatbotFlowName);
+      if (data.chatbotNodeId) setChatbotNodeId(data.chatbotNodeId);
+      if (data.chatbotVariables) setChatbotVariables(data.chatbotVariables);
 
       if (data.messages.length > 0) {
         setMessages((prev) => {
@@ -409,6 +424,17 @@ export default function AgentChatDashboard() {
                       minute: "2-digit",
                     })}
                   </p>
+                  {chatbotFlowName && (
+                    <p className="font-mono text-[10px] text-emerald-600">
+                      Bot: {chatbotFlowName}
+                      {chatbotNodeId && ` \u00b7 Node: ${chatbotNodeId.slice(0, 8)}`}
+                      {Object.keys(chatbotVariables).length > 0 && (
+                        <span className="ml-2 text-zinc-400">
+                          vars: {Object.entries(chatbotVariables).map(([k, v]) => `${k}=${v}`).join(", ")}
+                        </span>
+                      )}
+                    </p>
+                  )}
                 </div>
                 {sessionStatus !== "closed" && (
                   <button
@@ -548,9 +574,40 @@ export default function AgentChatDashboard() {
         <p className="mt-2 text-sm text-zinc-400">
           Add this script to your website to enable live chat:
         </p>
-        <pre className="mt-4 overflow-x-auto bg-zinc-900 p-4 font-mono text-sm text-emerald-400">
-          {`<script src="${origin}/api/chat/widget.js"></script>`}
-        </pre>
+
+        {chatbots.length > 0 && (
+          <div className="mt-4 flex items-center gap-3">
+            <span className="font-mono text-xs text-zinc-400">Chatbot:</span>
+            <select
+              value={selectedChatbotId}
+              onChange={(e) => setSelectedChatbotId(e.target.value)}
+              className="border border-zinc-700 bg-zinc-800 px-3 py-1 font-mono text-xs text-zinc-200"
+            >
+              <option value="">Default (active bot)</option>
+              {chatbots.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <p className="mb-1 font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+            Iframe Embed (recommended)
+          </p>
+          <pre className="overflow-x-auto bg-zinc-900 p-4 font-mono text-sm text-emerald-400">
+            {`<script src="${origin}/api/chat/widget.js${selectedChatbotId ? `?chatbotId=${selectedChatbotId}` : ""}"></script>`}
+          </pre>
+        </div>
+
+        <div className="mt-4">
+          <p className="mb-1 font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+            Shadow DOM Embed (no iframe)
+          </p>
+          <pre className="overflow-x-auto bg-zinc-900 p-4 font-mono text-sm text-amber-400">
+            {`<script src="${origin}/api/chat/widget-standalone.js${selectedChatbotId ? `?chatbotId=${selectedChatbotId}` : ""}"></script>`}
+          </pre>
+        </div>
       </section>
     </main>
   );

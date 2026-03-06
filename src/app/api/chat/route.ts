@@ -12,9 +12,10 @@ import {
 } from '@/lib/chat';
 import { eventBus } from '@/lib/realtime/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
-import { getActiveChatbot } from '@/lib/chatbot/store';
+import { requirePerm } from '@/lib/rbac';
+import { getActiveChatbot, getChatbot } from '@/lib/chatbot/store';
 import { evaluateBotResponse, processInitialGreeting } from '@/lib/chatbot/runtime';
+import { handleAiResponse, handleArticleSuggest, handleWebhook } from '@/lib/chatbot/handlers';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,7 +73,7 @@ export async function GET(request: NextRequest) {
  *   { action: "typing", sessionId: "...", role: "customer"|"agent", typing: boolean }
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<Record<string, unknown>>(request);
@@ -86,6 +87,8 @@ export async function POST(request: NextRequest) {
     case 'create': {
       const customerName = (body.customerName as string)?.trim();
       const customerEmail = (body.customerEmail as string)?.trim();
+      const chatbotId = body.chatbotId as string | undefined;
+      const channel = body.channel as string | undefined;
 
       if (!customerName || !customerEmail) {
         return NextResponse.json(
@@ -102,13 +105,16 @@ export async function POST(request: NextRequest) {
           subject: `New chat from ${customerName}`,
           sessionId: session.id,
           customerEmail,
+          channel: channel ?? 'web',
         },
         timestamp: Date.now(),
       });
 
       // Check for active chatbot flow and send initial greeting
       try {
-        const activeBotFlow = await getActiveChatbot();
+        const activeBotFlow = chatbotId
+          ? await getChatbot(chatbotId)
+          : await getActiveChatbot();
         if (activeBotFlow) {
           const greeting = processInitialGreeting(activeBotFlow);
           if (greeting.text) {
@@ -183,15 +189,44 @@ export async function POST(request: NextRequest) {
             if (activeBotFlow && activeBotFlow.id === session.botState.flowId) {
               const botResp = evaluateBotResponse(activeBotFlow, session.botState, msgBody);
 
-              if (botResp.text) {
-                const metadata = botResp.buttons
-                  ? { buttons: botResp.buttons.map((b) => ({ label: b.label })) }
-                  : undefined;
+              // Handle async node types
+              let asyncText: string | undefined;
+              if (botResp.aiRequest) {
+                const aiResult = await handleAiResponse(botResp.aiRequest, {
+                  customerMessage: msgBody,
+                  variables: botResp.newState.variables,
+                });
+                asyncText = aiResult?.text;
+                if (!aiResult && botResp.aiRequest.fallbackNodeId) {
+                  botResp.newState.currentNodeId = botResp.aiRequest.fallbackNodeId;
+                }
+              } else if (botResp.articleRequest) {
+                const articleResult = await handleArticleSuggest(botResp.articleRequest);
+                asyncText = articleResult?.text;
+                if (!articleResult && botResp.articleRequest.noResultsNodeId) {
+                  botResp.newState.currentNodeId = botResp.articleRequest.noResultsNodeId;
+                }
+              } else if (botResp.webhookRequest) {
+                const webhookResult = await handleWebhook(botResp.webhookRequest, botResp.newState.variables);
+                if (webhookResult.success && botResp.webhookRequest.responseVariable) {
+                  botResp.newState.variables[botResp.webhookRequest.responseVariable] = webhookResult.responseData;
+                }
+                if (!webhookResult.success && botResp.webhookRequest.failureNodeId) {
+                  botResp.newState.currentNodeId = botResp.webhookRequest.failureNodeId;
+                }
+              }
+
+              const displayText = asyncText || botResp.text;
+              if (displayText) {
+                const metadata: Record<string, unknown> = {};
+                if (botResp.buttons) metadata.buttons = botResp.buttons.map((b) => ({ label: b.label }));
+                if (botResp.delay) metadata.delay = botResp.delay;
+                if (botResp.collectInput) metadata.collectInput = botResp.collectInput;
                 botMessage = addMessage(
                   sessionId,
                   'bot',
-                  botResp.text,
-                  metadata,
+                  displayText,
+                  Object.keys(metadata).length > 0 ? metadata : undefined,
                 );
               }
 
@@ -199,7 +234,6 @@ export async function POST(request: NextRequest) {
               for (const action of botResp.actions) {
                 switch (action.actionType) {
                   case 'set_tag':
-                    // Tag stored as variable for future use
                     if (action.value && botResp.newState) {
                       botResp.newState.variables[`tag:${action.value}`] = 'true';
                     }
@@ -207,12 +241,10 @@ export async function POST(request: NextRequest) {
                   case 'close':
                     closeSession(sessionId);
                     break;
-                  // create_ticket and assign are handled at session close
                 }
               }
 
               if (botResp.handoff) {
-                // Clear bot state — session goes to agent queue
                 setBotState(sessionId, undefined);
               } else {
                 setBotState(sessionId, botResp.newState);

@@ -74,6 +74,10 @@ export async function upsertChatbot(flow: ChatbotFlow): Promise<ChatbotFlow> {
       flow: { nodes: flow.nodes, rootNodeId: flow.rootNodeId },
       enabled: flow.enabled,
       greeting: flow.greeting ?? null,
+      version: flow.version ?? 1,
+      status: flow.status ?? 'published',
+      channels: flow.channels ?? ['web'],
+      description: flow.description ?? null,
       updatedAt: new Date(),
     };
 
@@ -126,6 +130,10 @@ function rowToFlow(row: {
   flow: unknown;
   enabled: boolean;
   greeting: string | null;
+  version?: number;
+  status?: string | null;
+  channels?: unknown;
+  description?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): ChatbotFlow {
@@ -137,6 +145,10 @@ function rowToFlow(row: {
     rootNodeId: flowData.rootNodeId,
     enabled: row.enabled,
     greeting: row.greeting ?? undefined,
+    version: row.version ?? 1,
+    status: (row.status as ChatbotFlow['status']) ?? 'published',
+    channels: (row.channels as ChatbotFlow['channels']) ?? undefined,
+    description: row.description ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

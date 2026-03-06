@@ -49,6 +49,21 @@ export default function ChatEmbedPage() {
   const [sending, setSending] = useState(false);
   const [formError, setFormError] = useState("");
 
+  // Read params from URL (set by widget.js)
+  const [chatbotId, setChatbotId] = useState<string | null>(null);
+  const [themeColor, setThemeColor] = useState<string | null>(null);
+  const [channel, setChannel] = useState("web");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const cid = params.get("chatbotId");
+    const color = params.get("color");
+    const ch = params.get("channel");
+    if (cid) setChatbotId(cid);
+    if (color) setThemeColor(color);
+    if (ch) setChannel(ch);
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastTimestampRef = useRef<number>(0);
@@ -130,14 +145,18 @@ export default function ChatEmbedPage() {
     }
 
     try {
+      const createBody: Record<string, unknown> = {
+        action: "create",
+        customerName: trimName,
+        customerEmail: trimEmail,
+      };
+      if (chatbotId) createBody.chatbotId = chatbotId;
+      if (channel) createBody.channel = channel;
+
       const res = await fetch(API_BASE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "create",
-          customerName: trimName,
-          customerEmail: trimEmail,
-        }),
+        body: JSON.stringify(createBody),
       });
 
       if (!res.ok) {
@@ -317,9 +336,9 @@ export default function ChatEmbedPage() {
             justifyContent: "center",
             width: "56px",
             height: "56px",
-            backgroundColor: "#09090b",
+            backgroundColor: themeColor || "#09090b",
             color: "#fff",
-            border: "2px solid #09090b",
+            border: `2px solid ${themeColor || "#09090b"}`,
             cursor: "pointer",
             boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
           }}

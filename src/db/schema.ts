@@ -1361,6 +1361,11 @@ export const chatbotAnalytics = pgTable(
     avgTimeSeconds: real('avg_time_seconds'),
   },
   table => ({
+    chatbotAnalyticsUniqueIdx: uniqueIndex('chatbot_analytics_unique_idx').on(
+      table.chatbotId,
+      table.nodeId,
+      table.date,
+    ),
     chatbotAnalyticsChatbotDateIdx: index('chatbot_analytics_chatbot_date_idx').on(
       table.chatbotId,
       table.date,
