@@ -5,16 +5,17 @@ import { loadKBArticles } from '@/lib/data';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/portal/kb/:slug — public article detail by slug.
+ * GET /api/portal/kb/:idOrSlug — public article detail by ID or slug.
  * Increments view_count and returns full article with SEO metadata.
  * No auth required (portal is public).
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { slug } = await params;
+    const { id: idOrSlug } = await params;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrSlug);
 
     // Try DB first
     if (process.env.DATABASE_URL) {
@@ -23,7 +24,10 @@ export async function GET(
         const schema = await import('@/db/schema');
         const { eq, and, sql } = await import('drizzle-orm');
 
-        // Find the published/public article by slug
+        const condition = isUUID
+          ? eq(schema.kbArticles.id, idOrSlug)
+          : eq(schema.kbArticles.slug, idOrSlug);
+
         const [article] = await db
           .select({
             id: schema.kbArticles.id,
@@ -45,7 +49,7 @@ export async function GET(
           .from(schema.kbArticles)
           .where(
             and(
-              eq(schema.kbArticles.slug, slug),
+              condition,
               eq(schema.kbArticles.visibility, 'public'),
             ),
           )
@@ -90,11 +94,11 @@ export async function GET(
       }
     }
 
-    // JSONL fallback — find by slug
+    // JSONL fallback — find by slug or ID
     const articles = await loadKBArticles();
     const article = articles.find(
       (a) =>
-        a.slug === slug &&
+        (a.slug === idOrSlug || a.id === idOrSlug) &&
         (!a.visibility || a.visibility === 'public'),
     );
 
