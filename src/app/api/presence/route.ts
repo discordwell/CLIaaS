@@ -26,12 +26,8 @@ export async function POST(request: NextRequest) {
     if (action === 'leave') {
       presence.leave(userId, ticketId);
     } else {
-      presence.update(
-        userId,
-        userName,
-        ticketId,
-        activity || 'viewing'
-      );
+      const validActivity = activity === 'typing' ? 'typing' : 'viewing';
+      presence.update(userId, userName, ticketId, validActivity);
     }
 
     const viewers = presence.getViewers(ticketId);

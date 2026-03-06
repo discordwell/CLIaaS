@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import CannedResponsePicker from "./CannedResponsePicker";
+import MentionInput from "./MentionInput";
 
 interface TicketActionsProps {
   ticketId: string;
@@ -24,6 +25,7 @@ export default function TicketActions({
   const [collisionWarning, setCollisionWarning] = useState<{
     newReplies: Array<{ author: string; body: string; createdAt: string }>;
   } | null>(null);
+  const [mentionIds, setMentionIds] = useState<string[]>([]);
 
   const [status, setStatus] = useState(currentStatus);
   const [priority, setPriority] = useState(currentPriority);
@@ -70,25 +72,22 @@ export default function TicketActions({
     broadcastActivity("viewing");
   }, [broadcastActivity]);
 
-  // Cleanup on unmount
+  // Cleanup typing timer on unmount (leave is handled by CollisionDetector)
   useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      fetch("/api/presence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId, action: "leave" }),
-      }).catch(() => {});
     };
   }, [ticketId]);
 
-  // Listen for SSE new reply events
+  // Listen for SSE new reply events (use ref for replyBody to avoid recreating EventSource on every keystroke)
+  const replyBodyRef = useRef(replyBody);
+  replyBodyRef.current = replyBody;
+
   useEffect(() => {
-    const es = new EventSource("/api/events");
+    const es = new EventSource(`/api/events?ticketId=${encodeURIComponent(ticketId)}`);
     const handler = (e: MessageEvent) => {
       try {
-        const event = JSON.parse(e.data);
-        if (event.data?.ticketId === ticketId && replyBody.trim()) {
+        if (replyBodyRef.current.trim()) {
           setNewReplyBanner(true);
         }
       } catch { /* ignore */ }
@@ -98,17 +97,23 @@ export default function TicketActions({
       es.removeEventListener("ticket:reply", handler);
       es.close();
     };
-  }, [ticketId, replyBody]);
+  }, [ticketId]);
 
   const doSendReply = async () => {
     setReplyState("sending");
     setReplyMsg("");
     setCollisionWarning(null);
     try {
-      const res = await fetch(`/api/tickets/${ticketId}/reply`, {
+      const url = isNote
+        ? `/api/tickets/${ticketId}/notes`
+        : `/api/tickets/${ticketId}/reply`;
+      const payload = isNote
+        ? { body: replyBody, mentions: mentionIds.length > 0 ? mentionIds : undefined }
+        : { message: replyBody, isNote: false };
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: replyBody, isNote }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Reply failed");
@@ -289,27 +294,65 @@ export default function TicketActions({
         )}
 
         <div className="mt-4">
-          <textarea
-            value={replyBody}
-            onChange={(e) => {
-              setReplyBody(e.target.value);
-              handleTyping();
-            }}
-            onBlur={handleTextareaBlur}
-            placeholder="Type your reply..."
-            rows={5}
-            className="w-full border-2 border-zinc-300 p-3 text-sm focus:border-zinc-950 focus:outline-none"
-          />
+          {/* Reply / Note toggle */}
+          <div className="mb-3 inline-flex border-2 border-zinc-950">
+            <button
+              type="button"
+              onClick={() => setIsNote(false)}
+              className={`px-4 py-1.5 font-mono text-xs font-bold uppercase transition-colors ${
+                !isNote
+                  ? "bg-zinc-950 text-white"
+                  : "bg-white text-zinc-500 hover:bg-zinc-100"
+              }`}
+            >
+              Reply
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsNote(true)}
+              className={`px-4 py-1.5 font-mono text-xs font-bold uppercase transition-colors ${
+                isNote
+                  ? "bg-amber-400 text-amber-900"
+                  : "bg-white text-zinc-500 hover:bg-zinc-100"
+              }`}
+            >
+              Note
+            </button>
+          </div>
+          {isNote ? (
+            <MentionInput
+              value={replyBody}
+              onChange={(v) => {
+                setReplyBody(v);
+                handleTyping();
+              }}
+              onMentionsChange={setMentionIds}
+              onBlur={handleTextareaBlur}
+              onKeyDown={handleTyping}
+              placeholder="Add an internal note... (use @name to mention)"
+              rows={5}
+              className="w-full border-2 border-amber-300 bg-amber-50 p-3 text-sm focus:border-amber-500 focus:outline-none"
+            />
+          ) : (
+            <textarea
+              value={replyBody}
+              onChange={(e) => {
+                setReplyBody(e.target.value);
+                handleTyping();
+              }}
+              onBlur={handleTextareaBlur}
+              placeholder="Type your reply..."
+              rows={5}
+              className="w-full border-2 border-zinc-300 p-3 text-sm focus:border-zinc-950 focus:outline-none"
+            />
+          )}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <label className="flex items-center gap-2 font-mono text-xs font-bold text-zinc-600">
-              <input
-                type="checkbox"
-                checked={isNote}
-                onChange={(e) => setIsNote(e.target.checked)}
-                className="h-4 w-4"
-              />
-              Internal note (not visible to customer)
-            </label>
+            {isNote && (
+              <span className="font-mono text-xs font-bold text-amber-700">
+                Internal note — not visible to customer
+              </span>
+            )}
+            {!isNote && <div />}
             <div className="flex items-center gap-3">
               <CannedResponsePicker
                 ticketId={ticketId}
