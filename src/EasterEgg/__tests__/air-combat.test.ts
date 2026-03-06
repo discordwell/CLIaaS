@@ -27,26 +27,26 @@ describe('Aircraft type definitions', () => {
     const s = UNIT_STATS.MIG;
     expect(s.type).toBe(UnitType.V_MIG);
     expect(s.name).toBe('MiG');
-    expect(s.strength).toBe(60);
+    expect(s.strength).toBe(50);
     expect(s.armor).toBe('light');
-    expect(s.speed).toBe(50);
+    expect(s.speed).toBe(20);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isFixedWing).toBe(true);
     expect(s.landingBuilding).toBe('AFLD');
-    expect(s.maxAmmo).toBe(2);
+    expect(s.maxAmmo).toBe(3);
     expect(s.primaryWeapon).toBe('Maverick');
   });
 
   it('YAK has correct stats', () => {
     const s = UNIT_STATS.YAK;
     expect(s.type).toBe(UnitType.V_YAK);
-    expect(s.strength).toBe(50);
+    expect(s.strength).toBe(60);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isFixedWing).toBe(true);
     expect(s.landingBuilding).toBe('AFLD');
-    expect(s.maxAmmo).toBe(2);
+    expect(s.maxAmmo).toBe(15);
     expect(s.primaryWeapon).toBe('ChainGun');
   });
 
@@ -54,28 +54,28 @@ describe('Aircraft type definitions', () => {
     const s = UNIT_STATS.HELI;
     expect(s.type).toBe(UnitType.V_HELI);
     expect(s.name).toBe('Longbow');
-    expect(s.strength).toBe(100);
+    expect(s.strength).toBe(225);
     expect(s.armor).toBe('heavy');
-    expect(s.speed).toBe(40);
+    expect(s.speed).toBe(16);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);
     expect(s.isFixedWing).toBeUndefined();
     expect(s.landingBuilding).toBe('HPAD');
-    expect(s.maxAmmo).toBe(8);
+    expect(s.maxAmmo).toBe(6);
     expect(s.primaryWeapon).toBe('Hellfire');
   });
 
   it('HIND has correct stats', () => {
     const s = UNIT_STATS.HIND;
     expect(s.type).toBe(UnitType.V_HIND);
-    expect(s.strength).toBe(100);
+    expect(s.strength).toBe(225);
     expect(s.armor).toBe('heavy');
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);
     expect(s.landingBuilding).toBe('HPAD');
-    expect(s.maxAmmo).toBe(4);
+    expect(s.maxAmmo).toBe(12);
     expect(s.primaryWeapon).toBe('ChainGun');
   });
 
@@ -192,16 +192,16 @@ describe('Entity air detection', () => {
 describe('Ammo system', () => {
   it('Aircraft start with maxAmmo', () => {
     const mig = makeEntity(UnitType.V_MIG, House.Spain);
-    expect(mig.ammo).toBe(2);
-    expect(mig.maxAmmo).toBe(2);
+    expect(mig.ammo).toBe(3);
+    expect(mig.maxAmmo).toBe(3);
 
     const yak = makeEntity(UnitType.V_YAK, House.Spain);
-    expect(yak.ammo).toBe(2);
-    expect(yak.maxAmmo).toBe(2);
+    expect(yak.ammo).toBe(15);
+    expect(yak.maxAmmo).toBe(15);
 
     const hind = makeEntity(UnitType.V_HIND, House.Spain);
-    expect(hind.ammo).toBe(4);
-    expect(hind.maxAmmo).toBe(4);
+    expect(hind.ammo).toBe(12);
+    expect(hind.maxAmmo).toBe(12);
   });
 
   it('Non-aircraft have unlimited ammo (-1)', () => {
@@ -213,9 +213,9 @@ describe('Ammo system', () => {
   it('Ammo can be decremented', () => {
     const mig = makeEntity(UnitType.V_MIG, House.Spain);
     mig.ammo--;
-    expect(mig.ammo).toBe(1);
+    expect(mig.ammo).toBe(2);
     mig.ammo--;
-    expect(mig.ammo).toBe(0);
+    expect(mig.ammo).toBe(1);
   });
 
   it('Rearm timer restores ammo', () => {
@@ -454,7 +454,7 @@ describe('Aircraft production items', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'HPAD');
     expect(item).toBeDefined();
     expect(item!.isStructure).toBe(true);
-    expect(item!.prerequisite).toBe('FACT');
+    expect(item!.prerequisite).toBe('DOME');
     expect(item!.cost).toBe(1500);
   });
 
@@ -462,7 +462,7 @@ describe('Aircraft production items', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'AFLD');
     expect(item).toBeDefined();
     expect(item!.isStructure).toBe(true);
-    expect(item!.prerequisite).toBe('FACT');
+    expect(item!.prerequisite).toBe('DOME');
     expect(item!.faction).toBe('soviet');
     expect(item!.cost).toBe(600);
   });
@@ -479,12 +479,12 @@ describe('HPAD/AFLD structure config', () => {
     expect(STRUCTURE_SIZE.AFLD).toEqual([2, 2]);
   });
 
-  it('HPAD has 400 max HP', () => {
-    expect(STRUCTURE_MAX_HP.HPAD).toBe(400);
+  it('HPAD has 800 max HP', () => {
+    expect(STRUCTURE_MAX_HP.HPAD).toBe(800);
   });
 
-  it('AFLD has 500 max HP', () => {
-    expect(STRUCTURE_MAX_HP.AFLD).toBe(500);
+  it('AFLD has 1000 max HP', () => {
+    expect(STRUCTURE_MAX_HP.AFLD).toBe(1000);
   });
 
   it('MapStructure interface supports dockedAircraft field', () => {

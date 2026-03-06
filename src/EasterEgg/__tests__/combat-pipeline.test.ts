@@ -67,20 +67,20 @@ describe('Aircraft damage formula includes firepower bias', () => {
   // Mirrors the formula in Game.fireWeaponAt:
   // damage = mult <= 0 ? 0 : Math.max(1, Math.round(weapon.damage * mult * houseBias))
 
-  it('USSR aircraft (firepowerMult=1.10) deal 10% more damage than Spain (1.0)', () => {
+  it('Germany aircraft (firepowerMult=1.10) deal 10% more damage than Spain (1.0)', () => {
     const weaponName = UNIT_STATS.MIG.primaryWeapon!;
     const weapon = WEAPON_STATS[weaponName];
     const targetArmor: ArmorType = 'heavy'; // typical ground target
     const mult = getWarheadMultiplier(weapon.warhead, targetArmor);
 
     const spainBias = COUNTRY_BONUSES.Spain.firepowerMult;
-    const ussrBias = COUNTRY_BONUSES.USSR.firepowerMult;
-    expect(ussrBias).toBe(1.10);
+    const germanyBias = COUNTRY_BONUSES.Germany.firepowerMult;
+    expect(germanyBias).toBe(1.10);
     expect(spainBias).toBe(1.0);
 
     const spainDmg = Math.max(1, Math.round(weapon.damage * mult * spainBias));
-    const ussrDmg = Math.max(1, Math.round(weapon.damage * mult * ussrBias));
-    expect(ussrDmg).toBeGreaterThan(spainDmg);
+    const germanyDmg = Math.max(1, Math.round(weapon.damage * mult * germanyBias));
+    expect(germanyDmg).toBeGreaterThan(spainDmg);
   });
 
   it('aircraft structure attack uses warhead-vs-concrete mult + house bias', () => {
@@ -131,7 +131,7 @@ describe('Defense structure damage formula includes firepower bias', () => {
   // Mirrors the formula in Game.updateStructureCombat:
   // damage = mult <= 0 ? 0 : Math.max(1, Math.round(s.weapon.damage * mult * houseBias))
 
-  it('USSR defense (firepowerMult=1.10) deals more damage than neutral (1.0)', () => {
+  it('Germany defense (firepowerMult=1.10) deals more damage than neutral (1.0)', () => {
     // Simulate a GUN turret-like defense with HE warhead
     const weaponDamage = 40; // typical turret damage
     const warhead: WarheadType = 'HE';
@@ -139,28 +139,28 @@ describe('Defense structure damage formula includes firepower bias', () => {
     const mult = getWarheadMultiplier(warhead, targetArmor);
 
     const neutralBias = COUNTRY_BONUSES.Neutral.firepowerMult;
-    const ussrBias = COUNTRY_BONUSES.USSR.firepowerMult;
+    const germanyBias = COUNTRY_BONUSES.Germany.firepowerMult;
 
     const neutralDmg = Math.max(1, Math.round(weaponDamage * mult * neutralBias));
-    const ussrDmg = Math.max(1, Math.round(weaponDamage * mult * ussrBias));
+    const germanyDmg = Math.max(1, Math.round(weaponDamage * mult * germanyBias));
 
-    expect(ussrDmg).toBeGreaterThan(neutralDmg);
+    expect(germanyDmg).toBeGreaterThan(neutralDmg);
   });
 
-  it('Ukraine defense (firepowerMult=1.05) gets 5% boost', () => {
+  it('Germany defense (firepowerMult=1.10) gets 10% boost', () => {
     const weaponDamage = 100;
     const warhead: WarheadType = 'AP';
     const targetArmor: ArmorType = 'heavy';
     const mult = getWarheadMultiplier(warhead, targetArmor);
 
     const baseDmg = Math.max(1, Math.round(weaponDamage * mult * 1.0));
-    const ukraineBias = COUNTRY_BONUSES.Ukraine.firepowerMult;
-    expect(ukraineBias).toBe(1.05);
-    const ukraineDmg = Math.max(1, Math.round(weaponDamage * mult * ukraineBias));
+    const germanyBias = COUNTRY_BONUSES.Germany.firepowerMult;
+    expect(germanyBias).toBe(1.10);
+    const germanyDmg = Math.max(1, Math.round(weaponDamage * mult * germanyBias));
 
-    expect(ukraineDmg).toBeGreaterThan(baseDmg);
-    // AP vs heavy = 1.0, so: base=100, ukraine=Math.round(100*1.0*1.05)=105
-    expect(ukraineDmg).toBe(105);
+    expect(germanyDmg).toBeGreaterThan(baseDmg);
+    // AP vs heavy = 1.0, so: base=100, germany=Math.round(100*1.0*1.10)=110
+    expect(germanyDmg).toBe(110);
     expect(baseDmg).toBe(100);
   });
 

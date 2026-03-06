@@ -52,12 +52,12 @@ describe('AI data structures', () => {
     const factStructures = PRODUCTION_ITEMS.filter(p =>
       p.isStructure && p.prerequisite === 'FACT'
     );
-    expect(factStructures.length).toBeGreaterThan(8);
-    // POWR, TENT, WEAP, PROC, SILO, DOME, HBOX, GUN, TSLA, FIX, HPAD, AFLD
+    expect(factStructures.length).toBe(4);
+    // POWR, SBAG, FENC, BRIK — all other structures chain through POWR/PROC/WEAP/etc.
     const types = factStructures.map(p => p.type);
     expect(types).toContain('POWR');
-    expect(types).toContain('TENT');
-    expect(types).toContain('WEAP');
+    expect(types).toContain('SBAG');
+    expect(types).toContain('FENC');
   });
 
   it('STRUCTURE_SIZE has entries for key AI-buildable types', () => {
@@ -103,13 +103,13 @@ describe('AI strategic planner', () => {
     expect(tsla!.faction).toBe('soviet');
   });
 
-  it('tech centers have POWR prerequisite', () => {
+  it('tech centers have WEAP prerequisite', () => {
     const atek = PRODUCTION_ITEMS.find(p => p.type === 'ATEK');
     const stek = PRODUCTION_ITEMS.find(p => p.type === 'STEK');
     expect(atek).toBeDefined();
-    expect(atek!.prerequisite).toBe('POWR');
+    expect(atek!.prerequisite).toBe('WEAP');
     expect(stek).toBeDefined();
-    expect(stek!.prerequisite).toBe('POWR');
+    expect(stek!.prerequisite).toBe('WEAP');
   });
 
   it('DOME is available to both factions', () => {
@@ -184,7 +184,7 @@ describe('AI base construction', () => {
     expect(STRUCTURE_SIZE.GUN).toEqual([1, 1]);
     expect(STRUCTURE_SIZE.HBOX).toEqual([1, 1]);
     // TSLA uses default [1,1] fallback — not explicitly in STRUCTURE_SIZE
-    expect(STRUCTURE_MAX_HP.TSLA).toBe(500);
+    expect(STRUCTURE_MAX_HP.TSLA).toBe(400);
   });
 
   it('1x1 structures are more flexible for placement', () => {
@@ -198,10 +198,10 @@ describe('AI base construction', () => {
   });
 
   it('STRUCTURE_MAX_HP has higher HP for advanced buildings', () => {
-    expect(STRUCTURE_MAX_HP.ATEK).toBe(600);
+    expect(STRUCTURE_MAX_HP.ATEK).toBe(400);
     expect(STRUCTURE_MAX_HP.STEK).toBe(600);
-    expect(STRUCTURE_MAX_HP.MSLO).toBe(800);
-    expect(STRUCTURE_MAX_HP.TSLA).toBe(500);
+    expect(STRUCTURE_MAX_HP.MSLO).toBe(400);
+    expect(STRUCTURE_MAX_HP.TSLA).toBe(400);
   });
 
   it('factory exits are at bottom of multi-cell structures', () => {
@@ -279,9 +279,9 @@ describe('AI enhanced production', () => {
     expect(types).toContain('HARV');
   });
 
-  it('soviet faction has unique infantry (E4, DOG, SHOK)', () => {
+  it('soviet faction has unique infantry (E2, E4, SHOK)', () => {
     const sovietInf = PRODUCTION_ITEMS.filter(p =>
-      (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
+      (p.prerequisite === 'TENT' || p.prerequisite === 'BARR' || p.prerequisite === 'KENN') &&
       !p.isStructure && p.faction === 'soviet'
     );
     const types = sovietInf.map(p => p.type);

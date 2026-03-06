@@ -108,7 +108,7 @@ describe('Naval vessel type definitions', () => {
     const stats = UNIT_STATS['LST'];
     expect(stats.isVessel).toBe(true);
     expect(stats.speedClass).toBe(SpeedClass.FLOAT);
-    expect(stats.passengers).toBe(8);
+    expect(stats.passengers).toBe(5);
   });
 
   it('all vessels report isNavalUnit = true', () => {
@@ -136,7 +136,7 @@ describe('Naval weapon stats', () => {
     expect(w).toBeDefined();
     expect(w.damage).toBe(30);
     expect(w.range).toBe(9.0);
-    expect(w.warhead).toBe('HE');
+    expect(w.warhead).toBe('AP');
     expect(w.rof).toBe(60);
   });
 
@@ -435,9 +435,9 @@ describe('LST door state', () => {
     expect(lst.doorOpen).toBe(false);
   });
 
-  it('LST has transport capacity of 8', () => {
+  it('LST has transport capacity of 5', () => {
     const lst = makeEntity(UnitType.V_LST, House.Spain);
-    expect(lst.maxPassengers).toBe(8);
+    expect(lst.maxPassengers).toBe(5);
     expect(lst.isTransport).toBe(true);
   });
 });

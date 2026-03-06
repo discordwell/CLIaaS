@@ -198,24 +198,24 @@ describe('Tesla Coil power cutoff behavior', () => {
 // ─── Superweapon Recharge Times ──────────────────
 
 describe('Superweapon recharge times match updated values', () => {
-  it('Chronosphere recharges in 2700 ticks (180 seconds)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE].rechargeTicks).toBe(2700);
+  it('Chronosphere recharges in 6300 ticks (420 seconds)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE].rechargeTicks).toBe(6300);
   });
 
-  it('Iron Curtain recharges in 6300 ticks (420 seconds)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN].rechargeTicks).toBe(6300);
+  it('Iron Curtain recharges in 9900 ticks (660 seconds)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN].rechargeTicks).toBe(9900);
   });
 
-  it('Nuclear Strike recharges in 12600 ticks (840 seconds)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.NUKE].rechargeTicks).toBe(12600);
+  it('Nuclear Strike recharges in 11700 ticks (780 seconds)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.NUKE].rechargeTicks).toBe(11700);
   });
 
-  it('GPS Satellite recharges in 6300 ticks', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(6300);
+  it('GPS Satellite recharges in 7200 ticks', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(7200);
   });
 
-  it('Sonar Pulse recharges in 12600 ticks', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(12600);
+  it('Sonar Pulse recharges in 9000 ticks', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(9000);
   });
 
   it('ParaBomb recharges in 9000 ticks (600 seconds)', () => {

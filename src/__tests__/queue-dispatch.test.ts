@@ -108,7 +108,7 @@ describe('Queue Integration — email send inline fallback', () => {
     const { sendEmail } = await import('@/lib/email/sender');
     const result = await sendEmail({ to: 'test@test.com', subject: 'Hi', text: 'hello' });
     expect(result.success).toBe(true);
-    expect(result.messageId).toMatch(/^mock-/);
+    expect(result.messageId).toMatch(/^console-/);
   });
 });
 

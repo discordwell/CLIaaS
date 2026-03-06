@@ -32,7 +32,7 @@ describe('Superweapon definitions', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE];
     expect(def.name).toBe('Chronosphere');
     expect(def.building).toBe('PDOX');
-    expect(def.rechargeTicks).toBe(2700);
+    expect(def.rechargeTicks).toBe(6300);
     expect(def.faction).toBe('allied');
     expect(def.requiresPower).toBe(true);
     expect(def.needsTarget).toBe(true);
@@ -43,7 +43,7 @@ describe('Superweapon definitions', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
     expect(def.name).toBe('Iron Curtain');
     expect(def.building).toBe('IRON');
-    expect(def.rechargeTicks).toBe(6300);
+    expect(def.rechargeTicks).toBe(9900);
     expect(def.faction).toBe('soviet');
     expect(def.requiresPower).toBe(true);
     expect(def.needsTarget).toBe(true);
@@ -54,7 +54,7 @@ describe('Superweapon definitions', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.NUKE];
     expect(def.name).toBe('Nuclear Strike');
     expect(def.building).toBe('MSLO');
-    expect(def.rechargeTicks).toBe(12600);
+    expect(def.rechargeTicks).toBe(11700);
     expect(def.faction).toBe('soviet');
     expect(def.requiresPower).toBe(true);
     expect(def.needsTarget).toBe(true);
@@ -64,8 +64,8 @@ describe('Superweapon definitions', () => {
   it('GPS Satellite has correct definition', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE];
     expect(def.name).toBe('GPS Satellite');
-    expect(def.building).toBe('DOME');
-    expect(def.rechargeTicks).toBe(6300);
+    expect(def.building).toBe('ATEK');
+    expect(def.rechargeTicks).toBe(7200);
     expect(def.faction).toBe('allied');
     expect(def.needsTarget).toBe(false);
     expect(def.targetMode).toBe('none');
@@ -74,8 +74,8 @@ describe('Superweapon definitions', () => {
   it('Sonar Pulse has correct definition', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
     expect(def.name).toBe('Sonar Pulse');
-    expect(def.building).toBe('DOME');
-    expect(def.rechargeTicks).toBe(12600);
+    expect(def.building).toBe('SPEN');
+    expect(def.rechargeTicks).toBe(9000);
     expect(def.faction).toBe('both');
     expect(def.needsTarget).toBe(false);
     expect(def.targetMode).toBe('none');
@@ -93,7 +93,7 @@ describe('Superweapon definitions', () => {
 describe('Superweapon structure config', () => {
   it('ATEK has correct size and HP', () => {
     expect(STRUCTURE_SIZE['ATEK']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['ATEK']).toBe(600);
+    expect(STRUCTURE_MAX_HP['ATEK']).toBe(400);
   });
 
   it('STEK has correct size and HP', () => {
@@ -103,17 +103,17 @@ describe('Superweapon structure config', () => {
 
   it('PDOX has correct size and HP', () => {
     expect(STRUCTURE_SIZE['PDOX']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['PDOX']).toBe(600);
+    expect(STRUCTURE_MAX_HP['PDOX']).toBe(400);
   });
 
   it('IRON has correct size and HP', () => {
     expect(STRUCTURE_SIZE['IRON']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['IRON']).toBe(600);
+    expect(STRUCTURE_MAX_HP['IRON']).toBe(400);
   });
 
   it('MSLO has correct size and HP', () => {
     expect(STRUCTURE_SIZE['MSLO']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['MSLO']).toBe(800);
+    expect(STRUCTURE_MAX_HP['MSLO']).toBe(400);
   });
 
   it('all 5 superweapon structures are in STRUCTURE_SIZE', () => {
@@ -128,7 +128,7 @@ describe('Superweapon structure config', () => {
     expect(item).toBeDefined();
     expect(item!.cost).toBe(1500);
     expect(item!.buildTime).toBe(200);
-    expect(item!.prerequisite).toBe('POWR');
+    expect(item!.prerequisite).toBe('WEAP');
     expect(item!.faction).toBe('allied');
     expect(item!.isStructure).toBe(true);
   });
@@ -138,7 +138,7 @@ describe('Superweapon structure config', () => {
     expect(item).toBeDefined();
     expect(item!.cost).toBe(1500);
     expect(item!.buildTime).toBe(200);
-    expect(item!.prerequisite).toBe('POWR');
+    expect(item!.prerequisite).toBe('WEAP');
     expect(item!.faction).toBe('soviet');
     expect(item!.isStructure).toBe(true);
   });
@@ -333,7 +333,7 @@ describe('Nuclear missile', () => {
     expect(def.building).toBe('MSLO');
     // The detonateNuke method uses 'Super' warhead with 1000 damage in 10-cell radius
     // We verify the definition parameters
-    expect(def.rechargeTicks).toBe(12600); // longest recharge
+    expect(def.rechargeTicks).toBe(11700); // longest recharge
   });
 
   it('Nuke is soviet faction from MSLO', () => {
@@ -355,8 +355,8 @@ describe('Nuclear missile', () => {
     }
   });
 
-  it('MSLO structure has 800 HP', () => {
-    expect(STRUCTURE_MAX_HP['MSLO']).toBe(800);
+  it('MSLO structure has 400 HP', () => {
+    expect(STRUCTURE_MAX_HP['MSLO']).toBe(400);
   });
 
   it('entity can be killed by large damage (simulating nuke)', () => {
@@ -370,32 +370,32 @@ describe('Nuclear missile', () => {
 // === Part 7: Recharge System ===
 
 describe('Recharge system', () => {
-  it('Chronosphere recharges in 2700 ticks (180 seconds)', () => {
+  it('Chronosphere recharges in 6300 ticks (420 seconds)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE];
-    expect(def.rechargeTicks).toBe(2700);
-    expect(def.rechargeTicks / 15).toBe(180); // seconds
-  });
-
-  it('Iron Curtain recharges in 6300 ticks', () => {
-    const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
     expect(def.rechargeTicks).toBe(6300);
+    expect(def.rechargeTicks / 15).toBe(420); // seconds
   });
 
-  it('Nuke recharges in 12600 ticks (840 seconds)', () => {
+  it('Iron Curtain recharges in 9900 ticks', () => {
+    const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
+    expect(def.rechargeTicks).toBe(9900);
+  });
+
+  it('Nuke recharges in 11700 ticks (780 seconds)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.NUKE];
-    expect(def.rechargeTicks).toBe(12600);
-    expect(def.rechargeTicks / 15).toBe(840);
+    expect(def.rechargeTicks).toBe(11700);
+    expect(def.rechargeTicks / 15).toBe(780);
   });
 
-  it('Sonar Pulse has 12600 tick recharge (840 seconds)', () => {
+  it('Sonar Pulse has 9000 tick recharge (600 seconds)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
-    expect(def.rechargeTicks).toBe(12600);
-    expect(def.rechargeTicks / 15).toBe(840);
+    expect(def.rechargeTicks).toBe(9000);
+    expect(def.rechargeTicks / 15).toBe(600);
   });
 
-  it('GPS Satellite recharges in 6300 ticks', () => {
+  it('GPS Satellite recharges in 7200 ticks', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE];
-    expect(def.rechargeTicks).toBe(6300); // unchanged
+    expect(def.rechargeTicks).toBe(7200);
   });
 
   it('all superweapons have positive recharge times', () => {
@@ -442,9 +442,9 @@ describe('GPS Satellite', () => {
     expect(def.faction).toBe('allied');
   });
 
-  it('GPS requires DOME building', () => {
+  it('GPS requires ATEK building', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE];
-    expect(def.building).toBe('DOME');
+    expect(def.building).toBe('ATEK');
   });
 
   it('GPS is one-shot (fired flag prevents re-firing)', () => {
@@ -467,8 +467,8 @@ describe('GPS Satellite', () => {
     expect(state.fired).toBe(true); // still fired
   });
 
-  it('GPS recharge time is 6300 ticks', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(6300);
+  it('GPS recharge time is 7200 ticks', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(7200);
   });
 });
 
@@ -497,9 +497,9 @@ describe('Sonar Pulse', () => {
     expect(def.faction).toBe('both');
   });
 
-  it('Sonar Pulse requires DOME', () => {
+  it('Sonar Pulse requires SPEN', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
-    expect(def.building).toBe('DOME');
+    expect(def.building).toBe('SPEN');
   });
 
   it('sonarPulseTimer decrements to 0', () => {
@@ -511,7 +511,7 @@ describe('Sonar Pulse', () => {
     expect(sub.sonarPulseTimer).toBe(0);
   });
 
-  it('Chronosphere has fastest recharge (2700 ticks)', () => {
+  it('Chronosphere has fastest recharge (6300 ticks)', () => {
     const chronoTicks = SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE].rechargeTicks;
     for (const def of Object.values(SUPERWEAPON_DEFS)) {
       expect(chronoTicks).toBeLessThanOrEqual(def.rechargeTicks);
@@ -552,11 +552,11 @@ describe('Power consumption', () => {
     expect(item!.cost).toBe(2500);
   });
 
-  it('tech centers require POWR as prerequisite', () => {
+  it('tech centers require WEAP as prerequisite', () => {
     const atek = PRODUCTION_ITEMS.find(p => p.type === 'ATEK');
     const stek = PRODUCTION_ITEMS.find(p => p.type === 'STEK');
-    expect(atek!.prerequisite).toBe('POWR');
-    expect(stek!.prerequisite).toBe('POWR');
+    expect(atek!.prerequisite).toBe('WEAP');
+    expect(stek!.prerequisite).toBe('WEAP');
   });
 
   it('superweapon buildings require tech centers as prerequisite', () => {

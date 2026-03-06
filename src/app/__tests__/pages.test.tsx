@@ -2,6 +2,30 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
+// Provide jsdom stubs for browser APIs used by page components
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
+
+// IntersectionObserver stub (HeroDemo video autoplay)
+class MockIntersectionObserver {
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  constructor() {}
+}
+globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
+
 vi.mock('next/link', () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string; [key: string]: unknown }) => (
     <a href={href} {...props}>{children}</a>
@@ -23,9 +47,9 @@ describe('Home page', () => {
     expect(screen.getByText('Now, so does your helpdesk')).toBeInTheDocument();
   });
 
-  it('renders the Get Started Free CTA link', () => {
+  it('renders the Start Pro Hosted CTA link', () => {
     render(<Home />);
-    const signupLinks = screen.getAllByText('Get Started Free');
+    const signupLinks = screen.getAllByText('Start Pro Hosted');
     expect(signupLinks[0].closest('a')).toHaveAttribute('href', '/sign-up');
   });
 
@@ -50,7 +74,7 @@ describe('Home page', () => {
 
   it('renders the terminal demo section', () => {
     render(<Home />);
-    expect(screen.getByText('Claude Code')).toBeInTheDocument();
+    expect(screen.getByText('CLI')).toBeInTheDocument();
   });
 
   it('renders the MCP server section', () => {
