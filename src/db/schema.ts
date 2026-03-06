@@ -357,6 +357,8 @@ export const tickets = pgTable(
     source: providerEnum('source').default('zendesk'),
     tags: text('tags').array().default([]),
     customFields: jsonb('custom_fields'),
+    hasPii: boolean('has_pii').default(false),
+    piiScannedAt: timestamp('pii_scanned_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
@@ -410,6 +412,9 @@ export const messages = pgTable(
     authorId: uuid('author_id'),
     body: text('body').notNull(),
     bodyHtml: text('body_html'),
+    bodyRedacted: text('body_redacted'),
+    hasPii: boolean('has_pii').default(false),
+    piiScannedAt: timestamp('pii_scanned_at', { withTimezone: true }),
     visibility: messageVisibilityEnum('visibility').notNull().default('public'),
     mentionedUserIds: uuid('mentioned_user_ids').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -515,6 +520,8 @@ export const customFields = pgTable('custom_fields', {
   fieldType: text('field_type').notNull(),
   options: jsonb('options'),
   required: boolean('required').notNull().default(false),
+  encrypted: boolean('encrypted').notNull().default(false),
+  piiCategory: text('pii_category'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -1411,8 +1418,12 @@ export const retentionPolicies = pgTable(
 
 export const forumThreadStatusEnum = pgEnum('forum_thread_status', ['open', 'closed', 'pinned']);
 export const qaReviewStatusEnum = pgEnum('qa_review_status', ['pending', 'in_progress', 'completed']);
-export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'scheduled', 'sending', 'sent', 'cancelled']);
-export const campaignChannelEnum = pgEnum('campaign_channel', ['email', 'sms', 'whatsapp']);
+export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'scheduled', 'sending', 'sent', 'cancelled', 'active', 'paused', 'completed']);
+export const campaignChannelEnum = pgEnum('campaign_channel', ['email', 'sms', 'whatsapp', 'in_app', 'push']);
+export const campaignStepTypeEnum = pgEnum('campaign_step_type', ['send_email', 'send_sms', 'send_in_app', 'send_push', 'wait_delay', 'wait_event', 'condition', 'branch', 'update_tag', 'webhook']);
+export const campaignStepStatusEnum = pgEnum('campaign_step_status', ['pending', 'active', 'completed', 'skipped', 'failed']);
+export const inAppMessageTypeEnum = pgEnum('in_app_message_type', ['banner', 'modal', 'tooltip', 'slide_in']);
+export const tourStepPositionEnum = pgEnum('tour_step_position', ['top', 'bottom', 'left', 'right', 'center']);
 export const customerNoteTypeEnum = pgEnum('customer_note_type', ['note', 'call_log', 'meeting']);
 
 // ---- Customer 360 Tables ----
@@ -1577,6 +1588,142 @@ export const qaReviews = pgTable(
   }),
 );
 
+// ---- AutoQA & Predictions Tables ----
+
+export const autoqaConfigs = pgTable(
+  'autoqa_configs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    enabled: boolean('enabled').notNull().default(false),
+    scorecardId: uuid('scorecard_id').references(() => qaScorecards.id),
+    triggerOnResolved: boolean('trigger_on_resolved').notNull().default(true),
+    triggerOnClosed: boolean('trigger_on_closed').notNull().default(false),
+    provider: text('provider').notNull().default('claude'),
+    model: text('model'),
+    sampleRate: numeric('sample_rate', { precision: 3, scale: 2 }).notNull().default('1.00'),
+    customInstructions: text('custom_instructions'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    autoqaConfigsWsUnique: uniqueIndex('autoqa_configs_ws_unique').on(table.workspaceId),
+  }),
+);
+
+export const qaFlags = pgTable(
+  'qa_flags',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    reviewId: uuid('review_id').notNull().references(() => qaReviews.id),
+    ticketId: uuid('ticket_id').references(() => tickets.id),
+    category: text('category').notNull(),
+    severity: text('severity').notNull(),
+    message: text('message').notNull(),
+    dismissed: boolean('dismissed').notNull().default(false),
+    dismissedBy: uuid('dismissed_by').references(() => users.id),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    qaFlagsWsSeverityIdx: index('qa_flags_ws_severity_idx').on(table.workspaceId, table.severity),
+    qaFlagsReviewIdx: index('qa_flags_review_idx').on(table.reviewId),
+  }),
+);
+
+export const qaCoachingAssignments = pgTable(
+  'qa_coaching_assignments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    reviewId: uuid('review_id').notNull().references(() => qaReviews.id),
+    agentId: uuid('agent_id').notNull().references(() => users.id),
+    assignedBy: uuid('assigned_by').notNull().references(() => users.id),
+    status: text('status').notNull().default('pending'),
+    notes: text('notes'),
+    agentResponse: text('agent_response'),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }).defaultNow().notNull(),
+    acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  table => ({
+    qaCoachingWsAgentIdx: index('qa_coaching_ws_agent_idx').on(table.workspaceId, table.agentId, table.status),
+  }),
+);
+
+export const csatPredictions = pgTable(
+  'csat_predictions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
+    predictedScore: numeric('predicted_score', { precision: 3, scale: 1 }).notNull(),
+    confidence: numeric('confidence', { precision: 3, scale: 2 }).notNull(),
+    riskLevel: text('risk_level').notNull(),
+    factors: jsonb('factors').notNull().default({}),
+    predictedAt: timestamp('predicted_at', { withTimezone: true }).defaultNow().notNull(),
+    actualScore: integer('actual_score'),
+    actualReceivedAt: timestamp('actual_received_at', { withTimezone: true }),
+  },
+  table => ({
+    csatPredictionsWsTicketIdx: index('csat_predictions_ws_ticket_idx').on(table.workspaceId, table.ticketId),
+    csatPredictionsWsRiskIdx: index('csat_predictions_ws_risk_idx').on(table.workspaceId, table.riskLevel),
+  }),
+);
+
+export const customerHealthScores = pgTable(
+  'customer_health_scores',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    overallScore: integer('overall_score').notNull(),
+    csatScore: integer('csat_score'),
+    sentimentScore: integer('sentiment_score'),
+    effortScore: integer('effort_score'),
+    resolutionScore: integer('resolution_score'),
+    engagementScore: integer('engagement_score'),
+    trend: text('trend').notNull().default('stable'),
+    previousScore: integer('previous_score'),
+    signals: jsonb('signals').notNull().default({}),
+    computedAt: timestamp('computed_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customerHealthWsCustomerUnique: uniqueIndex('customer_health_ws_customer_unique').on(table.workspaceId, table.customerId),
+    customerHealthWsScoreIdx: index('customer_health_ws_score_idx').on(table.workspaceId, table.overallScore),
+  }),
+);
+
+export const qaCalibrationSessions = pgTable(
+  'qa_calibration_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('open'),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+  },
+);
+
+export const qaCalibrationEntries = pgTable(
+  'qa_calibration_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    sessionId: uuid('session_id').notNull().references(() => qaCalibrationSessions.id),
+    autoReviewId: uuid('auto_review_id').notNull().references(() => qaReviews.id),
+    manualReviewId: uuid('manual_review_id').references(() => qaReviews.id),
+    scoreDelta: numeric('score_delta', { precision: 4, scale: 2 }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    qaCalibrationEntriesSessionIdx: index('qa_calibration_entries_session_idx').on(table.sessionId),
+  }),
+);
+
 // ---- Campaign Tables ----
 
 export const campaigns = pgTable(
@@ -1593,6 +1740,7 @@ export const campaigns = pgTable(
     segmentQuery: jsonb('segment_query').default({}),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
     sentAt: timestamp('sent_at', { withTimezone: true }),
+    entryStepId: uuid('entry_step_id'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -2585,5 +2733,476 @@ export const aiAgentConfigs = pgTable(
   },
   table => ({
     aiAgentConfigsUniqueIdx: uniqueIndex('ai_agent_configs_unique_idx').on(table.workspaceId),
+  }),
+);
+
+// ---- PII Detection & HIPAA Compliance (Plan 16) ----
+
+export const piiTypeEnum = pgEnum('pii_type', [
+  'ssn', 'credit_card', 'phone', 'email', 'address',
+  'dob', 'medical_id', 'passport', 'drivers_license', 'custom',
+]);
+
+export const piiDetectionStatusEnum = pgEnum('pii_detection_status', [
+  'pending', 'confirmed', 'dismissed', 'redacted', 'auto_redacted',
+]);
+
+export const piiScanStatusEnum = pgEnum('pii_scan_status', [
+  'queued', 'running', 'completed', 'failed', 'cancelled',
+]);
+
+export const piiDetections = pgTable(
+  'pii_detections',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    fieldName: text('field_name').notNull(),
+    piiType: piiTypeEnum('pii_type').notNull(),
+    charOffset: integer('char_offset').notNull(),
+    charLength: integer('char_length').notNull(),
+    originalEncrypted: customType<{ data: Buffer; driverParam: Buffer }>({
+      dataType() { return 'bytea'; },
+    })('original_encrypted'),
+    maskedValue: text('masked_value').notNull(),
+    confidence: real('confidence').notNull(),
+    detectionMethod: text('detection_method').notNull(),
+    status: piiDetectionStatusEnum('status').notNull().default('pending'),
+    reviewedBy: uuid('reviewed_by').references(() => users.id),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    redactedAt: timestamp('redacted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    piiDetectionsWorkspaceStatusIdx: index('pii_detections_workspace_status_idx').on(table.workspaceId, table.status),
+    piiDetectionsEntityIdx: index('pii_detections_entity_idx').on(table.entityType, table.entityId),
+    piiDetectionsTypeIdx: index('pii_detections_type_idx').on(table.workspaceId, table.piiType),
+  }),
+);
+
+export const piiRedactionLog = pgTable(
+  'pii_redaction_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    detectionId: uuid('detection_id').notNull().references(() => piiDetections.id),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    fieldName: text('field_name').notNull(),
+    originalHash: text('original_hash').notNull(),
+    maskedValue: text('masked_value').notNull(),
+    redactedBy: uuid('redacted_by').notNull().references(() => users.id),
+    reason: text('reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    piiRedactionLogWorkspaceIdx: index('pii_redaction_log_workspace_idx').on(table.workspaceId, table.createdAt),
+    piiRedactionLogEntityIdx: index('pii_redaction_log_entity_idx').on(table.entityType, table.entityId),
+  }),
+);
+
+export const piiAccessLog = pgTable(
+  'pii_access_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    fieldName: text('field_name').notNull(),
+    piiType: text('pii_type').notNull(),
+    accessType: text('access_type').notNull(),
+    ipAddress: inet('ip_address'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    piiAccessLogWorkspaceIdx: index('pii_access_log_workspace_idx').on(table.workspaceId, table.createdAt),
+    piiAccessLogUserIdx: index('pii_access_log_user_idx').on(table.userId, table.createdAt),
+  }),
+);
+
+export const piiScanJobs = pgTable(
+  'pii_scan_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    startedBy: uuid('started_by').notNull().references(() => users.id),
+    entityTypes: text('entity_types').array().notNull(),
+    status: piiScanStatusEnum('status').notNull().default('queued'),
+    totalRecords: integer('total_records').default(0),
+    scannedRecords: integer('scanned_records').default(0),
+    detectionsFound: integer('detections_found').default(0),
+    error: text('error'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    piiScanJobsWorkspaceIdx: index('pii_scan_jobs_workspace_idx').on(table.workspaceId, table.status),
+  }),
+);
+
+export const piiSensitivityRules = pgTable(
+  'pii_sensitivity_rules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    piiType: piiTypeEnum('pii_type').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    autoRedact: boolean('auto_redact').notNull().default(false),
+    customPattern: text('custom_pattern'),
+    maskingStyle: text('masking_style').notNull().default('full'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    piiSensitivityRulesUniqueIdx: uniqueIndex('pii_sensitivity_rules_unique_idx').on(table.workspaceId, table.piiType),
+  }),
+);
+
+export const hipaaBaaRecords = pgTable(
+  'hipaa_baa_records',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    partnerName: text('partner_name').notNull(),
+    partnerEmail: text('partner_email').notNull(),
+    signedAt: timestamp('signed_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    documentUrl: text('document_url'),
+    documentHash: text('document_hash'),
+    status: text('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    hipaaBaaWorkspaceIdx: index('hipaa_baa_workspace_idx').on(table.workspaceId, table.status),
+  }),
+);
+
+// ---- Integration Expansion (Plan 20) ----
+
+export const integrationCredentials = pgTable(
+  'integration_credentials',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    provider: text('provider').notNull(),
+    authType: text('auth_type').notNull(),
+    credentials: jsonb('credentials').notNull().default({}),
+    scopes: text('scopes').array().default([]),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    integrationCredsWsProviderIdx: uniqueIndex('integration_creds_ws_provider_idx').on(
+      table.workspaceId,
+      table.provider,
+    ),
+  }),
+);
+
+export const ticketExternalLinks = pgTable(
+  'ticket_external_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    externalId: text('external_id').notNull(),
+    externalUrl: text('external_url').notNull(),
+    externalStatus: text('external_status'),
+    externalTitle: text('external_title'),
+    direction: text('direction').notNull().default('outbound'),
+    metadata: jsonb('metadata').default({}),
+    syncEnabled: boolean('sync_enabled').notNull().default(true),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ticketExternalLinksTicketIdx: index('ticket_external_links_ticket_idx').on(table.ticketId),
+    ticketExternalLinksExternalIdx: uniqueIndex('ticket_external_links_external_idx').on(
+      table.workspaceId,
+      table.provider,
+      table.externalId,
+    ),
+    ticketExternalLinksWorkspaceIdx: index('ticket_external_links_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const externalLinkComments = pgTable(
+  'external_link_comments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    linkId: uuid('link_id').notNull().references(() => ticketExternalLinks.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    direction: text('direction').notNull(),
+    localMessageId: uuid('local_message_id'),
+    externalCommentId: text('external_comment_id'),
+    body: text('body').notNull(),
+    authorName: text('author_name'),
+    syncedAt: timestamp('synced_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    externalLinkCommentsLinkIdx: index('external_link_comments_link_idx').on(table.linkId),
+  }),
+);
+
+export const crmLinks = pgTable(
+  'crm_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    provider: text('provider').notNull(),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    crmObjectType: text('crm_object_type').notNull(),
+    crmObjectId: text('crm_object_id').notNull(),
+    crmObjectUrl: text('crm_object_url'),
+    crmData: jsonb('crm_data').default({}),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    crmLinksEntityIdx: index('crm_links_entity_idx').on(table.entityType, table.entityId),
+    crmLinksExternalIdx: uniqueIndex('crm_links_external_idx').on(
+      table.workspaceId,
+      table.provider,
+      table.crmObjectType,
+      table.crmObjectId,
+    ),
+    crmLinksWorkspaceIdx: index('crm_links_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const customObjectTypes = pgTable(
+  'custom_object_types',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    namePlural: text('name_plural').notNull(),
+    description: text('description'),
+    icon: text('icon'),
+    fields: jsonb('fields').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customObjectTypesKeyIdx: uniqueIndex('custom_object_types_key_idx').on(
+      table.workspaceId,
+      table.key,
+    ),
+  }),
+);
+
+export const customObjectRecords = pgTable(
+  'custom_object_records',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    typeId: uuid('type_id').notNull().references(() => customObjectTypes.id, { onDelete: 'cascade' }),
+    data: jsonb('data').notNull().default({}),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customObjectRecordsTypeIdx: index('custom_object_records_type_idx').on(table.typeId),
+    customObjectRecordsWorkspaceIdx: index('custom_object_records_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const customObjectRelationships = pgTable(
+  'custom_object_relationships',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    sourceType: text('source_type').notNull(),
+    sourceId: uuid('source_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: uuid('target_id').notNull(),
+    relationshipType: text('relationship_type').notNull().default('related'),
+    metadata: jsonb('metadata').default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customObjectRelsSourceIdx: index('custom_object_rels_source_idx').on(table.sourceType, table.sourceId),
+    customObjectRelsTargetIdx: index('custom_object_rels_target_idx').on(table.targetType, table.targetId),
+    customObjectRelsDedupIdx: uniqueIndex('custom_object_rels_dedup_idx').on(
+      table.sourceType,
+      table.sourceId,
+      table.targetType,
+      table.targetId,
+    ),
+  }),
+);
+
+// ---- Campaign Orchestration Tables (Plan 19) ----
+
+export const campaignSteps = pgTable(
+  'campaign_steps',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id').notNull().references(() => campaigns.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    stepType: campaignStepTypeEnum('step_type').notNull(),
+    position: integer('position').notNull().default(0),
+    name: text('name').notNull(),
+    config: jsonb('config').notNull().default({}),
+    delaySeconds: integer('delay_seconds'),
+    conditionQuery: jsonb('condition_query'),
+    nextStepId: uuid('next_step_id'),
+    branchTrueStepId: uuid('branch_true_step_id'),
+    branchFalseStepId: uuid('branch_false_step_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    campaignStepsCampaignPosIdx: index('campaign_steps_campaign_pos_idx').on(table.campaignId, table.position),
+  }),
+);
+
+export const campaignEnrollments = pgTable(
+  'campaign_enrollments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id').notNull().references(() => campaigns.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    currentStepId: uuid('current_step_id'),
+    status: text('status').notNull().default('active'),
+    enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    nextExecutionAt: timestamp('next_execution_at', { withTimezone: true }),
+    metadata: jsonb('metadata').notNull().default({}),
+  },
+  table => ({
+    campaignEnrollmentsCampaignStatusIdx: index('campaign_enrollments_campaign_status_idx').on(table.campaignId, table.status),
+    campaignEnrollmentsCustomerIdx: index('campaign_enrollments_customer_idx').on(table.customerId),
+    campaignEnrollmentsNextExecIdx: index('campaign_enrollments_next_exec_idx').on(table.nextExecutionAt),
+  }),
+);
+
+export const campaignStepEvents = pgTable(
+  'campaign_step_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    enrollmentId: uuid('enrollment_id').notNull().references(() => campaignEnrollments.id, { onDelete: 'cascade' }),
+    stepId: uuid('step_id').notNull().references(() => campaignSteps.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    eventType: text('event_type').notNull(),
+    metadata: jsonb('metadata').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    campaignStepEventsStepTypeIdx: index('campaign_step_events_step_type_idx').on(table.stepId, table.eventType),
+    campaignStepEventsEnrollmentIdx: index('campaign_step_events_enrollment_idx').on(table.enrollmentId),
+  }),
+);
+
+export const productTours = pgTable(
+  'product_tours',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    targetUrlPattern: text('target_url_pattern').notNull().default('*'),
+    segmentQuery: jsonb('segment_query').notNull().default({}),
+    isActive: boolean('is_active').notNull().default(false),
+    priority: integer('priority').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    productToursWsActiveIdx: index('product_tours_ws_active_idx').on(table.workspaceId, table.isActive),
+  }),
+);
+
+export const productTourSteps = pgTable(
+  'product_tour_steps',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tourId: uuid('tour_id').notNull().references(() => productTours.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    position: integer('position').notNull().default(0),
+    targetSelector: text('target_selector').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    placement: tourStepPositionEnum('placement').notNull().default('bottom'),
+    highlightTarget: boolean('highlight_target').notNull().default(true),
+    actionLabel: text('action_label').notNull().default('Next'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    productTourStepsTourPosIdx: index('product_tour_steps_tour_pos_idx').on(table.tourId, table.position),
+  }),
+);
+
+export const productTourProgress = pgTable(
+  'product_tour_progress',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tourId: uuid('tour_id').notNull().references(() => productTours.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    currentStep: integer('current_step').notNull().default(0),
+    status: text('status').notNull().default('in_progress'),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  table => ({
+    productTourProgressTourCustomerIdx: uniqueIndex('product_tour_progress_tour_customer_idx').on(table.tourId, table.customerId),
+  }),
+);
+
+export const inAppMessages = pgTable(
+  'in_app_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    messageType: inAppMessageTypeEnum('message_type').notNull().default('banner'),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    ctaText: text('cta_text'),
+    ctaUrl: text('cta_url'),
+    targetUrlPattern: text('target_url_pattern').notNull().default('*'),
+    segmentQuery: jsonb('segment_query').notNull().default({}),
+    isActive: boolean('is_active').notNull().default(false),
+    priority: integer('priority').notNull().default(0),
+    startAt: timestamp('start_at', { withTimezone: true }),
+    endAt: timestamp('end_at', { withTimezone: true }),
+    maxImpressions: integer('max_impressions').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    inAppMessagesWsActiveIdx: index('in_app_messages_ws_active_idx').on(table.workspaceId, table.isActive),
+  }),
+);
+
+export const inAppMessageImpressions = pgTable(
+  'in_app_message_impressions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    messageId: uuid('message_id').notNull().references(() => inAppMessages.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    action: text('action').notNull().default('displayed'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    inAppMsgImpressionsMsgCustIdx: index('in_app_msg_impressions_msg_cust_idx').on(table.messageId, table.customerId),
+    inAppMsgImpressionsCustIdx: index('in_app_msg_impressions_cust_idx').on(table.customerId),
   }),
 );

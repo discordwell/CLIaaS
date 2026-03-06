@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-03-07T01:28Z — Session 103: PII Masking Code Review Fixes (HIGH+MEDIUM)
+- Fixed **4 HIGH** severity issues from code review:
+  - **#5**: AES-256 key length validation — `getEncryptionKey()` now rejects non-32-byte keys
+  - **#6**: ReDoS mitigation — custom regex patterns >200 chars are rejected
+  - **#7**: Added `medical_id` default pattern (MRN/MED/HIC/MBI formats) to `pii-detector.ts`
+  - **#8**: Stale offset race condition — `redactDetection` now uses `decryptPii` to find original text when stored offsets don't match
+- Fixed **2 MEDIUM** severity issues:
+  - **#9**: `getPiiStats` now uses SQL `GROUP BY` aggregation instead of fetching all rows
+  - **#10**: `applyRedaction` and `markEntityHasPii` now include `workspaceId` in WHERE clauses
+- 5 new tests added (74 total, all passing)
+
+## 2026-03-07T01:20Z — Session 102: Slice 17 — AutoQA & Satisfaction Predictions (Backend Complete)
+- **Plan 17 backend/API/CLI/MCP fully implemented** across all 4 plan phases (schema through coaching)
+- **Phase 1 (Schema + Core)**: Migration `0022_autoqa_predictions.sql` (7 new tables, 3 ALTER TABLE), Drizzle schema (7 table defs), 5 JSONL stores (autoqa-config, qa-flags, qa-coaching, csat-prediction, health-score), feature gate (`autoqa`)
+- **Phase 1 (Engines)**: AutoQA engine (`src/lib/ai/autoqa.ts` — connects `scoreResponse()` to scorecards, maps QA dimensions to criteria, persists reviews + flags, generates CSAT predictions), CSAT predictor (`csat-predictor.ts` — 7 heuristic signal factors), Health engine (`health-engine.ts` — weighted composite: CSAT 30%, sentiment 20%, effort 20%, resolution 15%, engagement 15%)
+- **Phase 1 (Queue)**: `AutoQAScoringJob` type, `getAutoQAQueue()`, `enqueueAutoQA()`, BullMQ worker (`autoqa-worker.ts`, concurrency 2), event dispatcher channel 9 (ticket.resolved → AutoQA)
+- **Phase 2-4 (API)**: 10 new + 1 modified API routes (autoqa config, flags CRUD, coaching CRUD, agent performance, score trends, CSAT predictions, accuracy stats, health overview). All with `requireAuth` + workspace scoping
+- **Phase 2-4 (MCP)**: Expanded from 2 to 11 MCP tools (qa_review, qa_dashboard, autoqa_config, autoqa_run, qa_flags, qa_coaching, csat_predict, csat_prediction_accuracy, customer_health, customer_at_risk, qa_agent_performance)
+- **Phase 2-4 (CLI)**: Real `runAutoQA()` in `qa review`, added `qa autoqa config/enable/disable`, `qa flags/flags-dismiss`, `qa coaching`, `predict csat/accuracy`, `customers health/at-risk`
+- **Tests**: 15 tests across 8 describe blocks (config store, flags store, predictions store, CSAT predictor, health score store, health engine, AutoQA engine, coaching store). All passing. 0 type errors in AutoQA files.
+- **UI not started** — new pages (AutoQA config, enhanced dashboard, predictions dashboard, per-agent quality) deferred
+- **Files**: ~20 new, ~10 modified
+
 ## 2026-03-06T22:40Z — Session 101: Slice 15 — RBAC / Light Agents (All 6 Phases)
 - **Full 6-phase implementation** of Role-Based Access Control with light agents, collaborators, and custom roles
 - **Phase 0 (Skeleton)**: Feature flag (`RBAC_ENABLED` env var), module structure under `src/lib/rbac/`

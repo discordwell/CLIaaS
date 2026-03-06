@@ -30,13 +30,19 @@ export type Feature =
   | 'custom_branding'
   | 'community_forums'
   | 'qa_reviews'
+  | 'autoqa'
   | 'proactive_messaging'
   | 'workforce_management'
   | 'canned_responses'
   | 'custom_reports'
   | 'live_dashboard'
   | 'multi_brand'
-  | 'answer_bot';
+  | 'answer_bot'
+  | 'pii_masking'
+  | 'hipaa_compliance'
+  | 'engineering_integrations'
+  | 'crm_integrations'
+  | 'custom_objects';
 
 /** All tiers (including legacy aliases). */
 export const ALL_TIERS: TierLevel[] = [
@@ -62,6 +68,7 @@ export const FEATURE_MATRIX: Record<Feature, TierLevel[]> = {
   custom_branding:     [...ALL_TIERS],
   community_forums:    [...ALL_TIERS],
   qa_reviews:          [...ALL_TIERS],
+  autoqa:              [...ALL_TIERS],
   proactive_messaging: [...ALL_TIERS],
   workforce_management: [...ALL_TIERS],
   canned_responses:     [...ALL_TIERS],
@@ -69,6 +76,11 @@ export const FEATURE_MATRIX: Record<Feature, TierLevel[]> = {
   live_dashboard:       [...ALL_TIERS],
   multi_brand:          ['enterprise'],
   answer_bot:           ['pro', 'pro_hosted', 'enterprise', 'byoc'],
+  pii_masking:          ['pro', 'pro_hosted', 'enterprise', 'byoc'],
+  hipaa_compliance:     ['enterprise', 'byoc'],
+  engineering_integrations: [...ALL_TIERS],
+  crm_integrations:         [...ALL_TIERS],
+  custom_objects:            [...ALL_TIERS],
 };
 
 /** Check whether a specific feature is enabled for a given tier. */
@@ -113,6 +125,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   custom_branding:     'Custom Branding',
   community_forums:    'Community Forums',
   qa_reviews:          'QA & Conversation Review',
+  autoqa:              'AutoQA & Satisfaction Prediction',
   proactive_messaging: 'Proactive Messaging',
   workforce_management: 'Workforce Management',
   canned_responses:     'Canned Responses & Macros',
@@ -120,6 +133,11 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   live_dashboard:       'Live Dashboard',
   multi_brand:          'Multi-Brand Help Centers',
   answer_bot:           'Answer Bot (AI Suggestions)',
+  pii_masking:          'PII Detection & Data Masking',
+  hipaa_compliance:     'HIPAA Compliance Controls',
+  engineering_integrations: 'Jira/Linear Integration',
+  crm_integrations:         'CRM Sync (Salesforce/HubSpot)',
+  custom_objects:            'Custom Objects',
 };
 
 /** Human-readable tier labels. */

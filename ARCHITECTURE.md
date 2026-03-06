@@ -822,3 +822,47 @@ Feature matrix summary:
 - Load testing (k6 or Artillery)
 - SOC 2 documentation finalization
 - Production deployment checklist and runbook
+
+## PII Detection, Data Masking & HIPAA Compliance (Plan 16)
+
+### Overview
+Automated PII detection with regex-based scanning (10 PII types), sensitivity rules per workspace, auto-redaction, role-based masking, HIPAA readiness scoring, and access audit logging. Ships behind `pii_masking` (pro+) and `hipaa_compliance` (enterprise+byoc) feature gates.
+
+### DB Schema (Migration 0021)
+- **3 new enums**: `pii_type` (10 values), `pii_detection_status` (5 values), `pii_scan_status` (5 values)
+- **6 new tables**: `pii_detections`, `pii_redaction_log`, `pii_access_log`, `pii_scan_jobs`, `pii_sensitivity_rules`, `hipaa_baa_records`
+- **Column additions**: `messages` (+body_redacted, has_pii, pii_scanned_at), `tickets` (+has_pii, pii_scanned_at), `custom_fields` (+encrypted, pii_category)
+- All tables have RLS policies for workspace isolation
+
+### Detection Engine (`src/lib/compliance/pii-detector.ts`)
+- **10 PII types**: SSN, credit card (Luhn-validated), phone, email, address, DOB, medical ID, passport, driver's license, custom
+- **Masking styles**: full (`[REDACTED-SSN]`), partial (`***6789`), hash
+- **Custom patterns**: Per-workspace regex via sensitivity rules
+- **Confidence scoring**: 0.70-0.99 per type
+
+### Core Modules
+| Module | Path | Purpose |
+|--------|------|---------|
+| PII Detector | `src/lib/compliance/pii-detector.ts` | Regex-based detection with 10 PII types |
+| PII Encryption | `src/lib/compliance/pii-encryption.ts` | AES-256-GCM for original values, SHA-256 hashing |
+| PII Masking Service | `src/lib/compliance/pii-masking.ts` | Scan/redact/review orchestration |
+| Sensitivity Rules | `src/lib/compliance/pii-rules.ts` | Per-workspace detection config CRUD |
+| Role-Based Masking | `src/lib/compliance/role-masking.ts` | light_agent/viewer see masked data |
+| HIPAA Checker | `src/lib/compliance/hipaa.ts` | 10-control readiness evaluation |
+
+### Event Pipeline Integration
+- `message.created` and `ticket.created` events trigger PII scan via BullMQ `pii-scan` queue
+- Fire-and-forget pattern matching existing AI resolution channel
+
+### API Routes (14 new)
+- PII: scan, detections (list + review), redact, access-log, redaction-log, stats, scan-job (CRUD), rules
+- HIPAA: status (readiness checklist), BAA (CRUD)
+- Messages: unmasked view with access logging
+
+### CLI & MCP
+- **CLI**: `cliaas compliance` with 8 subcommands (pii-scan, detections, redact, rules, hipaa-status, access-log, scan-status)
+- **MCP**: 9 tools (pii_scan, pii_detections, pii_review, pii_redact, pii_rules, pii_stats, pii_access_log, hipaa_status, retroactive_scan)
+
+### UI (`/compliance`)
+- 8-tab dashboard: Overview, PII Detections, Redaction Log, Sensitivity Rules, Retention, GDPR, HIPAA, Access Log
+- 6 reusable components: PiiDetectionTable, PiiRedactionBadge, MaskedField, PiiScanProgress, HipaaChecklist, SensitivityRuleEditor

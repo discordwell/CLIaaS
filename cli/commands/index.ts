@@ -50,6 +50,7 @@ import { registerBusinessHoursCommands } from './business-hours.js';
 import { registerReportsCommands } from './reports.js';
 import { registerRoleCommands } from './roles.js';
 import { registerAICommands } from './ai.js';
+import { registerComplianceCommands } from './compliance.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -103,4 +104,5 @@ export function registerCommands(program: Command): void {
   registerReportsCommands(program);
   registerRoleCommands(program);
   registerAICommands(program);
+  registerComplianceCommands(program);
 }

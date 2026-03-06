@@ -35,3 +35,5 @@ export function getAutomationQueue() { return getQueue(QUEUE_NAMES.AUTOMATION_SC
 export function getAIResolutionQueue() { return getQueue(QUEUE_NAMES.AI_RESOLUTION); }
 export function getEmailQueue() { return getQueue(QUEUE_NAMES.EMAIL_SEND); }
 export function getReportExportQueue() { return getQueue(QUEUE_NAMES.REPORT_EXPORT); }
+export function getPiiScanQueue() { return getQueue(QUEUE_NAMES.PII_SCAN); }
+export function getAutoQAQueue() { return getQueue(QUEUE_NAMES.AUTOQA_SCORING); }

@@ -67,6 +67,10 @@ const ALL_WRITE_TOOLS = [
   'ai_stats',
   'ai_approve',
   'ai_reject',
+  'pii_review',
+  'pii_redact',
+  'pii_rules',
+  'retroactive_scan',
 ];
 
 export function loadScopes(): MCPScopeConfig {

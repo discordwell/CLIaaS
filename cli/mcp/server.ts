@@ -31,6 +31,7 @@ import { registerBusinessHoursTools } from './tools/business-hours.js';
 import { registerReportTools } from './tools/reports.js';
 import { registerRoleTools } from './tools/roles.js';
 import { registerAITools } from './tools/ai.js';
+import { registerComplianceTools } from './tools/compliance.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -68,6 +69,7 @@ registerBusinessHoursTools(server);
 registerReportTools(server);
 registerRoleTools(server);
 registerAITools(server);
+registerComplianceTools(server);
 
 // Register resources and prompts
 registerResources(server);

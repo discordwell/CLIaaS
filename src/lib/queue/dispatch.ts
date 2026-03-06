@@ -2,13 +2,15 @@
  * enqueue*() helpers — try Redis, return false to signal caller should fallback to inline.
  */
 
-import { getWebhookQueue, getEmailQueue, getAIResolutionQueue, getAutomationQueue, getReportExportQueue } from './queues';
+import { getWebhookQueue, getEmailQueue, getAIResolutionQueue, getAutomationQueue, getReportExportQueue, getPiiScanQueue, getAutoQAQueue } from './queues';
 import type {
   WebhookDeliveryJob,
   EmailSendJob,
   AIResolutionJob,
   AutomationSchedulerJob,
   ReportExportJob,
+  PiiScanJob,
+  AutoQAScoringJob,
 } from './types';
 
 /**
@@ -102,6 +104,46 @@ export async function enqueueReportExport(job: ReportExportJob): Promise<boolean
   try {
     await queue.add('export', job, {
       attempts: 3,
+      backoff: { type: 'exponential', delay: 10000 },
+      removeOnComplete: { count: 500 },
+      removeOnFail: { count: 2000 },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Enqueue a PII scan job. Returns true if enqueued, false if caller should fallback.
+ */
+export async function enqueuePiiScan(job: PiiScanJob): Promise<boolean> {
+  const queue = getPiiScanQueue();
+  if (!queue) return false;
+
+  try {
+    await queue.add('scan', job, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: { count: 1000 },
+      removeOnFail: { count: 5000 },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Enqueue an AutoQA scoring job. Returns true if enqueued, false if caller should fallback.
+ */
+export async function enqueueAutoQA(job: AutoQAScoringJob): Promise<boolean> {
+  const queue = getAutoQAQueue();
+  if (!queue) return false;
+
+  try {
+    await queue.add('score', job, {
+      attempts: 2,
       backoff: { type: 'exponential', delay: 10000 },
       removeOnComplete: { count: 500 },
       removeOnFail: { count: 2000 },

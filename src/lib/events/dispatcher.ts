@@ -7,7 +7,7 @@ import { dispatchWebhook, type WebhookEventType } from '../webhooks';
 import { executePluginHook } from '../plugins';
 import { eventBus, type EventType as SSEEventType } from '../realtime/events';
 import { evaluateAutomation } from '../automation/executor';
-import { enqueueAIResolution } from '../queue/dispatch';
+import { enqueueAIResolution, enqueuePiiScan, enqueueAutoQA } from '../queue/dispatch';
 import { createLogger } from '../logger';
 
 const logger = createLogger('events:dispatcher');
@@ -95,6 +95,19 @@ const AUTOMATION_EVENT_MAP: Partial<Record<CanonicalEvent, AutomationTriggerType
   'sla.breached': 'sla',
   'side_conversation.replied': 'trigger',
 };
+
+// ---- PII scan eligible events ----
+
+const PII_SCAN_EVENTS: Set<CanonicalEvent> = new Set([
+  'ticket.created',
+  'message.created',
+]);
+
+// ---- AutoQA eligible events ----
+
+const AUTOQA_EVENTS: Set<CanonicalEvent> = new Set([
+  'ticket.resolved',
+]);
 
 // ---- AI resolution eligible events ----
 
@@ -211,6 +224,25 @@ export function dispatch(
       }
     }),
 
+    // 8. PII scan (fire-and-forget for new messages and tickets)
+    Promise.resolve().then(async () => {
+      if (PII_SCAN_EVENTS.has(event)) {
+        const entityType = event === 'message.created' ? 'message' : 'ticket';
+        const entityId = (event === 'message.created' ? data.messageId : data.ticketId) as string | undefined;
+        const workspaceId = data.workspaceId as string | undefined;
+        if (entityId && workspaceId) {
+          void enqueuePiiScan({
+            entityType,
+            entityId,
+            workspaceId,
+            batchSize: 1,
+          }).catch((err) => {
+            logger.error({ channel: 'pii-scan', event, error: err instanceof Error ? err.message : 'Unknown' }, 'PII scan enqueue failed');
+          });
+        }
+      }
+    }),
+
     // 7. AI resolution queue (only for eligible events, with quota check; skip internal notes)
     Promise.resolve().then(async () => {
       if (AI_RESOLUTION_EVENTS.has(event) && data.ticketId && !data.isNote && data.visibility !== 'internal') {
@@ -231,6 +263,21 @@ export function dispatch(
           requestedAt: timestamp,
         }).catch((err) => {
           logger.error({ channel: 'ai-resolution', event, error: err instanceof Error ? err.message : 'Unknown' }, 'AI resolution enqueue failed');
+        });
+      }
+    }),
+
+    // 9. AutoQA scoring (trigger on ticket.resolved)
+    Promise.resolve().then(async () => {
+      if (AUTOQA_EVENTS.has(event) && data.ticketId) {
+        const workspaceId = (data.workspaceId as string) ?? 'default';
+        void enqueueAutoQA({
+          ticketId: data.ticketId as string,
+          workspaceId,
+          trigger: 'resolved',
+          requestedAt: timestamp,
+        }).catch((err) => {
+          logger.error({ channel: 'autoqa', event, error: err instanceof Error ? err.message : 'Unknown' }, 'AutoQA enqueue failed');
         });
       }
     }),
