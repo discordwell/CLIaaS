@@ -16,6 +16,7 @@ interface MentionInputProps {
   rows?: number;
   className?: string;
   onKeyDown?: () => void;
+  onFocus?: () => void;
   onBlur?: () => void;
 }
 
@@ -27,6 +28,7 @@ export default function MentionInput({
   rows = 5,
   className = "",
   onKeyDown,
+  onFocus,
   onBlur,
 }: MentionInputProps) {
   const [showDropdown, setShowDropdown] = useState(false);
@@ -151,6 +153,7 @@ export default function MentionInput({
         value={value}
         onChange={handleInput}
         onKeyDown={handleKeyDown}
+        onFocus={onFocus}
         onBlur={onBlur}
         placeholder={placeholder}
         rows={rows}

@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import CannedResponsePicker from "./CannedResponsePicker";
 import MentionInput from "./MentionInput";
+import CollisionWarningModal from "./CollisionWarningModal";
 
 interface TicketActionsProps {
   ticketId: string;
@@ -67,6 +68,10 @@ export default function TicketActions({
     }, 5000);
   }, [broadcastActivity]);
 
+  const handleTextareaFocus = useCallback(() => {
+    broadcastActivity("viewing");
+  }, [broadcastActivity]);
+
   const handleTextareaBlur = useCallback(() => {
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     broadcastActivity("viewing");
@@ -109,7 +114,7 @@ export default function TicketActions({
         : `/api/tickets/${ticketId}/reply`;
       const payload = isNote
         ? { body: replyBody, mentions: mentionIds.length > 0 ? mentionIds : undefined }
-        : { message: replyBody, isNote: false };
+        : { message: replyBody, isNote: false, mentionedUserIds: mentionIds.length > 0 ? mentionIds : undefined };
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -247,50 +252,24 @@ export default function TicketActions({
           </div>
         )}
 
-        {/* Collision warning modal inline */}
+        {/* Collision warning modal */}
         {collisionWarning && (
-          <div className="mt-3 border-2 border-red-400 bg-red-50 p-4">
-            <h4 className="font-mono text-sm font-bold text-red-800">
-              Collision Detected
-            </h4>
-            <p className="mt-1 font-mono text-xs text-red-700">
-              New replies were added while you were composing:
-            </p>
-            <div className="mt-2 max-h-40 space-y-2 overflow-y-auto">
-              {collisionWarning.newReplies.map((r, i) => (
-                <div key={i} className="border border-red-200 bg-white p-2">
-                  <p className="font-mono text-xs font-bold text-red-800">{r.author}</p>
-                  <p className="mt-1 text-xs text-zinc-700 line-clamp-2">{r.body}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                className="border border-zinc-300 bg-white px-3 py-1 font-mono text-xs font-bold text-zinc-700 hover:bg-zinc-50"
-              >
-                Review Their Reply
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCollisionWarning(null);
-                  void doSendReply();
-                }}
-                className="border-2 border-red-600 bg-red-600 px-3 py-1 font-mono text-xs font-bold text-white hover:bg-red-700"
-              >
-                Send Anyway
-              </button>
-              <button
-                type="button"
-                onClick={() => setCollisionWarning(null)}
-                className="border border-zinc-300 bg-white px-3 py-1 font-mono text-xs font-bold text-zinc-700 hover:bg-zinc-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <CollisionWarningModal
+            newReplies={collisionWarning.newReplies}
+            onDiscard={() => {
+              setCollisionWarning(null);
+              setReplyBody("");
+              composingStartedAt.current = null;
+            }}
+            onSendAnyway={() => {
+              setCollisionWarning(null);
+              void doSendReply();
+            }}
+            onReview={() => {
+              setCollisionWarning(null);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
         )}
 
         <div className="mt-4">
@@ -327,6 +306,7 @@ export default function TicketActions({
                 handleTyping();
               }}
               onMentionsChange={setMentionIds}
+              onFocus={handleTextareaFocus}
               onBlur={handleTextareaBlur}
               onKeyDown={handleTyping}
               placeholder="Add an internal note... (use @name to mention)"
@@ -334,14 +314,17 @@ export default function TicketActions({
               className="w-full border-2 border-amber-300 bg-amber-50 p-3 text-sm focus:border-amber-500 focus:outline-none"
             />
           ) : (
-            <textarea
+            <MentionInput
               value={replyBody}
-              onChange={(e) => {
-                setReplyBody(e.target.value);
+              onChange={(v) => {
+                setReplyBody(v);
                 handleTyping();
               }}
+              onMentionsChange={setMentionIds}
+              onFocus={handleTextareaFocus}
               onBlur={handleTextareaBlur}
-              placeholder="Type your reply..."
+              onKeyDown={handleTyping}
+              placeholder="Type your reply... (use @name to mention)"
               rows={5}
               className="w-full border-2 border-zinc-300 p-3 text-sm focus:border-zinc-950 focus:outline-none"
             />

@@ -104,18 +104,38 @@ export function registerActionTools(server: McpServer): void {
     {
       ticketId: z.string().describe('Ticket ID or external ID'),
       body: z.string().describe('Reply body text'),
+      cannedResponseId: z.string().optional().describe('Canned response ID — if provided, resolves merge variables from the canned response body before sending'),
       since: z.string().optional().describe('ISO timestamp — if provided, checks for new replies since this time before sending'),
       forceSubmit: z.boolean().optional().describe('Set true to send despite detected collisions'),
       confirm: z.boolean().optional().describe('Must be true to send the reply'),
       dir: z.string().optional().describe('Export directory override'),
     },
-    async ({ ticketId, body, since, forceSubmit, confirm, dir }) => {
+    async ({ ticketId, body, cannedResponseId, since, forceSubmit, confirm, dir }) => {
       const guard = scopeGuard('ticket_reply');
       if (guard) return guard;
 
       const tickets = await safeLoadTickets(dir);
       const ticket = findTicket(tickets, ticketId);
       if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
+
+      // Resolve canned response if cannedResponseId is provided
+      let resolvedBody = body;
+      if (cannedResponseId) {
+        try {
+          const { getCannedResponse } = await import('@/lib/canned/canned-store.js');
+          const { resolveMergeVariables } = await import('@/lib/canned/merge.js');
+          const { incrementCannedUsage } = await import('@/lib/canned/canned-store.js');
+          const cr = getCannedResponse(cannedResponseId);
+          if (cr) {
+            const context = {
+              ticket: { id: ticket.id, subject: ticket.subject, status: ticket.status, priority: ticket.priority },
+              customer: { name: ticket.requester, email: ticket.requester },
+            };
+            resolvedBody = resolveMergeVariables(cr.body, context);
+            incrementCannedUsage(cannedResponseId);
+          }
+        } catch { /* canned response resolution failed — use original body */ }
+      }
 
       // Collision check: if `since` is provided, check for new replies
       if (since && !forceSubmit) {
@@ -139,12 +159,12 @@ export function registerActionTools(server: McpServer): void {
 
       const result = withConfirmation(confirm, {
         description: `Reply to ticket ${ticket.id}`,
-        preview: { ticketId: ticket.id, subject: ticket.subject, replyLength: body.length },
+        preview: { ticketId: ticket.id, subject: ticket.subject, replyLength: resolvedBody.length, cannedResponseId },
         execute: () => {
           const now = new Date().toISOString();
           recordMCPAction({
             tool: 'ticket_reply', action: 'reply',
-            params: { ticketId: ticket.id, bodyLength: body.length },
+            params: { ticketId: ticket.id, bodyLength: resolvedBody.length, cannedResponseId },
             timestamp: now, result: 'success',
           });
 
@@ -154,11 +174,11 @@ export function registerActionTools(server: McpServer): void {
               operation: 'create_reply',
               ticketId: ticket.id,
               externalId: ticket.externalId,
-              payload: { body },
+              payload: { body: resolvedBody },
             }).catch(() => {});
           }
 
-          return { sent: true, ticketId: ticket.id, timestamp: now };
+          return { sent: true, ticketId: ticket.id, timestamp: now, cannedResponseId };
         },
       });
 

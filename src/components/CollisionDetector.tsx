@@ -15,9 +15,9 @@ export default function CollisionDetector({
 }) {
   const [viewers, setViewers] = useState<Viewer[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const updatePresence = useCallback(async () => {
+  // Register presence on mount (single POST to get userId + initial viewers)
+  const registerPresence = useCallback(async () => {
     try {
       const res = await fetch("/api/presence", {
         method: "POST",
@@ -39,20 +39,78 @@ export default function CollisionDetector({
   }, [ticketId]);
 
   useEffect(() => {
-    const initialTimer = setTimeout(() => void updatePresence(), 0);
-    intervalRef.current = setInterval(() => void updatePresence(), 10_000);
+    // Register presence initially
+    void registerPresence();
+
+    // Connect to SSE for real-time presence updates
+    const es = new EventSource(
+      `/api/events?ticketId=${encodeURIComponent(ticketId)}`
+    );
+
+    const handleViewing = (e: MessageEvent) => {
+      try {
+        const event = JSON.parse(e.data);
+        const { userId, userName } = event.data ?? {};
+        if (!userId || userId === currentUserId) return;
+        setViewers((prev) => {
+          const existing = prev.find((v) => v.userId === userId);
+          if (existing) {
+            return prev.map((v) =>
+              v.userId === userId ? { ...v, activity: "viewing" } : v
+            );
+          }
+          return [...prev, { userId, userName: userName ?? "Agent", activity: "viewing" }];
+        });
+      } catch { /* ignore */ }
+    };
+
+    const handleTyping = (e: MessageEvent) => {
+      try {
+        const event = JSON.parse(e.data);
+        const { userId, userName } = event.data ?? {};
+        if (!userId || userId === currentUserId) return;
+        setViewers((prev) => {
+          const existing = prev.find((v) => v.userId === userId);
+          if (existing) {
+            return prev.map((v) =>
+              v.userId === userId ? { ...v, activity: "typing" } : v
+            );
+          }
+          return [...prev, { userId, userName: userName ?? "Agent", activity: "typing" }];
+        });
+      } catch { /* ignore */ }
+    };
+
+    const handleLeft = (e: MessageEvent) => {
+      try {
+        const event = JSON.parse(e.data);
+        const { userId } = event.data ?? {};
+        if (!userId) return;
+        setViewers((prev) => prev.filter((v) => v.userId !== userId));
+      } catch { /* ignore */ }
+    };
+
+    es.addEventListener("presence:viewing", handleViewing);
+    es.addEventListener("presence:typing", handleTyping);
+    es.addEventListener("presence:left", handleLeft);
+
+    // Heartbeat: re-register presence every 30s to keep server-side presence alive
+    const heartbeat = setInterval(() => void registerPresence(), 30_000);
 
     return () => {
-      clearTimeout(initialTimer);
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      // Signal leave — use sendBeacon to survive page unload
+      es.removeEventListener("presence:viewing", handleViewing);
+      es.removeEventListener("presence:typing", handleTyping);
+      es.removeEventListener("presence:left", handleLeft);
+      es.close();
+      clearInterval(heartbeat);
+      // Signal leave via sendBeacon to survive page unload
       const payload = new Blob(
         [JSON.stringify({ ticketId, action: "leave" })],
-        { type: "application/json" },
+        { type: "application/json" }
       );
       navigator.sendBeacon("/api/presence", payload);
     };
-  }, [ticketId, updatePresence]);
+  }, [ticketId, currentUserId, registerPresence]);
 
   if (viewers.length === 0) return null;
 

@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import TicketSplitBar from "./TicketSplitBar";
+import MacroButton from "./MacroButton";
 
 interface MessageRow {
   id: string;
@@ -107,11 +108,14 @@ export default function TicketDetailClient({
             Conversation ({messages.length} message
             {messages.length !== 1 ? "s" : ""})
           </h2>
-          {selectedMessages.size > 0 && (
-            <span className="font-mono text-xs font-bold text-indigo-600">
-              {selectedMessages.size} selected for split
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {selectedMessages.size > 0 && (
+              <span className="font-mono text-xs font-bold text-indigo-600">
+                {selectedMessages.size} selected for split
+              </span>
+            )}
+            <MacroButton ticketId={ticketId} onApply={() => router.refresh()} />
+          </div>
         </div>
 
         {messages.length > 0 ? (

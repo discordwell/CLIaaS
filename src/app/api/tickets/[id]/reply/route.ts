@@ -8,19 +8,24 @@ import { freshdeskReply, freshdeskAddNote } from '@cli/connectors/freshdesk';
 import { groovePostMessage } from '@cli/connectors/groove';
 import { messageCreated } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:reply_public');
   if ('error' in authResult) return authResult.error;
 
+  // Light agents cannot send public replies
+  if (authResult.user.role === 'light_agent') {
+    return NextResponse.json({ error: 'Light agents cannot send public replies' }, { status: 403 });
+  }
+
   const { id } = await params;
-  const parsed = await parseJsonBody<{ message: string; isNote?: boolean }>(request);
+  const parsed = await parseJsonBody<{ message: string; isNote?: boolean; mentionedUserIds?: string[] }>(request);
   if ('error' in parsed) return parsed.error;
-  const { message, isNote } = parsed.data;
+  const { message, isNote, mentionedUserIds } = parsed.data;
 
   if (!message?.trim()) {
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });
@@ -84,13 +89,89 @@ export async function POST(
         break;
     }
 
+    // Persist message in DB if available
+    let messageId: string | undefined;
+    if (process.env.DATABASE_URL) {
+      try {
+        const { db } = await import('@/db');
+        const schema = await import('@/db/schema');
+        const { eq } = await import('drizzle-orm');
+
+        // Find ticket + workspace
+        const [ticketRow] = await db.select({ id: schema.tickets.id, workspaceId: schema.tickets.workspaceId })
+          .from(schema.tickets).where(eq(schema.tickets.id, id)).limit(1);
+
+        if (ticketRow) {
+          // Find or create conversation
+          const convRows = await db.select({ id: schema.conversations.id })
+            .from(schema.conversations).where(eq(schema.conversations.ticketId, id)).limit(1);
+
+          let conversationId = convRows[0]?.id;
+          if (!conversationId) {
+            const [convRow] = await db.insert(schema.conversations).values({
+              ticketId: id,
+              workspaceId: ticketRow.workspaceId,
+              channelType: 'email',
+              startedAt: new Date(),
+              lastActivityAt: new Date(),
+            }).returning({ id: schema.conversations.id });
+            conversationId = convRow.id;
+          }
+
+          // Insert message
+          const authorId = authResult.user?.id ?? null;
+          const [row] = await db.insert(schema.messages).values({
+            conversationId,
+            workspaceId: ticketRow.workspaceId,
+            authorType: 'user' as const,
+            authorId,
+            body: message.trim(),
+            visibility: isNote ? ('internal' as const) : ('public' as const),
+            mentionedUserIds: mentionedUserIds?.length ? mentionedUserIds : null,
+          }).returning({ id: schema.messages.id });
+
+          messageId = row.id;
+
+          // Update ticket's updatedAt
+          await db.update(schema.tickets).set({ updatedAt: new Date() }).where(eq(schema.tickets.id, id));
+
+          // Dispatch mention notifications if mentionedUserIds provided
+          if (mentionedUserIds?.length && messageId) {
+            try {
+              const { extractMentions, resolveMentions } = await import('@/lib/mentions');
+              const { dispatchMentionNotifications } = await import('@/lib/notifications');
+              const parsedMentions = extractMentions(message);
+              const resolvedUsers = await resolveMentions(parsedMentions, ticketRow.workspaceId);
+              const allMentionIds = [...new Set([...mentionedUserIds, ...resolvedUsers.map(u => u.id)])];
+              if (allMentionIds.length > 0) {
+                void dispatchMentionNotifications({
+                  messageId,
+                  ticketId: id,
+                  mentionedUserIds: allMentionIds,
+                  authorName: authResult.user?.name ?? authResult.user?.email ?? 'Agent',
+                  notePreview: message.trim().slice(0, 200),
+                  workspaceId: ticketRow.workspaceId,
+                });
+              }
+            } catch {
+              // Mention dispatch is best-effort
+            }
+          }
+        }
+      } catch {
+        // DB persistence is best-effort for connector-based replies
+      }
+    }
+
     messageCreated({
       ticketId: id,
       source,
+      messageId,
       isNote: !!isNote,
       visibility: isNote ? 'internal' : 'public',
+      mentions: mentionedUserIds ?? [],
     });
-    return NextResponse.json({ status: 'ok' });
+    return NextResponse.json({ status: 'ok', messageId });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Reply failed' },
