@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getThreads, createThread } from '@/lib/forums/forum-store';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/forums/threads — list threads, optionally filtered by categoryId
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'forums:view');
   if ('error' in auth) return auth.error;
 
   const categoryId = request.nextUrl.searchParams.get('categoryId') ?? undefined;
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
  * POST /api/forums/threads — create a thread
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'forums:view');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

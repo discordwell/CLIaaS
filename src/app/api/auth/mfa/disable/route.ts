@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { verifyTotp, decryptSecret } from '@/lib/auth/totp';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { requireDatabase, getMfaRecord, getMfaDeps } from '@/lib/auth/mfa-helpers';
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * Requires a valid TOTP code to confirm.
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{ code?: string }>(request);

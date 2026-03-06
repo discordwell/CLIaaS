@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConnector } from "@/lib/connectors";
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<Record<string, unknown>>(request);

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { loadCustomers } from '@/lib/data';
 import { mergeCustomers } from '@/lib/customers/customer-store';
@@ -8,7 +8,7 @@ import { mergeCustomers } from '@/lib/customers/customer-store';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'customers:merge');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody(request);

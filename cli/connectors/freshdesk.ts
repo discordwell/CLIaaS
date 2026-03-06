@@ -99,16 +99,23 @@ function mapPriority(priority: number): TicketPriority {
 
 // ---- Export ----
 
-export async function exportFreshdesk(auth: FreshdeskAuth, outDir: string): Promise<ExportManifest> {
+export interface FreshdeskCursorState {
+  lastSyncAt?: string;
+}
+
+export async function exportFreshdesk(auth: FreshdeskAuth, outDir: string, cursorState?: FreshdeskCursorState): Promise<ExportManifest> {
   const client = createFreshdeskClient(auth);
   const files = setupExport(outDir);
   const counts = initCounts();
 
   // Export tickets (page-based, max 100 per page)
   const ticketSpinner = exportSpinner('Exporting tickets...');
+  const ticketPath = cursorState?.lastSyncAt
+    ? `/api/v2/tickets?updated_since=${encodeURIComponent(cursorState.lastSyncAt)}`
+    : '/api/v2/tickets';
   await paginatePages<FDTicket>({
     fetch: client.request.bind(client),
-    path: '/api/v2/tickets',
+    path: ticketPath,
     onPage: async (tickets) => {
       for (const t of tickets) {
         const ticket: Ticket = {
@@ -263,7 +270,8 @@ export async function exportFreshdesk(auth: FreshdeskAuth, outDir: string): Prom
   } catch { /* SLA not available */ }
   rulesSpinner.succeed(`${counts.rules} business rules exported`);
 
-  return writeManifest(outDir, 'freshdesk', counts);
+  const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
+  return writeManifest(outDir, 'freshdesk', counts, { cursorState: newCursorState });
 }
 
 // ---- Verify ----

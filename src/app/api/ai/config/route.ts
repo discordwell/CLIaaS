@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope, requireScopeAndRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getAgentConfig, saveAgentConfig } from '@/lib/ai/store';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireScope(request, 'ai:read');
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   const config = await getAgentConfig(auth.user.workspaceId);
@@ -21,7 +21,7 @@ const ALLOWED_CONFIG_FIELDS = [
 ] as const;
 
 export async function PUT(request: NextRequest) {
-  const auth = await requireScopeAndRole(request, 'ai:write', 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<Record<string, unknown>>(request);

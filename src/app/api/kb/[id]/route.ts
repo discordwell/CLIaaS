@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadKBArticles } from '@/lib/data';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireScope(request, 'kb:read');
+  const auth = await requirePerm(request, 'kb:view');
   if ('error' in auth) return auth.error;
 
   try {
@@ -116,7 +116,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireScope(request, 'kb:write');
+  const auth = await requirePerm(request, 'kb:edit');
   if ('error' in auth) return auth.error;
 
   try {
@@ -202,7 +202,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireScope(request, 'kb:write');
+  const auth = await requirePerm(request, 'kb:edit');
   if ('error' in auth) return auth.error;
 
   try {

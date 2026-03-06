@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getDb } from '@/db';
 import * as schema from '@/db/schema';
@@ -12,7 +12,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody(request);

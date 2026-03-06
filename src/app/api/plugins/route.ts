@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { PluginRegistry, getInstallations } from '@/lib/plugins';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   try {

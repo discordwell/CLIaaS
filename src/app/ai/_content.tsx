@@ -98,6 +98,17 @@ interface RoutingAgent {
   skills: string[];
 }
 
+interface ApprovalItem {
+  id: string;
+  ticketId: string;
+  confidence: number;
+  suggestedReply: string;
+  reasoning?: string;
+  kbArticlesUsed: string[];
+  status: string;
+  createdAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -132,9 +143,13 @@ export default function AICommandCenterContent() {
     alternateAgents: Array<{ agentName: string; score: number }>;
   } | null>(null);
 
+  // Approval queue
+  const [approvalQueue, setApprovalQueue] = useState<ApprovalItem[]>([]);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+
   // Active tab
   const [activeTab, setActiveTab] = useState<
-    "overview" | "agent" | "routing" | "insights" | "qa"
+    "overview" | "agent" | "routing" | "insights" | "qa" | "approvals"
   >("overview");
 
   const fetchData = useCallback(async () => {
@@ -239,12 +254,56 @@ export default function AICommandCenterContent() {
     }
   }
 
+  const fetchApprovalQueue = useCallback(async () => {
+    setApprovalLoading(true);
+    try {
+      const res = await fetch(
+        "/api/ai/resolutions?status=queued_for_approval"
+      );
+      const data = await res.json();
+      setApprovalQueue(data.resolutions ?? []);
+    } catch {
+      // Silently fail — queue may be empty
+      setApprovalQueue([]);
+    } finally {
+      setApprovalLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "approvals") {
+      fetchApprovalQueue();
+    }
+  }, [activeTab, fetchApprovalQueue]);
+
+  async function handleApproval(id: string, action: "approve" | "reject") {
+    try {
+      const endpoint =
+        action === "approve"
+          ? `/api/ai/resolutions/${id}/approve`
+          : `/api/ai/resolutions/${id}/reject`;
+      const res = await fetch(endpoint, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? `Failed to ${action} resolution`);
+        return;
+      }
+      // Remove from local queue
+      setApprovalQueue((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : `Failed to ${action} resolution`
+      );
+    }
+  }
+
   const tabs = [
     { id: "overview" as const, label: "Overview" },
     { id: "agent" as const, label: "AI Agent" },
     { id: "routing" as const, label: "Routing" },
     { id: "insights" as const, label: "Insights" },
     { id: "qa" as const, label: "QA" },
+    { id: "approvals" as const, label: "Approval Queue" },
   ];
 
   return (
@@ -1268,6 +1327,127 @@ export default function AICommandCenterContent() {
               </p>
             </section>
           )}
+        </div>
+      )}
+
+      {/* APPROVAL QUEUE TAB */}
+      {!loading && activeTab === "approvals" && (
+        <div className="mt-8 space-y-8">
+          <section className="border-2 border-zinc-950 bg-white p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Approval Queue</h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Review pending AI resolutions before they are sent to
+                  customers.
+                </p>
+              </div>
+              <button
+                onClick={fetchApprovalQueue}
+                disabled={approvalLoading}
+                className="border-2 border-zinc-300 px-4 py-2 font-mono text-xs font-bold uppercase hover:border-zinc-950 disabled:opacity-50"
+              >
+                {approvalLoading ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+          </section>
+
+          {approvalLoading && (
+            <section className="border-2 border-zinc-950 bg-white p-8 text-center">
+              <p className="font-mono text-sm text-zinc-500">
+                Loading approval queue...
+              </p>
+            </section>
+          )}
+
+          {!approvalLoading && approvalQueue.length === 0 && (
+            <section className="border-2 border-zinc-950 bg-white p-8 text-center">
+              <p className="text-lg font-bold">Queue is empty</p>
+              <p className="mt-2 text-sm text-zinc-600">
+                No AI resolutions are waiting for approval.
+              </p>
+            </section>
+          )}
+
+          {!approvalLoading &&
+            approvalQueue.map((item) => (
+              <section
+                key={item.id}
+                className="border-2 border-zinc-950 bg-white p-6"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="bg-amber-400 px-2 py-0.5 font-mono text-xs font-bold uppercase text-black">
+                      pending
+                    </span>
+                    <span className="font-mono text-xs text-zinc-500">
+                      Ticket: {item.ticketId.slice(0, 16)}
+                    </span>
+                    <span className="font-mono text-xs font-bold">
+                      {(item.confidence * 100).toFixed(0)}% confidence
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs text-zinc-400">
+                    {new Date(item.createdAt).toLocaleString()}
+                  </span>
+                </div>
+
+                {item.suggestedReply && (
+                  <div className="mt-4">
+                    <p className="font-mono text-xs font-bold uppercase text-zinc-500">
+                      Suggested Reply
+                    </p>
+                    <div className="mt-2 whitespace-pre-wrap border border-zinc-200 bg-zinc-50 p-4 text-sm">
+                      {item.suggestedReply}
+                    </div>
+                  </div>
+                )}
+
+                {item.reasoning && (
+                  <div className="mt-3">
+                    <p className="font-mono text-xs font-bold uppercase text-zinc-500">
+                      Reasoning
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-700">
+                      {item.reasoning}
+                    </p>
+                  </div>
+                )}
+
+                {item.kbArticlesUsed.length > 0 && (
+                  <div className="mt-3">
+                    <p className="font-mono text-xs font-bold uppercase text-zinc-500">
+                      KB Articles
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {item.kbArticlesUsed.map((kb) => (
+                        <span
+                          key={kb}
+                          className="border border-zinc-300 bg-zinc-100 px-2 py-0.5 font-mono text-xs"
+                        >
+                          {kb}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 flex gap-3">
+                  <button
+                    onClick={() => handleApproval(item.id, "approve")}
+                    className="border-2 border-emerald-600 bg-emerald-600 px-6 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-emerald-700"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => handleApproval(item.id, "reject")}
+                    className="border-2 border-red-500 bg-white px-6 py-2 font-mono text-xs font-bold uppercase text-red-500 hover:bg-red-50"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </section>
+            ))}
         </div>
       )}
     </main>

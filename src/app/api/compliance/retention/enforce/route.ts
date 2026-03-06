@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { enforceRetentionPolicies } from '@/lib/compliance/retention-scheduler';
 import { recordAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   try {

@@ -148,8 +148,8 @@ describe('runSyncCycle', () => {
   }> = [
     {
       name: 'freshdesk',
-      envVars: { FRESHDESK_DOMAIN: 'test.freshdesk.com', FRESHDESK_API_KEY: 'fk-test' },
-      missingEnvVars: { FRESHDESK_DOMAIN: '', FRESHDESK_API_KEY: '' },
+      envVars: { FRESHDESK_SUBDOMAIN: 'test.freshdesk.com', FRESHDESK_DOMAIN: 'test.freshdesk.com', FRESHDESK_API_KEY: 'fk-test' },
+      missingEnvVars: { FRESHDESK_DOMAIN: '', FRESHDESK_SUBDOMAIN: '', FRESHDESK_API_KEY: '' },
       expectedAuth: { subdomain: 'test.freshdesk.com', apiKey: 'fk-test' },
       mockModule: '../../connectors/freshdesk.js',
       mockFnName: 'exportFreshdesk',
@@ -164,16 +164,16 @@ describe('runSyncCycle', () => {
     },
     {
       name: 'groove',
-      envVars: { GROOVE_API_KEY: 'gv-test' },
-      missingEnvVars: { GROOVE_API_KEY: '' },
+      envVars: { GROOVE_API_TOKEN: 'gv-test', GROOVE_API_KEY: 'gv-test' },
+      missingEnvVars: { GROOVE_API_KEY: '', GROOVE_API_TOKEN: '' },
       expectedAuth: { apiToken: 'gv-test' },
       mockModule: '../../connectors/groove.js',
       mockFnName: 'exportGroove',
     },
     {
       name: 'intercom',
-      envVars: { INTERCOM_TOKEN: 'ic-test' },
-      missingEnvVars: { INTERCOM_TOKEN: '' },
+      envVars: { INTERCOM_ACCESS_TOKEN: 'ic-test', INTERCOM_TOKEN: 'ic-test' },
+      missingEnvVars: { INTERCOM_TOKEN: '', INTERCOM_ACCESS_TOKEN: '' },
       expectedAuth: { accessToken: 'ic-test' },
       mockModule: '../../connectors/intercom.js',
       mockFnName: 'exportIntercom',
@@ -188,16 +188,16 @@ describe('runSyncCycle', () => {
     },
     {
       name: 'zoho-desk',
-      envVars: { ZOHO_DESK_DOMAIN: 'desk.zoho.com', ZOHO_DESK_ORG_ID: 'org-123', ZOHO_DESK_TOKEN: 'zd-test' },
-      missingEnvVars: { ZOHO_DESK_DOMAIN: '', ZOHO_DESK_ORG_ID: '', ZOHO_DESK_TOKEN: '' },
+      envVars: { ZOHO_DESK_API_DOMAIN: 'desk.zoho.com', ZOHO_DESK_DOMAIN: 'desk.zoho.com', ZOHO_DESK_ORG_ID: 'org-123', ZOHO_DESK_ACCESS_TOKEN: 'zd-test', ZOHO_DESK_TOKEN: 'zd-test' },
+      missingEnvVars: { ZOHO_DESK_DOMAIN: '', ZOHO_DESK_API_DOMAIN: '', ZOHO_DESK_ORG_ID: '', ZOHO_DESK_TOKEN: '', ZOHO_DESK_ACCESS_TOKEN: '' },
       expectedAuth: { orgId: 'org-123', accessToken: 'zd-test', apiDomain: 'desk.zoho.com' },
       mockModule: '../../connectors/zoho-desk.js',
       mockFnName: 'exportZohoDesk',
     },
     {
       name: 'hubspot',
-      envVars: { HUBSPOT_TOKEN: 'hub-test' },
-      missingEnvVars: { HUBSPOT_TOKEN: '' },
+      envVars: { HUBSPOT_ACCESS_TOKEN: 'hub-test', HUBSPOT_TOKEN: 'hub-test' },
+      missingEnvVars: { HUBSPOT_TOKEN: '', HUBSPOT_ACCESS_TOKEN: '' },
       expectedAuth: { accessToken: 'hub-test' },
       mockModule: '../../connectors/hubspot.js',
       mockFnName: 'exportHubSpot',
@@ -216,7 +216,10 @@ describe('runSyncCycle', () => {
 
       // Verify the connector was called with correctly remapped auth fields
       const mod = await import(mockModule);
-      expect(mod[mockFnName]).toHaveBeenCalledWith(expectedAuth, TEST_DIR);
+      // Verify the first two arguments (auth + outDir); cursor state may or may not be passed
+      const call = mod[mockFnName].mock.calls[0];
+      expect(call[0]).toEqual(expectedAuth);
+      expect(call[1]).toBe(TEST_DIR);
     },
   );
 

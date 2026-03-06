@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { updateCoachingAssignment } from '@/lib/qa/qa-coaching-store';
 
@@ -13,7 +13,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:review');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

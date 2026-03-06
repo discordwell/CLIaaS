@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { drillDown } from '@/lib/reports/engine';
 
@@ -10,7 +10,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireScope(request, 'analytics:read');
+  const auth = await requirePerm(request, 'analytics:view');
   if ('error' in auth) return auth.error;
   const { id } = await params;
 

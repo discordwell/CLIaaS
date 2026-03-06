@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getTimeReport } from '@/lib/time-tracking';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   try {

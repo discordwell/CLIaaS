@@ -7,7 +7,7 @@ import {
   getQAOverview,
 } from '@/lib/ai/qa';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/ai/qa - Get QA overview stats
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   const overview = getQAOverview();
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
  * }
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   try {

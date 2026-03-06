@@ -125,16 +125,23 @@ function extractIdFromHref(href: string): string {
 
 // ---- Export ----
 
-export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<ExportManifest> {
+export interface GrooveCursorState {
+  lastSyncAt?: string;
+}
+
+export async function exportGroove(auth: GrooveAuth, outDir: string, cursorState?: GrooveCursorState): Promise<ExportManifest> {
   const client = createGrooveClient(auth);
   const files = setupExport(outDir);
   const counts = initCounts();
 
   // Export tickets (page-based, max 50 per page)
   const ticketSpinner = exportSpinner('Exporting tickets...');
+  const ticketPath = cursorState?.lastSyncAt
+    ? `/tickets?updated_after=${encodeURIComponent(cursorState.lastSyncAt)}`
+    : '/tickets';
   await paginatePages<GVTicket>({
     fetch: client.request.bind(client),
-    path: '/tickets',
+    path: ticketPath,
     pageSize: 50,
     dataKey: 'tickets',
     onPage: async (tickets) => {
@@ -283,7 +290,8 @@ export async function exportGroove(auth: GrooveAuth, outDir: string): Promise<Ex
   // No automation rules API
   exportSpinner('Business rules: not available via Groove API').info();
 
-  return writeManifest(outDir, 'groove', counts);
+  const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
+  return writeManifest(outDir, 'groove', counts, { cursorState: newCursorState });
 }
 
 // ---- Verify ----

@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { testWebhook } from '@/lib/webhooks';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireScope(request, 'webhooks:write');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   try {

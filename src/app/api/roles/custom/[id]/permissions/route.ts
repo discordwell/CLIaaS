@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requirePermission } from '@/lib/rbac/check';
-import { requireAuth } from '@/lib/api-auth';
-import { isRbacEnabled } from '@/lib/rbac/feature-flag';
+import { requirePerm } from '@/lib/rbac';
 import { PERMISSION_KEYS } from '@/lib/rbac/constants';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
@@ -17,9 +15,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'admin:roles')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -69,9 +65,7 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'admin:roles')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

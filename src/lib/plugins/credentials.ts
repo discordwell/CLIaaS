@@ -31,6 +31,9 @@ function getEncryptionKey(): Buffer {
   }
 
   // Last resort: deterministic key (development only)
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('PLUGIN_ENCRYPTION_KEY is required in production');
+  }
   return createHash('sha256').update('cliaas-plugin-dev-key').digest();
 }
 

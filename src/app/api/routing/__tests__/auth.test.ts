@@ -9,6 +9,10 @@ vi.mock('@/lib/api-auth', () => ({
   requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
   requireScope: (...args: unknown[]) => mockRequireScope(...args),
   requireRole: (...args: unknown[]) => mockRequireRole(...args),
+  requireScopeAndRole: (...args: unknown[]) => mockRequireRole(...args),
+  getAuthUser: vi.fn(async () => ({ id: 'user-1', role: 'admin', workspaceId: 'ws-1', email: 'test@test.com' })),
+  ROLE_HIERARCHY: { owner: 6, admin: 5, agent: 4, light_agent: 3, collaborator: 2, viewer: 1 },
+  VALID_SCOPES: ['tickets:read', 'tickets:write', 'kb:read', 'kb:write', 'analytics:read', '*'],
 }));
 
 vi.mock('@/lib/routing/store', () => ({
@@ -50,6 +54,7 @@ describe('routing API auth guards', () => {
   });
 
   it('queues GET returns 401 without auth', async () => {
+    mockRequireRole.mockResolvedValue(authError);
     mockRequireScope.mockResolvedValue(authError);
     const { GET } = await import('../../routing/queues/route');
     const res = await GET(makeRequest() as any);
@@ -57,6 +62,7 @@ describe('routing API auth guards', () => {
   });
 
   it('queues GET returns 200 with valid auth', async () => {
+    mockRequireRole.mockResolvedValue(authSuccess);
     mockRequireScope.mockResolvedValue(authSuccess);
     const { GET } = await import('../../routing/queues/route');
     const res = await GET(makeRequest() as any);
@@ -64,6 +70,7 @@ describe('routing API auth guards', () => {
   });
 
   it('queues POST validates strategy enum', async () => {
+    mockRequireRole.mockResolvedValue(authSuccess);
     mockRequireScope.mockResolvedValue(authSuccess);
     const { POST } = await import('../../routing/queues/route');
     const req = makeRequest('POST', { name: 'Test', strategy: 'invalid_strategy' });
@@ -74,6 +81,7 @@ describe('routing API auth guards', () => {
   });
 
   it('queues POST accepts valid strategy', async () => {
+    mockRequireRole.mockResolvedValue(authSuccess);
     mockRequireScope.mockResolvedValue(authSuccess);
     const { POST } = await import('../../routing/queues/route');
     const req = makeRequest('POST', { name: 'Test', strategy: 'round_robin' });
@@ -82,6 +90,7 @@ describe('routing API auth guards', () => {
   });
 
   it('agents availability GET returns 401 without auth', async () => {
+    mockRequireRole.mockResolvedValue(authError);
     mockRequireAuth.mockResolvedValue(authError);
     const { GET } = await import('../../agents/availability/route');
     const res = await GET(makeRequest() as any);
@@ -89,6 +98,7 @@ describe('routing API auth guards', () => {
   });
 
   it('log GET caps limit at 200', async () => {
+    mockRequireRole.mockResolvedValue(authSuccess);
     mockRequireScope.mockResolvedValue(authSuccess);
     const { getRoutingLog } = await import('@/lib/routing/store');
     const { GET } = await import('../../routing/log/route');

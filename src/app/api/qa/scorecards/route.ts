@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getScorecards, createScorecard } from '@/lib/qa/qa-store';
 import type { ScorecardCriterion } from '@/lib/qa/qa-store';
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/qa/scorecards — list all QA scorecards
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:view');
   if ('error' in auth) return auth.error;
 
   const scorecards = getScorecards();
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
  * POST /api/qa/scorecards — create a QA scorecard
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:review');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

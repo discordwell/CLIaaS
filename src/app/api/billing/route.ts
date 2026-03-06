@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { PLANS, getPlanQuotas } from '@/lib/billing/plans';
 import { getCurrentUsage } from '@/lib/billing/usage';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:billing', 'owner');
   if ('error' in auth) return auth.error;
 
   const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;

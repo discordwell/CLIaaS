@@ -87,6 +87,7 @@ export default function BusinessHoursContent() {
   // Holiday form
   const [showHolidayForm, setShowHolidayForm] = useState(false);
   const [holidayName, setHolidayName] = useState("");
+  const [holidayDescription, setHolidayDescription] = useState("");
   const [holidayEntryName, setHolidayEntryName] = useState("");
   const [holidayEntryDate, setHolidayEntryDate] = useState("");
   const [holidayEntryRecurring, setHolidayEntryRecurring] = useState(false);
@@ -193,10 +194,14 @@ export default function BusinessHoursContent() {
       await fetch("/api/holidays", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: holidayName }),
+        body: JSON.stringify({
+          name: holidayName,
+          description: holidayDescription || undefined,
+        }),
       });
       setShowHolidayForm(false);
       setHolidayName("");
+      setHolidayDescription("");
       loadAll();
     } finally {
       setSaving(false);
@@ -503,22 +508,31 @@ export default function BusinessHoursContent() {
               <h2 className="font-mono text-xs font-bold uppercase text-zinc-500">
                 Create Holiday Calendar
               </h2>
-              <form onSubmit={createCalendar} className="mt-4 flex gap-3">
+              <form onSubmit={createCalendar} className="mt-4 space-y-3">
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    required
+                    value={holidayName}
+                    onChange={(e) => setHolidayName(e.target.value)}
+                    className="flex-1 border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                    placeholder="Calendar name"
+                  />
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    Create
+                  </button>
+                </div>
                 <input
                   type="text"
-                  required
-                  value={holidayName}
-                  onChange={(e) => setHolidayName(e.target.value)}
-                  className="flex-1 border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-                  placeholder="Calendar name"
+                  value={holidayDescription}
+                  onChange={(e) => setHolidayDescription(e.target.value)}
+                  className="w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
+                  placeholder="Optional description (e.g., US federal holidays 2026)"
                 />
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
-                >
-                  Create
-                </button>
               </form>
             </section>
           )}
@@ -532,7 +546,14 @@ export default function BusinessHoursContent() {
             </section>
           ) : (
             <section className="mt-8 space-y-4">
-              {calendars.map((cal) => (
+              {calendars.map((cal) => {
+                const today = new Date().toISOString().slice(0, 10);
+                const upcomingCount = cal.entries.filter(
+                  (e) => e.recurring || e.date >= today
+                ).length;
+                const pastCount = cal.entries.length - upcomingCount;
+
+                return (
                 <div key={cal.id} className="border-2 border-zinc-950 bg-white p-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -542,9 +563,19 @@ export default function BusinessHoursContent() {
                           {cal.description}
                         </span>
                       )}
-                      <span className="ml-3 font-mono text-xs text-zinc-400">
-                        {cal.entries.length} date{cal.entries.length !== 1 ? "s" : ""}
-                      </span>
+                      <div className="mt-1 flex gap-3 font-mono text-xs text-zinc-400">
+                        <span>{cal.entries.length} date{cal.entries.length !== 1 ? "s" : ""}</span>
+                        {upcomingCount > 0 && (
+                          <span className="text-emerald-600">
+                            {upcomingCount} upcoming
+                          </span>
+                        )}
+                        {pastCount > 0 && (
+                          <span className="text-zinc-400">
+                            {pastCount} past
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => deleteCalendar(cal.id)}
@@ -610,7 +641,8 @@ export default function BusinessHoursContent() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </section>
           )}
         </>

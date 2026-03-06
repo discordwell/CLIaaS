@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { seedWorkspaceWithSampleData } from '@/lib/onboarding/seed-sample-data';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   if (!process.env.DATABASE_URL) {

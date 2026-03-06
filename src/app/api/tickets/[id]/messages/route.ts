@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadMessages } from '@/lib/data';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireScope(request, 'tickets:read');
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

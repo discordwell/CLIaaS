@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getPredictions, createPrediction } from '@/lib/predictions/csat-prediction-store';
 import { predictCSAT } from '@/lib/predictions/csat-predictor';
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/predictions/csat — list CSAT predictions
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'analytics:view');
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
  * POST /api/predictions/csat — trigger CSAT prediction for a ticket
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{ ticketId?: string }>(request);

@@ -5,7 +5,7 @@ import { zendeskVerifyConnection } from '@cli/connectors/zendesk';
 import { helpcrunchVerifyConnection } from '@cli/connectors/helpcrunch';
 import { freshdeskVerifyConnection } from '@cli/connectors/freshdesk';
 import { grooveVerifyConnection } from '@cli/connectors/groove';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 const VALID_CONNECTORS = ['zendesk', 'helpcrunch', 'freshdesk', 'groove'];
 
@@ -13,7 +13,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> },
 ) {
-  const roleCheck = await requireRole(request, 'admin');
+  const roleCheck = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in roleCheck) return roleCheck.error;
 
   const { name } = await params;

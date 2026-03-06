@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireRole, VALID_SCOPES } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
+import { VALID_SCOPES } from '@/lib/api-auth';
 import { createApiKey, listApiKeys } from '@/lib/api-keys';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/api-keys — List all active API keys for the workspace.
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   try {
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
  * POST /api/api-keys — Create a new API key. Returns the raw key once.
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

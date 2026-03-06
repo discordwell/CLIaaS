@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { evaluateRule, type TicketContext } from '@/lib/automation/engine';
 import type { Rule } from '@/lib/automation/engine';
 import type { RuleConditions } from '@/lib/automation/conditions';
@@ -11,7 +11,7 @@ import { persistAuditEntry } from '@/lib/automation/audit-store';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody(request);

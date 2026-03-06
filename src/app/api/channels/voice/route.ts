@@ -4,12 +4,12 @@ import { isDemoMode } from '@/lib/channels/twilio';
 import { getIVRConfig, saveIVRConfig, type IVRConfig } from '@/lib/channels/voice-ivr';
 import { getAllCalls, getAgents, getActiveCalls } from '@/lib/channels/voice-store';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'channels:view');
   if ('error' in auth) return auth.error;
 
   const config = getIVRConfig();
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'channels:edit');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<Record<string, unknown>>(request);

@@ -7,6 +7,18 @@ vi.mock('@/lib/api-auth', () => ({
   requireAuth: vi.fn(async () => ({
     user: { id: 'u1', email: 'agent@test.com', name: 'Agent', role: 'agent', workspaceId: 'ws1' },
   })),
+  requireRole: vi.fn(async () => ({
+    user: { id: 'u1', email: 'agent@test.com', name: 'Agent', role: 'agent', workspaceId: 'ws1' },
+  })),
+  requireScope: vi.fn(async () => ({
+    user: { id: 'u1', email: 'agent@test.com', name: 'Agent', role: 'agent', workspaceId: 'ws1' },
+  })),
+  requireScopeAndRole: vi.fn(async () => ({
+    user: { id: 'u1', email: 'agent@test.com', name: 'Agent', role: 'agent', workspaceId: 'ws1' },
+  })),
+  getAuthUser: vi.fn(async () => ({ id: 'u1', email: 'agent@test.com', name: 'Agent', role: 'agent', workspaceId: 'ws1' })),
+  ROLE_HIERARCHY: { owner: 6, admin: 5, agent: 4, light_agent: 3, collaborator: 2, viewer: 1 },
+  VALID_SCOPES: ['tickets:read', 'tickets:write', 'kb:read', 'kb:write', 'analytics:read', '*'],
 }));
 
 // Reset presence singleton before import

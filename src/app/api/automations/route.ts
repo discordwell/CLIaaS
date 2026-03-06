@@ -6,12 +6,12 @@ import {
 } from '@/lib/automation/executor';
 import type { Rule } from '@/lib/automation/engine';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   // Scope by workspace to prevent cross-workspace data leakage
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   try {

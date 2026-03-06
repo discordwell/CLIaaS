@@ -40,6 +40,7 @@ describe('requirePermission', () => {
 
   it('denies when RBAC enabled, no bitfield, and role lacks permission (default-deny)', async () => {
     process.env.RBAC_ENABLED = '1';
+    process.env.DATABASE_URL = 'postgres://localhost/test';
     // agent role does not have admin:billing → should deny
     const result = await requirePermission(mockRequest(), 'admin:billing');
     expect('error' in result).toBe(true);
@@ -47,6 +48,7 @@ describe('requirePermission', () => {
 
   it('passes when RBAC enabled, no bitfield, but role has the permission', async () => {
     process.env.RBAC_ENABLED = '1';
+    process.env.DATABASE_URL = 'postgres://localhost/test';
     // agent role has tickets:view → should pass via role-based fallback
     const result = await requirePermission(mockRequest(), 'tickets:view');
     expect('user' in result).toBe(true);

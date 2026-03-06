@@ -97,9 +97,10 @@ export async function POST(
         const schema = await import('@/db/schema');
         const { eq } = await import('drizzle-orm');
 
-        // Find ticket + workspace
+        // Find ticket + workspace (scoped to user's workspace)
+        const { and } = await import('drizzle-orm');
         const [ticketRow] = await db.select({ id: schema.tickets.id, workspaceId: schema.tickets.workspaceId })
-          .from(schema.tickets).where(eq(schema.tickets.id, id)).limit(1);
+          .from(schema.tickets).where(and(eq(schema.tickets.id, id), eq(schema.tickets.workspaceId, authResult.user.workspaceId))).limit(1);
 
         if (ticketRow) {
           // Find or create conversation

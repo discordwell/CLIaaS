@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getResolution } from '@/lib/ai/store';
 import { rejectEntry } from '@/lib/ai/approval-queue';
 
@@ -10,7 +10,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireScope(request, 'ai:write');
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

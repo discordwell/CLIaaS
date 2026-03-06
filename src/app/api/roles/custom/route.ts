@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requirePermission } from '@/lib/rbac/check';
-import { requireAuth } from '@/lib/api-auth';
-import { isRbacEnabled } from '@/lib/rbac/feature-flag';
+import { requirePerm } from '@/lib/rbac';
 import { BUILTIN_ROLE_MATRIX } from '@/lib/rbac/constants';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import type { BuiltinRole } from '@/lib/rbac/types';
@@ -12,9 +10,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/roles/custom — List custom roles in the workspace.
  */
 export async function GET(request: Request) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'admin:roles')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   if (!process.env.DATABASE_URL) {
@@ -41,9 +37,7 @@ export async function GET(request: Request) {
  * POST /api/roles/custom — Create a custom role.
  */
 export async function POST(request: Request) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'admin:roles')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody(request);

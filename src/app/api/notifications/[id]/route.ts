@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:read');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;

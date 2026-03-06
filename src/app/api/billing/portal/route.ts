@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { createPortalSession } from '@/lib/billing/checkout';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:billing', 'owner');
   if ('error' in auth) return auth.error;
 
   if (!process.env.STRIPE_SECRET_KEY) {

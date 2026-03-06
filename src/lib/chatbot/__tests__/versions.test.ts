@@ -38,7 +38,7 @@ function makeFlow(overrides?: Partial<ChatbotFlow>): ChatbotFlow {
 }
 
 describe('chatbot versions (JSONL mode)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (readJsonlFile as any).__resetStore?.();
     // Reset the mock store

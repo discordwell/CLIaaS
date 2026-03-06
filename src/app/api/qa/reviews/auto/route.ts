@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { runAutoQA } from '@/lib/ai/autoqa';
 import { loadTickets, loadMessages } from '@/lib/data';
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * Uses real LLM/heuristic scoring instead of random scores.
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:review');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

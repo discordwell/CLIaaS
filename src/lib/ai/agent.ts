@@ -42,6 +42,7 @@ export interface AIAgentRunOptions {
   kbArticles?: KBArticle[];
   config: AIAgentConfig;
   dryRun?: boolean; // suggest but don't auto-reply
+  extraSystemPrompt?: string; // additional prompt context (e.g. procedures)
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,7 @@ function buildAgentPrompt(
   ticket: Ticket,
   messages: Message[],
   kbArticles: KBArticle[],
+  extraSystemPrompt?: string,
 ): string {
   const thread = messages
     .sort(
@@ -129,6 +131,8 @@ function buildAgentPrompt(
           .join('\n\n---\n\n')}`
       : '';
 
+  const procedureSection = extraSystemPrompt ?? '';
+
   return `You are an AI customer-support agent for CLIaaS. Your job is to resolve
 support tickets autonomously when you are confident you can help.
 
@@ -141,7 +145,7 @@ Created: ${ticket.createdAt}
 
 --- CONVERSATION ---
 ${thread || '(no messages yet)'}
-${kbSection}
+${kbSection}${procedureSection}
 
 INSTRUCTIONS:
 1. Analyze the ticket and conversation history.
@@ -255,9 +259,9 @@ export async function runAgent(opts: AIAgentRunOptions): Promise<AIAgentResult> 
     return result;
   }
 
-  // Build prompt with optional KB context
+  // Build prompt with optional KB context and extra system prompt (procedures)
   const contextArticles = config.kbContext ? kbArticles : [];
-  const prompt = buildAgentPrompt(ticket, messages, contextArticles);
+  const prompt = buildAgentPrompt(ticket, messages, contextArticles, opts.extraSystemPrompt);
 
   try {
     const raw = await complete(prompt, config);

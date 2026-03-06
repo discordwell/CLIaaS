@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { listWorkspaceUsers, sanitizeUser } from '@/lib/user-service';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:users', 'admin');
   if ('error' in auth) return auth.error;
 
   try {

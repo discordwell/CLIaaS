@@ -1,16 +1,23 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { loadTickets } from "@/lib/data";
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
+import { getCollaboratorTicketIds } from '@/lib/rbac/collaborator-scope';
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireScope(request, 'tickets:read');
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const { searchParams } = request.nextUrl;
   let tickets = await loadTickets();
+
+  // Collaborator scoping: only see assigned tickets
+  if (auth.user.role === 'collaborator') {
+    const allowedIds = await getCollaboratorTicketIds(auth.user.id, auth.user.workspaceId);
+    tickets = tickets.filter(t => allowedIds.includes(t.id));
+  }
 
   // Filters
   const status = searchParams.get("status");

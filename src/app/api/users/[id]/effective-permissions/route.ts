@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
-import { requirePermission } from '@/lib/rbac/check';
-import { isRbacEnabled } from '@/lib/rbac/feature-flag';
+import { requirePerm } from '@/lib/rbac';
 import { resolveUserPermissions, getUserBitfield } from '@/lib/rbac/permissions';
 import { BUILTIN_ROLE_MATRIX } from '@/lib/rbac/constants';
 import type { BuiltinRole } from '@/lib/rbac/types';
@@ -16,9 +14,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'admin:users')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const { id: userId } = await params;

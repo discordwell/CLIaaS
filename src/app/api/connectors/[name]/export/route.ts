@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { type ConnectorName, getAuth } from '@/lib/connector-auth';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { exportZendesk } from '@cli/connectors/zendesk';
 import { exportHelpcrunch } from '@cli/connectors/helpcrunch';
 import { exportFreshdesk } from '@cli/connectors/freshdesk';
@@ -36,7 +36,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> },
 ) {
-  const roleCheck = await requireRole(request, 'admin');
+  const roleCheck = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in roleCheck) return roleCheck.error;
 
   const { name } = await params;

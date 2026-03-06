@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import {
   generateTotpSecret,
   generateTotpUrl,
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * The setup is not finalized until the user verifies a code via /api/auth/mfa/verify.
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   try {

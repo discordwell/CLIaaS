@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRoutingQueues, createRoutingQueue } from '@/lib/routing/store';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import type { RoutingStrategy } from '@/lib/routing/types';
 
 const VALID_STRATEGIES: RoutingStrategy[] = ['round_robin', 'load_balanced', 'skill_match', 'priority_weighted'];
 
 export async function GET(request: NextRequest) {
-  const auth = await requireScope(request, 'routing:read');
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   return NextResponse.json(getRoutingQueues());
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireScope(request, 'routing:write');
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   let body: Record<string, unknown>;

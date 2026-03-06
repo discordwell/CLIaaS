@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getHealthScores, getAtRiskCustomers } from '@/lib/customers/health-score-store';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/customers/health/overview — health score distribution and at-risk list
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'customers:view');
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';

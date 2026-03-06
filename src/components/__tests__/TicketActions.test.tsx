@@ -57,7 +57,7 @@ describe('TicketActions', () => {
 
   it('renders the reply textarea with placeholder', () => {
     render(<TicketActions ticketId="t1" currentStatus="open" currentPriority="normal" />);
-    expect(screen.getByPlaceholderText('Type your reply...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Type your reply... (use @name to mention)')).toBeInTheDocument();
   });
 
   it('shows "Send Reply" button by default', () => {
@@ -81,7 +81,7 @@ describe('TicketActions', () => {
 
   it('enables reply button when textarea has content', () => {
     render(<TicketActions ticketId="t1" currentStatus="open" currentPriority="normal" />);
-    const textarea = screen.getByPlaceholderText('Type your reply...');
+    const textarea = screen.getByPlaceholderText('Type your reply... (use @name to mention)');
     fireEvent.change(textarea, { target: { value: 'Hello there' } });
     const replyBtn = screen.getByText('Send Reply');
     expect(replyBtn).not.toBeDisabled();
@@ -95,7 +95,7 @@ describe('TicketActions', () => {
     } as Response);
 
     render(<TicketActions ticketId="t1" currentStatus="open" currentPriority="normal" />);
-    const textarea = screen.getByPlaceholderText('Type your reply...');
+    const textarea = screen.getByPlaceholderText('Type your reply... (use @name to mention)');
     fireEvent.change(textarea, { target: { value: 'Test reply' } });
     fireEvent.click(screen.getByText('Send Reply'));
 

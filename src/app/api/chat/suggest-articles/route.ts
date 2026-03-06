@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { suggestArticles } from '@/lib/kb/text-match';
 
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * Auth required (kb:read) — this is an agent-facing endpoint, not portal.
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireScope(request, 'kb:read');
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   try {

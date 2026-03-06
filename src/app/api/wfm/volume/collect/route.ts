@@ -12,14 +12,7 @@ export async function POST(request: NextRequest) {
   const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
-  let body: Record<string, unknown> = {};
-  try {
-    body = await request.json();
-  } catch {
-    // No body — use default workspace
-  }
-
-  const workspaceId = (body.workspaceId as string) ?? 'default';
+  const workspaceId = auth.user.workspaceId ?? 'default';
 
   try {
     const snapshot = await collectVolumeSnapshot(workspaceId);

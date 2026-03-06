@@ -162,7 +162,11 @@ function mapStatus(status: string): TicketStatus {
 
 // ---- Export ----
 
-export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Promise<ExportManifest> {
+export interface HelpScoutCursorState {
+  lastSyncAt?: string;
+}
+
+export async function exportHelpScout(auth: HelpScoutAuth, outDir: string, cursorState?: HelpScoutCursorState): Promise<ExportManifest> {
   const client = createHelpScoutClient(auth);
   const files = setupExport(outDir);
   const counts = initCounts();
@@ -171,9 +175,12 @@ export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Prom
   const convSpinner = exportSpinner('Exporting conversations...');
   const convFetch = createHSPaginatedFetch(client.request.bind(client), 'conversations');
 
+  const convPath = cursorState?.lastSyncAt
+    ? `/conversations?status=all&modifiedSince=${encodeURIComponent(cursorState.lastSyncAt)}`
+    : '/conversations?status=all';
   await paginatePages<HSConversation>({
     fetch: convFetch,
-    path: '/conversations?status=all',
+    path: convPath,
     dataKey: 'conversations',
     totalPagesKey: 'totalPages',
     onPage: async (conversations) => {
@@ -338,7 +345,8 @@ export async function exportHelpScout(auth: HelpScoutAuth, outDir: string): Prom
   // No rules API
   exportSpinner('Business rules: not available via Help Scout API').info();
 
-  return writeManifest(outDir, 'helpscout', counts);
+  const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
+  return writeManifest(outDir, 'helpscout', counts, { cursorState: newCursorState });
 }
 
 // ---- Verify ----

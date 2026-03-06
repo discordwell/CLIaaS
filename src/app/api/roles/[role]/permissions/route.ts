@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
-import { requirePermission } from '@/lib/rbac/check';
-import { isRbacEnabled } from '@/lib/rbac/feature-flag';
+import { requirePerm } from '@/lib/rbac';
 import { BUILTIN_ROLE_MATRIX, PERMISSION_LABELS, PERMISSION_CATEGORIES } from '@/lib/rbac/constants';
 import type { BuiltinRole } from '@/lib/rbac/types';
 
@@ -14,9 +12,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ role: string }> },
 ) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'admin:roles')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const { role } = await params;

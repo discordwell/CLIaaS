@@ -8,7 +8,7 @@ import {
   type AIAgentConfig,
 } from '@/lib/ai/agent';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/ai/agent - Return AI agent config and stats
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   const stats = getAgentStats();
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
  * }
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   try {

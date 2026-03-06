@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { logPiiAccess } from '@/lib/compliance/pii-masking';
 import { getDb } from '@/db';
 import * as schema from '@/db/schema';
@@ -13,7 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   // Agents and above can view unmasked content
-  const auth = await requireRole(request, 'agent');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

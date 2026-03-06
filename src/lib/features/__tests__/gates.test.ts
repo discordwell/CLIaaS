@@ -57,10 +57,11 @@ describe('isFeatureEnabled', () => {
     }
   });
 
-  it('returns true for pro_hosted on all features except enterprise-only ones', () => {
+  it('returns true for pro_hosted on all features except enterprise-only and byoc-only ones', () => {
     const features = Object.keys(FEATURE_MATRIX) as Feature[];
+    const NOT_PRO_HOSTED: Feature[] = [...ENTERPRISE_ONLY, 'hipaa_compliance'];
     for (const feature of features) {
-      if (ENTERPRISE_ONLY.includes(feature)) {
+      if (NOT_PRO_HOSTED.includes(feature)) {
         expect(isFeatureEnabled(feature, 'pro_hosted')).toBe(false);
       } else {
         expect(isFeatureEnabled(feature, 'pro_hosted')).toBe(true);
@@ -84,10 +85,10 @@ describe('getAvailableFeatures', () => {
     expect(features).toEqual(allFeatures);
   });
 
-  it('returns correct features for legacy tiers (no sso, multi_brand, answer_bot)', () => {
+  it('returns correct features for legacy tiers (no sso, multi_brand, answer_bot, pii_masking, hipaa_compliance)', () => {
     const legacyTiers: TierLevel[] = ['basic', 'free', 'founder', 'starter'];
     const allFeatures = Object.keys(FEATURE_MATRIX) as Feature[];
-    const excluded: Feature[] = ['sso', 'multi_brand', 'answer_bot'];
+    const excluded: Feature[] = ['sso', 'multi_brand', 'answer_bot', 'pii_masking', 'hipaa_compliance'];
     const expectedFeatures = allFeatures.filter(f => !excluded.includes(f));
     for (const tier of legacyTiers) {
       expect(getAvailableFeatures(tier)).toEqual(expectedFeatures);

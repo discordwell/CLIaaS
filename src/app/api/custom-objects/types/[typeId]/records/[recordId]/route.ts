@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getRecord, updateRecord, deleteRecord, getObjectType, validateRecordData } from '@/lib/custom-objects';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ typeId: string; recordId: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const { recordId } = await params;
@@ -30,7 +30,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ typeId: string; recordId: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings');
   if ('error' in auth) return auth.error;
 
   const { typeId, recordId } = await params;
@@ -65,7 +65,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ typeId: string; recordId: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings');
   if ('error' in auth) return auth.error;
 
   const { recordId } = await params;

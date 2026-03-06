@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getListing, incrementInstallCount } from '@/lib/plugins/marketplace-store';
 import { installPlugin, getInstallationByPluginId } from '@/lib/plugins/store';
@@ -11,7 +11,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ pluginId: string }> }
 ) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const { pluginId } = await params;

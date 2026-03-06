@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:read');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;
@@ -50,7 +50,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;
@@ -119,7 +119,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { analyzeContentGaps } from '@/lib/kb/content-gaps';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
  * Auth required (kb:read).
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireScope(request, 'kb:read');
+  const auth = await requirePerm(request, 'kb:view');
   if ('error' in auth) return auth.error;
 
   try {
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
  * Auth required (kb:write).
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireScope(request, 'kb:write');
+  const auth = await requirePerm(request, 'kb:edit');
   if ('error' in auth) return auth.error;
 
   try {

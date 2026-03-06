@@ -11,7 +11,22 @@
 import { NextResponse } from 'next/server';
 import { isRbacEnabled } from './feature-flag';
 import { parseBitfield, hasPermission, hasAnyPermission as _hasAny } from './bitfield';
-import { requireAuth, type AuthSuccess, type AuthError } from '@/lib/api-auth';
+import { requireAuth, requireRole, type AuthSuccess, type AuthError, type Role } from '@/lib/api-auth';
+
+/**
+ * Convenience wrapper: when RBAC is enabled, check the permission;
+ * when RBAC is disabled, fall back to requireRole with the given minimum role.
+ */
+export async function requirePerm(
+  request: Request,
+  permission: string,
+  fallbackMinRole: Role = 'agent',
+): Promise<AuthSuccess | AuthError> {
+  if (isRbacEnabled()) {
+    return requirePermission(request, permission);
+  }
+  return requireRole(request, fallbackMinRole);
+}
 
 /**
  * Require a specific permission.

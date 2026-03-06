@@ -1,4 +1,4 @@
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { computeLiveSnapshot } from '@/lib/reports/live-metrics';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
  * Clients connect via EventSource.
  */
 export async function GET(request: Request) {
-  const auth = await requireScope(request, 'reports:read');
+  const auth = await requirePerm(request, 'analytics:view');
   if ('error' in auth) return auth.error;
 
   const encoder = new TextEncoder();

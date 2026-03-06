@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { pushZendeskOutboundTickets } from "@/lib/zendesk/outbound";
-import { requireRole } from "@/lib/api-auth";
+import { requirePerm } from '@/lib/rbac';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const tenant = process.env.CLIAAS_TENANT ?? "default";

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getCategories, createCategory } from '@/lib/forums/forum-store';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/forums/categories — list all forum categories
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'forums:view');
   if ('error' in auth) return auth.error;
 
   const categories = getCategories();
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
  * POST /api/forums/categories — create a forum category
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'forums:moderate');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

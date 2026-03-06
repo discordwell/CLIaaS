@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getReviews } from '@/lib/qa/qa-store';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/qa/dashboard/trends — QA score trends over time (last 30 days by default)
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:view');
   if ('error' in auth) return auth.error;
 
   const rawDays = parseInt(request.nextUrl.searchParams.get('days') ?? '30', 10);

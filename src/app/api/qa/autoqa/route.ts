@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getAutoQAConfig, upsertAutoQAConfig } from '@/lib/qa/autoqa-config-store';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/qa/autoqa — get AutoQA config
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:view');
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
  * PUT /api/qa/autoqa — create/update AutoQA config
  */
 export async function PUT(request: NextRequest) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

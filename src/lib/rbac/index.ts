@@ -12,4 +12,4 @@ export {
   parseBitfield,
 } from './bitfield';
 export { resolveUserPermissions, getUserBitfield } from './permissions';
-export { requirePermission, requireAnyPermission } from './check';
+export { requirePermission, requireAnyPermission, requirePerm } from './check';

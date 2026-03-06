@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getDataProvider } from '@/lib/data-provider';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:read');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   try {

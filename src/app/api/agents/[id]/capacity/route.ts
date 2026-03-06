@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAgentCapacity, setAgentCapacity } from '@/lib/routing/store';
-import { requireAuth, requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:users', 'admin');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

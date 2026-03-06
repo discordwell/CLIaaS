@@ -121,16 +121,23 @@ function mapStatus(status: string): TicketStatus {
 
 // ---- Export ----
 
-export async function exportZohoDesk(auth: ZohoDeskAuth, outDir: string): Promise<ExportManifest> {
+export interface ZohoDeskCursorState {
+  lastSyncAt?: string;
+}
+
+export async function exportZohoDesk(auth: ZohoDeskAuth, outDir: string, cursorState?: ZohoDeskCursorState): Promise<ExportManifest> {
   const client = createZohoDeskClient(auth);
   const files = setupExport(outDir);
   const counts = initCounts();
 
   // Export tickets (offset-based via "from" param)
   const ticketSpinner = exportSpinner('Exporting tickets...');
+  const ticketPath = cursorState?.lastSyncAt
+    ? `/tickets?sortBy=createdTime&modifiedTime=${encodeURIComponent(cursorState.lastSyncAt)}`
+    : '/tickets?sortBy=createdTime';
   await paginateOffset<ZDTicket>({
     fetch: client.request.bind(client),
-    path: '/tickets?sortBy=createdTime',
+    path: ticketPath,
     dataKey: 'data',
     offsetParam: 'from',
     onPage: async (tickets) => {
@@ -304,7 +311,8 @@ export async function exportZohoDesk(auth: ZohoDeskAuth, outDir: string): Promis
 
   exportSpinner('Business rules: not exported via Zoho Desk API').info();
 
-  return writeManifest(outDir, 'zoho-desk', counts);
+  const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
+  return writeManifest(outDir, 'zoho-desk', counts, { cursorState: newCursorState });
 }
 
 // ---- Verify ----

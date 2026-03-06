@@ -4,7 +4,7 @@ import { getAutomationRules } from '@/lib/automation/executor';
 import { evaluateRule } from '@/lib/automation/engine';
 import type { TicketContext } from '@/lib/automation/engine';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +12,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireAuth(request);
+  const authResult = await requirePerm(request, 'automation:edit');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;

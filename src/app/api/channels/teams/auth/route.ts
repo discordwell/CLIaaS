@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { saveTeamsConfig } from '@/lib/channels/teams-intake';
 
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
  * Save MS Teams Bot Framework app credentials.
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'channels:edit');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

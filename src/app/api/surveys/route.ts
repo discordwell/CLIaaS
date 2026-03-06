@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { surveySubmitted } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import type { SurveyType } from '@/lib/data-provider/types';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
  * GET /api/surveys?type=nps|ces|csat — aggregated stats per survey type
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'analytics:view');
   if ('error' in auth) return auth.error;
 
   try {

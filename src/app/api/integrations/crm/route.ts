@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import * as linkStore from '@/lib/integrations/link-store';
 import { SalesforceClient } from '@/lib/integrations/salesforce-client';
 import { HubSpotCrmClient } from '@/lib/integrations/hubspot-crm-client';
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 // GET: Show CRM configuration status
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const workspaceId = auth.user.workspaceId ?? 'default';
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
 // POST: Save CRM credentials + verify connection
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'admin:settings', 'admin');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody(request);

@@ -60,7 +60,7 @@ describe('auth bypass protection', () => {
       const request = new Request('http://localhost/api/test');
       const user = await getAuthUser(request);
       expect(user).toBeDefined();
-      expect(user!.role).toBe('admin');
+      expect(user!.role).toBe('owner');
     } finally {
       if (originalDbUrl !== undefined) {
         process.env.DATABASE_URL = originalDbUrl;

@@ -10,7 +10,7 @@
 |--------|-------|
 | Pages | 43 (Next.js App Router) |
 | API Routes | 191 |
-| Components | 18 shared React components |
+| Components | 24 shared React components |
 | Library modules | 78 (`src/lib/`) |
 | CLI files | 84 (`cli/`) |
 | CLI commands | 44 registered command groups |
@@ -20,8 +20,8 @@
 | MCP tools | 110 (across 21 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 83 (Drizzle/PostgreSQL, RLS-enabled) |
-| Tests | 92 files, ~8,000 LOC |
+| DB tables | 86 (Drizzle/PostgreSQL, RLS-enabled) |
+| Tests | 95 files, ~9,200 LOC |
 | Source LOC | ~61,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
 
@@ -115,10 +115,12 @@ Each domain has a dedicated store in `src/lib/`:
 | Plugin Installations | `plugins/store.ts` | DB + JSONL dual-path |
 | Plugin Credentials | `plugins/credentials.ts` | AES-256-GCM encrypted in config |
 | Rule Versions | `automation/versioning.ts` | DB + JSONL dual-path |
+| AI Procedures | `ai/procedures.ts` | DB + in-memory dual-path |
+| Sync Health | `sync/health-store.ts` | DB + in-memory dual-path |
 
 ---
 
-## Database Schema (76 tables)
+## Database Schema (86 tables)
 
 ### Core Multi-Tenancy (3)
 `tenants` → `workspaces` → `users`
@@ -140,6 +142,9 @@ Each domain has a dedicated store in `src/lib/`:
 
 ### Rules & Automation (4)
 `rules` (macros, triggers, automations, SLA), `automation_rules`, `sla_policies`, `rule_versions` (snapshot history with version number, conditions/actions/name, created_by; unique on ruleId+versionNumber). Versioning API at `/api/rules/:id/versions` (GET list, POST restore/snapshot). Automation events include merge/split/unmerge in addition to create/update/reply/status_change/assignment.
+
+### AI Procedures (1)
+`ai_procedures` (workspace-scoped step-by-step instructions matched by trigger_topics, with enabled flag). Procedures are injected into the AI agent's system prompt when ticket topics match. CRUD via `/api/ai/procedures`. Dual-mode store: DB primary, in-memory fallback.
 
 ### Canned Responses & Macros (3)
 `canned_responses` (reusable reply templates with merge variables, categories, shortcuts), `macros` (native one-click multi-action bundles with structured actions JSONB), `agent_signatures` (per-agent HTML/text email signatures with default flag)
@@ -165,8 +170,8 @@ Each domain has a dedicated store in `src/lib/`:
 ### Knowledge Base (4)
 `kb_collections` → `kb_categories` → `kb_articles` → `kb_revisions`
 
-### Integration & Sync (6)
-`integrations`, `external_objects` (ID mapping), `sync_cursors`, `raw_records`, `sync_outbox` (hybrid push queue), `sync_conflicts` (conflict tracking)
+### Integration & Sync (7)
+`integrations`, `external_objects` (ID mapping), `sync_cursors`, `raw_records`, `sync_outbox` (hybrid push queue), `sync_conflicts` (conflict tracking), `sync_health` (per-connector health tracking with cursor state, last sync times, error logging)
 
 ### Jobs (2)
 `import_jobs`, `export_jobs`
@@ -450,9 +455,11 @@ BullMQ + Redis for reliable background processing with graceful fallback to inli
 
 **Permission resolution chain:** Built-in role matrix → workspace overrides → custom role grants/denies
 
+**Route enforcement:** All ~224 API route files use `requirePerm()` — a convenience wrapper that calls `requirePermission()` when RBAC is enabled, falling back to legacy `requireRole()` when disabled. Light agents are blocked from public replies (403). Collaborators see only their assigned tickets via `canCollaboratorAccessTicket()` and `getCollaboratorTicketIds()`.
+
 **Key files:**
 - `src/lib/rbac/` — Core modules (bitfield, check, constants, permissions, feature-flag, types, seed, collaborator-scope, seat-check)
-- `src/lib/rbac/check.ts` — `requirePermission()` and `requireAnyPermission()` route guards
+- `src/lib/rbac/check.ts` — `requirePermission()`, `requireAnyPermission()`, and `requirePerm()` route guards
 - `src/lib/rbac/bitfield.ts` — Encode/decode/check via BigInt bitwise ops
 - `src/lib/rbac/constants.ts` — 35 PERMISSION_KEYS with stable bit indices, BUILTIN_ROLE_MATRIX
 - `src/lib/rbac/seat-check.ts` — Billing seat enforcement (full seats plan-limited, light agents free up to 50)
@@ -781,7 +788,6 @@ Feature matrix summary:
 ## Known Technical Debt
 
 ### High Priority
-- **Auth middleware gap**: ~88% of API routes lack authentication checks
 - **Connector duplication**: ~4,700 LOC across 10 connectors with repeated auth, pagination, and normalization patterns
 
 ### Medium Priority
@@ -795,8 +801,9 @@ Feature matrix summary:
 - **Inconsistent spinner usage**: Some long operations lack progress feedback
 - **4 persistence patterns**: `JsonlStore`, raw `readFileSync`, global singletons, and Drizzle ORM — could consolidate
 
-### Resolved (Session 30)
+### Resolved (Session 30+)
 - ~~Unsafe JSON parsing~~: All 38 routes migrated to `parseJsonBody` utility (standardized 400 errors)
+- ~~Auth middleware gap~~: All ~224 API routes now use `requirePerm()` with appropriate permissions (Gap Closure Plan)
 - ~~SCIM PatchOp format~~: Corrected to RFC 7644, timing-safe auth, store consolidation
 - ~~Automation side effects gap~~: Engine now propagates notifications/webhooks through full execution chain
 - ~~Connector type fragmentation~~: Single `CONNECTOR_REGISTRY` source of truth created
@@ -809,8 +816,8 @@ Feature matrix summary:
 
 6-week plan to bring CLIaaS to production-grade enterprise readiness.
 
-### Week 1–2: Auth & API Keys
-- Wire `requireAuth` middleware to all ~101 API routes (currently ~88% unprotected)
+### Week 1–2: Auth & API Keys ✅
+- All ~224 API routes protected via `requirePerm()` (RBAC-aware, falls back to role hierarchy)
 - Build API key CRUD system (create, list, revoke, scoped permissions)
 - Add MFA via TOTP (Time-based One-Time Password)
 - Rate limiting per API key
@@ -1044,3 +1051,41 @@ chatbot_list, chatbot_get, chatbot_create, chatbot_toggle, chatbot_delete, chatb
 ### DB Migration (0024)
 - ALTER chatbots: version, status, published_flow, published_at, channels, description
 - CREATE chatbot_versions, chatbot_sessions, chatbot_analytics
+
+---
+
+## Gap Closure: Features 1-15 (Plan 19.5)
+
+Cross-cutting sweep bringing all 15 core features to production-ready status.
+
+### RBAC Enforcement Sweep (Phase 0)
+All ~224 API route files migrated from legacy `requireAuth`/`requireRole`/`requireScope` to `requirePerm()`. Collaborator ticket scoping enforced. Light agents blocked from public replies. JWT `p` claim carries permission bitfield.
+
+### AI Procedures (Phase 1)
+- **Store** (`src/lib/ai/procedures.ts`): Dual-mode CRUD — DB primary, in-memory fallback
+- **Engine** (`src/lib/ai/procedure-engine.ts`): Topic-based matching (case-insensitive substring), formats matched procedures into agent system prompt
+- **Hallucination guard**: `requireKbCitation` flag blocks replies without KB article references
+- **Approval queue**: UI tab in `/ai` listing pending resolutions
+- **API**: `/api/ai/procedures` (GET/POST), `/api/ai/procedures/[id]` (GET/PUT/DELETE)
+
+### Collision Detection (Phase 8)
+- **SSE upgrade**: `CollisionDetector` uses `EventSource('/api/events?ticketId=X')` instead of 10s polling
+- **Typing broadcast**: Debounced 500ms presence updates on textarea focus/input
+- **Warning modal** (`CollisionWarningModal`): Shows when another agent replies while user is composing
+
+### UI Components (new)
+- `RoleBadge` — colored badge for user roles
+- `PermissionGate` — client-side permission check using JWT bitfield
+- `CollaboratorPanel` — add/remove ticket collaborators
+- `MacroButton` — dropdown for applying macros from ticket detail
+- `CollisionWarningModal` — draft conflict resolution
+
+### Sync Health (Phase 6)
+- **Store** (`src/lib/sync/health-store.ts`): Per-connector health tracking with cursor state
+- **Incremental sync**: 6 connectors (Freshdesk, HelpCrunch, Intercom, Help Scout, Zoho Desk, Groove) support cursor-based incremental export
+- **API**: `/api/connectors/health` (GET)
+
+### DB Migration (0025)
+- CREATE `ai_procedures` (UUID PK, workspace FK, steps JSONB, trigger_topics TEXT[])
+- CREATE `rule_versions` (UUID PK, rule FK CASCADE, version_number INT, conditions/actions JSONB)
+- CREATE `sync_health` (UUID PK, workspace FK, connector TEXT, cursor_state JSONB, UNIQUE workspace+connector)

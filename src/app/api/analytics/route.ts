@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { computeAnalytics } from '@/lib/analytics';
-import { requireScopeAndRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireScopeAndRole(request, 'analytics:read', 'admin');
+  const auth = await requirePerm(request, 'analytics:view', 'admin');
   if ('error' in auth) return auth.error;
 
   try {

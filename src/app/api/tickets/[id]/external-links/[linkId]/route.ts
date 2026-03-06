@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import * as linkStore from '@/lib/integrations/link-store';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; linkId: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const { linkId } = await params;
@@ -30,7 +30,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; linkId: string }> },
 ) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:update_status');
   if ('error' in auth) return auth.error;
 
   const { linkId } = await params;

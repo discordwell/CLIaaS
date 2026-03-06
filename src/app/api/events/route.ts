@@ -1,5 +1,5 @@
 import { eventBus, type AppEvent } from '@/lib/realtime/events';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
  * Optional ?ticketId=X parameter filters events to a specific ticket.
  */
 export async function GET(request: Request) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const url = new URL(request.url);

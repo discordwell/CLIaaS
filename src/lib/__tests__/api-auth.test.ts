@@ -45,7 +45,7 @@ describe('api-auth', () => {
       const user = await getAuthUser(makeRequest());
       expect(user).not.toBeNull();
       expect(user!.id).toBe('demo-user');
-      expect(user!.role).toBe('admin');
+      expect(user!.role).toBe('owner');
     });
 
     it('returns user from headers when DATABASE_URL is set', async () => {
@@ -147,7 +147,7 @@ describe('api-auth', () => {
       const result = await requireRole(makeRequest(), 'admin');
       expect('user' in result).toBe(true);
       if ('user' in result) {
-        expect(result.user.role).toBe('admin');
+        expect(result.user.role).toBe('owner');
       }
     });
   });

@@ -127,6 +127,7 @@ export async function runSyncCycle(
         manifest = await exportFreshdesk(
           { subdomain: auth.domain, apiKey: auth.apiKey },
           outDir,
+          cursorState ? { lastSyncAt: cursorState.lastSyncAt } : undefined,
         );
         break;
       }
@@ -135,6 +136,7 @@ export async function runSyncCycle(
         manifest = await exportHelpcrunch(
           { apiKey: auth.apiKey },
           outDir,
+          cursorState ? { lastSyncAt: cursorState.lastSyncAt } : undefined,
         );
         break;
       }
@@ -143,6 +145,7 @@ export async function runSyncCycle(
         manifest = await exportGroove(
           { apiToken: auth.apiKey },
           outDir,
+          cursorState ? { lastSyncAt: cursorState.lastSyncAt } : undefined,
         );
         break;
       }
@@ -151,6 +154,7 @@ export async function runSyncCycle(
         manifest = await exportIntercom(
           { accessToken: auth.token },
           outDir,
+          cursorState ? { lastSyncAt: cursorState.lastSyncAt } : undefined,
         );
         break;
       }
@@ -159,6 +163,7 @@ export async function runSyncCycle(
         manifest = await exportHelpScout(
           { appId: auth.appId, appSecret: auth.appSecret },
           outDir,
+          cursorState ? { lastSyncAt: cursorState.lastSyncAt } : undefined,
         );
         break;
       }
@@ -167,6 +172,7 @@ export async function runSyncCycle(
         manifest = await exportZohoDesk(
           { orgId: auth.orgId, accessToken: auth.token, apiDomain: auth.domain },
           outDir,
+          cursorState ? { lastSyncAt: cursorState.lastSyncAt } : undefined,
         );
         break;
       }
@@ -186,6 +192,15 @@ export async function runSyncCycle(
     }
   } catch (err) {
     const finishedAt = new Date();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+
+    // Record sync failure for health monitoring
+    void recordSyncHealth(connectorName, {
+      success: false,
+      error: errorMsg,
+      recordsSynced: 0,
+    });
+
     return {
       connector: connectorName,
       startedAt: startedAt.toISOString(),
@@ -193,7 +208,7 @@ export async function runSyncCycle(
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       counts: { tickets: 0, messages: 0, customers: 0, organizations: 0, kbArticles: 0, rules: 0 },
       fullSync,
-      error: err instanceof Error ? err.message : String(err),
+      error: errorMsg,
     };
   }
 
@@ -227,6 +242,16 @@ export async function runSyncCycle(
       }
     })();
   }
+
+  // Record sync success for health monitoring
+  const totalRecords = manifest.counts.tickets + manifest.counts.messages
+    + manifest.counts.customers + manifest.counts.organizations
+    + manifest.counts.kbArticles + manifest.counts.rules;
+  void recordSyncHealth(connectorName, {
+    success: true,
+    recordsSynced: totalRecords,
+    cursorState: manifest.cursorState,
+  });
 
   return {
     connector: connectorName,
@@ -280,4 +305,19 @@ export function getSyncStatus(connectorName?: string): Array<{
  */
 export function listConnectors(): string[] {
   return Object.keys(CONNECTOR_DEFAULTS);
+}
+
+/**
+ * Best-effort recording of sync health. Falls through silently on failure.
+ */
+async function recordSyncHealth(
+  connector: string,
+  result: { success: boolean; error?: string; recordsSynced: number; cursorState?: object },
+): Promise<void> {
+  try {
+    const { recordSyncResult } = await import('@/lib/sync/health-store.js');
+    await recordSyncResult('default', connector, result);
+  } catch {
+    // Health monitoring is best-effort; don't fail the sync
+  }
 }

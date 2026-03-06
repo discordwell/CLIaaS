@@ -212,7 +212,7 @@ describe('Comprehensive API Feature Tests', () => {
         const user = await getAuthUser(req);
         expect(user).not.toBeNull();
         expect(user!.id).toBe('demo-user');
-        expect(user!.role).toBe('admin');
+        expect(user!.role).toBe('owner');
       });
 
       it('requireAuth passes in demo mode', async () => {

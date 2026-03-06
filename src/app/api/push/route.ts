@@ -8,13 +8,13 @@ import {
   getVapidConfig,
 } from '@/lib/push';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 // GET: list subscriptions + config
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const subs = listSubscriptions();
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 
 // POST: add subscription
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{ endpoint?: string; keys?: { p256dh?: string; auth?: string }; userId?: string }>(request);
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
 
 // DELETE: remove subscription
 export async function DELETE(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{ endpoint?: string }>(request);

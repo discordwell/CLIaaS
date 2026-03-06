@@ -7,11 +7,11 @@ import { freshdeskCreateTicket } from '@cli/connectors/freshdesk';
 import { grooveCreateTicket } from '@cli/connectors/groove';
 import { ticketCreated } from '@/lib/events';
 import { parseJsonBody } from '@/lib/parse-json-body';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { checkQuota, incrementUsage } from '@/lib/billing/usage';
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:create');
   if ('error' in authResult) return authResult.error;
 
   // Quota enforcement: check ticket creation limit

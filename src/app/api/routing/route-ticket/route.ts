@@ -3,10 +3,10 @@ import { routeTicket } from '@/lib/routing/engine';
 import { getDataProvider } from '@/lib/data-provider/index';
 import { availability } from '@/lib/routing/availability';
 import { eventBus } from '@/lib/realtime/events';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireScope(request, 'routing:write');
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   let body: Record<string, unknown>;

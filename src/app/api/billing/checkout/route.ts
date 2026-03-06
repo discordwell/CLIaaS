@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { createCheckoutSession } from '@/lib/billing/checkout';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
@@ -13,7 +13,7 @@ const PLAN_TO_PRICE_ENV: Record<string, string> = {
 };
 
 export async function POST(request: Request) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:billing', 'owner');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{ plan: string }>(request);

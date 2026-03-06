@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getCoachingAssignments, createCoachingAssignment } from '@/lib/qa/qa-coaching-store';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/qa/coaching — list coaching assignments
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:review');
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
  * POST /api/qa/coaching — create coaching assignment
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:review');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

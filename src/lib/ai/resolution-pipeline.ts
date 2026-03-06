@@ -8,6 +8,7 @@ import { runAgent, DEFAULT_AGENT_CONFIG, type AIAgentConfig, type AIAgentResult 
 import { recordResolution } from './roi-tracker';
 import { saveResolution, type AIAgentConfigRecord } from './store';
 import { sendAIReply } from './reply-sender';
+import { matchProcedures, formatProcedurePrompt } from './procedure-engine';
 import type { Ticket, Message, KBArticle } from '@/lib/data';
 import { buildBaseTicketFromEvent } from '@/lib/automation/ticket-from-event';
 
@@ -92,9 +93,34 @@ export async function resolveTicket(
     return { ticketId: ticket.id, action: 'escalated', result };
   }
 
+  // Load matching procedures based on ticket topics
+  const ticketTopics = [...ticket.tags, ...ticket.subject.toLowerCase().split(/\s+/)];
+  const matched = await matchProcedures(workspaceId, ticketTopics);
+  const procedurePrompt = formatProcedurePrompt(matched);
+
   const startTime = Date.now();
-  const result = await runAgent({ ticket, messages, kbArticles, config });
+  const result = await runAgent({
+    ticket,
+    messages,
+    kbArticles,
+    config,
+    extraSystemPrompt: procedurePrompt || undefined,
+  });
   const latencyMs = Date.now() - startTime;
+
+  // Hallucination guard: if requireKbCitation is enabled, verify the reply
+  // references at least one KB article. If not, escalate.
+  if (
+    dbConfig?.requireKbCitation &&
+    !result.escalated &&
+    result.resolved &&
+    kbArticles.length > 0 &&
+    result.kbArticlesUsed.length === 0
+  ) {
+    result.escalated = true;
+    result.resolved = false;
+    result.escalationReason = 'No KB citation (hallucination guard)';
+  }
 
   // Record for legacy ROI tracking
   recordResolution(result);

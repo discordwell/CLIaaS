@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { messageCreated } from '@/lib/events';
 
@@ -10,7 +10,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:reply_internal');
   if ('error' in authResult) return authResult.error;
 
   const { id } = await params;
@@ -27,13 +27,13 @@ export async function POST(
     try {
       const { db } = await import('@/db');
       const schema = await import('@/db/schema');
-      const { eq } = await import('drizzle-orm');
+      const { eq, and } = await import('drizzle-orm');
 
-      // Verify ticket exists
+      // Verify ticket exists and belongs to user's workspace
       const ticketRows = await db
         .select({ id: schema.tickets.id, workspaceId: schema.tickets.workspaceId })
         .from(schema.tickets)
-        .where(eq(schema.tickets.id, id))
+        .where(and(eq(schema.tickets.id, id), eq(schema.tickets.workspaceId, authResult.user.workspaceId)))
         .limit(1);
 
       if (ticketRows.length === 0) {

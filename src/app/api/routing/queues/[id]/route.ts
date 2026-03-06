@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRoutingQueue, updateRoutingQueue, deleteRoutingQueue } from '@/lib/routing/store';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireScope(request, 'routing:read');
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireScope(request, 'routing:write');
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -29,7 +29,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireScope(request, 'routing:write');
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * Auth required (kb:read).
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireScope(request, 'kb:read');
+  const auth = await requirePerm(request, 'analytics:view');
   if ('error' in auth) return auth.error;
 
   try {

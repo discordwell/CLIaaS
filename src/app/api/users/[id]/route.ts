@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { updateUser, removeUser, sanitizeUser } from '@/lib/user-service';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:users', 'admin');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
@@ -35,7 +35,7 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:users', 'admin');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

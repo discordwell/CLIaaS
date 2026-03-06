@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getReviews } from '@/lib/qa/qa-store';
 import { getFlags } from '@/lib/qa/qa-flags-store';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/qa/dashboard/agents — per-agent quality breakdown
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:view');
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';

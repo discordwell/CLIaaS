@@ -118,7 +118,11 @@ function mapPriority(priority: string): TicketPriority {
 
 // ---- Export ----
 
-export async function exportIntercom(auth: IntercomAuth, outDir: string): Promise<ExportManifest> {
+export interface IntercomCursorState {
+  lastSyncAt?: string;
+}
+
+export async function exportIntercom(auth: IntercomAuth, outDir: string, cursorState?: IntercomCursorState): Promise<ExportManifest> {
   const client = createIntercomClient(auth);
   const files = setupExport(outDir);
   const counts = initCounts();
@@ -126,14 +130,21 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string): Promis
   // Export conversations (= tickets)
   const convSpinner = exportSpinner('Exporting conversations...');
 
+  const convBaseUrl = cursorState?.lastSyncAt
+    ? `/conversations?per_page=50&updated_after=${Math.floor(new Date(cursorState.lastSyncAt).getTime() / 1000)}`
+    : '/conversations?per_page=50';
   await paginateCursor<ICConversation>({
     fetch: client.request.bind(client),
-    initialUrl: '/conversations?per_page=50',
+    initialUrl: convBaseUrl,
     getData: (response) => (response as unknown as { conversations: ICConversation[] }).conversations ?? [],
     getNextUrl: (response) => {
       const pages = (response as unknown as { pages: { next?: { starting_after: string } } }).pages;
       const startingAfter = pages?.next?.starting_after;
-      return startingAfter ? `/conversations?per_page=50&starting_after=${startingAfter}` : null;
+      if (!startingAfter) return null;
+      const updatedFilter = cursorState?.lastSyncAt
+        ? `&updated_after=${Math.floor(new Date(cursorState.lastSyncAt).getTime() / 1000)}`
+        : '';
+      return `/conversations?per_page=50&starting_after=${startingAfter}${updatedFilter}`;
     },
     onPage: async (conversations) => {
       for (const conv of conversations) {
@@ -317,7 +328,8 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string): Promis
   // No automation rules API
   exportSpinner('Business rules: not available via Intercom API').info();
 
-  return writeManifest(outDir, 'intercom', counts);
+  const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
+  return writeManifest(outDir, 'intercom', counts, { cursorState: newCursorState });
 }
 
 // ---- Verify ----

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireRole } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { revokeApiKey } from '@/lib/api-keys';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +12,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireRole(request, 'admin');
+  const auth = await requirePerm(request, 'admin:api_keys', 'admin');
   if ('error' in auth) return auth.error;
 
   const { id } = await params;

@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireScope(request, 'tickets:read');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   const q = request.nextUrl.searchParams.get('q') ?? '';

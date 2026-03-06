@@ -87,6 +87,11 @@ export default function SettingsPage() {
             <p className="text-lg font-bold">Tags</p>
             <p className="mt-1 text-sm text-zinc-600">Manage tags, colors, and usage</p>
           </Link>
+          <Link href="/settings/views"
+            className="block border-2 border-zinc-200 p-5 hover:border-zinc-950 transition-colors">
+            <p className="text-lg font-bold">Views</p>
+            <p className="mt-1 text-sm text-zinc-600">Manage shared and personal ticket views</p>
+          </Link>
         </div>
       </section>
 

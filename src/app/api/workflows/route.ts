@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getWorkflows, upsertWorkflow } from '@/lib/workflow/store';
 import { validateWorkflow } from '@/lib/workflow/decomposer';
@@ -23,7 +23,7 @@ function getDemoWorkflows(): Workflow[] {
  * GET /api/workflows — list all workflows
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   let workflows: Workflow[];
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
  * POST /api/workflows — create a new workflow
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

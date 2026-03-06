@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
-import { requirePermission } from '@/lib/rbac/check';
-import { isRbacEnabled } from '@/lib/rbac/feature-flag';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
@@ -15,9 +13,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'tickets:view')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
   const { id: ticketId } = await params;
@@ -68,9 +64,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'tickets:update_assignee')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:update_assignee');
   if ('error' in auth) return auth.error;
 
   const { id: ticketId } = await params;
@@ -80,14 +74,32 @@ export async function POST(
 
   const parsed = await parseJsonBody(request);
   if ('error' in parsed) return parsed.error;
-  const { userId, canReply } = parsed.data;
-
-  if (!userId || !UUID_RE.test(userId)) {
-    return NextResponse.json({ error: 'Valid userId is required' }, { status: 400 });
-  }
+  const { userId, email, canReply } = parsed.data;
 
   if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: 'Database required' }, { status: 503 });
+  }
+
+  // Resolve userId from email if needed
+  let resolvedUserId = userId;
+  if (!resolvedUserId && email) {
+    try {
+      const { db: dbInstance } = await import('@/db');
+      const { users } = await import('@/db/schema');
+      const { eq, and } = await import('drizzle-orm');
+      const [user] = await dbInstance
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.email, email), eq(users.workspaceId, auth.user.workspaceId)))
+        .limit(1);
+      if (user) resolvedUserId = user.id;
+    } catch {
+      // Fall through
+    }
+  }
+
+  if (!resolvedUserId || !UUID_RE.test(resolvedUserId)) {
+    return NextResponse.json({ error: 'Valid userId or email is required' }, { status: 400 });
   }
 
   try {
@@ -99,7 +111,7 @@ export async function POST(
       .values({
         workspaceId: auth.user.workspaceId,
         ticketId,
-        userId,
+        userId: resolvedUserId,
         addedBy: auth.user.id,
         canReply: canReply === true,
       })
@@ -119,15 +131,13 @@ export async function POST(
 
 /**
  * DELETE /api/tickets/[id]/collaborators — Remove a collaborator.
- * Expects { userId } in the body.
+ * Expects { userId } or { collaboratorId } in the body.
  */
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = isRbacEnabled()
-    ? await requirePermission(request, 'tickets:update_assignee')
-    : await requireAuth(request);
+  const auth = await requirePerm(request, 'tickets:update_assignee');
   if ('error' in auth) return auth.error;
 
   const { id: ticketId } = await params;
@@ -137,10 +147,12 @@ export async function DELETE(
 
   const parsed = await parseJsonBody(request);
   if ('error' in parsed) return parsed.error;
-  const { userId } = parsed.data;
+  const { userId, collaboratorId } = parsed.data;
 
-  if (!userId || !UUID_RE.test(userId)) {
-    return NextResponse.json({ error: 'Valid userId is required' }, { status: 400 });
+  // Accept either userId or collaboratorId (record ID)
+  const targetId = userId || collaboratorId;
+  if (!targetId || !UUID_RE.test(targetId)) {
+    return NextResponse.json({ error: 'Valid userId or collaboratorId is required' }, { status: 400 });
   }
 
   if (!process.env.DATABASE_URL) {
@@ -150,14 +162,14 @@ export async function DELETE(
   try {
     const { db } = await import('@/db');
     const { ticketCollaborators } = await import('@/db/schema');
-    const { eq, and } = await import('drizzle-orm');
+    const { eq, and, or } = await import('drizzle-orm');
 
     const [deleted] = await db
       .delete(ticketCollaborators)
       .where(
         and(
           eq(ticketCollaborators.ticketId, ticketId),
-          eq(ticketCollaborators.userId, userId),
+          or(eq(ticketCollaborators.userId, targetId), eq(ticketCollaborators.id, targetId)),
           eq(ticketCollaborators.workspaceId, auth.user.workspaceId),
         ),
       )

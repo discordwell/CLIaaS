@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { getReviews, createReview } from '@/lib/qa/qa-store';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/qa/reviews — list QA reviews, optionally filtered by ?ticketId
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:view');
   if ('error' in auth) return auth.error;
 
   const ticketId = request.nextUrl.searchParams.get('ticketId') ?? undefined;
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
  * POST /api/qa/reviews — create a QA review
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePerm(request, 'qa:review');
   if ('error' in auth) return auth.error;
 
   const parsed = await parseJsonBody<{

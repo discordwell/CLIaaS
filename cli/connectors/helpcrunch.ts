@@ -90,16 +90,23 @@ function mapChatStatus(status: number): TicketStatus {
 
 // ---- Export ----
 
-export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Promise<ExportManifest> {
+export interface HelpcrunchCursorState {
+  lastSyncAt?: string;
+}
+
+export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string, cursorState?: HelpcrunchCursorState): Promise<ExportManifest> {
   const client = createHelpcrunchClient(auth);
   const files = setupExport(outDir);
   const counts = initCounts();
 
   // Export chats (= tickets)
   const chatSpinner = exportSpinner('Exporting chats...');
+  const chatPath = cursorState?.lastSyncAt
+    ? `/chats?updated_at[from]=${encodeURIComponent(cursorState.lastSyncAt)}`
+    : '/chats';
   await paginateOffset<HCChat>({
     fetch: client.request.bind(client),
-    path: '/chats',
+    path: chatPath,
     limit: 100,
     dataKey: 'data',
     onPage: async (chats) => {
@@ -208,7 +215,8 @@ export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string): Pr
   exportSpinner('KB articles: not available via HelpCrunch API').info();
   exportSpinner('Business rules: not available via HelpCrunch API').info();
 
-  return writeManifest(outDir, 'helpcrunch', counts);
+  const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
+  return writeManifest(outDir, 'helpcrunch', counts, { cursorState: newCursorState });
 }
 
 // ---- Verify ----

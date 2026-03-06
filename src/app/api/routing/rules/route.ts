@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRoutingRules, createRoutingRule } from '@/lib/routing/store';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireScope(request, 'routing:read');
+  const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
   return NextResponse.json(getRoutingRules());
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireScope(request, 'routing:write');
+  const auth = await requirePerm(request, 'automation:edit');
   if ('error' in auth) return auth.error;
 
   let body: Record<string, unknown>;

@@ -28,7 +28,7 @@ export interface AuthUser {
 const DEMO_USER: AuthUser = {
   id: 'demo-user',
   email: 'demo@cliaas.local',
-  role: 'admin',
+  role: 'owner',
   workspaceId: 'demo-workspace',
   authType: 'session',
 };

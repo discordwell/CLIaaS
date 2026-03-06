@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import type { ViewQuery } from '@/lib/views/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireScope(request, 'tickets:read');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   try {
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:view');
   if ('error' in authResult) return authResult.error;
 
   const parsed = await parseJsonBody<{
