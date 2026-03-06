@@ -28,6 +28,9 @@ export async function GET(
         .limit(1);
 
       if (!row) return NextResponse.json({ error: 'View not found' }, { status: 404 });
+      if ((row as Record<string, unknown>).viewType === 'personal' && (row as Record<string, unknown>).userId !== authResult.user.id) {
+        return NextResponse.json({ error: 'View not found' }, { status: 404 });
+      }
       return NextResponse.json({ view: row });
     }
 
@@ -68,9 +71,9 @@ export async function PATCH(
       const { eq, and, ne } = await import('drizzle-orm');
       const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
 
-      // Prevent modifying system views
+      // Prevent modifying system views and enforce personal view ownership
       const [existing] = await conn.db
-        .select({ viewType: conn.schema.views.viewType })
+        .select({ viewType: conn.schema.views.viewType, userId: conn.schema.views.userId })
         .from(conn.schema.views)
         .where(and(eq(conn.schema.views.id, id), eq(conn.schema.views.workspaceId, wsId)))
         .limit(1);
@@ -78,6 +81,9 @@ export async function PATCH(
       if (!existing) return NextResponse.json({ error: 'View not found' }, { status: 404 });
       if (existing.viewType === 'system') {
         return NextResponse.json({ error: 'Cannot modify system views' }, { status: 403 });
+      }
+      if (existing.viewType === 'personal' && existing.userId !== authResult.user.id) {
+        return NextResponse.json({ error: 'View not found' }, { status: 404 });
       }
 
       const set: Record<string, unknown> = { updatedAt: new Date() };

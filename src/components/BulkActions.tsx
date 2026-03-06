@@ -45,17 +45,16 @@ export default function BulkActions({ selectedIds, onClearSelection, onRefresh }
   const handleBulkUpdate = async (updates: Record<string, string>) => {
     setSaving(true);
     setMessage("");
-    let success = 0;
-    for (const id of ids) {
-      try {
-        const res = await fetch(`/api/tickets/${id}`, {
+    const results = await Promise.allSettled(
+      ids.map((id) =>
+        fetch(`/api/tickets/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updates),
-        });
-        if (res.ok) success++;
-      } catch { /* continue */ }
-    }
+        }).then((res) => { if (!res.ok) throw new Error(); })
+      )
+    );
+    const success = results.filter((r) => r.status === "fulfilled").length;
     setMessage(`Updated ${success}/${ids.length} tickets`);
     setSaving(false);
     onRefresh?.();

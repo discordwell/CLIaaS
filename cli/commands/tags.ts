@@ -71,11 +71,34 @@ export function registerTagCommands(program: Command): void {
         if (!conn) { console.error('DB not available'); return; }
 
         const { eq } = await import('drizzle-orm');
-        await conn.db.delete(conn.schema.ticketTags).where(eq(conn.schema.ticketTags.tagId, id));
-        const [deleted] = await conn.db.delete(conn.schema.tags)
-          .where(eq(conn.schema.tags.id, id)).returning({ id: conn.schema.tags.id });
 
-        console.log(deleted ? `Deleted tag: ${id}` : 'Tag not found');
+        let found = false;
+        await conn.db.transaction(async (tx) => {
+          const affected = await tx
+            .select({ ticketId: conn.schema.ticketTags.ticketId })
+            .from(conn.schema.ticketTags)
+            .where(eq(conn.schema.ticketTags.tagId, id));
+
+          await tx.delete(conn.schema.ticketTags).where(eq(conn.schema.ticketTags.tagId, id));
+          const [deleted] = await tx.delete(conn.schema.tags)
+            .where(eq(conn.schema.tags.id, id)).returning({ id: conn.schema.tags.id });
+          if (!deleted) return;
+          found = true;
+
+          for (const { ticketId } of affected) {
+            const remaining = await tx
+              .select({ name: conn.schema.tags.name })
+              .from(conn.schema.ticketTags)
+              .innerJoin(conn.schema.tags, eq(conn.schema.tags.id, conn.schema.ticketTags.tagId))
+              .where(eq(conn.schema.ticketTags.ticketId, ticketId));
+            await tx
+              .update(conn.schema.tickets)
+              .set({ tags: remaining.map((r: { name: string }) => r.name) })
+              .where(eq(conn.schema.tickets.id, ticketId));
+          }
+        });
+
+        console.log(found ? `Deleted tag: ${id}` : 'Tag not found');
       } catch (err) {
         console.error('Error:', err instanceof Error ? err.message : err);
       }

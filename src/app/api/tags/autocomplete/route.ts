@@ -18,9 +18,10 @@ export async function GET(request: NextRequest) {
     const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
     const { eq, and, ilike } = await import('drizzle-orm');
 
+    const escapeLike = (s: string) => s.replace(/[%_\\]/g, '\\$&');
     const conditions = [eq(conn.schema.tags.workspaceId, wsId)];
     if (q.trim()) {
-      conditions.push(ilike(conn.schema.tags.name, `${q.trim()}%`));
+      conditions.push(ilike(conn.schema.tags.name, `${escapeLike(q.trim())}%`));
     }
 
     const rows = await conn.db

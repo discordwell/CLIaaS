@@ -23,14 +23,19 @@ export async function GET(
     const conn = await tryDb();
 
     if (conn) {
-      const { eq } = await import('drizzle-orm');
+      const { eq, and } = await import('drizzle-orm');
+      const { getDefaultWorkspaceId } = await import('@/lib/store-helpers');
+      const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
       const [row] = await conn.db
-        .select({ query: conn.schema.views.query })
+        .select({ query: conn.schema.views.query, viewType: conn.schema.views.viewType, userId: conn.schema.views.userId })
         .from(conn.schema.views)
-        .where(eq(conn.schema.views.id, id))
+        .where(and(eq(conn.schema.views.id, id), eq(conn.schema.views.workspaceId, wsId)))
         .limit(1);
 
       if (!row) return NextResponse.json({ error: 'View not found' }, { status: 404 });
+      if (row.viewType === 'personal' && row.userId !== authResult.user.id) {
+        return NextResponse.json({ error: 'View not found' }, { status: 404 });
+      }
       query = row.query as ViewQuery;
     } else {
       const { getView } = await import('@/lib/views/store');

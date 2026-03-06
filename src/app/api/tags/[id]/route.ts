@@ -87,12 +87,31 @@ export async function DELETE(
     }
 
     await conn.db.transaction(async (tx) => {
+      // Find affected tickets before deleting join rows
+      const affected = await tx
+        .select({ ticketId: conn.schema.ticketTags.ticketId })
+        .from(conn.schema.ticketTags)
+        .where(eq(conn.schema.ticketTags.tagId, id));
+
       await tx
         .delete(conn.schema.ticketTags)
         .where(eq(conn.schema.ticketTags.tagId, id));
       await tx
         .delete(conn.schema.tags)
         .where(eq(conn.schema.tags.id, id));
+
+      // Sync tickets.tags text array for affected tickets
+      for (const { ticketId } of affected) {
+        const remaining = await tx
+          .select({ name: conn.schema.tags.name })
+          .from(conn.schema.ticketTags)
+          .innerJoin(conn.schema.tags, eq(conn.schema.tags.id, conn.schema.ticketTags.tagId))
+          .where(eq(conn.schema.ticketTags.ticketId, ticketId));
+        await tx
+          .update(conn.schema.tickets)
+          .set({ tags: remaining.map((r: { name: string }) => r.name) })
+          .where(eq(conn.schema.tickets.id, ticketId));
+      }
     });
 
     return NextResponse.json({ deleted: true });

@@ -178,11 +178,35 @@ export function registerTagTools(server: McpServer): void {
           if (!conn) return { error: 'DB not available' };
 
           const { eq } = await import('drizzle-orm');
-          await conn.db.delete(conn.schema.ticketTags).where(eq(conn.schema.ticketTags.tagId, tagId));
-          const [deleted] = await conn.db.delete(conn.schema.tags)
-            .where(eq(conn.schema.tags.id, tagId)).returning({ id: conn.schema.tags.id });
 
-          if (!deleted) return { error: 'Tag not found' };
+          // Use transaction and sync tickets.tags array
+          let found = false;
+          await conn.db.transaction(async (tx) => {
+            const affected = await tx
+              .select({ ticketId: conn.schema.ticketTags.ticketId })
+              .from(conn.schema.ticketTags)
+              .where(eq(conn.schema.ticketTags.tagId, tagId));
+
+            await tx.delete(conn.schema.ticketTags).where(eq(conn.schema.ticketTags.tagId, tagId));
+            const [deleted] = await tx.delete(conn.schema.tags)
+              .where(eq(conn.schema.tags.id, tagId)).returning({ id: conn.schema.tags.id });
+            if (!deleted) return;
+            found = true;
+
+            for (const { ticketId } of affected) {
+              const remaining = await tx
+                .select({ name: conn.schema.tags.name })
+                .from(conn.schema.ticketTags)
+                .innerJoin(conn.schema.tags, eq(conn.schema.tags.id, conn.schema.ticketTags.tagId))
+                .where(eq(conn.schema.ticketTags.ticketId, ticketId));
+              await tx
+                .update(conn.schema.tickets)
+                .set({ tags: remaining.map((r: { name: string }) => r.name) })
+                .where(eq(conn.schema.tickets.id, ticketId));
+            }
+          });
+
+          if (!found) return { error: 'Tag not found' };
 
           recordMCPAction({
             tool: 'tag_delete', action: 'delete',

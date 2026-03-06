@@ -104,9 +104,11 @@ export function registerViewTools(server: McpServer): void {
         const conn = await tryDb();
 
         if (conn) {
-          const { eq } = await import('drizzle-orm');
+          const { eq, and } = await import('drizzle-orm');
+          const { getDefaultWorkspaceId } = await import('@/lib/store-helpers.js');
+          const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
           const [row] = await conn.db.select().from(conn.schema.views)
-            .where(eq(conn.schema.views.id, viewId)).limit(1);
+            .where(and(eq(conn.schema.views.id, viewId), eq(conn.schema.views.workspaceId, wsId))).limit(1);
           if (!row) return errorResult('View not found');
           return textResult(row);
         }
@@ -135,9 +137,11 @@ export function registerViewTools(server: McpServer): void {
         const conn = await tryDb();
 
         if (conn) {
-          const { eq } = await import('drizzle-orm');
+          const { eq, and } = await import('drizzle-orm');
+          const { getDefaultWorkspaceId } = await import('@/lib/store-helpers.js');
+          const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
           const [row] = await conn.db.select({ query: conn.schema.views.query })
-            .from(conn.schema.views).where(eq(conn.schema.views.id, viewId)).limit(1);
+            .from(conn.schema.views).where(and(eq(conn.schema.views.id, viewId), eq(conn.schema.views.workspaceId, wsId))).limit(1);
           if (!row) return errorResult('View not found');
           query = row.query;
         } else {
@@ -189,10 +193,13 @@ export function registerViewTools(server: McpServer): void {
         const conn = await tryDb();
 
         if (conn) {
-          const { eq } = await import('drizzle-orm');
+          const { eq, and, ne } = await import('drizzle-orm');
+          const { getDefaultWorkspaceId } = await import('@/lib/store-helpers.js');
+          const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
           const [deleted] = await conn.db.delete(conn.schema.views)
-            .where(eq(conn.schema.views.id, viewId)).returning({ id: conn.schema.views.id });
-          if (!deleted) return errorResult('View not found');
+            .where(and(eq(conn.schema.views.id, viewId), eq(conn.schema.views.workspaceId, wsId), ne(conn.schema.views.viewType, 'system')))
+            .returning({ id: conn.schema.views.id });
+          if (!deleted) return errorResult('View not found or system view');
           return textResult({ deleted: true, viewId });
         }
 

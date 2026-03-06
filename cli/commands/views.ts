@@ -155,10 +155,13 @@ export function registerViewCommands(program: Command): void {
         const conn = await tryDb();
 
         if (conn) {
-          const { eq } = await import('drizzle-orm');
+          const { eq, and, ne } = await import('drizzle-orm');
+          const { getDefaultWorkspaceId } = await import('@/lib/store-helpers.js');
+          const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
           const [deleted] = await conn.db.delete(conn.schema.views)
-            .where(eq(conn.schema.views.id, id)).returning({ id: conn.schema.views.id });
-          if (!deleted) { console.error('View not found'); return; }
+            .where(and(eq(conn.schema.views.id, id), eq(conn.schema.views.workspaceId, wsId), ne(conn.schema.views.viewType, 'system')))
+            .returning({ id: conn.schema.views.id });
+          if (!deleted) { console.error('View not found or system view'); return; }
           console.log(`Deleted view: ${id}`);
         } else {
           const { deleteView } = await import('@/lib/views/store.js');
