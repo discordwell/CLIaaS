@@ -2830,19 +2830,22 @@ export class Renderer {
     ctx.lineTo(x, this.height);
     ctx.stroke();
 
-    // Credits strip below radar — dark background to prevent text bleed-through
+    // Credits strip below radar — semi-transparent to blend with sidebar texture
     const credY = Renderer.CREDITS_Y;
-    ctx.fillStyle = '#0a0a0f';
+    ctx.fillStyle = 'rgba(10,10,15,0.6)';
     ctx.fillRect(x + 1, credY, w - 1, Renderer.CREDITS_H);
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
     const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
+    // Text shadow for readability on textured background
+    ctx.fillStyle = '#000';
+    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2 + 1, credY + 11);
     ctx.fillStyle = atCapacity ? '#FF4444' : '#FFD700';
     ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, credY + 10);
     if (this.sidebarSiloCapacity > 0) {
       ctx.font = '7px monospace';
       ctx.fillStyle = '#888';
-      ctx.fillText(`/${this.sidebarSiloCapacity}`, x + w / 2, credY + 20);
+      ctx.fillText(`/${this.sidebarSiloCapacity}`, x + w / 2 + 24, credY + 10);
     }
 
     // Button row: repair / sell / map icons
@@ -2883,18 +2886,19 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
-  /** Render vertical power bar on left edge of sidebar (original RA style) */
+  /** Render vertical power bar on left edge of sidebar (original RA two-tone gauge) */
   private renderVerticalPowerBar(assets: AssetManager, sidebarX: number, lowPower: boolean): void {
     const ctx = this.ctx;
     const pwrX = sidebarX + Renderer.POWER_BAR_X_OFFSET;
     const pwrY = Renderer.STRIP_START_Y;
     const pwrW = Renderer.POWER_BAR_W;
     const pwrH = Math.min(this.height - pwrY - 44, Renderer.CAMEO_VISIBLE * (Renderer.CAMEO_H + Renderer.CAMEO_GAP));
+    const produced = this.sidebarPowerProduced;
+    const consumed = this.sidebarPowerConsumed;
 
-    // Draw powerbar.png frame if available
+    // Draw powerbar.png frame if available, else dark background
     const pwrSheet = assets.getSheet('powerbar');
     if (pwrSheet) {
-      // Scale powerbar sprite to fill the vertical space
       ctx.drawImage(pwrSheet.image, 0, 0, 10, 112, pwrX, pwrY, pwrW, pwrH);
     } else {
       ctx.fillStyle = '#111';
@@ -2904,41 +2908,55 @@ export class Renderer {
       ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
     }
 
-    // Fill level — green from bottom up, yellow when high, red when over
-    const pwrRatio = this.sidebarPowerProduced > 0
-      ? Math.min(1, this.sidebarPowerConsumed / this.sidebarPowerProduced) : 1;
-    const fillH = pwrH * Math.min(1, pwrRatio);
-    const fillY = pwrY + pwrH - fillH;
-    const pwrColor = lowPower ? '#f44' : pwrRatio > 0.8 ? '#fa0' : '#4f4';
-    ctx.fillStyle = pwrColor;
-    ctx.fillRect(pwrX + 1, fillY, pwrW - 2, fillH);
+    // Two-tone gauge: green (produced) from bottom, red (over-consumed) above
+    const maxPwr = Math.max(produced, consumed, 100);
+    const consumedH = (consumed / maxPwr) * pwrH;
+    const producedH = (produced / maxPwr) * pwrH;
 
-    // Low-power pulsing glow
-    if (lowPower) {
-      const pulse = 0.15 + 0.15 * Math.sin(Date.now() * 0.005);
-      ctx.fillStyle = `rgba(255,40,40,${pulse})`;
-      ctx.fillRect(pwrX + 1, pwrY, pwrW - 2, pwrH);
-
-      // LOW POWER warning (flashing)
-      const flash = Math.sin(Date.now() * 0.006) > 0;
-      if (flash) {
-        ctx.save();
-        ctx.translate(pwrX + pwrW / 2, pwrY + pwrH / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.font = 'bold 6px monospace';
-        ctx.fillStyle = '#f44';
-        ctx.textAlign = 'center';
-        ctx.fillText('LOW POWER', 0, 0);
-        ctx.restore();
-      }
+    // Always draw produced power as green from bottom
+    if (produced > 0) {
+      ctx.fillStyle = '#4c4';
+      ctx.fillRect(pwrX + 1, pwrY + pwrH - producedH, pwrW - 2, producedH);
     }
 
-    // Numeric label at bottom
+    // Over-consumed: red section from produced level up to consumed level
+    if (consumed > produced) {
+      const overH = consumedH - producedH;
+      const overY = pwrY + pwrH - consumedH;
+      ctx.fillStyle = '#d33';
+      ctx.fillRect(pwrX + 1, overY, pwrW - 2, overH);
+    } else if (consumed > 0 && produced > 0 && consumed / produced > 0.7) {
+      // Near capacity: yellow overlay on consumed portion
+      ctx.fillStyle = '#ca0';
+      ctx.fillRect(pwrX + 1, pwrY + pwrH - consumedH, pwrW - 2, consumedH);
+    }
+
+    // Divider line at produced level
+    if (produced > 0) {
+      const divY = pwrY + pwrH - producedH;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pwrX, divY);
+      ctx.lineTo(pwrX + pwrW, divY);
+      ctx.stroke();
+    }
+
+    // Low-power pulsing glow (subtle, only on over-consumed section)
+    if (lowPower) {
+      const pulse = 0.06 + 0.06 * Math.sin(Date.now() * 0.005);
+      ctx.fillStyle = `rgba(255,40,40,${pulse})`;
+      const overY = pwrY + pwrH - consumedH;
+      ctx.fillRect(pwrX + 1, overY, pwrW - 2, consumedH - producedH);
+    }
+
+    // Numeric labels at bottom
     ctx.font = '6px monospace';
-    ctx.fillStyle = lowPower ? '#f88' : '#888';
     ctx.textAlign = 'center';
-    ctx.fillText(`${this.sidebarPowerConsumed}`, pwrX + pwrW / 2, pwrY + pwrH + 8);
-    ctx.fillText(`${this.sidebarPowerProduced}`, pwrX + pwrW / 2, pwrY + pwrH + 16);
+    ctx.fillStyle = lowPower ? '#f88' : '#8f8';
+    ctx.fillText(`${produced}`, pwrX + pwrW / 2, pwrY + pwrH + 8);
+    ctx.fillStyle = lowPower ? '#f88' : '#cc0';
+    ctx.fillText(`${consumed}`, pwrX + pwrW / 2, pwrY + pwrH + 16);
   }
 
   /** Render a single production strip (C++ parity: 1-column, 4 visible slots, clock overlay) */
@@ -2975,18 +2993,13 @@ export class Renderer {
         ctx.strokeRect(stripX, iy, camW, camH);
       }
 
-      // Draw cameo icon (HIRES icons are 64x48, scale to fit cameo slot)
+      // Draw cameo icon — use actual image dimensions (manifest may not match PNG)
       const iconName = item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
-        const iconScale = Math.min(camW / iconSheet.meta.frameWidth, camH / iconSheet.meta.frameHeight);
-        if (iconScale < 1) {
-          // HIRES icon — scale to fit, draw from top-left
-          ctx.drawImage(iconSheet.image, 0, 0, iconSheet.meta.frameWidth, iconSheet.meta.frameHeight,
-            stripX, iy, camW, camH);
-        } else {
-          assets.drawFrame(ctx, iconName, 0, stripX, iy);
-        }
+        // Draw icon scaled to fill full cameo slot, using actual image dimensions as source
+        ctx.drawImage(iconSheet.image, 0, 0, iconSheet.image.width as number, iconSheet.image.height as number,
+          stripX, iy, camW, camH);
       } else {
         const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
         const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
@@ -3106,18 +3119,18 @@ export class Renderer {
       const btn = buttons[i];
       const bx = sidebarX + i * btnW;
 
-      // Background
-      ctx.fillStyle = btn.active ? 'rgba(255,200,60,0.5)' : 'rgba(30,30,40,0.9)';
+      // Background — semi-transparent to let sidebar texture show through
+      ctx.fillStyle = btn.active ? 'rgba(255,200,60,0.45)' : 'rgba(20,20,28,0.55)';
       ctx.fillRect(bx, btnY, btnW - 1, btnH);
-      ctx.strokeStyle = btn.active ? '#FFD700' : '#444';
+      ctx.strokeStyle = btn.active ? '#FFD700' : '#555';
       ctx.lineWidth = 1;
       ctx.strokeRect(bx, btnY, btnW - 1, btnH);
 
-      // Sprite icon (frame 0=normal, 1=hover, 2=active) — scale LORES 17x14 to fill button
+      // Sprite icon (frame 0=normal, 1=hover, 2=active) — scale to fill full button
       const spriteSheet = assets.getSheet(btn.sprite);
       if (spriteSheet) {
         const frame = btn.active ? 2 : 0;
-        const btnScale = Math.min((btnW - 2) / spriteSheet.meta.frameWidth, (btnH - 2) / spriteSheet.meta.frameHeight);
+        const btnScale = Math.min((btnW - 1) / spriteSheet.meta.frameWidth, btnH / spriteSheet.meta.frameHeight);
         const sw = spriteSheet.meta.frameWidth * btnScale;
         const sh = spriteSheet.meta.frameHeight * btnScale;
         assets.drawFrame(ctx, btn.sprite, frame, bx + (btnW - sw) / 2, btnY + (btnH - sh) / 2, { scale: btnScale });
