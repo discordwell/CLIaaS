@@ -19,7 +19,6 @@ describe('cross-tenant data isolation', () => {
       schema.tags,
       schema.customFields,
       schema.rules,
-      schema.automationRules,
       schema.slaPolicies,
       schema.views,
       schema.kbCollections,

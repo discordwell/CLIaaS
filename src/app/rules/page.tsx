@@ -1,19 +1,22 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import {
-  CONDITION_FIELDS,
-  CONDITION_OPERATORS,
-  ACTION_TYPES,
-} from "@/lib/automation/constants";
+import RuleForm, { type RuleFormData } from "./_components/RuleForm";
 
 interface Rule {
   id: string;
   type: string;
   name: string;
+  description?: string;
   enabled: boolean;
-  conditions: { all?: Array<{ field: string; operator: string; value: unknown }>; any?: Array<{ field: string; operator: string; value: unknown }> };
-  actions: Array<{ type: string; value?: unknown }>;
+  conditions: {
+    all?: Array<{ field: string; operator: string; value: unknown }>;
+    any?: Array<{ field: string; operator: string; value: unknown }>;
+  };
+  actions: Array<{ type: string; value?: unknown; [k: string]: unknown }>;
+  executionCount?: number;
+  lastExecutedAt?: string;
+  executionOrder?: number;
 }
 
 const typeColors: Record<string, string> = {
@@ -27,17 +30,8 @@ export default function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [filter, setFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    type: "trigger" as string,
-    conditionField: "status",
-    conditionOp: "is",
-    conditionValue: "",
-    actionType: "set_priority",
-    actionValue: "",
-  });
-  const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState<"list" | "create" | "edit">("list");
+  const [editingRule, setEditingRule] = useState<Rule | null>(null);
 
   const loadRules = useCallback(async () => {
     try {
@@ -70,31 +64,48 @@ export default function RulesPage() {
     loadRules();
   }
 
-  async function createRule(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await fetch("/api/rules", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          type: formData.type,
-          conditions: {
-            all: formData.conditionValue
-              ? [{ field: formData.conditionField, operator: formData.conditionOp, value: formData.conditionValue }]
-              : [],
-          },
-          actions: [{ type: formData.actionType, value: formData.actionValue || undefined }],
-        }),
-      });
-      setShowForm(false);
-      setFormData({ name: "", type: "trigger", conditionField: "status", conditionOp: "is", conditionValue: "", actionType: "set_priority", actionValue: "" });
-      loadRules();
-    } finally {
-      setSaving(false);
-    }
+  async function handleCreate(data: RuleFormData) {
+    await fetch("/api/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: data.name,
+        type: data.type,
+        description: data.description || undefined,
+        conditions: data.conditions,
+        actions: data.actions,
+        enabled: data.enabled,
+      }),
+    });
+    setMode("list");
+    loadRules();
   }
+
+  async function handleEdit(data: RuleFormData) {
+    if (!editingRule) return;
+    await fetch(`/api/rules/${editingRule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: data.name,
+        description: data.description || undefined,
+        conditions: data.conditions,
+        actions: data.actions,
+        enabled: data.enabled,
+      }),
+    });
+    setMode("list");
+    setEditingRule(null);
+    loadRules();
+  }
+
+  function startEdit(rule: Rule) {
+    setEditingRule(rule);
+    setMode("edit");
+  }
+
+  const conditionCount = (r: Rule) =>
+    (r.conditions?.all?.length ?? 0) + (r.conditions?.any?.length ?? 0);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-12 text-zinc-950">
@@ -109,12 +120,21 @@ export default function RulesPage() {
             </h1>
           </div>
           <div className="flex gap-3">
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
-            >
-              {showForm ? "Cancel" : "New Rule"}
-            </button>
+            {mode === "list" ? (
+              <button
+                onClick={() => setMode("create")}
+                className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+              >
+                New Rule
+              </button>
+            ) : (
+              <button
+                onClick={() => { setMode("list"); setEditingRule(null); }}
+                className="border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+            )}
           </div>
         </div>
 
@@ -135,100 +155,41 @@ export default function RulesPage() {
         </div>
       </header>
 
-      {showForm && (
+      {mode === "create" && (
         <section className="mt-4 border-2 border-zinc-950 bg-white p-6">
-          <h2 className="font-mono text-xs font-bold uppercase text-zinc-500">Create Rule</h2>
-          <form onSubmit={createRule} className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="font-mono text-xs font-bold uppercase">Name</span>
-              <input
-                type="text"
-                required
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-                placeholder="Auto-escalate urgent"
-              />
-            </label>
-            <label className="block">
-              <span className="font-mono text-xs font-bold uppercase">Type</span>
-              <select
-                value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-              >
-                <option value="trigger">Trigger</option>
-                <option value="macro">Macro</option>
-                <option value="automation">Automation</option>
-                <option value="sla">SLA</option>
-              </select>
-            </label>
-            <label className="block">
-              <span className="font-mono text-xs font-bold uppercase">Condition field</span>
-              <select
-                value={formData.conditionField}
-                onChange={(e) => setFormData({ ...formData, conditionField: e.target.value })}
-                className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-              >
-                {CONDITION_FIELDS.map((f) => (
-                  <option key={f} value={f}>{f}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="font-mono text-xs font-bold uppercase">Operator</span>
-              <select
-                value={formData.conditionOp}
-                onChange={(e) => setFormData({ ...formData, conditionOp: e.target.value })}
-                className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-              >
-                {CONDITION_OPERATORS.map((o) => (
-                  <option key={o} value={o}>{o.replace(/_/g, " ")}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="font-mono text-xs font-bold uppercase">Condition value</span>
-              <input
-                type="text"
-                value={formData.conditionValue}
-                onChange={(e) => setFormData({ ...formData, conditionValue: e.target.value })}
-                className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-                placeholder="urgent"
-              />
-            </label>
-            <label className="block">
-              <span className="font-mono text-xs font-bold uppercase">Action type</span>
-              <select
-                value={formData.actionType}
-                onChange={(e) => setFormData({ ...formData, actionType: e.target.value })}
-                className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-              >
-                {ACTION_TYPES.map((a) => (
-                  <option key={a} value={a}>{a.replace(/_/g, " ")}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="font-mono text-xs font-bold uppercase">Action value</span>
-              <input
-                type="text"
-                value={formData.actionValue}
-                onChange={(e) => setFormData({ ...formData, actionValue: e.target.value })}
-                className="mt-1 w-full border-2 border-zinc-300 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-950"
-                placeholder="high"
-              />
-            </label>
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={saving}
-                className="w-full border-2 border-zinc-950 bg-zinc-950 px-4 py-2 font-mono text-xs font-bold uppercase text-white hover:bg-zinc-800 disabled:opacity-50"
-              >
-                {saving ? "Creating..." : "Create Rule"}
-              </button>
-            </div>
-          </form>
+          <h2 className="mb-4 font-mono text-xs font-bold uppercase text-zinc-500">
+            Create Rule
+          </h2>
+          <RuleForm
+            onSubmit={handleCreate}
+            onCancel={() => setMode("list")}
+            submitLabel="Create Rule"
+          />
+        </section>
+      )}
+
+      {mode === "edit" && editingRule && (
+        <section className="mt-4 border-2 border-zinc-950 bg-white p-6">
+          <h2 className="mb-4 font-mono text-xs font-bold uppercase text-zinc-500">
+            Edit Rule
+          </h2>
+          <RuleForm
+            initial={{
+              name: editingRule.name,
+              type: editingRule.type,
+              description: editingRule.description ?? "",
+              conditions: {
+                all: editingRule.conditions?.all ?? [],
+                any: editingRule.conditions?.any ?? [],
+              },
+              actions: editingRule.actions ?? [],
+              enabled: editingRule.enabled,
+            }}
+            ruleId={editingRule.id}
+            onSubmit={handleEdit}
+            onCancel={() => { setMode("list"); setEditingRule(null); }}
+            submitLabel="Update Rule"
+          />
         </section>
       )}
 
@@ -244,8 +205,10 @@ export default function RulesPage() {
                 <tr className="border-b-2 border-zinc-200 bg-zinc-50 text-left">
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Type</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Name</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Description</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Conditions</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Actions</th>
+                  <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Runs</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">Status</th>
                   <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500"></th>
                 </tr>
@@ -259,11 +222,17 @@ export default function RulesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-medium">{r.name}</td>
+                    <td className="max-w-[200px] truncate px-4 py-3 text-xs text-zinc-500">
+                      {r.description || "—"}
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-zinc-600">
-                      {[...(r.conditions?.all || []), ...(r.conditions?.any || [])].length} condition{[...(r.conditions?.all || []), ...(r.conditions?.any || [])].length !== 1 ? "s" : ""}
+                      {conditionCount(r)} condition{conditionCount(r) !== 1 ? "s" : ""}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-zinc-600">
                       {r.actions?.length || 0} action{(r.actions?.length || 0) !== 1 ? "s" : ""}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-600">
+                      {r.executionCount ?? 0}
                     </td>
                     <td className="px-4 py-3">
                       <button
@@ -274,12 +243,20 @@ export default function RulesPage() {
                       </button>
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => deleteRule(r.id)}
-                        className="font-mono text-xs font-bold uppercase text-red-500 hover:text-red-700"
-                      >
-                        Delete
-                      </button>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => startEdit(r)}
+                          className="font-mono text-xs font-bold uppercase text-blue-600 hover:text-blue-800"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteRule(r.id)}
+                          className="font-mono text-xs font-bold uppercase text-red-500 hover:text-red-700"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

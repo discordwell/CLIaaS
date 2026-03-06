@@ -8,6 +8,7 @@ import {
   integer,
   bigint,
   boolean,
+  numeric,
   jsonb,
   timestamp,
   primaryKey,
@@ -435,13 +436,45 @@ export const rules = pgTable('rules', {
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
   type: ruleTypeEnum('type').notNull(),
   name: text('name').notNull(),
+  description: text('description'),
   enabled: boolean('enabled').notNull().default(true),
   conditions: jsonb('conditions'),
   actions: jsonb('actions'),
   source: providerEnum('source').default('zendesk'),
+  version: integer('version').notNull().default(1),
+  executionOrder: integer('execution_order').notNull().default(0),
+  lastExecutedAt: timestamp('last_executed_at', { withTimezone: true }),
+  executionCount: integer('execution_count').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const ruleExecutions = pgTable(
+  'rule_executions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ruleId: text('rule_id').notNull(),
+    ruleName: text('rule_name').notNull(),
+    ruleType: ruleTypeEnum('rule_type').notNull(),
+    ticketId: text('ticket_id').notNull(),
+    event: text('event').notNull(),
+    matched: boolean('matched').notNull(),
+    dryRun: boolean('dry_run').notNull().default(false),
+    actionsExecuted: integer('actions_executed').notNull().default(0),
+    changes: jsonb('changes'),
+    errors: jsonb('errors'),
+    notificationsSent: integer('notifications_sent').default(0),
+    webhooksFired: integer('webhooks_fired').default(0),
+    durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ruleExecWorkspaceIdx: index('rule_executions_workspace_idx').on(table.workspaceId, table.createdAt),
+    ruleExecRuleIdx: index('rule_executions_rule_idx').on(table.ruleId),
+    ruleExecTicketIdx: index('rule_executions_ticket_idx').on(table.ticketId),
+  }),
+);
 
 export const slaPolicies = pgTable('sla_policies', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -775,31 +808,7 @@ export const auditEntries = pgTable(
   }),
 );
 
-// ---- Automation Rules ----
-
-export const automationRules = pgTable(
-  'automation_rules',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-    name: text('name').notNull(),
-    description: text('description'),
-    conditions: jsonb('conditions'),
-    actions: jsonb('actions'),
-    enabled: boolean('enabled').notNull().default(true),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  table => ({
-    automationRulesWorkspaceIdx: index('automation_rules_workspace_idx').on(
-      table.workspaceId,
-    ),
-    automationRulesEnabledIdx: index('automation_rules_enabled_idx').on(
-      table.workspaceId,
-      table.enabled,
-    ),
-  }),
-);
+// ---- Automation Rules (legacy duplicate removed — use `rules` table) ----
 
 // ---- RAG (Retrieval-Augmented Generation) ----
 
@@ -1520,5 +1529,273 @@ export const teamsChannelMappings = pgTable(
   },
   table => ({
     teamsMappingsWsChannelIdx: uniqueIndex('teams_mappings_ws_channel_idx').on(table.workspaceId, table.teamsChannelId),
+  }),
+);
+
+// ---- Plugin Marketplace Enums ----
+
+export const pluginListingStatusEnum = pgEnum('plugin_listing_status', [
+  'draft', 'review', 'published', 'rejected', 'deprecated',
+]);
+
+// ---- Marketplace Listings (global plugin catalog) ----
+
+export const marketplaceListings = pgTable(
+  'marketplace_listings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    pluginId: text('plugin_id').notNull().unique(),
+    manifest: jsonb('manifest').notNull(),
+    status: pluginListingStatusEnum('status').notNull().default('draft'),
+    publishedBy: uuid('published_by').references(() => users.id),
+    installCount: integer('install_count').notNull().default(0),
+    averageRating: numeric('average_rating', { precision: 3, scale: 2 }),
+    reviewCount: integer('review_count').notNull().default(0),
+    featured: boolean('featured').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    marketplaceListingsStatusIdx: index('marketplace_listings_status_idx').on(table.status),
+  }),
+);
+
+// ---- Plugin Installations (workspace-scoped) ----
+
+export const pluginInstallations = pgTable(
+  'plugin_installations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    pluginId: text('plugin_id').notNull(),
+    version: text('version').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    config: jsonb('config').notNull().default({}),
+    installedBy: uuid('installed_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    pluginInstallationsWsPluginIdx: uniqueIndex('plugin_installations_ws_plugin_idx').on(
+      table.workspaceId,
+      table.pluginId,
+    ),
+  }),
+);
+
+// ---- Plugin Hook Registrations ----
+
+export const pluginHookRegistrations = pgTable(
+  'plugin_hook_registrations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    installationId: uuid('installation_id').notNull().references(() => pluginInstallations.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    hookName: text('hook_name').notNull(),
+    priority: integer('priority').notNull().default(100),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    pluginHookRegistrationsWsHookIdx: index('plugin_hook_registrations_ws_hook_idx').on(
+      table.workspaceId,
+      table.hookName,
+    ),
+  }),
+);
+
+// ---- Plugin Execution Logs ----
+
+export const pluginExecutionLogs = pgTable(
+  'plugin_execution_logs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    installationId: uuid('installation_id').notNull().references(() => pluginInstallations.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull(),
+    hookName: text('hook_name').notNull(),
+    status: text('status').notNull(),
+    durationMs: integer('duration_ms').notNull().default(0),
+    input: jsonb('input'),
+    output: jsonb('output'),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    pluginExecutionLogsWsInstIdx: index('plugin_execution_logs_ws_inst_idx').on(
+      table.workspaceId,
+      table.installationId,
+      table.createdAt,
+    ),
+  }),
+);
+
+// ---- Plugin Reviews ----
+
+export const pluginReviews = pgTable(
+  'plugin_reviews',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    listingId: uuid('listing_id').notNull().references(() => marketplaceListings.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    rating: integer('rating').notNull(),
+    title: text('title').notNull().default(''),
+    body: text('body').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    pluginReviewsListingWsIdx: uniqueIndex('plugin_reviews_listing_ws_idx').on(
+      table.listingId,
+      table.workspaceId,
+    ),
+  }),
+);
+
+// ---- Routing Engine Tables ----
+
+export const routingStrategyEnum = pgEnum('routing_strategy', [
+  'round_robin',
+  'load_balanced',
+  'skill_match',
+  'priority_weighted',
+]);
+
+export const agentAvailabilityEnum = pgEnum('agent_availability', [
+  'online',
+  'away',
+  'offline',
+]);
+
+export const routingTargetTypeEnum = pgEnum('routing_target_type', [
+  'queue',
+  'group',
+  'agent',
+]);
+
+export const agentSkills = pgTable(
+  'agent_skills',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    skillName: text('skill_name').notNull(),
+    proficiency: integer('proficiency').notNull().default(100), // 0-100
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    agentSkillsUserIdx: index('agent_skills_user_idx').on(table.userId),
+    agentSkillsUniqueIdx: uniqueIndex('agent_skills_unique_idx').on(
+      table.userId,
+      table.skillName,
+    ),
+  }),
+);
+
+export const agentCapacityRules = pgTable(
+  'agent_capacity_rules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    channelType: channelTypeEnum('channel_type').notNull(),
+    maxConcurrent: integer('max_concurrent').notNull().default(10),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    agentCapacityUserIdx: index('agent_capacity_user_idx').on(table.userId),
+    agentCapacityUniqueIdx: uniqueIndex('agent_capacity_unique_idx').on(
+      table.userId,
+      table.channelType,
+    ),
+  }),
+);
+
+export const groupMemberships = pgTable(
+  'group_memberships',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    groupId: uuid('group_id').notNull().references(() => groups.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    groupMembershipsGroupIdx: index('group_memberships_group_idx').on(table.groupId),
+    groupMembershipsUniqueIdx: uniqueIndex('group_memberships_unique_idx').on(
+      table.userId,
+      table.groupId,
+    ),
+  }),
+);
+
+export const routingQueues = pgTable(
+  'routing_queues',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    priority: integer('priority').notNull().default(0),
+    conditions: jsonb('conditions').notNull().default({}),
+    strategy: routingStrategyEnum('strategy').notNull().default('skill_match'),
+    groupId: uuid('group_id').references(() => groups.id),
+    overflowQueueId: uuid('overflow_queue_id'),
+    overflowTimeoutSecs: integer('overflow_timeout_secs'),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    routingQueuesWorkspaceIdx: index('routing_queues_workspace_idx').on(
+      table.workspaceId,
+      table.enabled,
+    ),
+  }),
+);
+
+export const routingRules = pgTable(
+  'routing_rules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    priority: integer('priority').notNull().default(0),
+    conditions: jsonb('conditions').notNull().default({}),
+    targetType: routingTargetTypeEnum('target_type').notNull(),
+    targetId: uuid('target_id').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    routingRulesWorkspaceIdx: index('routing_rules_workspace_idx').on(
+      table.workspaceId,
+      table.enabled,
+    ),
+  }),
+);
+
+export const routingLog = pgTable(
+  'routing_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ticketId: uuid('ticket_id').references(() => tickets.id),
+    queueId: uuid('queue_id').references(() => routingQueues.id),
+    ruleId: uuid('rule_id').references(() => routingRules.id),
+    assignedUserId: uuid('assigned_user_id').references(() => users.id),
+    strategy: routingStrategyEnum('strategy').notNull(),
+    matchedSkills: text('matched_skills').array().default([]),
+    scores: jsonb('scores').default({}),
+    reasoning: text('reasoning'),
+    durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    routingLogWorkspaceIdx: index('routing_log_workspace_idx').on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    routingLogTicketIdx: index('routing_log_ticket_idx').on(table.ticketId),
   }),
 );

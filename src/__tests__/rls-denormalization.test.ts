@@ -37,7 +37,6 @@ describe('RLS denormalization — workspace_id columns', () => {
     { name: 'tags', table: schema.tags },
     { name: 'customFields', table: schema.customFields },
     { name: 'rules', table: schema.rules },
-    { name: 'automationRules', table: schema.automationRules },
     { name: 'slaPolicies', table: schema.slaPolicies },
     { name: 'views', table: schema.views },
     { name: 'kbCollections', table: schema.kbCollections },

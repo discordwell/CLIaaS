@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadTickets, loadMessages } from "@/lib/data";
 import TicketActions from "@/components/TicketActions";
+import MacroDropdown from "./_components/MacroDropdown";
+import ReRouteButton from "./_components/ReRouteButton";
+import { getRoutingLog } from "@/lib/routing/store";
 
 const priorityColor: Record<string, string> = {
   urgent: "bg-red-500 text-white",
@@ -29,6 +32,9 @@ export default async function TicketDetailPage({
   const ticket = tickets.find((t) => t.id === id || t.externalId === id);
 
   if (!ticket) notFound();
+
+  const routingLog = getRoutingLog().filter((l) => l.ticketId === ticket.id);
+  const lastRoute = routingLog.length > 0 ? routingLog[routingLog.length - 1] : null;
 
   const messages = (await loadMessages(ticket.id)).sort(
     (a, b) =>
@@ -169,12 +175,58 @@ export default async function TicketDetailPage({
         )}
       </section>
 
-      {/* TICKET ACTIONS (reply, update) */}
+      {/* MACRO / TICKET ACTIONS */}
+      <div className="mt-8 flex items-center justify-between">
+        <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-zinc-500">
+          Actions
+        </h3>
+        <MacroDropdown ticketId={ticket.id} />
+      </div>
       <TicketActions
         ticketId={ticket.id}
         currentStatus={ticket.status}
         currentPriority={ticket.priority}
       />
+
+      {/* ROUTING */}
+      <section className="mt-8 border-2 border-zinc-950 bg-white p-6">
+        <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-zinc-500">
+          Routing
+        </h3>
+        {lastRoute ? (
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <p className="font-mono text-[10px] font-bold uppercase text-zinc-400">Strategy</p>
+              <p className="mt-1 font-mono text-sm font-bold">{lastRoute.strategy}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] font-bold uppercase text-zinc-400">Assigned To</p>
+              <p className="mt-1 font-mono text-sm font-bold">
+                {lastRoute.assignedUserId?.slice(0, 12) ?? "Unassigned"}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] font-bold uppercase text-zinc-400">Skills Matched</p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {lastRoute.matchedSkills.length > 0 ? (
+                  lastRoute.matchedSkills.map((s) => (
+                    <span key={s} className="border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px]">
+                      {s}
+                    </span>
+                  ))
+                ) : (
+                  <span className="font-mono text-sm text-zinc-400">none</span>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-zinc-500">Not routed yet.</p>
+        )}
+        <div className="mt-4">
+          <ReRouteButton ticketId={ticket.id} />
+        </div>
+      </section>
 
       {/* CLI ACTIONS */}
       <section className="mt-8 border-2 border-zinc-950 bg-zinc-950 p-6 text-zinc-100">

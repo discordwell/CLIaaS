@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { requireAuth } from '@/lib/api-auth';
+import { invalidateRuleCache } from '@/lib/automation/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
   if ('error' in parsed) return parsed.error;
 
   try {
-    const { name, type, conditions, actions, enabled } = parsed.data;
+    const { name, type, description, conditions, actions, enabled } = parsed.data;
 
     if (!name || !type) {
       return NextResponse.json(
@@ -85,12 +86,14 @@ export async function POST(request: NextRequest) {
         workspaceId,
         name,
         type,
+        description: description ?? null,
         enabled: enabled ?? true,
         conditions: conditions ?? { all: [], any: [] },
         actions: actions ?? [],
       })
       .returning();
 
+    invalidateRuleCache();
     return NextResponse.json({ rule }, { status: 201 });
   } catch (err) {
     return NextResponse.json(

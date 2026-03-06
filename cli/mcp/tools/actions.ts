@@ -246,20 +246,45 @@ export function registerActionTools(server: McpServer): void {
       type: z.enum(['trigger', 'macro', 'automation', 'sla']).describe('Rule type'),
       conditions: z.record(z.string(), z.unknown()).optional().describe('Rule conditions (JSON)'),
       actions: z.array(z.record(z.string(), z.unknown())).optional().describe('Rule actions (JSON array)'),
+      description: z.string().optional().describe('Rule description'),
       confirm: z.boolean().optional().describe('Must be true to create the rule'),
     },
-    async ({ name, type, conditions, actions, confirm }) => {
+    async ({ name, type, conditions, actions, description, confirm }) => {
       const guard = scopeGuard('rule_create');
       if (guard) return guard;
 
-      const ruleData = { name, type, conditions: conditions ?? {}, actions: actions ?? [] };
+      const ruleData = { name, type, conditions: conditions ?? {}, actions: actions ?? [], description };
 
       const result = withConfirmation(confirm, {
         description: `Create ${type} rule "${name}"`,
         preview: ruleData,
-        execute: () => {
+        execute: async () => {
           const now = new Date().toISOString();
-          const id = `rule-${Date.now()}`;
+          let id = `rule-${Date.now()}`;
+
+          // Persist to DB if available
+          try {
+            const { tryDb } = await import('@/lib/store-helpers.js');
+            const conn = await tryDb();
+            if (conn) {
+              const { getDefaultWorkspaceId } = await import('@/lib/store-helpers.js');
+              const wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
+              const [row] = await conn.db.insert(conn.schema.rules).values({
+                workspaceId: wsId,
+                name,
+                type,
+                description: description ?? null,
+                conditions: conditions ?? { all: [], any: [] },
+                actions: actions ?? [],
+              }).returning();
+              if (row) id = row.id;
+
+              // Invalidate rule cache
+              const { invalidateRuleCache } = await import('@/lib/automation/bootstrap.js');
+              invalidateRuleCache();
+            }
+          } catch { /* DB unavailable — rule persisted in log only */ }
+
           recordMCPAction({
             tool: 'rule_create', action: 'create',
             params: ruleData,
@@ -270,7 +295,7 @@ export function registerActionTools(server: McpServer): void {
       });
 
       if (result.needsConfirmation) return result.result;
-      return textResult(result.value);
+      return textResult(await result.value);
     },
   );
 
@@ -290,8 +315,24 @@ export function registerActionTools(server: McpServer): void {
       const result = withConfirmation(confirm, {
         description: `${enabled ? 'Enable' : 'Disable'} rule ${ruleId}`,
         preview: { ruleId, enabled },
-        execute: () => {
+        execute: async () => {
           const now = new Date().toISOString();
+
+          // Persist to DB if available
+          try {
+            const { tryDb } = await import('@/lib/store-helpers.js');
+            const conn = await tryDb();
+            if (conn) {
+              const { eq } = await import('drizzle-orm');
+              await conn.db.update(conn.schema.rules)
+                .set({ enabled, updatedAt: new Date() })
+                .where(eq(conn.schema.rules.id, ruleId));
+
+              const { invalidateRuleCache } = await import('@/lib/automation/bootstrap.js');
+              invalidateRuleCache();
+            }
+          } catch { /* DB unavailable */ }
+
           recordMCPAction({
             tool: 'rule_toggle', action: enabled ? 'enable' : 'disable',
             params: { ruleId, enabled },
@@ -302,7 +343,97 @@ export function registerActionTools(server: McpServer): void {
       });
 
       if (result.needsConfirmation) return result.result;
-      return textResult(result.value);
+      return textResult(await result.value);
+    },
+  );
+
+  // ---- macro_apply ----
+  server.tool(
+    'macro_apply',
+    'Apply a macro to a ticket (requires confirm=true)',
+    {
+      macroId: z.string().describe('Macro rule ID'),
+      ticketId: z.string().describe('Ticket ID'),
+      confirm: z.boolean().optional().describe('Must be true to apply'),
+      dir: z.string().optional().describe('Export directory override'),
+    },
+    async ({ macroId, ticketId, confirm, dir }) => {
+      const guard = scopeGuard('macro_apply');
+      if (guard) return guard;
+
+      const tickets = await safeLoadTickets(dir);
+      const ticket = findTicket(tickets, ticketId);
+      if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
+
+      const result = withConfirmation(confirm, {
+        description: `Apply macro ${macroId} to ticket ${ticket.id}`,
+        preview: { macroId, ticketId: ticket.id, subject: ticket.subject },
+        execute: async () => {
+          try {
+            const { tryDb } = await import('@/lib/store-helpers.js');
+            const conn = await tryDb();
+            if (!conn) return { error: 'DB not available' };
+
+            const { eq, and } = await import('drizzle-orm');
+            const [macroRow] = await conn.db.select().from(conn.schema.rules)
+              .where(and(eq(conn.schema.rules.id, macroId), eq(conn.schema.rules.type, 'macro')))
+              .limit(1);
+
+            if (!macroRow) return { error: `Macro "${macroId}" not found` };
+
+            const { applyMacro } = await import('@/lib/automation/engine.js');
+            const macroRule = {
+              id: macroRow.id,
+              type: 'macro' as const,
+              name: macroRow.name,
+              enabled: true,
+              conditions: (macroRow.conditions ?? {}) as Record<string, unknown>,
+              actions: (macroRow.actions ?? []) as Array<Record<string, unknown>>,
+              workspaceId: macroRow.workspaceId,
+            };
+
+            const ticketCtx = {
+              id: ticket.id,
+              subject: ticket.subject ?? '',
+              status: ticket.status ?? 'open',
+              priority: ticket.priority ?? 'normal',
+              assignee: ticket.assignee ?? null,
+              requester: ticket.requester ?? '',
+              tags: ticket.tags ?? [],
+              createdAt: ticket.createdAt ?? new Date().toISOString(),
+              updatedAt: ticket.updatedAt ?? new Date().toISOString(),
+            };
+
+            const execResult = applyMacro(macroRule as Parameters<typeof applyMacro>[0], ticketCtx);
+
+            // Apply changes to in-memory ticket
+            if (execResult.changes.status) ticket.status = execResult.changes.status as TicketStatus;
+            if (execResult.changes.priority) ticket.priority = execResult.changes.priority as TicketPriority;
+            if (execResult.changes.assignee !== undefined) ticket.assignee = execResult.changes.assignee as string | undefined;
+
+            const now = new Date().toISOString();
+            recordMCPAction({
+              tool: 'macro_apply', action: 'apply',
+              params: { macroId, ticketId: ticket.id },
+              timestamp: now, result: 'success',
+            });
+
+            return {
+              applied: true,
+              macroId,
+              macroName: macroRow.name,
+              ticketId: ticket.id,
+              changes: execResult.changes,
+              actionsExecuted: execResult.actionsExecuted,
+            };
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : 'Failed to apply macro' };
+          }
+        },
+      });
+
+      if (result.needsConfirmation) return result.result;
+      return textResult(await result.value);
     },
   );
 
@@ -344,6 +475,297 @@ export function registerActionTools(server: McpServer): void {
 
       if (result.needsConfirmation) return result.result;
       return textResult(result.value);
+    },
+  );
+
+  // ---- rule_list ----
+  server.tool(
+    'rule_list',
+    'List automation rules with optional filters',
+    {
+      type: z.enum(['trigger', 'macro', 'automation', 'sla']).optional().describe('Filter by rule type'),
+      enabled: z.boolean().optional().describe('Filter by enabled status'),
+    },
+    async ({ type, enabled }) => {
+      const guard = scopeGuard('rule_list');
+      if (guard) return guard;
+
+      try {
+        const { tryDb } = await import('@/lib/store-helpers.js');
+        const conn = await tryDb();
+        if (!conn) return textResult({ rules: [], message: 'DB not available' });
+
+        const { eq, and } = await import('drizzle-orm');
+        const conditions = [];
+        if (type) conditions.push(eq(conn.schema.rules.type, type));
+        if (enabled !== undefined) conditions.push(eq(conn.schema.rules.enabled, enabled));
+
+        const rows = await conn.db.select().from(conn.schema.rules)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .orderBy(conn.schema.rules.createdAt);
+
+        return textResult({
+          count: rows.length,
+          rules: rows.map(r => ({
+            id: r.id, name: r.name, type: r.type, enabled: r.enabled,
+            description: r.description, executionCount: r.executionCount,
+          })),
+        });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to list rules');
+      }
+    },
+  );
+
+  // ---- rule_get ----
+  server.tool(
+    'rule_get',
+    'Get rule details and recent executions',
+    {
+      ruleId: z.string().describe('Rule ID'),
+    },
+    async ({ ruleId }) => {
+      const guard = scopeGuard('rule_get');
+      if (guard) return guard;
+
+      try {
+        const { tryDb } = await import('@/lib/store-helpers.js');
+        const conn = await tryDb();
+        if (!conn) return errorResult('DB not available');
+
+        const { eq } = await import('drizzle-orm');
+        const [rule] = await conn.db.select().from(conn.schema.rules)
+          .where(eq(conn.schema.rules.id, ruleId)).limit(1);
+
+        if (!rule) return errorResult(`Rule "${ruleId}" not found`);
+
+        const { queryAuditLog } = await import('@/lib/automation/audit-store.js');
+        const executions = await queryAuditLog({ ruleId, limit: 10 });
+
+        return textResult({ rule, recentExecutions: executions });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to get rule');
+      }
+    },
+  );
+
+  // ---- rule_update ----
+  server.tool(
+    'rule_update',
+    'Update an automation rule (requires confirm=true)',
+    {
+      ruleId: z.string().describe('Rule ID'),
+      name: z.string().optional().describe('New name'),
+      description: z.string().optional().describe('New description'),
+      conditions: z.record(z.string(), z.unknown()).optional().describe('New conditions'),
+      actions: z.array(z.record(z.string(), z.unknown())).optional().describe('New actions'),
+      confirm: z.boolean().optional().describe('Must be true to update'),
+    },
+    async ({ ruleId, name, description, conditions, actions, confirm }) => {
+      const guard = scopeGuard('rule_update');
+      if (guard) return guard;
+
+      const updates = { name, description, conditions, actions };
+      const result = withConfirmation(confirm, {
+        description: `Update rule ${ruleId}`,
+        preview: { ruleId, updates },
+        execute: async () => {
+          const { tryDb } = await import('@/lib/store-helpers.js');
+          const conn = await tryDb();
+          if (!conn) return { error: 'DB not available' };
+
+          const { eq } = await import('drizzle-orm');
+          const set: Record<string, unknown> = { updatedAt: new Date() };
+          if (name !== undefined) set.name = name;
+          if (description !== undefined) set.description = description;
+          if (conditions !== undefined) set.conditions = conditions;
+          if (actions !== undefined) set.actions = actions;
+
+          const [updated] = await conn.db.update(conn.schema.rules)
+            .set(set).where(eq(conn.schema.rules.id, ruleId)).returning();
+
+          if (!updated) return { error: `Rule "${ruleId}" not found` };
+
+          const { invalidateRuleCache } = await import('@/lib/automation/bootstrap.js');
+          invalidateRuleCache();
+
+          return { updated: true, rule: { id: updated.id, name: updated.name } };
+        },
+      });
+
+      if (result.needsConfirmation) return result.result;
+      return textResult(await result.value);
+    },
+  );
+
+  // ---- rule_delete ----
+  server.tool(
+    'rule_delete',
+    'Delete an automation rule (requires confirm=true)',
+    {
+      ruleId: z.string().describe('Rule ID'),
+      confirm: z.boolean().optional().describe('Must be true to delete'),
+    },
+    async ({ ruleId, confirm }) => {
+      const guard = scopeGuard('rule_delete');
+      if (guard) return guard;
+
+      const result = withConfirmation(confirm, {
+        description: `Delete rule ${ruleId}`,
+        preview: { ruleId },
+        execute: async () => {
+          const { tryDb } = await import('@/lib/store-helpers.js');
+          const conn = await tryDb();
+          if (!conn) return { error: 'DB not available' };
+
+          const { eq } = await import('drizzle-orm');
+          const [deleted] = await conn.db.delete(conn.schema.rules)
+            .where(eq(conn.schema.rules.id, ruleId))
+            .returning({ id: conn.schema.rules.id });
+
+          if (!deleted) return { error: `Rule "${ruleId}" not found` };
+
+          const { invalidateRuleCache } = await import('@/lib/automation/bootstrap.js');
+          invalidateRuleCache();
+
+          return { deleted: true, ruleId };
+        },
+      });
+
+      if (result.needsConfirmation) return result.result;
+      return textResult(await result.value);
+    },
+  );
+
+  // ---- rule_test ----
+  server.tool(
+    'rule_test',
+    'Dry-run test a rule against sample ticket data',
+    {
+      ruleId: z.string().optional().describe('Rule ID to test (from DB)'),
+      conditions: z.record(z.string(), z.unknown()).optional().describe('Inline conditions'),
+      actions: z.array(z.record(z.string(), z.unknown())).optional().describe('Inline actions'),
+      ticket: z.record(z.string(), z.unknown()).describe('Sample ticket data'),
+    },
+    async ({ ruleId, conditions, actions, ticket }) => {
+      const guard = scopeGuard('rule_test');
+      if (guard) return guard;
+
+      try {
+        const { evaluateRule } = await import('@/lib/automation/engine.js');
+
+        let rule: { id: string; type: string; name: string; enabled: boolean; conditions: unknown; actions: unknown };
+
+        if (ruleId) {
+          const { tryDb } = await import('@/lib/store-helpers.js');
+          const conn = await tryDb();
+          if (!conn) return errorResult('DB not available');
+
+          const { eq } = await import('drizzle-orm');
+          const [row] = await conn.db.select().from(conn.schema.rules)
+            .where(eq(conn.schema.rules.id, ruleId)).limit(1);
+
+          if (!row) return errorResult(`Rule "${ruleId}" not found`);
+          rule = { id: row.id, type: row.type, name: row.name, enabled: true, conditions: row.conditions, actions: row.actions };
+        } else if (conditions || actions) {
+          rule = {
+            id: 'inline-test',
+            type: 'trigger',
+            name: 'Inline test',
+            enabled: true,
+            conditions: conditions ?? {},
+            actions: actions ?? [],
+          };
+        } else {
+          return errorResult('Either ruleId or conditions/actions required');
+        }
+
+        const ticketCtx = {
+          id: String(ticket.id ?? 'test-1'),
+          subject: String(ticket.subject ?? ''),
+          status: String(ticket.status ?? 'open'),
+          priority: String(ticket.priority ?? 'normal'),
+          assignee: ticket.assignee != null ? String(ticket.assignee) : null,
+          requester: String(ticket.requester ?? ''),
+          tags: Array.isArray(ticket.tags) ? ticket.tags.map(String) : [],
+          createdAt: String(ticket.createdAt ?? new Date().toISOString()),
+          updatedAt: String(ticket.updatedAt ?? new Date().toISOString()),
+          event: ticket.event as 'create' | 'update' | 'reply' | 'status_change' | 'assignment' | undefined,
+        };
+
+        const result = evaluateRule(rule as Parameters<typeof evaluateRule>[0], ticketCtx);
+        return textResult({
+          matched: result.matched,
+          actionsExecuted: result.actionsExecuted,
+          changes: result.changes,
+          notifications: result.notifications.length,
+          webhooks: result.webhooks.length,
+          errors: result.errors,
+        });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Test failed');
+      }
+    },
+  );
+
+  // ---- rule_executions ----
+  server.tool(
+    'rule_executions',
+    'Query rule execution history',
+    {
+      ruleId: z.string().optional().describe('Filter by rule ID'),
+      ticketId: z.string().optional().describe('Filter by ticket ID'),
+      limit: z.number().optional().describe('Max entries (default 20)'),
+    },
+    async ({ ruleId, ticketId, limit }) => {
+      const guard = scopeGuard('rule_executions');
+      if (guard) return guard;
+
+      try {
+        const { queryAuditLog } = await import('@/lib/automation/audit-store.js');
+        const entries = await queryAuditLog({
+          ruleId,
+          ticketId,
+          limit: limit ?? 20,
+        });
+
+        return textResult({ count: entries.length, executions: entries });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to query executions');
+      }
+    },
+  );
+
+  // ---- macro_list ----
+  server.tool(
+    'macro_list',
+    'List available macros',
+    {},
+    async () => {
+      const guard = scopeGuard('macro_list');
+      if (guard) return guard;
+
+      try {
+        const { tryDb } = await import('@/lib/store-helpers.js');
+        const conn = await tryDb();
+        if (!conn) return textResult({ macros: [], message: 'DB not available' });
+
+        const { eq } = await import('drizzle-orm');
+        const rows = await conn.db.select().from(conn.schema.rules)
+          .where(eq(conn.schema.rules.type, 'macro'))
+          .orderBy(conn.schema.rules.name);
+
+        return textResult({
+          count: rows.length,
+          macros: rows.map(r => ({
+            id: r.id, name: r.name, enabled: r.enabled,
+            description: r.description,
+            actions: (r.actions as unknown[])?.length ?? 0,
+          })),
+        });
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to list macros');
+      }
     },
   );
 }

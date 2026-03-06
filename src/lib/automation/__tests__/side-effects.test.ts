@@ -1,7 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { applyExecutionResults } from '../executor';
 import type { ExecutionResult, TicketContext } from '../engine';
 import { buildBaseTicketFromEvent } from '../ticket-from-event';
+
+// Mock the side-effects dispatcher
+vi.mock('../side-effects', () => ({
+  dispatchSideEffects: vi.fn().mockResolvedValue({
+    notificationsSent: 0,
+    webhooksFired: 0,
+    errors: [],
+  }),
+}));
+
+const { dispatchSideEffects } = await import('../side-effects');
+const mockedDispatch = vi.mocked(dispatchSideEffects);
 
 const baseTicket: TicketContext = {
   id: 'ticket-1',
@@ -28,29 +40,37 @@ function makeResult(overrides: Partial<ExecutionResult> = {}): ExecutionResult {
   };
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  global.__cliaasAutomationDepth = 0;
+  mockedDispatch.mockResolvedValue({ notificationsSent: 0, webhooksFired: 0, errors: [] });
+});
+
 describe('applyExecutionResults', () => {
-  it('applies changes to ticket when not dry-run', () => {
+  it('applies changes to ticket when not dry-run', async () => {
     const result = makeResult({
       changes: { status: 'closed', priority: 'urgent' },
     });
-    const { ticket } = applyExecutionResults(result, baseTicket, false);
+    const { ticket } = await applyExecutionResults(result, baseTicket, false);
     expect(ticket.status).toBe('closed');
     expect(ticket.priority).toBe('urgent');
   });
 
-  it('skips all side effects when dry-run', () => {
+  it('skips all side effects when dry-run', async () => {
     const result = makeResult({
       changes: { status: 'closed' },
       notifications: [{ type: 'email', to: 'a@b.com' }],
       webhooks: [{ url: 'https://hook.test', method: 'POST', body: {} }],
     });
-    const { ticket, notificationsSent, webhooksFired } = applyExecutionResults(result, baseTicket, true);
+    const { ticket, notificationsSent, webhooksFired } = await applyExecutionResults(result, baseTicket, true);
     expect(ticket.status).toBe('open'); // unchanged
     expect(notificationsSent).toBe(0);
     expect(webhooksFired).toBe(0);
+    expect(mockedDispatch).not.toHaveBeenCalled();
   });
 
-  it('counts notifications and webhooks when not dry-run', () => {
+  it('dispatches side effects and returns counts', async () => {
+    mockedDispatch.mockResolvedValue({ notificationsSent: 2, webhooksFired: 1, errors: [] });
     const result = makeResult({
       notifications: [
         { type: 'email', to: 'a@b.com', template: 'escalation' },
@@ -58,9 +78,20 @@ describe('applyExecutionResults', () => {
       ],
       webhooks: [{ url: 'https://hook.test', method: 'POST', body: {} }],
     });
-    const { notificationsSent, webhooksFired } = applyExecutionResults(result, baseTicket, false);
+    const { notificationsSent, webhooksFired } = await applyExecutionResults(result, baseTicket, false);
+    expect(mockedDispatch).toHaveBeenCalledOnce();
     expect(notificationsSent).toBe(2);
     expect(webhooksFired).toBe(1);
+  });
+
+  it('skips side effects when max automation depth reached', async () => {
+    global.__cliaasAutomationDepth = 2;
+    const result = makeResult({
+      notifications: [{ type: 'email', to: 'a@b.com' }],
+    });
+    const { errors } = await applyExecutionResults(result, baseTicket, false);
+    expect(mockedDispatch).not.toHaveBeenCalled();
+    expect(errors).toContain('Skipped side effects: max automation depth reached');
   });
 
   it('propagates notifications and webhooks through ExecutionResult', () => {

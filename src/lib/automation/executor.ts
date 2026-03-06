@@ -6,6 +6,9 @@
 import { runRules, type Rule, type TicketContext, type ExecutionResult } from './engine';
 import { buildBaseTicketFromEvent } from './ticket-from-event';
 import { bootstrapWorkflows } from '@/lib/workflow/bootstrap';
+import { bootstrapRules } from './bootstrap';
+import { dispatchSideEffects } from './side-effects';
+import { persistAuditEntry } from './audit-store';
 
 // ---- Audit trail (in-memory, singleton) ----
 
@@ -94,47 +97,75 @@ export interface ExecuteOptions {
 export function executeRules(opts: ExecuteOptions): ExecutionResult[] {
   const { ticket, event, triggerType, dryRun = false } = opts;
   const rules = getAutomationRules();
+  const startTime = performance.now();
   const results = runRules(rules, ticket, triggerType);
+  const durationMs = Math.round(performance.now() - startTime);
 
   for (const result of results) {
     if (result.matched) {
-      recordAudit({
+      const matchedRule = rules.find(r => r.id === result.ruleId);
+      // Fire-and-forget persistent audit
+      persistAuditEntry({
         id: crypto.randomUUID(),
         ruleId: result.ruleId,
         ruleName: result.ruleName,
+        ruleType: matchedRule?.type,
         ticketId: ticket.id,
         event,
+        matched: true,
+        actionsExecuted: result.actionsExecuted,
         actions: result.changes,
+        changes: result.changes,
+        errors: result.errors,
+        notificationsSent: result.notifications.length,
+        webhooksFired: result.webhooks.length,
+        durationMs,
         timestamp: new Date().toISOString(),
         dryRun,
-      });
+        workspaceId: matchedRule?.workspaceId,
+      }).catch(() => {}); // fire-and-forget
     }
   }
 
   return results;
 }
 
+// ---- Loop prevention ----
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __cliaasAutomationDepth: number | undefined;
+}
+
+const MAX_AUTOMATION_DEPTH = 2;
+
 // ---- Apply execution results ----
 
-export function applyExecutionResults(
+export async function applyExecutionResults(
   result: ExecutionResult,
   ticket: TicketContext,
   dryRun: boolean,
-): { ticket: TicketContext; notificationsSent: number; webhooksFired: number } {
+): Promise<{ ticket: TicketContext; notificationsSent: number; webhooksFired: number; errors: string[] }> {
   if (dryRun) {
-    return { ticket, notificationsSent: 0, webhooksFired: 0 };
+    return { ticket, notificationsSent: 0, webhooksFired: 0, errors: [] };
   }
 
   // Apply field changes to ticket
   const updated = { ...ticket, ...result.changes };
 
-  // Dispatch notifications (log for now; real dispatch would integrate with notification service)
-  const notificationsSent = result.notifications.length;
+  // Loop prevention: skip side effects if we're too deep
+  const depth = global.__cliaasAutomationDepth ?? 0;
+  if (depth >= MAX_AUTOMATION_DEPTH) {
+    return { ticket: updated, notificationsSent: 0, webhooksFired: 0, errors: ['Skipped side effects: max automation depth reached'] };
+  }
 
-  // Fire webhooks (log for now; real dispatch would use fetch)
-  const webhooksFired = result.webhooks.length;
-
-  return { ticket: updated, notificationsSent, webhooksFired };
+  global.__cliaasAutomationDepth = depth + 1;
+  try {
+    const report = await dispatchSideEffects(result, ticket);
+    return { ticket: updated, ...report };
+  } finally {
+    global.__cliaasAutomationDepth = depth;
+  }
 }
 
 // ---- Integration point for the dispatcher ----
@@ -146,6 +177,10 @@ export async function evaluateAutomation(
 ): Promise<void> {
   // Ensure workflow-generated rules are loaded into the engine
   await bootstrapWorkflows();
+
+  // Ensure DB rules are loaded into the engine
+  const workspaceId = data.workspaceId != null ? String(data.workspaceId) : undefined;
+  await bootstrapRules(workspaceId);
 
   // Build a TicketContext from the event data
   const base = buildBaseTicketFromEvent(data);

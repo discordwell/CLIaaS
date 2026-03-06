@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-03-06T04:50Z — Session 78: Workflow Automation Engine Production Implementation
+- **7-phase implementation** closing 5 critical gaps in the automation system:
+  1. **DB↔Engine Bridge**: `bootstrap.ts` lazy-loads DB rules into in-memory engine on first ticket event. `invalidateRuleCache()` wired into all API mutation endpoints. Removed duplicate `automationRules` table.
+  2. **Side Effects Fire**: `side-effects.ts` dispatches email (sendNotification), Slack, Teams, push notifications, and webhook fetches via `Promise.allSettled`. Loop prevention via `__cliaasAutomationDepth` global (max 2).
+  3. **Persistent Audit**: `ruleExecutions` table + `audit-store.ts` with DB+in-memory dual-path. New API routes `/api/rules/executions` and `/api/rules/[id]/executions`.
+  4. **Rule UI Overhaul**: ConditionBuilder (ALL/ANY groups), ActionBuilder (type-specific inputs), RuleForm with DryRunPanel. Rules page now supports multi-condition/action create+edit.
+  5. **Macro Support**: `/api/macros` + `/api/macros/[id]/apply` routes. `MacroDropdown` component in ticket detail page. MCP `macro_apply` tool.
+  6. **Dry-Run**: `/api/rules/dry-run` endpoint for testing rules against sample tickets. DryRunPanel UI component with before/after diff.
+  7. **MCP Parity**: 7 new MCP tools (rule_list, rule_get, rule_update, rule_delete, rule_test, rule_executions, macro_list). Fixed rule_create/rule_toggle to persist to DB.
+- Schema changes: Added `description`, `version`, `executionOrder`, `lastExecutedAt`, `executionCount` to `rules` table. New `ruleExecutions` table with workspace/rule/ticket indexes.
+- `applyExecutionResults()` now async (breaking change from sync, all callers updated).
+- **89 tests passing** across 10 test files (50 automation + 39 security/RLS).
+
 ## 2026-03-06T12:00Z — Session 77: Implementation Roadmap Synthesis
 - Read all 20 competitive gap plan files (plan-01 through plan-20) in docs/plans/
 - Produced comprehensive prioritized roadmap at docs/plans/ROADMAP.md with 7 sections:

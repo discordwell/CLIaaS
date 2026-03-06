@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { requireAuth } from '@/lib/api-auth';
+import { invalidateRuleCache } from '@/lib/automation/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,9 +59,11 @@ export async function PATCH(
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (body.name !== undefined) updates.name = body.name;
+  if (body.description !== undefined) updates.description = body.description;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
   if (body.conditions !== undefined) updates.conditions = body.conditions;
   if (body.actions !== undefined) updates.actions = body.actions;
+  if (body.executionOrder !== undefined) updates.executionOrder = body.executionOrder;
 
   // Scope by workspace to prevent cross-workspace modification
   const [updated] = await db
@@ -73,6 +76,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
   }
 
+  invalidateRuleCache();
   return NextResponse.json({ rule: updated });
 }
 
@@ -103,5 +107,6 @@ export async function DELETE(
     return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
   }
 
+  invalidateRuleCache();
   return NextResponse.json({ ok: true });
 }
