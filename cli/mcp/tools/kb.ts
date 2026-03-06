@@ -339,7 +339,7 @@ export function registerKBTools(server: McpServer): void {
     'kb_content_gaps',
     'List content gaps — topics with ticket volume but no KB coverage',
     {
-      status: z.enum(['open', 'in-progress', 'resolved', 'dismissed']).optional()
+      status: z.enum(['open', 'accepted', 'dismissed', 'stale']).optional()
         .describe('Filter by status (default: all)'),
       limit: z.number().default(20).describe('Max results'),
     },

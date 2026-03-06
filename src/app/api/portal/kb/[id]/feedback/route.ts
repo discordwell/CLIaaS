@@ -55,27 +55,23 @@ export async function POST(
 
         const workspaceId = articleRows[0].workspaceId;
 
-        // Insert feedback record
-        await db.insert(schema.kbArticleFeedback).values({
-          workspaceId,
-          articleId,
-          helpful,
-          comment: comment ?? null,
-          sessionId: sessionId ?? null,
-        });
+        // Insert feedback + update counter atomically
+        await db.transaction(async (tx: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+          await tx.insert(schema.kbArticleFeedback).values({
+            workspaceId,
+            articleId,
+            helpful,
+            comment: comment ?? null,
+            sessionId: sessionId ?? null,
+          });
 
-        // Update article counters
-        if (helpful) {
-          await db
+          const counterCol = helpful ? 'helpfulCount' : 'notHelpfulCount';
+          const counterField = helpful ? schema.kbArticles.helpfulCount : schema.kbArticles.notHelpfulCount;
+          await tx
             .update(schema.kbArticles)
-            .set({ helpfulCount: sql`COALESCE(${schema.kbArticles.helpfulCount}, 0) + 1` })
+            .set({ [counterCol]: sql`COALESCE(${counterField}, 0) + 1` })
             .where(eq(schema.kbArticles.id, articleId));
-        } else {
-          await db
-            .update(schema.kbArticles)
-            .set({ notHelpfulCount: sql`COALESCE(${schema.kbArticles.notHelpfulCount}, 0) + 1` })
-            .where(eq(schema.kbArticles.id, articleId));
-        }
+        });
       } catch {
         // DB unavailable — silently succeed
       }

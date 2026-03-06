@@ -17,8 +17,8 @@ interface ContentGapCardProps {
 
 const STATUS_COLORS: Record<string, string> = {
   open: "border-amber-500 bg-amber-50 text-amber-700",
-  "in-progress": "border-blue-500 bg-blue-50 text-blue-700",
-  resolved: "border-green-500 bg-green-50 text-green-700",
+  accepted: "border-blue-500 bg-blue-50 text-blue-700",
+  stale: "border-zinc-400 bg-zinc-100 text-zinc-500",
   dismissed: "border-zinc-400 bg-zinc-100 text-zinc-500",
 };
 

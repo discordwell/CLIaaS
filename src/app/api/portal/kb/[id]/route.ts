@@ -62,10 +62,10 @@ export async function GET(
           );
         }
 
-        // Increment view_count
+        // Increment view_count (COALESCE handles null)
         await db
           .update(schema.kbArticles)
-          .set({ viewCount: sql`${schema.kbArticles.viewCount} + 1` })
+          .set({ viewCount: sql`COALESCE(${schema.kbArticles.viewCount}, 0) + 1` })
           .where(eq(schema.kbArticles.id, article.id));
 
         return NextResponse.json({

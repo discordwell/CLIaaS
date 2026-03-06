@@ -24,7 +24,9 @@ export async function GET() {
       try {
         const { db } = await import('@/db');
         const schema = await import('@/db/schema');
-        const { eq } = await import('drizzle-orm');
+        const { eq, and } = await import('drizzle-orm');
+        const { getDefaultWorkspaceId } = await import('@/lib/store-helpers');
+        const wsId = await getDefaultWorkspaceId(db, schema);
 
         const rows = await db
           .select({
@@ -33,7 +35,11 @@ export async function GET() {
             locale: schema.kbArticles.locale,
           })
           .from(schema.kbArticles)
-          .where(eq(schema.kbArticles.visibility, 'public'));
+          .where(and(
+            eq(schema.kbArticles.workspaceId, wsId),
+            eq(schema.kbArticles.visibility, 'public'),
+            eq(schema.kbArticles.status, 'published'),
+          ));
 
         articles = rows
           .filter((r) => r.slug)
@@ -64,8 +70,9 @@ export async function GET() {
         const lastmod = a.updatedAt
           ? `<lastmod>${a.updatedAt.split('T')[0]}</lastmod>`
           : '';
+        const safeLoc = `${base}/portal/kb/${a.slug}`.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         return `  <url>
-    <loc>${base}/portal/kb/${a.slug}</loc>
+    <loc>${safeLoc}</loc>
     ${lastmod}
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>

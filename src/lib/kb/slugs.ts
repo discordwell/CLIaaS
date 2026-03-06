@@ -33,6 +33,9 @@ export async function ensureUniqueSlug(
     const schema = await import('@/db/schema');
     const { eq, and, like } = await import('drizzle-orm');
 
+    // Escape LIKE wildcards to prevent injection
+    const escapedSlug = slug.replace(/%/g, '\\%').replace(/_/g, '\\_');
+
     // Fetch all slugs that start with the base slug in this workspace
     const rows = await db
       .select({ slug: schema.kbArticles.slug })
@@ -40,7 +43,7 @@ export async function ensureUniqueSlug(
       .where(
         and(
           eq(schema.kbArticles.workspaceId, workspaceId),
-          like(schema.kbArticles.slug, `${slug}%`),
+          like(schema.kbArticles.slug, `${escapedSlug}%`),
         ),
       );
 

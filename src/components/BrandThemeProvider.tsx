@@ -115,9 +115,9 @@ export default function BrandThemeProvider({
   return (
     <BrandThemeContext.Provider value={value}>
       <div style={cssVars}>
-        {/* Inject custom CSS if present */}
+        {/* Inject custom CSS if present (sanitize to prevent XSS via </style> injection) */}
         {theme.customCss && (
-          <style dangerouslySetInnerHTML={{ __html: theme.customCss }} />
+          <style dangerouslySetInnerHTML={{ __html: theme.customCss.replace(/<\/?style[^>]*>/gi, '').replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '') }} />
         )}
         {children}
       </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { requireScope } from '@/lib/api-auth';
 import { parseJsonBody } from '@/lib/parse-json-body';
 import { suggestArticles } from '@/lib/kb/text-match';
 
@@ -8,9 +9,12 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/chat/suggest-articles
  * Returns relevant KB articles for a chat message.
- * Uses the same text-matching as portal suggest.
+ * Auth required (kb:read) — this is an agent-facing endpoint, not portal.
  */
 export async function POST(request: NextRequest) {
+  const auth = await requireScope(request, 'kb:read');
+  if ('error' in auth) return auth.error;
+
   try {
     const parsed = await parseJsonBody<{
       message?: string;

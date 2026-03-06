@@ -26,7 +26,9 @@ export async function GET(request: NextRequest) {
       try {
         const { db } = await import('@/db');
         const schema = await import('@/db/schema');
-        const { eq } = await import('drizzle-orm');
+        const { eq, and } = await import('drizzle-orm');
+        const { getDefaultWorkspaceId } = await import('@/lib/store-helpers');
+        const wsId = await getDefaultWorkspaceId(db, schema);
 
         const [brand] = await db
           .select({
@@ -34,7 +36,7 @@ export async function GET(request: NextRequest) {
             supportedLocales: schema.brands.supportedLocales,
           })
           .from(schema.brands)
-          .where(eq(schema.brands.id, brandId))
+          .where(and(eq(schema.brands.id, brandId), eq(schema.brands.workspaceId, wsId)))
           .limit(1);
 
         if (brand?.supportedLocales && brand.supportedLocales.length > 0) {

@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
     const { db } = await import('@/db');
     const schema = await import('@/db/schema');
-    const { eq, desc } = await import('drizzle-orm');
+    const { eq } = await import('drizzle-orm');
 
     // Get articles with feedback counts, scoped by workspace
     const articles = await db

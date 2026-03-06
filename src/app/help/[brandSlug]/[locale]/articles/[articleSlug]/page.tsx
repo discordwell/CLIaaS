@@ -215,10 +215,9 @@ export default async function ArticleDetailPage({
           </div>
         </header>
 
-        <div
-          className="prose prose-zinc mt-8 max-w-none"
-          dangerouslySetInnerHTML={{ __html: article.body }}
-        />
+        <div className="prose prose-zinc mt-8 max-w-none whitespace-pre-wrap">
+          {article.body}
+        </div>
       </article>
 
       {/* Feedback section */}
