@@ -56,7 +56,13 @@ next-env.d.ts
 /packages/cliaas/node_modules/
 
 # Easter Egg - Red Alert C++ source (cloned at build time)
-/src/EasterEgg/CnC_and_Red_Alert
+# Ignore everything inside CnC_and_Red_Alert...
+/src/EasterEgg/CnC_and_Red_Alert/**
+# ...except our custom C++ files that patch the engine
+!/src/EasterEgg/CnC_and_Red_Alert/RA/
+!/src/EasterEgg/CnC_and_Red_Alert/RA/input_inject.cpp
+!/src/EasterEgg/CnC_and_Red_Alert/RA/agent_harness.cpp
+!/src/EasterEgg/CnC_and_Red_Alert/RA/CMakeLists.txt
 
 # Easter Egg - Red Alert music (downloaded separately, ~122MB)
 /public/ra/music/
