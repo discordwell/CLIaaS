@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       auth.user.workspaceId,
       { email, name, role },
       auth.user.tenantId,
+      auth.user.role,
     );
     return NextResponse.json({ user: sanitizeUser(user) }, { status: 201 });
   } catch (err: unknown) {

@@ -22,7 +22,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const updated = await updateUser(id, auth.user.workspaceId, body, auth.user.role);
+    const updated = await updateUser(id, auth.user.workspaceId, body, auth.user.role, auth.user.tenantId);
     return NextResponse.json({ user: sanitizeUser(updated) });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Update failed';

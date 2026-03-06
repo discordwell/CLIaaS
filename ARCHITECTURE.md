@@ -15,7 +15,7 @@
 | CLI files | 81 (`cli/`) |
 | CLI commands | 40 registered command groups |
 | Connectors | 10 helpdesk integrations |
-| MCP tools | 80 (across 17 modules) |
+| MCP tools | 91 (across 18 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
 | DB tables | 76 (Drizzle/PostgreSQL, RLS-enabled) |
@@ -403,6 +403,36 @@ BullMQ + Redis for reliable background processing with graceful fallback to inli
 ### SOC 2 Compliance
 - Compliance checks: `src/lib/compliance/soc2.ts`
 - Audit trail for all state mutations
+
+### RBAC (Role-Based Access Control)
+
+**Feature flag:** `RBAC_ENABLED` env var (default false). All guards fall through to legacy role-hierarchy when disabled.
+
+**6 built-in roles:** owner → admin → agent → light_agent → collaborator → viewer
+- owner: all 35 permissions
+- admin: 34 (all except admin:billing)
+- agent: 22 (day-to-day operations)
+- light_agent: 5 (view, reply_internal, kb:view, customers:view, forums:view)
+- collaborator: 2 (view, reply_internal)
+- viewer: 3 (kb:view, analytics:view, forums:view)
+
+**Bitfield encoding:** 35 permissions encoded as a single BigInt decimal string in the JWT `p` claim (~10 bytes). O(1) permission checks via bitwise operations.
+
+**Permission resolution chain:** Built-in role matrix → workspace overrides → custom role grants/denies
+
+**Key files:**
+- `src/lib/rbac/` — Core modules (bitfield, check, constants, permissions, feature-flag, types, seed, collaborator-scope, seat-check)
+- `src/lib/rbac/check.ts` — `requirePermission()` and `requireAnyPermission()` route guards
+- `src/lib/rbac/bitfield.ts` — Encode/decode/check via BigInt bitwise ops
+- `src/lib/rbac/constants.ts` — 35 PERMISSION_KEYS with stable bit indices, BUILTIN_ROLE_MATRIX
+- `src/lib/rbac/seat-check.ts` — Billing seat enforcement (full seats plan-limited, light agents free up to 50)
+- `src/components/rbac/` — PermissionProvider, PermissionGate, RoleBadge, CollaboratorPanel, RoleManagement
+- `src/db/migrations/0014_rbac_permissions.sql` — permissions, role_permissions, group_memberships, ticket_collaborators
+- `src/db/migrations/0015_custom_roles_billing.sql` — custom_roles, custom_role_permissions
+
+**Custom roles (Phase 6):** Extend a base built-in role with per-permission grant/deny overrides. Stored in `custom_roles` + `custom_role_permissions` tables.
+
+**Seat billing model:** Full seats (owner/admin/agent) are plan-limited. Light agent seats free up to 50. Collaborator/viewer unlimited. Enforced in `updateUser()` and `inviteUser()`.
 
 ---
 

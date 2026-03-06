@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-03-06T22:40Z — Session 101: Slice 15 — RBAC / Light Agents (All 6 Phases)
+- **Full 6-phase implementation** of Role-Based Access Control with light agents, collaborators, and custom roles
+- **Phase 0 (Skeleton)**: Feature flag (`RBAC_ENABLED` env var), module structure under `src/lib/rbac/`
+- **Phase 1 (Schema)**: 2 migrations (`0014_rbac_permissions.sql`, `0015_custom_roles_billing.sql`), 6 new DB tables (permissions, role_permissions, group_memberships, ticket_collaborators, custom_roles, custom_role_permissions), user_role enum extended with light_agent + collaborator, RLS policies
+- **Phase 2 (Bitfield Engine)**: 35 permissions with stable bit indices encoded as BigInt, O(1) checks. `encodeBitfield()`, `decodeBitfield()`, `hasPermission()`. Auto-computed in `createToken()`. JWT `p` claim ~10 bytes. Middleware propagates as `x-user-permissions` header
+- **Phase 3 (API Routes)**: `requirePermission()`/`requireAnyPermission()` guards with graceful fallback (role-based recompute when no bitfield). 8 new API routes (roles, permissions, custom roles CRUD, collaborators, effective-permissions, auth/refresh)
+- **Phase 4 (UI)**: PermissionProvider context, PermissionGate component, RoleBadge, CollaboratorPanel, RoleManagement page. AppNav permission-gated links. TeamSection updated with new roles
+- **Phase 5 (CLI/MCP)**: 11 MCP tools (roles_list, role_permissions, user_permissions, roles_assign, group CRUD, collaborator CRUD). CLI commands (roles, groups, collaborators)
+- **Phase 6 (Custom Roles + Billing)**: Custom role API (CRUD + permission overrides). Seat check enforcement in `updateUser()` + `inviteUser()` (full seats plan-limited, light agents free up to 50). Plan limits: free=3/10, starter=10/25, pro=25/50, enterprise=∞
+- **BigInt ES2017 fix**: Replaced all `0n`/`1n` literals with `BigInt(0)`/`BigInt(1)` for tsconfig target compatibility
+- **Tests**: 54 RBAC tests pass, 4280 total tests pass (0 failures). All type errors resolved.
+- **Files**: ~25 new files, ~15 modified. ARCHITECTURE.md updated with RBAC section.
+
 ## 2026-03-06T18:40Z — Session 100: Slice 2 — Omnichannel Routing Gap Closure (All 4 Phases)
 - **Phase 1 (Critical Stubs)**: Fixed 3 non-functional stubs in `engine.ts`: (1) `getAgentLoad()` now uses `LoadTracker` singleton that counts open/pending tickets per assignee via data provider with 5-min TTL + event invalidation; (2) `isInBusinessHours()` now uses async dynamic import of WFM business-hours module (fallback true); (3) `scoreAgentSkills()` now weights by proficiency (score = coverage * avgProficiency)
 - **Phase 2 (Migration + Heartbeat + Fix)**: SQL migration `0020_routing_tables.sql` (6 tables, 2 enums, 3 ALTER TABLE extensions). Heartbeat endpoint `POST /api/agents/:id/heartbeat`. ReRouteButton fixed (`data.assignedTo` -> `data.suggestedAgentName`, `data.reason` -> `data.reasoning`)

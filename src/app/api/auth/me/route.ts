@@ -1,15 +1,27 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
+import { getSession, getJwtSecret, COOKIE_NAME } from '@/lib/auth';
 import { updateProfile, sanitizeUser } from '@/lib/user-service';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ user: null }, { status: 401 });
   }
-  return NextResponse.json({ user: session });
+  // Extract permissions bitfield from JWT `p` claim for the frontend
+  let permissions: string | undefined;
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (token) {
+      const { jwtVerify } = await import('jose');
+      const { payload } = await jwtVerify(token, getJwtSecret());
+      if (payload.p) permissions = String(payload.p);
+    }
+  } catch { /* JWT parse error — skip permissions */ }
+  return NextResponse.json({ user: session, ...(permissions ? { permissions } : {}) });
 }
 
 export async function PATCH(request: Request) {

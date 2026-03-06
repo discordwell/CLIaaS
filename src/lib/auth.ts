@@ -28,7 +28,17 @@ export interface SessionUser {
 }
 
 export async function createToken(user: SessionUser): Promise<string> {
-  return new SignJWT({ ...user })
+  const payload: Record<string, unknown> = { ...user };
+  // Auto-compute RBAC bitfield when enabled
+  try {
+    const { isRbacEnabled } = await import('@/lib/rbac/feature-flag');
+    if (isRbacEnabled()) {
+      const { getUserBitfield } = await import('@/lib/rbac/permissions');
+      const bitfield = await getUserBitfield(user.role, user.workspaceId);
+      payload.p = bitfield.toString();
+    }
+  } catch { /* RBAC module not available — skip */ }
+  return new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')

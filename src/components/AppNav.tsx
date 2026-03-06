@@ -39,7 +39,7 @@ const navLinks: NavLink[] = [
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
-  const { permissions, hasPermission } = usePermissions();
+  const { rbacActive, hasPermission } = usePermissions();
 
   async function handleSignOut() {
     try {
@@ -52,7 +52,7 @@ export default function AppNav() {
 
   // Filter nav links by permission when RBAC is active
   const visibleLinks =
-    permissions > 0n
+    rbacActive
       ? navLinks.filter(
           (link) => !link.permission || hasPermission(link.permission),
         )

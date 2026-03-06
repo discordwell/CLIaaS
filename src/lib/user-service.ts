@@ -38,6 +38,7 @@ export async function updateUser(
   workspaceId: string,
   data: { name?: string; role?: Role; status?: UserStatus },
   actorRole: Role,
+  tenantId?: string,
 ) {
   const target = await getUser(userId, workspaceId);
   if (!target) throw new Error('User not found');
@@ -52,6 +53,15 @@ export async function updateUser(
     throw new Error('Cannot demote the workspace owner');
   }
 
+  // Seat availability check when changing to a paid role
+  if (data.role && data.role !== target.role && tenantId) {
+    const { checkSeatAvailability } = await import('@/lib/rbac/seat-check');
+    const seat = await checkSeatAvailability(workspaceId, tenantId, data.role);
+    if (!seat.allowed) {
+      throw new Error(seat.reason ?? 'Seat limit reached');
+    }
+  }
+
   const [updated] = await db
     .update(users)
     .set({ ...data, updatedAt: new Date() })
@@ -64,13 +74,28 @@ export async function inviteUser(
   workspaceId: string,
   data: { email: string; name: string; role?: Role },
   tenantId?: string,
+  actorRole?: Role,
 ) {
+  // Prevent privilege escalation — can't invite someone with a higher role
+  const targetRole = data.role ?? 'agent';
+  if (actorRole && (ROLE_HIERARCHY[targetRole] ?? 0) > (ROLE_HIERARCHY[actorRole] ?? 0)) {
+    throw new Error('Cannot invite a user with a role higher than your own');
+  }
   // Check for existing user with same email in workspace
   const [existing] = await db
     .select()
     .from(users)
     .where(and(eq(users.workspaceId, workspaceId), eq(users.email, data.email)));
   if (existing) throw new Error('A user with this email already exists in this workspace');
+
+  // Seat availability check for the target role
+  if (tenantId) {
+    const { checkSeatAvailability } = await import('@/lib/rbac/seat-check');
+    const seat = await checkSeatAvailability(workspaceId, tenantId, targetRole);
+    if (!seat.allowed) {
+      throw new Error(seat.reason ?? 'Seat limit reached');
+    }
+  }
 
   const [created] = await db
     .insert(users)
@@ -79,7 +104,7 @@ export async function inviteUser(
       tenantId: tenantId ?? null,
       email: data.email,
       name: data.name,
-      role: data.role ?? 'agent',
+      role: targetRole,
       status: 'invited',
     })
     .returning();

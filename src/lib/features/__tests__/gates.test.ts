@@ -10,10 +10,12 @@ import {
 import type { Feature, TierLevel } from '../gates';
 
 describe('isFeatureEnabled', () => {
-  it('returns true for byoc on all features except sso', () => {
+  const ENTERPRISE_ONLY: Feature[] = ['sso', 'multi_brand'];
+
+  it('returns true for byoc on all features except enterprise-only ones', () => {
     const features = Object.keys(FEATURE_MATRIX) as Feature[];
     for (const feature of features) {
-      if (feature === 'sso') {
+      if (ENTERPRISE_ONLY.includes(feature)) {
         expect(isFeatureEnabled(feature, 'byoc')).toBe(false);
       } else {
         expect(isFeatureEnabled(feature, 'byoc')).toBe(true);
@@ -21,7 +23,7 @@ describe('isFeatureEnabled', () => {
     }
   });
 
-  it('returns true for all legacy tiers on non-sso features', () => {
+  it('returns true for all legacy tiers on broadly-available features', () => {
     const legacyTiers: TierLevel[] = ['basic', 'free', 'founder', 'starter'];
     for (const tier of legacyTiers) {
       expect(isFeatureEnabled('analytics', tier)).toBe(true);
@@ -31,15 +33,21 @@ describe('isFeatureEnabled', () => {
     }
   });
 
-  it('sso is enterprise-only', () => {
-    expect(isFeatureEnabled('sso', 'enterprise')).toBe(true);
-    expect(isFeatureEnabled('sso', 'byoc')).toBe(false);
-    expect(isFeatureEnabled('sso', 'pro')).toBe(false);
-    expect(isFeatureEnabled('sso', 'pro_hosted')).toBe(false);
-    expect(isFeatureEnabled('sso', 'basic')).toBe(false);
-    expect(isFeatureEnabled('sso', 'free')).toBe(false);
-    expect(isFeatureEnabled('sso', 'founder')).toBe(false);
-    expect(isFeatureEnabled('sso', 'starter')).toBe(false);
+  it('legacy tiers do not get answer_bot', () => {
+    const legacyTiers: TierLevel[] = ['basic', 'free', 'founder', 'starter'];
+    for (const tier of legacyTiers) {
+      expect(isFeatureEnabled('answer_bot', tier)).toBe(false);
+    }
+  });
+
+  it('sso and multi_brand are enterprise-only', () => {
+    for (const feature of ENTERPRISE_ONLY) {
+      expect(isFeatureEnabled(feature, 'enterprise')).toBe(true);
+      expect(isFeatureEnabled(feature, 'byoc')).toBe(false);
+      expect(isFeatureEnabled(feature, 'pro')).toBe(false);
+      expect(isFeatureEnabled(feature, 'pro_hosted')).toBe(false);
+      expect(isFeatureEnabled(feature, 'basic')).toBe(false);
+    }
   });
 
   it('returns true for enterprise on all features', () => {
@@ -49,10 +57,10 @@ describe('isFeatureEnabled', () => {
     }
   });
 
-  it('returns true for pro_hosted on all features except sso', () => {
+  it('returns true for pro_hosted on all features except enterprise-only ones', () => {
     const features = Object.keys(FEATURE_MATRIX) as Feature[];
     for (const feature of features) {
-      if (feature === 'sso') {
+      if (ENTERPRISE_ONLY.includes(feature)) {
         expect(isFeatureEnabled(feature, 'pro_hosted')).toBe(false);
       } else {
         expect(isFeatureEnabled(feature, 'pro_hosted')).toBe(true);
@@ -62,10 +70,12 @@ describe('isFeatureEnabled', () => {
 });
 
 describe('getAvailableFeatures', () => {
-  it('returns all features except sso for byoc tier', () => {
+  const ENTERPRISE_ONLY: Feature[] = ['sso', 'multi_brand'];
+
+  it('returns all features except enterprise-only for byoc tier', () => {
     const features = getAvailableFeatures('byoc');
     const allFeatures = Object.keys(FEATURE_MATRIX) as Feature[];
-    expect(features).toEqual(allFeatures.filter(f => f !== 'sso'));
+    expect(features).toEqual(allFeatures.filter(f => !ENTERPRISE_ONLY.includes(f)));
   });
 
   it('returns all features for enterprise tier', () => {
@@ -74,23 +84,26 @@ describe('getAvailableFeatures', () => {
     expect(features).toEqual(allFeatures);
   });
 
-  it('returns all features except sso for legacy tiers', () => {
+  it('returns correct features for legacy tiers (no sso, multi_brand, answer_bot)', () => {
     const legacyTiers: TierLevel[] = ['basic', 'free', 'founder', 'starter'];
     const allFeatures = Object.keys(FEATURE_MATRIX) as Feature[];
-    const expectedFeatures = allFeatures.filter(f => f !== 'sso');
+    const excluded: Feature[] = ['sso', 'multi_brand', 'answer_bot'];
+    const expectedFeatures = allFeatures.filter(f => !excluded.includes(f));
     for (const tier of legacyTiers) {
       expect(getAvailableFeatures(tier)).toEqual(expectedFeatures);
     }
   });
 
-  it('returns all features except sso for pro tier', () => {
+  it('returns all features except enterprise-only for pro tier', () => {
     const features = getAvailableFeatures('pro');
     expect(features).toContain('analytics');
     expect(features).toContain('ai_dashboard');
     expect(features).toContain('sla_management');
     expect(features).toContain('voice_channels');
     expect(features).toContain('social_channels');
+    expect(features).toContain('answer_bot');
     expect(features).not.toContain('sso');
+    expect(features).not.toContain('multi_brand');
   });
 });
 
