@@ -144,7 +144,7 @@ function MarketingHome() {
         <div className="mt-6 flex items-center gap-4">
           <p className="font-mono text-xs text-emerald-600 font-bold uppercase">
             Sign up by <span className="line-through text-muted">the Ides of March</span>{" "}
-            the Birthday of Rome (April 21) and get <span className="line-through">BYOC</span> Claudeus Maximus ∞. Free, Forever.
+            the Birthday of Rome (April 21) and get Claudeus Maximus ∞. Free, Forever.
           </p>
           <img
             src="/caesar-brutus.png"
@@ -278,9 +278,9 @@ function MarketingHome() {
           <div className="flex flex-col border-2 border-line bg-panel p-6">
             <div className="flex items-center justify-between">
               <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted">
-                <span className="line-through">BYOC</span>
+                BYOC
               </p>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter" className="text-emerald-500"><path d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 1 0 0-8c-2 0-4 1.33-6 4Z"/></svg>
+              <span className="text-2xl font-bold text-emerald-500">∞</span>
             </div>
             <p className="mt-4 text-3xl font-bold uppercase text-foreground">
               Self-Hosted
