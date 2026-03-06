@@ -2926,13 +2926,13 @@ export class Renderer {
       ctx.fillStyle = '#d33';
       ctx.fillRect(pwrX + 1, overY, pwrW - 2, overH);
     } else if (consumed > 0 && produced > 0 && consumed / produced > 0.7) {
-      // Near capacity: yellow overlay on consumed portion
-      ctx.fillStyle = '#ca0';
+      // Near capacity: semi-transparent yellow tint over consumed portion (preserves green underneath)
+      ctx.fillStyle = 'rgba(200,170,0,0.4)';
       ctx.fillRect(pwrX + 1, pwrY + pwrH - consumedH, pwrW - 2, consumedH);
     }
 
-    // Divider line at produced level
-    if (produced > 0) {
+    // Divider line at produced level (only when consumed > 0 so the line separates something)
+    if (produced > 0 && consumed > 0) {
       const divY = pwrY + pwrH - producedH;
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
@@ -2998,7 +2998,7 @@ export class Renderer {
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
         // Draw icon scaled to fill full cameo slot, using actual image dimensions as source
-        ctx.drawImage(iconSheet.image, 0, 0, iconSheet.image.width as number, iconSheet.image.height as number,
+        ctx.drawImage(iconSheet.image, 0, 0, iconSheet.image.naturalWidth, iconSheet.image.naturalHeight,
           stripX, iy, camW, camH);
       } else {
         const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
