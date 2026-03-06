@@ -36,8 +36,10 @@ import { registerTimeCommands } from './time.js';
 import { registerForumCommands } from './forums.js';
 import { registerQACommands } from './qa.js';
 import { registerCampaignCommands } from './campaigns.js';
+import { registerPluginCommands } from './plugins.js';
 import { registerInitCommand } from './init.js';
 import { registerSetupCommand } from './setup.js';
+import { registerRoutingCommands } from './routing.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -77,6 +79,8 @@ export function registerCommands(program: Command): void {
   registerForumCommands(program);
   registerQACommands(program);
   registerCampaignCommands(program);
+  registerPluginCommands(program);
   registerInitCommand(program);
   registerSetupCommand(program);
+  registerRoutingCommands(program);
 }

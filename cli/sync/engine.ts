@@ -34,7 +34,7 @@ export interface SyncOptions {
 }
 
 /** Supported connectors that have export functions. */
-const CONNECTOR_DEFAULTS: Record<string, { outDir: string }> = {
+export const CONNECTOR_DEFAULTS: Record<string, { outDir: string }> = {
   zendesk: { outDir: './exports/zendesk' },
   kayako: { outDir: './exports/kayako' },
   'kayako-classic': { outDir: './exports/kayako-classic' },
@@ -198,6 +198,35 @@ export async function runSyncCycle(
   }
 
   const finishedAt = new Date();
+
+  // Auto-route newly imported tickets that have no assignee
+  if (manifest.counts.tickets > 0) {
+    void (async () => {
+      try {
+        const { routeTicket } = await import('@/lib/routing/engine.js');
+        const { availability } = await import('@/lib/routing/availability.js');
+        const { getRoutingConfig } = await import('@/lib/routing/store.js');
+        const { getDataProvider } = await import('@/lib/data-provider/index.js');
+
+        const config = getRoutingConfig();
+        if (!config.enabled || !config.autoRouteOnCreate) return;
+
+        const allAvail = availability.getAllAvailability();
+        const allAgents = allAvail.map(a => ({ userId: a.userId, userName: a.userName }));
+        if (allAgents.length === 0) return;
+
+        const provider = await getDataProvider(outDir);
+        const tickets = await provider.loadTickets();
+        const unassigned = tickets.filter(t => !t.assignee);
+
+        for (const ticket of unassigned.slice(0, 50)) {
+          await routeTicket(ticket, { allAgents });
+        }
+      } catch {
+        // Routing is best-effort during sync
+      }
+    })();
+  }
 
   return {
     connector: connectorName,

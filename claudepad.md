@@ -1,5 +1,30 @@
 # Session Summaries
 
+## 2026-03-06T06:30Z — Session 80: Marketplace & Plugin Platform
+- **9-phase implementation** replacing demo-grade plugin system with production plugin platform:
+  1. **Types & Schema**: `src/lib/plugins/types.ts` (PluginManifestV2, 24 hooks, 11 permissions, node|webhook runtime), 5 DB tables (marketplace_listings, plugin_installations, plugin_hook_registrations, plugin_execution_logs, plugin_reviews), migration 0006
+  2. **Store Layer**: Dual-mode (DB+JSONL) stores for installations (`store.ts`), marketplace (`marketplace-store.ts`), execution logs (`execution-log.ts`). JOIN-based hook lookup in DB path, cross-ref in JSONL path.
+  3. **Execution Engine**: `sandbox.ts` (node:vm with restricted globals, 5s timeout, SSRF prevention), `sdk-context.ts` (permission-gated SDK), `executor.ts` (fan-out via Promise.allSettled). Barrel module `plugins.ts` preserves backward compat.
+  4. **API Routes**: 7 new routes (marketplace browse/detail/install/reviews/publish, plugin logs, plugin PATCH). Modified existing plugin GET/DELETE for dual-store fallback.
+  5. **CLI**: `cli/commands/plugins.ts` — 10 subcommands (list/show/install/uninstall/enable/disable/config/logs/marketplace/publish)
+  6. **MCP**: 8 tools (plugin_list/install/uninstall/toggle/config/logs, marketplace_search/show). 4 new scope guards.
+  7. **UI**: Marketplace browse page + detail page with reviews/ratings, PluginConfigForm (JSON Schema-driven), PluginSidebar for ticket detail. Enhanced integrations page with toggle/logs.
+  8. **First-Party Plugins**: slack-notify, jira-sync, stripe-context with manifests + handlers + seed script
+  9. **Tests**: 52 tests across 8 files — store, marketplace-store, sandbox, executor, validator, MCP tools, API routes, integration
+- Cross-realm Error fix in sandbox: `vm.createContext()` errors fail `instanceof Error`, added object-shape check
+- AppNav updated with Marketplace link
+
+## 2026-03-06T00:15Z — Session 79: Real-time Omnichannel Routing Engine
+- **5-phase implementation** of skill-based, capacity-aware routing engine replacing demo router:
+  1. **Core Engine**: `src/lib/routing/` — types, dual-mode JSONL store, availability tracker (singleton with auto-offline), 4 strategies (round_robin, load_balanced, skill_match, priority_weighted), queue manager with condition evaluation + overflow, core engine with category extraction + agent scoring
+  2. **API Routes**: 22 new routes under `/api/routing/`, `/api/agents/`, `/api/groups/` — config, queues, rules, route-ticket, log, analytics, skills, capacity, availability, group members
+  3. **CLI + MCP**: `cli/commands/routing.ts` (10 subcommands), `cli/mcp/tools/routing.ts` (5 tools: route_ticket, routing_status, agent_availability, agent_skills, queue_depth). MCP tool count: 60→81
+  4. **Auto-routing Hooks**: Event dispatcher channel 5 — on `ticket.created` without assignee, auto-routes. Slack command creates real ticket + auto-routes. Sync engine routes imported unassigned tickets.
+  5. **UI**: Settings page (`/settings/routing`) with config, queue CRUD, rule CRUD, agent skills/availability. Analytics page (`/analytics/routing`) with stat cards, bar charts, routing log. 4 components (AgentAvailabilityIndicator, AgentSkillBadges, RoutingQueueCard, AgentCapacityBar). Modified ticket detail (routing info + re-route button), dashboard (availability + queue panels), AppNav (routing link).
+- **31 routing unit tests** across 4 test files, all passing. MCP server test updated (60→81 tools).
+- DB schema: 3 enums + 6 tables (agentSkills, agentCapacity, groupMemberships, routingQueues, routingRules, routingLog)
+- Business hours placeholder in engine scoring (0.7 penalty factor for off-hours agents)
+
 ## 2026-03-06T04:50Z — Session 78: Workflow Automation Engine Production Implementation
 - **7-phase implementation** closing 5 critical gaps in the automation system:
   1. **DB↔Engine Bridge**: `bootstrap.ts` lazy-loads DB rules into in-memory engine on first ticket event. `invalidateRuleCache()` wired into all API mutation endpoints. Removed duplicate `automationRules` table.

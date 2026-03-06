@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { loadTickets, computeStats } from "@/lib/data";
 import { getAllConnectorStatuses } from "@/lib/connector-service";
+import { availability } from "@/lib/routing/availability";
+import { getRoutingQueues } from "@/lib/routing/store";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,13 @@ export default async function DashboardPage() {
   const tickets = await loadTickets();
   const stats = computeStats(tickets);
   const connectors = getAllConnectorStatuses();
+
+  const allAvailability = availability.getAllAvailability();
+  const availCounts = { online: 0, away: 0, offline: 0 };
+  for (const entry of allAvailability) {
+    availCounts[entry.status]++;
+  }
+  const queues = getRoutingQueues().filter((q) => q.enabled);
 
   const statCards = [
     { label: "Total Tickets", value: stats.total },
@@ -59,6 +68,51 @@ export default async function DashboardPage() {
           </div>
         ))}
       </section>
+
+      {/* AGENT AVAILABILITY + QUEUES */}
+      {(allAvailability.length > 0 || queues.length > 0) && (
+        <section className="mt-8 grid gap-4 sm:grid-cols-2">
+          <div className="border-2 border-line bg-panel p-5">
+            <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+              Agent Availability
+            </p>
+            <div className="mt-3 flex gap-6">
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span className="font-mono text-sm font-bold">{availCounts.online}</span>
+                <span className="font-mono text-xs text-muted">online</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
+                <span className="font-mono text-sm font-bold">{availCounts.away}</span>
+                <span className="font-mono text-xs text-muted">away</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-zinc-400" />
+                <span className="font-mono text-sm font-bold">{availCounts.offline}</span>
+                <span className="font-mono text-xs text-muted">offline</span>
+              </div>
+            </div>
+          </div>
+          {queues.length > 0 && (
+            <div className="border-2 border-line bg-panel p-5">
+              <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+                Routing Queues
+              </p>
+              <div className="mt-3 space-y-2">
+                {queues.slice(0, 4).map((q) => (
+                  <div key={q.id} className="flex items-center justify-between font-mono text-sm">
+                    <span className="font-bold">{q.name}</span>
+                    <span className="border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                      {q.strategy.replace("_", " ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {stats.recentTickets.length > 0 && (
         <section className="mt-8 border-2 border-line bg-panel p-8">

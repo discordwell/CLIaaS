@@ -127,10 +127,12 @@ describe('MCP Server', () => {
         expect(toolsResponse.result).toBeDefined();
 
         const tools = toolsResponse.result!.tools ?? [];
-        expect(tools.length).toBe(60);
+        expect(tools.length).toBe(81);
 
         const toolNames = tools.map((t: { name: string }) => t.name).sort();
         expect(toolNames).toEqual([
+          'agent_availability',
+          'agent_skills',
           'ai_resolve',
           'campaign_create',
           'campaign_list',
@@ -152,14 +154,33 @@ describe('MCP Server', () => {
           'forum_moderate',
           'kb_search',
           'kb_suggest',
+          'macro_apply',
+          'macro_list',
+          'marketplace_search',
+          'marketplace_show',
+          'plugin_config',
+          'plugin_install',
+          'plugin_list',
+          'plugin_logs',
+          'plugin_toggle',
+          'plugin_uninstall',
           'qa_dashboard',
           'qa_review',
+          'queue_depth',
           'queue_stats',
           'rag_ask',
           'rag_search',
           'rag_status',
+          'route_ticket',
+          'routing_status',
           'rule_create',
+          'rule_delete',
+          'rule_executions',
+          'rule_get',
+          'rule_list',
+          'rule_test',
           'rule_toggle',
+          'rule_update',
           'sentiment_analyze',
           'sla_report',
           'summarize_queue',

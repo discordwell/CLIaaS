@@ -19,6 +19,8 @@ import { registerTimeTools } from './tools/time.js';
 import { registerForumTools } from './tools/forums.js';
 import { registerQATools } from './tools/qa.js';
 import { registerCampaignTools } from './tools/campaigns.js';
+import { registerPluginTools } from './tools/plugins.js';
+import { registerRoutingTools } from './tools/routing.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -44,6 +46,8 @@ registerTimeTools(server);
 registerForumTools(server);
 registerQATools(server);
 registerCampaignTools(server);
+registerPluginTools(server);
+registerRoutingTools(server);
 
 // Register resources and prompts
 registerResources(server);

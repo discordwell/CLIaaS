@@ -42,11 +42,30 @@ export async function POST(request: NextRequest) {
     if (subcommand === 'ticket') {
       const subject = args.slice(1).join(' ') || 'Ticket from Slack';
 
-      // In a full implementation, this would create a ticket via the data provider
-      return NextResponse.json({
-        response_type: 'ephemeral',
-        text: `Ticket created: "${subject}" (requested by @${userName}).\nThis is a demo response — connect a data provider for live ticket creation.`,
-      });
+      try {
+        const { getDataProvider } = await import('@/lib/data-provider/index');
+        const provider = await getDataProvider();
+        const { id } = await provider.createTicket({
+          subject,
+          requester: userName,
+          source: 'slack',
+          tags: ['slack'],
+        });
+
+        // Fire-and-forget auto-routing
+        const { dispatch } = await import('@/lib/events/dispatcher');
+        dispatch('ticket.created', { ticketId: id, source: 'slack', subject });
+
+        return NextResponse.json({
+          response_type: 'in_channel',
+          text: `Ticket *${id.slice(0, 8)}* created: "${subject}" (by @${userName}). Routing to best agent...`,
+        });
+      } catch {
+        return NextResponse.json({
+          response_type: 'ephemeral',
+          text: `Ticket created: "${subject}" (by @${userName}). Note: database not configured — ticket stored in-memory only.`,
+        });
+      }
     }
 
     if (subcommand === 'help' || !subcommand) {

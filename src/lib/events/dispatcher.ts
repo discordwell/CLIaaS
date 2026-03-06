@@ -111,6 +111,7 @@ export function dispatch(
       event,
       data,
       timestamp,
+      workspaceId: data.workspaceId as string | undefined,
     }).catch((err) => {
       logger.error({ channel: 'plugins', event, error: err instanceof Error ? err.message : 'Unknown' }, 'Plugin hook failed');
     }),
@@ -137,7 +138,48 @@ export function dispatch(
       }
     }),
 
-    // 5. AI resolution queue (only for eligible events, with quota check)
+    // 5. Routing engine (auto-route new tickets without assignee)
+    Promise.resolve().then(async () => {
+      if (event === 'ticket.created' && data.ticketId && !data.assignee) {
+        try {
+          const { routeTicket } = await import('../routing/engine');
+          const { availability } = await import('../routing/availability');
+          const { getDataProvider } = await import('../data-provider/index');
+
+          const provider = await getDataProvider();
+          const tickets = await provider.loadTickets();
+          const ticket = tickets.find(t => t.id === data.ticketId);
+          if (!ticket || ticket.assignee) return;
+
+          const messages = await provider.loadMessages(ticket.id);
+          const allAvail = availability.getAllAvailability();
+          const allAgents = allAvail.map(a => ({ userId: a.userId, userName: a.userName }));
+          if (allAgents.length === 0) return;
+
+          const result = await routeTicket(ticket, { allAgents, messages });
+          if (result.suggestedAgentId) {
+            try {
+              await provider.updateTicket(ticket.id, { assignee: result.suggestedAgentName });
+            } catch { /* JSONL mode — no writes */ }
+
+            eventBus.emit({
+              type: 'ticket:routed',
+              data: {
+                ticketId: ticket.id,
+                agentId: result.suggestedAgentId,
+                agentName: result.suggestedAgentName,
+                strategy: result.strategy,
+              },
+              timestamp: Date.now(),
+            });
+          }
+        } catch (err) {
+          logger.error({ channel: 'routing', event, error: err instanceof Error ? err.message : 'Unknown' }, 'Auto-routing failed');
+        }
+      }
+    }),
+
+    // 6. AI resolution queue (only for eligible events, with quota check)
     Promise.resolve().then(async () => {
       if (AI_RESOLUTION_EVENTS.has(event) && data.ticketId) {
         // Check AI call quota before enqueueing
