@@ -1,5 +1,48 @@
 # Session Summaries
 
+## 2026-03-06T05:12Z — Session 85: Workforce Management (WFM) — Plan 05
+- **Types**: `src/lib/wfm/types.ts` — 16 interfaces/types (ShiftBlock, ScheduleTemplate, AgentSchedule, AgentAvailability, AgentStatusEntry, AgentCurrentStatus, TimeOffRequest, VolumeSnapshot, ForecastPoint, StaffingRecommendation, BusinessHoursConfig, AdherenceRecord, UtilizationRecord, WfmDashboardData, ScheduledActivity)
+- **Store**: `src/lib/wfm/store.ts` — JSONL persistence for 6 collections with demo data seeding + compatibility aliases
+- **Core modules**: business-hours.ts (timezone-aware checks, elapsed minutes, next-open), agent-status.ts (singleton tracker with events), schedules.ts (CRUD, conflict detection, activity tracking), time-off.ts (request/approve/deny with events), forecast.ts (EMA + staffing), adherence.ts (schedule-vs-status comparison), utilization.ts (occupancy calc), volume-tracker.ts (event-driven hourly counters)
+- **Migration**: `0007_workforce_management.sql` — 7 new tables, 2 enums, 2 ALTER TABLE
+- **Drizzle schema**: 7 new table defs + timeOffStatusEnum added to schema.ts (reuses agentAvailabilityEnum from routing)
+- **API routes**: 13 new routes under `/api/wfm/` (schedules, templates, time-off, agent-status, adherence, forecast, utilization, business-hours, dashboard)
+- **CLI**: `cli/commands/wfm.ts` — 15 subcommands (schedule/template/status/time-off/forecast/adherence/utilization/business-hours)
+- **MCP tools**: `cli/mcp/tools/wfm.ts` — 13 tools with scopeGuard + withConfirmation on write ops
+- **Events**: Added 4 WFM event types to EventType union
+- **Feature gate**: Added `workforce_management` (all tiers)
+- **UI**: `src/app/wfm/page.tsx` + `_content.tsx` — 5-tab dashboard (Dashboard, Schedules, Adherence, Forecast, Time Off)
+- **Nav**: Added WFM link in AppNav
+- **Tests**: 41 tests across 5 files (business-hours: 13, schedules: 10, adherence: 7, forecast: 7, utilization: 4), all passing
+- **Code review**: Fixed phantom `changedAt` field in agent-status.ts, added positive-case conflict detection tests
+- **Files**: 28+ new, 7 modified
+
+## 2026-03-06T05:15Z — Session 84: Canned Responses, Macros & Agent Signatures (Plan 07)
+- **Migration**: `0008_canned_responses_macros.sql` — 3 new tables (canned_responses, macros, agent_signatures), template_scope enum, RLS policies
+- **Drizzle schema**: Added cannedResponses, nativeMacros, agentSignatures tables + templateScopeEnum to schema.ts
+- **JSONL stores**: 3 new stores (canned-store.ts, macro-store.ts, signature-store.ts) with demo data seeding
+- **Merge engine**: `src/lib/canned/merge.ts` — regex-based {{variable.path}} resolution, 12 supported variables (customer/ticket/agent/workspace)
+- **Macro executor**: `src/lib/canned/macro-executor.ts` — sequential action processing (9 action types), merge variable integration
+- **API routes**: 18 new routes — CRUD for canned-responses (6), macros (6), signatures (5), merge-variables (1)
+- **Updated macros API**: Switched from rules table to native macros table + JSONL store; apply endpoint uses new executor
+- **CLI commands**: `cli/commands/canned.ts` — 3 command groups (canned, macro, signature) with 15 subcommands
+- **MCP tools**: `cli/mcp/tools/canned.ts` — 10 new tools (search/get/create/update/delete canned, resolve_template, list/create/apply macros, get_signature)
+- **UI**: CannedResponsePicker component integrated into TicketActions reply form; 3 settings pages (canned-responses, macros, signatures)
+- **Settings page**: Added Templates & Macros section with links to all 3 management pages
+- **Feature gate**: Added `canned_responses` feature (all tiers)
+- **Tests**: 21 tests (10 merge engine, 11 macro executor), all passing
+- **Files**: 18 new, 8 modified
+
+## 2026-03-06T10:10Z — Session 83: Port C++ Sidebar Rendering to TypeScript
+- **Asset extraction**: 12 new SHP sprites (stripup/dn, power_marker, side1-3na/us, stripna/us, pips) from HIRES.MIX/LORES.MIX
+- **Layout constants**: Replaced all sidebar constants with C++ HIRES values — MAX_VISIBLE 3→4, CAMEO_GAP 2→0, C++ English button layout (64/40/40 widths)
+- **Rendering rewrite**: House-specific 3-section backgrounds (side1-3na for Allied, side1-3us for Soviet), strip column backgrounds (stripna/stripus), sprite-based buttons (ShapeButtonClass frames), sprite scroll arrows (stripup/stripdn), pips READY/HOLDING overlays, clock ghost overlay
+- **Power bar**: Logarithmic Power_Height() scale from power.cpp, bounce animation via _modtable[13], palette-accurate colors (green/orange/red), drain marker shape, flash timer
+- **Click handlers**: Updated for C++ English button layout, side-by-side scroll buttons below strip
+- **Tests**: 96 tests passing — layout constants, Power_Height() verification, bounce modtable, sidebar background positions
+- **Bug fix**: stripup/stripdn only have 2 frames (not 3) — fixed disabled frame index from 2→1
+- **Files**: extract-ra-assets.ts, renderer.ts, index.ts, sidebar-ui.test.ts, MISSING_FEATURES.md
+
 ## 2026-03-06T05:05Z — Session 82: Agent Collision Detection (Plan 08)
 - **Presence API auth fix**: Extracts userId/userName from `auth.user` instead of trusting request body; POST returns `currentUserId` + `viewers`
 - **PresenceTracker**: Reduced stale threshold from 60s to 30s

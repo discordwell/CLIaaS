@@ -8,7 +8,7 @@ export interface ShiftBlock {
   dayOfWeek: number;
   startTime: string;
   endTime: string;
-  activity: string;
+  activity?: string;
   label?: string;
 }
 

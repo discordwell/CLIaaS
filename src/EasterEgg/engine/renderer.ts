@@ -256,14 +256,24 @@ export class Renderer {
     if (this.drainBounce > 0 && this.drainHeight === this.desiredDrainHeight) {
       this.drainBounce--;
     } else if (this.drainHeight !== this.desiredDrainHeight) {
-      this.drainHeight += this.drainDir;
+      const dStep = Math.max(1, Math.ceil(Math.abs(this.desiredDrainHeight - this.drainHeight) / 8));
+      this.drainHeight += this.drainDir * dStep;
+      if ((this.drainDir > 0 && this.drainHeight > this.desiredDrainHeight) ||
+          (this.drainDir < 0 && this.drainHeight < this.desiredDrainHeight)) {
+        this.drainHeight = this.desiredDrainHeight;
+      }
     }
 
     // Animate power height
     if (this.powerBounce > 0 && this.powerHeight === this.desiredPowerHeight) {
       this.powerBounce--;
     } else if (this.powerHeight !== this.desiredPowerHeight) {
-      this.powerHeight += this.powerDir;
+      const pStep = Math.max(1, Math.ceil(Math.abs(this.desiredPowerHeight - this.powerHeight) / 8));
+      this.powerHeight += this.powerDir * pStep;
+      if ((this.powerDir > 0 && this.powerHeight > this.desiredPowerHeight) ||
+          (this.powerDir < 0 && this.powerHeight < this.desiredPowerHeight)) {
+        this.powerHeight = this.desiredPowerHeight;
+      }
     }
 
     // Flash timer countdown
@@ -3075,13 +3085,6 @@ export class Renderer {
     ph = Math.max(0, Math.min(pwrH - 2, ph));
     dh = Math.max(0, Math.min(pwrH - 2, dh));
 
-    // Rescale heights for HIRES bar (C++: power_height * 153 / 107)
-    const hiresScale = (76 * 2 + 1) / (53 * 2 + 1);
-    ph = Math.round(ph * hiresScale);
-    dh = Math.round(dh * hiresScale);
-    ph = Math.max(0, Math.min(pwrH - 2, ph));
-    dh = Math.max(0, Math.min(pwrH - 2, dh));
-
     const bottom = pwrY + pwrH - 1;
 
     // Choose color based on drain vs power ratio (C++ power.cpp)
@@ -3110,7 +3113,7 @@ export class Renderer {
     // Draw drain marker shape at drain height
     const markerSheet = assets.getSheet('power_marker');
     if (markerSheet && dh > 0) {
-      const markerY = bottom - dh - markerSheet.meta.frameHeight;
+      const markerY = bottom - dh - markerSheet.meta.frameHeight * 2;
       assets.drawFrame(ctx, 'power_marker', 0, pwrX, markerY, { scale: 2 });
     } else if (dh > 0) {
       // Fallback: white divider line at drain level
@@ -3288,7 +3291,7 @@ export class Renderer {
     const upDisabled = scroll <= 0;
     const upSheet = assets.getSheet('stripup');
     if (upSheet) {
-      const frame = upDisabled ? 2 : 0; // frame 0=enabled, 2=disabled
+      const frame = upDisabled ? 1 : 0; // frame 0=enabled, 1=disabled
       assets.drawFrame(ctx, 'stripup', frame, stripX + Renderer.UP_X_OFFSET, btnY, { scale: 2 });
     } else {
       ctx.fillStyle = upDisabled ? '#444' : '#aaa';
@@ -3301,7 +3304,7 @@ export class Renderer {
     const downDisabled = scroll >= maxScroll;
     const dnSheet = assets.getSheet('stripdn');
     if (dnSheet) {
-      const frame = downDisabled ? 2 : 0;
+      const frame = downDisabled ? 1 : 0;
       assets.drawFrame(ctx, 'stripdn', frame, stripX + Renderer.DOWN_X_OFFSET, btnY, { scale: 2 });
     } else {
       ctx.fillStyle = downDisabled ? '#444' : '#aaa';

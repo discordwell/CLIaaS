@@ -307,6 +307,10 @@ Nearly every aircraft stat is wrong. C++ aircraft have Sight=0 (rely on ground u
 - [x] **R3: Per-type animation rates** — Correct.
 - [x] **R7: Infantry death animation by warhead** — Correct.
 - [x] **R8: ExplosionSet per warhead** — Correct.
+- [x] [VERIFIED] **R9: Sidebar house-specific backgrounds** — Ported: side1na/us, side2na/us, side3na/us 3-section shapes. Allied=NA, Soviet=US. Extracted from HIRES.MIX.
+- [x] [VERIFIED] **R10: Sidebar C++ HIRES layout** — Ported: MAX_VISIBLE=4, CAMEO_GAP=0, C++ English button layout (64/40/40), exact column positions from sidebar.h.
+- [x] [VERIFIED] **R11: Power bar logarithmic scale + bounce** — Ported: Power_Height() from power.cpp:394-417, bounce via _modtable[13], palette-accurate colors (green/orange/red).
+- [x] [VERIFIED] **R12: Sidebar sprite-based buttons/arrows** — Ported: stripup/stripdn SHP scroll arrows, repair/sell/map ShapeButtonClass sprites, pips READY/HOLDING frames.
 
 ## AUDIO / MUSIC
 

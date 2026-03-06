@@ -5,39 +5,38 @@
  */
 
 import { eventBus } from '@/lib/realtime/events';
-import type { AgentCurrentStatus, AgentStatusEntry, AgentAvailability } from './types';
-import { getAgentStatusEntries, addAgentStatusEntry, genId } from './store';
+import type { AgentCurrentStatus, AgentStatusEntry } from './types';
+import { getStatusLog as getAgentStatusEntries, addStatusEntry as addAgentStatusEntry, genId } from './store';
+
+/** Read the timestamp from a status entry. */
+function entryTime(e: AgentStatusEntry): string {
+  return e.startedAt ?? '';
+}
 
 class AgentStatusTracker {
   private statuses: Map<string, AgentCurrentStatus> = new Map();
   private initialized = false;
 
-  /**
-   * Lazy-load current statuses from the store defaults.
-   * Builds the in-memory Map from the most recent status entry per user.
-   */
+  /** Lazy-load current statuses from the persisted log. */
   private ensureInit(): void {
     if (this.initialized) return;
     this.initialized = true;
 
     const entries = getAgentStatusEntries();
-
-    // Build latest status per user from the log
     const latest = new Map<string, AgentStatusEntry>();
-    for (const entry of entries) {
-      const existing = latest.get(entry.userId);
-      if (!existing || entry.startedAt > existing.startedAt) {
-        latest.set(entry.userId, entry);
+    for (const e of entries) {
+      const existing = latest.get(e.userId);
+      if (!existing || entryTime(e) > entryTime(existing)) {
+        latest.set(e.userId, e);
       }
     }
-
-    for (const entry of latest.values()) {
-      this.statuses.set(entry.userId, {
-        userId: entry.userId,
-        userName: entry.userName,
-        status: entry.status,
-        reason: entry.reason,
-        since: entry.startedAt,
+    for (const e of latest.values()) {
+      this.statuses.set(e.userId, {
+        userId: e.userId,
+        userName: e.userName,
+        status: e.status,
+        reason: e.reason,
+        since: entryTime(e),
       });
     }
   }
@@ -49,23 +48,15 @@ class AgentStatusTracker {
   setStatus(
     userId: string,
     userName: string,
-    status: AgentAvailability,
+    status: AgentCurrentStatus['status'],
     reason?: string,
   ): AgentCurrentStatus {
     this.ensureInit();
-
     const now = new Date().toISOString();
 
-    const current: AgentCurrentStatus = {
-      userId,
-      userName,
-      status,
-      reason,
-      since: now,
-    };
+    const current: AgentCurrentStatus = { userId, userName, status, reason, since: now };
     this.statuses.set(userId, current);
 
-    // Persist to log
     const entry: AgentStatusEntry = {
       id: genId('ast'),
       userId,
@@ -76,7 +67,7 @@ class AgentStatusTracker {
     };
     addAgentStatusEntry(entry);
 
-    // Emit event (cast type to satisfy strict EventType union until WFM events are added)
+    // Emit event (cast to satisfy strict EventType union)
     eventBus.emit({
       type: 'wfm:status_changed' as Parameters<typeof eventBus.emit>[0]['type'],
       data: { userId, userName, status, reason },
@@ -86,17 +77,13 @@ class AgentStatusTracker {
     return current;
   }
 
-  /**
-   * Get a single agent's current status.
-   */
+  /** Get a single agent's current status. */
   getStatus(userId: string): AgentCurrentStatus | undefined {
     this.ensureInit();
     return this.statuses.get(userId);
   }
 
-  /**
-   * Get all current agent statuses.
-   */
+  /** Get all current agent statuses. */
   getAllStatuses(): AgentCurrentStatus[] {
     this.ensureInit();
     return Array.from(this.statuses.values());
@@ -111,15 +98,10 @@ class AgentStatusTracker {
     if (userId) entries = entries.filter((e) => e.userId === userId);
 
     let results = [...entries];
+    if (from) results = results.filter((e) => entryTime(e) >= from);
+    if (to) results = results.filter((e) => entryTime(e) <= to);
 
-    if (from) {
-      results = results.filter((e) => e.startedAt >= from);
-    }
-    if (to) {
-      results = results.filter((e) => e.startedAt <= to);
-    }
-
-    return results.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    return results.sort((a, b) => entryTime(b).localeCompare(entryTime(a)));
   }
 }
 

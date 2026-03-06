@@ -20,7 +20,11 @@ export type EventType =
   | 'wfm:status_changed'
   | 'wfm:adherence_alert'
   | 'wfm:time_off_requested'
-  | 'wfm:time_off_decided';
+  | 'wfm:time_off_decided'
+  | 'ticket:merged'
+  | 'ticket:split'
+  | 'note:created'
+  | 'mention:created';
 
 export interface AppEvent {
   type: EventType;

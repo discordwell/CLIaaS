@@ -271,49 +271,132 @@ describe('Strip Bounds — C++ HIRES Layout', () => {
 // Scroll Arrow Click Regions
 // ═══════════════════════════════════════════════════════════
 
-describe('Scroll Arrow Click Regions', () => {
-  const STRIP_START_Y = 194;
-  const CAMEO_H = 48;
-  const CAMEO_GAP = 2;
-  const CAMEO_VISIBLE = 3;
-  const SCROLL_ARROW_H = 16;
-  const stripClipH = CAMEO_VISIBLE * (CAMEO_H + CAMEO_GAP); // 150
-
-  it('up arrow region fits between button row bottom and strip start', () => {
-    const BUTTON_ROW_Y = 164;
-    const BUTTON_H = 28;
-    const btnRowBottom = BUTTON_ROW_Y + BUTTON_H; // 192
-    const upH = STRIP_START_Y - btnRowBottom; // 2px gap
-    expect(btnRowBottom).toBe(192);
-    expect(upH).toBe(2);
-    // No overlap with button row
-    expect(btnRowBottom + upH).toBe(STRIP_START_Y);
+describe('Scroll Buttons — C++ Layout (side-by-side below strip)', () => {
+  it('scroll buttons are at STRIP_START_Y + SCROLL_BTN_Y_OFFSET', () => {
+    const btnY = Renderer.STRIP_START_Y + Renderer.SCROLL_BTN_Y_OFFSET;
+    expect(btnY).toBe(374); // 180 + 194
   });
 
-  it('down arrow region is below visible slots (STRIP_START_Y + 150 to +166)', () => {
-    const downY = STRIP_START_Y + stripClipH;
-    expect(downY).toBe(344);
-    expect(downY + SCROLL_ARROW_H).toBe(360);
+  it('up button at UP_X_OFFSET=4, down button at DOWN_X_OFFSET=36', () => {
+    expect(Renderer.UP_X_OFFSET).toBe(4);
+    expect(Renderer.DOWN_X_OFFSET).toBe(36);
+  });
+
+  it('scroll buttons are 32×24 px each (SBUTTON_W × SBUTTON_H)', () => {
+    expect(Renderer.SBUTTON_W).toBe(32);
+    expect(Renderer.SBUTTON_H).toBe(24);
   });
 
   it('scroll up clamps at 0', () => {
     let scroll = 0;
-    scroll = Math.max(0, scroll - 50);
+    scroll = Math.max(0, scroll - Renderer.CAMEO_H);
     expect(scroll).toBe(0);
   });
 
   it('scroll down clamps at maxScroll', () => {
-    const items = 6;
-    const rowH = 50;
-    const visibleH = 150;
+    const items = 8;
+    const rowH = Renderer.CAMEO_H;
+    const visibleH = Renderer.CAMEO_VISIBLE * rowH;
     const maxScroll = Math.max(0, items * rowH - visibleH);
     let scroll = maxScroll;
-    scroll = Math.min(maxScroll, scroll + 50);
-    expect(scroll).toBe(maxScroll); // stays at max
+    scroll = Math.min(maxScroll, scroll + rowH);
+    expect(scroll).toBe(maxScroll);
   });
 
-  it('clip rect height is exactly 3 * 50 = 150px', () => {
-    expect(stripClipH).toBe(150);
+  it('button row ends exactly where strips start (no gap)', () => {
+    const btnEnd = Renderer.BUTTON_ROW_Y + Renderer.BUTTON_H;
+    expect(btnEnd).toBe(Renderer.STRIP_START_Y); // 162+18 = 180
+  });
+
+  it('strip clip height is 4 × 48 = 192px', () => {
+    const stripClipH = Renderer.CAMEO_VISIBLE * Renderer.CAMEO_H;
+    expect(stripClipH).toBe(192);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Power Bar — C++ Parity (power.cpp)
+// ═══════════════════════════════════════════════════════════
+
+describe('Power Bar — C++ Power_Height() Logarithmic Scale', () => {
+  it('Power_Height(0) = 0', () => {
+    expect(Renderer.powerBarHeight(0)).toBe(0);
+  });
+
+  it('Power_Height(100) fills first step = floor(151/5) = 30', () => {
+    expect(Renderer.powerBarHeight(100)).toBe(30);
+  });
+
+  it('Power_Height(200) = 30 + floor((151-30)/5) = 30 + 24 = 54', () => {
+    expect(Renderer.powerBarHeight(200)).toBe(54);
+  });
+
+  it('Power_Height is monotonically increasing', () => {
+    let prev = 0;
+    for (let v = 0; v <= 2000; v += 50) {
+      const h = Renderer.powerBarHeight(v);
+      expect(h).toBeGreaterThanOrEqual(prev);
+      prev = h;
+    }
+  });
+
+  it('Power_Height is clamped to POWER_HEIGHT - 2', () => {
+    const max = Renderer.POWER_HEIGHT - 2;
+    expect(Renderer.powerBarHeight(100000)).toBeLessThanOrEqual(max);
+  });
+
+  it('Power_Height shows diminishing returns (logarithmic)', () => {
+    const h100 = Renderer.powerBarHeight(100);
+    const h200 = Renderer.powerBarHeight(200);
+    const h300 = Renderer.powerBarHeight(300);
+    const step1 = h200 - h100; // second 100 units
+    const step2 = h300 - h200; // third 100 units
+    expect(step2).toBeLessThan(step1); // each step adds less
+  });
+
+  it('fractional part interpolates within a step', () => {
+    const h0 = Renderer.powerBarHeight(0);
+    const h50 = Renderer.powerBarHeight(50);
+    const h100 = Renderer.powerBarHeight(100);
+    expect(h50).toBeGreaterThan(h0);
+    expect(h50).toBeLessThan(h100);
+  });
+});
+
+describe('Power Bar — Bounce Animation (power.cpp)', () => {
+  it('bounce modtable matches C++ _modtable exactly', () => {
+    expect(Renderer.POWER_MODTABLE).toEqual([0, -1, 0, 1, 0, -1, -2, -1, 0, 1, 2, 1, 0]);
+  });
+
+  it('modtable has 13 entries (bounce counter 12→0)', () => {
+    expect(Renderer.POWER_MODTABLE.length).toBe(13);
+  });
+
+  it('modtable starts and ends at 0 (smooth start/stop)', () => {
+    expect(Renderer.POWER_MODTABLE[0]).toBe(0);
+    expect(Renderer.POWER_MODTABLE[12]).toBe(0);
+  });
+
+  it('POWER_STEP_LEVEL = 100, POWER_STEP_FACTOR = 5', () => {
+    expect(Renderer.POWER_STEP_LEVEL).toBe(100);
+    expect(Renderer.POWER_STEP_FACTOR).toBe(5);
+  });
+
+  it('POWER_Y = 176 (88×2), POWER_HEIGHT = 153 (76×2+1)', () => {
+    expect(Renderer.POWER_Y).toBe(176);
+    expect(Renderer.POWER_HEIGHT).toBe(153);
+  });
+});
+
+describe('Sidebar Background — C++ Shape Positions', () => {
+  it('sidebar background shapes at correct Y positions', () => {
+    expect(Renderer.SIDEBAR_BG_TOP_Y).toBe(16);   // 8×2
+    expect(Renderer.SIDEBAR_BG_MID_Y).toBe(176);  // 88×2
+    expect(Renderer.SIDEBAR_BG_BOT_Y).toBe(276);  // 138×2
+  });
+
+  it('SCROLL_RATE = 12 (WIN32 value)', () => {
+    expect(Renderer.SCROLL_RATE).toBe(12);
   });
 });
 

@@ -1,266 +1,104 @@
 /**
  * Schedule and template CRUD + helpers for the WFM domain.
- * Determines what activity an agent is scheduled for at a given moment.
- * Provides CRUD operations for schedules and templates with JSONL persistence.
  */
 
-import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
-import type {
-  AgentSchedule,
-  ScheduleTemplate,
-  ShiftBlock,
-  ScheduledActivity,
-} from './types';
-import { genId } from './store';
+import type { AgentSchedule, ScheduleTemplate, ScheduledActivity, ShiftBlock } from './types';
+import {
+  getSchedulesStore, addSchedule, updateScheduleStore, removeSchedule,
+  getTemplatesStore, addTemplate, updateTemplateStore, removeTemplate,
+  getTimeOffStore, genId,
+} from './store';
 
-// ---- JSONL persistence ----
-
-const SCHEDULES_FILE = 'wfm-schedules.jsonl';
-const TEMPLATES_FILE = 'wfm-templates.jsonl';
-
-let scheduleCache: AgentSchedule[] | null = null;
-let templateCache: ScheduleTemplate[] | null = null;
-
-function ensureSchedulesLoaded(): AgentSchedule[] {
-  if (scheduleCache === null) {
-    scheduleCache = readJsonlFile<AgentSchedule>(SCHEDULES_FILE);
-  }
-  return scheduleCache;
+export function getTemplates(id?: string): ScheduleTemplate[] {
+  const all = getTemplatesStore();
+  return id ? all.filter(t => t.id === id) : all;
 }
 
-function persistSchedules(): void {
-  writeJsonlFile(SCHEDULES_FILE, ensureSchedulesLoaded());
+export function createTemplate(input: { name: string; shifts: ShiftBlock[] }): ScheduleTemplate {
+  const now = new Date().toISOString();
+  const t: ScheduleTemplate = { id: genId('tmpl'), name: input.name, shifts: input.shifts, createdAt: now, updatedAt: now };
+  addTemplate(t);
+  return t;
 }
 
-function ensureTemplatesLoaded(): ScheduleTemplate[] {
-  if (templateCache === null) {
-    templateCache = readJsonlFile<ScheduleTemplate>(TEMPLATES_FILE);
-  }
-  return templateCache;
+export function updateTemplate(id: string, updates: Partial<Pick<ScheduleTemplate, 'name' | 'shifts'>>): ScheduleTemplate | null {
+  return updateTemplateStore(id, updates);
 }
 
-function persistTemplates(): void {
-  writeJsonlFile(TEMPLATES_FILE, ensureTemplatesLoaded());
-}
+export function deleteTemplate(id: string): boolean { return removeTemplate(id); }
 
-// ---- Schedule CRUD ----
+export function getSchedules(userId?: string): AgentSchedule[] { return getSchedulesStore(userId); }
 
-/** Get schedules, optionally filtered by userId. */
-export function getSchedules(userId?: string): AgentSchedule[] {
-  const all = ensureSchedulesLoaded();
-  if (userId) return all.filter((s) => s.userId === userId);
-  return [...all];
-}
-
-/** Create a new schedule. */
 export function createSchedule(input: {
-  userId: string;
-  userName: string;
-  templateId?: string;
-  effectiveFrom: string;
-  effectiveTo?: string;
-  timezone: string;
-  shifts: ShiftBlock[];
+  userId: string; userName: string; templateId?: string; effectiveFrom: string;
+  effectiveTo?: string; timezone: string; shifts: ShiftBlock[];
 }): AgentSchedule {
   const now = new Date().toISOString();
-  const schedule: AgentSchedule = {
-    id: genId('sched'),
-    userId: input.userId,
-    userName: input.userName,
-    timezone: input.timezone,
-    effectiveFrom: input.effectiveFrom,
-    effectiveTo: input.effectiveTo,
-    templateId: input.templateId,
-    shifts: input.shifts,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  ensureSchedulesLoaded().push(schedule);
-  persistSchedules();
-  return schedule;
+  const s: AgentSchedule = { id: genId('sched'), ...input, createdAt: now, updatedAt: now };
+  addSchedule(s);
+  return s;
 }
 
-/** Update a schedule by id. Returns updated schedule or null. */
-export function updateSchedule(
-  id: string,
-  updates: Partial<Omit<AgentSchedule, 'id' | 'createdAt'>>
-): AgentSchedule | null {
-  const all = ensureSchedulesLoaded();
-  const idx = all.findIndex((s) => s.id === id);
-  if (idx === -1) return null;
-
-  all[idx] = { ...all[idx], ...updates, updatedAt: new Date().toISOString() };
-  persistSchedules();
-  return all[idx];
+export function updateSchedule(id: string, updates: Partial<Pick<AgentSchedule, 'templateId' | 'effectiveFrom' | 'effectiveTo' | 'timezone' | 'shifts'>>): AgentSchedule | null {
+  return updateScheduleStore(id, updates);
 }
 
-/** Delete a schedule by id. Returns true if found and removed. */
-export function deleteSchedule(id: string): boolean {
-  const all = ensureSchedulesLoaded();
-  const idx = all.findIndex((s) => s.id === id);
-  if (idx === -1) return false;
+export function deleteSchedule(id: string): boolean { return removeSchedule(id); }
 
-  all.splice(idx, 1);
-  persistSchedules();
-  return true;
-}
-
-// ---- Template CRUD ----
-
-/** Get all templates. */
-export function getTemplates(): ScheduleTemplate[] {
-  return [...ensureTemplatesLoaded()];
-}
-
-/** Create a template. */
-export function createTemplate(input: {
-  name: string;
-  shifts: ShiftBlock[];
-}): ScheduleTemplate {
-  const now = new Date().toISOString();
-  const template: ScheduleTemplate = {
-    id: genId('tmpl'),
-    name: input.name,
-    shifts: input.shifts,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  ensureTemplatesLoaded().push(template);
-  persistTemplates();
-  return template;
-}
-
-/** Update a template by id. Returns updated template or null. */
-export function updateTemplate(
-  id: string,
-  updates: Partial<Omit<ScheduleTemplate, 'id' | 'createdAt'>>
-): ScheduleTemplate | null {
-  const all = ensureTemplatesLoaded();
-  const idx = all.findIndex((t) => t.id === id);
-  if (idx === -1) return null;
-
-  all[idx] = { ...all[idx], ...updates, updatedAt: new Date().toISOString() };
-  persistTemplates();
-  return all[idx];
-}
-
-/** Delete a template by id. Returns true if found and removed. */
-export function deleteTemplate(id: string): boolean {
-  const all = ensureTemplatesLoaded();
-  const idx = all.findIndex((t) => t.id === id);
-  if (idx === -1) return false;
-
-  all.splice(idx, 1);
-  persistTemplates();
-  return true;
-}
-
-/** Apply a template's shifts to a schedule. */
 export function applyTemplate(scheduleId: string, templateId: string): AgentSchedule | null {
-  const templates = ensureTemplatesLoaded();
-  const template = templates.find((t) => t.id === templateId);
-  if (!template) return null;
-
-  return updateSchedule(scheduleId, {
-    templateId,
-    shifts: [...template.shifts],
-  });
+  const tmpls = getTemplatesStore();
+  const tmpl = tmpls.find(t => t.id === templateId);
+  if (!tmpl) return null;
+  return updateScheduleStore(scheduleId, { templateId, shifts: [...tmpl.shifts] });
 }
 
-// ---- Schedule activity helpers ----
+export function detectConflicts(userId: string, newShifts: ShiftBlock[], effectiveFrom: string, effectiveTo?: string): Array<{ type: string; detail: string }> {
+  const conflicts: Array<{ type: string; detail: string }> = [];
 
-/** Parse "HH:MM" into total minutes from midnight. */
-function parseTimeToMinutes(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + (m || 0);
-}
-
-/**
- * Get the scheduled activity for an agent at the current moment (or a given date).
- * Returns 'off_shift' if no matching shift block is found.
- */
-export function getScheduledActivity(
-  schedule: AgentSchedule,
-  at?: Date
-): ScheduledActivity {
-  const now = at ?? new Date();
-  const dayOfWeek = now.getUTCDay();
-  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-
-  for (const shift of schedule.shifts) {
-    if (shift.dayOfWeek !== dayOfWeek) continue;
-
-    const shiftStart = parseTimeToMinutes(shift.startTime);
-    const shiftEnd = parseTimeToMinutes(shift.endTime);
-
-    if (currentMinutes >= shiftStart && currentMinutes < shiftEnd) {
-      return (shift.activity ?? 'work') as ScheduledActivity;
-    }
-  }
-
-  return 'off_shift';
-}
-
-/**
- * Count how many agents are scheduled for 'work' during a given hour.
- */
-export function countScheduledAgents(
-  schedules: AgentSchedule[],
-  hourKey: string
-): number {
-  const date = new Date(hourKey);
-  // Check at mid-hour (e.g. XX:30) for a representative sample
-  date.setUTCMinutes(30);
-
-  let count = 0;
-  for (const schedule of schedules) {
-    const activity = getScheduledActivity(schedule, date);
-    if (activity === 'work') count++;
-  }
-  return count;
-}
-
-/**
- * Get total scheduled work minutes for an agent within a date range.
- */
-export function getScheduledWorkMinutes(
-  schedule: AgentSchedule,
-  from: Date,
-  to: Date
-): number {
-  let totalMinutes = 0;
-  const cursor = new Date(from);
-
-  while (cursor < to) {
-    const dayOfWeek = cursor.getUTCDay();
-    for (const shift of schedule.shifts) {
-      if (shift.dayOfWeek !== dayOfWeek) continue;
-      if ((shift.activity ?? 'work') !== 'work') continue;
-
-      const shiftStart = parseTimeToMinutes(shift.startTime);
-      const shiftEnd = parseTimeToMinutes(shift.endTime);
-
-      // Clamp shift to the from/to range within this day
-      const dayStart = new Date(cursor);
-      dayStart.setUTCHours(0, 0, 0, 0);
-
-      const absStart = new Date(dayStart.getTime() + shiftStart * 60_000);
-      const absEnd = new Date(dayStart.getTime() + shiftEnd * 60_000);
-
-      const effectiveStart = absStart < from ? from : absStart;
-      const effectiveEnd = absEnd > to ? to : absEnd;
-
-      if (effectiveStart < effectiveEnd) {
-        totalMinutes += (effectiveEnd.getTime() - effectiveStart.getTime()) / 60_000;
+  // Check overlapping shifts in existing schedules
+  const existing = getSchedulesStore(userId);
+  for (const sched of existing) {
+    const schedEnd = sched.effectiveTo ?? '9999-12-31';
+    const newEnd = effectiveTo ?? '9999-12-31';
+    if (effectiveFrom <= schedEnd && newEnd >= sched.effectiveFrom) {
+      for (const ns of newShifts) for (const es of sched.shifts) {
+        if (ns.dayOfWeek === es.dayOfWeek && ns.startTime < es.endTime && ns.endTime > es.startTime) {
+          conflicts.push({ type: 'shift_overlap', detail: `Day ${ns.dayOfWeek}: ${ns.startTime}-${ns.endTime} overlaps ${es.startTime}-${es.endTime} in ${sched.id}` });
+        }
       }
     }
-
-    // Advance to next day
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-    cursor.setUTCHours(0, 0, 0, 0);
   }
 
-  return totalMinutes;
+  // Check approved time-off within the effective date range
+  const timeOff = getTimeOffStore(userId, 'approved');
+  const newEnd = effectiveTo ?? '9999-12-31';
+  for (const pto of timeOff) {
+    if (pto.startDate <= newEnd && pto.endDate >= effectiveFrom) {
+      conflicts.push({ type: 'time_off_overlap', detail: `Approved time off ${pto.startDate} to ${pto.endDate} (${pto.reason ?? 'no reason'})` });
+    }
+  }
+
+  return conflicts;
+}
+
+export function getScheduledActivity(schedule: AgentSchedule, at?: Date): ScheduledActivity {
+  const now = at ?? new Date();
+  const dow = now.getUTCDay();
+  const curMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const dayShifts = schedule.shifts.filter(s => s.dayOfWeek === dow)
+    .sort((a, b) => (a.activity === 'work' ? 0 : 1) - (b.activity === 'work' ? 0 : 1));
+  let result: ScheduledActivity = 'off_shift';
+  for (const shift of dayShifts) {
+    const [sh, sm] = shift.startTime.split(':').map(Number);
+    const [eh, em] = shift.endTime.split(':').map(Number);
+    if (curMin >= sh*60+sm && curMin < eh*60+em) result = shift.activity as ScheduledActivity;
+  }
+  return result;
+}
+
+export function countScheduledAgents(schedules: AgentSchedule[], hourStr: string): number {
+  const d = new Date(hourStr); d.setUTCMinutes(30);
+  let count = 0;
+  for (const s of schedules) if (getScheduledActivity(s, d) === 'work') count++;
+  return count;
 }

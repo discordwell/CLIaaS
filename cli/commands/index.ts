@@ -41,6 +41,8 @@ import { registerInitCommand } from './init.js';
 import { registerSetupCommand } from './setup.js';
 import { registerRoutingCommands } from './routing.js';
 import { registerWfmCommands } from './wfm.js';
+import { registerCannedCommands } from './canned.js';
+import { registerNotificationCommands } from './notifications.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -85,4 +87,6 @@ export function registerCommands(program: Command): void {
   registerSetupCommand(program);
   registerRoutingCommands(program);
   registerWfmCommands(program);
+  registerCannedCommands(program);
+  registerNotificationCommands(program);
 }

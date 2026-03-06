@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import NotificationBell from "./NotificationBell";
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard" },
@@ -66,12 +67,15 @@ export default function AppNav() {
             })}
           </div>
         </div>
-        <button
-          onClick={handleSignOut}
-          className="px-2 py-1 font-mono text-xs font-bold uppercase text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950"
-        >
-          Sign Out
-        </button>
+        <div className="flex items-center gap-2">
+          <NotificationBell />
+          <button
+            onClick={handleSignOut}
+            className="px-2 py-1 font-mono text-xs font-bold uppercase text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950"
+          >
+            Sign Out
+          </button>
+        </div>
       </div>
     </nav>
   );

@@ -87,6 +87,23 @@ export const messageVisibilityEnum = pgEnum('message_visibility', [
   'internal',
 ]);
 
+export const notificationTypeEnum = pgEnum('notification_type', [
+  'mention',
+  'side_conversation_reply',
+  'assignment',
+  'escalation',
+]);
+
+export const conversationKindEnum = pgEnum('conversation_kind', [
+  'primary',
+  'side',
+]);
+
+export const sideConversationStatusEnum = pgEnum('side_conversation_status', [
+  'open',
+  'closed',
+]);
+
 export const ssoProtocolEnum = pgEnum('sso_protocol', [
   'saml',
   'oidc',
@@ -336,12 +353,18 @@ export const conversations = pgTable(
     ticketId: uuid('ticket_id').notNull().references(() => tickets.id),
     workspaceId: uuid('workspace_id').references(() => workspaces.id),
     channelType: channelTypeEnum('channel_type').notNull().default('email'),
+    kind: conversationKindEnum('kind').notNull().default('primary'),
+    subject: text('subject'),
+    externalEmail: varchar('external_email', { length: 320 }),
+    createdById: uuid('created_by_id').references(() => users.id),
+    status: sideConversationStatusEnum('status').notNull().default('open'),
     startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
-    conversationsTicketIdx: uniqueIndex('conversations_ticket_idx').on(table.ticketId),
+    conversationsTicketIdx: index('conversations_ticket_idx').on(table.ticketId),
     conversationsWorkspaceIdx: index('conversations_workspace_idx').on(table.workspaceId),
+    conversationsKindIdx: index('conversations_kind_idx').on(table.ticketId, table.kind),
   }),
 );
 
@@ -356,6 +379,7 @@ export const messages = pgTable(
     body: text('body').notNull(),
     bodyHtml: text('body_html'),
     visibility: messageVisibilityEnum('visibility').notNull().default('public'),
+    mentionedUserIds: uuid('mentioned_user_ids').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
@@ -381,6 +405,42 @@ export const attachments = pgTable(
   },
   table => ({
     attachmentsWorkspaceIdx: index('attachments_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    type: notificationTypeEnum('type').notNull(),
+    title: text('title').notNull(),
+    body: text('body'),
+    resourceType: text('resource_type'),
+    resourceId: uuid('resource_id'),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    notificationsUserUnreadIdx: index('notifications_user_unread_idx').on(table.userId, table.createdAt),
+    notificationsWorkspaceIdx: index('notifications_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const mentions = pgTable(
+  'mentions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    messageId: uuid('message_id').notNull().references(() => messages.id),
+    mentionedUserId: uuid('mentioned_user_id').notNull().references(() => users.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    mentionsMessageIdx: index('mentions_message_idx').on(table.messageId),
+    mentionsUserUnreadIdx: index('mentions_user_unread_idx').on(table.mentionedUserId, table.createdAt),
   }),
 );
 

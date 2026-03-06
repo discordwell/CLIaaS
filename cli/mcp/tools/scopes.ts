@@ -42,6 +42,8 @@ const ALL_WRITE_TOOLS = [
   'wfm_agent_status_set',
   'wfm_time_off_request',
   'wfm_time_off_decide',
+  'ticket_merge',
+  'ticket_split',
 ];
 
 export function loadScopes(): MCPScopeConfig {

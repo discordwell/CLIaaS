@@ -1,55 +1,94 @@
 /**
  * Time-off request management.
+ * Emits events via the shared eventBus.
  */
 
+import { eventBus } from '@/lib/realtime/events';
 import type { TimeOffRequest } from './types';
 import {
   getTimeOffRequests as storeGetRequests,
   addTimeOffRequest,
   updateTimeOffRequest,
-  removeTimeOffRequest,
+  genId,
 } from './store';
-import { genId } from './store';
 
+/**
+ * Get time-off requests, optionally filtered by userId and/or status.
+ */
 export function getTimeOffRequests(
   userId?: string,
   status?: 'pending' | 'approved' | 'denied',
 ): TimeOffRequest[] {
-  let requests = storeGetRequests();
-  if (userId) requests = requests.filter(r => r.userId === userId);
-  if (status) requests = requests.filter(r => r.status === status);
-  return requests;
+  return storeGetRequests(userId, status);
 }
 
-export function requestTimeOff(params: {
+/**
+ * Submit a new time-off request. Status starts as 'pending'.
+ * Emits wfm:time_off_requested.
+ */
+export function requestTimeOff(input: {
   userId: string;
-  userName?: string;
+  userName: string;
   startDate: string;
   endDate: string;
   reason?: string;
 }): TimeOffRequest {
+  const now = new Date().toISOString();
   const request: TimeOffRequest = {
-    id: genId(),
-    userId: params.userId,
-    userName: params.userName ?? params.userId,
-    startDate: params.startDate,
-    endDate: params.endDate,
-    reason: params.reason,
+    id: genId('pto'),
+    userId: input.userId,
+    userName: input.userName,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    reason: input.reason,
     status: 'pending',
-    createdAt: new Date().toISOString(),
+    createdAt: now,
   };
   addTimeOffRequest(request);
+
+  eventBus.emit({
+    type: 'wfm:time_off_requested' as Parameters<typeof eventBus.emit>[0]['type'],
+    data: {
+      requestId: request.id,
+      userId: input.userId,
+      userName: input.userName,
+      startDate: input.startDate,
+      endDate: input.endDate,
+    },
+    timestamp: Date.now(),
+  });
+
   return request;
 }
 
+/**
+ * Approve or deny a time-off request.
+ * Emits wfm:time_off_decided.
+ */
 export function decideTimeOff(
-  requestId: string,
+  id: string,
   decision: 'approved' | 'denied',
-  decidedBy: string,
+  approvedBy: string,
 ): TimeOffRequest | null {
-  return updateTimeOffRequest(requestId, {
+  const now = new Date().toISOString();
+  const updated = updateTimeOffRequest(id, {
     status: decision,
-    decidedBy,
-    decidedAt: new Date().toISOString(),
+    approvedBy,
+    decidedAt: now,
   });
+
+  if (updated) {
+    eventBus.emit({
+      type: 'wfm:time_off_decided' as Parameters<typeof eventBus.emit>[0]['type'],
+      data: {
+        requestId: id,
+        decision,
+        approvedBy,
+        userId: updated.userId,
+      },
+      timestamp: Date.now(),
+    });
+  }
+
+  return updated;
 }

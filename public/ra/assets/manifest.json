@@ -1187,6 +1187,114 @@
     "sheetWidth": 512,
     "sheetHeight": 96
   },
+  "stripup": {
+    "frameWidth": 16,
+    "frameHeight": 13,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 13
+  },
+  "stripdn": {
+    "frameWidth": 16,
+    "frameHeight": 13,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 13
+  },
+  "power_marker": {
+    "frameWidth": 9,
+    "frameHeight": 6,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 9,
+    "sheetHeight": 6
+  },
+  "side1na": {
+    "frameWidth": 160,
+    "frameHeight": 160,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 160,
+    "sheetHeight": 160
+  },
+  "side2na": {
+    "frameWidth": 160,
+    "frameHeight": 100,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 320,
+    "sheetHeight": 100
+  },
+  "side3na": {
+    "frameWidth": 160,
+    "frameHeight": 124,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 320,
+    "sheetHeight": 124
+  },
+  "side1us": {
+    "frameWidth": 160,
+    "frameHeight": 160,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 160,
+    "sheetHeight": 160
+  },
+  "side2us": {
+    "frameWidth": 160,
+    "frameHeight": 100,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 320,
+    "sheetHeight": 100
+  },
+  "side3us": {
+    "frameWidth": 160,
+    "frameHeight": 124,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 320,
+    "sheetHeight": 124
+  },
+  "stripna": {
+    "frameWidth": 64,
+    "frameHeight": 192,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 128,
+    "sheetHeight": 192
+  },
+  "stripus": {
+    "frameWidth": 64,
+    "frameHeight": 192,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 128,
+    "sheetHeight": 192
+  },
+  "pips": {
+    "frameWidth": 34,
+    "frameHeight": 8,
+    "frameCount": 22,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 544,
+    "sheetHeight": 16
+  },
   "gold01": {
     "frameWidth": 24,
     "frameHeight": 24,
