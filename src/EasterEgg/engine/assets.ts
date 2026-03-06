@@ -109,9 +109,12 @@ export class AssetManager {
   }
 
   private async doLoadAll(): Promise<void> {
+    // Single cache-bust token for this load session — forces fresh fetch after deploys
+    // (Next.js serves public/ with immutable cache headers)
+    const cacheBust = `?v=${Date.now()}`;
+
     // Load manifest (required — must complete before we know what sprites to fetch)
-    // Cache-bust to prevent stale manifests after deploys
-    const manifestRes = await fetch(`${BASE_URL}/manifest.json?v=${Date.now()}`);
+    const manifestRes = await fetch(`${BASE_URL}/manifest.json${cacheBust}`);
     if (!manifestRes.ok) throw new Error(`Failed to load manifest: ${manifestRes.status}`);
     this.manifest = await manifestRes.json();
     if (!this.manifest) throw new Error('Empty manifest');
@@ -122,7 +125,7 @@ export class AssetManager {
     this._loadedCount = 0;
 
     const spritePromises = names.map(async (name) => {
-      const image = await loadImage(`${BASE_URL}/${name}.png`);
+      const image = await loadImage(`${BASE_URL}/${name}.png${cacheBust}`);
       this.sheets.set(name, { image, meta: this.manifest![name] });
       this._loadedCount++;
       this._onProgress?.(this._loadedCount, this._totalCount);
@@ -131,7 +134,7 @@ export class AssetManager {
     // Load palette, tileset, remap colors, and ALL sprites in parallel
     await Promise.all([
       // Palette (optional)
-      fetch(`${BASE_URL}/palette.json`)
+      fetch(`${BASE_URL}/palette.json${cacheBust}`)
         .then(r => r.json())
         .then(p => { this.palette = p; })
         .catch(() => {}),
@@ -140,13 +143,13 @@ export class AssetManager {
         { theatre: 'SNOW', file: 'snow-palette.json' },
         { theatre: 'INTERIOR', file: 'interior-palette.json' },
       ].map(({ theatre, file }) =>
-        fetch(`${BASE_URL}/${file}`)
+        fetch(`${BASE_URL}/${file}${cacheBust}`)
           .then(r => r.ok ? r.json() : null)
           .then(p => { if (p) this.theatrePalettes.set(theatre, p); })
           .catch(() => {})
       ),
       // House color remap data (optional — falls back to tint overlay)
-      this.loadRemapColors(),
+      this.loadRemapColors(cacheBust),
       // Tileset atlases (optional — renderer falls back to procedural colors)
       // Load TEMPERATE (backwards compat filenames) + SNOW + INTERIOR
       ...[
@@ -155,8 +158,8 @@ export class AssetManager {
         { theatre: 'INTERIOR', prefix: 'interior_' },
       ].map(({ theatre, prefix }) =>
         Promise.all([
-          fetch(`${BASE_URL}/${prefix}tileset.json`).then(r => r.ok ? r.json() : null),
-          loadImage(`${BASE_URL}/${prefix}tileset.png`).catch(() => null),
+          fetch(`${BASE_URL}/${prefix}tileset.json${cacheBust}`).then(r => r.ok ? r.json() : null),
+          loadImage(`${BASE_URL}/${prefix}tileset.png${cacheBust}`).catch(() => null),
         ]).then(([meta, img]) => {
           if (meta && img) {
             this.tilesets.set(theatre, { image: img, meta: meta as TilesetMeta });
@@ -287,9 +290,9 @@ export class AssetManager {
   private remappedSheets = new Map<string, HTMLCanvasElement>();
 
   /** Load remap color data (called during loadAll) */
-  private async loadRemapColors(): Promise<void> {
+  private async loadRemapColors(cacheBust = ''): Promise<void> {
     try {
-      const res = await fetch(`${BASE_URL}/remap-colors.json`);
+      const res = await fetch(`${BASE_URL}/remap-colors.json${cacheBust}`);
       if (res.ok) this.remapData = await res.json();
     } catch { /* optional — house tint fallback */ }
   }
