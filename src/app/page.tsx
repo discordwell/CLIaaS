@@ -149,7 +149,7 @@ function MarketingHome() {
           <img
             src="/caesar-brutus.png"
             alt="Cartoon Julius Caesar saying Not today, Brutus!"
-            className="hidden sm:block w-24 shrink-0 -my-6"
+            className="hidden sm:block w-32 shrink-0 -my-8"
           />
         </div>
       </header>
