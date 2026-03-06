@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-03-06T06:20Z — Session 91: Collision Detection Review Fixes (Low/Medium)
+- Implemented 8 fixes from collision detection code review:
+  1. Extracted shared `checkForNewReplies()` utility in `src/lib/realtime/collision.ts`, updated 3 consumers
+  2. Added `ticketIndex` secondary index to PresenceTracker for O(1) `getViewers()` lookup
+  3. Added max entries cap (10,000) with cleanup + oldest-eviction in PresenceTracker
+  4. Replaced `fetch()` with `navigator.sendBeacon()` for leave signal in CollisionDetector
+  5. Added test helpers (`_testClear`, `_testRunCleanup`, `_testSetLastSeen`, `_testSetMaxEntries`, `_testEntryCount`) to PresenceTracker; removed unsafe casts from tests
+  6. Fixed SSE event listener leak — catch blocks now call `unsubscribe()` + null guard consistently
+  7. Added `loadMessagesSince` to DataProvider interface (optional) + DbProvider implementation with SQL `gt()` filter; extracted shared `resolveMessageRows` private method
+  8. Added 11 API route tests (6 presence, 5 collision-check)
+- 29 new/updated tests pass. No regressions (2 pre-existing SLA/scenario failures unrelated).
+
+## 2026-03-06T11:30Z — Session 90: Code Review Fixes for Plan 10 (Ticket Merge & Split)
+- **Fixed 9 issues** from code review of Ticket Merge & Split:
+  1. HIGH: Added `requireScope(request, 'tickets:write')` auth to merge, split, undo routes; `tickets:read` to merge-history
+  2. HIGH: Wrapped `mergeTickets`, `splitTicket`, `unmergeTicket` in `db.transaction()` calls
+  3. MEDIUM: Added UUID format validation on all API input parameters (primaryTicketId, mergedTicketIds, messageIds, mergeLogId)
+  4. MEDIUM: Optimized `getMergeHistory` to filter in SQL with `or()` conditions instead of full table scan + JS filter
+  5. LOW: Added primary-ticket-already-merged check in `mergeTickets`
+  6. LOW: Added `ticket:unmerged` to EventType union + emit from undo route
+  7. LOW: Added `ticket.merged/split/unmerged` to CanonicalEvent + WebhookEventType + SSE_EVENT_MAP
+  8. LOW: Fixed autoMerge sort by `createdAt` instead of `id` in `detect_duplicates`
+  9. LOW: Added RemoteProvider stubs for merge/split/unmerge/history methods
+- All 6 merge-split tests + 5 routing tests pass. No new TS errors.
+- Committed `24fee02`, pushed, deployed to cliaas.com.
+
 ## 2026-03-06T10:30Z — Session 89: Code Review Fixes for Plan 09
 - **Fixed 8 issues** from code review of Internal Notes & Side Conversations:
   1. CRITICAL: Added auth via `X-Webhook-Secret` header (requires `INBOUND_EMAIL_SECRET` env var) to inbound email endpoint. Rejects if not configured.

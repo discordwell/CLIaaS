@@ -67,14 +67,8 @@ export function registerPresenceTools(server: McpServer): void {
         const ticket = findTicket(tickets, ticketId);
         if (!ticket) return errorResult(`Ticket "${ticketId}" not found.`);
 
-        // Load messages for this ticket
-        const { getDataProvider } = await import('@/lib/data-provider/index.js');
-        const provider = await getDataProvider(dir);
-        const messages = await provider.loadMessages(ticket.id);
-
-        const newReplies = messages.filter(
-          (m) => new Date(m.createdAt).getTime() > sinceDate.getTime()
-        );
+        const { checkForNewReplies } = await import('@/lib/realtime/collision.js');
+        const { hasNewReplies, newReplies } = await checkForNewReplies(ticket.id, sinceDate, dir);
 
         // Get active viewers
         const { presence } = await import('@/lib/realtime/presence.js');
@@ -83,14 +77,9 @@ export function registerPresenceTools(server: McpServer): void {
         return textResult({
           ticketId: ticket.id,
           since,
-          hasNewReplies: newReplies.length > 0,
+          hasNewReplies,
           newReplyCount: newReplies.length,
-          newReplies: newReplies.map((m) => ({
-            id: m.id,
-            author: m.author,
-            body: m.body.slice(0, 200),
-            createdAt: m.createdAt,
-          })),
+          newReplies,
           activeViewers,
         });
       } catch (err) {

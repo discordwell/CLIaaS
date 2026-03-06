@@ -2,7 +2,7 @@
  * DbProvider — reads/writes via Drizzle + Postgres. Hosted or local DB backend.
  */
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, gt, inArray } from 'drizzle-orm';
 import type {
   DataProvider,
   ProviderCapabilities,
@@ -181,30 +181,14 @@ export class DbProvider implements DataProvider {
     }));
   }
 
-  async loadMessages(ticketId?: string): Promise<Message[]> {
-    const { db, schema, workspaceId } = await requireDb();
-
-    const conditions = [eq(schema.tickets.workspaceId, workspaceId)];
-    if (ticketId) conditions.push(eq(schema.tickets.id, ticketId));
-
-    const rows: Array<{
+  private async resolveMessageRows(
+    db: DbContext['db'],
+    schema: DbContext['schema'],
+    rows: Array<{
       id: string; ticketId: string; authorType: string; authorId: string | null;
       body: string; visibility: string | null; createdAt: Date;
-    }> = await db
-      .select({
-        id: schema.messages.id,
-        ticketId: schema.tickets.id,
-        authorType: schema.messages.authorType,
-        authorId: schema.messages.authorId,
-        body: schema.messages.body,
-        visibility: schema.messages.visibility,
-        createdAt: schema.messages.createdAt,
-      })
-      .from(schema.messages)
-      .innerJoin(schema.conversations, eq(schema.conversations.id, schema.messages.conversationId))
-      .innerJoin(schema.tickets, eq(schema.tickets.id, schema.conversations.ticketId))
-      .where(and(...conditions));
-
+    }>,
+  ): Promise<Message[]> {
     if (rows.length === 0) return [];
 
     const userIds = new Set<string>();
@@ -256,6 +240,55 @@ export class DbProvider implements DataProvider {
 
       return { id: row.id, ticketId: row.ticketId, author, body: row.body, type, visibility, createdAt: row.createdAt.toISOString() };
     });
+  }
+
+  async loadMessages(ticketId?: string): Promise<Message[]> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const conditions = [eq(schema.tickets.workspaceId, workspaceId)];
+    if (ticketId) conditions.push(eq(schema.tickets.id, ticketId));
+
+    const rows = await db
+      .select({
+        id: schema.messages.id,
+        ticketId: schema.tickets.id,
+        authorType: schema.messages.authorType,
+        authorId: schema.messages.authorId,
+        body: schema.messages.body,
+        visibility: schema.messages.visibility,
+        createdAt: schema.messages.createdAt,
+      })
+      .from(schema.messages)
+      .innerJoin(schema.conversations, eq(schema.conversations.id, schema.messages.conversationId))
+      .innerJoin(schema.tickets, eq(schema.tickets.id, schema.conversations.ticketId))
+      .where(and(...conditions));
+
+    return this.resolveMessageRows(db, schema, rows);
+  }
+
+  async loadMessagesSince(ticketId: string, since: Date): Promise<Message[]> {
+    const { db, schema, workspaceId } = await requireDb();
+
+    const rows = await db
+      .select({
+        id: schema.messages.id,
+        ticketId: schema.tickets.id,
+        authorType: schema.messages.authorType,
+        authorId: schema.messages.authorId,
+        body: schema.messages.body,
+        visibility: schema.messages.visibility,
+        createdAt: schema.messages.createdAt,
+      })
+      .from(schema.messages)
+      .innerJoin(schema.conversations, eq(schema.conversations.id, schema.messages.conversationId))
+      .innerJoin(schema.tickets, eq(schema.tickets.id, schema.conversations.ticketId))
+      .where(and(
+        eq(schema.tickets.workspaceId, workspaceId),
+        eq(schema.tickets.id, ticketId),
+        gt(schema.messages.createdAt, since),
+      ));
+
+    return this.resolveMessageRows(db, schema, rows);
   }
 
   async loadKBArticles(): Promise<KBArticle[]> {
@@ -500,7 +533,7 @@ export class DbProvider implements DataProvider {
   }
 
   async updateTicket(ticketId: string, params: TicketUpdateParams): Promise<void> {
-    const { db, schema } = await requireDb();
+    const { db, schema, workspaceId } = await requireDb();
 
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (params.status !== undefined) set.status = params.status;
@@ -508,6 +541,64 @@ export class DbProvider implements DataProvider {
     if (params.subject !== undefined) set.subject = params.subject;
 
     await db.update(schema.tickets).set(set).where(eq(schema.tickets.id, ticketId));
+
+    // Handle addTags: upsert into tags table, insert into ticket_tags, sync tickets.tags array
+    if (params.addTags && params.addTags.length > 0) {
+      for (const tagName of params.addTags) {
+        // Upsert tag
+        const existing = await db
+          .select({ id: schema.tags.id })
+          .from(schema.tags)
+          .where(and(eq(schema.tags.workspaceId, workspaceId), eq(schema.tags.name, tagName)))
+          .limit(1);
+
+        let tagId: string;
+        if (existing[0]) {
+          tagId = existing[0].id;
+        } else {
+          const [row] = await db
+            .insert(schema.tags)
+            .values({ workspaceId, name: tagName })
+            .returning({ id: schema.tags.id });
+          tagId = row.id;
+        }
+
+        // Insert ticket_tag (ignore conflict)
+        await db
+          .insert(schema.ticketTags)
+          .values({ ticketId, tagId, workspaceId })
+          .onConflictDoNothing();
+      }
+    }
+
+    // Handle removeTags: delete from ticket_tags
+    if (params.removeTags && params.removeTags.length > 0) {
+      const tagRows = await db
+        .select({ id: schema.tags.id })
+        .from(schema.tags)
+        .where(and(eq(schema.tags.workspaceId, workspaceId), inArray(schema.tags.name, params.removeTags)));
+
+      if (tagRows.length > 0) {
+        const tagIds = tagRows.map(r => r.id);
+        await db
+          .delete(schema.ticketTags)
+          .where(and(eq(schema.ticketTags.ticketId, ticketId), inArray(schema.ticketTags.tagId, tagIds)));
+      }
+    }
+
+    // Sync tickets.tags text array from ticket_tags join
+    if ((params.addTags && params.addTags.length > 0) || (params.removeTags && params.removeTags.length > 0)) {
+      const currentTags = await db
+        .select({ name: schema.tags.name })
+        .from(schema.ticketTags)
+        .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
+        .where(eq(schema.ticketTags.ticketId, ticketId));
+
+      await db
+        .update(schema.tickets)
+        .set({ tags: currentTags.map((r: { name: string }) => r.name) })
+        .where(eq(schema.tickets.id, ticketId));
+    }
   }
 
   async createMessage(params: MessageCreateParams): Promise<{ id: string }> {

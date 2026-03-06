@@ -243,6 +243,8 @@ export interface DataProvider {
   // Reads
   loadTickets(): Promise<Ticket[]>;
   loadMessages(ticketId?: string): Promise<Message[]>;
+  /** Load messages created after `since`. Optional — falls back to loadMessages + filter. */
+  loadMessagesSince?(ticketId: string, since: Date): Promise<Message[]>;
   loadKBArticles(): Promise<KBArticle[]>;
   loadCustomers(): Promise<Customer[]>;
   loadOrganizations(): Promise<Organization[]>;

@@ -45,7 +45,7 @@ export function registerActionTools(server: McpServer): void {
       const result = withConfirmation(confirm, {
         description: `Update ticket ${ticket.id}`,
         preview: { ticketId: ticket.id, subject: ticket.subject, changes },
-        execute: () => {
+        execute: async () => {
           // Apply changes in-memory
           if (status) ticket.status = status as TicketStatus;
           if (priority) ticket.priority = priority as TicketPriority;
@@ -59,6 +59,17 @@ export function registerActionTools(server: McpServer): void {
             ticket.tags = ticket.tags.filter(t => !removeTags.includes(t));
           }
           ticket.updatedAt = new Date().toISOString();
+
+          // Persist via DataProvider (DB or JSONL)
+          try {
+            const { getDataProvider } = await import('@/lib/data-provider/index.js');
+            const provider = await getDataProvider(dir);
+            await provider.updateTicket(ticket.id, {
+              status, priority,
+              addTags: addTags?.length ? addTags : undefined,
+              removeTags: removeTags?.length ? removeTags : undefined,
+            });
+          } catch { /* provider unavailable — in-memory only */ }
 
           recordMCPAction({
             tool: 'ticket_update', action: 'update',
@@ -82,7 +93,7 @@ export function registerActionTools(server: McpServer): void {
       });
 
       if (result.needsConfirmation) return result.result;
-      return textResult(result.value);
+      return textResult(await result.value);
     },
   );
 
@@ -111,18 +122,14 @@ export function registerActionTools(server: McpServer): void {
         try {
           const sinceDate = new Date(since);
           if (!isNaN(sinceDate.getTime())) {
-            const { getDataProvider } = await import('@/lib/data-provider/index.js');
-            const provider = await getDataProvider(dir);
-            const messages = await provider.loadMessages(ticket.id);
-            const newReplies = messages.filter(
-              (m) => new Date(m.createdAt).getTime() > sinceDate.getTime()
-            );
-            if (newReplies.length > 0) {
+            const { checkForNewReplies } = await import('@/lib/realtime/collision.js');
+            const { hasNewReplies, newReplies } = await checkForNewReplies(ticket.id, sinceDate, dir);
+            if (hasNewReplies) {
               return textResult({
                 collision: true,
                 message: `${newReplies.length} new reply(s) since ${since}. Set forceSubmit=true to send anyway.`,
                 newReplies: newReplies.map((m) => ({
-                  author: m.author, body: m.body.slice(0, 200), createdAt: m.createdAt,
+                  author: m.author, body: m.body, createdAt: m.createdAt,
                 })),
               });
             }
@@ -186,18 +193,14 @@ export function registerActionTools(server: McpServer): void {
         try {
           const sinceDate = new Date(since);
           if (!isNaN(sinceDate.getTime())) {
-            const { getDataProvider } = await import('@/lib/data-provider/index.js');
-            const provider = await getDataProvider(dir);
-            const messages = await provider.loadMessages(ticket.id);
-            const newReplies = messages.filter(
-              (m) => new Date(m.createdAt).getTime() > sinceDate.getTime()
-            );
-            if (newReplies.length > 0) {
+            const { checkForNewReplies } = await import('@/lib/realtime/collision.js');
+            const { hasNewReplies, newReplies } = await checkForNewReplies(ticket.id, sinceDate, dir);
+            if (hasNewReplies) {
               return textResult({
                 collision: true,
                 message: `${newReplies.length} new reply(s) since ${since}. Set forceSubmit=true to add note anyway.`,
                 newReplies: newReplies.map((m) => ({
-                  author: m.author, body: m.body.slice(0, 200), createdAt: m.createdAt,
+                  author: m.author, body: m.body, createdAt: m.createdAt,
                 })),
               });
             }

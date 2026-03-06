@@ -45,12 +45,12 @@ export default function CollisionDetector({
     return () => {
       clearTimeout(initialTimer);
       if (intervalRef.current) clearInterval(intervalRef.current);
-      // Signal leave
-      fetch("/api/presence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId, action: "leave" }),
-      }).catch(() => {});
+      // Signal leave — use sendBeacon to survive page unload
+      const payload = new Blob(
+        [JSON.stringify({ ticketId, action: "leave" })],
+        { type: "application/json" },
+      );
+      navigator.sendBeacon("/api/presence", payload);
     };
   }, [ticketId, updatePresence]);
 

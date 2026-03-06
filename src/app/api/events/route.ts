@@ -23,6 +23,16 @@ export async function GET(request: Request) {
       // Send initial keepalive
       controller.enqueue(encoder.encode(': connected\n\n'));
 
+      // Keepalive every 30s (declared before onAny so it's in scope for cleanup)
+      const keepalive = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(': keepalive\n\n'));
+        } catch {
+          clearInterval(keepalive);
+          if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+        }
+      }, 30_000);
+
       // Subscribe to all events
       unsubscribe = eventBus.onAny((event: AppEvent) => {
         try {
@@ -35,28 +45,21 @@ export async function GET(request: Request) {
             encoder.encode(`event: ${event.type}\ndata: ${data}\n\n`)
           );
         } catch {
-          // Client disconnected
+          // Client disconnected — clean up listener and keepalive
+          clearInterval(keepalive);
+          if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         }
       });
-
-      // Keepalive every 30s
-      const keepalive = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(': keepalive\n\n'));
-        } catch {
-          clearInterval(keepalive);
-        }
-      }, 30_000);
 
       // Clean up on abort
       request.signal.addEventListener('abort', () => {
         clearInterval(keepalive);
-        if (unsubscribe) unsubscribe();
+        if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         try { controller.close(); } catch { /* already closed */ }
       });
     },
     cancel() {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribe) { unsubscribe(); unsubscribe = null; }
     },
   });
 

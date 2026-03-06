@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireAuth } from '@/lib/api-auth';
-import { loadMessages } from '@/lib/data';
+import { checkForNewReplies } from '@/lib/realtime/collision';
 import { presence } from '@/lib/realtime/presence';
 
 export const dynamic = 'force-dynamic';
@@ -30,24 +30,15 @@ export async function GET(
   }
 
   try {
-    const messages = await loadMessages(id);
-    const newReplies = messages.filter(
-      (m) => new Date(m.createdAt).getTime() > sinceDate.getTime()
-    );
+    const { hasNewReplies, newReplies } = await checkForNewReplies(id, sinceDate);
 
     const activeViewers = presence.getViewers(id).filter(
       (v) => v.userId !== auth.user.id
     );
 
     return NextResponse.json({
-      hasNewReplies: newReplies.length > 0,
-      newReplies: newReplies.map((m) => ({
-        id: m.id,
-        author: m.author,
-        body: m.body.slice(0, 200),
-        createdAt: m.createdAt,
-        type: m.type,
-      })),
+      hasNewReplies,
+      newReplies,
       activeViewers,
     });
   } catch (err) {

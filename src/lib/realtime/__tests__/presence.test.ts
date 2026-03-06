@@ -12,7 +12,7 @@ import { eventBus } from '../events';
 
 describe('PresenceTracker', () => {
   beforeEach(() => {
-    (presence as unknown as { entries: Map<string, unknown> }).entries.clear();
+    presence._testClear();
   });
 
   describe('update', () => {
@@ -110,17 +110,96 @@ describe('PresenceTracker', () => {
   describe('cleanup', () => {
     it('should remove stale entries (entries older than 30s)', () => {
       presence.update('user-1', 'Alice', 'ticket-1', 'viewing');
-
-      // Manually age the entry
-      const entries = (presence as unknown as { entries: Map<string, { lastSeen: number }> }).entries;
-      for (const entry of entries.values()) {
-        entry.lastSeen = Date.now() - 31_000;
-      }
-
-      // Trigger cleanup manually
-      (presence as unknown as { cleanup: () => void }).cleanup();
-
+      presence._testSetLastSeen('user-1', 'ticket-1', Date.now() - 31_000);
+      presence._testRunCleanup();
       expect(presence.getViewers('ticket-1')).toHaveLength(0);
+    });
+  });
+
+  describe('ticketIndex', () => {
+    it('should use O(1) lookup via ticketIndex', () => {
+      // Add viewers for different tickets
+      for (let i = 0; i < 100; i++) {
+        presence.update(`user-${i}`, `User${i}`, `ticket-${i}`, 'viewing');
+      }
+      presence.update('target-user', 'Target', 'target-ticket', 'viewing');
+
+      const viewers = presence.getViewers('target-ticket');
+      expect(viewers).toHaveLength(1);
+      expect(viewers[0].userId).toBe('target-user');
+    });
+
+    it('should update ticketIndex on leave', () => {
+      presence.update('user-1', 'Alice', 'ticket-1', 'viewing');
+      presence.update('user-2', 'Bob', 'ticket-1', 'viewing');
+      presence.leave('user-1', 'ticket-1');
+      const viewers = presence.getViewers('ticket-1');
+      expect(viewers).toHaveLength(1);
+      expect(viewers[0].userId).toBe('user-2');
+    });
+
+    it('should update ticketIndex on cleanup', () => {
+      presence.update('user-1', 'Alice', 'ticket-1', 'viewing');
+      presence.update('user-2', 'Bob', 'ticket-1', 'viewing');
+      presence._testSetLastSeen('user-1', 'ticket-1', Date.now() - 31_000);
+      presence._testRunCleanup();
+      const viewers = presence.getViewers('ticket-1');
+      expect(viewers).toHaveLength(1);
+      expect(viewers[0].userId).toBe('user-2');
+    });
+  });
+
+  describe('max entries cap', () => {
+    it('should evict stale entries via cleanup when at capacity', () => {
+      const restore = presence._testSetMaxEntries(3);
+      try {
+        presence.update('u1', 'A', 't1', 'viewing');
+        presence.update('u2', 'B', 't2', 'viewing');
+        presence.update('u3', 'C', 't3', 'viewing');
+        // Make u1 stale
+        presence._testSetLastSeen('u1', 't1', Date.now() - 31_000);
+        // Adding u4 should trigger cleanup which removes u1
+        presence.update('u4', 'D', 't4', 'viewing');
+        expect(presence._testEntryCount()).toBe(3);
+        expect(presence.getViewers('t1')).toHaveLength(0);
+        expect(presence.getViewers('t4')).toHaveLength(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it('should evict oldest entry when cleanup is insufficient', () => {
+      const restore = presence._testSetMaxEntries(3);
+      try {
+        presence.update('u1', 'A', 't1', 'viewing');
+        presence.update('u2', 'B', 't2', 'viewing');
+        presence.update('u3', 'C', 't3', 'viewing');
+        // Make u1 oldest but not stale (cleanup won't remove it)
+        presence._testSetLastSeen('u1', 't1', Date.now() - 5_000);
+        // Adding u4 should force-evict u1 as oldest
+        presence.update('u4', 'D', 't4', 'viewing');
+        expect(presence._testEntryCount()).toBe(3);
+        expect(presence.getViewers('t1')).toHaveLength(0);
+        expect(presence.getViewers('t4')).toHaveLength(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it('should maintain ticketIndex after eviction', () => {
+      const restore = presence._testSetMaxEntries(2);
+      try {
+        presence.update('u1', 'A', 'shared-ticket', 'viewing');
+        presence.update('u2', 'B', 'shared-ticket', 'viewing');
+        presence._testSetLastSeen('u1', 'shared-ticket', Date.now() - 31_000);
+        // u3 triggers cleanup, evicts u1
+        presence.update('u3', 'C', 'other-ticket', 'viewing');
+        const viewers = presence.getViewers('shared-ticket');
+        expect(viewers).toHaveLength(1);
+        expect(viewers[0].userId).toBe('u2');
+      } finally {
+        restore();
+      }
     });
   });
 });
