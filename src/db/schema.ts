@@ -140,6 +140,8 @@ export const userRoleEnum = pgEnum('user_role', [
   'owner',
   'admin',
   'agent',
+  'light_agent',
+  'collaborator',
   'viewer',
   'system',
   'unknown',
@@ -266,6 +268,7 @@ export const groups = pgTable('groups', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
   name: text('name').notNull(),
+  defaultRole: text('default_role').default('agent'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -1849,24 +1852,6 @@ export const agentCapacityRules = pgTable(
   }),
 );
 
-export const groupMemberships = pgTable(
-  'group_memberships',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
-    userId: uuid('user_id').notNull().references(() => users.id),
-    groupId: uuid('group_id').notNull().references(() => groups.id),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  table => ({
-    groupMembershipsGroupIdx: index('group_memberships_group_idx').on(table.groupId),
-    groupMembershipsUniqueIdx: uniqueIndex('group_memberships_unique_idx').on(
-      table.userId,
-      table.groupId,
-    ),
-  }),
-);
-
 export const routingQueues = pgTable(
   'routing_queues',
   {
@@ -2433,5 +2418,69 @@ export const kbContentGaps = pgTable(
   },
   table => ({
     kbContentGapsWorkspaceIdx: index('kb_content_gaps_workspace_idx').on(table.workspaceId, table.status),
+  }),
+);
+
+// ---- RBAC ----
+
+export const permissions = pgTable(
+  'permissions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    key: text('key').notNull().unique(),
+    category: text('category').notNull(),
+    label: text('label').notNull(),
+    description: text('description'),
+    bitIndex: integer('bit_index').notNull().unique(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+);
+
+export const rolePermissions = pgTable(
+  'role_permissions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    role: text('role').notNull(),
+    permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    rolePermissionsRoleIdx: index('role_permissions_role_idx').on(table.role),
+    rolePermissionsWorkspaceIdx: index('role_permissions_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const groupMemberships = pgTable(
+  'group_memberships',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    groupId: uuid('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    groupMembershipsUniqueIdx: uniqueIndex('group_memberships_unique_idx').on(table.workspaceId, table.userId, table.groupId),
+    groupMembershipsGroupIdx: index('group_memberships_group_idx').on(table.groupId),
+    groupMembershipsUserIdx: index('group_memberships_user_idx').on(table.userId),
+  }),
+);
+
+export const ticketCollaborators = pgTable(
+  'ticket_collaborators',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    ticketId: uuid('ticket_id').notNull().references(() => tickets.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    addedBy: uuid('added_by').references(() => users.id),
+    canReply: boolean('can_reply').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    ticketCollaboratorsUniqueIdx: uniqueIndex('ticket_collaborators_unique_idx').on(table.workspaceId, table.ticketId, table.userId),
+    ticketCollaboratorsTicketIdx: index('ticket_collaborators_ticket_idx').on(table.ticketId),
+    ticketCollaboratorsUserIdx: index('ticket_collaborators_user_idx').on(table.userId),
   }),
 );
