@@ -205,6 +205,9 @@ function mapEventToContext(event: string): TicketContext['event'] {
     case 'ticket.updated': return 'update';
     case 'message.created': return 'reply';
     case 'ticket.resolved': return 'status_change';
+    case 'ticket.merged': return 'merge';
+    case 'ticket.split': return 'split';
+    case 'ticket.unmerged': return 'unmerge';
     default: return undefined;
   }
 }

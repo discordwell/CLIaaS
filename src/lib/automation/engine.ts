@@ -35,7 +35,7 @@ export interface TicketContext {
   updatedAt: string;
   customFields?: Record<string, unknown>;
   // Event context
-  event?: 'create' | 'update' | 'reply' | 'status_change' | 'assignment';
+  event?: 'create' | 'update' | 'reply' | 'status_change' | 'assignment' | 'merge' | 'split' | 'unmerge';
   previousStatus?: string;
   previousPriority?: string;
   previousAssignee?: string | null;

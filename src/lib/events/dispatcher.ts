@@ -114,6 +114,9 @@ const AUTOMATION_EVENT_MAP: Partial<Record<CanonicalEvent, AutomationTriggerType
   'message.created': 'trigger',
   'sla.breached': 'sla',
   'side_conversation.replied': 'trigger',
+  'ticket.merged': 'trigger',
+  'ticket.split': 'trigger',
+  'ticket.unmerged': 'trigger',
 };
 
 // ---- PII scan eligible events ----

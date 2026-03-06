@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getDataProvider } from '@/lib/data-provider';
 import { ticketSplit } from '@/lib/events';
 import { eventBus } from '@/lib/realtime/events';
+import { evaluateAutomation } from '@/lib/automation/executor';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -11,7 +12,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:merge');
   if ('error' in authResult) return authResult.error;
 
   try {
@@ -46,6 +47,14 @@ export async function POST(
       data: { sourceTicketId: id, newTicketId: result.newTicketId },
       timestamp: Date.now(),
     });
+
+    // Fire automation rules for split event
+    void evaluateAutomation('ticket.split', {
+      ticketId: id,
+      sourceTicketId: id,
+      newTicketId: result.newTicketId,
+      splitBy,
+    }, 'trigger').catch(() => {});
 
     return NextResponse.json(result);
   } catch (err) {

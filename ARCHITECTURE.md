@@ -112,6 +112,9 @@ Each domain has a dedicated store in `src/lib/`:
 | Canned Responses | `canned/canned-store.ts` | Module-level arrays |
 | Macros | `canned/macro-store.ts` | Module-level arrays |
 | Agent Signatures | `canned/signature-store.ts` | Module-level arrays |
+| Plugin Installations | `plugins/store.ts` | DB + JSONL dual-path |
+| Plugin Credentials | `plugins/credentials.ts` | AES-256-GCM encrypted in config |
+| Rule Versions | `automation/versioning.ts` | DB + JSONL dual-path |
 
 ---
 
@@ -135,8 +138,8 @@ Each domain has a dedicated store in `src/lib/`:
 ### Configuration (4)
 `brands`, `ticket_forms`, `custom_fields`, `custom_field_values`
 
-### Rules & Automation (3)
-`rules` (macros, triggers, automations, SLA), `automation_rules`, `sla_policies`
+### Rules & Automation (4)
+`rules` (macros, triggers, automations, SLA), `automation_rules`, `sla_policies`, `rule_versions` (snapshot history with version number, conditions/actions/name, created_by; unique on ruleId+versionNumber). Versioning API at `/api/rules/:id/versions` (GET list, POST restore/snapshot). Automation events include merge/split/unmerge in addition to create/update/reply/status_change/assignment.
 
 ### Canned Responses & Macros (3)
 `canned_responses` (reusable reply templates with merge variables, categories, shortcuts), `macros` (native one-click multi-action bundles with structured actions JSONB), `agent_signatures` (per-agent HTML/text email signatures with default flag)
@@ -225,7 +228,8 @@ Skill-based, capacity-aware routing with 4 strategies, queue matching, rule eval
 ```
 Ticket arrives → extractCategories() → evaluateRules() → matchQueue()
                                                             ↓
-                                              checkBusinessHours()
+                                              WFM schedule check → exclude off-shift agents
+                                              checkBusinessHours(groupBhId?) → per-group schedule
                                               checkSLA() → slaBoost
                                               loadTracker.getLoad()
                                                             ↓
@@ -244,12 +248,20 @@ Ticket arrives → extractCategories() → evaluateRules() → matchQueue()
 - `capPenalty`: -0.2 when agent load exceeds 80% capacity
 - `slaBoost`: +0.15 for SLA warning, +0.30 for SLA breach
 
+**Dual-Mode Store:** Routing store (`store.ts`) exposes async DB-primary variants (`getAgentSkillsAsync`, `getRoutingQueuesAsync`, `getRoutingRulesAsync`, `appendRoutingLogAsync`, `setAgentSkillsAsync`) that try Postgres first and fall back to JSONL.
+
+**Business Hours Awareness:** `checkBusinessHoursActive()` accepts an optional `businessHoursId` to look up a group-specific or queue-specific schedule from the `businessHours` DB table. Falls back to default schedule, then to "always open."
+
+**WFM Integration:** Before building candidates, the engine queries WFM schedules via `getScheduledActivity()` and excludes agents whose current schedule activity is `off_shift`.
+
 **Load Tracking:** `LoadTracker` singleton counts open/pending/on_hold tickets per assignee via data provider, 5-minute TTL cache, invalidated by `ticket:routed`/`ticket:updated` events.
 
 **Overflow Timeout:** Queues with `overflowTimeoutSecs` redirect to overflow queue when ticket age exceeds threshold.
 
+**Deprecated:** `src/lib/ai/router.ts` contains hardcoded demo agents (Alice/Bob/Carol/Dan). Use `src/lib/routing/engine.ts` instead.
+
 **Source:** `src/lib/routing/` (engine, store, queue-manager, strategies, availability, load-tracker, types, constants)
-**API:** `/api/routing/` (route-ticket, queues, rules, config, analytics, log)
+**API:** `/api/routing/` (route-ticket, queues, rules, config, analytics, log), `/api/groups/[id]/members/`
 **UI:** `/settings/routing`, `/analytics/routing`
 **Migration:** `src/db/migrations/0020_routing_tables.sql`
 
@@ -938,3 +950,81 @@ Deep bidirectional integrations with engineering tools (Jira Cloud, Linear), CRM
 - `/custom-objects` — type management page with dynamic field schema builder
 - `/custom-objects/[typeKey]` — record CRUD with type-aware form generation
 - Integrations Hub "Engineering & CRM" tab — configure Jira/Linear/Salesforce/HubSpot
+
+---
+
+## Plan 18: Visual Chatbot Builder + @xyflow/react Canvas Migration
+
+### Visual Flow Canvas (@xyflow/react)
+
+Both the **Workflow Builder** and **Chatbot Builder** use a shared canvas infrastructure built on `@xyflow/react` (React Flow v12):
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| FlowCanvasBase | `src/components/flow-canvas/FlowCanvasBase.tsx` | Shared React Flow wrapper with pan/zoom, grid, minimap, controls |
+| useFlowHistory | `src/components/flow-canvas/useFlowHistory.ts` | Undo/redo hook (structuredClone snapshots, 20-entry stack) |
+| dagre-layout | `src/components/flow-canvas/dagre-layout.ts` | Auto-layout using dagre (top-to-bottom) |
+
+**Workflow Builder** (`src/app/workflows/_components/WorkflowBuilder.tsx`): Migrated from 967-line custom Canvas/SVG to ~400 lines using React Flow. Preserves all features: 6 node types, validation dots, optimize dry-run, import/export, undo, onboarding, entry badge.
+
+### Chatbot Builder
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| FlowCanvas | `src/components/chatbot/FlowCanvas.tsx` | Main chatbot canvas with palette, detail panel, test chat |
+| NodePalette | `src/components/chatbot/NodePalette.tsx` | 10 draggable node types sidebar |
+| NodeDetailPanel | `src/components/chatbot/NodeDetailPanel.tsx` | Type-specific property editors for all 10 node types |
+| TestChatPanel | `src/components/chatbot/TestChatPanel.tsx` | Slide-out sandbox chat using runtime engine |
+| BaseNode + 10 nodes | `src/components/chatbot/nodes/BaseNode.tsx` | Custom React Flow node components |
+| Serialization | `src/components/chatbot/flow-serialization.ts` | `flowToReactFlow()` / `reactFlowToFlow()` conversion |
+| Builder page | `src/app/chatbots/builder/[id]/page.tsx` | Full visual builder page |
+| Analytics page | `src/app/chatbots/[id]/analytics/page.tsx` | Per-node metrics and funnel data |
+
+### Chatbot Node Types (10)
+
+| Type | Purpose |
+|------|---------|
+| `message` | Send a text message |
+| `buttons` | Present button options to the user |
+| `branch` | Condition-based routing (keywords, variables) |
+| `action` | Execute side effects (tags, fields, assignments) |
+| `handoff` | Transfer to a human agent |
+| `ai_response` | Generate AI response via Anthropic |
+| `article_suggest` | Search and suggest KB articles |
+| `collect_input` | Collect and validate user input (email, phone, number) |
+| `webhook` | Call external HTTP endpoint |
+| `delay` | Pause before continuing to next node |
+
+### Chatbot Runtime
+
+- **Runtime** (`src/lib/chatbot/runtime.ts`): Pure/synchronous evaluation. Async nodes (ai_response, article_suggest, webhook) return request objects.
+- **Handlers** (`src/lib/chatbot/handlers.ts`): Async fulfillment called by API route — AI via Anthropic SDK, articles via text-match, webhooks with SSRF protection.
+- **Templates** (`src/lib/chatbot/templates.ts`): 4 pre-built flows (Support Triage, FAQ Bot, Sales Router, Lead Qualifier) with positioned nodes and strong default prompts.
+- **Versions** (`src/lib/chatbot/versions.ts`): Publish/rollback with version snapshots.
+- **Analytics** (`src/lib/chatbot/analytics.ts`): Per-node daily aggregation (entries, exits, drop-offs).
+
+### Embed Widget
+
+Two embedding approaches for the chat widget:
+
+- **Iframe** (`/api/chat/widget.js`): Parameterized script tag with `chatbotId`, `color`, `position`, `greeting`, `channel` URL params
+- **Shadow DOM** (`/api/chat/widget-standalone.js`): Self-contained standalone bundle using shadow DOM, no iframe
+
+### API Routes (8 new)
+- Publish: POST `/api/chatbots/[id]/publish`
+- Rollback: POST `/api/chatbots/[id]/rollback`
+- Versions: GET `/api/chatbots/[id]/versions`
+- Test: POST `/api/chatbots/[id]/test`
+- Analytics: GET `/api/chatbots/[id]/analytics`
+- Analytics summary: GET `/api/chatbots/[id]/analytics/summary`
+- Standalone widget: GET `/api/chat/widget-standalone.js`
+
+### CLI Commands (10)
+`cliaas chatbot` — list, show, create (--template), publish, rollback, test (interactive), analytics, export, import, delete, versions
+
+### MCP Tools (14, expanded from 4)
+chatbot_list, chatbot_get, chatbot_create, chatbot_toggle, chatbot_delete, chatbot_publish, chatbot_rollback, chatbot_versions, chatbot_test, chatbot_test_respond, chatbot_analytics, chatbot_export, chatbot_import, chatbot_duplicate
+
+### DB Migration (0024)
+- ALTER chatbots: version, status, published_flow, published_at, channels, description
+- CREATE chatbot_versions, chatbot_sessions, chatbot_analytics

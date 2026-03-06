@@ -1,5 +1,27 @@
 # Session Summaries
 
+## 2026-03-07T16:10Z — Session 107: Gap Closure Phase 3+4 — Workflow Automation & Marketplace/Plugins
+- **Phase 3.1**: Rule versioning (`src/lib/automation/versioning.ts`) — createVersion/listVersions/restoreVersion with DB+JSONL dual-path, API route at `/api/rules/:id/versions`
+- **Phase 3.2**: Merge/split/unmerge automation events — extended TicketContext.event union, mapEventToContext, AUTOMATION_EVENT_MAP, added evaluateAutomation calls in merge/split/unmerge routes
+- **Phase 4.1**: Plugin credentials (`src/lib/plugins/credentials.ts`) — AES-256-GCM encryption with PLUGIN_ENCRYPTION_KEY env var or DATABASE_URL fallback
+- **Phase 4.2**: Plugin API routes — `/api/plugins/:id/execute` (manual hook trigger), `/api/plugins/:id/credentials` (GET masked, PUT encrypted)
+- **Phase 4.3**: 3 reference plugins in `src/lib/plugins/reference/` — hello-world, slack-notifier, auto-tagger
+- **Phase 4.4**: Plugin SDK docs at `docs/plugin-sdk.md`
+- **40 new tests passing** (9 versioning, 8 credentials, 6 merge/split automation, 17 reference plugins)
+- **0 TypeScript errors**, ARCHITECTURE.md updated
+
+## 2026-03-07T15:00Z — Session 106: Plan 18 — Visual Chatbot Builder + @xyflow/react Canvas Migration
+- **All 7 phases complete**: Foundation → Runtime → Canvas → Templates → API/Analytics → Widget → CLI/MCP/Polish
+- **Phase 1**: Extended chatbot types (5 new node types, positions, version/status fields), DB migration 0024, schema updates, store updates, version management with publish/rollback
+- **Phase 2**: 5 new runtime node handlers (collect_input, delay, ai_response, article_suggest, webhook), async handlers for AI/articles/webhooks, chat route integration
+- **Phase 3**: Shared @xyflow/react canvas (FlowCanvasBase, useFlowHistory, dagre-layout), workflow builder migrated from 967-line custom Canvas/SVG to ~400 lines, chatbot visual builder with 10 custom node components, flow serialization (flowToReactFlow/reactFlowToFlow)
+- **Phase 4**: 4 starter templates (Support Triage, FAQ Bot, Sales Router, Lead Qualifier) with positioned nodes and strong default prompts
+- **Phase 5**: 6 API routes (publish, rollback, versions, test, analytics, summary), analytics engine with per-node daily aggregation, analytics page with summary cards + drop-off visualization
+- **Phase 6**: Enhanced iframe widget with chatbotId/color/position/greeting params, shadow DOM standalone widget bundle, enhanced embed page with color theming
+- **Phase 7**: 10 CLI commands, 14 MCP tools (expanded from 4), chatbot_builder feature gate, agent console chatbot context display, embed snippet with chatbot selector + dual embed options, ARCHITECTURE.md update
+- **Tests**: 58 new tests passing (13 new-nodes, 6 analytics, 6 versions-api, 8 versions, 10 store + existing), build clean with zero type errors
+- **Key stats**: ~32 new files, 6 new API routes, 14 MCP tools, 10 CLI commands, ~18 new React components, 3 new pages
+
 ## 2026-03-07T14:00Z — Session 105: Plan 19 — Campaign Orchestration (Full Build)
 - **Agent 19**: Replaced all campaign stubs with real, working, tested code across 6 phases
 - **Phase 1-2 (pre-existing)**: DB migration 0022, Drizzle schema, campaign-store extensions, segment evaluator, orchestration engine, step/enrollment CRUD, 48 tests

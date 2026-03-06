@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { requireScope } from '@/lib/api-auth';
+import { requirePerm } from '@/lib/rbac';
 import { getDataProvider } from '@/lib/data-provider';
 import { ticketUnmerged } from '@/lib/events';
 import { eventBus } from '@/lib/realtime/events';
+import { evaluateAutomation } from '@/lib/automation/executor';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireScope(request, 'tickets:write');
+  const authResult = await requirePerm(request, 'tickets:merge', 'admin');
   if ('error' in authResult) return authResult.error;
 
   try {
@@ -41,6 +42,12 @@ export async function POST(request: NextRequest) {
       data: { mergeLogId },
       timestamp: Date.now(),
     });
+
+    // Fire automation rules for unmerge event
+    void evaluateAutomation('ticket.unmerged', {
+      mergeLogId,
+      unmergedBy,
+    }, 'trigger').catch(() => {});
 
     return NextResponse.json({ status: 'ok', mergeLogId, undone: true });
   } catch (err) {
