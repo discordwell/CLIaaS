@@ -28,7 +28,7 @@ export async function checkForNewReplies(
   since: Date,
   dir?: string,
 ): Promise<CollisionCheckResult> {
-  const { getDataProvider } = await import('@/lib/data-provider/index.js');
+  const { getDataProvider } = await import('@/lib/data-provider/index');
   const provider = await getDataProvider(dir);
 
   let messages: Message[];
