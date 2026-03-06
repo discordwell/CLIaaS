@@ -2,12 +2,13 @@
  * enqueue*() helpers — try Redis, return false to signal caller should fallback to inline.
  */
 
-import { getWebhookQueue, getEmailQueue, getAIResolutionQueue, getAutomationQueue } from './queues';
+import { getWebhookQueue, getEmailQueue, getAIResolutionQueue, getAutomationQueue, getReportExportQueue } from './queues';
 import type {
   WebhookDeliveryJob,
   EmailSendJob,
   AIResolutionJob,
   AutomationSchedulerJob,
+  ReportExportJob,
 } from './types';
 
 /**
@@ -84,6 +85,26 @@ export async function enqueueAutomationTick(job: AutomationSchedulerJob): Promis
     await queue.add('tick', job, {
       removeOnComplete: { count: 100 },
       removeOnFail: { count: 500 },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Enqueue a report export job. Returns true if enqueued, false if caller should fallback.
+ */
+export async function enqueueReportExport(job: ReportExportJob): Promise<boolean> {
+  const queue = getReportExportQueue();
+  if (!queue) return false;
+
+  try {
+    await queue.add('export', job, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 10000 },
+      removeOnComplete: { count: 500 },
+      removeOnFail: { count: 2000 },
     });
     return true;
   } catch {

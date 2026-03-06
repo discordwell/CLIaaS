@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-03-06T10:00Z — Session 97: Slice 14 — KB Enhancements (All 5 Phases)
+- **All 5 phases implemented**: i18n/multilingual, branded help centers, answer bot deflection, article feedback + content gaps, SEO + language detection
+- **Phase 1 (Schema + Core i18n)**: Migration `0014_kb_enhancements.sql` (3 new tables: kb_article_feedback, kb_deflections, kb_content_gaps; 2 enums: kb_visibility, kb_gap_status; 5 ALTERed tables: brands +12 cols, kb_articles +13 cols, kb_categories +6 cols, kb_collections +3 cols, rag_chunks +locale). Drizzle schema updated. DataProvider types extended (KBArticle, KBArticleFeedbackParams/Record, 3 new provider methods). All 4 provider implementations updated. API routes for kb CRUD updated with locale/brand/visibility params. New translations API. RAG chunker locale prefix, retriever locale filter. 14/14 tests pass.
+- **Phase 2 (Brand Theming)**: Brand type reconciliation (brands.ts extended). 3 components (BrandThemeProvider, LocalePicker, TranslationStatusBadge). Branded help center routes (/help/[brandSlug]/..., 3 pages). Subdomain routing in middleware.ts. Brand management pages (/brands, /brands/[id]). Feature gates (multi_brand, answer_bot). Portal KB scoping (visibility=public filter).
+- **Phase 3 (Answer Bot)**: Suggestion API (portal/kb/suggest), deflection tracking API (portal/kb/deflection), DeflectionPanel component, portal new ticket form integration, chat article suggestion API. Text-match lib for article search.
+- **Phase 4 (Feedback + Content Gaps)**: Portal + agent-side feedback APIs (portal/kb/[id]/feedback, kb/[id]/feedback), feedback analytics API, ArticleFeedback component, content gap analysis lib + API + UI pages (content-gaps, analytics). ContentGapCard component.
+- **Phase 5 (SEO + Polish)**: Slug generation (lib/kb/slugs.ts), SEO-friendly portal article URLs (portal/kb/[slug]), sitemap API (portal/kb/sitemap), language detection API (portal/detect-locale), ArticleEditor component, KB management page overhaul (locale/brand/visibility filters, translation badges). CLI expanded (translate, feedback, gaps, seo-audit commands). MCP tools expanded (6+ new tools).
+- **Files**: ~50 new files, ~20 modified. 0 new TS errors. Build passes. 14/14 KB tests pass.
+
+## 2026-03-06T09:30Z — Session 96: Slice 13 — Custom Reports & Analytics (All 6 Phases)
+- **Full 6-phase implementation** of Custom Reports & Analytics feature:
+  - **Phase 1 (Schema + Engine)**: Migration `0014_custom_reports.sql` (6 tables), Drizzle schema defs, report engine (`engine.ts` — 20 metrics, in-memory execution), metric registry (`metrics.ts`), 6 templates, CSV/JSON formatters, SHA-256 report cache with 5min/1hr TTL
+  - **Phase 2 (API + CLI + MCP)**: 6 API routes (`/api/reports/` — CRUD, execute, export, drill-down, share), CLI `reports` command (5 subcommands), 6 MCP tools (report_list/run/create/export/dashboard_live/report_schedule), `reports:read/write/export` scopes, feature gates (`custom_reports`, `live_dashboard`)
+  - **Phase 3 (Report Builder UI)**: 5 Recharts components (BarChart/LineChart/PieChart/NumberCard/ChartRenderer) with brutalist zinc palette, DrillDownPanel slide-over, ShareLinkDialog, report list + builder page (`/reports`), report detail page (`/reports/[id]`)
+  - **Phase 4 (Dashboard Builder)**: 3 API routes (`/api/dashboards/`), 4 dashboard pages, DashboardGrid (12-col CSS grid), DashboardWidget (auto-executing report renderer), auto-refresh, fullscreen, widget add/remove
+  - **Phase 5 (Scheduled Exports)**: 2 schedule API routes, BullMQ `report-export` worker, schedule-checker (DB+memory dual-path), ScheduleModal UI, queue types/dispatch/worker registration
+  - **Phase 6 (Live Dashboard)**: SSE endpoint at `/api/dashboard/live`, snapshot polling fallback, live dashboard page with 6 LiveMetricCards, auto-reconnect, EventBus `metric:updated` event, snapshot-retention cleanup
+- **Integrations**: AppNav (Reports link), dashboard modules (Reports entry), analytics (Report Builder CTA), CLI index + MCP server registrations
+- **77 tests across 8 files** — engine (20), metrics (8), formatters (9), cache (9), live-metrics (6), schedule-checker (5), API routes (12), chart renderer (8). All passing.
+- **0 type errors** in new files. 49 new files created, 10 existing files modified.
+
 ## 2026-03-06T09:20Z — Session 95: Slice 11 Implementation + Code Review + Fixes
 - Slice 11 (Custom Views/Filters/Tags) was already fully implemented by prior session — verified completeness
 - Code review found **8 issues** (4 high, 4 medium), all fixed:

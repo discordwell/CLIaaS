@@ -37,12 +37,21 @@ export interface EmailSendJob {
   from?: string;
 }
 
+export interface ReportExportJob {
+  scheduleId: string;
+  reportId: string;
+  format: 'csv' | 'json';
+  recipients: string[];
+  dateRange?: { from: string; to: string };
+}
+
 /** Queue name constants */
 export const QUEUE_NAMES = {
   WEBHOOK_DELIVERY: 'webhook-delivery',
   AUTOMATION_SCHEDULER: 'automation-scheduler',
   AI_RESOLUTION: 'ai-resolution',
   EMAIL_SEND: 'email-send',
+  REPORT_EXPORT: 'report-export',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

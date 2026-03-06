@@ -32,7 +32,11 @@ export type Feature =
   | 'qa_reviews'
   | 'proactive_messaging'
   | 'workforce_management'
-  | 'canned_responses';
+  | 'canned_responses'
+  | 'custom_reports'
+  | 'live_dashboard'
+  | 'multi_brand'
+  | 'answer_bot';
 
 /** All tiers (including legacy aliases). */
 export const ALL_TIERS: TierLevel[] = [
@@ -61,6 +65,10 @@ export const FEATURE_MATRIX: Record<Feature, TierLevel[]> = {
   proactive_messaging: [...ALL_TIERS],
   workforce_management: [...ALL_TIERS],
   canned_responses:     [...ALL_TIERS],
+  custom_reports:       [...ALL_TIERS],
+  live_dashboard:       [...ALL_TIERS],
+  multi_brand:          ['enterprise'],
+  answer_bot:           ['pro', 'pro_hosted', 'enterprise', 'byoc'],
 };
 
 /** Check whether a specific feature is enabled for a given tier. */
@@ -108,6 +116,10 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   proactive_messaging: 'Proactive Messaging',
   workforce_management: 'Workforce Management',
   canned_responses:     'Canned Responses & Macros',
+  custom_reports:       'Custom Reports & Analytics',
+  live_dashboard:       'Live Dashboard',
+  multi_brand:          'Multi-Brand Help Centers',
+  answer_bot:           'Answer Bot (AI Suggestions)',
 };
 
 /** Human-readable tier labels. */

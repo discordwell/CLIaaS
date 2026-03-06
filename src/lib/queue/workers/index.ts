@@ -8,6 +8,7 @@ import { createWebhookWorker } from './webhook-worker';
 import { createAutomationWorker } from './automation-worker';
 import { createAIResolutionWorker } from './ai-resolution-worker';
 import { createEmailWorker } from './email-worker';
+import { createReportExportWorker } from './report-export-worker';
 import { createLogger } from '../../logger';
 
 const logger = createLogger('queue:workers');
@@ -31,6 +32,7 @@ export function startAllWorkers(): void {
     createAutomationWorker,
     createAIResolutionWorker,
     createEmailWorker,
+    createReportExportWorker,
   ];
 
   for (const factory of factories) {

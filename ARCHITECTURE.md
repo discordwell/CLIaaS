@@ -145,6 +145,9 @@ Each domain has a dedicated store in `src/lib/`:
 ### Business Hours & Holidays (3)
 `holiday_calendars` (named collections of holidays with descriptions), `holiday_entries` (individual dates with recurring/partial-day support), `business_hours_holiday_links` (M2M join linking schedules to calendars). Holiday presets available: US Federal, UK Bank, Canada Statutory, Australia Public. Core engine in `src/lib/wfm/business-hours.ts` provides `addBusinessMinutes()`, `getElapsedBusinessMinutes()`, `isWithinBusinessHours()`, `nextBusinessHourStart/Close()`. UI at `/business-hours` with weekly grid editor + holiday calendar management.
 
+### Custom Reports & Analytics (6)
+`reports` (saved report definitions: metric, group_by, filters, visualization, formula, is_template, share_token), `dashboards` (named dashboard layouts with widget grid positions), `dashboard_widgets` (report_id FK + grid x/y/w/h per dashboard), `report_schedules` (automated exports: frequency/recipients/format/next_run_at with CHECK constraint), `report_cache` (SHA-256 hash lookup with TTL: 5-min live, 1-hour historical), `metric_snapshots` (periodic live metric values with dimensions JSONB). Engine at `src/lib/reports/engine.ts` executes 20 metrics in-memory via `getDataProvider()`. Recharts visualizations (bar/line/pie/number) at `src/components/charts/`. Live dashboard via SSE at `/api/dashboard/live`. Report builder UI at `/reports`, dashboard canvas at `/dashboards`, live dashboard at `/dashboards/live`. CLI: `cliaas reports list|run|create|export|schedule`. MCP: 6 tools (report_list/run/create/export/dashboard_live/report_schedule).
+
 ### Views & Tags (3)
 `views` (saved ticket filters with query JSONB, view_type: system/shared/personal, position ordering, user ownership), `tags` (workspace-scoped with color + description), `ticket_tags` (many-to-many junction, synced to tickets.tags array)
 

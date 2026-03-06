@@ -1,0 +1,65 @@
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { requireScope } from '@/lib/api-auth';
+import { executeReport } from '@/lib/reports/engine';
+import { formatCSV, formatJSON, getContentType, getFileExtension } from '@/lib/reports/formatters';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await requireScope(request, 'analytics:read');
+  if ('error' in auth) return auth.error;
+  const { id } = await params;
+
+  const url = new URL(request.url);
+  const format = url.searchParams.get('format') ?? 'csv';
+  const from = url.searchParams.get('from');
+  const to = url.searchParams.get('to');
+  const dateRange = from && to ? { from, to } : undefined;
+
+  try {
+    let reportDef;
+
+    if (process.env.DATABASE_URL) {
+      const { db } = await import('@/db');
+      const schema = await import('@/db/schema');
+      const { eq, and } = await import('drizzle-orm');
+
+      const [row] = await db.select().from(schema.reports)
+        .where(and(eq(schema.reports.id, id), eq(schema.reports.workspaceId, auth.user.workspaceId)))
+        .limit(1);
+      if (!row) return NextResponse.json({ error: 'Report not found' }, { status: 404 });
+
+      reportDef = {
+        metric: row.metric,
+        groupBy: row.groupBy ?? [],
+        filters: (row.filters ?? {}) as Record<string, unknown>,
+        visualization: row.visualization,
+      };
+    } else {
+      const { REPORT_TEMPLATES } = await import('@/lib/reports/templates');
+      const idx = parseInt(id.replace('template-', ''), 10);
+      const template = REPORT_TEMPLATES[idx];
+      if (!template) return NextResponse.json({ error: 'Report not found' }, { status: 404 });
+      reportDef = template;
+    }
+
+    const result = await executeReport(reportDef, dateRange);
+    const output = format === 'json' ? formatJSON(result) : formatCSV(result);
+
+    return new Response(output, {
+      headers: {
+        'Content-Type': getContentType(format),
+        'Content-Disposition': `attachment; filename="report-${id}${getFileExtension(format)}"`,
+      },
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to export report' },
+      { status: 500 },
+    );
+  }
+}

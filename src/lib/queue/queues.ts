@@ -34,3 +34,4 @@ export function getWebhookQueue() { return getQueue(QUEUE_NAMES.WEBHOOK_DELIVERY
 export function getAutomationQueue() { return getQueue(QUEUE_NAMES.AUTOMATION_SCHEDULER); }
 export function getAIResolutionQueue() { return getQueue(QUEUE_NAMES.AI_RESOLUTION); }
 export function getEmailQueue() { return getQueue(QUEUE_NAMES.EMAIL_SEND); }
+export function getReportExportQueue() { return getQueue(QUEUE_NAMES.REPORT_EXPORT); }

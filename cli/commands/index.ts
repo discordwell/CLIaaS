@@ -47,6 +47,7 @@ import { registerSideConversationCommands } from './side-conversations.js';
 import { registerViewCommands } from './views.js';
 import { registerTagCommands } from './tags.js';
 import { registerBusinessHoursCommands } from './business-hours.js';
+import { registerReportsCommands } from './reports.js';
 
 export function registerCommands(program: Command): void {
   registerZendeskCommands(program);
@@ -97,4 +98,5 @@ export function registerCommands(program: Command): void {
   registerViewCommands(program);
   registerTagCommands(program);
   registerBusinessHoursCommands(program);
+  registerReportsCommands(program);
 }

@@ -28,6 +28,7 @@ import { registerSideConversationTools } from './tools/side-conversations.js';
 import { registerViewTools } from './tools/views.js';
 import { registerTagTools } from './tools/tags.js';
 import { registerBusinessHoursTools } from './tools/business-hours.js';
+import { registerReportTools } from './tools/reports.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -62,6 +63,7 @@ registerSideConversationTools(server);
 registerViewTools(server);
 registerTagTools(server);
 registerBusinessHoursTools(server);
+registerReportTools(server);
 
 // Register resources and prompts
 registerResources(server);

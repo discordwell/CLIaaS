@@ -12,7 +12,7 @@
 
 import { NextResponse } from 'next/server';
 
-export type Role = 'owner' | 'admin' | 'agent';
+export type Role = 'owner' | 'admin' | 'agent' | 'light_agent' | 'collaborator' | 'viewer';
 
 export interface AuthUser {
   id: string;
@@ -34,9 +34,12 @@ const DEMO_USER: AuthUser = {
 };
 
 export const ROLE_HIERARCHY: Record<Role, number> = {
-  owner: 3,
-  admin: 2,
-  agent: 1,
+  owner: 6,
+  admin: 5,
+  agent: 4,
+  light_agent: 3,
+  collaborator: 2,
+  viewer: 1,
 };
 
 /**
@@ -141,6 +144,9 @@ export const VALID_SCOPES = [
   'webhooks:write',
   'routing:read',
   'routing:write',
+  'reports:read',
+  'reports:write',
+  'reports:export',
   'admin:*',
   '*',
 ] as const;

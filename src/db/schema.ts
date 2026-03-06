@@ -2484,3 +2484,36 @@ export const ticketCollaborators = pgTable(
     ticketCollaboratorsUserIdx: index('ticket_collaborators_user_idx').on(table.userId),
   }),
 );
+
+// ---- Custom Roles ----
+
+export const customRoles = pgTable(
+  'custom_roles',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    baseRole: text('base_role').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    customRolesWorkspaceNameIdx: uniqueIndex('custom_roles_workspace_name_idx').on(table.workspaceId, table.name),
+    customRolesWorkspaceIdx: index('custom_roles_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const customRolePermissions = pgTable(
+  'custom_role_permissions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    customRoleId: uuid('custom_role_id').notNull().references(() => customRoles.id, { onDelete: 'cascade' }),
+    permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
+    granted: boolean('granted').notNull().default(true),
+  },
+  table => ({
+    customRolePermissionsUniqueIdx: uniqueIndex('custom_role_permissions_unique_idx').on(table.customRoleId, table.permissionKey),
+    customRolePermissionsRoleIdx: index('custom_role_permissions_role_idx').on(table.customRoleId),
+  }),
+);

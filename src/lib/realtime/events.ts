@@ -27,7 +27,8 @@ export type EventType =
   | 'note:created'
   | 'mention:created'
   | 'side_conversation:created'
-  | 'side_conversation:replied';
+  | 'side_conversation:replied'
+  | 'metric:updated';
 
 export interface AppEvent {
   type: EventType;

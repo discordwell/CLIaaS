@@ -11,6 +11,7 @@ const modules = [
   { path: "/customers", name: "Customers", gated: false },
   { path: "/kb", name: "Knowledge Base", gated: false },
   { path: "/analytics", name: "Analytics", gated: true },
+  { path: "/reports", name: "Reports", gated: true },
   { path: "/ai", name: "AI Dashboard", gated: true },
   { path: "/automation", name: "Automation", gated: true },
   { path: "/sla", name: "SLA Policies", gated: true },

@@ -3,32 +3,43 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import NotificationBell from "./NotificationBell";
+import { usePermissions } from "./rbac/PermissionProvider";
 
-const navLinks = [
+interface NavLink {
+  href: string;
+  label: string;
+  permission?: string;
+}
+
+const navLinks: NavLink[] = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/tickets", label: "Tickets" },
-  { href: "/rules", label: "Rules" },
-  { href: "/workflows", label: "Workflows" },
+  { href: "/tickets", label: "Tickets", permission: "tickets:view" },
+  { href: "/rules", label: "Rules", permission: "automation:view" },
+  { href: "/workflows", label: "Workflows", permission: "automation:view" },
   { href: "/chat", label: "Chat" },
   { href: "/chatbots", label: "Bots" },
-  { href: "/channels", label: "Channels" },
+  { href: "/channels", label: "Channels", permission: "channels:view" },
   { href: "/ai", label: "AI" },
-  { href: "/analytics", label: "Analytics" },
+  { href: "/analytics", label: "Analytics", permission: "analytics:view" },
+  { href: "/reports", label: "Reports" },
   { href: "/sla", label: "SLA" },
   { href: "/business-hours", label: "Hours" },
-  { href: "/settings/routing", label: "Routing" },
+  { href: "/settings/routing", label: "Routing", permission: "channels:view" },
+  { href: "/kb", label: "KB" },
+  { href: "/brands", label: "Brands" },
   { href: "/integrations", label: "Integrations" },
-  { href: "/wfm", label: "WFM" },
+  { href: "/wfm", label: "WFM", permission: "admin:settings" },
   { href: "/marketplace", label: "Marketplace" },
   { href: "/security", label: "Security" },
   { href: "/enterprise", label: "Enterprise" },
-  { href: "/billing", label: "Billing" },
+  { href: "/billing", label: "Billing", permission: "admin:billing" },
   { href: "/docs", label: "Docs" },
 ];
 
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
+  const { permissions, hasPermission } = usePermissions();
 
   async function handleSignOut() {
     try {
@@ -38,6 +49,14 @@ export default function AppNav() {
     }
     router.push("/");
   }
+
+  // Filter nav links by permission when RBAC is active
+  const visibleLinks =
+    permissions > 0n
+      ? navLinks.filter(
+          (link) => !link.permission || hasPermission(link.permission),
+        )
+      : navLinks;
 
   return (
     <nav className="border-2 border-zinc-950 bg-white">
@@ -50,7 +69,7 @@ export default function AppNav() {
             CLIaaS
           </Link>
           <div className="flex items-center gap-1">
-            {navLinks.map((link) => {
+            {visibleLinks.map((link) => {
               const isActive =
                 pathname === link.href || pathname.startsWith(link.href + "/");
               return (

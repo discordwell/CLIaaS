@@ -392,6 +392,24 @@ export default function AnalyticsPageContent() {
             </section>
           )}
 
+          {/* REPORT BUILDER CTA */}
+          <section className="mt-8 border-2 border-zinc-950 bg-zinc-950 p-6 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Custom Report Builder</h2>
+                <p className="mt-1 text-sm text-zinc-400">
+                  Build custom reports with 20+ metrics, multiple visualizations, and drill-down.
+                </p>
+              </div>
+              <a
+                href="/reports"
+                className="border-2 border-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-white hover:text-zinc-950"
+              >
+                Open Report Builder
+              </a>
+            </div>
+          </section>
+
           {/* NO DATA */}
           {data.totalTickets === 0 && (
             <section className="mt-8 border-2 border-zinc-950 bg-white p-8 text-center">
