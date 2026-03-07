@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-07T09:00Z — Session 122: AI Admin Pages (C6 Procedures + C7 Safety)
+- Created `/dashboard/ai/procedures/page.tsx` (client component): full CRUD for AI procedures with inline expandable editor, toggle switches, test section, status derivation (active/draft/disabled), fetches from `/api/ai/procedures`
+- Created `/dashboard/ai/safety/page.tsx` (server component): circuit breaker panel with large visual indicator + metrics, PII configuration toggles (8 types), usage quota progress bars (calls/tokens/cost), audit trail table (last 20 entries)
+- Created `/dashboard/ai/safety/_actions.tsx` (client component): Trip/Reset buttons for manual circuit breaker override, calls `/api/ai/admin` API
+- Both pages follow brutalist/Swiss design: `border-2 border-line bg-panel`, `font-mono text-xs font-bold uppercase tracking-[0.2em]`, `max-w-6xl`
+- 27 tests across 2 test files, all passing. Clean Next.js build with zero errors.
+
 ## 2026-03-07T08:33Z — Session 121: WFM Intraday Management with Reforecasting (B9)
 - Built `src/lib/wfm/intraday.ts`: intraday status, reforecasting, staffing gap identification
 - `getIntradayStatus()` compares predicted vs actual volumes, builds variance snapshots
