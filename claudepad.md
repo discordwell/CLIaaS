@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-07T08:33Z — Session 121: WFM Intraday Management with Reforecasting (B9)
+- Built `src/lib/wfm/intraday.ts`: intraday status, reforecasting, staffing gap identification
+- `getIntradayStatus()` compares predicted vs actual volumes, builds variance snapshots
+- `reforecast()` applies rolling adjustment factor to remaining hours (20% threshold, urgency levels)
+- `identifyStaffingGaps()` highlights hours with staffing shortfalls and per-hour urgency flags
+- Division-by-zero safe (zero predicted volumes handled gracefully)
+- 20 tests in `src/lib/wfm/__tests__/intraday.test.ts`, all 87 WFM tests pass
+
 ## 2026-03-07T08:30Z — Session 120: Easter Egg Engine Bug Fixes (4 parallel agents)
 - **FCOM yellow boxes**: Added FCOM/MISS/V19 to STRUCTURE_IMAGES, BUILDING_FRAME_TABLE, STRUCTURE_SIZE, STRUCTURE_MAX_HP. Fixed V-series skip logic. Added 6 missing buildings to frame table (apwr, afld, hpad, kenn, pbox, v19). 68 tests.
 - **Harvester behavior**: Added Terrain.ORE to PASSABLE. Broadened harvester AI gate from GUARD-only to exclude ATTACK/DIE. Added isIdleMission() helper for GUARD+AREA_GUARD. Fixed seeking/returning state checks. 23 tests.
