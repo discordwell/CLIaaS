@@ -8,7 +8,7 @@
  * function signatures so existing web routes and components don't change.
  */
 
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { getDataProvider } from '@/lib/data-provider/index';
 
@@ -40,21 +40,36 @@ export interface TicketStats {
 
 // ---- Export dir helper (still needed by some web routes) ----
 
-const EXPORT_DIRS = [
-  '/tmp/cliaas-demo',
-  './exports/zendesk',
-  './exports/kayako',
-  './exports/kayako-classic',
-  './exports/helpcrunch',
-  './exports/freshdesk',
-  './exports/groove',
-  './exports',
-];
-
 export function findExportDir(): string | null {
-  for (const dir of EXPORT_DIRS) {
-    if (existsSync(join(dir, 'manifest.json'))) return dir;
+  // Check demo directory first
+  if (existsSync(join('/tmp/cliaas-demo', 'manifest.json'))) {
+    return '/tmp/cliaas-demo';
   }
+
+  // Auto-discover from ./exports/*/manifest.json
+  const exportsRoot = './exports';
+  if (existsSync(exportsRoot)) {
+    try {
+      for (const entry of readdirSync(exportsRoot)) {
+        const subdir = join(exportsRoot, entry);
+        try {
+          if (statSync(subdir).isDirectory() && existsSync(join(subdir, 'manifest.json'))) {
+            return subdir;
+          }
+        } catch {
+          // skip
+        }
+      }
+    } catch {
+      // exports dir unreadable
+    }
+  }
+
+  // Legacy flat layout
+  if (existsSync(join(exportsRoot, 'manifest.json'))) {
+    return exportsRoot;
+  }
+
   return null;
 }
 

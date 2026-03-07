@@ -3,7 +3,7 @@
  * Writes are not supported (throws).
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import type {
   DataProvider,
@@ -32,16 +32,41 @@ import type {
   MergeHistoryEntry,
 } from './types';
 
-const EXPORT_DIRS = [
-  '/tmp/cliaas-demo',
-  './exports/zendesk',
-  './exports/kayako',
-  './exports/kayako-classic',
-  './exports/helpcrunch',
-  './exports/freshdesk',
-  './exports/groove',
-  './exports',
-];
+/** Auto-discover all export directories that contain a manifest.json. */
+function discoverExportDirs(): string[] {
+  const dirs: string[] = [];
+
+  // Check the demo directory
+  if (existsSync(join('/tmp/cliaas-demo', 'manifest.json'))) {
+    dirs.push('/tmp/cliaas-demo');
+  }
+
+  // Scan ./exports/* for any connector subdirectory with a manifest
+  const exportsRoot = './exports';
+  if (existsSync(exportsRoot)) {
+    try {
+      for (const entry of readdirSync(exportsRoot)) {
+        const subdir = join(exportsRoot, entry);
+        try {
+          if (statSync(subdir).isDirectory() && existsSync(join(subdir, 'manifest.json'))) {
+            dirs.push(subdir);
+          }
+        } catch {
+          // Skip unreadable entries
+        }
+      }
+    } catch {
+      // exports dir unreadable
+    }
+  }
+
+  // Check ./exports itself (legacy flat layout)
+  if (existsSync(join(exportsRoot, 'manifest.json'))) {
+    dirs.push(exportsRoot);
+  }
+
+  return dirs;
+}
 
 function readJsonl<T>(filePath: string): T[] {
   if (!existsSync(filePath)) return [];
@@ -61,7 +86,7 @@ function findAllExportDirs(overrideDir?: string): string[] {
   if (overrideDir) {
     return existsSync(join(overrideDir, 'manifest.json')) ? [overrideDir] : [];
   }
-  return EXPORT_DIRS.filter(dir => existsSync(join(dir, 'manifest.json')));
+  return discoverExportDirs();
 }
 
 function loadAllFromDirs<T>(filename: string, overrideDir?: string): T[] {
