@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { SignJWT } from 'jose';
+import { getJwtSecret } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,16 @@ export async function GET(request: Request) {
     );
   }
 
-  const state = crypto.randomUUID();
+  // Sign the state as a JWT so the callback can verify it without a cookie.
+  // This eliminates the race condition where two tabs overwrite each other's
+  // state cookie (google_state_mismatch error).
+  const nonce = crypto.randomUUID();
+  const state = await new SignJWT({ nonce, purpose: 'google-oauth-state' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('10m')
+    .sign(getJwtSecret());
+
   const callbackUrl = `${base}/api/auth/google/callback`;
 
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -33,15 +43,6 @@ export async function GET(request: Request) {
   url.searchParams.set('state', state);
   url.searchParams.set('access_type', 'online');
   url.searchParams.set('prompt', 'select_account');
-
-  const cookieStore = await cookies();
-  cookieStore.set('google-oauth-state', state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 600,
-    path: '/',
-  });
 
   return NextResponse.redirect(url.toString());
 }

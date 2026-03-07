@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { SignJWT } from 'jose';
+import { SignJWT, jwtVerify } from 'jose';
 import { eq } from 'drizzle-orm';
 import { createToken, setSessionCookie, getJwtSecret } from '@/lib/auth';
 import { isPersonalEmail, extractDomain } from '@/lib/auth/personal-domains';
@@ -32,12 +31,15 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${base}/sign-in?error=google_missing_params`);
   }
 
-  // Verify state
-  const cookieStore = await cookies();
-  const savedState = cookieStore.get('google-oauth-state')?.value;
-  cookieStore.delete('google-oauth-state');
-
-  if (state !== savedState) {
+  // Verify state — the state is a signed JWT, so we verify the signature
+  // instead of comparing against a cookie. This is immune to the race
+  // condition where multiple tabs overwrite each other's state cookie.
+  try {
+    const { payload } = await jwtVerify(state, getJwtSecret());
+    if (payload.purpose !== 'google-oauth-state') {
+      return NextResponse.redirect(`${base}/sign-in?error=google_state_mismatch`);
+    }
+  } catch {
     return NextResponse.redirect(`${base}/sign-in?error=google_state_mismatch`);
   }
 

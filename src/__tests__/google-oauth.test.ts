@@ -20,16 +20,8 @@ describe('Google OAuth routes', () => {
   // -- GET /api/auth/google/login --
 
   describe('GET /api/auth/google/login', () => {
-    it('redirects to Google when GOOGLE_CLIENT_ID is set', async () => {
+    it('redirects to Google with a signed state JWT when GOOGLE_CLIENT_ID is set', async () => {
       process.env.GOOGLE_CLIENT_ID = 'test-client-id';
-
-      vi.doMock('next/headers', () => ({
-        cookies: vi.fn().mockResolvedValue({
-          get: vi.fn().mockReturnValue(undefined),
-          set: vi.fn(),
-          delete: vi.fn(),
-        }),
-      }));
 
       const { GET } = await import('@/app/api/auth/google/login/route');
       const req = new Request('http://localhost:3000/api/auth/google/login');
@@ -40,18 +32,15 @@ describe('Google OAuth routes', () => {
       expect(location).toContain('accounts.google.com');
       expect(location).toContain('client_id=test-client-id');
       expect(location).toContain('scope=openid+email+profile');
+
+      // State should be a JWT (three dot-separated base64 segments)
+      const url = new URL(location);
+      const state = url.searchParams.get('state') || '';
+      expect(state.split('.').length).toBe(3);
     });
 
     it('redirects back to sign-up when GOOGLE_CLIENT_ID is not set', async () => {
       delete process.env.GOOGLE_CLIENT_ID;
-
-      vi.doMock('next/headers', () => ({
-        cookies: vi.fn().mockResolvedValue({
-          get: vi.fn().mockReturnValue(undefined),
-          set: vi.fn(),
-          delete: vi.fn(),
-        }),
-      }));
 
       const { GET } = await import('@/app/api/auth/google/login/route');
       const req = new Request('http://localhost:3000/api/auth/google/login', {
@@ -70,14 +59,6 @@ describe('Google OAuth routes', () => {
 
   describe('GET /api/auth/google/callback', () => {
     it('redirects to sign-in with error when code is missing', async () => {
-      vi.doMock('next/headers', () => ({
-        cookies: vi.fn().mockResolvedValue({
-          get: vi.fn().mockReturnValue(undefined),
-          set: vi.fn(),
-          delete: vi.fn(),
-        }),
-      }));
-
       const { GET } = await import('@/app/api/auth/google/callback/route');
       const req = new Request('http://localhost:3000/api/auth/google/callback?state=abc');
       const res = await GET(req);
@@ -89,14 +70,6 @@ describe('Google OAuth routes', () => {
     });
 
     it('redirects to sign-in with error when state is missing', async () => {
-      vi.doMock('next/headers', () => ({
-        cookies: vi.fn().mockResolvedValue({
-          get: vi.fn().mockReturnValue(undefined),
-          set: vi.fn(),
-          delete: vi.fn(),
-        }),
-      }));
-
       const { GET } = await import('@/app/api/auth/google/callback/route');
       const req = new Request('http://localhost:3000/api/auth/google/callback?code=authcode');
       const res = await GET(req);
@@ -107,21 +80,29 @@ describe('Google OAuth routes', () => {
       expect(location).toContain('google_missing_params');
     });
 
-    it('redirects with state_mismatch when state cookie does not match', async () => {
-      vi.doMock('next/headers', () => ({
-        cookies: vi.fn().mockResolvedValue({
-          get: vi.fn().mockImplementation((name: string) => {
-            if (name === 'google-oauth-state') return { value: 'saved-state' };
-            return undefined;
-          }),
-          set: vi.fn(),
-          delete: vi.fn(),
-        }),
-      }));
+    it('redirects with state_mismatch when state is not a valid signed JWT', async () => {
+      const { GET } = await import('@/app/api/auth/google/callback/route');
+      const req = new Request(
+        'http://localhost:3000/api/auth/google/callback?code=authcode&state=not-a-valid-jwt'
+      );
+      const res = await GET(req);
+
+      expect(res.status).toBe(307);
+      const location = res.headers.get('location') || '';
+      expect(location).toContain('/sign-in');
+      expect(location).toContain('google_state_mismatch');
+    });
+
+    it('redirects with state_mismatch when state JWT has wrong purpose', async () => {
+      const wrongPurpose = await new SignJWT({ nonce: 'test', purpose: 'password-reset' })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime('10m')
+        .sign(getJwtSecret());
 
       const { GET } = await import('@/app/api/auth/google/callback/route');
       const req = new Request(
-        'http://localhost:3000/api/auth/google/callback?code=authcode&state=wrong-state'
+        `http://localhost:3000/api/auth/google/callback?code=authcode&state=${encodeURIComponent(wrongPurpose)}`
       );
       const res = await GET(req);
 
@@ -132,14 +113,6 @@ describe('Google OAuth routes', () => {
     });
 
     it('redirects with google_denied when error param is present', async () => {
-      vi.doMock('next/headers', () => ({
-        cookies: vi.fn().mockResolvedValue({
-          get: vi.fn().mockReturnValue(undefined),
-          set: vi.fn(),
-          delete: vi.fn(),
-        }),
-      }));
-
       const { GET } = await import('@/app/api/auth/google/callback/route');
       const req = new Request(
         'http://localhost:3000/api/auth/google/callback?error=access_denied'
