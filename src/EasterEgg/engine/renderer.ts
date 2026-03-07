@@ -1338,66 +1338,82 @@ export class Renderer {
             frame = damaged ? Math.floor(totalFrames / 2) : 0;
           }
         }
-        // Sell / Construction frame override — cycle through construction frames
-        // In C++ RA, sell plays the building's construction frames in reverse.
-        // Construction frames span 0..damageFrame-1 in the sprite sheet.
+        // Construction/Sell: use dedicated *make buildup sheet if available (C++ RA parity).
+        // In C++ RA, Get_Image_Data() switches to BuildupData (*make.shp) during BSTATE_CONSTRUCTION.
+        // Sell plays the make frames in reverse. Fall back to cycling normal frames if no make sheet.
+        let useSheet = s.image;
+        let useFrame = frame;
+        let useTotalFrames = totalFrames;
         if (isSelling || isConstructing) {
-          const tableEntry2 = BUILDING_FRAME_TABLE[s.image];
-          if (tableEntry2 && tableEntry2.damageFrame > 1) {
-            const maxFrame = tableEntry2.damageFrame - 1;
+          const makeSheetName = s.image + 'make';
+          const makeSheet = assets.getSheet(makeSheetName);
+          if (makeSheet) {
+            // Use the dedicated buildup sheet
+            useSheet = makeSheetName;
+            useTotalFrames = makeSheet.meta.frameCount;
+            const maxFrame = useTotalFrames - 1;
             if (isConstructing) {
-              // Construction: cycle 0 → damageFrame-1 as buildProgress 0→1
-              frame = Math.min(Math.floor(s.buildProgress! * maxFrame), maxFrame);
+              useFrame = Math.min(Math.floor(s.buildProgress! * maxFrame), maxFrame);
             } else {
-              // Sell: cycle damageFrame-1 → 0 as sellProgress 0→1 (reverse construction)
-              frame = Math.max(0, Math.floor((1 - s.sellProgress!) * maxFrame));
+              useFrame = Math.max(0, Math.floor((1 - s.sellProgress!) * maxFrame));
+            }
+          } else {
+            // No make sheet — cycle through normal frames 0..damageFrame-1
+            const tableEntry2 = BUILDING_FRAME_TABLE[s.image];
+            if (tableEntry2 && tableEntry2.damageFrame > 1) {
+              const maxFrame = tableEntry2.damageFrame - 1;
+              if (isConstructing) {
+                useFrame = Math.min(Math.floor(s.buildProgress! * maxFrame), maxFrame);
+              } else {
+                useFrame = Math.max(0, Math.floor((1 - s.sellProgress!) * maxFrame));
+              }
             }
           }
         }
-        // Clamp frame to valid range (prevent overflow for non-standard frame counts)
-        frame = Math.min(frame, totalFrames - 1);
+        // Clamp frame to valid range
+        useFrame = Math.min(useFrame, useTotalFrames - 1);
+        // Resolve draw dimensions once (make sheet may differ from normal sheet)
+        const drawMeta = (useSheet !== s.image ? assets.getSheet(useSheet)?.meta : null) ?? sheet.meta;
+        const dfw = drawMeta.frameWidth;
+        const dfh = drawMeta.frameHeight;
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
         // Construction: reveal building from bottom up with scanline effect
         if (isConstructing) {
           const prog = s.buildProgress!;
-          const fh = sheet.meta.frameHeight;
-          const revealH = Math.floor(fh * prog);
+          const revealH = Math.floor(dfh * prog);
           ctx.save();
           ctx.beginPath();
-          ctx.rect(screenX - fh / 2, screenY + fh / 2 - revealH, sheet.meta.frameWidth + fh, revealH);
+          ctx.rect(screenX - dfh / 2, screenY + dfh / 2 - revealH, dfw + dfh, revealH);
           ctx.clip();
           ctx.globalAlpha = 0.5 + prog * 0.5;
         }
         // Sell: shrink building top-to-bottom (reverse of construction) while fading
         if (isSelling) {
           const prog = s.sellProgress!;
-          const fh = sheet.meta.frameHeight;
-          const remainH = Math.floor(fh * (1 - prog));
+          const remainH = Math.floor(dfh * (1 - prog));
           ctx.save();
           ctx.beginPath();
-          ctx.rect(screenX - fh / 2, screenY + fh / 2 - remainH, sheet.meta.frameWidth + fh, remainH);
+          ctx.rect(screenX - dfh / 2, screenY + dfh / 2 - remainH, dfw + dfh, remainH);
           ctx.clip();
           ctx.globalAlpha = Math.max(0.15, 1 - prog);
         }
-        assets.drawFrame(ctx, s.image, frame % totalFrames, screenX + sheet.meta.frameWidth / 2, screenY + sheet.meta.frameHeight / 2, {
+        assets.drawFrame(ctx, useSheet, useFrame % useTotalFrames, screenX + dfw / 2, screenY + dfh / 2, {
           centerX: true,
           centerY: true,
         });
         if (isConstructing) {
           // Green construction scanline at the build edge
-          const fh = sheet.meta.frameHeight;
-          const revealY = screenY + fh / 2 - Math.floor(fh * s.buildProgress!);
+          const revealY = screenY + dfh / 2 - Math.floor(dfh * s.buildProgress!);
           ctx.restore();
           ctx.fillStyle = `rgba(80,255,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
-          ctx.fillRect(screenX - 2, revealY - 1, sheet.meta.frameWidth + 4, 2);
+          ctx.fillRect(screenX - 2, revealY - 1, dfw + 4, 2);
         }
         if (isSelling) {
           // Red sell scanline at the shrinking edge
-          const fh = sheet.meta.frameHeight;
-          const shrinkY = screenY + fh / 2 - Math.floor(fh * (1 - s.sellProgress!));
+          const shrinkY = screenY + dfh / 2 - Math.floor(dfh * (1 - s.sellProgress!));
           ctx.restore();
           ctx.fillStyle = `rgba(255,80,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
-          ctx.fillRect(screenX - 2, shrinkY - 1, sheet.meta.frameWidth + 4, 2);
+          ctx.fillRect(screenX - 2, shrinkY - 1, dfw + 4, 2);
         }
         if (vis === 1) ctx.globalAlpha = 1;
       } else {
