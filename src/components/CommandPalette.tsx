@@ -103,22 +103,26 @@ function fuzzyMatch(query: string, text: string): FuzzyResult {
   return { matches: true, score, indices };
 }
 
-function matchItem(query: string, item: PaletteItem): FuzzyResult {
+interface MatchResult extends FuzzyResult {
+  matchedField: "label" | "other";
+}
+
+function matchItem(query: string, item: PaletteItem): MatchResult {
   const labelResult = fuzzyMatch(query, item.label);
-  if (labelResult.matches) return { ...labelResult, score: labelResult.score + 20 };
+  if (labelResult.matches) return { ...labelResult, score: labelResult.score + 20, matchedField: "label" };
 
   const descResult = fuzzyMatch(query, item.description);
-  if (descResult.matches) return { ...descResult, score: descResult.score + 5 };
+  if (descResult.matches) return { ...descResult, score: descResult.score + 5, matchedField: "other" };
 
   const hrefResult = fuzzyMatch(query, item.href);
-  if (hrefResult.matches) return hrefResult;
+  if (hrefResult.matches) return { ...hrefResult, matchedField: "other" };
 
   for (const kw of item.keywords ?? []) {
     const kwResult = fuzzyMatch(query, kw);
-    if (kwResult.matches) return { ...kwResult, score: kwResult.score + 10 };
+    if (kwResult.matches) return { ...kwResult, score: kwResult.score + 10, matchedField: "other" };
   }
 
-  return { matches: false, score: -1, indices: [] };
+  return { matches: false, score: -1, indices: [], matchedField: "other" };
 }
 
 /* ── Highlighted text renderer ────────────────────────────────── */
@@ -242,6 +246,18 @@ export default function CommandPalette() {
   // Flat list of all visible items for keyboard navigation
   const flatItems = useMemo(() => results.flatMap((g) => g.items), [results]);
 
+  // Pre-computed flat index map: item id+group → flat index (avoids mutable counter in render)
+  const flatIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let idx = 0;
+    for (const group of results) {
+      for (const entry of group.items) {
+        map.set(`${group.group}-${entry.item.id}`, idx++);
+      }
+    }
+    return map;
+  }, [results]);
+
   // ── Keyboard handler ──────────────────────────────────────────
 
   const handleSelect = useCallback(
@@ -260,16 +276,19 @@ export default function CommandPalette() {
     [router],
   );
 
-  // Global ⌘K listener
+  // Global ⌘K listener — no deps to avoid stale closure
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setOpen((prev) => !prev);
-        if (!open) {
-          setQuery("");
-          setActiveIndex(0);
-        }
+        setOpen((prev) => {
+          if (!prev) {
+            // Opening: always reset search state
+            setQuery("");
+            setActiveIndex(0);
+          }
+          return !prev;
+        });
       }
     }
 
@@ -285,7 +304,7 @@ export default function CommandPalette() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("open-command-palette", onCustomOpen);
     };
-  }, [open]);
+  }, []);
 
   // Focus input when opened
   useEffect(() => {
@@ -340,7 +359,7 @@ export default function CommandPalette() {
 
   if (!open) return null;
 
-  let itemCounter = -1;
+  const listboxId = "cmd-palette-listbox";
 
   return (
     <>
@@ -362,6 +381,9 @@ export default function CommandPalette() {
       {/* Palette */}
       <div
         className="fixed inset-0 z-[1000] flex items-start justify-center"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
         style={{ paddingTop: "min(20vh, 160px)" }}
         onClick={() => {
           setOpen(false);
@@ -408,6 +430,10 @@ export default function CommandPalette() {
             <input
               ref={inputRef}
               type="text"
+              role="combobox"
+              aria-expanded="true"
+              aria-controls={listboxId}
+              aria-activedescendant={flatItems[activeIndex] ? `cmd-item-${flatItems[activeIndex].item.id}` : undefined}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onInputKeyDown}
@@ -445,6 +471,9 @@ export default function CommandPalette() {
           {/* Results */}
           <div
             ref={listRef}
+            id={listboxId}
+            role="listbox"
+            aria-label="Navigation results"
             style={{
               flex: 1,
               overflowY: "auto",
@@ -467,7 +496,7 @@ export default function CommandPalette() {
               </div>
             )}
             {results.map((group) => (
-              <div key={group.group} style={{ marginBottom: "4px" }}>
+              <div key={group.group} role="group" aria-label={group.group} style={{ marginBottom: "4px" }}>
                 {/* Group header */}
                 <div
                   style={{
@@ -496,13 +525,17 @@ export default function CommandPalette() {
                 </div>
                 {/* Items */}
                 {group.items.map(({ item, result }) => {
-                  itemCounter++;
-                  const isActive = itemCounter === activeIndex;
+                  const itemKey = `${group.group}-${item.id}`;
+                  const idx = flatIndexMap.get(itemKey) ?? -1;
+                  const isActive = idx === activeIndex;
                   const isCurrent = pathname === item.href || pathname.startsWith(item.href + "/");
-                  const idx = itemCounter; // capture for closure
+                  const showHighlight = query && "matchedField" in result && result.matchedField === "label" && result.indices.length > 0;
                   return (
                     <div
-                      key={`${group.group}-${item.id}`}
+                      key={itemKey}
+                      id={`cmd-item-${item.id}`}
+                      role="option"
+                      aria-selected={isActive}
                       data-active={isActive}
                       onMouseEnter={() => setActiveIndex(idx)}
                       onClick={() => handleSelect(item)}
@@ -522,7 +555,7 @@ export default function CommandPalette() {
                       {/* Label + description */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          {query && result.indices.length > 0 ? (
+                          {showHighlight ? (
                             <HighlightedText
                               text={item.label}
                               indices={result.indices}
