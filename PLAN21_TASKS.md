@@ -25,8 +25,8 @@
 - [x] C14: Voice admin page `/dashboard/channels/voice`
 - [x] C15: WFM dashboard `/dashboard/wfm`
 
-## Phase D: Polish
+## Phase D: Polish ✅
 - [x] D1: Plugin dependency resolution
 - [x] D2: Code review + test sweep (4 critical fixes applied)
 - [x] D3: ARCHITECTURE.md update
-- [ ] D4: Deploy + wet test
+- [x] D4: Deploy + wet test (8 pages verified on cliaas.com)

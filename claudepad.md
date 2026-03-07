@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-03-07T06:15Z — Session 123: Plan 21 Phase D — Polish, Security Fixes, Deploy
+- Ran full test suite post-Phase C: 352 files pass, 5935 tests pass (4 EE pre-existing failures)
+- **D1**: Plugin dependency resolution — `dependencies` field on PluginManifestV2, install-time check, uninstall-time warning, 13 new tests
+- **D2**: Code review found 4 CRITICAL + 8 WARNINGS. Fixed all 4 critical:
+  - C1: SCIM token moved from `NEXT_PUBLIC_` env to server-side `/api/settings/scim-token` endpoint with admin auth
+  - C2: Added `requirePerm` auth guard to `GET /api/plugins/[id]`
+  - C3/C4: Created `src/lib/sanitize-html.ts` with proper HTML/CSS sanitization (strips event handlers, javascript: URIs, @import, expression()), applied to portal KB layout + BrandThemeProvider
+  - W5: Jira webhook switched to `timingSafeEqual`, W6: circuit breaker trip button wired to new `trip_circuit_breaker` API action, W2: connector capabilities endpoint got auth guard
+- **D3**: ARCHITECTURE.md updated with all Plan 21 additions (tables, routes, modules, pages)
+- **D4**: Deployed to cliaas.com, wet tested 8 admin pages (AI dashboard, setup wizard, marketplace, WFM, channels, SSO, SCIM, safety, plugins) — all rendering correctly
+- Plan 21 complete: 41/41 tasks done, 109 files changed, 18,850 insertions
+
 ## 2026-03-07T09:00Z — Session 122: AI Admin Pages (C6 Procedures + C7 Safety)
 - Created `/dashboard/ai/procedures/page.tsx` (client component): full CRUD for AI procedures with inline expandable editor, toggle switches, test section, status derivation (active/draft/disabled), fetches from `/api/ai/procedures`
 - Created `/dashboard/ai/safety/page.tsx` (server component): circuit breaker panel with large visual indicator + metrics, PII configuration toggles (8 types), usage quota progress bars (calls/tokens/cost), audit trail table (last 20 entries)
