@@ -64,6 +64,34 @@ interface FDFolder { id: number; name: string; category_id: number; }
 interface FDArticle { id: number; title: string; description: string; folder_id: number; category_id: number; }
 interface FDSLAPolicy { id: number; name: string; description: string; is_default: boolean; applicable_to: unknown; sla_target: unknown; }
 
+interface FDDispatchRule {
+  id: number;
+  name: string;
+  conditions: unknown;
+  actions: unknown;
+  active?: boolean;
+  position?: number;
+}
+
+interface FDObserverRule {
+  id: number;
+  name: string;
+  conditions: unknown;
+  actions: unknown;
+  event_type?: string;
+  active?: boolean;
+  position?: number;
+}
+
+interface FDScenarioAutomation {
+  id: number;
+  name: string;
+  description: string;
+  actions: unknown;
+  active?: boolean;
+  position?: number;
+}
+
 // ---- Client ----
 
 function createFreshdeskClient(auth: FreshdeskAuth) {
@@ -268,6 +296,63 @@ export async function exportFreshdesk(auth: FreshdeskAuth, outDir: string, curso
       counts.rules++;
     }
   } catch { /* SLA not available */ }
+
+  // Export Dispatch'r rules (ticket creation triggers)
+  try {
+    const dispatches = await client.request<FDDispatchRule[]>('/api/v2/admin/dispatch_rules');
+    for (const d of dispatches) {
+      const rule: Rule = {
+        id: `fd-rule-${d.id}`, externalId: String(d.id), source: 'freshdesk',
+        type: 'trigger', title: d.name, conditions: d.conditions, actions: d.actions,
+        active: d.active !== false,
+      };
+      appendJsonl(files.rules, rule);
+      counts.rules++;
+    }
+  } catch (err) {
+    // 403 = plan doesn't include admin API access; silently skip
+    if (!(err instanceof Error && /403|Forbidden/i.test(err.message))) {
+      rulesSpinner.text = `Exporting business rules... dispatch rules unavailable`;
+    }
+  }
+
+  // Export Observer rules (time/event-based automations)
+  try {
+    const observers = await client.request<FDObserverRule[]>('/api/v2/admin/observer_rules');
+    for (const o of observers) {
+      const rule: Rule = {
+        id: `fd-rule-${o.id}`, externalId: String(o.id), source: 'freshdesk',
+        type: 'automation', title: o.name,
+        conditions: o.event_type ? { event_type: o.event_type, ...((o.conditions as object) ?? {}) } : o.conditions,
+        actions: o.actions, active: o.active !== false,
+      };
+      appendJsonl(files.rules, rule);
+      counts.rules++;
+    }
+  } catch (err) {
+    if (!(err instanceof Error && /403|Forbidden/i.test(err.message))) {
+      rulesSpinner.text = `Exporting business rules... observer rules unavailable`;
+    }
+  }
+
+  // Export Scenario automations (agent-triggered macros)
+  try {
+    const scenarios = await client.request<FDScenarioAutomation[]>('/api/v2/admin/scenario_automations');
+    for (const s of scenarios) {
+      const rule: Rule = {
+        id: `fd-rule-${s.id}`, externalId: String(s.id), source: 'freshdesk',
+        type: 'macro', title: s.name, conditions: s.description ? { description: s.description } : {},
+        actions: s.actions, active: s.active !== false,
+      };
+      appendJsonl(files.rules, rule);
+      counts.rules++;
+    }
+  } catch (err) {
+    if (!(err instanceof Error && /403|Forbidden/i.test(err.message))) {
+      rulesSpinner.text = `Exporting business rules... scenario automations unavailable`;
+    }
+  }
+
   rulesSpinner.succeed(`${counts.rules} business rules exported`);
 
   const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };

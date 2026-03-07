@@ -109,6 +109,7 @@ export function registerPluginCommands(program: Command): void {
           version: listing.manifest.version,
           config,
           hooks: listing.manifest.hooks,
+          dependencies: listing.manifest.dependencies,
         });
 
         console.log(chalk.bold.green(`\nPlugin installed: ${pluginId}`));
@@ -132,8 +133,12 @@ export function registerPluginCommands(program: Command): void {
           throw new Error(`Plugin "${pluginId}" is not installed`);
         }
 
-        await uninstallPlugin(installation.id);
+        const result = await uninstallPlugin(installation.id);
         console.log(chalk.bold.green(`\nPlugin uninstalled: ${pluginId}\n`));
+        if (result.dependents.length) {
+          console.log(chalk.yellow(`  Warning: The following installed plugins depend on "${pluginId}": ${result.dependents.join(', ')}`));
+          console.log(chalk.yellow('  They may not function correctly.\n'));
+        }
       } catch (err) {
         console.error(chalk.red(`Failed: ${err instanceof Error ? err.message : 'Unknown error'}`));
         process.exitCode = 1;

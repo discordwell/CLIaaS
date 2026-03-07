@@ -14,6 +14,10 @@ vi.mock('@/lib/jsonl-store', () => {
   return {
     readJsonlFile: vi.fn((file: string) => store[file] ?? []),
     writeJsonlFile: vi.fn((file: string, data: unknown[]) => { store[file] = data; }),
+    appendJsonlLine: vi.fn((file: string, item: unknown) => {
+      if (!store[file]) store[file] = [];
+      store[file].push(item);
+    }),
     __store: store,
   };
 });
@@ -24,6 +28,8 @@ describe('SCIM store — JSONL fallback path', () => {
     global.__cliaasScimUsersLoaded = undefined;
     global.__cliaasScimGroups = undefined;
     global.__cliaasScimGroupsLoaded = undefined;
+    (global as Record<string, unknown>).__cliaasScimAuditLog = undefined;
+    (global as Record<string, unknown>).__cliaasScimAuditLogLoaded = undefined;
   });
 
   it('getUsersAsync falls back to JSONL when DB unavailable', async () => {

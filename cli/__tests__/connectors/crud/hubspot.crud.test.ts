@@ -116,6 +116,8 @@ describe('HubSpot export pipeline (mocked)', () => {
       }))
       // 5. email associations (empty)
       .mockResolvedValueOnce(jsonResponse({ results: [] }))
+      // 5b. conversations list (empty)
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))
       // 6. contacts
       .mockResolvedValueOnce(jsonResponse({
         results: [{ id: '20', properties: { firstname: 'Bob', lastname: 'B', email: 'bob@t.com' } }],
@@ -171,6 +173,8 @@ describe('HubSpot export pipeline (mocked)', () => {
       .mockResolvedValueOnce(jsonResponse({ results: [] }))  // contacts
       .mockResolvedValueOnce(jsonResponse({ results: [] }))  // notes
       .mockResolvedValueOnce(jsonResponse({ results: [] })); // emails
+    // Conversations (empty)
+    mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
     // Contacts, owners, companies
     mockFetch
       .mockResolvedValueOnce(jsonResponse({ results: [] }))  // contacts

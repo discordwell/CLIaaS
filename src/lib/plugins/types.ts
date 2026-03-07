@@ -13,9 +13,15 @@ export type PluginHookType =
   | 'ticket.assigned'
   | 'ticket.tagged'
   | 'ticket.priority_changed'
+  | 'ticket.merged'
+  | 'ticket.split'
+  | 'ticket.unmerged'
   // Messages
   | 'message.created'
   | 'message.updated'
+  | 'message.displayed'
+  | 'message.clicked'
+  | 'message.dismissed'
   // SLA
   | 'sla.breached'
   | 'sla.warning'
@@ -23,14 +29,38 @@ export type PluginHookType =
   | 'customer.created'
   | 'customer.updated'
   | 'customer.merged'
-  // Satisfaction
+  // Satisfaction & surveys
   | 'csat.submitted'
   | 'survey.submitted'
+  | 'survey.sent'
   // KB
   | 'kb.article_created'
   | 'kb.article_updated'
   // Campaigns
+  | 'campaign.created'
   | 'campaign.sent'
+  | 'campaign.activated'
+  | 'campaign.paused'
+  | 'campaign.step_executed'
+  | 'campaign.enrollment_completed'
+  // Automation
+  | 'automation.executed'
+  // Forum
+  | 'forum.thread_created'
+  | 'forum.reply_created'
+  | 'forum.thread_converted'
+  // QA
+  | 'qa.review_created'
+  | 'qa.review_completed'
+  // Time tracking
+  | 'time.entry_created'
+  // Side conversations
+  | 'side_conversation.created'
+  | 'side_conversation.replied'
+  // Tours
+  | 'tour.started'
+  | 'tour.completed'
+  | 'tour.dismissed'
   // Lifecycle hooks
   | 'plugin.installed'
   | 'plugin.uninstalled'
@@ -90,6 +120,7 @@ export interface PluginManifestV2 {
   runtime: PluginRuntime;
   icon?: string;
   category?: string;
+  dependencies?: string[]; // plugin IDs that must be installed before this one
 }
 
 export interface PluginAction {

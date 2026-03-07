@@ -1,0 +1,48 @@
+{
+  "id": "ai-summary",
+  "name": "AI Summary",
+  "version": "1.0.0",
+  "description": "Automatically generate AI-powered summaries of ticket conversations when tickets are resolved. Summaries are added as internal notes for team reference and reporting.",
+  "author": "CLIaaS",
+  "hooks": [
+    "ticket.resolved"
+  ],
+  "permissions": [
+    "tickets:read",
+    "tickets:write"
+  ],
+  "actions": [
+    {
+      "id": "generate-summary",
+      "name": "Generate Summary",
+      "description": "Generate an AI summary of this ticket conversation now"
+    }
+  ],
+  "uiSlots": [
+    {
+      "location": "ticket.sidebar",
+      "component": "AISummaryPanel"
+    }
+  ],
+  "oauthRequirements": [],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "maxTokens": {
+        "type": "integer",
+        "description": "Maximum tokens for the summary output",
+        "default": 150
+      },
+      "model": {
+        "type": "string",
+        "description": "AI model to use for summarization",
+        "enum": ["gpt-4o-mini", "gpt-4o", "claude-sonnet-4-20250514"],
+        "default": "gpt-4o-mini"
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { event, data } = context;\nif (event !== 'ticket.resolved') return;\nconst messages = data.messages || [];\nif (!messages.length) return;\nconst cfg = cliaas.config;\ncliaas.log.info(`Generating AI summary for ticket ${data.ticketId} (${messages.length} messages, model: ${cfg.model || 'gpt-4o-mini'})`);",
+  "category": "AI & Automation",
+  "icon": "brain"
+}

@@ -287,11 +287,17 @@ export async function exportGroove(auth: GrooveAuth, outDir: string, cursorState
   if (counts.kbArticles > 0) kbSpinner.succeed(`${counts.kbArticles} KB articles exported`);
   else kbSpinner.info('0 KB articles');
 
-  // No automation rules API
-  exportSpinner('Business rules: not available via Groove API').info();
+  // Business rules — Groove does not expose automation rules via API
+  const rulesSpinner = exportSpinner('Checking business rules API...');
+  const ruleLimitations: Record<string, string> = {
+    automations: 'Groove API does not include rule/automation endpoints. Business rules must be migrated manually.',
+  };
+  rulesSpinner.info(
+    `Business rules: upstream API limitation — ${ruleLimitations.automations}`,
+  );
 
   const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
-  return writeManifest(outDir, 'groove', counts, { cursorState: newCursorState });
+  return writeManifest(outDir, 'groove', counts, { cursorState: newCursorState, ruleLimitations });
 }
 
 // ---- Verify ----

@@ -1,6 +1,7 @@
 "use client";
 
 import BrandThemeProvider, { useBrandTheme } from "@/components/BrandThemeProvider";
+import { sanitizeHtml } from "@/lib/sanitize-html";
 import type { ReactNode } from "react";
 
 function KBBrandedHeader() {
@@ -15,9 +16,7 @@ function KBBrandedHeader() {
         <div
           className="border-b border-zinc-200"
           dangerouslySetInnerHTML={{
-            __html: theme.headerHtml
-              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-              .replace(/<\/?style[^>]*>/gi, ""),
+            __html: sanitizeHtml(theme.headerHtml),
           }}
         />
       )}
@@ -52,9 +51,7 @@ function KBBrandedFooter() {
     <div
       className="mt-8 border-t border-zinc-200"
       dangerouslySetInnerHTML={{
-        __html: theme.footerHtml
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-          .replace(/<\/?style[^>]*>/gi, ""),
+        __html: sanitizeHtml(theme.footerHtml),
       }}
     />
   );

@@ -1,6 +1,6 @@
 /**
  * Webhook receiver for connector-driven real-time sync.
- * Supports Zendesk, Intercom, and Freshdesk webhooks.
+ * Supports Zendesk, Intercom, Freshdesk, HubSpot, Zoho Desk, and Help Scout webhooks.
  * Validates signatures, normalizes payloads, dispatches through event system.
  */
 
@@ -68,6 +68,26 @@ function verifyHubSpotSignature(
   const url = request.url;
   const toSign = `POST${url}${body}${timestamp}`;
   const expected = createHmac('sha256', secret).update(toSign).digest('base64');
+  try {
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+function verifyZohoDeskSignature(body: string, signature: string | null, secret: string): boolean {
+  if (!signature) return false;
+  const expected = createHmac('sha256', secret).update(body).digest('base64');
+  try {
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+function verifyHelpScoutSignature(body: string, signature: string | null, secret: string): boolean {
+  if (!signature) return false;
+  const expected = createHmac('sha256', secret).update(body).digest('base64');
   try {
     return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
   } catch {
@@ -212,6 +232,82 @@ function normalizeFreshdeskPayload(payload: Record<string, unknown>): Normalized
   };
 }
 
+function normalizeZohoDeskPayload(payload: Record<string, unknown>): NormalizedEvent | null {
+  const module = payload.module as string | undefined;
+  if (module !== 'tickets') return null;
+
+  const event = payload.event as string | undefined;
+  const data = (payload.data ?? {}) as Record<string, unknown>;
+  const ticket = (data.ticket ?? {}) as Record<string, unknown>;
+
+  if (!ticket.id) return null;
+
+  const statusMap: Record<string, string> = {
+    'Open': 'open',
+    'On Hold': 'on_hold',
+    'Closed': 'closed',
+    'Escalated': 'open',
+  };
+
+  let canonicalEvent: NormalizedEvent['event'] = 'ticket.updated';
+  if (event === 'create') canonicalEvent = 'ticket.created';
+  else if (event === 'delete' || String(ticket.status) === 'Closed') canonicalEvent = 'ticket.resolved';
+
+  return {
+    event: canonicalEvent,
+    data: {
+      ticketId: `zo-${ticket.id}`,
+      externalId: String(ticket.id),
+      source: 'zoho-desk',
+      subject: (ticket.subject as string) ?? `Ticket #${ticket.id}`,
+      status: statusMap[String(ticket.status ?? 'Open')] ?? 'open',
+      priority: ticket.priority ?? 'normal',
+      assignee: ticket.assignee ? String(ticket.assignee) : undefined,
+    },
+  };
+}
+
+function normalizeHelpScoutPayload(payload: Record<string, unknown>): NormalizedEvent | null {
+  const eventType = payload.event as string | undefined;
+  if (!eventType) return null;
+
+  // Help Scout sends conversation-related events prefixed with "convo."
+  const id = payload.id as number | undefined;
+  if (!id) return null;
+
+  const statusMap: Record<string, string> = {
+    active: 'open',
+    open: 'open',
+    pending: 'pending',
+    closed: 'closed',
+    spam: 'closed',
+  };
+
+  let canonicalEvent: NormalizedEvent['event'] = 'ticket.updated';
+  if (eventType === 'convo.created') canonicalEvent = 'ticket.created';
+  else if (eventType === 'convo.closed' || eventType === 'convo.deleted') {
+    canonicalEvent = 'ticket.resolved';
+  } else if (eventType === 'convo.customer.reply.created' || eventType === 'convo.agent.reply.created') {
+    canonicalEvent = 'message.created';
+  }
+
+  const status = payload.status as string | undefined;
+  const subject = payload.subject as string | undefined;
+  const assignee = payload.assignee as Record<string, unknown> | undefined;
+
+  return {
+    event: canonicalEvent,
+    data: {
+      ticketId: `hs-${id}`,
+      externalId: String(id),
+      source: 'helpscout',
+      subject: subject ?? `Conversation #${id}`,
+      status: statusMap[String(status ?? 'active')] ?? 'open',
+      assignee: assignee?.id ? String(assignee.id) : undefined,
+    },
+  };
+}
+
 // ---- Route handler ----
 
 export async function POST(
@@ -219,7 +315,7 @@ export async function POST(
   { params }: { params: Promise<{ name: string }> },
 ) {
   const { name } = await params;
-  const supported = ['zendesk', 'intercom', 'freshdesk', 'hubspot'];
+  const supported = ['zendesk', 'intercom', 'freshdesk', 'hubspot', 'zoho-desk', 'helpscout'];
 
   if (!supported.includes(name)) {
     return NextResponse.json(
@@ -237,9 +333,10 @@ export async function POST(
   }
 
   // Signature verification
-  const secret = process.env[`${name.toUpperCase()}_WEBHOOK_SECRET`];
+  const envKey = `${name.toUpperCase().replace(/-/g, '_')}_WEBHOOK_SECRET`;
+  const secret = process.env[envKey];
   if (!secret) {
-    logger.warn({ connector: name }, 'No webhook secret configured — accepting unsigned payload. Set %s_WEBHOOK_SECRET for production.', name.toUpperCase());
+    logger.warn({ connector: name }, 'No webhook secret configured — accepting unsigned payload. Set %s for production.', envKey);
   }
   if (secret) {
     let valid = false;
@@ -255,6 +352,12 @@ export async function POST(
         break;
       case 'hubspot':
         valid = verifyHubSpotSignature(request, rawBody, secret);
+        break;
+      case 'zoho-desk':
+        valid = verifyZohoDeskSignature(rawBody, request.headers.get('x-zoho-webhook-signature'), secret);
+        break;
+      case 'helpscout':
+        valid = verifyHelpScoutSignature(rawBody, request.headers.get('x-helpscout-signature'), secret);
         break;
     }
     if (!valid) {
@@ -277,6 +380,12 @@ export async function POST(
       break;
     case 'hubspot':
       normalized = normalizeHubSpotPayload(payload);
+      break;
+    case 'zoho-desk':
+      normalized = normalizeZohoDeskPayload(payload);
+      break;
+    case 'helpscout':
+      normalized = normalizeHelpScoutPayload(payload);
       break;
   }
 

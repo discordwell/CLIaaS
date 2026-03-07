@@ -6,6 +6,7 @@
 export interface ConnectorCapability {
   read: boolean;
   incrementalSync: boolean;
+  webhookSync: boolean;
   update: boolean;
   reply: boolean;
   note: boolean;
@@ -13,16 +14,16 @@ export interface ConnectorCapability {
 }
 
 export const CONNECTOR_CAPABILITIES: Record<string, ConnectorCapability> = {
-  zendesk:           { read: true, incrementalSync: true,  update: true,  reply: true,  note: true,  create: true  },
-  freshdesk:         { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
-  groove:            { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
-  helpcrunch:        { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
-  intercom:          { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
-  helpscout:         { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
-  'zoho-desk':       { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
-  hubspot:           { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
-  kayako:            { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
-  'kayako-classic':  { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+  zendesk:           { read: true, incrementalSync: true,  webhookSync: true,  update: true,  reply: true,  note: true,  create: true  },
+  freshdesk:         { read: true, incrementalSync: false, webhookSync: true,  update: true,  reply: true,  note: true,  create: true  },
+  groove:            { read: true, incrementalSync: false, webhookSync: false, update: true,  reply: true,  note: true,  create: true  },
+  helpcrunch:        { read: true, incrementalSync: false, webhookSync: false, update: true,  reply: true,  note: true,  create: true  },
+  intercom:          { read: true, incrementalSync: false, webhookSync: true,  update: false, reply: true,  note: true,  create: true  },
+  helpscout:         { read: true, incrementalSync: false, webhookSync: false, update: false, reply: true,  note: true,  create: true  },
+  'zoho-desk':       { read: true, incrementalSync: false, webhookSync: false, update: false, reply: true,  note: true,  create: true  },
+  hubspot:           { read: true, incrementalSync: false, webhookSync: true,  update: true,  reply: true,  note: true,  create: true  },
+  kayako:            { read: true, incrementalSync: false, webhookSync: false, update: true,  reply: true,  note: true,  create: true  },
+  'kayako-classic':  { read: true, incrementalSync: false, webhookSync: false, update: true,  reply: true,  note: true,  create: true  },
 };
 
 export function getCapabilities(connector: string): ConnectorCapability | null {

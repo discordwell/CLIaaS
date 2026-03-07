@@ -8,9 +8,12 @@ import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requirePerm(request, 'admin:settings');
+  if ('error' in auth) return auth.error;
+
   const { id } = await params;
 
   try {

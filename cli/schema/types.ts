@@ -171,7 +171,7 @@ export interface Brand {
   raw?: unknown;
 }
 
-export type RuleType = 'macro' | 'trigger' | 'automation' | 'sla';
+export type RuleType = 'macro' | 'trigger' | 'automation' | 'sla' | 'assignment';
 
 export interface Rule {
   id: string;
@@ -206,6 +206,7 @@ export interface ExportManifest {
     timeEntries?: number;
   };
   cursorState?: Record<string, string>;
+  ruleLimitations?: Record<string, string>;
 }
 
 export interface TriageResult {

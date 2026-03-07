@@ -84,11 +84,20 @@ export async function POST(request: NextRequest) {
       .filter(Boolean)
       .join(' ') || samlUser.email.split('@')[0];
 
-    const token = await handleSsoLogin({
+    const result = await handleSsoLogin({
       email: samlUser.email,
       name: displayName,
       providerId: matchedProvider.id,
     });
+
+    if (!result.ok) {
+      // JIT provisioning is disabled and user does not exist — friendly error
+      const origin = request.nextUrl.origin;
+      const errorUrl = new URL('/login', origin);
+      errorUrl.searchParams.set('error', 'sso_jit_disabled');
+      errorUrl.searchParams.set('message', result.error);
+      return NextResponse.redirect(errorUrl);
+    }
 
     // Set session cookie on the redirect response (not via cookies() API)
     const redirectTo =
@@ -96,7 +105,7 @@ export async function POST(request: NextRequest) {
     const origin = request.nextUrl.origin;
 
     const response = NextResponse.redirect(new URL(redirectTo, origin));
-    response.cookies.set('cliaas-session', token, COOKIE_OPTIONS);
+    response.cookies.set('cliaas-session', result.token, COOKIE_OPTIONS);
     response.cookies.delete('saml-relay');
 
     return response;

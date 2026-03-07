@@ -86,6 +86,59 @@ interface HSEmail {
   };
 }
 
+// ---- Conversations API types ----
+
+interface HSConversation {
+  id: string;
+  subject?: string;
+  status: string; // OPEN, CLOSED
+  assignee?: {
+    actorId?: string;
+    email?: string;
+    name?: string;
+  };
+  channel?: string; // EMAIL, CHAT, FORM, etc.
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface HSConversationThread {
+  id: string;
+  conversationId: string;
+  type: string; // MESSAGE, COMMENT, NOTE
+  text: string;
+  author?: {
+    actorId?: string;
+    email?: string;
+    name?: string;
+  };
+  createdAt: string;
+}
+
+interface HSConversationMessage {
+  id: string;
+  text?: string;
+  richText?: string;
+  type: string; // MESSAGE, COMMENT, NOTE, STATUS_CHANGE
+  senders?: Array<{
+    actorId?: string;
+    email?: string;
+    name?: string;
+    deliveryIdentifier?: { type?: string; value?: string };
+  }>;
+  createdAt: string;
+}
+
+interface HSConversationsListResponse {
+  results: HSConversation[];
+  paging?: { next?: { after: string } };
+}
+
+interface HSConversationMessagesResponse {
+  results: HSConversationMessage[];
+  paging?: { next?: { after: string } };
+}
+
 interface HSBlogPost {
   id: string;
   name: string;
@@ -288,6 +341,121 @@ async function processHubSpotTicket(
   } catch { /* email association not available */ }
 }
 
+// ---- Conversations status mapping ----
+
+function mapConversationStatus(status: string | undefined): TicketStatus {
+  if (!status) return 'open';
+  const lower = status.toLowerCase();
+  if (lower === 'open') return 'open';
+  if (lower === 'closed') return 'closed';
+  return 'open';
+}
+
+// ---- Conversations export helper ----
+
+async function exportConversations(
+  client: ReturnType<typeof createHubSpotClient>,
+  files: ReturnType<typeof setupExport>,
+  counts: ReturnType<typeof initCounts>,
+): Promise<void> {
+  const convSpinner = exportSpinner('Exporting conversations...');
+  let convCount = 0;
+
+  try {
+    let after: string | undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const params = new URLSearchParams({ limit: '100' });
+      if (after) params.set('after', after);
+
+      const convList = await client.request<HSConversationsListResponse>(
+        `/conversations/v3/conversations/threads?${params}`,
+      );
+
+      for (const conv of convList.results ?? []) {
+        // Create a ticket for each conversation
+        const ticket: Ticket = {
+          id: `hub-conv-${conv.id}`,
+          externalId: `conv-${conv.id}`,
+          source: 'hubspot',
+          subject: conv.subject ?? `Conversation #${conv.id}`,
+          status: mapConversationStatus(conv.status),
+          priority: 'normal',
+          assignee: conv.assignee?.actorId ?? conv.assignee?.email ?? undefined,
+          requester: 'unknown',
+          tags: conv.channel ? [`channel:${conv.channel.toLowerCase()}`] : [],
+          createdAt: conv.createdAt ?? new Date().toISOString(),
+          updatedAt: conv.updatedAt ?? new Date().toISOString(),
+        };
+        appendJsonl(files.tickets, ticket);
+        counts.tickets++;
+        convCount++;
+
+        // Fetch messages for this conversation
+        try {
+          let msgAfter: string | undefined;
+          let msgHasMore = true;
+
+          while (msgHasMore) {
+            const msgParams = new URLSearchParams({ limit: '100' });
+            if (msgAfter) msgParams.set('after', msgAfter);
+
+            const msgList = await client.request<HSConversationMessagesResponse>(
+              `/conversations/v3/conversations/threads/${conv.id}/messages?${msgParams}`,
+            );
+
+            for (const msg of msgList.results ?? []) {
+              const body = msg.text ?? msg.richText ?? '';
+              if (!body) continue;
+
+              const sender = msg.senders?.[0];
+              const authorEmail = sender?.deliveryIdentifier?.value ?? sender?.email ?? sender?.actorId ?? 'unknown';
+
+              const msgType: import('../schema/types').MessageType =
+                msg.type === 'NOTE' ? 'note'
+                  : msg.type === 'STATUS_CHANGE' ? 'system'
+                    : 'reply';
+
+              const message: Message = {
+                id: `hub-convmsg-${msg.id}`,
+                ticketId: `hub-conv-${conv.id}`,
+                author: authorEmail,
+                body,
+                bodyHtml: msg.richText ?? undefined,
+                type: msgType,
+                createdAt: msg.createdAt ?? conv.createdAt ?? new Date().toISOString(),
+              };
+              appendJsonl(files.messages, message);
+              counts.messages++;
+            }
+
+            msgAfter = msgList.paging?.next?.after;
+            msgHasMore = !!msgAfter;
+          }
+        } catch {
+          // Individual conversation messages fetch failed — continue with others
+        }
+      }
+
+      convSpinner.text = `Exporting conversations... ${convCount} exported`;
+      after = convList.paging?.next?.after;
+      hasMore = !!after;
+    }
+
+    if (convCount > 0) convSpinner.succeed(`${convCount} conversations exported`);
+    else convSpinner.info('0 conversations exported');
+  } catch (err) {
+    // 403 = Conversations API not available on current plan; 404 = endpoint not found
+    const msg = err instanceof Error ? err.message : 'not available';
+    if (msg.includes('403') || msg.includes('Forbidden') || msg.includes('404') || msg.includes('Not Found')) {
+      convSpinner.info('Conversations: requires Service Hub Professional+ or Sales Hub Professional+');
+    } else {
+      convSpinner.warn(`Conversations: ${msg}`);
+    }
+  }
+}
+
 // ---- Incremental search helper ----
 
 async function searchHubSpotObjects<T>(
@@ -356,6 +524,9 @@ export async function exportHubSpot(auth: HubSpotAuth, outDir: string, cursorSta
     });
   }
   ticketSpinner.succeed(`${counts.tickets} tickets exported (${counts.messages} messages)`);
+
+  // Export conversations (HubSpot Conversations API — threaded messages)
+  await exportConversations(client, files, counts);
 
   // Export contacts (= customers)
   const contactProperties = 'firstname,lastname,email,phone,company,associatedcompanyid';

@@ -1,5 +1,5 @@
 import type {
-  Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus,
+  Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus,
 } from '../schema/types';
 import {
   createClient, paginateOffset, setupExport, appendJsonl, writeManifest, exportSpinner,
@@ -84,6 +84,35 @@ interface ZDAgent {
   roleId: string | null;
 }
 
+export interface ZDWorkflowRule {
+  id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  module: string | null;
+  criteria: unknown;
+  actions: unknown;
+}
+
+export interface ZDAssignmentRule {
+  id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  module: string | null;
+  criteria: unknown;
+  assignee: { id: string; name: string } | null;
+}
+
+export interface ZDSLAPolicy {
+  id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  escalationLevels: unknown;
+  targets: unknown;
+}
+
 // ---- Client ----
 
 function createZohoDeskClient(auth: ZohoDeskAuth) {
@@ -117,6 +146,71 @@ function mapStatus(status: string): TicketStatus {
   if (lower === 'escalated') return 'pending';
   if (lower === 'closed') return 'closed';
   return 'open';
+}
+
+// ---- Rule export helpers ----
+
+type RuleClient = ReturnType<typeof createZohoDeskClient>;
+type RuleCounts = ReturnType<typeof initCounts>;
+
+export async function exportWorkflowRules(
+  client: RuleClient, rulesFile: string, counts: RuleCounts,
+): Promise<void> {
+  const res = await client.request<{ data: ZDWorkflowRule[] }>('/automationRules');
+  for (const w of res.data ?? []) {
+    const rule: Rule = {
+      id: `zo-rule-${w.id}`,
+      externalId: w.id,
+      source: 'zoho-desk',
+      type: 'automation',
+      title: w.name,
+      conditions: w.criteria,
+      actions: w.actions,
+      active: w.active,
+    };
+    appendJsonl(rulesFile, rule);
+    counts.rules++;
+  }
+}
+
+export async function exportAssignmentRules(
+  client: RuleClient, rulesFile: string, counts: RuleCounts,
+): Promise<void> {
+  const res = await client.request<{ data: ZDAssignmentRule[] }>('/assignmentRules');
+  for (const a of res.data ?? []) {
+    const rule: Rule = {
+      id: `zo-rule-${a.id}`,
+      externalId: a.id,
+      source: 'zoho-desk',
+      type: 'assignment',
+      title: a.name,
+      conditions: a.criteria,
+      actions: a.assignee,
+      active: a.active,
+    };
+    appendJsonl(rulesFile, rule);
+    counts.rules++;
+  }
+}
+
+export async function exportSLAPolicies(
+  client: RuleClient, rulesFile: string, counts: RuleCounts,
+): Promise<void> {
+  const res = await client.request<{ data: ZDSLAPolicy[] }>('/slaPolicies');
+  for (const s of res.data ?? []) {
+    const rule: Rule = {
+      id: `zo-rule-${s.id}`,
+      externalId: s.id,
+      source: 'zoho-desk',
+      type: 'sla',
+      title: s.name,
+      conditions: s.escalationLevels,
+      actions: s.targets,
+      active: s.active,
+    };
+    appendJsonl(rulesFile, rule);
+    counts.rules++;
+  }
 }
 
 // ---- Export ----
@@ -309,7 +403,35 @@ export async function exportZohoDesk(auth: ZohoDeskAuth, outDir: string, cursorS
   if (counts.kbArticles > 0) kbSpinner.succeed(`${counts.kbArticles} articles exported`);
   else kbSpinner.info('0 articles exported');
 
-  exportSpinner('Business rules: not exported via Zoho Desk API').info();
+  // Export business rules (workflow rules, assignment rules, SLA policies)
+  const rulesSpinner = exportSpinner('Exporting business rules...');
+  const isPermissionError = (err: unknown): boolean => {
+    const msg = err instanceof Error ? err.message : '';
+    return /API error: (403|404)\b/.test(msg);
+  };
+  try {
+    await exportWorkflowRules(client, files.rules, counts);
+  } catch (err) {
+    if (!isPermissionError(err)) {
+      rulesSpinner.text = `Workflows: ${err instanceof Error ? err.message : 'not available'}`;
+    }
+  }
+  try {
+    await exportAssignmentRules(client, files.rules, counts);
+  } catch (err) {
+    if (!isPermissionError(err)) {
+      rulesSpinner.text = `Assignment rules: ${err instanceof Error ? err.message : 'not available'}`;
+    }
+  }
+  try {
+    await exportSLAPolicies(client, files.rules, counts);
+  } catch (err) {
+    if (!isPermissionError(err)) {
+      rulesSpinner.text = `SLA policies: ${err instanceof Error ? err.message : 'not available'}`;
+    }
+  }
+  if (counts.rules > 0) rulesSpinner.succeed(`${counts.rules} business rules exported`);
+  else rulesSpinner.info('0 business rules exported');
 
   const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
   return writeManifest(outDir, 'zoho-desk', counts, { cursorState: newCursorState });

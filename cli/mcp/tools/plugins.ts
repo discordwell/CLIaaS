@@ -77,6 +77,7 @@ export function registerPluginTools(server: McpServer): void {
           version: listing.manifest.version,
           config: parsedConfig,
           hooks: listing.manifest.hooks,
+          dependencies: listing.manifest.dependencies,
         });
 
         return textResult({
@@ -105,8 +106,12 @@ export function registerPluginTools(server: McpServer): void {
         const installation = await getInstallationByPluginId(pluginId);
         if (!installation) return errorResult(`Plugin "${pluginId}" is not installed`);
 
-        await uninstallPlugin(installation.id);
-        return textResult({ message: `Plugin "${pluginId}" uninstalled` });
+        const result = await uninstallPlugin(installation.id);
+        const response: Record<string, unknown> = { message: `Plugin "${pluginId}" uninstalled` };
+        if (result.dependents.length) {
+          response.warning = `The following installed plugins depend on "${pluginId}": ${result.dependents.join(', ')}. They may not function correctly.`;
+        }
+        return textResult(response);
       } catch (err) {
         return errorResult(`Failed to uninstall plugin: ${err}`);
       }

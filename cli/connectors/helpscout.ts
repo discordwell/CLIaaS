@@ -342,11 +342,17 @@ export async function exportHelpScout(auth: HelpScoutAuth, outDir: string, curso
   if (counts.kbArticles > 0) kbSpinner.succeed(`${counts.kbArticles} articles exported`);
   else kbSpinner.info('0 articles exported');
 
-  // No rules API
-  exportSpinner('Business rules: not available via Help Scout API').info();
+  // Business rules — Help Scout does not expose workflows via API
+  const rulesSpinner = exportSpinner('Checking business rules API...');
+  const ruleLimitations: Record<string, string> = {
+    workflows: 'Help Scout Mailbox API does not expose workflow/automation rules. Export these manually from Settings > Workflows.',
+  };
+  rulesSpinner.info(
+    `Business rules: upstream API limitation — ${ruleLimitations.workflows}`,
+  );
 
   const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
-  return writeManifest(outDir, 'helpscout', counts, { cursorState: newCursorState });
+  return writeManifest(outDir, 'helpscout', counts, { cursorState: newCursorState, ruleLimitations });
 }
 
 // ---- Verify ----

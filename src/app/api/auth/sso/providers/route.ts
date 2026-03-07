@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import {
-  getProviders,
-  createProvider,
+  getProvidersAsync,
+  createProviderAsync,
   type SSOProvider,
 } from '@/lib/auth/sso-config';
 import { requirePerm } from '@/lib/rbac';
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const providers = getProviders();
+    const providers = await getProvidersAsync();
 
     // Strip secrets from the response
     const safe = providers.map(sanitize);
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const provider = createProvider({
+    const provider = await createProviderAsync({
       name,
       protocol,
       enabled: enabled ?? true,

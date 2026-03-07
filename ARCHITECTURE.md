@@ -8,10 +8,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Pages | 43 (Next.js App Router) |
-| API Routes | 191 |
+| Pages | 96 (Next.js App Router) |
+| API Routes | 194 |
 | Components | 24 shared React components |
-| Library modules | 78 (`src/lib/`) |
+| Library modules | 83 (`src/lib/`) |
 | CLI files | 84 (`cli/`) |
 | CLI commands | 44 registered command groups |
 | Connectors | 10 helpdesk integrations |
@@ -20,7 +20,7 @@
 | MCP tools | 110 (across 21 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 86 (Drizzle/PostgreSQL, RLS-enabled) |
+| DB tables | 90 (Drizzle/PostgreSQL, RLS-enabled) |
 | Tests | 95 files, ~9,200 LOC |
 | Source LOC | ~61,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
@@ -120,7 +120,7 @@ Each domain has a dedicated store in `src/lib/`:
 
 ---
 
-## Database Schema (86 tables)
+## Database Schema (90 tables)
 
 ### Core Multi-Tenancy (3)
 `tenants` → `workspaces` → `users`
@@ -134,8 +134,8 @@ Each domain has a dedicated store in `src/lib/`:
 ### Customers (6)
 `customers` (+10 enrichment columns), `organizations`, `customer_activities`, `customer_notes`, `customer_segments`, `customer_merge_log`
 
-### Channels (4)
-`inboxes` (email, chat, api, sms, phone, web, whatsapp, facebook, instagram, twitter, slack, teams, telegram, sdk), `telegram_bot_configs`, `slack_channel_mappings`, `teams_channel_mappings`
+### Channels (7)
+`inboxes` (email, chat, api, sms, phone, web, whatsapp, facebook, instagram, twitter, slack, teams, telegram, sdk), `telegram_bot_configs`, `slack_channel_mappings`, `teams_channel_mappings`, `voice_calls` (call tracking with SID, direction, IVR path, queue metrics), `voice_agents` (extension/phone/status per agent), `voice_queue_metrics` (real-time queue snapshots: waiting calls, avg/longest wait, available agents)
 
 ### Configuration (4)
 `brands`, `ticket_forms`, `custom_fields`, `custom_field_values`
@@ -176,8 +176,8 @@ Each domain has a dedicated store in `src/lib/`:
 ### Jobs (2)
 `import_jobs`, `export_jobs`
 
-### SSO (1)
-`sso_providers` (SAML + OIDC)
+### SSO & SCIM (2)
+`sso_providers` (SAML + OIDC, with `jit_enabled` and `default_role` columns for JIT provisioning), `scim_audit_log` (action/entity tracking with actor, changes JSONB, timestamps)
 
 ### Audit (2)
 `audit_events`, `audit_entries`
@@ -282,7 +282,13 @@ Schedule management, real-time adherence tracking, forecasting, and staffing rec
 
 **Real-Time Adherence:** `src/lib/wfm/adherence.ts` emits `wfm:adherence_alert` events via SSE `eventBus` on schedule violations (e.g., agent offline during scheduled work). Violation types: `not_working`, `wrong_activity`.
 
-**Source:** `src/lib/wfm/` (store, adherence, schedules, business-hours, holidays, forecast, utilization, agent-status, volume-tracker, volume-collector, types)
+**Schedule Optimization:** `src/lib/wfm/optimizer.ts` — greedy heuristic scheduler that assigns agents to shifts based on demand forecast, skill coverage, and fairness constraints.
+
+**Intraday Reforecasting:** `src/lib/wfm/intraday.ts` — adjusts volume forecasts in real-time based on actual ticket arrival rates, triggering staffing alerts when actuals deviate significantly from plan.
+
+**Shift Swaps:** `src/lib/wfm/shift-swaps.ts` — agent-initiated shift trade management with manager approval workflow, coverage validation, and schedule auto-update on approval.
+
+**Source:** `src/lib/wfm/` (store, adherence, schedules, business-hours, holidays, forecast, utilization, agent-status, volume-tracker, volume-collector, optimizer, intraday, shift-swaps, types)
 **API:** `/api/wfm/` (adherence, agent-status, business-hours, dashboard, forecast, schedules, templates, time-off, utilization, volume/collect)
 **Migration:** `src/db/migrations/0007_wfm.sql`
 
@@ -374,6 +380,8 @@ BullMQ + Redis for reliable background processing with graceful fallback to inli
 - IVR: configurable menu tree, TwiML generation (`<Gather>`, `<Say>`, `<Record>`, `<Dial>`)
 - Webhooks: `/api/channels/voice/inbound` (IVR routing), `/api/channels/voice/status` (call completion)
 - Voicemail → auto-creates ticket with recording URL
+- Dual-mode store: `src/lib/channels/voice-store.ts` — DB-primary with RLS, JSONL fallback. Tracks calls, agents, queue metrics.
+- DB tables: `voice_calls`, `voice_agents`, `voice_queue_metrics` (migration 0029)
 - Source: `src/lib/channels/voice-ivr.ts`, `src/lib/channels/voice-store.ts`
 
 ### Social Media
@@ -418,10 +426,12 @@ BullMQ + Redis for reliable background processing with graceful fallback to inli
 
 ## Authentication & Security
 
-### SSO
+### SSO & JIT Provisioning
 - SAML 2.0: XML signature verification, assertion parsing
 - OIDC: Authorization Code flow with PKCE
-- Config: `src/lib/auth/sso-config.ts`, `src/lib/auth/saml.ts`, `src/lib/auth/oidc.ts`
+- JIT provisioning: `src/lib/auth/sso-session.ts` — auto-creates user accounts on first SSO login when `jit_enabled` is true on the SSO provider, assigns `default_role` from provider config
+- SCIM audit trail: `GET /api/scim/audit` — queryable log of all SCIM provisioning actions (user create/update/deactivate, group membership changes)
+- Config: `src/lib/auth/sso-config.ts`, `src/lib/auth/saml.ts`, `src/lib/auth/oidc.ts`, `src/lib/auth/sso-session.ts`
 
 ### Session Auth
 - JWT signing with `AUTH_SECRET`
@@ -598,7 +608,7 @@ The upstream sync layer pushes changes made within CLIaaS back to the originatin
 
 ## Frontend Architecture
 
-### Pages (38)
+### Pages (96)
 
 | Route | Purpose |
 |-------|---------|
@@ -627,6 +637,21 @@ The upstream sync layer pushes changes made within CLIaaS back to the originatin
 | `/portal/forums/[categorySlug]` | Forum category view |
 | `/portal/forums/thread/[id]` | Forum thread detail |
 | `/offline` | PWA offline fallback |
+| `/dashboard/ai` | AI Command Center — overview of AI agent performance and status |
+| `/dashboard/ai/setup` | AI setup wizard (6-step guided configuration) |
+| `/dashboard/ai/channels` | Channel policy editor — per-channel AI behavior config |
+| `/dashboard/ai/performance` | AI performance metrics and trend charts |
+| `/dashboard/ai/procedures` | Procedures editor — CRUD for topic-matched AI instructions |
+| `/dashboard/ai/safety` | Safety controls + circuit breaker configuration |
+| `/dashboard/qa/auto` | AutoQA results — automated conversation review scores |
+| `/dashboard/marketplace` | Marketplace browse — discover and install plugins |
+| `/dashboard/marketplace/publish` | Publisher submission flow for marketplace listings |
+| `/dashboard/plugins` | Plugin management — installed plugins, config, toggle |
+| `/dashboard/settings/sso` | SSO admin — SAML/OIDC provider config + JIT provisioning |
+| `/dashboard/settings/scim` | SCIM admin — provisioning config + audit log viewer |
+| `/dashboard/channels` | Omnichannel dashboard — unified channel status overview |
+| `/dashboard/channels/voice` | Voice admin — agents, queues, IVR, call metrics |
+| `/dashboard/wfm` | WFM dashboard — schedules, forecasts, adherence, shift swaps |
 | ...and more | |
 
 ### Design System
@@ -1089,3 +1114,83 @@ All ~224 API route files migrated from legacy `requireAuth`/`requireRole`/`requi
 - CREATE `ai_procedures` (UUID PK, workspace FK, steps JSONB, trigger_topics TEXT[])
 - CREATE `rule_versions` (UUID PK, rule FK CASCADE, version_number INT, conditions/actions JSONB)
 - CREATE `sync_health` (UUID PK, workspace FK, connector TEXT, cursor_state JSONB, UNIQUE workspace+connector)
+
+---
+
+## Plan 21: Competitive Gap Closure — Voice, AI Admin, WFM, Plugins, Connectors
+
+Cross-cutting plan adding 15 admin UI pages, 4 DB tables, 3 API routes, and 8 backend modules to close competitive gaps against Zendesk/Freshdesk/Intercom.
+
+### DB Migration (0029)
+- CREATE `voice_calls` (UUID PK, workspace FK, call_sid, direction enum, from/to, status enum, duration, recording_url, transcription, agent_id, ticket_id, queue metrics, ivr_path JSONB)
+- CREATE `voice_agents` (UUID PK, workspace FK, name, extension, phone_number, status enum, current_call_id)
+- CREATE `voice_queue_metrics` (UUID PK, workspace FK, queue_id, waiting_calls, avg/longest wait, available_agents, timestamp)
+- CREATE `scim_audit_log` (UUID PK, workspace FK, action, entity_type, entity_id, actor_id, changes JSONB, timestamp)
+- ALTER `sso_providers` ADD `jit_enabled` BOOLEAN, `default_role` TEXT
+
+### New API Routes (3)
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/scim/audit` | GET | Query SCIM provisioning audit log (filter by entity, action, date range) |
+| `/api/connectors/[name]/webhook` | POST | Webhook-based sync endpoint for Zoho Desk and Help Scout |
+| `/api/connectors/capabilities` | GET | Entity-level connector capability matrix (tickets, articles, contacts, rules per connector) |
+
+### New Backend Modules (8)
+
+| Module | Path | Purpose |
+|--------|------|---------|
+| Schedule Optimizer | `src/lib/wfm/optimizer.ts` | Greedy heuristic scheduler — assigns agents to shifts based on demand forecast, skills, fairness |
+| Intraday Reforecast | `src/lib/wfm/intraday.ts` | Real-time volume forecast adjustment based on actual arrival rates |
+| Shift Swaps | `src/lib/wfm/shift-swaps.ts` | Agent-initiated shift trades with manager approval and coverage validation |
+| Voice Store | `src/lib/channels/voice-store.ts` | Dual-mode (DB + JSONL) call/agent/queue tracking with RLS |
+| SSO Session / JIT | `src/lib/auth/sso-session.ts` | Just-in-time user provisioning on first SSO login |
+| First-Party Plugins | `src/lib/plugins/first-party/` | 8 marketplace plugins (5 new: SLA escalator, CSAT survey, webhook relay, field sync, AI summary) |
+
+### First-Party Plugin Catalog
+
+| Plugin | Directory | Purpose |
+|--------|-----------|---------|
+| Slack Notify | `first-party/slack-notify/` | Post ticket events to Slack channels |
+| Jira Sync | `first-party/jira-sync/` | Bidirectional Jira issue sync |
+| Stripe Context | `first-party/stripe-context/` | Enrich tickets with Stripe billing data |
+| SLA Escalator | `first-party/sla-escalator/` | Auto-escalate tickets approaching SLA breach |
+| CSAT Survey | `first-party/csat-survey/` | Trigger CSAT surveys on ticket resolution |
+| Webhook Relay | `first-party/webhook-relay/` | Fan-out ticket events to external webhooks |
+| Field Sync | `first-party/field-sync/` | Sync custom field values with external systems |
+| AI Summary | `first-party/ai-summary/` | Auto-generate conversation summaries via LLM |
+
+Seeded via `src/lib/plugins/first-party/seed.ts` — auto-publishes to marketplace on first run.
+
+### Admin UI Pages (15 new)
+
+All 15 pages live under `/dashboard/` and follow the existing App Router pattern:
+
+| Route | Purpose |
+|-------|---------|
+| `/dashboard/ai` | AI Command Center — overview of AI agent health, resolution rate, queue depth |
+| `/dashboard/ai/setup` | 6-step AI setup wizard (provider, model, channels, procedures, safety, review) |
+| `/dashboard/ai/channels` | Per-channel AI behavior policy editor |
+| `/dashboard/ai/performance` | AI performance metrics — resolution rate, CSAT impact, response time trends |
+| `/dashboard/ai/procedures` | Procedures CRUD — topic-matched step-by-step AI instructions |
+| `/dashboard/ai/safety` | Safety controls — confidence thresholds, circuit breaker, human escalation rules |
+| `/dashboard/qa/auto` | AutoQA results — automated conversation scoring and review queue |
+| `/dashboard/marketplace` | Marketplace browse — search and install first-party + community plugins |
+| `/dashboard/marketplace/publish` | Publisher submission flow for marketplace plugin listings |
+| `/dashboard/plugins` | Plugin management — installed plugins, configuration, enable/disable toggle |
+| `/dashboard/settings/sso` | SSO admin — SAML/OIDC provider CRUD, JIT provisioning toggle, certificate management |
+| `/dashboard/settings/scim` | SCIM admin — provisioning endpoint config, token management, audit log viewer |
+| `/dashboard/channels` | Omnichannel dashboard — unified view of all channel statuses and metrics |
+| `/dashboard/channels/voice` | Voice admin — agent roster, queue config, IVR editor, live call metrics |
+| `/dashboard/wfm` | WFM dashboard — schedule editor, forecast charts, adherence, shift swap approvals |
+
+### Connector Enhancements
+
+| Connector | Enhancement |
+|-----------|-------------|
+| Zoho Desk | Workflow rules, assignment rules, SLA policy export; webhook sync via `/api/connectors/[name]/webhook` |
+| Freshdesk | Dispatch rules, observer rules, scenario automations export |
+| HubSpot | Conversations v3 API for threaded message import |
+| Intercom | Source field tagging — distinguishes conversation vs ticket origin |
+| Help Scout | Rule limitation documentation; webhook sync support |
+| Groove | Rule limitation documentation |
+| HelpCrunch | Rule limitation documentation |

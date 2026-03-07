@@ -195,6 +195,7 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string, cursorS
           tags: (conv.tags?.tags ?? []).map((t: { id: string; name: string }) => t.name),
           createdAt: epochToISO(conv.created_at),
           updatedAt: epochToISO(conv.updated_at),
+          customFields: { source: 'conversation' },
         };
         appendJsonl(files.tickets, ticket);
         counts.tickets++;
@@ -280,6 +281,7 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string, cursorS
             tags: t.ticket_type ? [t.ticket_type.name] : [],
             createdAt: epochToISO(t.created_at),
             updatedAt: epochToISO(t.updated_at),
+            customFields: { source: 'ticket' },
           };
           appendJsonl(files.tickets, ticket);
           counts.tickets++;
@@ -438,7 +440,14 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string, cursorS
   exportSpinner('Business rules: not available via Intercom API').info();
 
   const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
-  return writeManifest(outDir, 'intercom', counts, { cursorState: newCursorState });
+  return writeManifest(outDir, 'intercom', counts, {
+    cursorState: newCursorState,
+    sourceTagging: {
+      enabled: true,
+      field: 'customFields.source',
+      values: ['conversation', 'ticket'],
+    },
+  });
 }
 
 // ---- Verify ----

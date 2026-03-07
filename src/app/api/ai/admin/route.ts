@@ -105,6 +105,13 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ policy: result });
     }
 
+    case 'trip_circuit_breaker': {
+      // Manually trip the circuit breaker from admin UI
+      const { recordAIFailure } = await import('@/lib/ai/admin-controls');
+      for (let i = 0; i < 6; i++) recordAIFailure('Manual trip from safety dashboard');
+      return NextResponse.json({ circuitBreaker: await getCircuitBreakerStatusAsync(auth.user.workspaceId) });
+    }
+
     case 'reset_circuit_breaker': {
       resetCircuitBreaker();
       return NextResponse.json({ circuitBreaker: await getCircuitBreakerStatusAsync(auth.user.workspaceId) });

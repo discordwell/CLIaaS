@@ -1,6 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { validateSCIMAuth, requireSCIMAuth } from '../auth';
 import { applyUserPatchOps, applyGroupPatchOps, type SCIMPatchOp, SCIM_SCHEMAS } from '../schema';
+
+vi.mock('../../jsonl-store', () => ({
+  readJsonlFile: vi.fn().mockReturnValue([]),
+  writeJsonlFile: vi.fn(),
+  appendJsonlLine: vi.fn(),
+}));
+
+vi.mock('../../store-helpers', () => ({
+  withRls: vi.fn().mockResolvedValue(null),
+  tryDb: vi.fn().mockResolvedValue(null),
+}));
+
 import { getUsers, setUsers, getGroups, setGroups } from '../store';
 
 // ---- Auth timing-safe tests ----
@@ -10,7 +22,9 @@ const ORIGINAL_TOKEN = process.env.SCIM_BEARER_TOKEN;
 beforeEach(() => {
   process.env.SCIM_BEARER_TOKEN = 'test-scim-token-abc123';
   global.__cliaasScimUsers = undefined;
+  global.__cliaasScimUsersLoaded = undefined;
   global.__cliaasScimGroups = undefined;
+  global.__cliaasScimGroupsLoaded = undefined;
 });
 
 afterEach(() => {
@@ -155,7 +169,7 @@ describe('SCIM store', () => {
   it('setUsers/getUsers returns consistent references', () => {
     const users = [{ id: 'u-1', email: 'a@b.com', name: 'A', role: 'agent', status: 'active', createdAt: '', updatedAt: '' }];
     setUsers(users);
-    expect(getUsers()).toBe(users);
+    expect(getUsers()).toEqual(users);
     expect(getUsers()[0].id).toBe('u-1');
   });
 
@@ -166,7 +180,7 @@ describe('SCIM store', () => {
   it('setGroups/getGroups returns consistent references', () => {
     const groups = [{ id: 'g-1', name: 'Support', createdAt: '', updatedAt: '' }];
     setGroups(groups);
-    expect(getGroups()).toBe(groups);
+    expect(getGroups()).toEqual(groups);
     expect(getGroups()[0].id).toBe('g-1');
   });
 });

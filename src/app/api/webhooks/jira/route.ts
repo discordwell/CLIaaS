@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { processJiraWebhook } from '@/lib/integrations/engineering-sync';
 import * as linkStore from '@/lib/integrations/link-store';
+import { timingSafeEqual } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +17,9 @@ export async function POST(request: NextRequest) {
       const providedSecret = url.searchParams.get('secret')
         ?? request.headers.get('x-jira-webhook-secret')
         ?? '';
-      if (providedSecret !== webhookSecret) {
+      const a = Buffer.from(providedSecret);
+      const b = Buffer.from(webhookSecret);
+      if (a.length !== b.length || !timingSafeEqual(a, b)) {
         return NextResponse.json({ error: 'Invalid webhook secret' }, { status: 401 });
       }
     }

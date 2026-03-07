@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import {
-  getProvider,
-  updateProvider,
-  deleteProvider,
+  getProviderAsync,
+  updateProviderAsync,
+  deleteProviderAsync,
   type SSOProvider,
 } from '@/lib/auth/sso-config';
 import { requirePerm } from '@/lib/rbac';
@@ -24,7 +24,7 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const provider = getProvider(id);
+    const provider = await getProviderAsync(id);
     if (!provider) {
       return NextResponse.json(
         { error: 'SSO provider not found' },
@@ -85,7 +85,7 @@ export async function PATCH(
     }
 
     // Prevent removing certificate from SAML providers or switching to SAML without one
-    const existing = getProvider(id);
+    const existing = await getProviderAsync(id);
     if (existing) {
       const resultProtocol = updates.protocol ?? existing.protocol;
       const resultCert = updates.certificate !== undefined ? updates.certificate : existing.certificate;
@@ -97,7 +97,7 @@ export async function PATCH(
       }
     }
 
-    const updated = updateProvider(id, updates);
+    const updated = await updateProviderAsync(id, updates);
     if (!updated) {
       return NextResponse.json(
         { error: 'SSO provider not found' },
@@ -127,7 +127,7 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    const deleted = deleteProvider(id);
+    const deleted = await deleteProviderAsync(id);
     if (!deleted) {
       return NextResponse.json(
         { error: 'SSO provider not found' },

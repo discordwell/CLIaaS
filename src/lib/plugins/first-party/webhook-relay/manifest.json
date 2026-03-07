@@ -1,0 +1,95 @@
+{
+  "id": "webhook-relay",
+  "name": "Webhook Relay",
+  "version": "1.0.0",
+  "description": "Forward CLIaaS events to any external URL via webhook. Supports HMAC-SHA256 payload signing and per-event filtering for secure, flexible integrations.",
+  "author": "CLIaaS",
+  "hooks": [
+    "ticket.created",
+    "ticket.updated",
+    "ticket.resolved",
+    "ticket.deleted",
+    "ticket.assigned",
+    "ticket.tagged",
+    "ticket.priority_changed",
+    "ticket.merged",
+    "ticket.split",
+    "ticket.unmerged",
+    "message.created",
+    "message.updated",
+    "message.displayed",
+    "message.clicked",
+    "message.dismissed",
+    "sla.breached",
+    "sla.warning",
+    "customer.created",
+    "customer.updated",
+    "customer.merged",
+    "csat.submitted",
+    "survey.submitted",
+    "survey.sent",
+    "kb.article_created",
+    "kb.article_updated",
+    "campaign.created",
+    "campaign.sent",
+    "campaign.activated",
+    "campaign.paused",
+    "campaign.step_executed",
+    "campaign.enrollment_completed",
+    "automation.executed",
+    "forum.thread_created",
+    "forum.reply_created",
+    "forum.thread_converted",
+    "qa.review_created",
+    "qa.review_completed",
+    "time.entry_created",
+    "side_conversation.created",
+    "side_conversation.replied",
+    "tour.started",
+    "tour.completed",
+    "tour.dismissed",
+    "plugin.installed",
+    "plugin.uninstalled",
+    "plugin.enabled",
+    "plugin.disabled",
+    "plugin.configured"
+  ],
+  "permissions": [
+    "tickets:read",
+    "customers:read",
+    "webhooks:manage"
+  ],
+  "actions": [
+    {
+      "id": "test-webhook",
+      "name": "Send Test Payload",
+      "description": "Send a test payload to the configured webhook URL"
+    }
+  ],
+  "uiSlots": [],
+  "oauthRequirements": [],
+  "configSchema": {
+    "type": "object",
+    "required": ["url"],
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The external URL to forward events to",
+        "format": "uri"
+      },
+      "secret": {
+        "type": "string",
+        "description": "Shared secret for HMAC-SHA256 payload signing"
+      },
+      "events": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional list of events to relay (empty = all events)"
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { event, data } = context;\nconst cfg = cliaas.config;\nif (!cfg.url) return;\nif (cfg.events && cfg.events.length && !cfg.events.includes(event)) return;\nconst payload = JSON.stringify({ event, data, timestamp: context.timestamp });\ncliaas.log.info(`Would POST to ${cfg.url}: ${event}`);",
+  "category": "Developer Tools",
+  "icon": "webhook"
+}

@@ -14,17 +14,13 @@ export default function SafetyActions({ currentState }: Props) {
   async function trip() {
     setLoading(true);
     try {
-      // Record 5 failures to trip the breaker
-      for (let i = 0; i < 6; i++) {
-        await fetch('/api/ai/admin', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'record_failure',
-            error: 'Manual trip from safety dashboard',
-          }),
-        });
-      }
+      await fetch('/api/ai/admin', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'trip_circuit_breaker',
+        }),
+      });
       router.refresh();
     } finally {
       setLoading(false);

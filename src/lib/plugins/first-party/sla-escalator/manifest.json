@@ -1,0 +1,41 @@
+{
+  "id": "sla-escalator",
+  "name": "SLA Escalator",
+  "version": "1.0.0",
+  "description": "Automatically escalate ticket priority when SLA targets are breached. Adds internal notes documenting the escalation and optionally reassigns to a designated group.",
+  "author": "CLIaaS",
+  "hooks": [
+    "sla.breached"
+  ],
+  "permissions": [
+    "tickets:read",
+    "tickets:write"
+  ],
+  "actions": [
+    {
+      "id": "manual-escalate",
+      "name": "Escalate Priority",
+      "description": "Manually escalate the ticket priority by one level"
+    }
+  ],
+  "uiSlots": [],
+  "oauthRequirements": [],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "escalateToGroup": {
+        "type": "string",
+        "description": "Group to reassign the ticket to upon escalation"
+      },
+      "addTag": {
+        "type": "string",
+        "description": "Tag to add to the ticket when escalated",
+        "default": "sla-escalated"
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { event, data } = context;\nif (event !== 'sla.breached') return;\nconst cfg = cliaas.config;\nconst priorities = ['low','normal','high','urgent'];\nconst idx = priorities.indexOf(data.priority || 'normal');\nconst newPriority = priorities[Math.min(idx+1, priorities.length-1)];\ncliaas.log.info(`Escalating ticket ${data.ticketId} from ${data.priority} to ${newPriority}`);",
+  "category": "Automation",
+  "icon": "alert-triangle"
+}

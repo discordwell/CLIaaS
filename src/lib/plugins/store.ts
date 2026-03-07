@@ -6,9 +6,17 @@
 import { randomUUID } from 'crypto';
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
 import { tryDb, getDefaultWorkspaceId, withRls } from '../store-helpers';
-import type { PluginInstallation } from './types';
+import type { PluginInstallation, PluginManifestV2 } from './types';
 
 const INSTALLATIONS_FILE = 'plugin-installations.jsonl';
+const LISTINGS_FILE = 'marketplace-listings.jsonl';
+
+// ---- Result types ----
+
+export interface UninstallResult {
+  deleted: boolean;
+  dependents: string[]; // plugin IDs that depend on the one being removed
+}
 
 // ---- JSONL helpers ----
 
@@ -165,6 +173,62 @@ export async function getHookRegistrations(installationId: string, workspaceId?:
   return [];
 }
 
+// ---- Dependency helpers ----
+
+/**
+ * Resolve the manifest for a plugin ID by checking marketplace listings.
+ * Returns null if no listing exists.
+ */
+async function resolveManifest(pluginId: string): Promise<PluginManifestV2 | null> {
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db.select({ manifest: schema.marketplaceListings.manifest })
+      .from(schema.marketplaceListings)
+      .where(eq(schema.marketplaceListings.pluginId, pluginId));
+    return row ? (row.manifest as PluginManifestV2) : null;
+  }
+  const listings = readJsonlFile<{ pluginId: string; manifest: PluginManifestV2 }>(LISTINGS_FILE);
+  const listing = listings.find(l => l.pluginId === pluginId);
+  return listing?.manifest ?? null;
+}
+
+/**
+ * Check that all dependencies of a manifest are already installed.
+ * Returns an array of missing plugin IDs (empty if all satisfied).
+ */
+export async function checkDependencies(
+  dependencies: string[],
+  workspaceId?: string,
+): Promise<string[]> {
+  if (!dependencies.length) return [];
+  const installations = await getInstallations(workspaceId);
+  const installedIds = new Set(installations.map(i => i.pluginId));
+  return dependencies.filter(dep => !installedIds.has(dep));
+}
+
+/**
+ * Find all installed plugins that declare a dependency on the given plugin ID.
+ * Checks marketplace listing manifests for each installed plugin.
+ */
+export async function findDependents(
+  pluginId: string,
+  workspaceId?: string,
+): Promise<string[]> {
+  const installations = await getInstallations(workspaceId);
+  const dependents: string[] = [];
+
+  for (const inst of installations) {
+    if (inst.pluginId === pluginId) continue;
+    const manifest = await resolveManifest(inst.pluginId);
+    if (manifest?.dependencies?.includes(pluginId)) {
+      dependents.push(inst.pluginId);
+    }
+  }
+  return dependents;
+}
+
 export async function installPlugin(data: {
   pluginId: string;
   version: string;
@@ -172,7 +236,19 @@ export async function installPlugin(data: {
   installedBy?: string;
   workspaceId?: string;
   hooks?: string[];
+  dependencies?: string[];
 }): Promise<PluginInstallation> {
+  // ---- Dependency check ----
+  const deps = data.dependencies ?? [];
+  if (deps.length) {
+    const missing = await checkDependencies(deps, data.workspaceId);
+    if (missing.length) {
+      throw new Error(
+        `Missing dependencies: ${missing.join(', ')}. Install them before installing "${data.pluginId}".`,
+      );
+    }
+  }
+
   const now = new Date().toISOString();
   const id = randomUUID();
 
@@ -272,7 +348,14 @@ export async function updateInstallation(
   return all[idx];
 }
 
-export async function uninstallPlugin(id: string): Promise<boolean> {
+export async function uninstallPlugin(id: string, workspaceId?: string): Promise<UninstallResult> {
+  // Look up the installation to find its pluginId for dependent checking
+  const installation = await getInstallation(id, workspaceId);
+  let dependents: string[] = [];
+  if (installation) {
+    dependents = await findDependents(installation.pluginId, workspaceId);
+  }
+
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -280,14 +363,14 @@ export async function uninstallPlugin(id: string): Promise<boolean> {
     // Cascading delete removes hook_registrations and execution_logs
     const result = await db.delete(schema.pluginInstallations)
       .where(eq(schema.pluginInstallations.id, id));
-    return (result.rowCount ?? 0) > 0;
+    return { deleted: (result.rowCount ?? 0) > 0, dependents };
   }
 
   const all = readAllInstallations();
   const filtered = all.filter(i => i.id !== id);
-  if (filtered.length === all.length) return false;
+  if (filtered.length === all.length) return { deleted: false, dependents };
   writeAllInstallations(filtered);
-  return true;
+  return { deleted: true, dependents };
 }
 
 export async function togglePlugin(

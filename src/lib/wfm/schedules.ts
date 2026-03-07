@@ -1,13 +1,16 @@
 /**
  * Schedule and template CRUD + helpers for the WFM domain.
+ * Includes auto-schedule generation (B12) using the optimizer.
  */
 
-import type { AgentSchedule, ScheduleTemplate, ScheduledActivity, ShiftBlock } from './types';
+import type { AgentSchedule, ForecastPoint, ScheduleTemplate, ScheduledActivity, ShiftBlock } from './types';
 import {
   getSchedulesStore, addSchedule, updateScheduleStore, removeSchedule,
   getTemplatesStore, addTemplate, updateTemplateStore, removeTemplate,
   getTimeOffStore, genId,
 } from './store';
+import { optimizeSchedules } from './optimizer';
+import type { OptimizerConstraints } from './optimizer';
 
 export function getTemplates(id?: string): ScheduleTemplate[] {
   const all = getTemplatesStore();
@@ -101,4 +104,152 @@ export function countScheduledAgents(schedules: AgentSchedule[], hourStr: string
   let count = 0;
   for (const s of schedules) if (getScheduledActivity(s, d) === 'work') count++;
   return count;
+}
+
+// ---------------------------------------------------------------------------
+// B12: Auto-schedule generation
+// ---------------------------------------------------------------------------
+
+export interface AutoScheduleInput {
+  weekStart: string; // ISO date (Monday)
+  templateId?: string;
+  agents: Array<{ id: string; name: string; skills: string[]; maxHours?: number }>;
+  forecast: ForecastPoint[];
+  constraints?: Partial<OptimizerConstraints>;
+  qaScores?: Record<string, number>;
+}
+
+export interface AutoScheduleResult {
+  schedules: AgentSchedule[];
+  coverage: Array<{ hour: string; assigned: number; required: number }>;
+  warnings: string[];
+  needsReview: boolean;
+}
+
+/**
+ * Generate a full weekly schedule for the given agents using forecast data
+ * and (optionally) a template as the baseline. Results are flagged for
+ * admin review before they take effect.
+ */
+export function generateWeeklySchedules(input: AutoScheduleInput): AutoScheduleResult {
+  const warnings: string[] = [];
+
+  // 1. If templateId provided, load template shifts as base
+  let templateShifts: ShiftBlock[] | undefined;
+  if (input.templateId) {
+    const templates = getTemplatesStore();
+    const tmpl = templates.find(t => t.id === input.templateId);
+    if (tmpl) {
+      templateShifts = tmpl.shifts;
+    } else {
+      warnings.push(`Template ${input.templateId} not found; generating schedule from forecast only.`);
+    }
+  }
+
+  // 2. Build optimizer input
+  const optimizerConstraints: OptimizerConstraints = {
+    maxHoursPerWeek: 40,
+    minRestBetweenShifts: 8,
+    maxConsecutiveDays: 6,
+    respectTimeOff: true,
+    preferredShiftLength: 8,
+    ...input.constraints,
+  };
+
+  // Map forecast to optimizer format — include dayOfWeek for QA peak detection
+  const forecast = input.forecast.map(fp => ({
+    hour: fp.hour,
+    predictedVolume: fp.predictedVolume,
+    dayOfWeek: fp.dayOfWeek,
+  }));
+
+  // Map agents
+  const agents = input.agents.map(a => ({
+    id: a.id,
+    name: a.name,
+    skills: a.skills,
+    maxHours: a.maxHours,
+  }));
+
+  // If we have a template, we need a different strategy:
+  // Assign template shifts directly then let optimizer fill gaps
+  let existingSchedules: AgentSchedule[] | undefined;
+  if (templateShifts && templateShifts.length > 0) {
+    const now = new Date().toISOString();
+    // Calculate week end (Sunday)
+    const weekEndDate = new Date(input.weekStart + 'T00:00:00Z');
+    weekEndDate.setUTCDate(weekEndDate.getUTCDate() + 6);
+    const weekEnd = weekEndDate.toISOString().slice(0, 10);
+
+    existingSchedules = agents.map(a => ({
+      id: genId('auto-sched'),
+      userId: a.id,
+      userName: a.name,
+      templateId: input.templateId,
+      effectiveFrom: input.weekStart,
+      effectiveTo: weekEnd,
+      timezone: 'UTC',
+      shifts: templateShifts!.map(s => ({ ...s })),
+      createdAt: now,
+      updatedAt: now,
+    }));
+  }
+
+  // 3. Run optimizer
+  const result = optimizeSchedules({
+    agents,
+    forecast,
+    constraints: optimizerConstraints,
+    existingSchedules,
+    qaScores: input.qaScores,
+  });
+
+  // 4. Merge: if we had template-based existing schedules, use those as the base
+  // and only append any additional optimizer-generated shifts
+  let finalSchedules: AgentSchedule[];
+  if (existingSchedules) {
+    // Template schedules are the base; optimizer may have assigned additional agents
+    const templateAgentIds = new Set(existingSchedules.map(s => s.userId));
+    const additionalFromOptimizer = result.schedules.filter(s => !templateAgentIds.has(s.userId));
+    finalSchedules = [...existingSchedules, ...additionalFromOptimizer];
+
+    // Inject coaching blocks from optimizer into template schedules
+    if (result.coachingBlocks) {
+      for (const [agentId, blocks] of result.coachingBlocks) {
+        const sched = finalSchedules.find(s => s.userId === agentId);
+        if (sched) {
+          sched.shifts.push(...blocks);
+        }
+      }
+    }
+  } else {
+    finalSchedules = result.schedules;
+  }
+
+  // 5. Build coverage report
+  const coverage = result.coverage.map(c => ({
+    hour: c.hour,
+    assigned: c.assigned,
+    required: c.required,
+  }));
+
+  // 6. Add warnings for coverage gaps
+  for (const c of result.coverage) {
+    if (c.gap > 0) {
+      warnings.push(`Coverage gap at ${c.hour}: ${c.required} needed, ${c.assigned} assigned (${c.gap} short)`);
+    }
+  }
+
+  // Add violation warnings
+  for (const v of result.violations) {
+    warnings.push(`Constraint violation for agent ${v.agentId}: ${v.type} — ${v.detail}`);
+  }
+
+  // 7. Return with needsReview: true
+  return {
+    schedules: finalSchedules,
+    coverage,
+    warnings,
+    needsReview: true,
+  };
 }

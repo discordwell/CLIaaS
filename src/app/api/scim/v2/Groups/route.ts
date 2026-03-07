@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireSCIMAuth } from '@/lib/scim/auth';
 import { toSCIMGroup, wrapListResponse, scimError, type SCIMGroup } from '@/lib/scim/schema';
-import { getGroups, setGroups, getGroupsAsync, createGroupAsync } from '@/lib/scim/store';
+import { getGroupsAsync, createGroupAsync } from '@/lib/scim/store';
 import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';

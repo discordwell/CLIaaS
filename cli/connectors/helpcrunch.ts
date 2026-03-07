@@ -211,12 +211,20 @@ export async function exportHelpcrunch(auth: HelpcrunchAuth, outDir: string, cur
   flushCollectedOrgs(orgNames, 'hc', 'helpcrunch', files.organizations, counts);
   orgSpinner.succeed(`${counts.organizations} organizations collected`);
 
-  // No KB or Rules API available
+  // No KB API available
   exportSpinner('KB articles: not available via HelpCrunch API').info();
-  exportSpinner('Business rules: not available via HelpCrunch API').info();
+
+  // Business rules — HelpCrunch does not expose automations via API
+  const rulesSpinner = exportSpinner('Checking business rules API...');
+  const ruleLimitations: Record<string, string> = {
+    automations: 'HelpCrunch API does not expose automation rules. Export from HelpCrunch dashboard > Automations.',
+  };
+  rulesSpinner.info(
+    `Business rules: upstream API limitation — ${ruleLimitations.automations}`,
+  );
 
   const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
-  return writeManifest(outDir, 'helpcrunch', counts, { cursorState: newCursorState });
+  return writeManifest(outDir, 'helpcrunch', counts, { cursorState: newCursorState, ruleLimitations });
 }
 
 // ---- Verify ----

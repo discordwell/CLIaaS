@@ -27,6 +27,7 @@ export interface SSOProvider {
   // Common
   domainHint?: string;
   defaultRole?: string;
+  jitEnabled?: boolean;
   forceAuthn?: boolean;
   signedAssertions?: boolean;
   createdAt: string;
@@ -75,6 +76,7 @@ function dbRowToProvider(row: any): SSOProvider {
     userInfoUrl: row.userInfoUrl ?? undefined,
     domainHint: row.domainHint ?? undefined,
     defaultRole: row.defaultRole ?? undefined,
+    jitEnabled: row.jitEnabled ?? undefined,
     forceAuthn: row.forceAuthn ?? undefined,
     signedAssertions: row.signedAssertions ?? undefined,
     createdAt: new Date(row.createdAt).toISOString(),
@@ -147,6 +149,8 @@ export async function createProviderAsync(
         tokenUrl: input.tokenUrl ?? null,
         userInfoUrl: input.userInfoUrl ?? null,
         domainHint: input.domainHint ?? null,
+        defaultRole: input.defaultRole ?? null,
+        jitEnabled: input.jitEnabled ?? true,
       }).returning();
       return dbRowToProvider(row);
     } catch { /* fall through */ }

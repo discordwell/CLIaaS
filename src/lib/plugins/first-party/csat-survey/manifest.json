@@ -1,0 +1,43 @@
+{
+  "id": "csat-survey",
+  "name": "CSAT Survey Trigger",
+  "version": "1.0.0",
+  "description": "Automatically send customer satisfaction surveys when tickets are resolved. Configure delay timing and exclude specific ticket types via tags.",
+  "author": "CLIaaS",
+  "hooks": [
+    "ticket.resolved"
+  ],
+  "permissions": [
+    "tickets:read",
+    "customers:read"
+  ],
+  "actions": [
+    {
+      "id": "send-survey-now",
+      "name": "Send Survey Now",
+      "description": "Immediately send a CSAT survey for this ticket"
+    }
+  ],
+  "uiSlots": [],
+  "oauthRequirements": [],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "delayMinutes": {
+        "type": "integer",
+        "description": "Minutes to wait after resolution before sending the survey",
+        "default": 60
+      },
+      "excludeTags": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Tickets with any of these tags will not receive a survey",
+        "default": []
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { event, data } = context;\nif (event !== 'ticket.resolved') return;\nconst cfg = cliaas.config;\nconst excludeTags = cfg.excludeTags || [];\nif (data.tags && data.tags.some(t => excludeTags.includes(t))) return;\nconst delay = cfg.delayMinutes || 60;\ncliaas.log.info(`Scheduling CSAT survey for ticket ${data.ticketId} in ${delay} minutes`);",
+  "category": "Feedback",
+  "icon": "star"
+}

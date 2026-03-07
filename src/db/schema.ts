@@ -905,6 +905,8 @@ export const ssoProviders = pgTable(
     userInfoUrl: text('user_info_url'),
     // Common
     domainHint: text('domain_hint'),
+    defaultRole: text('default_role').default('agent'),
+    jitEnabled: boolean('jit_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -3474,6 +3476,25 @@ export const scimGroupMembers = pgTable(
   }),
 );
 
+export const scimAuditLog = pgTable(
+  'scim_audit_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    action: text('action').notNull(), // 'user.created' | 'user.updated' | 'user.deleted' | 'group.created' | 'group.updated' | 'group.deleted'
+    entityType: text('entity_type').notNull(), // 'user' | 'group'
+    entityId: text('entity_id').notNull(),
+    actorId: text('actor_id'), // SCIM client identifier
+    changes: jsonb('changes'), // diff of what changed
+    timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    scimAuditWorkspaceIdx: index('scim_audit_workspace_idx').on(table.workspaceId),
+    scimAuditTimestampIdx: index('scim_audit_timestamp_idx').on(table.timestamp),
+    scimAuditEntityIdx: index('scim_audit_entity_idx').on(table.entityType, table.entityId),
+  }),
+);
+
 export const syncHealth = pgTable(
   'sync_health',
   {
@@ -3491,5 +3512,91 @@ export const syncHealth = pgTable(
   },
   table => ({
     syncHealthUniqueIdx: uniqueIndex('sync_health_workspace_connector_idx').on(table.workspaceId, table.connector),
+  }),
+);
+
+// ---- Voice / Telephony ----
+
+export const voiceCallDirectionEnum = pgEnum('voice_call_direction', [
+  'inbound',
+  'outbound',
+]);
+
+export const voiceCallStatusEnum = pgEnum('voice_call_status', [
+  'ringing',
+  'in-progress',
+  'completed',
+  'busy',
+  'no-answer',
+  'failed',
+  'voicemail',
+]);
+
+export const voiceAgentStatusEnum = pgEnum('voice_agent_status', [
+  'available',
+  'busy',
+  'offline',
+  'wrap-up',
+]);
+
+export const voiceCalls = pgTable(
+  'voice_calls',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    callSid: text('call_sid').notNull(),
+    direction: voiceCallDirectionEnum('direction').notNull(),
+    from: text('from').notNull(),
+    to: text('to').notNull(),
+    status: voiceCallStatusEnum('status').notNull().default('ringing'),
+    duration: integer('duration'),
+    recordingUrl: text('recording_url'),
+    transcription: text('transcription'),
+    agentId: uuid('agent_id'),
+    ticketId: uuid('ticket_id'),
+    queueId: text('queue_id'),
+    queueWaitMs: integer('queue_wait_ms'),
+    ivrPath: jsonb('ivr_path').default([]),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    voiceCallsWorkspaceIdx: index('voice_calls_workspace_idx').on(table.workspaceId),
+    voiceCallsCallSidIdx: index('voice_calls_call_sid_idx').on(table.callSid),
+  }),
+);
+
+export const voiceAgents = pgTable(
+  'voice_agents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    extension: text('extension').notNull(),
+    phoneNumber: text('phone_number').notNull(),
+    status: voiceAgentStatusEnum('status').notNull().default('offline'),
+    currentCallId: uuid('current_call_id'),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+  },
+  table => ({
+    voiceAgentsWorkspaceIdx: index('voice_agents_workspace_idx').on(table.workspaceId),
+  }),
+);
+
+export const voiceQueueMetrics = pgTable(
+  'voice_queue_metrics',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    queueId: text('queue_id').notNull(),
+    name: text('name').notNull(),
+    waitingCalls: integer('waiting_calls').notNull().default(0),
+    avgWaitMs: integer('avg_wait_ms').notNull().default(0),
+    longestWaitMs: integer('longest_wait_ms').notNull().default(0),
+    availableAgents: integer('available_agents').notNull().default(0),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    voiceQueueMetricsWorkspaceIdx: index('voice_queue_metrics_workspace_idx').on(table.workspaceId),
+    voiceQueueMetricsTimestampIdx: index('voice_queue_metrics_timestamp_idx').on(table.timestamp),
   }),
 );

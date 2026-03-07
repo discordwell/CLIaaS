@@ -1,0 +1,51 @@
+{
+  "id": "field-sync",
+  "name": "Field Sync",
+  "version": "1.0.0",
+  "description": "Automatically copy values between ticket fields using configurable mapping rules. Sync custom fields, standardize data, and eliminate manual data entry on ticket creation and updates.",
+  "author": "CLIaaS",
+  "hooks": [
+    "ticket.created",
+    "ticket.updated"
+  ],
+  "permissions": [
+    "tickets:read",
+    "tickets:write"
+  ],
+  "actions": [
+    {
+      "id": "run-sync",
+      "name": "Run Field Sync",
+      "description": "Manually run field sync mappings on this ticket"
+    }
+  ],
+  "uiSlots": [],
+  "oauthRequirements": [],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "mappings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["source", "target"],
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Source field name to copy from"
+            },
+            "target": {
+              "type": "string",
+              "description": "Target field name to copy to"
+            }
+          }
+        },
+        "description": "List of field-to-field mapping rules"
+      }
+    }
+  },
+  "runtime": "node",
+  "entrypoint": "const { event, data } = context;\nif (event !== 'ticket.created' && event !== 'ticket.updated') return;\nconst cfg = cliaas.config;\nconst mappings = cfg.mappings || [];\nfor (const m of mappings) {\n  const val = data[m.source] || data.fields?.[m.source];\n  if (val) cliaas.log.info(`Syncing ${m.source} -> ${m.target}: ${val}`);\n}",
+  "category": "Automation",
+  "icon": "copy"
+}

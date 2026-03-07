@@ -94,7 +94,7 @@ describe('Plugin integration flow', () => {
 
     // 7. Uninstall
     const removed = await uninstallPlugin(installation.id);
-    expect(removed).toBe(true);
+    expect(removed).toEqual({ deleted: true, dependents: [] });
 
     // 8. Verify removed
     const afterUninstall = await getInstallations();

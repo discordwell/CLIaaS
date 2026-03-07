@@ -49,6 +49,12 @@ describe('Freshdesk agent pagination', () => {
       // KB categories
       .mockResolvedValueOnce(jsonResponse([]))
       // SLA policies
+      .mockResolvedValueOnce(jsonResponse([]))
+      // Dispatch rules
+      .mockResolvedValueOnce(jsonResponse([]))
+      // Observer rules
+      .mockResolvedValueOnce(jsonResponse([]))
+      // Scenario automations
       .mockResolvedValueOnce(jsonResponse([]));
 
     const { exportFreshdesk } = await import('../../connectors/freshdesk.js');
@@ -102,6 +108,12 @@ describe('Freshdesk agent pagination', () => {
       // KB categories
       .mockResolvedValueOnce(jsonResponse([]))
       // SLA policies
+      .mockResolvedValueOnce(jsonResponse([]))
+      // Dispatch rules
+      .mockResolvedValueOnce(jsonResponse([]))
+      // Observer rules
+      .mockResolvedValueOnce(jsonResponse([]))
+      // Scenario automations
       .mockResolvedValueOnce(jsonResponse([]));
 
     const { exportFreshdesk } = await import('../../connectors/freshdesk.js');

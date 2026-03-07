@@ -153,6 +153,27 @@ export interface UtilizationRecord {
   occupancy: number;
 }
 
+// ---- Shift Swaps ----
+
+export interface ShiftSwapRequest {
+  id: string;
+  requesterId: string;
+  requesterName: string;
+  targetId?: string;          // null for open swap (any taker)
+  targetName?: string;
+  requesterShiftDate: string;
+  requesterShiftStart: string;
+  requesterShiftEnd: string;
+  targetShiftDate?: string;
+  targetShiftStart?: string;
+  targetShiftEnd?: string;
+  status: 'pending' | 'accepted' | 'approved' | 'rejected' | 'cancelled';
+  reason?: string;
+  managerNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WfmDashboardData {
   agentStatuses: AgentCurrentStatus[];
   adherence: AdherenceRecord[];

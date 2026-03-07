@@ -1,9 +1,11 @@
 /**
  * Voice call tracking store — JSONL-persistent with DB-ready interface.
+ * Dual-mode: async functions try DB (with RLS) first, fall back to sync JSONL.
  * No demo seed data in production; explicit seed function for dev/test.
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { withRls } from '../store-helpers';
 
 // ---- Types ----
 
@@ -264,4 +266,259 @@ export function seedDemoData(): void {
   ];
   for (const call of demoCalls) store.set(call.id, call);
   persistCalls(store);
+}
+
+// ---- DB row → interface mappers ----
+
+type VoiceCallRow = {
+  id: string;
+  callSid: string;
+  direction: 'inbound' | 'outbound';
+  from: string;
+  to: string;
+  status: 'ringing' | 'in-progress' | 'completed' | 'busy' | 'no-answer' | 'failed' | 'voicemail';
+  duration: number | null;
+  recordingUrl: string | null;
+  transcription: string | null;
+  agentId: string | null;
+  ticketId: string | null;
+  queueId: string | null;
+  queueWaitMs: number | null;
+  ivrPath: unknown;
+  workspaceId: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type VoiceAgentRow = {
+  id: string;
+  name: string;
+  extension: string;
+  phoneNumber: string;
+  status: 'available' | 'busy' | 'offline' | 'wrap-up';
+  currentCallId: string | null;
+  workspaceId: string;
+};
+
+type VoiceQueueMetricsRow = {
+  id: string;
+  queueId: string;
+  name: string;
+  waitingCalls: number;
+  avgWaitMs: number;
+  longestWaitMs: number;
+  availableAgents: number;
+  workspaceId: string;
+  timestamp: Date;
+};
+
+function mapRowToVoiceCall(r: VoiceCallRow): VoiceCall {
+  return {
+    id: r.id,
+    callSid: r.callSid,
+    direction: r.direction,
+    from: r.from,
+    to: r.to,
+    status: r.status,
+    duration: r.duration ?? undefined,
+    recordingUrl: r.recordingUrl ?? undefined,
+    transcription: r.transcription ?? undefined,
+    agentId: r.agentId ?? undefined,
+    ticketId: r.ticketId ?? undefined,
+    queueId: r.queueId ?? undefined,
+    queueWaitMs: r.queueWaitMs ?? undefined,
+    ivrPath: Array.isArray(r.ivrPath) ? r.ivrPath as string[] : undefined,
+    workspaceId: r.workspaceId,
+    createdAt: r.createdAt.getTime(),
+    updatedAt: r.updatedAt.getTime(),
+  };
+}
+
+function mapRowToVoiceAgent(r: VoiceAgentRow): VoiceAgent {
+  return {
+    id: r.id,
+    name: r.name,
+    extension: r.extension,
+    phoneNumber: r.phoneNumber,
+    status: r.status,
+    currentCallId: r.currentCallId ?? undefined,
+    workspaceId: r.workspaceId,
+  };
+}
+
+function mapRowToVoiceQueueMetrics(r: VoiceQueueMetricsRow): VoiceQueueMetrics {
+  return {
+    queueId: r.queueId,
+    name: r.name,
+    waitingCalls: r.waitingCalls,
+    avgWaitMs: r.avgWaitMs,
+    longestWaitMs: r.longestWaitMs,
+    availableAgents: r.availableAgents,
+    timestamp: r.timestamp.getTime(),
+  };
+}
+
+// ---- Async DB-first variants (JSONL fallback) ----
+
+export async function createCallAsync(
+  callSid: string,
+  direction: VoiceCall['direction'],
+  from: string,
+  to: string,
+  workspaceId: string,
+): Promise<VoiceCall> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const [row] = await db.insert(schema.voiceCalls).values({
+      callSid,
+      direction,
+      from,
+      to,
+      status: 'ringing',
+      workspaceId,
+    }).returning();
+    return mapRowToVoiceCall(row);
+  });
+  return dbResult ?? createCall(callSid, direction, from, to, workspaceId);
+}
+
+export async function getCallAsync(
+  id: string,
+  workspaceId: string,
+): Promise<VoiceCall | undefined> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db.select().from(schema.voiceCalls)
+      .where(eq(schema.voiceCalls.id, id)).limit(1);
+    if (!row) return undefined;
+    return mapRowToVoiceCall(row);
+  });
+  return dbResult ?? getCall(id);
+}
+
+export async function getAllCallsAsync(
+  workspaceId: string,
+): Promise<VoiceCall[]> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { desc } = await import('drizzle-orm');
+    const rows = await db.select().from(schema.voiceCalls)
+      .orderBy(desc(schema.voiceCalls.createdAt));
+    return rows.map(mapRowToVoiceCall);
+  });
+  return dbResult ?? getAllCalls(workspaceId);
+}
+
+export async function updateCallAsync(
+  id: string,
+  updates: Partial<Pick<VoiceCall, 'status' | 'duration' | 'recordingUrl' | 'transcription' | 'agentId' | 'ticketId' | 'ivrPath' | 'queueId' | 'queueWaitMs'>>,
+  workspaceId: string,
+): Promise<VoiceCall | null> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq } = await import('drizzle-orm');
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    for (const [k, v] of Object.entries(updates)) {
+      if (k !== 'updatedAt') set[k] = v ?? null;
+    }
+    const [row] = await db.update(schema.voiceCalls)
+      .set(set).where(eq(schema.voiceCalls.id, id)).returning();
+    if (!row) return null;
+    return mapRowToVoiceCall(row);
+  });
+  return dbResult ?? updateCall(id, updates);
+}
+
+export async function getAgentsAsync(
+  workspaceId: string,
+): Promise<VoiceAgent[]> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const rows = await db.select().from(schema.voiceAgents);
+    return rows.map(mapRowToVoiceAgent);
+  });
+  return dbResult ?? getAgents(workspaceId);
+}
+
+export async function registerAgentAsync(
+  agent: Omit<VoiceAgent, 'status'> & { status?: VoiceAgent['status'] },
+  workspaceId: string,
+): Promise<VoiceAgent> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const values = {
+      id: agent.id,
+      name: agent.name,
+      extension: agent.extension,
+      phoneNumber: agent.phoneNumber,
+      status: (agent.status ?? 'available') as 'available' | 'busy' | 'offline' | 'wrap-up',
+      currentCallId: agent.currentCallId ?? null,
+      workspaceId,
+    };
+    const [row] = await db.insert(schema.voiceAgents).values(values)
+      .onConflictDoUpdate({
+        target: schema.voiceAgents.id,
+        set: {
+          name: values.name,
+          extension: values.extension,
+          phoneNumber: values.phoneNumber,
+          status: values.status,
+          currentCallId: values.currentCallId,
+        },
+      }).returning();
+    return mapRowToVoiceAgent(row);
+  });
+  return dbResult ?? registerAgent(agent);
+}
+
+export async function updateAgentStatusAsync(
+  id: string,
+  status: VoiceAgent['status'],
+  currentCallId: string | undefined,
+  workspaceId: string,
+): Promise<VoiceAgent | null> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq } = await import('drizzle-orm');
+    const set: Record<string, unknown> = { status };
+    if (currentCallId !== undefined) set.currentCallId = currentCallId;
+    const [row] = await db.update(schema.voiceAgents)
+      .set(set).where(eq(schema.voiceAgents.id, id)).returning();
+    if (!row) return null;
+    return mapRowToVoiceAgent(row);
+  });
+  return dbResult ?? updateAgentStatus(id, status, currentCallId);
+}
+
+export async function recordQueueMetricsAsync(
+  metrics: VoiceQueueMetrics,
+  workspaceId: string,
+): Promise<void> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    await db.insert(schema.voiceQueueMetrics).values({
+      queueId: metrics.queueId,
+      name: metrics.name,
+      waitingCalls: metrics.waitingCalls,
+      avgWaitMs: metrics.avgWaitMs,
+      longestWaitMs: metrics.longestWaitMs,
+      availableAgents: metrics.availableAgents,
+      workspaceId,
+      timestamp: new Date(metrics.timestamp),
+    });
+    return true as const;
+  });
+  if (!dbResult) recordQueueMetrics(metrics);
+}
+
+export async function getQueueMetricsAsync(
+  workspaceId: string,
+  queueId?: string,
+  limit = 100,
+): Promise<VoiceQueueMetrics[]> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { desc, eq, and } = await import('drizzle-orm');
+    const conditions = queueId
+      ? and(eq(schema.voiceQueueMetrics.queueId, queueId))
+      : undefined;
+    const rows = await db.select().from(schema.voiceQueueMetrics)
+      .where(conditions)
+      .orderBy(desc(schema.voiceQueueMetrics.timestamp))
+      .limit(limit);
+    return rows.map(mapRowToVoiceQueueMetrics);
+  });
+  return dbResult ?? getQueueMetrics(queueId, limit);
 }

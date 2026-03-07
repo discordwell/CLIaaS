@@ -21,7 +21,8 @@ function makeConnector(overrides: Partial<ConnectorMeta> = {}): ConnectorMeta {
     customerCount: 10,
     kbArticleCount: 5,
     lastExport: '2026-01-15T10:30:00Z',
-    capabilities: { read: true, incrementalSync: true, update: true, reply: true, note: true, create: true },
+    capabilities: { read: true, incrementalSync: true, webhookSync: true, update: true, reply: true, note: true, create: true },
+    syncConfig: { connectorId: 'zendesk', syncMode: 'webhook', pollingIntervalMs: 300000, webhookVerified: false, fallbackToPolling: true },
     ...overrides,
   };
 }
@@ -43,7 +44,7 @@ describe('ConnectorCard', () => {
 
   it('shows "read + write" badge for partial-capability connector', () => {
     render(<ConnectorCard connector={makeConnector({
-      capabilities: { read: true, incrementalSync: false, update: false, reply: true, note: true, create: true },
+      capabilities: { read: true, incrementalSync: false, webhookSync: false, update: false, reply: true, note: true, create: true },
     })} />);
     expect(screen.getByText(/read \+ write/)).toBeInTheDocument();
   });

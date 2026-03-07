@@ -115,15 +115,23 @@ export async function GET(request: NextRequest) {
     }
 
     // Bridge to JWT session
-    const token = await handleSsoLogin({
+    const result = await handleSsoLogin({
       email,
       name: name || email.split('@')[0],
       providerId: provider.id,
     });
 
+    if (!result.ok) {
+      // JIT provisioning is disabled and user does not exist — friendly redirect
+      const errorUrl = new URL('/login', origin);
+      errorUrl.searchParams.set('error', 'sso_jit_disabled');
+      errorUrl.searchParams.set('message', result.error);
+      return NextResponse.redirect(errorUrl);
+    }
+
     // Set session cookie on the redirect response (not via cookies() API)
     const response = NextResponse.redirect(new URL('/dashboard', origin));
-    response.cookies.set('cliaas-session', token, COOKIE_OPTIONS);
+    response.cookies.set('cliaas-session', result.token, COOKIE_OPTIONS);
     response.cookies.delete('oidc-state');
 
     return response;

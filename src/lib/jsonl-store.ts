@@ -4,7 +4,7 @@
  * Files are stored in /tmp/cliaas-demo/ (same dir as the demo export data).
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 function getStoreDir(): string {
@@ -38,4 +38,10 @@ export function writeJsonlFile<T>(filename: string, items: T[]): void {
   const filePath = join(getStoreDir(), filename);
   const content = items.map((item) => JSON.stringify(item)).join('\n');
   writeFileSync(filePath, content + '\n', 'utf-8');
+}
+
+export function appendJsonlLine<T>(filename: string, item: T): void {
+  ensureDir();
+  const filePath = join(getStoreDir(), filename);
+  appendFileSync(filePath, JSON.stringify(item) + '\n', 'utf-8');
 }
