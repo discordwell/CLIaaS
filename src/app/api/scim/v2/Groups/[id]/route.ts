@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireSCIMAuth } from '@/lib/scim/auth';
 import { toSCIMGroup, scimError, applyGroupPatchOps, type SCIMPatchOp } from '@/lib/scim/schema';
-import { getGroups, setGroups } from '@/lib/scim/store';
+import { getGroups, setGroups, getGroup, updateGroup, deleteGroup } from '@/lib/scim/store';
 import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function GET(
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
-  const group = getGroups().find(g => g.id === id);
+  const group = getGroup(id);
   if (!group) {
     return NextResponse.json(scimError(404, 'Group not found'), { status: 404 });
   }
@@ -31,9 +31,8 @@ export async function PATCH(
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
-  const groups = getGroups();
-  const idx = groups.findIndex(g => g.id === id);
-  if (idx === -1) {
+  const existing = getGroup(id);
+  if (!existing) {
     return NextResponse.json(scimError(404, 'Group not found'), { status: 404 });
   }
 
@@ -41,10 +40,10 @@ export async function PATCH(
     const parsed = await parseJsonBody<SCIMPatchOp>(request);
     if ('error' in parsed) return parsed.error;
     const body = parsed.data;
-    const group = groups[idx];
-    applyGroupPatchOps(group, body);
-    setGroups(groups);
-    return NextResponse.json(toSCIMGroup(group));
+    const mutable = { ...existing };
+    applyGroupPatchOps(mutable, body);
+    const updated = updateGroup(id, { name: mutable.name, members: mutable.members });
+    return NextResponse.json(toSCIMGroup(updated ?? mutable));
   } catch (err) {
     return NextResponse.json(
       scimError(500, safeErrorMessage(err, 'Update failed')),
@@ -61,13 +60,11 @@ export async function DELETE(
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
-  const groups = getGroups();
-  const idx = groups.findIndex(g => g.id === id);
-  if (idx === -1) {
+  const existing = getGroup(id);
+  if (!existing) {
     return NextResponse.json(scimError(404, 'Group not found'), { status: 404 });
   }
 
-  groups.splice(idx, 1);
-  setGroups(groups);
+  deleteGroup(id);
   return new NextResponse(null, { status: 204 });
 }

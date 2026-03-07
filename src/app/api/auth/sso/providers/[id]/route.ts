@@ -84,6 +84,19 @@ export async function PATCH(
       }
     }
 
+    // Prevent removing certificate from SAML providers or switching to SAML without one
+    const existing = getProvider(id);
+    if (existing) {
+      const resultProtocol = updates.protocol ?? existing.protocol;
+      const resultCert = updates.certificate !== undefined ? updates.certificate : existing.certificate;
+      if (resultProtocol === 'saml' && !resultCert) {
+        return NextResponse.json(
+          { error: 'SAML providers require an IdP X.509 certificate. Cannot remove certificate or switch to SAML without one.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const updated = updateProvider(id, updates);
     if (!updated) {
       return NextResponse.json(

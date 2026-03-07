@@ -71,7 +71,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
 
     it('returns all created providers', async () => {
       const { createProvider, getProviders } = await import('../sso-config');
-      createProvider({ name: 'P1', protocol: 'saml' as const, enabled: true });
+      createProvider({ name: 'P1', protocol: 'saml' as const, enabled: true, certificate: 'MIICtest' });
       createProvider({ name: 'P2', protocol: 'oidc' as const, enabled: false });
       const providers = getProviders();
       expect(providers).toHaveLength(2);
@@ -86,6 +86,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         name: 'Test Provider',
         protocol: 'saml' as const,
         enabled: true,
+        certificate: 'MIICtest',
       });
       const fetched = getProvider(created.id);
       expect(fetched).toBeDefined();
@@ -105,6 +106,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         name: 'Original',
         protocol: 'saml' as const,
         enabled: true,
+        certificate: 'MIICtest',
       });
       await new Promise(r => setTimeout(r, 5));
       const updated = updateProvider(created.id, { name: 'Renamed', enabled: false });
@@ -143,6 +145,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         protocol: 'saml' as const,
         enabled: true,
         domainHint: 'acme.com',
+        certificate: 'MIICtest',
       });
       createProvider({
         name: 'Other SSO',
@@ -162,6 +165,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         protocol: 'saml' as const,
         enabled: false,
         domainHint: 'disabled.com',
+        certificate: 'MIICtest',
       });
       expect(findByDomain('disabled.com')).toBeUndefined();
     });
@@ -185,6 +189,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         forceAuthn: true,
         signedAssertions: true,
         defaultRole: 'agent',
+        certificate: 'MIICtest',
       });
 
       // Reset globals to simulate fresh process
@@ -202,9 +207,9 @@ describe('SSO config dual-mode (JSONL path)', () => {
 
     it('multiple providers persist and reload correctly', async () => {
       const mod1 = await import('../sso-config');
-      mod1.createProvider({ name: 'P1', protocol: 'saml' as const, enabled: true });
+      mod1.createProvider({ name: 'P1', protocol: 'saml' as const, enabled: true, certificate: 'MIICtest' });
       mod1.createProvider({ name: 'P2', protocol: 'oidc' as const, enabled: false });
-      mod1.createProvider({ name: 'P3', protocol: 'saml' as const, enabled: true });
+      mod1.createProvider({ name: 'P3', protocol: 'saml' as const, enabled: true, certificate: 'MIICtest' });
 
       // Reset globals
       const g = globalThis as Record<string, unknown>;
@@ -228,6 +233,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         protocol: 'saml' as const,
         enabled: true,
         forceAuthn: true,
+        certificate: 'MIICtest',
       });
       const fetched = getProvider(created.id);
       expect(fetched!.forceAuthn).toBe(true);
@@ -240,6 +246,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         protocol: 'saml' as const,
         enabled: true,
         signedAssertions: true,
+        certificate: 'MIICtest',
       });
       const fetched = getProvider(created.id);
       expect(fetched!.signedAssertions).toBe(true);
@@ -266,6 +273,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         forceAuthn: false,
         signedAssertions: false,
         defaultRole: 'agent',
+        certificate: 'MIICtest',
       });
       await new Promise(r => setTimeout(r, 5));
       const updated = updateProvider(created.id, {
@@ -287,6 +295,7 @@ describe('SSO config dual-mode (JSONL path)', () => {
         forceAuthn: true,
         signedAssertions: true,
         defaultRole: 'supervisor',
+        certificate: 'MIICtest',
       });
 
       // Reset globals

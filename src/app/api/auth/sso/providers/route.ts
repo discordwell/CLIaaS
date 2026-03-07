@@ -60,6 +60,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (protocol === 'saml' && !body.certificate) {
+      return NextResponse.json(
+        { error: 'SAML providers require an IdP X.509 certificate. Provide the "certificate" field (base64-encoded or PEM).' },
+        { status: 400 }
+      );
+    }
+
     const provider = createProvider({
       name,
       protocol,

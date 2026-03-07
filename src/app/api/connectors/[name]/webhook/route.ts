@@ -51,6 +51,30 @@ function verifyFreshdeskSignature(body: string, signature: string | null, secret
   }
 }
 
+function verifyHubSpotSignature(
+  request: NextRequest,
+  body: string,
+  secret: string,
+): boolean {
+  // HubSpot v3 signature: HMAC SHA-256 over requestMethod + requestUri + requestBody + timestamp
+  const signature = request.headers.get('x-hubspot-signature-v3');
+  const timestamp = request.headers.get('x-hubspot-request-timestamp');
+  if (!signature || !timestamp) return false;
+
+  // Replay protection: reject requests older than 5 minutes
+  const age = Date.now() - parseInt(timestamp, 10);
+  if (age > 300_000) return false;
+
+  const url = request.url;
+  const toSign = `POST${url}${body}${timestamp}`;
+  const expected = createHmac('sha256', secret).update(toSign).digest('base64');
+  try {
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
 // ---- Payload normalization ----
 
 interface NormalizedEvent {
@@ -127,6 +151,34 @@ function normalizeIntercomPayload(payload: Record<string, unknown>): NormalizedE
   };
 }
 
+function normalizeHubSpotPayload(payload: Record<string, unknown>): NormalizedEvent | null {
+  // HubSpot sends an array of subscription events
+  const events = Array.isArray(payload) ? payload : [payload];
+  const first = events[0] as Record<string, unknown> | undefined;
+  if (!first) return null;
+
+  const objectId = first.objectId as number | undefined;
+  if (!objectId) return null;
+
+  const subscriptionType = first.subscriptionType as string ?? '';
+  let canonicalEvent: NormalizedEvent['event'] = 'ticket.updated';
+  if (subscriptionType.includes('creation')) canonicalEvent = 'ticket.created';
+  else if (subscriptionType.includes('deletion')) canonicalEvent = 'ticket.resolved';
+
+  return {
+    event: canonicalEvent,
+    data: {
+      ticketId: `hub-${objectId}`,
+      externalId: String(objectId),
+      source: 'hubspot',
+      subject: `Ticket #${objectId}`,
+      status: canonicalEvent === 'ticket.resolved' ? 'closed' : 'open',
+      propertyName: first.propertyName,
+      propertyValue: first.propertyValue,
+    },
+  };
+}
+
 function normalizeFreshdeskPayload(payload: Record<string, unknown>): NormalizedEvent | null {
   // Freshdesk webhooks use a configurable template; we handle the standard format
   const ticket = (payload.freshdesk_webhook ?? payload) as Record<string, unknown>;
@@ -167,7 +219,7 @@ export async function POST(
   { params }: { params: Promise<{ name: string }> },
 ) {
   const { name } = await params;
-  const supported = ['zendesk', 'intercom', 'freshdesk'];
+  const supported = ['zendesk', 'intercom', 'freshdesk', 'hubspot'];
 
   if (!supported.includes(name)) {
     return NextResponse.json(
@@ -201,6 +253,9 @@ export async function POST(
       case 'freshdesk':
         valid = verifyFreshdeskSignature(rawBody, request.headers.get('x-freshdesk-webhook-signature'), secret);
         break;
+      case 'hubspot':
+        valid = verifyHubSpotSignature(request, rawBody, secret);
+        break;
     }
     if (!valid) {
       logger.warn({ connector: name }, 'Webhook signature verification failed');
@@ -219,6 +274,9 @@ export async function POST(
       break;
     case 'freshdesk':
       normalized = normalizeFreshdeskPayload(payload);
+      break;
+    case 'hubspot':
+      normalized = normalizeHubSpotPayload(payload);
       break;
   }
 

@@ -274,8 +274,9 @@ export async function parseSamlResponse(
       );
     }
   } else {
-    log.warn(
-      'No IdP certificate configured — skipping SAML signature verification (demo mode)'
+    throw new Error(
+      'SAML signature verification failed: no IdP certificate configured. ' +
+      'Configure the IdP X.509 certificate on this SSO provider before enabling SAML authentication.'
     );
   }
 

@@ -26,6 +26,7 @@ describe('sso-config', () => {
       enabled: true,
       entityId: 'https://idp.test.com',
       ssoUrl: 'https://idp.test.com/sso',
+      certificate: 'MIICpDCCAYwCCQDU+pQ4pHgSpDANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAl0ZXN0LWlkcA==',
     });
     expect(created.id).toBeTruthy();
     expect(created.name).toBe('Test SAML');
@@ -47,6 +48,7 @@ describe('sso-config', () => {
       name: 'Update Me',
       protocol: 'saml',
       enabled: true,
+      certificate: 'MIICpDCCAYwCCQDU+pQ4pHgSpDANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAl0ZXN0LWlkcA==',
     });
     const providers = mod.getProviders();
     const first = providers[0];

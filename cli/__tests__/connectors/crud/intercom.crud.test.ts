@@ -119,11 +119,11 @@ describe('Intercom export pipeline (mocked)', () => {
   beforeEach(() => { tmpDir = createTempDir('ic-export'); });
   afterEach(() => { cleanupTempDir(tmpDir); });
 
-  it('exports conversations and parts to JSONL with correct IDs and source', async () => {
+  it('exports conversations and tickets to JSONL with correct IDs and source', async () => {
     const { exportIntercom } = await import('../../../connectors/intercom.js');
 
     mockFetch
-      // conversations page 1
+      // 1. conversations list (no pages.next → no further pagination)
       .mockResolvedValueOnce(jsonResponse({
         conversations: [{
           id: 'conv-1',
@@ -136,9 +136,7 @@ describe('Intercom export pipeline (mocked)', () => {
         }],
         pages: { total_pages: 1 },
       }))
-      // conversations page 2 (empty)
-      .mockResolvedValueOnce(jsonResponse({ conversations: [], pages: { total_pages: 1 } }))
-      // conversation detail (for parts)
+      // 2. conversation detail (for parts)
       .mockResolvedValueOnce(jsonResponse({
         id: 'conv-1',
         conversation_parts: {
@@ -148,33 +146,88 @@ describe('Intercom export pipeline (mocked)', () => {
           }],
         },
       }))
-      // contacts page 1
+      // 3. tickets list (no pages.next → no further pagination)
+      .mockResolvedValueOnce(jsonResponse({
+        tickets: [{
+          id: 'tkt-1', ticket_id: 'TKT-001',
+          ticket_type: { id: 'type-1', name: 'Bug', description: 'Bug report' },
+          ticket_attributes: { title: 'Login broken', description: 'Cannot login' },
+          ticket_state: 'submitted', open: true,
+          created_at: 1706745600, updated_at: 1706832000,
+          contacts: { contacts: [{ id: 'user-1', type: 'user' }] },
+        }],
+        pages: { total_pages: 1 },
+      }))
+      // 4. ticket detail (for parts)
+      .mockResolvedValueOnce(jsonResponse({
+        id: 'tkt-1',
+        ticket_parts: {
+          ticket_parts: [{
+            id: 'tpart-200', part_type: 'comment', body: 'Looking into it',
+            author: { id: '10', type: 'admin' }, created_at: 1706832000,
+          }],
+        },
+      }))
+      // 5. contacts list
       .mockResolvedValueOnce(jsonResponse({
         data: [{ id: 'user-1', name: 'User A', email: 'a@t.com', phone: null, role: 'user',
           companies: { data: [] }, type: 'contact' }],
         pages: { total_pages: 1 },
       }))
-      // contacts page 2 (empty)
-      .mockResolvedValueOnce(jsonResponse({ data: [], pages: { total_pages: 1 } }))
-      // admins
+      // 6. admins
       .mockResolvedValueOnce(jsonResponse({ admins: [{ id: '10', name: 'Admin I', email: 'admin@i.com' }] }))
-      // companies scroll
+      // 7. companies scroll
       .mockResolvedValueOnce(jsonResponse({ data: [], scroll_param: null }))
-      // KB articles
+      // 8. KB articles
       .mockResolvedValueOnce(jsonResponse({ data: [], pages: { total_pages: 1 } }));
 
     const manifest = await exportIntercom(INTERCOM_AUTH, tmpDir);
 
     expect(manifest.source).toBe('intercom');
-    expect(manifest.counts.tickets).toBeGreaterThanOrEqual(1);
+    // 1 conversation + 1 ticket = 2 tickets total
+    expect(manifest.counts.tickets).toBe(2);
 
     const tickets = readJsonlFile(join(tmpDir, 'tickets.jsonl'));
-    expect(tickets).toHaveLength(1);
+    expect(tickets).toHaveLength(2);
     expect(tickets[0]).toMatchObject({ id: 'ic-conv-1', source: 'intercom' });
+    expect(tickets[1]).toMatchObject({ id: 'ic-ticket-tkt-1', source: 'intercom', subject: 'Login broken' });
 
     const messages = readJsonlFile(join(tmpDir, 'messages.jsonl'));
-    expect(messages.length).toBeGreaterThanOrEqual(1);
-    expect(messages[0]).toMatchObject({ ticketId: 'ic-conv-1' });
+    expect(messages.length).toBeGreaterThanOrEqual(2);
+    // Conversation messages
+    expect(messages.some((m: Record<string, unknown>) => m.ticketId === 'ic-conv-1')).toBe(true);
+    // Ticket messages
+    expect(messages.some((m: Record<string, unknown>) => m.ticketId === 'ic-ticket-tkt-1')).toBe(true);
+  });
+
+  it('applies incremental sync filter to both conversations and tickets', async () => {
+    const { exportIntercom } = await import('../../../connectors/intercom.js');
+    const lastSync = '2026-01-01T00:00:00Z';
+    const expectedTs = Math.floor(new Date(lastSync).getTime() / 1000);
+
+    mockFetch
+      // conversations page (empty)
+      .mockResolvedValueOnce(jsonResponse({ conversations: [], pages: { total_pages: 1 } }))
+      // tickets page (empty)
+      .mockResolvedValueOnce(jsonResponse({ tickets: [], pages: { total_pages: 1 } }))
+      // contacts page (empty)
+      .mockResolvedValueOnce(jsonResponse({ data: [], pages: { total_pages: 1 } }))
+      // admins
+      .mockResolvedValueOnce(jsonResponse({ admins: [] }))
+      // companies
+      .mockResolvedValueOnce(jsonResponse({ data: [], scroll_param: null }))
+      // articles
+      .mockResolvedValueOnce(jsonResponse({ data: [], pages: { total_pages: 1 } }));
+
+    await exportIntercom(INTERCOM_AUTH, tmpDir, { lastSyncAt: lastSync });
+
+    // Verify conversations URL includes updated_after
+    const convUrl = mockFetch.mock.calls[0][0] as string;
+    expect(convUrl).toContain(`updated_after=${expectedTs}`);
+
+    // Verify tickets URL includes updated_after
+    const ticketUrl = mockFetch.mock.calls[1][0] as string;
+    expect(ticketUrl).toContain(`updated_after=${expectedTs}`);
   });
 });
 

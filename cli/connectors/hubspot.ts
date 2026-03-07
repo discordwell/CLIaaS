@@ -1,5 +1,5 @@
 import type {
-  Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus, TicketPriority,
+  Ticket, Message, Customer, Organization, KBArticle, Rule, ExportManifest, TicketStatus, TicketPriority,
 } from '../schema/types';
 import {
   createClient, paginateCursor, setupExport, appendJsonl, writeManifest, exportSpinner,
@@ -182,113 +182,179 @@ function hsGetNextUrl(basePath: string, properties: string) {
 
 // ---- Export ----
 
-export async function exportHubSpot(auth: HubSpotAuth, outDir: string): Promise<ExportManifest> {
+export interface HubSpotCursorState {
+  lastSyncAt?: string;
+}
+
+// ---- Workflow API types ----
+
+interface HSWorkflow {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  insertedAt?: string;
+  updatedAt?: string;
+  actions?: unknown[];
+  enrollmentCriteria?: unknown;
+}
+
+// ---- Ticket processing helper ----
+
+async function processHubSpotTicket(
+  client: ReturnType<typeof createHubSpotClient>,
+  t: HSTicket,
+  files: ReturnType<typeof setupExport>,
+  counts: ReturnType<typeof initCounts>,
+): Promise<void> {
+  const p = t.properties;
+  const ticket: Ticket = {
+    id: `hub-${t.id}`,
+    externalId: t.id,
+    source: 'hubspot',
+    subject: p.subject ?? `Ticket #${t.id}`,
+    status: mapPipelineStage(p.hs_pipeline_stage),
+    priority: mapPriority(p.hs_ticket_priority),
+    assignee: p.hubspot_owner_id ?? undefined,
+    requester: 'unknown',
+    tags: p.hs_ticket_category ? [p.hs_ticket_category] : [],
+    createdAt: p.createdate ?? new Date().toISOString(),
+    updatedAt: p.hs_lastmodifieddate ?? new Date().toISOString(),
+  };
+
+  try {
+    const assoc = await client.request<{
+      results: Array<{ id: string; type: string }>;
+    }>(`/crm/v3/objects/tickets/${t.id}/associations/contacts`);
+    if (assoc.results.length > 0) ticket.requester = assoc.results[0].id;
+  } catch { /* no associations */ }
+
+  appendJsonl(files.tickets, ticket);
+  counts.tickets++;
+
+  try {
+    const notes = await client.request<{
+      results: Array<{ id: string; type: string }>;
+    }>(`/crm/v3/objects/tickets/${t.id}/associations/notes`);
+    for (const noteRef of notes.results) {
+      try {
+        const note = await client.request<HSNote>(
+          `/crm/v3/objects/notes/${noteRef.id}?properties=hs_note_body,hs_timestamp,hubspot_owner_id`,
+        );
+        if (note.properties.hs_note_body) {
+          const message: Message = {
+            id: `hub-note-${note.id}`,
+            ticketId: `hub-${t.id}`,
+            author: note.properties.hubspot_owner_id ?? 'unknown',
+            body: note.properties.hs_note_body,
+            type: 'note',
+            createdAt: note.properties.hs_timestamp ?? p.createdate ?? new Date().toISOString(),
+          };
+          appendJsonl(files.messages, message);
+          counts.messages++;
+        }
+      } catch { /* individual note fetch failed */ }
+    }
+  } catch { /* notes association not available */ }
+
+  try {
+    const emailAssocs = await client.request<{
+      results: Array<{ id: string; type: string }>;
+    }>(`/crm/v3/objects/tickets/${t.id}/associations/emails`);
+    for (const emailRef of emailAssocs.results) {
+      try {
+        const email = await client.request<HSEmail>(
+          `/crm/v3/objects/emails/${emailRef.id}?properties=hs_email_subject,hs_email_text,hs_email_html,hs_email_direction,hs_timestamp,hubspot_owner_id,hs_email_from_email,hs_email_to_email`,
+        );
+        const emailBody = email.properties.hs_email_text ?? email.properties.hs_email_html ?? '';
+        if (emailBody) {
+          const isIncoming = email.properties.hs_email_direction === 'INCOMING_EMAIL';
+          const message: Message = {
+            id: `hub-email-${email.id}`,
+            ticketId: `hub-${t.id}`,
+            author: isIncoming
+              ? (email.properties.hs_email_from_email ?? 'unknown')
+              : (email.properties.hubspot_owner_id ?? 'unknown'),
+            body: emailBody,
+            bodyHtml: email.properties.hs_email_html ?? undefined,
+            type: 'reply',
+            createdAt: email.properties.hs_timestamp ?? p.createdate ?? new Date().toISOString(),
+          };
+          appendJsonl(files.messages, message);
+          counts.messages++;
+        }
+      } catch { /* individual email fetch failed */ }
+    }
+  } catch { /* email association not available */ }
+}
+
+// ---- Incremental search helper ----
+
+async function searchHubSpotObjects<T>(
+  client: ReturnType<typeof createHubSpotClient>,
+  objectType: string,
+  properties: string[],
+  lastSyncAt: string,
+): Promise<T[]> {
+  const all: T[] = [];
+  let searchAfter: string | undefined;
+  let hasMore = true;
+  while (hasMore) {
+    const searchBody: Record<string, unknown> = {
+      filterGroups: [{
+        filters: [{
+          propertyName: 'hs_lastmodifieddate',
+          operator: 'GTE',
+          value: new Date(lastSyncAt).getTime(),
+        }],
+      }],
+      properties,
+      limit: 100,
+    };
+    if (searchAfter) searchBody.after = searchAfter;
+    const result = await client.request<HSPaginatedResponse<T>>(
+      `/crm/v3/objects/${objectType}/search`, { method: 'POST', body: searchBody },
+    );
+    all.push(...(result.results ?? []));
+    searchAfter = result.paging?.next?.after;
+    hasMore = !!searchAfter;
+  }
+  return all;
+}
+
+export async function exportHubSpot(auth: HubSpotAuth, outDir: string, cursorState?: HubSpotCursorState): Promise<ExportManifest> {
   const client = createHubSpotClient(auth);
   const files = setupExport(outDir);
   const counts = initCounts();
 
   // Export tickets
-  const ticketProperties = 'subject,content,hs_pipeline_stage,hs_ticket_priority,hubspot_owner_id,createdate,hs_lastmodifieddate,hs_ticket_category';
+  const ticketPropertiesList = ['subject', 'content', 'hs_pipeline_stage', 'hs_ticket_priority', 'hubspot_owner_id', 'createdate', 'hs_lastmodifieddate', 'hs_ticket_category'];
+  const ticketProperties = ticketPropertiesList.join(',');
   const ticketSpinner = exportSpinner('Exporting tickets...');
 
-  await paginateCursor<HSTicket>({
-    fetch: client.request.bind(client),
-    initialUrl: hubspotCursorUrl('/crm/v3/objects/tickets', ticketProperties),
-    getData: hsGetData,
-    getNextUrl: hsGetNextUrl('/crm/v3/objects/tickets', ticketProperties),
-    onPage: async (tickets) => {
-      for (const t of tickets) {
-        const p = t.properties;
-        const ticket: Ticket = {
-          id: `hub-${t.id}`,
-          externalId: t.id,
-          source: 'hubspot',
-          subject: p.subject ?? `Ticket #${t.id}`,
-          status: mapPipelineStage(p.hs_pipeline_stage),
-          priority: mapPriority(p.hs_ticket_priority),
-          assignee: p.hubspot_owner_id ?? undefined,
-          requester: 'unknown', // resolved via associations below
-          tags: p.hs_ticket_category ? [p.hs_ticket_category] : [],
-          createdAt: p.createdate ?? new Date().toISOString(),
-          updatedAt: p.hs_lastmodifieddate ?? new Date().toISOString(),
-        };
-
-        // Get associated contacts
-        try {
-          const assoc = await client.request<{
-            results: Array<{ id: string; type: string }>;
-          }>(`/crm/v3/objects/tickets/${t.id}/associations/contacts`);
-          if (assoc.results.length > 0) {
-            ticket.requester = assoc.results[0].id;
-          }
-        } catch { /* no associations */ }
-
-        appendJsonl(files.tickets, ticket);
-        counts.tickets++;
-
-        // Get notes associated with this ticket
-        try {
-          const notes = await client.request<{
-            results: Array<{ id: string; type: string }>;
-          }>(`/crm/v3/objects/tickets/${t.id}/associations/notes`);
-
-          for (const noteRef of notes.results) {
-            try {
-              const note = await client.request<HSNote>(
-                `/crm/v3/objects/notes/${noteRef.id}?properties=hs_note_body,hs_timestamp,hubspot_owner_id`,
-              );
-              if (note.properties.hs_note_body) {
-                const message: Message = {
-                  id: `hub-note-${note.id}`,
-                  ticketId: `hub-${t.id}`,
-                  author: note.properties.hubspot_owner_id ?? 'unknown',
-                  body: note.properties.hs_note_body,
-                  type: 'note',
-                  createdAt: note.properties.hs_timestamp ?? p.createdate ?? new Date().toISOString(),
-                };
-                appendJsonl(files.messages, message);
-                counts.messages++;
-              }
-            } catch { /* individual note fetch failed */ }
-          }
-        } catch { /* notes association not available */ }
-
-        // Get email threads associated with this ticket
-        try {
-          const emailAssocs = await client.request<{
-            results: Array<{ id: string; type: string }>;
-          }>(`/crm/v3/objects/tickets/${t.id}/associations/emails`);
-
-          for (const emailRef of emailAssocs.results) {
-            try {
-              const email = await client.request<HSEmail>(
-                `/crm/v3/objects/emails/${emailRef.id}?properties=hs_email_subject,hs_email_text,hs_email_html,hs_email_direction,hs_timestamp,hubspot_owner_id,hs_email_from_email,hs_email_to_email`,
-              );
-              const emailBody = email.properties.hs_email_text ?? email.properties.hs_email_html ?? '';
-              if (emailBody) {
-                const isIncoming = email.properties.hs_email_direction === 'INCOMING_EMAIL';
-                const message: Message = {
-                  id: `hub-email-${email.id}`,
-                  ticketId: `hub-${t.id}`,
-                  author: isIncoming
-                    ? (email.properties.hs_email_from_email ?? 'unknown')
-                    : (email.properties.hubspot_owner_id ?? 'unknown'),
-                  body: emailBody,
-                  bodyHtml: email.properties.hs_email_html ?? undefined,
-                  type: 'reply',
-                  createdAt: email.properties.hs_timestamp ?? p.createdate ?? new Date().toISOString(),
-                };
-                appendJsonl(files.messages, message);
-                counts.messages++;
-              }
-            } catch { /* individual email fetch failed */ }
-          }
-        } catch { /* email association not available */ }
-      }
-
-      ticketSpinner.text = `Exporting tickets... ${counts.tickets} exported`;
-    },
-  });
+  if (cursorState?.lastSyncAt) {
+    // Incremental: use search API with hs_lastmodifieddate filter
+    const tickets = await searchHubSpotObjects<HSTicket>(
+      client, 'tickets', ticketPropertiesList, cursorState.lastSyncAt,
+    );
+    for (const t of tickets) {
+      await processHubSpotTicket(client, t, files, counts);
+    }
+    ticketSpinner.text = `Exporting tickets... ${counts.tickets} exported`;
+  } else {
+    await paginateCursor<HSTicket>({
+      fetch: client.request.bind(client),
+      initialUrl: hubspotCursorUrl('/crm/v3/objects/tickets', ticketProperties),
+      getData: hsGetData,
+      getNextUrl: hsGetNextUrl('/crm/v3/objects/tickets', ticketProperties),
+      onPage: async (tickets) => {
+        for (const t of tickets) {
+          await processHubSpotTicket(client, t, files, counts);
+        }
+        ticketSpinner.text = `Exporting tickets... ${counts.tickets} exported`;
+      },
+    });
+  }
   ticketSpinner.succeed(`${counts.tickets} tickets exported (${counts.messages} messages)`);
 
   // Export contacts (= customers)
@@ -374,7 +440,6 @@ export async function exportHubSpot(auth: HubSpotAuth, outDir: string): Promise<
   let kbCount = 0;
 
   try {
-    // Try the CMS Blog API first (available with CMS Hub)
     await paginateCursor<HSBlogPost>({
       fetch: client.request.bind(client),
       initialUrl: hubspotCursorUrl('/cms/v3/blogs/posts', 'id,name,postBody,state,slug,categoryId,created,updated'),
@@ -397,7 +462,6 @@ export async function exportHubSpot(auth: HubSpotAuth, outDir: string): Promise<
       },
     });
   } catch {
-    // CMS Hub not available — try knowledge-base endpoint (newer API)
     try {
       await paginateCursor<HSKBArticle>({
         fetch: client.request.bind(client),
@@ -430,9 +494,39 @@ export async function exportHubSpot(auth: HubSpotAuth, outDir: string): Promise<
   if (kbCount > 0) kbSpinner.succeed(`${kbCount} KB articles exported`);
   else kbSpinner.info('0 KB articles exported');
 
-  exportSpinner('Business rules: not available via HubSpot API').info();
+  // Export workflows (business rules) via Automation API
+  const rulesSpinner = exportSpinner('Exporting workflows...');
+  try {
+    const flowsResult = await client.request<{ results: HSWorkflow[] }>('/automation/v4/flows?limit=100');
+    const workflows = flowsResult.results ?? [];
+    for (const wf of workflows) {
+      const rule: Rule = {
+        id: `hub-rule-${wf.id}`,
+        externalId: wf.id,
+        source: 'hubspot',
+        type: 'automation',
+        title: wf.name ?? `Workflow ${wf.id}`,
+        conditions: wf.enrollmentCriteria ?? null,
+        actions: wf.actions ?? null,
+        active: wf.enabled ?? false,
+      };
+      appendJsonl(files.rules, rule);
+      counts.rules++;
+    }
+    if (counts.rules > 0) rulesSpinner.succeed(`${counts.rules} workflows exported`);
+    else rulesSpinner.info('0 workflows exported');
+  } catch (err) {
+    // 403 = automation scope not granted; other errors also handled gracefully
+    const msg = err instanceof Error ? err.message : 'not available';
+    if (msg.includes('403') || msg.includes('Forbidden')) {
+      rulesSpinner.info('Workflows: automation scope not granted (requires Operations Hub)');
+    } else {
+      rulesSpinner.warn(`Workflows: ${msg}`);
+    }
+  }
 
-  return writeManifest(outDir, 'hubspot', counts);
+  const newCursorState: Record<string, string> = { lastSyncAt: new Date().toISOString() };
+  return writeManifest(outDir, 'hubspot', counts, { cursorState: newCursorState });
 }
 
 // ---- Verify ----

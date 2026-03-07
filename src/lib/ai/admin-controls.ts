@@ -4,6 +4,7 @@
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
+import { withRls } from '../store-helpers';
 import { createLogger } from '../logger';
 
 const logger = createLogger('ai:admin-controls');
@@ -320,4 +321,232 @@ export function getUsageSummary(workspaceId: string, opts?: {
     avgConfidence: totals.totalRequests > 0 ? Math.round((totals.confidenceSum / totals.totalRequests) * 100) / 100 : 0,
     resolutionRate: totals.totalRequests > 0 ? Math.round((totals.autoResolved / totals.totalRequests) * 100) : 0,
   };
+}
+
+// ---- Async DB-first variants (JSONL fallback) ----
+
+export async function getChannelPoliciesAsync(workspaceId: string): Promise<ChannelPolicy[]> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const rows = await db.select().from(schema.aiChannelPolicies);
+    return rows.map(r => ({
+      channel: r.channel,
+      enabled: r.enabled,
+      mode: r.mode as ChannelPolicy['mode'],
+      maxAutoResolvesPerHour: r.maxAutoResolvesPerHour,
+      confidenceThreshold: Number(r.confidenceThreshold),
+      excludedTopics: (r.excludedTopics as string[]) ?? [],
+    }));
+  });
+  return dbResult ?? getChannelPolicies();
+}
+
+export async function setChannelPolicyAsync(policy: ChannelPolicy, workspaceId: string): Promise<ChannelPolicy> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { sql } = await import('drizzle-orm');
+    const now = new Date();
+    await db.insert(schema.aiChannelPolicies).values({
+      workspaceId,
+      channel: policy.channel,
+      enabled: policy.enabled,
+      mode: policy.mode,
+      maxAutoResolvesPerHour: policy.maxAutoResolvesPerHour,
+      confidenceThreshold: String(policy.confidenceThreshold),
+      excludedTopics: policy.excludedTopics,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [schema.aiChannelPolicies.workspaceId, schema.aiChannelPolicies.channel],
+      set: {
+        enabled: sql`excluded.enabled`,
+        mode: sql`excluded.mode`,
+        maxAutoResolvesPerHour: sql`excluded.max_auto_resolves_per_hour`,
+        confidenceThreshold: sql`excluded.confidence_threshold`,
+        excludedTopics: sql`excluded.excluded_topics`,
+        updatedAt: now,
+      },
+    });
+    return policy;
+  });
+  return dbResult ?? setChannelPolicy(policy);
+}
+
+export async function getCircuitBreakerStatusAsync(workspaceId: string): Promise<CircuitBreakerState> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const [row] = await db.select().from(schema.aiCircuitBreaker).limit(1);
+    if (!row) return { state: 'closed' as const, failureCount: 0, halfOpenAttempts: 0 };
+    const state: CircuitBreakerState = {
+      state: row.state as CircuitBreakerState['state'],
+      failureCount: row.failureCount,
+      halfOpenAttempts: row.halfOpenAttempts,
+      lastFailureAt: row.lastFailureAt?.toISOString(),
+      lastSuccessAt: row.lastSuccessAt?.toISOString(),
+      openedAt: row.openedAt?.toISOString(),
+    };
+    // Auto-transition from open to half_open
+    if (state.state === 'open' && state.openedAt) {
+      const elapsed = Date.now() - new Date(state.openedAt).getTime();
+      if (elapsed >= RECOVERY_TIMEOUT_MS) {
+        const { eq } = await import('drizzle-orm');
+        await db.update(schema.aiCircuitBreaker)
+          .set({ state: 'half_open', halfOpenAttempts: 0, updatedAt: new Date() })
+          .where(eq(schema.aiCircuitBreaker.workspaceId, workspaceId));
+        state.state = 'half_open';
+        state.halfOpenAttempts = 0;
+      }
+    }
+    return state;
+  });
+  return dbResult ?? getCircuitBreakerStatus();
+}
+
+export async function recordAISuccessAsync(workspaceId: string): Promise<void> {
+  const done = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq, sql } = await import('drizzle-orm');
+    const now = new Date();
+    // Atomic update: decrement failure count, set lastSuccessAt
+    const [row] = await db.select().from(schema.aiCircuitBreaker).limit(1);
+    if (!row) return;
+    if (row.state === 'half_open') {
+      await db.update(schema.aiCircuitBreaker)
+        .set({ state: 'closed', failureCount: 0, halfOpenAttempts: 0, lastSuccessAt: now, updatedAt: now })
+        .where(eq(schema.aiCircuitBreaker.workspaceId, workspaceId));
+    } else {
+      await db.update(schema.aiCircuitBreaker)
+        .set({
+          failureCount: sql`GREATEST(failure_count - 1, 0)`,
+          lastSuccessAt: now,
+          updatedAt: now,
+        })
+        .where(eq(schema.aiCircuitBreaker.workspaceId, workspaceId));
+    }
+  });
+  if (done === null) recordAISuccess();
+}
+
+export async function recordAIFailureAsync(error: string, workspaceId: string): Promise<void> {
+  const done = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq, sql } = await import('drizzle-orm');
+    const now = new Date();
+    // Upsert circuit breaker row
+    await db.insert(schema.aiCircuitBreaker).values({
+      workspaceId,
+      state: 'closed',
+      failureCount: 1,
+      halfOpenAttempts: 0,
+      lastFailureAt: now,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: schema.aiCircuitBreaker.workspaceId,
+      set: {
+        failureCount: sql`ai_circuit_breaker.failure_count + 1`,
+        lastFailureAt: now,
+        updatedAt: now,
+      },
+    });
+    // Check if we need to open the circuit
+    const [row] = await db.select().from(schema.aiCircuitBreaker)
+      .where(eq(schema.aiCircuitBreaker.workspaceId, workspaceId));
+    if (row) {
+      if (row.state === 'half_open' && row.halfOpenAttempts >= 2) {
+        await db.update(schema.aiCircuitBreaker)
+          .set({ state: 'open', openedAt: now, updatedAt: now })
+          .where(eq(schema.aiCircuitBreaker.workspaceId, workspaceId));
+      } else if (row.state === 'closed' && row.failureCount >= FAILURE_THRESHOLD) {
+        await db.update(schema.aiCircuitBreaker)
+          .set({ state: 'open', openedAt: now, updatedAt: now })
+          .where(eq(schema.aiCircuitBreaker.workspaceId, workspaceId));
+      }
+    }
+  });
+  if (done === null) recordAIFailure(error);
+}
+
+export async function appendAuditEntryAsync(
+  entry: Omit<AIAuditEntry, 'id' | 'timestamp'>,
+): Promise<AIAuditEntry> {
+  const full: AIAuditEntry = {
+    ...entry,
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+  };
+  const dbResult = await withRls(entry.workspaceId, async ({ db, schema }) => {
+    await db.insert(schema.aiAuditTrail).values({
+      workspaceId: entry.workspaceId,
+      action: entry.action,
+      ticketId: entry.ticketId ?? null,
+      resolutionId: entry.resolutionId ?? null,
+      userId: entry.userId ?? null,
+      details: entry.details,
+    });
+    return full;
+  });
+  return dbResult ?? recordAuditEntry(entry);
+}
+
+export async function getAuditTrailAsync(opts?: {
+  workspaceId?: string;
+  action?: string;
+  ticketId?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ entries: AIAuditEntry[]; total: number }> {
+  if (!opts?.workspaceId) return getAuditTrail(opts);
+  const dbResult = await withRls(opts.workspaceId, async ({ db, schema }) => {
+    const { eq, and, count, desc } = await import('drizzle-orm');
+    const conditions = [];
+    if (opts.action) conditions.push(eq(schema.aiAuditTrail.action, opts.action));
+    if (opts.ticketId) conditions.push(eq(schema.aiAuditTrail.ticketId, opts.ticketId));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [{ value: total }] = await db.select({ value: count() }).from(schema.aiAuditTrail).where(where);
+    const rows = await db.select().from(schema.aiAuditTrail)
+      .where(where)
+      .orderBy(desc(schema.aiAuditTrail.createdAt))
+      .offset(opts.offset ?? 0)
+      .limit(opts.limit ?? 50);
+
+    return {
+      total,
+      entries: rows.map(r => ({
+        id: r.id,
+        timestamp: r.createdAt.toISOString(),
+        workspaceId: r.workspaceId,
+        action: r.action as AIAuditEntry['action'],
+        ticketId: r.ticketId ?? undefined,
+        resolutionId: r.resolutionId ?? undefined,
+        userId: r.userId ?? undefined,
+        details: (r.details as Record<string, unknown>) ?? {},
+      })),
+    };
+  });
+  return dbResult ?? getAuditTrail(opts);
+}
+
+export async function getUsageReportAsync(workspaceId: string, opts?: {
+  from?: string;
+  to?: string;
+}): Promise<AIUsageSnapshot[]> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { and, gte, lte } = await import('drizzle-orm');
+    const conditions = [];
+    if (opts?.from) conditions.push(gte(schema.aiUsageSnapshots.period, opts.from));
+    if (opts?.to) conditions.push(lte(schema.aiUsageSnapshots.period, opts.to));
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await db.select().from(schema.aiUsageSnapshots).where(where);
+    return rows.map(r => ({
+      workspaceId: r.workspaceId,
+      period: r.period,
+      totalRequests: r.totalRequests,
+      autoResolved: r.autoResolved,
+      escalated: r.escalated,
+      errors: r.errors,
+      totalTokens: r.totalTokens,
+      promptTokens: r.promptTokens,
+      completionTokens: r.completionTokens,
+      totalCostCents: Number(r.totalCostCents),
+      avgLatencyMs: r.avgLatencyMs,
+      avgConfidence: Number(r.avgConfidence),
+    }));
+  });
+  return dbResult ?? getUsageReport(workspaceId, opts);
 }

@@ -91,11 +91,9 @@ describe('HubSpot export pipeline (mocked)', () => {
   beforeEach(() => { tmpDir = createTempDir('hub-export'); });
   afterEach(() => { cleanupTempDir(tmpDir); });
 
-  it('exports tickets and notes to JSONL with correct IDs and source', async () => {
-    const { exportHubSpot } = await import('../../../connectors/hubspot.js');
-
+  function mockFullExport() {
     mockFetch
-      // 1. tickets page 1 (no paging.next → stops after this page)
+      // 1. tickets page 1
       .mockResolvedValueOnce(jsonResponse({
         results: [{
           id: '1',
@@ -108,29 +106,36 @@ describe('HubSpot export pipeline (mocked)', () => {
       }))
       // 2. associated contacts for ticket 1
       .mockResolvedValueOnce(jsonResponse({ results: [{ id: '20', type: 'contact_to_ticket' }] }))
-      // 3. associated notes for ticket 1 (refs only)
+      // 3. associated notes for ticket 1
       .mockResolvedValueOnce(jsonResponse({ results: [{ id: '100', type: 'note_to_ticket' }] }))
-      // 4. note detail for note 100
+      // 4. note detail
       .mockResolvedValueOnce(jsonResponse({
-        id: '100',
-        properties: {
-          hs_note_body: 'A note', hubspot_owner_id: '10',
-          hs_timestamp: '2026-01-01T12:00:00Z',
+        id: '100', properties: {
+          hs_note_body: 'A note', hubspot_owner_id: '10', hs_timestamp: '2026-01-01T12:00:00Z',
         },
       }))
-      // 5. contacts cursor page 1 (no paging → stops)
+      // 5. email associations (empty)
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))
+      // 6. contacts
       .mockResolvedValueOnce(jsonResponse({
-        results: [{
-          id: '20',
-          properties: { firstname: 'Bob', lastname: 'B', email: 'bob@t.com', phone: null, company: null },
-        }],
+        results: [{ id: '20', properties: { firstname: 'Bob', lastname: 'B', email: 'bob@t.com' } }],
       }))
-      // 6. owners
+      // 7. owners
       .mockResolvedValueOnce(jsonResponse({
         results: [{ id: '10', firstName: 'Owner', lastName: 'O', email: 'owner@h.com' }],
       }))
-      // 7. companies cursor page 1 (empty → stops)
+      // 8. companies (empty)
       .mockResolvedValueOnce(jsonResponse({ results: [] }));
+  }
+
+  it('exports tickets and notes to JSONL with correct IDs and source', async () => {
+    const { exportHubSpot } = await import('../../../connectors/hubspot.js');
+
+    mockFullExport();
+    // KB (blog posts) — empty
+    mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
+    // Workflows
+    mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
 
     const manifest = await exportHubSpot(HUBSPOT_AUTH, tmpDir);
 
@@ -144,6 +149,84 @@ describe('HubSpot export pipeline (mocked)', () => {
     const messages = readJsonlFile(join(tmpDir, 'messages.jsonl'));
     expect(messages.length).toBeGreaterThanOrEqual(1);
     expect(messages[0]).toMatchObject({ ticketId: 'hub-1' });
+  });
+
+  it('incremental sync uses search API with hs_lastmodifieddate filter', async () => {
+    const { exportHubSpot } = await import('../../../connectors/hubspot.js');
+    const lastSync = '2026-02-01T00:00:00Z';
+
+    // Search endpoint for incremental tickets
+    mockFetch.mockResolvedValueOnce(jsonResponse({
+      results: [{
+        id: '42',
+        properties: {
+          subject: 'Updated ticket', hs_pipeline_stage: '1',
+          hs_ticket_priority: 'normal', hubspot_owner_id: '10',
+          createdate: '2026-01-15T00:00:00Z', hs_lastmodifieddate: '2026-02-02T00:00:00Z',
+        },
+      }],
+    }));
+    // Associations for ticket 42
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))  // contacts
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))  // notes
+      .mockResolvedValueOnce(jsonResponse({ results: [] })); // emails
+    // Contacts, owners, companies
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))  // contacts
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))  // owners
+      .mockResolvedValueOnce(jsonResponse({ results: [] })); // companies
+    // KB + workflows
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))  // KB
+      .mockResolvedValueOnce(jsonResponse({ results: [] })); // workflows
+
+    await exportHubSpot(HUBSPOT_AUTH, tmpDir, { lastSyncAt: lastSync });
+
+    // First call should be to search endpoint
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain('/crm/v3/objects/tickets/search');
+    expect(opts.method).toBe('POST');
+    const body = JSON.parse(opts.body);
+    expect(body.filterGroups[0].filters[0].propertyName).toBe('hs_lastmodifieddate');
+    expect(body.filterGroups[0].filters[0].operator).toBe('GTE');
+  });
+
+  it('exports workflows to rules.jsonl', async () => {
+    const { exportHubSpot } = await import('../../../connectors/hubspot.js');
+
+    mockFullExport();
+    // KB (empty)
+    mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
+    // Workflows with data
+    mockFetch.mockResolvedValueOnce(jsonResponse({
+      results: [{
+        id: 'wf-1', name: 'Auto-assign tickets', type: 'TICKET',
+        enabled: true, actions: [{ type: 'SET_PROPERTY' }],
+        enrollmentCriteria: { type: 'FILTER' },
+      }],
+    }));
+
+    const manifest = await exportHubSpot(HUBSPOT_AUTH, tmpDir);
+
+    expect(manifest.counts.rules).toBe(1);
+    const rules = readJsonlFile(join(tmpDir, 'rules.jsonl'));
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({ id: 'hub-rule-wf-1', source: 'hubspot', type: 'automation' });
+  });
+
+  it('gracefully handles 403 for workflows (scope not granted)', async () => {
+    const { exportHubSpot } = await import('../../../connectors/hubspot.js');
+
+    mockFullExport();
+    // KB (empty)
+    mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
+    // Workflows — 403 Forbidden
+    mockFetch.mockResolvedValueOnce(new Response('Forbidden', { status: 403, statusText: 'Forbidden' }));
+
+    const manifest = await exportHubSpot(HUBSPOT_AUTH, tmpDir);
+    // Should still succeed, just with 0 rules
+    expect(manifest.counts.rules).toBe(0);
   });
 });
 

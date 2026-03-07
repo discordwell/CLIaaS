@@ -126,6 +126,9 @@ export async function getProviderAsync(id: string): Promise<SSOProvider | undefi
 export async function createProviderAsync(
   input: Omit<SSOProvider, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<SSOProvider> {
+  if (input.protocol === 'saml' && !input.certificate) {
+    throw new Error('SAML providers require an IdP X.509 certificate');
+  }
   const conn = await tryDb();
   if (conn && conn.schema.ssoProviders) {
     try {
@@ -166,6 +169,9 @@ export async function createProviderAsync(
 export function createProvider(
   input: Omit<SSOProvider, 'id' | 'createdAt' | 'updatedAt'>
 ): SSOProvider {
+  if (input.protocol === 'saml' && !input.certificate) {
+    throw new Error('SAML providers require an IdP X.509 certificate');
+  }
   const now = new Date().toISOString();
   const provider: SSOProvider = {
     ...input,

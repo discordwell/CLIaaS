@@ -249,12 +249,18 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string, cursorS
   try {
     await paginateCursor<ICTicket>({
       fetch: client.request.bind(client),
-      initialUrl: '/tickets?per_page=50',
+      initialUrl: cursorState?.lastSyncAt
+        ? `/tickets?per_page=50&updated_after=${Math.floor(new Date(cursorState.lastSyncAt).getTime() / 1000)}`
+        : '/tickets?per_page=50',
       getData: (response) => (response as unknown as { tickets: ICTicket[] }).tickets ?? [],
       getNextUrl: (response) => {
         const pages = (response as unknown as { pages: { next?: { starting_after: string } } }).pages;
         const startingAfter = pages?.next?.starting_after;
-        return startingAfter ? `/tickets?per_page=50&starting_after=${startingAfter}` : null;
+        if (!startingAfter) return null;
+        const updatedFilter = cursorState?.lastSyncAt
+          ? `&updated_after=${Math.floor(new Date(cursorState.lastSyncAt).getTime() / 1000)}`
+          : '';
+        return `/tickets?per_page=50&starting_after=${startingAfter}${updatedFilter}`;
       },
       onPage: async (tickets) => {
         for (const t of tickets) {

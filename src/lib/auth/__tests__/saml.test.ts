@@ -149,21 +149,17 @@ describe('saml', () => {
 
   // -- parseSamlResponse (XML parsing, no signature) --
 
-  it('parseSamlResponse extracts user from valid SAML XML (demo mode, no cert)', async () => {
-    const xml = [
-      '<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">',
-      '  <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>',
-      '  <saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">',
-      '    <saml:Subject><saml:NameID>alice@test.com</saml:NameID></saml:Subject>',
-      '    <saml:AttributeStatement>',
-      '      <saml:Attribute Name="firstName"><saml:AttributeValue>Alice</saml:AttributeValue></saml:Attribute>',
-      '      <saml:Attribute Name="lastName"><saml:AttributeValue>Smith</saml:AttributeValue></saml:Attribute>',
-      '    </saml:AttributeStatement>',
-      '  </saml:Assertion>',
-      '</samlp:Response>',
-    ].join('\n');
+  it('parseSamlResponse extracts user from valid signed SAML XML', async () => {
+    const xml = buildSignedSamlResponse({
+      nameId: 'alice@test.com',
+      attributes: [
+        { name: 'firstName', value: 'Alice' },
+        { name: 'lastName', value: 'Smith' },
+      ],
+      privateKey: testPrivateKey,
+    });
     const b64 = Buffer.from(xml).toString('base64');
-    const user = await parseSamlResponse(b64, mockProvider);
+    const user = await parseSamlResponse(b64, certProvider);
     expect(user.nameId).toBe('alice@test.com');
     expect(user.email).toBe('alice@test.com');
     expect(user.firstName).toBe('Alice');
@@ -171,15 +167,29 @@ describe('saml', () => {
   });
 
   it('parseSamlResponse throws for missing NameID', async () => {
+    // Use a signed response with no NameID in Subject
+    const signedInfo =
+      '<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">' +
+      '<ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>' +
+      '<ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>' +
+      '<ds:Reference URI=""><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>' +
+      '<ds:DigestValue>placeholder</ds:DigestValue></ds:Reference></ds:SignedInfo>';
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(signedInfo, 'utf-8');
+    const sigValue = signer.sign(testPrivateKey, 'base64');
     const xml =
       '<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">' +
       '<samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>' +
       '<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">' +
+      '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">' +
+      signedInfo +
+      `<ds:SignatureValue>${sigValue}</ds:SignatureValue>` +
+      '</ds:Signature>' +
       '<saml:Subject></saml:Subject>' +
       '</saml:Assertion>' +
       '</samlp:Response>';
     const b64 = Buffer.from(xml).toString('base64');
-    await expect(parseSamlResponse(b64, mockProvider)).rejects.toThrow(
+    await expect(parseSamlResponse(b64, certProvider)).rejects.toThrow(
       'missing NameID'
     );
   });
@@ -207,35 +217,40 @@ describe('saml', () => {
     );
   });
 
-  it('parseSamlResponse handles non-prefixed XML namespaces', async () => {
+  it('parseSamlResponse handles non-prefixed XML namespaces (with cert)', async () => {
+    // Non-prefixed namespaces + signature with non-prefixed SignedInfo
+    const signedInfo =
+      '<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">' +
+      '<CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>' +
+      '<SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>' +
+      '<Reference URI=""><DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>' +
+      '<DigestValue>placeholder</DigestValue></Reference></SignedInfo>';
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(signedInfo, 'utf-8');
+    const sigValue = signer.sign(testPrivateKey, 'base64');
     const xml = [
       '<Response xmlns="urn:oasis:names:tc:SAML:2.0:protocol">',
       '  <Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status>',
       '  <Assertion xmlns="urn:oasis:names:tc:SAML:2.0:assertion">',
+      `    <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">${signedInfo}<SignatureValue>${sigValue}</SignatureValue></Signature>`,
       '    <Subject><NameID>bob@test.com</NameID></Subject>',
       '  </Assertion>',
       '</Response>',
     ].join('\n');
     const b64 = Buffer.from(xml).toString('base64');
-    const user = await parseSamlResponse(b64, mockProvider);
+    const user = await parseSamlResponse(b64, certProvider);
     expect(user.nameId).toBe('bob@test.com');
     expect(user.email).toBe('bob@test.com');
   });
 
   it('parseSamlResponse derives email from attributes when NameID is not email-like', async () => {
-    const xml = [
-      '<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">',
-      '  <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>',
-      '  <saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">',
-      '    <saml:Subject><saml:NameID>user-12345</saml:NameID></saml:Subject>',
-      '    <saml:AttributeStatement>',
-      '      <saml:Attribute Name="email"><saml:AttributeValue>charlie@test.com</saml:AttributeValue></saml:Attribute>',
-      '    </saml:AttributeStatement>',
-      '  </saml:Assertion>',
-      '</samlp:Response>',
-    ].join('\n');
+    const xml = buildSignedSamlResponse({
+      nameId: 'user-12345',
+      attributes: [{ name: 'email', value: 'charlie@test.com' }],
+      privateKey: testPrivateKey,
+    });
     const b64 = Buffer.from(xml).toString('base64');
-    const user = await parseSamlResponse(b64, mockProvider);
+    const user = await parseSamlResponse(b64, certProvider);
     expect(user.nameId).toBe('user-12345');
     expect(user.email).toBe('charlie@test.com');
   });
@@ -377,8 +392,7 @@ describe('saml', () => {
       );
     });
 
-    it('parseSamlResponse skips verification in demo mode (no cert)', async () => {
-      // Same unsigned response, but with mockProvider (no cert) — should succeed
+    it('parseSamlResponse rejects when no IdP certificate configured', async () => {
       const xml = [
         '<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">',
         '  <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>',
@@ -388,8 +402,9 @@ describe('saml', () => {
         '</samlp:Response>',
       ].join('\n');
       const b64 = Buffer.from(xml).toString('base64');
-      const user = await parseSamlResponse(b64, mockProvider);
-      expect(user.nameId).toBe('grace@test.com');
+      await expect(parseSamlResponse(b64, mockProvider)).rejects.toThrow(
+        'no IdP certificate configured'
+      );
     });
   });
 });

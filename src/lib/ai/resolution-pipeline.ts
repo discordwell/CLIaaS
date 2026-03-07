@@ -13,6 +13,8 @@ import {
   isChannelAllowed, getChannelPolicy,
   shouldAllowAIRequest, recordAISuccess, recordAIFailure,
   recordAuditEntry, recordUsageSnapshot,
+  recordAISuccessAsync, recordAIFailureAsync,
+  appendAuditEntryAsync,
 } from './admin-controls';
 import type { Ticket, Message, KBArticle } from '@/lib/data';
 import { buildBaseTicketFromEvent } from '@/lib/automation/ticket-from-event';
@@ -135,12 +137,12 @@ export async function resolveTicket(
       escalationReason: 'Circuit breaker open',
       kbArticlesUsed: [],
     };
-    recordAuditEntry({
+    appendAuditEntryAsync({
       workspaceId,
       action: 'resolution_escalated',
       ticketId: ticket.id,
       details: { reason: 'circuit_breaker_open' },
-    });
+    }).catch(() => {});
     return { ticketId: ticket.id, action: 'escalated', result };
   }
 
@@ -182,8 +184,10 @@ export async function resolveTicket(
   );
   if (isInfraError) {
     recordAIFailure(result.escalationReason ?? 'unknown');
+    recordAIFailureAsync(result.escalationReason ?? 'unknown', workspaceId).catch(() => {});
   } else {
     recordAISuccess();
+    recordAISuccessAsync(workspaceId).catch(() => {});
   }
 
   // Record for legacy ROI tracking
@@ -240,6 +244,20 @@ export async function resolveTicket(
       kbArticlesUsed: result.kbArticlesUsed.length,
     },
   });
+  appendAuditEntryAsync({
+    workspaceId,
+    action: auditAction,
+    ticketId: ticket.id,
+    resolutionId,
+    details: {
+      confidence: result.confidence,
+      action,
+      provider: config.provider,
+      model: config.model,
+      latencyMs,
+      kbArticlesUsed: result.kbArticlesUsed.length,
+    },
+  }).catch(() => {});
 
   // Usage snapshot (hourly bucket)
   const hourBucket = new Date().toISOString().slice(0, 13) + ':00:00Z';

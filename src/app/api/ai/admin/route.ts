@@ -10,6 +10,10 @@ import {
   getCircuitBreakerStatus, resetCircuitBreaker,
   getAuditTrail,
   getUsageSummary, getUsageReport,
+  getChannelPoliciesAsync, setChannelPolicyAsync,
+  getCircuitBreakerStatusAsync,
+  getAuditTrailAsync,
+  getUsageReportAsync,
 } from '@/lib/ai/admin-controls';
 import { parseJsonBody } from '@/lib/parse-json-body';
 
@@ -22,20 +26,22 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const view = searchParams.get('view') ?? 'overview';
 
+  const wsId = auth.user.workspaceId;
+
   switch (view) {
     case 'channel-policies':
-      return NextResponse.json({ policies: getChannelPolicies() });
+      return NextResponse.json({ policies: await getChannelPoliciesAsync(wsId) });
 
     case 'circuit-breaker':
-      return NextResponse.json({ circuitBreaker: getCircuitBreakerStatus() });
+      return NextResponse.json({ circuitBreaker: await getCircuitBreakerStatusAsync(wsId) });
 
     case 'audit': {
       const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 500);
       const offset = Math.max(parseInt(searchParams.get('offset') ?? '0', 10), 0);
       const action = searchParams.get('action') ?? undefined;
       const ticketId = searchParams.get('ticketId') ?? undefined;
-      const result = getAuditTrail({
-        workspaceId: auth.user.workspaceId,
+      const result = await getAuditTrailAsync({
+        workspaceId: wsId,
         action,
         ticketId,
         limit,
@@ -47,18 +53,18 @@ export async function GET(request: NextRequest) {
     case 'usage': {
       const from = searchParams.get('from') ?? undefined;
       const to = searchParams.get('to') ?? undefined;
-      const summary = getUsageSummary(auth.user.workspaceId, { from, to });
-      const report = getUsageReport(auth.user.workspaceId, { from, to });
+      const summary = getUsageSummary(wsId, { from, to });
+      const report = await getUsageReportAsync(wsId, { from, to });
       return NextResponse.json({ summary, hourly: report });
     }
 
     default: {
       // Overview: all admin surfaces in one response
-      const policies = getChannelPolicies();
-      const circuitBreaker = getCircuitBreakerStatus();
-      const usage = getUsageSummary(auth.user.workspaceId);
-      const { entries: recentAudit, total: auditTotal } = getAuditTrail({
-        workspaceId: auth.user.workspaceId,
+      const policies = await getChannelPoliciesAsync(wsId);
+      const circuitBreaker = await getCircuitBreakerStatusAsync(wsId);
+      const usage = getUsageSummary(wsId);
+      const { entries: recentAudit, total: auditTotal } = await getAuditTrailAsync({
+        workspaceId: wsId,
         limit: 10,
       });
       return NextResponse.json({
@@ -87,20 +93,21 @@ export async function PUT(request: NextRequest) {
       if (!policy?.channel) {
         return NextResponse.json({ error: 'channel is required' }, { status: 400 });
       }
-      const result = setChannelPolicy({
+      const policyInput = {
         channel: policy.channel as string,
         enabled: (policy.enabled as boolean) ?? true,
         mode: (policy.mode as 'suggest' | 'approve' | 'auto') ?? 'suggest',
         maxAutoResolvesPerHour: (policy.maxAutoResolvesPerHour as number) ?? 50,
         confidenceThreshold: (policy.confidenceThreshold as number) ?? 0.7,
         excludedTopics: (policy.excludedTopics as string[]) ?? [],
-      });
+      };
+      const result = await setChannelPolicyAsync(policyInput, auth.user.workspaceId);
       return NextResponse.json({ policy: result });
     }
 
     case 'reset_circuit_breaker': {
       resetCircuitBreaker();
-      return NextResponse.json({ circuitBreaker: getCircuitBreakerStatus() });
+      return NextResponse.json({ circuitBreaker: await getCircuitBreakerStatusAsync(auth.user.workspaceId) });
     }
 
     default:

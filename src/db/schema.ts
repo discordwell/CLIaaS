@@ -3347,6 +3347,133 @@ export const connectorCapabilities = pgTable(
   }),
 );
 
+// ---- AI Admin Controls (DB-hardened) ----
+
+export const aiChannelPolicyModeEnum = pgEnum('ai_channel_policy_mode', ['suggest', 'approve', 'auto']);
+export const aiCircuitBreakerStateEnum = pgEnum('ai_circuit_breaker_state', ['closed', 'open', 'half_open']);
+
+export const aiChannelPolicies = pgTable(
+  'ai_channel_policies',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    channel: text('channel').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    mode: text('mode').notNull().default('suggest'),
+    maxAutoResolvesPerHour: integer('max_auto_resolves_per_hour').notNull().default(50),
+    confidenceThreshold: numeric('confidence_threshold', { precision: 4, scale: 3 }).notNull().default('0.700'),
+    excludedTopics: jsonb('excluded_topics').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    aiChannelPoliciesUniqueIdx: uniqueIndex('ai_channel_policies_ws_channel_idx').on(table.workspaceId, table.channel),
+  }),
+);
+
+export const aiCircuitBreaker = pgTable(
+  'ai_circuit_breaker',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id).unique(),
+    state: text('state').notNull().default('closed'),
+    failureCount: integer('failure_count').notNull().default(0),
+    halfOpenAttempts: integer('half_open_attempts').notNull().default(0),
+    lastFailureAt: timestamp('last_failure_at', { withTimezone: true }),
+    lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+);
+
+export const aiAuditTrail = pgTable(
+  'ai_audit_trail',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    action: text('action').notNull(),
+    ticketId: text('ticket_id'),
+    resolutionId: text('resolution_id'),
+    userId: text('user_id'),
+    details: jsonb('details').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    aiAuditTrailWorkspaceIdx: index('ai_audit_trail_workspace_idx').on(table.workspaceId, table.createdAt),
+    aiAuditTrailActionIdx: index('ai_audit_trail_action_idx').on(table.action),
+  }),
+);
+
+export const aiUsageSnapshots = pgTable(
+  'ai_usage_snapshots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    period: text('period').notNull(),
+    totalRequests: integer('total_requests').notNull().default(0),
+    autoResolved: integer('auto_resolved').notNull().default(0),
+    escalated: integer('escalated').notNull().default(0),
+    errors: integer('errors').notNull().default(0),
+    totalTokens: integer('total_tokens').notNull().default(0),
+    promptTokens: integer('prompt_tokens').notNull().default(0),
+    completionTokens: integer('completion_tokens').notNull().default(0),
+    totalCostCents: numeric('total_cost_cents', { precision: 12, scale: 2 }).notNull().default('0'),
+    avgLatencyMs: integer('avg_latency_ms').notNull().default(0),
+    avgConfidence: numeric('avg_confidence', { precision: 4, scale: 3 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    aiUsageSnapshotsUniqueIdx: uniqueIndex('ai_usage_snapshots_ws_period_idx').on(table.workspaceId, table.period),
+  }),
+);
+
+// ---- SCIM (DB-hardened) ----
+
+export const scimUsers = pgTable(
+  'scim_users',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    role: text('role').notNull().default('agent'),
+    status: text('status').notNull().default('active'),
+    externalId: text('external_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    scimUsersUniqueIdx: uniqueIndex('scim_users_ws_email_idx').on(table.workspaceId, table.email),
+  }),
+);
+
+export const scimGroups = pgTable(
+  'scim_groups',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    scimGroupsUniqueIdx: uniqueIndex('scim_groups_ws_name_idx').on(table.workspaceId, table.name),
+  }),
+);
+
+export const scimGroupMembers = pgTable(
+  'scim_group_members',
+  {
+    groupId: uuid('group_id').notNull().references(() => scimGroups.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => scimUsers.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  table => ({
+    scimGroupMembersPk: primaryKey({ columns: [table.groupId, table.userId] }),
+  }),
+);
+
 export const syncHealth = pgTable(
   'sync_health',
   {

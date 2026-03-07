@@ -12,10 +12,10 @@ const CAPABILITIES: Record<string, ConnectorCapabilities> = {
   freshdesk:         { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
   groove:            { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
   helpcrunch:        { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
-  intercom:          { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
+  intercom:          { read: true, incrementalSync: true,  update: false, reply: true,  note: true,  create: true  },
   helpscout:         { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
   'zoho-desk':       { read: true, incrementalSync: false, update: false, reply: true,  note: true,  create: true  },
-  hubspot:           { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
+  hubspot:           { read: true, incrementalSync: true,  update: true,  reply: true,  note: true,  create: true  },
   kayako:            { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
   'kayako-classic':  { read: true, incrementalSync: false, update: true,  reply: true,  note: true,  create: true  },
 };
