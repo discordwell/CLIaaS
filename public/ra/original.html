@@ -16,6 +16,21 @@
 <progress id="progress" max="100" value="0"></progress>
 <canvas id="canvas" width="320" height="200" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 <script>
+function getAutoplayModeFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  return params.get('autoplay') || params.get('agentautoplay');
+}
+
+function getStartupScenarioFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  var scenario = params.get('scenario');
+  if (!scenario) return null;
+  scenario = scenario.trim();
+  if (!scenario) return null;
+  if (!/\.[A-Za-z0-9]+$/.test(scenario)) scenario += '.INI';
+  return scenario.toUpperCase();
+}
+
 // === Self-capture + rendering hook system ===
 (function() {
   window.__wasmScreenshots = [];
@@ -434,7 +449,7 @@
 // In autoplay mode, suppress audio entirely — silence_callback fires during
 // Asyncify yields and corrupts the WASM stack with "memory access out of bounds".
 (function() {
-  var isAutoplay = new URLSearchParams(window.location.search).get('autoplay');
+  var isAutoplay = getAutoplayModeFromQuery();
   if (isAutoplay) {
     // Comprehensive AudioContext stub — SDL2 Emscripten calls createBuffer,
     // createScriptProcessor, createGain, createBufferSource during audio init.
@@ -505,7 +520,7 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 window.addEventListener('load', function() {
-  var isAutoplayLoad = new URLSearchParams(window.location.search).get('autoplay');
+  var isAutoplayLoad = getAutoplayModeFromQuery();
   // Make canvas focusable and give it focus
   canvasElement.tabIndex = 0;
   canvasElement.focus();
@@ -527,7 +542,7 @@ window.addEventListener('load', function() {
   // a FocusEvent should trigger the C callback that sets GameInFocus = true.
   // SKIP in autoplay mode: set_autoplay() already sets GameInFocus=true in C++,
   // and dispatching events during Asyncify yield corrupts the WASM stack.
-  var isAutoplay = new URLSearchParams(window.location.search).get('autoplay');
+  var isAutoplay = getAutoplayModeFromQuery();
   if (!isAutoplay) {
     var focusAttempts = 0;
     var focusInterval = setInterval(function() {
@@ -774,8 +789,19 @@ var Module = {
   //   - main() hasn't started yet, so g_autoplay_mode=1 will be set before
   //     any blocking dialogs (WWMessageBox, BGMessageBox) are reached
   onRuntimeInitialized: function() {
-    var params = new URLSearchParams(window.location.search);
-    if (params.get('autoplay')) {
+    var autoplay = getAutoplayModeFromQuery();
+    var startupScenario = getStartupScenarioFromQuery();
+    if (startupScenario && typeof Module.ccall === 'function') {
+      var antsEnabled = autoplay === 'ants' || /^SCA/i.test(startupScenario);
+      var configured = Module.ccall(
+        'set_startup_scenario',
+        'number',
+        ['string', 'number'],
+        [startupScenario, antsEnabled ? 1 : 0]
+      );
+      console.log('[AUTOPLAY] startup scenario override ' + startupScenario + ' → ' + configured);
+    }
+    if (autoplay) {
       if (typeof Module._set_autoplay === 'function') {
         Module._set_autoplay(1);
         console.log('[AUTOPLAY] g_autoplay_mode SET TO 1 via onRuntimeInitialized (before main)');
@@ -947,8 +973,7 @@ Module.setStatus('Downloading...');
 // VK codes (SDL scancode-based, from keyboard.h):
 //   VK_LBUTTON=1, VK_RBUTTON=2, VK_RETURN=40, VK_ESCAPE=41, VK_SPACE=44
 (function() {
-  var params = new URLSearchParams(window.location.search);
-  if (!params.get('autoplay')) return;
+  if (!getAutoplayModeFromQuery()) return;
 
   // --- Public API: thin wrappers around Module._inject_* exports ---
 
@@ -1036,8 +1061,7 @@ Module.setStatus('Downloading...');
 // (which fills BriefingText) and Restate_Mission (which displays it), the game
 // yields to the browser via Call_Back()/emscripten_sleep, giving us a window.
 (function() {
-  var params = new URLSearchParams(window.location.search);
-  if (!params.get('autoplay')) return;
+  if (!getAutoplayModeFromQuery()) return;
 
   // The briefing text starts with "Rescue Einstein" (ant missions).
   // We search for it in WASM heap and zero the first byte → strlen returns 0.
@@ -1099,7 +1123,8 @@ Module.setStatus('Downloading...');
 })();
 
 // === Autoplay coordination ===
-// Activated by ?autoplay=ants (or ?autoplay=allies).
+// Activated by ?autoplay=ants (or ?autoplay=allies), and by the JS-only
+// ?agentautoplay=... mode used by parity tooling.
 // Provides screen detection helpers for Playwright test. Menu navigation
 // is driven externally by Playwright via CDP keyboard.press() events.
 //
@@ -1108,8 +1133,7 @@ Module.setStatus('Downloading...');
 // permanently (ASYNCIFY's unwind/rewind cycle gets disrupted). Only
 // Playwright's trusted CDP keyboard events work for menu navigation.
 (function() {
-  var params = new URLSearchParams(window.location.search);
-  var autoplay = params.get('autoplay');
+  var autoplay = getAutoplayModeFromQuery();
   if (!autoplay) return;
 
   window.__wasmGameplayStarted = false;
@@ -1281,20 +1305,14 @@ Module.setStatus('Downloading...');
 
     var checkpoints = {};
     var state = null;
-    var enterRetries = 0;
     var start = Date.now();
 
-    while (Date.now() - start < 60000) {
+    while (Date.now() - start < 120000) {
       if (typeof window.__agentState === 'function') {
         state = window.__agentState();
         if (state && !state.error && Array.isArray(state.units) && state.units.length > 0) {
           break;
         }
-      }
-
-      if (enterRetries < 6 && typeof window.__injectKey === 'function') {
-        enterRetries++;
-        window.__injectKey(40);
       }
 
       await new Promise(function(resolve) { setTimeout(resolve, 1000); });
@@ -1331,28 +1349,32 @@ Module.setStatus('Downloading...');
     emit('[AGENTSEQ_RESULT]', checkpoints);
   }
 
+  function handleError(err) {
+    emit('[AGENTSEQ_ERROR]', { message: err && err.message ? err.message : String(err) });
+  }
+
+  window.__startAgentSequence = function() {
+    runSequence().catch(handleError);
+  };
+
   var origSetStatus = Module.setStatus;
   Module.setStatus = function(text) {
     origSetStatus.call(Module, text);
-    if (!text && !started) {
+    if (!text && !started && params.get('agentwait') !== '1') {
       setTimeout(function() {
-        runSequence().catch(function(err) {
-          emit('[AGENTSEQ_ERROR]', { message: err && err.message ? err.message : String(err) });
-        });
+        window.__startAgentSequence();
       }, 0);
     }
   };
 
   setTimeout(function() {
-    if (!started) {
-      runSequence().catch(function(err) {
-        emit('[AGENTSEQ_ERROR]', { message: err && err.message ? err.message : String(err) });
-      });
+    if (!started && params.get('agentwait') !== '1') {
+      window.__startAgentSequence();
     }
   }, 45000);
 })();
 </script>
 <script src="gamedata.js"></script>
-<script async src="rasdl.js?v=20260306c"></script>
+<script async src="rasdl.js?v=20260307d"></script>
 </body>
 </html>

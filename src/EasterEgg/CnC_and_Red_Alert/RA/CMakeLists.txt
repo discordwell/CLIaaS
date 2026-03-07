@@ -288,7 +288,7 @@ install(TARGETS rasdl)
 if(EMSCRIPTEN)
 	set_target_properties(rasdl PROPERTIES
 		SUFFIX ".html"
-		LINK_FLAGS "-sENVIRONMENT=web -sASYNCIFY -sASYNCIFY_STACK_SIZE=1048576 -sFORCE_FILESYSTEM -sINITIAL_MEMORY=128mb -sALLOW_MEMORY_GROWTH -sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_inject_key','_inject_key_press','_inject_key_release','_inject_mouse_click','_inject_mouse_press','_inject_mouse_release','_inject_mouse_move','_input_diag','_set_autoplay','_agent_get_state','_agent_command','_agent_step'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
+		LINK_FLAGS "-sENVIRONMENT=web -sASYNCIFY -sASYNCIFY_STACK_SIZE=1048576 -sFORCE_FILESYSTEM -sINITIAL_MEMORY=128mb -sALLOW_MEMORY_GROWTH -sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_inject_key','_inject_key_press','_inject_key_release','_inject_mouse_click','_inject_mouse_press','_inject_mouse_release','_inject_mouse_move','_input_diag','_set_autoplay','_set_startup_scenario','_agent_get_state','_agent_command','_agent_step'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
 	)
 	# this does not include the files, that would require something like
 	# file_packager files.data --js-output=files.js --preload *.mix REDALERT.INI

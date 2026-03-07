@@ -3,9 +3,9 @@
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
-import { chromium, type Browser, type Page } from '@playwright/test';
+import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 import { compareStates, type AgentLikeState } from './ra-parity/stateDiff';
 
@@ -14,6 +14,8 @@ const REPORT_DIR = path.join(process.cwd(), 'test-results', 'parity');
 const JSON_OUTPUT = path.join(REPORT_DIR, 'agent-parity.json');
 const MD_OUTPUT = path.join(REPORT_DIR, 'agent-parity.md');
 const SERVER_LOG = path.join(REPORT_DIR, 'agent-parity-server.log');
+const SERVER_PID = path.join(REPORT_DIR, 'agent-parity-server.pid');
+const HARD_TIMEOUT_MS = 12 * 60_000;
 const strict = process.argv.includes('--strict');
 
 type AgentCommand =
@@ -48,6 +50,131 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function readManagedServerPid(): number | undefined {
+  try {
+    const raw = fs.readFileSync(SERVER_PID, 'utf8').trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeManagedServerPid(pid: number): void {
+  fs.writeFileSync(SERVER_PID, `${pid}\n`);
+}
+
+function clearManagedServerPid(expectedPid?: number): void {
+  try {
+    if (expectedPid !== undefined) {
+      const currentPid = readManagedServerPid();
+      if (currentPid !== expectedPid) {
+        return;
+      }
+    }
+    fs.unlinkSync(SERVER_PID);
+  } catch {
+    // Ignore stale or missing pid files during cleanup.
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function listDescendantPids(rootPid: number): number[] {
+  try {
+    const output = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+    const childrenByParent = new Map<number, number[]>();
+
+    for (const line of output.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const [pidText, parentText] = trimmed.split(/\s+/, 2);
+      const pid = Number.parseInt(pidText, 10);
+      const parentPid = Number.parseInt(parentText, 10);
+      if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) {
+        continue;
+      }
+
+      const siblings = childrenByParent.get(parentPid) ?? [];
+      siblings.push(pid);
+      childrenByParent.set(parentPid, siblings);
+    }
+
+    const descendants: number[] = [];
+    const stack = [...(childrenByParent.get(rootPid) ?? [])];
+    while (stack.length > 0) {
+      const pid = stack.pop();
+      if (pid === undefined) {
+        continue;
+      }
+      descendants.push(pid);
+      stack.push(...(childrenByParent.get(pid) ?? []));
+    }
+    return descendants;
+  } catch {
+    return [];
+  }
+}
+
+function signalManagedProcessTree(pid: number, signal: NodeJS.Signals): boolean {
+  let signaled = false;
+  for (const childPid of listDescendantPids(pid).reverse()) {
+    try {
+      process.kill(childPid, signal);
+      signaled = true;
+    } catch {
+      // Descendant may already be gone.
+    }
+  }
+
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch {
+    return signaled;
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return true;
+    }
+    await sleep(100);
+  }
+  return !isProcessAlive(pid);
+}
+
+async function reapPreviousManagedServer(): Promise<void> {
+  const pid = readManagedServerPid();
+  if (!pid) {
+    return;
+  }
+
+  if (!isProcessAlive(pid)) {
+    clearManagedServerPid(pid);
+    return;
+  }
+
+  console.log(`Reaping leftover parity dev server pid ${pid}`);
+  signalManagedProcessTree(pid, 'SIGTERM');
+  const exitedOnTerm = await waitForProcessExit(pid, 2_000);
+  if (!exitedOnTerm) {
+    signalManagedProcessTree(pid, 'SIGKILL');
+    await waitForProcessExit(pid, 1_000);
+  }
+  clearManagedServerPid(pid);
+}
+
 async function isPortOpen(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const socket = net.connect({ port, host: '127.0.0.1' });
@@ -80,12 +207,24 @@ function startDevServer(): ChildProcessWithoutNullStreams {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  if (server.pid) {
+    writeManagedServerPid(server.pid);
+  }
   server.stdout.pipe(logStream);
   server.stderr.pipe(logStream);
+  server.once('close', () => {
+    clearManagedServerPid(server.pid);
+    logStream.end();
+  });
+  server.once('error', () => {
+    clearManagedServerPid(server.pid);
+    logStream.end();
+  });
   return server;
 }
 
 async function ensureServer(): Promise<{ server?: ChildProcessWithoutNullStreams; startedByScript: boolean }> {
+  await reapPreviousManagedServer();
   const port = Number.parseInt(new URL(BASE_URL).port || '80', 10);
   if (await isPortOpen(port)) {
     await waitForHttp(BASE_URL, 10_000);
@@ -93,23 +232,49 @@ async function ensureServer(): Promise<{ server?: ChildProcessWithoutNullStreams
   }
 
   const server = startDevServer();
-  await waitForHttp(BASE_URL, 120_000);
+  try {
+    await waitForHttp(BASE_URL, 120_000);
+  } catch (err) {
+    await stopServer(server);
+    throw err;
+  }
   return { server, startedByScript: true };
 }
 
-async function stopServer(server: ChildProcessWithoutNullStreams | undefined): Promise<void> {
-  if (!server || server.killed) return;
-  server.kill('SIGTERM');
-  await sleep(1000);
-  if (!server.killed) {
-    server.kill('SIGKILL');
+async function stopServerPid(pid: number): Promise<void> {
+  if (!isProcessAlive(pid)) {
+    clearManagedServerPid(pid);
+    return;
   }
+
+  signalManagedProcessTree(pid, 'SIGTERM');
+  const exitedOnTerm = await Promise.race([
+    waitForProcessExit(pid, 1_000),
+    sleep(1_000).then(() => false),
+  ]);
+
+  if (!exitedOnTerm && isProcessAlive(pid)) {
+    signalManagedProcessTree(pid, 'SIGKILL');
+    await waitForProcessExit(pid, 1_000);
+  }
+
+  clearManagedServerPid(pid);
+}
+
+async function stopServer(server: ChildProcessWithoutNullStreams | undefined): Promise<void> {
+  const pid = server?.pid ?? readManagedServerPid();
+  if (!pid) {
+    return;
+  }
+  await stopServerPid(pid);
 }
 
 async function loadTsAgent(page: Page): Promise<AgentLikeState> {
   console.log('TS: opening agent page');
-  await page.goto(`${BASE_URL}?anttest=agent&scenario=SCA01EA`, { waitUntil: 'load' });
+  await page.goto(`${BASE_URL}?anttest=agent&scenario=SCA01EA`, { waitUntil: 'load', timeout: 120_000 });
+  console.log('TS: waiting for canvas');
   await page.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });
+  console.log('TS: waiting for __agentReady');
   await page.waitForFunction(() => (window as { __agentReady?: boolean }).__agentReady === true, { timeout: 120_000 });
   const state = await page.evaluate(() => (window as unknown as { __agentState: () => AgentLikeState }).__agentState());
   console.log(`TS: agent ready at tick ${state.tick}`);
@@ -151,8 +316,26 @@ async function loadWasmSequence(page: Page): Promise<SequenceCheckpoints> {
     page.on('pageerror', onPageError);
   });
 
-  await page.goto(`${BASE_URL}/ra/original.html?autoplay=ants&agentseq=1`, { waitUntil: 'load' });
+  await page.goto(`${BASE_URL}/ra/original.html?agentautoplay=ants&agentseq=1&agentwait=1&scenario=SCA01EA.INI`, { waitUntil: 'load', timeout: 120_000 });
+  console.log('WASM: waiting for canvas');
   await page.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });
+  console.log('WASM: waiting for agent bridge');
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __agentReady?: boolean;
+      __startAgentSequence?: () => void;
+    };
+    return typeof w.__startAgentSequence === 'function'
+      && w.__agentReady === true;
+  }, { timeout: 120_000 });
+
+  console.log('WASM: starting in-page agent sequence');
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __startAgentSequence: () => void;
+    };
+    w.__startAgentSequence();
+  });
 
   const checkpoints = await Promise.race([
     sequencePromise,
@@ -225,8 +408,21 @@ function addCheckpoint(
 async function main(): Promise<void> {
   fs.mkdirSync(REPORT_DIR, { recursive: true });
 
-  const { server, startedByScript } = await ensureServer();
+  let server: ChildProcessWithoutNullStreams | undefined;
+  let startedByScript = false;
   let browser: Browser | undefined;
+  const openContexts = new Set<BrowserContext>();
+  let cleanedUp = false;
+  const handleExit = () => {
+    const pid = server?.pid ?? readManagedServerPid();
+    if (!pid) {
+      return;
+    }
+    if (isProcessAlive(pid)) {
+      signalManagedProcessTree(pid, 'SIGKILL');
+    }
+    clearManagedServerPid(pid);
+  };
 
   const launchBrowser = () => chromium.launch({
     headless: true,
@@ -238,25 +434,76 @@ async function main(): Promise<void> {
     ],
   });
 
+  const cleanup = async () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+
+    for (const context of Array.from(openContexts)) {
+      try {
+        await context.close();
+      } catch {
+        // Best-effort teardown for interrupted Playwright sessions.
+      }
+      openContexts.delete(context);
+    }
+
+    try {
+      await browser?.close();
+    } catch {
+      // Ignore browser teardown failures during shutdown.
+    }
+    browser = undefined;
+
+    await stopServer(server);
+  };
+
+  const handleSignal = () => {
+    void cleanup().finally(() => {
+      process.exitCode = 1;
+      process.exit();
+    });
+  };
+
+  const hardStop = setTimeout(() => {
+    console.error(`Agent parity run exceeded ${HARD_TIMEOUT_MS}ms; forcing cleanup.`);
+    handleSignal();
+  }, HARD_TIMEOUT_MS);
+  hardStop.unref();
+
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
+  process.once('SIGHUP', handleSignal);
+  process.once('exit', handleExit);
+
   try {
+    ({ server, startedByScript } = await ensureServer());
+
     const checkpoints: CheckpointReport[] = [];
     const blockers: string[] = [];
 
     try {
       browser = await launchBrowser();
       const tsContext = await browser.newContext({ viewport: { width: 640, height: 400 } });
+      openContexts.add(tsContext);
       const tsPage = await tsContext.newPage();
+      tsPage.setDefaultTimeout(120_000);
+      tsPage.setDefaultNavigationTimeout(120_000);
       await loadTsAgent(tsPage);
       const tsSequence = await runSequence(tsPage);
       await tsContext.close();
+      openContexts.delete(tsContext);
       await browser.close();
       browser = undefined;
 
       browser = await launchBrowser();
       const wasmContext = await browser.newContext({ viewport: { width: 640, height: 400 } });
+      openContexts.add(wasmContext);
       const wasmPage = await wasmContext.newPage();
+      wasmPage.setDefaultTimeout(120_000);
+      wasmPage.setDefaultNavigationTimeout(120_000);
       const wasmSequence = await loadWasmSequence(wasmPage);
       await wasmContext.close();
+      openContexts.delete(wasmContext);
       await browser.close();
       browser = undefined;
 
@@ -333,16 +580,25 @@ async function main(): Promise<void> {
       }
     }
 
-    if (strict && (totals.diffCount > 0 || report.blockers.length > 0)) {
+    if (report.blockers.length > 0) {
+      process.exitCode = 1;
+    } else if (strict && totals.diffCount > 0) {
       process.exitCode = 1;
     }
   } finally {
-    await browser?.close();
-    await stopServer(server);
+    clearTimeout(hardStop);
+    process.off('SIGINT', handleSignal);
+    process.off('SIGTERM', handleSignal);
+    process.off('SIGHUP', handleSignal);
+    await cleanup();
   }
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exitCode = 1;
-});
+main()
+  .then(() => {
+    process.exit(process.exitCode ?? 0);
+  })
+  .catch(err => {
+    console.error(err);
+    process.exit(1);
+  });

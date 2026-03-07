@@ -13,6 +13,8 @@
 #include <emscripten.h>
 #endif
 
+#include <string.h>
+
 #include "function.h"
 
 extern void Update_Mouse_Pos(int x, int y);
@@ -22,6 +24,8 @@ extern void Update_Mouse_Pos(int x, int y);
 ** (as if OK was pressed). Set via set_autoplay(1) from JavaScript.
 */
 int g_autoplay_mode = 0;
+char g_startup_scenario_name[_MAX_FNAME + _MAX_EXT] = "";
+int g_startup_scenario_ants = 0;
 
 extern "C" {
 
@@ -40,6 +44,35 @@ int set_autoplay(int mode)
     // Force GameInFocus=true so focus-wait loops don't block
     if (mode) GameInFocus = true;
     return prev;
+}
+
+/*
+** set_startup_scenario: Configure a one-shot scenario override for the next
+** single-player startup path. This lets the WASM parity harness enter an
+** exact mission without relying on menu automation.
+*/
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int set_startup_scenario(const char* scenario_name, int ants_enabled)
+{
+    printf("[AUTOPLAY] set_startup_scenario(%s, ants=%d)\n", scenario_name ? scenario_name : "<null>", ants_enabled);
+    if (!scenario_name || !*scenario_name) {
+        g_startup_scenario_name[0] = '\0';
+        g_startup_scenario_ants = 0;
+#ifdef FIXIT_ANTS
+        AntsEnabled = false;
+#endif
+        return 0;
+    }
+
+    strncpy(g_startup_scenario_name, scenario_name, sizeof(g_startup_scenario_name));
+    g_startup_scenario_name[sizeof(g_startup_scenario_name) - 1] = '\0';
+    g_startup_scenario_ants = ants_enabled ? 1 : 0;
+#ifdef FIXIT_ANTS
+    AntsEnabled = ants_enabled ? true : false;
+#endif
+    return 1;
 }
 
 /*

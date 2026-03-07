@@ -17,6 +17,10 @@
 ## Connectors
 - Kayako and Kayako Classic will remain unconfigured — this is expected (no active accounts).
 
+## Design and Resource Allocation
+- This project is budgeted for over a year and has two dozen senior developers working on it. The goal is to create a unique, modern, enterprise grade product that stands head-and-shoulders above the competition. 
+- When making design decisions, think about what senior management would choose and act accordingly.
+
 ## MCP Server
 - MCP server entry point: `cli/mcp/server.ts` (stdio transport, 60 tools, 6 resources, 4 prompts)
 - Auto-discovery: `.mcp.json` in project root

@@ -7,21 +7,21 @@
 
 ✓ Starting...
 ⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
-✓ Ready in 877ms
-[18:54:09.289] [32mINFO[39m (55844): [36mRedis not available — workers not started (inline fallback active)[39m
+✓ Ready in 1076ms
+[22:46:49.321] [32mINFO[39m (29554): [36mRedis not available — workers not started (inline fallback active)[39m
     [35mmodule[39m: "queue:workers"
 { module: 'middleware' } {
   method: 'GET',
   pathname: '/',
-  requestId: 'f7318368-21e2-4ee3-aeca-8eb305ad2a83'
+  requestId: '0fab5d95-485d-4915-90ac-7d8f7d6adf77'
 } 'Incoming request'
- GET / 200 in 784ms (compile: 460ms, proxy.ts: 52ms, render: 271ms)
+ GET / 200 in 812ms (compile: 487ms, proxy.ts: 52ms, render: 273ms)
 { module: 'middleware' } {
   method: 'GET',
   pathname: '/',
-  requestId: '3c99f9d6-8061-42fb-a5e6-1a61481db550'
+  requestId: '8e62cb2a-1c8c-45eb-8122-06f99f4f5ab0'
 } 'Incoming request'
- GET /?anttest=agent&scenario=SCA01EA 200 in 36ms (compile: 1696µs, proxy.ts: 4ms, render: 31ms)
+ GET /?anttest=agent&scenario=SCA01EA 200 in 37ms (compile: 1888µs, proxy.ts: 4ms, render: 31ms)
 ⚠ ./node_modules/.pnpm/bullmq@5.70.1/node_modules/bullmq/dist/esm/classes
 Package ioredis can't be external
 The request ioredis/built/utils matches serverExternalPackages (or the default list).
@@ -41,19 +41,18 @@ Or update the import side to use a compatible request that can be resolved by No
 { module: 'middleware' } {
   method: 'GET',
   pathname: '/offline',
-  requestId: '9572f6d6-7598-4ded-8293-74e220a90991'
+  requestId: '2a9b174c-e8cb-46ea-946e-80685092f881'
 } 'Incoming request'
- GET /offline 200 in 51ms (compile: 15ms, proxy.ts: 2ms, render: 34ms)
- GET /ra/audio/sniper.wav 404 in 62ms (compile: 21ms, proxy.ts: 1518µs, render: 40ms)
- GET /ra/audio/building_placed.wav 404 in 63ms (compile: 16ms, proxy.ts: 1671µs, render: 45ms)
- GET /ra/audio/mammoth_cannon.wav 404 in 63ms (compile: 28ms, proxy.ts: 1314µs, render: 34ms)
- GET /ra/audio/eva_building_captured.wav 404 in 66ms (compile: 13ms, proxy.ts: 1377µs, render: 52ms)
- GET /ra/audio/eva_insufficient_funds.wav 404 in 66ms (compile: 18ms, proxy.ts: 1721µs, render: 46ms)
- GET /ra/audio/eva_silos_needed.wav 404 in 67ms (compile: 36ms, proxy.ts: 948µs, render: 30ms)
- GET /ra/audio/sniper.wav 404 in 76ms (compile: 10ms, proxy.ts: 1187µs, render: 65ms)
- GET /ra/audio/building_placed.wav 404 in 89ms (compile: 7ms, proxy.ts: 1772µs, render: 80ms)
- GET /ra/audio/mammoth_cannon.wav 404 in 85ms (compile: 23ms, proxy.ts: 1155µs, render: 60ms)
- GET /ra/audio/eva_building_captured.wav 404 in 55ms (compile: 8ms, proxy.ts: 6ms, render: 41ms)
- GET /ra/audio/eva_insufficient_funds.wav 404 in 49ms (compile: 21ms, proxy.ts: 1280µs, render: 27ms)
- GET /ra/audio/eva_silos_needed.wav 404 in 46ms (compile: 30ms, proxy.ts: 1301µs, render: 14ms)
-[?25h
+ GET /offline 200 in 40ms (compile: 13ms, proxy.ts: 3ms, render: 24ms)
+ GET /ra/audio/sniper.wav 404 in 60ms (compile: 19ms, proxy.ts: 2ms, render: 39ms)
+ GET /ra/audio/building_placed.wav 404 in 55ms (compile: 15ms, proxy.ts: 1863µs, render: 38ms)
+ GET /ra/audio/mammoth_cannon.wav 404 in 57ms (compile: 22ms, proxy.ts: 1899µs, render: 33ms)
+ GET /ra/audio/eva_building_captured.wav 404 in 66ms (compile: 11ms, proxy.ts: 1479µs, render: 53ms)
+ GET /ra/audio/eva_silos_needed.wav 404 in 66ms (compile: 33ms, proxy.ts: 1839µs, render: 30ms)
+ GET /ra/audio/eva_insufficient_funds.wav 404 in 66ms (compile: 27ms, proxy.ts: 1729µs, render: 38ms)
+ GET /ra/audio/sniper.wav 404 in 76ms (compile: 8ms, proxy.ts: 1108µs, render: 67ms)
+ GET /ra/audio/mammoth_cannon.wav 404 in 102ms (compile: 17ms, proxy.ts: 7ms, render: 78ms)
+ GET /ra/audio/building_placed.wav 404 in 109ms (compile: 11ms, proxy.ts: 13ms, render: 85ms)
+ GET /ra/audio/eva_building_captured.wav 404 in 48ms (compile: 5ms, proxy.ts: 1209µs, render: 42ms)
+ GET /ra/audio/eva_insufficient_funds.wav 404 in 48ms (compile: 16ms, proxy.ts: 1204µs, render: 31ms)
+ GET /ra/audio/eva_silos_needed.wav 404 in 45ms (compile: 30ms, proxy.ts: 1096µs, render: 14ms)
