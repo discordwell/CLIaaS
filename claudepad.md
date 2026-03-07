@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-07T03:05Z — Session 115: Schema Integrity & Dual-Mode Store Test Suites
+- **Phase 1 — schema-integrity.test.ts** (16 tests): Migration sequence, schema-migration parity, RLS coverage, column type parity, unique index consistency, FK validation
+- **Phase 2 — dual-mode-stores.test.ts** (69 tests): Static pattern analysis for 5 stores, store-helpers module verification, CRUD tests for AI Resolution/Canned Response/Views/Tours/Messages in JSONL mode, withRls/tryDb fallback behavior, Macro Store pattern
+- **Key findings**: 10 tables in schema.ts have no CREATE TABLE migration (push-only: rule_executions, rag_import_jobs, api_keys, user_mfa, usage_metrics, billing_events, survey_responses, survey_configs, ticket_events, workflows); 22 unique indexes are ORM-managed without explicit CREATE UNIQUE INDEX
+- **All 85 tests pass**, code review clean (no issues above confidence threshold)
+- **Regex fixes**: Handled quoted vs unquoted SQL identifiers in Drizzle-generated vs hand-written migrations; fixed Views store fallback detection regex
+
 ## 2026-03-07T01:00Z — Session 114: Plan 19 Phase 5 — Production DB RLS Activation
 - **Migrations applied**: All 27 migrations run on VPS PostgreSQL (was at 64 tables, now 147)
 - **Manual fixes**: Created missing `chatbots`, `chatbot_versions/sessions/analytics`, `workflows`, `rule_executions`, `survey_responses/configs`, `ticket_events` tables + `agent_availability`, `survey_type`, `survey_trigger`, `ticket_event_type/actor` enums + `role_permissions` with unique index workaround

@@ -4,6 +4,8 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('rls');
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Execute a function within a tenant-scoped transaction.
  * Sets PostgreSQL session variables for RLS policy evaluation.
@@ -14,14 +16,17 @@ export async function withTenantContext<T>(
   tenantId: string,
   fn: (tx: AppDb) => Promise<T>,
 ): Promise<T> {
+  if (!UUID_RE.test(workspaceId) || !UUID_RE.test(tenantId)) {
+    throw new Error('Invalid UUID for RLS context');
+  }
   const db = getDb();
   if (!db) {
     throw new Error('Database not available — cannot use RLS context in demo mode');
   }
 
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL app.current_workspace_id = ${workspaceId}`);
-    await tx.execute(sql`SET LOCAL app.current_tenant_id = ${tenantId}`);
+    await tx.execute(sql`SET LOCAL app.current_workspace_id = '${sql.raw(workspaceId)}'`);
+    await tx.execute(sql`SET LOCAL app.current_tenant_id = '${sql.raw(tenantId)}'`);
     return fn(tx as unknown as AppDb);
   });
 }

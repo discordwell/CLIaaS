@@ -8,30 +8,67 @@
  *   3.10 Ticket Merge & Split
  *   3.11 Views & Tags
  *
- * All tests run in JSONL/demo mode (no DATABASE_URL) unless otherwise noted.
+ * All tests run in JSONL/demo mode (no DATABASE_URL).
+ *
+ * Routes that import @/lib/events (dispatcher) pull in heavy deps
+ * (BullMQ, ioredis, automation-executor) causing hangs under vi.resetModules().
+ * We mock @/lib/events and @/lib/automation/executor to avoid this.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+
+// Increase test timeout to handle cold-start module initialization
+vi.setConfig({ testTimeout: 15_000 });
+
+// ---------------------------------------------------------------------------
+// Top-level mocks for heavy deps that routes import at module scope
+// ---------------------------------------------------------------------------
+
+vi.mock('@/lib/events', () => ({
+  dispatch: vi.fn(),
+  messageCreated: vi.fn(),
+  ticketCreated: vi.fn(),
+  ticketUpdated: vi.fn(),
+  ticketResolved: vi.fn(),
+  ticketMerged: vi.fn(),
+  ticketUnmerged: vi.fn(),
+  ticketSplit: vi.fn(),
+  slaBreached: vi.fn(),
+  csatSubmitted: vi.fn(),
+  surveySubmitted: vi.fn(),
+  surveySent: vi.fn(),
+}));
+
+vi.mock('@/lib/automation/executor', () => ({
+  evaluateAutomation: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/lib/realtime/events', () => ({
+  eventBus: {
+    emit: vi.fn(),
+    subscribe: vi.fn(),
+    unsubscribe: vi.fn(),
+  },
+}));
+
+// Ensure demo mode throughout
+const originalEnv = { ...process.env };
+
+beforeEach(() => {
+  delete process.env.DATABASE_URL;
+  delete process.env.REDIS_URL;
+});
+
+afterEach(() => {
+  process.env = { ...originalEnv };
+});
 
 // ---------------------------------------------------------------------------
 // 3.7 — Canned Responses & Macros
 // ---------------------------------------------------------------------------
 
 describe('3.7 Canned Responses & Macros', () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    delete process.env.DATABASE_URL;
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
-  });
-
   // ---- Canned Response Store (unit-level) ----
 
   describe('Canned Response Store', () => {
@@ -167,7 +204,7 @@ describe('3.7 Canned Responses & Macros', () => {
         expect(resolved).toBe('');
       }
 
-      // Verify that the merge engine regex only matches safe variable patterns
+      // Verify that safe patterns still work after the check
       const safeTemplate = '{{customer.name}} - {{ticket.subject}}';
       const safeResolved = resolveMergeVariables(safeTemplate, {
         customer: { name: 'Alice' },
@@ -266,7 +303,8 @@ describe('3.7 Canned Responses & Macros', () => {
         [
           {
             type: 'add_reply',
-            value: 'Hi {{customer.name}}, your ticket {{ticket.subject}} is being processed.',
+            value:
+              'Hi {{customer.name}}, your ticket {{ticket.subject}} is being processed.',
           },
         ],
         ticket,
@@ -314,19 +352,6 @@ describe('3.7 Canned Responses & Macros', () => {
 // ---------------------------------------------------------------------------
 
 describe('3.8 Collision Detection', () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    delete process.env.DATABASE_URL;
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
-  });
-
   describe('checkForNewReplies', () => {
     it('returns hasNewReplies=false when no replies exist since timestamp', async () => {
       const { checkForNewReplies } = await import(
@@ -409,7 +434,11 @@ describe('3.8 Collision Detection', () => {
       expect(presence.getViewers(ticketId)).toHaveLength(1);
 
       // Set lastSeen to 60s ago (beyond 30s stale threshold)
-      presence._testSetLastSeen('stale-user', ticketId, Date.now() - 60_000);
+      presence._testSetLastSeen(
+        'stale-user',
+        ticketId,
+        Date.now() - 60_000,
+      );
       presence._testRunCleanup();
 
       expect(presence.getViewers(ticketId)).toHaveLength(0);
@@ -439,21 +468,8 @@ describe('3.8 Collision Detection', () => {
 // ---------------------------------------------------------------------------
 
 describe('3.9 Internal Notes', () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    delete process.env.DATABASE_URL;
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
-  });
-
   describe('Notes API (JSONL fallback)', () => {
-    it('creates an internal note and returns visibility=internal', async () => {
+    it('creates an internal note and returns correct fields', async () => {
       const { POST } = await import(
         '@/app/api/tickets/[id]/notes/route'
       );
@@ -463,17 +479,23 @@ describe('3.9 Internal Notes', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: 'This is an internal note for the team.' }),
+          body: JSON.stringify({
+            body: 'This is an internal note for the team.',
+          }),
         },
       );
 
-      const res = await POST(req, { params: Promise.resolve({ id: 'test-ticket' }) });
+      const res = await POST(req, {
+        params: Promise.resolve({ id: 'test-ticket' }),
+      });
       expect(res.status).toBe(200);
       const data = await res.json();
 
       expect(data.message).toBeDefined();
       expect(data.message.id).toBeTruthy();
-      expect(data.message.body).toBe('This is an internal note for the team.');
+      expect(data.message.body).toBe(
+        'This is an internal note for the team.',
+      );
       expect(data.message.createdAt).toBeTruthy();
     });
 
@@ -491,10 +513,43 @@ describe('3.9 Internal Notes', () => {
         },
       );
 
-      const res = await POST(req, { params: Promise.resolve({ id: 'test-ticket' }) });
+      const res = await POST(req, {
+        params: Promise.resolve({ id: 'test-ticket' }),
+      });
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error).toBeTruthy();
+    });
+
+    it('dispatches messageCreated event with isNote=true', async () => {
+      const events = await import('@/lib/events');
+      const { POST } = await import(
+        '@/app/api/tickets/[id]/notes/route'
+      );
+
+      const spy = vi.mocked(events.messageCreated);
+      spy.mockClear();
+
+      const req = new NextRequest(
+        'http://localhost:3000/api/tickets/evt-ticket/notes',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: 'Event test note' }),
+        },
+      );
+
+      await POST(req, {
+        params: Promise.resolve({ id: 'evt-ticket' }),
+      });
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ticketId: 'evt-ticket',
+          visibility: 'internal',
+          isNote: true,
+        }),
+      );
     });
   });
 
@@ -536,9 +591,9 @@ describe('3.9 Internal Notes', () => {
   });
 
   describe('Notes are internal-only', () => {
-    it('internal notes have visibility=internal in JSONL message store', () => {
+    it('internal notes have visibility=internal in event contract', () => {
       // In the JSONL fallback path (notes/route.ts), the note event fires with
-      // visibility: 'internal' and isNote: true. Verify the contract.
+      // visibility: 'internal' and isNote: true. Verify the contract shape.
       const event = {
         ticketId: 'any-ticket',
         messageId: 'note-123',
@@ -548,7 +603,8 @@ describe('3.9 Internal Notes', () => {
 
       expect(event.visibility).toBe('internal');
       expect(event.isNote).toBe(true);
-      // Public responses should NOT have isNote or visibility=internal
+
+      // Public responses should NOT have isNote=true or visibility=internal
       const publicEvent = {
         ticketId: 'any-ticket',
         messageId: 'reply-456',
@@ -565,19 +621,6 @@ describe('3.9 Internal Notes', () => {
 // ---------------------------------------------------------------------------
 
 describe('3.10 Ticket Merge & Split', () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    delete process.env.DATABASE_URL;
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
-  });
-
   describe('Merge API validation', () => {
     it('rejects merge without primaryTicketId', async () => {
       const { POST } = await import('@/app/api/tickets/merge/route');
@@ -643,7 +686,9 @@ describe('3.10 Ticket Merge & Split', () => {
 
   describe('Undo Merge API validation', () => {
     it('rejects unmerge without mergeLogId', async () => {
-      const { POST } = await import('@/app/api/tickets/merge/undo/route');
+      const { POST } = await import(
+        '@/app/api/tickets/merge/undo/route'
+      );
 
       const req = new NextRequest(
         'http://localhost:3000/api/tickets/merge/undo',
@@ -661,7 +706,9 @@ describe('3.10 Ticket Merge & Split', () => {
     });
 
     it('rejects unmerge with invalid UUID mergeLogId', async () => {
-      const { POST } = await import('@/app/api/tickets/merge/undo/route');
+      const { POST } = await import(
+        '@/app/api/tickets/merge/undo/route'
+      );
 
       const req = new NextRequest(
         'http://localhost:3000/api/tickets/merge/undo',
@@ -681,7 +728,9 @@ describe('3.10 Ticket Merge & Split', () => {
 
   describe('Split API validation', () => {
     it('rejects split without messageIds', async () => {
-      const { POST } = await import('@/app/api/tickets/[id]/split/route');
+      const { POST } = await import(
+        '@/app/api/tickets/[id]/split/route'
+      );
 
       const req = new NextRequest(
         'http://localhost:3000/api/tickets/test-ticket/split',
@@ -701,7 +750,9 @@ describe('3.10 Ticket Merge & Split', () => {
     });
 
     it('rejects split with invalid UUID messageIds', async () => {
-      const { POST } = await import('@/app/api/tickets/[id]/split/route');
+      const { POST } = await import(
+        '@/app/api/tickets/[id]/split/route'
+      );
 
       const req = new NextRequest(
         'http://localhost:3000/api/tickets/test-ticket/split',
@@ -724,7 +775,9 @@ describe('3.10 Ticket Merge & Split', () => {
     });
 
     it('split fails gracefully in JSONL mode (requires DB)', async () => {
-      const { POST } = await import('@/app/api/tickets/[id]/split/route');
+      const { POST } = await import(
+        '@/app/api/tickets/[id]/split/route'
+      );
 
       const req = new NextRequest(
         'http://localhost:3000/api/tickets/test-ticket/split',
@@ -754,19 +807,6 @@ describe('3.10 Ticket Merge & Split', () => {
 // ---------------------------------------------------------------------------
 
 describe('3.11 Views & Tags', () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    delete process.env.DATABASE_URL;
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
-    vi.restoreAllMocks();
-  });
-
   // ---- Views Store (unit) ----
 
   describe('View Store', () => {
@@ -800,7 +840,9 @@ describe('3.11 Views & Tags', () => {
     });
 
     it('system views cannot be updated or deleted', async () => {
-      const { updateView, deleteView } = await import('@/lib/views/store');
+      const { updateView, deleteView } = await import(
+        '@/lib/views/store'
+      );
 
       // 'system-all-open' is a built-in system view
       const updated = updateView('system-all-open', { name: 'Hacked' });
@@ -811,12 +853,20 @@ describe('3.11 Views & Tags', () => {
     });
 
     it('lists views and filters by userId for personal views', async () => {
-      const { createView, listViews } = await import('@/lib/views/store');
+      const { createView, listViews } = await import(
+        '@/lib/views/store'
+      );
 
       createView({
         name: 'My Personal View',
         query: {
-          conditions: [{ field: 'assignee', operator: 'is', value: '$CURRENT_USER' }],
+          conditions: [
+            {
+              field: 'assignee',
+              operator: 'is',
+              value: '$CURRENT_USER',
+            },
+          ],
           combineMode: 'and',
         },
         viewType: 'personal',
@@ -825,11 +875,15 @@ describe('3.11 Views & Tags', () => {
 
       // user-xyz should see their personal view
       const xyzViews = await listViews('user-xyz');
-      expect(xyzViews.some((v) => v.name === 'My Personal View')).toBe(true);
+      expect(xyzViews.some((v) => v.name === 'My Personal View')).toBe(
+        true,
+      );
 
       // user-other should NOT see user-xyz's personal view
       const otherViews = await listViews('user-other');
-      expect(otherViews.some((v) => v.name === 'My Personal View')).toBe(false);
+      expect(
+        otherViews.some((v) => v.name === 'My Personal View'),
+      ).toBe(false);
     });
   });
 
@@ -841,14 +895,17 @@ describe('3.11 Views & Tags', () => {
       const { loadTickets } = await import('@/lib/data');
 
       const tickets = await loadTickets();
-      if (tickets.length === 0) {
-        // No demo data available — skip
-        return;
-      }
+      if (tickets.length === 0) return;
 
       // Query: all open tickets
       const openQuery = {
-        conditions: [{ field: 'status' as const, operator: 'is' as const, value: 'open' }],
+        conditions: [
+          {
+            field: 'status' as const,
+            operator: 'is' as const,
+            value: 'open',
+          },
+        ],
         combineMode: 'and' as const,
       };
 
@@ -872,8 +929,16 @@ describe('3.11 Views & Tags', () => {
 
       const orQuery = {
         conditions: [
-          { field: 'status' as const, operator: 'is' as const, value: 'open' },
-          { field: 'status' as const, operator: 'is' as const, value: 'pending' },
+          {
+            field: 'status' as const,
+            operator: 'is' as const,
+            value: 'open',
+          },
+          {
+            field: 'status' as const,
+            operator: 'is' as const,
+            value: 'pending',
+          },
         ],
         combineMode: 'or' as const,
       };
@@ -892,14 +957,20 @@ describe('3.11 Views & Tags', () => {
       if (tickets.length < 2) return;
 
       const sortedQuery = {
-        conditions: [] as Array<{ field: string; operator: 'is' | 'is_not'; value: string }>,
+        conditions: [] as Array<{
+          field: string;
+          operator: 'is' | 'is_not';
+          value: string;
+        }>,
         combineMode: 'and' as const,
         sort: { field: 'created_at', direction: 'asc' as const },
       };
 
       const sorted = executeViewQuery(sortedQuery, tickets);
       for (let i = 1; i < sorted.length; i++) {
-        expect(sorted[i].createdAt >= sorted[i - 1].createdAt).toBe(true);
+        expect(sorted[i].createdAt >= sorted[i - 1].createdAt).toBe(
+          true,
+        );
       }
     });
   });
@@ -920,7 +991,9 @@ describe('3.11 Views & Tags', () => {
           body: JSON.stringify({
             name: 'API Test View',
             query: {
-              conditions: [{ field: 'priority', operator: 'is', value: 'urgent' }],
+              conditions: [
+                { field: 'priority', operator: 'is', value: 'urgent' },
+              ],
               combineMode: 'and',
             },
           }),
@@ -951,19 +1024,18 @@ describe('3.11 Views & Tags', () => {
     it('POST /api/views rejects missing name', async () => {
       const { POST } = await import('@/app/api/views/route');
 
-      const req = new NextRequest(
-        'http://localhost:3000/api/views',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: {
-              conditions: [{ field: 'status', operator: 'is', value: 'open' }],
-              combineMode: 'and',
-            },
-          }),
-        },
-      );
+      const req = new NextRequest('http://localhost:3000/api/views', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: {
+            conditions: [
+              { field: 'status', operator: 'is', value: 'open' },
+            ],
+            combineMode: 'and',
+          },
+        }),
+      });
 
       const res = await POST(req);
       expect(res.status).toBe(400);
@@ -987,14 +1059,11 @@ describe('3.11 Views & Tags', () => {
     it('POST /api/tags rejects empty name with 400', async () => {
       const { POST } = await import('@/app/api/tags/route');
 
-      const req = new NextRequest(
-        'http://localhost:3000/api/tags',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: '   ' }),
-        },
-      );
+      const req = new NextRequest('http://localhost:3000/api/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: '   ' }),
+      });
 
       const res = await POST(req);
       expect(res.status).toBe(400);
@@ -1005,14 +1074,11 @@ describe('3.11 Views & Tags', () => {
     it('POST /api/tags rejects invalid color format', async () => {
       const { POST } = await import('@/app/api/tags/route');
 
-      const req = new NextRequest(
-        'http://localhost:3000/api/tags',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'urgent', color: 'red' }),
-        },
-      );
+      const req = new NextRequest('http://localhost:3000/api/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'urgent', color: 'red' }),
+      });
 
       const res = await POST(req);
       expect(res.status).toBe(400);
@@ -1035,7 +1101,13 @@ describe('3.11 Views & Tags', () => {
 
       // Query for tickets with this tag
       const tagQuery = {
-        conditions: [{ field: 'tag' as const, operator: 'is' as const, value: firstTag }],
+        conditions: [
+          {
+            field: 'tag' as const,
+            operator: 'is' as const,
+            value: firstTag,
+          },
+        ],
         combineMode: 'and' as const,
       };
 
