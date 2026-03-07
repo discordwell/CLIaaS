@@ -38,7 +38,10 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     structureTypes: new Set(),
     builtStructureTypes: new Set(),
     destroyedTriggerNames: new Set(),
+    attackedTriggerNames: new Set(),
     houseAlive: new Map(),
+    houseUnitsAlive: new Map(),
+    houseBuildingsAlive: new Map(),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),
@@ -244,9 +247,9 @@ describe('TR5: Event index mapping matches C++ tevent.h', () => {
 
   it('TEVENT_UNITS_DESTROYED at index 9 (C++ matches, was 26)', () => {
     const event: TriggerEvent = { type: 9, team: -1, data: 2 };
-    // C++ semantics: all units of house destroyed (house index in event.data)
-    expect(checkTriggerEvent(event, createState({ houseAlive: new Map([[2, false]]) }))).toBe(true);
-    expect(checkTriggerEvent(event, createState({ houseAlive: new Map([[2, true]]) }))).toBe(false);
+    // C++ semantics: all units (not buildings) of house destroyed (house index in event.data)
+    expect(checkTriggerEvent(event, createState({ houseUnitsAlive: new Map([[2, false]]) }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ houseUnitsAlive: new Map([[2, true]]) }))).toBe(false);
   });
 
   it('TEVENT_CREDITS at index 12 (C++ matches, was 30)', () => {

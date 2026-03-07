@@ -7,7 +7,7 @@ import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
   type WarheadMeta, type WarheadProps,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
-  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
+  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
 	  Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
@@ -289,6 +289,22 @@ export class Game {
   private bridgeCellCount = 0;
   /** Persistent set of trigger names whose attached entities/structures were destroyed */
   private destroyedTriggerNames = new Set<string>();
+  /** Transient set of trigger names whose attached objects were damaged this tick */
+  private attackedTriggerNames = new Set<string>();
+  /** Running total of enemy buildings destroyed (for NBUILDINGS_DESTROYED) */
+  private nBuildingsDestroyedCount = 0;
+  /** Trigger names of spy-infiltrated buildings (for TEVENT_SPIED) */
+  private spiedBuildingTriggers = new Set<string>();
+  /** Whether the mission timer is actively counting down */
+  private missionTimerRunning = true;
+  /** Teams marked as destroyed by DESTROY_TEAM action */
+  private destroyedTeams = new Set<number>();
+  /** Unit types player has built (for TEVENT_BUILD_UNIT) */
+  private builtUnitTypes = new Set<string>();
+  /** Infantry types player has built (for TEVENT_BUILD_INFANTRY) */
+  private builtInfantryTypes = new Set<string>();
+  /** Aircraft types player has built (for TEVENT_BUILD_AIRCRAFT) */
+  private builtAircraftTypes = new Set<string>();
 
   // Turbo mode (for E2E test runner)
   turboMultiplier = 1;
@@ -442,6 +458,14 @@ export class Game {
     this.structuresBuilt = 0;
     this.structuresLost = 0;
     this.bridgeCellCount = this.map.countBridgeCells();
+    this.attackedTriggerNames.clear();
+    this.nBuildingsDestroyedCount = 0;
+    this.spiedBuildingTriggers.clear();
+    this.missionTimerRunning = true;
+    this.destroyedTeams.clear();
+    this.builtUnitTypes.clear();
+    this.builtInfantryTypes.clear();
+    this.builtAircraftTypes.clear();
     // Initialize trigger timers to game tick 0 (start of mission)
     for (const t of this.triggers) t.timerTick = 0;
 
@@ -2293,6 +2317,8 @@ export class Game {
   private damageStructure(s: MapStructure, damage: number): boolean {
     if (!s.alive) return false;
     s.hp = Math.max(0, s.hp - damage);
+    // Track attacked trigger names for TEVENT_ATTACKED
+    if (s.triggerName) this.attackedTriggerNames.add(s.triggerName);
     // Record base attack for AI defense system
     const aiState = this.aiStates.get(s.house);
     if (aiState) {
@@ -2309,6 +2335,10 @@ export class Game {
     if (s.hp <= 0) {
       s.alive = false;
       s.rubble = true;
+      // Track enemy building destruction count (excluding walls)
+      if (!this.isAllied(s.house, this.playerHouse) && !WALL_TYPES.has(s.type)) {
+        this.nBuildingsDestroyedCount++;
+      }
       // Clear terrain footprint so units can walk through rubble
       this.clearStructureFootprint(s);
       // Spawn destruction explosion chain — small pops then big blast (like original RA)
@@ -5047,7 +5077,9 @@ export class Game {
   }
 
   private damageEntity(target: Entity, amount: number, warhead: WarheadType, attacker?: Entity): boolean {
-    return target.takeDamage(amount, warhead, attacker, this.getWarheadProps(warhead));
+    const killed = target.takeDamage(amount, warhead, attacker, this.getWarheadProps(warhead));
+    if (target.triggerName) this.attackedTriggerNames.add(target.triggerName);
+    return killed;
   }
 
   /** Damage-based speed reduction (C++ drive.cpp:1157-1161).
@@ -5059,9 +5091,9 @@ export class Game {
   }
 
   /** M1+M2: Compute movement speed with terrain and damage multipliers.
-   *  All moveToward calls should use this instead of flat speed * 0.5. */
+   *  Speed values in UNIT_STATS are C++ MPH (leptons/tick); MPH_TO_PX converts to pixels/tick. */
   private movementSpeed(entity: Entity, speedFraction = 1.0): number {
-    return entity.stats.speed * speedFraction
+    return entity.stats.speed * MPH_TO_PX * speedFraction
       * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
       * this.damageSpeedFactor(entity);
   }
@@ -5347,7 +5379,9 @@ export class Game {
   private buildTriggerState(trigger: ScenarioTrigger, shared: {
     structureTypes: Set<string>; destroyedTriggerNames: Set<string>;
     enemyUnitsAlive: number; playerFactories: number;
-    houseAlive: Map<number, boolean>; builtStructureTypes: Set<string>;
+    houseAlive: Map<number, boolean>; houseUnitsAlive: Map<number, boolean>;
+    houseBuildingsAlive: Map<number, boolean>; builtStructureTypes: Set<string>;
+    buildingsDestroyedByHouse: Map<number, boolean>; fakesExist: boolean;
   }): TriggerGameState {
     return {
       gameTick: this.tick,
@@ -5363,27 +5397,29 @@ export class Game {
       unitsLeftMap: this.unitsLeftMap,
       structureTypes: shared.structureTypes,
       destroyedTriggerNames: shared.destroyedTriggerNames,
+      attackedTriggerNames: this.attackedTriggerNames,
       houseAlive: shared.houseAlive,
+      houseUnitsAlive: shared.houseUnitsAlive,
+      houseBuildingsAlive: shared.houseBuildingsAlive,
       builtStructureTypes: shared.builtStructureTypes,
       isLowPower: this.powerConsumed > this.powerProduced && this.powerProduced > 0,
       playerCredits: this.credits,
-      // TR3: Extended trigger state fields (not actively tracked in ant missions)
-      buildingsDestroyedByHouse: new Map(),
-      nBuildingsDestroyed: 0,
+      buildingsDestroyedByHouse: shared.buildingsDestroyedByHouse,
+      nBuildingsDestroyed: this.nBuildingsDestroyedCount,
       playerFactoriesExist: shared.playerFactories > 0,
       civiliansEvacuated: this.civiliansEvacuated,
-      builtUnitTypes: new Set(),
-      builtInfantryTypes: new Set(),
-      builtAircraftTypes: new Set(),
-      fakesExist: false,
-      spiedBuildings: new Set(),
+      builtUnitTypes: this.builtUnitTypes,
+      builtInfantryTypes: this.builtInfantryTypes,
+      builtAircraftTypes: this.builtAircraftTypes,
+      fakesExist: shared.fakesExist,
+      spiedBuildings: this.spiedBuildingTriggers,
     };
   }
 
   /** Process trigger system — check conditions and fire actions */
   private processTriggers(): void {
     // Tick mission timer (processTriggers runs every 15 ticks, so decrement by 15)
-    if (this.missionTimer > 0) {
+    if (this.missionTimer > 0 && this.missionTimerRunning) {
       this.missionTimer -= 15;
       if (this.missionTimer <= 0) {
         this.missionTimerExpired = true;
@@ -5395,7 +5431,12 @@ export class Game {
     // Start with persistent destroyed trigger names, then add currently-dead entities/structures
     const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
     const houseAlive = new Map<number, boolean>();
+    const houseUnitsAlive = new Map<number, boolean>();
+    const houseBuildingsAlive = new Map<number, boolean>();
+    const housesWithBuildings = new Set<number>(); // houses that currently have alive buildings
     let playerFactories = 0;
+    let fakesExist = false;
+    const FAKE_TYPES = new Set(['FACF', 'DOMF', 'WEAF']);
     for (const s of this.structures) {
       if (s.alive) {
         structureTypes.add(s.type);
@@ -5404,7 +5445,14 @@ export class Game {
           playerFactories++;
         }
         const hi = Game.HOUSE_TO_INDEX[s.house];
-        if (hi !== undefined) houseAlive.set(hi, true);
+        if (hi !== undefined) {
+          houseAlive.set(hi, true);
+          if (!WALL_TYPES.has(s.type)) {
+            houseBuildingsAlive.set(hi, true);
+            housesWithBuildings.add(hi);
+          }
+        }
+        if (FAKE_TYPES.has(s.type)) fakesExist = true;
       } else if (s.triggerName) {
         destroyedTriggerNames.add(s.triggerName);
       }
@@ -5414,12 +5462,29 @@ export class Game {
       if (e.alive && !this.isPlayerControlled(e) && !e.isCivilian) enemyUnitsAlive++;
       if (e.alive) {
         const hi = Game.HOUSE_TO_INDEX[e.house];
-        if (hi !== undefined) houseAlive.set(hi, true);
+        if (hi !== undefined) {
+          houseAlive.set(hi, true);
+          houseUnitsAlive.set(hi, true);
+        }
       } else if (e.triggerName) {
         destroyedTriggerNames.add(e.triggerName);
       }
     }
-    const shared = { structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories, houseAlive, builtStructureTypes: this.builtStructureTypes };
+    // Compute per-house buildings destroyed: house had buildings at some point but has none now
+    const buildingsDestroyedByHouse = new Map<number, boolean>();
+    // Check all house indices — if structures existed for a house but none are alive now
+    for (const s of this.structures) {
+      const hi = Game.HOUSE_TO_INDEX[s.house];
+      if (hi !== undefined && !WALL_TYPES.has(s.type) && !housesWithBuildings.has(hi)) {
+        buildingsDestroyedByHouse.set(hi, true);
+      }
+    }
+    const shared = {
+      structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories,
+      houseAlive, houseUnitsAlive, houseBuildingsAlive,
+      builtStructureTypes: this.builtStructureTypes,
+      buildingsDestroyedByHouse, fakesExist,
+    };
 
     for (const trigger of this.triggers) {
       // Volatile (0) and semi-persistent (1): skip once fired
@@ -5458,6 +5523,8 @@ export class Game {
 
       // Execute actions
       const executeAction = (action: typeof trigger.action1) => {
+        // Skip team spawning if team was destroyed by DESTROY_TEAM
+        if ((action.action === 4 || action.action === 7) && this.destroyedTeams.has(action.team)) return;
         const result = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
           this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH }
@@ -5520,6 +5587,7 @@ export class Game {
         if (result.setTimer !== undefined) {
           this.missionTimer = result.setTimer * TIME_UNIT_TICKS;
           this.missionTimerExpired = false;
+          this.missionTimerRunning = true; // SET_TIMER implicitly starts the timer
         }
         if (result.timerExtend !== undefined) {
           this.missionTimer += result.timerExtend * TIME_UNIT_TICKS;
@@ -5527,6 +5595,55 @@ export class Game {
         }
         // Autocreate: enable AI auto-spawning (queen spawning + base rebuild)
         if (result.autocreate) this.autocreateEnabled = true;
+        // Destroy team: mark team as destroyed, preventing future spawns
+        if (result.destroyTeam !== undefined) this.destroyedTeams.add(result.destroyTeam);
+        // Start/stop mission timer
+        if (result.startTimer) this.missionTimerRunning = true;
+        if (result.stopTimer) this.missionTimerRunning = false;
+        // Subtract time from mission timer
+        if (result.timerSubtract !== undefined) {
+          this.missionTimer = Math.max(0, this.missionTimer - result.timerSubtract * TIME_UNIT_TICKS);
+        }
+        // Fire sale: sell all buildings of trigger house and set units to HUNT
+        if (result.fireSale && trigger.house !== undefined) {
+          const saleHouse = houseIdToHouse(trigger.house);
+          for (const s of this.structures) {
+            if (s.alive && s.house === saleHouse && s.sellProgress === undefined) {
+              s.sellProgress = 0;
+            }
+          }
+          for (const e of this.entities) {
+            if (e.alive && e.house === saleHouse) e.mission = Mission.HUNT;
+          }
+        }
+        // Reveal zone: reveal around waypoint with 15-cell radius
+        if (result.revealZone !== undefined) {
+          const wp = this.waypoints.get(result.revealZone);
+          if (wp) this.revealAroundCell(wp.cx, wp.cy, 15);
+        }
+        // Charge one superweapon of trigger house
+        if (result.oneSpecial && trigger.house !== undefined) {
+          const swHouse = houseIdToHouse(trigger.house);
+          for (const [, state] of this.superweapons) {
+            if (state.house === swHouse && !state.ready) {
+              state.ready = true;
+              break;
+            }
+          }
+        }
+        // Charge all superweapons of trigger house
+        if (result.fullSpecial && trigger.house !== undefined) {
+          const swHouse = houseIdToHouse(trigger.house);
+          for (const [, state] of this.superweapons) {
+            if (state.house === swHouse) state.ready = true;
+          }
+        }
+        // Set AI preferred target
+        if (result.preferredTarget !== undefined && trigger.house !== undefined) {
+          const ptHouse = houseIdToHouse(trigger.house);
+          const aiState = this.aiStates.get(ptHouse);
+          if (aiState) (aiState as AIHouseState & { preferredTarget?: number }).preferredTarget = result.preferredTarget;
+        }
         // Begin production: activate AI for the specified house
         // C++ parity: this trigger gates unit/structure production for AI houses
         if (result.beginProduction !== undefined) {
@@ -5607,19 +5724,21 @@ export class Game {
             });
           }
         }
-        // Destroy the unit that triggered this (e.g. hazard zone kill)
+        // Destroy the attached object (entity/structure with matching triggerName)
         if (result.destroyTriggeringUnit) {
           for (const e of this.entities) {
-            if (!e.alive || !e.isPlayerUnit) continue;
-            const cellIdx = e.cell.cy * MAP_CELLS + e.cell.cx;
-            const trigName = this.map.cellTriggers.get(cellIdx);
-            if (trigName === trigger.name) {
+            if (e.alive && e.triggerName === trigger.name) {
               e.takeDamage(9999);
               this.effects.push({
                 type: 'explosion', x: e.pos.x, y: e.pos.y,
                 frame: 0, maxFrames: 18, size: 12,
                 sprite: 'fball1', spriteStart: 0,
               });
+            }
+          }
+          for (const s of this.structures) {
+            if (s.alive && s.triggerName === trigger.name) {
+              this.damageStructure(s, s.maxHp + 1);
             }
           }
         }
@@ -5630,6 +5749,9 @@ export class Game {
         executeAction(trigger.action2);
       }
     }
+
+    // Clear transient per-tick state
+    this.attackedTriggerNames.clear();
   }
 
   /** Display an EVA text message (by trigger data ID) */
@@ -6211,6 +6333,7 @@ export class Game {
       }
       this.entities.push(entity);
       this.entityById.set(entity.id, entity);
+      this.builtAircraftTypes.add(item.type);
       return;
     }
 
@@ -6229,6 +6352,9 @@ export class Game {
     entity.mission = Mission.GUARD;
     this.entities.push(entity);
     this.entityById.set(entity.id, entity);
+    // Track built unit types for TEVENT_BUILD_UNIT / TEVENT_BUILD_INFANTRY
+    if (unitStats?.isInfantry) this.builtInfantryTypes.add(item.type);
+    else this.builtUnitTypes.add(item.type);
 
     // If harvester, set it to auto-harvest
     if (unitType === UnitType.V_HARV) {
@@ -7972,6 +8098,9 @@ export class Game {
         this.evaMessages.push({ text: 'BUILDING INFILTRATED', tick: this.tick });
         break;
     }
+
+    // Track spy infiltration for TEVENT_SPIED
+    if (structure.triggerName) this.spiedBuildingTriggers.add(structure.triggerName);
 
     // Spy is consumed on infiltration
     spy.alive = false;

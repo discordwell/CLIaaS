@@ -3261,11 +3261,14 @@ export class Renderer {
           const clockSheet = assets.getSheet('clock');
           if (clockSheet) {
             const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)), clockSheet.meta.frameCount - 1);
-            // Darken cameo (approximates SHAPE_GHOST translucent table)
-            ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.35)' : 'rgba(0,0,0,0.35)';
-            ctx.fillRect(stripX, iy, camW, camH);
+            // Draw clock shape as dark overlay (extracted sprites are green;
+            // brightness(0) turns them black, matching C++ SHAPE_GHOST translucent table)
+            ctx.save();
+            ctx.globalAlpha = lowPower ? 0.55 : 0.5;
+            ctx.filter = 'brightness(0)';
             const clockScale = camW / clockSheet.meta.frameWidth;
             assets.drawFrame(ctx, 'clock', clockFrame, stripX, iy, { scale: clockScale });
+            ctx.restore();
           } else {
             const uncoverH = camH * (1 - progress);
             ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
@@ -3299,10 +3302,13 @@ export class Renderer {
         if (this.sidebarCredits < item.cost) {
           const clockSheet = assets.getSheet('clock');
           if (clockSheet) {
-            ctx.fillStyle = 'rgba(0,0,0,0.35)';
-            ctx.fillRect(stripX, iy, camW, camH);
+            // Full clock (frame 0) as dark overlay — same brightness(0) fix
+            ctx.save();
+            ctx.globalAlpha = 0.5;
+            ctx.filter = 'brightness(0)';
             const clockScale = camW / clockSheet.meta.frameWidth;
             assets.drawFrame(ctx, 'clock', 0, stripX, iy, { scale: clockScale });
+            ctx.restore();
           } else {
             ctx.fillStyle = 'rgba(0,0,0,0.4)';
             ctx.fillRect(stripX, iy, camW, camH);

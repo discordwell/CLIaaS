@@ -57,7 +57,7 @@ const TACTION_WIN = 1;
 const TACTION_LOSE = 2;
 const TACTION_BEGIN_PRODUCTION = 3;
 const TACTION_CREATE_TEAM = 4;
-// 5 = DESTROY_TEAM (unused)
+const TACTION_DESTROY_TEAM = 5;
 const TACTION_ALL_HUNT = 6;
 const TACTION_REINFORCEMENTS = 7;
 const TACTION_DZ = 8;
@@ -75,18 +75,18 @@ const TACTION_PLAY_SOUND = 19;
 const TACTION_PLAY_MUSIC = 20;            // TR4: play music track (C++ TACTION_PLAY_MUSIC)
 const TACTION_PLAY_SPEECH = 21;
 const TACTION_FORCE_TRIGGER = 22;
-// 23 = START_TIMER (unused)
-// 24 = STOP_TIMER (unused)
+const TACTION_START_TIMER = 23;
+const TACTION_STOP_TIMER = 24;
 const TACTION_TIMER_EXTEND = 25;          // C++ TACTION_ADD_TIMER
-// 26 = SUB_TIMER (unused)
+const TACTION_SUB_TIMER = 26;
 const TACTION_SET_TIMER = 27;
 const TACTION_SET_GLOBAL = 28;
 const TACTION_CLEAR_GLOBAL = 29;
 // 30 = BASE_BUILDING (unused)
 const TACTION_CREEP_SHADOW = 31;
 const TACTION_DESTROY_OBJECT = 32;
-// 33 = 1_SPECIAL (unused)
-// 34 = FULL_SPECIAL (unused)
+const TACTION_1_SPECIAL = 33;
+const TACTION_FULL_SPECIAL = 34;
 const TACTION_PREFERRED_TARGET = 35;      // TR4: designate preferred target for AI house
 const TACTION_LAUNCH_NUKES = 36;          // C++ TACTION_LAUNCH_NUKES — launch fake nukes from all silos
 
@@ -1653,8 +1653,14 @@ export interface TriggerGameState {
   builtStructureTypes: Set<string>;
   // Trigger attachment: names of triggers whose attached object was destroyed
   destroyedTriggerNames: Set<string>;
+  // Trigger attachment: names of triggers whose attached object was attacked (damaged)
+  attackedTriggerNames: Set<string>;
   // Per-house alive status (for ALL_DESTROYED — RA house index → has alive units/structures)
   houseAlive: Map<number, boolean>;
+  // Per-house: any living UNITS (entities only, not structures) — for UNITS_DESTROYED
+  houseUnitsAlive: Map<number, boolean>;
+  // Per-house: any living BUILDINGS (structures only, excluding walls) — for BUILDINGS_DESTROYED
+  houseBuildingsAlive: Map<number, boolean>;
   isLowPower: boolean;        // player is low on power
   playerCredits: number;      // player's current credits
   // TR3: new event state fields
@@ -1724,8 +1730,8 @@ export function checkTriggerEvent(
       // Area discovered / zone entered — use playerEntered flag (set via cell triggers)
       return state.playerEntered;
     case TEVENT_ATTACKED:
-      // Something was attacked — simplified: always true after first combat
-      return state.enemyKillCount > 0;
+      // Attached object was attacked (damaged) — per-entity tracking via triggerName
+      return state.attackedTriggerNames.has(state.triggerName);
     case TEVENT_BUILD: {
       // Player has built a structure of the specified type (event.data = StructType index)
       // Uses the same STRUCT_TYPES mapping as BUILDING_EXISTS
@@ -1761,8 +1767,8 @@ export function checkTriggerEvent(
       return state.playerEntered;
     case TEVENT_UNITS_DESTROYED:
       // All units of a house destroyed (event.data = RA house index)
-      // C++ index 9: "all house's units destroyed" — uses houseAlive check
-      return !(state.houseAlive.get(event.data) ?? false);
+      // C++ index 9: "all house's units destroyed" — checks units only, not structures
+      return !(state.houseUnitsAlive.get(event.data) ?? false);
     case TEVENT_CREDITS:
       // Player has accumulated a certain amount of credits
       return state.playerCredits >= event.data;
@@ -1829,6 +1835,12 @@ export interface TriggerActionResult {
   playMusic?: number;             // play music track (PLAY_MUSIC)
   preferredTarget?: number;       // set preferred target type for AI (PREFERRED_TARGET)
   beginProduction?: number;       // house index that should start AI production (BEGIN_PRODUCTION)
+  destroyTeam?: number;           // team index to mark as destroyed (DESTROY_TEAM)
+  startTimer?: boolean;           // start the mission timer (START_TIMER)
+  stopTimer?: boolean;            // stop the mission timer (STOP_TIMER)
+  timerSubtract?: number;         // subtract time from mission timer (SUB_TIMER)
+  oneSpecial?: boolean;           // charge one superweapon (1_SPECIAL)
+  fullSpecial?: boolean;          // charge all superweapons (FULL_SPECIAL)
 }
 
 /** Execute a trigger action — returns result with entities and side effects */
@@ -1970,6 +1982,19 @@ export function executeTriggerAction(
       globals.delete(action.data);
       break;
 
+    case TACTION_START_TIMER:
+      result.startTimer = true;
+      break;
+
+    case TACTION_STOP_TIMER:
+      result.stopTimer = true;
+      break;
+
+    case TACTION_SUB_TIMER:
+      // Subtract time from mission timer (action.data in 1/10th minute units)
+      result.timerSubtract = action.data;
+      break;
+
     case TACTION_FORCE_TRIGGER: {
       // Force another trigger to fire on the next check regardless of event conditions
       if (action.trigger >= 0 && action.trigger < triggers.length) {
@@ -2000,6 +2025,11 @@ export function executeTriggerAction(
 
     case TACTION_ALLOWWIN:
       result.allowWin = true;
+      break;
+
+    case TACTION_DESTROY_TEAM:
+      // Mark a team as destroyed — prevents future CREATE_TEAM/REINFORCEMENTS for this team
+      result.destroyTeam = action.team;
       break;
 
     case TACTION_ALL_HUNT:
@@ -2088,6 +2118,16 @@ export function executeTriggerAction(
     case TACTION_PREFERRED_TARGET:
       // Designate preferred target type for AI house (action.data = quarry type)
       result.preferredTarget = action.data;
+      break;
+
+    case TACTION_1_SPECIAL:
+      // Charge one superweapon of the trigger's house
+      result.oneSpecial = true;
+      break;
+
+    case TACTION_FULL_SPECIAL:
+      // Charge all superweapons of the trigger's house
+      result.fullSpecial = true;
       break;
 
     case TACTION_LAUNCH_NUKES:

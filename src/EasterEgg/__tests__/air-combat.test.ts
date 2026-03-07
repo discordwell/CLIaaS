@@ -29,7 +29,7 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('MiG');
     expect(s.strength).toBe(50);
     expect(s.armor).toBe('light');
-    expect(s.speed).toBe(20);
+    expect(s.speed).toBe(24);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isFixedWing).toBe(true);
@@ -56,7 +56,7 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('Longbow');
     expect(s.strength).toBe(225);
     expect(s.armor).toBe('heavy');
-    expect(s.speed).toBe(16);
+    expect(s.speed).toBe(18);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);

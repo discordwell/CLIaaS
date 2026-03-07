@@ -28,8 +28,8 @@ describe('ANT1 unit stats (C++ parity)', () => {
     expect(ant1.armor).toBe('heavy');
   });
 
-  it('speed is 8 (C++ RULES.INI)', () => {
-    expect(ant1.speed).toBe(8);
+  it('speed is 14 (C++ MPH_MEDIUM_FAST)', () => {
+    expect(ant1.speed).toBe(14);
   });
 
   it('ROT is 8 (C++ RULES.INI)', () => {
@@ -216,7 +216,7 @@ describe('ANT2 and ANT3 stats', () => {
     const ant2 = UNIT_STATS.ANT2;
     expect(ant2.strength).toBe(75);
     expect(ant2.armor).toBe('heavy');
-    expect(ant2.speed).toBe(8);
+    expect(ant2.speed).toBe(14);
     expect(ant2.sight).toBe(3);
     expect(ant2.primaryWeapon).toBe('FireballLauncher');
   });
@@ -225,7 +225,7 @@ describe('ANT2 and ANT3 stats', () => {
     const ant3 = UNIT_STATS.ANT3;
     expect(ant3.strength).toBe(85);
     expect(ant3.armor).toBe('light');
-    expect(ant3.speed).toBe(7);
+    expect(ant3.speed).toBe(12);
     expect(ant3.sight).toBe(3);
     expect(ant3.primaryWeapon).toBe('TeslaZap');
   });
