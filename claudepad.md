@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-07T09:30Z — Session 124: Allied Mission 1 (SCG01EA) Bug Fixes
+- **BARL/BRL3 barrel sprites**: Generated procedural barrel sprites (24x24, 2 frames each). Added to manifest, STRUCTURE_IMAGES, BUILDING_FRAME_TABLE. Barrel explosions already implemented.
+- **Einstein helicopter script**: Fixed 4 bugs — aircraft edge spawn, transport landing without helipad, click detection at flight altitude, TMISSION_MOVE arrival-first check. Full rescue→evac→win chain works.
+- **Soviet AI production**: Added `productionEnabled` flag to AIHouseState, gated behind BEGIN_PRODUCTION trigger. SCG01EA has no such trigger, so Soviet base stays passive.
+- **STRUCTURE_SIZE audit**: Reverted incorrect dimension changes from agent. Added missing entries (TSLA, AGUN, GAP, KENN, civilian V-types, etc.) with correct values.
+- 2222/2222 tests passing. 3 new test files (26 tests).
+
 ## 2026-03-07T06:15Z — Session 123: Plan 21 Phase D — Polish, Security Fixes, Deploy
 - Ran full test suite post-Phase C: 352 files pass, 5935 tests pass (4 EE pre-existing failures)
 - **D1**: Plugin dependency resolution — `dependencies` field on PluginManifestV2, install-time check, uninstall-time warning, 13 new tests

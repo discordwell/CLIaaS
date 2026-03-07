@@ -49,6 +49,8 @@ function makeGame(overrides: Partial<MockGame> = {}): MockGame {
     },
     _repairing: new Set<number>(),
     getAvailableItems: () => [],
+    isAllied: (house: House, playerHouse: House) =>
+      house === playerHouse || house === House.Greece || house === House.Neutral,
     startProduction: vi.fn(),
     cancelProduction: vi.fn(),
     placeStructure: vi.fn().mockReturnValue(true),
@@ -151,6 +153,25 @@ describe('serializeState', () => {
     expect(s.structures[0].t).toBe('POWR');
     expect(s.structures[0].ally).toBe(true);
     expect(s.structures[0].rep).toBe(true);
+  });
+
+  it('treats neutral structures as allied when the game alliance table does', () => {
+    const game = makeGame();
+    const struct = makeStructure('V19', House.Neutral, 54, 49);
+    (game as unknown as { structures: MapStructure[] }).structures = [struct];
+
+    const s = serializeState(game as unknown as Parameters<typeof serializeState>[0]);
+    expect(s.structures[0].ally).toBe(true);
+  });
+
+  it('serializes structure coordinates using the footprint center cell', () => {
+    const game = makeGame();
+    const struct = makeStructure('FIX', House.Spain, 71, 69);
+    (game as unknown as { structures: MapStructure[] }).structures = [struct];
+
+    const s = serializeState(game as unknown as Parameters<typeof serializeState>[0]);
+    expect(s.structures[0].cx).toBe(72);
+    expect(s.structures[0].cy).toBe(69); // FIX is [3,2]: cy = 69 + floor((2-1)/2) = 69
   });
 
   it('includes cell coordinates not pixel coords', () => {

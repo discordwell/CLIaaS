@@ -9,8 +9,8 @@ import {
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
-  Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
-  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
+	  Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
+	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, type StripType, getStripSide,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames, modifyDamage,
@@ -65,6 +65,8 @@ const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
 interface AIHouseState {
   house: House;
   phase: 'economy' | 'buildup' | 'attack';
+  // Production gate — in campaign missions, AI only produces after BEGIN_PRODUCTION trigger
+  productionEnabled: boolean;
   // Build order
   buildQueue: string[];
   lastBuildTick: number;
@@ -409,13 +411,6 @@ export class Game {
     this.nukePendingTick = 0;
     this.nukePendingSource = null;
     this.globals.clear();
-    // SCA01EA: Set global 1 at start so ant waves spawn immediately.
-    // rvl2 would set it at time 30 anyway, but this ensures action from the start.
-    // Other scenarios (SCA02-04) use global 1 for different purposes (DZ flares,
-    // reinforcement timing) and must NOT have it set early.
-    if (scenarioId === 'SCA01EA') {
-      this.globals.add(1);
-    }
     // First crate spawns after 60 seconds
     this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
     this.crates = [];
@@ -792,33 +787,6 @@ export class Game {
               }
               entity.passengers = [];
             }
-          }
-        }
-      }
-    }
-
-    // H6: Infantry scatter from approaching vehicles (C++ techno.cpp)
-    // Every 4 ticks, check if a moving vehicle is in the same cell as idle infantry
-    if (this.tick % 4 === 0) {
-      for (const inf of this.entities) {
-        if (!inf.alive || !inf.stats.isInfantry || inf.isAnt) continue;
-        if (inf.mission !== Mission.GUARD && inf.mission !== Mission.AREA_GUARD) continue;
-        const ic = inf.cell;
-        for (const veh of this.entities) {
-          if (!veh.alive || veh.stats.isInfantry || veh.id === inf.id) continue;
-          if (!veh.moveTarget && veh.mission !== Mission.MOVE && veh.mission !== Mission.HUNT) continue;
-          const vc = veh.cell;
-          if (ic.cx === vc.cx && ic.cy === vc.cy) {
-            // Scatter infantry to adjacent passable cell
-            const angle = Math.atan2(inf.pos.y - veh.pos.y, inf.pos.x - veh.pos.x);
-            const sx = inf.pos.x + Math.cos(angle) * CELL_SIZE * 0.8;
-            const sy = inf.pos.y + Math.sin(angle) * CELL_SIZE * 0.8;
-            const sc = worldToCell(sx, sy);
-            if (this.map.isPassable(sc.cx, sc.cy)) {
-              inf.pos.x = sx;
-              inf.pos.y = sy;
-            }
-            break;
           }
         }
       }
@@ -2282,6 +2250,16 @@ export class Game {
         closestDist = dist;
         closest = e;
       }
+      // Aircraft: also check against visual position (offset up by flightAltitude)
+      // so players can click on airborne aircraft where they appear on screen
+      if (e.isAirUnit && e.flightAltitude > 0) {
+        const dyAlt = (e.pos.y - e.flightAltitude) - pos.y;
+        const distAlt = Math.sqrt(dx * dx + dyAlt * dyAlt);
+        if (distAlt < closestDist) {
+          closestDist = distAlt;
+          closest = e;
+        }
+      }
     }
     return closest;
   }
@@ -2588,15 +2566,17 @@ export class Game {
         if (!wp) { entity.teamMissionIndex++; return; }
         const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
 
-        if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+        // Check arrival first — aircraft may have already completed the move
+        // (aircraftState machine clears moveTarget on arrival before team mission scans)
+        if (worldDist(entity.pos, target) < 2) {
+          // Arrived at waypoint — advance to next mission
+          entity.teamMissionIndex++;
+        } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.target = null;
           entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
-        } else if (worldDist(entity.pos, target) < 2) {
-          // Arrived at waypoint — advance to next mission
-          entity.teamMissionIndex++;
         }
         break;
       }
@@ -2831,13 +2811,13 @@ export class Game {
             return;
           }
         }
-        if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+        if (worldDist(entity.pos, target) < 2) {
+          entity.teamMissionIndex++;
+        } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
-        } else if (worldDist(entity.pos, target) < 2) {
-          entity.teamMissionIndex++;
         }
         break;
       }
@@ -2849,17 +2829,17 @@ export class Game {
         if (!wp) { entity.teamMissionIndex++; return; }
         const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
 
-        if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+        if (worldDist(entity.pos, target) < 2) {
+          // Arrived — switch to guard mode and complete mission
+          entity.mission = Mission.GUARD;
+          entity.moveTarget = null;
+          entity.teamMissionIndex++;
+        } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.target = null;
           entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
-        } else if (worldDist(entity.pos, target) < 2) {
-          // Arrived — switch to guard mode and complete mission
-          entity.mission = Mission.GUARD;
-          entity.moveTarget = null;
-          entity.teamMissionIndex++;
         }
         break;
       }
@@ -3245,20 +3225,21 @@ export class Game {
       }
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
       const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
-      if (occ > 0 && occ !== entity.id && entity.moveTarget &&
-          this.tick - entity.lastPathRecalc > 15) {
-        entity.lastPathRecalc = this.tick;
-        const newPath = findPath(
-          this.map, entity.cell,
-          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-          entity.isNavalUnit, entity.stats.speedClass
-        );
-        if (newPath.length === 0) {
-          // Can't find alternate route — wait a moment
-          return;
+      if (occ > 0 && occ !== entity.id && entity.moveTarget) {
+        if (this.tick - entity.lastPathRecalc > 15) {
+          entity.lastPathRecalc = this.tick;
+          const newPath = findPath(
+            this.map, entity.cell,
+            worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+            entity.isNavalUnit, entity.stats.speedClass
+          );
+          if (newPath.length === 0) {
+            // Can't find alternate route — wait a moment
+            return;
+          }
+          entity.path = newPath;
+          entity.pathIndex = 0;
         }
-        entity.path = newPath;
-        entity.pathIndex = 0;
       }
       const target: WorldPos = {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
@@ -3269,72 +3250,65 @@ export class Game {
         entity.pathIndex++;
       }
     } else if (entity.moveTarget) {
-      // M3: Close-enough distance (C++ Rule.CloseEnoughDistance ~2.5 cells)
-      // Unit considers itself "arrived" if within 2.5 cells of final destination
+      // C++ drive.cpp only accepts "close enough" as a fallback when pathing is blocked.
+      // A direct move order should otherwise continue to the exact commanded cell.
       const closeEnough = 2.5; // worldDist returns cells
-      const distToTarget = worldDist(entity.pos, entity.moveTarget);
-      if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
+      const finishMove = () => {
         entity.moveTarget = null;
-        entity.mission = this.idleMission(entity);
-        entity.animState = AnimState.IDLE;
-      } else {
-        // Bug 3 fix: Before moving directly, check if the unit would enter an impassable cell.
-        // Calculate which cell the unit would move into based on movement direction and speed.
-        const speed = this.movementSpeed(entity);
-        const dx = entity.moveTarget.x - entity.pos.x;
-        const dy = entity.moveTarget.y - entity.pos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 0) {
-          const step = Math.min(speed * entity.speedBias, dist);
-          const nextX = entity.pos.x + (dx / dist) * step;
-          const nextY = entity.pos.y + (dy / dist) * step;
-          const nextCellPos = worldToCell(nextX, nextY);
-          const currentCell = entity.cell;
-          // Only check terrain if we're actually crossing into a new cell
-          if ((nextCellPos.cx !== currentCell.cx || nextCellPos.cy !== currentCell.cy)) {
-            const passable = entity.isNavalUnit
-              ? this.map.isWaterPassable(nextCellPos.cx, nextCellPos.cy)
-              : this.map.isPassable(nextCellPos.cx, nextCellPos.cy);
-            // Also check occupancy on the new cell
-            const occBlocked = !entity.isNavalUnit &&
-              this.map.getOccupancy(nextCellPos.cx, nextCellPos.cy) > 0 &&
-              this.map.getOccupancy(nextCellPos.cx, nextCellPos.cy) !== entity.id;
-            if (!passable || occBlocked) {
-              // Re-pathfind instead of sliding through impassable terrain
-              if (this.tick - entity.lastPathRecalc > 15) {
-                entity.lastPathRecalc = this.tick;
-                const newPath = findPath(
-                  this.map, currentCell,
-                  worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-                  entity.isNavalUnit, entity.stats.speedClass
-                );
-                if (newPath.length > 0) {
-                  entity.path = newPath;
-                  entity.pathIndex = 0;
-                } else {
-                  // No valid path — stop movement
-                  entity.moveTarget = null;
-                  entity.mission = this.idleMission(entity);
-                  entity.animState = AnimState.IDLE;
-                }
+        if (entity.moveQueue.length > 0) {
+          const next = entity.moveQueue.shift()!;
+          entity.moveTarget = next;
+          entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit, entity.stats.speedClass);
+          entity.pathIndex = 0;
+        } else {
+          entity.mission = this.idleMission(entity);
+          entity.animState = AnimState.IDLE;
+        }
+      };
+
+      // Bug 3 fix: Before moving directly, check if the unit would enter an impassable cell.
+      // Calculate which cell the unit would move into based on movement direction and speed.
+      const speed = this.movementSpeed(entity);
+      const dx = entity.moveTarget.x - entity.pos.x;
+      const dy = entity.moveTarget.y - entity.pos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const distToTarget = worldDist(entity.pos, entity.moveTarget);
+      if (dist > 0) {
+        const step = Math.min(speed * entity.speedBias, dist);
+        const nextX = entity.pos.x + (dx / dist) * step;
+        const nextY = entity.pos.y + (dy / dist) * step;
+        const nextCellPos = worldToCell(nextX, nextY);
+        const currentCell = entity.cell;
+        // Only check terrain if we're actually crossing into a new cell
+        if ((nextCellPos.cx !== currentCell.cx || nextCellPos.cy !== currentCell.cy)) {
+          const passable = entity.isNavalUnit
+            ? this.map.isWaterPassable(nextCellPos.cx, nextCellPos.cy)
+            : this.map.isPassable(nextCellPos.cx, nextCellPos.cy);
+          // Also check occupancy on the new cell
+          const occId = this.map.getOccupancy(nextCellPos.cx, nextCellPos.cy);
+          const occBlocked = !entity.isNavalUnit && occId > 0 && occId !== entity.id;
+          if (!passable || occBlocked) {
+            // Re-pathfind instead of sliding through impassable terrain.
+            if (this.tick - entity.lastPathRecalc > 15) {
+              entity.lastPathRecalc = this.tick;
+              const newPath = findPath(
+                this.map, currentCell,
+                worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+                entity.isNavalUnit, entity.stats.speedClass
+              );
+              if (newPath.length > 0) {
+                entity.path = newPath;
+                entity.pathIndex = 0;
+              } else if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
+                finishMove();
               }
-              return;
             }
+            return;
           }
         }
-        if (entity.moveToward(entity.moveTarget, speed)) {
-          entity.moveTarget = null;
-          // Check for queued waypoints
-          if (entity.moveQueue.length > 0) {
-            const next = entity.moveQueue.shift()!;
-            entity.moveTarget = next;
-            entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit, entity.stats.speedClass);
-            entity.pathIndex = 0;
-          } else {
-            entity.mission = this.idleMission(entity);
-            entity.animState = AnimState.IDLE;
-          }
-        }
+      }
+      if (entity.moveToward(entity.moveTarget, speed)) {
+        finishMove();
       }
     } else {
       entity.mission = this.idleMission(entity);
@@ -3713,6 +3687,7 @@ export class Game {
         let bestStructDist = huntRange;
         for (const s of this.structures) {
           if (!s.alive) continue;
+          if (s.house === House.Neutral) continue;
           if (this.isAllied(entity.house, s.house)) continue;
           const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
           const dist = worldDist(entity.pos, sPos);
@@ -3910,6 +3885,7 @@ export class Game {
       let bestStructDist = scanRange;
       for (const s of this.structures) {
         if (!s.alive) continue;
+        if (s.house === House.Neutral) continue;
         if (this.isAllied(entity.house, s.house)) continue;
         const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
         const dist = worldDist(entity.pos, sPos);
@@ -4764,7 +4740,13 @@ export class Game {
         // Find home pad
         const padIdx = this.findLandingPad(entity);
         if (padIdx < 0) {
-          // No pad available — orbit in place
+          // No pad available — transport helicopters land on the ground (C++ aircraft.cpp)
+          // Chinooks can land anywhere; combat aircraft orbit until a pad frees up
+          if (entity.isTransport) {
+            entity.aircraftState = 'landing';
+            entity.landedAtStructure = -1;
+          }
+          // Combat aircraft orbit in place
           return true;
         }
         const pad = this.structures[padIdx];
@@ -5546,10 +5528,16 @@ export class Game {
         // Autocreate: enable AI auto-spawning (queen spawning + base rebuild)
         if (result.autocreate) this.autocreateEnabled = true;
         // Begin production: activate AI for the specified house
+        // C++ parity: this trigger gates unit/structure production for AI houses
         if (result.beginProduction !== undefined) {
           const bpHouse = houseIdToHouse(result.beginProduction);
           if (!this.aiStates.has(bpHouse) && !this.isAllied(bpHouse, this.playerHouse)) {
-            this.aiStates.set(bpHouse, this.createAIHouseState(bpHouse));
+            const newState = this.createAIHouseState(bpHouse);
+            newState.productionEnabled = true;
+            this.aiStates.set(bpHouse, newState);
+          } else {
+            const existingState = this.aiStates.get(bpHouse);
+            if (existingState) existingState.productionEnabled = true;
           }
         }
         // Airstrike: explosion + damage at trigger waypoint
@@ -7097,6 +7085,7 @@ export class Game {
     return {
       house,
       phase: 'economy',
+      productionEnabled: false, // C++ parity: AI only produces after BEGIN_PRODUCTION trigger
       buildQueue: [],
       lastBuildTick: 0,
       buildCooldown: 0,
@@ -7408,6 +7397,8 @@ export class Game {
     if (this.tick % 90 !== 0) return; // every 6 seconds
 
     for (const [house, state] of this.aiStates) {
+      // C++ parity: AI only builds structures after BEGIN_PRODUCTION trigger
+      if (!state.productionEnabled) continue;
       // Need a ConYard
       if (this.aiCountStructure(house, 'FACT') === 0) continue;
 
@@ -7567,6 +7558,9 @@ export class Game {
       }
       state.refineryCount = this.aiCountStructure(house, 'PROC');
 
+      // C++ parity: AI only force-produces harvesters after BEGIN_PRODUCTION trigger
+      if (!state.productionEnabled) continue;
+
       // If 0 harvesters and has refinery + war factory → force-produce
       if (state.harvesterCount === 0 && state.refineryCount > 0 &&
           this.aiCountStructure(house, 'WEAP') > 0) {
@@ -7587,6 +7581,8 @@ export class Game {
     if (this.tick % 120 !== 0) return; // every 8 seconds
 
     for (const [house, state] of this.aiStates) {
+      // C++ parity: attack groups only form after BEGIN_PRODUCTION trigger
+      if (!state.productionEnabled) continue;
       if (state.phase !== 'buildup' && state.phase !== 'attack') continue;
 
       const staging = this.aiStagingArea(house);
@@ -7843,6 +7839,8 @@ export class Game {
       if (this.isAllied(house, this.playerHouse)) continue;
 
       const state = this.aiStates.get(house);
+      // C++ parity: strategic AI houses only produce after BEGIN_PRODUCTION trigger fires
+      if (state && !state.productionEnabled) continue;
       const hasTent = this.aiHasPrereq(house, 'TENT');
       const hasWeap = this.structures.some(s => s.alive && s.house === house && s.type === 'WEAP');
 

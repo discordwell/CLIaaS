@@ -6,6 +6,10 @@
  * Bug fix: FCOM (Forward Command Post) in SCA03EA.ini was missing from all three
  * tables, causing a yellow/brown box to render instead of the building sprite.
  * Also broadened V-series skip to catch non-Neutral V01-V18 (no sprites exist).
+ *
+ * BARL/BRL3 (explosive/bridge barrels) now have procedurally generated sprites
+ * via scripts/generate-barrel-sprites.ts with full STRUCTURE_IMAGES, BUILDING_FRAME_TABLE,
+ * and manifest.json coverage.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -59,8 +63,8 @@ const TURRET_TYPES = new Set(['GUN', 'SAM', 'AGUN']);
 const V_SERIES_NO_SPRITE = new Set(
   Array.from({ length: 18 }, (_, i) => `V${String(i + 1).padStart(2, '0')}`)
 );
-// Bridge/barrel structures (no individual sprites, rendered as small objects)
-const BRIDGE_TYPES = new Set(['BARL', 'BRL3']);
+// Bridge/barrel structures now have procedurally generated sprites
+const BRIDGE_TYPES = new Set<string>();  // empty — BARL/BRL3 now have full sprite coverage
 
 const INI_FILES = ['SCA01EA.ini', 'SCA02EA.ini', 'SCA03EA.ini', 'SCA04EA.ini'];
 
@@ -96,6 +100,44 @@ describe('Structure sprite coverage for ant missions', () => {
   it('fcom sprite exists in manifest with 2 frames', () => {
     expect(manifest['fcom']).toBeDefined();
     expect(manifest['fcom'].frameCount).toBe(2);
+  });
+
+  it('BARL is in STRUCTURE_IMAGES', () => {
+    expect(STRUCTURE_IMAGES.has('BARL')).toBe(true);
+  });
+
+  it('BRL3 is in STRUCTURE_IMAGES', () => {
+    expect(STRUCTURE_IMAGES.has('BRL3')).toBe(true);
+  });
+
+  it('barl is in BUILDING_FRAME_TABLE', () => {
+    expect(BUILDING_FRAME_TABLE.has('barl')).toBe(true);
+  });
+
+  it('brl3 is in BUILDING_FRAME_TABLE', () => {
+    expect(BUILDING_FRAME_TABLE.has('brl3')).toBe(true);
+  });
+
+  it('barl sprite exists in manifest with 2 frames', () => {
+    expect(manifest['barl']).toBeDefined();
+    expect(manifest['barl'].frameCount).toBe(2);
+  });
+
+  it('brl3 sprite exists in manifest with 2 frames', () => {
+    expect(manifest['brl3']).toBeDefined();
+    expect(manifest['brl3'].frameCount).toBe(2);
+  });
+
+  it('BARL/BRL3 are 1x1 in STRUCTURE_SIZE', () => {
+    expect(STRUCTURE_SIZE['BARL']).toEqual([1, 1]);
+    expect(STRUCTURE_SIZE['BRL3']).toEqual([1, 1]);
+  });
+
+  it('BARL/BRL3 have low HP for barrel explosions', () => {
+    expect(STRUCTURE_MAX_HP['BARL']).toBeDefined();
+    expect(STRUCTURE_MAX_HP['BARL']).toBeLessThanOrEqual(50);
+    expect(STRUCTURE_MAX_HP['BRL3']).toBeDefined();
+    expect(STRUCTURE_MAX_HP['BRL3']).toBeLessThanOrEqual(50);
   });
 
   it('V19 (oil pump) is in STRUCTURE_IMAGES', () => {

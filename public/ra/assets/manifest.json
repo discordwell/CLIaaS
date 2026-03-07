@@ -2581,5 +2581,23 @@
     "rows": 2,
     "sheetWidth": 768,
     "sheetHeight": 48
+  },
+  "barl": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 48,
+    "sheetHeight": 24
+  },
+  "brl3": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 48,
+    "sheetHeight": 24
   }
 }

@@ -6,7 +6,7 @@
 import {
   type CellPos, type UnitStats, type WeaponStats,
   CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
-  House, Mission, UnitType, GAME_TICKS_PER_SEC,
+  House, Mission, UnitType, AnimState, GAME_TICKS_PER_SEC,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
 } from './types';
@@ -951,20 +951,50 @@ const STRUCTURE_IMAGES: Record<string, string> = {
   FENC: 'fenc', BRIK: 'brik', SBAG: 'sbag', BARB: 'barb', WOOD: 'wood',
   QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
   FCOM: 'fcom', MISS: 'miss', V19: 'v19',
+  BARL: 'barl', BRL3: 'brl3',
 };
+
+const CIVILIAN_STRUCTURE_2X2 = ['V01', 'V02', 'V03', 'V04', 'V20', 'V21', 'V24', 'V25'];
+const CIVILIAN_STRUCTURE_2X1 = ['V05', 'V06', 'V07', 'V22', 'V26', 'V30', 'V31', 'V32', 'V33'];
+const CIVILIAN_STRUCTURE_1X1 = [
+  'V08', 'V09', 'V10', 'V11', 'V12', 'V13', 'V14', 'V15', 'V16', 'V17', 'V18', 'V19',
+  'V23', 'V27', 'V28', 'V29', 'V34', 'V35', 'V36',
+];
+const CIVILIAN_STRUCTURE_4X2 = ['V37'];
+const CIVILIAN_STRUCTURE_TYPES = [
+  ...CIVILIAN_STRUCTURE_2X2,
+  ...CIVILIAN_STRUCTURE_2X1,
+  ...CIVILIAN_STRUCTURE_1X1,
+  ...CIVILIAN_STRUCTURE_4X2,
+];
+
+function mapStructureSize(types: string[], size: [number, number]): Record<string, [number, number]> {
+  return Object.fromEntries(types.map(type => [type, size])) as Record<string, [number, number]>;
+}
+
+function mapStructureHp(types: string[], hp: number): Record<string, number> {
+  return Object.fromEntries(types.map(type => [type, hp])) as Record<string, number>;
+}
 
 // Building footprint sizes in cells (w, h) — defaults to 1x1
 export const STRUCTURE_SIZE: Record<string, [number, number]> = {
-  FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
+  FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], APWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
   PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
-  GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], HPAD: [2, 2], AFLD: [2, 2],
-  ATEK: [2, 2], STEK: [2, 2], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 2],
-  QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
-  FCOM: [2, 2], MISS: [3, 2], V19: [2, 2],
+  GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], TSLA: [1, 1], AGUN: [1, 1], GAP: [1, 1], PBOX: [1, 1],
+  HPAD: [2, 2], AFLD: [2, 2], ATEK: [2, 2], STEK: [2, 2], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 2], KENN: [1, 1],
+  SYRD: [3, 3], SPEN: [3, 3], BIO: [2, 2], HOSP: [2, 2],
+  FACF: [3, 3], DOMF: [2, 2], WEAF: [3, 2],
+  QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1], FTUR: [1, 1],
+  FCOM: [2, 2], MISS: [3, 2],
+  MINP: [1, 1], MINV: [1, 1],
   // Bridge structures (destroyable)
   BARL: [1, 1], BRL3: [1, 1],
   // Walls (1x1)
-  SBAG: [1, 1], FENC: [1, 1], BARB: [1, 1], BRIK: [1, 1],
+  SBAG: [1, 1], FENC: [1, 1], BARB: [1, 1], BRIK: [1, 1], WOOD: [1, 1], CYCL: [1, 1],
+  ...mapStructureSize(CIVILIAN_STRUCTURE_2X2, [2, 2]),
+  ...mapStructureSize(CIVILIAN_STRUCTURE_2X1, [2, 1]),
+  ...mapStructureSize(CIVILIAN_STRUCTURE_1X1, [1, 1]),
+  ...mapStructureSize(CIVILIAN_STRUCTURE_4X2, [4, 2]),
 };
 
 // Structure max HP overrides (default is 256)
@@ -975,10 +1005,14 @@ export const STRUCTURE_MAX_HP: Record<string, number> = {
   PBOX: 400, HBOX: 600, AGUN: 400, FTUR: 400, KENN: 400,
   ATEK: 400, STEK: 600, IRON: 400, PDOX: 400, MSLO: 400,
   FIX: 800, SILO: 300, FACT: 1000,
-  SYRD: 1000, SPEN: 1000,
+  SYRD: 1000, SPEN: 1000, BIO: 600, HOSP: 400,
+  FACF: 30, DOMF: 30, WEAF: 30,
   QUEE: 800, LAR1: 25, LAR2: 50,
-  BARL: 150, BRL3: 150,
-  FCOM: 500, MISS: 600, V19: 1000,
+  MINP: 1, MINV: 1,
+  BARL: 10, BRL3: 10,
+  SBAG: 1, FENC: 1, BARB: 1, BRIK: 1, WOOD: 1, CYCL: 1,
+  FCOM: 400, MISS: 400,
+  ...mapStructureHp(CIVILIAN_STRUCTURE_TYPES, 400),
 };
 
 export interface ScenarioResult {
@@ -1133,8 +1167,6 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   // Create structures from INI and mark their cells as impassable
   const structures: MapStructure[] = [];
   for (const s of data.structures) {
-    // Skip V-series village buildings without sprites (V01-V18 have no assets; V19 oil pump does)
-    if (s.type.startsWith('V') && s.type !== 'V19') continue;
     const pos = cellIndexToPos(s.cell);
     const image = STRUCTURE_IMAGES[s.type] ?? s.type.toLowerCase();
     const maxHp = STRUCTURE_MAX_HP[s.type] ?? 256;
@@ -1145,7 +1177,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       house: toHouse(s.house),
       cx: pos.cx,
       cy: pos.cy,
-      hp: Math.floor((s.hp / 256) * maxHp),
+      hp: Math.round((s.hp / 256) * maxHp),
       maxHp,
       alive: s.hp > 0,
       rubble: false,
@@ -1871,6 +1903,39 @@ export function executeTriggerAction(
           // so they can start moving before being killed (C++ building-exit protection equivalent)
           if (CIVILIAN_UNIT_TYPES.has(member.type)) {
             entity.invulnTick = 90; // ~6 seconds at 15 FPS — enough to escape spawn zone
+          }
+          // Aircraft reinforcements: spawn at house edge, fly in to origin waypoint
+          // C++ ScenarioClass::Create_Army spawns aircraft at the map edge, not the origin.
+          // Only for pure aircraft teams (no infantry members) — teams with infantry use
+          // origin spawn so the transport unloads passengers at the intended position.
+          const hasInfantryMember = team.members.some(m => {
+            const ut = toUnitType(m.type);
+            return ut ? (UNIT_STATS[m.type]?.isInfantry ?? false) : false;
+          });
+          if (entity.stats.isAircraft && !hasInfantryMember && houseEdges && mapBounds) {
+            const teamHouse = houseIdToHouse(team.house);
+            const edge = houseEdges.get(teamHouse)?.toLowerCase();
+            if (edge) {
+              const bx = mapBounds.x, by = mapBounds.y, bw = mapBounds.w, bh = mapBounds.h;
+              // Position at edge, roughly aligned with the origin waypoint
+              let edgeX = wp!.cx, edgeY = wp!.cy;
+              switch (edge) {
+                case 'north': edgeY = by; break;
+                case 'south': edgeY = by + bh - 1; break;
+                case 'east':  edgeX = bx + bw - 1; break;
+                case 'west':  edgeX = bx; break;
+              }
+              const edgeWorld = cellToWorld(edgeX, edgeY);
+              entity.pos = { x: edgeWorld.x, y: edgeWorld.y };
+              entity.prevPos = { x: edgeWorld.x, y: edgeWorld.y };
+            }
+            // Start airborne in flying state (not landed on the ground)
+            entity.aircraftState = 'flying';
+            entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
+            entity.animState = AnimState.WALK;
+            // Set initial MOVE toward the origin waypoint so the first TMISSION_MOVE works naturally
+            entity.mission = Mission.MOVE;
+            entity.moveTarget = { x: world.x, y: world.y };
           }
           // Track transports and infantry for auto-loading
           if (entity.isTransport && !transport) {

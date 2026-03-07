@@ -76,6 +76,9 @@ const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: num
   quee: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // queen chamber pulses
   lar1: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // small larva
   lar2: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // large larva
+  // Bridge barrels (destroyable)
+  barl: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // explosive barrel
+  brl3: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // bridge barrel
   // Civilian structures
   v19:  { idleFrame: 0, damageFrame: 14, idleAnimCount: 14 },   // Oil pump (animated)
   // Naval production structures
