@@ -846,4 +846,7 @@ CREATE POLICY tenant_isolation ON billing_events
 
 -- user_mfa — user-level, not workspace-scoped. Skip.
 -- marketplace_listings — global catalog. Skip.
--- permissions — already has read-only policy. Skip.
+-- permissions — global catalog, SELECT for all. Add write policy for migration/seeding.
+CREATE POLICY permissions_write ON permissions FOR INSERT WITH CHECK (true);
+CREATE POLICY permissions_update ON permissions FOR UPDATE USING (true);
+CREATE POLICY permissions_delete ON permissions FOR DELETE USING (true);

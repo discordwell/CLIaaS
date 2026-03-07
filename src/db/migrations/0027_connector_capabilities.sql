@@ -16,3 +16,9 @@ CREATE TABLE IF NOT EXISTS connector_capabilities (
 
 CREATE UNIQUE INDEX IF NOT EXISTS connector_capabilities_unique_idx
   ON connector_capabilities(workspace_id, connector);
+
+-- RLS: workspace isolation
+ALTER TABLE connector_capabilities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE connector_capabilities FORCE ROW LEVEL SECURITY;
+CREATE POLICY workspace_isolation ON connector_capabilities
+  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);

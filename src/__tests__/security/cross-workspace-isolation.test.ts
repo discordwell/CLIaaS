@@ -229,6 +229,7 @@ describe('cross-workspace isolation', () => {
       'telegramBotConfigs', 'slackChannelMappings', 'teamsChannelMappings',
       'aiResolutions', 'aiAgentConfigs', 'aiProcedures',
       'ticketEvents', 'ticketForms',
+      'connectorCapabilities',
     ];
 
     // Exempt tables (tenant-level or global)
