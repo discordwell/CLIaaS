@@ -488,10 +488,12 @@ describe('MAD Tank deployment', () => {
 // 9. Demo Truck kamikaze explosion
 // ============================================================================
 describe('Demo Truck kamikaze', () => {
-  it('Demo Truck has no primary weapon (unarmed, uses self-destruct)', () => {
+  it('Demo Truck has Democharge weapon (self-destruct explosion params)', () => {
     const dtrk = makeEntity(UnitType.V_DTRK, House.USSR, 100, 100);
-    expect(dtrk.weapon).toBeNull();
-    expect(dtrk.stats.primaryWeapon).toBeNull();
+    expect(dtrk.weapon).not.toBeNull();
+    expect(dtrk.stats.primaryWeapon).toBe('Democharge');
+    expect(dtrk.weapon!.damage).toBe(500);
+    expect(dtrk.weapon!.warhead).toBe('Nuke');
   });
 
   it('Demo Truck deals 1000 damage in 3-cell radius', () => {
