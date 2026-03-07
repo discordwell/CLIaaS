@@ -42,6 +42,8 @@ interface AgentParityReport {
   };
 }
 
+type SequenceCheckpoints = Partial<Record<'initial' | 'idle-60' | 'jeep-move-120' | 'jeep-stop-45', AgentLikeState>>;
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -104,17 +106,6 @@ async function stopServer(server: ChildProcessWithoutNullStreams | undefined): P
   }
 }
 
-async function tryEval<T>(page: Page, body: () => T, timeoutMs = 5_000): Promise<T | null> {
-  try {
-    return await Promise.race([
-      page.evaluate(body),
-      new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-  } catch {
-    return null;
-  }
-}
-
 async function loadTsAgent(page: Page): Promise<AgentLikeState> {
   console.log('TS: opening agent page');
   await page.goto(`${BASE_URL}?anttest=agent&scenario=SCA01EA`, { waitUntil: 'load' });
@@ -125,140 +116,90 @@ async function loadTsAgent(page: Page): Promise<AgentLikeState> {
   return state;
 }
 
-async function loadWasmAgent(page: Page): Promise<AgentLikeState> {
+async function loadWasmSequence(page: Page): Promise<SequenceCheckpoints> {
   console.log('WASM: opening original build');
-  await page.goto(`${BASE_URL}/ra/original.html?autoplay=ants`, { waitUntil: 'load' });
-  await page.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });
-  await page.bringToFront();
-  await page.locator('canvas').focus();
+  const sequencePromise = new Promise<SequenceCheckpoints>((resolve, reject) => {
+    let settled = false;
 
-  const readyStart = Date.now();
-  let bridgeReady = false;
-  while (Date.now() - readyStart < 120_000) {
-    const ready = await tryEval(page, () => {
-      const w = window as unknown as {
-        __agentState?: () => unknown;
-        __setAutoplay?: (mode: boolean) => void;
-      };
-      return typeof w.__agentState === 'function' && typeof w.__setAutoplay === 'function';
-    });
-    if (ready) {
-      bridgeReady = true;
-      console.log('WASM: agent bridge ready');
-      break;
-    }
-    await sleep(1_000);
-  }
-  if (!bridgeReady) {
-    throw new Error('WASM agent bridge never became ready');
-  }
+    const cleanup = () => {
+      page.off('console', onConsole);
+      page.off('pageerror', onPageError);
+    };
 
-  await page.evaluate(() => {
-    const w = window as unknown as { __setAutoplay?: (mode: boolean) => void };
-    w.__setAutoplay?.(true);
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+
+    const onConsole = (msg: { text: () => string }) => {
+      const text = msg.text();
+      if (text.startsWith('[AGENTSEQ_RESULT] ')) {
+        settle(() => resolve(JSON.parse(text.slice('[AGENTSEQ_RESULT] '.length)) as SequenceCheckpoints));
+      } else if (text.startsWith('[AGENTSEQ_ERROR] ')) {
+        const payload = JSON.parse(text.slice('[AGENTSEQ_ERROR] '.length)) as { message?: string };
+        settle(() => reject(new Error(payload.message ?? 'Unknown WASM agent sequence error')));
+      }
+    };
+
+    const onPageError = (err: Error) => {
+      settle(() => reject(err));
+    };
+
+    page.on('console', onConsole);
+    page.on('pageerror', onPageError);
   });
-  console.log('WASM: autoplay enabled');
 
-  try {
-    await page.waitForFunction(
-      () => {
-        const status = document.getElementById('status');
-        return Boolean(status) && (status!.style.display === 'none' || status!.textContent === 'All downloads complete.');
-      },
-      { timeout: 120_000, polling: 2_000 },
-    );
-    console.log('WASM: status reports load complete');
-  } catch {
-    console.log('WASM: load completion timeout, continuing');
+  await page.goto(`${BASE_URL}/ra/original.html?autoplay=ants&agentseq=1`, { waitUntil: 'load' });
+  await page.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });
+
+  const checkpoints = await Promise.race([
+    sequencePromise,
+    (async () => {
+      await sleep(180_000);
+      throw new Error('Timed out waiting for WASM agent sequence');
+    })(),
+  ]);
+
+  if (checkpoints.initial) {
+    console.log(`WASM: gameplay ready at tick ${checkpoints.initial.tick}`);
   }
 
-  let enterRetries = 0;
-  const start = Date.now();
-  let lastDiagBucket = -1;
-
-  while (Date.now() - start < 180_000) {
-    const state = await tryEval(page, () => {
-      const w = window as unknown as { __agentState?: () => AgentLikeState };
-      return w.__agentState?.() ?? null;
-    }, 5_000);
-
-    if (state && !state.error && Array.isArray(state.units) && state.units.length > 0) {
-      const pausedState = await tryEval(page, () => {
-        const w = window as unknown as {
-          __wasmSetPaused?: (paused: boolean) => void;
-          __agentState?: () => AgentLikeState;
-        };
-        w.__wasmSetPaused?.(true);
-        return w.__agentState?.() ?? null;
-      }, 10_000);
-      const finalState = pausedState && !finalStateHasError(pausedState) ? pausedState : state;
-      console.log(`WASM: gameplay ready at tick ${finalState.tick}`);
-      return finalState;
-    }
-
-    const elapsed = Math.round((Date.now() - start) / 1000);
-    if ((!state || state.error || !Array.isArray(state.units) || state.units.length === 0) && elapsed >= 10 && enterRetries < 6) {
-      enterRetries++;
-      console.log(`WASM: Enter retry ${enterRetries}`);
-      try {
-        await Promise.race([
-          page.keyboard.press('Enter'),
-          sleep(2_000),
-        ]);
-      } catch {
-        // The page may be blocked during scenario load.
-      }
-      await sleep(3_000);
-      continue;
-    }
-
-    const diagBucket = Math.floor(elapsed / 15);
-    if (diagBucket > 0 && diagBucket !== lastDiagBucket) {
-      lastDiagBucket = diagBucket;
-      const diag = await tryEval(page, () => {
-        const w = window as unknown as {
-          __autoplayState?: string;
-          __wasmRenderCount?: number;
-          __agentState?: () => AgentLikeState;
-        };
-        const state = w.__agentState?.() ?? null;
-        return {
-          title: document.title,
-          autoplayState: w.__autoplayState ?? null,
-          renderCount: w.__wasmRenderCount ?? 0,
-          tick: state?.tick ?? null,
-          unitCount: Array.isArray(state?.units) ? state.units.length : null,
-          error: state?.error ?? null,
-        };
-      }, 2_000);
-      if (diag) {
-        console.log(`WASM: waiting title=${diag.title} autoplay=${diag.autoplayState} renders=${diag.renderCount} tick=${diag.tick} units=${diag.unitCount} error=${diag.error}`);
-      }
-    }
-
-    await sleep(5_000);
-  }
-
-  throw new Error('Timed out waiting for WASM gameplay state');
+  return checkpoints;
 }
 
-async function stepPage(page: Page, ticks: number, commands?: AgentCommand[]): Promise<AgentLikeState> {
-  return page.evaluate(async ([n, cmds]) => {
+async function runSequence(page: Page): Promise<SequenceCheckpoints> {
+  return page.evaluate(async () => {
     const w = window as unknown as {
+      __agentState: () => AgentLikeState;
       __agentStep: (ticks: number, commands?: AgentCommand[]) => Promise<{ state: AgentLikeState }> | { state: AgentLikeState };
     };
-    const result = await w.__agentStep(n, cmds);
-    return result.state;
-  }, [ticks, commands] as [number, AgentCommand[] | undefined]);
-}
 
-function finalStateHasError(state: AgentLikeState | null): state is AgentLikeState & { error: string } {
-  return Boolean(state && 'error' in state && typeof state.error === 'string' && state.error.length > 0);
-}
+    const checkpoints: SequenceCheckpoints = {};
 
-function pickUnitId(state: AgentLikeState, type: string): number | null {
-  const matches = state.units.filter(unit => unit.t === type);
-  return matches.length === 1 ? matches[0].id : null;
+    let state = w.__agentState();
+    checkpoints.initial = state;
+
+    state = (await w.__agentStep(60)).state;
+    checkpoints['idle-60'] = state;
+
+    const jeepMatches = state.units.filter(unit => unit.t === 'JEEP');
+    const jeepId = jeepMatches.length === 1 ? jeepMatches[0].id : null;
+    if (jeepId !== null) {
+      state = (await w.__agentStep(120, [{ cmd: 'move', unitIds: [jeepId], cx: 45, cy: 84 }])).state;
+      checkpoints['jeep-move-120'] = state;
+
+      const jeepMatches2 = state.units.filter(unit => unit.t === 'JEEP');
+      const jeepId2 = jeepMatches2.length === 1 ? jeepMatches2[0].id : null;
+      if (jeepId2 !== null) {
+        state = (await w.__agentStep(45, [{ cmd: 'stop', unitIds: [jeepId2] }])).state;
+        checkpoints['jeep-stop-45'] = state;
+      }
+    }
+
+    return checkpoints;
+  });
 }
 
 function addCheckpoint(
@@ -287,49 +228,54 @@ async function main(): Promise<void> {
   const { server, startedByScript } = await ensureServer();
   let browser: Browser | undefined;
 
-  try {
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--mute-audio',
-        '--use-gl=swiftshader',
-        '--enable-webgl',
-        '--autoplay-policy=no-user-gesture-required',
-      ],
-    });
+  const launchBrowser = () => chromium.launch({
+    headless: true,
+    args: [
+      '--mute-audio',
+      '--use-gl=swiftshader',
+      '--enable-webgl',
+      '--autoplay-policy=no-user-gesture-required',
+    ],
+  });
 
-    const context = await browser.newContext({ viewport: { width: 640, height: 400 } });
-    const tsPage = await context.newPage();
-    const wasmPage = await context.newPage();
+  try {
     const checkpoints: CheckpointReport[] = [];
     const blockers: string[] = [];
 
     try {
-      let tsState = await loadTsAgent(tsPage);
-      let wasmState = await loadWasmAgent(wasmPage);
-      const tsStartTick = tsState.tick;
-      const wasmStartTick = wasmState.tick;
+      browser = await launchBrowser();
+      const tsContext = await browser.newContext({ viewport: { width: 640, height: 400 } });
+      const tsPage = await tsContext.newPage();
+      await loadTsAgent(tsPage);
+      const tsSequence = await runSequence(tsPage);
+      await tsContext.close();
+      await browser.close();
+      browser = undefined;
 
-      addCheckpoint(checkpoints, 'initial', 'Paused initial gameplay snapshot after load', tsState, wasmState, tsStartTick, wasmStartTick);
+      browser = await launchBrowser();
+      const wasmContext = await browser.newContext({ viewport: { width: 640, height: 400 } });
+      const wasmPage = await wasmContext.newPage();
+      const wasmSequence = await loadWasmSequence(wasmPage);
+      await wasmContext.close();
+      await browser.close();
+      browser = undefined;
 
-      tsState = await stepPage(tsPage, 60);
-      wasmState = await stepPage(wasmPage, 60);
-      addCheckpoint(checkpoints, 'idle-60', 'No commands, both engines advanced 60 ticks', tsState, wasmState, tsStartTick, wasmStartTick);
+      if (!tsSequence.initial || !wasmSequence.initial || !tsSequence['idle-60'] || !wasmSequence['idle-60']) {
+        throw new Error('Agent sequence did not produce required initial checkpoints');
+      }
 
-      const tsJeepId = pickUnitId(tsState, 'JEEP');
-      const wasmJeepId = pickUnitId(wasmState, 'JEEP');
-      if (tsJeepId !== null && wasmJeepId !== null) {
-        tsState = await stepPage(tsPage, 120, [{ cmd: 'move', unitIds: [tsJeepId], cx: 45, cy: 84 }]);
-        wasmState = await stepPage(wasmPage, 120, [{ cmd: 'move', unitIds: [wasmJeepId], cx: 45, cy: 84 }]);
-        addCheckpoint(checkpoints, 'jeep-move-120', 'Unique allied JEEP ordered to move toward cell (45,84)', tsState, wasmState, tsStartTick, wasmStartTick);
+      const tsStartTick = tsSequence.initial.tick;
+      const wasmStartTick = wasmSequence.initial.tick;
 
-        const tsJeepId2 = pickUnitId(tsState, 'JEEP');
-        const wasmJeepId2 = pickUnitId(wasmState, 'JEEP');
-        if (tsJeepId2 !== null && wasmJeepId2 !== null) {
-          tsState = await stepPage(tsPage, 45, [{ cmd: 'stop', unitIds: [tsJeepId2] }]);
-          wasmState = await stepPage(wasmPage, 45, [{ cmd: 'stop', unitIds: [wasmJeepId2] }]);
-          addCheckpoint(checkpoints, 'jeep-stop-45', 'Moved JEEP receives a stop command', tsState, wasmState, tsStartTick, wasmStartTick);
-        }
+      addCheckpoint(checkpoints, 'initial', 'Initial gameplay snapshot after load', tsSequence.initial, wasmSequence.initial, tsStartTick, wasmStartTick);
+      addCheckpoint(checkpoints, 'idle-60', 'No commands, both engines advanced 60 ticks', tsSequence['idle-60'], wasmSequence['idle-60'], tsStartTick, wasmStartTick);
+
+      if (tsSequence['jeep-move-120'] && wasmSequence['jeep-move-120']) {
+        addCheckpoint(checkpoints, 'jeep-move-120', 'Unique allied JEEP ordered to move toward cell (45,84)', tsSequence['jeep-move-120'], wasmSequence['jeep-move-120'], tsStartTick, wasmStartTick);
+      }
+
+      if (tsSequence['jeep-stop-45'] && wasmSequence['jeep-stop-45']) {
+        addCheckpoint(checkpoints, 'jeep-stop-45', 'Moved JEEP receives a stop command', tsSequence['jeep-stop-45'], wasmSequence['jeep-stop-45'], tsStartTick, wasmStartTick);
       }
     } catch (err) {
       blockers.push(err instanceof Error ? err.message : String(err));

@@ -7,19 +7,23 @@ export type AppDb = ReturnType<typeof drizzle<typeof schema>>;
 
 declare global {
   var __cliaasPool: Pool | undefined;
+  var __cliaasRlsPool: Pool | undefined;
 }
 
 let _db: AppDb | null = null;
 let _pool: Pool | null = null;
 let _initFailed = false;
 
+let _rlsDb: AppDb | null = null;
+let _rlsPool: Pool | null = null;
+let _rlsInitFailed = false;
+
 function init(): boolean {
   if (_initFailed) return false;
 
-  // Prefer DATABASE_APP_ROLE_URL for RLS-compatible connections, fall back to DATABASE_URL
-  const connectionString = process.env.DATABASE_APP_ROLE_URL || process.env.DATABASE_URL;
+  // Main pool uses DATABASE_URL (superuser). All existing code paths use this.
+  const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
-    // Demo mode: no database configured — this is fine
     _initFailed = true;
     return false;
   }
@@ -31,6 +35,29 @@ function init(): boolean {
     return true;
   } catch {
     _initFailed = true;
+    return false;
+  }
+}
+
+function initRls(): boolean {
+  if (_rlsInitFailed) return false;
+
+  // RLS pool uses DATABASE_APP_ROLE_URL (cliaas_app role, no BYPASSRLS).
+  // Used exclusively by withRls() for workspace-scoped transactions.
+  const connectionString = process.env.DATABASE_APP_ROLE_URL;
+  if (!connectionString) {
+    // No RLS role configured — withRls() falls back to superuser pool
+    _rlsInitFailed = true;
+    return false;
+  }
+
+  try {
+    _rlsPool = global.__cliaasRlsPool ?? new Pool({ connectionString });
+    if (process.env.NODE_ENV !== 'production') global.__cliaasRlsPool = _rlsPool;
+    _rlsDb = drizzle(_rlsPool, { schema });
+    return true;
+  } catch {
+    _rlsInitFailed = true;
     return false;
   }
 }
@@ -53,6 +80,18 @@ export function getPool(): Pool | null {
   return _pool;
 }
 
+/**
+ * Returns a Drizzle DB using DATABASE_APP_ROLE_URL (cliaas_app role, RLS-enforced).
+ * Falls back to getDb() (superuser) if no APP_ROLE_URL is configured.
+ * Used exclusively by withRls() for workspace-scoped transactions.
+ */
+export function getRlsDb(): AppDb | null {
+  if (_rlsDb) return _rlsDb;
+  if (!_rlsInitFailed && initRls()) return _rlsDb;
+  // Fall back to superuser DB if no RLS role configured
+  return getDb();
+}
+
 /** Returns true if a DATABASE_URL is configured and the DB connection is available. */
 export function isDatabaseAvailable(): boolean {
   return getDb() !== null;
@@ -73,6 +112,9 @@ export const db = new Proxy({} as AppDb, {
     return (instance as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
+
+// Backward compat alias — db already uses superuser, so adminDb is the same
+export const adminDb = db;
 
 export const pool = new Proxy({} as Pool, {
   get(_, prop) {

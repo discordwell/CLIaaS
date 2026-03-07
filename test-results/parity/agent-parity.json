@@ -1,14 +1,1639 @@
 {
-  "timestamp": "2026-03-06T23:58:02.311Z",
+  "timestamp": "2026-03-07T01:30:03.110Z",
   "baseUrl": "http://localhost:3001",
   "serverStartedByScript": false,
-  "status": "blocked",
-  "blockers": [
-    "WASM page never became responsive"
+  "status": "ok",
+  "blockers": [],
+  "checkpoints": [
+    {
+      "name": "initial",
+      "note": "Initial gameplay snapshot after load",
+      "tsTickDelta": 0,
+      "wasmTickDelta": 0,
+      "diffCount": 93,
+      "diffs": [
+        {
+          "kind": "top_level",
+          "key": "credits",
+          "ts": 1500,
+          "wasm": 0
+        },
+        {
+          "kind": "top_level",
+          "key": "power.produced",
+          "ts": 51,
+          "wasm": 0
+        },
+        {
+          "kind": "top_level",
+          "key": "power.consumed",
+          "ts": 190,
+          "wasm": 0
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.C7",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.C8",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.E1",
+          "ts": 4,
+          "wasm": 5
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.E7",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.JEEP",
+          "ts": 1,
+          "wasm": 3
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.TRAN",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "enemies.E1",
+          "ts": null,
+          "wasm": 10
+        },
+        {
+          "kind": "unit_counts",
+          "key": "enemies.E2",
+          "ts": null,
+          "wasm": 3
+        },
+        {
+          "kind": "unit_counts",
+          "key": "enemies.HARV",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.C7",
+          "ts": null,
+          "wasm": [
+            "76,48"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.C8",
+          "ts": null,
+          "wasm": [
+            "74,50"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.E1",
+          "ts": [
+            "42,87",
+            "43,86",
+            "43,88",
+            "44,87"
+          ],
+          "wasm": [
+            "62,49",
+            "62,49",
+            "63,49",
+            "64,49",
+            "64,49"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.E7",
+          "ts": null,
+          "wasm": [
+            "63,48"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.JEEP",
+          "ts": [
+            "43,87"
+          ],
+          "wasm": [
+            "62,50",
+            "63,50",
+            "64,50"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.TRAN",
+          "ts": null,
+          "wasm": [
+            "63,47"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "enemies.E1",
+          "ts": null,
+          "wasm": [
+            "56,60",
+            "58,60",
+            "61,63",
+            "62,52",
+            "62,67",
+            "63,63",
+            "64,52",
+            "64,61",
+            "65,67",
+            "67,67"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "enemies.E2",
+          "ts": null,
+          "wasm": [
+            "62,56",
+            "62,56",
+            "73,66"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "enemies.HARV",
+          "ts": null,
+          "wasm": [
+            "72,56"
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.C7",
+          "ts": null,
+          "wasm": [
+            25
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.C8",
+          "ts": null,
+          "wasm": [
+            25
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.E1",
+          "ts": [
+            50,
+            50,
+            50,
+            50
+          ],
+          "wasm": [
+            50,
+            50,
+            50,
+            50,
+            50
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.E7",
+          "ts": null,
+          "wasm": [
+            100
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.JEEP",
+          "ts": [
+            150
+          ],
+          "wasm": [
+            141,
+            141,
+            150
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.TRAN",
+          "ts": null,
+          "wasm": [
+            90
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "enemies.E1",
+          "ts": null,
+          "wasm": [
+            4,
+            12,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "enemies.E2",
+          "ts": null,
+          "wasm": [
+            50,
+            50,
+            50
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "enemies.HARV",
+          "ts": null,
+          "wasm": [
+            600
+          ]
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.DOME",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.FIX",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.HBOX",
+          "ts": 2,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.POWR",
+          "ts": 2,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.PROC",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.SILO",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.TENT",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.V19",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.WEAP",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.BARL",
+          "ts": 10,
+          "wasm": 4
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.BARR",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.BRL3",
+          "ts": 8,
+          "wasm": 2
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.DOME",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.FACT",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.KENN",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.POWR",
+          "ts": null,
+          "wasm": 7
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.PROC",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.SILO",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.STEK",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.TSLA",
+          "ts": null,
+          "wasm": 3
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.WEAP",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.DOME",
+          "ts": [
+            "71,60"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.FIX",
+          "ts": [
+            "71,69"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.HBOX",
+          "ts": [
+            "65,60",
+            "72,65"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.POWR",
+          "ts": [
+            "58,59",
+            "68,67"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.PROC",
+          "ts": [
+            "59,67"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.SILO",
+          "ts": [
+            "61,60"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.TENT",
+          "ts": [
+            "68,61"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.V19",
+          "ts": null,
+          "wasm": [
+            "59,57"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.WEAP",
+          "ts": [
+            "62,62"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.BARL",
+          "ts": [
+            "53,52",
+            "54,50",
+            "55,51",
+            "56,50",
+            "62,74",
+            "65,76",
+            "73,53",
+            "75,48",
+            "75,51",
+            "76,47"
+          ],
+          "wasm": [
+            "58,56",
+            "59,59",
+            "60,56",
+            "61,56"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.BARR",
+          "ts": null,
+          "wasm": [
+            "61,64"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.BRL3",
+          "ts": [
+            "53,51",
+            "55,50",
+            "55,52",
+            "56,49",
+            "63,75",
+            "64,76",
+            "74,52",
+            "76,48"
+          ],
+          "wasm": [
+            "60,57",
+            "60,58"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.DOME",
+          "ts": null,
+          "wasm": [
+            "67,65"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.FACT",
+          "ts": null,
+          "wasm": [
+            "70,63"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.KENN",
+          "ts": null,
+          "wasm": [
+            "64,65"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.POWR",
+          "ts": null,
+          "wasm": [
+            "61,57",
+            "65,57",
+            "67,57",
+            "75,64",
+            "75,67",
+            "77,64",
+            "77,67"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.PROC",
+          "ts": null,
+          "wasm": [
+            "74,59"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.SILO",
+          "ts": null,
+          "wasm": [
+            "59,64"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.STEK",
+          "ts": null,
+          "wasm": [
+            "62,61"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.TSLA",
+          "ts": null,
+          "wasm": [
+            "60,66",
+            "67,67",
+            "71,59"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.WEAP",
+          "ts": null,
+          "wasm": [
+            "66,62"
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.DOME",
+          "ts": [
+            125
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.FIX",
+          "ts": [
+            115
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.HBOX",
+          "ts": [
+            210,
+            225
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.POWR",
+          "ts": [
+            50,
+            150
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.PROC",
+          "ts": [
+            393
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.SILO",
+          "ts": [
+            37
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.TENT",
+          "ts": [
+            250
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.V19",
+          "ts": null,
+          "wasm": [
+            400
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.WEAP",
+          "ts": [
+            394
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.BARL",
+          "ts": [
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150
+          ],
+          "wasm": [
+            10,
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.BARR",
+          "ts": null,
+          "wasm": [
+            800
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.BRL3",
+          "ts": [
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150
+          ],
+          "wasm": [
+            10,
+            10
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.DOME",
+          "ts": null,
+          "wasm": [
+            1000
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.FACT",
+          "ts": null,
+          "wasm": [
+            1000
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.KENN",
+          "ts": null,
+          "wasm": [
+            397
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.POWR",
+          "ts": null,
+          "wasm": [
+            400,
+            400,
+            400,
+            400,
+            400,
+            400,
+            400
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.PROC",
+          "ts": null,
+          "wasm": [
+            900
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.SILO",
+          "ts": null,
+          "wasm": [
+            300
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.STEK",
+          "ts": null,
+          "wasm": [
+            600
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.TSLA",
+          "ts": null,
+          "wasm": [
+            400,
+            400,
+            400
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.WEAP",
+          "ts": null,
+          "wasm": [
+            1000
+          ]
+        }
+      ]
+    },
+    {
+      "name": "idle-60",
+      "note": "No commands, both engines advanced 60 ticks",
+      "tsTickDelta": 60,
+      "wasmTickDelta": 60,
+      "diffCount": 96,
+      "diffs": [
+        {
+          "kind": "top_level",
+          "key": "credits",
+          "ts": 1500,
+          "wasm": 0
+        },
+        {
+          "kind": "top_level",
+          "key": "power.produced",
+          "ts": 51,
+          "wasm": 0
+        },
+        {
+          "kind": "top_level",
+          "key": "power.consumed",
+          "ts": 190,
+          "wasm": 0
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.C7",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.C8",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.E1",
+          "ts": 4,
+          "wasm": 5
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.E7",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.JEEP",
+          "ts": 1,
+          "wasm": 3
+        },
+        {
+          "kind": "unit_counts",
+          "key": "units.TRAN",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_counts",
+          "key": "enemies.ANT3",
+          "ts": 2,
+          "wasm": null
+        },
+        {
+          "kind": "unit_counts",
+          "key": "enemies.E1",
+          "ts": null,
+          "wasm": 8
+        },
+        {
+          "kind": "unit_counts",
+          "key": "enemies.E2",
+          "ts": null,
+          "wasm": 3
+        },
+        {
+          "kind": "unit_counts",
+          "key": "enemies.HARV",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.C7",
+          "ts": null,
+          "wasm": [
+            "76,48"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.C8",
+          "ts": null,
+          "wasm": [
+            "73,51"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.E1",
+          "ts": [
+            "42,87",
+            "43,86",
+            "43,88",
+            "44,87"
+          ],
+          "wasm": [
+            "62,49",
+            "62,49",
+            "63,49",
+            "64,49",
+            "64,49"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.E7",
+          "ts": null,
+          "wasm": [
+            "63,48"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.JEEP",
+          "ts": [
+            "43,87"
+          ],
+          "wasm": [
+            "62,50",
+            "63,50",
+            "64,50"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "units.TRAN",
+          "ts": null,
+          "wasm": [
+            "63,47"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "enemies.ANT3",
+          "ts": [
+            "48,41",
+            "88,41"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "unit_cells",
+          "key": "enemies.E1",
+          "ts": null,
+          "wasm": [
+            "56,60",
+            "58,60",
+            "61,63",
+            "62,67",
+            "63,63",
+            "64,61",
+            "65,67",
+            "67,67"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "enemies.E2",
+          "ts": null,
+          "wasm": [
+            "62,56",
+            "62,56",
+            "73,66"
+          ]
+        },
+        {
+          "kind": "unit_cells",
+          "key": "enemies.HARV",
+          "ts": null,
+          "wasm": [
+            "71,55"
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.C7",
+          "ts": null,
+          "wasm": [
+            25
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.C8",
+          "ts": null,
+          "wasm": [
+            25
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.E1",
+          "ts": [
+            50,
+            50,
+            50,
+            50
+          ],
+          "wasm": [
+            50,
+            50,
+            50,
+            50,
+            50
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.E7",
+          "ts": null,
+          "wasm": [
+            100
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.JEEP",
+          "ts": [
+            150
+          ],
+          "wasm": [
+            132,
+            141,
+            150
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "units.TRAN",
+          "ts": null,
+          "wasm": [
+            90
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "enemies.ANT3",
+          "ts": [
+            85,
+            85
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "unit_hp",
+          "key": "enemies.E1",
+          "ts": null,
+          "wasm": [
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "enemies.E2",
+          "ts": null,
+          "wasm": [
+            50,
+            50,
+            50
+          ]
+        },
+        {
+          "kind": "unit_hp",
+          "key": "enemies.HARV",
+          "ts": null,
+          "wasm": [
+            600
+          ]
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.DOME",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.FIX",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.HBOX",
+          "ts": 2,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.POWR",
+          "ts": 2,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.PROC",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.SILO",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.TENT",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.V19",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.ally.WEAP",
+          "ts": 1,
+          "wasm": null
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.BARL",
+          "ts": 10,
+          "wasm": 4
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.BARR",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.BRL3",
+          "ts": 8,
+          "wasm": 2
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.DOME",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.FACT",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.KENN",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.POWR",
+          "ts": null,
+          "wasm": 7
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.PROC",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.SILO",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.STEK",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.TSLA",
+          "ts": null,
+          "wasm": 3
+        },
+        {
+          "kind": "structure_counts",
+          "key": "structures.enemy.WEAP",
+          "ts": null,
+          "wasm": 1
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.DOME",
+          "ts": [
+            "71,60"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.FIX",
+          "ts": [
+            "71,69"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.HBOX",
+          "ts": [
+            "65,60",
+            "72,65"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.POWR",
+          "ts": [
+            "58,59",
+            "68,67"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.PROC",
+          "ts": [
+            "59,67"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.SILO",
+          "ts": [
+            "61,60"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.TENT",
+          "ts": [
+            "68,61"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.V19",
+          "ts": null,
+          "wasm": [
+            "59,57"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.ally.WEAP",
+          "ts": [
+            "62,62"
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.BARL",
+          "ts": [
+            "53,52",
+            "54,50",
+            "55,51",
+            "56,50",
+            "62,74",
+            "65,76",
+            "73,53",
+            "75,48",
+            "75,51",
+            "76,47"
+          ],
+          "wasm": [
+            "58,56",
+            "59,59",
+            "60,56",
+            "61,56"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.BARR",
+          "ts": null,
+          "wasm": [
+            "61,64"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.BRL3",
+          "ts": [
+            "53,51",
+            "55,50",
+            "55,52",
+            "56,49",
+            "63,75",
+            "64,76",
+            "74,52",
+            "76,48"
+          ],
+          "wasm": [
+            "60,57",
+            "60,58"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.DOME",
+          "ts": null,
+          "wasm": [
+            "67,65"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.FACT",
+          "ts": null,
+          "wasm": [
+            "70,63"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.KENN",
+          "ts": null,
+          "wasm": [
+            "64,65"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.POWR",
+          "ts": null,
+          "wasm": [
+            "61,57",
+            "65,57",
+            "67,57",
+            "75,64",
+            "75,67",
+            "77,64",
+            "77,67"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.PROC",
+          "ts": null,
+          "wasm": [
+            "74,59"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.SILO",
+          "ts": null,
+          "wasm": [
+            "59,64"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.STEK",
+          "ts": null,
+          "wasm": [
+            "62,61"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.TSLA",
+          "ts": null,
+          "wasm": [
+            "60,66",
+            "67,67",
+            "71,59"
+          ]
+        },
+        {
+          "kind": "structure_cells",
+          "key": "structures.enemy.WEAP",
+          "ts": null,
+          "wasm": [
+            "66,62"
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.DOME",
+          "ts": [
+            125
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.FIX",
+          "ts": [
+            115
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.HBOX",
+          "ts": [
+            210,
+            225
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.POWR",
+          "ts": [
+            50,
+            150
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.PROC",
+          "ts": [
+            393
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.SILO",
+          "ts": [
+            37
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.TENT",
+          "ts": [
+            250
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.V19",
+          "ts": null,
+          "wasm": [
+            400
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.ally.WEAP",
+          "ts": [
+            394
+          ],
+          "wasm": null
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.BARL",
+          "ts": [
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150
+          ],
+          "wasm": [
+            10,
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.BARR",
+          "ts": null,
+          "wasm": [
+            800
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.BRL3",
+          "ts": [
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150
+          ],
+          "wasm": [
+            10,
+            10
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.DOME",
+          "ts": null,
+          "wasm": [
+            1000
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.FACT",
+          "ts": null,
+          "wasm": [
+            1000
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.KENN",
+          "ts": null,
+          "wasm": [
+            397
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.POWR",
+          "ts": null,
+          "wasm": [
+            400,
+            400,
+            400,
+            400,
+            400,
+            400,
+            400
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.PROC",
+          "ts": null,
+          "wasm": [
+            900
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.SILO",
+          "ts": null,
+          "wasm": [
+            300
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.STEK",
+          "ts": null,
+          "wasm": [
+            600
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.TSLA",
+          "ts": null,
+          "wasm": [
+            400,
+            400,
+            400
+          ]
+        },
+        {
+          "kind": "structure_hp",
+          "key": "structures.enemy.WEAP",
+          "ts": null,
+          "wasm": [
+            1000
+          ]
+        }
+      ]
+    }
   ],
-  "checkpoints": [],
   "totals": {
-    "diffCount": 0,
-    "checkpointsWithDiffs": 0
+    "diffCount": 189,
+    "checkpointsWithDiffs": 2
   }
 }

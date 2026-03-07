@@ -18,8 +18,8 @@ export async function withRls<T>(
   tenantId?: string,
 ): Promise<T | null> {
   try {
-    const { getDb } = await import('@/db');
-    const db = getDb();
+    const { getRlsDb } = await import('@/db');
+    const db = getRlsDb();
     if (!db) return null;
     const schema = await import('@/db/schema');
     return db.transaction(async (tx) => {

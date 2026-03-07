@@ -1259,6 +1259,98 @@ Module.setStatus('Downloading...');
     } catch(e) { return {error: e.message}; }
   };
 })();
+
+// === Agent parity bootstrap ===
+// When ?agentseq=1 is present, run the parity checkpoint sequence inside the page
+// and emit the results over console so Playwright does not need to evaluate into
+// the page after the WASM main loop becomes busy.
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('agentseq') !== '1') return;
+
+  window.__agentSequenceResult = null;
+  var started = false;
+
+  function emit(prefix, payload) {
+    console.log(prefix + ' ' + JSON.stringify(payload));
+  }
+
+  async function runSequence() {
+    if (started) return;
+    started = true;
+
+    var checkpoints = {};
+    var state = null;
+    var enterRetries = 0;
+    var start = Date.now();
+
+    while (Date.now() - start < 60000) {
+      if (typeof window.__agentState === 'function') {
+        state = window.__agentState();
+        if (state && !state.error && Array.isArray(state.units) && state.units.length > 0) {
+          break;
+        }
+      }
+
+      if (enterRetries < 6 && typeof window.__injectKey === 'function') {
+        enterRetries++;
+        window.__injectKey(40);
+      }
+
+      await new Promise(function(resolve) { setTimeout(resolve, 1000); });
+    }
+
+    if (!state || state.error || !Array.isArray(state.units) || state.units.length === 0) {
+      throw new Error('Timed out waiting for WASM gameplay state');
+    }
+
+    checkpoints.initial = state;
+
+    if (typeof window.__agentStep !== 'function') {
+      throw new Error('agentStep bridge missing');
+    }
+
+    state = (await window.__agentStep(60)).state;
+    checkpoints['idle-60'] = state;
+
+    var jeepMatches = state.units.filter(function(unit) { return unit.t === 'JEEP'; });
+    var jeepId = jeepMatches.length === 1 ? jeepMatches[0].id : null;
+    if (jeepId !== null) {
+      state = (await window.__agentStep(120, [{ cmd: 'move', unitIds: [jeepId], cx: 45, cy: 84 }])).state;
+      checkpoints['jeep-move-120'] = state;
+
+      var jeepMatches2 = state.units.filter(function(unit) { return unit.t === 'JEEP'; });
+      var jeepId2 = jeepMatches2.length === 1 ? jeepMatches2[0].id : null;
+      if (jeepId2 !== null) {
+        state = (await window.__agentStep(45, [{ cmd: 'stop', unitIds: [jeepId2] }])).state;
+        checkpoints['jeep-stop-45'] = state;
+      }
+    }
+
+    window.__agentSequenceResult = checkpoints;
+    emit('[AGENTSEQ_RESULT]', checkpoints);
+  }
+
+  var origSetStatus = Module.setStatus;
+  Module.setStatus = function(text) {
+    origSetStatus.call(Module, text);
+    if (!text && !started) {
+      setTimeout(function() {
+        runSequence().catch(function(err) {
+          emit('[AGENTSEQ_ERROR]', { message: err && err.message ? err.message : String(err) });
+        });
+      }, 0);
+    }
+  };
+
+  setTimeout(function() {
+    if (!started) {
+      runSequence().catch(function(err) {
+        emit('[AGENTSEQ_ERROR]', { message: err && err.message ? err.message : String(err) });
+      });
+    }
+  }, 45000);
+})();
 </script>
 <script src="gamedata.js"></script>
 <script async src="rasdl.js?v=20260306c"></script>
