@@ -18,34 +18,6 @@ const navLinks: NavLink[] = [
   { href: "/ai", label: "AI" },
 ];
 
-// Full list preserved for test compatibility and reference
-export const allNavLinks: NavLink[] = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/tickets", label: "Tickets", permission: "tickets:view" },
-  { href: "/rules", label: "Rules", permission: "automation:view" },
-  { href: "/workflows", label: "Workflows", permission: "automation:view" },
-  { href: "/chat", label: "Chat" },
-  { href: "/chatbots", label: "Bots" },
-  { href: "/channels", label: "Channels", permission: "channels:view" },
-  { href: "/ai", label: "AI" },
-  { href: "/analytics", label: "Analytics", permission: "analytics:view" },
-  { href: "/reports", label: "Reports" },
-  { href: "/sla", label: "SLA" },
-  { href: "/business-hours", label: "Hours" },
-  { href: "/settings/routing", label: "Routing", permission: "channels:view" },
-  { href: "/kb", label: "KB" },
-  { href: "/brands", label: "Brands" },
-  { href: "/integrations", label: "Integrations" },
-  { href: "/wfm", label: "WFM", permission: "admin:settings" },
-  { href: "/campaigns", label: "Campaigns" },
-  { href: "/tours", label: "Tours" },
-  { href: "/messages", label: "Messages" },
-  { href: "/marketplace", label: "Marketplace" },
-  { href: "/security", label: "Security" },
-  { href: "/enterprise", label: "Enterprise" },
-  { href: "/billing", label: "Billing", permission: "admin:billing" },
-  { href: "/docs", label: "Docs" },
-];
 
 function openCommandPalette() {
   window.dispatchEvent(new Event("open-command-palette"));
@@ -107,6 +79,7 @@ export default function AppNav() {
           <button
             onClick={openCommandPalette}
             className="flex items-center gap-2 rounded border border-zinc-300 bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-400 transition-colors hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+            aria-label="Open command palette"
             title="Command palette (⌘K)"
           >
             <span className="text-zinc-500">⌘K</span>
