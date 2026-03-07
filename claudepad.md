@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-03-07T04:15Z — Session 116: Plan 19 Phase 6 — RLS Wet Test (PASS)
+- **Sign-in**: Fixed password hash for `wettest@cliaas.test`, verified auth works with superuser `db` (bypasses RLS correctly)
+- **Architecture fix discovered during wet test**: `SET LOCAL` with drizzle-orm `sql` tag produces `$1` parameterized values which PostgreSQL rejects for SET commands. Fixed: `sql.raw()` with UUID regex validation pre-check (already committed in Session 115)
+- **Dual-pool architecture**: `getDb()` → `DATABASE_URL` (superuser, for auth/data-provider/existing routes), `getRlsDb()` → `DATABASE_APP_ROLE_URL` (cliaas_app, RLS-enforced, for `withRls()` only)
+- **Cross-workspace isolation verified live on cliaas.com**:
+  - DB level: inserted chatbot in "dwell" workspace, queried as "cliaas" → 0 rows (PASS)
+  - API level: `/api/chatbots` as cliaas user → `{"chatbots":[]}` despite dwell chatbot existing (PASS)
+  - Write protection: INSERT with wrong workspace_id → `new row violates row-level security policy` (PASS)
+  - Unscoped query: no SET LOCAL → uuid cast error (PASS)
+- **Data-provider note**: `/tickets` shows 0 because `DbProvider.getWorkspaceId()` picks first workspace by `created_at` (Live Test Workspace, not session workspace). Pre-existing issue — not RLS-related.
+- **Plan 19: COMPLETE** — All 6 phases done.
+
 ## 2026-03-07T03:05Z — Session 115: Schema Integrity & Dual-Mode Store Test Suites
 - **Phase 1 — schema-integrity.test.ts** (16 tests): Migration sequence, schema-migration parity, RLS coverage, column type parity, unique index consistency, FK validation
 - **Phase 2 — dual-mode-stores.test.ts** (69 tests): Static pattern analysis for 5 stores, store-helpers module verification, CRUD tests for AI Resolution/Canned Response/Views/Tours/Messages in JSONL mode, withRls/tryDb fallback behavior, Macro Store pattern
