@@ -1,5 +1,10 @@
 # Session Summaries
 
+## 2026-03-07T15:10Z — Session 125: Sell Animation Fix (C++ RA Parity)
+- **Sell animation**: Replaced mock clip/fade with proper construction frame cycling in reverse. During sell, building cycles frames damageFrame-1→0 as sellProgress 0→1. Also added construction frame cycling (0→damageFrame-1) as a bonus.
+- Frame override in `renderer.ts:1341-1356`, only for buildings with damageFrame > 1. Clip/fade/scanline visuals kept.
+- 11 new tests in `sell-animation.test.ts`. All 6145+ tests pass.
+
 ## 2026-03-07T09:30Z — Session 124: Allied Mission 1 (SCG01EA) Bug Fixes
 - **BARL/BRL3 barrel sprites**: Generated procedural barrel sprites (24x24, 2 frames each). Added to manifest, STRUCTURE_IMAGES, BUILDING_FRAME_TABLE. Barrel explosions already implemented.
 - **Einstein helicopter script**: Fixed 4 bugs — aircraft edge spawn, transport landing without helipad, click detection at flight altitude, TMISSION_MOVE arrival-first check. Full rescue→evac→win chain works.

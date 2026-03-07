@@ -1338,6 +1338,22 @@ export class Renderer {
             frame = damaged ? Math.floor(totalFrames / 2) : 0;
           }
         }
+        // Sell / Construction frame override — cycle through construction frames
+        // In C++ RA, sell plays the building's construction frames in reverse.
+        // Construction frames span 0..damageFrame-1 in the sprite sheet.
+        if (isSelling || isConstructing) {
+          const tableEntry2 = BUILDING_FRAME_TABLE[s.image];
+          if (tableEntry2 && tableEntry2.damageFrame > 1) {
+            const maxFrame = tableEntry2.damageFrame - 1;
+            if (isConstructing) {
+              // Construction: cycle 0 → damageFrame-1 as buildProgress 0→1
+              frame = Math.min(Math.floor(s.buildProgress! * maxFrame), maxFrame);
+            } else {
+              // Sell: cycle damageFrame-1 → 0 as sellProgress 0→1 (reverse construction)
+              frame = Math.max(0, Math.floor((1 - s.sellProgress!) * maxFrame));
+            }
+          }
+        }
         // Clamp frame to valid range (prevent overflow for non-standard frame counts)
         frame = Math.min(frame, totalFrames - 1);
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
