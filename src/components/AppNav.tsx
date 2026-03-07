@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import NotificationBell from "./NotificationBell";
@@ -18,10 +19,19 @@ const navLinks: NavLink[] = [
   { href: "/ai", label: "AI" },
 ];
 
+function openCommandPalette() {
+  window.dispatchEvent(new Event("open-command-palette"));
+}
+
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { rbacActive, hasPermission } = usePermissions();
+  const [isMac, setIsMac] = useState(false);
+
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
+  }, []);
 
   async function handleSignOut() {
     try {
@@ -69,7 +79,14 @@ export default function AppNav() {
             })}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={openCommandPalette}
+            className="flex items-center gap-2 rounded border border-zinc-300 bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-400 transition-colors hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+            aria-label="Open command palette"
+          >
+            <span className="text-zinc-500">{isMac ? "⌘" : "Ctrl+"}K</span>
+          </button>
           <NotificationBell />
           <button
             onClick={handleSignOut}
