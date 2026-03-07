@@ -2481,8 +2481,9 @@ export class Game {
     }
 
     // Harvester AI — automatic ore gathering
+    // Gate allows GUARD, AREA_GUARD (idle/arrival), and MOVE (seeking/returning with timeout tracking)
     if (entity.alive && entity.type === UnitType.V_HARV && entity.isPlayerUnit &&
-        entity.mission === Mission.GUARD && !entity.target) {
+        !entity.target && entity.mission !== Mission.ATTACK && entity.mission !== Mission.DIE) {
       this.updateHarvester(entity);
     }
 
@@ -2908,10 +2909,17 @@ export class Game {
     }
   }
 
+  /** Check if a mission represents an idle/guard state (GUARD or AREA_GUARD) */
+  private isIdleMission(mission: Mission): boolean {
+    return mission === Mission.GUARD || mission === Mission.AREA_GUARD;
+  }
+
   /** Harvester AI — seek ore, harvest, return to refinery, unload */
   private updateHarvester(entity: Entity): void {
     switch (entity.harvesterState) {
       case 'idle': {
+        // Only start auto-harvest from idle mission (GUARD/AREA_GUARD), not during manual MOVE
+        if (!this.isIdleMission(entity.mission)) break;
         // Find nearest ore cell
         const ec = entity.cell;
         const oreCell = this.map.findNearestOre(ec.cx, ec.cy, 30);
@@ -2933,10 +2941,10 @@ export class Game {
           entity.harvestTick = 0;
           entity.mission = Mission.GUARD;
           entity.animState = AnimState.IDLE;
-        } else if (entity.mission === Mission.GUARD) {
-          // Arrived but no ore here — re-seek
+        } else if (this.isIdleMission(entity.mission)) {
+          // Arrived (move completed → GUARD/AREA_GUARD) but no ore here — re-seek
           entity.harvesterState = 'idle';
-        } else if (entity.path.length === 0 && entity.pathIndex >= 0) {
+        } else if (entity.mission === Mission.MOVE && entity.path.length === 0 && entity.pathIndex >= 0) {
           // Path exhausted or failed but still in MOVE — stuck seeking.
           // Use harvestTick as a timeout counter (30 ticks = 2s grace).
           entity.harvestTick++;
@@ -2988,8 +2996,8 @@ export class Game {
           }
           break;
         }
-        // When move completes (mission returns to GUARD), transition to unloading or re-seek
-        if (entity.mission !== Mission.GUARD) break; // still moving, wait
+        // When move completes (mission returns to GUARD/AREA_GUARD), transition to unloading or re-seek
+        if (!this.isIdleMission(entity.mission)) break; // still moving, wait
         // Check if we're near a refinery
         const ec = entity.cell;
         let bestProc: MapStructure | null = null;
@@ -3211,6 +3219,30 @@ export class Game {
 
     if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
       const nextCell = entity.path[entity.pathIndex];
+      // Safety check: verify next path cell is still passable (terrain may have changed since path was calculated)
+      const terrainOk = entity.isNavalUnit
+        ? this.map.isWaterPassable(nextCell.cx, nextCell.cy)
+        : this.map.isTerrainPassable(nextCell.cx, nextCell.cy);
+      if (!terrainOk && entity.moveTarget && this.tick - entity.lastPathRecalc > 15) {
+        entity.lastPathRecalc = this.tick;
+        const newPath = findPath(
+          this.map, entity.cell,
+          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+          entity.isNavalUnit, entity.stats.speedClass
+        );
+        if (newPath.length === 0) {
+          // Destination unreachable — stop movement
+          entity.moveTarget = null;
+          entity.path = [];
+          entity.pathIndex = 0;
+          entity.mission = this.idleMission(entity);
+          entity.animState = AnimState.IDLE;
+          return;
+        }
+        entity.path = newPath;
+        entity.pathIndex = 0;
+        return;
+      }
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
       const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
       if (occ > 0 && occ !== entity.id && entity.moveTarget &&
@@ -3246,7 +3278,51 @@ export class Game {
         entity.mission = this.idleMission(entity);
         entity.animState = AnimState.IDLE;
       } else {
-        if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
+        // Bug 3 fix: Before moving directly, check if the unit would enter an impassable cell.
+        // Calculate which cell the unit would move into based on movement direction and speed.
+        const speed = this.movementSpeed(entity);
+        const dx = entity.moveTarget.x - entity.pos.x;
+        const dy = entity.moveTarget.y - entity.pos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+          const step = Math.min(speed * entity.speedBias, dist);
+          const nextX = entity.pos.x + (dx / dist) * step;
+          const nextY = entity.pos.y + (dy / dist) * step;
+          const nextCellPos = worldToCell(nextX, nextY);
+          const currentCell = entity.cell;
+          // Only check terrain if we're actually crossing into a new cell
+          if ((nextCellPos.cx !== currentCell.cx || nextCellPos.cy !== currentCell.cy)) {
+            const passable = entity.isNavalUnit
+              ? this.map.isWaterPassable(nextCellPos.cx, nextCellPos.cy)
+              : this.map.isPassable(nextCellPos.cx, nextCellPos.cy);
+            // Also check occupancy on the new cell
+            const occBlocked = !entity.isNavalUnit &&
+              this.map.getOccupancy(nextCellPos.cx, nextCellPos.cy) > 0 &&
+              this.map.getOccupancy(nextCellPos.cx, nextCellPos.cy) !== entity.id;
+            if (!passable || occBlocked) {
+              // Re-pathfind instead of sliding through impassable terrain
+              if (this.tick - entity.lastPathRecalc > 15) {
+                entity.lastPathRecalc = this.tick;
+                const newPath = findPath(
+                  this.map, currentCell,
+                  worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+                  entity.isNavalUnit, entity.stats.speedClass
+                );
+                if (newPath.length > 0) {
+                  entity.path = newPath;
+                  entity.pathIndex = 0;
+                } else {
+                  // No valid path — stop movement
+                  entity.moveTarget = null;
+                  entity.mission = this.idleMission(entity);
+                  entity.animState = AnimState.IDLE;
+                }
+              }
+              return;
+            }
+          }
+        }
+        if (entity.moveToward(entity.moveTarget, speed)) {
           entity.moveTarget = null;
           // Check for queued waypoints
           if (entity.moveQueue.length > 0) {

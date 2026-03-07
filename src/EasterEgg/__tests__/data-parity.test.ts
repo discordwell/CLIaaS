@@ -933,6 +933,7 @@ describe('STRUCTURE_MAX_HP parity', () => {
     SYRD: 1000, SPEN: 1000,
     QUEE: 800, LAR1: 25, LAR2: 50,
     BARL: 150, BRL3: 150,
+    FCOM: 500, MISS: 600, V19: 1000,
   };
 
   for (const [type, hp] of Object.entries(expected)) {
@@ -1476,6 +1477,7 @@ describe('STRUCTURE_SIZE parity', () => {
     QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
     BARL: [1, 1], BRL3: [1, 1],
     SBAG: [1, 1], FENC: [1, 1], BARB: [1, 1], BRIK: [1, 1],
+    FCOM: [2, 2], MISS: [3, 2], V19: [2, 2],
   };
 
   for (const [type, size] of Object.entries(expected)) {

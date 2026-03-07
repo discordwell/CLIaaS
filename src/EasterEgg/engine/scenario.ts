@@ -950,6 +950,7 @@ const STRUCTURE_IMAGES: Record<string, string> = {
   ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', MSLO: 'mslo', KENN: 'kenn',
   FENC: 'fenc', BRIK: 'brik', SBAG: 'sbag', BARB: 'barb', WOOD: 'wood',
   QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
+  FCOM: 'fcom', MISS: 'miss', V19: 'v19',
 };
 
 // Building footprint sizes in cells (w, h) — defaults to 1x1
@@ -959,6 +960,7 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], HPAD: [2, 2], AFLD: [2, 2],
   ATEK: [2, 2], STEK: [2, 2], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 2],
   QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1],
+  FCOM: [2, 2], MISS: [3, 2], V19: [2, 2],
   // Bridge structures (destroyable)
   BARL: [1, 1], BRL3: [1, 1],
   // Walls (1x1)
@@ -976,6 +978,7 @@ export const STRUCTURE_MAX_HP: Record<string, number> = {
   SYRD: 1000, SPEN: 1000,
   QUEE: 800, LAR1: 25, LAR2: 50,
   BARL: 150, BRL3: 150,
+  FCOM: 500, MISS: 600, V19: 1000,
 };
 
 export interface ScenarioResult {
@@ -1130,8 +1133,8 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   // Create structures from INI and mark their cells as impassable
   const structures: MapStructure[] = [];
   for (const s of data.structures) {
-    // Skip V-series Neutral village buildings (V01-V19) — no sprite assets
-    if (s.type.startsWith('V') && s.house === 'Neutral') continue;
+    // Skip V-series village buildings without sprites (V01-V18 have no assets; V19 oil pump does)
+    if (s.type.startsWith('V') && s.type !== 'V19') continue;
     const pos = cellIndexToPos(s.cell);
     const image = STRUCTURE_IMAGES[s.type] ?? s.type.toLowerCase();
     const maxHp = STRUCTURE_MAX_HP[s.type] ?? 256;

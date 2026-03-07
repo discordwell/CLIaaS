@@ -17,7 +17,7 @@ export enum Terrain {
   RIVER = 8,
 }
 
-const PASSABLE = new Set([Terrain.CLEAR]);
+const PASSABLE = new Set([Terrain.CLEAR, Terrain.ORE, Terrain.ROUGH, Terrain.BEACH]);
 
 export class GameMap {
   /** 128×128 grid of terrain types */

@@ -57,6 +57,12 @@ const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: num
   hbox: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: pillbox
   bio:  { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
   miss: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
+  fcom: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: forward command post
+  apwr: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: advanced power plant
+  afld: { idleFrame: 0, damageFrame: 8, idleAnimCount: 0 },    // 16 frames: airfield states
+  hpad: { idleFrame: 0, damageFrame: 7, idleAnimCount: 0 },    // 14 frames: helipad states
+  kenn: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: kennel
+  pbox: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: pillbox
   // Animated buildings (have genuine idle animation loops)
   hosp: { idleFrame: 0, damageFrame: 4, idleAnimCount: 4 },    // 9 frames: red cross blinks
   tsla: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: sparking animation
@@ -70,6 +76,8 @@ const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: num
   quee: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // queen chamber pulses
   lar1: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // small larva
   lar2: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // large larva
+  // Civilian structures
+  v19:  { idleFrame: 0, damageFrame: 14, idleAnimCount: 14 },   // Oil pump (animated)
   // Naval production structures
   syrd: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Allied Shipyard
   spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet Sub Pen

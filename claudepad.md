@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-03-07T08:30Z — Session 120: Easter Egg Engine Bug Fixes (4 parallel agents)
+- **FCOM yellow boxes**: Added FCOM/MISS/V19 to STRUCTURE_IMAGES, BUILDING_FRAME_TABLE, STRUCTURE_SIZE, STRUCTURE_MAX_HP. Fixed V-series skip logic. Added 6 missing buildings to frame table (apwr, afld, hpad, kenn, pbox, v19). 68 tests.
+- **Harvester behavior**: Added Terrain.ORE to PASSABLE. Broadened harvester AI gate from GUARD-only to exclude ATTACK/DIE. Added isIdleMission() helper for GUARD+AREA_GUARD. Fixed seeking/returning state checks. 23 tests.
+- **Units crossing rivers**: Added Terrain.ROUGH/BEACH to PASSABLE. Added terrain passability check to path-following (safety) and direct movement (main fix). Units can no longer slide over water/rivers. 20 tests.
+- **Ant sprites**: Added 7 missing manifest entries (ant1/2/3, antdie, lar1, lar2, quee). Regenerated ant sprite PNGs. 8 tests.
+- **Files**: 9 modified + 4 new test files + 3 regenerated PNGs. 119 new tests, all pass. Code review: clean, no conflicts.
+
+## 2026-03-07T07:45Z — Session 119: Close 4 Competitive Gaps
+- **SAML cert enforcement**: `saml.ts` throws on missing certificate (was warn+skip), API guards on create/update, defense-in-depth in `sso-config.ts`, all SAML tests updated with certificates
+- **Intercom incremental sync**: Added `updated_after` filter to tickets URL, tests for ticket export (`ic-ticket-` prefix) and incremental sync verification
+- **HubSpot enhancements**: Incremental sync via search API (`hs_lastmodifieddate`), webhook signature verification (HMAC SHA-256 v3 + replay protection), workflows export via automation/v4/flows with 403 graceful fallback
+- **JSONL→DB dual-mode**: Migration 0028 (7 tables with RLS), Drizzle schema (7 table defs + 2 enums), async DB-first variants for AI admin-controls and SCIM store, all consumer routes updated to use async variants
+- **27 files changed**, 1769 insertions. 329/334 test files pass (2 pre-existing EE failures). Commit 73ad581.
+
 ## 2026-03-07T06:32Z — Session 118: P0 Feature Implementation — Eval Readiness
 - **AutoQA + PII scan workers**: Registered both missing workers in `workers/index.ts` (previously built but never started)
 - **Intercom Tickets API**: Added separate `ICTicket`/`ICTicketPart` types and export via `/tickets` endpoint (distinct from conversations)
