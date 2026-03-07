@@ -18,11 +18,6 @@ const navLinks: NavLink[] = [
   { href: "/ai", label: "AI" },
 ];
 
-
-function openCommandPalette() {
-  window.dispatchEvent(new Event("open-command-palette"));
-}
-
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -74,16 +69,7 @@ export default function AppNav() {
             })}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Command palette trigger */}
-          <button
-            onClick={openCommandPalette}
-            className="flex items-center gap-2 rounded border border-zinc-300 bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-400 transition-colors hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-            aria-label="Open command palette"
-            title="Command palette (⌘K)"
-          >
-            <span className="text-zinc-500">⌘K</span>
-          </button>
+        <div className="flex items-center gap-2">
           <NotificationBell />
           <button
             onClick={handleSignOut}

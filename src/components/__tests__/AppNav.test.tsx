@@ -53,11 +53,6 @@ describe('AppNav', () => {
     }
   });
 
-  it('renders the command palette trigger', () => {
-    render(<AppNav />);
-    expect(screen.getByTitle('Command palette (⌘K)')).toBeInTheDocument();
-  });
-
   it('renders correct hrefs for nav links', () => {
     render(<AppNav />);
     const dashboardLink = screen.getByText('Dashboard').closest('a');

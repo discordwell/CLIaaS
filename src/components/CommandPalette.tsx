@@ -171,17 +171,30 @@ function pushRecent(id: string) {
   } catch { /* localStorage unavailable */ }
 }
 
+/* ── Platform detection ────────────────────────────────────────── */
+
+function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
+}
+
 /* ── Component ────────────────────────────────────────────────── */
 
 export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [isMac, setIsMac] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
   const { rbacActive, hasPermission } = usePermissions();
+
+  // Detect platform after hydration
+  useEffect(() => {
+    setIsMac(isMacPlatform());
+  }, []);
 
   // Filter items by RBAC
   const permittedItems = useMemo(
@@ -653,11 +666,15 @@ export default function CommandPalette() {
             <span
               style={{
                 marginLeft: "auto",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
                 color: "#3f3f46",
                 fontSize: "10px",
               }}
             >
-              {flatItems.length} result{flatItems.length !== 1 ? "s" : ""}
+              <span>{flatItems.length} result{flatItems.length !== 1 ? "s" : ""}</span>
+              <Kbd>{isMac ? "⌘" : "Ctrl+"}K</Kbd>
             </span>
           </div>
         </div>
