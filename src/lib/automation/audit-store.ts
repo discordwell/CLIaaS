@@ -56,6 +56,43 @@ export async function queryAuditLog(filters: {
   since?: Date;
   limit?: number;
 }): Promise<PersistentAuditEntry[]> {
+  // RLS-scoped path
+  if (filters.workspaceId) {
+    const result = await withRls(filters.workspaceId, async ({ db, schema }) => {
+      const { eq, and, gte, desc } = await import('drizzle-orm');
+      const conditions = [];
+      if (filters.ruleId) conditions.push(eq(schema.ruleExecutions.ruleId, filters.ruleId));
+      if (filters.ticketId) conditions.push(eq(schema.ruleExecutions.ticketId, filters.ticketId));
+      if (filters.since) conditions.push(gte(schema.ruleExecutions.createdAt, filters.since));
+      const rows = await db
+        .select()
+        .from(schema.ruleExecutions)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(schema.ruleExecutions.createdAt))
+        .limit(filters.limit ?? 100);
+      return rows.map(row => ({
+        id: row.id,
+        ruleId: row.ruleId,
+        ruleName: row.ruleName,
+        ruleType: row.ruleType,
+        ticketId: row.ticketId,
+        event: row.event,
+        matched: row.matched,
+        dryRun: row.dryRun,
+        actionsExecuted: row.actionsExecuted,
+        changes: row.changes as Record<string, unknown>,
+        errors: row.errors as string[],
+        notificationsSent: row.notificationsSent ?? 0,
+        webhooksFired: row.webhooksFired ?? 0,
+        durationMs: row.durationMs ?? undefined,
+        actions: row.changes as Record<string, unknown>,
+        timestamp: row.createdAt.toISOString(),
+        workspaceId: row.workspaceId,
+      }));
+    });
+    if (result !== null) return result;
+  }
+
   try {
     const conn = await tryDb();
     if (!conn) return queryInMemory(filters);

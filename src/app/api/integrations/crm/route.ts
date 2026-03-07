@@ -14,8 +14,8 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const workspaceId = auth.user.workspaceId ?? 'default';
-  const sfCreds = linkStore.getCredentials(workspaceId, 'salesforce');
-  const hubCreds = linkStore.getCredentials(workspaceId, 'hubspot-crm');
+  const sfCreds = await linkStore.getCredentials(workspaceId, 'salesforce');
+  const hubCreds = await linkStore.getCredentials(workspaceId, 'hubspot-crm');
 
   return NextResponse.json({
     salesforce: { configured: !!sfCreds },

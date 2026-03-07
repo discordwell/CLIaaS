@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Find the link for this Jira issue
-    const allLinks = linkStore.listExternalLinks();
+    const allLinks = await linkStore.listExternalLinks();
     const link = allLinks.find(l => l.provider === 'jira' && l.externalId === event.issueKey);
     if (!link) {
       return NextResponse.json({ ok: true, skipped: 'no matching link' });
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (event.eventType === 'comment_created' && event.commentId && event.commentBody) {
-      const existing = linkStore.listLinkComments(link.id);
+      const existing = await linkStore.listLinkComments(link.id);
       if (!existing.find(c => c.externalCommentId === event.commentId)) {
         linkStore.createLinkComment({
           linkId: link.id,

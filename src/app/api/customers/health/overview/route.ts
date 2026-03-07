@@ -13,8 +13,8 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';
-  const allScores = getHealthScores({ workspaceId: wsId });
-  const atRisk = getAtRiskCustomers(wsId, 20);
+  const allScores = await getHealthScores({ workspaceId: wsId });
+  const atRisk = await getAtRiskCustomers(wsId, 20);
 
   // Distribution
   const distribution = {

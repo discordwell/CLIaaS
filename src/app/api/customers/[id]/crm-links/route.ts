@@ -17,7 +17,7 @@ export async function GET(
 
   const { id } = await params;
   const workspaceId = auth.user.workspaceId ?? 'default';
-  const crmData = getCrmDataForCustomer(id, workspaceId);
+  const crmData = await getCrmDataForCustomer(id, workspaceId);
   return NextResponse.json({ customerId: id, crm: crmData });
 }
 

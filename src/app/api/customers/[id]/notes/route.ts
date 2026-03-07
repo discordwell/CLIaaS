@@ -18,7 +18,7 @@ export async function GET(
 
   try {
     const { id } = await params;
-    const notes = getCustomerNotes(id);
+    const notes = await getCustomerNotes(id);
 
     return NextResponse.json({ notes });
   } catch (err) {

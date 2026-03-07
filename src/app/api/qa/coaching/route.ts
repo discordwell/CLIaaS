@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const agentId = request.nextUrl.searchParams.get('agentId') ?? undefined;
   const status = request.nextUrl.searchParams.get('status') ?? undefined;
 
-  const assignments = getCoachingAssignments({ workspaceId: wsId, agentId, status });
+  const assignments = await getCoachingAssignments({ workspaceId: wsId, agentId, status });
   return NextResponse.json({ assignments, total: assignments.length });
 }
 

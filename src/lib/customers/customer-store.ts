@@ -203,7 +203,24 @@ function ensureDefaults(): void {
 
 // ---- Public API: Activities ----
 
-export function getCustomerActivities(customerId: string): CustomerActivity[] {
+export async function getCustomerActivities(customerId: string, workspaceId?: string): Promise<CustomerActivity[]> {
+  if (workspaceId) {
+    const { eq } = await import('drizzle-orm');
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.customerActivities).where(eq(schema.customerActivities.customerId, customerId));
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        customerId: r.customerId,
+        activityType: r.activityType,
+        entityType: r.entityType ?? undefined,
+        entityId: r.entityId ?? undefined,
+        metadata: (r.metadata ?? {}) as Record<string, unknown>,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    });
+    if (result !== null) return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
   ensureDefaults();
   return activities
     .filter((a) => a.customerId === customerId)
@@ -226,7 +243,24 @@ export function addCustomerActivity(
 
 // ---- Public API: Notes ----
 
-export function getCustomerNotes(customerId: string): CustomerNote[] {
+export async function getCustomerNotes(customerId: string, workspaceId?: string): Promise<CustomerNote[]> {
+  if (workspaceId) {
+    const { eq } = await import('drizzle-orm');
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.customerNotes).where(eq(schema.customerNotes.customerId, customerId));
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        customerId: r.customerId,
+        authorId: r.authorId ?? undefined,
+        noteType: r.noteType as 'note' | 'call_log' | 'meeting',
+        body: r.body,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
   ensureDefaults();
   return notes
     .filter((n) => n.customerId === customerId)
@@ -251,7 +285,24 @@ export function addCustomerNote(
 
 // ---- Public API: Segments ----
 
-export function getCustomerSegments(): CustomerSegment[] {
+export async function getCustomerSegments(workspaceId?: string): Promise<CustomerSegment[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.customerSegments);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        description: r.description ?? undefined,
+        query: (r.query ?? {}) as Record<string, unknown>,
+        customerCount: r.customerCount,
+        createdBy: r.createdBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return [...segments];
 }
@@ -317,7 +368,22 @@ export function mergeCustomers(
   return entry;
 }
 
-export function getMergeLog(): CustomerMergeEntry[] {
+export async function getMergeLog(workspaceId?: string): Promise<CustomerMergeEntry[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.customerMergeLog);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        primaryCustomerId: r.primaryCustomerId,
+        mergedCustomerId: r.mergedCustomerId,
+        mergedData: (r.mergedData ?? {}) as Record<string, unknown>,
+        mergedBy: r.mergedBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return [...mergeLog];
 }

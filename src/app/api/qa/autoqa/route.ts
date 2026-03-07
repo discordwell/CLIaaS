@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';
-  const config = getAutoQAConfig(wsId);
+  const config = await getAutoQAConfig(wsId);
   return NextResponse.json({ config: config ?? { enabled: false, workspaceId: wsId } });
 }
 

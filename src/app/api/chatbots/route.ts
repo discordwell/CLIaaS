@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
-  const flows = await getChatbots();
+  const flows = await getChatbots(auth.user.workspaceId);
   return NextResponse.json({ chatbots: flows });
 }
 
@@ -90,6 +90,6 @@ export async function POST(request: NextRequest) {
     updatedAt: now,
   };
 
-  await upsertChatbot(flow);
+  await upsertChatbot(flow, auth.user.workspaceId);
   return NextResponse.json({ chatbot: flow }, { status: 201 });
 }

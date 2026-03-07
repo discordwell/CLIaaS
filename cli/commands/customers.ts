@@ -32,8 +32,8 @@ export function registerCustomerCommands(program: Command): void {
           process.exit(1);
         }
 
-        const activities = getCustomerActivities(customer.id);
-        const notes = getCustomerNotes(customer.id);
+        const activities = await getCustomerActivities(customer.id);
+        const notes = await getCustomerNotes(customer.id);
 
         output(
           {
@@ -92,9 +92,9 @@ export function registerCustomerCommands(program: Command): void {
     .description('Show activity timeline for a customer')
     .argument('<id>', 'Customer ID')
     .option('--limit <n>', 'Max activities to show', '20')
-    .action((id: string, opts: { limit: string }) => {
+    .action(async (id: string, opts: { limit: string }) => {
       const limit = parseInt(opts.limit, 10);
-      const activities = getCustomerActivities(id);
+      const activities = await getCustomerActivities(id);
 
       if (activities.length === 0) {
         output(

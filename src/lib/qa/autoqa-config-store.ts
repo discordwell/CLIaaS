@@ -36,7 +36,29 @@ function persist(): void {
   writeJsonlFile(FILE, configs);
 }
 
-export function getAutoQAConfig(workspaceId: string): AutoQAConfig | null {
+export async function getAutoQAConfig(workspaceId: string): Promise<AutoQAConfig | null> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.autoqaConfigs);
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        enabled: r.enabled,
+        scorecardId: r.scorecardId ?? undefined,
+        triggerOnResolved: r.triggerOnResolved,
+        triggerOnClosed: r.triggerOnClosed,
+        provider: r.provider as 'claude' | 'openai',
+        model: r.model ?? undefined,
+        sampleRate: parseFloat(r.sampleRate),
+        customInstructions: r.customInstructions ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      };
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return configs.find(c => c.workspaceId === workspaceId) ?? null;
 }

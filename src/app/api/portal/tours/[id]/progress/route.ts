@@ -22,7 +22,7 @@ export async function POST(
     return NextResponse.json({ error: 'customerId and action are required' }, { status: 400 });
   }
 
-  const steps = getTourSteps(id);
+  const steps = await getTourSteps(id);
 
   if (action === 'dismiss') {
     const progress = upsertTourProgress(id, customerId, { status: 'dismissed' });
@@ -41,7 +41,7 @@ export async function POST(
   }
 
   // next — check existing progress first (read-only), then mutate
-  const existing = getTourProgress(id, customerId);
+  const existing = await getTourProgress(id, customerId);
   const isNew = !existing;
   const currentStep = existing?.currentStep ?? 0;
 

@@ -14,8 +14,8 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const workspaceId = auth.user.workspaceId ?? 'default';
-  const jiraCreds = linkStore.getCredentials(workspaceId, 'jira');
-  const linearCreds = linkStore.getCredentials(workspaceId, 'linear');
+  const jiraCreds = await linkStore.getCredentials(workspaceId, 'jira');
+  const linearCreds = await linkStore.getCredentials(workspaceId, 'linear');
 
   return NextResponse.json({
     jira: {

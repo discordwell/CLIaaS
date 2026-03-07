@@ -48,13 +48,39 @@ export function createFlag(input: Omit<QAFlagRecord, 'id' | 'createdAt' | 'dismi
   return flag;
 }
 
-export function getFlags(filters?: {
+export async function getFlags(filters?: {
   workspaceId?: string;
   severity?: string;
   dismissed?: boolean;
   ticketId?: string;
   reviewId?: string;
-}): QAFlagRecord[] {
+}): Promise<QAFlagRecord[]> {
+  if (filters?.workspaceId) {
+    const dbResult = await withRls(filters.workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.qaFlags);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        reviewId: r.reviewId,
+        ticketId: r.ticketId ?? undefined,
+        category: r.category,
+        severity: r.severity as 'info' | 'warning' | 'critical',
+        message: r.message,
+        dismissed: r.dismissed,
+        dismissedBy: r.dismissedBy ?? undefined,
+        dismissedAt: r.dismissedAt?.toISOString(),
+        createdAt: r.createdAt.toISOString(),
+      }));
+    });
+    if (dbResult !== null) {
+      let filtered = dbResult;
+      if (filters.severity) filtered = filtered.filter(f => f.severity === filters.severity);
+      if (filters.dismissed !== undefined) filtered = filtered.filter(f => f.dismissed === filters.dismissed);
+      if (filters.ticketId) filtered = filtered.filter(f => f.ticketId === filters.ticketId);
+      if (filters.reviewId) filtered = filtered.filter(f => f.reviewId === filters.reviewId);
+      return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+  }
   ensureLoaded();
   let result = [...flags];
   if (filters?.workspaceId) result = result.filter(f => f.workspaceId === filters.workspaceId);

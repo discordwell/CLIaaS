@@ -243,11 +243,40 @@ function ensureDefaults(): void {
 
 // ---- Public API ----
 
-export function getCampaigns(filters?: {
+export async function getCampaigns(filters?: {
   status?: Campaign['status'];
   channel?: Campaign['channel'];
   workspaceId?: string;
-}): Campaign[] {
+}): Promise<Campaign[]> {
+  if (filters?.workspaceId) {
+    const result = await withRls(filters.workspaceId, async ({ db, schema }) => {
+      const { eq, and } = await import('drizzle-orm');
+      const conditions = [];
+      if (filters.status) conditions.push(eq(schema.campaigns.status, filters.status));
+      if (filters.channel) conditions.push(eq(schema.campaigns.channel, filters.channel));
+      const rows = await db.select().from(schema.campaigns)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(schema.campaigns.updatedAt);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        channel: r.channel,
+        status: r.status,
+        subject: r.subject ?? undefined,
+        templateBody: r.templateBody ?? undefined,
+        templateVariables: (r.templateVariables as Record<string, unknown>) ?? undefined,
+        segmentQuery: (r.segmentQuery as Record<string, unknown>) ?? undefined,
+        entryStepId: r.entryStepId ?? undefined,
+        scheduledAt: r.scheduledAt?.toISOString(),
+        sentAt: r.sentAt?.toISOString(),
+        createdBy: r.createdBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as Campaign)).reverse();
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   let result = [...campaigns];
   if (filters?.workspaceId) {
@@ -262,7 +291,32 @@ export function getCampaigns(filters?: {
   return result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-export function getCampaign(id: string, workspaceId?: string): Campaign | undefined {
+export async function getCampaign(id: string, workspaceId?: string): Promise<Campaign | undefined> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db.select().from(schema.campaigns).where(eq(schema.campaigns.id, id));
+      if (!row) return undefined;
+      return {
+        id: row.id,
+        workspaceId: row.workspaceId,
+        name: row.name,
+        channel: row.channel,
+        status: row.status,
+        subject: row.subject ?? undefined,
+        templateBody: row.templateBody ?? undefined,
+        templateVariables: (row.templateVariables as Record<string, unknown>) ?? undefined,
+        segmentQuery: (row.segmentQuery as Record<string, unknown>) ?? undefined,
+        entryStepId: row.entryStepId ?? undefined,
+        scheduledAt: row.scheduledAt?.toISOString(),
+        sentAt: row.sentAt?.toISOString(),
+        createdBy: row.createdBy ?? undefined,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      } as Campaign;
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   const campaign = campaigns.find(c => c.id === id);
   if (!campaign) return undefined;
@@ -315,9 +369,9 @@ export function updateCampaign(
   return campaigns[idx];
 }
 
-export function sendCampaign(id: string, workspaceId?: string): Campaign | null {
+export async function sendCampaign(id: string, workspaceId?: string): Promise<Campaign | null> {
   ensureDefaults();
-  const campaign = getCampaign(id, workspaceId);
+  const campaign = await getCampaign(id, workspaceId);
   if (!campaign) return null;
   if (campaign.status !== 'draft' && campaign.status !== 'scheduled') return null;
 
@@ -357,9 +411,29 @@ export function sendCampaign(id: string, workspaceId?: string): Campaign | null 
   return campaigns[idx];
 }
 
-export function getCampaignAnalytics(id: string, workspaceId?: string): CampaignAnalytics | null {
+export async function getCampaignAnalytics(id: string, workspaceId?: string): Promise<CampaignAnalytics | null> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      // Verify the campaign exists
+      const [camp] = await db.select({ id: schema.campaigns.id }).from(schema.campaigns).where(eq(schema.campaigns.id, id));
+      if (!camp) return null;
+      const rows = await db.select().from(schema.campaignRecipients).where(eq(schema.campaignRecipients.campaignId, id));
+      return {
+        campaignId: id,
+        total: rows.length,
+        pending: rows.filter(r => r.status === 'pending').length,
+        sent: rows.filter(r => r.status === 'sent').length,
+        delivered: rows.filter(r => r.status === 'delivered').length,
+        opened: rows.filter(r => r.status === 'opened').length,
+        clicked: rows.filter(r => r.status === 'clicked').length,
+        failed: rows.filter(r => r.status === 'failed').length,
+      };
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
-  const campaign = getCampaign(id, workspaceId);
+  const campaign = await getCampaign(id, workspaceId);
   if (!campaign) return null;
 
   const campaignRecipients = recipients.filter(r => r.campaignId === id);
@@ -378,24 +452,73 @@ export function getCampaignAnalytics(id: string, workspaceId?: string): Campaign
 
 // ---- Campaign Steps CRUD ----
 
-export function getCampaignSteps(campaignId: string, workspaceId?: string): CampaignStep[] {
+export async function getCampaignSteps(campaignId: string, workspaceId?: string): Promise<CampaignStep[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.campaignSteps)
+        .where(eq(schema.campaignSteps.campaignId, campaignId))
+        .orderBy(schema.campaignSteps.position);
+      return rows.map(r => ({
+        id: r.id,
+        campaignId: r.campaignId,
+        workspaceId: r.workspaceId,
+        stepType: r.stepType,
+        position: r.position,
+        name: r.name,
+        config: (r.config as Record<string, unknown>) ?? {},
+        delaySeconds: r.delaySeconds ?? undefined,
+        conditionQuery: (r.conditionQuery as Record<string, unknown>) ?? undefined,
+        nextStepId: r.nextStepId ?? undefined,
+        branchTrueStepId: r.branchTrueStepId ?? undefined,
+        branchFalseStepId: r.branchFalseStepId ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as CampaignStep));
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return steps
     .filter(s => s.campaignId === campaignId && (!workspaceId || !s.workspaceId || s.workspaceId === workspaceId))
     .sort((a, b) => a.position - b.position);
 }
 
-export function getCampaignStep(stepId: string): CampaignStep | undefined {
+export async function getCampaignStep(stepId: string, workspaceId?: string): Promise<CampaignStep | undefined> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [r] = await db.select().from(schema.campaignSteps).where(eq(schema.campaignSteps.id, stepId));
+      if (!r) return undefined;
+      return {
+        id: r.id,
+        campaignId: r.campaignId,
+        workspaceId: r.workspaceId,
+        stepType: r.stepType,
+        position: r.position,
+        name: r.name,
+        config: (r.config as Record<string, unknown>) ?? {},
+        delaySeconds: r.delaySeconds ?? undefined,
+        conditionQuery: (r.conditionQuery as Record<string, unknown>) ?? undefined,
+        nextStepId: r.nextStepId ?? undefined,
+        branchTrueStepId: r.branchTrueStepId ?? undefined,
+        branchFalseStepId: r.branchFalseStepId ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as CampaignStep;
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return steps.find(s => s.id === stepId);
 }
 
-export function addCampaignStep(
+export async function addCampaignStep(
   input: Pick<CampaignStep, 'campaignId' | 'stepType' | 'name'> & Partial<Pick<CampaignStep, 'config' | 'delaySeconds' | 'conditionQuery' | 'nextStepId' | 'branchTrueStepId' | 'branchFalseStepId'>>,
   workspaceId?: string,
-): CampaignStep {
+): Promise<CampaignStep> {
   ensureDefaults();
-  const existing = getCampaignSteps(input.campaignId, workspaceId);
+  const existing = await getCampaignSteps(input.campaignId, workspaceId);
   const now = new Date().toISOString();
   const step: CampaignStep = {
     id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -417,7 +540,7 @@ export function addCampaignStep(
 
   // Set as entry step if first step
   if (existing.length === 0) {
-    const campaign = getCampaign(input.campaignId, workspaceId);
+    const campaign = await getCampaign(input.campaignId, workspaceId);
     if (campaign) {
       updateCampaign(input.campaignId, { entryStepId: step.id }, workspaceId);
     }
@@ -452,7 +575,7 @@ export function removeCampaignStep(stepId: string): boolean {
   return true;
 }
 
-export function reorderCampaignSteps(campaignId: string, stepIds: string[]): CampaignStep[] {
+export async function reorderCampaignSteps(campaignId: string, stepIds: string[]): Promise<CampaignStep[]> {
   ensureDefaults();
   for (let i = 0; i < stepIds.length; i++) {
     const idx = steps.findIndex(s => s.id === stepIds[i] && s.campaignId === campaignId);
@@ -466,14 +589,54 @@ export function reorderCampaignSteps(campaignId: string, stepIds: string[]): Cam
 
 // ---- Campaign Enrollments CRUD ----
 
-export function getEnrollments(campaignId: string, workspaceId?: string): CampaignEnrollment[] {
+export async function getEnrollments(campaignId: string, workspaceId?: string): Promise<CampaignEnrollment[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.campaignEnrollments)
+        .where(eq(schema.campaignEnrollments.campaignId, campaignId));
+      return rows.map(r => ({
+        id: r.id,
+        campaignId: r.campaignId,
+        workspaceId: r.workspaceId,
+        customerId: r.customerId,
+        currentStepId: r.currentStepId ?? undefined,
+        status: r.status as CampaignEnrollment['status'],
+        enrolledAt: r.enrolledAt.toISOString(),
+        completedAt: r.completedAt?.toISOString(),
+        nextExecutionAt: r.nextExecutionAt?.toISOString(),
+        metadata: (r.metadata as Record<string, unknown>) ?? {},
+      } as CampaignEnrollment)).sort((a, b) => new Date(b.enrolledAt).getTime() - new Date(a.enrolledAt).getTime());
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return enrollments
     .filter(e => e.campaignId === campaignId && (!workspaceId || !e.workspaceId || e.workspaceId === workspaceId))
     .sort((a, b) => new Date(b.enrolledAt).getTime() - new Date(a.enrolledAt).getTime());
 }
 
-export function getEnrollment(enrollmentId: string): CampaignEnrollment | undefined {
+export async function getEnrollment(enrollmentId: string, workspaceId?: string): Promise<CampaignEnrollment | undefined> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [r] = await db.select().from(schema.campaignEnrollments).where(eq(schema.campaignEnrollments.id, enrollmentId));
+      if (!r) return undefined;
+      return {
+        id: r.id,
+        campaignId: r.campaignId,
+        workspaceId: r.workspaceId,
+        customerId: r.customerId,
+        currentStepId: r.currentStepId ?? undefined,
+        status: r.status as CampaignEnrollment['status'],
+        enrolledAt: r.enrolledAt.toISOString(),
+        completedAt: r.completedAt?.toISOString(),
+        nextExecutionAt: r.nextExecutionAt?.toISOString(),
+        metadata: (r.metadata as Record<string, unknown>) ?? {},
+      } as CampaignEnrollment;
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return enrollments.find(e => e.id === enrollmentId);
 }
@@ -541,14 +704,48 @@ export function addStepEvent(
   return event;
 }
 
-export function getStepEvents(stepId: string): CampaignStepEvent[] {
+export async function getStepEvents(stepId: string, workspaceId?: string): Promise<CampaignStepEvent[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.campaignStepEvents)
+        .where(eq(schema.campaignStepEvents.stepId, stepId));
+      return rows.map(r => ({
+        id: r.id,
+        enrollmentId: r.enrollmentId,
+        stepId: r.stepId,
+        workspaceId: r.workspaceId,
+        eventType: r.eventType,
+        metadata: (r.metadata as Record<string, unknown>) ?? {},
+        createdAt: r.createdAt.toISOString(),
+      } as CampaignStepEvent)).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return stepEvents
     .filter(e => e.stepId === stepId)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
-export function getEnrollmentEvents(enrollmentId: string): CampaignStepEvent[] {
+export async function getEnrollmentEvents(enrollmentId: string, workspaceId?: string): Promise<CampaignStepEvent[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.campaignStepEvents)
+        .where(eq(schema.campaignStepEvents.enrollmentId, enrollmentId));
+      return rows.map(r => ({
+        id: r.id,
+        enrollmentId: r.enrollmentId,
+        stepId: r.stepId,
+        workspaceId: r.workspaceId,
+        eventType: r.eventType,
+        metadata: (r.metadata as Record<string, unknown>) ?? {},
+        createdAt: r.createdAt.toISOString(),
+      } as CampaignStepEvent)).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return stepEvents
     .filter(e => e.enrollmentId === enrollmentId)
@@ -568,10 +765,40 @@ export interface StepFunnelEntry {
   skipped: number;
 }
 
-export function getCampaignFunnel(campaignId: string, workspaceId?: string): StepFunnelEntry[] {
+export async function getCampaignFunnel(campaignId: string, workspaceId?: string): Promise<StepFunnelEntry[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const stepsRows = await db.select().from(schema.campaignSteps)
+        .where(eq(schema.campaignSteps.campaignId, campaignId))
+        .orderBy(schema.campaignSteps.position);
+      // Fetch all events for all steps
+      const allEvents: { stepId: string; eventType: string }[] = [];
+      for (const s of stepsRows) {
+        const evts = await db.select({ stepId: schema.campaignStepEvents.stepId, eventType: schema.campaignStepEvents.eventType })
+          .from(schema.campaignStepEvents)
+          .where(eq(schema.campaignStepEvents.stepId, s.id));
+        allEvents.push(...evts);
+      }
+      return stepsRows.map(step => {
+        const events = allEvents.filter(e => e.stepId === step.id);
+        return {
+          stepId: step.id,
+          stepName: step.name,
+          stepType: step.stepType,
+          position: step.position,
+          executed: events.filter(e => e.eventType === 'executed').length,
+          completed: events.filter(e => e.eventType === 'completed' || e.eventType === 'sent' || e.eventType === 'delivered').length,
+          failed: events.filter(e => e.eventType === 'failed' || e.eventType === 'bounced').length,
+          skipped: events.filter(e => e.eventType === 'skipped').length,
+        } as StepFunnelEntry;
+      });
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
-  const campaignSteps = getCampaignSteps(campaignId, workspaceId);
-  return campaignSteps.map(step => {
+  const campaignStepsLocal = await getCampaignSteps(campaignId, workspaceId);
+  return campaignStepsLocal.map(step => {
     const events = stepEvents.filter(e => e.stepId === step.id);
     return {
       stepId: step.id,

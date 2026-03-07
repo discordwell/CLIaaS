@@ -30,7 +30,7 @@ export async function POST(
     customers = [];
   }
 
-  const result = enrollCampaign(id, customers, auth.user.workspaceId);
+  const result = await enrollCampaign(id, customers, auth.user.workspaceId);
 
   if (!result.campaign) {
     return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });

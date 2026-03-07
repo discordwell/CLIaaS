@@ -4,6 +4,7 @@ import { persistAuditEntry, queryAuditLog } from '../audit-store';
 // Mock tryDb to return null (no DB)
 vi.mock('@/lib/store-helpers', () => ({
   tryDb: vi.fn().mockResolvedValue(null),
+  withRls: vi.fn().mockResolvedValue(null),
 }));
 
 beforeEach(() => {

@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get('status') as 'draft' | 'scheduled' | 'sending' | 'sent' | 'cancelled' | null;
   const channel = searchParams.get('channel') as 'email' | 'sms' | 'whatsapp' | null;
 
-  const campaigns = getCampaigns({
+  const campaigns = await getCampaigns({
     status: status ?? undefined,
     channel: channel ?? undefined,
     workspaceId: auth.user.workspaceId,

@@ -13,6 +13,6 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const enrollments = getEnrollments(id, auth.user.workspaceId);
+  const enrollments = await getEnrollments(id, auth.user.workspaceId);
   return NextResponse.json({ enrollments, total: enrollments.length });
 }

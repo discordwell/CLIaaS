@@ -6,7 +6,7 @@ import * as linkStore from '@/lib/integrations/link-store';
 
 export const dynamic = 'force-dynamic';
 
-function handlePayload(payload: Record<string, unknown>): NextResponse {
+async function handlePayload(payload: Record<string, unknown>): Promise<NextResponse> {
   const event = processLinearWebhook(payload);
 
   if (!event.issueId) {
@@ -14,7 +14,7 @@ function handlePayload(payload: Record<string, unknown>): NextResponse {
   }
 
   // Find the link for this Linear issue
-  const allLinks = linkStore.listExternalLinks();
+  const allLinks = await linkStore.listExternalLinks();
   const link = allLinks.find(l => l.provider === 'linear' && l.externalId === event.issueId);
   if (!link) {
     return NextResponse.json({ ok: true, skipped: 'no matching link' });
@@ -28,7 +28,7 @@ function handlePayload(payload: Record<string, unknown>): NextResponse {
   }
 
   if (event.eventType === 'comment_created' && event.commentId && event.commentBody) {
-    const existing = linkStore.listLinkComments(link.id);
+    const existing = await linkStore.listLinkComments(link.id);
     if (!existing.find(c => c.externalCommentId === event.commentId)) {
       linkStore.createLinkComment({
         linkId: link.id,
@@ -57,11 +57,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 401 });
       }
       const payload = JSON.parse(rawBody) as Record<string, unknown>;
-      return handlePayload(payload);
+      return await handlePayload(payload);
     }
 
     const payload = await request.json();
-    return handlePayload(payload as Record<string, unknown>);
+    return await handlePayload(payload as Record<string, unknown>);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Webhook processing failed' },

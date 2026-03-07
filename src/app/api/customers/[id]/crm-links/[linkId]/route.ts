@@ -13,7 +13,7 @@ export async function DELETE(
   if ('error' in auth) return auth.error;
 
   const { linkId } = await params;
-  const link = linkStore.getCrmLink(linkId);
+  const link = await linkStore.getCrmLink(linkId);
   if (!link) return NextResponse.json({ error: 'Link not found' }, { status: 404 });
 
   // Scope by workspace to prevent cross-workspace deletion

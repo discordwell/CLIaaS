@@ -7,9 +7,9 @@ describe('Campaign Steps CRUD', () => {
     store = await import('../lib/campaigns/campaign-store');
   });
 
-  it('addCampaignStep creates a step and returns it', () => {
+  it('addCampaignStep creates a step and returns it', async () => {
     const campaign = store.createCampaign({ name: 'Test Multi-Step', channel: 'email' });
-    const step = store.addCampaignStep({
+    const step = await store.addCampaignStep({
       campaignId: campaign.id,
       stepType: 'send_email',
       name: 'Welcome Email',
@@ -23,25 +23,25 @@ describe('Campaign Steps CRUD', () => {
     expect(step.position).toBe(0);
   });
 
-  it('addCampaignStep sets entry_step_id on campaign for first step', () => {
+  it('addCampaignStep sets entry_step_id on campaign for first step', async () => {
     const campaign = store.createCampaign({ name: 'Entry Step Test', channel: 'email' });
-    const step = store.addCampaignStep({
+    const step = await store.addCampaignStep({
       campaignId: campaign.id,
       stepType: 'send_email',
       name: 'First Step',
     });
 
-    const updated = store.getCampaign(campaign.id);
+    const updated = await store.getCampaign(campaign.id);
     expect(updated?.entryStepId).toBe(step.id);
   });
 
-  it('getCampaignSteps returns sorted by position', () => {
+  it('getCampaignSteps returns sorted by position', async () => {
     const campaign = store.createCampaign({ name: 'Sorted Steps', channel: 'email' });
-    store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'Step A' });
-    store.addCampaignStep({ campaignId: campaign.id, stepType: 'wait_delay', name: 'Step B' });
-    store.addCampaignStep({ campaignId: campaign.id, stepType: 'condition', name: 'Step C' });
+    await store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'Step A' });
+    await store.addCampaignStep({ campaignId: campaign.id, stepType: 'wait_delay', name: 'Step B' });
+    await store.addCampaignStep({ campaignId: campaign.id, stepType: 'condition', name: 'Step C' });
 
-    const steps = store.getCampaignSteps(campaign.id);
+    const steps = await store.getCampaignSteps(campaign.id);
     expect(steps).toHaveLength(3);
     expect(steps[0].name).toBe('Step A');
     expect(steps[0].position).toBe(0);
@@ -51,9 +51,9 @@ describe('Campaign Steps CRUD', () => {
     expect(steps[2].position).toBe(2);
   });
 
-  it('updateCampaignStep modifies step fields', () => {
+  it('updateCampaignStep modifies step fields', async () => {
     const campaign = store.createCampaign({ name: 'Update Test', channel: 'email' });
-    const step = store.addCampaignStep({
+    const step = await store.addCampaignStep({
       campaignId: campaign.id,
       stepType: 'wait_delay',
       name: 'Wait 1 Day',
@@ -66,29 +66,29 @@ describe('Campaign Steps CRUD', () => {
     expect(updated!.delaySeconds).toBe(172800);
   });
 
-  it('removeCampaignStep deletes a step', () => {
+  it('removeCampaignStep deletes a step', async () => {
     const campaign = store.createCampaign({ name: 'Remove Test', channel: 'email' });
-    const step = store.addCampaignStep({
+    const step = await store.addCampaignStep({
       campaignId: campaign.id,
       stepType: 'send_email',
       name: 'Removable',
     });
 
     expect(store.removeCampaignStep(step.id)).toBe(true);
-    expect(store.getCampaignSteps(campaign.id)).toHaveLength(0);
+    expect(await store.getCampaignSteps(campaign.id)).toHaveLength(0);
   });
 
   it('removeCampaignStep returns false for nonexistent', () => {
     expect(store.removeCampaignStep('nonexistent')).toBe(false);
   });
 
-  it('reorderCampaignSteps changes positions', () => {
+  it('reorderCampaignSteps changes positions', async () => {
     const campaign = store.createCampaign({ name: 'Reorder Test', channel: 'email' });
-    const a = store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'A' });
-    const b = store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'B' });
-    const c = store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'C' });
+    const a = await store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'A' });
+    const b = await store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'B' });
+    const c = await store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'C' });
 
-    const reordered = store.reorderCampaignSteps(campaign.id, [c.id, a.id, b.id]);
+    const reordered = await store.reorderCampaignSteps(campaign.id, [c.id, a.id, b.id]);
     expect(reordered[0].name).toBe('C');
     expect(reordered[0].position).toBe(0);
     expect(reordered[1].name).toBe('A');
@@ -128,12 +128,12 @@ describe('Campaign Enrollments', () => {
     expect(enrollment.enrolledAt).toBeTruthy();
   });
 
-  it('getEnrollments returns enrollments for campaign', () => {
+  it('getEnrollments returns enrollments for campaign', async () => {
     const campaign = store.createCampaign({ name: 'List Enroll', channel: 'email' });
     store.createEnrollment({ campaignId: campaign.id, customerId: 'cust-1' });
     store.createEnrollment({ campaignId: campaign.id, customerId: 'cust-2' });
 
-    const enrollments = store.getEnrollments(campaign.id);
+    const enrollments = await store.getEnrollments(campaign.id);
     expect(enrollments).toHaveLength(2);
   });
 
@@ -165,11 +165,11 @@ describe('Campaign Step Events', () => {
     expect(event.eventType).toBe('executed');
   });
 
-  it('getStepEvents returns events for a step', () => {
+  it('getStepEvents returns events for a step', async () => {
     store.addStepEvent({ enrollmentId: 'enr-1', stepId: 'step-x', eventType: 'executed' });
     store.addStepEvent({ enrollmentId: 'enr-2', stepId: 'step-x', eventType: 'sent' });
 
-    const events = store.getStepEvents('step-x');
+    const events = await store.getStepEvents('step-x');
     expect(events.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -181,10 +181,10 @@ describe('Campaign Funnel Analytics', () => {
     store = await import('../lib/campaigns/campaign-store');
   });
 
-  it('getCampaignFunnel returns per-step analytics', () => {
+  it('getCampaignFunnel returns per-step analytics', async () => {
     const campaign = store.createCampaign({ name: 'Funnel Test', channel: 'email' });
-    const step1 = store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'Email 1' });
-    const step2 = store.addCampaignStep({ campaignId: campaign.id, stepType: 'wait_delay', name: 'Wait' });
+    const step1 = await store.addCampaignStep({ campaignId: campaign.id, stepType: 'send_email', name: 'Email 1' });
+    const step2 = await store.addCampaignStep({ campaignId: campaign.id, stepType: 'wait_delay', name: 'Wait' });
 
     store.addStepEvent({ enrollmentId: 'e1', stepId: step1.id, eventType: 'executed' });
     store.addStepEvent({ enrollmentId: 'e1', stepId: step1.id, eventType: 'sent' });
@@ -193,7 +193,7 @@ describe('Campaign Funnel Analytics', () => {
     store.addStepEvent({ enrollmentId: 'e1', stepId: step2.id, eventType: 'executed' });
     store.addStepEvent({ enrollmentId: 'e1', stepId: step2.id, eventType: 'completed' });
 
-    const funnel = store.getCampaignFunnel(campaign.id);
+    const funnel = await store.getCampaignFunnel(campaign.id);
     expect(funnel).toHaveLength(2);
     expect(funnel[0].executed).toBe(2);
     expect(funnel[0].completed).toBe(1); // 'sent' counts as completed

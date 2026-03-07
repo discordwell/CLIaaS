@@ -13,24 +13,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'customerId is required' }, { status: 400 });
   }
 
-  const activeTours = getTours().filter(t => {
-    if (!t.isActive) return false;
+  const allTours = await getTours();
+  const activeTours = [];
+  for (const t of allTours) {
+    if (!t.isActive) continue;
     if (t.targetUrlPattern !== '*') {
       const escaped = t.targetUrlPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
-      if (!new RegExp(`^${escaped}$`).test(currentUrl)) return false;
+      if (!new RegExp(`^${escaped}$`).test(currentUrl)) continue;
     }
-    const progress = getTourProgress(t.id, customerId);
-    if (progress && (progress.status === 'completed' || progress.status === 'dismissed')) return false;
-    return true;
-  });
+    const progress = await getTourProgress(t.id, customerId);
+    if (progress && (progress.status === 'completed' || progress.status === 'dismissed')) continue;
+    activeTours.push(t);
+  }
 
   if (activeTours.length === 0) {
     return NextResponse.json({ tour: null });
   }
 
   const tour = activeTours[0];
-  const steps = getTourSteps(tour.id);
-  const progress = getTourProgress(tour.id, customerId);
+  const steps = await getTourSteps(tour.id);
+  const progress = await getTourProgress(tour.id, customerId);
 
   return NextResponse.json({
     tour: {

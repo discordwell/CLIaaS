@@ -16,7 +16,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const steps = getCampaignSteps(id, auth.user.workspaceId);
+  const steps = await getCampaignSteps(id, auth.user.workspaceId);
   return NextResponse.json({ steps, total: steps.length });
 }
 
@@ -40,7 +40,7 @@ export async function POST(
 
   // Handle reorder
   if (parsed.data.stepIds) {
-    const reordered = reorderCampaignSteps(id, parsed.data.stepIds);
+    const reordered = await reorderCampaignSteps(id, parsed.data.stepIds);
     return NextResponse.json({ steps: reordered });
   }
 
@@ -53,7 +53,7 @@ export async function POST(
     return NextResponse.json({ error: `Invalid stepType: ${stepType}` }, { status: 400 });
   }
 
-  const step = addCampaignStep(
+  const step = await addCampaignStep(
     { campaignId: id, stepType, name, config, delaySeconds, conditionQuery },
     auth.user.workspaceId,
   );

@@ -43,7 +43,7 @@ export async function syncSalesforceContacts(
       const customerId = customerEmails.get(contact.Email.toLowerCase());
       if (!customerId) continue;
 
-      const existing = linkStore.listCrmLinks('customer', customerId, workspaceId)
+      const existing = (await linkStore.listCrmLinks('customer', customerId, workspaceId))
         .find(l => l.provider === 'salesforce' && l.crmObjectId === contact.Id);
 
       const crmData: Record<string, unknown> = {
@@ -111,7 +111,7 @@ export async function syncHubSpotContacts(
       const customerId = customerEmails.get(email.toLowerCase());
       if (!customerId) continue;
 
-      const existing = linkStore.listCrmLinks('customer', customerId, workspaceId)
+      const existing = (await linkStore.listCrmLinks('customer', customerId, workspaceId))
         .find(l => l.provider === 'hubspot-crm' && l.crmObjectId === contact.id);
 
       const crmData: Record<string, unknown> = {
@@ -167,8 +167,8 @@ export async function syncHubSpotContacts(
 
 // ---- Get CRM Data for a Customer ----
 
-export function getCrmDataForCustomer(customerId: string, workspaceId?: string): CrmCustomerData[] {
-  const links = linkStore.listCrmLinks('customer', customerId, workspaceId);
+export async function getCrmDataForCustomer(customerId: string, workspaceId?: string): Promise<CrmCustomerData[]> {
+  const links = await linkStore.listCrmLinks('customer', customerId, workspaceId);
   const byProvider: Record<string, CrmCustomerData> = {};
 
   for (const link of links) {
@@ -190,8 +190,8 @@ export function getCrmDataForCustomer(customerId: string, workspaceId?: string):
 
 // ---- Get CRM Data for an Organization ----
 
-export function getCrmDataForOrg(orgId: string, workspaceId?: string): CrmCustomerData[] {
-  const links = linkStore.listCrmLinks('organization', orgId, workspaceId);
+export async function getCrmDataForOrg(orgId: string, workspaceId?: string): Promise<CrmCustomerData[]> {
+  const links = await linkStore.listCrmLinks('organization', orgId, workspaceId);
   const byProvider: Record<string, CrmCustomerData> = {};
 
   for (const link of links) {

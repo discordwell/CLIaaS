@@ -278,7 +278,7 @@ describe('link-store', () => {
     linkStore = await import('@/lib/integrations/link-store');
   });
 
-  it('creates and lists external links', () => {
+  it('creates and lists external links', async () => {
     const link = linkStore.createExternalLink({
       workspaceId: 'ws-1',
       ticketId: 'ticket-1',
@@ -295,12 +295,12 @@ describe('link-store', () => {
     expect(link.id).toBeDefined();
     expect(link.provider).toBe('jira');
 
-    const links = linkStore.listExternalLinks('ticket-1');
+    const links = await linkStore.listExternalLinks('ticket-1');
     expect(links).toHaveLength(1);
     expect(links[0].externalId).toBe('PROJ-123');
   });
 
-  it('manages credentials', () => {
+  it('manages credentials', async () => {
     linkStore.saveCredentials({
       workspaceId: 'ws-1',
       provider: 'jira',
@@ -309,16 +309,16 @@ describe('link-store', () => {
       scopes: ['read', 'write'],
     });
 
-    const creds = linkStore.getCredentials('ws-1', 'jira');
+    const creds = await linkStore.getCredentials('ws-1', 'jira');
     expect(creds).toBeDefined();
     expect(creds?.provider).toBe('jira');
     expect((creds?.credentials as Record<string, string>).baseUrl).toBe('https://x.atlassian.net');
 
     linkStore.deleteCredentials('ws-1', 'jira');
-    expect(linkStore.getCredentials('ws-1', 'jira')).toBeUndefined();
+    expect(await linkStore.getCredentials('ws-1', 'jira')).toBeUndefined();
   });
 
-  it('creates and lists CRM links', () => {
+  it('creates and lists CRM links', async () => {
     const link = linkStore.createCrmLink({
       workspaceId: 'ws-1',
       provider: 'salesforce',
@@ -332,11 +332,11 @@ describe('link-store', () => {
 
     expect(link.id).toBeDefined();
 
-    const links = linkStore.listCrmLinks('customer', 'cust-1');
+    const links = await linkStore.listCrmLinks('customer', 'cust-1');
     expect(links).toHaveLength(1);
     expect(links[0].crmData.Name).toBe('John Smith');
 
     linkStore.deleteCrmLink(link.id);
-    expect(linkStore.listCrmLinks('customer', 'cust-1')).toHaveLength(0);
+    expect(await linkStore.listCrmLinks('customer', 'cust-1')).toHaveLength(0);
   });
 });

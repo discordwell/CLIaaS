@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const dismissed = request.nextUrl.searchParams.get('dismissed');
   const ticketId = request.nextUrl.searchParams.get('ticketId') ?? undefined;
 
-  const flags = getFlags({
+  const flags = await getFlags({
     workspaceId: wsId,
     severity,
     dismissed: dismissed !== null ? dismissed === 'true' : undefined,

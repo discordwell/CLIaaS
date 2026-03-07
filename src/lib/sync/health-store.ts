@@ -143,6 +143,15 @@ export async function recordSyncResult(
 export async function getSyncHealth(
   workspaceId: string,
 ): Promise<SyncHealthRecord[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.syncHealth);
+      return rows.map(rowToRecord);
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
 
   if (ctx) {
@@ -170,6 +179,17 @@ export async function getSyncHealthForConnector(
   workspaceId: string,
   connector: string,
 ): Promise<SyncHealthRecord | null> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db.select().from(schema.syncHealth)
+        .where(eq(schema.syncHealth.connector, connector));
+      return row ? rowToRecord(row) : null;
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
 
   if (ctx) {

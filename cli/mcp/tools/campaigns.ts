@@ -27,7 +27,7 @@ export function registerCampaignTools(server: McpServer): void {
     },
     async ({ status, channel }) => {
       try {
-        const campaigns = getCampaigns({ status, channel });
+        const campaigns = await getCampaigns({ status, channel });
         const summary = campaigns.map(c => ({
           id: c.id,
           name: c.name,
@@ -107,7 +107,7 @@ export function registerCampaignTools(server: McpServer): void {
       const guard = scopeGuard('campaign_send');
       if (guard) return guard;
 
-      const campaign = getCampaign(campaignId);
+      const campaign = await getCampaign(campaignId);
       if (!campaign) return errorResult(`Campaign "${campaignId}" not found.`);
 
       if (campaign.status !== 'draft' && campaign.status !== 'scheduled') {
@@ -123,11 +123,11 @@ export function registerCampaignTools(server: McpServer): void {
           subject: campaign.subject,
           currentStatus: campaign.status,
         },
-        execute: () => {
-          const sent = sendCampaign(campaignId);
+        execute: async () => {
+          const sent = await sendCampaign(campaignId);
           if (!sent) return { sent: false, error: 'Failed to send campaign' };
 
-          const analytics = getCampaignAnalytics(campaignId);
+          const analytics = await getCampaignAnalytics(campaignId);
           const now = new Date().toISOString();
 
           recordMCPAction({

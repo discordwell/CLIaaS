@@ -11,15 +11,15 @@ import {
   type EngineeringProvider,
 } from '@/lib/integrations/engineering-sync.js';
 
-function getJiraClient(workspaceId: string): JiraClient {
-  const creds = linkStore.getCredentials(workspaceId, 'jira');
+async function getJiraClient(workspaceId: string): Promise<JiraClient> {
+  const creds = await linkStore.getCredentials(workspaceId, 'jira');
   if (!creds) throw new Error('Jira not configured. Run: cliaas jira configure');
   const c = creds.credentials as Record<string, string>;
   return new JiraClient({ baseUrl: c.baseUrl, email: c.email, apiToken: c.apiToken });
 }
 
-function getLinearClient(workspaceId: string): LinearClient {
-  const creds = linkStore.getCredentials(workspaceId, 'linear');
+async function getLinearClient(workspaceId: string): Promise<LinearClient> {
+  const creds = await linkStore.getCredentials(workspaceId, 'linear');
   if (!creds) throw new Error('Linear not configured. Run: cliaas linear configure');
   const c = creds.credentials as Record<string, string>;
   return new LinearClient({ apiKey: c.apiKey });
@@ -63,7 +63,7 @@ export function registerJiraCommands(program: Command): void {
     .option('--subject <subject>', 'Issue summary')
     .action(async (opts: { ticket: string; project: string; type: string; subject?: string }) => {
       try {
-        const client = getJiraClient('default');
+        const client = await getJiraClient('default');
         const provider: EngineeringProvider = { provider: 'jira', jira: client };
         const link = await createIssueFromTicket(provider, {
           workspaceId: 'default',
@@ -89,7 +89,7 @@ export function registerJiraCommands(program: Command): void {
     .requiredOption('--issue <key>', 'Jira issue key (e.g. PROJ-123)')
     .action(async (opts: { ticket: string; issue: string }) => {
       try {
-        const client = getJiraClient('default');
+        const client = await getJiraClient('default');
         const provider: EngineeringProvider = { provider: 'jira', jira: client };
         const link = await linkExistingIssue(provider, {
           workspaceId: 'default',
@@ -111,7 +111,7 @@ export function registerJiraCommands(program: Command): void {
     .description('Sync all linked Jira issues')
     .action(async () => {
       try {
-        const client = getJiraClient('default');
+        const client = await getJiraClient('default');
         const provider: EngineeringProvider = { provider: 'jira', jira: client };
         const result = await syncWorkspaceLinks(provider, 'default');
         output(result, () => {
@@ -128,8 +128,8 @@ export function registerJiraCommands(program: Command): void {
   jira
     .command('status')
     .description('Show linked Jira issues')
-    .action(() => {
-      const links = linkStore.listExternalLinks().filter(l => l.provider === 'jira');
+    .action(async () => {
+      const links = (await linkStore.listExternalLinks()).filter(l => l.provider === 'jira');
       output(links, () => {
         if (!links.length) { console.log('No Jira links found.'); return; }
         console.log(chalk.bold(`\nJira Links (${links.length})`));
@@ -175,7 +175,7 @@ export function registerLinearCommands(program: Command): void {
     .option('--title <title>', 'Issue title')
     .action(async (opts: { ticket: string; team: string; title?: string }) => {
       try {
-        const client = getLinearClient('default');
+        const client = await getLinearClient('default');
         const provider: EngineeringProvider = { provider: 'linear', linear: client };
         const link = await createIssueFromTicket(provider, {
           workspaceId: 'default',
@@ -200,7 +200,7 @@ export function registerLinearCommands(program: Command): void {
     .requiredOption('--issue <id>', 'Linear issue identifier (e.g. ENG-42)')
     .action(async (opts: { ticket: string; issue: string }) => {
       try {
-        const client = getLinearClient('default');
+        const client = await getLinearClient('default');
         const provider: EngineeringProvider = { provider: 'linear', linear: client };
         const link = await linkExistingIssue(provider, {
           workspaceId: 'default',
@@ -222,7 +222,7 @@ export function registerLinearCommands(program: Command): void {
     .description('Sync all linked Linear issues')
     .action(async () => {
       try {
-        const client = getLinearClient('default');
+        const client = await getLinearClient('default');
         const provider: EngineeringProvider = { provider: 'linear', linear: client };
         const result = await syncWorkspaceLinks(provider, 'default');
         output(result, () => {
@@ -239,8 +239,8 @@ export function registerLinearCommands(program: Command): void {
   linear
     .command('status')
     .description('Show linked Linear issues')
-    .action(() => {
-      const links = linkStore.listExternalLinks().filter(l => l.provider === 'linear');
+    .action(async () => {
+      const links = (await linkStore.listExternalLinks()).filter(l => l.provider === 'linear');
       output(links, () => {
         if (!links.length) { console.log('No Linear links found.'); return; }
         console.log(chalk.bold(`\nLinear Links (${links.length})`));

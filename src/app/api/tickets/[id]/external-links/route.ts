@@ -18,7 +18,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const links = linkStore.listExternalLinks(id);
+  const links = await linkStore.listExternalLinks(id);
   return NextResponse.json({ links });
 }
 
@@ -43,7 +43,7 @@ export async function POST(
     return NextResponse.json({ error: 'provider must be jira or linear' }, { status: 400 });
   }
 
-  const creds = linkStore.getCredentials(workspaceId, provider);
+  const creds = await linkStore.getCredentials(workspaceId, provider);
   if (!creds) {
     return NextResponse.json({ error: `${provider} not configured. Set up credentials first.` }, { status: 400 });
   }

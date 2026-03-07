@@ -13,6 +13,6 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';
-  const stats = getAccuracyStats(wsId);
+  const stats = await getAccuracyStats(wsId);
   return NextResponse.json(stats);
 }

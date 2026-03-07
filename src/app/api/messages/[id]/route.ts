@@ -14,10 +14,10 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const message = getMessage(id, auth.user.workspaceId);
+  const message = await getMessage(id, auth.user.workspaceId);
   if (!message) return NextResponse.json({ error: 'Message not found' }, { status: 404 });
 
-  const analytics = getMessageAnalytics(id);
+  const analytics = await getMessageAnalytics(id);
   return NextResponse.json({ message, analytics });
 }
 
@@ -73,7 +73,7 @@ export async function PATCH(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const message = toggleMessage(id, auth.user.workspaceId);
+  const message = await toggleMessage(id, auth.user.workspaceId);
   if (!message) return NextResponse.json({ error: 'Message not found' }, { status: 404 });
 
   return NextResponse.json({ message });

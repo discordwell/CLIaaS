@@ -12,6 +12,6 @@ export async function GET(request: NextRequest) {
   const auth = await requirePerm(request, 'qa:view');
   if ('error' in auth) return auth.error;
 
-  const dashboard = getQADashboard();
+  const dashboard = await getQADashboard(auth.user.workspaceId);
   return NextResponse.json(dashboard);
 }

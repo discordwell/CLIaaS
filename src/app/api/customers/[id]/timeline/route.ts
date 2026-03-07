@@ -14,7 +14,7 @@ export async function GET(
 
   try {
     const { id } = await params;
-    const activities = getCustomerActivities(id);
+    const activities = await getCustomerActivities(id);
 
     return NextResponse.json({ activities });
   } catch (err) {

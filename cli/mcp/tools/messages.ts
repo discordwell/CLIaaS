@@ -23,7 +23,7 @@ export function registerMessageTools(server: McpServer): void {
     {},
     async () => {
       try {
-        const messages = getMessages();
+        const messages = await getMessages();
         return textResult({
           total: messages.length,
           messages: messages.map(m => ({
@@ -46,9 +46,9 @@ export function registerMessageTools(server: McpServer): void {
     'Show message details and analytics',
     { messageId: z.string().describe('Message ID') },
     async ({ messageId }) => {
-      const msg = getMessage(messageId);
+      const msg = await getMessage(messageId);
       if (!msg) return errorResult(`Message "${messageId}" not found`);
-      const analytics = getMessageAnalytics(messageId);
+      const analytics = await getMessageAnalytics(messageId);
       return textResult({ message: msg, analytics });
     },
   );
@@ -100,14 +100,14 @@ export function registerMessageTools(server: McpServer): void {
       const guard = scopeGuard('message_toggle');
       if (guard) return guard;
 
-      const msg = getMessage(messageId);
+      const msg = await getMessage(messageId);
       if (!msg) return errorResult(`Message "${messageId}" not found`);
 
       const result = withConfirmation(confirm, {
         description: `Toggle message "${msg.name}" (currently ${msg.isActive ? 'active' : 'inactive'})`,
         preview: { messageId, currentlyActive: msg.isActive },
-        execute: () => {
-          const toggled = toggleMessage(messageId);
+        execute: async () => {
+          const toggled = await toggleMessage(messageId);
           return { toggled: true, isActive: toggled!.isActive };
         },
       });
@@ -128,7 +128,7 @@ export function registerMessageTools(server: McpServer): void {
       const guard = scopeGuard('message_delete');
       if (guard) return guard;
 
-      const msg = getMessage(messageId);
+      const msg = await getMessage(messageId);
       if (!msg) return errorResult(`Message "${messageId}" not found`);
 
       const result = withConfirmation(confirm, {

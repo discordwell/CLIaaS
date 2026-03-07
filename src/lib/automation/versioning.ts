@@ -119,6 +119,20 @@ export async function listVersions(
   ruleId: string,
   workspaceId: string,
 ): Promise<RuleVersion[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq, desc } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(schema.ruleVersions)
+        .where(eq(schema.ruleVersions.ruleId, ruleId))
+        .orderBy(desc(schema.ruleVersions.versionNumber));
+      return rows.map(rowToVersion);
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;

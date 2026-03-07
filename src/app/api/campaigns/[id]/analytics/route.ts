@@ -13,7 +13,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const analytics = getCampaignAnalytics(id, auth.user.workspaceId);
+  const analytics = await getCampaignAnalytics(id, auth.user.workspaceId);
 
   if (!analytics) {
     return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });

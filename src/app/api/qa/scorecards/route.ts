@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const auth = await requirePerm(request, 'qa:view');
   if ('error' in auth) return auth.error;
 
-  const scorecards = getScorecards();
+  const scorecards = await getScorecards(auth.user.workspaceId);
   return NextResponse.json({ scorecards });
 }
 

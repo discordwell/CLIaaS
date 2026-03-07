@@ -49,11 +49,35 @@ export function createCoachingAssignment(
   return assignment;
 }
 
-export function getCoachingAssignments(filters?: {
+export async function getCoachingAssignments(filters?: {
   workspaceId?: string;
   agentId?: string;
   status?: string;
-}): QACoachingAssignment[] {
+}): Promise<QACoachingAssignment[]> {
+  if (filters?.workspaceId) {
+    const dbResult = await withRls(filters.workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.qaCoachingAssignments);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        reviewId: r.reviewId,
+        agentId: r.agentId,
+        assignedBy: r.assignedBy,
+        status: r.status as 'pending' | 'acknowledged' | 'completed',
+        notes: r.notes ?? undefined,
+        agentResponse: r.agentResponse ?? undefined,
+        assignedAt: r.assignedAt.toISOString(),
+        acknowledgedAt: r.acknowledgedAt?.toISOString(),
+        completedAt: r.completedAt?.toISOString(),
+      }));
+    });
+    if (dbResult !== null) {
+      let filtered = dbResult;
+      if (filters.agentId) filtered = filtered.filter(a => a.agentId === filters.agentId);
+      if (filters.status) filtered = filtered.filter(a => a.status === filters.status);
+      return filtered.sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime());
+    }
+  }
   ensureLoaded();
   let result = [...assignments];
   if (filters?.workspaceId) result = result.filter(a => a.workspaceId === filters.workspaceId);

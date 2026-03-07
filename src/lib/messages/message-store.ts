@@ -89,14 +89,68 @@ function ensureLoaded(): void {
 
 // ---- Message CRUD ----
 
-export function getMessages(workspaceId?: string): InAppMessage[] {
+export async function getMessages(workspaceId?: string): Promise<InAppMessage[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.inAppMessages);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        messageType: r.messageType,
+        title: r.title,
+        body: r.body,
+        ctaText: r.ctaText ?? undefined,
+        ctaUrl: r.ctaUrl ?? undefined,
+        targetUrlPattern: r.targetUrlPattern,
+        segmentQuery: (r.segmentQuery as Record<string, unknown>) ?? {},
+        isActive: r.isActive,
+        priority: r.priority,
+        startAt: r.startAt?.toISOString(),
+        endAt: r.endAt?.toISOString(),
+        maxImpressions: r.maxImpressions,
+        createdBy: r.createdBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as InAppMessage)).sort((a, b) => b.priority - a.priority);
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return messages
     .filter(m => !workspaceId || !m.workspaceId || m.workspaceId === workspaceId)
     .sort((a, b) => b.priority - a.priority);
 }
 
-export function getMessage(id: string, workspaceId?: string): InAppMessage | undefined {
+export async function getMessage(id: string, workspaceId?: string): Promise<InAppMessage | undefined> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [r] = await db.select().from(schema.inAppMessages).where(eq(schema.inAppMessages.id, id));
+      if (!r) return undefined;
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        messageType: r.messageType,
+        title: r.title,
+        body: r.body,
+        ctaText: r.ctaText ?? undefined,
+        ctaUrl: r.ctaUrl ?? undefined,
+        targetUrlPattern: r.targetUrlPattern,
+        segmentQuery: (r.segmentQuery as Record<string, unknown>) ?? {},
+        isActive: r.isActive,
+        priority: r.priority,
+        startAt: r.startAt?.toISOString(),
+        endAt: r.endAt?.toISOString(),
+        maxImpressions: r.maxImpressions,
+        createdBy: r.createdBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as InAppMessage;
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   const msg = messages.find(m => m.id === id);
   if (!msg) return undefined;
@@ -157,9 +211,9 @@ export function deleteMessage(id: string, workspaceId?: string): boolean {
   return true;
 }
 
-export function toggleMessage(id: string, workspaceId?: string): InAppMessage | null {
+export async function toggleMessage(id: string, workspaceId?: string): Promise<InAppMessage | null> {
   ensureLoaded();
-  const msg = getMessage(id, workspaceId);
+  const msg = await getMessage(id, workspaceId);
   if (!msg) return null;
   return updateMessage(id, { isActive: !msg.isActive }, workspaceId);
 }
@@ -186,12 +240,40 @@ export function recordImpression(
   return impression;
 }
 
-export function getImpressionCount(messageId: string, customerId: string): number {
+export async function getImpressionCount(messageId: string, customerId: string, workspaceId?: string): Promise<number> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq, and } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.inAppMessageImpressions)
+        .where(and(
+          eq(schema.inAppMessageImpressions.messageId, messageId),
+          eq(schema.inAppMessageImpressions.customerId, customerId),
+          eq(schema.inAppMessageImpressions.action, 'displayed'),
+        ));
+      return rows.length;
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return impressions.filter(i => i.messageId === messageId && i.customerId === customerId && i.action === 'displayed').length;
 }
 
-export function getMessageAnalytics(messageId: string): MessageAnalytics {
+export async function getMessageAnalytics(messageId: string, workspaceId?: string): Promise<MessageAnalytics> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.inAppMessageImpressions)
+        .where(eq(schema.inAppMessageImpressions.messageId, messageId));
+      return {
+        messageId,
+        displayed: rows.filter(r => r.action === 'displayed').length,
+        dismissed: rows.filter(r => r.action === 'dismissed').length,
+        clicked: rows.filter(r => r.action === 'clicked').length,
+        ctaClicked: rows.filter(r => r.action === 'cta_clicked').length,
+      };
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   const msgImpressions = impressions.filter(i => i.messageId === messageId);
   return {

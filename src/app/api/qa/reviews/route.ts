@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const ticketId = request.nextUrl.searchParams.get('ticketId') ?? undefined;
-  const reviews = getReviews({ ticketId });
+  const reviews = await getReviews({ ticketId });
 
   return NextResponse.json({ reviews });
 }

@@ -13,7 +13,9 @@ export async function GET(request: NextRequest) {
 
     // New store-backed installations
     if (source === 'installations') {
-      const installations = await getInstallations();
+      const auth = await requirePerm(request, 'admin:settings');
+      if ('error' in auth) return auth.error;
+      const installations = await getInstallations(auth.user.workspaceId);
       return NextResponse.json({ installations });
     }
 

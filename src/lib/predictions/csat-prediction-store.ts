@@ -45,11 +45,34 @@ export function createPrediction(input: Omit<CSATPrediction, 'id' | 'predictedAt
   return prediction;
 }
 
-export function getPredictions(filters?: {
+export async function getPredictions(filters?: {
   workspaceId?: string;
   ticketId?: string;
   riskLevel?: string;
-}): CSATPrediction[] {
+}): Promise<CSATPrediction[]> {
+  if (filters?.workspaceId) {
+    const result = await withRls(filters.workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.csatPredictions);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        ticketId: r.ticketId,
+        predictedScore: Number(r.predictedScore),
+        confidence: Number(r.confidence),
+        riskLevel: r.riskLevel as 'low' | 'medium' | 'high',
+        factors: (r.factors ?? {}) as Record<string, unknown>,
+        predictedAt: r.predictedAt.toISOString(),
+        actualScore: r.actualScore ?? undefined,
+        actualReceivedAt: r.actualReceivedAt?.toISOString() ?? undefined,
+      } as CSATPrediction));
+    });
+    if (result !== null) {
+      let filtered = result;
+      if (filters?.ticketId) filtered = filtered.filter(p => p.ticketId === filters.ticketId);
+      if (filters?.riskLevel) filtered = filtered.filter(p => p.riskLevel === filters.riskLevel);
+      return filtered.sort((a, b) => new Date(b.predictedAt).getTime() - new Date(a.predictedAt).getTime());
+    }
+  }
   ensureLoaded();
   let result = [...predictions];
   if (filters?.workspaceId) result = result.filter(p => p.workspaceId === filters.workspaceId);
@@ -71,17 +94,13 @@ export function recordActualScore(ticketId: string, actualScore: number, workspa
   return predictions[idx];
 }
 
-export function getAccuracyStats(workspaceId?: string): {
+function computeAccuracyStats(preds: CSATPrediction[]): {
   totalPredictions: number;
   withActual: number;
   avgError: number;
   avgConfidence: number;
   byRiskLevel: Record<string, { count: number; avgPredicted: number; avgActual: number }>;
 } {
-  ensureLoaded();
-  let preds = [...predictions];
-  if (workspaceId) preds = preds.filter(p => p.workspaceId === workspaceId);
-
   const withActual = preds.filter(p => p.actualScore !== undefined);
   const avgError = withActual.length > 0
     ? withActual.reduce((s, p) => s + Math.abs(p.predictedScore - (p.actualScore ?? 0)), 0) / withActual.length
@@ -112,4 +131,37 @@ export function getAccuracyStats(workspaceId?: string): {
     avgConfidence: Math.round(avgConfidence * 100) / 100,
     byRiskLevel,
   };
+}
+
+export async function getAccuracyStats(workspaceId?: string): Promise<{
+  totalPredictions: number;
+  withActual: number;
+  avgError: number;
+  avgConfidence: number;
+  byRiskLevel: Record<string, { count: number; avgPredicted: number; avgActual: number }>;
+}> {
+  if (workspaceId) {
+    const dbPreds = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.csatPredictions);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        ticketId: r.ticketId,
+        predictedScore: Number(r.predictedScore),
+        confidence: Number(r.confidence),
+        riskLevel: r.riskLevel as 'low' | 'medium' | 'high',
+        factors: (r.factors ?? {}) as Record<string, unknown>,
+        predictedAt: r.predictedAt.toISOString(),
+        actualScore: r.actualScore ?? undefined,
+        actualReceivedAt: r.actualReceivedAt?.toISOString() ?? undefined,
+      } as CSATPrediction));
+    });
+    if (dbPreds !== null) {
+      return computeAccuracyStats(dbPreds);
+    }
+  }
+  ensureLoaded();
+  let preds = [...predictions];
+  if (workspaceId) preds = preds.filter(p => p.workspaceId === workspaceId);
+  return computeAccuracyStats(preds);
 }

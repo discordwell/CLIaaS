@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   const ticketId = request.nextUrl.searchParams.get('ticketId') ?? undefined;
   const riskLevel = request.nextUrl.searchParams.get('riskLevel') ?? undefined;
 
-  const predictions = getPredictions({ workspaceId: wsId, ticketId, riskLevel });
+  const predictions = await getPredictions({ workspaceId: wsId, ticketId, riskLevel });
   return NextResponse.json({ predictions, total: predictions.length });
 }
 

@@ -16,7 +16,7 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { linkId } = await params;
-  const link = linkStore.getExternalLink(linkId);
+  const link = await linkStore.getExternalLink(linkId);
   if (!link) return NextResponse.json({ error: 'Link not found' }, { status: 404 });
 
   // Scope by workspace to prevent cross-workspace sync triggers
@@ -24,7 +24,7 @@ export async function POST(
   if (link.workspaceId !== workspaceId) {
     return NextResponse.json({ error: 'Link not found' }, { status: 404 });
   }
-  const creds = linkStore.getCredentials(workspaceId, link.provider);
+  const creds = await linkStore.getCredentials(workspaceId, link.provider);
   if (!creds) {
     return NextResponse.json({ error: `${link.provider} not configured` }, { status: 400 });
   }

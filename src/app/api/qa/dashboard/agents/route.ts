@@ -14,8 +14,8 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const wsId = auth.user.workspaceId ?? 'default';
-  const reviews = getReviews({ status: 'completed', workspaceId: wsId });
-  const flags = getFlags({ workspaceId: wsId, dismissed: false });
+  const reviews = await getReviews({ status: 'completed', workspaceId: wsId });
+  const flags = await getFlags({ workspaceId: wsId, dismissed: false });
 
   // Group reviews by reviewerId (agent)
   const agentMap = new Map<string, {

@@ -38,8 +38,8 @@ export function registerCustomerTools(server: McpServer): void {
           return errorResult(`Customer not found: "${identifier}"`);
         }
 
-        const activities = getCustomerActivities(customer.id);
-        const notes = getCustomerNotes(customer.id);
+        const activities = await getCustomerActivities(customer.id);
+        const notes = await getCustomerNotes(customer.id);
 
         return textResult({
           ...customer,
@@ -66,7 +66,7 @@ export function registerCustomerTools(server: McpServer): void {
     },
     async ({ customerId, limit }) => {
       try {
-        const activities = getCustomerActivities(customerId);
+        const activities = await getCustomerActivities(customerId);
         const maxItems = limit ?? 20;
 
         if (activities.length === 0) {

@@ -125,7 +125,18 @@ export async function saveResolution(record: AIResolutionRecord): Promise<AIReso
   return clone;
 }
 
-export async function getResolution(id: string): Promise<AIResolutionRecord | null> {
+export async function getResolution(id: string, workspaceId?: string): Promise<AIResolutionRecord | null> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db.select().from(schema.aiResolutions)
+        .where(eq(schema.aiResolutions.id, id)).limit(1);
+      return row ? dbRowToRecord(row) : null;
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const conn = await tryDb();
   if (conn) {
     try {
@@ -151,6 +162,25 @@ export async function listResolutions(opts?: {
   const limit = opts?.limit ?? 50;
   const offset = opts?.offset ?? 0;
 
+  // RLS-scoped path
+  if (opts?.workspaceId) {
+    const result = await withRls(opts.workspaceId, async ({ db, schema }) => {
+      const { eq, and, desc, count } = await import('drizzle-orm');
+      const conditions = [];
+      if (opts?.status) conditions.push(eq(schema.aiResolutions.status, opts.status as AIResolutionRecord['status']));
+      if (opts?.ticketId) conditions.push(eq(schema.aiResolutions.ticketId, opts.ticketId));
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const [countResult] = await db.select({ count: count() }).from(schema.aiResolutions).where(where);
+      const rows = await db.select().from(schema.aiResolutions)
+        .where(where)
+        .orderBy(desc(schema.aiResolutions.createdAt))
+        .limit(limit).offset(offset);
+      return { records: rows.map(dbRowToRecord), total: Number(countResult?.count ?? 0) };
+    });
+    if (result !== null) return result;
+  }
+
+  // Unscoped DB path (fallback)
   const conn = await tryDb();
   if (conn) {
     try {
@@ -234,6 +264,15 @@ const DEFAULT_CONFIG: Omit<AIAgentConfigRecord, 'id' | 'workspaceId'> = {
 };
 
 export async function getAgentConfig(workspaceId: string): Promise<AIAgentConfigRecord> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const [row] = await db.select().from(schema.aiAgentConfigs).limit(1);
+      return row ? dbConfigToRecord(row) : null;
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const conn = await tryDb();
   if (conn) {
     try {

@@ -34,7 +34,7 @@ export function registerQATools(server: McpServer): void {
     async ({ ticketId, scores, notes, confirm }) => {
       try {
         if (!scores) {
-          const reviews = getReviews(ticketId ? { ticketId } : undefined);
+          const reviews = await getReviews(ticketId ? { ticketId } : undefined);
           return textResult({
             reviewCount: reviews.length,
             reviews: reviews.map((r) => ({
@@ -54,7 +54,7 @@ export function registerQATools(server: McpServer): void {
 
         if (!ticketId) return errorResult('ticketId is required when creating a review.');
 
-        const scorecards = getScorecards();
+        const scorecards = await getScorecards();
         const activeScorecard = scorecards.find((s) => s.enabled);
         if (!activeScorecard) {
           return errorResult('No active scorecard found. Create and enable a scorecard first.');
@@ -94,7 +94,7 @@ export function registerQATools(server: McpServer): void {
     {},
     async () => {
       try {
-        return textResult(getQADashboard());
+        return textResult(await getQADashboard());
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to load QA dashboard');
       }
@@ -120,7 +120,7 @@ export function registerQATools(server: McpServer): void {
         const hasUpdate = enabled !== undefined || scorecardId !== undefined || sampleRate !== undefined
           || provider !== undefined || model !== undefined || customInstructions !== undefined;
         if (!hasUpdate) {
-          const config = getAutoQAConfig(wsId);
+          const config = await getAutoQAConfig(wsId);
           return textResult({ config: config ?? { enabled: false, workspaceId: wsId } });
         }
 
@@ -222,7 +222,7 @@ export function registerQATools(server: McpServer): void {
           return textResult({ dismissed: true, flag: result });
         }
 
-        const flags = getFlags({ severity, ticketId, dismissed: false });
+        const flags = await getFlags({ severity, ticketId, dismissed: false });
         return textResult({
           flagCount: flags.length,
           flags: flags.map(f => ({
@@ -295,7 +295,7 @@ export function registerQATools(server: McpServer): void {
         }
 
         // List mode
-        const assignments = getCoachingAssignments({ agentId, status });
+        const assignments = await getCoachingAssignments({ agentId, status });
         return textResult({ count: assignments.length, assignments });
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to manage coaching');
@@ -344,7 +344,7 @@ export function registerQATools(server: McpServer): void {
     {},
     async () => {
       try {
-        return textResult(getAccuracyStats());
+        return textResult(await getAccuracyStats());
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to get accuracy stats');
       }
@@ -360,7 +360,7 @@ export function registerQATools(server: McpServer): void {
     },
     async ({ customerId }) => {
       try {
-        const score = getHealthScore('default', customerId);
+        const score = await getHealthScore('default', customerId);
         if (!score) return textResult({ customerId, status: 'no_score', message: 'Health score not yet computed. Run health compute first.' });
         return textResult(score);
       } catch (err) {
@@ -378,7 +378,7 @@ export function registerQATools(server: McpServer): void {
     },
     async ({ limit }) => {
       try {
-        const atRisk = getAtRiskCustomers('default', limit ?? 20);
+        const atRisk = await getAtRiskCustomers('default', limit ?? 20);
         return textResult({
           atRiskCount: atRisk.length,
           customers: atRisk.map(s => ({
@@ -405,8 +405,8 @@ export function registerQATools(server: McpServer): void {
     },
     async ({ agentId }) => {
       try {
-        const reviews = getReviews({ status: 'completed' });
-        const flags = getFlags({ dismissed: false });
+        const reviews = await getReviews({ status: 'completed' });
+        const flags = await getFlags({ dismissed: false });
 
         if (agentId) {
           const agentReviews = reviews.filter(r => r.reviewerId === agentId);

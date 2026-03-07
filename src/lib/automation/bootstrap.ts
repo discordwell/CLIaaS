@@ -44,6 +44,32 @@ export function invalidateRuleCache(): void {
 }
 
 async function loadDbRules(workspaceId?: string): Promise<void> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(schema.rules)
+        .where(eq(schema.rules.enabled, true));
+      return rows.map(row => ({
+        id: row.id,
+        type: row.type,
+        name: row.name,
+        enabled: row.enabled,
+        conditions: (row.conditions ?? { all: [], any: [] }) as RuleConditions,
+        actions: (row.actions ?? []) as RuleAction[],
+        workspaceId: row.workspaceId,
+      }));
+    });
+    if (result !== null) {
+      const workflowRules = getAutomationRules().filter(r => r.id.startsWith(WF_RULE_PREFIX));
+      setAutomationRules([...workflowRules, ...result]);
+      return;
+    }
+  }
+
+  // Unscoped DB path (fallback)
   const conn = await tryDb();
   if (!conn) return; // No DB available — keep whatever is in memory
 

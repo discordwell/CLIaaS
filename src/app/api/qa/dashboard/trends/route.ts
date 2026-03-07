@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
   const wsId = auth.user.workspaceId ?? 'default';
-  const reviews = getReviews({ status: 'completed', workspaceId: wsId }).filter(
+  const reviews = (await getReviews({ status: 'completed', workspaceId: wsId })).filter(
     r => new Date(r.createdAt) >= cutoff,
   );
 

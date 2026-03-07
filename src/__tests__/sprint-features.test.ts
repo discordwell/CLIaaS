@@ -10,8 +10,8 @@ describe('Customer 360 Enrichment', () => {
     store = await import('../lib/customers/customer-store');
   });
 
-  it('getCustomerActivities returns demo activities', () => {
-    const activities = store.getCustomerActivities('cust-1');
+  it('getCustomerActivities returns demo activities', async () => {
+    const activities = await store.getCustomerActivities('cust-1');
     expect(activities.length).toBeGreaterThan(0);
     expect(activities[0]).toHaveProperty('activityType');
     expect(activities[0]).toHaveProperty('customerId');
@@ -29,8 +29,8 @@ describe('Customer 360 Enrichment', () => {
     expect(activity.activityType).toBe('ticket_created');
   });
 
-  it('getCustomerNotes returns demo notes', () => {
-    const notes = store.getCustomerNotes('cust-1');
+  it('getCustomerNotes returns demo notes', async () => {
+    const notes = await store.getCustomerNotes('cust-1');
     expect(notes.length).toBeGreaterThan(0);
     expect(notes[0]).toHaveProperty('body');
   });
@@ -46,8 +46,8 @@ describe('Customer 360 Enrichment', () => {
     expect(note.noteType).toBe('note');
   });
 
-  it('getCustomerSegments returns demo segments', () => {
-    const segments = store.getCustomerSegments();
+  it('getCustomerSegments returns demo segments', async () => {
+    const segments = await store.getCustomerSegments();
     expect(segments.length).toBeGreaterThan(0);
     expect(segments[0]).toHaveProperty('name');
     expect(segments[0]).toHaveProperty('query');
@@ -218,8 +218,8 @@ describe('QA / Conversation Review', () => {
     qa = await import('../lib/qa/qa-store');
   });
 
-  it('getScorecards returns demo scorecards', () => {
-    const scorecards = qa.getScorecards();
+  it('getScorecards returns demo scorecards', async () => {
+    const scorecards = await qa.getScorecards();
     expect(scorecards.length).toBeGreaterThan(0);
     expect(scorecards[0]).toHaveProperty('criteria');
     expect(Array.isArray(scorecards[0].criteria)).toBe(true);
@@ -239,8 +239,8 @@ describe('QA / Conversation Review', () => {
     expect(sc.enabled).toBe(true);
   });
 
-  it('createReview creates review with scores', () => {
-    const scorecards = qa.getScorecards();
+  it('createReview creates review with scores', async () => {
+    const scorecards = await qa.getScorecards();
     const review = qa.createReview({
       ticketId: 'tkt-qa-1',
       scorecardId: scorecards[0].id,
@@ -255,15 +255,15 @@ describe('QA / Conversation Review', () => {
     expect(review.status).toBe('completed');
   });
 
-  it('getQADashboard returns metrics', () => {
-    const dashboard = qa.getQADashboard();
+  it('getQADashboard returns metrics', async () => {
+    const dashboard = await qa.getQADashboard();
     expect(dashboard).toHaveProperty('totalReviews');
     expect(dashboard).toHaveProperty('averageScore');
     expect(typeof dashboard.totalReviews).toBe('number');
   });
 
-  it('getReviews filters by ticketId', () => {
-    const scorecards = qa.getScorecards();
+  it('getReviews filters by ticketId', async () => {
+    const scorecards = await qa.getScorecards();
     qa.createReview({
       ticketId: 'tkt-qa-filter',
       scorecardId: scorecards[0].id,
@@ -274,7 +274,7 @@ describe('QA / Conversation Review', () => {
       status: 'completed',
     });
 
-    const reviews = qa.getReviews({ ticketId: 'tkt-qa-filter' });
+    const reviews = await qa.getReviews({ ticketId: 'tkt-qa-filter' });
     expect(reviews.length).toBeGreaterThan(0);
     expect(reviews.every(r => r.ticketId === 'tkt-qa-filter')).toBe(true);
   });
@@ -289,8 +289,8 @@ describe('Campaigns', () => {
     campaigns = await import('../lib/campaigns/campaign-store');
   });
 
-  it('getCampaigns returns demo campaigns', () => {
-    const list = campaigns.getCampaigns();
+  it('getCampaigns returns demo campaigns', async () => {
+    const list = await campaigns.getCampaigns();
     expect(list.length).toBeGreaterThan(0);
     expect(list[0]).toHaveProperty('name');
     expect(list[0]).toHaveProperty('status');
@@ -308,30 +308,30 @@ describe('Campaigns', () => {
     expect(c.channel).toBe('email');
   });
 
-  it('updateCampaign modifies fields', () => {
-    const list = campaigns.getCampaigns();
+  it('updateCampaign modifies fields', async () => {
+    const list = await campaigns.getCampaigns();
     const id = list[0].id;
     const updated = campaigns.updateCampaign(id, { name: 'Updated Name' });
     expect(updated).not.toBeNull();
     expect(updated!.name).toBe('Updated Name');
   });
 
-  it('sendCampaign transitions status to sent', () => {
+  it('sendCampaign transitions status to sent', async () => {
     const c = campaigns.createCampaign({
       name: 'Send Test',
       channel: 'email',
       subject: 'Test',
       templateBody: 'Body',
     });
-    const sent = campaigns.sendCampaign(c.id);
+    const sent = await campaigns.sendCampaign(c.id);
     expect(sent).not.toBeNull();
     expect(sent!.status).toBe('sent');
     expect(sent!.sentAt).toBeTruthy();
   });
 
-  it('getCampaignAnalytics returns breakdown', () => {
-    const list = campaigns.getCampaigns();
-    const analytics = campaigns.getCampaignAnalytics(list[0].id);
+  it('getCampaignAnalytics returns breakdown', async () => {
+    const list = await campaigns.getCampaigns();
+    const analytics = await campaigns.getCampaignAnalytics(list[0].id);
     expect(analytics).toHaveProperty('total');
     expect(analytics).toHaveProperty('sent');
     expect(analytics).toHaveProperty('delivered');

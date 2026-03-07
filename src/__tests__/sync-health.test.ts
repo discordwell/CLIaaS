@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('@/lib/store-helpers', () => ({
   tryDb: vi.fn().mockResolvedValue(null),
   getDefaultWorkspaceId: vi.fn().mockResolvedValue('demo-workspace'),
+  withRls: vi.fn().mockResolvedValue(null),
 }));
 
 // Mock jsonl-store with in-memory storage

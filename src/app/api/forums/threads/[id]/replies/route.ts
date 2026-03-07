@@ -23,7 +23,7 @@ export async function GET(
     return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
   }
 
-  const replies = await getReplies(id);
+  const replies = await getReplies(id, auth.user.workspaceId);
   return NextResponse.json({ replies });
 }
 

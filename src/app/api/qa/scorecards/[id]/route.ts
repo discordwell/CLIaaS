@@ -19,7 +19,7 @@ export async function PATCH(
 
   const { id } = await params;
 
-  const existing = getScorecard(id);
+  const existing = await getScorecard(id);
   if (!existing) {
     return NextResponse.json({ error: 'Scorecard not found' }, { status: 404 });
   }

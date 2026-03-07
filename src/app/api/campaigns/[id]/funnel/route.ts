@@ -13,6 +13,6 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const funnel = getCampaignFunnel(id, auth.user.workspaceId);
+  const funnel = await getCampaignFunnel(id, auth.user.workspaceId);
   return NextResponse.json({ funnel, totalSteps: funnel.length });
 }

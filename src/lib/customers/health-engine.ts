@@ -33,7 +33,7 @@ export interface HealthComputeInput {
 /**
  * Compute health score for a single customer.
  */
-export function computeHealthScore(input: HealthComputeInput): CustomerHealthScore {
+export async function computeHealthScore(input: HealthComputeInput): Promise<CustomerHealthScore> {
   const { customer, tickets, messages, csatRatings, workspaceId } = input;
   const now = Date.now();
   const cutoff = now - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
@@ -135,7 +135,7 @@ export function computeHealthScore(input: HealthComputeInput): CustomerHealthSco
   );
 
   // Trend: compare to previous score
-  const previous = getHealthScore(workspaceId, customer.id);
+  const previous = await getHealthScore(workspaceId, customer.id);
   let trend: 'improving' | 'declining' | 'stable' = 'stable';
   if (previous) {
     const delta = overallScore - previous.overallScore;
@@ -175,14 +175,14 @@ export function computeHealthScore(input: HealthComputeInput): CustomerHealthSco
 /**
  * Batch compute health scores for all customers in a workspace.
  */
-export function computeHealthScoresBatch(
+export async function computeHealthScoresBatch(
   inputs: HealthComputeInput[],
-): { computed: number; avgScore: number; atRisk: number } {
+): Promise<{ computed: number; avgScore: number; atRisk: number }> {
   let totalScore = 0;
   let atRisk = 0;
 
   for (const input of inputs) {
-    const result = computeHealthScore(input);
+    const result = await computeHealthScore(input);
     totalScore += result.overallScore;
     if (result.overallScore <= 40) atRisk++;
   }

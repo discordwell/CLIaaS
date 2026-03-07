@@ -21,7 +21,7 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const flow = await getChatbot(id);
+  const flow = await getChatbot(id, auth.user.workspaceId);
   if (!flow) {
     return NextResponse.json({ error: 'Chatbot not found' }, { status: 404 });
   }

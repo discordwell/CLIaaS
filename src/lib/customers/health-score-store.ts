@@ -59,17 +59,68 @@ export function upsertHealthScore(
   return score;
 }
 
-export function getHealthScore(workspaceId: string, customerId: string): CustomerHealthScore | null {
+export async function getHealthScore(workspaceId: string, customerId: string): Promise<CustomerHealthScore | null> {
+  const { eq, and } = await import('drizzle-orm');
+  const result = await withRls(workspaceId, async ({ db, schema }) => {
+    const rows = await db.select().from(schema.customerHealthScores).where(
+      and(eq(schema.customerHealthScores.workspaceId, workspaceId), eq(schema.customerHealthScores.customerId, customerId)),
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      workspaceId: r.workspaceId,
+      customerId: r.customerId,
+      overallScore: r.overallScore,
+      csatScore: r.csatScore ?? undefined,
+      sentimentScore: r.sentimentScore ?? undefined,
+      effortScore: r.effortScore ?? undefined,
+      resolutionScore: r.resolutionScore ?? undefined,
+      engagementScore: r.engagementScore ?? undefined,
+      trend: r.trend as 'improving' | 'declining' | 'stable',
+      previousScore: r.previousScore ?? undefined,
+      signals: (r.signals ?? {}) as Record<string, unknown>,
+      computedAt: r.computedAt.toISOString(),
+    } as CustomerHealthScore;
+  });
+  if (result !== null) return result;
   ensureLoaded();
   return scores.find(s => s.workspaceId === workspaceId && s.customerId === customerId) ?? null;
 }
 
-export function getHealthScores(filters?: {
+export async function getHealthScores(filters?: {
   workspaceId?: string;
   minScore?: number;
   maxScore?: number;
   trend?: string;
-}): CustomerHealthScore[] {
+}): Promise<CustomerHealthScore[]> {
+  if (filters?.workspaceId) {
+    const result = await withRls(filters.workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.customerHealthScores);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        customerId: r.customerId,
+        overallScore: r.overallScore,
+        csatScore: r.csatScore ?? undefined,
+        sentimentScore: r.sentimentScore ?? undefined,
+        effortScore: r.effortScore ?? undefined,
+        resolutionScore: r.resolutionScore ?? undefined,
+        engagementScore: r.engagementScore ?? undefined,
+        trend: r.trend as 'improving' | 'declining' | 'stable',
+        previousScore: r.previousScore ?? undefined,
+        signals: (r.signals ?? {}) as Record<string, unknown>,
+        computedAt: r.computedAt.toISOString(),
+      } as CustomerHealthScore));
+    });
+    if (result !== null) {
+      let filtered = result;
+      if (filters?.minScore !== undefined) filtered = filtered.filter(s => s.overallScore >= filters.minScore!);
+      if (filters?.maxScore !== undefined) filtered = filtered.filter(s => s.overallScore <= filters.maxScore!);
+      if (filters?.trend) filtered = filtered.filter(s => s.trend === filters.trend);
+      return filtered.sort((a, b) => a.overallScore - b.overallScore);
+    }
+  }
   ensureLoaded();
   let result = [...scores];
   if (filters?.workspaceId) result = result.filter(s => s.workspaceId === filters.workspaceId);
@@ -79,9 +130,10 @@ export function getHealthScores(filters?: {
   return result.sort((a, b) => a.overallScore - b.overallScore);
 }
 
-export function getAtRiskCustomers(workspaceId?: string, limit = 20): CustomerHealthScore[] {
-  return getHealthScores({
+export async function getAtRiskCustomers(workspaceId?: string, limit = 20): Promise<CustomerHealthScore[]> {
+  const all = await getHealthScores({
     workspaceId,
     maxScore: 40,
-  }).slice(0, limit);
+  });
+  return all.slice(0, limit);
 }

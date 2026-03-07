@@ -14,7 +14,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { stepId } = await params;
-  const step = getCampaignStep(stepId);
+  const step = await getCampaignStep(stepId);
   if (!step) {
     return NextResponse.json({ error: 'Step not found' }, { status: 404 });
   }

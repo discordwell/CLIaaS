@@ -7,8 +7,8 @@ describe('Message Store', () => {
     store = await import('../lib/messages/message-store');
   });
 
-  it('getMessages returns demo messages', () => {
-    const messages = store.getMessages();
+  it('getMessages returns demo messages', async () => {
+    const messages = await store.getMessages();
     expect(messages.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -25,9 +25,9 @@ describe('Message Store', () => {
     expect(msg.isActive).toBe(false);
   });
 
-  it('getMessage returns by id', () => {
+  it('getMessage returns by id', async () => {
     const created = store.createMessage({ name: 'Find Me', messageType: 'modal', title: 'Found' });
-    const found = store.getMessage(created.id);
+    const found = await store.getMessage(created.id);
     expect(found).toBeDefined();
     expect(found!.title).toBe('Found');
   });
@@ -39,18 +39,18 @@ describe('Message Store', () => {
     expect(updated!.body).toBe('Updated body');
   });
 
-  it('toggleMessage flips isActive', () => {
+  it('toggleMessage flips isActive', async () => {
     const msg = store.createMessage({ name: 'Toggle', messageType: 'banner', title: 'T' });
     expect(msg.isActive).toBe(false);
-    const toggled = store.toggleMessage(msg.id);
+    const toggled = await store.toggleMessage(msg.id);
     expect(toggled!.isActive).toBe(true);
   });
 
-  it('deleteMessage removes message and impressions', () => {
+  it('deleteMessage removes message and impressions', async () => {
     const msg = store.createMessage({ name: 'Delete Me', messageType: 'slide_in', title: 'D' });
     store.recordImpression(msg.id, 'cust-1', 'displayed');
     expect(store.deleteMessage(msg.id)).toBe(true);
-    expect(store.getMessage(msg.id)).toBeUndefined();
+    expect(await store.getMessage(msg.id)).toBeUndefined();
   });
 
   it('recordImpression creates an impression', () => {
@@ -60,15 +60,15 @@ describe('Message Store', () => {
     expect(imp.action).toBe('displayed');
   });
 
-  it('getImpressionCount counts displayed impressions', () => {
+  it('getImpressionCount counts displayed impressions', async () => {
     const msg = store.createMessage({ name: 'Count Test', messageType: 'banner', title: 'C' });
     store.recordImpression(msg.id, 'cust-1', 'displayed');
     store.recordImpression(msg.id, 'cust-1', 'displayed');
     store.recordImpression(msg.id, 'cust-1', 'clicked');
-    expect(store.getImpressionCount(msg.id, 'cust-1')).toBe(2);
+    expect(await store.getImpressionCount(msg.id, 'cust-1')).toBe(2);
   });
 
-  it('getMessageAnalytics returns correct counts', () => {
+  it('getMessageAnalytics returns correct counts', async () => {
     const msg = store.createMessage({ name: 'Analytics Test', messageType: 'modal', title: 'A' });
     store.recordImpression(msg.id, 'c1', 'displayed');
     store.recordImpression(msg.id, 'c2', 'displayed');
@@ -76,7 +76,7 @@ describe('Message Store', () => {
     store.recordImpression(msg.id, 'c2', 'dismissed');
     store.recordImpression(msg.id, 'c1', 'cta_clicked');
 
-    const analytics = store.getMessageAnalytics(msg.id);
+    const analytics = await store.getMessageAnalytics(msg.id);
     expect(analytics.displayed).toBe(2);
     expect(analytics.clicked).toBe(1);
     expect(analytics.dismissed).toBe(1);

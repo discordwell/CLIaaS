@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const auth = await requirePerm(request, 'automation:view');
   if ('error' in auth) return auth.error;
 
-  const tours = getTours(auth.user.workspaceId);
+  const tours = await getTours(auth.user.workspaceId);
   return NextResponse.json({ tours, total: tours.length });
 }
 

@@ -12,7 +12,7 @@ export function registerMessageCommands(program: Command): void {
     .description('List in-app messages')
     .option('--json', 'Output as JSON')
     .action(async (opts: { json?: boolean }) => {
-      const list = getMessages();
+      const list = await getMessages();
       if (opts.json) { console.log(JSON.stringify({ messages: list }, null, 2)); return; }
       console.log(chalk.bold.cyan(`\n${list.length} message(s)\n`));
       for (const m of list) {
@@ -28,9 +28,9 @@ export function registerMessageCommands(program: Command): void {
     .description('Show message details and analytics')
     .option('--json', 'Output as JSON')
     .action(async (id: string, opts: { json?: boolean }) => {
-      const msg = getMessage(id);
+      const msg = await getMessage(id);
       if (!msg) { console.error(chalk.red('Message not found')); process.exitCode = 1; return; }
-      const analytics = getMessageAnalytics(id);
+      const analytics = await getMessageAnalytics(id);
       if (opts.json) { console.log(JSON.stringify({ message: msg, analytics }, null, 2)); return; }
       console.log(chalk.bold.cyan(`\n${msg.name}`));
       console.log(`  Type: ${msg.messageType} | Status: ${msg.isActive ? 'Active' : 'Inactive'}`);
@@ -73,7 +73,7 @@ export function registerMessageCommands(program: Command): void {
     .command('toggle <id>')
     .description('Toggle message active/inactive')
     .action(async (id: string) => {
-      const msg = toggleMessage(id);
+      const msg = await toggleMessage(id);
       if (msg) console.log(chalk.green(`Message ${msg.isActive ? 'activated' : 'deactivated'}: ${msg.name}`));
       else { console.error(chalk.red('Message not found')); process.exitCode = 1; }
     });

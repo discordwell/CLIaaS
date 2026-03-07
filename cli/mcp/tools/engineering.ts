@@ -21,7 +21,7 @@ export function registerEngineeringTools(server: McpServer): void {
         const { JiraClient } = await import('@/lib/integrations/jira-client.js');
         const { createIssueFromTicket } = await import('@/lib/integrations/engineering-sync.js');
 
-        const creds = linkStore.getCredentials('default', 'jira');
+        const creds = await linkStore.getCredentials('default', 'jira');
         if (!creds) return errorResult('Jira not configured. Use the engineering configure API first.');
 
         const c = creds.credentials as Record<string, string>;
@@ -56,7 +56,7 @@ export function registerEngineeringTools(server: McpServer): void {
         const { JiraClient } = await import('@/lib/integrations/jira-client.js');
         const { linkExistingIssue } = await import('@/lib/integrations/engineering-sync.js');
 
-        const creds = linkStore.getCredentials('default', 'jira');
+        const creds = await linkStore.getCredentials('default', 'jira');
         if (!creds) return errorResult('Jira not configured.');
 
         const c = creds.credentials as Record<string, string>;
@@ -81,7 +81,7 @@ export function registerEngineeringTools(server: McpServer): void {
         const { JiraClient } = await import('@/lib/integrations/jira-client.js');
         const { syncWorkspaceLinks, syncTicketLinks } = await import('@/lib/integrations/engineering-sync.js');
 
-        const creds = linkStore.getCredentials('default', 'jira');
+        const creds = await linkStore.getCredentials('default', 'jira');
         if (!creds) return errorResult('Jira not configured.');
 
         const c = creds.credentials as Record<string, string>;
@@ -113,7 +113,7 @@ export function registerEngineeringTools(server: McpServer): void {
         const { LinearClient } = await import('@/lib/integrations/linear-client.js');
         const { createIssueFromTicket } = await import('@/lib/integrations/engineering-sync.js');
 
-        const creds = linkStore.getCredentials('default', 'linear');
+        const creds = await linkStore.getCredentials('default', 'linear');
         if (!creds) return errorResult('Linear not configured.');
 
         const c = creds.credentials as Record<string, string>;
@@ -147,7 +147,7 @@ export function registerEngineeringTools(server: McpServer): void {
         const { LinearClient } = await import('@/lib/integrations/linear-client.js');
         const { linkExistingIssue } = await import('@/lib/integrations/engineering-sync.js');
 
-        const creds = linkStore.getCredentials('default', 'linear');
+        const creds = await linkStore.getCredentials('default', 'linear');
         if (!creds) return errorResult('Linear not configured.');
 
         const c = creds.credentials as Record<string, string>;
@@ -172,7 +172,7 @@ export function registerEngineeringTools(server: McpServer): void {
         const { LinearClient } = await import('@/lib/integrations/linear-client.js');
         const { syncWorkspaceLinks, syncTicketLinks } = await import('@/lib/integrations/engineering-sync.js');
 
-        const creds = linkStore.getCredentials('default', 'linear');
+        const creds = await linkStore.getCredentials('default', 'linear');
         if (!creds) return errorResult('Linear not configured.');
 
         const c = creds.credentials as Record<string, string>;
@@ -196,7 +196,7 @@ export function registerEngineeringTools(server: McpServer): void {
     async ({ ticketId }) => {
       try {
         const linkStore = await import('@/lib/integrations/link-store.js');
-        const links = linkStore.listExternalLinks(ticketId);
+        const links = await linkStore.listExternalLinks(ticketId);
         if (!links.length) return textResult({ message: 'No external links found for this ticket' });
 
         const result = links.map(l => ({

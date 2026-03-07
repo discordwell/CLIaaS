@@ -9,6 +9,7 @@ import type { Rule } from '../engine';
 // Mock tryDb
 vi.mock('@/lib/store-helpers', () => ({
   tryDb: vi.fn(),
+  withRls: vi.fn().mockResolvedValue(null),
 }));
 
 // Mock drizzle-orm

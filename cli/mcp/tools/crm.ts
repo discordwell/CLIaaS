@@ -12,7 +12,7 @@ export function registerCrmTools(server: McpServer): void {
     async ({ customerId }) => {
       try {
         const { getCrmDataForCustomer } = await import('@/lib/integrations/crm-sync.js');
-        const data = getCrmDataForCustomer(customerId);
+        const data = await getCrmDataForCustomer(customerId);
         if (!data.length) return textResult({ message: 'No CRM data linked to this customer' });
         return textResult({ crm: data });
       } catch (err) {
@@ -64,7 +64,7 @@ export function registerCrmTools(server: McpServer): void {
 
         const providers = provider ? [provider] : ['salesforce', 'hubspot-crm'];
         for (const p of providers) {
-          const creds = linkStore.getCredentials('default', p);
+          const creds = await linkStore.getCredentials('default', p);
           if (!creds) {
             results.push({ provider: p, skipped: 'not configured' });
             continue;
@@ -90,7 +90,7 @@ export function registerCrmTools(server: McpServer): void {
     async ({ provider, query }) => {
       try {
         const linkStore = await import('@/lib/integrations/link-store.js');
-        const creds = linkStore.getCredentials('default', provider);
+        const creds = await linkStore.getCredentials('default', provider);
         if (!creds) return errorResult(`${provider} not configured`);
 
         const credData = creds.credentials as Record<string, string>;

@@ -163,7 +163,7 @@ export async function syncLink(
     }
 
     // Sync comments from Jira → CLIaaS
-    const existingComments = linkStore.listLinkComments(link.id);
+    const existingComments = await linkStore.listLinkComments(link.id);
     const jiraComments = await client.jira.getComments(link.externalId);
     for (const jc of jiraComments) {
       const already = existingComments.find(c => c.externalCommentId === jc.id);
@@ -196,7 +196,7 @@ export async function syncLink(
     }
 
     // Sync comments from Linear → CLIaaS
-    const existingComments = linkStore.listLinkComments(link.id);
+    const existingComments = await linkStore.listLinkComments(link.id);
     const linearComments = issue.comments?.nodes ?? await client.linear.getComments(link.externalId);
     for (const lc of linearComments) {
       const already = existingComments.find(c => c.externalCommentId === lc.id);
@@ -284,7 +284,8 @@ export async function syncTicketLinks(
   ticketId: string,
   customMappings?: StatusMapping[],
 ): Promise<SyncResult> {
-  const links = linkStore.listExternalLinks(ticketId).filter(l =>
+  const allLinks = await linkStore.listExternalLinks(ticketId);
+  const links = allLinks.filter(l =>
     l.syncEnabled && l.provider === client.provider,
   );
 
@@ -311,7 +312,8 @@ export async function syncWorkspaceLinks(
   workspaceId: string,
   customMappings?: StatusMapping[],
 ): Promise<SyncResult> {
-  const links = linkStore.listExternalLinks(undefined, workspaceId).filter(l =>
+  const allWsLinks = await linkStore.listExternalLinks(undefined, workspaceId);
+  const links = allWsLinks.filter(l =>
     l.syncEnabled && l.provider === client.provider,
   );
 

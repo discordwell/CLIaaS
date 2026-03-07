@@ -97,6 +97,19 @@ function dbRowToRecord(row: any): AIProcedure {
 // ---------------------------------------------------------------------------
 
 export async function listProcedures(workspaceId: string): Promise<AIProcedure[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { desc } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(schema.aiProcedures)
+        .orderBy(desc(schema.aiProcedures.createdAt));
+      return rows.map(dbRowToRecord);
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const conn = await tryDb();
   if (conn) {
     try {
@@ -115,7 +128,21 @@ export async function listProcedures(workspaceId: string): Promise<AIProcedure[]
   return getInMemory().filter((p) => p.workspaceId === workspaceId);
 }
 
-export async function getProcedure(id: string, _workspaceId?: string): Promise<AIProcedure | null> {
+export async function getProcedure(id: string, workspaceId?: string): Promise<AIProcedure | null> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(schema.aiProcedures)
+        .where(eq(schema.aiProcedures.id, id))
+        .limit(1);
+      return row ? dbRowToRecord(row) : null;
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const conn = await tryDb();
   if (conn) {
     try {

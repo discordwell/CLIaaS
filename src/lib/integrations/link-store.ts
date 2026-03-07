@@ -94,7 +94,34 @@ function uid(): string {
 
 // ---- External Links ----
 
-export function listExternalLinks(ticketId?: string, workspaceId?: string): ExternalLink[] {
+export async function listExternalLinks(ticketId?: string, workspaceId?: string): Promise<ExternalLink[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      let query = db.select().from(schema.ticketExternalLinks);
+      if (ticketId) {
+        const { eq } = await import('drizzle-orm');
+        query = query.where(eq(schema.ticketExternalLinks.ticketId, ticketId)) as typeof query;
+      }
+      const rows = await query;
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        ticketId: r.ticketId,
+        provider: r.provider,
+        externalId: r.externalId,
+        externalUrl: r.externalUrl,
+        externalStatus: r.externalStatus ?? undefined,
+        externalTitle: r.externalTitle ?? undefined,
+        direction: r.direction as 'outbound' | 'inbound' | 'bidirectional',
+        metadata: (r.metadata ?? {}) as Record<string, unknown>,
+        syncEnabled: r.syncEnabled,
+        lastSyncedAt: r.lastSyncedAt?.toISOString() ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as ExternalLink));
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return links.filter(l =>
     (!ticketId || l.ticketId === ticketId) &&
@@ -102,7 +129,32 @@ export function listExternalLinks(ticketId?: string, workspaceId?: string): Exte
   );
 }
 
-export function getExternalLink(id: string): ExternalLink | undefined {
+export async function getExternalLink(id: string, workspaceId?: string): Promise<ExternalLink | undefined> {
+  if (workspaceId) {
+    const { eq } = await import('drizzle-orm');
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.ticketExternalLinks).where(eq(schema.ticketExternalLinks.id, id));
+      if (rows.length === 0) return undefined;
+      const r = rows[0];
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        ticketId: r.ticketId,
+        provider: r.provider,
+        externalId: r.externalId,
+        externalUrl: r.externalUrl,
+        externalStatus: r.externalStatus ?? undefined,
+        externalTitle: r.externalTitle ?? undefined,
+        direction: r.direction as 'outbound' | 'inbound' | 'bidirectional',
+        metadata: (r.metadata ?? {}) as Record<string, unknown>,
+        syncEnabled: r.syncEnabled,
+        lastSyncedAt: r.lastSyncedAt?.toISOString() ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as ExternalLink;
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return links.find(l => l.id === id);
 }
@@ -138,7 +190,26 @@ export function deleteExternalLink(id: string): boolean {
 
 // ---- External Link Comments ----
 
-export function listLinkComments(linkId: string): ExternalLinkComment[] {
+export async function listLinkComments(linkId: string, workspaceId?: string): Promise<ExternalLinkComment[]> {
+  if (workspaceId) {
+    const { eq } = await import('drizzle-orm');
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.externalLinkComments).where(eq(schema.externalLinkComments.linkId, linkId));
+      return rows.map(r => ({
+        id: r.id,
+        linkId: r.linkId,
+        workspaceId: r.workspaceId ?? undefined,
+        direction: r.direction as 'to_external' | 'from_external',
+        localMessageId: r.localMessageId ?? undefined,
+        externalCommentId: r.externalCommentId ?? undefined,
+        body: r.body,
+        authorName: r.authorName ?? undefined,
+        syncedAt: r.syncedAt.toISOString(),
+        createdAt: r.createdAt.toISOString(),
+      } as ExternalLinkComment));
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return comments.filter(c => c.linkId === linkId);
 }
@@ -154,7 +225,32 @@ export function createLinkComment(input: Omit<ExternalLinkComment, 'id' | 'creat
 
 // ---- CRM Links ----
 
-export function listCrmLinks(entityType?: string, entityId?: string, workspaceId?: string): CrmLink[] {
+export async function listCrmLinks(entityType?: string, entityId?: string, workspaceId?: string): Promise<CrmLink[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.crmLinks);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        provider: r.provider,
+        entityType: r.entityType as 'customer' | 'organization',
+        entityId: r.entityId,
+        crmObjectType: r.crmObjectType,
+        crmObjectId: r.crmObjectId,
+        crmObjectUrl: r.crmObjectUrl ?? undefined,
+        crmData: (r.crmData ?? {}) as Record<string, unknown>,
+        lastSyncedAt: r.lastSyncedAt?.toISOString() ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as CrmLink));
+    });
+    if (result !== null) {
+      return result.filter(l =>
+        (!entityType || l.entityType === entityType) &&
+        (!entityId || l.entityId === entityId),
+      );
+    }
+  }
   ensureLoaded();
   return crmLinks.filter(l =>
     (!entityType || l.entityType === entityType) &&
@@ -163,7 +259,30 @@ export function listCrmLinks(entityType?: string, entityId?: string, workspaceId
   );
 }
 
-export function getCrmLink(id: string): CrmLink | undefined {
+export async function getCrmLink(id: string, workspaceId?: string): Promise<CrmLink | undefined> {
+  if (workspaceId) {
+    const { eq } = await import('drizzle-orm');
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.crmLinks).where(eq(schema.crmLinks.id, id));
+      if (rows.length === 0) return undefined;
+      const r = rows[0];
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        provider: r.provider,
+        entityType: r.entityType as 'customer' | 'organization',
+        entityId: r.entityId,
+        crmObjectType: r.crmObjectType,
+        crmObjectId: r.crmObjectId,
+        crmObjectUrl: r.crmObjectUrl ?? undefined,
+        crmData: (r.crmData ?? {}) as Record<string, unknown>,
+        lastSyncedAt: r.lastSyncedAt?.toISOString() ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as CrmLink;
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return crmLinks.find(l => l.id === id);
 }
@@ -197,7 +316,27 @@ export function deleteCrmLink(id: string): boolean {
 
 // ---- Integration Credentials ----
 
-export function getCredentials(workspaceId: string, provider: string): IntegrationCredential | undefined {
+export async function getCredentials(workspaceId: string, provider: string): Promise<IntegrationCredential | undefined> {
+  const { eq, and } = await import('drizzle-orm');
+  const result = await withRls(workspaceId, async ({ db, schema }) => {
+    const rows = await db.select().from(schema.integrationCredentials).where(
+      and(eq(schema.integrationCredentials.workspaceId, workspaceId), eq(schema.integrationCredentials.provider, provider)),
+    );
+    if (rows.length === 0) return undefined;
+    const r = rows[0];
+    return {
+      id: r.id,
+      workspaceId: r.workspaceId,
+      provider: r.provider,
+      authType: r.authType,
+      credentials: (r.credentials ?? {}) as Record<string, unknown>,
+      scopes: (r.scopes ?? []) as string[],
+      expiresAt: r.expiresAt?.toISOString() ?? undefined,
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+    } as IntegrationCredential;
+  });
+  if (result !== null) return result;
   ensureLoaded();
   return creds.find(c => c.workspaceId === workspaceId && c.provider === provider);
 }

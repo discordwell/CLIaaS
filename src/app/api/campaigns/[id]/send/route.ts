@@ -13,7 +13,7 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const campaign = sendCampaign(id, auth.user.workspaceId);
+  const campaign = await sendCampaign(id, auth.user.workspaceId);
 
   if (!campaign) {
     return NextResponse.json(

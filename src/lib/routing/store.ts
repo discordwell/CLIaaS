@@ -160,6 +160,26 @@ export function getRoutingQueues(workspaceId?: string): RoutingQueue[] {
 }
 
 export async function getRoutingQueuesAsync(workspaceId?: string): Promise<RoutingQueue[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      return (await db.select().from(schema.routingQueues)).map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        description: r.description ?? undefined,
+        priority: r.priority,
+        conditions: (r.conditions ?? {}) as RoutingQueue['conditions'],
+        strategy: r.strategy as RoutingQueue['strategy'],
+        groupId: r.groupId ?? undefined,
+        overflowQueueId: r.overflowQueueId ?? undefined,
+        overflowTimeoutSecs: r.overflowTimeoutSecs ?? undefined,
+        enabled: r.enabled,
+      }));
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -186,6 +206,54 @@ export async function getRoutingQueuesAsync(workspaceId?: string): Promise<Routi
 
 export function getRoutingQueue(id: string): RoutingQueue | undefined {
   return readJsonlFile<RoutingQueue>(FILES.queues).find(q => q.id === id);
+}
+
+export async function getRoutingQueueAsync(id: string, workspaceId?: string): Promise<RoutingQueue | undefined> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [r] = await db.select().from(schema.routingQueues).where(eq(schema.routingQueues.id, id));
+      if (!r) return undefined;
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        description: r.description ?? undefined,
+        priority: r.priority,
+        conditions: (r.conditions ?? {}) as RoutingQueue['conditions'],
+        strategy: r.strategy as RoutingQueue['strategy'],
+        groupId: r.groupId ?? undefined,
+        overflowQueueId: r.overflowQueueId ?? undefined,
+        overflowTimeoutSecs: r.overflowTimeoutSecs ?? undefined,
+        enabled: r.enabled,
+      };
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped tryDb path
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    const [r] = await db.select().from(schema.routingQueues).where(eq(schema.routingQueues.id, id));
+    if (!r) return undefined;
+    return {
+      id: r.id,
+      workspaceId: r.workspaceId,
+      name: r.name,
+      description: r.description ?? undefined,
+      priority: r.priority,
+      conditions: (r.conditions ?? {}) as RoutingQueue['conditions'],
+      strategy: r.strategy as RoutingQueue['strategy'],
+      groupId: r.groupId ?? undefined,
+      overflowQueueId: r.overflowQueueId ?? undefined,
+      overflowTimeoutSecs: r.overflowTimeoutSecs ?? undefined,
+      enabled: r.enabled,
+    };
+  }
+  // JSONL fallback
+  return getRoutingQueue(id);
 }
 
 export function createRoutingQueue(queue: Omit<RoutingQueue, 'id'>): RoutingQueue {
@@ -221,6 +289,23 @@ export function getRoutingRules(workspaceId?: string): RoutingRule[] {
 }
 
 export async function getRoutingRulesAsync(workspaceId?: string): Promise<RoutingRule[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      return (await db.select().from(schema.routingRules)).map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        priority: r.priority,
+        conditions: (r.conditions ?? {}) as RoutingRule['conditions'],
+        targetType: r.targetType as RoutingRule['targetType'],
+        targetId: r.targetId,
+        enabled: r.enabled,
+      }));
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -244,6 +329,48 @@ export async function getRoutingRulesAsync(workspaceId?: string): Promise<Routin
 
 export function getRoutingRule(id: string): RoutingRule | undefined {
   return readJsonlFile<RoutingRule>(FILES.rules).find(r => r.id === id);
+}
+
+export async function getRoutingRuleAsync(id: string, workspaceId?: string): Promise<RoutingRule | undefined> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [r] = await db.select().from(schema.routingRules).where(eq(schema.routingRules.id, id));
+      if (!r) return undefined;
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        priority: r.priority,
+        conditions: (r.conditions ?? {}) as RoutingRule['conditions'],
+        targetType: r.targetType as RoutingRule['targetType'],
+        targetId: r.targetId,
+        enabled: r.enabled,
+      };
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped tryDb path
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    const [r] = await db.select().from(schema.routingRules).where(eq(schema.routingRules.id, id));
+    if (!r) return undefined;
+    return {
+      id: r.id,
+      workspaceId: r.workspaceId,
+      name: r.name,
+      priority: r.priority,
+      conditions: (r.conditions ?? {}) as RoutingRule['conditions'],
+      targetType: r.targetType as RoutingRule['targetType'],
+      targetId: r.targetId,
+      enabled: r.enabled,
+    };
+  }
+  // JSONL fallback
+  return getRoutingRule(id);
 }
 
 export function createRoutingRule(rule: Omit<RoutingRule, 'id'>): RoutingRule {
@@ -277,6 +404,59 @@ export function getRoutingLog(workspaceId?: string, limit: number = 100): Routin
   const all = readJsonlFile<RoutingLogEntry>(FILES.log);
   const filtered = workspaceId ? all.filter(l => l.workspaceId === workspaceId) : all;
   return filtered.slice(-limit);
+}
+
+export async function getRoutingLogAsync(workspaceId?: string, limit: number = 100): Promise<RoutingLogEntry[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { desc } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.routingLog)
+        .orderBy(desc(schema.routingLog.createdAt))
+        .limit(limit);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        ticketId: r.ticketId ?? '',
+        queueId: r.queueId ?? undefined,
+        ruleId: r.ruleId ?? undefined,
+        assignedUserId: r.assignedUserId ?? undefined,
+        strategy: r.strategy as RoutingLogEntry['strategy'],
+        matchedSkills: (r.matchedSkills ?? []) as string[],
+        scores: (r.scores ?? {}) as Record<string, number>,
+        reasoning: r.reasoning ?? '',
+        durationMs: r.durationMs ?? 0,
+        createdAt: r.createdAt?.toISOString() ?? new Date().toISOString(),
+      }));
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped tryDb path
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq, desc } = await import('drizzle-orm');
+    const query = workspaceId
+      ? db.select().from(schema.routingLog).where(eq(schema.routingLog.workspaceId, workspaceId))
+      : db.select().from(schema.routingLog);
+    const rows = await query.orderBy(desc(schema.routingLog.createdAt)).limit(limit);
+    return rows.map(r => ({
+      id: r.id,
+      workspaceId: r.workspaceId,
+      ticketId: r.ticketId ?? '',
+      queueId: r.queueId ?? undefined,
+      ruleId: r.ruleId ?? undefined,
+      assignedUserId: r.assignedUserId ?? undefined,
+      strategy: r.strategy as RoutingLogEntry['strategy'],
+      matchedSkills: (r.matchedSkills ?? []) as string[],
+      scores: (r.scores ?? {}) as Record<string, number>,
+      reasoning: r.reasoning ?? '',
+      durationMs: r.durationMs ?? 0,
+      createdAt: r.createdAt?.toISOString() ?? new Date().toISOString(),
+    }));
+  }
+  // JSONL fallback
+  return getRoutingLog(workspaceId, limit);
 }
 
 export function appendRoutingLog(entry: Omit<RoutingLogEntry, 'id'>): RoutingLogEntry {

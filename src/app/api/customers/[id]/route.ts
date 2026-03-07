@@ -31,8 +31,8 @@ export async function GET(
       );
     }
 
-    const activities = getCustomerActivities(customer.id);
-    const notes = getCustomerNotes(customer.id);
+    const activities = await getCustomerActivities(customer.id);
+    const notes = await getCustomerNotes(customer.id);
     const enrichment = getCustomerEnrichment(customer.id);
 
     return NextResponse.json({

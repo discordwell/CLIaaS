@@ -67,8 +67,8 @@ export function registerQACommands(program: Command): void {
   qa
     .command('dashboard')
     .description('Show QA metrics dashboard')
-    .action(() => {
-      const dashboard = getQADashboard();
+    .action(async () => {
+      const dashboard = await getQADashboard();
       if (dashboard.totalReviews === 0) {
         if (isJsonMode()) { output(dashboard, () => {}); } else { console.log(chalk.yellow('No QA reviews found.')); }
         return;
@@ -92,8 +92,8 @@ export function registerQACommands(program: Command): void {
   // ---- qa autoqa ----
   const autoqa = qa.command('autoqa').description('AutoQA pipeline management');
 
-  autoqa.command('config').description('Show AutoQA configuration').action(() => {
-    const config = getAutoQAConfig('default');
+  autoqa.command('config').description('Show AutoQA configuration').action(async () => {
+    const config = await getAutoQAConfig('default');
     output(config ?? { enabled: false }, () => {
       console.log(chalk.bold.cyan('\n  AutoQA Config\n'));
       if (!config) { console.log('  Not configured.\n'); return; }
@@ -122,8 +122,8 @@ export function registerQACommands(program: Command): void {
   qa.command('flags')
     .description('List spotlight flags')
     .option('--severity <level>', 'Filter by severity (info, warning, critical)')
-    .action((opts: { severity?: string }) => {
-      const flags = getFlags({ dismissed: false, severity: opts.severity });
+    .action(async (opts: { severity?: string }) => {
+      const flags = await getFlags({ dismissed: false, severity: opts.severity });
       output({ flags }, () => {
         console.log(chalk.bold.cyan(`\n  QA Flags (${flags.length})\n`));
         if (flags.length === 0) { console.log('  No active flags.\n'); return; }
@@ -149,8 +149,8 @@ export function registerQACommands(program: Command): void {
     .description('List coaching assignments')
     .option('--agent <id>', 'Filter by agent')
     .option('--status <status>', 'Filter by status')
-    .action((opts: { agent?: string; status?: string }) => {
-      const assignments = getCoachingAssignments({ agentId: opts.agent, status: opts.status });
+    .action(async (opts: { agent?: string; status?: string }) => {
+      const assignments = await getCoachingAssignments({ agentId: opts.agent, status: opts.status });
       output({ assignments }, () => {
         console.log(chalk.bold.cyan(`\n  Coaching Assignments (${assignments.length})\n`));
         for (const a of assignments) {
@@ -193,8 +193,8 @@ export function registerQACommands(program: Command): void {
 
   predict.command('accuracy')
     .description('Show prediction accuracy report')
-    .action(() => {
-      const stats = getAccuracyStats();
+    .action(async () => {
+      const stats = await getAccuracyStats();
       output(stats, () => {
         console.log(chalk.bold.cyan('\n  CSAT Prediction Accuracy\n'));
         console.log(`  ${'Total Predictions:'.padEnd(22)} ${stats.totalPredictions}`);
@@ -211,8 +211,8 @@ export function registerQACommands(program: Command): void {
 
   customers.command('health <customerId>')
     .description('Show customer health score')
-    .action((customerId: string) => {
-      const score = getHealthScore('default', customerId);
+    .action(async (customerId: string) => {
+      const score = await getHealthScore('default', customerId);
       if (!score) { console.log(chalk.yellow('No health score found. Run health-compute first.')); return; }
       output(score, () => {
         const color = score.overallScore >= 70 ? chalk.green : score.overallScore >= 40 ? chalk.yellow : chalk.red;
@@ -229,8 +229,8 @@ export function registerQACommands(program: Command): void {
   customers.command('at-risk')
     .description('List at-risk customers')
     .option('--limit <n>', 'Max results', '20')
-    .action((opts: { limit: string }) => {
-      const atRisk = getAtRiskCustomers('default', parseInt(opts.limit, 10));
+    .action(async (opts: { limit: string }) => {
+      const atRisk = await getAtRiskCustomers('default', parseInt(opts.limit, 10));
       output({ atRisk }, () => {
         console.log(chalk.bold.cyan(`\n  At-Risk Customers (${atRisk.length})\n`));
         if (atRisk.length === 0) { console.log('  No at-risk customers.\n'); return; }

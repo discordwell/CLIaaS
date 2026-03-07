@@ -12,7 +12,7 @@ export function registerTourCommands(program: Command): void {
     .description('List product tours')
     .option('--json', 'Output as JSON')
     .action(async (opts: { json?: boolean }) => {
-      const list = getTours();
+      const list = await getTours();
       if (opts.json) { console.log(JSON.stringify({ tours: list }, null, 2)); return; }
       console.log(chalk.bold.cyan(`\n${list.length} tour(s)\n`));
       for (const t of list) {
@@ -28,9 +28,9 @@ export function registerTourCommands(program: Command): void {
     .description('Show tour details and steps')
     .option('--json', 'Output as JSON')
     .action(async (id: string, opts: { json?: boolean }) => {
-      const tour = getTour(id);
+      const tour = await getTour(id);
       if (!tour) { console.error(chalk.red('Tour not found')); process.exitCode = 1; return; }
-      const steps = getTourSteps(id);
+      const steps = await getTourSteps(id);
       if (opts.json) { console.log(JSON.stringify({ tour, steps }, null, 2)); return; }
       console.log(chalk.bold.cyan(`\n${tour.name}`));
       console.log(`  Status: ${tour.isActive ? 'Active' : 'Inactive'}`);
@@ -67,7 +67,7 @@ export function registerTourCommands(program: Command): void {
     .option('--label <label>', 'Action button label', 'Next')
     .option('--json', 'Output as JSON')
     .action(async (tourId: string, opts: { selector: string; title: string; body?: string; placement: string; label: string; json?: boolean }) => {
-      const step = addTourStep({
+      const step = await addTourStep({
         tourId,
         targetSelector: opts.selector,
         title: opts.title,
@@ -85,7 +85,7 @@ export function registerTourCommands(program: Command): void {
     .command('toggle <id>')
     .description('Toggle tour active/inactive')
     .action(async (id: string) => {
-      const tour = toggleTour(id);
+      const tour = await toggleTour(id);
       if (tour) console.log(chalk.green(`Tour ${tour.isActive ? 'activated' : 'deactivated'}: ${tour.name}`));
       else { console.error(chalk.red('Tour not found')); process.exitCode = 1; }
     });

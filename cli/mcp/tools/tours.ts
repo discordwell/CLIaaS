@@ -24,7 +24,7 @@ export function registerTourTools(server: McpServer): void {
     {},
     async () => {
       try {
-        const tours = getTours();
+        const tours = await getTours();
         return textResult({
           total: tours.length,
           tours: tours.map(t => ({
@@ -46,9 +46,9 @@ export function registerTourTools(server: McpServer): void {
     'Show tour details including steps',
     { tourId: z.string().describe('Tour ID') },
     async ({ tourId }) => {
-      const tour = getTour(tourId);
+      const tour = await getTour(tourId);
       if (!tour) return errorResult(`Tour "${tourId}" not found`);
-      const steps = getTourSteps(tourId);
+      const steps = await getTourSteps(tourId);
       return textResult({ tour, steps });
     },
   );
@@ -101,14 +101,14 @@ export function registerTourTools(server: McpServer): void {
       const guard = scopeGuard('tour_step_add');
       if (guard) return guard;
 
-      const tour = getTour(tourId);
+      const tour = await getTour(tourId);
       if (!tour) return errorResult(`Tour "${tourId}" not found`);
 
       const result = withConfirmation(confirm, {
         description: `Add step "${title}" to tour "${tour.name}"`,
         preview: { tourId, targetSelector, title },
-        execute: () => {
-          const step = addTourStep({ tourId, targetSelector, title, body, placement, actionLabel });
+        execute: async () => {
+          const step = await addTourStep({ tourId, targetSelector, title, body, placement, actionLabel });
           recordMCPAction({
             tool: 'tour_step_add', action: 'add_step',
             params: { tourId, title }, timestamp: new Date().toISOString(), result: 'success',
@@ -133,14 +133,14 @@ export function registerTourTools(server: McpServer): void {
       const guard = scopeGuard('tour_toggle');
       if (guard) return guard;
 
-      const tour = getTour(tourId);
+      const tour = await getTour(tourId);
       if (!tour) return errorResult(`Tour "${tourId}" not found`);
 
       const result = withConfirmation(confirm, {
         description: `Toggle tour "${tour.name}" (currently ${tour.isActive ? 'active' : 'inactive'})`,
         preview: { tourId, currentlyActive: tour.isActive },
-        execute: () => {
-          const toggled = toggleTour(tourId);
+        execute: async () => {
+          const toggled = await toggleTour(tourId);
           return { toggled: true, isActive: toggled!.isActive };
         },
       });
@@ -161,7 +161,7 @@ export function registerTourTools(server: McpServer): void {
       const guard = scopeGuard('tour_delete');
       if (guard) return guard;
 
-      const tour = getTour(tourId);
+      const tour = await getTour(tourId);
       if (!tour) return errorResult(`Tour "${tourId}" not found`);
 
       const result = withConfirmation(confirm, {

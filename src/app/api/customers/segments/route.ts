@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const segments = getCustomerSegments();
+    const segments = await getCustomerSegments(auth.user.workspaceId);
     return NextResponse.json({ segments });
   } catch (err) {
     return NextResponse.json(

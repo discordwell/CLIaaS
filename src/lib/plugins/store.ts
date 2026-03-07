@@ -23,6 +23,16 @@ function writeAllInstallations(items: PluginInstallation[]): void {
 // ---- Public API ----
 
 export async function getInstallations(workspaceId?: string): Promise<PluginInstallation[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.pluginInstallations)
+        .orderBy(schema.pluginInstallations.createdAt);
+      return rows.map(rowToInstallation);
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -36,7 +46,18 @@ export async function getInstallations(workspaceId?: string): Promise<PluginInst
   return readAllInstallations();
 }
 
-export async function getInstallation(id: string): Promise<PluginInstallation | null> {
+export async function getInstallation(id: string, workspaceId?: string): Promise<PluginInstallation | null> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db.select().from(schema.pluginInstallations)
+        .where(eq(schema.pluginInstallations.id, id));
+      return row ? rowToInstallation(row) : null;
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;
@@ -108,6 +129,40 @@ export async function getEnabledInstallationsForHook(
     const listing = listings.find(l => l.pluginId === i.pluginId);
     return listing?.manifest?.hooks?.includes(hookName);
   });
+}
+
+export async function getHookRegistrations(installationId: string, workspaceId?: string): Promise<{ id: string; installationId: string; hookName: string; priority: number }[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.pluginHookRegistrations)
+        .where(eq(schema.pluginHookRegistrations.installationId, installationId));
+      return rows.map(r => ({
+        id: r.id,
+        installationId: r.installationId,
+        hookName: r.hookName,
+        priority: r.priority,
+      }));
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
+  const ctx = await tryDb();
+  if (ctx) {
+    const { db, schema } = ctx;
+    const { eq } = await import('drizzle-orm');
+    const rows = await db.select().from(schema.pluginHookRegistrations)
+      .where(eq(schema.pluginHookRegistrations.installationId, installationId));
+    return rows.map(r => ({
+      id: r.id,
+      installationId: r.installationId,
+      hookName: r.hookName,
+      priority: r.priority,
+    }));
+  }
+  // No JSONL fallback for hook registrations
+  return [];
 }
 
 export async function installPlugin(data: {

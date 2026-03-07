@@ -57,7 +57,25 @@ export async function logExecution(data: {
 export async function getExecutionLogs(
   installationId: string,
   opts?: { limit?: number; since?: string },
+  workspaceId?: string,
 ): Promise<PluginExecutionLog[]> {
+  // RLS-scoped path
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq, and, gte, desc } = await import('drizzle-orm');
+      const conditions = [eq(schema.pluginExecutionLogs.installationId, installationId)];
+      if (opts?.since) {
+        conditions.push(gte(schema.pluginExecutionLogs.createdAt, new Date(opts.since)));
+      }
+      const rows = await db.select().from(schema.pluginExecutionLogs)
+        .where(conditions.length > 1 ? and(...conditions) : conditions[0])
+        .orderBy(desc(schema.pluginExecutionLogs.createdAt))
+        .limit(opts?.limit ?? 50);
+      return rows.map(rowToLog);
+    });
+    if (result !== null) return result;
+  }
+  // Unscoped DB path (fallback)
   const ctx = await tryDb();
   if (ctx) {
     const { db, schema } = ctx;

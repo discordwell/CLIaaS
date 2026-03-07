@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const auth = await requirePerm(request, 'tickets:view');
   if ('error' in auth) return auth.error;
 
-  const messages = getMessages(auth.user.workspaceId);
+  const messages = await getMessages(auth.user.workspaceId);
   return NextResponse.json({ messages, total: messages.length });
 }
 

@@ -67,8 +67,8 @@ export function registerCrmCommands(program: Command): void {
     .command('show')
     .description('Show CRM data for a customer')
     .requiredOption('--customer <id>', 'Customer ID')
-    .action((opts: { customer: string }) => {
-      const data = getCrmDataForCustomer(opts.customer);
+    .action(async (opts: { customer: string }) => {
+      const data = await getCrmDataForCustomer(opts.customer);
       output(data, () => {
         if (!data.length) { console.log('No CRM data linked to this customer.'); return; }
         for (const provider of data) {
@@ -110,10 +110,10 @@ export function registerCrmCommands(program: Command): void {
   crm
     .command('status')
     .description('Show CRM sync status')
-    .action(() => {
-      const sfCreds = linkStore.getCredentials('default', 'salesforce');
-      const hubCreds = linkStore.getCredentials('default', 'hubspot-crm');
-      const allCrmLinks = linkStore.listCrmLinks();
+    .action(async () => {
+      const sfCreds = await linkStore.getCredentials('default', 'salesforce');
+      const hubCreds = await linkStore.getCredentials('default', 'hubspot-crm');
+      const allCrmLinks = await linkStore.listCrmLinks();
 
       const data = {
         salesforce: { configured: !!sfCreds, links: allCrmLinks.filter(l => l.provider === 'salesforce').length },

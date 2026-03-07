@@ -18,7 +18,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const flow = await getChatbot(id);
+  const flow = await getChatbot(id, auth.user.workspaceId);
   if (!flow) {
     return NextResponse.json({ error: 'Chatbot not found' }, { status: 404 });
   }
@@ -37,7 +37,7 @@ export async function PUT(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const existing = await getChatbot(id);
+  const existing = await getChatbot(id, auth.user.workspaceId);
   if (!existing) {
     return NextResponse.json({ error: 'Chatbot not found' }, { status: 404 });
   }
@@ -73,7 +73,7 @@ export async function PUT(
     updatedAt: new Date().toISOString(),
   };
 
-  await upsertChatbot(updated);
+  await upsertChatbot(updated, auth.user.workspaceId);
   return NextResponse.json({ chatbot: updated });
 }
 
@@ -88,7 +88,7 @@ export async function DELETE(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const deleted = await deleteChatbot(id);
+  const deleted = await deleteChatbot(id, auth.user.workspaceId);
   if (!deleted) {
     return NextResponse.json({ error: 'Chatbot not found' }, { status: 404 });
   }

@@ -7,6 +7,7 @@
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
 import { withRls } from '../store-helpers';
+import { eq } from 'drizzle-orm';
 
 // ---- Types ----
 
@@ -139,12 +140,44 @@ function ensureDefaults(): void {
 
 // ---- Scorecard CRUD ----
 
-export function getScorecards(): QAScorecard[] {
+export async function getScorecards(workspaceId?: string): Promise<QAScorecard[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.qaScorecards);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        criteria: r.criteria as ScorecardCriterion[],
+        enabled: r.enabled,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return [...scorecards];
 }
 
-export function getScorecard(id: string): QAScorecard | null {
+export async function getScorecard(id: string, workspaceId?: string): Promise<QAScorecard | null> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.qaScorecards).where(eq(schema.qaScorecards.id, id));
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        criteria: r.criteria as ScorecardCriterion[],
+        enabled: r.enabled,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      };
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
   return scorecards.find((s) => s.id === id) ?? null;
 }
@@ -183,12 +216,41 @@ export function updateScorecard(
 
 // ---- Review CRUD ----
 
-export function getReviews(filters?: {
+export async function getReviews(filters?: {
   ticketId?: string;
   scorecardId?: string;
   status?: string;
   workspaceId?: string;
-}): QAReview[] {
+}): Promise<QAReview[]> {
+  if (filters?.workspaceId) {
+    const dbResult = await withRls(filters.workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.qaReviews);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        ticketId: r.ticketId ?? undefined,
+        conversationId: r.conversationId ?? undefined,
+        scorecardId: r.scorecardId,
+        reviewerId: r.reviewerId ?? undefined,
+        reviewType: r.reviewType as 'manual' | 'auto',
+        scores: r.scores as Record<string, number>,
+        totalScore: r.totalScore,
+        maxPossibleScore: r.maxPossibleScore,
+        notes: r.notes ?? undefined,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    });
+    if (dbResult !== null) {
+      let filtered = dbResult;
+      if (filters.ticketId) filtered = filtered.filter(r => r.ticketId === filters.ticketId);
+      if (filters.scorecardId) filtered = filtered.filter(r => r.scorecardId === filters.scorecardId);
+      if (filters.status) filtered = filtered.filter(r => r.status === filters.status);
+      return filtered.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+    }
+  }
   ensureDefaults();
   let result = [...reviews];
   if (filters?.workspaceId) {
@@ -252,7 +314,75 @@ export interface QADashboardMetrics {
   }>;
 }
 
-export function getQADashboard(): QADashboardMetrics {
+export async function getQADashboard(workspaceId?: string): Promise<QADashboardMetrics> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const scorecardRows = await db.select().from(schema.qaScorecards);
+      const reviewRows = await db.select().from(schema.qaReviews);
+
+      const allScorecards = scorecardRows.map(r => ({
+        id: r.id,
+        name: r.name,
+      }));
+      const allReviews = reviewRows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        ticketId: r.ticketId ?? undefined,
+        conversationId: r.conversationId ?? undefined,
+        scorecardId: r.scorecardId,
+        reviewerId: r.reviewerId ?? undefined,
+        reviewType: r.reviewType as 'manual' | 'auto',
+        scores: r.scores as Record<string, number>,
+        totalScore: r.totalScore,
+        maxPossibleScore: r.maxPossibleScore,
+        notes: r.notes ?? undefined,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+      }));
+
+      const completedDb = allReviews.filter(r => r.status === 'completed');
+      let avgScore = 0;
+      let avgPct = 0;
+      if (completedDb.length > 0) {
+        const totalScoreSum = completedDb.reduce((sum, r) => sum + r.totalScore, 0);
+        const maxScoreSum = completedDb.reduce((sum, r) => sum + r.maxPossibleScore, 0);
+        avgScore = Math.round((totalScoreSum / completedDb.length) * 100) / 100;
+        avgPct = maxScoreSum > 0 ? Math.round((totalScoreSum / maxScoreSum) * 10000) / 100 : 0;
+      }
+
+      const byScorecardMap = new Map<string, typeof allReviews>();
+      for (const r of completedDb) {
+        const existing = byScorecardMap.get(r.scorecardId) ?? [];
+        existing.push(r);
+        byScorecardMap.set(r.scorecardId, existing);
+      }
+      const byScorecard = Array.from(byScorecardMap.entries()).map(([scorecardId, scReviews]) => {
+        const sc = allScorecards.find(s => s.id === scorecardId);
+        const totalSum = scReviews.reduce((sum, r) => sum + r.totalScore, 0);
+        const maxSum = scReviews.reduce((sum, r) => sum + r.maxPossibleScore, 0);
+        return {
+          scorecardId,
+          scorecardName: sc?.name ?? 'Unknown',
+          reviewCount: scReviews.length,
+          avgScore: Math.round((totalSum / scReviews.length) * 100) / 100,
+          avgPercentage: maxSum > 0 ? Math.round((totalSum / maxSum) * 10000) / 100 : 0,
+        };
+      });
+
+      return {
+        totalReviews: allReviews.length,
+        completedReviews: completedDb.length,
+        averageScore: avgScore,
+        averagePercentage: avgPct,
+        scorecardCount: allScorecards.length,
+        recentReviews: [...allReviews].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ).slice(0, 10) as QAReview[],
+        byScorecard,
+      };
+    });
+    if (result !== null) return result;
+  }
   ensureDefaults();
 
   const completed = reviews.filter((r) => r.status === 'completed');

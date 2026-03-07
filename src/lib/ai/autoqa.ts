@@ -37,7 +37,7 @@ export async function runAutoQA(
   input: QAInput,
   options?: { forceScorecardId?: string; skipSampling?: boolean },
 ): Promise<AutoQAResult> {
-  const config = getAutoQAConfig(workspaceId);
+  const config = await getAutoQAConfig(workspaceId);
 
   // Check if enabled (allow override for manual trigger)
   if (!options?.skipSampling && (!config || !config.enabled)) {
@@ -66,11 +66,11 @@ export async function runAutoQA(
   let scorecard: QAScorecard | null = null;
 
   if (scorecardId) {
-    scorecard = getScorecard(scorecardId);
+    scorecard = await getScorecard(scorecardId);
   }
   if (!scorecard) {
     // Fall back to first enabled scorecard
-    const all = getScorecards();
+    const all = await getScorecards();
     scorecard = all.find(s => s.enabled) ?? null;
   }
 

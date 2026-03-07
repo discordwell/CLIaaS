@@ -192,4 +192,108 @@ describe('cross-workspace isolation', () => {
       expect(schema.customRolePermissions.workspaceId).toBeDefined();
     });
   });
+
+  describe('schema completeness — all workspace-scoped tables have workspaceId', () => {
+    // Tables that should have workspaceId in the Drizzle schema
+    const workspaceScopedTables = [
+      'tickets', 'conversations', 'messages', 'customers', 'organizations',
+      'tags', 'ticketTags', 'groups', 'users', 'views', 'customFields',
+      'customFieldValues', 'attachments', 'inboxes', 'brands', 'slaPolicies',
+      'slaEvents', 'csatRatings', 'timeEntries', 'auditEntries', 'auditEvents',
+      'chatbots', 'chatbotSessions', 'chatbotVersions', 'chatbotAnalytics',
+      'workflows', 'rules', 'ruleVersions', 'ruleExecutions',
+      'campaigns', 'campaignSteps', 'campaignRecipients', 'campaignEnrollments', 'campaignStepEvents',
+      'cannedResponses', 'nativeMacros', 'agentSignatures',
+      'ticketMergeLog', 'ticketSplitLog',
+      'customerActivities', 'customerNotes', 'customerSegments', 'customerMergeLog',
+      'forumCategories', 'forumThreads', 'forumReplies',
+      'qaScorecards', 'qaReviews', 'autoqaConfigs', 'qaFlags',
+      'qaCoachingAssignments', 'qaCalibrationSessions', 'qaCalibrationEntries',
+      'csatPredictions', 'customerHealthScores',
+      'kbArticles', 'kbCategories', 'kbCollections', 'kbRevisions',
+      'kbArticleFeedback', 'kbDeflections', 'kbContentGaps',
+      'surveyConfigs', 'surveyResponses',
+      'reports', 'dashboards', 'dashboardWidgets', 'reportCache', 'reportSchedules', 'metricSnapshots',
+      'routingQueues', 'routingRules', 'routingLog',
+      'scheduleTemplates', 'agentSchedules', 'scheduleShifts', 'timeOffRequests',
+      'agentStatusLog', 'volumeSnapshots', 'agentSkills', 'agentCapacityRules',
+      'businessHours', 'holidayCalendars', 'holidayEntries',
+      'pluginInstallations', 'pluginHookRegistrations', 'pluginExecutionLogs', 'pluginReviews',
+      'syncOutbox', 'syncConflicts', 'syncHealth', 'upstreamOutbox',
+      'productTours', 'productTourSteps', 'productTourProgress',
+      'inAppMessages', 'inAppMessageImpressions',
+      'integrationCredentials', 'ticketExternalLinks', 'externalLinkComments', 'crmLinks',
+      'customObjectTypes', 'customObjectRecords', 'customObjectRelationships',
+      'notifications', 'mentions', 'rolePermissions',
+      'groupMemberships', 'ticketCollaborators', 'customRoles', 'customRolePermissions',
+      'telegramBotConfigs', 'slackChannelMappings', 'teamsChannelMappings',
+      'aiResolutions', 'aiAgentConfigs', 'aiProcedures',
+      'ticketEvents', 'ticketForms',
+    ];
+
+    // Exempt tables (tenant-level or global)
+    const exemptTables = [
+      'tenants', 'workspaces', 'usageMetrics', 'billingEvents',
+      'marketplaceListings', 'permissions',
+    ];
+
+    it('all workspace-scoped tables have workspaceId column in schema', async () => {
+      const schema = await import('@/db/schema');
+      const missing: string[] = [];
+
+      for (const tableName of workspaceScopedTables) {
+        const table = (schema as Record<string, unknown>)[tableName];
+        if (!table || typeof table !== 'object') {
+          missing.push(`${tableName} (not found in schema)`);
+          continue;
+        }
+        if (!('workspaceId' in (table as Record<string, unknown>))) {
+          missing.push(tableName);
+        }
+      }
+
+      expect(missing).toEqual([]);
+    });
+
+    it('exempt tables do NOT require workspace scoping', async () => {
+      // Verify exempt tables exist but use tenant-level or global policies
+      const schema = await import('@/db/schema');
+      for (const tableName of exemptTables) {
+        const table = (schema as Record<string, unknown>)[tableName];
+        expect(table).toBeDefined();
+      }
+    });
+
+    it('migration covers all workspace-scoped tables with RLS policies', () => {
+      // The migration should have a CREATE POLICY for every workspace-scoped table
+      // (either in 0026 or in prior migrations that weren't broken)
+      const allMigrationDir = path.resolve(__dirname, '../../db/migrations');
+      const migrationFiles = fs.readdirSync(allMigrationDir).filter(f => f.endsWith('.sql'));
+      const allSql = migrationFiles.map(f => fs.readFileSync(path.join(allMigrationDir, f), 'utf-8')).join('\n');
+
+      // Extract all table names that have CREATE POLICY
+      const policyMatches = allSql.match(/CREATE POLICY\s+\w+\s+ON\s+(\w+)/g) ?? [];
+      const tablesWithPolicy = new Set(policyMatches.map(m => {
+        const match = m.match(/ON\s+(\w+)/);
+        return match ? match[1] : '';
+      }));
+
+      // Convert camelCase schema names to snake_case SQL names
+      const toSnake = (s: string) => s.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`);
+      // Handle Drizzle variable names that don't match SQL table names
+      const schemaToSql: Record<string, string> = {
+        nativeMacros: 'macros',
+      };
+
+      const missingPolicy: string[] = [];
+      for (const tableName of workspaceScopedTables) {
+        const sqlName = schemaToSql[tableName] ?? toSnake(tableName);
+        if (!tablesWithPolicy.has(sqlName)) {
+          missingPolicy.push(`${tableName} (${sqlName})`);
+        }
+      }
+
+      expect(missingPolicy).toEqual([]);
+    });
+  });
 });

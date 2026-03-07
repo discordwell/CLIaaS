@@ -13,7 +13,7 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const campaign = resumeCampaign(id, auth.user.workspaceId);
+  const campaign = await resumeCampaign(id, auth.user.workspaceId);
 
   if (!campaign) {
     return NextResponse.json({ error: 'Campaign not found or not in paused state' }, { status: 400 });

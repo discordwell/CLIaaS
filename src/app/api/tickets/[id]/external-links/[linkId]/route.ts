@@ -13,7 +13,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { linkId } = await params;
-  const link = linkStore.getExternalLink(linkId);
+  const link = await linkStore.getExternalLink(linkId);
   if (!link) return NextResponse.json({ error: 'Link not found' }, { status: 404 });
 
   // Scope by workspace to prevent cross-workspace data leakage
@@ -22,7 +22,7 @@ export async function GET(
     return NextResponse.json({ error: 'Link not found' }, { status: 404 });
   }
 
-  const comments = linkStore.listLinkComments(linkId);
+  const comments = await linkStore.listLinkComments(linkId);
   return NextResponse.json({ link, comments });
 }
 
@@ -34,7 +34,7 @@ export async function DELETE(
   if ('error' in auth) return auth.error;
 
   const { linkId } = await params;
-  const link = linkStore.getExternalLink(linkId);
+  const link = await linkStore.getExternalLink(linkId);
   if (!link) return NextResponse.json({ error: 'Link not found' }, { status: 404 });
 
   // Scope by workspace to prevent cross-workspace deletion

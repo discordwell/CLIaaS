@@ -27,7 +27,7 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (opts: { status?: string; channel?: string; json?: boolean }) => {
       try {
-        const list = getCampaigns({ status: opts.status as Campaign['status'], channel: opts.channel as Campaign['channel'] });
+        const list = await getCampaigns({ status: opts.status as Campaign['status'], channel: opts.channel as Campaign['channel'] });
 
         if (opts.json) {
           console.log(JSON.stringify({ campaigns: list }, null, 2));
@@ -108,12 +108,12 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (id: string, opts: { json?: boolean }) => {
       try {
-        const existing = getCampaign(id);
+        const existing = await getCampaign(id);
         if (!existing) {
           throw new Error(`Campaign not found: ${id}`);
         }
 
-        const c = sendCampaign(id);
+        const c = await sendCampaign(id);
         if (!c) {
           throw new Error(`Failed to send campaign ${id} (may already be sent)`);
         }
@@ -142,7 +142,7 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (campaignId: string, opts: { json?: boolean }) => {
       try {
-        const list = getCampaignSteps(campaignId);
+        const list = await getCampaignSteps(campaignId);
         if (opts.json) { console.log(JSON.stringify({ steps: list }, null, 2)); return; }
         console.log(chalk.bold.cyan(`\n${list.length} step(s) for campaign ${campaignId}\n`));
         for (const s of list) {
@@ -165,7 +165,7 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (campaignId: string, opts: { type: string; name: string; delay?: string; json?: boolean }) => {
       try {
-        const step = addCampaignStep({
+        const step = await addCampaignStep({
           campaignId,
           stepType: opts.type as CampaignStepType,
           name: opts.name,
@@ -196,7 +196,7 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (campaignId: string, opts: { json?: boolean }) => {
       try {
-        const result = enrollCampaign(campaignId, []);
+        const result = await enrollCampaign(campaignId, []);
         if (!result.campaign) throw new Error('Campaign not found');
         if (opts.json) { console.log(JSON.stringify(result, null, 2)); return; }
         console.log(chalk.bold.green(`\nCampaign activated: ${result.campaign.name}`));
@@ -212,7 +212,7 @@ export function registerCampaignCommands(program: Command): void {
     .command('pause <campaignId>')
     .description('Pause an active campaign')
     .action(async (campaignId: string) => {
-      const c = pauseCampaign(campaignId);
+      const c = await pauseCampaign(campaignId);
       if (c) console.log(chalk.yellow(`Campaign paused: ${c.name}`));
       else { console.error(chalk.red('Campaign not found or not active')); process.exitCode = 1; }
     });
@@ -221,7 +221,7 @@ export function registerCampaignCommands(program: Command): void {
     .command('resume <campaignId>')
     .description('Resume a paused campaign')
     .action(async (campaignId: string) => {
-      const c = resumeCampaign(campaignId);
+      const c = await resumeCampaign(campaignId);
       if (c) console.log(chalk.green(`Campaign resumed: ${c.name}`));
       else { console.error(chalk.red('Campaign not found or not paused')); process.exitCode = 1; }
     });
@@ -232,7 +232,7 @@ export function registerCampaignCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (campaignId: string, opts: { json?: boolean }) => {
       try {
-        const funnel = getCampaignFunnel(campaignId);
+        const funnel = await getCampaignFunnel(campaignId);
         if (opts.json) { console.log(JSON.stringify({ funnel }, null, 2)); return; }
         console.log(chalk.bold.cyan(`\nFunnel for campaign ${campaignId}\n`));
         for (const entry of funnel) {

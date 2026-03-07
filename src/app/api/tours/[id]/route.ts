@@ -14,7 +14,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const tour = getTour(id, auth.user.workspaceId);
+  const tour = await getTour(id, auth.user.workspaceId);
   if (!tour) return NextResponse.json({ error: 'Tour not found' }, { status: 404 });
 
   return NextResponse.json({ tour });
@@ -66,7 +66,7 @@ export async function PATCH(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const tour = toggleTour(id, auth.user.workspaceId);
+  const tour = await toggleTour(id, auth.user.workspaceId);
   if (!tour) return NextResponse.json({ error: 'Tour not found' }, { status: 404 });
 
   return NextResponse.json({ tour });

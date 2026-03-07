@@ -95,14 +95,54 @@ function ensureLoaded(): void {
 
 // ---- Tour CRUD ----
 
-export function getTours(workspaceId?: string): ProductTour[] {
+export async function getTours(workspaceId?: string): Promise<ProductTour[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const rows = await db.select().from(schema.productTours);
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        description: r.description ?? undefined,
+        targetUrlPattern: r.targetUrlPattern,
+        segmentQuery: (r.segmentQuery as Record<string, unknown>) ?? {},
+        isActive: r.isActive,
+        priority: r.priority,
+        createdBy: r.createdBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as ProductTour)).sort((a, b) => b.priority - a.priority);
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return tours
     .filter(t => !workspaceId || !t.workspaceId || t.workspaceId === workspaceId)
     .sort((a, b) => b.priority - a.priority);
 }
 
-export function getTour(id: string, workspaceId?: string): ProductTour | undefined {
+export async function getTour(id: string, workspaceId?: string): Promise<ProductTour | undefined> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const [r] = await db.select().from(schema.productTours).where(eq(schema.productTours.id, id));
+      if (!r) return undefined;
+      return {
+        id: r.id,
+        workspaceId: r.workspaceId,
+        name: r.name,
+        description: r.description ?? undefined,
+        targetUrlPattern: r.targetUrlPattern,
+        segmentQuery: (r.segmentQuery as Record<string, unknown>) ?? {},
+        isActive: r.isActive,
+        priority: r.priority,
+        createdBy: r.createdBy ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      } as ProductTour;
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   const tour = tours.find(t => t.id === id);
   if (!tour) return undefined;
@@ -161,26 +201,48 @@ export function deleteTour(id: string, workspaceId?: string): boolean {
   return true;
 }
 
-export function toggleTour(id: string, workspaceId?: string): ProductTour | null {
+export async function toggleTour(id: string, workspaceId?: string): Promise<ProductTour | null> {
   ensureLoaded();
-  const tour = getTour(id, workspaceId);
+  const tour = await getTour(id, workspaceId);
   if (!tour) return null;
   return updateTour(id, { isActive: !tour.isActive }, workspaceId);
 }
 
 // ---- Tour Steps CRUD ----
 
-export function getTourSteps(tourId: string): ProductTourStep[] {
+export async function getTourSteps(tourId: string, workspaceId?: string): Promise<ProductTourStep[]> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq } = await import('drizzle-orm');
+      const rows = await db.select().from(schema.productTourSteps)
+        .where(eq(schema.productTourSteps.tourId, tourId))
+        .orderBy(schema.productTourSteps.position);
+      return rows.map(r => ({
+        id: r.id,
+        tourId: r.tourId,
+        workspaceId: r.workspaceId,
+        position: r.position,
+        targetSelector: r.targetSelector,
+        title: r.title,
+        body: r.body,
+        placement: r.placement as TourStepPlacement,
+        highlightTarget: r.highlightTarget,
+        actionLabel: r.actionLabel,
+        createdAt: r.createdAt.toISOString(),
+      } as ProductTourStep));
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return tourSteps.filter(s => s.tourId === tourId).sort((a, b) => a.position - b.position);
 }
 
-export function addTourStep(
+export async function addTourStep(
   input: Pick<ProductTourStep, 'tourId' | 'targetSelector' | 'title'> & Partial<Pick<ProductTourStep, 'body' | 'placement' | 'highlightTarget' | 'actionLabel'>>,
   workspaceId?: string,
-): ProductTourStep {
+): Promise<ProductTourStep> {
   ensureLoaded();
-  const existing = getTourSteps(input.tourId);
+  const existing = await getTourSteps(input.tourId);
   const step: ProductTourStep = {
     id: `ts-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     tourId: input.tourId,
@@ -217,7 +279,7 @@ export function deleteTourStep(stepId: string): boolean {
   return true;
 }
 
-export function reorderTourSteps(tourId: string, stepIds: string[]): ProductTourStep[] {
+export async function reorderTourSteps(tourId: string, stepIds: string[]): Promise<ProductTourStep[]> {
   ensureLoaded();
   for (let i = 0; i < stepIds.length; i++) {
     const idx = tourSteps.findIndex(s => s.id === stepIds[i] && s.tourId === tourId);
@@ -229,7 +291,26 @@ export function reorderTourSteps(tourId: string, stepIds: string[]): ProductTour
 
 // ---- Tour Progress ----
 
-export function getTourProgress(tourId: string, customerId: string): ProductTourProgress | undefined {
+export async function getTourProgress(tourId: string, customerId: string, workspaceId?: string): Promise<ProductTourProgress | undefined> {
+  if (workspaceId) {
+    const result = await withRls(workspaceId, async ({ db, schema }) => {
+      const { eq, and } = await import('drizzle-orm');
+      const [r] = await db.select().from(schema.productTourProgress)
+        .where(and(eq(schema.productTourProgress.tourId, tourId), eq(schema.productTourProgress.customerId, customerId)));
+      if (!r) return undefined;
+      return {
+        id: r.id,
+        tourId: r.tourId,
+        workspaceId: r.workspaceId,
+        customerId: r.customerId,
+        currentStep: r.currentStep,
+        status: r.status as ProductTourProgress['status'],
+        startedAt: r.startedAt.toISOString(),
+        completedAt: r.completedAt?.toISOString(),
+      } as ProductTourProgress;
+    });
+    if (result !== null) return result;
+  }
   ensureLoaded();
   return tourProgress.find(p => p.tourId === tourId && p.customerId === customerId);
 }

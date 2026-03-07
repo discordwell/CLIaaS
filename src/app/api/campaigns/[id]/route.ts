@@ -14,7 +14,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const campaign = getCampaign(id, auth.user.workspaceId);
+  const campaign = await getCampaign(id, auth.user.workspaceId);
 
   if (!campaign) {
     return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });

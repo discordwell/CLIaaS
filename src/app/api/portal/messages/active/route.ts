@@ -14,20 +14,22 @@ export async function GET(request: NextRequest) {
   }
 
   const now = new Date();
-  const active = getMessages().filter(m => {
-    if (!m.isActive) return false;
-    if (m.startAt && new Date(m.startAt) > now) return false;
-    if (m.endAt && new Date(m.endAt) < now) return false;
+  const allMessages = await getMessages();
+  const active = [];
+  for (const m of allMessages) {
+    if (!m.isActive) continue;
+    if (m.startAt && new Date(m.startAt) > now) continue;
+    if (m.endAt && new Date(m.endAt) < now) continue;
     if (m.targetUrlPattern !== '*') {
       const escaped = m.targetUrlPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
-      if (!new RegExp(`^${escaped}$`).test(currentUrl)) return false;
+      if (!new RegExp(`^${escaped}$`).test(currentUrl)) continue;
     }
     if (m.maxImpressions > 0) {
-      const count = getImpressionCount(m.id, customerId);
-      if (count >= m.maxImpressions) return false;
+      const count = await getImpressionCount(m.id, customerId);
+      if (count >= m.maxImpressions) continue;
     }
-    return true;
-  });
+    active.push(m);
+  }
 
   return NextResponse.json({ messages: active });
 }

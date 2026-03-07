@@ -27,19 +27,19 @@ const logger = createLogger('campaigns:orchestration');
  * Activate a campaign: evaluate its segment query, create enrollments for matching customers,
  * and set the campaign status to 'active'.
  */
-export function enrollCampaign(
+export async function enrollCampaign(
   campaignId: string,
   customers: EvaluableCustomer[],
   workspaceId?: string,
-): { enrolled: number; campaign: Campaign | null } {
-  const campaign = getCampaign(campaignId, workspaceId);
+): Promise<{ enrolled: number; campaign: Campaign | null }> {
+  const campaign = await getCampaign(campaignId, workspaceId);
   if (!campaign) return { enrolled: 0, campaign: null };
 
   if (campaign.status !== 'draft' && campaign.status !== 'scheduled' && campaign.status !== 'paused') {
     return { enrolled: 0, campaign };
   }
 
-  const steps = getCampaignSteps(campaignId, workspaceId);
+  const steps = await getCampaignSteps(campaignId, workspaceId);
   if (steps.length === 0) {
     return { enrolled: 0, campaign };
   }
@@ -51,7 +51,7 @@ export function enrollCampaign(
   const matching = evaluateSegment(customers, segmentQuery);
 
   // Get already enrolled customer IDs to avoid duplicates
-  const existingEnrollments = getEnrollments(campaignId, workspaceId);
+  const existingEnrollments = await getEnrollments(campaignId, workspaceId);
   const enrolledCustomerIds = new Set(existingEnrollments.map(e => e.customerId));
 
   let enrolled = 0;
@@ -72,14 +72,14 @@ export function enrollCampaign(
   // Update campaign status
   updateCampaign(campaignId, { status: 'active' }, workspaceId);
 
-  return { enrolled, campaign: getCampaign(campaignId, workspaceId)! };
+  return { enrolled, campaign: (await getCampaign(campaignId, workspaceId))! };
 }
 
 /**
  * Pause a running campaign — stops executing next steps.
  */
-export function pauseCampaign(campaignId: string, workspaceId?: string): Campaign | null {
-  const campaign = getCampaign(campaignId, workspaceId);
+export async function pauseCampaign(campaignId: string, workspaceId?: string): Promise<Campaign | null> {
+  const campaign = await getCampaign(campaignId, workspaceId);
   if (!campaign || campaign.status !== 'active') return null;
   return updateCampaign(campaignId, { status: 'paused' }, workspaceId);
 }
@@ -87,8 +87,8 @@ export function pauseCampaign(campaignId: string, workspaceId?: string): Campaig
 /**
  * Resume a paused campaign.
  */
-export function resumeCampaign(campaignId: string, workspaceId?: string): Campaign | null {
-  const campaign = getCampaign(campaignId, workspaceId);
+export async function resumeCampaign(campaignId: string, workspaceId?: string): Promise<Campaign | null> {
+  const campaign = await getCampaign(campaignId, workspaceId);
   if (!campaign || campaign.status !== 'paused') return null;
   return updateCampaign(campaignId, { status: 'active' }, workspaceId);
 }
@@ -226,7 +226,7 @@ export function advanceEnrollment(
  * Finds all due enrollments and executes their current step.
  * Called by the campaign worker or setInterval fallback.
  */
-export function processCampaignTick(): { processed: number; errors: number } {
+export async function processCampaignTick(): Promise<{ processed: number; errors: number }> {
   const dueEnrollments = getActiveEnrollmentsDue();
   let processed = 0;
   let errors = 0;
@@ -240,10 +240,10 @@ export function processCampaignTick(): { processed: number; errors: number } {
     }
 
     // Check campaign is still active
-    const campaign = getCampaign(enrollment.campaignId);
+    const campaign = await getCampaign(enrollment.campaignId);
     if (!campaign || campaign.status !== 'active') continue;
 
-    const step = getCampaignStep(enrollment.currentStepId);
+    const step = await getCampaignStep(enrollment.currentStepId);
     if (!step) {
       logger.warn(`Step ${enrollment.currentStepId} not found for enrollment ${enrollment.id}`);
       updateEnrollment(enrollment.id, { status: 'failed' });

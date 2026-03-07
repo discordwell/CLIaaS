@@ -28,7 +28,7 @@ describe('AutoQA Config Store', () => {
 
   it('returns null for unknown workspace', async () => {
     const { getAutoQAConfig } = await import('@/lib/qa/autoqa-config-store');
-    const config = getAutoQAConfig('nonexistent');
+    const config = await getAutoQAConfig('nonexistent');
     expect(config).toBeNull();
   });
 
@@ -39,7 +39,7 @@ describe('AutoQA Config Store', () => {
     expect(config.sampleRate).toBe(0.5);
     expect(config.workspaceId).toBe('ws-1');
 
-    const fetched = getAutoQAConfig('ws-1');
+    const fetched = await getAutoQAConfig('ws-1');
     expect(fetched?.id).toBe(config.id);
   });
 
@@ -76,10 +76,10 @@ describe('QA Flags Store', () => {
       message: 'Incorrect information',
     });
 
-    const all = getFlags({ workspaceId: 'ws-1' });
+    const all = await getFlags({ workspaceId: 'ws-1' });
     expect(all).toHaveLength(2);
 
-    const critical = getFlags({ severity: 'critical' });
+    const critical = await getFlags({ severity: 'critical' });
     expect(critical).toHaveLength(1);
     expect(critical[0].category).toBe('accuracy');
   });
@@ -98,7 +98,7 @@ describe('QA Flags Store', () => {
     expect(result?.dismissed).toBe(true);
     expect(result?.dismissedBy).toBe('user-1');
 
-    const active = getFlags({ dismissed: false });
+    const active = await getFlags({ dismissed: false });
     expect(active.find(f => f.id === flag.id)).toBeUndefined();
   });
 });
@@ -119,7 +119,7 @@ describe('CSAT Prediction Store', () => {
       factors: { resolutionSpeed: 'fast' },
     });
 
-    const preds = getPredictions({ workspaceId: 'ws-1' });
+    const preds = await getPredictions({ workspaceId: 'ws-1' });
     expect(preds).toHaveLength(1);
     expect(preds[0].predictedScore).toBe(4.2);
     expect(preds[0].riskLevel).toBe('low');
@@ -139,7 +139,7 @@ describe('CSAT Prediction Store', () => {
     const updated = recordActualScore('t-2', 5);
     expect(updated?.actualScore).toBe(5);
 
-    const stats = getAccuracyStats('ws-1');
+    const stats = await getAccuracyStats('ws-1');
     expect(stats.totalPredictions).toBe(1);
     expect(stats.withActual).toBe(1);
     expect(stats.avgError).toBe(1); // |4.0 - 5| = 1
@@ -223,7 +223,7 @@ describe('Customer Health Score Store', () => {
       signals: {},
     });
 
-    const score = getHealthScore('ws-1', 'c-1');
+    const score = await getHealthScore('ws-1', 'c-1');
     expect(score?.overallScore).toBe(75);
     expect(score?.trend).toBe('stable');
   });
@@ -234,7 +234,7 @@ describe('Customer Health Score Store', () => {
     upsertHealthScore({ workspaceId: 'ws-1', customerId: 'c-bad', overallScore: 25, trend: 'declining', signals: {} });
     upsertHealthScore({ workspaceId: 'ws-1', customerId: 'c-mid', overallScore: 50, trend: 'stable', signals: {} });
 
-    const atRisk = getAtRiskCustomers('ws-1');
+    const atRisk = await getAtRiskCustomers('ws-1');
     expect(atRisk).toHaveLength(1);
     expect(atRisk[0].customerId).toBe('c-bad');
   });
@@ -244,7 +244,7 @@ describe('Health Engine', () => {
   it('computes health score from signals', async () => {
     const { computeHealthScore } = await import('@/lib/customers/health-engine');
     const now = Date.now();
-    const result = computeHealthScore({
+    const result = await computeHealthScore({
       workspaceId: 'ws-1',
       customer: {
         id: 'c-test',
@@ -347,7 +347,7 @@ describe('QA Coaching Store', () => {
     expect(completed?.status).toBe('completed');
     expect(completed?.completedAt).toBeDefined();
 
-    const all = getCoachingAssignments({ agentId: 'agent-1' });
+    const all = await getCoachingAssignments({ agentId: 'agent-1' });
     expect(all).toHaveLength(1);
   });
 });

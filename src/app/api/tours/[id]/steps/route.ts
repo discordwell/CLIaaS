@@ -14,7 +14,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { id } = await params;
-  const steps = getTourSteps(id);
+  const steps = await getTourSteps(id);
   return NextResponse.json({ steps });
 }
 
@@ -39,7 +39,7 @@ export async function POST(
   if ('error' in parsed) return parsed.error;
 
   if (parsed.data.action === 'reorder' && parsed.data.stepIds) {
-    const steps = reorderTourSteps(id, parsed.data.stepIds);
+    const steps = await reorderTourSteps(id, parsed.data.stepIds);
     return NextResponse.json({ steps });
   }
 
@@ -47,7 +47,7 @@ export async function POST(
     return NextResponse.json({ error: 'targetSelector and title are required' }, { status: 400 });
   }
 
-  const step = addTourStep(
+  const step = await addTourStep(
     {
       tourId: id,
       targetSelector: parsed.data.targetSelector,
