@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-03-07T06:32Z — Session 118: P0 Feature Implementation — Eval Readiness
+- **AutoQA + PII scan workers**: Registered both missing workers in `workers/index.ts` (previously built but never started)
+- **Intercom Tickets API**: Added separate `ICTicket`/`ICTicketPart` types and export via `/tickets` endpoint (distinct from conversations)
+- **HubSpot parity**: Added email thread export via ticket→email associations, KB article export via CMS Blog API + knowledge-base fallback
+- **Webhook sync**: Created `/api/connectors/[name]/webhook/route.ts` — real-time ingest for Zendesk, Intercom, Freshdesk with HMAC signature verification and canonical event normalization
+- **Demo fallback removal**: Voice store (no auto-seed, explicit `seedDemoData()`), SCIM store (JSONL-persistent CRUD), SSO config (dual-mode DB+JSONL with async API), Plugins (removed hardcoded demo plugins)
+- **AI admin controls**: New `admin-controls.ts` — channel policies, circuit breaker (5-fail threshold, 60s recovery), audit trail, hourly usage reporting. Integrated into resolution pipeline. API at `/api/ai/admin`
+- **120 tests passing** across 9 files (12 voice, 7 worker registry, 33 admin controls, 24 SCIM, 21 SSO, 3 pipeline, 23 dispatcher, 5 SSO-legacy)
+- **Zero new type errors** — all pre-existing TS errors unchanged
+
+## 2026-03-07T05:20Z — Session 117: Comprehensive Test Plan Execution
+- **TEST_PLAN.md** created: 295 scenarios across 8 phases (schema, data layer, API routes, security, integration, MCP, wet tests, adversarial)
+- **471 new tests written and passing** across 8 test files:
+  - `schema-integrity.test.ts` (16) — migration parity, RLS coverage, FK validation
+  - `dual-mode-stores.test.ts` (69) — JSONL CRUD, withRls fallback
+  - `security-boundaries.test.ts` (84) — auth, RBAC bitfield, workspace isolation, input validation
+  - `sandbox-security.test.ts` (40) — blocked globals, timeout, prototype isolation, SSRF
+  - `core-features.test.ts` (42) — canned responses, collision detection, notes, merge/split, views/tags
+  - `platform-features.test.ts` (84) — AI resolution, routing engine, WFM schedules
+  - `extended-features.test.ts` (132) — campaigns, chatbots, PII detection, reports, CRM/custom objects
+  - `rls.test.ts` updated (4) — UUID validation test added
+- **Security fixes applied**:
+  - SSRF: Added `localhost` to `BLOCKED_HOSTNAMES` in url-safety.ts
+  - Sandbox: Frozen Object/Array/JSON copies prevent prototype pollution leak to host
+  - SQL injection: UUID validation in `withRls()` and `withTenantContext()` (from schema agent)
+- **Findings**: Campaign condition steps always evaluate true (hardcoded); chatbot collect_input as root node has edge case; 10 tables push-only (no migration)
+- **Batch 3 running**: integration-flows + workflow-integration tests
+
 ## 2026-03-07T04:15Z — Session 116: Plan 19 Phase 6 — RLS Wet Test (PASS)
 - **Sign-in**: Fixed password hash for `wettest@cliaas.test`, verified auth works with superuser `db` (bypasses RLS correctly)
 - **Architecture fix discovered during wet test**: `SET LOCAL` with drizzle-orm `sql` tag produces `$1` parameterized values which PostgreSQL rejects for SET commands. Fixed: `sql.raw()` with UUID regex validation pre-check (already committed in Session 115)

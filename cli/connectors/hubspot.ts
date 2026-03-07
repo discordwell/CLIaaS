@@ -1,5 +1,5 @@
 import type {
-  Ticket, Message, Customer, Organization, ExportManifest, TicketStatus, TicketPriority,
+  Ticket, Message, Customer, Organization, KBArticle, ExportManifest, TicketStatus, TicketPriority,
 } from '../schema/types';
 import {
   createClient, paginateCursor, setupExport, appendJsonl, writeManifest, exportSpinner,
@@ -68,6 +68,46 @@ interface HSOwner {
   email: string;
   firstName: string;
   lastName: string;
+}
+
+interface HSEmail {
+  id: string;
+  properties: {
+    hs_email_subject?: string;
+    hs_email_text?: string;
+    hs_email_html?: string;
+    hs_email_direction?: string; // EMAIL, INCOMING_EMAIL, FORWARDED_EMAIL
+    hs_email_status?: string;
+    hs_timestamp?: string;
+    hubspot_owner_id?: string;
+    hs_email_from_email?: string;
+    hs_email_to_email?: string;
+    [key: string]: unknown;
+  };
+}
+
+interface HSBlogPost {
+  id: string;
+  name: string;
+  postBody: string;
+  state: string; // PUBLISHED, DRAFT
+  slug: string;
+  categoryId?: number;
+  tagIds?: number[];
+  created: string;
+  updated: string;
+}
+
+interface HSKBArticle {
+  id: string;
+  title: string;
+  body: string;
+  state: string;
+  categoryId?: number;
+  subcategoryId?: number;
+  slug: string;
+  created: string;
+  updated: string;
 }
 
 // ---- HubSpot cursor-based pagination response shape ----
@@ -212,6 +252,38 @@ export async function exportHubSpot(auth: HubSpotAuth, outDir: string): Promise<
             } catch { /* individual note fetch failed */ }
           }
         } catch { /* notes association not available */ }
+
+        // Get email threads associated with this ticket
+        try {
+          const emailAssocs = await client.request<{
+            results: Array<{ id: string; type: string }>;
+          }>(`/crm/v3/objects/tickets/${t.id}/associations/emails`);
+
+          for (const emailRef of emailAssocs.results) {
+            try {
+              const email = await client.request<HSEmail>(
+                `/crm/v3/objects/emails/${emailRef.id}?properties=hs_email_subject,hs_email_text,hs_email_html,hs_email_direction,hs_timestamp,hubspot_owner_id,hs_email_from_email,hs_email_to_email`,
+              );
+              const emailBody = email.properties.hs_email_text ?? email.properties.hs_email_html ?? '';
+              if (emailBody) {
+                const isIncoming = email.properties.hs_email_direction === 'INCOMING_EMAIL';
+                const message: Message = {
+                  id: `hub-email-${email.id}`,
+                  ticketId: `hub-${t.id}`,
+                  author: isIncoming
+                    ? (email.properties.hs_email_from_email ?? 'unknown')
+                    : (email.properties.hubspot_owner_id ?? 'unknown'),
+                  body: emailBody,
+                  bodyHtml: email.properties.hs_email_html ?? undefined,
+                  type: 'reply',
+                  createdAt: email.properties.hs_timestamp ?? p.createdate ?? new Date().toISOString(),
+                };
+                appendJsonl(files.messages, message);
+                counts.messages++;
+              }
+            } catch { /* individual email fetch failed */ }
+          }
+        } catch { /* email association not available */ }
       }
 
       ticketSpinner.text = `Exporting tickets... ${counts.tickets} exported`;
@@ -297,8 +369,67 @@ export async function exportHubSpot(auth: HubSpotAuth, outDir: string): Promise<
   } catch { /* companies endpoint may not be available */ }
   companySpinner.succeed(`${counts.organizations} companies exported`);
 
-  // No KB articles via standard API (HubSpot KB is part of CMS Hub)
-  exportSpinner('KB articles: requires CMS Hub (not exported)').info();
+  // Export KB articles via CMS Knowledge Base API
+  const kbSpinner = exportSpinner('Exporting KB articles...');
+  let kbCount = 0;
+
+  try {
+    // Try the CMS Blog API first (available with CMS Hub)
+    await paginateCursor<HSBlogPost>({
+      fetch: client.request.bind(client),
+      initialUrl: hubspotCursorUrl('/cms/v3/blogs/posts', 'id,name,postBody,state,slug,categoryId,created,updated'),
+      getData: hsGetData,
+      getNextUrl: hsGetNextUrl('/cms/v3/blogs/posts', 'id,name,postBody,state,slug,categoryId,created,updated'),
+      onPage: (posts) => {
+        for (const post of posts) {
+          const article: KBArticle = {
+            id: `hub-kb-${post.id}`,
+            externalId: post.id,
+            source: 'hubspot',
+            title: post.name ?? `Article ${post.id}`,
+            body: post.postBody ?? '',
+            categoryPath: post.categoryId ? [String(post.categoryId)] : [],
+          };
+          appendJsonl(files.kb_articles, article);
+          counts.kbArticles++;
+          kbCount++;
+        }
+      },
+    });
+  } catch {
+    // CMS Hub not available — try knowledge-base endpoint (newer API)
+    try {
+      await paginateCursor<HSKBArticle>({
+        fetch: client.request.bind(client),
+        initialUrl: '/cms/v3/knowledge-base/articles?limit=100',
+        getData: hsGetData,
+        getNextUrl: (response) => {
+          const after = (response as unknown as HSPaginatedResponse<unknown>).paging?.next?.after;
+          return after ? `/cms/v3/knowledge-base/articles?limit=100&after=${after}` : null;
+        },
+        onPage: (articles) => {
+          for (const a of articles) {
+            const article: KBArticle = {
+              id: `hub-kb-${a.id}`,
+              externalId: a.id,
+              source: 'hubspot',
+              title: a.title ?? `Article ${a.id}`,
+              body: a.body ?? '',
+              categoryPath: [a.categoryId, a.subcategoryId].filter(Boolean).map(String),
+            };
+            appendJsonl(files.kb_articles, article);
+            counts.kbArticles++;
+            kbCount++;
+          }
+        },
+      });
+    } catch {
+      kbSpinner.warn('KB articles: requires CMS Hub or Service Hub Professional+');
+    }
+  }
+  if (kbCount > 0) kbSpinner.succeed(`${kbCount} KB articles exported`);
+  else kbSpinner.info('0 KB articles exported');
+
   exportSpinner('Business rules: not available via HubSpot API').info();
 
   return writeManifest(outDir, 'hubspot', counts);

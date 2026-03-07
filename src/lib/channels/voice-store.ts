@@ -1,6 +1,6 @@
 /**
- * In-memory voice call tracking store with global singleton pattern.
- * Mirrors sms-store.ts for voice/phone channel.
+ * Voice call tracking store — JSONL-persistent with DB-ready interface.
+ * No demo seed data in production; explicit seed function for dev/test.
  */
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
@@ -19,6 +19,8 @@ export interface VoiceCall {
   transcription?: string;
   agentId?: string;
   ticketId?: string;
+  queueId?: string;
+  queueWaitMs?: number;
   ivrPath?: string[];        // digits pressed through IVR
   workspaceId?: string;
   createdAt: number;
@@ -30,13 +32,26 @@ export interface VoiceAgent {
   name: string;
   extension: string;
   phoneNumber: string;
-  status: 'available' | 'busy' | 'offline';
+  status: 'available' | 'busy' | 'offline' | 'wrap-up';
+  currentCallId?: string;
+  workspaceId?: string;
+}
+
+export interface VoiceQueueMetrics {
+  queueId: string;
+  name: string;
+  waitingCalls: number;
+  avgWaitMs: number;
+  longestWaitMs: number;
+  availableAgents: number;
+  timestamp: number;
 }
 
 // ---- JSONL persistence ----
 
 const CALLS_FILE = 'voice-calls.jsonl';
 const AGENTS_FILE = 'voice-agents.jsonl';
+const QUEUE_METRICS_FILE = 'voice-queue-metrics.jsonl';
 
 function persistCalls(store: Map<string, VoiceCall>): void {
   writeJsonlFile(CALLS_FILE, Array.from(store.values()));
@@ -65,12 +80,8 @@ function getCallStore(): Map<string, VoiceCall> {
   }
   if (!global.__cliaasVoiceCallsLoaded) {
     const saved = readJsonlFile<VoiceCall>(CALLS_FILE);
-    if (saved.length > 0) {
-      for (const call of saved) {
-        global.__cliaasVoiceCalls.set(call.id, call);
-      }
-    } else {
-      seedDemoCalls(global.__cliaasVoiceCalls);
+    for (const call of saved) {
+      global.__cliaasVoiceCalls.set(call.id, call);
     }
     global.__cliaasVoiceCallsLoaded = true;
   }
@@ -85,70 +96,10 @@ function getAgentStore(): VoiceAgent[] {
     const saved = readJsonlFile<VoiceAgent>(AGENTS_FILE);
     if (saved.length > 0) {
       global.__cliaasVoiceAgents = saved;
-    } else {
-      global.__cliaasVoiceAgents = [
-        { id: 'agent-1', name: 'Sarah Chen', extension: '101', phoneNumber: '+15005550001', status: 'available' },
-        { id: 'agent-2', name: 'Mike Johnson', extension: '102', phoneNumber: '+15005550002', status: 'available' },
-        { id: 'agent-3', name: 'Emma Davis', extension: '103', phoneNumber: '+15005550003', status: 'offline' },
-      ];
-      persistAgents(global.__cliaasVoiceAgents);
     }
     global.__cliaasVoiceAgentsLoaded = true;
   }
   return global.__cliaasVoiceAgents;
-}
-
-// ---- Demo seed data ----
-
-function seedDemoCalls(store: Map<string, VoiceCall>): void {
-  const now = Date.now();
-
-  const calls: VoiceCall[] = [
-    {
-      id: crypto.randomUUID(),
-      callSid: 'CA' + crypto.randomUUID().replace(/-/g, '').slice(0, 32),
-      direction: 'inbound',
-      from: '+14155559876',
-      to: '+15005550006',
-      status: 'completed',
-      duration: 245,
-      agentId: 'agent-1',
-      ivrPath: ['2'],
-      createdAt: now - 7200000,
-      updatedAt: now - 7200000 + 245000,
-    },
-    {
-      id: crypto.randomUUID(),
-      callSid: 'CA' + crypto.randomUUID().replace(/-/g, '').slice(0, 32),
-      direction: 'inbound',
-      from: '+447700900456',
-      to: '+15005550006',
-      status: 'voicemail',
-      duration: 35,
-      recordingUrl: 'https://api.twilio.com/demo/recording/RE001.mp3',
-      transcription: 'Hi, this is James. I need help with my subscription renewal. Please call me back.',
-      ivrPath: ['0'],
-      createdAt: now - 3600000,
-      updatedAt: now - 3600000 + 35000,
-    },
-    {
-      id: crypto.randomUUID(),
-      callSid: 'CA' + crypto.randomUUID().replace(/-/g, '').slice(0, 32),
-      direction: 'inbound',
-      from: '+12125551234',
-      to: '+15005550006',
-      status: 'in-progress',
-      agentId: 'agent-2',
-      ivrPath: ['1'],
-      createdAt: now - 300000,
-      updatedAt: now - 300000,
-    },
-  ];
-
-  for (const call of calls) {
-    store.set(call.id, call);
-  }
-  persistCalls(store);
 }
 
 // ---- Call operations ----
@@ -158,6 +109,7 @@ export function createCall(
   direction: VoiceCall['direction'],
   from: string,
   to: string,
+  workspaceId?: string,
 ): VoiceCall {
   const store = getCallStore();
   const call: VoiceCall = {
@@ -167,6 +119,7 @@ export function createCall(
     from,
     to,
     status: 'ringing',
+    workspaceId,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -198,7 +151,7 @@ export function getAllCalls(workspaceId?: string): VoiceCall[] {
 
 export function updateCall(
   id: string,
-  updates: Partial<Pick<VoiceCall, 'status' | 'duration' | 'recordingUrl' | 'transcription' | 'agentId' | 'ticketId' | 'ivrPath'>>,
+  updates: Partial<Pick<VoiceCall, 'status' | 'duration' | 'recordingUrl' | 'transcription' | 'agentId' | 'ticketId' | 'ivrPath' | 'queueId' | 'queueWaitMs'>>,
 ): VoiceCall | null {
   const store = getCallStore();
   const call = store.get(id);
@@ -218,16 +171,30 @@ export function getActiveCalls(workspaceId?: string): VoiceCall[] {
 
 // ---- Agent operations ----
 
-export function getAgents(): VoiceAgent[] {
-  return [...getAgentStore()];
+export function getAgents(workspaceId?: string): VoiceAgent[] {
+  const agents = [...getAgentStore()];
+  if (workspaceId) return agents.filter(a => !a.workspaceId || a.workspaceId === workspaceId);
+  return agents;
 }
 
-export function getAvailableAgent(): VoiceAgent | undefined {
+export function registerAgent(agent: Omit<VoiceAgent, 'status'> & { status?: VoiceAgent['status'] }): VoiceAgent {
   const agents = getAgentStore();
+  const existing = agents.findIndex(a => a.id === agent.id);
+  const full: VoiceAgent = { status: 'available', ...agent };
+  if (existing >= 0) {
+    agents[existing] = full;
+  } else {
+    agents.push(full);
+  }
+  persistAgents(agents);
+  return full;
+}
+
+export function getAvailableAgent(workspaceId?: string): VoiceAgent | undefined {
+  const agents = getAgents(workspaceId);
   const available = agents.filter((a) => a.status === 'available');
   if (available.length === 0) return undefined;
-  // Round-robin: pick the one assigned to least active calls
-  const activeCalls = getActiveCalls();
+  const activeCalls = getActiveCalls(workspaceId);
   return available.sort((a, b) => {
     const aCount = activeCalls.filter((c) => c.agentId === a.id).length;
     const bCount = activeCalls.filter((c) => c.agentId === b.id).length;
@@ -235,11 +202,66 @@ export function getAvailableAgent(): VoiceAgent | undefined {
   })[0];
 }
 
-export function updateAgentStatus(id: string, status: VoiceAgent['status']): VoiceAgent | null {
+export function updateAgentStatus(id: string, status: VoiceAgent['status'], currentCallId?: string): VoiceAgent | null {
   const agents = getAgentStore();
   const agent = agents.find((a) => a.id === id);
   if (!agent) return null;
   agent.status = status;
+  if (currentCallId !== undefined) agent.currentCallId = currentCallId;
   persistAgents(agents);
   return agent;
+}
+
+// ---- Queue metrics ----
+
+export function recordQueueMetrics(metrics: VoiceQueueMetrics): void {
+  const existing = readJsonlFile<VoiceQueueMetrics>(QUEUE_METRICS_FILE);
+  existing.push(metrics);
+  // Keep last 1000 snapshots
+  const trimmed = existing.slice(-1000);
+  writeJsonlFile(QUEUE_METRICS_FILE, trimmed);
+}
+
+export function getQueueMetrics(queueId?: string, limit = 100): VoiceQueueMetrics[] {
+  const all = readJsonlFile<VoiceQueueMetrics>(QUEUE_METRICS_FILE);
+  const filtered = queueId ? all.filter(m => m.queueId === queueId) : all;
+  return filtered.slice(-limit);
+}
+
+// ---- Demo seed (explicit, not auto-loaded) ----
+
+export function seedDemoData(): void {
+  const agents = getAgentStore();
+  if (agents.length > 0) return; // Already has data
+
+  const demoAgents: VoiceAgent[] = [
+    { id: 'agent-1', name: 'Sarah Chen', extension: '101', phoneNumber: '+15005550001', status: 'available' },
+    { id: 'agent-2', name: 'Mike Johnson', extension: '102', phoneNumber: '+15005550002', status: 'available' },
+    { id: 'agent-3', name: 'Emma Davis', extension: '103', phoneNumber: '+15005550003', status: 'offline' },
+  ];
+  global.__cliaasVoiceAgents = demoAgents;
+  persistAgents(demoAgents);
+
+  const now = Date.now();
+  const store = getCallStore();
+  const demoCalls: VoiceCall[] = [
+    {
+      id: crypto.randomUUID(),
+      callSid: 'CA' + crypto.randomUUID().replace(/-/g, '').slice(0, 32),
+      direction: 'inbound', from: '+14155559876', to: '+15005550006',
+      status: 'completed', duration: 245, agentId: 'agent-1', ivrPath: ['2'],
+      createdAt: now - 7200000, updatedAt: now - 7200000 + 245000,
+    },
+    {
+      id: crypto.randomUUID(),
+      callSid: 'CA' + crypto.randomUUID().replace(/-/g, '').slice(0, 32),
+      direction: 'inbound', from: '+447700900456', to: '+15005550006',
+      status: 'voicemail', duration: 35,
+      recordingUrl: 'https://api.twilio.com/demo/recording/RE001.mp3',
+      transcription: 'Hi, this is James. I need help with my subscription renewal. Please call me back.',
+      ivrPath: ['0'], createdAt: now - 3600000, updatedAt: now - 3600000 + 35000,
+    },
+  ];
+  for (const call of demoCalls) store.set(call.id, call);
+  persistCalls(store);
 }

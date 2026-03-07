@@ -75,6 +75,30 @@ interface ICAdmin {
   type: string;
 }
 
+// Intercom Tickets API (separate from conversations)
+interface ICTicket {
+  id: string;
+  ticket_id: string;
+  ticket_type?: { id: string; name: string; description: string };
+  ticket_attributes: Record<string, unknown>;
+  ticket_state: string; // submitted, in_progress, waiting_on_customer, resolved
+  open: boolean;
+  created_at: number;
+  updated_at: number;
+  admin_assignee_id?: string;
+  team_assignee_id?: string;
+  contacts: { contacts: Array<{ id: string; type: string }> };
+  ticket_parts?: { ticket_parts: ICTicketPart[] };
+}
+
+interface ICTicketPart {
+  id: string;
+  part_type: string; // comment, note, state_change, assignment
+  body: string | null;
+  author: { id: string; type: string; email?: string };
+  created_at: number;
+}
+
 // ---- Client ----
 
 function createIntercomClient(auth: IntercomAuth, apiVersion?: string) {
@@ -114,6 +138,16 @@ function mapState(state: string): TicketStatus {
 
 function mapPriority(priority: string): TicketPriority {
   return priority === 'priority' ? 'high' : 'normal';
+}
+
+function mapTicketState(state: string): TicketStatus {
+  const map: Record<string, TicketStatus> = {
+    submitted: 'open',
+    in_progress: 'open',
+    waiting_on_customer: 'pending',
+    resolved: 'closed',
+  };
+  return map[state] ?? 'open';
 }
 
 // ---- Export ----
@@ -207,6 +241,75 @@ export async function exportIntercom(auth: IntercomAuth, outDir: string, cursorS
     },
   });
   convSpinner.succeed(`${counts.tickets} conversations exported (${counts.messages} messages)`);
+
+  // Export Intercom Tickets (separate object from conversations)
+  const ticketSpinner = exportSpinner('Exporting tickets...');
+  let ticketCount = 0;
+
+  try {
+    await paginateCursor<ICTicket>({
+      fetch: client.request.bind(client),
+      initialUrl: '/tickets?per_page=50',
+      getData: (response) => (response as unknown as { tickets: ICTicket[] }).tickets ?? [],
+      getNextUrl: (response) => {
+        const pages = (response as unknown as { pages: { next?: { starting_after: string } } }).pages;
+        const startingAfter = pages?.next?.starting_after;
+        return startingAfter ? `/tickets?per_page=50&starting_after=${startingAfter}` : null;
+      },
+      onPage: async (tickets) => {
+        for (const t of tickets) {
+          const contactId = t.contacts?.contacts?.[0]?.id ?? 'unknown';
+          const title = (t.ticket_attributes?.title as string)
+            ?? (t.ticket_attributes?.description as string)?.slice(0, 100)
+            ?? `Ticket #${t.ticket_id}`;
+          const ticket: Ticket = {
+            id: `ic-ticket-${t.id}`,
+            externalId: t.id,
+            source: 'intercom',
+            subject: title,
+            status: mapTicketState(t.ticket_state),
+            priority: 'normal',
+            assignee: t.admin_assignee_id ?? undefined,
+            requester: contactId,
+            tags: t.ticket_type ? [t.ticket_type.name] : [],
+            createdAt: epochToISO(t.created_at),
+            updatedAt: epochToISO(t.updated_at),
+          };
+          appendJsonl(files.tickets, ticket);
+          counts.tickets++;
+          ticketCount++;
+
+          // Hydrate ticket parts (comments/notes)
+          try {
+            const detail = await client.request<{
+              ticket_parts: { ticket_parts: ICTicketPart[] };
+            }>(`/tickets/${t.id}`);
+
+            for (const part of detail.ticket_parts?.ticket_parts ?? []) {
+              if (!part.body) continue;
+              const message: Message = {
+                id: `ic-tpart-${part.id}`,
+                ticketId: `ic-ticket-${t.id}`,
+                author: part.author?.id ?? 'unknown',
+                body: part.body,
+                type: part.part_type === 'note' ? 'note' : 'reply',
+                createdAt: epochToISO(part.created_at),
+              };
+              appendJsonl(files.messages, message);
+              counts.messages++;
+            }
+          } catch {
+            ticketSpinner.text = `Exporting tickets... ${ticketCount} (parts failed for #${t.ticket_id})`;
+          }
+        }
+        ticketSpinner.text = `Exporting tickets... ${ticketCount} exported`;
+      },
+    });
+  } catch (err) {
+    ticketSpinner.warn(`Tickets: ${err instanceof Error ? err.message : 'Tickets API not available (requires Intercom plan with Tickets)'}`);
+  }
+  if (ticketCount > 0) ticketSpinner.succeed(`${ticketCount} tickets exported`);
+  else ticketSpinner.info('0 tickets exported (Tickets API may require plan upgrade)');
 
   // Export contacts (= customers)
   const contactSpinner = exportSpinner('Exporting contacts...');

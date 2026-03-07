@@ -23,13 +23,10 @@ describe('voice-store', () => {
     delete (global as Record<string, unknown>).__cliaasVoiceAgentsLoaded;
   });
 
-  it('seeds demo calls on first access', async () => {
-    const { getAllCalls } = await import('@/lib/channels/voice-store');
-    const calls = getAllCalls();
-    expect(calls.length).toBeGreaterThan(0);
-    expect(calls[0]).toHaveProperty('callSid');
-    expect(calls[0]).toHaveProperty('from');
-    expect(calls[0]).toHaveProperty('status');
+  it('starts empty without auto-seeding', async () => {
+    const { getAllCalls, getAgents } = await import('@/lib/channels/voice-store');
+    expect(getAllCalls()).toEqual([]);
+    expect(getAgents()).toEqual([]);
   });
 
   it('creates and retrieves a call', async () => {
@@ -77,34 +74,69 @@ describe('voice-store', () => {
     updateCall(call2.id, { status: 'completed' });
 
     const active = getActiveCalls();
-    // Active should include call1 (in-progress) but not call2 (completed)
-    // Plus any demo seed calls that are in-progress
     const activeSids = active.map((c) => c.callSid);
     expect(activeSids).toContain('CA-A1');
     expect(activeSids).not.toContain('CA-A2');
   });
 
-  it('seeds demo agents on first access', async () => {
-    const { getAgents } = await import('@/lib/channels/voice-store');
+  it('registers and retrieves agents', async () => {
+    const { registerAgent, getAgents } = await import('@/lib/channels/voice-store');
+    registerAgent({ id: 'a1', name: 'Test Agent', extension: '100', phoneNumber: '+15550001' });
     const agents = getAgents();
-    expect(agents.length).toBeGreaterThan(0);
-    expect(agents[0]).toHaveProperty('name');
-    expect(agents[0]).toHaveProperty('extension');
+    expect(agents.length).toBe(1);
+    expect(agents[0].name).toBe('Test Agent');
+    expect(agents[0].status).toBe('available');
   });
 
   it('selects available agent with round-robin', async () => {
-    const { getAvailableAgent } = await import('@/lib/channels/voice-store');
+    const { registerAgent, getAvailableAgent } = await import('@/lib/channels/voice-store');
+    registerAgent({ id: 'a1', name: 'Agent 1', extension: '101', phoneNumber: '+15550001' });
+    registerAgent({ id: 'a2', name: 'Agent 2', extension: '102', phoneNumber: '+15550002', status: 'offline' });
     const agent = getAvailableAgent();
     expect(agent).toBeDefined();
-    expect(agent?.status).toBe('available');
+    expect(agent?.id).toBe('a1');
   });
 
   it('updates agent status', async () => {
-    const { getAgents, updateAgentStatus } = await import('@/lib/channels/voice-store');
-    const agents = getAgents();
-    const agent = agents[0];
-    const updated = updateAgentStatus(agent.id, 'busy');
+    const { registerAgent, updateAgentStatus } = await import('@/lib/channels/voice-store');
+    registerAgent({ id: 'a1', name: 'Agent 1', extension: '101', phoneNumber: '+15550001' });
+    const updated = updateAgentStatus('a1', 'busy', 'call-123');
     expect(updated?.status).toBe('busy');
+    expect(updated?.currentCallId).toBe('call-123');
+  });
+
+  it('seeds demo data only when explicitly called', async () => {
+    const { getAllCalls, getAgents, seedDemoData } = await import('@/lib/channels/voice-store');
+    expect(getAllCalls()).toEqual([]);
+    expect(getAgents()).toEqual([]);
+
+    seedDemoData();
+    expect(getAgents().length).toBe(3);
+    expect(getAllCalls().length).toBeGreaterThan(0);
+  });
+
+  it('supports workspace-scoped queries', async () => {
+    const { createCall, getAllCalls, registerAgent, getAgents } = await import('@/lib/channels/voice-store');
+    createCall('CA-WS1', 'inbound', '+1111', '+2222', 'ws-1');
+    createCall('CA-WS2', 'inbound', '+3333', '+4444', 'ws-2');
+
+    expect(getAllCalls('ws-1').length).toBe(1);
+    expect(getAllCalls('ws-1')[0].callSid).toBe('CA-WS1');
+
+    registerAgent({ id: 'a1', name: 'Agent 1', extension: '101', phoneNumber: '+15550001', workspaceId: 'ws-1' });
+    registerAgent({ id: 'a2', name: 'Agent 2', extension: '102', phoneNumber: '+15550002', workspaceId: 'ws-2' });
+    expect(getAgents('ws-1').length).toBe(1);
+  });
+
+  it('records and retrieves queue metrics', async () => {
+    const { recordQueueMetrics, getQueueMetrics } = await import('@/lib/channels/voice-store');
+    recordQueueMetrics({
+      queueId: 'q1', name: 'Support', waitingCalls: 3,
+      avgWaitMs: 12000, longestWaitMs: 30000, availableAgents: 2, timestamp: Date.now(),
+    });
+    const metrics = getQueueMetrics('q1');
+    expect(metrics.length).toBe(1);
+    expect(metrics[0].waitingCalls).toBe(3);
   });
 
   it('persists calls to JSONL', async () => {

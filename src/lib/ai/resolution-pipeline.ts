@@ -9,6 +9,11 @@ import { recordResolution } from './roi-tracker';
 import { saveResolution, type AIAgentConfigRecord } from './store';
 import { sendAIReply } from './reply-sender';
 import { matchProcedures, formatProcedurePrompt } from './procedure-engine';
+import {
+  isChannelAllowed, getChannelPolicy,
+  shouldAllowAIRequest, recordAISuccess, recordAIFailure,
+  recordAuditEntry, recordUsageSnapshot,
+} from './admin-controls';
 import type { Ticket, Message, KBArticle } from '@/lib/data';
 import { buildBaseTicketFromEvent } from '@/lib/automation/ticket-from-event';
 
@@ -93,6 +98,52 @@ export async function resolveTicket(
     return { ticketId: ticket.id, action: 'escalated', result };
   }
 
+  // Channel policy check
+  const ticketChannel = (ticket as unknown as Record<string, unknown>).channel as string | undefined;
+  if (ticketChannel && !isChannelAllowed(ticketChannel)) {
+    const result: AIAgentResult = {
+      ticketId: ticket.id,
+      resolved: false,
+      confidence: 0,
+      suggestedReply: '',
+      reasoning: `AI disabled for channel: ${ticketChannel}`,
+      escalated: true,
+      escalationReason: `Channel policy: ${ticketChannel} disabled`,
+      kbArticlesUsed: [],
+    };
+    return { ticketId: ticket.id, action: 'escalated', result };
+  }
+
+  // Apply channel-specific overrides
+  if (ticketChannel) {
+    const channelPolicy = getChannelPolicy(ticketChannel);
+    if (channelPolicy) {
+      config.confidenceThreshold = Math.max(config.confidenceThreshold, channelPolicy.confidenceThreshold);
+      config.autoSend = channelPolicy.mode === 'auto' ? config.autoSend : false;
+    }
+  }
+
+  // Circuit breaker check
+  if (!shouldAllowAIRequest()) {
+    const result: AIAgentResult = {
+      ticketId: ticket.id,
+      resolved: false,
+      confidence: 0,
+      suggestedReply: '',
+      reasoning: 'AI circuit breaker is open — too many recent failures',
+      escalated: true,
+      escalationReason: 'Circuit breaker open',
+      kbArticlesUsed: [],
+    };
+    recordAuditEntry({
+      workspaceId,
+      action: 'resolution_escalated',
+      ticketId: ticket.id,
+      details: { reason: 'circuit_breaker_open' },
+    });
+    return { ticketId: ticket.id, action: 'escalated', result };
+  }
+
   // Load matching procedures based on ticket topics
   const ticketTopics = [...ticket.tags, ...ticket.subject.toLowerCase().split(/\s+/)];
   const matched = await matchProcedures(workspaceId, ticketTopics);
@@ -120,6 +171,19 @@ export async function resolveTicket(
     result.escalated = true;
     result.resolved = false;
     result.escalationReason = 'No KB citation (hallucination guard)';
+  }
+
+  // Record circuit breaker status — only count provider/infra errors, not content escalations
+  const isInfraError = result.escalated && (
+    result.escalationReason?.startsWith('Provider error') ||
+    result.escalationReason?.startsWith('API error') ||
+    result.escalationReason?.startsWith('Timeout') ||
+    result.confidence === 0
+  );
+  if (isInfraError) {
+    recordAIFailure(result.escalationReason ?? 'unknown');
+  } else {
+    recordAISuccess();
   }
 
   // Record for legacy ROI tracking
@@ -157,6 +221,43 @@ export async function resolveTicket(
   if (action === 'auto_sent' && dbConfig) {
     await sendAIReply(record, dbConfig);
   }
+
+  // Audit trail
+  const auditAction = action === 'auto_sent' ? 'resolution_auto_sent' as const
+    : action === 'escalated' ? 'resolution_escalated' as const
+    : 'resolution_created' as const;
+  recordAuditEntry({
+    workspaceId,
+    action: auditAction,
+    ticketId: ticket.id,
+    resolutionId,
+    details: {
+      confidence: result.confidence,
+      action,
+      provider: config.provider,
+      model: config.model,
+      latencyMs,
+      kbArticlesUsed: result.kbArticlesUsed.length,
+    },
+  });
+
+  // Usage snapshot (hourly bucket)
+  const hourBucket = new Date().toISOString().slice(0, 13) + ':00:00Z';
+  recordUsageSnapshot({
+    workspaceId,
+    period: hourBucket,
+    totalRequests: 1,
+    autoResolved: action === 'auto_sent' ? 1 : 0,
+    escalated: action === 'escalated' ? 1 : 0,
+    errors: 0,
+    totalTokens: ((result as unknown as Record<string, number>).promptTokens ?? 0)
+      + ((result as unknown as Record<string, number>).completionTokens ?? 0),
+    promptTokens: (result as unknown as Record<string, number>).promptTokens ?? 0,
+    completionTokens: (result as unknown as Record<string, number>).completionTokens ?? 0,
+    totalCostCents: 0,
+    avgLatencyMs: latencyMs,
+    avgConfidence: result.confidence,
+  });
 
   return { ticketId: ticket.id, action, result, resolutionId };
 }

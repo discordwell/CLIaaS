@@ -9,6 +9,8 @@ import { createAutomationWorker } from './automation-worker';
 import { createAIResolutionWorker } from './ai-resolution-worker';
 import { createEmailWorker } from './email-worker';
 import { createReportExportWorker } from './report-export-worker';
+import { startPiiScanWorker } from './pii-scan-worker';
+import { createAutoQAWorker } from './autoqa-worker';
 import { createLogger } from '../../logger';
 
 const logger = createLogger('queue:workers');
@@ -33,6 +35,8 @@ export function startAllWorkers(): void {
     createAIResolutionWorker,
     createEmailWorker,
     createReportExportWorker,
+    startPiiScanWorker,
+    createAutoQAWorker,
   ];
 
   for (const factory of factories) {
