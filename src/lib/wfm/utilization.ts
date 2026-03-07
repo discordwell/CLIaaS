@@ -40,7 +40,7 @@ export function calculateUtilization(
       const mins = (end.getTime() - start.getTime()) / 60000;
       if (mins > 0) am += mins;
     }
-    const occ = am > 0 ? Math.round((hm / am) * 10000) / 100 : 0;
+    const occ = am > 0 ? Math.min(Math.round((hm / am) * 10000) / 100, 100) : 0;
     records.push({ userId: uid, userName: nm.get(uid) ?? uid, handleMinutes: Math.round(hm * 100) / 100, availableMinutes: Math.round(am * 100) / 100, occupancy: occ });
   }
   return records;

@@ -1508,4 +1508,40 @@ describe('Plan 5 — WFM', () => {
       expect(found).toHaveLength(0);
     });
   });
+
+  // --------------------------------------------------------------------------
+  // Utilization — occupancy cap
+  // --------------------------------------------------------------------------
+  describe('Utilization occupancy cap', () => {
+    it('caps occupancy at 100% when handle time exceeds available time', async () => {
+      const { calculateUtilization } = await import('@/lib/wfm/utilization');
+      const now = new Date();
+      const fiveMinAgo = new Date(now.getTime() - 5 * 60000).toISOString();
+      const fourMinAgo = new Date(now.getTime() - 4 * 60000).toISOString();
+
+      const result = calculateUtilization(
+        [{ id: '1', ticketId: 't1', userId: 'u1', userName: 'Test', startTime: fiveMinAgo, durationMinutes: 60, notes: '' }],
+        [
+          { userId: 'u1', userName: 'Test', status: 'online' as const, startedAt: fiveMinAgo, reason: '' },
+          { userId: 'u1', userName: 'Test', status: 'offline' as const, startedAt: fourMinAgo, reason: '' },
+        ],
+        [],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].occupancy).toBeLessThanOrEqual(100);
+      expect(result[0].occupancy).toBe(100);
+    });
+
+    it('returns 0% occupancy when no available time', async () => {
+      const { calculateUtilization } = await import('@/lib/wfm/utilization');
+      const result = calculateUtilization(
+        [{ id: '1', ticketId: 't1', userId: 'u1', userName: 'Test', startTime: new Date().toISOString(), durationMinutes: 30, notes: '' }],
+        [],
+        [],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0].occupancy).toBe(0);
+    });
+  });
 });
