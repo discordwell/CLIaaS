@@ -4,7 +4,7 @@
 
 import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats,
-  type WarheadType, type ArmorType,
+  type WarheadProps, type WarheadType, type ArmorType,
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
@@ -431,7 +431,7 @@ export class Entity {
 
   /** Take damage, return true if killed. warhead affects death animation.
    *  Optional attacker parameter enables DG1: dog instant-kill when attacking its designated target. */
-  takeDamage(amount: number, warhead?: string, attacker?: Entity): boolean {
+  takeDamage(amount: number, warhead?: string, attacker?: Entity, warheadPropsOverride?: WarheadProps): boolean {
     if (!this.alive) return false;
     if (this.isInvulnerable) return false; // invulnerability (crate or Iron Curtain)
     // DG1: Dog instant-kill — if attacker is a living dog and this is the dog's target, instant kill
@@ -475,7 +475,7 @@ export class Entity {
       this.deathTick = 0;
       // R7: Use warhead's infantryDeath property from C++ warhead.cpp InfantryDeath
       // 0=normal (die1), 1=fire death (die2), 2=explode (die2)
-      const whProps = warhead ? WARHEAD_PROPS[warhead as WarheadType] : undefined;
+      const whProps = warheadPropsOverride ?? (warhead ? WARHEAD_PROPS[warhead as WarheadType] : undefined);
       if (whProps && whProps.infantryDeath > 0) {
         this.deathVariant = 1; // die2 for fire death (1) and explode (2)
       } else if (whProps && whProps.infantryDeath === 0) {

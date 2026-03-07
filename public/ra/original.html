@@ -30,6 +30,7 @@
 
   // === Comparison mode flags ===
   window.__wasmPaused = false;        // When true, skip emscripten_set_main_loop callbacks
+  window.__wasmMainLoopPaused = false;
   window.__captureOnNextRender = false; // When true, capture at putImageData time
   window.__captureOnRenderKey = '';     // Key to tag the captured screenshot
 
@@ -56,6 +57,20 @@
   /** Pause/unpause the game loop (skip emscripten_set_main_loop callbacks) */
   window.__wasmSetPaused = function(paused) {
     window.__wasmPaused = !!paused;
+    var module = window.Module;
+    try {
+      if (module) {
+        if (window.__wasmPaused && typeof module.pauseMainLoop === 'function' && !window.__wasmMainLoopPaused) {
+          module.pauseMainLoop();
+          window.__wasmMainLoopPaused = true;
+        } else if (!window.__wasmPaused && typeof module.resumeMainLoop === 'function' && window.__wasmMainLoopPaused) {
+          module.resumeMainLoop();
+          window.__wasmMainLoopPaused = false;
+        }
+      }
+    } catch (e) {
+      wlog('Pause bridge error: ' + e.message);
+    }
     wlog('Pause set to: ' + window.__wasmPaused);
   };
 
@@ -1232,12 +1247,11 @@ Module.setStatus('Downloading...');
 
   window.__agentStep = function(n, commands) {
     if (!Module || !Module.ccall) return {error: 'not ready'};
-    // Ensure autoplay mode (prevents emscripten_sleep in Main_Loop)
-    if (Module._set_autoplay) Module._set_autoplay(1);
     try {
+      // Ensure autoplay mode (prevents emscripten_sleep in Main_Loop)
+      if (Module._set_autoplay) Module._set_autoplay(1);
       var cmdJson = commands ? JSON.stringify(commands) : '';
       var str = Module.ccall('agent_step', 'string', ['number', 'string'], [n || 15, cmdJson], {async: true});
-      // With Asyncify, ccall may return a Promise
       if (str && typeof str.then === 'function') {
         return str.then(function(s) { try { return JSON.parse(s); } catch(e) { return {error: e.message}; } });
       }

@@ -12,10 +12,13 @@ import {
   WEAPON_STATS,
 } from '../src/EasterEgg/engine/types';
 import {
+  buildScenarioRuleOverrides,
+  interpretProductionPrerequisites,
+  normalizeOwnerToFaction,
+} from '../src/EasterEgg/engine/scenarioRules';
+import {
   getSection,
   loadRedAlertSourceSections,
-  normalizeOwner,
-  normalizePrerequisites,
   normalizeValue,
   parseVerses,
   readNumber,
@@ -45,17 +48,18 @@ const REPORT_DIR = path.join(process.cwd(), 'test-results', 'parity');
 const JSON_OUTPUT = path.join(REPORT_DIR, 'source-parity.json');
 const MD_OUTPUT = path.join(REPORT_DIR, 'source-parity.md');
 const strict = process.argv.includes('--strict');
+const BASE_WEAPON_SECTION_NAME: Record<string, string | undefined> = {
+  TeslaCannon: 'TeslaZap',
+  TeslaZap: undefined,
+};
 
 function sameValue(actual: unknown, expected: unknown): boolean {
   return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
-function addMismatch(mismatches: Mismatch[], mismatch: Mismatch): void {
-  mismatches.push(mismatch);
-}
-
-function sourceLabel(sectionName: string, loadedFiles: string[]): string {
-  return `${sectionName} (${loadedFiles.map(file => path.basename(file)).join(', ')})`;
+function sourceLabel(sectionName: string, files: string[], suffix?: string): string {
+  const fileList = files.map(file => path.basename(file)).join(', ');
+  return suffix ? `${sectionName} (${fileList}; ${suffix})` : `${sectionName} (${fileList})`;
 }
 
 function compareField(
@@ -68,171 +72,255 @@ function compareField(
   source: string,
 ): void {
   if (!sameValue(actual, expected)) {
-    addMismatch(mismatches, { category, id, field, actual, expected, source });
+    mismatches.push({ category, id, field, actual, expected, source });
+  }
+}
+
+function compareUnitTable(
+  mismatches: Mismatch[],
+  units: Record<string, typeof UNIT_STATS[string]>,
+  sections: Map<string, Map<string, string>>,
+  loadedFiles: string[],
+  explicitOnly = false,
+): void {
+  for (const [unitName, unit] of Object.entries(units)) {
+    const section = getSection(sections, unitName);
+    if (!section) continue;
+
+    const source = sourceLabel(unitName, loadedFiles, explicitOnly ? 'scenario override' : undefined);
+    const actualPrimary = unit.primaryWeapon === null ? null : normalizeValue(unit.primaryWeapon ?? undefined);
+    const sourcePrimary = normalizeValue(readString(section, 'Primary'));
+    const actualSecondary = unit.secondaryWeapon === null ? null : normalizeValue(unit.secondaryWeapon ?? undefined);
+    const sourceSecondary = normalizeValue(readString(section, 'Secondary'));
+
+    if (!explicitOnly || section.has('Strength')) {
+      compareField(mismatches, 'unit', unitName, 'strength', unit.strength, readNumber(section, 'Strength'), source);
+    }
+    if (!explicitOnly || section.has('Armor')) {
+      compareField(mismatches, 'unit', unitName, 'armor', unit.armor, readString(section, 'Armor')?.toLowerCase(), source);
+    }
+    if (!explicitOnly || section.has('Speed')) {
+      compareField(mismatches, 'unit', unitName, 'speed', unit.speed, readNumber(section, 'Speed'), source);
+    }
+    if (!explicitOnly || section.has('Sight')) {
+      compareField(mismatches, 'unit', unitName, 'sight', unit.sight, readNumber(section, 'Sight'), source);
+    }
+    if ((!explicitOnly || section.has('ROT')) && section.has('ROT')) {
+      compareField(mismatches, 'unit', unitName, 'rot', unit.rot, readNumber(section, 'ROT'), source);
+    }
+    const shouldComparePrimary = explicitOnly
+      ? section.has('Primary')
+      : (sourcePrimary !== undefined || unit.primaryWeapon !== null);
+    if (shouldComparePrimary) {
+      compareField(mismatches, 'unit', unitName, 'primaryWeapon', actualPrimary, sourcePrimary, source);
+    }
+    const shouldCompareSecondary = explicitOnly
+      ? section.has('Secondary')
+      : (
+        sourceSecondary !== undefined
+          ? !(sourceSecondary === null && unit.secondaryWeapon === undefined)
+          : (unit.secondaryWeapon !== undefined && unit.secondaryWeapon !== null)
+      );
+    if (shouldCompareSecondary) {
+      compareField(mismatches, 'unit', unitName, 'secondaryWeapon', actualSecondary, sourceSecondary, source);
+    }
+    if ((explicitOnly && section.has('Owner')) || (!explicitOnly && unit.owner !== undefined)) {
+      compareField(mismatches, 'unit', unitName, 'owner', unit.owner, normalizeOwnerToFaction(readString(section, 'Owner')), source);
+    }
+    if ((explicitOnly && section.has('Cost')) || (!explicitOnly && unit.cost !== undefined)) {
+      compareField(mismatches, 'unit', unitName, 'cost', unit.cost, readNumber(section, 'Cost'), source);
+    }
+    if ((explicitOnly && section.has('Passengers')) || (!explicitOnly && unit.passengers !== undefined)) {
+      compareField(mismatches, 'unit', unitName, 'passengers', unit.passengers, readNumber(section, 'Passengers'), source);
+    }
+    if ((explicitOnly && section.has('Ammo')) || (!explicitOnly && unit.maxAmmo !== undefined)) {
+      compareField(mismatches, 'unit', unitName, 'maxAmmo', unit.maxAmmo, readNumber(section, 'Ammo'), source);
+    }
+  }
+}
+
+function compareWeaponTable(
+  mismatches: Mismatch[],
+  weapons: Record<string, typeof WEAPON_STATS[string]>,
+  sections: Map<string, Map<string, string>>,
+  loadedFiles: string[],
+  explicitOnly = false,
+): void {
+  for (const [weaponName, weapon] of Object.entries(weapons)) {
+    const mappedSectionName = BASE_WEAPON_SECTION_NAME[weaponName];
+    const sourceSectionName = explicitOnly
+      ? weaponName
+      : (Object.prototype.hasOwnProperty.call(BASE_WEAPON_SECTION_NAME, weaponName) ? mappedSectionName : weaponName);
+    if (!sourceSectionName) continue;
+    const section = getSection(sections, sourceSectionName);
+    if (!section) continue;
+
+    const source = sourceLabel(sourceSectionName, loadedFiles, explicitOnly ? 'scenario override' : undefined);
+    if (!explicitOnly || section.has('Damage')) {
+      compareField(mismatches, 'weapon', weaponName, 'damage', weapon.damage, readNumber(section, 'Damage'), source);
+    }
+    if (!explicitOnly || section.has('ROF')) {
+      compareField(mismatches, 'weapon', weaponName, 'rof', weapon.rof, readNumber(section, 'ROF'), source);
+    }
+    if (!explicitOnly || section.has('Range')) {
+      compareField(mismatches, 'weapon', weaponName, 'range', weapon.range, readNumber(section, 'Range'), source);
+    }
+    if (!explicitOnly || section.has('Warhead')) {
+      compareField(mismatches, 'weapon', weaponName, 'warhead', weapon.warhead, readString(section, 'Warhead'), source);
+    }
+    if (!explicitOnly || section.has('Burst')) {
+      compareField(mismatches, 'weapon', weaponName, 'burst', weapon.burst ?? 1, readNumber(section, 'Burst') ?? 1, source);
+    }
+  }
+}
+
+function compareWarheadTables(
+  mismatches: Mismatch[],
+  versesTable: Record<string, [number, number, number, number, number]>,
+  metaTable: Record<string, typeof WARHEAD_META[string]>,
+  propsTable: Record<string, typeof WARHEAD_PROPS[string]>,
+  sections: Map<string, Map<string, string>>,
+  loadedFiles: string[],
+  explicitOnly = false,
+): void {
+  for (const [warheadName, verses] of Object.entries(versesTable)) {
+    const section = getSection(sections, warheadName);
+    if (!section) continue;
+
+    const source = sourceLabel(warheadName, loadedFiles, explicitOnly ? 'scenario override' : undefined);
+    if (!explicitOnly || section.has('Verses')) {
+      compareField(mismatches, 'warhead', warheadName, 'verses', verses, parseVerses(readString(section, 'Verses')), source);
+    }
+    if (!explicitOnly || section.has('Spread')) {
+      compareField(mismatches, 'warhead', warheadName, 'spreadFactor', metaTable[warheadName].spreadFactor, readNumber(section, 'Spread'), source);
+    }
+    if (!explicitOnly || section.has('Wall')) {
+      compareField(
+        mismatches,
+        'warhead',
+        warheadName,
+        'destroysWalls',
+        Boolean(metaTable[warheadName].destroysWalls),
+        readString(section, 'Wall')?.toLowerCase() === 'yes',
+        source,
+      );
+    }
+    if (!explicitOnly || section.has('Wood')) {
+      compareField(
+        mismatches,
+        'warhead',
+        warheadName,
+        'destroysWood',
+        Boolean(metaTable[warheadName].destroysWood),
+        readString(section, 'Wood')?.toLowerCase() === 'yes',
+        source,
+      );
+    }
+    if (!explicitOnly || section.has('Ore')) {
+      compareField(
+        mismatches,
+        'warhead',
+        warheadName,
+        'destroysOre',
+        Boolean(metaTable[warheadName].destroysOre),
+        readString(section, 'Ore')?.toLowerCase() === 'yes',
+        source,
+      );
+    }
+    if (!explicitOnly || section.has('InfDeath')) {
+      compareField(
+        mismatches,
+        'warhead',
+        warheadName,
+        'infantryDeath',
+        propsTable[warheadName].infantryDeath,
+        readNumber(section, 'InfDeath'),
+        source,
+      );
+    }
+  }
+}
+
+function compareProductionTable(
+  mismatches: Mismatch[],
+  items: Array<typeof PRODUCTION_ITEMS[number]>,
+  sections: Map<string, Map<string, string>>,
+  loadedFiles: string[],
+  explicitOnly = false,
+): void {
+  for (const item of items) {
+    const section = getSection(sections, item.type);
+    if (!section) continue;
+
+    const source = sourceLabel(item.type, loadedFiles, explicitOnly ? 'scenario override' : undefined);
+    if (!explicitOnly || section.has('Cost')) {
+      compareField(mismatches, 'production', item.type, 'cost', item.cost, readNumber(section, 'Cost'), source);
+    }
+    if (!explicitOnly || section.has('TechLevel')) {
+      compareField(mismatches, 'production', item.type, 'techLevel', item.techLevel ?? null, readNumber(section, 'TechLevel'), source);
+    }
+    if (!explicitOnly || section.has('Owner')) {
+      compareField(mismatches, 'production', item.type, 'faction', item.faction, normalizeOwnerToFaction(readString(section, 'Owner')), source);
+    }
+    if (!explicitOnly || section.has('Prerequisite')) {
+      const expected = interpretProductionPrerequisites(item, readString(section, 'Prerequisite'));
+      compareField(mismatches, 'production', item.type, 'prerequisite', item.prerequisite, expected.prerequisite, source);
+      compareField(mismatches, 'production', item.type, 'techPrereq', item.techPrereq ?? null, expected.techPrereq ?? null, source);
+    }
   }
 }
 
 async function main(): Promise<void> {
   fs.mkdirSync(REPORT_DIR, { recursive: true });
 
-  const { files, sections } = loadRedAlertSourceSections();
-  const loadedFiles = files.map(file => file.absolutePath);
+  const base = loadRedAlertSourceSections(process.cwd(), ['rules', 'aftermath']);
+  const scenario = loadRedAlertSourceSections(process.cwd(), ['scenario']);
+  const loadedFiles = [...base.files, ...scenario.files].map(file => file.absolutePath);
   const mismatches: Mismatch[] = [];
 
-  for (const [unitName, unit] of Object.entries(UNIT_STATS)) {
-    const section = getSection(sections, unitName);
-    if (!section) continue;
+  compareUnitTable(mismatches, UNIT_STATS, base.sections, base.files.map(file => file.absolutePath));
+  compareWeaponTable(mismatches, WEAPON_STATS, base.sections, base.files.map(file => file.absolutePath));
+  compareWarheadTables(
+    mismatches,
+    WARHEAD_VS_ARMOR,
+    WARHEAD_META,
+    WARHEAD_PROPS,
+    base.sections,
+    base.files.map(file => file.absolutePath),
+  );
+  compareProductionTable(mismatches, PRODUCTION_ITEMS, base.sections, base.files.map(file => file.absolutePath));
 
-    const source = sourceLabel(unitName, loadedFiles);
-    const actualPrimary = unit.primaryWeapon === null ? null : normalizeValue(unit.primaryWeapon ?? undefined);
-    const sourcePrimary = normalizeValue(readString(section, 'Primary'));
-    const actualSecondary = unit.secondaryWeapon === null ? null : normalizeValue(unit.secondaryWeapon ?? undefined);
-    const sourceSecondary = normalizeValue(readString(section, 'Secondary'));
-
-    compareField(mismatches, 'unit', unitName, 'strength', unit.strength, readNumber(section, 'Strength'), source);
-    compareField(mismatches, 'unit', unitName, 'armor', unit.armor, readString(section, 'Armor')?.toLowerCase(), source);
-    compareField(mismatches, 'unit', unitName, 'speed', unit.speed, readNumber(section, 'Speed'), source);
-    compareField(mismatches, 'unit', unitName, 'sight', unit.sight, readNumber(section, 'Sight'), source);
-    const sourceRot = readNumber(section, 'ROT');
-    if (sourceRot !== undefined) {
-      compareField(mismatches, 'unit', unitName, 'rot', unit.rot, sourceRot, source);
-    }
-    if (sourcePrimary !== undefined || unit.primaryWeapon !== null) {
-      compareField(
-        mismatches,
-        'unit',
-        unitName,
-        'primaryWeapon',
-        actualPrimary,
-        sourcePrimary,
-        source,
-      );
-    }
-    const shouldCompareSecondary =
-      sourceSecondary !== undefined
-        ? !(sourceSecondary === null && unit.secondaryWeapon === undefined)
-        : (unit.secondaryWeapon !== undefined && unit.secondaryWeapon !== null);
-    if (shouldCompareSecondary) {
-      compareField(
-        mismatches,
-        'unit',
-        unitName,
-        'secondaryWeapon',
-        actualSecondary,
-        sourceSecondary,
-        source,
-      );
-    }
-
-    if (unit.owner !== undefined) {
-      const sourceOwner = normalizeOwner(readString(section, 'Owner'));
-      compareField(mismatches, 'unit', unitName, 'owner', unit.owner, sourceOwner, source);
-    }
-
-    if (unit.cost !== undefined) {
-      const sourceCost = readNumber(section, 'Cost');
-      compareField(mismatches, 'unit', unitName, 'cost', unit.cost, sourceCost, source);
-    }
-
-    if (unit.passengers !== undefined) {
-      const sourcePassengers = readNumber(section, 'Passengers');
-      compareField(mismatches, 'unit', unitName, 'passengers', unit.passengers, sourcePassengers, source);
-    }
-
-    if (unit.maxAmmo !== undefined) {
-      const sourceAmmo = readNumber(section, 'Ammo');
-      compareField(mismatches, 'unit', unitName, 'maxAmmo', unit.maxAmmo, sourceAmmo, source);
-    }
-  }
-
-  for (const [weaponName, weapon] of Object.entries(WEAPON_STATS)) {
-    const section = getSection(sections, weaponName);
-    if (!section) continue;
-
-    const source = sourceLabel(weaponName, loadedFiles);
-    compareField(mismatches, 'weapon', weaponName, 'damage', weapon.damage, readNumber(section, 'Damage'), source);
-    compareField(mismatches, 'weapon', weaponName, 'rof', weapon.rof, readNumber(section, 'ROF'), source);
-    compareField(mismatches, 'weapon', weaponName, 'range', weapon.range, readNumber(section, 'Range'), source);
-    compareField(mismatches, 'weapon', weaponName, 'warhead', weapon.warhead, readString(section, 'Warhead'), source);
-
-    const sourceBurst = readNumber(section, 'Burst') ?? 1;
-    const actualBurst = weapon.burst ?? 1;
-    compareField(mismatches, 'weapon', weaponName, 'burst', actualBurst, sourceBurst, source);
-  }
-
-  for (const [warheadName, verses] of Object.entries(WARHEAD_VS_ARMOR)) {
-    const section = getSection(sections, warheadName);
-    if (!section) continue;
-
-    const source = sourceLabel(warheadName, loadedFiles);
-    compareField(mismatches, 'warhead', warheadName, 'verses', verses, parseVerses(readString(section, 'Verses')), source);
-    compareField(mismatches, 'warhead', warheadName, 'spreadFactor', WARHEAD_META[warheadName].spreadFactor, readNumber(section, 'Spread'), source);
-    compareField(
-      mismatches,
-      'warhead',
-      warheadName,
-      'destroysWalls',
-      Boolean(WARHEAD_META[warheadName].destroysWalls),
-      readString(section, 'Wall')?.toLowerCase() === 'yes',
-      source,
-    );
-    compareField(
-      mismatches,
-      'warhead',
-      warheadName,
-      'destroysWood',
-      Boolean(WARHEAD_META[warheadName].destroysWood),
-      readString(section, 'Wood')?.toLowerCase() === 'yes',
-      source,
-    );
-    compareField(
-      mismatches,
-      'warhead',
-      warheadName,
-      'destroysOre',
-      Boolean(WARHEAD_META[warheadName].destroysOre),
-      readString(section, 'Ore')?.toLowerCase() === 'yes',
-      source,
-    );
-    compareField(
-      mismatches,
-      'warhead',
-      warheadName,
-      'infantryDeath',
-      WARHEAD_PROPS[warheadName].infantryDeath,
-      readNumber(section, 'InfDeath'),
-      source,
-    );
-  }
-
-  for (const item of PRODUCTION_ITEMS) {
-    const section = getSection(sections, item.type);
-    if (!section) continue;
-
-    const source = sourceLabel(item.type, loadedFiles);
-    const sourceCost = readNumber(section, 'Cost');
-    if (sourceCost !== undefined) {
-      compareField(mismatches, 'production', item.type, 'cost', item.cost, sourceCost, source);
-    }
-
-    const sourceTechLevel = readNumber(section, 'TechLevel');
-    if (sourceTechLevel !== undefined) {
-      compareField(mismatches, 'production', item.type, 'techLevel', item.techLevel ?? null, sourceTechLevel, source);
-    }
-
-    const sourceOwner = normalizeOwner(readString(section, 'Owner'));
-    if (sourceOwner !== undefined) {
-      compareField(mismatches, 'production', item.type, 'faction', item.faction, sourceOwner, source);
-    }
-
-    const prereqs = normalizePrerequisites(readString(section, 'Prerequisite'));
-    if (prereqs.prerequisite !== undefined) {
-      compareField(mismatches, 'production', item.type, 'prerequisite', item.prerequisite, prereqs.prerequisite, source);
-    }
-    if (prereqs.techPrereq !== undefined) {
-      compareField(mismatches, 'production', item.type, 'techPrereq', item.techPrereq ?? null, prereqs.techPrereq, source);
-    }
-  }
+  const scenarioOverrides = buildScenarioRuleOverrides(scenario.sections);
+  compareUnitTable(
+    mismatches,
+    scenarioOverrides.scenarioUnitStats,
+    scenario.sections,
+    scenario.files.map(file => file.absolutePath),
+    true,
+  );
+  compareWeaponTable(
+    mismatches,
+    scenarioOverrides.scenarioWeaponStats,
+    scenario.sections,
+    scenario.files.map(file => file.absolutePath),
+    true,
+  );
+  compareWarheadTables(
+    mismatches,
+    scenarioOverrides.scenarioWarheadVerses,
+    scenarioOverrides.scenarioWarheadMeta,
+    scenarioOverrides.scenarioWarheadProps,
+    scenario.sections,
+    scenario.files.map(file => file.absolutePath),
+    true,
+  );
+  compareProductionTable(
+    mismatches,
+    scenarioOverrides.scenarioProductionItems,
+    scenario.sections,
+    scenario.files.map(file => file.absolutePath),
+    true,
+  );
 
   const byCategory: Record<Mismatch['category'], number> = {
     unit: 0,

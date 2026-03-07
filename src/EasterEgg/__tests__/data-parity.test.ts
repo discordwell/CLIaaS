@@ -126,7 +126,7 @@ describe('UNIT_STATS parity', () => {
       expect(u.primaryWeapon).toBe('Colt45');
       expect(u.secondaryWeapon).toBe('Colt45');
       expect(u.isInfantry).toBe(true);
-      expect(u.owner).toBe('allied');
+      expect(u.owner).toBe('both');
     });
 
     it('THF (Thief) — new entry', () => {
@@ -267,13 +267,13 @@ describe('UNIT_STATS parity', () => {
 
     it('STNK (Phase Transport) — full stats', () => {
       const u = UNIT_STATS.STNK;
-      expect(u.strength).toBe(110);
+      expect(u.strength).toBe(200);
       expect(u.speed).toBe(10);
-      expect(u.armor).toBe('light');
+      expect(u.armor).toBe('heavy');
       expect(u.sight).toBe(5);
       expect(u.rot).toBe(5);
       expect(u.primaryWeapon).toBe('APTusk');
-      expect(u.passengers).toBe(5);
+      expect(u.passengers).toBe(1);
       expect(u.crusher).toBe(true);
       expect(u.isCloakable).toBe(true);
     });
@@ -356,12 +356,13 @@ describe('UNIT_STATS parity', () => {
       expect(u.isCloakable).toBe(true);
     });
 
-    it('MSUB (Missile Sub) — ROT=3, sight=5, speed=6', () => {
+    it('MSUB (Missile Sub) — ROT=7, sight=6, speed=5', () => {
       const u = UNIT_STATS.MSUB;
       expect(u.strength).toBe(150);
-      expect(u.speed).toBe(6);
-      expect(u.sight).toBe(5);
-      expect(u.rot).toBe(3);
+      expect(u.speed).toBe(5);
+      expect(u.sight).toBe(6);
+      expect(u.rot).toBe(7);
+      expect(u.primaryWeapon).toBe('SubSCUD');
     });
 
     it('PT (Gunboat) — ROT=7, sight=7, speed=9, weapon=2Inch', () => {
@@ -526,12 +527,13 @@ describe('WEAPON_STATS parity', () => {
     expect(w.warhead).toBe('Super');
   });
 
-  it('APTusk — damage=75, rof=60, range=6.0, warhead=AP', () => {
+  it('APTusk — damage=75, rof=80, range=5.0, warhead=AP, burst=2', () => {
     const w = WEAPON_STATS.APTusk;
     expect(w.damage).toBe(75);
-    expect(w.rof).toBe(60);
-    expect(w.range).toBe(6.0);
+    expect(w.rof).toBe(80);
+    expect(w.range).toBe(5.0);
     expect(w.warhead).toBe('AP');
+    expect(w.burst).toBe(2);
   });
 
   it('SCUD (V2 Rocket) — new weapon', () => {
@@ -687,27 +689,27 @@ describe('WEAPON_STATS parity', () => {
   });
 
   // --- Expansion weapons (missing) ---
-  it('PortaTesla — damage=50, rof=60, range=4.0, warhead=Super', () => {
+  it('PortaTesla — damage=45, rof=70, range=3.5, warhead=Super', () => {
     const w = WEAPON_STATS.PortaTesla;
-    expect(w.damage).toBe(50);
-    expect(w.rof).toBe(60);
-    expect(w.range).toBe(4.0);
+    expect(w.damage).toBe(45);
+    expect(w.rof).toBe(70);
+    expect(w.range).toBe(3.5);
     expect(w.warhead).toBe('Super');
   });
 
-  it('GoodWrench — damage=-30, rof=60, range=1.83, warhead=Organic', () => {
+  it('GoodWrench — damage=-100, rof=80, range=1.83, warhead=Mechanical', () => {
     const w = WEAPON_STATS.GoodWrench;
-    expect(w.damage).toBe(-30);
-    expect(w.rof).toBe(60);
+    expect(w.damage).toBe(-100);
+    expect(w.rof).toBe(80);
     expect(w.range).toBe(1.83);
-    expect(w.warhead).toBe('Organic');
+    expect(w.warhead).toBe('Mechanical');
   });
 
-  it('TTankZap — damage=80, rof=80, range=5.0, warhead=Super', () => {
+  it('TTankZap — damage=100, rof=120, range=7.0, warhead=Super', () => {
     const w = WEAPON_STATS.TTankZap;
-    expect(w.damage).toBe(80);
-    expect(w.rof).toBe(80);
-    expect(w.range).toBe(5.0);
+    expect(w.damage).toBe(100);
+    expect(w.rof).toBe(120);
+    expect(w.range).toBe(7.0);
     expect(w.warhead).toBe('Super');
   });
 
@@ -822,8 +824,8 @@ describe('WARHEAD_VS_ARMOR parity', () => {
     expect(WARHEAD_VS_ARMOR.Nuke).toEqual([0.9, 1.0, 0.6, 0.25, 0.5]);
   });
 
-  it('Mechanical — [0.0, 0.0, 0.0, 0.0, 0.0]', () => {
-    expect(WARHEAD_VS_ARMOR.Mechanical).toEqual([0.0, 0.0, 0.0, 0.0, 0.0]);
+  it('Mechanical — [1.0, 1.0, 1.0, 1.0, 1.0]', () => {
+    expect(WARHEAD_VS_ARMOR.Mechanical).toEqual([1.0, 1.0, 1.0, 1.0, 1.0]);
   });
 });
 
@@ -1091,11 +1093,11 @@ describe('PRODUCTION_ITEMS cost parity', () => {
   });
 
   // New production items
-  it('E7 (Tanya) cost = 1200, faction = allied', () => {
+  it('E7 (Tanya) cost = 1200, faction = both', () => {
     const item = findItem('E7');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(1200);
-    expect(item!.faction).toBe('allied');
+    expect(item!.faction).toBe('both');
   });
 
   it('THF (Thief) cost = 500, faction = allied', () => {

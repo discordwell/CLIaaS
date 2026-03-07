@@ -172,7 +172,7 @@ describe('Faction Tech Trees', () => {
       expect(stek.prerequisite).toBe('WEAP');
       expect(iron.faction).toBe('soviet');
       expect(iron.prerequisite).toBe('STEK');
-      expect(mslo.faction).toBe('soviet');
+      expect(mslo.faction).toBe('both');
       expect(mslo.prerequisite).toBe('STEK');
     });
 
@@ -267,12 +267,12 @@ describe('Faction Tech Trees', () => {
     it('STNK (Phase Transport) needs ATEK', () => {
       const stnk = PRODUCTION_ITEMS.find(i => i.type === 'STNK')!;
       expect(stnk.techPrereq).toBe('ATEK');
-      expect(stnk.faction).toBe('allied');
+      expect(stnk.faction).toBe('both');
     });
 
-    it('TTNK (Tesla Tank) needs STEK', () => {
+    it('TTNK (Tesla Tank) needs TSLA', () => {
       const ttnk = PRODUCTION_ITEMS.find(i => i.type === 'TTNK')!;
-      expect(ttnk.techPrereq).toBe('STEK');
+      expect(ttnk.techPrereq).toBe('TSLA');
       expect(ttnk.faction).toBe('soviet');
     });
 
@@ -288,9 +288,9 @@ describe('Faction Tech Trees', () => {
       expect(shok.faction).toBe('soviet');
     });
 
-    it('HELI (Longbow) needs ATEK', () => {
+    it('HELI (Longbow) needs no extra tech prereq', () => {
       const heli = PRODUCTION_ITEMS.find(i => i.type === 'HELI')!;
-      expect(heli.techPrereq).toBe('ATEK');
+      expect(heli.techPrereq).toBeUndefined();
       expect(heli.faction).toBe('allied');
     });
 
@@ -334,8 +334,8 @@ describe('Faction Tech Trees', () => {
       expect(bothTypes.has('FENC')).toBe(false);
     });
 
-    it('TRAN (Chinook) and LST (Transport) are both-faction', () => {
-      expect(bothTypes.has('TRAN')).toBe(true);
+    it('LST is both-faction while TRAN is soviet-only', () => {
+      expect(bothTypes.has('TRAN')).toBe(false);
       expect(bothTypes.has('LST')).toBe(true);
     });
 

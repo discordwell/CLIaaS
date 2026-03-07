@@ -1,0 +1,59 @@
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://192.168.3.194:3001
+- Environments: .env
+- Experiments (use with caution):
+  · clientTraceMetadata
+
+✓ Starting...
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+✓ Ready in 877ms
+[18:54:09.289] [32mINFO[39m (55844): [36mRedis not available — workers not started (inline fallback active)[39m
+    [35mmodule[39m: "queue:workers"
+{ module: 'middleware' } {
+  method: 'GET',
+  pathname: '/',
+  requestId: 'f7318368-21e2-4ee3-aeca-8eb305ad2a83'
+} 'Incoming request'
+ GET / 200 in 784ms (compile: 460ms, proxy.ts: 52ms, render: 271ms)
+{ module: 'middleware' } {
+  method: 'GET',
+  pathname: '/',
+  requestId: '3c99f9d6-8061-42fb-a5e6-1a61481db550'
+} 'Incoming request'
+ GET /?anttest=agent&scenario=SCA01EA 200 in 36ms (compile: 1696µs, proxy.ts: 4ms, render: 31ms)
+⚠ ./node_modules/.pnpm/bullmq@5.70.1/node_modules/bullmq/dist/esm/classes
+Package ioredis can't be external
+The request ioredis/built/utils matches serverExternalPackages (or the default list).
+The request could not be resolved by Node.js from the importing module. The way Node.js resolves modules is slightly different from the way Next.js resolves modules. Next.js was able to resolve it, while Node.js would not be able to.
+Try to remove this package from serverExternalPackages.
+Or update the import side to use a compatible request that can be resolved by Node.js.
+
+
+⚠ ./node_modules/.pnpm/bullmq@5.70.1/node_modules/bullmq/dist/esm/utils
+Package ioredis can't be external
+The request ioredis/built/utils matches serverExternalPackages (or the default list).
+The request could not be resolved by Node.js from the importing module. The way Node.js resolves modules is slightly different from the way Next.js resolves modules. Next.js was able to resolve it, while Node.js would not be able to.
+Try to remove this package from serverExternalPackages.
+Or update the import side to use a compatible request that can be resolved by Node.js.
+
+
+{ module: 'middleware' } {
+  method: 'GET',
+  pathname: '/offline',
+  requestId: '9572f6d6-7598-4ded-8293-74e220a90991'
+} 'Incoming request'
+ GET /offline 200 in 51ms (compile: 15ms, proxy.ts: 2ms, render: 34ms)
+ GET /ra/audio/sniper.wav 404 in 62ms (compile: 21ms, proxy.ts: 1518µs, render: 40ms)
+ GET /ra/audio/building_placed.wav 404 in 63ms (compile: 16ms, proxy.ts: 1671µs, render: 45ms)
+ GET /ra/audio/mammoth_cannon.wav 404 in 63ms (compile: 28ms, proxy.ts: 1314µs, render: 34ms)
+ GET /ra/audio/eva_building_captured.wav 404 in 66ms (compile: 13ms, proxy.ts: 1377µs, render: 52ms)
+ GET /ra/audio/eva_insufficient_funds.wav 404 in 66ms (compile: 18ms, proxy.ts: 1721µs, render: 46ms)
+ GET /ra/audio/eva_silos_needed.wav 404 in 67ms (compile: 36ms, proxy.ts: 948µs, render: 30ms)
+ GET /ra/audio/sniper.wav 404 in 76ms (compile: 10ms, proxy.ts: 1187µs, render: 65ms)
+ GET /ra/audio/building_placed.wav 404 in 89ms (compile: 7ms, proxy.ts: 1772µs, render: 80ms)
+ GET /ra/audio/mammoth_cannon.wav 404 in 85ms (compile: 23ms, proxy.ts: 1155µs, render: 60ms)
+ GET /ra/audio/eva_building_captured.wav 404 in 55ms (compile: 8ms, proxy.ts: 6ms, render: 41ms)
+ GET /ra/audio/eva_insufficient_funds.wav 404 in 49ms (compile: 21ms, proxy.ts: 1280µs, render: 27ms)
+ GET /ra/audio/eva_silos_needed.wav 404 in 46ms (compile: 30ms, proxy.ts: 1301µs, render: 14ms)
+[?25h

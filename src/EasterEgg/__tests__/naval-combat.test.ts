@@ -100,7 +100,7 @@ describe('Naval vessel type definitions', () => {
     expect(stats.speedClass).toBe(SpeedClass.FLOAT);
     expect(stats.isVessel).toBe(true);
     expect(stats.isCloakable).toBe(true);
-    expect(stats.primaryWeapon).toBe('SeaSerpent');
+    expect(stats.primaryWeapon).toBe('SubSCUD');
     expect(stats.strength).toBe(150);
   });
 

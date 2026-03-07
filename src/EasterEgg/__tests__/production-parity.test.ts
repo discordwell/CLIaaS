@@ -562,7 +562,7 @@ describe('TechLevel: all production items have techLevel values', () => {
   it('every PRODUCTION_ITEMS entry has a techLevel', () => {
     for (const item of PRODUCTION_ITEMS) {
       expect(item.techLevel, `${item.type} should have techLevel`).toBeDefined();
-      expect(item.techLevel, `${item.type} techLevel should be positive`).toBeGreaterThan(0);
+      expect(item.techLevel, `${item.type} techLevel should be >= -1`).toBeGreaterThanOrEqual(-1);
     }
   });
 });
@@ -594,10 +594,13 @@ describe('TechLevel filtering logic', () => {
     }
   });
 
-  it('expansion units (TL99) hidden at normal tech levels', () => {
+  it('disabled units (TL=-1) stay hidden at normal tech levels', () => {
     const filtered = filterByTechLevel(PRODUCTION_ITEMS, 13);
+    const stnk = filtered.find(p => p.type === 'STNK');
     const mech = filtered.find(p => p.type === 'MECH');
-    expect(mech).toBeUndefined();
+    expect(stnk).toBeDefined();
+    expect(stnk!.techLevel).toBe(-1);
+    expect(mech).toBeDefined();
   });
 });
 

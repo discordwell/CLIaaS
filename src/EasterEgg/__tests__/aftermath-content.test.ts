@@ -84,10 +84,10 @@ describe('Aftermath production gating', () => {
     expect(prod!.faction).toBe('allied');
   });
 
-  it('Tesla Tank requires STEK (Soviet Tech Center)', () => {
+  it('Tesla Tank requires TSLA (Tesla Coil)', () => {
     const prod = PRODUCTION_ITEMS.find(p => p.type === 'TTNK');
     expect(prod).toBeDefined();
-    expect(prod!.techPrereq).toBe('STEK');
+    expect(prod!.techPrereq).toBe('TSLA');
     expect(prod!.faction).toBe('soviet');
   });
 
@@ -122,9 +122,9 @@ describe('Aftermath production gating', () => {
     expect(PRODUCTION_ITEMS.find(p => p.type === 'MRLS')).toBeUndefined();
   });
 
-  it('Mechanic is available to both factions', () => {
+  it('Mechanic is allied-only', () => {
     const prod = PRODUCTION_ITEMS.find(p => p.type === 'MECH');
     expect(prod).toBeDefined();
-    expect(prod!.faction).toBe('both');
+    expect(prod!.faction).toBe('allied');
   });
 });

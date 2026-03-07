@@ -416,14 +416,14 @@ describe('Aircraft production items', () => {
     expect(item).toBeDefined();
     expect(item!.prerequisite).toBe('HPAD');
     expect(item!.cost).toBe(1200);
-    expect(item!.faction).toBe('both');
+    expect(item!.faction).toBe('soviet');
   });
 
-  it('HELI production requires HPAD and ATEK', () => {
+  it('HELI production requires only HPAD', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'HELI');
     expect(item).toBeDefined();
     expect(item!.prerequisite).toBe('HPAD');
-    expect(item!.techPrereq).toBe('ATEK');
+    expect(item!.techPrereq).toBeUndefined();
     expect(item!.faction).toBe('allied');
   });
 

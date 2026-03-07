@@ -115,20 +115,6 @@ async function tryEval<T>(page: Page, body: () => T, timeoutMs = 5_000): Promise
   }
 }
 
-async function waitForResponsive(page: Page, maxWaitMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    const renderCount = await tryEval(page, () => {
-      return (window as unknown as { __wasmRenderCount?: number }).__wasmRenderCount ?? 0;
-    }, 5_000);
-    if (renderCount !== null) {
-      return true;
-    }
-    await sleep(3_000);
-  }
-  return false;
-}
-
 async function loadTsAgent(page: Page): Promise<AgentLikeState> {
   console.log('TS: opening agent page');
   await page.goto(`${BASE_URL}?anttest=agent&scenario=SCA01EA`, { waitUntil: 'load' });
@@ -147,6 +133,7 @@ async function loadWasmAgent(page: Page): Promise<AgentLikeState> {
   await page.locator('canvas').focus();
 
   const readyStart = Date.now();
+  let bridgeReady = false;
   while (Date.now() - readyStart < 120_000) {
     const ready = await tryEval(page, () => {
       const w = window as unknown as {
@@ -156,10 +143,14 @@ async function loadWasmAgent(page: Page): Promise<AgentLikeState> {
       return typeof w.__agentState === 'function' && typeof w.__setAutoplay === 'function';
     });
     if (ready) {
+      bridgeReady = true;
       console.log('WASM: agent bridge ready');
       break;
     }
     await sleep(1_000);
+  }
+  if (!bridgeReady) {
+    throw new Error('WASM agent bridge never became ready');
   }
 
   await page.evaluate(() => {
@@ -181,56 +172,32 @@ async function loadWasmAgent(page: Page): Promise<AgentLikeState> {
     console.log('WASM: load completion timeout, continuing');
   }
 
-  await sleep(5_000);
-
-  const responsive = await waitForResponsive(page, 60_000);
-  if (!responsive) {
-    throw new Error('WASM page never became responsive');
-  }
-  console.log('WASM: page responsive at menu');
-
-  const hashBefore = await tryEval(page, () => {
-    return (window as unknown as { __getScreenHash?: () => string }).__getScreenHash?.() ?? '';
-  }, 5_000);
-  const rendersBefore = await tryEval(page, () => {
-    return (window as unknown as { __wasmRenderCount?: number }).__wasmRenderCount ?? 0;
-  }, 5_000);
-
   let enterRetries = 0;
   const start = Date.now();
-  let gameplayReady = false;
+  let lastDiagBucket = -1;
 
-  while (Date.now() - start < 360_000) {
+  while (Date.now() - start < 180_000) {
     const state = await tryEval(page, () => {
       const w = window as unknown as { __agentState?: () => AgentLikeState };
       return w.__agentState?.() ?? null;
     }, 5_000);
 
-    const elapsed = Math.round((Date.now() - start) / 1000);
-    const renders = await tryEval(page, () => {
-      return (window as unknown as { __wasmRenderCount?: number }).__wasmRenderCount ?? 0;
-    }, 5_000);
-
-    if (renders !== null && renders > (rendersBefore ?? 0) + 5) {
-      const hashNow = await tryEval(page, () => {
-        return (window as unknown as { __getScreenHash?: () => string }).__getScreenHash?.() ?? '';
-      }, 5_000);
-      if (hashNow !== null && hashNow !== hashBefore) {
-        gameplayReady = true;
-      }
-    }
-
-    if (gameplayReady && state && !state.error && Array.isArray(state.units) && state.units.length > 0) {
-      await page.evaluate(() => {
-        const w = window as unknown as { __wasmSetPaused?: (paused: boolean) => void };
+    if (state && !state.error && Array.isArray(state.units) && state.units.length > 0) {
+      const pausedState = await tryEval(page, () => {
+        const w = window as unknown as {
+          __wasmSetPaused?: (paused: boolean) => void;
+          __agentState?: () => AgentLikeState;
+        };
         w.__wasmSetPaused?.(true);
-      });
-      const pausedState = await page.evaluate(() => (window as unknown as { __agentState: () => AgentLikeState }).__agentState());
-      console.log(`WASM: gameplay ready at tick ${pausedState.tick}`);
-      return pausedState;
+        return w.__agentState?.() ?? null;
+      }, 10_000);
+      const finalState = pausedState && !finalStateHasError(pausedState) ? pausedState : state;
+      console.log(`WASM: gameplay ready at tick ${finalState.tick}`);
+      return finalState;
     }
 
-    if (renders !== null && elapsed > 10 && enterRetries < 8) {
+    const elapsed = Math.round((Date.now() - start) / 1000);
+    if ((!state || state.error || !Array.isArray(state.units) || state.units.length === 0) && elapsed >= 10 && enterRetries < 6) {
       enterRetries++;
       console.log(`WASM: Enter retry ${enterRetries}`);
       try {
@@ -245,20 +212,27 @@ async function loadWasmAgent(page: Page): Promise<AgentLikeState> {
       continue;
     }
 
-    if (elapsed > 0 && elapsed % 20 === 0) {
+    const diagBucket = Math.floor(elapsed / 15);
+    if (diagBucket > 0 && diagBucket !== lastDiagBucket) {
+      lastDiagBucket = diagBucket;
       const diag = await tryEval(page, () => {
         const w = window as unknown as {
           __autoplayState?: string;
           __wasmRenderCount?: number;
+          __agentState?: () => AgentLikeState;
         };
+        const state = w.__agentState?.() ?? null;
         return {
           title: document.title,
           autoplayState: w.__autoplayState ?? null,
           renderCount: w.__wasmRenderCount ?? 0,
+          tick: state?.tick ?? null,
+          unitCount: Array.isArray(state?.units) ? state.units.length : null,
+          error: state?.error ?? null,
         };
       }, 2_000);
       if (diag) {
-        console.log(`WASM: waiting title=${diag.title} autoplay=${diag.autoplayState} renders=${diag.renderCount}`);
+        console.log(`WASM: waiting title=${diag.title} autoplay=${diag.autoplayState} renders=${diag.renderCount} tick=${diag.tick} units=${diag.unitCount} error=${diag.error}`);
       }
     }
 
@@ -276,6 +250,10 @@ async function stepPage(page: Page, ticks: number, commands?: AgentCommand[]): P
     const result = await w.__agentStep(n, cmds);
     return result.state;
   }, [ticks, commands] as [number, AgentCommand[] | undefined]);
+}
+
+function finalStateHasError(state: AgentLikeState | null): state is AgentLikeState & { error: string } {
+  return Boolean(state && 'error' in state && typeof state.error === 'string' && state.error.length > 0);
 }
 
 function pickUnitId(state: AgentLikeState, type: string): number | null {

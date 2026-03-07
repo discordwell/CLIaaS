@@ -5,6 +5,7 @@
 
 import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
+  type WarheadMeta, type WarheadProps,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
@@ -265,7 +266,10 @@ export class Game {
   /** Per-scenario stat overrides (from INI [TypeName] sections) */
   private scenarioUnitStats: Record<string, UnitStats> = UNIT_STATS;
   private scenarioWeaponStats: Record<string, WeaponStats> = WEAPON_STATS;
+  private scenarioProductionItems: ProductionItem[] = PRODUCTION_ITEMS;
   private warheadOverrides: Record<string, [number, number, number, number, number]> = {};
+  private scenarioWarheadMeta: Record<string, WarheadMeta> = WARHEAD_META;
+  private scenarioWarheadProps: Record<string, WarheadProps> = WARHEAD_PROPS;
   private inflightProjectiles: InflightProjectile[] = [];
   private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
@@ -386,7 +390,10 @@ export class Game {
     this.theatre = scenario.theatre;
     this.scenarioUnitStats = scenario.scenarioUnitStats;
     this.scenarioWeaponStats = scenario.scenarioWeaponStats;
+    this.scenarioProductionItems = scenario.scenarioProductionItems;
     this.warheadOverrides = scenario.warheadOverrides;
+    this.scenarioWarheadMeta = scenario.scenarioWarheadMeta;
+    this.scenarioWarheadProps = scenario.scenarioWarheadProps;
     this.crateOverrides = scenario.crateOverrides;
     this.baseBlueprint = scenario.baseBlueprint ?? [];
     this.baseRebuildQueue = [];
@@ -865,7 +872,7 @@ export class Game {
           this.repairingStructures.delete(idx);
           continue;
         }
-        const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+        const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
         const repairCostPerStep = prodItem ? Math.ceil((prodItem.cost * REPAIR_PERCENT) / (s.maxHp / REPAIR_STEP)) : 1;
         if (this.credits < repairCostPerStep) {
           continue; // pause repair until credits available (RA1 parity — don't cancel)
@@ -909,7 +916,7 @@ export class Game {
         }
         if (docked) {
           // Repair cost per step: same formula as building repair
-          const unitCost = PRODUCTION_ITEMS.find(p => p.type === docked!.type)?.cost ?? 400;
+          const unitCost = this.scenarioProductionItems.find(p => p.type === docked!.type)?.cost ?? 400;
           const repairCost = Math.ceil((unitCost * REPAIR_PERCENT) / (docked.maxHp / REPAIR_STEP));
           if (this.credits >= repairCost) {
             this.credits -= repairCost;
@@ -1099,7 +1106,7 @@ export class Game {
           s.sellProgress = undefined;
           this.clearStructureFootprint(s);
           // Refund: flat 50% of building cost (C++ parity — no health scaling)
-          const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+          const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
           // Recalculate silo capacity BEFORE adding refund (structure is now dead)
           this.recalculateSiloCapacity();
           if (prodItem) {
@@ -1655,7 +1662,7 @@ export class Game {
           if (WALL_TYPES.has(s.type)) {
             s.alive = false;
             this.clearStructureFootprint(s);
-            const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+            const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
             if (prodItem) {
               this.addCredits(Math.floor(prodItem.cost * 0.5), true);
             }
@@ -2370,7 +2377,7 @@ export class Game {
         if (dist > blastRadius) continue;
         const falloff = 1 - (dist / blastRadius) * 0.6;
         const blastDmg = Math.max(1, Math.round(100 * falloff));
-        e.takeDamage(blastDmg, 'HE');
+        this.damageEntity(e, blastDmg, 'HE');
       }
       // Leave large scorch mark
       this.map.addDecal(s.cx, s.cy, 14, 0.6);
@@ -2880,7 +2887,7 @@ export class Game {
       // C++ drive.cpp: RA1 crushes ALL crushable units including allies (no friendly immunity)
       const oc = other.cell;
       if (oc.cx === vc.cx && oc.cy === vc.cy) {
-        other.takeDamage(other.hp + 10, 'Super'); // instant kill, always die2
+        this.damageEntity(other, other.hp + 10, 'Super'); // instant kill, always die2
         vehicle.creditKill();
         this.effects.push({
           type: 'blood', x: other.pos.x, y: other.pos.y,
@@ -3466,7 +3473,7 @@ export class Game {
         // CF1: Apply C++ Modify_Damage formula — direct hit at distance 0 gets full damage
         const houseBias = this.getFirepowerBias(entity.house);
         const whMult = this.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
-        let damage = modifyDamage(activeWeapon.damage, activeWeapon.warhead, entity.target.stats.armor, 0, houseBias, whMult);
+        let damage = modifyDamage(activeWeapon.damage, activeWeapon.warhead, entity.target.stats.armor, 0, houseBias, whMult, this.getWarheadMeta(activeWeapon.warhead).spreadFactor);
         if (damage <= 0) {
           // This weapon can't hurt the target. If dual-weapon, don't give up —
           // the other weapon might work. Only give up if neither weapon can damage.
@@ -3485,7 +3492,7 @@ export class Game {
           this.launchProjectile(entity, entity.target, activeWeapon, damage, impactX, impactY, directHit);
         } else {
           // Instant damage (melee, hitscan weapons)
-          const killed = directHit ? entity.target.takeDamage(damage, activeWeapon.warhead) : false;
+          const killed = directHit ? this.damageEntity(entity.target, damage, activeWeapon.warhead, entity) : false;
 
           if (directHit && !killed) {
             this.triggerRetaliation(entity.target, entity);
@@ -3567,7 +3574,7 @@ export class Game {
           }
 
           // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-          const impactSprite = WARHEAD_PROPS[activeWeapon.warhead]?.explosionSet ?? 'veh-hit1';
+          const impactSprite = this.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 'veh-hit1';
           this.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0, maxFrames: 17, size: 8,
             sprite: impactSprite, spriteStart: 0 });
         }
@@ -4196,7 +4203,7 @@ export class Game {
           muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
         });
         // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-        const structImpactSprite = WARHEAD_PROPS[entity.weapon.warhead]?.explosionSet ?? 'veh-hit1';
+        const structImpactSprite = this.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
         this.effects.push({
           type: 'explosion', x: structPos.x, y: structPos.y,
           frame: 0, maxFrames: 10, size: 8,
@@ -4270,7 +4277,7 @@ export class Game {
           startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
         });
         // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-        const ffImpactSprite = WARHEAD_PROPS[entity.weapon.warhead]?.explosionSet ?? 'veh-hit1';
+        const ffImpactSprite = this.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
         this.effects.push({
           type: 'explosion', x: impactX, y: impactY,
           frame: 0, maxFrames: 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,
@@ -4385,8 +4392,8 @@ export class Game {
         const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
         const houseBias = this.getFirepowerBias(s.house);
         const whMult = this.getWarheadMult(wh, bestTarget.stats.armor);
-        const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult);
-        const killed = bestTarget.takeDamage(damage, wh);
+        const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult, this.getWarheadMeta(wh).spreadFactor);
+        const killed = this.damageEntity(bestTarget, damage, wh);
 
         // Fire effects — color based on structure type
         const structMuzzleColor = (s.type === 'TSLA' || s.type === 'QUEE') ? '120,180,255'
@@ -4418,7 +4425,7 @@ export class Game {
             type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
             frame: 0, maxFrames: 10, size: 6,
             // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-            sprite: WARHEAD_PROPS[wh]?.explosionSet ?? 'veh-hit1', spriteStart: 0,
+            sprite: this.getWarheadProps(wh)?.explosionSet ?? 'veh-hit1', spriteStart: 0,
           });
           this.playSoundAt('machinegun', sx, sy);
         }
@@ -4865,8 +4872,8 @@ export class Game {
   private fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void {
     const houseBias = this.getFirepowerBias(attacker.house);
     const whMult = this.getWarheadMult(weapon.warhead, target.stats.armor);
-    const damage = modifyDamage(weapon.damage, weapon.warhead, target.stats.armor, 0, houseBias, whMult);
-    const killed = target.takeDamage(damage, weapon.warhead);
+    const damage = modifyDamage(weapon.damage, weapon.warhead, target.stats.armor, 0, houseBias, whMult, this.getWarheadMeta(weapon.warhead).spreadFactor);
+    const killed = this.damageEntity(target, damage, weapon.warhead, attacker);
     if (killed) {
       attacker.creditKill();
       this.handleUnitDeath(target, {
@@ -4890,7 +4897,7 @@ export class Game {
     const wh = (weapon.warhead ?? 'HE') as WarheadType;
     const houseBias = this.getFirepowerBias(attacker.house);
     const whMult = this.getWarheadMult(wh, 'concrete');
-    const damage = modifyDamage(weapon.damage, wh, 'concrete', 0, houseBias, whMult);
+    const damage = modifyDamage(weapon.damage, wh, 'concrete', 0, houseBias, whMult, this.getWarheadMeta(wh).spreadFactor);
     const destroyed = this.damageStructure(s, damage);
     if (destroyed) attacker.creditKill();
     this.effects.push({
@@ -4970,6 +4977,19 @@ export class Game {
     const overridden = this.warheadOverrides[warhead];
     if (overridden) return overridden[idx] ?? 1;
     return WARHEAD_VS_ARMOR[warhead]?.[idx] ?? 1;
+  }
+
+  private getWarheadMeta(warhead: WarheadType): WarheadMeta {
+    return this.scenarioWarheadMeta[warhead] ?? WARHEAD_META[warhead] ?? { spreadFactor: 1 };
+  }
+
+  private getWarheadProps(warhead: WarheadType | string | undefined): WarheadProps | undefined {
+    if (!warhead) return undefined;
+    return this.scenarioWarheadProps[warhead] ?? WARHEAD_PROPS[warhead as WarheadType];
+  }
+
+  private damageEntity(target: Entity, amount: number, warhead: WarheadType, attacker?: Entity): boolean {
+    return target.takeDamage(amount, warhead, attacker, this.getWarheadProps(warhead));
   }
 
   /** Damage-based speed reduction (C++ drive.cpp:1157-1161).
@@ -5111,7 +5131,7 @@ export class Game {
       const attacker = this.entityById.get(proj.attackerId);
 
       if (proj.directHit && target && target.alive) {
-        const killed = target.takeDamage(proj.damage, proj.weapon.warhead);
+        const killed = this.damageEntity(target, proj.damage, proj.weapon.warhead, attacker);
 
         if (!killed && attacker) {
           this.triggerRetaliation(target, attacker);
@@ -5141,7 +5161,7 @@ export class Game {
       }
 
       // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-      const projImpactSprite = WARHEAD_PROPS[proj.weapon.warhead]?.explosionSet ?? 'veh-hit1';
+      const projImpactSprite = this.getWarheadProps(proj.weapon.warhead)?.explosionSet ?? 'veh-hit1';
       this.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
         frame: 0, maxFrames: 17, size: 8, sprite: projImpactSprite, spriteStart: 0 });
     }
@@ -5168,9 +5188,9 @@ export class Game {
       // CF2: C++ inverse-proportional falloff via modifyDamage (combat.cpp:106-125)
       const distPixels = distCells * CELL_SIZE;
       const whMult = this.getWarheadMult(weapon.warhead, other.stats.armor);
-      const splashDmg = modifyDamage(weapon.damage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult);
+      const splashDmg = modifyDamage(weapon.damage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, this.getWarheadMeta(weapon.warhead).spreadFactor);
       if (splashDmg <= 0) continue;
-      const killed = other.takeDamage(splashDmg, weapon.warhead);
+      const killed = this.damageEntity(other, splashDmg, weapon.warhead, attacker);
 
       // Retaliation from splash damage
       if (!killed && attacker) {
@@ -5465,7 +5485,7 @@ export class Game {
             this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 20, size: 24, sprite: 'art-exp1', spriteStart: 0 });
             for (const e of this.entities) {
               if (!e.alive) continue;
-              if (worldDist(e.pos, { x: wx, y: wy }) <= 4) e.takeDamage(200, 'HE'); // worldDist returns cells
+              if (worldDist(e.pos, { x: wx, y: wy }) <= 4) this.damageEntity(e, 200, 'HE'); // worldDist returns cells
             }
             this.audio.play('explode_lg');
           }
@@ -5477,7 +5497,7 @@ export class Game {
           this.effects.push({ type: 'explosion', x: cx, y: cy, frame: 0, maxFrames: 30, size: 48, sprite: 'art-exp1', spriteStart: 0 });
           for (const e of this.entities) {
             if (!e.alive) continue;
-            if (worldDist(e.pos, { x: cx, y: cy }) <= 8) e.takeDamage(500, 'HE'); // worldDist returns cells
+            if (worldDist(e.pos, { x: cx, y: cy }) <= 8) this.damageEntity(e, 500, 'HE'); // worldDist returns cells
           }
         }
         // Center camera on waypoint
@@ -5824,7 +5844,7 @@ export class Game {
   getAvailableItems(): ProductionItem[] {
     // No production until player discovers their base
     if (!this.baseDiscovered) return [];
-    return PRODUCTION_ITEMS.filter(item => {
+    return this.scenarioProductionItems.filter(item => {
       // Must have primary prerequisite building
       if (!this.hasBuilding(item.prerequisite)) return false;
       // Faction filter: player only sees items matching their faction or 'both'
@@ -5832,7 +5852,7 @@ export class Game {
       // Tech prerequisite (e.g. Artillery needs Radar Dome)
       if (item.techPrereq && !this.hasBuilding(item.techPrereq)) return false;
       // TechLevel filter: items above player's scenario tech level are hidden
-      if (item.techLevel !== undefined && item.techLevel > this.playerTechLevel) return false;
+      if (item.techLevel !== undefined && (item.techLevel < 0 || item.techLevel > this.playerTechLevel)) return false;
       return true;
     });
   }
@@ -6429,7 +6449,7 @@ export class Game {
           if (!e.alive) continue;
           const d = worldDist(e.pos, { x: crate.x, y: crate.y });
           if (d <= 3) {
-            e.takeDamage(200, 'HE');
+            this.damageEntity(e, 200, 'HE');
           }
         }
         this.effects.push({ type: 'explosion', x: crate.x, y: crate.y, frame: 0, maxFrames: 17, size: 20, sprite: 'atomsfx', spriteStart: 0 });
@@ -6472,7 +6492,7 @@ export class Game {
             for (const e of this.entities) {
               if (!e.alive) continue;
               const d = worldDist(e.pos, { x: fx, y: fy });
-              if (d <= 1) e.takeDamage(80, 'Fire');
+              if (d <= 1) this.damageEntity(e, 80, 'Fire');
             }
           }
         }
@@ -6717,7 +6737,7 @@ export class Game {
       const falloff = Math.max(NUKE_MIN_FALLOFF, 1 - dist / blastRadius);
       const mult = this.getWarheadMult('Super', e.stats.armor);
       const dmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff));
-      const killed = e.takeDamage(dmg, 'Super');
+      const killed = this.damageEntity(e, dmg, 'Super');
       if (killed) {
         if (e.isPlayerUnit) this.lossCount++;
         else this.killCount++;
@@ -6853,7 +6873,7 @@ export class Game {
     if (this.selectedStructureIdx >= 0 && this.selectedIds.size === 0) {
       const ss = this.structures[this.selectedStructureIdx];
       if (ss?.alive) {
-        const prodItem = PRODUCTION_ITEMS.find(p => p.type === ss.type);
+        const prodItem = this.scenarioProductionItems.find(p => p.type === ss.type);
         this.renderer.selectedStructure = {
           type: ss.type, hp: ss.hp, maxHp: ss.maxHp,
           name: prodItem?.name ?? ss.type,
@@ -7331,7 +7351,7 @@ export class Game {
       if (state.buildQueue.length === 0) continue;
 
       const buildType = state.buildQueue[0];
-      const prodItem = PRODUCTION_ITEMS.find(p => p.type === buildType && p.isStructure);
+      const prodItem = this.scenarioProductionItems.find(p => p.type === buildType && p.isStructure);
       if (!prodItem) {
         state.buildQueue.shift();
         continue;
@@ -7398,10 +7418,11 @@ export class Game {
     const faction = HOUSE_FACTION[house] ?? 'both';
     const prereq = category === 'infantry' ? 'TENT' : 'WEAP';
 
-    const items = PRODUCTION_ITEMS.filter(p =>
+    const items = this.scenarioProductionItems.filter(p =>
       (p.prerequisite === prereq || (category === 'infantry' && p.prerequisite === 'BARR')) &&
       !p.isStructure &&
       (p.faction === 'both' || p.faction === faction) &&
+      (p.techLevel === undefined || p.techLevel >= 0) &&
       // Check tech prereq
       (!p.techPrereq || this.aiHasPrereq(house, p.techPrereq))
     );
@@ -7474,7 +7495,7 @@ export class Game {
       if (state.harvesterCount === 0 && state.refineryCount > 0 &&
           this.aiCountStructure(house, 'WEAP') > 0) {
         const credits = this.houseCredits.get(house) ?? 0;
-        const harvItem = PRODUCTION_ITEMS.find(p => p.type === 'HARV');
+        const harvItem = this.scenarioProductionItems.find(p => p.type === 'HARV');
         if (harvItem && credits >= harvItem.cost) {
           const unit = this.spawnAIUnit(house, UnitType.V_HARV, 'WEAP');
           if (unit) {
@@ -7751,7 +7772,7 @@ export class Game {
 
       // Strategic AI: Harvester priority — if harvesterCount < refineryCount
       if (state && hasWeap && state.harvesterCount < state.refineryCount) {
-        const harvItem = PRODUCTION_ITEMS.find(p => p.type === 'HARV');
+        const harvItem = this.scenarioProductionItems.find(p => p.type === 'HARV');
         if (harvItem && credits >= harvItem.cost) {
           const unit = this.spawnAIUnit(house, UnitType.V_HARV, 'WEAP');
           if (unit) {
@@ -7769,10 +7790,11 @@ export class Game {
           ? this.getAIProductionPick(house, 'infantry')
           : (() => {
               const houseFaction = HOUSE_FACTION[house] ?? 'both';
-              const infItems = PRODUCTION_ITEMS.filter(p =>
+              const infItems = this.scenarioProductionItems.filter(p =>
                 (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
                 !p.isStructure &&
-                (p.faction === 'both' || p.faction === houseFaction)
+                (p.faction === 'both' || p.faction === houseFaction) &&
+                (p.techLevel === undefined || p.techLevel >= 0)
               );
               return infItems.length > 0 ? infItems[Math.floor(Math.random() * infItems.length)] : null;
             })();
@@ -7799,10 +7821,11 @@ export class Game {
           ? this.getAIProductionPick(house, 'vehicle')
           : (() => {
               const houseFaction = HOUSE_FACTION[house] ?? 'both';
-              const vehItems = PRODUCTION_ITEMS.filter(p =>
+              const vehItems = this.scenarioProductionItems.filter(p =>
                 p.prerequisite === 'WEAP' &&
                 !p.isStructure &&
-                (p.faction === 'both' || p.faction === houseFaction)
+                (p.faction === 'both' || p.faction === houseFaction) &&
+                (p.techLevel === undefined || p.techLevel >= 0)
               );
               return vehItems.length > 0 ? vehItems[Math.floor(Math.random() * vehItems.length)] : null;
             })();
@@ -7971,7 +7994,7 @@ export class Game {
         if (!e.alive || this.isAllied(e.house, mine.house) || e.isAirUnit) continue;
         const ec = e.cell;
         if (ec.cx === mine.cx && ec.cy === mine.cy) {
-          e.takeDamage(mine.damage, 'AP');
+          this.damageEntity(e, mine.damage, 'AP');
           this.effects.push({ type: 'explosion', x: mine.cx * CELL_SIZE + CELL_SIZE / 2, y: mine.cy * CELL_SIZE + CELL_SIZE / 2, frame: 0, maxFrames: 12, size: 10 });
           this.playSoundAt('building_explode', mine.cx * CELL_SIZE, mine.cy * CELL_SIZE);
           this.mines.splice(i, 1);
@@ -8081,7 +8104,7 @@ export class Game {
     for (const other of this.entities) {
       if (!other.alive || other.id === entity.id) continue;
       const d = worldDist(entity.pos, other.pos);
-      if (d <= blastRadius) { other.takeDamage(Math.round(Game.DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)), 'Nuke'); }
+      if (d <= blastRadius) { this.damageEntity(other, Math.round(Game.DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)), 'Nuke'); }
     }
     for (const s of this.structures) {
       if (!s.alive) continue;
@@ -8187,7 +8210,7 @@ export class Game {
     if (WALL_TYPES.has(s.type)) {
       s.alive = false;
       this.clearStructureFootprint(s);
-      const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+      const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
       if (prodItem) this.addCredits(Math.floor(prodItem.cost * 0.5), true);
       return true;
     }

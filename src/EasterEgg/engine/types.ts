@@ -431,7 +431,7 @@ export const WARHEAD_VS_ARMOR: Record<WarheadType, [number, number, number, numb
   Super:      [1.0,  1.0,  1.0,  1.0,  1.0 ], // Super — equal damage to all
   Organic:    [1.0,  0.0,  0.0,  0.0,  0.0 ], // Organic — kills unarmored only (dogs)
   Nuke:       [0.9,  1.0,  0.6,  0.25, 0.5 ], // Nuke — same verses as Fire (rules.ini: 90%,100%,60%,25%,50%)
-  Mechanical: [0.0,  0.0,  0.0,  0.0,  0.0 ], // Mechanical — no direct damage (special effects)
+  Mechanical: [1.0,  1.0,  1.0,  1.0,  1.0 ], // Mechanical — vehicle repair/heal applies equally to all armor
 };
 
 /** Map ArmorType string to WARHEAD_VS_ARMOR index */
@@ -556,11 +556,11 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: true },
   MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true },
   // Counterstrike/Aftermath expansion vehicles — crusher for tank variants
-  STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 5, crusher: true, isCloakable: true },
-  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true },
-  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true },
+  STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true },
+  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true },
+  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true },
   QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
-  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
+  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge' },
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true },
@@ -569,14 +569,14 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   DD: { type: UnitType.V_DD, name: 'Destroyer', image: 'dd', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'Stinger', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
   CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 4, speedClass: SpeedClass.FLOAT, sight: 7, rot: 5, isInfantry: false, primaryWeapon: '8Inch', secondaryWeapon: '8Inch', isVessel: true },
   PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 7, rot: 7, isInfantry: false, primaryWeapon: '2Inch', secondaryWeapon: 'DepthCharge', isVessel: true },
-  MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 5, rot: 3, isInfantry: false, primaryWeapon: 'SeaSerpent', isVessel: true, isCloakable: true },
+  MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'SubSCUD', isVessel: true, isCloakable: true },
   // Aircraft (C++ aadata.cpp / RULES.INI)
   MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 50, armor: 'light', speed: 20, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'Maverick', secondaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 3 },
   YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 15 },
   HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6 },
   HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 12 },
   // Tanya & Thief (new infantry)
-  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e1', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'allied', cost: 1200, canSwim: true },
+  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e1', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true },
   THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500 },
   // Expansion vehicles (V2 Rocket, Minelayer)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true },
@@ -605,16 +605,18 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12 },
   TeslaCannon:      { name: 'TeslaCannon',       damage: 100, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
-  PortaTesla:       { name: 'PortaTesla',        damage: 50,  rof: 60, range: 4.0,  warhead: 'Super', splash: 0.5, projSpeed: 40 }, // Shock Trooper
-  GoodWrench:       { name: 'GoodWrench',        damage: -30, rof: 60, range: 1.83, warhead: 'Organic', projSpeed: 40 },            // Mechanic (heals vehicles)
-  APTusk:           { name: 'APTusk',             damage: 75,  rof: 60, range: 6.0,  warhead: 'AP', projSpeed: 40 },                 // Chrono Tank missile
-  TTankZap:         { name: 'TTankZap',           damage: 80,  rof: 80, range: 5.0,  warhead: 'Super', splash: 1.0, projSpeed: 40 }, // Tesla Tank
+  PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 40 }, // Shock Trooper
+  GoodWrench:       { name: 'GoodWrench',        damage: -100, rof: 80, range: 1.83, warhead: 'Mechanical', projSpeed: 40 },        // Mechanic (heals vehicles)
+  APTusk:           { name: 'APTusk',             damage: 75,  rof: 80, range: 5.0,  warhead: 'AP', projSpeed: 40, burst: 2 },       // Chrono Tank missile
+  TTankZap:         { name: 'TTankZap',           damage: 100, rof: 120, range: 7.0,  warhead: 'Super', splash: 1.0, projSpeed: 40 }, // Tesla Tank
   // Naval weapons (C++ RULES.INI — vessel.cpp)
   Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 40, burst: 2 },                                 // DD primary naval gun
   TorpTube:         { name: 'TorpTube',         damage: 90,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 1.0, isSubSurface: true }, // SS torpedo, underwater travel
   DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 12, isAntiSub: true },                         // DD secondary, hits submerged subs
   Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // CA cruise missile
   SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // MSUB missiles
+  SubSCUD:          { name: 'SubSCUD',          damage: 400, rof: 120, range: 14.0, warhead: 'HE', projSpeed: 20, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // Aftermath missile sub missile
+  Democharge:       { name: 'Democharge',       damage: 500, rof: 80, range: 1.75, warhead: 'Nuke', projSpeed: 40 }, // Demo truck self-destruct charge
   // Aircraft weapons (C++ RULES.INI — aircraft.cpp)
   Maverick:         { name: 'Maverick',          damage: 50,  rof: 3,  range: 6.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Air-to-ground missile (MIG)
   Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Helicopter missile (HELI)
@@ -743,14 +745,14 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: '4TNK', name: 'Mammoth Tank', cost: 1700, buildTime: 240, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK', techLevel: 10 },  // rules.ini Prerequisite=weap,stek (line 549)
   { type: 'ARTY', name: 'Artillery', cost: 600, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 8 },  // TechLevel=8 gates it, no extra techPrereq needed (rules.ini line 596)
   { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'TENT', techLevel: 5 },  // rules.ini Prerequisite=weap,tent (line 658)
-  { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techLevel: 1 },
+  { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'PROC', techLevel: 1 },
   // Counterstrike/Aftermath expansion units — techLevel=99 for units not in base rules.ini
   { type: 'SHOK', name: 'Shock Trpr', cost: 900, buildTime: 80, prerequisite: 'TENT', faction: 'soviet', techPrereq: 'TSLA', techLevel: 7 },  // TSLA prereq (expansion, Tesla Coil gate)
-  { type: 'MECH', name: 'Mechanic', cost: 950, buildTime: 70, prerequisite: 'TENT', faction: 'both', techPrereq: 'FIX', techLevel: 99 },
-  { type: 'STNK', name: 'Phase Trns', cost: 800, buildTime: 160, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 99 },
-  { type: 'CTNK', name: 'Chrono Tank', cost: 2400, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 99 },
-  { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK', techLevel: 99 },
-  { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK', techLevel: 11 },
+  { type: 'MECH', name: 'Mechanic', cost: 950, buildTime: 70, prerequisite: 'TENT', faction: 'allied', techPrereq: 'FIX', techLevel: 7 },
+  { type: 'STNK', name: 'Phase Trns', cost: 800, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'ATEK', techLevel: -1 },
+  { type: 'CTNK', name: 'Chrono Tank', cost: 2400, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 12 },
+  { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'TSLA', techLevel: 8 },
+  { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'both', techPrereq: 'ATEK', techLevel: 11 },
   { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK', techLevel: 11 },
   { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'DOME', techLevel: 4 },  // rules.ini Prerequisite=weap,dome (line 482)
   { type: 'MNLY', name: 'Minelayer', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'both', techPrereq: 'FIX', techLevel: 3 },  // rules.ini Owner=allies,soviet (line 680), Prerequisite=weap,fix (line 674)
@@ -761,13 +763,13 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'CA', name: 'Cruiser', cost: 2000, buildTime: 240, prerequisite: 'SYRD', faction: 'allied', techPrereq: 'ATEK', techLevel: 10 },  // rules.ini Prerequisite=syrd,atek (line 735)
   // Naval (from SPEN — Soviet Sub Pen)
   { type: 'SS', name: 'Submarine', cost: 950, buildTime: 140, prerequisite: 'SPEN', faction: 'soviet', techLevel: 5 },
-  { type: 'MSUB', name: 'Missile Sub', cost: 1500, buildTime: 200, prerequisite: 'SPEN', faction: 'soviet', techPrereq: 'STEK', techLevel: 99 },
+  { type: 'MSUB', name: 'Missile Sub', cost: 1650, buildTime: 200, prerequisite: 'SPEN', faction: 'soviet', techPrereq: 'STEK', techLevel: 9 },
   // Aircraft (from HPAD/AFLD)
-  { type: 'TRAN', name: 'Chinook', cost: 1200, buildTime: 120, prerequisite: 'HPAD', faction: 'both', techLevel: 99 },
-  { type: 'HELI', name: 'Longbow', cost: 1500, buildTime: 200, prerequisite: 'HPAD', faction: 'allied', techPrereq: 'ATEK', techLevel: 99 },
-  { type: 'HIND', name: 'Hind', cost: 1200, buildTime: 180, prerequisite: 'HPAD', faction: 'soviet', techLevel: 99 },
-  { type: 'MIG', name: 'MiG', cost: 1200, buildTime: 180, prerequisite: 'AFLD', faction: 'soviet', techLevel: 99 },
-  { type: 'YAK', name: 'Yak', cost: 800, buildTime: 120, prerequisite: 'AFLD', faction: 'soviet', techLevel: 99 },
+  { type: 'TRAN', name: 'Chinook', cost: 1200, buildTime: 120, prerequisite: 'HPAD', faction: 'soviet', techLevel: 11 },
+  { type: 'HELI', name: 'Longbow', cost: 1200, buildTime: 200, prerequisite: 'HPAD', faction: 'allied', techLevel: 9 },
+  { type: 'HIND', name: 'Hind', cost: 1200, buildTime: 180, prerequisite: 'HPAD', faction: 'soviet', techLevel: 9 },
+  { type: 'MIG', name: 'MiG', cost: 1200, buildTime: 180, prerequisite: 'AFLD', faction: 'soviet', techLevel: 10 },
+  { type: 'YAK', name: 'Yak', cost: 800, buildTime: 120, prerequisite: 'AFLD', faction: 'soviet', techLevel: 5 },
   // Structures — rules.ini Prerequisite=, Cost=, Owner=, TechLevel= values
   { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 1 },
   { type: 'APWR', name: 'Adv. Power Plant', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 8 },
@@ -798,7 +800,7 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'STEK', name: 'Soviet Tech', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true, techPrereq: 'DOME', techLevel: 6 },
   { type: 'PDOX', name: 'Chronosphere', cost: 2800, buildTime: 300, prerequisite: 'ATEK', faction: 'allied', isStructure: true, techLevel: 12 },
   { type: 'IRON', name: 'Iron Curtain', cost: 2800, buildTime: 300, prerequisite: 'STEK', faction: 'soviet', isStructure: true, techLevel: 12 },
-  { type: 'MSLO', name: 'Missile Silo', cost: 2500, buildTime: 280, prerequisite: 'STEK', faction: 'soviet', isStructure: true, techLevel: 13 },
+  { type: 'MSLO', name: 'Missile Silo', cost: 2500, buildTime: 280, prerequisite: 'STEK', faction: 'both', isStructure: true, techLevel: 13 },
   // Walls — rules.ini Cost=, Owner=, TechLevel= values (BARB removed: no Owner in rules.ini, not buildable)
   { type: 'SBAG', name: 'Sandbag', cost: 25, buildTime: 15, prerequisite: 'FACT', faction: 'allied', isStructure: true, techLevel: 2 },
   { type: 'FENC', name: 'Wire Fence', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'soviet', isStructure: true, techLevel: 2 },  // rules.ini: FENC is barbed wire fence (line 1695)
@@ -920,7 +922,7 @@ export function calcProjectileTravelFrames(distPixels: number, projSpeed?: numbe
  *  @returns final damage value (0 if warhead does 0% vs armor) */
 export function modifyDamage(
   baseDamage: number, warhead: WarheadType, armor: ArmorType,
-  distPixels: number, houseBias = 1.0, warheadMultOverride?: number,
+  distPixels: number, houseBias = 1.0, warheadMultOverride?: number, spreadFactorOverride?: number,
 ): number {
   // Step 1: Warhead vs armor multiplier (combat.cpp:98)
   const mult = warheadMultOverride ?? getWarheadMultiplier(warhead, armor);
@@ -932,7 +934,7 @@ export function modifyDamage(
   // C++ converts pixel distance to a factor using SpreadFactor and PIXEL_LEPTON_W.
   // In pixel space: distFactor = distPixels * 2 / SpreadFactor (for SpreadFactor > 0)
   //                 distFactor = distPixels * 4               (for SpreadFactor == 0)
-  const spreadFactor = WARHEAD_META[warhead]?.spreadFactor ?? 1;
+  const spreadFactor = spreadFactorOverride ?? WARHEAD_META[warhead]?.spreadFactor ?? 1;
   let distFactor: number;
   if (spreadFactor === 0) {
     distFactor = distPixels * 4;

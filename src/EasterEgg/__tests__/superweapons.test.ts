@@ -167,7 +167,7 @@ describe('Superweapon structure config', () => {
     expect(item!.cost).toBe(2500);
     expect(item!.buildTime).toBe(280);
     expect(item!.prerequisite).toBe('STEK');
-    expect(item!.faction).toBe('soviet');
+    expect(item!.faction).toBe('both');
   });
 });
 
@@ -584,6 +584,9 @@ describe('Power consumption', () => {
   it('soviet structures have correct faction', () => {
     expect(PRODUCTION_ITEMS.find(p => p.type === 'STEK')!.faction).toBe('soviet');
     expect(PRODUCTION_ITEMS.find(p => p.type === 'IRON')!.faction).toBe('soviet');
-    expect(PRODUCTION_ITEMS.find(p => p.type === 'MSLO')!.faction).toBe('soviet');
+  });
+
+  it('shared structures have correct faction', () => {
+    expect(PRODUCTION_ITEMS.find(p => p.type === 'MSLO')!.faction).toBe('both');
   });
 });

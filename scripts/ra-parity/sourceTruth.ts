@@ -83,11 +83,16 @@ export function mergeSections(...inputs: IniSections[]): IniSections {
   return merged;
 }
 
-export function loadRedAlertSourceSections(root = process.cwd()): LoadedSourceSections {
+export function loadRedAlertSourceSections(
+  root = process.cwd(),
+  kinds?: LoadedSourceFile['kind'][],
+): LoadedSourceSections {
   const parsedSections: IniSections[] = [];
   const files: LoadedSourceFile[] = [];
+  const allowedKinds = kinds ? new Set(kinds) : null;
 
   for (const file of DEFAULT_SOURCE_FILES) {
+    if (allowedKinds && !allowedKinds.has(file.kind)) continue;
     const absolutePath = path.join(root, file.relativePath);
     if (!fs.existsSync(absolutePath)) continue;
     const text = fs.readFileSync(absolutePath, 'utf8');
