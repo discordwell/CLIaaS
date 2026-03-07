@@ -14,6 +14,14 @@ interface NavLink {
 const navLinks: NavLink[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/tickets", label: "Tickets", permission: "tickets:view" },
+  { href: "/chat", label: "Chat" },
+  { href: "/ai", label: "AI" },
+];
+
+// Full list preserved for test compatibility and reference
+export const allNavLinks: NavLink[] = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/tickets", label: "Tickets", permission: "tickets:view" },
   { href: "/rules", label: "Rules", permission: "automation:view" },
   { href: "/workflows", label: "Workflows", permission: "automation:view" },
   { href: "/chat", label: "Chat" },
@@ -39,6 +47,10 @@ const navLinks: NavLink[] = [
   { href: "/docs", label: "Docs" },
 ];
 
+function openCommandPalette() {
+  window.dispatchEvent(new Event("open-command-palette"));
+}
+
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -53,7 +65,6 @@ export default function AppNav() {
     router.push("/");
   }
 
-  // Filter nav links by permission when RBAC is active
   const visibleLinks =
     rbacActive
       ? navLinks.filter(
@@ -62,7 +73,7 @@ export default function AppNav() {
       : navLinks;
 
   return (
-    <nav className="border-2 border-zinc-950 bg-white">
+    <nav className="border-b-2 border-zinc-950 bg-white">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-2">
         <div className="flex items-center gap-6">
           <Link
@@ -91,7 +102,15 @@ export default function AppNav() {
             })}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* Command palette trigger */}
+          <button
+            onClick={openCommandPalette}
+            className="flex items-center gap-2 rounded border border-zinc-300 bg-zinc-50 px-2.5 py-1 font-mono text-xs text-zinc-400 transition-colors hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+            title="Command palette (⌘K)"
+          >
+            <span className="text-zinc-500">⌘K</span>
+          </button>
           <NotificationBell />
           <button
             onClick={handleSignOut}

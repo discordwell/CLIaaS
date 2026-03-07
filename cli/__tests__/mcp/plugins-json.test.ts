@@ -5,7 +5,7 @@ vi.mock('@/lib/plugins/store', () => ({
   getInstallations: vi.fn().mockResolvedValue([]),
   getInstallationByPluginId: vi.fn(),
   installPlugin: vi.fn().mockResolvedValue({ id: 'inst-1', pluginId: 'test', version: '1.0.0' }),
-  uninstallPlugin: vi.fn().mockResolvedValue(true),
+  uninstallPlugin: vi.fn().mockResolvedValue({ deleted: true, dependents: [] }),
   togglePlugin: vi.fn().mockResolvedValue({ id: 'inst-1', enabled: true }),
   updateInstallation: vi.fn().mockResolvedValue({ id: 'inst-1', config: {} }),
 }));

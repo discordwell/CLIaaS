@@ -11,13 +11,18 @@ import {
   WARHEAD_VS_ARMOR,
   WEAPON_STATS,
 } from '../src/EasterEgg/engine/types';
+import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../src/EasterEgg/engine/scenario';
 import {
   buildScenarioRuleOverrides,
   interpretProductionPrerequisites,
   normalizeOwnerToFaction,
 } from '../src/EasterEgg/engine/scenarioRules';
 import {
+  BUILDING_DATA_RELATIVE_PATH,
+  collectPlacedStructureTypes,
+  collectSectionNumberTruth,
   getSection,
+  loadBuildingSizeTruth,
   loadRedAlertSourceSections,
   normalizeValue,
   parseVerses,
@@ -26,7 +31,7 @@ import {
 } from './ra-parity/sourceTruth';
 
 interface Mismatch {
-  category: 'unit' | 'weapon' | 'warhead' | 'production';
+  category: 'unit' | 'weapon' | 'warhead' | 'production' | 'structure';
   id: string;
   field: string;
   actual: unknown;
@@ -270,13 +275,80 @@ function compareProductionTable(
   }
 }
 
+function compareStructureTables(
+  mismatches: Mismatch[],
+  structureHp: Record<string, number>,
+  structureSize: Record<string, [number, number]>,
+  sections: Map<string, Map<string, string>>,
+  ruleFiles: string[],
+  placedTypes: string[],
+  strengthTruth: Record<string, number>,
+  sizeTruth: Record<string, [number, number]>,
+  buildingDataPath?: string,
+): void {
+  const allTypes = new Set<string>([
+    ...placedTypes,
+    ...Object.keys(structureHp),
+    ...Object.keys(structureSize),
+  ]);
+  const placedTypeSet = new Set(placedTypes);
+
+  for (const type of [...allTypes].sort()) {
+    const section = getSection(sections, type);
+    const expectedHp = readNumber(section, 'Strength') ?? strengthTruth[type];
+    if (expectedHp !== undefined || structureHp[type] !== undefined) {
+      compareField(
+        mismatches,
+        'structure',
+        type,
+        'maxHp',
+        structureHp[type] ?? null,
+        expectedHp ?? null,
+        sourceLabel(type, ruleFiles),
+      );
+    }
+
+    const expectedSize = sizeTruth[type];
+    if (expectedSize !== undefined || structureSize[type] !== undefined) {
+      const sizeSource = buildingDataPath
+        ? sourceLabel(type, [buildingDataPath], 'C++ building footprint')
+        : sourceLabel(type, ruleFiles, 'scenario footprint');
+      compareField(
+        mismatches,
+        'structure',
+        type,
+        'footprint',
+        structureSize[type] ?? null,
+        expectedSize ?? null,
+        sizeSource,
+      );
+    } else if (placedTypeSet.has(type)) {
+      mismatches.push({
+        category: 'structure',
+        id: type,
+        field: 'footprint',
+        actual: structureSize[type] ?? null,
+        expected: null,
+        source: 'Placed in extracted scenario INIs, but no C++ footprint truth was found',
+      });
+    }
+  }
+}
+
 async function main(): Promise<void> {
   fs.mkdirSync(REPORT_DIR, { recursive: true });
 
   const base = loadRedAlertSourceSections(process.cwd(), ['rules', 'aftermath']);
   const scenario = loadRedAlertSourceSections(process.cwd(), ['scenario']);
+  const buildingDataPath = path.join(process.cwd(), BUILDING_DATA_RELATIVE_PATH);
   const loadedFiles = [...base.files, ...scenario.files].map(file => file.absolutePath);
+  if (fs.existsSync(buildingDataPath)) {
+    loadedFiles.push(buildingDataPath);
+  }
   const mismatches: Mismatch[] = [];
+  const placedStructureTypes = collectPlacedStructureTypes(process.cwd());
+  const structureStrengthTruth = collectSectionNumberTruth(process.cwd(), 'Strength');
+  const buildingSizeTruth = loadBuildingSizeTruth(process.cwd());
 
   compareUnitTable(mismatches, UNIT_STATS, base.sections, base.files.map(file => file.absolutePath));
   compareWeaponTable(mismatches, WEAPON_STATS, base.sections, base.files.map(file => file.absolutePath));
@@ -289,6 +361,17 @@ async function main(): Promise<void> {
     base.files.map(file => file.absolutePath),
   );
   compareProductionTable(mismatches, PRODUCTION_ITEMS, base.sections, base.files.map(file => file.absolutePath));
+  compareStructureTables(
+    mismatches,
+    STRUCTURE_MAX_HP,
+    STRUCTURE_SIZE,
+    base.sections,
+    base.files.map(file => file.absolutePath),
+    placedStructureTypes,
+    structureStrengthTruth,
+    buildingSizeTruth,
+    fs.existsSync(buildingDataPath) ? buildingDataPath : undefined,
+  );
 
   const scenarioOverrides = buildScenarioRuleOverrides(scenario.sections);
   compareUnitTable(
@@ -327,6 +410,7 @@ async function main(): Promise<void> {
     weapon: 0,
     warhead: 0,
     production: 0,
+    structure: 0,
   };
   for (const mismatch of mismatches) {
     byCategory[mismatch.category]++;
@@ -358,6 +442,7 @@ async function main(): Promise<void> {
     `- Weapons: ${byCategory.weapon}`,
     `- Warheads: ${byCategory.warhead}`,
     `- Production: ${byCategory.production}`,
+    `- Structures: ${byCategory.structure}`,
     '',
     'Top mismatches:',
     ...topMismatches.map(mismatch => `- [${mismatch.category}] ${mismatch.id}.${mismatch.field}: TS=${JSON.stringify(mismatch.actual)} source=${JSON.stringify(mismatch.expected)}`),
@@ -368,7 +453,7 @@ async function main(): Promise<void> {
 
   console.log(`Source parity report written to ${JSON_OUTPUT}`);
   console.log(`Mismatch summary: ${report.summary.mismatchCount} total`);
-  console.log(`  unit=${byCategory.unit} weapon=${byCategory.weapon} warhead=${byCategory.warhead} production=${byCategory.production}`);
+  console.log(`  unit=${byCategory.unit} weapon=${byCategory.weapon} warhead=${byCategory.warhead} production=${byCategory.production} structure=${byCategory.structure}`);
   for (const mismatch of topMismatches.slice(0, 15)) {
     console.log(`  [${mismatch.category}] ${mismatch.id}.${mismatch.field}: TS=${JSON.stringify(mismatch.actual)} source=${JSON.stringify(mismatch.expected)}`);
   }

@@ -7,9 +7,9 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, getStripSide } from './types';
+import { House, Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, getStripSide } from './types';
 import { findPath } from './pathfinding';
-import type { MapStructure } from './scenario';
+import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 
 // === Serialized state types ===
 
@@ -121,12 +121,14 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
 }
 
 function serializeStructure(s: MapStructure, idx: number, isAlly: boolean, repairing: boolean): AgentStructure {
+  const [width, height] = STRUCTURE_SIZE[s.type] ?? [1, 1];
   const st: AgentStructure = {
     idx,
     t: s.type,
     h: s.house,
-    cx: s.cx,
-    cy: s.cy,
+    // Match the WASM harness, which reports Coord_Cell(Center_Coord()).
+    cx: s.cx + Math.floor((width - 1) / 2),
+    cy: s.cy + Math.floor((height - 1) / 2),
     hp: s.hp,
     mhp: s.maxHp,
     ally: isAlly,
@@ -152,8 +154,11 @@ export function serializeState(game: Game): AgentState {
   for (let i = 0; i < game.structures.length; i++) {
     const s = game.structures[i];
     if (!s.alive) continue;
-    const isAlly = s.house === game.playerHouse;
-    structures.push(serializeStructure(s, i, isAlly, game.isStructureRepairing(i)));
+    const isAlly = typeof game.isAllied === 'function'
+      ? game.isAllied(s.house, game.playerHouse)
+      : s.house === game.playerHouse;
+    const reportAsAlly = isAlly || s.house === House.Neutral;
+    structures.push(serializeStructure(s, i, reportAsAlly, game.isStructureRepairing(i)));
   }
 
   const production: AgentQueueItem[] = [];

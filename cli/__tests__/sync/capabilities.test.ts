@@ -69,6 +69,6 @@ describe('getSyncTier', () => {
   });
 
   it('returns "read only" when no write ops', () => {
-    expect(getSyncTier({ read: true, incrementalSync: false, update: false, reply: false, note: false, create: false })).toBe('read only');
+    expect(getSyncTier({ read: true, incrementalSync: false, webhookSync: false, update: false, reply: false, note: false, create: false })).toBe('read only');
   });
 });

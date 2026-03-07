@@ -20,6 +20,8 @@ const DEFAULT_SOURCE_FILES: LoadedSourceFile[] = [
   { kind: 'scenario', relativePath: 'public/ra/assets/SCA01EA.ini', absolutePath: '' },
 ];
 
+export const BUILDING_DATA_RELATIVE_PATH = 'src/EasterEgg/CnC_and_Red_Alert/RA/bdata.cpp';
+
 const ALLIED_OWNERS = new Set([
   'allies',
   'england',
@@ -167,4 +169,83 @@ export function parseVerses(raw: string | undefined): number[] | undefined {
   if (!raw) return undefined;
   const values = raw.split(',').map(part => Number.parseFloat(part.replace(/%/g, '').trim()) / 100);
   return values.every(value => Number.isFinite(value)) ? values : undefined;
+}
+
+function parsePlacedStructureType(sectionName: string, rawValue: string): string | undefined {
+  const parts = rawValue.split(',').map(part => part.trim()).filter(Boolean);
+  if (sectionName === 'STRUCTURES') {
+    return parts[1]?.toUpperCase();
+  }
+  if (sectionName === 'Base') {
+    return parts[0]?.toUpperCase();
+  }
+  return undefined;
+}
+
+export function collectPlacedStructureTypes(root = process.cwd()): string[] {
+  const assetsDir = path.join(root, 'public', 'ra', 'assets');
+  if (!fs.existsSync(assetsDir)) return [];
+
+  const structureTypes = new Set<string>();
+  for (const filename of fs.readdirSync(assetsDir)) {
+    if (!filename.toLowerCase().endsWith('.ini')) continue;
+    const absolutePath = path.join(assetsDir, filename);
+    const sections = parseIni(fs.readFileSync(absolutePath, 'utf8'));
+
+    for (const sectionName of ['STRUCTURES', 'Base'] as const) {
+      const section = sections.get(sectionName);
+      if (!section) continue;
+
+      for (const [key, value] of section.entries()) {
+        if (sectionName === 'Base' && (key === 'Count' || key === 'Player')) continue;
+        const type = parsePlacedStructureType(sectionName, value);
+        if (type) structureTypes.add(type);
+      }
+    }
+  }
+
+  return [...structureTypes].sort();
+}
+
+export function loadBuildingSizeTruth(root = process.cwd()): Record<string, [number, number]> {
+  const absolutePath = path.join(root, BUILDING_DATA_RELATIVE_PATH);
+  if (!fs.existsSync(absolutePath)) return {};
+
+  const source = fs.readFileSync(absolutePath, 'utf8');
+  const sizes: Record<string, [number, number]> = {};
+
+  for (const block of source.split('static BuildingTypeClass const ').slice(1)) {
+    const typeMatch = /\n\s*"([A-Z0-9]+)",\s*\/\/\s*NAME:/.exec(block);
+    const sizeMatch = /BSIZE_(\d)(\d)/.exec(block);
+    if (!typeMatch || !sizeMatch) continue;
+
+    sizes[typeMatch[1]] = [
+      Number.parseInt(sizeMatch[1], 10),
+      Number.parseInt(sizeMatch[2], 10),
+    ];
+  }
+
+  return sizes;
+}
+
+export function collectSectionNumberTruth(root = process.cwd(), key: string): Record<string, number> {
+  const assetsDir = path.join(root, 'public', 'ra', 'assets');
+  if (!fs.existsSync(assetsDir)) return {};
+
+  const truth: Record<string, number> = {};
+  for (const filename of fs.readdirSync(assetsDir).sort()) {
+    if (!filename.toLowerCase().endsWith('.ini')) continue;
+    const absolutePath = path.join(assetsDir, filename);
+    const sections = parseIni(fs.readFileSync(absolutePath, 'utf8'));
+
+    for (const [sectionName, section] of sections.entries()) {
+      if (truth[sectionName] !== undefined) continue;
+      const value = readNumber(section, key);
+      if (value !== undefined) {
+        truth[sectionName] = value;
+      }
+    }
+  }
+
+  return truth;
 }

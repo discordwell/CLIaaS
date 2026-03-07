@@ -1253,6 +1253,21 @@ Module.setStatus('Downloading...');
 (function() {
   window.__agentReady = false;
 
+  function normalizeAgentCommands(commands) {
+    if (!Array.isArray(commands)) return commands;
+    return commands.map(function(command) {
+      if (!command || typeof command !== 'object') return command;
+      var normalized = Object.assign({}, command);
+      if (Array.isArray(command.unitIds) && !Array.isArray(command.ids)) {
+        normalized.ids = command.unitIds;
+      }
+      if (typeof command.targetId === 'number' && typeof command.target !== 'number') {
+        normalized.target = command.targetId;
+      }
+      return normalized;
+    });
+  }
+
   window.__agentState = function() {
     if (!Module || !Module.ccall) return {error: 'not ready'};
     try {
@@ -1264,7 +1279,7 @@ Module.setStatus('Downloading...');
   window.__agentCommand = function(commands) {
     if (!Module || !Module.ccall) return {error: 'not ready'};
     try {
-      var str = Module.ccall('agent_command', 'string', ['string'], [JSON.stringify(commands)]);
+      var str = Module.ccall('agent_command', 'string', ['string'], [JSON.stringify(normalizeAgentCommands(commands))]);
       return JSON.parse(str);
     } catch(e) { return {error: e.message}; }
   };
@@ -1274,7 +1289,7 @@ Module.setStatus('Downloading...');
     try {
       // Ensure autoplay mode (prevents emscripten_sleep in Main_Loop)
       if (Module._set_autoplay) Module._set_autoplay(1);
-      var cmdJson = commands ? JSON.stringify(commands) : '';
+      var cmdJson = commands ? JSON.stringify(normalizeAgentCommands(commands)) : '';
       var str = Module.ccall('agent_step', 'string', ['number', 'string'], [n || 15, cmdJson], {async: true});
       if (str && typeof str.then === 'function') {
         return str.then(function(s) { try { return JSON.parse(s); } catch(e) { return {error: e.message}; } });

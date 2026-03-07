@@ -7,21 +7,21 @@
 
 ✓ Starting...
 ⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
-✓ Ready in 1076ms
-[22:46:49.321] [32mINFO[39m (29554): [36mRedis not available — workers not started (inline fallback active)[39m
+✓ Ready in 2.2s
+[01:08:29.774] [32mINFO[39m (45640): [36mRedis not available — workers not started (inline fallback active)[39m
     [35mmodule[39m: "queue:workers"
 { module: 'middleware' } {
   method: 'GET',
   pathname: '/',
-  requestId: '0fab5d95-485d-4915-90ac-7d8f7d6adf77'
+  requestId: '81609bae-b7ef-42a9-8f57-8bdc8bb13602'
 } 'Incoming request'
- GET / 200 in 812ms (compile: 487ms, proxy.ts: 52ms, render: 273ms)
+ GET / 200 in 1950ms (compile: 1611ms, proxy.ts: 56ms, render: 283ms)
 { module: 'middleware' } {
   method: 'GET',
   pathname: '/',
-  requestId: '8e62cb2a-1c8c-45eb-8122-06f99f4f5ab0'
+  requestId: 'b3fcdb73-c803-4426-b054-b78a241c2683'
 } 'Incoming request'
- GET /?anttest=agent&scenario=SCA01EA 200 in 37ms (compile: 1888µs, proxy.ts: 4ms, render: 31ms)
+ GET /?anttest=agent&scenario=SCA01EA 200 in 35ms (compile: 1790µs, proxy.ts: 5ms, render: 28ms)
 ⚠ ./node_modules/.pnpm/bullmq@5.70.1/node_modules/bullmq/dist/esm/classes
 Package ioredis can't be external
 The request ioredis/built/utils matches serverExternalPackages (or the default list).
@@ -41,18 +41,12 @@ Or update the import side to use a compatible request that can be resolved by No
 { module: 'middleware' } {
   method: 'GET',
   pathname: '/offline',
-  requestId: '2a9b174c-e8cb-46ea-946e-80685092f881'
+  requestId: 'f16ab15d-3ed0-4061-b8f5-e8ea295d2585'
 } 'Incoming request'
- GET /offline 200 in 40ms (compile: 13ms, proxy.ts: 3ms, render: 24ms)
- GET /ra/audio/sniper.wav 404 in 60ms (compile: 19ms, proxy.ts: 2ms, render: 39ms)
- GET /ra/audio/building_placed.wav 404 in 55ms (compile: 15ms, proxy.ts: 1863µs, render: 38ms)
- GET /ra/audio/mammoth_cannon.wav 404 in 57ms (compile: 22ms, proxy.ts: 1899µs, render: 33ms)
- GET /ra/audio/eva_building_captured.wav 404 in 66ms (compile: 11ms, proxy.ts: 1479µs, render: 53ms)
- GET /ra/audio/eva_silos_needed.wav 404 in 66ms (compile: 33ms, proxy.ts: 1839µs, render: 30ms)
- GET /ra/audio/eva_insufficient_funds.wav 404 in 66ms (compile: 27ms, proxy.ts: 1729µs, render: 38ms)
- GET /ra/audio/sniper.wav 404 in 76ms (compile: 8ms, proxy.ts: 1108µs, render: 67ms)
- GET /ra/audio/mammoth_cannon.wav 404 in 102ms (compile: 17ms, proxy.ts: 7ms, render: 78ms)
- GET /ra/audio/building_placed.wav 404 in 109ms (compile: 11ms, proxy.ts: 13ms, render: 85ms)
- GET /ra/audio/eva_building_captured.wav 404 in 48ms (compile: 5ms, proxy.ts: 1209µs, render: 42ms)
- GET /ra/audio/eva_insufficient_funds.wav 404 in 48ms (compile: 16ms, proxy.ts: 1204µs, render: 31ms)
- GET /ra/audio/eva_silos_needed.wav 404 in 45ms (compile: 30ms, proxy.ts: 1096µs, render: 14ms)
+ GET /offline 200 in 394ms (compile: 369ms, proxy.ts: 1644µs, render: 23ms)
+ GET /ra/audio/mammoth_cannon.wav 404 in 332ms (compile: 235ms, proxy.ts: 10ms, render: 87ms)
+ GET /ra/audio/eva_building_captured.wav 404 in 298ms (compile: 244ms, proxy.ts: 1249µs, render: 53ms)
+ GET /ra/audio/eva_silos_needed.wav 404 in 295ms (compile: 228ms, proxy.ts: 886µs, render: 66ms)
+ GET /ra/audio/eva_insufficient_funds.wav 404 in 295ms (compile: 235ms, proxy.ts: 978µs, render: 60ms)
+ GET /ra/audio/sniper.wav 404 in 359ms (compile: 284ms, proxy.ts: 2ms, render: 73ms)
+ GET /ra/audio/building_placed.wav 404 in 334ms (compile: 305ms, proxy.ts: 3ms, render: 26ms)

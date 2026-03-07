@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import AppNav from "./AppNav";
 import PublicNav from "./PublicNav";
+import CommandPalette from "./CommandPalette";
 
 /** Routes that render NO nav at all (they have their own or need none). */
 const NO_NAV_PREFIXES = ["/portal", "/sign-in", "/sign-up", "/chat/embed", "/demo-recording"];
@@ -27,8 +28,20 @@ export default function AppNavWrapper() {
   if (NO_NAV_PREFIXES.some((p) => pathname.startsWith(p))) return null;
 
   if (PUBLIC_NAV_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
-    return loggedIn ? <AppNav /> : <PublicNav />;
+    return loggedIn ? (
+      <>
+        <AppNav />
+        <CommandPalette />
+      </>
+    ) : (
+      <PublicNav />
+    );
   }
 
-  return <AppNav />;
+  return (
+    <>
+      <AppNav />
+      <CommandPalette />
+    </>
+  );
 }

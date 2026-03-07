@@ -100,7 +100,39 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		(int)obj->Strength,
 		(int)obj->Class_Of().MaxStrength,
 		(int)obj->Get_Mission(),
-		ally ? "true" : "false");
+			ally ? "true" : "false");
+}
+
+static int agent_power_produced(void)
+{
+	int total = 0;
+
+	if (!PlayerPtr) return 0;
+
+	for (int i = 0; i < Buildings.Count(); i++) {
+		BuildingClass* b = Buildings.Ptr(i);
+		if (!b || b->IsInLimbo || b->Strength <= 0) continue;
+		if (!PlayerPtr->Is_Ally(b)) continue;
+		total += b->Power_Output();
+	}
+
+	return total;
+}
+
+static int agent_power_consumed(void)
+{
+	int total = 0;
+
+	if (!PlayerPtr) return 0;
+
+	for (int i = 0; i < Buildings.Count(); i++) {
+		BuildingClass* b = Buildings.Ptr(i);
+		if (!b || b->IsInLimbo || b->Strength <= 0) continue;
+		if (!PlayerPtr->Is_Ally(b)) continue;
+		total += b->Class->Drain;
+	}
+
+	return total;
 }
 
 /* ======================================================================
@@ -284,12 +316,14 @@ char* agent_get_state(void)
 	}
 
 	HousesType player_house = PlayerPtr->Class->House;
+	int power_produced = agent_power_produced();
+	int power_consumed = agent_power_consumed();
 
 	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"power\":{\"produced\":%d,\"consumed\":%d},",
 		Frame,
 		(long)(PlayerPtr->Credits + PlayerPtr->Tiberium),
-		PlayerPtr->Power,
-		PlayerPtr->Drain);
+		power_produced,
+		power_consumed);
 
 	/* --- Friendly mobile units --- */
 	buf_cat("\"units\":[");

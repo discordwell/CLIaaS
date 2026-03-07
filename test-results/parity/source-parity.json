@@ -1,9 +1,10 @@
 {
-  "timestamp": "2026-03-07T01:30:32.486Z",
+  "timestamp": "2026-03-07T06:23:56.933Z",
   "loadedFiles": [
     "/Users/discordwell/Projects/Zachathon/public/ra/assets/rules.ini",
     "/Users/discordwell/Projects/Zachathon/public/ra/assets/aftrmath.ini",
-    "/Users/discordwell/Projects/Zachathon/public/ra/assets/SCA01EA.ini"
+    "/Users/discordwell/Projects/Zachathon/public/ra/assets/SCA01EA.ini",
+    "/Users/discordwell/Projects/Zachathon/src/EasterEgg/CnC_and_Red_Alert/RA/bdata.cpp"
   ],
   "summary": {
     "mismatchCount": 0,
@@ -11,7 +12,8 @@
       "unit": 0,
       "weapon": 0,
       "warhead": 0,
-      "production": 0
+      "production": 0,
+      "structure": 0
     }
   },
   "mismatches": []

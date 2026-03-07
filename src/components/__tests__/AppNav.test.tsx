@@ -45,15 +45,17 @@ describe('AppNav', () => {
     expect(brandLink.closest('a')).toHaveAttribute('href', '/');
   });
 
-  it('renders all navigation links', () => {
+  it('renders the essential navigation links', () => {
     render(<AppNav />);
-    const expectedLabels = [
-      'Dashboard', 'Rules', 'Chat', 'Channels', 'AI',
-      'Analytics', 'SLA', 'Integrations', 'Security', 'Enterprise', 'Billing', 'Docs',
-    ];
+    const expectedLabels = ['Dashboard', 'Tickets', 'Chat', 'AI'];
     for (const label of expectedLabels) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+  });
+
+  it('renders the command palette trigger', () => {
+    render(<AppNav />);
+    expect(screen.getByTitle('Command palette (⌘K)')).toBeInTheDocument();
   });
 
   it('renders correct hrefs for nav links', () => {
@@ -61,11 +63,11 @@ describe('AppNav', () => {
     const dashboardLink = screen.getByText('Dashboard').closest('a');
     expect(dashboardLink).toHaveAttribute('href', '/dashboard');
 
-    const rulesLink = screen.getByText('Rules').closest('a');
-    expect(rulesLink).toHaveAttribute('href', '/rules');
+    const chatLink = screen.getByText('Chat').closest('a');
+    expect(chatLink).toHaveAttribute('href', '/chat');
 
-    const docsLink = screen.getByText('Docs').closest('a');
-    expect(docsLink).toHaveAttribute('href', '/docs');
+    const aiLink = screen.getByText('AI').closest('a');
+    expect(aiLink).toHaveAttribute('href', '/ai');
   });
 
   it('renders a Sign Out button that calls signout API', async () => {
@@ -91,18 +93,18 @@ describe('AppNav', () => {
   });
 
   it('highlights the active nav link for sub-routes', () => {
-    mockedUsePathname.mockReturnValue('/rules/edit/123');
+    mockedUsePathname.mockReturnValue('/ai/setup');
     render(<AppNav />);
-    const rulesLink = screen.getByText('Rules').closest('a');
-    expect(rulesLink?.className).toContain('bg-zinc-950');
-    expect(rulesLink?.className).toContain('text-white');
+    const aiLink = screen.getByText('AI').closest('a');
+    expect(aiLink?.className).toContain('bg-zinc-950');
+    expect(aiLink?.className).toContain('text-white');
   });
 
   it('does not highlight inactive nav links', () => {
     mockedUsePathname.mockReturnValue('/dashboard');
     render(<AppNav />);
-    const rulesLink = screen.getByText('Rules').closest('a');
-    expect(rulesLink?.className).toContain('text-zinc-500');
-    expect(rulesLink?.className).not.toContain('bg-zinc-950 text-white');
+    const chatLink = screen.getByText('Chat').closest('a');
+    expect(chatLink?.className).toContain('text-zinc-500');
+    expect(chatLink?.className).not.toContain('bg-zinc-950 text-white');
   });
 });
