@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-03-07T01:00Z — Session 114: Plan 19 Phase 5 — Production DB RLS Activation
+- **Migrations applied**: All 27 migrations run on VPS PostgreSQL (was at 64 tables, now 147)
+- **Manual fixes**: Created missing `chatbots`, `chatbot_versions/sessions/analytics`, `workflows`, `rule_executions`, `survey_responses/configs`, `ticket_events` tables + `agent_availability`, `survey_type`, `survey_trigger`, `ticket_event_type/actor` enums + `role_permissions` with unique index workaround
+- **RLS activated**: 143 policies, 143 tables with ENABLE+FORCE RLS
+- **`cliaas_app` role created**: No BYPASSRLS, password set, all table/sequence grants
+- **`DATABASE_APP_ROLE_URL`** added to `/opt/cliaas/shared/.env`
+- **Verification**: cliaas_app can SET LOCAL, queries without workspace_id are blocked (uuid cast error), scoped queries work correctly
+- **Deployed**: Latest code with all withRls store updates live on cliaas.com
+- **Plan 19 status**: Phases 1-5 complete. Phase 6 (wet test) remaining.
+
+## 2026-03-07T00:10Z — Session 113: Plan 19 RLS Sessions 2+3 — All Stores + API Audit
+- **Session 2** (commit 29855e2): withRls into canned/macro/signature/forums/views stores + 18 cross-workspace isolation tests
+- **Session 3** (commit 2f48fec): withRls into remaining 25+ stores (QA×4, campaigns, tours, messages, customers×2, predictions, integrations, routing, WFM, plugins×2, automation×3, sync, AI×2) — 103 files, 2143 insertions
+- **API route audit**: All authenticated routes now pass `auth.user.workspaceId` to store calls (chatbots, forums, plugins, QA, customers)
+- **Schema completeness test**: Verifies all workspace-scoped tables have workspaceId + RLS policies
+- **Fixed 4 test mock files**: Added `withRls` to `vi.mock('@/lib/store-helpers')` in rule-versioning, sync-health, audit-store, bootstrap tests
+- **4666/4667 tests pass** (1 pre-existing Easter Egg FP)
+
 ## 2026-03-06T23:35Z — Session 112: Plan 19 — PostgreSQL RLS Big-Bang Workspace Scoping
 - **Phase 1**: `withRls()` helper added to `src/lib/store-helpers.ts` — transaction-scoped `SET LOCAL app.current_workspace_id`, null fallback for JSONL mode
 - **Phase 2**: Migration `0026_rls_big_bang.sql` — 135 CREATE POLICY, 107 ENABLE RLS, 143 FORCE RLS statements
