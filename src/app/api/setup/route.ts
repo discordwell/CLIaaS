@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest) {
     dbConnected = result.rows?.[0]?.ok === 1;
     await client.end();
   } catch (err) {
-    dbError = err instanceof Error ? err.message : 'Database connection failed';
+    dbError = safeErrorMessage(err, 'Database connection failed');
   }
 
   if (!dbConnected) {

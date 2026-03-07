@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { messageCreated } from '@/lib/events';
 
 export const dynamic = 'force-dynamic';
@@ -125,7 +125,7 @@ export async function POST(
       });
     } catch (err) {
       return NextResponse.json(
-        { error: err instanceof Error ? err.message : 'Failed to create note' },
+        { error: safeErrorMessage(err, 'Failed to create note') },
         { status: 500 },
       );
     }

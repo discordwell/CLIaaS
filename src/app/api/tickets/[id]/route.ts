@@ -8,7 +8,7 @@ import { helpcrunchUpdateChat } from "@cli/connectors/helpcrunch";
 import { freshdeskUpdateTicket } from "@cli/connectors/freshdesk";
 import { grooveUpdateTicket } from "@cli/connectors/groove";
 import { ticketUpdated, ticketResolved } from "@/lib/events";
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 import { canCollaboratorAccessTicket } from '@/lib/rbac/collaborator-scope';
 
@@ -156,7 +156,7 @@ export async function PATCH(
     return NextResponse.json({ status: 'ok', updated: updates });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Update failed' },
+      { error: safeErrorMessage(err, 'Update failed') },
       { status: 500 },
     );
   }

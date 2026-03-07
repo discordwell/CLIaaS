@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { createLogger } from '@/lib/logger';
 
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     const rawBody = await request.text();
     event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Invalid signature';
+    const message = safeErrorMessage(err, 'Invalid signature');
     logger.warn({ error: message }, 'Webhook signature verification failed');
     return NextResponse.json({ error: `Webhook Error: ${message}` }, { status: 400 });
   }

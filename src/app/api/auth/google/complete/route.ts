@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 import { createToken, setSessionCookie, getJwtSecret } from '@/lib/auth';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { createOrJoinAccount, AccountExistsError } from '@/lib/auth/create-account';
 
 export const dynamic = 'force-dynamic';
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     if (err instanceof AccountExistsError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
-    const message = err instanceof Error ? err.message : 'Signup failed';
+    const message = safeErrorMessage(err, 'Signup failed');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

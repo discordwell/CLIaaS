@@ -5,7 +5,7 @@ import {
   updateAutomationRule,
   removeAutomationRule,
 } from '@/lib/automation/executor';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -45,7 +45,7 @@ export async function PATCH(
     return NextResponse.json({ rule: updated });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Update failed' },
+      { error: safeErrorMessage(err, 'Update failed') },
       { status: 500 },
     );
   }

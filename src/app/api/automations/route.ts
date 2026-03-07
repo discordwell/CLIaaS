@@ -5,7 +5,7 @@ import {
   addAutomationRule,
 } from '@/lib/automation/executor';
 import type { Rule } from '@/lib/automation/engine';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ rule }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create rule' },
+      { error: safeErrorMessage(err, 'Failed to create rule') },
       { status: 500 },
     );
   }

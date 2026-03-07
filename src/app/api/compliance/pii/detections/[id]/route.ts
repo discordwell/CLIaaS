@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { reviewDetection } from '@/lib/compliance/pii-masking';
 
 export const dynamic = 'force-dynamic';
@@ -33,7 +33,7 @@ export async function PATCH(
     return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to review detection' },
+      { error: safeErrorMessage(err, 'Failed to review detection') },
       { status: 500 },
     );
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list reports' },
+      { error: safeErrorMessage(err, 'Failed to list reports') },
       { status: 500 },
     );
   }
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create report' },
+      { error: safeErrorMessage(err, 'Failed to create report') },
       { status: 500 },
     );
   }

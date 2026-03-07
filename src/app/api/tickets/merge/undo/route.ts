@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: 'ok', mergeLogId, undone: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Unmerge failed' },
+      { error: safeErrorMessage(err, 'Unmerge failed') },
       { status: 500 },
     );
   }

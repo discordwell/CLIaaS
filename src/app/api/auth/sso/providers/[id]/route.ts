@@ -7,7 +7,7 @@ import {
   type SSOProvider,
 } from '@/lib/auth/sso-config';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +35,7 @@ export async function GET(
     return NextResponse.json({ provider: sanitize(provider) });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get SSO provider' },
+      { error: safeErrorMessage(err, 'Failed to get SSO provider') },
       { status: 500 }
     );
   }
@@ -95,7 +95,7 @@ export async function PATCH(
     return NextResponse.json({ provider: sanitize(updated) });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update SSO provider' },
+      { error: safeErrorMessage(err, 'Failed to update SSO provider') },
       { status: 500 }
     );
   }
@@ -125,7 +125,7 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to delete SSO provider' },
+      { error: safeErrorMessage(err, 'Failed to delete SSO provider') },
       { status: 500 }
     );
   }

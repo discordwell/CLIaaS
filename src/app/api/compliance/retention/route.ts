@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listRetentionPolicies, createRetentionPolicy } from '@/lib/compliance';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { recordAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ policies });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list retention policies' },
+      { error: safeErrorMessage(err, 'Failed to list retention policies') },
       { status: 500 }
     );
   }
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ policy }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create retention policy' },
+      { error: safeErrorMessage(err, 'Failed to create retention policy') },
       { status: 500 }
     );
   }

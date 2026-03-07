@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { scanEntity } from '@/lib/compliance/pii-masking';
 
 export const dynamic = 'force-dynamic';
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ detections });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to scan entity for PII' },
+      { error: safeErrorMessage(err, 'Failed to scan entity for PII') },
       { status: 500 },
     );
   }

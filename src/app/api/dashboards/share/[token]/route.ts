@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -35,7 +36,7 @@ export async function GET(
     return NextResponse.json({ error: 'Dashboard not found' }, { status: 404 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load shared dashboard' },
+      { error: safeErrorMessage(err, 'Failed to load shared dashboard') },
       { status: 500 },
     );
   }

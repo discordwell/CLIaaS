@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { computeAnalytics, analyticsToCSV } from '@/lib/analytics';
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to export analytics' },
+      { error: safeErrorMessage(err, 'Failed to export analytics') },
       { status: 500 }
     );
   }

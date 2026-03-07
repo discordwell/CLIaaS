@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +40,7 @@ export async function GET(
     return NextResponse.json({ view });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get view' },
+      { error: safeErrorMessage(err, 'Failed to get view') },
       { status: 500 },
     );
   }
@@ -109,7 +109,7 @@ export async function PATCH(
     return NextResponse.json({ view });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update view' },
+      { error: safeErrorMessage(err, 'Failed to update view') },
       { status: 500 },
     );
   }
@@ -151,7 +151,7 @@ export async function DELETE(
     return NextResponse.json({ deleted: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to delete view' },
+      { error: safeErrorMessage(err, 'Failed to delete view') },
       { status: 500 },
     );
   }

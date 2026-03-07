@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import {
   getCustomerSegments,
   createCustomerSegment,
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ segments });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load segments' },
+      { error: safeErrorMessage(err, 'Failed to load segments') },
       { status: 500 },
     );
   }
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ segment }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create segment' },
+      { error: safeErrorMessage(err, 'Failed to create segment') },
       { status: 500 },
     );
   }

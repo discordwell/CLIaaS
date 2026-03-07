@@ -7,7 +7,7 @@ import { helpcrunchPostMessage } from '@cli/connectors/helpcrunch';
 import { freshdeskReply, freshdeskAddNote } from '@cli/connectors/freshdesk';
 import { groovePostMessage } from '@cli/connectors/groove';
 import { messageCreated } from '@/lib/events';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export async function POST(
@@ -175,7 +175,7 @@ export async function POST(
     return NextResponse.json({ status: 'ok', messageId });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Reply failed' },
+      { error: safeErrorMessage(err, 'Reply failed') },
       { status: 500 },
     );
   }

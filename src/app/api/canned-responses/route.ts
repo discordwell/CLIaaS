@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getCannedResponses, createCannedResponse } from '@/lib/canned/canned-store';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ cannedResponses: responses });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load canned responses' },
+      { error: safeErrorMessage(err, 'Failed to load canned responses') },
       { status: 500 },
     );
   }
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ cannedResponse: cr }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create canned response' },
+      { error: safeErrorMessage(err, 'Failed to create canned response') },
       { status: 500 },
     );
   }

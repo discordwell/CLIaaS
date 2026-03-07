@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { generateAccessReview } from '@/lib/security/access-review';
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(report);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to generate access review' },
+      { error: safeErrorMessage(err, 'Failed to generate access review') },
       { status: 500 },
     );
   }

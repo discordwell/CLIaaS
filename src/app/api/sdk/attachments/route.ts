@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { validateSession, updateSessionActivity } from '@/lib/channels/sdk-session';
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to upload attachment' },
+      { error: safeErrorMessage(err, 'Failed to upload attachment') },
       { status: 500 },
     );
   }

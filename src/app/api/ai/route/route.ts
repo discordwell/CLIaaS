@@ -7,7 +7,7 @@ import {
   DEFAULT_ROUTING_CONFIG,
   type RoutingConfig,
 } from '@/lib/ai/router';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       {
-        error: err instanceof Error ? err.message : 'Routing failed',
+        error: safeErrorMessage(err, 'Routing failed'),
       },
       { status: 500 },
     );

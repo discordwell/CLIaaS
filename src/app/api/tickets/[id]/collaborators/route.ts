@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,7 +52,7 @@ export async function GET(
 
     return NextResponse.json({ collaborators: rows });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed to list collaborators';
+    const msg = safeErrorMessage(err, 'Failed to list collaborators');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -124,7 +124,7 @@ export async function POST(
 
     return NextResponse.json({ collaborator: created }, { status: 201 });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed to add collaborator';
+    const msg = safeErrorMessage(err, 'Failed to add collaborator');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -181,7 +181,7 @@ export async function DELETE(
 
     return NextResponse.json({ removed: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed to remove collaborator';
+    const msg = safeErrorMessage(err, 'Failed to remove collaborator');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { executeViewQuery } from '@/lib/views/executor';
 import { loadTickets } from '@/lib/data';
 import type { ViewQuery } from '@/lib/views/types';
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ count });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed' },
+      { error: safeErrorMessage(err, 'Failed') },
       { status: 500 },
     );
   }

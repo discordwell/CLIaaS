@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ export async function GET(
     return NextResponse.json({ error: 'Report not found' }, { status: 404 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get report' },
+      { error: safeErrorMessage(err, 'Failed to get report') },
       { status: 500 },
     );
   }
@@ -88,7 +88,7 @@ export async function PUT(
     return NextResponse.json({ error: 'Not supported in JSONL mode' }, { status: 501 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update report' },
+      { error: safeErrorMessage(err, 'Failed to update report') },
       { status: 500 },
     );
   }
@@ -119,7 +119,7 @@ export async function DELETE(
     return NextResponse.json({ error: 'Not supported in JSONL mode' }, { status: 501 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to delete report' },
+      { error: safeErrorMessage(err, 'Failed to delete report') },
       { status: 500 },
     );
   }

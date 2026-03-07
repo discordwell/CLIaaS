@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getListing } from '@/lib/plugins/marketplace-store';
@@ -18,7 +19,7 @@ export async function GET(
     return NextResponse.json({ listing });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get listing' },
+      { error: safeErrorMessage(err, 'Failed to get listing') },
       { status: 500 }
     );
   }

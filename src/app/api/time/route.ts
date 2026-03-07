@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getTimeEntries, logManualTime } from '@/lib/time-tracking';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ entries });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get time entries' },
+      { error: safeErrorMessage(err, 'Failed to get time entries') },
       { status: 500 }
     );
   }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ entry }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to log time' },
+      { error: safeErrorMessage(err, 'Failed to log time') },
       { status: 500 }
     );
   }

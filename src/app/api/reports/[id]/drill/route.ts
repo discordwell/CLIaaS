@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { drillDown } from '@/lib/reports/engine';
 
 export const dynamic = 'force-dynamic';
@@ -57,7 +57,7 @@ export async function POST(
     return NextResponse.json({ drillDown: result });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to drill down' },
+      { error: safeErrorMessage(err, 'Failed to drill down') },
       { status: 500 },
     );
   }

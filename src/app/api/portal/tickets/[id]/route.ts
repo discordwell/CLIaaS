@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadTickets, loadMessages } from '@/lib/data';
 import { getPortalEmail } from '@/lib/portal/get-portal-email';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -188,7 +188,7 @@ export async function GET(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load ticket' },
+      { error: safeErrorMessage(err, 'Failed to load ticket') },
       { status: 500 }
     );
   }
@@ -342,7 +342,7 @@ export async function POST(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to add reply' },
+      { error: safeErrorMessage(err, 'Failed to add reply') },
       { status: 500 }
     );
   }

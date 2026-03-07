@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { getResolution } from '@/lib/ai/store';
 import { approveEntry, rejectEntry, editEntry } from '@/lib/ai/approval-queue';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,7 +68,7 @@ export async function PATCH(
     return NextResponse.json({ entry: result });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Update failed' },
+      { error: safeErrorMessage(err, 'Update failed') },
       { status: 500 },
     );
   }

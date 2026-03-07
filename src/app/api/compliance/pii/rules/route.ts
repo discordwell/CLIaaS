@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getSensitivityRules, upsertSensitivityRules } from '@/lib/compliance/pii-rules';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ rules });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get sensitivity rules' },
+      { error: safeErrorMessage(err, 'Failed to get sensitivity rules') },
       { status: 500 },
     );
   }
@@ -42,7 +42,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ rules: result });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to upsert sensitivity rules' },
+      { error: safeErrorMessage(err, 'Failed to upsert sensitivity rules') },
       { status: 500 },
     );
   }

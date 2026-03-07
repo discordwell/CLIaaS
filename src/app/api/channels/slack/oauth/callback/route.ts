@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getSlackClientId, getSlackClientSecret } from '@/lib/channels/slack-intake';
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: `OAuth callback failed: ${err instanceof Error ? err.message : 'Unknown error'}` },
+      { error: `OAuth callback failed: ${safeErrorMessage(err, 'Unknown error')}` },
       { status: 500 },
     );
   }

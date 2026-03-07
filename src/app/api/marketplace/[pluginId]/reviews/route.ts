@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getListing, getReviews, upsertReview } from '@/lib/plugins/marketplace-store';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,7 @@ export async function GET(
     return NextResponse.json({ reviews });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get reviews' },
+      { error: safeErrorMessage(err, 'Failed to get reviews') },
       { status: 500 }
     );
   }
@@ -67,7 +67,7 @@ export async function POST(
     return NextResponse.json({ review }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to submit review' },
+      { error: safeErrorMessage(err, 'Failed to submit review') },
       { status: 500 }
     );
   }

@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { getAutomationRules } from '@/lib/automation/executor';
 import { evaluateRule } from '@/lib/automation/engine';
 import type { TicketContext } from '@/lib/automation/engine';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -44,7 +44,7 @@ export async function POST(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Test failed' },
+      { error: safeErrorMessage(err, 'Test failed') },
       { status: 500 },
     );
   }

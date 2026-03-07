@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { executeReport } from '@/lib/reports/engine';
 import { computeCacheKey, getCached, setCache } from '@/lib/reports/cache';
 
@@ -70,7 +70,7 @@ export async function POST(
     return NextResponse.json({ result });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to execute report' },
+      { error: safeErrorMessage(err, 'Failed to execute report') },
       { status: 500 },
     );
   }

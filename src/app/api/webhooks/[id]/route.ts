@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getWebhook, updateWebhook, deleteWebhook } from '@/lib/webhooks';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,7 @@ export async function GET(
     return NextResponse.json({ webhook });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get webhook' },
+      { error: safeErrorMessage(err, 'Failed to get webhook') },
       { status: 500 }
     );
   }
@@ -50,7 +50,7 @@ export async function PATCH(
     return NextResponse.json({ webhook });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update webhook' },
+      { error: safeErrorMessage(err, 'Failed to update webhook') },
       { status: 500 }
     );
   }
@@ -74,7 +74,7 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to delete webhook' },
+      { error: safeErrorMessage(err, 'Failed to delete webhook') },
       { status: 500 }
     );
   }

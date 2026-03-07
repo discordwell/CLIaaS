@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { type ConnectorName, getAuth } from '@/lib/connector-auth';
@@ -56,7 +57,7 @@ export async function POST(
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Verification failed' },
+      { error: safeErrorMessage(err, 'Verification failed') },
       { status: 500 },
     );
   }

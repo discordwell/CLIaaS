@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { upsertListing } from '@/lib/plugins/marketplace-store';
 import type { PluginManifestV2 } from '@/lib/plugins/types';
 
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ listing }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to publish plugin' },
+      { error: safeErrorMessage(err, 'Failed to publish plugin') },
       { status: 500 }
     );
   }

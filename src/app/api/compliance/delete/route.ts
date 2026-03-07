@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { deleteUserData } from '@/lib/compliance';
 import { deleteUserDataFromDb } from '@/lib/compliance/gdpr-db';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { recordAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to delete user data' },
+      { error: safeErrorMessage(err, 'Failed to delete user data') },
       { status: 500 }
     );
   }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parseInboundEmail, extractTicketId, extractEmailAddress } from '@/lib/email/parser';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('email:inbound');
@@ -143,7 +143,7 @@ export async function POST(request: Request) {
     }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to process email' },
+      { error: safeErrorMessage(err, 'Failed to process email') },
       { status: 500 }
     );
   }

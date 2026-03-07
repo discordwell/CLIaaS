@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { loadTickets } from '@/lib/data';
 import { generateToken } from '@/lib/portal/magic-link';
 import { sendMagicLink } from '@/lib/portal/send-magic-link';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { validateEmail } from '@/lib/email-validation';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/security/rate-limiter';
 
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Authentication failed' },
+      { error: safeErrorMessage(err, 'Authentication failed') },
       { status: 500 }
     );
   }

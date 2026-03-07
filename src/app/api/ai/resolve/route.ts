@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { resolveTicket } from '@/lib/ai/resolution-pipeline';
 import { loadTickets, loadMessages, loadKBArticles } from '@/lib/data';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(outcome);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Resolution failed' },
+      { error: safeErrorMessage(err, 'Resolution failed') },
       { status: 500 },
     );
   }

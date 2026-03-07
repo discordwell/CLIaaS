@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getCannedResponse, incrementCannedUsage } from '@/lib/canned/canned-store';
 import { resolveMergeVariables, type MergeContext } from '@/lib/canned/merge';
 import { loadTickets } from '@/lib/data';
@@ -72,7 +72,7 @@ export async function POST(
     return NextResponse.json({ resolved });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to resolve' },
+      { error: safeErrorMessage(err, 'Failed to resolve') },
       { status: 500 },
     );
   }

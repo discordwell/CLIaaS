@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { updateUser, removeUser, sanitizeUser } from '@/lib/user-service';
@@ -25,7 +26,7 @@ export async function PATCH(
     const updated = await updateUser(id, auth.user.workspaceId, body, auth.user.role, auth.user.tenantId);
     return NextResponse.json({ user: sanitizeUser(updated) });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Update failed';
+    const message = safeErrorMessage(err, 'Update failed');
     const status = message.includes('not found') ? 404 : 400;
     return NextResponse.json({ error: message }, { status });
   }
@@ -44,7 +45,7 @@ export async function DELETE(
     await removeUser(id, auth.user.workspaceId, auth.user.id);
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Remove failed';
+    const message = safeErrorMessage(err, 'Remove failed');
     const status = message.includes('not found') ? 404 : 400;
     return NextResponse.json({ error: message }, { status });
   }

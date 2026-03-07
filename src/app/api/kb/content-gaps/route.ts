@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load content gaps' },
+      { error: safeErrorMessage(err, 'Failed to load content gaps') },
       { status: 500 },
     );
   }
@@ -97,7 +98,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to analyze content gaps' },
+      { error: safeErrorMessage(err, 'Failed to analyze content gaps') },
       { status: 500 },
     );
   }

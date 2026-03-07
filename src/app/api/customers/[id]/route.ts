@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { loadCustomers } from '@/lib/data';
 import {
   getCustomerActivities,
@@ -45,7 +45,7 @@ export async function GET(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load customer' },
+      { error: safeErrorMessage(err, 'Failed to load customer') },
       { status: 500 },
     );
   }
@@ -101,7 +101,7 @@ export async function PATCH(
     return NextResponse.json({ customer: enriched });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update customer' },
+      { error: safeErrorMessage(err, 'Failed to update customer') },
       { status: 500 },
     );
   }

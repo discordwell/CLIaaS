@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getDb } from '@/db';
 import * as schema from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -73,7 +73,7 @@ export async function PATCH(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update BAA record' },
+      { error: safeErrorMessage(err, 'Failed to update BAA record') },
       { status: 500 },
     );
   }

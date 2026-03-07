@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getTeamsIntegration } from '@/lib/integrations/teams';
 import type { TeamsActivityPayload } from '@/lib/integrations/teams';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(status);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get Teams status' },
+      { error: safeErrorMessage(err, 'Failed to get Teams status') },
       { status: 500 }
     );
   }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to process Teams event' },
+      { error: safeErrorMessage(err, 'Failed to process Teams event') },
       { status: 500 }
     );
   }

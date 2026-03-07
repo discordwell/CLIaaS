@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ tags: rows });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load tags' },
+      { error: safeErrorMessage(err, 'Failed to load tags') },
       { status: 500 },
     );
   }
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ tag: row }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create tag' },
+      { error: safeErrorMessage(err, 'Failed to create tag') },
       { status: 500 },
     );
   }

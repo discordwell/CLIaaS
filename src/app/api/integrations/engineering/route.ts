@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, provider: 'jira', serverTitle: info.serverTitle });
     } catch (err) {
       return NextResponse.json(
-        { error: `Jira connection failed: ${err instanceof Error ? err.message : String(err)}` },
+        { error: `Jira connection failed: ${safeErrorMessage(err, "connection failed")}` },
         { status: 400 },
       );
     }
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, provider: 'linear', user: viewer.name });
     } catch (err) {
       return NextResponse.json(
-        { error: `Linear connection failed: ${err instanceof Error ? err.message : String(err)}` },
+        { error: `Linear connection failed: ${safeErrorMessage(err, "connection failed")}` },
         { status: 400 },
       );
     }

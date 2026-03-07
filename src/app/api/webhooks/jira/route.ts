@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { processJiraWebhook } from '@/lib/integrations/engineering-sync';
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, event: event.eventType });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Webhook processing failed' },
+      { error: safeErrorMessage(err, 'Webhook processing failed') },
       { status: 500 },
     );
   }

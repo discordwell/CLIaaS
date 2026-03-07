@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
@@ -18,7 +19,7 @@ export async function GET(
     return NextResponse.json({ ticketId: id, history });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load merge history' },
+      { error: safeErrorMessage(err, 'Failed to load merge history') },
       { status: 500 },
     );
   }

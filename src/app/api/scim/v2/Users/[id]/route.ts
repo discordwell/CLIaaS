@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { requireSCIMAuth } from '@/lib/scim/auth';
 import { toSCIMUser, scimError, applyUserPatchOps, type SCIMPatchOp } from '@/lib/scim/schema';
 import { getUsers, setUsers } from '@/lib/scim/store';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,7 +47,7 @@ export async function PATCH(
     return NextResponse.json(toSCIMUser(user));
   } catch (err) {
     return NextResponse.json(
-      scimError(500, err instanceof Error ? err.message : 'Update failed'),
+      scimError(500, safeErrorMessage(err, 'Update failed')),
       { status: 500 },
     );
   }

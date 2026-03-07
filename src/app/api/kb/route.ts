@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadKBArticles, createKBArticle } from '@/lib/data';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ articles, total: articles.length });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load articles' },
+      { error: safeErrorMessage(err, 'Failed to load articles') },
       { status: 500 }
     );
   }
@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ article }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to create article';
+    const message = safeErrorMessage(err, 'Failed to create article');
     const status = message.includes('not configured') ? 503 : 500;
     return NextResponse.json({ error: message }, { status });
   }

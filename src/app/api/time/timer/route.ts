@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { startTimer, stopTimer, getActiveTimers } from '@/lib/time-tracking';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ timers });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get active timers' },
+      { error: safeErrorMessage(err, 'Failed to get active timers') },
       { status: 500 }
     );
   }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ entry, status: 'started' }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to toggle timer' },
+      { error: safeErrorMessage(err, 'Failed to toggle timer') },
       { status: 500 }
     );
   }

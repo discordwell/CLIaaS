@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { pushZendeskOutboundTickets } from "@/lib/zendesk/outbound";
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: "ok", ...result });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "sync failed" },
+      { error: safeErrorMessage(err, "sync failed") },
       { status: 500 },
     );
   }

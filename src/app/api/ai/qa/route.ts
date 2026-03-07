@@ -6,7 +6,7 @@ import {
   recordQAReport,
   getQAOverview,
 } from '@/lib/ai/qa';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       {
-        error: err instanceof Error ? err.message : 'QA scoring failed',
+        error: safeErrorMessage(err, 'QA scoring failed'),
       },
       { status: 500 },
     );

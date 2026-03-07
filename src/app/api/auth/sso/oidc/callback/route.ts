@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getProvider } from '@/lib/auth/sso-config';
@@ -128,7 +129,7 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'OIDC callback failed' },
+      { error: safeErrorMessage(err, 'OIDC callback failed') },
       { status: 500 }
     );
   }

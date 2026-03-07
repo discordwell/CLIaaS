@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getProviders } from '@/lib/auth/sso-config';
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'SAML callback failed' },
+      { error: safeErrorMessage(err, 'SAML callback failed') },
       { status: 500 }
     );
   }

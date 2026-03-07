@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { exportUserData } from '@/lib/compliance';
 import { exportUserDataFromDb } from '@/lib/compliance/gdpr-db';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { recordAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to export user data' },
+      { error: safeErrorMessage(err, 'Failed to export user data') },
       { status: 500 }
     );
   }

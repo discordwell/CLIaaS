@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export async function POST(
   request: NextRequest,
@@ -43,7 +43,7 @@ export async function POST(
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to reply to side conversation' },
+      { error: safeErrorMessage(err, 'Failed to reply to side conversation') },
       { status: 500 },
     );
   }

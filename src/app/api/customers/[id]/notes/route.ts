@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import {
   getCustomerNotes,
   addCustomerNote,
@@ -23,7 +23,7 @@ export async function GET(
     return NextResponse.json({ notes });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load notes' },
+      { error: safeErrorMessage(err, 'Failed to load notes') },
       { status: 500 },
     );
   }
@@ -60,7 +60,7 @@ export async function POST(
     return NextResponse.json({ note }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create note' },
+      { error: safeErrorMessage(err, 'Failed to create note') },
       { status: 500 },
     );
   }

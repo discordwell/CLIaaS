@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getWebhook, getWebhookLogs } from '@/lib/webhooks';
@@ -25,7 +26,7 @@ export async function GET(
     return NextResponse.json({ logs });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get webhook logs' },
+      { error: safeErrorMessage(err, 'Failed to get webhook logs') },
       { status: 500 }
     );
   }

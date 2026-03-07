@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { requireSCIMAuth } from '@/lib/scim/auth';
 import { toSCIMUser, wrapListResponse, scimError, type SCIMUser } from '@/lib/scim/schema';
 import { getUsers, setUsers } from '@/lib/scim/store';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(toSCIMUser(user), { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      scimError(500, err instanceof Error ? err.message : 'Create failed'),
+      scimError(500, safeErrorMessage(err, 'Create failed')),
       { status: 500 },
     );
   }

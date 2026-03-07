@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createHmac } from 'crypto';
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     return await handlePayload(payload as Record<string, unknown>);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Webhook processing failed' },
+      { error: safeErrorMessage(err, 'Webhook processing failed') },
       { status: 500 },
     );
   }

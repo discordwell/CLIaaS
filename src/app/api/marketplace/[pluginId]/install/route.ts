@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getListing, incrementInstallCount } from '@/lib/plugins/marketplace-store';
 import { installPlugin, getInstallationByPluginId } from '@/lib/plugins/store';
 
@@ -55,7 +55,7 @@ export async function POST(
     return NextResponse.json({ installation }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to install plugin' },
+      { error: safeErrorMessage(err, 'Failed to install plugin') },
       { status: 500 }
     );
   }

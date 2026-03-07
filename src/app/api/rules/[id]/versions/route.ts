@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { createVersion, listVersions, restoreVersion } from '@/lib/automation/versioning';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,7 @@ export async function GET(
     return NextResponse.json({ versions });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list versions' },
+      { error: safeErrorMessage(err, 'Failed to list versions') },
       { status: 500 },
     );
   }
@@ -59,7 +59,7 @@ export async function POST(
     return NextResponse.json({ version }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to process version request' },
+      { error: safeErrorMessage(err, 'Failed to process version request') },
       { status: 500 },
     );
   }

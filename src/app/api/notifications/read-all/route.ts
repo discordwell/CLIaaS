@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: 'ok', count: result.length });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to mark all read' },
+      { error: safeErrorMessage(err, 'Failed to mark all read') },
       { status: 500 },
     );
   }

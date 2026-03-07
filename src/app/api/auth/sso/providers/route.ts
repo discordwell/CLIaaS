@@ -6,7 +6,7 @@ import {
   type SSOProvider,
 } from '@/lib/auth/sso-config';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ providers: safe });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list SSO providers' },
+      { error: safeErrorMessage(err, 'Failed to list SSO providers') },
       { status: 500 }
     );
   }
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ provider: sanitize(provider) }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create SSO provider' },
+      { error: safeErrorMessage(err, 'Failed to create SSO provider') },
       { status: 500 }
     );
   }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,7 +80,7 @@ export async function POST(
     return NextResponse.json({ ok: true, helpful });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to submit feedback' },
+      { error: safeErrorMessage(err, 'Failed to submit feedback') },
       { status: 500 },
     );
   }

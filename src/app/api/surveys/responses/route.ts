@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import type { SurveyType } from '@/lib/data-provider/types';
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ responses });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load survey responses' },
+      { error: safeErrorMessage(err, 'Failed to load survey responses') },
       { status: 500 },
     );
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getSignatures, createSignature } from '@/lib/canned/signature-store';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     const sigs = await getSignatures({ userId });
     return NextResponse.json({ signatures: sigs });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }
 
@@ -85,6 +85,6 @@ export async function POST(request: NextRequest) {
     const sig = createSignature({ name, bodyHtml: bodyHtml ?? bodyText, bodyText, isDefault, userId: auth.user.id });
     return NextResponse.json({ signature: sig }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }

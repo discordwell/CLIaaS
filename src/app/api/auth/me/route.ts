@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { getSession, getJwtSecret, COOKIE_NAME } from '@/lib/auth';
 import { updateProfile, sanitizeUser } from '@/lib/user-service';
@@ -41,7 +42,7 @@ export async function PATCH(request: Request) {
     const updated = await updateProfile(session.id, { name: name.trim() });
     return NextResponse.json({ user: sanitizeUser(updated) });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Update failed';
+    const message = safeErrorMessage(err, 'Update failed');
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

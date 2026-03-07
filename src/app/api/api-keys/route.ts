@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { VALID_SCOPES } from '@/lib/api-auth';
 import { createApiKey, listApiKeys } from '@/lib/api-keys';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ keys });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list API keys' },
+      { error: safeErrorMessage(err, 'Failed to list API keys') },
       { status: 500 },
     );
   }
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create API key' },
+      { error: safeErrorMessage(err, 'Failed to create API key') },
       { status: 500 },
     );
   }

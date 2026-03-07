@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getDb } from '@/db';
 import * as schema from '@/db/schema';
 import { eq } from 'drizzle-orm';
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list BAA records' },
+      { error: safeErrorMessage(err, 'Failed to list BAA records') },
       { status: 500 },
     );
   }
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create BAA record' },
+      { error: safeErrorMessage(err, 'Failed to create BAA record') },
       { status: 500 },
     );
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyTotp, decryptSecret, verifyBackupCode, type BackupCode } from '@/lib/auth/totp';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requireDatabase, getMfaRecord, getMfaDeps } from '@/lib/auth/mfa-helpers';
 import { checkRateLimit } from '@/lib/security/rate-limiter';
 import type { SessionUser } from '@/lib/auth';
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ verified: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'MFA verification failed' },
+      { error: safeErrorMessage(err, 'MFA verification failed') },
       { status: 500 },
     );
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +20,7 @@ export async function GET(
     return NextResponse.json({ conversations });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list side conversations' },
+      { error: safeErrorMessage(err, 'Failed to list side conversations') },
       { status: 500 },
     );
   }
@@ -74,7 +74,7 @@ export async function POST(
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create side conversation' },
+      { error: safeErrorMessage(err, 'Failed to create side conversation') },
       { status: 500 },
     );
   }

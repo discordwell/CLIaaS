@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getSlackIntegration } from '@/lib/integrations/slack';
 import type { SlackCommandPayload } from '@/lib/integrations/slack';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(status);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get Slack status' },
+      { error: safeErrorMessage(err, 'Failed to get Slack status') },
       { status: 500 }
     );
   }
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to process Slack event' },
+      { error: safeErrorMessage(err, 'Failed to process Slack event') },
       { status: 500 }
     );
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getInstallation, updateInstallation } from '@/lib/plugins/store';
 import { encryptCredentials, decryptCredentials } from '@/lib/plugins/credentials';
 
@@ -48,7 +48,7 @@ export async function GET(
     return NextResponse.json({ credentials: masked, keys: Object.keys(credentials) });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get credentials' },
+      { error: safeErrorMessage(err, 'Failed to get credentials') },
       { status: 500 },
     );
   }
@@ -120,7 +120,7 @@ export async function PUT(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to store credentials' },
+      { error: safeErrorMessage(err, 'Failed to store credentials') },
       { status: 500 },
     );
   }

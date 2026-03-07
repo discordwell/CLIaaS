@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +51,7 @@ export async function PATCH(
 
     return NextResponse.json({ customRole: updated });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }
 
@@ -90,6 +90,6 @@ export async function DELETE(
 
     return NextResponse.json({ deleted: true });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }

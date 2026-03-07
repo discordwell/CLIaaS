@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getMacros, createMacro, type MacroAction } from '@/lib/canned/macro-store';
 
 export const dynamic = 'force-dynamic';
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ macros });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load macros' },
+      { error: safeErrorMessage(err, 'Failed to load macros') },
       { status: 500 },
     );
   }
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ macro }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create macro' },
+      { error: safeErrorMessage(err, 'Failed to create macro') },
       { status: 500 },
     );
   }

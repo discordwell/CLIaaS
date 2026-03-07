@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { suggestArticles } from '@/lib/kb/text-match';
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ articles });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to suggest articles' },
+      { error: safeErrorMessage(err, 'Failed to suggest articles') },
       { status: 500 },
     );
   }

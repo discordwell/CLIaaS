@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { verifyTotp, decryptSecret } from '@/lib/auth/totp';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requireDatabase, getMfaRecord, getMfaDeps } from '@/lib/auth/mfa-helpers';
 
 export const dynamic = 'force-dynamic';
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ mfaDisabled: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to disable MFA' },
+      { error: safeErrorMessage(err, 'Failed to disable MFA') },
       { status: 500 },
     );
   }

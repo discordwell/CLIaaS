@@ -6,7 +6,7 @@ import { helpcrunchCreateChat } from '@cli/connectors/helpcrunch';
 import { freshdeskCreateTicket } from '@cli/connectors/freshdesk';
 import { grooveCreateTicket } from '@cli/connectors/groove';
 import { ticketCreated } from '@/lib/events';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 import { checkQuota, incrementUsage } from '@/lib/billing/usage';
 
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: 'ok', ...result });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Create failed' },
+      { error: safeErrorMessage(err, 'Create failed') },
       { status: 500 },
     );
   }

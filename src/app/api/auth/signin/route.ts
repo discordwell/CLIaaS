@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { verifyPassword } from '@/lib/password';
 import { createToken, createIntermediateToken, setSessionCookie } from '@/lib/auth';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { validateEmail } from '@/lib/email-validation';
 
 export const dynamic = 'force-dynamic';
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
       workspaceId: user.workspaceId,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Sign-in failed';
+    const message = safeErrorMessage(err, 'Sign-in failed');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

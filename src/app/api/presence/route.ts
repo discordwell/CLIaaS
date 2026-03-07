@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { presence } from '@/lib/realtime/presence';
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, currentUserId: userId, viewers });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Presence update failed' },
+      { error: safeErrorMessage(err, 'Presence update failed') },
       { status: 500 }
     );
   }

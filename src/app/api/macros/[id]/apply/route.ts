@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 import { getMacro, incrementMacroUsage, type MacroAction } from '@/lib/canned/macro-store';
 import { executeMacroActions } from '@/lib/canned/macro-executor';
@@ -133,7 +133,7 @@ export async function POST(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to apply macro' },
+      { error: safeErrorMessage(err, 'Failed to apply macro') },
       { status: 500 },
     );
   }

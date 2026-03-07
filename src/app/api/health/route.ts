@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from "next/server";
 import { getPool } from "@/db";
 import { getRedis } from "@/lib/queue/connection";
@@ -23,7 +24,7 @@ export async function GET() {
       checks.database = {
         status: "error",
         latencyMs: Date.now() - start,
-        error: err instanceof Error ? err.message : "Unknown",
+        error: safeErrorMessage(err, "Unknown"),
       };
     }
   } else {
@@ -41,7 +42,7 @@ export async function GET() {
       checks.redis = {
         status: "error",
         latencyMs: Date.now() - start,
-        error: err instanceof Error ? err.message : "Unknown",
+        error: safeErrorMessage(err, "Unknown"),
       };
     }
   } else {

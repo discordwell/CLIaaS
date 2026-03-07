@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { type ConnectorName, getAuth } from '@/lib/connector-auth';
@@ -123,7 +124,7 @@ export async function POST(
       } catch (err) {
         ingestResult = {
           ingested: false,
-          error: err instanceof Error ? err.message : 'Ingest failed',
+          error: safeErrorMessage(err, 'Ingest failed'),
         };
       }
     }
@@ -131,7 +132,7 @@ export async function POST(
     return NextResponse.json({ status: 'ok', manifest, ingest: ingestResult });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Export failed' },
+      { error: safeErrorMessage(err, 'Export failed') },
       { status: 500 },
     );
   }

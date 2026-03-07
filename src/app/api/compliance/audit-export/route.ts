@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { generateAuditReport } from '@/lib/compliance/audit-report';
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(report);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Audit export failed' },
+      { error: safeErrorMessage(err, 'Audit export failed') },
       { status: 500 },
     );
   }

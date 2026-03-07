@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { checkTicketSLA } from '@/lib/sla';
 import { loadTickets, loadMessages, type Ticket } from '@/lib/data';
 import { slaBreached } from '@/lib/events';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to check SLA' },
+      { error: safeErrorMessage(err, 'Failed to check SLA') },
       { status: 500 }
     );
   }

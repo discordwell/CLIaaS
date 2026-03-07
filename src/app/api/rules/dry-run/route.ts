@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 import { evaluateRule, type TicketContext } from '@/lib/automation/engine';
 import type { Rule } from '@/lib/automation/engine';
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Dry-run failed' },
+      { error: safeErrorMessage(err, 'Dry-run failed') },
       { status: 500 },
     );
   }

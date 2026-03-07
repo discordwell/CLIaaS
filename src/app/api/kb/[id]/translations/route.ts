@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -69,7 +69,7 @@ export async function GET(
     return NextResponse.json({ translations, total: translations.length });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load translations' },
+      { error: safeErrorMessage(err, 'Failed to load translations') },
       { status: 500 }
     );
   }
@@ -147,7 +147,7 @@ export async function POST(
 
     return NextResponse.json({ translation: { id: row.id, locale: d.locale } }, { status: 201 });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed to create translation';
+    const msg = safeErrorMessage(err, 'Failed to create translation');
     // Unique constraint violation = duplicate locale
     if (msg.includes('kb_articles_translation_unique_idx')) {
       return NextResponse.json(

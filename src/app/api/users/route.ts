@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { listWorkspaceUsers, sanitizeUser } from '@/lib/user-service';
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
     const rows = await listWorkspaceUsers(auth.user.workspaceId);
     return NextResponse.json({ users: rows.map(sanitizeUser) });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal error';
+    const message = safeErrorMessage(err, 'Internal error');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

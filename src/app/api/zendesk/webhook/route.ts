@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextRequest, NextResponse } from "next/server";
 import { syncZendeskTicketById } from "@/lib/zendesk/sync";
 import { parseJsonBody } from '@/lib/parse-json-body';
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: "ok", ticketId: resolvedTicketId });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "sync failed" },
+      { error: safeErrorMessage(err, "sync failed") },
       { status: 500 },
     );
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listFields, createField } from '@/lib/custom-fields';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ fields });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list fields' },
+      { error: safeErrorMessage(err, 'Failed to list fields') },
       { status: 500 }
     );
   }
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ field }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create field' },
+      { error: safeErrorMessage(err, 'Failed to create field') },
       { status: 500 }
     );
   }

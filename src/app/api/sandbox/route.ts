@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listSandboxes, createSandbox } from '@/lib/sandbox';
 import type { CloneOptions } from '@/lib/sandbox-clone';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ sandboxes });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list sandboxes' },
+      { error: safeErrorMessage(err, 'Failed to list sandboxes') },
       { status: 500 }
     );
   }
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ sandbox }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create sandbox' },
+      { error: safeErrorMessage(err, 'Failed to create sandbox') },
       { status: 500 }
     );
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { listPolicies, createPolicy } from '@/lib/sla';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ policies });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load SLA policies' },
+      { error: safeErrorMessage(err, 'Failed to load SLA policies') },
       { status: 500 }
     );
   }
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ policy }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create SLA policy' },
+      { error: safeErrorMessage(err, 'Failed to create SLA policy') },
       { status: 500 }
     );
   }

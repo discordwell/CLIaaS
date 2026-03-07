@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { PluginRegistry } from '@/lib/plugins';
 import { getInstallation, updateInstallation, uninstallPlugin } from '@/lib/plugins/store';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +28,7 @@ export async function GET(
     return NextResponse.json({ plugin });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get plugin' },
+      { error: safeErrorMessage(err, 'Failed to get plugin') },
       { status: 500 }
     );
   }
@@ -57,7 +57,7 @@ export async function PATCH(
     return NextResponse.json({ installation: updated });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update plugin' },
+      { error: safeErrorMessage(err, 'Failed to update plugin') },
       { status: 500 }
     );
   }
@@ -87,7 +87,7 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to unregister plugin' },
+      { error: safeErrorMessage(err, 'Failed to unregister plugin') },
       { status: 500 }
     );
   }

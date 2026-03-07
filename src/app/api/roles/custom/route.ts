@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { BUILTIN_ROLE_MATRIX } from '@/lib/rbac/constants';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import type { BuiltinRole } from '@/lib/rbac/types';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ customRoles: rows });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }
 
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ customRole: created }, { status: 201 });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed';
+    const msg = safeErrorMessage(err, 'Failed');
     if (msg.includes('unique') || msg.includes('duplicate')) {
       return NextResponse.json({ error: 'A custom role with that name already exists' }, { status: 409 });
     }

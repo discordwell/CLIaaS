@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export async function GET(
   request: NextRequest,
@@ -21,7 +21,7 @@ export async function GET(
     return NextResponse.json(detail);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to get side conversation' },
+      { error: safeErrorMessage(err, 'Failed to get side conversation') },
       { status: 500 },
     );
   }
@@ -55,7 +55,7 @@ export async function PATCH(
     return NextResponse.json({ status: 'ok', newStatus: status });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update side conversation' },
+      { error: safeErrorMessage(err, 'Failed to update side conversation') },
       { status: 500 },
     );
   }

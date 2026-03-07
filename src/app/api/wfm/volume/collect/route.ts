@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 /**
  * POST /api/wfm/volume/collect
  * Trigger a real volume snapshot collection for a workspace.
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(snapshot, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Collection failed' },
+      { error: safeErrorMessage(err, 'Collection failed') },
       { status: 500 },
     );
   }

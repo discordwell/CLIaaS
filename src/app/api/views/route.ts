@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import type { ViewQuery } from '@/lib/views/types';
 
 export const dynamic = 'force-dynamic';
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ views: await listViews(authResult.user.id) });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load views' },
+      { error: safeErrorMessage(err, 'Failed to load views') },
       { status: 500 },
     );
   }
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ view }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create view' },
+      { error: safeErrorMessage(err, 'Failed to create view') },
       { status: 500 },
     );
   }

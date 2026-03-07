@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { changePassword } from '@/lib/user-service';
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
     await changePassword(session.id, currentPassword, newPassword);
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Password change failed';
+    const message = safeErrorMessage(err, 'Password change failed');
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

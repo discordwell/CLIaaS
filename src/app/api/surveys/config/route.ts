@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import type { SurveyType, SurveyTrigger } from '@/lib/data-provider/types';
 import { requirePerm } from '@/lib/rbac';
 
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ configs });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load configs' },
+      { error: safeErrorMessage(err, 'Failed to load configs') },
       { status: 500 },
     );
   }
@@ -183,7 +183,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ ok: true, updated: !!existing });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update config' },
+      { error: safeErrorMessage(err, 'Failed to update config') },
       { status: 500 },
     );
   }

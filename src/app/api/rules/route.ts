@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 import { invalidateRuleCache } from '@/lib/automation/bootstrap';
 
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ rules: rows });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load rules' },
+      { error: safeErrorMessage(err, 'Failed to load rules') },
       { status: 500 }
     );
   }
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ rule }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create rule' },
+      { error: safeErrorMessage(err, 'Failed to create rule') },
       { status: 500 }
     );
   }

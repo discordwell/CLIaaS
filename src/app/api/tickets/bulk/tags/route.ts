@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
         });
         successCount++;
       } catch (err) {
-        errors.push(`${ticketId}: ${err instanceof Error ? err.message : 'failed'}`);
+        errors.push(`${ticketId}: ${safeErrorMessage(err, 'failed')}`);
       }
     }
 
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Bulk operation failed' },
+      { error: safeErrorMessage(err, 'Bulk operation failed') },
       { status: 500 },
     );
   }

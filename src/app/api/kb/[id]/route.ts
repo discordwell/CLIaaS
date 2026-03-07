@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadKBArticles } from '@/lib/data';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -106,7 +106,7 @@ export async function GET(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load article' },
+      { error: safeErrorMessage(err, 'Failed to load article') },
       { status: 500 }
     );
   }
@@ -192,7 +192,7 @@ export async function PATCH(
     return NextResponse.json({ article: rows[0] });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to update article' },
+      { error: safeErrorMessage(err, 'Failed to update article') },
       { status: 500 }
     );
   }
@@ -254,7 +254,7 @@ export async function DELETE(
     return NextResponse.json({ ok: true, deleted: id });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to delete article' },
+      { error: safeErrorMessage(err, 'Failed to delete article') },
       { status: 500 }
     );
   }

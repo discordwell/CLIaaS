@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { PERMISSION_KEYS } from '@/lib/rbac/constants';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +53,7 @@ export async function GET(
 
     return NextResponse.json({ permissions: rows });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }
 
@@ -128,6 +128,6 @@ export async function PUT(
 
     return NextResponse.json({ updated: true, count: permissions.length });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }

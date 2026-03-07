@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { listWebhooks, createWebhook } from '@/lib/webhooks';
 import type { WebhookEventType } from '@/lib/webhooks';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ webhooks });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to list webhooks' },
+      { error: safeErrorMessage(err, 'Failed to list webhooks') },
       { status: 500 }
     );
   }
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ webhook }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create webhook' },
+      { error: safeErrorMessage(err, 'Failed to create webhook') },
       { status: 500 }
     );
   }

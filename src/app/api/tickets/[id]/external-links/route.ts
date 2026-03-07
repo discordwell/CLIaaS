@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 import * as linkStore from '@/lib/integrations/link-store';
 import { JiraClient } from '@/lib/integrations/jira-client';
@@ -77,7 +77,7 @@ export async function POST(
     return NextResponse.json({ error: 'action must be "create" or "link"' }, { status: 400 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create link' },
+      { error: safeErrorMessage(err, 'Failed to create link') },
       { status: 500 },
     );
   }

@@ -7,7 +7,7 @@ import {
   DEFAULT_AGENT_CONFIG,
   type AIAgentConfig,
 } from '@/lib/ai/agent';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       {
-        error: err instanceof Error ? err.message : 'AI agent failed',
+        error: safeErrorMessage(err, 'AI agent failed'),
       },
       { status: 500 },
     );

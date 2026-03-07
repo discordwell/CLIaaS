@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
@@ -38,7 +39,7 @@ export async function PATCH(
     return NextResponse.json({ status: 'ok' });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to mark notification read' },
+      { error: safeErrorMessage(err, 'Failed to mark notification read') },
       { status: 500 },
     );
   }

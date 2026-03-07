@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getSignature, updateSignature, deleteSignature } from '@/lib/canned/signature-store';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +31,7 @@ export async function GET(
     if (!sig) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ signature: sig });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }
 
@@ -81,7 +81,7 @@ export async function PATCH(
     if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ signature: updated });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }
 
@@ -110,6 +110,6 @@ export async function DELETE(
     if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ deleted: true });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed') }, { status: 500 });
   }
 }

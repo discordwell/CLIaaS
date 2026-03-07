@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { getInstallation } from '@/lib/plugins/store';
 import { executePluginHook } from '@/lib/plugins/executor';
 
@@ -62,7 +62,7 @@ export async function POST(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to execute plugin hook' },
+      { error: safeErrorMessage(err, 'Failed to execute plugin hook') },
       { status: 500 },
     );
   }

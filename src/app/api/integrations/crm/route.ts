@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { parseJsonBody } from '@/lib/parse-json-body';
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, provider: 'salesforce', displayName: info.displayName });
     } catch (err) {
       return NextResponse.json(
-        { error: `Salesforce connection failed: ${err instanceof Error ? err.message : String(err)}` },
+        { error: `Salesforce connection failed: ${safeErrorMessage(err, "connection failed")}` },
         { status: 400 },
       );
     }
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, provider: 'hubspot-crm', portalId: info.portalId });
     } catch (err) {
       return NextResponse.json(
-        { error: `HubSpot connection failed: ${err instanceof Error ? err.message : String(err)}` },
+        { error: `HubSpot connection failed: ${safeErrorMessage(err, "connection failed")}` },
         { status: 400 },
       );
     }

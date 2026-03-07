@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { executeReport } from '@/lib/reports/engine';
@@ -40,7 +41,7 @@ export async function GET(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load shared report' },
+      { error: safeErrorMessage(err, 'Failed to load shared report') },
       { status: 500 },
     );
   }

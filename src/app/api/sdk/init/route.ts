@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { createSession, cleanupExpiredSessions } from '@/lib/channels/sdk-session';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/security/rate-limiter';
 
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to create session' },
+      { error: safeErrorMessage(err, 'Failed to create session') },
       { status: 500 },
     );
   }

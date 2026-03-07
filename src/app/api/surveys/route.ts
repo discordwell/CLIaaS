@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { surveySubmitted } from '@/lib/events';
-import { parseJsonBody } from '@/lib/parse-json-body';
+import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import type { SurveyType } from '@/lib/data-provider/types';
 import { requirePerm } from '@/lib/rbac';
 
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, id }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to submit survey' },
+      { error: safeErrorMessage(err, 'Failed to submit survey') },
       { status: 500 },
     );
   }
@@ -185,7 +185,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(computeStats(type, ratings));
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to load stats' },
+      { error: safeErrorMessage(err, 'Failed to load stats') },
       { status: 500 },
     );
   }

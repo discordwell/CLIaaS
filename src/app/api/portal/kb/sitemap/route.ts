@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { loadKBArticles } from '@/lib/data';
 
@@ -94,7 +95,7 @@ ${urls}
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to generate sitemap' },
+      { error: safeErrorMessage(err, 'Failed to generate sitemap') },
       { status: 500 },
     );
   }

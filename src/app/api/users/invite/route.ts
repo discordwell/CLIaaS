@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { inviteUser, sanitizeUser } from '@/lib/user-service';
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ user: sanitizeUser(user) }, { status: 201 });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Invite failed';
+    const message = safeErrorMessage(err, 'Invite failed');
     const status = message.includes('already exists') ? 409 : 400;
     return NextResponse.json({ error: message }, { status });
   }

@@ -1,3 +1,4 @@
+import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { seedWorkspaceWithSampleData } from '@/lib/onboarding/seed-sample-data';
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     await seedWorkspaceWithSampleData({ tenantId, workspaceId });
     return NextResponse.json({ ok: true, message: 'Sample data loaded successfully' });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to seed data';
+    const message = safeErrorMessage(err, 'Failed to seed data');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
