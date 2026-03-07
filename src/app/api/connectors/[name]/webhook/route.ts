@@ -63,7 +63,7 @@ function verifyHubSpotSignature(
 
   // Replay protection: reject requests older than 5 minutes
   const age = Date.now() - parseInt(timestamp, 10);
-  if (age > 300_000) return false;
+  if (age > 300_000 || age < 0) return false;
 
   const url = request.url;
   const toSign = `POST${url}${body}${timestamp}`;

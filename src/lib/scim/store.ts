@@ -307,3 +307,70 @@ export async function createGroupAsync(
   });
   return dbResult ?? createGroup(group);
 }
+
+export async function updateGroupAsync(
+  id: string,
+  updates: Partial<Omit<SCIMGroupRecord, 'id' | 'createdAt'>>,
+  workspaceId: string,
+): Promise<SCIMGroupRecord | null> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db.update(schema.scimGroups)
+      .set({ name: updates.name, updatedAt: new Date() })
+      .where(eq(schema.scimGroups.id, id))
+      .returning();
+    if (!row) return null;
+    return {
+      id: row.id, name: row.name, workspaceId: row.workspaceId,
+      createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
+      members: updates.members,
+    };
+  });
+  return dbResult ?? updateGroup(id, updates);
+}
+
+export async function deleteGroupAsync(id: string, workspaceId: string): Promise<boolean> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq } = await import('drizzle-orm');
+    const result = await db.delete(schema.scimGroups).where(eq(schema.scimGroups.id, id));
+    return (result.rowCount ?? 0) > 0;
+  });
+  return dbResult ?? deleteGroup(id);
+}
+
+export async function getUserAsync(id: string, workspaceId: string): Promise<SCIMUserRecord | undefined> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db.select().from(schema.scimUsers).where(eq(schema.scimUsers.id, id)).limit(1);
+    if (!row) return undefined;
+    return {
+      id: row.id, email: row.email, name: row.name,
+      role: row.role, status: row.status, workspaceId: row.workspaceId,
+      externalId: row.externalId ?? undefined,
+      createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
+    };
+  });
+  return dbResult ?? getUser(id);
+}
+
+export async function getGroupAsync(id: string, workspaceId: string): Promise<SCIMGroupRecord | undefined> {
+  const dbResult = await withRls(workspaceId, async ({ db, schema }) => {
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db.select().from(schema.scimGroups).where(eq(schema.scimGroups.id, id)).limit(1);
+    if (!row) return undefined;
+    const memberRows = await db.select({ userId: schema.scimGroupMembers.userId })
+      .from(schema.scimGroupMembers).where(eq(schema.scimGroupMembers.groupId, row.id));
+    const members: Array<{ id: string; name: string }> = [];
+    for (const m of memberRows) {
+      const [user] = await db.select({ id: schema.scimUsers.id, name: schema.scimUsers.name })
+        .from(schema.scimUsers).where(eq(schema.scimUsers.id, m.userId)).limit(1);
+      if (user) members.push({ id: user.id, name: user.name });
+    }
+    return {
+      id: row.id, name: row.name, workspaceId: row.workspaceId,
+      createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
+      members,
+    };
+  });
+  return dbResult ?? getGroup(id);
+}

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireSCIMAuth } from '@/lib/scim/auth';
 import { toSCIMGroup, scimError, applyGroupPatchOps, type SCIMPatchOp } from '@/lib/scim/schema';
-import { getGroups, setGroups, getGroup, updateGroup, deleteGroup } from '@/lib/scim/store';
+import { getGroupAsync, updateGroupAsync, deleteGroupAsync } from '@/lib/scim/store';
 import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,8 @@ export async function GET(
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
-  const group = getGroup(id);
+  const workspaceId = (auth as unknown as { workspaceId?: string }).workspaceId ?? 'default';
+  const group = await getGroupAsync(id, workspaceId);
   if (!group) {
     return NextResponse.json(scimError(404, 'Group not found'), { status: 404 });
   }
@@ -31,7 +32,8 @@ export async function PATCH(
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
-  const existing = getGroup(id);
+  const workspaceId = (auth as unknown as { workspaceId?: string }).workspaceId ?? 'default';
+  const existing = await getGroupAsync(id, workspaceId);
   if (!existing) {
     return NextResponse.json(scimError(404, 'Group not found'), { status: 404 });
   }
@@ -42,7 +44,7 @@ export async function PATCH(
     const body = parsed.data;
     const mutable = { ...existing };
     applyGroupPatchOps(mutable, body);
-    const updated = updateGroup(id, { name: mutable.name, members: mutable.members });
+    const updated = await updateGroupAsync(id, { name: mutable.name, members: mutable.members }, workspaceId);
     return NextResponse.json(toSCIMGroup(updated ?? mutable));
   } catch (err) {
     return NextResponse.json(
@@ -60,11 +62,12 @@ export async function DELETE(
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
-  const existing = getGroup(id);
+  const workspaceId = (auth as unknown as { workspaceId?: string }).workspaceId ?? 'default';
+  const existing = await getGroupAsync(id, workspaceId);
   if (!existing) {
     return NextResponse.json(scimError(404, 'Group not found'), { status: 404 });
   }
 
-  deleteGroup(id);
+  await deleteGroupAsync(id, workspaceId);
   return new NextResponse(null, { status: 204 });
 }

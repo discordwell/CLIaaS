@@ -137,12 +137,18 @@ export async function resolveTicket(
       escalationReason: 'Circuit breaker open',
       kbArticlesUsed: [],
     };
-    appendAuditEntryAsync({
+    const dbOk = await appendAuditEntryAsync({
       workspaceId,
       action: 'resolution_escalated',
       ticketId: ticket.id,
       details: { reason: 'circuit_breaker_open' },
-    }).catch(() => {});
+    }).catch(() => null);
+    if (!dbOk) recordAuditEntry({
+      workspaceId,
+      action: 'resolution_escalated',
+      ticketId: ticket.id,
+      details: { reason: 'circuit_breaker_open' },
+    });
     return { ticketId: ticket.id, action: 'escalated', result };
   }
 
@@ -230,7 +236,7 @@ export async function resolveTicket(
   const auditAction = action === 'auto_sent' ? 'resolution_auto_sent' as const
     : action === 'escalated' ? 'resolution_escalated' as const
     : 'resolution_created' as const;
-  recordAuditEntry({
+  const auditPayload = {
     workspaceId,
     action: auditAction,
     ticketId: ticket.id,
@@ -243,21 +249,9 @@ export async function resolveTicket(
       latencyMs,
       kbArticlesUsed: result.kbArticlesUsed.length,
     },
-  });
-  appendAuditEntryAsync({
-    workspaceId,
-    action: auditAction,
-    ticketId: ticket.id,
-    resolutionId,
-    details: {
-      confidence: result.confidence,
-      action,
-      provider: config.provider,
-      model: config.model,
-      latencyMs,
-      kbArticlesUsed: result.kbArticlesUsed.length,
-    },
-  }).catch(() => {});
+  };
+  const dbAuditOk = await appendAuditEntryAsync(auditPayload).catch(() => null);
+  if (!dbAuditOk) recordAuditEntry(auditPayload);
 
   // Usage snapshot (hourly bucket)
   const hourBucket = new Date().toISOString().slice(0, 13) + ':00:00Z';
