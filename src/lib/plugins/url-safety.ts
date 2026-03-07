@@ -19,6 +19,7 @@ const PRIVATE_RANGES: Array<{ start: number; end: number }> = [
 ];
 
 const BLOCKED_HOSTNAMES = new Set([
+  'localhost',
   'metadata.google.internal',
   'metadata.google',
   'kubernetes.default.svc',

@@ -833,13 +833,10 @@ describe('4.4 Input Validation', () => {
   });
 
   describe('webhook URL validation blocks private IPs', () => {
-    it('isObviouslyPrivateUrl does NOT block "localhost" by hostname (sync-only check)', async () => {
+    it('isObviouslyPrivateUrl blocks "localhost" by hostname', async () => {
       const { isObviouslyPrivateUrl } = await import('@/lib/plugins/url-safety');
-      // FINDING: isObviouslyPrivateUrl does not check hostname "localhost" —
-      // it only checks IP addresses and a hardcoded set of metadata hostnames.
-      // The async isPrivateUrl catches it via DNS resolution.
-      // "localhost" should be added to BLOCKED_HOSTNAMES for defense-in-depth.
-      expect(isObviouslyPrivateUrl('http://localhost/hook')).toBe(false);
+      // FIXED: "localhost" now in BLOCKED_HOSTNAMES for defense-in-depth
+      expect(isObviouslyPrivateUrl('http://localhost/hook')).toBe(true);
     });
 
     it('async isPrivateUrl blocks localhost via DNS resolution', async () => {

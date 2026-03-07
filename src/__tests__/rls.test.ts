@@ -1,10 +1,17 @@
 import { describe, it, expect } from 'vitest';
 
 describe('rls', () => {
-  it('withTenantContext throws without database', async () => {
+  it('withTenantContext rejects invalid UUID', async () => {
     const { withTenantContext } = await import('@/db/rls');
     await expect(
       withTenantContext('ws-1', 'tenant-1', async () => 'ok'),
+    ).rejects.toThrow('Invalid UUID for RLS context');
+  });
+
+  it('withTenantContext throws without database for valid UUID', async () => {
+    const { withTenantContext } = await import('@/db/rls');
+    await expect(
+      withTenantContext('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', async () => 'ok'),
     ).rejects.toThrow('Database not available');
   });
 

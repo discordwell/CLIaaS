@@ -18,6 +18,10 @@ export async function executeSandboxed(
   sdk: Record<string, unknown>,
 ): Promise<PluginHandlerResult> {
   try {
+    // Freeze built-in prototypes inside sandbox to prevent prototype pollution leaking to host
+    const frozenObject = Object.freeze(Object.create(null, Object.getOwnPropertyDescriptors(Object)));
+    const frozenArray = Object.freeze(Object.create(null, Object.getOwnPropertyDescriptors(Array)));
+
     const sandbox = createContext({
       // Inject SDK and context
       cliaas: sdk,
@@ -27,12 +31,12 @@ export async function executeSandboxed(
         warn: (...args: unknown[]) => sdk.log && (sdk.log as { warn: (...a: unknown[]) => void }).warn(...args),
         error: (...args: unknown[]) => sdk.log && (sdk.log as { error: (...a: unknown[]) => void }).error(...args),
       },
-      // Restricted globals
-      JSON,
+      // Restricted globals — use frozen copies to prevent prototype pollution leaking to host
+      JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
       Math,
       Date,
-      Array,
-      Object,
+      Array: frozenArray,
+      Object: frozenObject,
       String,
       Number,
       Boolean,
