@@ -120,17 +120,17 @@ describe('IQ gating for AI behaviors', () => {
 
 describe('AI repair cost calculation (C++ parity)', () => {
   it('repair cost per step matches player repair formula', () => {
-    // For POWR: cost=300, maxHp=400 (from STRUCTURE_MAX_HP)
+    // For POWR: cost=300, maxHp=200 (from STRUCTURE_MAX_HP, C++ RULES.INI)
     const powrItem = PRODUCTION_ITEMS.find(p => p.type === 'POWR' && p.isStructure);
     expect(powrItem).toBeDefined();
     expect(powrItem!.cost).toBe(300);
     const maxHp = STRUCTURE_MAX_HP['POWR'] ?? 256;
-    expect(maxHp).toBe(400);
+    expect(maxHp).toBe(200);
     // Formula: ceil((cost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP))
     const repairCostPerStep = Math.ceil((powrItem!.cost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP));
-    // cost=300, REPAIR_PERCENT=0.20, maxHp=400, REPAIR_STEP=5
-    // = ceil((300 * 0.20) / (400 / 5)) = ceil(60 / 80) = ceil(0.75) = 1
-    expect(repairCostPerStep).toBe(1);
+    // cost=300, REPAIR_PERCENT=0.20, maxHp=200, REPAIR_STEP=5
+    // = ceil((300 * 0.20) / (200 / 5)) = ceil(60 / 40) = ceil(1.5) = 2
+    expect(repairCostPerStep).toBe(2);
   });
 
   it('repair cost per step for WEAP', () => {

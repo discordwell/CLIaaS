@@ -865,10 +865,10 @@ describe('Thief attack structure integration', () => {
     expect(thief.weapon).toBeNull();
   });
 
-  it('Thief stats match C++ (25hp, speed 8, sight 5, 500 cost, allied)', () => {
+  it('Thief stats match C++ (25hp, speed 4, sight 5, 500 cost, allied)', () => {
     const stats = UNIT_STATS['THF'];
     expect(stats.strength).toBe(25);
-    expect(stats.speed).toBe(8);
+    expect(stats.speed).toBe(4);
     expect(stats.sight).toBe(5);
     expect(stats.cost).toBe(500);
     expect(stats.owner).toBe('allied');

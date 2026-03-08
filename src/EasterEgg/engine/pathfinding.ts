@@ -3,7 +3,7 @@
  */
 
 import { type CellPos, MAP_CELLS, SpeedClass } from './types';
-import { type GameMap } from './map';
+import { type GameMap, MoveResult } from './map';
 
 interface AStarNode {
   cx: number;
@@ -40,6 +40,7 @@ export function findPath(
   ignoreOccupancy = false,
   naval = false,
   speedClass: SpeedClass = SpeedClass.WHEEL,
+  isMoving?: (entityId: number) => boolean,
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
 
@@ -106,7 +107,13 @@ export function findPath(
       const nk = key(nx, ny);
 
       if (closed.has(nk)) continue;
-      if (naval ? !map.isWaterPassable(nx, ny) : !map.isTerrainPassable(nx, ny)) continue;
+
+      // PF3: Use MoveResult for nuanced passability (C++ Can_Enter_Cell)
+      const moveResult = ignoreOccupancy
+        ? (naval ? (map.isWaterPassable(nx, ny) ? MoveResult.OK : MoveResult.IMPASSABLE) : (map.isTerrainPassable(nx, ny) ? MoveResult.OK : MoveResult.IMPASSABLE))
+        : map.canEnterCell(nx, ny, naval, isMoving);
+      if (moveResult === MoveResult.IMPASSABLE) continue;
+      if (moveResult === MoveResult.OCCUPIED) continue; // hard-block stationary units
 
       // Check diagonal passability (can't cut corners)
       if (dx !== 0 && dy !== 0) {
@@ -119,15 +126,11 @@ export function findPath(
         }
       }
 
-      // PF1: Hard-block occupied cells (C++ pathfinding — occupied cells are impassable)
-      // ignoreOccupancy=true bypasses this for initial path calculation and special cases
-      if (!ignoreOccupancy && map.getOccupancy(nx, ny) > 0) {
-        continue; // skip occupied cells entirely
-      }
-
       // Terrain speed modifiers: roads are cheaper, trees are expensive
       const speedMult = map.getSpeedMultiplier(nx, ny, speedClass);
-      const moveCost = Math.round(((dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST) / speedMult);
+      let moveCost = Math.round(((dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST) / speedMult);
+      // PF3: TEMP_BLOCKED adds cost penalty — unit is moving through, will clear soon
+      if (moveResult === MoveResult.TEMP_BLOCKED) moveCost += 50;
       const g = current.g + moveCost;
 
       const existing = openMap.get(nk);
@@ -160,6 +163,129 @@ export function findPath(
   }
 
   return []; // no path found
+}
+
+/**
+ * C++ LOS + edge-follow pathfinding (findpath.cpp:435).
+ * Original Red Alert algorithm: try line-of-sight first, if blocked follow obstacle edges.
+ * Preserved as fallback — produces suboptimal paths but matches original C++ behavior exactly.
+ * The A* findPath() above is used by default as an intentional improvement.
+ */
+export function findPathLOS(
+  map: GameMap,
+  start: CellPos,
+  goal: CellPos,
+  naval = false,
+  maxSteps = 200,
+): CellPos[] {
+  if (start.cx === goal.cx && start.cy === goal.cy) return [];
+
+  const passable = naval
+    ? (cx: number, cy: number) => map.isWaterPassable(cx, cy)
+    : (cx: number, cy: number) => map.isTerrainPassable(cx, cy);
+
+  if (!passable(goal.cx, goal.cy)) return [];
+
+  // Phase 1: Try direct LOS (Bresenham line)
+  const losPath = bresenhamLine(start.cx, start.cy, goal.cx, goal.cy);
+  let blocked = false;
+  for (const cell of losPath) {
+    if (!passable(cell.cx, cell.cy)) { blocked = true; break; }
+  }
+  if (!blocked) return losPath;
+
+  // Phase 2: Edge-follow — walk toward goal, hug obstacles when blocked
+  const path: CellPos[] = [];
+  let cx = start.cx, cy = start.cy;
+  const visited = new Set<number>();
+  visited.add(cy * MAP_CELLS + cx);
+  let edgeFollowDir = -1; // -1 = not following, 0-7 = following in direction
+
+  for (let step = 0; step < maxSteps; step++) {
+    if (cx === goal.cx && cy === goal.cy) return path;
+
+    // Desired direction toward goal
+    const ddx = Math.sign(goal.cx - cx);
+    const ddy = Math.sign(goal.cy - cy);
+    const desiredDir = dirToIndex(ddx, ddy);
+
+    if (edgeFollowDir === -1) {
+      // Try to move directly toward goal
+      const nx = cx + ddx, ny = cy + ddy;
+      if (passable(nx, ny) && !visited.has(ny * MAP_CELLS + nx)) {
+        cx = nx; cy = ny;
+        path.push({ cx, cy });
+        visited.add(cy * MAP_CELLS + cx);
+        continue;
+      }
+      // Blocked — start edge-following (try right-hand rule)
+      edgeFollowDir = (desiredDir + 1) % 8;
+    }
+
+    // Edge-follow: scan clockwise from current edge direction for passable cell
+    let moved = false;
+    for (let i = 0; i < 8; i++) {
+      const dir = (edgeFollowDir + i) % 8;
+      const [dx, dy] = DIR_OFFSETS[dir];
+      const nx = cx + dx, ny = cy + dy;
+      if (passable(nx, ny) && !visited.has(ny * MAP_CELLS + nx)) {
+        cx = nx; cy = ny;
+        path.push({ cx, cy });
+        visited.add(cy * MAP_CELLS + cx);
+        // Update edge follow: face back toward the wall we came from
+        edgeFollowDir = (dir + 5) % 8; // roughly opposite + 1 (right-hand rule)
+        moved = true;
+
+        // Check if we can resume LOS to goal
+        const losCheck = bresenhamLine(cx, cy, goal.cx, goal.cy);
+        let losOk = true;
+        for (const cell of losCheck) {
+          if (!passable(cell.cx, cell.cy)) { losOk = false; break; }
+        }
+        if (losOk) edgeFollowDir = -1; // resume direct movement
+        break;
+      }
+    }
+    if (!moved) break; // completely stuck
+  }
+
+  return path;
+}
+
+// Direction index: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
+const DIR_OFFSETS: [number, number][] = [
+  [0, -1], [1, -1], [1, 0], [1, 1],
+  [0, 1], [-1, 1], [-1, 0], [-1, -1],
+];
+
+function dirToIndex(dx: number, dy: number): number {
+  if (dx === 0 && dy === -1) return 0;
+  if (dx === 1 && dy === -1) return 1;
+  if (dx === 1 && dy === 0) return 2;
+  if (dx === 1 && dy === 1) return 3;
+  if (dx === 0 && dy === 1) return 4;
+  if (dx === -1 && dy === 1) return 5;
+  if (dx === -1 && dy === 0) return 6;
+  if (dx === -1 && dy === -1) return 7;
+  return 4; // fallback: south
+}
+
+/** Bresenham line between two cells (excluding start) */
+function bresenhamLine(x0: number, y0: number, x1: number, y1: number): CellPos[] {
+  const path: CellPos[] = [];
+  let dx = Math.abs(x1 - x0);
+  let dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let cx = x0, cy = y0;
+  while (cx !== x1 || cy !== y1) {
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; cx += sx; }
+    if (e2 < dx) { err += dx; cy += sy; }
+    path.push({ cx, cy });
+  }
+  return path;
 }
 
 function reconstructPath(node: AStarNode): CellPos[] {

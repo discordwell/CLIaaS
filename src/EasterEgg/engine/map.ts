@@ -5,6 +5,14 @@
 
 import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX } from './types';
 
+/** C++ Can_Enter_Cell() result enum — nuanced passability for pathfinding */
+export enum MoveResult {
+  OK = 0,           // fully passable
+  IMPASSABLE = -1,  // terrain blocks permanently
+  OCCUPIED = 1,     // stationary unit blocking
+  TEMP_BLOCKED = 2, // unit passing through, will clear soon
+}
+
 export enum Terrain {
   CLEAR = 0,
   WATER = 1,
@@ -552,6 +560,23 @@ export class GameMap {
         }
       }
     }
+  }
+
+  /** PF3: C++ Can_Enter_Cell — returns nuanced MoveResult for pathfinding.
+   *  @param isMoving Optional callback: given occupant entity ID, returns true if that entity is currently moving */
+  canEnterCell(cx: number, cy: number, naval = false, isMoving?: (entityId: number) => boolean): MoveResult {
+    if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
+        cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
+      return MoveResult.IMPASSABLE;
+    }
+    const passable = naval ? this.getTerrain(cx, cy) === Terrain.WATER : PASSABLE.has(this.getTerrain(cx, cy));
+    if (!passable) return MoveResult.IMPASSABLE;
+    const occupant = this.getOccupancy(cx, cy);
+    if (occupant > 0) {
+      if (isMoving && isMoving(occupant)) return MoveResult.TEMP_BLOCKED;
+      return MoveResult.OCCUPIED;
+    }
+    return MoveResult.OK;
   }
 
   /** Initialize a basic map with impassable borders */

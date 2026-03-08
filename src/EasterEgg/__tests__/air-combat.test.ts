@@ -29,7 +29,7 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('MiG');
     expect(s.strength).toBe(50);
     expect(s.armor).toBe('light');
-    expect(s.speed).toBe(24);
+    expect(s.speed).toBe(20);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isFixedWing).toBe(true);
@@ -56,7 +56,7 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('Longbow');
     expect(s.strength).toBe(225);
     expect(s.armor).toBe('heavy');
-    expect(s.speed).toBe(18);
+    expect(s.speed).toBe(14);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);
@@ -479,12 +479,12 @@ describe('HPAD/AFLD structure config', () => {
     expect(STRUCTURE_SIZE.AFLD).toEqual([2, 2]);
   });
 
-  it('HPAD has 800 max HP', () => {
-    expect(STRUCTURE_MAX_HP.HPAD).toBe(800);
+  it('HPAD has 600 max HP', () => {
+    expect(STRUCTURE_MAX_HP.HPAD).toBe(600);
   });
 
-  it('AFLD has 1000 max HP', () => {
-    expect(STRUCTURE_MAX_HP.AFLD).toBe(1000);
+  it('AFLD has 800 max HP', () => {
+    expect(STRUCTURE_MAX_HP.AFLD).toBe(800);
   });
 
   it('MapStructure interface supports dockedAircraft field', () => {

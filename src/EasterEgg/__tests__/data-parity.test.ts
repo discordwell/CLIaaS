@@ -28,7 +28,7 @@ describe('UNIT_STATS parity', () => {
     it('E1 (Rifle Infantry)', () => {
       const u = UNIT_STATS.E1;
       expect(u.strength).toBe(50);
-      expect(u.speed).toBe(8);
+      expect(u.speed).toBe(4);
       expect(u.armor).toBe('none');
       expect(u.sight).toBe(4);
       expect(u.rot).toBe(8);
@@ -39,7 +39,7 @@ describe('UNIT_STATS parity', () => {
     it('E2 (Grenadier) — soviet owner', () => {
       const u = UNIT_STATS.E2;
       expect(u.strength).toBe(50);
-      expect(u.speed).toBe(8);
+      expect(u.speed).toBe(3);
       expect(u.armor).toBe('none');
       expect(u.primaryWeapon).toBe('Grenade');
       expect(u.owner).toBe('soviet');
@@ -57,37 +57,37 @@ describe('UNIT_STATS parity', () => {
     it('E4 (Flamethrower)', () => {
       const u = UNIT_STATS.E4;
       expect(u.strength).toBe(40);
-      expect(u.speed).toBe(6);
+      expect(u.speed).toBe(3);
       expect(u.primaryWeapon).toBe('Flamer');
     });
 
     it('E6 (Engineer)', () => {
       const u = UNIT_STATS.E6;
       expect(u.strength).toBe(25);
-      expect(u.speed).toBe(6);
+      expect(u.speed).toBe(4);
       expect(u.primaryWeapon).toBeNull();
     });
 
     it('DOG (Attack Dog)', () => {
       const u = UNIT_STATS.DOG;
       expect(u.strength).toBe(12);
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(6);
       expect(u.sight).toBe(5);
       expect(u.primaryWeapon).toBe('DogJaw');
     });
 
-    it('GNRL (Stavros) — strength=80, speed=8, sight=3, weapon=Pistol', () => {
+    it('GNRL (Stavros) — strength=80, speed=4, sight=3, weapon=Pistol', () => {
       const u = UNIT_STATS.GNRL;
       expect(u.strength).toBe(80);
-      expect(u.speed).toBe(8);
+      expect(u.speed).toBe(4);
       expect(u.sight).toBe(3);
       expect(u.primaryWeapon).toBe('Pistol');
     });
 
-    it('CHAN (Specialist) — strength=25, speed=8, sight=2', () => {
+    it('CHAN (Specialist) — strength=25, speed=4, sight=2', () => {
       const u = UNIT_STATS.CHAN;
       expect(u.strength).toBe(25);
-      expect(u.speed).toBe(8);
+      expect(u.speed).toBe(4);
       expect(u.sight).toBe(2);
     });
 
@@ -119,7 +119,7 @@ describe('UNIT_STATS parity', () => {
       const u = UNIT_STATS.E7;
       expect(u).toBeDefined();
       expect(u.strength).toBe(100);
-      expect(u.speed).toBe(10);
+      expect(u.speed).toBe(4);
       expect(u.armor).toBe('none');
       expect(u.sight).toBe(6);
       expect(u.rot).toBe(8);
@@ -133,7 +133,7 @@ describe('UNIT_STATS parity', () => {
       const u = UNIT_STATS.THF;
       expect(u).toBeDefined();
       expect(u.strength).toBe(25);
-      expect(u.speed).toBe(8);
+      expect(u.speed).toBe(4);
       expect(u.armor).toBe('none');
       expect(u.sight).toBe(5);
       expect(u.primaryWeapon).toBeNull();
@@ -160,12 +160,12 @@ describe('UNIT_STATS parity', () => {
       }
     });
 
-    it('EINSTEIN (Prof. Einstein) — strength=25, speed=6, sight=2, rot=8, no weapon', () => {
+    it('EINSTEIN (Prof. Einstein) — strength=25, speed=4, sight=2, rot=8, no weapon', () => {
       const u = UNIT_STATS.EINSTEIN;
       expect(u).toBeDefined();
       expect(u.strength).toBe(25);
       expect(u.armor).toBe('none');
-      expect(u.speed).toBe(6);
+      expect(u.speed).toBe(4);
       expect(u.sight).toBe(2);
       expect(u.rot).toBe(8);
       expect(u.primaryWeapon).toBeNull();
@@ -177,7 +177,7 @@ describe('UNIT_STATS parity', () => {
     it('1TNK (Light Tank)', () => {
       const u = UNIT_STATS['1TNK'];
       expect(u.strength).toBe(300);
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(9);
       expect(u.armor).toBe('heavy');
       expect(u.primaryWeapon).toBe('75mm');
       expect(u.crusher).toBe(true);
@@ -186,14 +186,14 @@ describe('UNIT_STATS parity', () => {
     it('2TNK (Medium Tank)', () => {
       const u = UNIT_STATS['2TNK'];
       expect(u.strength).toBe(400);
-      expect(u.speed).toBe(12);
+      expect(u.speed).toBe(8);
       expect(u.primaryWeapon).toBe('90mm');
     });
 
     it('3TNK (Heavy Tank) — has secondary weapon 105mm', () => {
       const u = UNIT_STATS['3TNK'];
       expect(u.strength).toBe(400);
-      expect(u.speed).toBe(10);
+      expect(u.speed).toBe(7);
       expect(u.primaryWeapon).toBe('105mm');
       expect(u.secondaryWeapon).toBe('105mm');
     });
@@ -209,44 +209,44 @@ describe('UNIT_STATS parity', () => {
     it('JEEP (Ranger)', () => {
       const u = UNIT_STATS.JEEP;
       expect(u.strength).toBe(150);
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(12);
       expect(u.armor).toBe('light');
     });
 
     it('APC', () => {
       const u = UNIT_STATS.APC;
       expect(u.strength).toBe(200);
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(10);
       expect(u.passengers).toBe(5);
     });
 
     it('ARTY (Artillery)', () => {
       const u = UNIT_STATS.ARTY;
       expect(u.strength).toBe(75);
-      expect(u.speed).toBe(10);
+      expect(u.speed).toBe(6);
       expect(u.primaryWeapon).toBe('155mm');
     });
 
-    it('TRUK (Supply Truck) — armor=light, speed=14, sight=3', () => {
+    it('TRUK (Supply Truck) — armor=light, speed=7, sight=3', () => {
       const u = UNIT_STATS.TRUK;
       expect(u.strength).toBe(110);
       expect(u.armor).toBe('light');
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(7);
       expect(u.sight).toBe(3);
     });
 
-    it('TTNK (Tesla Tank) — strength=110, speed=12, sight=7', () => {
+    it('TTNK (Tesla Tank) — strength=110, speed=10, sight=7', () => {
       const u = UNIT_STATS.TTNK;
       expect(u.strength).toBe(110);
-      expect(u.speed).toBe(12);
+      expect(u.speed).toBe(10);
       expect(u.sight).toBe(7);
       expect(u.primaryWeapon).toBe('TTankZap');
     });
 
-    it('CTNK (Chrono Tank) — strength=350, speed=12, armor=light, weapon=APTusk', () => {
+    it('CTNK (Chrono Tank) — strength=350, speed=8, armor=light, weapon=APTusk', () => {
       const u = UNIT_STATS.CTNK;
       expect(u.strength).toBe(350);
-      expect(u.speed).toBe(12);
+      expect(u.speed).toBe(8);
       expect(u.armor).toBe('light');
       expect(u.primaryWeapon).toBe('APTusk');
     });
@@ -258,17 +258,17 @@ describe('UNIT_STATS parity', () => {
       expect(u.sight).toBe(6);
     });
 
-    it('DTRK (Demo Truck) — strength=110, armor=light, speed=14', () => {
+    it('DTRK (Demo Truck) — strength=110, armor=light, speed=7', () => {
       const u = UNIT_STATS.DTRK;
       expect(u.strength).toBe(110);
       expect(u.armor).toBe('light');
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(7);
     });
 
     it('STNK (Phase Transport) — full stats', () => {
       const u = UNIT_STATS.STNK;
       expect(u.strength).toBe(200);
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(9);
       expect(u.armor).toBe('heavy');
       expect(u.sight).toBe(5);
       expect(u.rot).toBe(5);
@@ -283,7 +283,7 @@ describe('UNIT_STATS parity', () => {
       expect(u).toBeDefined();
       expect(u.strength).toBe(600);
       expect(u.armor).toBe('heavy');
-      expect(u.speed).toBe(12);
+      expect(u.speed).toBe(6);
       expect(u.sight).toBe(4);
       expect(u.rot).toBe(5);
       expect(u.primaryWeapon).toBeNull();
@@ -295,7 +295,7 @@ describe('UNIT_STATS parity', () => {
       expect(u).toBeDefined();
       expect(u.strength).toBe(600);
       expect(u.armor).toBe('light');
-      expect(u.speed).toBe(10);
+      expect(u.speed).toBe(6);
       expect(u.sight).toBe(4);
       expect(u.rot).toBe(5);
       expect(u.primaryWeapon).toBeNull();
@@ -306,7 +306,7 @@ describe('UNIT_STATS parity', () => {
       const u = UNIT_STATS.V2RL;
       expect(u).toBeDefined();
       expect(u.strength).toBe(150);
-      expect(u.speed).toBe(10);
+      expect(u.speed).toBe(7);
       expect(u.armor).toBe('light');
       expect(u.sight).toBe(5);
       expect(u.rot).toBe(5);
@@ -318,7 +318,7 @@ describe('UNIT_STATS parity', () => {
       const u = UNIT_STATS.MNLY;
       expect(u).toBeDefined();
       expect(u.strength).toBe(100);
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(7);
       expect(u.armor).toBe('heavy');
       expect(u.primaryWeapon).toBeNull();
       expect(u.owner).toBe('both');
@@ -328,56 +328,56 @@ describe('UNIT_STATS parity', () => {
 
   // --- Naval ---
   describe('Naval', () => {
-    it('DD (Destroyer) — ROT=7, sight=6, speed=12', () => {
+    it('DD (Destroyer) — ROT=7, sight=6, speed=8', () => {
       const u = UNIT_STATS.DD;
       expect(u.strength).toBe(400);
-      expect(u.speed).toBe(12);
+      expect(u.speed).toBe(8);
       expect(u.sight).toBe(6);
       expect(u.rot).toBe(7);
       expect(u.primaryWeapon).toBe('Stinger');
       expect(u.secondaryWeapon).toBe('DepthCharge');
     });
 
-    it('CA (Cruiser) — ROT=5, sight=7, speed=8, weapon=8Inch', () => {
+    it('CA (Cruiser) — ROT=5, sight=7, speed=6, weapon=8Inch', () => {
       const u = UNIT_STATS.CA;
       expect(u.strength).toBe(700);
-      expect(u.speed).toBe(8);
+      expect(u.speed).toBe(6);
       expect(u.sight).toBe(7);
       expect(u.rot).toBe(5);
       expect(u.primaryWeapon).toBe('8Inch');
     });
 
-    it('SS (Submarine) — ROT=7, sight=6, speed=10', () => {
+    it('SS (Submarine) — ROT=7, sight=6, speed=6', () => {
       const u = UNIT_STATS.SS;
       expect(u.strength).toBe(120);
-      expect(u.speed).toBe(10);
+      expect(u.speed).toBe(6);
       expect(u.sight).toBe(6);
       expect(u.rot).toBe(7);
       expect(u.isCloakable).toBe(true);
     });
 
-    it('MSUB (Missile Sub) — ROT=7, sight=6, speed=10', () => {
+    it('MSUB (Missile Sub) — ROT=7, sight=6, speed=6', () => {
       const u = UNIT_STATS.MSUB;
       expect(u.strength).toBe(150);
-      expect(u.speed).toBe(10);
+      expect(u.speed).toBe(6);
       expect(u.sight).toBe(6);
       expect(u.rot).toBe(7);
       expect(u.primaryWeapon).toBe('SubSCUD');
     });
 
-    it('PT (Gunboat) — ROT=7, sight=7, speed=14, weapon=2Inch', () => {
+    it('PT (Gunboat) — ROT=7, sight=7, speed=10, weapon=2Inch', () => {
       const u = UNIT_STATS.PT;
       expect(u.strength).toBe(200);
-      expect(u.speed).toBe(14);
+      expect(u.speed).toBe(10);
       expect(u.sight).toBe(7);
       expect(u.rot).toBe(7);
       expect(u.primaryWeapon).toBe('2Inch');
     });
 
-    it('LST (Transport) — ROT=10, sight=6, speed=12', () => {
+    it('LST (Transport) — ROT=10, sight=6, speed=8', () => {
       const u = UNIT_STATS.LST;
       expect(u.strength).toBe(350);
-      expect(u.speed).toBe(12);
+      expect(u.speed).toBe(8);
       expect(u.sight).toBe(6);
       expect(u.rot).toBe(10);
     });
@@ -385,44 +385,44 @@ describe('UNIT_STATS parity', () => {
 
   // --- Aircraft ---
   describe('Aircraft', () => {
-    it('HELI (Longbow) — strength=225, speed=18, ROT=4, maxAmmo=6', () => {
+    it('HELI (Longbow) — strength=225, speed=14, ROT=4, maxAmmo=6', () => {
       const u = UNIT_STATS.HELI;
       expect(u.strength).toBe(225);
-      expect(u.speed).toBe(18);
+      expect(u.speed).toBe(14);
       expect(u.rot).toBe(4);
       expect(u.maxAmmo).toBe(6);
       expect(u.primaryWeapon).toBe('Hellfire');
     });
 
-    it('HIND — strength=225, speed=18, ROT=4, maxAmmo=12, weapon=ChainGun', () => {
+    it('HIND — strength=225, speed=14, ROT=4, maxAmmo=12, weapon=ChainGun', () => {
       const u = UNIT_STATS.HIND;
       expect(u.strength).toBe(225);
-      expect(u.speed).toBe(18);
+      expect(u.speed).toBe(14);
       expect(u.rot).toBe(4);
       expect(u.maxAmmo).toBe(12);
       expect(u.primaryWeapon).toBe('ChainGun');
     });
 
-    it('TRAN (Chinook) — strength=90, speed=18, ROT=5', () => {
+    it('TRAN (Chinook) — strength=90, speed=12, ROT=5', () => {
       const u = UNIT_STATS.TRAN;
       expect(u.strength).toBe(90);
-      expect(u.speed).toBe(18);
+      expect(u.speed).toBe(12);
       expect(u.rot).toBe(5);
     });
 
-    it('MIG — strength=50, speed=24, ROT=5, maxAmmo=3, weapon=Maverick', () => {
+    it('MIG — strength=50, speed=20, ROT=5, maxAmmo=3, weapon=Maverick', () => {
       const u = UNIT_STATS.MIG;
       expect(u.strength).toBe(50);
-      expect(u.speed).toBe(24);
+      expect(u.speed).toBe(20);
       expect(u.rot).toBe(5);
       expect(u.maxAmmo).toBe(3);
       expect(u.primaryWeapon).toBe('Maverick');
     });
 
-    it('YAK — strength=60, speed=24, ROT=5, maxAmmo=15, weapon=ChainGun', () => {
+    it('YAK — strength=60, speed=18, ROT=5, maxAmmo=15, weapon=ChainGun', () => {
       const u = UNIT_STATS.YAK;
       expect(u.strength).toBe(60);
-      expect(u.speed).toBe(24);
+      expect(u.speed).toBe(18);
       expect(u.rot).toBe(5);
       expect(u.maxAmmo).toBe(15);
       expect(u.primaryWeapon).toBe('ChainGun');
@@ -938,13 +938,13 @@ const CIVILIAN_STRUCTURE_TYPES = [
 
 describe('STRUCTURE_MAX_HP parity', () => {
   const expected: Record<string, number> = {
-    POWR: 400, APWR: 700, PROC: 900, TENT: 800, BARR: 800,
-    WEAP: 1000, AFLD: 1000, HPAD: 800, DOME: 1000,
-    GUN: 400, SAM: 400, TSLA: 400, GAP: 1000,
+    POWR: 200, APWR: 700, PROC: 900, TENT: 800, BARR: 800,
+    WEAP: 1000, AFLD: 800, HPAD: 600, DOME: 1000,
+    GUN: 400, SAM: 400, TSLA: 400, GAP: 800,
     PBOX: 400, HBOX: 600, AGUN: 400, FTUR: 400, KENN: 400,
-    ATEK: 400, STEK: 600, IRON: 400, PDOX: 400, MSLO: 400,
-    FIX: 800, SILO: 300, FACT: 1000,
-    SYRD: 1000, SPEN: 1000, BIO: 600, HOSP: 400,
+    ATEK: 600, STEK: 600, IRON: 600, PDOX: 600, MSLO: 1000,
+    FIX: 800, SILO: 150, FACT: 1000,
+    SYRD: 500, SPEN: 500, BIO: 600, HOSP: 400,
     FACF: 30, DOMF: 30, WEAF: 30,
     QUEE: 800, LAR1: 25, LAR2: 50,
     MINP: 1, MINV: 1,

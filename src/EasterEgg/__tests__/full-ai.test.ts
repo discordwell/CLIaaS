@@ -198,9 +198,9 @@ describe('AI base construction', () => {
   });
 
   it('STRUCTURE_MAX_HP has higher HP for advanced buildings', () => {
-    expect(STRUCTURE_MAX_HP.ATEK).toBe(400);
+    expect(STRUCTURE_MAX_HP.ATEK).toBe(600);
     expect(STRUCTURE_MAX_HP.STEK).toBe(600);
-    expect(STRUCTURE_MAX_HP.MSLO).toBe(400);
+    expect(STRUCTURE_MAX_HP.MSLO).toBe(1000);
     expect(STRUCTURE_MAX_HP.TSLA).toBe(400);
   });
 

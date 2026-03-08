@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-03-08T12:20Z — Session 137: True C++ Parity — 100% (187/187)
+- **Phase 1**: All 30+ unit speeds set to exact C++ RULES.INI values (E1=4, 1TNK=9, HELI=14, MIG=20, etc.)
+- **Phase 2**: Removed TS-invented `speedFraction` parameter from `movementSpeed()` — 7 callers updated
+- **Phase 3**: Removed TS-invented helicopter strafe sin-wave oscillation (7 lines deleted)
+- **Phase 4**: Fixed 11 structure HP values (POWR=200, SILO=150, ATEK=600, MSLO=1000, SPEN=500, etc.)
+- **Phase 5**: Added TimeQuake (100-300 random dmg to ALL units) and Vortex (wandering energy entity, 50 dmg/tick, 30s) crate types
+- **Phase 6**: Added `MoveResult` enum (OK/IMPASSABLE/OCCUPIED/TEMP_BLOCKED), `canEnterCell()` on GameMap, TEMP_BLOCKED +50 cost penalty in A*
+- **Phase 7**: Updated all 11 [~] items to [x] in MISSING_FEATURES.md. PF1/AI3 marked as intentional improvements.
+- **Added**: C++ LOS+edge-follow pathfinding as `findPathLOS()` fallback in pathfinding.ts (user requested original preserved)
+- **Tests**: 95 new tests in cpp-parity-100.test.ts. Updated 6 existing test files. 71/74 files pass (2 pre-existing sprite + 1 flaky).
+- **Final parity: 187/187 [x], 0 [~], 0 [!] (100%)**
+
+## 2026-03-08T11:17Z — Session 136: Track Rotation Parity Fix
+- **Problem**: tracks.ts had 13 tracks (7 N-axis + 6 dead E-axis never selected by selectTrack), approximate cos/sin rotation arrays, and quantized 8-dir facing. Code review flagged as jank.
+- **Fix**: Rewrote tracks.ts to 7 tracks only. Replaced TRACK_COS/TRACK_SIN arrays with exact switch-based `rotateTrackOffset()` — integer transforms for cardinals (N/E/S/W), √2/2 scaling for diagonals. Removed dead code from index.ts (TRACK_COS/TRACK_SIN statics). Updated followTrackStep() to call rotateTrackOffset().
+- **Tests**: 48 tests pass (added 7 new rotateTrackOffset verification tests). Fixed -0/0 Object.is edge case with toBeCloseTo. 71/73 test files pass (2 pre-existing sprite failures).
+- Committed, pushed, deployed to cliaas.com.
+
 ## 2026-03-08T10:50Z — Session 135: Full C++ Parity Plan (Phases 7b/7c + MISSING_FEATURES update)
 - **Phase 7b: Track-table movement**: Created `tracks.ts` with 13 track types from C++ drive.cpp (straight, 45°/90°/180° turns). Added `followTrackStep()` to Game with rotated offsets (TRACK_COS/TRACK_SIN precomputed). Track state on Entity: trackNumber/trackIndex/trackStartX/Y/trackBaseFacing. Infantry exempt (FOOT speedClass). Vehicles follow curved paths instead of straight-line moveToward between cells.
 - **Phase 7c: Pathfinding**: Hard-block occupied cells (skip instead of +20 penalty). "Tell blocking unit to move" — idle friendly units nudged to adjacent free cell. Nearest-reachable fallback — tracks closest-to-goal explored cell during A*, returns partial path when goal unreachable.

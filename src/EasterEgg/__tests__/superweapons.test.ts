@@ -93,7 +93,7 @@ describe('Superweapon definitions', () => {
 describe('Superweapon structure config', () => {
   it('ATEK has correct size and HP', () => {
     expect(STRUCTURE_SIZE['ATEK']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['ATEK']).toBe(400);
+    expect(STRUCTURE_MAX_HP['ATEK']).toBe(600);
   });
 
   it('STEK has correct size and HP', () => {
@@ -103,17 +103,17 @@ describe('Superweapon structure config', () => {
 
   it('PDOX has correct size and HP', () => {
     expect(STRUCTURE_SIZE['PDOX']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['PDOX']).toBe(400);
+    expect(STRUCTURE_MAX_HP['PDOX']).toBe(600);
   });
 
   it('IRON has correct size and HP', () => {
     expect(STRUCTURE_SIZE['IRON']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['IRON']).toBe(400);
+    expect(STRUCTURE_MAX_HP['IRON']).toBe(600);
   });
 
   it('MSLO has correct size and HP', () => {
     expect(STRUCTURE_SIZE['MSLO']).toEqual([2, 2]);
-    expect(STRUCTURE_MAX_HP['MSLO']).toBe(400);
+    expect(STRUCTURE_MAX_HP['MSLO']).toBe(1000);
   });
 
   it('all 5 superweapon structures are in STRUCTURE_SIZE', () => {
@@ -355,8 +355,8 @@ describe('Nuclear missile', () => {
     }
   });
 
-  it('MSLO structure has 400 HP', () => {
-    expect(STRUCTURE_MAX_HP['MSLO']).toBe(400);
+  it('MSLO structure has 1000 HP', () => {
+    expect(STRUCTURE_MAX_HP['MSLO']).toBe(1000);
   });
 
   it('entity can be killed by large damage (simulating nuke)', () => {

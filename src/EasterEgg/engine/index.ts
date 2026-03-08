@@ -127,7 +127,7 @@ const STRUCTURE_IMAGES: Record<string, string> = {
 };
 
 /** Crate bonus types */
-type CrateType = 'money' | 'heal' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability' | 'parabomb' | 'sonar' | 'icbm';
+type CrateType = 'money' | 'heal' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability' | 'parabomb' | 'sonar' | 'icbm' | 'timequake' | 'vortex';
 interface Crate {
   x: number;
   y: number;
@@ -263,6 +263,9 @@ export class Game {
   // Crate system
   crates: Crate[] = [];
   private nextCrateTick = 0;
+
+  /** CR8: Active vortex entities from Vortex crate */
+  activeVortices: Array<{ x: number; y: number; angle: number; ticksLeft: number; id: number }> = [];
 
   // SP1: Spy infiltration house flags (C++ infantry.cpp:645-676)
   spiedHouses = new Set<House>();
@@ -1015,6 +1018,9 @@ export class Game {
 
     // Tick mine triggers (Minelayer AP mines)
     this.tickMines();
+
+    // CR8: Tick active vortices
+    this.tickVortices();
 
     // Gap Generator shroud jamming (every ~90 ticks)
     this.updateGapGenerators();
@@ -3355,7 +3361,7 @@ export class Game {
         const dist = worldDist(entity.pos, { x: waveCX, y: waveCY });
         if (dist > 2) {
           entity.animState = AnimState.WALK;
-          entity.moveToward({ x: waveCX, y: waveCY }, this.movementSpeed(entity, 0.3));
+          entity.moveToward({ x: waveCX, y: waveCY }, this.movementSpeed(entity));
           return;
         }
       }
@@ -3472,7 +3478,7 @@ export class Game {
       if (entity.flightAltitude < Entity.FLIGHT_ALTITUDE) {
         entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 3);
       }
-      if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity, 0.7))) {
+      if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
         entity.moveTarget = null;
         if (entity.moveQueue.length > 0) {
           const next = entity.moveQueue.shift()!;
@@ -5174,7 +5180,7 @@ export class Game {
             return true;
           }
           // Fly toward target
-          entity.moveToward(targetPos, this.movementSpeed(entity, 0.7));
+          entity.moveToward(targetPos, this.movementSpeed(entity));
         } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
           // Check if aircraft is at map edge with out-of-bounds target — exit map
           const ec = entity.cell;
@@ -5201,7 +5207,7 @@ export class Game {
             return true;
           }
           // Simple move — fly to destination
-          if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity, 0.7))) {
+          if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
             // Arrived — check if destination was out of bounds (aircraft map exit)
             const arrCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
             if (!this.map.inBounds(arrCell.cx, arrCell.cy)) {
@@ -5277,7 +5283,7 @@ export class Game {
           entity.landedAtStructure = padIdx;
           pad.dockedAircraft = entity.id;
         } else {
-          entity.moveToward(padPos, this.movementSpeed(entity, 0.7));
+          entity.moveToward(padPos, this.movementSpeed(entity));
         }
         return true;
       }
@@ -5333,7 +5339,7 @@ export class Game {
       return true;
     }
 
-    const speed = this.movementSpeed(entity, 0.7);
+    const speed = this.movementSpeed(entity);
     const dist = worldDist(entity.pos, targetPos);
     const weaponRange = entity.weapon?.range ?? 5;
 
@@ -5408,7 +5414,7 @@ export class Game {
     if (dist > weaponRange) {
       // Close to weapon range
       entity.animState = AnimState.WALK;
-      entity.moveToward(targetPos, this.movementSpeed(entity, 0.7));
+      entity.moveToward(targetPos, this.movementSpeed(entity));
       return true;
     }
 
@@ -5427,14 +5433,6 @@ export class Game {
       entity.attackCooldown = entity.weapon.rof;
       if (entity.ammo > 0) entity.ammo--;
     }
-
-    // Lateral strafe oscillation (±0.5px/tick, flip every 30 ticks)
-    const strafePhase = Math.sin(this.tick * 0.21) * 0.5;
-    const perpDx = -(targetPos.y - entity.pos.y);
-    const perpDy = (targetPos.x - entity.pos.x);
-    const perpLen = Math.sqrt(perpDx * perpDx + perpDy * perpDy) || 1;
-    entity.pos.x += (perpDx / perpLen) * strafePhase;
-    entity.pos.y += (perpDy / perpLen) * strafePhase;
 
     // Out of ammo — RTB
     if (entity.ammo === 0) {
@@ -5616,8 +5614,8 @@ export class Game {
 
   /** M1+M2: Compute movement speed with terrain and damage multipliers.
    *  Speed values in UNIT_STATS are C++ MPH (leptons/tick); MPH_TO_PX converts to pixels/tick. */
-  private movementSpeed(entity: Entity, speedFraction = 1.0): number {
-    return entity.stats.speed * MPH_TO_PX * speedFraction
+  private movementSpeed(entity: Entity): number {
+    return entity.stats.speed * MPH_TO_PX
       * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
       * this.damageSpeedFactor(entity);
   }
@@ -5676,7 +5674,7 @@ export class Game {
     const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
     const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
     const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
-    entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity, 0.4));
+    entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity));
   }
 
   /** Check if two houses are allied */
@@ -7167,6 +7165,7 @@ export class Game {
     squad: 'squad', heal_base: 'heal_base', napalm: 'napalm',
     cloak: 'cloak', invulnerability: 'invulnerability',
     parabomb: 'parabomb', sonar: 'sonar', icbm: 'icbm',
+    timequake: 'timequake', vortex: 'vortex',
   };
 
     /** CR9: Weighted crate share distribution (C++ CrateShares from rules.ini) */
@@ -7183,6 +7182,8 @@ export class Game {
     { type: 'parabomb', shares: 3 },
     { type: 'sonar', shares: 2 },
     { type: 'icbm', shares: 1 },
+    { type: 'timequake', shares: 1 },
+    { type: 'vortex', shares: 1 },
   ];
 
   /** CR9: Select a crate type using weighted random distribution */
@@ -7403,6 +7404,34 @@ export class Game {
           this.addCredits(2000, true);
           this.evaMessages.push({ text: 'MONEY CRATE', tick: this.tick });
         }
+        break;
+      }
+      case 'timequake': {
+        // CR8: TimeQuake — damages ALL units on map (friend and foe) for 100-300 random damage
+        for (const e of this.entities) {
+          if (!e.alive) continue;
+          const dmg = 100 + Math.floor(Math.random() * 201); // 100-300
+          this.damageEntity(e, dmg, 'HE');
+        }
+        this.renderer.screenShake = Math.max(this.renderer.screenShake, 15);
+        this.audio.play('explode_lg');
+        this.evaMessages.push({ text: 'TIME QUAKE', tick: this.tick });
+        break;
+      }
+      case 'vortex': {
+        // CR8: Vortex — spawns a wandering energy vortex that damages nearby units for ~30 seconds
+        const vortexDuration = 450; // 30 seconds at 15 FPS
+        const vortexSpeed = 0.5; // cells per tick movement
+        let vx = crate.x;
+        let vy = crate.y;
+        let vAngle = Math.random() * Math.PI * 2;
+        const vortexId = this.tick; // unique ID for this vortex
+        // Store vortex as a persistent effect with a custom update
+        this.activeVortices.push({
+          x: vx, y: vy, angle: vAngle, ticksLeft: vortexDuration, id: vortexId,
+        });
+        this.audio.play('tesla_zap');
+        this.evaMessages.push({ text: 'VORTEX SPAWNED', tick: this.tick });
         break;
       }
     }
@@ -9430,6 +9459,44 @@ export class Game {
           break;
         }
       }
+    }
+  }
+
+  /** CR8: Tick active vortex entities — wander randomly, damage nearby units */
+  private tickVortices(): void {
+    for (let i = this.activeVortices.length - 1; i >= 0; i--) {
+      const v = this.activeVortices[i];
+      v.ticksLeft--;
+      if (v.ticksLeft <= 0) {
+        this.activeVortices.splice(i, 1);
+        continue;
+      }
+      // Random wandering — adjust angle slightly each tick
+      v.angle += (Math.random() - 0.5) * 0.4;
+      v.x += Math.cos(v.angle) * CELL_SIZE * 0.15;
+      v.y += Math.sin(v.angle) * CELL_SIZE * 0.15;
+      // Clamp to map bounds
+      const minX = this.map.boundsX * CELL_SIZE;
+      const maxX = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
+      const minY = this.map.boundsY * CELL_SIZE;
+      const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
+      if (v.x < minX || v.x > maxX) { v.angle = Math.PI - v.angle; v.x = Math.max(minX, Math.min(maxX, v.x)); }
+      if (v.y < minY || v.y > maxY) { v.angle = -v.angle; v.y = Math.max(minY, Math.min(maxY, v.y)); }
+      // Damage all units within 1 cell radius — 50 damage/tick
+      for (const e of this.entities) {
+        if (!e.alive) continue;
+        const dx = e.pos.x - v.x;
+        const dy = e.pos.y - v.y;
+        if (dx * dx + dy * dy <= CELL_SIZE * CELL_SIZE) {
+          this.damageEntity(e, 50, 'Super');
+        }
+      }
+      // Visual effect — rotating translucent circle
+      this.effects.push({
+        type: 'explosion', x: v.x, y: v.y,
+        frame: 0, maxFrames: 2, size: 18,
+        sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen',
+      });
     }
   }
 
