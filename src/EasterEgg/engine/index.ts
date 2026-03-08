@@ -5398,7 +5398,7 @@ export class Game {
     return true;
   }
 
-  /** Helicopter hover + strafe: close to range, face target, fire, lateral oscillation */
+  /** Helicopter hover attack: close to weapon range, face target, fire */
   private updateHelicopterAttack(entity: Entity): boolean {
     const targetPos = this.getAircraftTargetPos(entity);
 
@@ -7407,11 +7407,16 @@ export class Game {
         break;
       }
       case 'timequake': {
-        // CR8: TimeQuake — damages ALL units on map (friend and foe) for 100-300 random damage
+        // CR8: TimeQuake — damages ALL units AND structures on map (friend and foe) for 100-300 random damage
         for (const e of this.entities) {
           if (!e.alive) continue;
           const dmg = 100 + Math.floor(Math.random() * 201); // 100-300
           this.damageEntity(e, dmg, 'HE');
+        }
+        for (const s of this.structures) {
+          if (!s.alive) continue;
+          const dmg = 100 + Math.floor(Math.random() * 201);
+          this.damageStructure(s, dmg);
         }
         this.renderer.screenShake = Math.max(this.renderer.screenShake, 15);
         this.audio.play('explode_lg');
@@ -7420,17 +7425,10 @@ export class Game {
       }
       case 'vortex': {
         // CR8: Vortex — spawns a wandering energy vortex that damages nearby units for ~30 seconds
-        const vortexDuration = 450; // 30 seconds at 15 FPS
-        const vortexSpeed = 0.5; // cells per tick movement
-        let vx = crate.x;
-        let vy = crate.y;
-        let vAngle = Math.random() * Math.PI * 2;
-        const vortexId = this.tick; // unique ID for this vortex
-        // Store vortex as a persistent effect with a custom update
         this.activeVortices.push({
-          x: vx, y: vy, angle: vAngle, ticksLeft: vortexDuration, id: vortexId,
+          x: crate.x, y: crate.y, angle: Math.random() * Math.PI * 2, ticksLeft: 450, id: this.tick,
         });
-        this.audio.play('tesla_zap');
+        this.audio.play('teslazap');
         this.evaMessages.push({ text: 'VORTEX SPAWNED', tick: this.tick });
         break;
       }
@@ -9482,13 +9480,25 @@ export class Game {
       const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
       if (v.x < minX || v.x > maxX) { v.angle = Math.PI - v.angle; v.x = Math.max(minX, Math.min(maxX, v.x)); }
       if (v.y < minY || v.y > maxY) { v.angle = -v.angle; v.y = Math.max(minY, Math.min(maxY, v.y)); }
-      // Damage all units within 1 cell radius — 50 damage/tick
-      for (const e of this.entities) {
-        if (!e.alive) continue;
-        const dx = e.pos.x - v.x;
-        const dy = e.pos.y - v.y;
-        if (dx * dx + dy * dy <= CELL_SIZE * CELL_SIZE) {
-          this.damageEntity(e, 50, 'Super');
+      // Damage units and structures within 1 cell radius — 50 damage every 3 ticks (~250 DPS)
+      if (v.ticksLeft % 3 === 0) {
+        for (const e of this.entities) {
+          if (!e.alive) continue;
+          const dx = e.pos.x - v.x;
+          const dy = e.pos.y - v.y;
+          if (dx * dx + dy * dy <= CELL_SIZE * CELL_SIZE) {
+            this.damageEntity(e, 50, 'Super');
+          }
+        }
+        for (const s of this.structures) {
+          if (!s.alive) continue;
+          const sx = s.cx * CELL_SIZE + CELL_SIZE / 2;
+          const sy = s.cy * CELL_SIZE + CELL_SIZE / 2;
+          const dx = sx - v.x;
+          const dy = sy - v.y;
+          if (dx * dx + dy * dy <= CELL_SIZE * CELL_SIZE) {
+            this.damageStructure(s, 50);
+          }
         }
       }
       // Visual effect — rotating translucent circle
