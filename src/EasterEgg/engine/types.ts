@@ -661,7 +661,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 40 },  // Gunboat weapon
   Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 40 },  // Tanya's dual pistols
   Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 40 },  // Stavros/civilian
-  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 15, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5 },  // V2 Rocket
+  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5 },  // V2 Rocket (C++ FROG: speed=25, High=yes, Proximity=yes)
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super', projSpeed: 40 }, // C++: Warhead=Super (combat.cpp confirms)
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
@@ -731,7 +731,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
   },
   [SuperweaponType.SPY_PLANE]: {
     type: SuperweaponType.SPY_PLANE, name: 'Spy Plane',
-    building: 'ATEK', rechargeTicks: 6300, faction: 'allied',  // 7 min × 60 × 15 FPS
+    building: 'AFLD', rechargeTicks: 1800, faction: 'both',  // C++ Rule.SpyTime=2min, AIRSTRIP req, both factions
     requiresPower: true, needsTarget: true, targetMode: 'ground',
   },
 };

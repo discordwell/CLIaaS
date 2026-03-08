@@ -763,12 +763,12 @@ export function threatScore(
     score *= 1.25;
   }
 
-  // AI5: Per-target splash avoidance — reduce threat when target is near friendly structures
-  // Only applies when the scanner actually has a splash weapon (C++ techno.cpp splash avoidance)
+  // AI5: Area_Modify — reduce threat when target is near friendly structures
+  // C++ techno.cpp: odds /= 2 per nearby building (exponential halving)
+  // Only applies when scanner has splash weapon (proxy for C++ IsSupressed flag)
   if (nearFriendlyStructureCount !== undefined && nearFriendlyStructureCount > 0 &&
       scanner.weapon?.splash && scanner.weapon.splash > 0) {
-    // Scale penalty by count: more nearby structures = less desirable target
-    score *= Math.max(0.3, 1 - 0.15 * nearFriendlyStructureCount);
+    score *= Math.pow(0.5, nearFriendlyStructureCount);
   }
 
   return score;

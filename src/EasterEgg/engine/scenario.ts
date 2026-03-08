@@ -1750,6 +1750,7 @@ export interface TriggerGameState {
   builtAircraftTypes: Set<string>; // aircraft types player has built
   fakesExist: boolean;           // do any fake structures still exist?
   spiedBuildings: Set<string>;   // trigger names of spied buildings
+  isThieved: boolean;            // C++ House.IsThieved — a Thief has infiltrated a building
 }
 
 export function checkTriggerEvent(
@@ -1834,8 +1835,8 @@ export function checkTriggerEvent(
       // Player is low on power
       return state.isLowPower;
     case TEVENT_THIEVED:
-      // Spy has infiltrated a building — not implemented for ant missions
-      return false;
+      // C++ House.IsThieved — set when a Thief infiltrates PROC/SILO
+      return state.isThieved;
     case TEVENT_CROSS_HORIZONTAL:
       // Player crossed a horizontal line — use playerEntered flag
       return state.playerEntered;

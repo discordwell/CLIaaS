@@ -154,18 +154,18 @@ describe('Minelayer and mines', () => {
 
     // Simulate mine placement
     const targetCell = worldToCell(200, 200);
-    mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: mnly.house, damage: 400 });
+    mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: mnly.house, damage: 1000 });
     mnly.mineCount++;
 
     expect(mines.length).toBe(1);
-    expect(mines[0].damage).toBe(400);
+    expect(mines[0].damage).toBe(1000);
     expect(mines[0].house).toBe(House.Spain);
     expect(mnly.mineCount).toBe(1);
   });
 
   it('Mine triggers when enemy enters cell', () => {
     const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
-    mines.push({ cx: 8, cy: 8, house: House.Spain, damage: 400 });
+    mines.push({ cx: 8, cy: 8, house: House.Spain, damage: 1000 });
 
     const enemy = makeEntity(UnitType.V_2TNK, House.USSR, 8 * CELL_SIZE + 12, 8 * CELL_SIZE + 12);
     const ec = enemy.cell;
@@ -190,7 +190,7 @@ describe('Minelayer and mines', () => {
 
   it('Friendly units do NOT trigger mines', () => {
     const alliances = defaultAlliances();
-    const mine = { cx: 5, cy: 5, house: House.Spain, damage: 400 };
+    const mine = { cx: 5, cy: 5, house: House.Spain, damage: 1000 };
     const friendly = makeEntity(UnitType.V_2TNK, House.Spain, 5 * CELL_SIZE + 12, 5 * CELL_SIZE + 12);
 
     expect(isAllied(alliances, friendly.house, mine.house)).toBe(true);
@@ -208,7 +208,7 @@ describe('Mine limit', () => {
 
     // Place 50 mines
     for (let i = 0; i < MAX_MINES; i++) {
-      mines.push({ cx: i, cy: 0, house: House.Spain, damage: 400 });
+      mines.push({ cx: i, cy: 0, house: House.Spain, damage: 1000 });
     }
     expect(mines.length).toBe(50);
 
@@ -223,13 +223,13 @@ describe('Mine limit', () => {
 
     // Spain places 50 mines
     for (let i = 0; i < MAX_MINES; i++) {
-      mines.push({ cx: i, cy: 0, house: House.Spain, damage: 400 });
+      mines.push({ cx: i, cy: 0, house: House.Spain, damage: 1000 });
     }
     // USSR can still place mines
     const ussrMines = mines.filter(m => m.house === House.USSR).length;
     expect(ussrMines < MAX_MINES).toBe(true);
 
-    mines.push({ cx: 0, cy: 1, house: House.USSR, damage: 400 });
+    mines.push({ cx: 0, cy: 1, house: House.USSR, damage: 1000 });
     expect(mines.filter(m => m.house === House.USSR).length).toBe(1);
   });
 });
@@ -727,39 +727,42 @@ describe('V2 Rocket weapon data', () => {
 // ============================================================================
 // AI5: Per-target splash avoidance — nearby friendly structures reduce threat score
 // ============================================================================
-describe('AI5: Per-target splash avoidance', () => {
-  it('splash-weapon scanner: threatScore decreases with more nearby friendly structures', () => {
+describe('AI5: Area_Modify — C++ exponential halving per nearby building', () => {
+  it('splash-weapon scanner: threatScore halves per nearby friendly structure (C++ odds/=2)', () => {
     // V2RL has SCUD weapon with splash: 2.0
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
     const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
     const scoreOne = threatScore(scanner, target, 1, false, 0, null, 1);
+    const scoreTwo = threatScore(scanner, target, 1, false, 0, null, 2);
     const scoreThree = threatScore(scanner, target, 1, false, 0, null, 3);
-    const scoreFour = threatScore(scanner, target, 1, false, 0, null, 4);
 
     // More nearby structures = lower score
     expect(scoreOne).toBeLessThan(scoreNone);
-    expect(scoreThree).toBeLessThan(scoreOne);
-    // 1 structure: score * (1 - 0.15) = 0.85x
-    expect(scoreOne).toBeCloseTo(scoreNone * 0.85, 0);
-    // 3 structures: score * (1 - 0.45) = 0.55x
-    expect(scoreThree).toBeCloseTo(scoreNone * 0.55, 0);
-    // 4 structures: score * (1 - 0.60) = 0.4x (floor of 0.3x kicks in at 5+)
-    expect(scoreFour).toBeCloseTo(scoreNone * 0.4, 0);
+    expect(scoreTwo).toBeLessThan(scoreOne);
+    // C++ Area_Modify: odds /= 2 per building → pow(0.5, count)
+    // 1 building: 0.5x
+    expect(scoreOne).toBeCloseTo(scoreNone * 0.5, 1);
+    // 2 buildings: 0.25x
+    expect(scoreTwo).toBeCloseTo(scoreNone * 0.25, 1);
+    // 3 buildings: 0.125x
+    expect(scoreThree).toBeCloseTo(scoreNone * 0.125, 1);
   });
 
-  it('splash-weapon scanner: penalty floors at 0.3x', () => {
+  it('splash-weapon scanner: penalty continues exponentially (no floor)', () => {
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
     const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
-    // 5+ structures would be 1 - 0.75 = 0.25, but clamped to 0.3
+    // C++ has no floor — keeps halving
     const scoreFive = threatScore(scanner, target, 1, false, 0, null, 5);
     const scoreTen = threatScore(scanner, target, 1, false, 0, null, 10);
 
-    expect(scoreFive).toBeCloseTo(scoreNone * 0.3, 0);
-    expect(scoreTen).toBeCloseTo(scoreNone * 0.3, 0);
+    // 5 buildings: 1/32 = 0.03125x
+    expect(scoreFive).toBeCloseTo(scoreNone * Math.pow(0.5, 5), 2);
+    // 10 buildings: 1/1024 ≈ 0.001x
+    expect(scoreTen).toBeCloseTo(scoreNone * Math.pow(0.5, 10), 4);
   });
 
   it('non-splash scanner: nearFriendlyStructureCount has no effect', () => {
@@ -839,8 +842,8 @@ describe('SW6: Missing superweapons', () => {
   it('SPY_PLANE superweapon is defined correctly', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SPY_PLANE];
     expect(def).toBeDefined();
-    expect(def.building).toBe('ATEK');
-    expect(def.faction).toBe('allied');
+    expect(def.building).toBe('AFLD');
+    expect(def.faction).toBe('both');
     expect(def.needsTarget).toBe(true);
     expect(def.targetMode).toBe('ground');
   });
@@ -882,12 +885,12 @@ describe('Minelayer entity loop integration', () => {
     expect(mnly.weapon).toBeNull();
   });
 
-  it('Minelayer mine damage matches AP warhead (400 dmg) from existing mine tests', () => {
-    // Verify mine placement creates mines with correct damage value
+  it('Minelayer mine damage matches C++ APMineDamage (1000 dmg)', () => {
+    // C++ RULES.CPP: APMineDamage=1000
     const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
     const targetCell = worldToCell(200, 200);
-    mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: House.Spain, damage: 400 });
-    expect(mines[0].damage).toBe(400);
+    mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: House.Spain, damage: 1000 });
+    expect(mines[0].damage).toBe(1000);
   });
 
   it('Minelayer tracks mineCount on entity', () => {

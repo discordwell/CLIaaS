@@ -18,15 +18,23 @@
 - Wet tested on cliaas.com: empty state + data-loaded state, all zones verified
 - Note: VPS DB provider returns 0 tickets (pre-existing issue, not from this change); local JSONL mode works with demo data
 
+## 2026-03-08T08:30Z — Session 134: C++ Parity Audit Fixes
+- **Mine damage**: 400 → 1000 (C++ RULES.CPP APMineDamage=1000)
+- **SCUD projSpeed**: 15 → 25 (C++ FROG projectile speed=25)
+- **SPY_PLANE**: building ATEK→AFLD (AIRSTRIP), faction allied→both, recharge 6300→1800 ticks (C++ Rule.SpyTime=2min)
+- **AI5 Area_Modify**: Linear `1 - 0.15×count` (floor 0.3) → exponential `pow(0.5, count)` (C++ odds/=2). Radius 1.5→1.0 cells.
+- **Thief IsThieved**: Added isThieved flag to Game, wired TEVENT_THIEVED trigger (was hardcoded false). Set on successful theft.
+- Updated 8 test files for new values. All 2376 tests pass (14 pre-existing failures unchanged).
+
 ## 2026-03-08T00:30Z — Session 131: Unit Behavior & Superweapon Parity (Thief, V2RL, Minelayer, SW6, AI5, AI6)
 - **Thief (THF)**: Hooked updateThief into updateAttackStructure — intercepts structure attack for enemy PROC/SILO. Steals 50% credits, dies after.
 - **V2RL**: SCUD weapon mapped to 'rocket' projStyle for visual arc trajectory. Large explosion (size 20, 22 frames) + screen shake (12) on impact (C++ IsGigundo). Also mapped Maverick/Hellfire/SubSCUD to rocket style.
-- **Minelayer (MNLY)**: Hooked updateMinelayer into entity update loop — places AP mines (400 dmg) at move destination. Already had tickMines() for enemy entry detection.
+- **Minelayer (MNLY)**: Hooked updateMinelayer into entity update loop — places AP mines (1000 dmg) at move destination. Already had tickMines() for enemy entry detection.
 - **SW6 ParaBomb**: 7-bomb line strike (200 dmg each per splash point), staggered detonation effects, screen shake.
 - **SW6 ParaInfantry**: Drops 5 E1 infantry at target with parachute visual markers.
-- **SW6 SpyPlane**: New SuperweaponType.SPY_PLANE — reveals 10-cell radius around target. ATEK building, allied faction.
+- **SW6 SpyPlane**: New SuperweaponType.SPY_PLANE — reveals 10-cell radius around target. AFLD building, both factions.
 - **AI auto-fire**: ParaBomb targets player's best unit cluster; ParaInfantry drops near own base as reinforcements.
-- **AI5**: Verified already implemented — nearFriendlyBase computed in Game.threatScore() wrapper, 0.75x multiplier in entity.ts.
+- **AI5**: Verified already implemented — Area_Modify computed in Game.threatScore() wrapper, pow(0.5, count) in entity.ts.
 - **AI6**: Verified already implemented — Spy exclusion returns 0 threat (except dogs). entity.ts:713-716.
 - 8 new tests (V2RL stats, AI5/AI6 threat scoring, SW6 defs, Thief/Minelayer hookup). Updated data-parity count to 8 SWs. All 2283 tests pass (15 pre-existing sprite failures unchanged).
 

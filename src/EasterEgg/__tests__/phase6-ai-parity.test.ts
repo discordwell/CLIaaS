@@ -278,8 +278,8 @@ describe('AI Chronosphere usage', () => {
 // === Part 6: AI Spy Plane Usage ===
 
 describe('AI Spy Plane usage', () => {
-  it('SPY_PLANE has correct building (ATEK)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.SPY_PLANE].building).toBe('ATEK');
+  it('SPY_PLANE has correct building (AFLD — C++ AIRSTRIP)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.SPY_PLANE].building).toBe('AFLD');
   });
 
   it('SPY_PLANE needs target', () => {

@@ -391,6 +391,14 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - Renderer: Added PARABOMB/PARAINFANTRY/SPY_PLANE to superweapon icon color map.
 - Tests: 8 new tests for V2RL stats, AI5 splash avoidance, AI6 spy exclusion, SW6 defs, Thief/Minelayer hookup.
 
+**2026-03-08 — C++ parity audit fixes (post-implementation verification)**
+
+- Mine damage: 400 → 1000 (C++ RULES.CPP APMineDamage=1000).
+- SCUD projSpeed: 15 → 25 (C++ FROG projectile speed=25).
+- SPY_PLANE: building ATEK → AFLD (C++ AIRSTRIP), faction 'allied' → 'both', recharge 6300 → 1800 (C++ Rule.SpyTime=2min).
+- AI5 Area_Modify: Linear reduction (1 - 0.15×count, floor 0.3) → exponential halving pow(0.5, count) matching C++ techno.cpp odds/=2. Search radius 1.5 → 1.0 cells (C++ Rule.SupressRadius).
+- Thief IsThieved: Added isThieved flag tracking to Game class + wired TEVENT_THIEVED trigger (C++ House.IsThieved).
+
 **2026-03-08 — Wrong-items cleanup (6 [!] → [x]) + C++ sanity check**
 
 - MV3: Fixed 6 worldDist() comparisons that multiplied by CELL_SIZE (pixels) when worldDist returns cells. Affected wave retreat (2), Iron Curtain targeting (3), defense scoring (5), attack pool (8), base rally (10), enemy detection (12).

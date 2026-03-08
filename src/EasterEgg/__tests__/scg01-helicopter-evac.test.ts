@@ -57,6 +57,7 @@ const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameStat
   builtAircraftTypes: new Set(),
   fakesExist: true,
   spiedBuildings: new Set(),
+  isThieved: false,
   ...overrides,
 });
 

@@ -321,6 +321,8 @@ export class Game {
   private nBuildingsDestroyedCount = 0;
   /** Trigger names of spy-infiltrated buildings (for TEVENT_SPIED) */
   private spiedBuildingTriggers = new Set<string>();
+  /** C++ House.IsThieved — set when a Thief infiltrates PROC/SILO (for TEVENT_THIEVED) */
+  private isThieved = false;
   /** Whether the mission timer is actively counting down */
   private missionTimerRunning = true;
   /** Teams marked as destroyed by DESTROY_TEAM action */
@@ -488,6 +490,7 @@ export class Game {
     this.attackedTriggerNames.clear();
     this.nBuildingsDestroyedCount = 0;
     this.spiedBuildingTriggers.clear();
+    this.isThieved = false;
     this.missionTimerRunning = true;
     this.destroyedTeams.clear();
     this.builtUnitTypes.clear();
@@ -5313,8 +5316,8 @@ export class Game {
     // AI4: Designated enemy from AI house state (if any)
     const aiState = this.aiStates.get(scanner.house);
     const designatedEnemy = aiState?.designatedEnemy ?? null;
-    // AI5: Count friendly structures within splash radius (1.5 cells) of the target
-    // Only computed for AI scanners with splash weapons to avoid unnecessary work
+    // AI5: Area_Modify — count friendly buildings within 1 cell of target (C++ Rule.SupressRadius=1)
+    // Only computed for scanners with splash weapons (proxy for C++ IsSupressed flag)
     let nearFriendlyCount = 0;
     if (scanner.weapon?.splash && scanner.weapon.splash > 0) {
       const tcx = target.pos.x / CELL_SIZE;
@@ -5325,7 +5328,7 @@ export class Game {
         const scx = s.cx + sw / 2;
         const scy = s.cy + sh / 2;
         const d = Math.sqrt((scx - tcx) ** 2 + (scy - tcy) ** 2);
-        if (d <= 1.5) nearFriendlyCount++;
+        if (d <= 1.0) nearFriendlyCount++;
       }
     }
     return computeThreatScore(scanner, target, dist, isTargetAttackingAlly, closingSpeed, designatedEnemy, nearFriendlyCount);
@@ -5745,6 +5748,7 @@ export class Game {
       builtAircraftTypes: this.builtAircraftTypes,
       fakesExist: shared.fakesExist,
       spiedBuildings: this.spiedBuildingTriggers,
+      isThieved: this.isThieved,
     };
   }
 
@@ -9102,6 +9106,7 @@ export class Game {
       if (entity.isPlayerUnit) { this.addCredits(stolen, true); } else { this.houseCredits.set(entity.house, (this.houseCredits.get(entity.house) ?? 0) + stolen); }
       this.evaMessages.push({ text: `CREDITS STOLEN: ${stolen}`, tick: this.tick });
     }
+    this.isThieved = true;  // C++ House.IsThieved — for TEVENT_THIEVED trigger
     entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
   }
 
@@ -9117,7 +9122,7 @@ export class Game {
     const houseMines = this.mines.filter(m => m.house === entity.house).length;
     if (houseMines >= Game.MAX_MINES_PER_HOUSE) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
     if (!this.mines.find(m => m.cx === targetCell.cx && m.cy === targetCell.cy)) {
-      this.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: 400 });
+      this.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: 1000 });
       entity.mineCount++;
     }
     entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE;

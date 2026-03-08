@@ -48,6 +48,7 @@ describe('Extended Trigger Events', () => {
     builtAircraftTypes: new Set(),
     fakesExist: true,
     spiedBuildings: new Set(),
+    isThieved: false,
     ...overrides,
   });
 
@@ -69,10 +70,12 @@ describe('Extended Trigger Events', () => {
     expect(checkTriggerEvent(event, stateLowPower)).toBe(true);
   });
 
-  it('TEVENT_THIEVED (3): always returns false (not implemented)', () => {
+  it('TEVENT_THIEVED (3): returns true when isThieved is set (C++ House.IsThieved)', () => {
     const event: TriggerEvent = { type: 3, team: -1, data: 0 }; // C++ TEVENT_THIEVED = 3
-    const state = createState();
-    expect(checkTriggerEvent(event, state)).toBe(false);
+    const stateNotThieved = createState({ isThieved: false });
+    expect(checkTriggerEvent(event, stateNotThieved)).toBe(false);
+    const stateThieved = createState({ isThieved: true });
+    expect(checkTriggerEvent(event, stateThieved)).toBe(true);
   });
 
   it('TEVENT_CROSS_HORIZONTAL (25): returns true when playerEntered is true', () => {
@@ -211,6 +214,7 @@ describe('TriggerGameState Interface', () => {
       builtAircraftTypes: new Set(),
       fakesExist: true,
       spiedBuildings: new Set(),
+      isThieved: false,
     };
 
     expect(state.isLowPower).toBe(true);
@@ -252,6 +256,7 @@ describe('Trigger Audit Fixes', () => {
     builtAircraftTypes: new Set(),
     fakesExist: true,
     spiedBuildings: new Set(),
+    isThieved: false,
     ...overrides,
   });
 

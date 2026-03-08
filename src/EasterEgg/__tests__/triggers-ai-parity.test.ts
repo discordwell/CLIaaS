@@ -53,6 +53,7 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     builtAircraftTypes: new Set(),
     fakesExist: true,
     spiedBuildings: new Set(),
+    isThieved: false,
     ...overrides,
   };
 }
@@ -251,10 +252,10 @@ describe('TR5: Event index mapping matches C++ tevent.h', () => {
     expect(checkTriggerEvent(event, createState({ spiedBuildings: new Set(['test']) }))).toBe(true);
   });
 
-  it('TEVENT_THIEVED at index 3 (C++ matches)', () => {
+  it('TEVENT_THIEVED at index 3 (C++ House.IsThieved)', () => {
     const event: TriggerEvent = { type: 3, team: -1, data: 0 };
-    // Thieved is not implemented — always false
-    expect(checkTriggerEvent(event, createState())).toBe(false);
+    expect(checkTriggerEvent(event, createState({ isThieved: false }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ isThieved: true }))).toBe(true);
   });
 
   it('TEVENT_DISCOVERED at index 4 (C++ matches)', () => {
@@ -415,7 +416,7 @@ describe('AI4: Designated enemy house bonus', () => {
 
 // === AI5: Area modification ===
 
-describe('AI5: Per-target splash avoidance (near friendly structures)', () => {
+describe('AI5: Area_Modify — C++ exponential halving per nearby building', () => {
   it('splash-weapon scanner: threat reduced when target near friendly structures', () => {
     // V2RL has SCUD weapon with splash: 2.0
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 100, 100);
@@ -425,8 +426,9 @@ describe('AI5: Per-target splash avoidance (near friendly structures)', () => {
     const nearOneStruct = threatScore(scanner, target, 3, false, undefined, null, 1);
 
     expect(nearOneStruct).toBeLessThan(normalScore);
-    // 1 structure: score * 0.85 (1 - 0.15*1)
-    expect(nearOneStruct / normalScore).toBeCloseTo(0.85, 2);
+    // C++ Area_Modify: odds /= 2 per building → pow(0.5, count)
+    // 1 building: 0.5x
+    expect(nearOneStruct / normalScore).toBeCloseTo(0.5, 2);
   });
 
   it('non-splash scanner: no penalty regardless of structure count', () => {

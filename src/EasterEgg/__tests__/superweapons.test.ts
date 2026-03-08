@@ -511,10 +511,10 @@ describe('Sonar Pulse', () => {
     expect(sub.sonarPulseTimer).toBe(0);
   });
 
-  it('Chronosphere has fastest recharge (6300 ticks)', () => {
-    const chronoTicks = SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE].rechargeTicks;
+  it('Spy Plane has fastest recharge (1800 ticks, C++ Rule.SpyTime=2min)', () => {
+    const spyTicks = SUPERWEAPON_DEFS[SuperweaponType.SPY_PLANE].rechargeTicks;
     for (const def of Object.values(SUPERWEAPON_DEFS)) {
-      expect(chronoTicks).toBeLessThanOrEqual(def.rechargeTicks);
+      expect(spyTicks).toBeLessThanOrEqual(def.rechargeTicks);
     }
   });
 });
