@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-08T05:45Z — Session 132: Dashboard Redesign — Operations Center
+- Complete rewrite of `src/app/dashboard/page.tsx` (only file changed)
+- **6 zones**: A) Slim header, B) Alert strip (5 LiveMetricCards), C) Actionable tickets sorted by urgency, D) Performance metrics (4 NumberCards + Agent Leaderboard + Top Issues), E) Trends (CSS bar chart + period comparison + KB gaps), F) Connector pills
+- **Empty state tiers**: 0 tickets = welcome card, 1-9 = sparse (no trends), 10+ = full
+- **Killed**: CLI Reference cheat sheet, System Health nav-dots, large Connections grid, Routing Queues panel
+- **New helpers**: formatHours, pctChange, trendDirection, formatMinutesRemaining, getActionableTickets (urgency scoring: SLA breach > SLA warning > priority > unassigned)
+- Wet tested on cliaas.com: empty state + data-loaded state, all zones verified
+- Note: VPS DB provider returns 0 tickets (pre-existing issue, not from this change); local JSONL mode works with demo data
+
 ## 2026-03-08T00:30Z — Session 131: Unit Behavior & Superweapon Parity (Thief, V2RL, Minelayer, SW6, AI5, AI6)
 - **Thief (THF)**: Hooked updateThief into updateAttackStructure — intercepts structure attack for enemy PROC/SILO. Steals 50% credits, dies after.
 - **V2RL**: SCUD weapon mapped to 'rocket' projStyle for visual arc trajectory. Large explosion (size 20, 22 frames) + screen shake (12) on impact (C++ IsGigundo). Also mapped Maverick/Hellfire/SubSCUD to rocket style.

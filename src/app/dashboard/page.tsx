@@ -1,21 +1,121 @@
 import Link from "next/link";
-import { loadTickets, computeStats, loadRules, loadKBArticles, loadMessages } from "@/lib/data";
+import { loadTickets, computeStats, loadMessages, loadKBArticles } from "@/lib/data";
 import { getAllConnectorStatuses } from "@/lib/connector-service";
 import { availability } from "@/lib/routing/availability";
-import { getRoutingQueues } from "@/lib/routing/store";
 import { checkAllTicketsSLA } from "@/lib/sla";
+import type { SLACheckResult } from "@/lib/sla";
 import { detectKBGapsLocal } from "@/lib/kb/content-gaps";
+import { computeAnalytics } from "@/lib/analytics";
+import type { Ticket } from "@/lib/data";
+import LiveMetricCard from "@/components/LiveMetricCard";
+import NumberCard from "@/components/charts/NumberCard";
 
 export const dynamic = "force-dynamic";
 
-type StatusLevel = "ok" | "warn" | "alert" | "neutral";
+// ---- Inline helpers ----
 
-const dotColor: Record<StatusLevel, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-400",
-  alert: "bg-red-500",
-  neutral: "bg-zinc-300",
-};
+function formatHours(hours: number): string {
+  if (hours < 1) return `${Math.round(hours * 60)}m`;
+  if (hours < 24) return `${Math.round(hours * 10) / 10}h`;
+  const days = Math.floor(hours / 24);
+  const remainHours = Math.round(hours % 24);
+  return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
+}
+
+function pctChange(current: number, previous: number): string {
+  if (previous === 0) return current > 0 ? "+100%" : "0%";
+  const pct = Math.round(((current - previous) / previous) * 100);
+  return pct >= 0 ? `+${pct}%` : `${pct}%`;
+}
+
+function trendDirection(
+  current: number,
+  previous: number,
+  invert = false,
+): "up" | "down" | "flat" {
+  if (current === previous || (current === 0 && previous === 0)) return "flat";
+  const improving = invert ? current < previous : current > previous;
+  return improving ? "up" : "down";
+}
+
+function formatMinutesRemaining(minutes: number): string {
+  if (minutes >= 0) {
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+  }
+  const elapsed = Math.abs(minutes);
+  const h = Math.floor(elapsed / 60);
+  const m = Math.round(elapsed % 60);
+  return h > 0 ? `BREACHED ${h}h ${m}m ago` : `BREACHED ${m}m ago`;
+}
+
+interface ActionableTicket {
+  ticket: Ticket;
+  sla: SLACheckResult | undefined;
+  urgencyScore: number;
+  slaLabel: string;
+}
+
+function getActionableTickets(
+  tickets: Ticket[],
+  slaResults: SLACheckResult[],
+): ActionableTicket[] {
+  const slaMap = new Map(slaResults.map((r) => [r.ticketId, r]));
+  const actionable = tickets.filter(
+    (t) =>
+      t.status === "open" || t.status === "pending" || t.status === "on_hold",
+  );
+
+  return actionable
+    .map((ticket) => {
+      const sla = slaMap.get(ticket.id);
+      let urgencyScore = 0;
+      let slaLabel = "---";
+
+      if (sla) {
+        const breached =
+          sla.firstResponse.status === "breached" ||
+          sla.resolution.status === "breached";
+        const warning =
+          sla.firstResponse.status === "warning" ||
+          sla.resolution.status === "warning";
+
+        if (breached) {
+          const worstRemaining = Math.min(
+            sla.firstResponse.remainingMinutes,
+            sla.resolution.remainingMinutes,
+          );
+          urgencyScore = 10000 + Math.abs(worstRemaining);
+          slaLabel = formatMinutesRemaining(worstRemaining);
+        } else if (warning) {
+          const worstRemaining = Math.min(
+            sla.firstResponse.remainingMinutes,
+            sla.resolution.remainingMinutes,
+          );
+          urgencyScore = 5000 + (1000 - Math.min(worstRemaining, 1000));
+          slaLabel = formatMinutesRemaining(worstRemaining);
+        } else {
+          const worstRemaining = Math.min(
+            sla.firstResponse.remainingMinutes,
+            sla.resolution.remainingMinutes,
+          );
+          slaLabel = formatMinutesRemaining(worstRemaining);
+        }
+      }
+
+      if (ticket.priority === "urgent") urgencyScore += 300;
+      else if (ticket.priority === "high") urgencyScore += 200;
+
+      if (!ticket.assignee) urgencyScore += 100;
+
+      return { ticket, sla, urgencyScore, slaLabel };
+    })
+    .sort((a, b) => b.urgencyScore - a.urgencyScore)
+    .slice(0, 10);
+}
+
+// ---- Main page ----
 
 export default async function DashboardPage() {
   const tickets = await loadTickets();
@@ -27,152 +127,524 @@ export default async function DashboardPage() {
   for (const entry of allAvailability) {
     availCounts[entry.status]++;
   }
-  const queues = getRoutingQueues().filter((q) => q.enabled);
 
-  const [messages, rules, kbArticles] = await Promise.all([
+  const [messages, kbArticles] = await Promise.all([
     loadMessages(),
-    loadRules(),
     loadKBArticles(),
   ]);
   const kbGaps = detectKBGapsLocal(tickets, messages, kbArticles);
 
   const slaResults = await checkAllTicketsSLA(tickets, messages);
   const slaBreaches = slaResults.filter(
-    (r) => r.firstResponse.status === "breached" || r.resolution.status === "breached",
+    (r) =>
+      r.firstResponse.status === "breached" ||
+      r.resolution.status === "breached",
   ).length;
   const slaWarnings = slaResults.filter(
-    (r) => r.firstResponse.status === "warning" || r.resolution.status === "warning",
+    (r) =>
+      r.firstResponse.status === "warning" ||
+      r.resolution.status === "warning",
   ).length;
-  const activeRules = rules.filter((r) => r.enabled !== false).length;
-  const uniqueCustomers = new Set(tickets.map((t) => t.requester)).size;
 
-  const statusItems: Array<{ href: string; name: string; metric: string; level: StatusLevel }> = [
-    {
-      href: "/sla",
-      name: "SLA Policies",
-      level:
-        slaBreaches > 0
-          ? "alert"
-          : slaWarnings > 0
-            ? "warn"
-            : slaResults.length > 0
-              ? "ok"
-              : "neutral",
-      metric:
-        slaBreaches > 0
-          ? `${slaBreaches} breached · ${slaWarnings} at risk`
-          : slaWarnings > 0
-            ? `${slaWarnings} at risk`
-            : slaResults.length > 0
-              ? `${slaResults.length} tracked · all clear`
-              : "No policies",
-    },
-    {
-      href: "/rules",
-      name: "Automation",
-      level: activeRules > 0 ? "ok" : "neutral",
-      metric: activeRules > 0 ? `${activeRules} rules active` : "No rules configured",
-    },
-    {
-      href: "/kb",
-      name: "Knowledge Base",
-      level: kbGaps.length > 0 ? "warn" : kbArticles.length > 0 ? "ok" : "neutral",
-      metric:
-        kbGaps.length > 0
-          ? `${kbArticles.length} articles · ${kbGaps.length} gaps`
-          : kbArticles.length > 0
-            ? `${kbArticles.length} articles`
-            : "No articles",
-    },
-    {
-      href: "/customers",
-      name: "Customers",
-      level: uniqueCustomers > 0 ? "ok" : "neutral",
-      metric: uniqueCustomers > 0 ? `${uniqueCustomers} contacts` : "No contacts",
-    },
-    { href: "/analytics", name: "Analytics", level: "neutral", metric: "Trends & metrics" },
-    { href: "/reports", name: "Reports", level: "neutral", metric: "Custom exports" },
-    { href: "/billing", name: "Billing", level: "neutral", metric: "Plans & usage" },
-  ];
+  const analytics = await computeAnalytics();
 
-  const statCards = [
-    { label: "Total Tickets", value: stats.total },
-    { label: "Open", value: stats.byStatus["open"] ?? 0 },
-    { label: "Urgent", value: stats.byPriority["urgent"] ?? 0 },
-    { label: "Pending", value: stats.byStatus["pending"] ?? 0 },
-  ];
+  const openCount = stats.byStatus["open"] ?? 0;
+  const unassigned = stats.byAssignee["unassigned"] ?? 0;
+  const totalTickets = stats.total;
+
+  const actionableTickets = getActionableTickets(tickets, slaResults);
+
+  // SLA compliance %
+  const slaMet = analytics.firstResponseSLA.met + analytics.resolutionSLA.met;
+  const slaTotal =
+    slaMet +
+    analytics.firstResponseSLA.breached +
+    analytics.resolutionSLA.breached;
+  const slaCompliancePct =
+    slaTotal > 0 ? Math.round((slaMet / slaTotal) * 100) : 0;
+
+  // CSAT trend
+  const csatTrendDir = (() => {
+    if (analytics.csatTrend.length < 2) return "flat" as const;
+    const first = analytics.csatTrend[0].score;
+    const last =
+      analytics.csatTrend[analytics.csatTrend.length - 1].score;
+    return trendDirection(last, first);
+  })();
+
+  // Period comparison shortcuts
+  const pc = analytics.periodComparison;
+
+  // Volume chart: last 14 days
+  const volumeData = analytics.ticketsCreated.slice(-14);
+  const maxVolume = Math.max(...volumeData.map((d) => d.count), 1);
+
+  const activeConnectors = connectors.filter(
+    (c) => c.configured || c.hasExport,
+  );
+
+  const now = new Date();
+  const timestamp = now.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  // ---- Empty state tier ----
+  const tier =
+    totalTickets === 0 ? "empty" : totalTickets < 10 ? "sparse" : "full";
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-4xl px-6 py-12 text-foreground">
-      <header className="border-2 border-line bg-panel p-8 sm:p-12">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-6">
-          <div>
-            <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-foreground">
-              Control Plane
-            </p>
-            <h1 className="mt-4 text-4xl font-bold">Workspace Status</h1>
-          </div>
-          <Link
-            href="/settings"
-            className="border-2 border-line bg-panel px-6 py-2 font-mono text-sm font-bold uppercase text-foreground hover:bg-accent-soft text-center"
-          >
-            Settings
-          </Link>
+    <main className="mx-auto min-h-screen w-full max-w-5xl px-6 py-10 text-foreground">
+      {/* ===== ZONE A: Slim Header ===== */}
+      <header className="flex items-center justify-between border-b-2 border-line pb-4">
+        <div className="flex items-baseline gap-4">
+          <p className="font-mono text-xs font-bold uppercase tracking-[0.2em]">
+            Control Plane
+          </p>
+          <span className="font-mono text-[11px] text-muted">
+            as of {timestamp}
+          </span>
         </div>
+        <Link
+          href="/settings"
+          className="font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground"
+        >
+          Settings
+        </Link>
       </header>
 
-      <section className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {statCards.map((s) => (
-          <div
-            key={s.label}
-            className="border-2 border-line bg-panel p-5 text-center"
-          >
-            <p className="font-mono text-3xl font-bold">{s.value}</p>
-            <p className="mt-1 font-mono text-xs font-bold uppercase tracking-wider text-muted">
-              {s.label}
-            </p>
+      {/* ===== ZONE B: Alert Strip ===== */}
+      {tier === "empty" ? (
+        <section className="mt-6 border-2 border-line bg-panel p-8">
+          <h2 className="text-2xl font-bold">Welcome to CLIaaS</h2>
+          <p className="mt-2 font-mono text-sm text-muted">
+            No tickets yet. Connect a helpdesk or create your first ticket
+            to get started.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href="/connectors"
+              className="border-2 border-line px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-accent-soft"
+            >
+              Connect Helpdesk
+            </Link>
+            <Link
+              href="/tickets/new"
+              className="border-2 border-line px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-accent-soft"
+            >
+              Create Ticket
+            </Link>
           </div>
-        ))}
-      </section>
-
-      {/* AGENT AVAILABILITY + QUEUES */}
-      {(allAvailability.length > 0 || queues.length > 0) && (
-        <section className="mt-8 grid gap-4 sm:grid-cols-2">
-          <div className="border-2 border-line bg-panel p-5">
-            <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
-              Agent Availability
-            </p>
-            <div className="mt-3 flex gap-6">
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                <span className="font-mono text-sm font-bold">{availCounts.online}</span>
-                <span className="font-mono text-xs text-muted">online</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
-                <span className="font-mono text-sm font-bold">{availCounts.away}</span>
-                <span className="font-mono text-xs text-muted">away</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2.5 w-2.5 rounded-full bg-zinc-400" />
-                <span className="font-mono text-sm font-bold">{availCounts.offline}</span>
-                <span className="font-mono text-xs text-muted">offline</span>
-              </div>
+          {activeConnectors.length > 0 && (
+            <div className="mt-6 flex flex-wrap gap-2">
+              {activeConnectors.map((c) => (
+                <span
+                  key={c.id}
+                  className={`inline-flex items-center gap-1.5 border-2 border-line px-3 py-1 font-mono text-[10px] font-bold uppercase ${
+                    c.configured
+                      ? "bg-emerald-400 text-black"
+                      : "bg-yellow-400 text-black"
+                  }`}
+                >
+                  {c.name}: {c.configured ? "Active" : "Export Only"}
+                </span>
+              ))}
             </div>
+          )}
+        </section>
+      ) : (
+        <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <LiveMetricCard
+            label="Open Queue"
+            value={openCount}
+            alert={openCount > 20}
+          />
+          <LiveMetricCard
+            label="SLA Breached"
+            value={slaBreaches}
+            alert={slaBreaches > 0}
+          />
+          <LiveMetricCard
+            label="SLA At Risk"
+            value={slaWarnings}
+            alert={slaWarnings > 3}
+          />
+          <LiveMetricCard
+            label="Unassigned"
+            value={unassigned}
+            alert={unassigned > 5}
+          />
+          <LiveMetricCard
+            label="Agents Online"
+            value={availCounts.online}
+            alert={availCounts.online === 0 && openCount > 0}
+          />
+        </section>
+      )}
+
+      {/* ===== ZONE C: Actionable Tickets ===== */}
+      {tier !== "empty" && (
+        <section className="mt-6 border-2 border-line bg-panel p-6">
+          <h2 className="text-lg font-bold">What Needs Attention</h2>
+          {actionableTickets.length > 0 ? (
+            <div className="mt-3 flex flex-col gap-1.5 font-mono text-sm">
+              {actionableTickets.map(({ ticket: t, slaLabel }) => (
+                <Link
+                  key={t.id}
+                  href={`/tickets/${t.id}`}
+                  className="flex items-center justify-between border-2 border-line p-3 transition-colors hover:bg-accent-soft"
+                >
+                  <span className="min-w-0 flex-1 truncate font-bold">
+                    {t.subject}
+                  </span>
+                  <span className="ml-3 flex shrink-0 items-center gap-2">
+                    <span
+                      className={`border-2 border-line px-2 py-0.5 text-[10px] font-bold uppercase ${
+                        t.priority === "urgent"
+                          ? "bg-red-500 text-white"
+                          : t.priority === "high"
+                            ? "bg-orange-400 text-black"
+                            : "bg-zinc-200 text-zinc-700"
+                      }`}
+                    >
+                      {t.priority}
+                    </span>
+                    <span
+                      className={`border-2 border-line px-2 py-0.5 text-[10px] font-bold uppercase ${
+                        t.status === "open"
+                          ? "bg-emerald-400 text-black"
+                          : t.status === "pending"
+                            ? "bg-yellow-400 text-black"
+                            : "bg-zinc-200 text-zinc-700"
+                      }`}
+                    >
+                      {t.status}
+                    </span>
+                    <span
+                      className={`text-[11px] font-bold ${
+                        !t.assignee ? "text-red-600" : "text-muted"
+                      }`}
+                    >
+                      {t.assignee ?? "Unassigned"}
+                    </span>
+                    <span
+                      className={`text-[11px] ${
+                        slaLabel.startsWith("BREACHED")
+                          ? "font-bold text-red-600"
+                          : "text-muted"
+                      }`}
+                    >
+                      {slaLabel}
+                    </span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 font-mono text-sm text-muted">
+              All clear. No tickets need attention right now.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* ===== ZONE D: Performance Metrics ===== */}
+      {tier !== "empty" && (
+        <section className="mt-6">
+          <h2 className="mb-3 text-lg font-bold">Performance</h2>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <NumberCard
+              label="Avg First Response"
+              value={
+                analytics.avgResponseTimeHours > 0
+                  ? formatHours(analytics.avgResponseTimeHours)
+                  : "---"
+              }
+              trend={
+                pc.previous.avgResponseHours > 0
+                  ? {
+                      direction: trendDirection(
+                        analytics.avgResponseTimeHours,
+                        pc.previous.avgResponseHours,
+                        true,
+                      ),
+                      value: pctChange(
+                        analytics.avgResponseTimeHours,
+                        pc.previous.avgResponseHours,
+                      ),
+                    }
+                  : undefined
+              }
+            />
+            <NumberCard
+              label="Avg Resolution"
+              value={
+                analytics.avgResolutionTimeHours > 0
+                  ? formatHours(analytics.avgResolutionTimeHours)
+                  : "---"
+              }
+            />
+            <NumberCard
+              label="CSAT"
+              value={
+                analytics.csatOverall > 0
+                  ? `${analytics.csatOverall} / 5`
+                  : "---"
+              }
+              trend={
+                analytics.csatTrend.length >= 2
+                  ? {
+                      direction: csatTrendDir,
+                      value: `${analytics.csatTrend[analytics.csatTrend.length - 1].score} / 5`,
+                    }
+                  : undefined
+              }
+            />
+            <NumberCard
+              label="SLA Compliance"
+              value={slaTotal > 0 ? `${slaCompliancePct}%` : "---"}
+              trend={
+                slaTotal > 0
+                  ? {
+                      direction: slaCompliancePct >= 95 ? "up" : slaCompliancePct >= 80 ? "flat" : "down",
+                      value: `${slaMet}/${slaTotal} met`,
+                    }
+                  : undefined
+              }
+            />
           </div>
-          {queues.length > 0 && (
+
+          {/* Agent Leaderboard + Top Issues */}
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {/* Agent Leaderboard */}
             <div className="border-2 border-line bg-panel p-5">
               <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
-                Routing Queues
+                Agent Leaderboard
               </p>
-              <div className="mt-3 space-y-2">
-                {queues.slice(0, 4).map((q) => (
-                  <div key={q.id} className="flex items-center justify-between font-mono text-sm">
-                    <span className="font-bold">{q.name}</span>
-                    <span className="border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold uppercase">
-                      {q.strategy.replaceAll("_", " ")}
-                    </span>
+              {analytics.agentPerformance.length > 0 ? (
+                <table className="mt-3 w-full font-mono text-sm">
+                  <thead>
+                    <tr className="border-b-2 border-line text-left text-[10px] font-bold uppercase text-muted">
+                      <th className="pb-2">Agent</th>
+                      <th className="pb-2 text-right">Handled</th>
+                      <th className="pb-2 text-right">Avg Res.</th>
+                      <th className="pb-2 text-right">CSAT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analytics.agentPerformance
+                      .slice(0, 5)
+                      .map((agent) => (
+                        <tr
+                          key={agent.name}
+                          className="border-b border-line/50"
+                        >
+                          <td className="py-2 font-bold">
+                            {agent.name}
+                          </td>
+                          <td className="py-2 text-right">
+                            {agent.ticketsHandled}
+                          </td>
+                          <td className="py-2 text-right">
+                            {agent.avgResolutionHours > 0
+                              ? formatHours(agent.avgResolutionHours)
+                              : "---"}
+                          </td>
+                          <td className="py-2 text-right">
+                            {agent.csatAvg > 0
+                              ? agent.csatAvg.toFixed(1)
+                              : "---"}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="mt-3 font-mono text-sm text-muted">
+                  No data yet.
+                </p>
+              )}
+            </div>
+
+            {/* Top Issues */}
+            <div className="border-2 border-line bg-panel p-5">
+              <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+                Top Issues
+              </p>
+              {analytics.topTags.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {analytics.topTags.slice(0, 5).map((tag) => {
+                    const maxTagCount = analytics.topTags[0].count;
+                    const widthPct = Math.max(
+                      Math.round((tag.count / maxTagCount) * 100),
+                      8,
+                    );
+                    return (
+                      <div
+                        key={tag.tag}
+                        className="flex items-center gap-3 font-mono text-sm"
+                      >
+                        <span className="w-28 shrink-0 truncate font-bold">
+                          {tag.tag}
+                        </span>
+                        <div className="relative h-5 flex-1 border border-zinc-200 bg-zinc-100">
+                          <div
+                            className="absolute inset-y-0 left-0 bg-zinc-800"
+                            style={{ width: `${widthPct}%` }}
+                          />
+                        </div>
+                        <span className="w-8 shrink-0 text-right text-muted">
+                          {tag.count}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-3 font-mono text-sm text-muted">
+                  No data yet.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ===== ZONE E: Trends ===== */}
+      {tier === "full" && (
+        <section className="mt-6">
+          <h2 className="mb-3 text-lg font-bold">Trends</h2>
+
+          {/* Volume chart: CSS bars */}
+          {volumeData.length > 0 && (
+            <div className="border-2 border-line bg-panel p-5">
+              <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+                Ticket Volume (Last 14 Days)
+              </p>
+              <div
+                className="mt-3 flex items-end gap-1"
+                style={{ height: "120px" }}
+              >
+                {volumeData.map((d) => {
+                  const heightPct = Math.max(
+                    (d.count / maxVolume) * 100,
+                    4,
+                  );
+                  return (
+                    <div
+                      key={d.date}
+                      className="flex h-full flex-1 flex-col items-center justify-end"
+                    >
+                      <span className="mb-1 font-mono text-[9px] text-muted">
+                        {d.count > 0 ? d.count : ""}
+                      </span>
+                      <div
+                        className="min-h-[2px] w-full bg-zinc-800"
+                        style={{ height: `${heightPct}%` }}
+                        title={`${d.date}: ${d.count} tickets`}
+                      />
+                      <span className="mt-1 origin-top-left rotate-[-45deg] whitespace-nowrap font-mono text-[8px] text-muted">
+                        {d.date.slice(5)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Period comparison */}
+          <div className="mt-4 border-2 border-line bg-panel p-5">
+            <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+              This Week vs Last Week
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-4 font-mono text-sm">
+              {[
+                {
+                  label: "Created",
+                  current: pc.current.tickets,
+                  previous: pc.previous.tickets,
+                  invert: false,
+                },
+                {
+                  label: "Resolved",
+                  current: pc.current.resolved,
+                  previous: pc.previous.resolved,
+                  invert: false,
+                },
+                {
+                  label: "Avg Response",
+                  current: pc.current.avgResponseHours,
+                  previous: pc.previous.avgResponseHours,
+                  invert: true,
+                },
+              ].map((item) => {
+                const dir = trendDirection(
+                  item.current,
+                  item.previous,
+                  item.invert,
+                );
+                const colorClass =
+                  dir === "up"
+                    ? "text-emerald-600"
+                    : dir === "down"
+                      ? "text-red-600"
+                      : "text-muted";
+                return (
+                  <div key={item.label}>
+                    <p className="text-[10px] font-bold uppercase text-muted">
+                      {item.label}
+                    </p>
+                    <p className="mt-1 text-xl font-bold">
+                      {item.label === "Avg Response"
+                        ? item.current > 0
+                          ? formatHours(item.current)
+                          : "---"
+                        : item.current}
+                    </p>
+                    <p
+                      className={`text-xs font-bold ${colorClass}`}
+                    >
+                      {item.previous > 0
+                        ? pctChange(item.current, item.previous)
+                        : "---"}{" "}
+                      vs{" "}
+                      {item.label === "Avg Response"
+                        ? item.previous > 0
+                          ? formatHours(item.previous)
+                          : "---"
+                        : item.previous}
+                    </p>
                   </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* KB Gaps (conditional) */}
+          {kbGaps.length > 0 && (
+            <div className="mt-4 border-2 border-line bg-panel p-5">
+              <p className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+                Knowledge Base Gaps
+              </p>
+              <div className="mt-3 space-y-2 font-mono text-sm">
+                {kbGaps.slice(0, 3).map((gap) => (
+                  <Link
+                    key={gap.topic}
+                    href="/kb"
+                    className="flex items-center justify-between py-1 text-muted transition-colors hover:text-foreground"
+                  >
+                    <span className="font-bold text-foreground">
+                      {gap.topic}
+                    </span>
+                    <span className="text-xs">
+                      {gap.ticketCount} ticket
+                      {gap.ticketCount !== 1 ? "s" : ""}
+                    </span>
+                  </Link>
                 ))}
               </div>
             </div>
@@ -180,132 +652,23 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {stats.recentTickets.length > 0 && (
-        <section className="mt-8 border-2 border-line bg-panel p-8">
-          <h2 className="text-2xl font-bold">Recent Tickets</h2>
-          <div className="mt-4 flex flex-col gap-2 font-mono text-sm">
-            {stats.recentTickets.slice(0, 8).map((t) => (
-              <Link
-                key={t.id}
-                href={`/tickets/${t.id}`}
-                className="flex items-center justify-between border-2 border-line p-3 transition-colors hover:bg-accent-soft"
-              >
-                <span className="truncate font-bold">{t.subject}</span>
-                <span className="ml-4 flex shrink-0 items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 text-[10px] font-bold uppercase border-2 border-line ${
-                      t.priority === "urgent"
-                        ? "bg-red-500 text-white"
-                        : t.priority === "high"
-                          ? "bg-orange-400 text-black"
-                          : "bg-zinc-200 text-zinc-700"
-                    }`}
-                  >
-                    {t.priority}
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 text-[10px] font-bold uppercase border-2 border-line ${
-                      t.status === "open"
-                        ? "bg-emerald-400 text-black"
-                        : t.status === "pending"
-                          ? "bg-yellow-400 text-black"
-                          : "bg-zinc-200 text-zinc-700"
-                    }`}
-                  >
-                    {t.status}
-                  </span>
-                </span>
-              </Link>
-            ))}
-          </div>
+      {/* ===== ZONE F: Connectors (compact footer) ===== */}
+      {tier !== "empty" && activeConnectors.length > 0 && (
+        <section className="mt-6 flex flex-wrap gap-2">
+          {activeConnectors.map((c) => (
+            <span
+              key={c.id}
+              className={`inline-flex items-center gap-1.5 border-2 border-line px-3 py-1 font-mono text-[10px] font-bold uppercase ${
+                c.configured
+                  ? "bg-emerald-400 text-black"
+                  : "bg-yellow-400 text-black"
+              }`}
+            >
+              {c.name}: {c.configured ? "Active" : "Export Only"}
+            </span>
+          ))}
         </section>
       )}
-
-      <section className="mt-8 border-2 border-line bg-panel p-8">
-        <h2 className="text-2xl font-bold">System Health</h2>
-        <div className="mt-4 flex flex-col font-mono text-sm">
-          {statusItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center justify-between border-t-2 border-line py-3 transition-colors hover:bg-accent-soft -mx-3 px-3 first:border-t-0"
-            >
-              <span className="flex items-center gap-3">
-                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotColor[item.level]}`} />
-                <span className="font-bold">{item.name}</span>
-              </span>
-              <span
-                className={`text-xs ${
-                  item.level === "alert"
-                    ? "font-bold text-red-600"
-                    : item.level === "warn"
-                      ? "text-amber-600"
-                      : "text-muted"
-                }`}
-              >
-                {item.metric}
-              </span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-8 border-2 border-line bg-panel p-8">
-        <h2 className="text-2xl font-bold">Connections</h2>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          {connectors.filter((c) => c.configured || c.hasExport).length > 0 ? (
-            connectors
-              .filter((c) => c.configured || c.hasExport)
-              .map((c) => (
-                <div key={c.id} className="flex items-center justify-between border-2 border-line p-5">
-                  <div>
-                    <span className="font-bold text-lg">{c.name}</span>
-                    {c.ticketCount > 0 && (
-                      <span className="ml-3 font-mono text-xs text-muted">
-                        {c.ticketCount} tickets
-                      </span>
-                    )}
-                  </div>
-                  <span
-                    className={`px-3 py-1 font-mono text-xs font-bold uppercase border-2 border-line ${
-                      c.configured
-                        ? "bg-emerald-400 text-black"
-                        : "bg-yellow-400 text-black"
-                    }`}
-                  >
-                    {c.configured ? "Active" : "Export Only"}
-                  </span>
-                </div>
-              ))
-          ) : (
-            <p className="col-span-2 font-mono text-sm text-muted">
-              No connectors configured. Run <code className="text-foreground">cliaas sync</code> to set up a connector.
-            </p>
-          )}
-        </div>
-      </section>
-
-      <section className="mt-8 border-2 border-line bg-zinc-950 p-8 text-zinc-100">
-        <h2 className="text-2xl font-bold text-white">CLI Reference</h2>
-        <div className="mt-6 flex flex-col gap-4 font-mono text-sm">
-          <div className="flex justify-between border-b-2 border-zinc-800 pb-4">
-            <span className="text-emerald-400">cliaas triage</span>
-            <span className="text-zinc-500">Auto-triage inbox</span>
-          </div>
-          <div className="flex justify-between border-b-2 border-zinc-800 pb-4">
-            <span className="text-emerald-400">cliaas draft</span>
-            <span className="text-zinc-500">Generate reply</span>
-          </div>
-          <div className="flex justify-between border-b-2 border-zinc-800 pb-4">
-            <span className="text-emerald-400">cliaas kb suggest</span>
-            <span className="text-zinc-500">Search articles</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-emerald-400">cliaas summarize</span>
-            <span className="text-zinc-500">Shift report</span>
-          </div>
-        </div>
-      </section>
     </main>
   );
 }
