@@ -745,7 +745,7 @@ describe('AI5: Per-target splash avoidance', () => {
     expect(scoreOne).toBeCloseTo(scoreNone * 0.85, 0);
     // 3 structures: score * (1 - 0.45) = 0.55x
     expect(scoreThree).toBeCloseTo(scoreNone * 0.55, 0);
-    // 4+ structures: floor at 0.3x (clamped by Math.max)
+    // 4 structures: score * (1 - 0.60) = 0.4x (floor of 0.3x kicks in at 5+)
     expect(scoreFour).toBeCloseTo(scoreNone * 0.4, 0);
   });
 

@@ -7290,14 +7290,14 @@ export class Game {
           this.activateSuperweapon(SuperweaponType.IRON_CURTAIN, state.house, bestUnit.pos);
         }
       } else if (state.type === SuperweaponType.CHRONOSPHERE) {
-        // AI Chronosphere: teleport best tank near enemy base (IQ >= 4 for advanced tactics)
-        if (aiState && aiState.iq >= 4) {
+        // AI Chronosphere: teleport best tank near enemy base (IQ >= 3)
+        if (aiState && aiState.iq >= 3) {
           let bestTank: Entity | null = null;
           let bestValue = 0;
           for (const e of this.entities) {
             if (!e.alive || e.house !== state.house) continue;
             if (e.stats.isInfantry || e.stats.isAircraft || e.stats.isVessel) continue;
-            if (e.type === UnitType.V_HARV || e.type === UnitType.V_MCV) continue;
+            if (e.type === UnitType.V_HARV || e.type === UnitType.V_MCV || e.type === UnitType.V_CTNK) continue;
             const val = e.stats.cost ?? e.stats.strength;
             if (val > bestValue) { bestValue = val; bestTank = e; }
           }
@@ -8742,7 +8742,7 @@ export class Game {
     }
   }
 
-/** AI passive income — AI houses earn credits from refineries */
+  /** AI passive income — AI houses earn credits from refineries */
   private updateAIIncome(): void {
     if (this.tick % 450 !== 0) return; // every 30 seconds
     for (const s of this.structures) {
@@ -8839,7 +8839,7 @@ export class Game {
       if (state && state.maxUnit >= 0) {
         let vehCount = 0;
         for (const e of this.entities) {
-          if (e.alive && e.house === house && !e.stats.isInfantry && !e.isAnt) vehCount++;
+          if (e.alive && e.house === house && !e.stats.isInfantry && !e.isAnt && !e.stats.isAircraft && !e.stats.isVessel) vehCount++;
         }
         if (vehCount >= state.maxUnit) skipVehicle = true;
       }
