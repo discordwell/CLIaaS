@@ -128,7 +128,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 ## MOVEMENT
 
-- [x] [VERIFIED] **MV1: Track-table movement** — Fixed: 13 track types ported from C++ drive.cpp (straight, 45°/90°/180° turns). Vehicles follow pre-computed curved paths via `followTrackStep()` with rotated offsets. Infantry exempt (FOOT speedClass keeps free-form moveToward). Track state on Entity: trackNumber/trackIndex/trackStart/trackBaseFacing.
+- [x] [VERIFIED] **MV1: Track-table movement** — Fixed: 7 North-reference track types ported from C++ drive.cpp (straight, 45°/90°/180° turns), rotated at runtime via exact coordinate transforms matching C++ drive.cpp tables. Vehicles follow pre-computed curved paths via `followTrackStep()`. Infantry exempt (FOOT speedClass keeps free-form moveToward). Track state on Entity: trackNumber/trackIndex/trackStart/trackBaseFacing.
 - [x] [VERIFIED] **MV2: Damage speed — single tier** — Fixed: removed fabricated ConditionRed 0.5x tier. Now only one tier: <=50% HP = 0.75x speed, matching C++ drive.cpp:1157-1161.
 - [x] [VERIFIED] **MV3: Close-enough distance unit bug** — Fixed: removed erroneous `CELL_SIZE *` multipliers from 6 worldDist() comparisons. worldDist() returns cells, so comparisons now use bare cell values (2, 3, 5, 8, 10, 12).
 - [x] [VERIFIED] **MV4: Three-point turns removed** — Fixed: removed fabricated 3-point turn code. C++ code was behind `#ifdef TOFIX` and `IsThreePoint=false` — never compiled in released game (drive.cpp:328-361).
@@ -408,7 +408,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - Phase 5b: Formation movement — formationOffset on Entity, stable group-relative positions
 - Phase 6: BulletTypeClass — 6 properties added to WeaponStats, wired into fire code
 - Phase 7a: 22-mission system — Mission enum expanded, MissionControl metadata, dispatch switch
-- Phase 7b: Track-table movement — 13 tracks from drive.cpp, followTrackStep() with rotated offsets
+- Phase 7b: Track-table movement — 7 North-reference tracks from drive.cpp, exact coordinate transform rotation, followTrackStep()
 - Phase 7c: Pathfinding — hard-block occupancy, nudge idle friendlies, nearest-reachable fallback
 
 **2026-03-08 — Deep C++ source audit & corrections**
@@ -546,7 +546,7 @@ All planned C++ parity work has been completed. The Full C++ Parity Plan (7 phas
 - **Phase 5**: Incremental cost deduction, formation movement with stable offsets
 - **Phase 6**: BulletTypeClass properties (isInaccurate, isFueled, isInvisible, isDropping, isParachuted, isGigundo)
 - **Phase 7a**: 22-mission formal system (Mission enum + MissionControl metadata + dispatch)
-- **Phase 7b**: Track-table movement (13 tracks from drive.cpp, rotated offsets, infantry exempt)
+- **Phase 7b**: Track-table movement (7 North-reference tracks from drive.cpp, exact coordinate transform rotation, infantry exempt)
 - **Phase 7c**: Pathfinding enhancements (hard-block occupancy, nudge-to-move, nearest-reachable fallback)
 
 ### Remaining [~] Items (acceptable architectural differences)
