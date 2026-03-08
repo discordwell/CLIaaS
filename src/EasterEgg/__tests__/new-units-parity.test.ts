@@ -725,19 +725,63 @@ describe('V2 Rocket weapon data', () => {
 });
 
 // ============================================================================
-// AI5: Splash avoidance — nearFriendlyBase reduces threat score
+// AI5: Per-target splash avoidance — nearby friendly structures reduce threat score
 // ============================================================================
-describe('AI5: Area modification (splash avoidance)', () => {
-  it('threatScore is lower when target is near friendly base', () => {
+describe('AI5: Per-target splash avoidance', () => {
+  it('splash-weapon scanner: threatScore decreases with more nearby friendly structures', () => {
+    // V2RL has SCUD weapon with splash: 2.0
+    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
+    const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
+
+    const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
+    const scoreOne = threatScore(scanner, target, 1, false, 0, null, 1);
+    const scoreThree = threatScore(scanner, target, 1, false, 0, null, 3);
+    const scoreFour = threatScore(scanner, target, 1, false, 0, null, 4);
+
+    // More nearby structures = lower score
+    expect(scoreOne).toBeLessThan(scoreNone);
+    expect(scoreThree).toBeLessThan(scoreOne);
+    // 1 structure: score * (1 - 0.15) = 0.85x
+    expect(scoreOne).toBeCloseTo(scoreNone * 0.85, 0);
+    // 3 structures: score * (1 - 0.45) = 0.55x
+    expect(scoreThree).toBeCloseTo(scoreNone * 0.55, 0);
+    // 4+ structures: floor at 0.3x (clamped by Math.max)
+    expect(scoreFour).toBeCloseTo(scoreNone * 0.4, 0);
+  });
+
+  it('splash-weapon scanner: penalty floors at 0.3x', () => {
+    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
+    const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
+
+    const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
+    // 5+ structures would be 1 - 0.75 = 0.25, but clamped to 0.3
+    const scoreFive = threatScore(scanner, target, 1, false, 0, null, 5);
+    const scoreTen = threatScore(scanner, target, 1, false, 0, null, 10);
+
+    expect(scoreFive).toBeCloseTo(scoreNone * 0.3, 0);
+    expect(scoreTen).toBeCloseTo(scoreNone * 0.3, 0);
+  });
+
+  it('non-splash scanner: nearFriendlyStructureCount has no effect', () => {
+    // 2TNK has 90mm weapon with no splash
     const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
-    const scoreNoBase = threatScore(scanner, target, 1, false, 0, null, false);
-    const scoreNearBase = threatScore(scanner, target, 1, false, 0, null, true);
+    const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
+    const scoreThree = threatScore(scanner, target, 1, false, 0, null, 3);
 
-    // AI5: nearFriendlyBase applies 0.75x multiplier
-    expect(scoreNearBase).toBeLessThan(scoreNoBase);
-    expect(scoreNearBase).toBeCloseTo(scoreNoBase * 0.75, 0);
+    // No splash weapon means no penalty regardless of structure count
+    expect(scoreThree).toBe(scoreNone);
+  });
+
+  it('count of 0 applies no penalty even for splash weapons', () => {
+    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
+    const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
+
+    const scoreUndefined = threatScore(scanner, target, 1, false, 0, null, undefined);
+    const scoreZero = threatScore(scanner, target, 1, false, 0, null, 0);
+
+    expect(scoreZero).toBe(scoreUndefined);
   });
 });
 

@@ -415,19 +415,21 @@ export class GameMap {
         // EC7: Spread requires density > 6 (overlay > 0x09)
         if (ovl <= GameMap.ORE_SPREAD_MIN_DENSITY) continue;
 
-        // Spread to one random adjacent empty cell (8 directions)
+        // EC7: Spread to first valid adjacent cell, starting from random direction (C++ Spread_Tiberium)
         if (Math.random() < GameMap.ORE_SPREAD_CHANCE) {
-          const [dx, dy] = dirs[Math.floor(Math.random() * 8)];
-          const nx = cx + dx, ny = cy + dy;
-          // Must be within map bounds
-          if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
-          const nidx = ny * MAP_CELLS + nx;
-          // Target cell must have no overlay, CLEAR terrain, and no wall
-          if (this.overlay[nidx] !== 0xFF) continue;
-          if (this.cells[nidx] !== Terrain.CLEAR) continue;
-          if (this.wallType[nidx] !== '') continue;
-          // Gold always spreads as gold (minimum density)
-          this.overlay[nidx] = 0x03;
+          const offset = Math.floor(Math.random() * 8);
+          for (let i = 0; i < 8; i++) {
+            const [dx, dy] = dirs[(i + offset) % 8];
+            const nx = cx + dx, ny = cy + dy;
+            if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
+            const nidx = ny * MAP_CELLS + nx;
+            if (this.overlay[nidx] !== 0xFF) continue;
+            if (this.cells[nidx] !== Terrain.CLEAR) continue;
+            if (this.wallType[nidx] !== '') continue;
+            // Gold always spreads as gold (minimum density)
+            this.overlay[nidx] = 0x03;
+            break; // C++: spread to first valid cell only
+          }
         }
       }
     }

@@ -703,12 +703,12 @@ export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
  *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit
  *  @param closingSpeed Rate of distance change (positive = target approaching). A9: zone-aware threat.
  *  @param designatedEnemy AI4: enemy house that gets massive bonus (or null)
- *  @param nearFriendlyBase AI5: true if target is within 3 cells of any friendly structure */
+ *  @param nearFriendlyStructureCount AI5: count of friendly structures within splash radius of target */
 export function threatScore(
   scanner: Entity, target: Entity, dist: number, isTargetAttackingAlly: boolean,
   closingSpeed?: number,
   designatedEnemy?: House | null,
-  nearFriendlyBase?: boolean,
+  nearFriendlyStructureCount?: number,
 ): number {
   // AI6: Spy target exclusion — spies are not normal targets (except for dogs)
   if (target.type === UnitType.I_SPY && scanner.type !== UnitType.I_DOG) {
@@ -763,10 +763,12 @@ export function threatScore(
     score *= 1.25;
   }
 
-  // AI5: Area modification — reduce threat for targets near friendly buildings
-  // to avoid splash damage to own base (25% reduction)
-  if (nearFriendlyBase) {
-    score *= 0.75;
+  // AI5: Per-target splash avoidance — reduce threat when target is near friendly structures
+  // Only applies when the scanner actually has a splash weapon (C++ techno.cpp splash avoidance)
+  if (nearFriendlyStructureCount !== undefined && nearFriendlyStructureCount > 0 &&
+      scanner.weapon?.splash && scanner.weapon.splash > 0) {
+    // Scale penalty by count: more nearby structures = less desirable target
+    score *= Math.max(0.3, 1 - 0.15 * nearFriendlyStructureCount);
   }
 
   return score;

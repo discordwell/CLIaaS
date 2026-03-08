@@ -117,31 +117,58 @@ describe('TR3: New trigger event constants', () => {
     expect(checkTriggerEvent(event, stateEvacuated)).toBe(true);
   });
 
-  it('TEVENT_BUILD_UNIT (20) fires when a unit is built', () => {
+  it('TEVENT_BUILD_UNIT (20) fires when specified unit type is built', () => {
+    // data=0 maps to HARV in C++ UnitType enum
     const event: TriggerEvent = { type: 20, team: -1, data: 0 };
     const stateNone = createState({ builtUnitTypes: new Set() });
-    const stateBuilt = createState({ builtUnitTypes: new Set(['LTNK']) });
+    const stateWrong = createState({ builtUnitTypes: new Set(['LTNK']) });
+    const stateBuilt = createState({ builtUnitTypes: new Set(['HARV']) });
 
     expect(checkTriggerEvent(event, stateNone)).toBe(false);
+    expect(checkTriggerEvent(event, stateWrong)).toBe(false);
     expect(checkTriggerEvent(event, stateBuilt)).toBe(true);
   });
 
-  it('TEVENT_BUILD_INFANTRY (21) fires when infantry is built', () => {
+  it('TEVENT_BUILD_UNIT (20) with data=1 matches 1TNK', () => {
+    const event: TriggerEvent = { type: 20, team: -1, data: 1 };
+    const stateBuilt = createState({ builtUnitTypes: new Set(['1TNK']) });
+    const stateOther = createState({ builtUnitTypes: new Set(['HARV']) });
+
+    expect(checkTriggerEvent(event, stateBuilt)).toBe(true);
+    expect(checkTriggerEvent(event, stateOther)).toBe(false);
+  });
+
+  it('TEVENT_BUILD_INFANTRY (21) fires when specified infantry type is built', () => {
+    // data=0 maps to E1 in C++ InfantryType enum
     const event: TriggerEvent = { type: 21, team: -1, data: 0 };
     const stateNone = createState({ builtInfantryTypes: new Set() });
+    const stateWrong = createState({ builtInfantryTypes: new Set(['E3']) });
     const stateBuilt = createState({ builtInfantryTypes: new Set(['E1']) });
 
     expect(checkTriggerEvent(event, stateNone)).toBe(false);
+    expect(checkTriggerEvent(event, stateWrong)).toBe(false);
     expect(checkTriggerEvent(event, stateBuilt)).toBe(true);
   });
 
-  it('TEVENT_BUILD_AIRCRAFT (22) fires when aircraft is built', () => {
+  it('TEVENT_BUILD_AIRCRAFT (22) fires when specified aircraft type is built', () => {
+    // data=0 maps to TRAN in C++ AircraftType enum
     const event: TriggerEvent = { type: 22, team: -1, data: 0 };
     const stateNone = createState({ builtAircraftTypes: new Set() });
-    const stateBuilt = createState({ builtAircraftTypes: new Set(['HIND']) });
+    const stateWrong = createState({ builtAircraftTypes: new Set(['HIND']) });
+    const stateBuilt = createState({ builtAircraftTypes: new Set(['TRAN']) });
 
     expect(checkTriggerEvent(event, stateNone)).toBe(false);
+    expect(checkTriggerEvent(event, stateWrong)).toBe(false);
     expect(checkTriggerEvent(event, stateBuilt)).toBe(true);
+  });
+
+  it('TEVENT_BUILD_UNIT with unknown data falls back to any-built check', () => {
+    const event: TriggerEvent = { type: 20, team: -1, data: 999 };
+    const stateNone = createState({ builtUnitTypes: new Set() });
+    const stateAny = createState({ builtUnitTypes: new Set(['HARV']) });
+
+    expect(checkTriggerEvent(event, stateNone)).toBe(false);
+    expect(checkTriggerEvent(event, stateAny)).toBe(true);
   });
 
   it('TEVENT_FAKES_DESTROYED (29) fires when no fakes remain', () => {
@@ -388,28 +415,40 @@ describe('AI4: Designated enemy house bonus', () => {
 
 // === AI5: Area modification ===
 
-describe('AI5: Area modification (near friendly buildings)', () => {
-  it('target near friendly base gets 25% score reduction', () => {
-    const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
+describe('AI5: Per-target splash avoidance (near friendly structures)', () => {
+  it('splash-weapon scanner: threat reduced when target near friendly structures', () => {
+    // V2RL has SCUD weapon with splash: 2.0
+    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
-    const normalScore = threatScore(scanner, target, 3, false, undefined, null, false);
-    const nearBaseScore = threatScore(scanner, target, 3, false, undefined, null, true);
+    const normalScore = threatScore(scanner, target, 3, false, undefined, null, 0);
+    const nearOneStruct = threatScore(scanner, target, 3, false, undefined, null, 1);
 
-    expect(nearBaseScore).toBeLessThan(normalScore);
-    // Should be exactly 75% of the normal score
-    expect(nearBaseScore / normalScore).toBeCloseTo(0.75, 2);
+    expect(nearOneStruct).toBeLessThan(normalScore);
+    // 1 structure: score * 0.85 (1 - 0.15*1)
+    expect(nearOneStruct / normalScore).toBeCloseTo(0.85, 2);
   });
 
-  it('target not near friendly base gets full score', () => {
+  it('non-splash scanner: no penalty regardless of structure count', () => {
+    // E1 has M1Carbine — no splash
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
     const scoreDefault = threatScore(scanner, target, 3, false);
-    const scoreNotNearBase = threatScore(scanner, target, 3, false, undefined, null, false);
+    const scoreWithStructures = threatScore(scanner, target, 3, false, undefined, null, 3);
 
-    // Default (no nearFriendlyBase param) and explicit false should give same result
-    expect(scoreDefault).toBe(scoreNotNearBase);
+    // Non-splash weapons are unaffected by nearby structure count
+    expect(scoreDefault).toBe(scoreWithStructures);
+  });
+
+  it('count of 0 gives same score as omitted parameter', () => {
+    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
+
+    const scoreDefault = threatScore(scanner, target, 3, false);
+    const scoreZero = threatScore(scanner, target, 3, false, undefined, null, 0);
+
+    expect(scoreDefault).toBe(scoreZero);
   });
 });
 

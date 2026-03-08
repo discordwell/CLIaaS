@@ -90,6 +90,25 @@ const TACTION_FULL_SPECIAL = 34;
 const TACTION_PREFERRED_TARGET = 35;      // TR4: designate preferred target for AI house
 const TACTION_LAUNCH_NUKES = 36;          // C++ TACTION_LAUNCH_NUKES — launch fake nukes from all silos
 
+// C++ type index → TS type name mappings (for BUILD_UNIT/INFANTRY/AIRCRAFT events)
+const UNIT_TYPE_NAMES: Record<number, string> = {
+  0: 'HARV', 1: '1TNK', 2: '2TNK', 3: '3TNK', 4: '4TNK', 5: 'APC',
+  6: 'MNLY', 7: 'JEEP', 8: 'TRUK', 9: 'ARTY', 10: 'MCV',
+  11: 'V2RL', 12: 'CTNK', 13: 'TTNK', 14: 'STNK', 15: 'QTNK', 16: 'DTRK',
+};
+
+const INFANTRY_TYPE_NAMES: Record<number, string> = {
+  0: 'E1', 1: 'E2', 2: 'E3', 3: 'E4', 4: 'E6',
+  5: 'E7', 6: 'SPY', 7: 'THF', 8: 'MEDI', 9: 'GNRL',
+  10: 'DOG', 11: 'C1', 12: 'C2', 13: 'C3', 14: 'C4', 15: 'C5',
+  16: 'C6', 17: 'C7', 18: 'C8', 19: 'C9', 20: 'C10',
+  21: 'EINSTEIN', 22: 'SHOK', 23: 'MECH', 24: 'CHAN',
+};
+
+const AIRCRAFT_TYPE_NAMES: Record<number, string> = {
+  0: 'TRAN', 1: 'BADR', 2: 'U2', 3: 'MIG', 4: 'YAK', 5: 'HELI', 6: 'HIND',
+};
+
 // Team mission types (TeamMissionType — from TEAMTYPE.H, exact numbering from RA source)
 const TMISSION_ATTACK = 0;       // Attack nearest enemy near waypoint
 const TMISSION_ATT_WAYPT = 1;    // Attack waypoint
@@ -511,6 +530,16 @@ interface ScenarioData {
   houseCredits: Map<string, number>;
   /** Per-house Edge= from scenario INI (house name → edge direction string) */
   houseEdges: Map<string, string>;
+  /** Per-house IQ= from scenario INI (0-3, gates AI behaviors) */
+  houseIQ: Map<string, number>;
+  /** Per-house TechLevel= from scenario INI (gates production items) */
+  houseTechLevels: Map<string, number>;
+  /** Per-house MaxUnit= from scenario INI (max vehicle units, -1=unlimited) */
+  houseMaxUnit: Map<string, number>;
+  /** Per-house MaxInfantry= from scenario INI (max infantry units, -1=unlimited) */
+  houseMaxInfantry: Map<string, number>;
+  /** Per-house MaxBuilding= from scenario INI (max buildings, -1=unlimited) */
+  houseMaxBuilding: Map<string, number>;
 }
 
 /** Parse an INI-format scenario file */
@@ -799,9 +828,14 @@ export function parseScenarioINI(text: string): ScenarioData {
     }
   }
 
-  // Parse per-house Credits= and Edge= fields
+  // Parse per-house Credits=, Edge=, IQ=, TechLevel=, MaxUnit=, MaxInfantry=, MaxBuilding= fields
   const houseCreditsMap = new Map<string, number>();
   const houseEdges = new Map<string, string>();
+  const houseIQ = new Map<string, number>();
+  const houseTechLevels = new Map<string, number>();
+  const houseMaxUnit = new Map<string, number>();
+  const houseMaxInfantry = new Map<string, number>();
+  const houseMaxBuilding = new Map<string, number>();
   for (const houseName of houseNames) {
     const hCredits = parseInt(get(houseName, 'Credits', ''));
     if (!isNaN(hCredits) && hCredits > 0 && houseName !== playerHouse) {
@@ -811,6 +845,19 @@ export function parseScenarioINI(text: string): ScenarioData {
     if (edge) {
       houseEdges.set(houseName, edge);
     }
+    // C++ parity: IQ level (0-3) gates AI behaviors
+    const iq = parseInt(get(houseName, 'IQ', ''));
+    if (!isNaN(iq)) houseIQ.set(houseName, iq);
+    // C++ parity: TechLevel gates which production items are available
+    const tl = parseInt(get(houseName, 'TechLevel', ''));
+    if (!isNaN(tl)) houseTechLevels.set(houseName, tl);
+    // C++ parity: MaxUnit/MaxInfantry/MaxBuilding caps
+    const maxU = parseInt(get(houseName, 'MaxUnit', ''));
+    if (!isNaN(maxU)) houseMaxUnit.set(houseName, maxU);
+    const maxI = parseInt(get(houseName, 'MaxInfantry', ''));
+    if (!isNaN(maxI)) houseMaxInfantry.set(houseName, maxI);
+    const maxB = parseInt(get(houseName, 'MaxBuilding', ''));
+    if (!isNaN(maxB)) houseMaxBuilding.set(houseName, maxB);
   }
 
   return {
@@ -839,6 +886,11 @@ export function parseScenarioINI(text: string): ScenarioData {
     houseAllies,
     houseCredits: houseCreditsMap,
     houseEdges,
+    houseIQ,
+    houseTechLevels,
+    houseMaxUnit,
+    houseMaxInfantry,
+    houseMaxBuilding,
   };
 }
 
@@ -1054,6 +1106,16 @@ export interface ScenarioResult {
   houseCredits: Map<House, number>;
   /** Per-house reinforcement edge direction from scenario INI */
   houseEdges: Map<House, string>;
+  /** Per-house IQ= from scenario INI (0-3, gates AI behaviors) */
+  houseIQ: Map<House, number>;
+  /** Per-house TechLevel= from scenario INI (gates production items) */
+  houseTechLevels: Map<House, number>;
+  /** Per-house MaxUnit= from scenario INI (max vehicle units, -1=unlimited) */
+  houseMaxUnit: Map<House, number>;
+  /** Per-house MaxInfantry= from scenario INI (max infantry units, -1=unlimited) */
+  houseMaxInfantry: Map<House, number>;
+  /** Per-house MaxBuilding= from scenario INI (max buildings, -1=unlimited) */
+  houseMaxBuilding: Map<House, number>;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -1356,6 +1418,21 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     ),
     houseEdges: new Map(
       Array.from(data.houseEdges.entries()).map(([k, v]) => [toHouse(k), v])
+    ),
+    houseIQ: new Map(
+      Array.from(data.houseIQ.entries()).map(([k, v]) => [toHouse(k), v])
+    ),
+    houseTechLevels: new Map(
+      Array.from(data.houseTechLevels.entries()).map(([k, v]) => [toHouse(k), v])
+    ),
+    houseMaxUnit: new Map(
+      Array.from(data.houseMaxUnit.entries()).map(([k, v]) => [toHouse(k), v])
+    ),
+    houseMaxInfantry: new Map(
+      Array.from(data.houseMaxInfantry.entries()).map(([k, v]) => [toHouse(k), v])
+    ),
+    houseMaxBuilding: new Map(
+      Array.from(data.houseMaxBuilding.entries()).map(([k, v]) => [toHouse(k), v])
     ),
   };
 }
@@ -1790,15 +1867,21 @@ export function checkTriggerEvent(
     case TEVENT_EVAC_CIVILIAN:
       // A civilian has been evacuated
       return state.civiliansEvacuated > 0;
-    case TEVENT_BUILD_UNIT:
-      // Specified unit type has been built (event.data = UnitType index)
-      return state.builtUnitTypes.size > 0;
-    case TEVENT_BUILD_INFANTRY:
-      // Specified infantry type has been built
-      return state.builtInfantryTypes.size > 0;
-    case TEVENT_BUILD_AIRCRAFT:
-      // Specified aircraft type has been built
-      return state.builtAircraftTypes.size > 0;
+    case TEVENT_BUILD_UNIT: {
+      // Specified unit type has been built (event.data = C++ UnitType enum index)
+      const unitName = UNIT_TYPE_NAMES[event.data];
+      return unitName ? state.builtUnitTypes.has(unitName) : state.builtUnitTypes.size > 0;
+    }
+    case TEVENT_BUILD_INFANTRY: {
+      // Specified infantry type has been built (event.data = C++ InfantryType enum index)
+      const infName = INFANTRY_TYPE_NAMES[event.data];
+      return infName ? state.builtInfantryTypes.has(infName) : state.builtInfantryTypes.size > 0;
+    }
+    case TEVENT_BUILD_AIRCRAFT: {
+      // Specified aircraft type has been built (event.data = C++ AircraftType enum index)
+      const airName = AIRCRAFT_TYPE_NAMES[event.data];
+      return airName ? state.builtAircraftTypes.has(airName) : state.builtAircraftTypes.size > 0;
+    }
     case TEVENT_FAKES_DESTROYED:
       // All fake structures have been destroyed
       return !state.fakesExist;

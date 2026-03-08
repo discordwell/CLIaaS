@@ -224,6 +224,7 @@ export class Renderer {
   // Superweapon state (set by game each frame)
   superweapons = new Map<string, SuperweaponState>();
   superweaponCursorMode: SuperweaponType | null = null;
+  chronoTankTargeting = false;
 
   // Power bar animation state (C++ power.cpp parity)
   private powerHeight = 0;          // current animated height (px)
@@ -739,6 +740,27 @@ export class Renderer {
           break;
         }
       }
+    }
+
+    // Chrono Tank deploy targeting cursor (blue crosshair, matches Chronosphere style)
+    if (this.chronoTankTargeting) {
+      const r = 10;
+      ctx.strokeStyle = '#4488ff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - r - 3, y); ctx.lineTo(x - 3, y);
+      ctx.moveTo(x + 3, y); ctx.lineTo(x + r + 3, y);
+      ctx.moveTo(x, y - r - 3); ctx.lineTo(x, y - 3);
+      ctx.moveTo(x, y + 3); ctx.lineTo(x, y + r + 3);
+      ctx.stroke();
+      const cp = 0.2 + 0.15 * Math.sin(Date.now() * 0.005);
+      ctx.fillStyle = `rgba(80,120,255,${cp})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r + 2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     ctx.restore();
@@ -2082,6 +2104,23 @@ export class Renderer {
           entity.hp / entity.maxHp,
           selectedIds.has(entity.id),
         );
+      }
+
+      // CTNK cooldown pips — C++ unit.cpp:3888 returns 0-5 pip count
+      if (entity.alive && entity.type === UnitType.V_CTNK && selectedIds.has(entity.id)) {
+        const fullCooldown = 2700; // Game.CHRONO_TANK_COOLDOWN
+        const progress = entity.chronoCooldown > 0
+          ? Math.floor((fullCooldown - entity.chronoCooldown) / (fullCooldown / 5))
+          : 5; // fully charged
+        const pipY = screen.y - spriteH / 2 - 9;
+        const pipW = 3, pipH = 2, pipGap = 1;
+        const totalW = 5 * pipW + 4 * pipGap;
+        const pipStartX = screen.x - totalW / 2;
+        for (let i = 0; i < 5; i++) {
+          const px = pipStartX + i * (pipW + pipGap);
+          ctx.fillStyle = i < progress ? '#4488ff' : '#222';
+          ctx.fillRect(px, pipY, pipW, pipH);
+        }
       }
 
       // Stance indicator for selected player units (small dot to right of selection circle)

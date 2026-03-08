@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-08T06:10Z — Session 133: Enemy AI C++ Parity Port (6 Phases)
+- **Phase 1**: IQ (0-3) + TechLevel + MaxUnit/MaxInfantry/MaxBuilding parsed from INI per house. IQ gates: 0=no AI, 1=basic production, 2=targeting/defense, 3=repair/sell/retreat/superweapons. TechLevel filters production items. Cap enforcement prevents overproduction.
+- **Phase 2**: Fixed TEVENT_BUILD_UNIT/INFANTRY/AIRCRAFT — now check specific type from event.data via C++ enum index lookup tables. Wired PREFERRED_TARGET action to aiPickAttackTarget() with proper StructType mapping.
+- **Phase 3**: Expanded CPP_MISSION_MAP (7→14 entries: RETREAT, ENTER, CAPTURE, HARVEST, RETURN, STOP, AMBUSH). Added updateAIAutocreateTeams() — spawns autocreate-flagged TeamTypes at house edge every 120 ticks when enabled.
+- **Phase 4**: AI base rebuild now IQ-gated (2+), costs credits, and priority-sorted (power→refinery→production→defense→tech). Added updateAIRepair() (IQ 3+, deducts AI credits) and updateAISellDamaged() (sells sub-25% HP buildings for refund, protects FACT/last power plant).
+- **Phase 5**: Per-target splash avoidance — scaled penalty by nearby friendly structure count, only for splash weapons. AI scatter-on-damage for IQ 2+ idle units. Updated threatScore signature (boolean→count).
+- **Phase 6**: Harvester spreading (AI harvesters avoid ore patches targeted by friendlies). Emergency harvester return at 30% HP. AI superweapon usage (nuke→structure clusters, Iron Curtain→attacking units, Chronosphere→teleport tanks, Spy Plane→reveal enemy base).
+- 87 new tests across 4 new test files. 2374 tests pass (16 pre-existing sprite/manifest failures unchanged).
+
 ## 2026-03-08T05:45Z — Session 132: Dashboard Redesign — Operations Center
 - Complete rewrite of `src/app/dashboard/page.tsx` (only file changed)
 - **6 zones**: A) Slim header, B) Alert strip (5 LiveMetricCards), C) Actionable tickets sorted by urgency, D) Performance metrics (4 NumberCards + Agent Leaderboard + Top Issues), E) Trends (CSS bar chart + period comparison + KB gaps), F) Connector pills

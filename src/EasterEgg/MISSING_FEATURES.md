@@ -391,14 +391,14 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - Renderer: Added PARABOMB/PARAINFANTRY/SPY_PLANE to superweapon icon color map.
 - Tests: 8 new tests for V2RL stats, AI5 splash avoidance, AI6 spy exclusion, SW6 defs, Thief/Minelayer hookup.
 
-**2026-03-08 — Wrong-items cleanup (6 [!] → [x])**
+**2026-03-08 — Wrong-items cleanup (6 [!] → [x]) + C++ sanity check**
 
 - MV3: Fixed 6 worldDist() comparisons that multiplied by CELL_SIZE (pixels) when worldDist returns cells. Affected wave retreat (2), Iron Curtain targeting (3), defense scoring (5), attack pool (8), base rally (10), enemy detection (12).
-- EC6: Verified already fixed — gems excluded from ore growth via isGold range check.
-- EC7: Verified already fixed — 8-direction spread with density > 0x09 threshold.
-- SW4: Verified already fixed — GPS_SATELLITE assigned to ATEK, not DOME.
-- SW5: Verified already fixed — SONAR_PULSE assigned to SPEN, granted via spy infiltration.
-- Chrono Tank: Verified already fixed — updateChronoTank() auto-teleports on moveTarget > 5 cells, 180-tick cooldown.
+- EC6: Verified vs C++ cell.cpp:2869-2884 — Can_Tiberium_Grow checks OVERLAY_GOLD1-4 only.
+- EC7: Fixed ore spread to try all 8 directions from random start (C++ Spread_Tiberium cell.cpp:2963-2979). Was trying 1 random direction; now iterates all 8 and takes first valid.
+- SW4: Verified vs C++ house.cpp:1461 — STRUCT_ADVANCED_TECH (ATEK) grants GPS. Correct.
+- SW5: Fixed — SONAR_PULSE building changed from 'SPEN' to '' (spy-only). Added sonar maintenance (C++ house.cpp:1605-1627): sonar removed if spied enemy SPEN destroyed.
+- Chrono Tank: Rewritten from auto-teleport to C++ deploy flow (D key → targeting cursor → click). Cooldown 2700 ticks. Cooldown pip display (C++ unit.cpp:3888). Chronosphere excludes CTNK (C++ house.cpp:2791).
 
 **2026-03-07 — Phases 1-8 parity sweep**
 
