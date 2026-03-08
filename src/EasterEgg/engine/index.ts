@@ -1373,6 +1373,9 @@ export class Game {
         this.pendingPlacement = null;
         this.wallPlacementPrepaid = false;
         keys.delete('Escape');
+      } else if (this.chronoTankTargeting) {
+        this.chronoTankTargeting = null;
+        keys.delete('Escape');
       } else if (this.superweaponCursorMode) {
         this.superweaponCursorMode = null;
         this.superweaponCursorHouse = null;
@@ -1593,6 +1596,11 @@ export class Game {
           this.deployMADTank(unit);
           break;
         }
+        if (unit?.alive && unit.type === UnitType.V_CTNK && unit.chronoCooldown <= 0) {
+          this.chronoTankTargeting = unit;
+          this.pushEva('Select target');
+          break;
+        }
       }
       keys.delete('d');
     }
@@ -1671,6 +1679,14 @@ export class Game {
       // Sidebar click — handle production
       if (leftClick.x >= this.canvas.width - Game.SIDEBAR_W) {
         this.handleSidebarClick(leftClick.x, leftClick.y);
+        return;
+      }
+
+      // Chrono Tank deploy targeting — click to teleport
+      if (this.chronoTankTargeting) {
+        const world = this.camera.screenToWorld(leftClick.x, leftClick.y);
+        this.teleportChronoTank(this.chronoTankTargeting, world);
+        this.chronoTankTargeting = null;
         return;
       }
 
@@ -1831,6 +1847,11 @@ export class Game {
         this.sellMode = false;
         this.repairMode = false;
         this.attackMoveMode = false;
+        return;
+      }
+      // Cancel chrono tank targeting
+      if (this.chronoTankTargeting) {
+        this.chronoTankTargeting = null;
         return;
       }
       // Cancel superweapon cursor mode
@@ -7021,7 +7042,36 @@ export class Game {
       }
     }
 
-    // Remove entries for destroyed buildings
+    // Spy-granted sonar pulse: charge and auto-fire (no building required)
+    for (const [key, state] of this.superweapons) {
+      if (state.type !== SuperweaponType.SONAR_PULSE) continue;
+      activeBuildings.add(key); // prevent cleanup from deleting spy-granted sonar
+      if (!state.ready && !state.fired) {
+        const chargeRate = (isLowPower && this.isAllied(state.house as House, this.playerHouse)) ? 0.25 : 1;
+        state.chargeTick = Math.min(state.chargeTick + chargeRate, SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks);
+        if (state.chargeTick >= SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks) {
+          state.ready = true;
+          if (this.isAllied(state.house as House, this.playerHouse)) {
+            this.pushEva('Sonar pulse ready');
+          }
+        }
+      }
+      if (state.ready) {
+        for (const e of this.entities) {
+          if (!e.alive || !e.stats.isCloakable) continue;
+          if (this.isAllied(e.house, state.house as House)) continue;
+          e.sonarPulseTimer = SONAR_REVEAL_TICKS;
+        }
+        state.ready = false;
+        state.chargeTick = 0;
+        this.audio.play('cannon');
+        if (this.isAllied(state.house as House, this.playerHouse)) {
+          this.pushEva('Sonar pulse activated');
+        }
+      }
+    }
+
+    // Remove entries for destroyed buildings (spy-granted sonar exempted above)
     for (const [key] of this.superweapons) {
       if (!activeBuildings.has(key)) {
         this.superweapons.delete(key);
@@ -7227,7 +7277,7 @@ export class Game {
         break;
       }
       case SuperweaponType.SPY_PLANE: {
-        // SW6: Spy Plane — reveals 10-cell radius around target for 150 ticks
+        // SW6: Spy Plane — permanently reveals 10-cell radius around target (matches C++ fog behavior)
         const revealRadius = 10;
         const tc = worldToCell(target.x, target.y);
         const r2 = revealRadius * revealRadius;
@@ -7245,7 +7295,7 @@ export class Game {
         });
         this.audio.play('eva_acknowledged');
         if (this.isAllied(house, this.playerHouse)) {
-          this.pushEva('Spy plane ready');
+          this.pushEva('Spy plane mission complete');
         }
         break;
       }
@@ -7449,6 +7499,7 @@ export class Game {
     // Superweapon data for sidebar buttons
     this.renderer.superweapons = this.superweapons;
     this.renderer.superweaponCursorMode = this.superweaponCursorMode;
+    this.renderer.chronoTankTargeting = this.chronoTankTargeting !== null;
     this.renderer.missionTimer = this.missionTimer;
     this.renderer.theatre = this.theatre;
     this.renderer.difficulty = this.difficulty;
@@ -8624,25 +8675,41 @@ export class Game {
     }
   }
 
-  /** Agent 9: Chrono Tank teleport — 180-tick cooldown, teleports if dist > 5 cells. */
-  static readonly CHRONO_TANK_COOLDOWN = 180;
+  /** Chrono Tank cooldown: C++ ChronoTankDuration=0x300 (3.0) × TICKS_PER_MINUTE(900) = 2700 ticks. */
+  static readonly CHRONO_TANK_COOLDOWN = 2700;
 
+  /** Tick Chrono Tank cooldown only — teleport is player-initiated via D key + click. */
   updateChronoTank(entity: Entity): void {
     if (entity.type !== UnitType.V_CTNK || !entity.alive) return;
     if (entity.chronoCooldown > 0) entity.chronoCooldown--;
-    if (entity.moveTarget && entity.chronoCooldown <= 0) {
-      const dist = worldDist(entity.pos, entity.moveTarget);
-      if (dist > 5) {
-        const tc = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
-        if (this.map.isPassable(tc.cx, tc.cy)) {
-          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 10, size: 12, muzzleColor: '100,150,255' });
-          entity.pos.x = entity.moveTarget.x; entity.pos.y = entity.moveTarget.y;
-          this.effects.push({ type: 'muzzle', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 10, size: 12, muzzleColor: '100,150,255' });
-          entity.chronoShiftTick = 30; entity.chronoCooldown = Game.CHRONO_TANK_COOLDOWN;
-          entity.moveTarget = null; entity.mission = Mission.GUARD;
-        }
-      }
-    }
+  }
+
+  /** Execute Chrono Tank teleport to target position. C++ SPC_CHRONO2 handler (house.cpp:2808). */
+  teleportChronoTank(entity: Entity, target: WorldPos): void {
+    if (!entity.alive || entity.chronoCooldown > 0) return;
+    const tc = worldToCell(target.x, target.y);
+    if (!this.map.isPassable(tc.cx, tc.cy)) return;
+    // Blue flash at origin
+    this.effects.push({
+      type: 'explosion', x: entity.pos.x, y: entity.pos.y,
+      frame: 0, maxFrames: 20, size: 24,
+      sprite: 'litning', spriteStart: 0,
+    });
+    // Teleport
+    entity.pos.x = target.x;
+    entity.pos.y = target.y;
+    // Blue flash at destination
+    this.effects.push({
+      type: 'explosion', x: entity.pos.x, y: entity.pos.y,
+      frame: 0, maxFrames: 20, size: 24,
+      sprite: 'litning', spriteStart: 0,
+    });
+    entity.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
+    entity.chronoCooldown = Game.CHRONO_TANK_COOLDOWN;
+    entity.moveTarget = null;
+    entity.target = null;
+    entity.mission = Mission.GUARD;
+    this.audio.play('chrono');
   }
 
   /** Agent 9: MAD Tank deploy + shockwave. 90-tick charge, 600 dmg to vehicles in 8 cells. */

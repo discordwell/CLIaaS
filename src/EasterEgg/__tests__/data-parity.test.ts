@@ -1017,7 +1017,7 @@ describe('SUPERWEAPON_DEFS parity', () => {
 
   it('SONAR_PULSE — all fields', () => {
     const d = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
-    expect(d.building).toBe('SPEN');
+    expect(d.building).toBe(''); // spy-only — granted via spyInfiltrate() on SPEN
     expect(d.rechargeTicks).toBe(9000);
     expect(d.faction).toBe('both');
     expect(d.requiresPower).toBe(true);
@@ -1039,7 +1039,7 @@ describe('SUPERWEAPON_DEFS parity', () => {
     const d = SUPERWEAPON_DEFS[SuperweaponType.PARAINFANTRY];
     expect(d.building).toBe('AFLD');
     expect(d.rechargeTicks).toBe(9000);
-    expect(d.faction).toBe('soviet');
+    expect(d.faction).toBe('both');
     expect(d.requiresPower).toBe(true);
     expect(d.needsTarget).toBe(true);
     expect(d.targetMode).toBe('ground');

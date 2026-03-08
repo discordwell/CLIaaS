@@ -726,7 +726,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
   },
   [SuperweaponType.PARAINFANTRY]: {
     type: SuperweaponType.PARAINFANTRY, name: 'Paratroopers',
-    building: 'AFLD', rechargeTicks: 9000, faction: 'soviet',
+    building: 'AFLD', rechargeTicks: 9000, faction: 'both',
     requiresPower: true, needsTarget: true, targetMode: 'ground',
   },
   [SuperweaponType.SPY_PLANE]: {

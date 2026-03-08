@@ -74,7 +74,7 @@ describe('Superweapon definitions', () => {
   it('Sonar Pulse has correct definition', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
     expect(def.name).toBe('Sonar Pulse');
-    expect(def.building).toBe('SPEN');
+    expect(def.building).toBe(''); // spy-only — granted via spyInfiltrate() on SPEN
     expect(def.rechargeTicks).toBe(9000);
     expect(def.faction).toBe('both');
     expect(def.needsTarget).toBe(false);
@@ -497,9 +497,9 @@ describe('Sonar Pulse', () => {
     expect(def.faction).toBe('both');
   });
 
-  it('Sonar Pulse requires SPEN', () => {
+  it('Sonar Pulse is spy-only (no building grants it)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
-    expect(def.building).toBe('SPEN');
+    expect(def.building).toBe('');
   });
 
   it('sonarPulseTimer decrements to 0', () => {
