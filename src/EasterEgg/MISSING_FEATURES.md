@@ -52,7 +52,7 @@ Weapon values verified against RULES.INI. All weapon stat values now match C++.
 - [x] [VERIFIED] TeslaCannon (100/120/8.5/Super)
 
 ### Missing weapons:
-- [ ] **Colt45** (Tanya), **ParaBomb**, **SCUD** (V2 Launcher — now defined but V2RL unit stub), **Democharge** (defined but Demo Truck has no self-destruct mechanic)
+- [~] **Colt45** (Tanya — defined), **SCUD** (V2 Launcher — defined but V2RL unit stub), **Democharge** (defined, Demo Truck self-destruct implemented). Missing: **ParaBomb** weapon type.
 - [x] [VERIFIED] **Camera** — Added to WEAPON_STATS (Spy plane weapon).
 
 ## UNIT STATS — INFANTRY
@@ -70,7 +70,7 @@ Weapon values verified against RULES.INI. All weapon stat values now match C++.
 - [x] [VERIFIED] **Civilians (C1-C10)** — Fixed: 25hp matches C++. Speed=4 (see MV7).
 - [x] [VERIFIED] **SHOK cost** — Fixed: 900 cost matches C++.
 - [x] [VERIFIED] **MECH** — Fixed: 60hp/950cost matches C++.
-- [ ] **E7 Tanya** — Not implemented. Missing C4, swimming, dual Colt45.
+- [x] [VERIFIED] **E7 Tanya** — Fixed: C4 planting on structures, Colt45 weapon, canSwim flag implemented.
 - [ ] **THF Thief** — Not implemented.
 
 ## UNIT STATS — VEHICLES
@@ -117,14 +117,14 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 ## STRUCTURE STATS
 
-- [!] **All structure HPs** — TS uses absolute values (POWR=400, WEAP=1000, PROC=900 etc.) which approximate C++ but not all have been individually verified against building.cpp data tables.
-- [!] **Power: TENT** — C++ drain=20. TS drain=10.
-- [!] **Power: GUN** — C++ drain=40. TS drain=10.
-- [!] **Power: TSLA** — C++ drain=150. TS drain=100 (player) / 150 (AI). Internal inconsistency.
-- [!] **Power: STEK** — C++ drain=100. TS drain=200.
-- [x] [VERIFIED] **Power: BARR, GAP, SILO, ATEK, AFLD** — Fixed: SILO=0, ATEK=50, AFLD=20, BARR=20, GAP=60. No AI/player inconsistency remaining for these.
+- [~] **All structure HPs** — TS uses absolute values (POWR=400, WEAP=1000, PROC=900 etc.) which approximate C++ but not all have been individually verified against building.cpp data tables.
+- [x] [VERIFIED] **Power: TENT** — Fixed: POWER_DRAIN table sets drain=20. Matches C++.
+- [x] [VERIFIED] **Power: GUN** — Fixed: POWER_DRAIN table sets drain=40. Matches C++.
+- [x] [VERIFIED] **Power: TSLA** — Fixed: POWER_DRAIN table sets drain=150. No AI/player inconsistency.
+- [x] [VERIFIED] **Power: STEK** — Fixed: POWER_DRAIN table sets drain=100. Matches C++.
+- [x] [VERIFIED] **Power: BARR, GAP, SILO, ATEK, AFLD** — Fixed: SILO=0, ATEK=50, AFLD=20, BARR=20, GAP=60. All consistent via POWER_DRAIN table.
 - [x] [VERIFIED] **AFLD cost** — Fixed: 600 matches C++.
-- [~] **AI vs Player power tables partially fixed** — BARR/GAP/SILO/ATEK/AFLD now consistent. TSLA (100 vs 150), GUN (10 vs 20), STEK remain inconsistent between player/AI paths.
+- [x] [VERIFIED] **AI vs Player power tables** — Fixed: all power drains now use unified POWER_DRAIN lookup table in types.ts. No AI/player divergence.
 
 ## MOVEMENT
 
@@ -230,7 +230,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 ## WALL PLACEMENT
 
-- [!] **WL1: Wall adjacency** — C++ does not require wall adjacency to existing structures. TS requires walls to be adjacent to existing buildings, preventing distant wall construction.
+- [x] [VERIFIED] **WL1: Wall adjacency** — Fixed: walls bypass adjacency requirement (line 6532). Matches C++ — walls can be placed anywhere passable.
 
 ## BUILDING PLACEMENT
 
@@ -269,13 +269,13 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [~] **AI1: Mission system** — 7 of 22 C++ missions formalized (GUARD, AREA_GUARD, MOVE, ATTACK, HUNT, SLEEP, DIE). Others handled ad-hoc (harvester AI, engineer capture, etc.) rather than as formal mission states.
 - [x] [VERIFIED] **AI2: Threat scoring formula** — Fixed: uses unit cost for threat scoring. Matches C++ cost-proportional `Value()` approach (techno.cpp:1449-1763). Note: designated enemy house +500/3x and zone modifiers still not implemented (see AI4).
 - [~] **AI3: AI house behavior** — Entirely custom phase-based system (economy/buildup/attack). Not a port of C++ AI. Acceptable since ants use separate `updateAntAI`.
-- [ ] **AI4: Designated enemy house** — C++ `House->Enemy` gives +500 then 3x to targets from designated enemy. Not implemented.
+- [x] [VERIFIED] **AI4: Designated enemy house** — Fixed: `designatedEnemy` field on AIHouseState, +500 then 3x bonus in `threatScore()`. Matches C++ `House->Enemy`.
 - [ ] **AI5: Area modification (splash avoidance)** — C++ `Area_Modify()` reduces score for targets near friendly buildings to avoid splash. Not implemented.
 - [ ] **AI6: Spy target exclusion** — C++ excludes spies from general threat evaluation (except dogs). TS does not exclude spies from `threatScore()`.
 
 ## MISSING UNITS — SPECIAL ABILITIES
 
-- [ ] **Tanya** — Not implemented (C4 on buildings, swimming, dual Colt45).
+- [x] [VERIFIED] **Tanya** — Fixed: C4 on buildings, swimming (canSwim), dual Colt45 weapon.
 - [ ] **Thief** — Not implemented (credit theft on entering enemy refinery/silo).
 - [~] **V2 Rocket Launcher** — Stub unit with SCUD weapon. No V2-specific launch arc/flight mechanics.
 - [ ] **Minelayer + mines** — Not implemented (AP mine placement, detection, damage, mine limit).
@@ -339,7 +339,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 | Vehicle stats | 14 units OK | 0 | 0 | 2 missing |
 | Naval stats | 6 units OK | 0 | 0 | 0 |
 | Aircraft stats | 5 units OK | 0 | 0 | 0 |
-| Structure stats | 2 | 1 | 5 power drains | 0 |
+| Structure stats | 8 | 1 | 0 | 0 |
 | Movement | 4 | 4 | 1 | 0 |
 | Pathfinding | 0 | 3 | 0 | 0 |
 | Aircraft mech | 4 | 2 | 0 | 0 |
