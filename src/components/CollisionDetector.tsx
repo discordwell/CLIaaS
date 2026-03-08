@@ -22,7 +22,7 @@ export default function CollisionDetector({
   ticketId: string;
 }) {
   const [viewers, setViewers] = useState<Viewer[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
   const [replyingUsers, setReplyingUsers] = useState<PresenceEntry[]>([]);
 
   // Register presence on mount (single POST to get userId + initial viewers)
@@ -34,7 +34,7 @@ export default function CollisionDetector({
         body: JSON.stringify({ ticketId, activity: "viewing" }),
       });
       const data = await res.json();
-      if (data.currentUserId) setCurrentUserId(data.currentUserId);
+      if (data.currentUserId) currentUserIdRef.current = data.currentUserId;
       if (data.viewers) {
         setViewers(
           (data.viewers as Viewer[]).filter(
@@ -60,7 +60,7 @@ export default function CollisionDetector({
       try {
         const event = JSON.parse(e.data);
         const { userId, userName } = event.data ?? {};
-        if (!userId || userId === currentUserId) return;
+        if (!userId || userId === currentUserIdRef.current) return;
         setViewers((prev) => {
           const existing = prev.find((v) => v.userId === userId);
           if (existing) {
@@ -77,7 +77,7 @@ export default function CollisionDetector({
       try {
         const event = JSON.parse(e.data);
         const { userId, userName } = event.data ?? {};
-        if (!userId || userId === currentUserId) return;
+        if (!userId || userId === currentUserIdRef.current) return;
         setViewers((prev) => {
           const existing = prev.find((v) => v.userId === userId);
           if (existing) {
@@ -119,7 +119,7 @@ export default function CollisionDetector({
       );
       navigator.sendBeacon("/api/presence", payload);
     };
-  }, [ticketId, currentUserId, registerPresence]);
+  }, [ticketId, registerPresence]);
 
   const handleCollisionDetected = useCallback((users: PresenceEntry[]) => {
     setReplyingUsers(users);

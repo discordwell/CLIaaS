@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { loadTickets, loadKBArticles, loadRules } from "@/lib/data";
 import { getAllConnectorStatuses } from "@/lib/connector-service";
 import { listPolicies } from "@/lib/sla";
+import { requirePerm } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authResult = await requirePerm(request, "tickets:read");
+  if (authResult instanceof Response) return authResult;
   try {
     const [tickets, kbArticles, rules, policies, connectors] = await Promise.all([
       loadTickets(),
