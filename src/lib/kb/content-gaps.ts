@@ -22,7 +22,7 @@ interface KBGap {
  * Detect KB gaps using the same keyword-overlap algorithm as proactive.ts.
  * This is a local copy to avoid circular dependency issues.
  */
-function detectKBGapsLocal(
+export function detectKBGapsLocal(
   tickets: Ticket[],
   _messages: Message[],
   kbArticles: KBArticle[],

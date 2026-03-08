@@ -1,20 +1,21 @@
 import Link from "next/link";
-import { loadTickets, computeStats } from "@/lib/data";
+import { loadTickets, computeStats, loadRules, loadKBArticles, loadMessages } from "@/lib/data";
 import { getAllConnectorStatuses } from "@/lib/connector-service";
 import { availability } from "@/lib/routing/availability";
 import { getRoutingQueues } from "@/lib/routing/store";
+import { checkAllTicketsSLA } from "@/lib/sla";
+import { detectKBGapsLocal } from "@/lib/kb/content-gaps";
 
 export const dynamic = "force-dynamic";
 
-const modules = [
-  { path: "/customers", name: "Customers", desc: "Contacts & organizations" },
-  { path: "/kb", name: "Knowledge Base", desc: "Articles & self-service" },
-  { path: "/analytics", name: "Analytics", desc: "Trends & insights" },
-  { path: "/reports", name: "Reports", desc: "Custom data exports" },
-  { path: "/rules", name: "Automation", desc: "Rules, macros & triggers" },
-  { path: "/sla", name: "SLA Policies", desc: "Response & resolution targets" },
-  { path: "/billing", name: "Billing & Plans", desc: "Subscription & usage" },
-];
+type StatusLevel = "ok" | "warn" | "alert" | "neutral";
+
+const dotColor: Record<StatusLevel, string> = {
+  ok: "bg-emerald-500",
+  warn: "bg-amber-400",
+  alert: "bg-red-500",
+  neutral: "bg-zinc-300",
+};
 
 export default async function DashboardPage() {
   const tickets = await loadTickets();
@@ -27,6 +28,72 @@ export default async function DashboardPage() {
     availCounts[entry.status]++;
   }
   const queues = getRoutingQueues().filter((q) => q.enabled);
+
+  const [messages, rules, kbArticles] = await Promise.all([
+    loadMessages(),
+    loadRules(),
+    loadKBArticles(),
+  ]);
+  const kbGaps = detectKBGapsLocal(tickets, messages, kbArticles);
+
+  const slaResults = await checkAllTicketsSLA(tickets, messages);
+  const slaBreaches = slaResults.filter(
+    (r) => r.firstResponse.status === "breached" || r.resolution.status === "breached",
+  ).length;
+  const slaWarnings = slaResults.filter(
+    (r) => r.firstResponse.status === "warning" || r.resolution.status === "warning",
+  ).length;
+  const activeRules = rules.filter((r) => r.enabled !== false).length;
+  const uniqueCustomers = new Set(tickets.map((t) => t.requester)).size;
+
+  const statusItems: Array<{ href: string; name: string; metric: string; level: StatusLevel }> = [
+    {
+      href: "/sla",
+      name: "SLA Policies",
+      level:
+        slaBreaches > 0
+          ? "alert"
+          : slaWarnings > 0
+            ? "warn"
+            : slaResults.length > 0
+              ? "ok"
+              : "neutral",
+      metric:
+        slaBreaches > 0
+          ? `${slaBreaches} breached · ${slaWarnings} at risk`
+          : slaWarnings > 0
+            ? `${slaWarnings} at risk`
+            : slaResults.length > 0
+              ? `${slaResults.length} tracked · all clear`
+              : "No policies",
+    },
+    {
+      href: "/rules",
+      name: "Automation",
+      level: activeRules > 0 ? "ok" : "neutral",
+      metric: activeRules > 0 ? `${activeRules} rules active` : "No rules configured",
+    },
+    {
+      href: "/kb",
+      name: "Knowledge Base",
+      level: kbGaps.length > 0 ? "warn" : kbArticles.length > 0 ? "ok" : "neutral",
+      metric:
+        kbGaps.length > 0
+          ? `${kbArticles.length} articles · ${kbGaps.length} gaps`
+          : kbArticles.length > 0
+            ? `${kbArticles.length} articles`
+            : "No articles",
+    },
+    {
+      href: "/customers",
+      name: "Customers",
+      level: uniqueCustomers > 0 ? "ok" : "neutral",
+      metric: uniqueCustomers > 0 ? `${uniqueCustomers} contacts` : "No contacts",
+    },
+    { href: "/analytics", name: "Analytics", level: "neutral", metric: "Trends & metrics" },
+    { href: "/reports", name: "Reports", level: "neutral", metric: "Custom exports" },
+    { href: "/billing", name: "Billing", level: "neutral", metric: "Plans & usage" },
+  ];
 
   const statCards = [
     { label: "Total Tickets", value: stats.total },
@@ -103,7 +170,7 @@ export default async function DashboardPage() {
                   <div key={q.id} className="flex items-center justify-between font-mono text-sm">
                     <span className="font-bold">{q.name}</span>
                     <span className="border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold uppercase">
-                      {q.strategy.replace("_", " ")}
+                      {q.strategy.replaceAll("_", " ")}
                     </span>
                   </div>
                 ))}
@@ -155,16 +222,29 @@ export default async function DashboardPage() {
       )}
 
       <section className="mt-8 border-2 border-line bg-panel p-8">
-        <h2 className="text-2xl font-bold">System Modules</h2>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 md:grid-cols-3 font-mono text-sm">
-          {modules.map((m) => (
+        <h2 className="text-2xl font-bold">System Health</h2>
+        <div className="mt-4 flex flex-col font-mono text-sm">
+          {statusItems.map((item) => (
             <Link
-              key={m.path}
-              href={m.path}
-              className="flex flex-col border-2 border-line p-4 transition-colors hover:bg-accent-soft"
+              key={item.href}
+              href={item.href}
+              className="flex items-center justify-between border-t-2 border-line py-3 transition-colors hover:bg-accent-soft -mx-3 px-3 first:border-t-0"
             >
-              <span className="font-bold text-foreground">{m.name}</span>
-              <span className="mt-1 text-xs text-muted">{m.desc}</span>
+              <span className="flex items-center gap-3">
+                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotColor[item.level]}`} />
+                <span className="font-bold">{item.name}</span>
+              </span>
+              <span
+                className={`text-xs ${
+                  item.level === "alert"
+                    ? "font-bold text-red-600"
+                    : item.level === "warn"
+                      ? "text-amber-600"
+                      : "text-muted"
+                }`}
+              >
+                {item.metric}
+              </span>
             </Link>
           ))}
         </div>
