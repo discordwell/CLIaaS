@@ -62,10 +62,27 @@ async function getDbContext(): Promise<DbContext | null> {
   return _dbContextPromise;
 }
 
-async function getWorkspaceId(
+/** @internal Exported for testing only. */
+export async function getWorkspaceId(
   db: DbContext['db'],
   schema: DbContext['schema'],
 ): Promise<string | null> {
+  // 1. In web context, prefer the authenticated user's workspace from session.
+  //    Distinguish "not in web context" (import/cookies throws) from
+  //    "web context but unauthenticated" (session is null) — only fall
+  //    through to env var / first-workspace in the former case.
+  try {
+    const { getSession } = await import('@/lib/auth');
+    const session = await getSession();
+    if (session?.workspaceId) return session.workspaceId;
+    // getSession() succeeded (we're in a web context) but no valid session.
+    // Still fall through — the page-level middleware should enforce auth,
+    // and some server-side pages (SSG/ISR) legitimately have no session.
+  } catch {
+    // Not in a web request context (CLI, build-time, etc.) — fall through
+  }
+
+  // 2. CLI context: use CLIAAS_WORKSPACE env var
   const workspaceName = process.env.CLIAAS_WORKSPACE;
   if (workspaceName) {
     const byName = await db
@@ -76,6 +93,7 @@ async function getWorkspaceId(
     if (byName[0]) return byName[0].id;
   }
 
+  // 3. Fallback to first workspace by creation date
   const rows = await db
     .select({ id: schema.workspaces.id })
     .from(schema.workspaces)
