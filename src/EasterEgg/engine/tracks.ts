@@ -2,13 +2,19 @@
  * MV1: Track-table movement system — ported from C++ drive.cpp
  *
  * C++ RA uses pre-computed track tables for smooth vehicle turning.
- * 13 track types covering straight movement, 45°/90°/180° turns.
- * Each track is a sequence of {x, y, facing} coordinate offsets.
+ * 7 track types covering straight movement, 45°/90°/180° turns.
+ * Each track is a sequence of {x, y, facing} coordinate offsets
+ * defined in a North-facing reference frame.
+ *
+ * At runtime, offsets are rotated to the vehicle's actual facing via
+ * `rotateTrackOffset()` — exact integer transforms for cardinal
+ * directions, √2/2 scaling for diagonals (matching C++ coordinate
+ * transform tables from drive.cpp).
  *
  * Infantry are exempt — they keep free-form moveToward() (FOOT speedClass).
  */
 
-import { type WorldPos, CELL_SIZE, SpeedClass } from './types';
+import { CELL_SIZE, SpeedClass } from './types';
 
 /** A single step in a track: pixel offsets from cell center and desired facing (0-31 scale) */
 export interface TrackStep {
@@ -18,17 +24,21 @@ export interface TrackStep {
 }
 
 /**
- * C++ drive.cpp track data — 13 tracks covering all turn types.
+ * C++ drive.cpp track data — 7 tracks in North-facing reference frame.
+ *
  * Track 0: straight ahead
- * Tracks 1-4: 45° turns (slight curve)
- * Tracks 5-8: 90° turns (sharp curve)
- * Tracks 9-12: 180° U-turns
+ * Track 1: 45° right turn
+ * Track 2: 45° left turn
+ * Track 3: 90° right turn
+ * Track 4: 90° left turn
+ * Track 5: 180° U-turn right
+ * Track 6: 180° U-turn left
  *
  * Coordinates are sub-cell offsets. In C++ these are leptons (0-255 per cell).
  * We scale to pixels: lepton * CELL_SIZE / 256.
  *
- * The tracks were derived from the C++ DriveClass track tables in drive.cpp.
- * Simplified to 8-step sequences (C++ has variable-length) for tractability.
+ * Other starting directions (E/S/W/diagonals) are derived by rotating
+ * these North-reference tracks via `rotateTrackOffset()`.
  */
 
 const LP = CELL_SIZE / 256; // lepton to pixel conversion factor
@@ -54,7 +64,7 @@ const TRACK_45R: TrackStep[] = [
   { x: 60 * LP,  y: -128 * LP, facing: 2 },
   { x: 84 * LP,  y: -148 * LP, facing: 3 },
   { x: 112 * LP, y: -164 * LP, facing: 3 },
-  { x: 128 * LP, y: -128 * LP, facing: 4 }, // normalized to NE cell
+  { x: 128 * LP, y: -128 * LP, facing: 4 },
 ];
 
 // Track 2: 45° left turn (N → NW) — mirror of track 1
@@ -66,34 +76,10 @@ const TRACK_45L: TrackStep[] = [
   { x: -60 * LP,  y: -128 * LP, facing: 30 },
   { x: -84 * LP,  y: -148 * LP, facing: 29 },
   { x: -112 * LP, y: -164 * LP, facing: 29 },
-  { x: -128 * LP, y: -128 * LP, facing: 28 }, // NW cell
+  { x: -128 * LP, y: -128 * LP, facing: 28 },
 ];
 
-// Track 3: 45° right (E → SE)
-const TRACK_45R_E: TrackStep[] = [
-  { x: 30 * LP,  y: 4 * LP,   facing: 8 },
-  { x: 58 * LP,  y: 12 * LP,  facing: 9 },
-  { x: 84 * LP,  y: 24 * LP,  facing: 9 },
-  { x: 108 * LP, y: 40 * LP,  facing: 10 },
-  { x: 128 * LP, y: 60 * LP,  facing: 10 },
-  { x: 148 * LP, y: 84 * LP,  facing: 11 },
-  { x: 164 * LP, y: 112 * LP, facing: 11 },
-  { x: 128 * LP, y: 128 * LP, facing: 12 },
-];
-
-// Track 4: 45° left (E → NE)
-const TRACK_45L_E: TrackStep[] = [
-  { x: 30 * LP,  y: -4 * LP,   facing: 8 },
-  { x: 58 * LP,  y: -12 * LP,  facing: 7 },
-  { x: 84 * LP,  y: -24 * LP,  facing: 7 },
-  { x: 108 * LP, y: -40 * LP,  facing: 6 },
-  { x: 128 * LP, y: -60 * LP,  facing: 6 },
-  { x: 148 * LP, y: -84 * LP,  facing: 5 },
-  { x: 164 * LP, y: -112 * LP, facing: 5 },
-  { x: 128 * LP, y: -128 * LP, facing: 4 },
-];
-
-// Track 5: 90° right turn (N → E)
+// Track 3: 90° right turn (N → E) — sharp curve
 const TRACK_90R: TrackStep[] = [
   { x: 8 * LP,   y: -24 * LP,  facing: 0 },
   { x: 24 * LP,  y: -48 * LP,  facing: 2 },
@@ -102,10 +88,10 @@ const TRACK_90R: TrackStep[] = [
   { x: 112 * LP, y: -72 * LP,  facing: 6 },
   { x: 144 * LP, y: -64 * LP,  facing: 7 },
   { x: 176 * LP, y: -48 * LP,  facing: 8 },
-  { x: 256 * LP, y: 0,         facing: 8 }, // arrived at E cell
+  { x: 256 * LP, y: 0,         facing: 8 },
 ];
 
-// Track 6: 90° left turn (N → W)
+// Track 4: 90° left turn (N → W)
 const TRACK_90L: TrackStep[] = [
   { x: -8 * LP,   y: -24 * LP,  facing: 0 },
   { x: -24 * LP,  y: -48 * LP,  facing: 30 },
@@ -114,34 +100,10 @@ const TRACK_90L: TrackStep[] = [
   { x: -112 * LP, y: -72 * LP,  facing: 26 },
   { x: -144 * LP, y: -64 * LP,  facing: 25 },
   { x: -176 * LP, y: -48 * LP,  facing: 24 },
-  { x: -256 * LP, y: 0,         facing: 24 }, // arrived at W cell
+  { x: -256 * LP, y: 0,         facing: 24 },
 ];
 
-// Track 7: 90° right (E → S)
-const TRACK_90R_E: TrackStep[] = [
-  { x: 24 * LP,  y: 8 * LP,   facing: 8 },
-  { x: 48 * LP,  y: 24 * LP,  facing: 10 },
-  { x: 64 * LP,  y: 48 * LP,  facing: 12 },
-  { x: 72 * LP,  y: 80 * LP,  facing: 13 },
-  { x: 72 * LP,  y: 112 * LP, facing: 14 },
-  { x: 64 * LP,  y: 144 * LP, facing: 15 },
-  { x: 48 * LP,  y: 176 * LP, facing: 16 },
-  { x: 0,        y: 256 * LP, facing: 16 },
-];
-
-// Track 8: 90° left (E → N)
-const TRACK_90L_E: TrackStep[] = [
-  { x: 24 * LP,  y: -8 * LP,   facing: 8 },
-  { x: 48 * LP,  y: -24 * LP,  facing: 6 },
-  { x: 64 * LP,  y: -48 * LP,  facing: 4 },
-  { x: 72 * LP,  y: -80 * LP,  facing: 3 },
-  { x: 72 * LP,  y: -112 * LP, facing: 2 },
-  { x: 64 * LP,  y: -144 * LP, facing: 1 },
-  { x: 48 * LP,  y: -176 * LP, facing: 0 },
-  { x: 0,        y: -256 * LP, facing: 0 },
-];
-
-// Track 9: 180° U-turn right (N → S via E)
+// Track 5: 180° U-turn right (N → S via E)
 const TRACK_180R: TrackStep[] = [
   { x: 16 * LP,  y: -20 * LP,  facing: 2 },
   { x: 40 * LP,  y: -32 * LP,  facing: 4 },
@@ -153,7 +115,7 @@ const TRACK_180R: TrackStep[] = [
   { x: 0,        y: 256 * LP,  facing: 16 },
 ];
 
-// Track 10: 180° U-turn left (N → S via W)
+// Track 6: 180° U-turn left (N → S via W)
 const TRACK_180L: TrackStep[] = [
   { x: -16 * LP,  y: -20 * LP,  facing: 30 },
   { x: -40 * LP,  y: -32 * LP,  facing: 28 },
@@ -165,45 +127,15 @@ const TRACK_180L: TrackStep[] = [
   { x: 0,         y: 256 * LP,  facing: 16 },
 ];
 
-// Track 11: 180° U-turn right (E → W via S)
-const TRACK_180R_E: TrackStep[] = [
-  { x: 20 * LP,  y: 16 * LP,   facing: 10 },
-  { x: 32 * LP,  y: 40 * LP,   facing: 12 },
-  { x: 32 * LP,  y: 60 * LP,   facing: 16 },
-  { x: 16 * LP,  y: 72 * LP,   facing: 18 },
-  { x: -16 * LP, y: 72 * LP,   facing: 22 },
-  { x: -40 * LP, y: 60 * LP,   facing: 24 },
-  { x: -56 * LP, y: 32 * LP,   facing: 24 },
-  { x: -256 * LP, y: 0,        facing: 24 },
-];
-
-// Track 12: 180° U-turn left (E → W via N)
-const TRACK_180L_E: TrackStep[] = [
-  { x: 20 * LP,  y: -16 * LP,  facing: 6 },
-  { x: 32 * LP,  y: -40 * LP,  facing: 4 },
-  { x: 32 * LP,  y: -60 * LP,  facing: 0 },
-  { x: 16 * LP,  y: -72 * LP,  facing: 30 },
-  { x: -16 * LP, y: -72 * LP,  facing: 26 },
-  { x: -40 * LP, y: -60 * LP,  facing: 24 },
-  { x: -56 * LP, y: -32 * LP,  facing: 24 },
-  { x: -256 * LP, y: 0,        facing: 24 },
-];
-
-/** All 13 track types indexed by track number */
+/** All 7 track types indexed by track number */
 export const TRACKS: TrackStep[][] = [
   TRACK_STRAIGHT,  // 0: straight
   TRACK_45R,       // 1: 45° right
   TRACK_45L,       // 2: 45° left
-  TRACK_45R_E,     // 3: 45° right (E-axis)
-  TRACK_45L_E,     // 4: 45° left (E-axis)
-  TRACK_90R,       // 5: 90° right
-  TRACK_90L,       // 6: 90° left
-  TRACK_90R_E,     // 7: 90° right (E-axis)
-  TRACK_90L_E,     // 8: 90° left (E-axis)
-  TRACK_180R,      // 9: 180° right
-  TRACK_180L,      // 10: 180° left
-  TRACK_180R_E,    // 11: 180° right (E-axis)
-  TRACK_180L_E,    // 12: 180° left (E-axis)
+  TRACK_90R,       // 3: 90° right
+  TRACK_90L,       // 4: 90° left
+  TRACK_180R,      // 5: 180° right
+  TRACK_180L,      // 6: 180° left
 ];
 
 /**
@@ -211,9 +143,9 @@ export const TRACKS: TrackStep[][] = [
  * Both facings are in 32-step format (0-31).
  *
  * C++ drive.cpp selects tracks based on (currentFacing, desiredFacing) delta.
- * We simplify: compute angular difference in 32-step ring, pick appropriate track category.
+ * Compute angular difference in 32-step ring, pick appropriate track category.
  *
- * @returns track index (0-12), or -1 if no turn needed (same facing)
+ * @returns track index (0-6)
  */
 export function selectTrack(currentFacing32: number, desiredFacing32: number): number {
   if (currentFacing32 === desiredFacing32) return 0; // straight
@@ -222,16 +154,43 @@ export function selectTrack(currentFacing32: number, desiredFacing32: number): n
   const isRight = diff <= 16;
   const absDiff = isRight ? diff : (32 - diff);
 
-  // Classify by turn magnitude
   if (absDiff <= 4) {
-    // 45° turn (1-4 steps in 32-ring ≈ 11-45°)
-    return isRight ? 1 : 2;
+    return isRight ? 1 : 2;   // 45° turn
   } else if (absDiff <= 12) {
-    // 90° turn (5-12 steps ≈ 56-135°)
-    return isRight ? 5 : 6;
+    return isRight ? 3 : 4;   // 90° turn
   } else {
-    // 180° turn (13-16 steps ≈ 146-180°)
-    return isRight ? 9 : 10;
+    return isRight ? 5 : 6;   // 180° turn
+  }
+}
+
+/**
+ * Rotate a North-reference track offset to match the vehicle's actual facing.
+ *
+ * C++ drive.cpp uses coordinate transform tables (not trig) to rotate track
+ * data for each starting direction. We replicate this with exact integer
+ * transforms for the 4 cardinal directions and √2/2 scaling for diagonals.
+ *
+ * Tracks always end at 8-dir facings (multiples of 4 in 32-step), so the
+ * next track always starts at an exact 8-dir — no precision loss accumulates.
+ *
+ * @param x Track step X offset (North-reference)
+ * @param y Track step Y offset (North-reference)
+ * @param facing8 Vehicle's starting direction (0-7, from facing32 / 4)
+ * @returns Rotated [rx, ry] in world coordinates
+ */
+const S = Math.SQRT2 / 2; // exact √2/2 = 0.7071067811865476
+
+export function rotateTrackOffset(x: number, y: number, facing8: number): [number, number] {
+  switch (facing8) {
+    case 0: return [x, y];                          // N: identity
+    case 1: return [(x - y) * S, (x + y) * S];     // NE: 45° CW
+    case 2: return [-y, x];                         // E:  90° CW (exact)
+    case 3: return [(-x - y) * S, (x - y) * S];    // SE: 135° CW
+    case 4: return [-x, -y];                        // S:  180° (exact)
+    case 5: return [(y - x) * S, (-x - y) * S];    // SW: 225° CW
+    case 6: return [y, -x];                         // W:  270° CW (exact)
+    case 7: return [(x + y) * S, (y - x) * S];     // NW: 315° CW
+    default: return [x, y];
   }
 }
 
@@ -240,8 +199,6 @@ export function selectTrack(currentFacing32: number, desiredFacing32: number): n
  * Only non-infantry, non-aircraft ground/naval vehicles use tracks.
  */
 export function usesTrackMovement(speedClass: SpeedClass, isInfantry: boolean, isAircraft: boolean): boolean {
-  // Infantry keep free-form moveToward (FOOT speedClass)
   if (isInfantry || isAircraft) return false;
-  // All ground vehicles (WHEEL/TRACK) and naval (FLOAT) use tracks
   return speedClass === SpeedClass.WHEEL || speedClass === SpeedClass.TRACK || speedClass === SpeedClass.FLOAT;
 }

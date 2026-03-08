@@ -27,7 +27,7 @@ import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatSc
 import { GameMap, Terrain } from './map';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
-import { TRACKS, selectTrack, usesTrackMovement } from './tracks';
+import { TRACKS, selectTrack, usesTrackMovement, rotateTrackOffset } from './tracks';
 import {
   loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
@@ -5622,25 +5622,18 @@ export class Game {
       * this.damageSpeedFactor(entity);
   }
 
-  // MV1: Precomputed cos/sin for 8 cardinal rotations (facing32 / 4 = 0..7)
-  private static readonly TRACK_COS = [1, 0.7071, 0, -0.7071, -1, -0.7071, 0, 0.7071];
-  private static readonly TRACK_SIN = [0, 0.7071, 1, 0.7071, 0, -0.7071, -1, -0.7071];
-
   /** MV1: Follow one tick of track-table movement. Returns true when track is complete.
    *  Vehicles follow pre-computed curved paths for smooth turning (C++ drive.cpp track tables).
-   *  Track offsets are rotated from North-reference to match the vehicle's starting facing. */
+   *  Track offsets are rotated from North-reference via rotateTrackOffset() — exact integer
+   *  transforms for cardinal directions, √2/2 for diagonals (matching C++ coord tables). */
   private followTrackStep(entity: Entity, speed: number): boolean {
     const track = TRACKS[entity.trackNumber];
-    const rotIdx = Math.floor(entity.trackBaseFacing / 4) % 8;
-    const cos = Game.TRACK_COS[rotIdx];
-    const sin = Game.TRACK_SIN[rotIdx];
+    const facing8 = Math.floor(entity.trackBaseFacing / 4) % 8;
 
     let remaining = speed;
     while (remaining > 0.5 && entity.trackIndex < track.length) {
       const step = track[entity.trackIndex];
-      // Rotate track offset from North-reference to actual facing
-      const rx = step.x * cos - step.y * sin;
-      const ry = step.x * sin + step.y * cos;
+      const [rx, ry] = rotateTrackOffset(step.x, step.y, facing8);
       const tx = entity.trackStartX + rx;
       const ty = entity.trackStartY + ry;
 
