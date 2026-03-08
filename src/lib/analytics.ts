@@ -111,7 +111,10 @@ function emptyAnalytics(dateRange?: DateRange): AnalyticsData {
 
 // ---- Core computation ----
 
-export async function computeAnalytics(dateRange?: DateRange): Promise<AnalyticsData> {
+export async function computeAnalytics(
+  dateRange?: DateRange,
+  preloaded?: { tickets?: Ticket[]; messages?: Message[] },
+): Promise<AnalyticsData> {
   let allTickets: Ticket[];
   let allMessages: Message[];
   let csatRatings: Awaited<ReturnType<typeof loadCSATRatings>>;
@@ -120,8 +123,8 @@ export async function computeAnalytics(dateRange?: DateRange): Promise<Analytics
 
   try {
     [allTickets, allMessages, csatRatings, npsResponses, cesResponses] = await Promise.all([
-      loadTickets(),
-      loadMessages(),
+      preloaded?.tickets ? Promise.resolve(preloaded.tickets) : loadTickets(),
+      preloaded?.messages ? Promise.resolve(preloaded.messages) : loadMessages(),
       loadCSATRatings(),
       loadSurveyResponses('nps'),
       loadSurveyResponses('ces'),

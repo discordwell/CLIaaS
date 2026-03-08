@@ -15,10 +15,11 @@ export const dynamic = "force-dynamic";
 // ---- Inline helpers ----
 
 function formatHours(hours: number): string {
-  if (hours < 1) return `${Math.round(hours * 60)}m`;
-  if (hours < 24) return `${Math.round(hours * 10) / 10}h`;
-  const days = Math.floor(hours / 24);
-  const remainHours = Math.round(hours % 24);
+  const h = Math.abs(hours);
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 24) return `${Math.round(h * 10) / 10}h`;
+  const days = Math.floor(h / 24);
+  const remainHours = Math.round(h % 24);
   return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
 }
 
@@ -146,7 +147,7 @@ export default async function DashboardPage() {
       r.resolution.status === "warning",
   ).length;
 
-  const analytics = await computeAnalytics();
+  const analytics = await computeAnalytics(undefined, { tickets, messages });
 
   const openCount = stats.byStatus["open"] ?? 0;
   const unassigned = stats.byAssignee["unassigned"] ?? 0;
@@ -164,12 +165,18 @@ export default async function DashboardPage() {
     slaTotal > 0 ? Math.round((slaMet / slaTotal) * 100) : 0;
 
   // CSAT trend
-  const csatTrendDir = (() => {
-    if (analytics.csatTrend.length < 2) return "flat" as const;
+  const csatTrendInfo = (() => {
+    if (analytics.csatTrend.length < 2)
+      return { direction: "flat" as const, delta: "" };
     const first = analytics.csatTrend[0].score;
     const last =
       analytics.csatTrend[analytics.csatTrend.length - 1].score;
-    return trendDirection(last, first);
+    const diff = Math.round((last - first) * 100) / 100;
+    const sign = diff >= 0 ? "+" : "";
+    return {
+      direction: trendDirection(last, first),
+      delta: `${sign}${diff} from ${first}`,
+    };
   })();
 
   // Period comparison shortcuts
@@ -397,8 +404,8 @@ export default async function DashboardPage() {
               trend={
                 analytics.csatTrend.length >= 2
                   ? {
-                      direction: csatTrendDir,
-                      value: `${analytics.csatTrend[analytics.csatTrend.length - 1].score} / 5`,
+                      direction: csatTrendInfo.direction,
+                      value: csatTrendInfo.delta,
                     }
                   : undefined
               }
