@@ -165,7 +165,7 @@ export default function KeyboardShortcuts() {
       // Enter — open selected ticket
       if (e.key === "Enter") {
         // Only fire when we're on a list page — don't hijack Enter globally
-        if (pathname === "/tickets" || pathname.startsWith("/tickets?")) {
+        if (pathname === "/tickets") {
           e.preventDefault();
           dispatchTicketNav("open");
         }

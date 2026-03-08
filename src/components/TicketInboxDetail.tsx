@@ -138,8 +138,9 @@ export default function TicketInboxDetail({
           throw new Error(data.error ?? "Update failed");
         }
         setStatusUpdate(newStatus);
-      } catch {
-        // Status update failed silently
+      } catch (err) {
+        setSendMsg(err instanceof Error ? err.message : "Status update failed");
+        setSendState("error");
       } finally {
         setStatusSaving(false);
       }

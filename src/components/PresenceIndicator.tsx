@@ -83,19 +83,11 @@ export default function PresenceIndicator({
     }
   }, [ticketId, onCollisionDetected]);
 
-  // Unregister presence
+  // Unregister presence (best-effort DELETE; TTL handles cleanup if this fails on tab close)
   const unregister = useCallback(() => {
-    // sendBeacon can't send DELETE, so we use the legacy presence endpoint for page unload
-    navigator.sendBeacon(
-      `/api/presence`,
-      new Blob(
-        [JSON.stringify({ ticketId, action: "leave" })],
-        { type: "application/json" },
-      ),
-    );
-    // Also try DELETE (won't work on unload, but works for normal unmount)
     fetch(`/api/tickets/${encodeURIComponent(ticketId)}/presence`, {
       method: "DELETE",
+      keepalive: true,
     }).catch(() => {});
   }, [ticketId]);
 

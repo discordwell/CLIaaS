@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-08T14:00Z — Session 138: 8 Major UX Improvements (Competitive Parity)
+- **Trigger**: User said "the whole site feels kinda mid" — competitive analysis vs Zendesk, Freshdesk, Intercom, Help Scout, Front, Linear identified 8 key gaps
+- **Method**: 8 parallel Opus agents in git worktrees, merged all into main
+- **Features**: (1) Collapsible sidebar nav (Sidebar.tsx), (2) Split-pane ticket inbox (TicketInbox.tsx + TicketInboxDetail.tsx), (3) G-chord keyboard shortcuts + `?` help overlay (KeyboardShortcuts.tsx, ShortcutHelpOverlay.tsx), (4) Collision detection/presence (PresenceIndicator.tsx, presence API), (5) Ticket slide-over drawer from any page (TicketDrawer.tsx, TicketDrawerProvider.tsx, TicketLink.tsx), (6) Density toggle spacious/comfortable/compact (DensityProvider.tsx, DensityToggle.tsx), (7) SSE live dashboard metrics (LiveMetricStrip.tsx, useLiveMetrics.ts, dashboard/stream API), (8) Onboarding checklist + empty states (SetupChecklist.tsx, EmptyState.tsx, onboarding/status API)
+- **Shell refactor**: AppNavWrapper → AppShell.tsx wrapping Sidebar + CommandPalette + KeyboardShortcuts + TicketDrawerProvider + DensityProvider
+- **Stats**: 45 files changed, 5718 insertions, 389 deletions. Build passes.
+- **Commit**: 1959f8c, pushed + deployed to cliaas.com
+
 ## 2026-03-08T12:20Z — Session 137: True C++ Parity — 100% (187/187)
 - **Phase 1**: All 30+ unit speeds set to exact C++ RULES.INI values (E1=4, 1TNK=9, HELI=14, MIG=20, etc.)
 - **Phase 2**: Removed TS-invented `speedFraction` parameter from `movementSpeed()` — 7 callers updated

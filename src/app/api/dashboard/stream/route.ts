@@ -1,6 +1,7 @@
 import { loadTickets, loadMessages, computeStats } from '@/lib/data';
 import { checkAllTicketsSLA } from '@/lib/sla';
 import { availability } from '@/lib/routing/availability';
+import { requirePerm } from '@/lib/rbac';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -55,9 +56,11 @@ async function computeDashboardMetrics(): Promise<DashboardMetrics> {
 /**
  * SSE endpoint for live dashboard metrics.
  * Streams a DashboardMetrics snapshot every 15 seconds.
- * No auth required (same level as the dashboard page itself).
  */
 export async function GET(request: Request) {
+  // Auth check — reject unauthenticated callers
+  const authResult = await requirePerm(request, 'tickets:read');
+  if (authResult instanceof Response) return authResult;
   const encoder = new TextEncoder();
   let interval: ReturnType<typeof setInterval> | null = null;
 
@@ -75,21 +78,20 @@ export async function GET(request: Request) {
 
       // Push updated snapshot every 15 seconds
       interval = setInterval(async () => {
+        if (request.signal.aborted) {
+          if (interval) { clearInterval(interval); interval = null; }
+          return;
+        }
         try {
           const metrics = await computeDashboardMetrics();
           controller.enqueue(
             encoder.encode(`event: metrics\ndata: ${JSON.stringify(metrics)}\n\n`),
           );
         } catch {
-          // Snapshot computation failed -- send keepalive comment
-          try {
-            controller.enqueue(encoder.encode(': keepalive\n\n'));
-          } catch {
-            // Client disconnected, clean up
-            if (interval) {
-              clearInterval(interval);
-              interval = null;
-            }
+          // Client disconnected or snapshot failed, clean up
+          if (interval) {
+            clearInterval(interval);
+            interval = null;
           }
         }
       }, 15_000);

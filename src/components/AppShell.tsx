@@ -22,7 +22,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setLoggedIn(
-      document.cookie.split(";").some((c) => c.trim().startsWith("cliaas-logged-in="))
+      document.cookie.split(";").some((c) => {
+        const trimmed = c.trim();
+        return trimmed.startsWith("cliaas-logged-in=") && trimmed !== "cliaas-logged-in=" && trimmed !== "cliaas-logged-in=0" && trimmed !== "cliaas-logged-in=false";
+      })
     );
   }, [pathname]);
 
