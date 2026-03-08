@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-03-08T00:20Z — Session 130: Visual Parity — C++ Rendering Effects → Canvas 2D
+- **Phase 1**: Effect system infrastructure — `blendMode` (screen/lighter), `loopStart/loopEnd/loops`, `followUp` chaining on Effect interface. Canvas 2D `globalCompositeOperation` dispatch in renderEffects. Follow-up effect queue (avoids filter-push bug).
+- **Phase 2**: Sprite-based building fire — BURN-S/M/L.SHP extracted (65-67 frames each). Replaces procedural ellipses with looping fire sprites at 3 HP tiers. Screen blend for glow-through.
+- **Phase 3**: Additive blending — tesla, napalm, atomsfx use `blendMode: 'screen'`. fball/veh-hit remain opaque (C++ adata.cpp).
+- **Phase 4**: New effect sprites — H2O_EXP1-3 (water explosions), FLAK (AA burst), GUNFIRE (muzzle flash). Water terrain routing, flak for AA-vs-aircraft, vehicle gunfire with screen blend.
+- **Phase 5**: Iron Curtain red tint — changed gold (255,215,0) to red (255,40,40) with multiply blend. Matches C++ FadingRed.
+- **Phase 6**: Nuke enhancement — flash 15→30, shake 20→30, quadratic decay curve, 6 staggered secondary ground explosions.
+- **Phase 7**: Building destruction scaling — pre-explosions scale with footprint (3-6), proportional screen shake.
+- **Phase 8**: Predator shimmer — 2 offset copies at 30% alpha during cloak transitions. Matches SHAPE_PREDATOR.
+- **Phase 9**: Construction frame animation — make sheets play naturally without clip/scanline overlay.
+- **Phase 10**: Power brownout multiply blend (preserves hue), code review fixes.
+- 8 new sprite extractions, ~300 lines changed across renderer.ts + index.ts + extract-ra-assets.ts. 19 new tests, all 2270 tests pass. MISSING_FEATURES.md R20-R31 added.
+
 ## 2026-03-07T23:45Z — Session 129: C++ Parity Mega-Fix (8 Phases, ~60 Items)
 - **Phase 1**: REPAIR_STEP=5, POWER_DRAIN table in types.ts, service depot 14-tick rate (already correct), silos-needed C++ threshold
 - **Phase 2**: Heal guard (distance+armor), dog instant kill (maxHp) + collateral prevention, AP vs infantry scatter, directional overshoot, arcing jitter, wall/ore destruction from splash

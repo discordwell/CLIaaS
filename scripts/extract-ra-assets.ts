@@ -187,6 +187,14 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'MISSILE.SHP', 'missile'],        // Missile projectile
   ['CONQUER.MIX', '120MM.SHP', '120mm'],            // 120mm shell
   ['CONQUER.MIX', '50CAL.SHP', '50cal'],            // 50 caliber tracer
+  ['CONQUER.MIX', 'BURN-S.SHP', 'burn-s'],       // Small building fire (looping)
+  ['CONQUER.MIX', 'BURN-M.SHP', 'burn-m'],       // Medium building fire (looping)
+  ['CONQUER.MIX', 'BURN-L.SHP', 'burn-l'],       // Large building fire (looping)
+  ['CONQUER.MIX', 'H2O_EXP1.SHP', 'h2o_exp1'],   // Water explosion 1
+  ['CONQUER.MIX', 'H2O_EXP2.SHP', 'h2o_exp2'],   // Water explosion 2
+  ['CONQUER.MIX', 'H2O_EXP3.SHP', 'h2o_exp3'],   // Water explosion 3
+  ['CONQUER.MIX', 'FLAK.SHP', 'flak'],           // Anti-aircraft flak burst
+  ['CONQUER.MIX', 'GUNFIRE.SHP', 'gunfire'],     // Muzzle flash sprite
   // Buildings — production (CONQUER.MIX)
   ['CONQUER.MIX', 'FACT.SHP', 'fact'],    // Construction Yard
   ['CONQUER.MIX', 'POWR.SHP', 'powr'],    // Power Plant

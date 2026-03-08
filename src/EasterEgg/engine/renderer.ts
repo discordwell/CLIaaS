@@ -139,6 +139,14 @@ export interface Effect {
   // Floating text (e.g. "+100" credits)
   text?: string;
   textColor?: string;
+  // Blend mode for additive/screen effects (C++ SHAPE_GHOST + TranslucentTable)
+  blendMode?: 'screen' | 'lighter';
+  // Looping support for persistent effects (fire, smoke)
+  loopStart?: number;
+  loopEnd?: number;
+  loops?: number;  // number of times to loop (-1 = infinite)
+  // Animation chaining (fire → smoke)
+  followUp?: string;  // sprite name for follow-up effect
 }
 
 // Pseudo-random hash for terrain variation
@@ -397,9 +405,11 @@ export class Renderer {
       ctx.restore();
     }
 
-    // Screen flash overlay (big explosions)
+    // Screen flash overlay (big explosions — rapid decay curve for nuke-strength flash)
     if (this.screenFlash > 0) {
-      const flashAlpha = Math.min(0.4, this.screenFlash * 0.08);
+      // Quadratic decay: initial burst fades quickly, lingering tail
+      const t = this.screenFlash / 30; // normalize to 0-1 range (max 30 ticks)
+      const flashAlpha = Math.min(0.8, t * t * 0.8);
       ctx.fillStyle = `rgba(255,255,220,${flashAlpha})`;
       ctx.fillRect(0, 0, this.width, this.height);
       this.screenFlash--;
@@ -1403,8 +1413,9 @@ export class Renderer {
         const dfw = drawMeta.frameWidth;
         const dfh = drawMeta.frameHeight;
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
-        // Construction: reveal building from bottom up with scanline effect
-        if (isConstructing) {
+        const hasMakeSheet = useSheet !== s.image; // true when dedicated buildup sprite exists
+        // Construction: make sheet plays frames naturally; fallback uses clip+scanline reveal
+        if (isConstructing && !hasMakeSheet) {
           const prog = s.buildProgress!;
           const revealH = Math.floor(dfh * prog);
           ctx.save();
@@ -1427,8 +1438,8 @@ export class Renderer {
           centerX: true,
           centerY: true,
         });
-        if (isConstructing) {
-          // Green construction scanline at the build edge
+        if (isConstructing && !hasMakeSheet) {
+          // Green construction scanline at the build edge (fallback only — make sheets show naturally)
           const revealY = screenY + dfh / 2 - Math.floor(dfh * s.buildProgress!);
           ctx.restore();
           ctx.fillStyle = `rgba(80,255,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
@@ -1456,14 +1467,17 @@ export class Renderer {
         if (vis === 1) ctx.globalAlpha = 1;
       }
 
-      // Power brownout dimming for defensive structures (matches severe brownout threshold in index.ts)
+      // Power brownout dimming — multiply blend preserves hue (C++ FadingShade remap)
       if (this.sidebarPowerConsumed > this.sidebarPowerProduced * 1.5 && this.sidebarPowerProduced > 0) {
         const defenseTypes = ['HBOX', 'GUN', 'TSLA', 'PBOX'];
         if (defenseTypes.includes(s.type)) {
-          const pulse = 0.15 + 0.1 * Math.sin(tick * 0.15);
-          ctx.fillStyle = `rgba(0,0,0,${pulse})`;
+          const pulse = 0.6 + 0.1 * Math.sin(tick * 0.15);
+          const shade = Math.floor(pulse * 255);
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
           const [bw, bh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
           ctx.fillRect(screenX, screenY, bw * CELL_SIZE, bh * CELL_SIZE);
+          ctx.globalCompositeOperation = 'source-over';
         }
       }
 
@@ -1486,20 +1500,35 @@ export class Renderer {
           const fy = screenY + CELL_SIZE * 0.3 + f * 4;
 
           if (hpRatio < 0.5) {
-            // Fire: animated orange/red flicker
-            const flicker = Math.sin(tick * 0.5 + f * 2.1) * 0.3;
-            const intensity = hpRatio < 0.25 ? 1.4 : 1.0;
-            const fh = (6 + Math.sin(tick * 0.7 + f * 1.5) * 3) * intensity;
-            ctx.fillStyle = `rgba(255,${100 + flicker * 60},${hpRatio < 0.25 ? 10 : 30},${(0.5 + flicker * 0.2) * intensity})`;
-            ctx.beginPath();
-            ctx.ellipse(fx, fy - fh * 0.5, 3 * intensity, fh * 0.5, 0, 0, Math.PI * 2);
-            ctx.fill();
-            // Inner bright core for critical damage
-            if (hpRatio < 0.25) {
-              ctx.fillStyle = `rgba(255,220,100,${0.3 + flicker * 0.2})`;
+            // Sprite-based fire (C++ BURN-S/M/L.SHP with SHAPE_GHOST blitting)
+            const burnSprite = hpRatio < 0.25 ? 'burn-l' : 'burn-m';
+            const burnSheet = assets.getSheet(burnSprite);
+            if (burnSheet) {
+              const burnFrameCount = burnSheet.meta.frameCount;
+              const burnFrame = (tick + f * 7) % burnFrameCount;
+              ctx.globalCompositeOperation = 'screen';
+              assets.drawFrame(ctx, burnSprite, burnFrame, fx, fy - 4, { centerX: true, centerY: true });
+              ctx.globalCompositeOperation = 'source-over';
+            } else {
+              // Procedural fallback if sprite not loaded
+              const flicker = Math.sin(tick * 0.5 + f * 2.1) * 0.3;
+              const intensity = hpRatio < 0.25 ? 1.4 : 1.0;
+              const fh = (6 + Math.sin(tick * 0.7 + f * 1.5) * 3) * intensity;
+              ctx.fillStyle = `rgba(255,${100 + flicker * 60},${hpRatio < 0.25 ? 10 : 30},${(0.5 + flicker * 0.2) * intensity})`;
               ctx.beginPath();
-              ctx.ellipse(fx, fy - fh * 0.3, 1.5, fh * 0.25, 0, 0, Math.PI * 2);
+              ctx.ellipse(fx, fy - fh * 0.5, 3 * intensity, fh * 0.5, 0, 0, Math.PI * 2);
               ctx.fill();
+            }
+          }
+
+          if (hpRatio >= 0.5) {
+            // Light damage: small smoldering fire (C++ BURN-S.SHP)
+            const burnSheet = assets.getSheet('burn-s');
+            if (burnSheet) {
+              const burnFrame = (tick + f * 7) % burnSheet.meta.frameCount;
+              ctx.globalCompositeOperation = 'screen';
+              assets.drawFrame(ctx, 'burn-s', burnFrame, fx, fy - 2, { centerX: true, centerY: true });
+              ctx.globalCompositeOperation = 'source-over';
             }
           }
 
@@ -1870,6 +1899,25 @@ export class Renderer {
             );
           }
         }
+        // Predator shimmer during cloak/uncloak transitions (C++ SHAPE_PREDATOR pixel-offset sampling)
+        if (entity.stats.isCloakable &&
+            (entity.cloakState === CloakState.CLOAKING || entity.cloakState === CloakState.UNCLOAKING)) {
+          const shimmerOffset = ((tick % 4) < 2) ? 1 : -1;
+          ctx.globalAlpha = preShadowAlpha * 0.3;
+          const shimmerFrame = entity.spriteFrame % sheet.meta.frameCount;
+          if (remapped) {
+            assets.drawFrameFrom(ctx, remapped, entity.stats.image, shimmerFrame,
+              screen.x + shimmerOffset, screen.y, { centerX: true, centerY: true });
+            assets.drawFrameFrom(ctx, remapped, entity.stats.image, shimmerFrame,
+              screen.x - shimmerOffset, screen.y + 1, { centerX: true, centerY: true });
+          } else {
+            assets.drawFrame(ctx, entity.stats.image, shimmerFrame,
+              screen.x + shimmerOffset, screen.y, { centerX: true, centerY: true });
+            assets.drawFrame(ctx, entity.stats.image, shimmerFrame,
+              screen.x - shimmerOffset, screen.y + 1, { centerX: true, centerY: true });
+          }
+          ctx.globalAlpha = preShadowAlpha;
+        }
         // Harvester harvesting animation: small ore chunks flying into harvester
         if (entity.type === UnitType.V_HARV && entity.harvesterState === 'harvesting') {
           for (let i = 0; i < 2; i++) {
@@ -1917,13 +1965,17 @@ export class Renderer {
         );
       }
 
-      // Iron Curtain gold overlay — invulnerable unit
+      // Iron Curtain red overlay — invulnerable unit (C++ FadingRed palette remap)
       if (entity.alive && entity.ironCurtainTick > 0) {
         const pulse = 0.25 + 0.15 * Math.sin(tick * 0.3);
-        ctx.fillStyle = `rgba(255,215,0,${pulse})`;
+        // Multiply blend darkens toward red without bleeding to adjacent pixels
+        ctx.globalCompositeOperation = 'multiply';
+        const redShade = Math.floor(255 * (1 - pulse * 0.5));
+        ctx.fillStyle = `rgb(255,${redShade * 0.3},${redShade * 0.3})`;
         ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
-        // Gold glow ring
-        ctx.strokeStyle = `rgba(255,215,0,${0.4 + 0.2 * Math.sin(tick * 0.2)})`;
+        ctx.globalCompositeOperation = 'source-over';
+        // Red glow ring
+        ctx.strokeStyle = `rgba(255,40,40,${0.4 + 0.2 * Math.sin(tick * 0.2)})`;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.ellipse(screen.x, screen.y, spriteW * 0.5 + 2, spriteH * 0.4 + 2, 0, 0, Math.PI * 2);
@@ -2162,10 +2214,12 @@ export class Renderer {
           const frameIdx = (fx.spriteStart ?? 0) + Math.min(fx.frame, sheet.meta.frameCount - 1);
           const alpha = fx.type === 'tesla' ? 1 - progress * 0.5 : 1;
           if (alpha < 1) ctx.globalAlpha = alpha;
+          if (fx.blendMode) ctx.globalCompositeOperation = fx.blendMode;
           assets.drawFrame(ctx, fx.sprite, frameIdx % sheet.meta.frameCount, screen.x, screen.y, {
             centerX: true,
             centerY: true,
           });
+          if (fx.blendMode) ctx.globalCompositeOperation = 'source-over';
           if (alpha < 1) ctx.globalAlpha = 1;
           continue;
         }

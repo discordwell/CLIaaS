@@ -829,11 +829,32 @@ export class Game {
       }
     }
 
-    // Update effects
+    // Update effects (with loop + follow-up support)
+    const followUpEffects: Effect[] = [];
     this.effects = this.effects.filter(e => {
       e.frame++;
-      return e.frame < e.maxFrames;
+      // Looping: when frame reaches loopEnd, reset to loopStart
+      if (e.loopEnd !== undefined && e.loopStart !== undefined && e.frame >= e.loopEnd) {
+        if (e.loops === undefined || e.loops === -1 || e.loops > 0) {
+          e.frame = e.loopStart;
+          if (e.loops !== undefined && e.loops > 0) e.loops--;
+          return true;
+        }
+      }
+      if (e.frame >= e.maxFrames) {
+        // Queue follow-up effect (e.g. fire → smoke) — pushed after filter to avoid silent drop
+        if (e.followUp) {
+          followUpEffects.push({
+            type: 'explosion', x: e.x, y: e.y,
+            frame: 0, maxFrames: 20, size: e.size,
+            sprite: e.followUp, spriteStart: 0,
+          });
+        }
+        return false;
+      }
+      return true;
     });
+    if (followUpEffects.length > 0) this.effects.push(...followUpEffects);
 
     // Crate spawning (every 60-90 seconds, max 3 on map)
     if (this.tick >= this.nextCrateTick && this.crates.length < 3) {
@@ -2382,8 +2403,9 @@ export class Game {
       const wx = s.cx * CELL_SIZE + CELL_SIZE;
       const wy = s.cy * CELL_SIZE + CELL_SIZE;
       const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      // Small pre-explosions scattered across the building footprint
-      for (let i = 0; i < 4; i++) {
+      // Small pre-explosions scattered across the building footprint (scale with building size)
+      const numPreExplosions = Math.max(3, Math.min(6, fw * fh));
+      for (let i = 0; i < numPreExplosions; i++) {
         const ox = (Math.random() - 0.5) * fw * CELL_SIZE;
         const oy = (Math.random() - 0.5) * fh * CELL_SIZE;
         this.effects.push({
@@ -2405,8 +2427,10 @@ export class Game {
         type: 'debris', x: wx, y: wy,
         frame: 0, maxFrames: 20, size: fw * CELL_SIZE * 0.8,
       });
-      this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
-      this.renderer.screenFlash = Math.max(this.renderer.screenFlash, 5);
+      // Screen shake proportional to building size (1x1=8, 2x2=12, 3x3=16)
+      const shakeIntensity = Math.min(20, 4 + Math.max(fw, fh) * 4);
+      this.renderer.screenShake = Math.max(this.renderer.screenShake, shakeIntensity);
+      this.renderer.screenFlash = Math.max(this.renderer.screenFlash, Math.min(8, fw * 2));
       this.playSoundAt('building_explode', wx, wy);
       if (this.isAllied(s.house, this.playerHouse)) {
         this.structuresLost++;
@@ -3139,7 +3163,7 @@ export class Game {
         waveCX /= waveCount;
         waveCY /= waveCount;
         const dist = worldDist(entity.pos, { x: waveCX, y: waveCY });
-        if (dist > CELL_SIZE * 2) {
+        if (dist > 2) {
           entity.animState = AnimState.WALK;
           entity.moveToward({ x: waveCX, y: waveCY }, this.movementSpeed(entity, 0.3));
           return;
@@ -3704,7 +3728,7 @@ export class Game {
 
         if (entity.isAnt && (activeWeapon.name === 'TeslaZap' || activeWeapon.name === 'TeslaCannon')) {
           this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
-            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty });
+            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty, blendMode: 'screen' });
         } else if (entity.isAnt && activeWeapon.name === 'Napalm') {
           // Napalm ant: fire burst at target
           this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 10, size: 10,
@@ -3717,11 +3741,14 @@ export class Game {
           this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
             sprite: 'piff', spriteStart: 0, muzzleColor: '120,180,255' });
           this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
-            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty });
+            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty, blendMode: 'screen' });
         } else {
-          // Muzzle flash at attacker — color matches warhead type (C++ parity)
+          // Muzzle flash at attacker — vehicles use GUNFIRE.SHP with screen blend (C++ isTranslucent)
+          const muzzleSprite = (!entity.stats.isInfantry && activeWeapon.warhead !== 'Fire') ? 'gunfire' : 'piff';
+          const muzzleBlend = (muzzleSprite === 'gunfire') ? 'screen' as const : undefined;
           this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
-            sprite: 'piff', spriteStart: 0, muzzleColor: this.warheadMuzzleColor(activeWeapon.warhead) });
+            sprite: muzzleSprite, spriteStart: 0, muzzleColor: this.warheadMuzzleColor(activeWeapon.warhead),
+            blendMode: muzzleBlend });
 
           // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
           const projStyle = this.weaponProjectileStyle(activeWeapon.name);
@@ -3736,7 +3763,17 @@ export class Game {
           }
 
           // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-          const impactSprite = this.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 'veh-hit1';
+          // Water terrain uses water splash sprites (C++ bullet.cpp:1032)
+          const impactCell = worldToCell(impactX, impactY);
+          const isWaterImpact = this.map.getTerrain(impactCell.cx, impactCell.cy) === Terrain.WATER
+            && !entity.target.isNavalUnit; // vessel targets still use normal explosions
+          let impactSprite: string;
+          if (isWaterImpact) {
+            const waterSprites = ['h2o_exp1', 'h2o_exp2', 'h2o_exp3'];
+            impactSprite = waterSprites[Math.floor(Math.random() * 3)];
+          } else {
+            impactSprite = this.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 'veh-hit1';
+          }
           this.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0, maxFrames: 17, size: 8,
             sprite: impactSprite, spriteStart: 0 });
         }
@@ -4580,6 +4617,7 @@ export class Game {
             type: 'tesla', x: bestTarget.pos.x, y: bestTarget.pos.y,
             frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
             startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
+            blendMode: 'screen',
           });
           this.playSoundAt('teslazap', sx, sy);
         } else {
@@ -4591,11 +4629,14 @@ export class Game {
             startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
             projStyle: 'bullet',
           });
+          // AA weapons hitting aircraft use flak burst sprite (C++ FLAK.SHP)
+          const aaImpactSprite = (s.weapon.isAntiAir && bestTarget.isAirUnit && bestTarget.flightAltitude > 0)
+            ? 'flak'
+            : (this.getWarheadProps(wh)?.explosionSet ?? 'veh-hit1');
           this.effects.push({
             type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
             frame: 0, maxFrames: 10, size: 6,
-            // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-            sprite: this.getWarheadProps(wh)?.explosionSet ?? 'veh-hit1', spriteStart: 0,
+            sprite: aaImpactSprite, spriteStart: 0,
           });
           this.playSoundAt('machinegun', sx, sy);
         }
@@ -6770,7 +6811,7 @@ export class Game {
             this.damageEntity(e, 200, 'HE');
           }
         }
-        this.effects.push({ type: 'explosion', x: crate.x, y: crate.y, frame: 0, maxFrames: 17, size: 20, sprite: 'atomsfx', spriteStart: 0 });
+        this.effects.push({ type: 'explosion', x: crate.x, y: crate.y, frame: 0, maxFrames: 17, size: 20, sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen' });
         this.evaMessages.push({ text: 'BOOBY TRAP!', tick: this.tick });
         break;
       }
@@ -6805,7 +6846,7 @@ export class Game {
           for (let dx = -1; dx <= 1; dx++) {
             const fx = crate.x + dx * CELL_SIZE;
             const fy = crate.y + dy * CELL_SIZE;
-            this.effects.push({ type: 'explosion', x: fx, y: fy, frame: 0, maxFrames: 15, size: 12, sprite: 'napalm1', spriteStart: 0 });
+            this.effects.push({ type: 'explosion', x: fx, y: fy, frame: 0, maxFrames: 15, size: 12, sprite: 'napalm1', spriteStart: 0, blendMode: 'screen' });
             // Damage units in each cell
             for (const e of this.entities) {
               if (!e.alive) continue;
@@ -7041,7 +7082,7 @@ export class Game {
         for (const e of this.entities) {
           if (!e.alive || !this.isAllied(e.house, house)) continue;
           const d = worldDist(e.pos, target);
-          if (d < bestDist && d < CELL_SIZE * 3) {
+          if (d < bestDist && d < 3) {
             bestDist = d;
             bestEntity = e;
           }
@@ -7092,9 +7133,9 @@ export class Game {
   private detonateNuke(target: WorldPos): void {
     // AU5: Nuke detonation SFX
     this.audio.play('nuke_explode');
-    // Screen flash
-    this.renderer.screenFlash = 15;
-    this.renderer.screenShake = 20;
+    // Intense screen flash + extended shake (C++ nuke visual impact)
+    this.renderer.screenFlash = 30;
+    this.renderer.screenShake = 30;
 
     // Apply nuke damage in blast radius using Super warhead
     const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS;
@@ -7150,7 +7191,21 @@ export class Game {
       type: 'explosion', x: target.x, y: target.y,
       frame: 0, maxFrames: 45, size: 48,
       sprite: 'atomsfx', spriteStart: 0,
+      blendMode: 'screen',
     });
+
+    // Secondary ground explosions — ring of staggered blasts around impact (C++ large explosion radius)
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2 + Math.random() * 0.5;
+      const dist = CELL_SIZE * (1.5 + Math.random() * 2);
+      const gx = target.x + Math.cos(angle) * dist;
+      const gy = target.y + Math.sin(angle) * dist;
+      this.effects.push({
+        type: 'explosion', x: gx, y: gy,
+        frame: -i * 3, maxFrames: 20, size: 16,
+        sprite: 'fball1', spriteStart: 0,
+      });
+    }
 
     // Scorched earth at ground zero
     const tc = worldToCell(target.x, target.y);
@@ -7186,7 +7241,7 @@ export class Game {
         const ox = other.cx * CELL_SIZE + CELL_SIZE;
         const oy = other.cy * CELL_SIZE + CELL_SIZE;
         const dist = worldDist({ x: sx, y: sy }, { x: ox, y: oy });
-        if (dist < CELL_SIZE * 5) score++;
+        if (dist < 5) score++;
       }
       if (score > bestScore) {
         bestScore = score;
@@ -7915,7 +7970,7 @@ export class Game {
         if (state.attackPool.has(e.id)) continue;
         // Within 8 cells of staging area
         const dist = worldDist(e.pos, staging);
-        if (dist < CELL_SIZE * 8) {
+        if (dist < 8) {
           state.attackPool.add(e.id);
         }
       }
@@ -8053,14 +8108,14 @@ export class Game {
         if (e.mission !== Mission.AREA_GUARD && e.mission !== Mission.GUARD) continue;
         // Only rally units close to base (within 10 cells)
         const dist = worldDist(e.pos, centerPos);
-        if (dist < CELL_SIZE * 10) {
+        if (dist < 10) {
           // Find nearest enemy near base
           let nearestEnemy: Entity | null = null;
           let nearestDist = Infinity;
           for (const enemy of this.entities) {
             if (!enemy.alive || this.isAllied(enemy.house, house)) continue;
             const eDist = worldDist(enemy.pos, centerPos);
-            if (eDist < CELL_SIZE * 12 && eDist < nearestDist) {
+            if (eDist < 12 && eDist < nearestDist) {
               nearestDist = eDist;
               nearestEnemy = enemy;
             }

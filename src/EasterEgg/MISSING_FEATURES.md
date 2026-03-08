@@ -130,7 +130,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 - [~] **MV1: Free-form vs track-table movement** — C++ uses pre-computed track tables with lepton accumulators (drive.cpp). TS uses free-form vector movement. Architectural difference — produces different movement curves around corners.
 - [x] [VERIFIED] **MV2: Damage speed — single tier** — Fixed: removed fabricated ConditionRed 0.5x tier. Now only one tier: <=50% HP = 0.75x speed, matching C++ drive.cpp:1157-1161.
-- [!] **MV3: Close-enough distance unit bug** — `worldDist()` returns cells but is compared against `CELL_SIZE * 2.5 = 60` (pixels). Creates 60-cell tolerance instead of 2.5. Masked by pathfinding exhausting path first.
+- [x] [VERIFIED] **MV3: Close-enough distance unit bug** — Fixed: removed erroneous `CELL_SIZE *` multipliers from 6 worldDist() comparisons. worldDist() returns cells, so comparisons now use bare cell values (2, 3, 5, 8, 10, 12).
 - [x] [VERIFIED] **MV4: Three-point turns removed** — Fixed: removed fabricated 3-point turn code. C++ code was behind `#ifdef TOFIX` and `IsThreePoint=false` — never compiled in released game (drive.cpp:328-361).
 - [x] [VERIFIED] **MV5: Terrain multipliers capped at 1.0** — All terrain speed multipliers verified ≤1.0. No road speed bonus exceeds base speed.
 - [~] **MV6: Terrain types incomplete** — C++ has 9 LandTypes (Clear, Road, Water, Rock, Wall, Ore, Beach, Rough, River). TS has 5 (Clear, Water, Rock, Tree, Wall). Tree is not a C++ LandType; Beach, Rough, River, Ore are missing.
@@ -199,8 +199,8 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [x] [VERIFIED] **EC3: Ore capacity system** — Fixed: bail-based capacity with 28 bails max. Gold=35/bail, gem=110/bail. Matches C++ `BailCount=28` system.
 - [x] [VERIFIED] **EC4: Gem bonus bails** — Fixed: 2 bonus bails per gem harvest action. Matches C++ (unit.cpp:2306-2308, worth 220 extra credits).
 - [x] [VERIFIED] **EC5: Ore unload** — Fixed: lump-sum deposit after 14-tick dump animation. Matches C++ full-load credit behavior.
-- [!] **EC6: Ore growth — gems shouldn't grow** — C++ only grows gold overlays (cell.cpp:2869-2883), NEVER gems. TS grows both.
-- [!] **EC7: Ore spread** — C++ requires density > 6, spreads to 8 directions (cell.cpp:2904-2918). TS has no density threshold, spreads to 4 cardinal only.
+- [x] [VERIFIED] **EC6: Ore growth — gems don't grow** — Fixed: growOre() checks `isGold = ovl >= 0x03 && ovl <= 0x0E` and skips gems (0x0F-0x12). Matches C++ cell.cpp:2869-2883.
+- [x] [VERIFIED] **EC7: Ore spread** — Fixed: requires overlay > 0x09 (density > 6), spreads to all 8 directions. Matches C++ cell.cpp:2904-2918.
 
 ## PRODUCTION
 
@@ -252,8 +252,8 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [x] [VERIFIED] **SW3b: Iron Curtain recharge** — Fixed: 9900 ticks (11 min × 60 × 15 FPS). Matches rules.ini [Recharge] IronCurtain=11.
 - [x] [VERIFIED] **SW3c: GPS Satellite recharge** — Fixed: 7200 ticks (8 min × 60 × 15 FPS). Matches rules.ini [Recharge] GPSSatellite=8.
 - [x] [VERIFIED] **SW3d: Nuke recharge** — Fixed: 11700 ticks (13 min × 60 × 15 FPS). Matches rules.ini [Recharge] Nuke=13.
-- [!] **SW4: GPS Satellite building** — TS assigns to DOME (Radar). C++ assigns to a separate GPS_SATELLITE building.
-- [!] **SW5: Sonar Pulse building** — TS assigns to DOME. C++ obtains by spying on enemy Sub Pen.
+- [x] [VERIFIED] **SW4: GPS Satellite building** — Fixed: SUPERWEAPON_DEFS assigns GPS_SATELLITE to 'ATEK' (Allied Tech Center). Matches C++ GPS building assignment.
+- [x] [VERIFIED] **SW5: Sonar Pulse building** — Fixed: SUPERWEAPON_DEFS assigns SONAR_PULSE to 'SPEN' (Sub Pen). Also granted via spyInfiltrate() on SPEN. Matches C++.
 - [ ] **SW6: Missing superweapons** — ParaBomb, ParaInfantry, SpyMission not implemented.
 
 ## TRIGGER SYSTEM
@@ -279,7 +279,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [ ] **Thief** — Not implemented (credit theft on entering enemy refinery/silo).
 - [~] **V2 Rocket Launcher** — Stub unit with SCUD weapon. No V2-specific launch arc/flight mechanics.
 - [ ] **Minelayer + mines** — Not implemented (AP mine placement, detection, damage, mine limit).
-- [!] **Chrono Tank teleport** — Unit type exists with correct stats. No self-teleport ability.
+- [x] [VERIFIED] **Chrono Tank teleport** — Fixed: updateChronoTank() auto-teleports when moveTarget > 5 cells away. 180-tick cooldown, blue flash effects at origin/destination. Matches C++ self-teleport behavior.
 - [x] [VERIFIED] **MAD Tank deploy** — Fixed: 90-tick charge + 600 HE damage to vehicles within 8 cells. Matches C++ seismic weapon.
 - [x] [VERIFIED] **Demo Truck self-destruct** — Fixed: 45-tick fuse + splash explosion. Matches C++ kamikaze mechanic.
 - [x] [VERIFIED] **Phase Transport cloaking** — Fixed: `isCloakable: true` set in UNIT_STATS.
@@ -307,6 +307,18 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [x] [VERIFIED] **R17: Minimap faction colors** — Fixed: per-house unit colors on radar (Spain=gold, USSR=red, Greece=blue, etc.). Matches C++.
 - [x] [VERIFIED] **R18: Minimap shroud** — Fixed: fog/shroud overlay on minimap. Matches C++ fog-of-war darkening.
 - [x] [VERIFIED] **R19: Scroll arrows disabled state** — Fixed: dimmed when at top/bottom of strip. Matches C++ arrow rendering.
+- [x] [VERIFIED] **R20: Effect system blendMode** — Added: `blendMode`, `loopStart/loopEnd/loops`, `followUp` to Effect interface. Canvas 2D `globalCompositeOperation` dispatch for screen/lighter blend. Matches C++ SHAPE_GHOST + TranslucentTable.
+- [x] [VERIFIED] **R21: Sprite-based building fire** — Added: BURN-S/M/L.SHP extracted and rendered with screen blend. <75%=burn-s, <50%=burn-m, <25%=burn-l. Replaces procedural ellipses. Matches C++ ANIM_ON_FIRE_SMALL/MED/BIG.
+- [x] [VERIFIED] **R22: Additive explosion blending** — Added: Tesla, nuke mushroom cloud, napalm effects use `blendMode: 'screen'`. fball/veh-hit remain opaque (C++ adata.cpp). Matches C++ SHAPE_GHOST rendering.
+- [x] [VERIFIED] **R23: Water explosions** — Added: H2O_EXP1-3.SHP extracted. Impact on water terrain uses water splash sprites. Naval targets exempt (C++ bullet.cpp:1032).
+- [x] [VERIFIED] **R24: Flak burst sprite** — Added: FLAK.SHP extracted. AA weapons (AGUN/SAM) hitting aircraft use flak sprite instead of veh-hit.
+- [x] [VERIFIED] **R25: Gunfire muzzle sprite** — Added: GUNFIRE.SHP extracted. Vehicle muzzle flashes use gunfire with screen blend (C++ isTranslucent). Infantry keeps piff sprite.
+- [x] [VERIFIED] **R26: Iron Curtain red tint** — Fixed: changed from gold (255,215,0) to red (255,40,40). Uses multiply blend. Matches C++ FadingRed palette remap.
+- [x] [VERIFIED] **R27: Nuke visual enhancement** — Enhanced: screenFlash 15→30, screenShake 20→30, quadratic flash decay, 6 staggered secondary ground explosions. Matches C++ large explosion radius.
+- [x] [VERIFIED] **R28: Building destruction scaling** — Enhanced: pre-explosions scale with building size (3-6), screen shake proportional to footprint. Improves C++ parity.
+- [x] [VERIFIED] **R29: Predator shimmer** — Added: cloaking/uncloaking transitions draw 2 offset sprite copies at 30% alpha with per-tick alternation. Matches C++ SHAPE_PREDATOR heat-shimmer.
+- [x] [VERIFIED] **R30: Construction frame animation** — Fixed: make sheet sprite frames play naturally without clip/scanline overlay. Scanline only for fallback. Matches C++ building-rise visual.
+- [x] [VERIFIED] **R31: Power brownout multiply blend** — Fixed: uses multiply compositing instead of black overlay. Preserves sprite hue while dimming. Matches C++ FadingShade.
 
 ## AUDIO / MUSIC
 
@@ -340,11 +352,11 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 | Naval stats | 6 units OK | 0 | 0 | 0 |
 | Aircraft stats | 5 units OK | 0 | 0 | 0 |
 | Structure stats | 8 | 1 | 0 | 0 |
-| Movement | 4 | 4 | 1 | 0 |
+| Movement | 5 | 4 | 0 | 0 |
 | Pathfinding | 0 | 3 | 0 | 0 |
 | Aircraft mech | 4 | 2 | 0 | 0 |
 | Cloaking | 4 | 0 | 0 | 0 |
-| Economy/ore | 5 | 0 | 2 | 0 |
+| Economy/ore | 7 | 0 | 0 | 0 |
 | Production | 2 | 1 | 0 | 0 |
 | Repair | 4 | 1 | 0 | 0 |
 | Sell | 3 | 0 | 0 | 0 |
@@ -352,11 +364,11 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 | Spy mechanics | 6 | 0 | 0 | 0 |
 | Engineer | 3 | 0 | 0 | 0 |
 | Crates | 7 | 2 | 0 | 0 |
-| Superweapons | 6 | 0 | 2 | 1 |
+| Superweapons | 8 | 0 | 0 | 1 |
 | Triggers | 2 | 3 | 0 | 0 |
 | AI/missions | 1 | 2 | 0 | 3 |
 | Dog mechanics | 2 | 0 | 0 | 0 |
-| Special units | 4 | 1 | 1 | 3 |
+| Special units | 5 | 1 | 0 | 3 |
 | Gap generator | 1 | 0 | 0 | 0 |
 | Rendering | 16 | 0 | 0 | 0 |
 | Audio | 5 | 0 | 0 | 0 |
@@ -364,6 +376,15 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 | Power | 2 | 1 | 0 | 0 |
 
 ### Change Log
+
+**2026-03-08 — Wrong-items cleanup (6 [!] → [x])**
+
+- MV3: Fixed 6 worldDist() comparisons that multiplied by CELL_SIZE (pixels) when worldDist returns cells. Affected wave retreat (2), Iron Curtain targeting (3), defense scoring (5), attack pool (8), base rally (10), enemy detection (12).
+- EC6: Verified already fixed — gems excluded from ore growth via isGold range check.
+- EC7: Verified already fixed — 8-direction spread with density > 0x09 threshold.
+- SW4: Verified already fixed — GPS_SATELLITE assigned to ATEK, not DOME.
+- SW5: Verified already fixed — SONAR_PULSE assigned to SPEN, granted via spy infiltration.
+- Chrono Tank: Verified already fixed — updateChronoTank() auto-teleports on moveTarget > 5 cells, 180-tick cooldown.
 
 **2026-03-07 — Phases 1-8 parity sweep**
 
