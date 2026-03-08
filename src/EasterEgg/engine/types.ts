@@ -21,11 +21,41 @@ export const TEMPLATE_ROAD_MAX = 228;
 
 // === C++ Rule.ini defaults (rules.cpp) ===
 export const MAX_DAMAGE = 1000;          // rules.cpp:227 — max damage per hit
-export const REPAIR_STEP = 7;            // rules.ini RepairStep=7 — HP per repair pulse
+export const REPAIR_STEP = 5;            // rules.cpp RepairStep(5) — HP per repair pulse
 export const REPAIR_PERCENT = 0.20;      // rules.ini RepairPercent=20% — cost ratio for full repair
 export const CONDITION_RED = 0.25;       // rules.cpp:235 — red health threshold
 export const CONDITION_YELLOW = 0.5;     // rules.cpp:234 — yellow health threshold
 export const PRONE_DAMAGE_BIAS = 0.5;    // rules.cpp:202 — prone infantry damage multiplier
+
+// Power drain per structure type — C++ rules.ini Power= values (negative = consumes)
+// Values sourced from each building's INI entry; 0 means no drain.
+export const POWER_DRAIN: Record<string, number> = {
+  PROC: 30,
+  WEAP: 30,
+  TENT: 20,
+  BARR: 20,
+  DOME: 40,
+  TSLA: 150,
+  PBOX: 15,
+  HBOX: 15,
+  GUN:  40,
+  SAM:  20,
+  AGUN: 50,
+  FIX:  30,
+  HPAD: 10,
+  AFLD: 20,
+  ATEK: 50,
+  STEK: 100,
+  PDOX: 200,
+  IRON: 200,
+  MSLO: 100,
+  GAP:  60,
+  FTUR: 20,
+  SILO: 0,
+  KENN: 10,
+  SYRD: 30,
+  SPEN: 30,
+};
 
 // === Directions ===
 export enum Dir {
@@ -502,7 +532,7 @@ export interface WarheadMeta {
 
 export const WARHEAD_META: Record<WarheadType, WarheadMeta> = {
   SA:          { spreadFactor: 3 },                                                              // Spread=3
-  HE:          { spreadFactor: 6, destroysWalls: true, destroysWood: true },                     // Spread=6, Wall=yes, Wood=yes
+  HE:          { spreadFactor: 6, destroysWalls: true, destroysWood: true, destroysOre: true },   // Spread=6, Wall=yes, Wood=yes, Ore=yes (C++ Tiberium=yes)
   AP:          { spreadFactor: 3, destroysWalls: true, destroysWood: true },                     // Spread=3, Wall=yes, Wood=yes
   Fire:        { spreadFactor: 8, destroysWood: true },                                          // Spread=8, Wood=yes
   HollowPoint: { spreadFactor: 1 },                                                             // Spread=1
@@ -637,6 +667,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
   FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8, projSpeed: 15 },
   Napalm:           { name: 'Napalm',            damage: 100, rof: 20, range: 4.5,  warhead: 'Fire', projSpeed: 12 },
+  Camera:           { name: 'Camera',            damage: 0,   rof: 1,  range: 10,   warhead: 'SA', projSpeed: 40 },  // Spy plane reveal (0 damage, reveals area)
 };
 
 // === Superweapon System ===

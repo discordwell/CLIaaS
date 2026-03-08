@@ -7,15 +7,13 @@ import { getRoutingQueues } from "@/lib/routing/store";
 export const dynamic = "force-dynamic";
 
 const modules = [
-  { path: "/tickets", name: "Tickets", gated: false },
-  { path: "/customers", name: "Customers", gated: false },
-  { path: "/kb", name: "Knowledge Base", gated: false },
-  { path: "/analytics", name: "Analytics", gated: true },
-  { path: "/reports", name: "Reports", gated: true },
-  { path: "/ai", name: "AI Dashboard", gated: true },
-  { path: "/automation", name: "Automation", gated: true },
-  { path: "/sla", name: "SLA Policies", gated: true },
-  { path: "/billing", name: "Billing & Plans", gated: false },
+  { path: "/customers", name: "Customers", desc: "Contacts & organizations" },
+  { path: "/kb", name: "Knowledge Base", desc: "Articles & self-service" },
+  { path: "/analytics", name: "Analytics", desc: "Trends & insights" },
+  { path: "/reports", name: "Reports", desc: "Custom data exports" },
+  { path: "/rules", name: "Automation", desc: "Rules, macros & triggers" },
+  { path: "/sla", name: "SLA Policies", desc: "Response & resolution targets" },
+  { path: "/billing", name: "Billing & Plans", desc: "Subscription & usage" },
 ];
 
 export default async function DashboardPage() {
@@ -165,10 +163,8 @@ export default async function DashboardPage() {
               href={m.path}
               className="flex flex-col border-2 border-line p-4 transition-colors hover:bg-accent-soft"
             >
-              <span className="font-bold text-foreground">{m.path}</span>
-              <span className={`mt-2 font-bold uppercase tracking-wider text-[10px] ${m.gated ? "text-emerald-600" : "text-muted"}`}>
-                {m.gated ? "PRO / ENTERPRISE" : "CORE FREE"}
-              </span>
+              <span className="font-bold text-foreground">{m.name}</span>
+              <span className="mt-1 text-xs text-muted">{m.desc}</span>
             </Link>
           ))}
         </div>

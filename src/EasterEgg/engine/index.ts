@@ -8,7 +8,7 @@ import {
   type WarheadMeta, type WarheadProps,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX,
-  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
+  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
 	  Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, type StripType, getStripSide,
@@ -25,7 +25,7 @@ import { Camera } from './camera';
 import { InputManager } from './input';
 import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
 import { GameMap, Terrain } from './map';
-import { Renderer, type Effect } from './renderer';
+import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
 import {
   loadScenario, applyScenarioOverrides,
@@ -116,7 +116,7 @@ const STRUCTURE_IMAGES: Record<string, string> = {
 };
 
 /** Crate bonus types */
-type CrateType = 'money' | 'heal' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability';
+type CrateType = 'money' | 'heal' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability' | 'parabomb' | 'sonar' | 'icbm';
 interface Crate {
   x: number;
   y: number;
@@ -159,6 +159,8 @@ export class Game {
   attackMoveMode = false;
   sellMode = false;
   repairMode = false;
+  /** U6: Fullscreen radar toggle — enlarged minimap overlay */
+  isRadarFullscreen = false;
   cursorType: CursorType = CursorType.DEFAULT;
   /** Set of structure indices currently being repaired */
   private repairingStructures = new Set<number>();
@@ -756,6 +758,17 @@ export class Game {
       }
       this.updateEntity(entity);
 
+      // Special unit updates — run after standard entity update
+      if (entity.alive && entity.type === UnitType.V_QTNK && entity.isDeployed) {
+        this.updateMADTank(entity);
+      }
+      if (entity.alive && entity.type === UnitType.V_CTNK) {
+        this.updateChronoTank(entity);
+      }
+      if (entity.alive && entity.stats.isCloakable && !entity.stats.isVessel) {
+        this.updateVehicleCloak(entity);
+      }
+
       // S5: Update wasMoving — entity moved this tick if position changed from prevPos
       const movedThisTick = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
       entity.wasMoving = wasMovingBefore || movedThisTick;
@@ -867,7 +880,10 @@ export class Game {
         const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
         const repairCostPerStep = prodItem ? Math.ceil((prodItem.cost * REPAIR_PERCENT) / (s.maxHp / REPAIR_STEP)) : 1;
         if (this.credits < repairCostPerStep) {
-          continue; // pause repair until credits available (RA1 parity — don't cancel)
+          // RP5: cancel repair on insufficient funds (C++ parity — player must re-initiate)
+          this.repairingStructures.delete(idx);
+          this.playEva('eva_insufficient_funds');
+          continue;
         }
         this.credits -= repairCostPerStep;
         s.hp = Math.min(s.maxHp, s.hp + REPAIR_STEP);
@@ -933,6 +949,15 @@ export class Game {
 
     // Defensive structure auto-fire
     this.updateStructureCombat();
+
+    // Tick C4 timers on structures (Tanya plants)
+    this.tickC4Timers();
+
+    // Tick mine triggers (Minelayer AP mines)
+    this.tickMines();
+
+    // Gap Generator shroud jamming (every ~90 ticks)
+    this.updateGapGenerators();
 
     // Advance in-flight projectiles
     this.updateInflightProjectiles();
@@ -1038,28 +1063,9 @@ export class Game {
       // C++ building.cpp: FACT produces 0 power (ConYard is not a power source)
       if (s.type === 'POWR') this.powerProduced += Math.round(100 * healthRatio);
       else if (s.type === 'APWR') this.powerProduced += Math.round(200 * healthRatio);
-      // Power consumption — rules.ini Power= values (negative = consumes)
-      else if (s.type === 'PROC') this.powerConsumed += 30;
-      else if (s.type === 'WEAP') this.powerConsumed += 30;
-      else if (s.type === 'TENT' || s.type === 'BARR') this.powerConsumed += 20;
-      else if (s.type === 'DOME') this.powerConsumed += 40;
-      else if (s.type === 'TSLA') this.powerConsumed += 150;
-      else if (s.type === 'PBOX' || s.type === 'HBOX') this.powerConsumed += 15;
-      else if (s.type === 'GUN') this.powerConsumed += 40;
-      else if (s.type === 'SAM') this.powerConsumed += 20;
-      else if (s.type === 'AGUN') this.powerConsumed += 50;
-      else if (s.type === 'FIX') this.powerConsumed += 30;
-      else if (s.type === 'HPAD') this.powerConsumed += 10;
-      else if (s.type === 'AFLD') this.powerConsumed += 30;
-      else if (s.type === 'ATEK') this.powerConsumed += 200;
-      else if (s.type === 'STEK') this.powerConsumed += 100;
-      else if (s.type === 'PDOX' || s.type === 'IRON') this.powerConsumed += 200;
-      else if (s.type === 'MSLO') this.powerConsumed += 100;
-      else if (s.type === 'GAP') this.powerConsumed += 60;
-      else if (s.type === 'FTUR') this.powerConsumed += 20;
-      else if (s.type === 'SILO') this.powerConsumed += 10;
-      else if (s.type === 'KENN') this.powerConsumed += 10;
-      else if (s.type === 'SYRD' || s.type === 'SPEN') this.powerConsumed += 30;
+      // Power consumption — from POWER_DRAIN table (rules.ini Power= values)
+      const drain = POWER_DRAIN[s.type];
+      if (drain) this.powerConsumed += drain;
     }
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
@@ -1089,14 +1095,27 @@ export class Game {
           }
         }
       }
-      // Sell: 0→1 over ~1 second = 15 ticks, then finalize
+      // Sell: play make-sheet frames in reverse at construction rate (C++ parity).
+      // Duration scales with per-building frame count from BUILDING_FRAME_TABLE.
       // Guard: skip if structure was destroyed mid-sell (e.g. by enemy attack)
       if (s.sellProgress !== undefined && s.alive) {
-        s.sellProgress = Math.min(1, s.sellProgress + 1 / 15);
+        const bft = BUILDING_FRAME_TABLE[s.image];
+        const sellFrameCount = bft ? Math.max(bft.damageFrame, 1) : 15;
+        // Match construction rate: 1 tick per frame (same visual pace as build-up)
+        s.sellProgress = Math.min(1, s.sellProgress + 1 / (sellFrameCount * 2));
         if (s.sellProgress >= 1) {
           s.alive = false;
           s.sellProgress = undefined;
           this.clearStructureFootprint(s);
+          // GAP1: unjam shroud when Gap Generator is sold
+          if (s.type === 'GAP') {
+            const si = this.structures.indexOf(s);
+            if (si >= 0 && this.gapGeneratorCells.has(si)) {
+              const prev = this.gapGeneratorCells.get(si)!;
+              this.map.unjamRadius(prev.cx, prev.cy, prev.radius);
+              this.gapGeneratorCells.delete(si);
+            }
+          }
           // Refund: flat 50% of building cost (C++ parity — no health scaling)
           const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
           // Recalculate silo capacity BEFORE adding refund (structure is now dead)
@@ -1534,12 +1553,16 @@ export class Game {
       keys.delete('Tab');
     }
 
-    // D key: deploy MCV
+    // D key: deploy MCV or MAD Tank
     if (keys.has('d') && !keys.has('ArrowRight')) {
       for (const id of this.selectedIds) {
         const unit = this.entityById.get(id);
         if (unit?.alive && unit.type === UnitType.V_MCV) {
           this.deployMCV(unit);
+          break;
+        }
+        if (unit?.alive && unit.type === UnitType.V_QTNK) {
+          this.deployMADTank(unit);
           break;
         }
       }
@@ -2089,8 +2112,8 @@ export class Game {
         this.sellMode = !this.sellMode;
         this.repairMode = false;
       } else if (relX >= Renderer.BUTTON_THREE_X && relX < Renderer.BUTTON_THREE_X + Renderer.BUTTON_THREE_W) {
-        // Map button — center camera on base
-        this.centerOnBase();
+        // U6: Map button — toggle fullscreen radar overlay
+        this.isRadarFullscreen = !this.isRadarFullscreen;
       }
       return;
     }
@@ -2195,15 +2218,15 @@ export class Game {
     }
   }
 
-  /** Map weapon name to muzzle flash color (RGB) */
-  private weaponMuzzleColor(name: string): string {
-    switch (name) {
-      case 'TeslaZap': return '120,180,255';           // blue electric
-      case 'FireballLauncher': case 'Flamer': case 'Napalm': return '255,140,30';  // orange fire
-      case '75mm': case '90mm': case '105mm': case '120mm': case '155mm': return '255,220,100'; // warm yellow
-      case 'Dragon': case 'RedEye': case 'MammothTusk': return '255,180,60';    // rocket orange
-      case 'Mandible': return '200,255,200';            // green organic
-      default: return '255,255,180';                    // standard gunfire white-yellow
+  /** Map warhead type to muzzle flash color (RGB) — C++ parity */
+  private warheadMuzzleColor(warhead: WarheadType | string): string {
+    switch (warhead) {
+      case 'Fire': return '255,150,50';                  // orange fire
+      case 'Super': return '100,150,255';                // blue (tesla)
+      case 'AP': return '255,200,80';                    // amber armor-piercing
+      case 'HE': return '255,255,100';                   // yellow high-explosive
+      case 'Organic': return '100,255,100';              // green organic
+      default: return '255,255,150';                     // SA/HollowPoint/default
     }
   }
 
@@ -2214,6 +2237,11 @@ export class Game {
 
   /** Play EVA announcement with 3-second throttle (45 ticks at 15fps) */
   private playEva(sound: SoundName): void {
+    // AU4: EVA power gate — skip EVA playback when power fraction < 0.25 (critically low power)
+    if (this.powerConsumed > 0 && this.powerProduced > 0) {
+      const powerFraction = this.powerProduced / this.powerConsumed;
+      if (powerFraction < 0.25) return;
+    }
     const last = this.lastEvaTime.get(sound) ?? 0;
     if (this.tick - last < 45) return; // 3 second throttle
     this.lastEvaTime.set(sound, this.tick);
@@ -2335,6 +2363,15 @@ export class Game {
     if (s.hp <= 0) {
       s.alive = false;
       s.rubble = true;
+      // GAP1: unjam shroud when Gap Generator is destroyed
+      if (s.type === 'GAP') {
+        const si = this.structures.indexOf(s);
+        if (si >= 0 && this.gapGeneratorCells.has(si)) {
+          const prev = this.gapGeneratorCells.get(si)!;
+          this.map.unjamRadius(prev.cx, prev.cy, prev.radius);
+          this.gapGeneratorCells.delete(si);
+        }
+      }
       // Track enemy building destruction count (excluding walls)
       if (!this.isAllied(s.house, this.playerHouse) && !WALL_TYPES.has(s.type)) {
         this.nBuildingsDestroyedCount++;
@@ -2355,10 +2392,12 @@ export class Game {
           sprite: 'veh-hit1', spriteStart: 0,
         });
       }
-      // Final large explosion
+      // Final large explosion — size-matched to building footprint (C++ parity)
+      const maxDimPx = Math.max(fw, fh) * CELL_SIZE;
+      const deathExplosionRadius = Math.round(maxDimPx * 0.6);
       this.effects.push({
         type: 'explosion', x: wx, y: wy,
-        frame: 0, maxFrames: 22, size: 20,
+        frame: 0, maxFrames: 22, size: deathExplosionRadius,
         sprite: 'fball1', spriteStart: 0,
       });
       // Flying debris
@@ -2425,7 +2464,7 @@ export class Game {
         entity.aircraftState !== 'attacking' && entity.aircraftState !== 'flying' &&
         entity.aircraftState !== 'returning' && entity.aircraftState !== 'takeoff' &&
         entity.mission !== Mission.MOVE) {
-      entity.flightAltitude = Math.max(0, entity.flightAltitude - 2);
+      entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
     }
 
     switch (entity.mission) {
@@ -2971,17 +3010,24 @@ export class Game {
         // Harvest every 10 ticks (~0.67s)
         if (entity.harvestTick % 10 === 0) {
           const ec = entity.cell;
-          const gained = this.map.depleteOre(ec.cx, ec.cy);
-          if (gained > 0) {
-            entity.oreLoad += gained;
+          const bailCredits = this.map.depleteOre(ec.cx, ec.cy);
+          if (bailCredits > 0) {
+            // EC3: bail-based capacity — track bail count, not credit amount
+            entity.oreLoad += 1;
+            entity.oreCreditValue += bailCredits;
+            // EC4: gem bonus bails — C++ unit.cpp:2306-2308, 2 extra bails per gem harvest
+            if (bailCredits >= 110) {
+              entity.oreLoad += 2;
+              entity.oreCreditValue += 220; // 2 bonus bails × 110 credits
+            }
           }
           // Check if full or current cell depleted
-          if (entity.oreLoad >= Entity.ORE_CAPACITY) {
+          if (entity.oreLoad >= Entity.BAIL_COUNT) {
             entity.harvesterState = 'returning';
-          } else if (gained === 0) {
+          } else if (bailCredits === 0) {
             // No more ore at this cell — look for adjacent ore
             const newOre = this.map.findNearestOre(ec.cx, ec.cy, 20);
-            if (newOre && entity.oreLoad < Entity.ORE_CAPACITY) {
+            if (newOre && entity.oreLoad < Entity.BAIL_COUNT) {
               entity.harvesterState = 'seeking';
               entity.mission = Mission.MOVE;
               entity.moveTarget = { x: newOre.cx * CELL_SIZE + CELL_SIZE / 2, y: newOre.cy * CELL_SIZE + CELL_SIZE / 2 };
@@ -3046,29 +3092,26 @@ export class Game {
         break;
       }
       case 'unloading': {
-        // C++ parity: gradual bail-by-bail unload (~50 credits per tick)
-        // Harvester drains incrementally over multiple ticks instead of instant dump
-        const bailAmount = Math.min(50, entity.oreLoad);
-        if (bailAmount > 0) {
-          let added: number;
-          if (this.isPlayerControlled(entity)) {
-            added = this.addCredits(bailAmount);
-          } else {
-            // AI harvester — deposit into houseCredits
-            added = bailAmount;
-            const cur = this.houseCredits.get(entity.house) ?? 0;
-            this.houseCredits.set(entity.house, cur + added);
-          }
-          entity.oreLoad -= bailAmount;
-          // Credit sound every 5 ticks during unload
-          entity.harvestTick++;
-          if (entity.harvestTick % 5 === 0 && this.isPlayerControlled(entity)) {
-            this.audio.play('heal');
-          }
+        // EC5: lump-sum unload after 14-tick dump animation (C++ parity)
+        entity.harvestTick++;
+        // Credit sound every 5 ticks during dump animation
+        if (entity.harvestTick % 5 === 0 && this.isPlayerControlled(entity)) {
+          this.audio.play('heal');
         }
-        if (entity.oreLoad <= 0) {
-          // Finished unloading — show total deposited and go idle
+        if (entity.harvestTick >= 14) {
+          // Dump all credits at once after animation completes
+          const totalCredits = entity.oreCreditValue;
+          if (totalCredits > 0) {
+            if (this.isPlayerControlled(entity)) {
+              this.addCredits(totalCredits);
+            } else {
+              // AI harvester — deposit into houseCredits
+              const cur = this.houseCredits.get(entity.house) ?? 0;
+              this.houseCredits.set(entity.house, cur + totalCredits);
+            }
+          }
           entity.oreLoad = 0;
+          entity.oreCreditValue = 0;
           entity.harvesterState = 'idle';
           entity.harvestTick = 0;
         }
@@ -3348,6 +3391,12 @@ export class Game {
 
   /** Attack target */
   private updateAttack(entity: Entity): void {
+    // Demo Truck kamikaze — intercepts normal attack to drive-and-explode
+    if (entity.type === UnitType.V_DTRK) {
+      this.updateDemoTruck(entity);
+      return;
+    }
+
     // Handle structure targets
     if (entity.targetStructure) {
       if (!entity.targetStructure.alive) {
@@ -3533,21 +3582,54 @@ export class Game {
         // C5: Moving-platform inaccuracy (C++ techno.cpp:3106-3108)
         const isMoving = entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
         const baseInaccuracy = activeWeapon.inaccuracy ?? 0;
-        const effectiveInaccuracy = isMoving ? Math.max(baseInaccuracy, 1.0) : baseInaccuracy;
+        let effectiveInaccuracy = isMoving ? Math.max(baseInaccuracy, 1.0) : baseInaccuracy;
+        // SC1: AP warheads force scatter vs infantry even with 0 weapon inaccuracy (C++ bullet.cpp:709-710)
+        if (activeWeapon.warhead === 'AP' && entity.target.stats.isInfantry && effectiveInaccuracy <= 0) {
+          effectiveInaccuracy = 0.5;
+        }
         if (effectiveInaccuracy > 0) {
           // C2: Distance-dependent scatter (C++ bullet.cpp:717-729)
           // Scatter radius scales with distance — close shots are more accurate
           const targetDist = worldDist(entity.pos, entity.target.pos);
           const distFactor = Math.min(1.0, targetDist / activeWeapon.range);
           const scatter = effectiveInaccuracy * CELL_SIZE * distFactor;
-          const angle = Math.random() * Math.PI * 2;
           const dist = Math.random() * scatter;
-          impactX += Math.cos(angle) * dist;
-          impactY += Math.sin(angle) * dist;
+          if (activeWeapon.isArcing) {
+            // SC5+SC2: Arcing projectiles — circular scatter with ±5° angular jitter (C++ bullet.cpp:722)
+            const baseAngle = Math.random() * Math.PI * 2;
+            const jitterDeg = (Math.random() * 10 - 5); // ±5 degrees (C++ Random_Pick(0,10)-5)
+            const angle = baseAngle + (jitterDeg * Math.PI / 180);
+            impactX += Math.cos(angle) * dist;
+            impactY += Math.sin(angle) * dist;
+          } else {
+            // SC2: Non-arcing projectiles — scatter along firing direction (overshoot/undershoot)
+            const firingAngle = Math.atan2(
+              entity.target.pos.y - entity.pos.y,
+              entity.target.pos.x - entity.pos.x,
+            );
+            impactX += Math.cos(firingAngle) * dist;
+            impactY += Math.sin(firingAngle) * dist;
+          }
           // Check if scattered shot still hits the target (within half-cell)
           const dx = impactX - entity.target.pos.x;
           const dy = impactY - entity.target.pos.y;
           directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
+        }
+
+        // CF7: Heal guard — negative damage weapons must pass proximity and armor checks (C++ combat.cpp:86-96)
+        if (activeWeapon.damage < 0) {
+          const healDist = worldDist(entity.pos, entity.target.pos);
+          if (activeWeapon.warhead === 'Mechanical') {
+            // GoodWrench/Mechanic: only heals armored targets (armor !== 'none') within 0.75 cells
+            if (healDist >= 0.75 || entity.target.stats.armor === 'none') return;
+          } else {
+            // Heal warhead (Organic): only heals unarmored targets (armor === 'none') within 0.75 cells
+            if (healDist >= 0.75 || entity.target.stats.armor !== 'none') return;
+          }
+          // Apply healing directly — modifyDamage clamps negative values to 0
+          const healAmount = Math.abs(activeWeapon.damage);
+          entity.target.hp = Math.min(entity.target.maxHp, entity.target.hp + healAmount);
+          return;
         }
 
         // CF1: Apply C++ Modify_Damage formula — direct hit at distance 0 gets full damage
@@ -3637,9 +3719,9 @@ export class Game {
           this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
             sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty });
         } else {
-          // Muzzle flash at attacker — color matches active weapon
+          // Muzzle flash at attacker — color matches warhead type (C++ parity)
           this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
-            sprite: 'piff', spriteStart: 0, muzzleColor: this.weaponMuzzleColor(activeWeapon.name) });
+            sprite: 'piff', spriteStart: 0, muzzleColor: this.warheadMuzzleColor(activeWeapon.warhead) });
 
           // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
           const projStyle = this.weaponProjectileStyle(activeWeapon.name);
@@ -3797,6 +3879,12 @@ export class Game {
       return;
     }
 
+    // Mechanic auto-heal: mirrors medic but for vehicles — non-combat, skip enemy targeting
+    if (entity.type === UnitType.I_MECH) {
+      this.updateMechanicUnit(entity);
+      return;
+    }
+
     // A3: Type-specific scan delays (C++ foot.cpp:589-612)
     const guardScanDelay = entity.stats.scanDelay ?? 15;
     if (this.tick - entity.lastGuardScan < guardScanDelay) return;
@@ -3951,22 +4039,15 @@ export class Game {
         }
         break;
       case CloakState.UNCLOAKED:
-        // Auto-cloak when idle, no enemies nearby, and sonar pulse expired
+        // Auto-cloak when idle and sonar pulse expired (C++ TECHNO.CPP Cloak_AI)
         if (entity.sonarPulseTimer > 0) break;
         if (entity.mission === Mission.ATTACK) break; // don't cloak while attacking
-        // Check for enemies within 3 cells
-        let enemyNearby = false;
-        for (const other of this.entities) {
-          if (!other.alive || this.entitiesAllied(entity, other)) continue;
-          if (worldDist(entity.pos, other.pos) <= 3) {
-            enemyNearby = true;
-            break;
-          }
-        }
-        if (!enemyNearby) {
-          entity.cloakState = CloakState.CLOAKING;
-          entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
-        }
+        // CL4: Don't cloak while weapon is on cooldown (C++ — firing prevents cloak)
+        if (entity.weapon && entity.attackCooldown > 0) break;
+        // CL3: Health-gated cloak — below ConditionRed (25%), 96% chance to stay uncloaked
+        if (entity.hp / entity.maxHp < CONDITION_RED && Math.random() > 0.04) break;
+        entity.cloakState = CloakState.CLOAKING;
+        entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
         break;
       case CloakState.CLOAKED:
         // Uncloak is handled by takeDamage and fire logic
@@ -4261,6 +4342,12 @@ export class Game {
         return;
       }
 
+      // Tanya C4: plants C4 on structure instead of shooting it
+      if (entity.type === UnitType.I_TANYA) {
+        this.updateTanyaC4(entity);
+        return;
+      }
+
       entity.desiredFacing = directionTo(entity.pos, structPos);
       entity.tickRotation();
       if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
@@ -4278,11 +4365,11 @@ export class Game {
         entity.attackCooldown = entity.weapon.rof;
         if (entity.hasTurret) entity.isInRecoilState = true; // M6
         this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
-        // Muzzle + impact effects
+        // Muzzle + impact effects (color by warhead — C++ parity)
         this.effects.push({
           type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-          muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
+          muzzleColor: this.warheadMuzzleColor(entity.weapon.warhead),
         });
         // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
         const structImpactSprite = this.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
@@ -4348,7 +4435,7 @@ export class Game {
         this.effects.push({
           type: 'muzzle', x: sx, y: sy,
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-          muzzleColor: this.weaponMuzzleColor(entity.weapon.name),
+          muzzleColor: this.warheadMuzzleColor(entity.weapon.warhead),
         });
         const projStyle = this.weaponProjectileStyle(entity.weapon.name);
         // Per-weapon projectile speed: compute travel frames from distance and projSpeed
@@ -4379,13 +4466,16 @@ export class Game {
   /** Turreted structure types (GUN/SAM) — turret rotates to face target */
   private static readonly TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
   private static readonly DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'PBOX', 'SAM', 'AGUN']);
+  /** Powered defense structures — disabled during any power deficit (C++ parity PW1/PW3) */
+  private static readonly POWERED_DEFENSES = new Set(['TSLA', 'GUN', 'SAM', 'AGUN']);
 
   private updateStructureCombat(): void {
     const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     for (const s of this.structures) {
       if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
-      // Severe brownout: defensive structures cannot fire at all
-      if (this.powerConsumed > this.powerProduced * 1.5 && this.powerProduced > 0 && Game.DEFENSE_TYPES.has(s.type)) {
+      // C++ parity PW1/PW3: powered defenses (TSLA, GUN, SAM, AGUN) cannot fire during any power deficit.
+      // Unpowered defenses (PBOX, HBOX, FTUR) always fire regardless of power.
+      if (isLowPower && Game.POWERED_DEFENSES.has(s.type)) {
         continue;
       }
       // C++ building.cpp:882-883 — ammo instantly reloads to MaxAmmo each AI tick
@@ -4477,13 +4567,11 @@ export class Game {
         const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult, this.getWarheadMeta(wh).spreadFactor);
         const killed = this.damageEntity(bestTarget, damage, wh);
 
-        // Fire effects — color based on structure type
-        const structMuzzleColor = (s.type === 'TSLA' || s.type === 'QUEE') ? '120,180,255'
-          : s.type === 'FTUR' ? '255,140,30' : '255,255,180';
+        // Fire effects — color by warhead type (C++ parity)
         this.effects.push({
           type: 'muzzle', x: sx, y: sy,
           frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-          muzzleColor: structMuzzleColor,
+          muzzleColor: this.warheadMuzzleColor(wh),
         });
 
         // Tesla coil and Queen Ant get special effect
@@ -4655,8 +4743,8 @@ export class Game {
       }
 
       case 'takeoff': {
-        // Ascend 3px/tick until at flight altitude
-        entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 3);
+        // Ascend 1px/tick until at flight altitude (C++ AIRCRAFT.CPP — 24 ticks to reach altitude)
+        entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 1);
         entity.animState = AnimState.WALK;
         // Undock from pad
         if (entity.landedAtStructure >= 0 && entity.landedAtStructure < this.structures.length) {
@@ -4796,14 +4884,16 @@ export class Game {
       }
 
       case 'landing': {
-        // Descend 2px/tick
-        entity.flightAltitude = Math.max(0, entity.flightAltitude - 2);
+        // Descend 1px/tick (C++ AIRCRAFT.CPP — matches takeoff rate)
+        entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
         entity.animState = AnimState.IDLE;
         if (entity.flightAltitude <= 0) {
           entity.flightAltitude = 0;
           if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
             entity.aircraftState = 'rearming';
-            entity.rearmTimer = 30;
+            // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
+            const rofBias = COUNTRY_BONUSES[entity.house]?.rofMult ?? 1.0;
+            entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * rofBias));
           } else {
             entity.aircraftState = 'landed';
           }
@@ -4821,7 +4911,9 @@ export class Game {
           if (entity.ammo >= entity.maxAmmo) {
             entity.aircraftState = 'landed';
           } else {
-            entity.rearmTimer = 30; // next ammo tick
+            // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
+            const nextRofBias = COUNTRY_BONUSES[entity.house]?.rofMult ?? 1.0;
+            entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * nextRofBias));
           }
         }
         return true;
@@ -5314,7 +5406,8 @@ export class Game {
       }
     }
 
-    // Tree destruction: large explosions (splash >= 1.5) can destroy trees in the blast radius
+    // Terrain destruction: large explosions (splash >= 1.5) can destroy trees, walls, and ore in the blast radius
+    const whMeta = this.getWarheadMeta(weapon.warhead);
     if (splashRange >= 1.5 && weapon.damage >= 30) {
       const cc = worldToCell(center.x, center.y);
       const r = Math.ceil(splashRange);
@@ -5336,6 +5429,33 @@ export class Game {
                 frame: 0, maxFrames: 10, size: 8,
                 sprite: 'piffpiff', spriteStart: 0,
               });
+            }
+          }
+          // CF8: Wall destruction from splash — warheads with IsWallDestroyer flag (C++ combat.cpp:244-270)
+          if (whMeta.destroysWalls && this.map.getWallType(tx, ty) !== '') {
+            this.map.clearWallType(tx, ty);
+            this.map.addDecal(tx, ty, 4, 0.3); // rubble decal
+            this.effects.push({
+              type: 'explosion',
+              x: tx * CELL_SIZE + CELL_SIZE / 2,
+              y: ty * CELL_SIZE + CELL_SIZE / 2,
+              frame: 0, maxFrames: 8, size: 6,
+              sprite: 'piffpiff', spriteStart: 0,
+            });
+          }
+          // CF9: Ore destruction from splash — warheads with IsTiberiumDestroyer flag (C++ combat.cpp)
+          if (whMeta.destroysOre) {
+            const oreIdx = ty * MAP_CELLS + tx;
+            if (tx >= 0 && tx < MAP_CELLS && ty >= 0 && ty < MAP_CELLS) {
+              const ovl = this.map.overlay[oreIdx];
+              if (ovl >= 0x03 && ovl <= 0x12) {
+                // Reduce ore density by one level; fully depleted if at minimum
+                if (ovl === 0x03 || ovl === 0x0F) {
+                  this.map.overlay[oreIdx] = 0xFF; // fully depleted
+                } else {
+                  this.map.overlay[oreIdx] = ovl - 1;
+                }
+              }
             }
           }
         }
@@ -5441,7 +5561,7 @@ export class Game {
       if (s.alive) {
         structureTypes.add(s.type);
         if (this.isAllied(s.house, this.playerHouse) &&
-            (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'TENT')) {
+            (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'BARR' || s.type === 'TENT' || s.type === 'AFLD' || s.type === 'HPAD' || s.type === 'SYRD' || s.type === 'SPEN')) {
           playerFactories++;
         }
         const hi = Game.HOUSE_TO_INDEX[s.house];
@@ -5691,6 +5811,10 @@ export class Game {
         // Movie trigger — show as title card EVA message (FMVs not available)
         if (result.playMovie !== undefined) {
           this.showEvaMessage(-1, `[Movie: ${result.playMovie}]`);
+        }
+        // Play music track from trigger (PLAY_MUSIC action)
+        if (result.playMusic !== undefined) {
+          this.audio.music.next(); // advance to next track (theme ID is informational)
         }
         // Sound/speech from triggers
         if (result.playSpeech !== undefined) {
@@ -6000,8 +6124,8 @@ export class Game {
     const before = this.credits;
     this.credits = Math.min(this.credits + amount, this.siloCapacity);
     const added = this.credits - before;
-    // EVA "silos needed" warning when credits exceed 80% capacity (throttled to 30s)
-    if (this.siloCapacity > 0 && this.credits >= this.siloCapacity * 0.8 &&
+    // EVA "silos needed" warning — C++ house.cpp threshold: capacity > 500 && free < 300
+    if (this.siloCapacity > 500 && (this.siloCapacity - this.credits) < 300 &&
         this.tick - this.lastSiloWarningTick >= 450) {
       this.lastSiloWarningTick = this.tick;
       this.playEva('eva_silos_needed');
@@ -6513,6 +6637,7 @@ export class Game {
     reveal: 'reveal', darkness: 'darkness', explosion: 'explosion',
     squad: 'squad', heal_base: 'heal_base', napalm: 'napalm',
     cloak: 'cloak', invulnerability: 'invulnerability',
+    parabomb: 'parabomb', sonar: 'sonar', icbm: 'icbm',
   };
 
     /** CR9: Weighted crate share distribution (C++ CrateShares from rules.ini) */
@@ -6526,6 +6651,9 @@ export class Game {
     { type: 'cloak', shares: 3 },
     { type: 'heal', shares: 15 },
     { type: 'explosion', shares: 5 },
+    { type: 'parabomb', shares: 3 },
+    { type: 'sonar', shares: 2 },
+    { type: 'icbm', shares: 1 },
   ];
 
   /** CR9: Select a crate type using weighted random distribution */
@@ -6699,6 +6827,55 @@ export class Game {
         unit.invulnTick = 300;
         this.evaMessages.push({ text: 'INVULNERABILITY', tick: this.tick });
         break;
+      case 'parabomb': {
+        // CR8: ParaBomb — airstrike at crate location (explosion effects in a line)
+        for (let i = -3; i <= 3; i++) {
+          const bx = crate.x + i * CELL_SIZE;
+          const by = crate.y;
+          this.effects.push({
+            type: 'explosion', x: bx, y: by,
+            frame: 0, maxFrames: 18, size: 16,
+            sprite: 'art-exp1', spriteStart: 0,
+          });
+          for (const e of this.entities) {
+            if (!e.alive) continue;
+            if (worldDist(e.pos, { x: bx, y: by }) <= 1.5) {
+              this.damageEntity(e, 150, 'HE');
+            }
+          }
+        }
+        this.audio.play('explode_lg');
+        this.evaMessages.push({ text: 'PARABOMB STRIKE', tick: this.tick });
+        break;
+      }
+      case 'sonar':
+        // CR8: Sonar — activate sonar pulse (reveal all subs for SONAR_PULSE_DURATION ticks)
+        for (const e of this.entities) {
+          if (!e.alive || !e.stats.isCloakable) continue;
+          if (this.isAllied(e.house, unit.house)) continue;
+          e.sonarPulseTimer = SONAR_PULSE_DURATION;
+        }
+        this.audio.play('cannon'); // sonar ping
+        this.evaMessages.push({ text: 'SONAR PULSE', tick: this.tick });
+        break;
+      case 'icbm': {
+        // CR8: ICBM — trigger a nuke strike at a random enemy structure
+        const enemyStructs = this.structures.filter(s =>
+          s.alive && !this.isAllied(s.house, unit.house)
+        );
+        if (enemyStructs.length > 0) {
+          const target = enemyStructs[Math.floor(Math.random() * enemyStructs.length)];
+          const tx = target.cx * CELL_SIZE + CELL_SIZE;
+          const ty = target.cy * CELL_SIZE + CELL_SIZE;
+          this.detonateNuke({ x: tx, y: ty });
+          this.evaMessages.push({ text: 'ICBM LAUNCHED', tick: this.tick });
+        } else {
+          // No enemy structures — fallback to money crate
+          this.addCredits(2000, true);
+          this.evaMessages.push({ text: 'MONEY CRATE', tick: this.tick });
+        }
+        break;
+      }
     }
   }
 
@@ -6775,6 +6952,8 @@ export class Game {
           }
           state.ready = false;
           state.chargeTick = 0;
+          // AU5: Sonar SFX — play sonar ping sound
+          this.audio.play('cannon'); // sonar ping approximation
           if (this.isAllied(s.house, this.playerHouse)) {
             this.pushEva('Sonar pulse activated');
           }
@@ -6911,6 +7090,8 @@ export class Game {
 
   /** Detonate nuclear warhead at target position */
   private detonateNuke(target: WorldPos): void {
+    // AU5: Nuke detonation SFX
+    this.audio.play('nuke_explode');
     // Screen flash
     this.renderer.screenFlash = 15;
     this.renderer.screenShake = 20;
@@ -6947,6 +7128,15 @@ export class Game {
       if (s.hp <= 0) {
         s.hp = 0;
         s.alive = false;
+        // GAP1: unjam shroud when Gap Generator is nuked
+        if (s.type === 'GAP') {
+          const si = this.structures.indexOf(s);
+          if (si >= 0 && this.gapGeneratorCells.has(si)) {
+            const prev = this.gapGeneratorCells.get(si)!;
+            this.map.unjamRadius(prev.cx, prev.cy, prev.radius);
+            this.gapGeneratorCells.delete(si);
+          }
+        }
         this.effects.push({
           type: 'explosion', x: sx, y: sy,
           frame: 0, maxFrames: 20, size: 32,
@@ -7057,6 +7247,8 @@ export class Game {
     // Radar requires DOME and sufficient power
     const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
     this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;
+    // U6: Pass fullscreen radar state to renderer
+    this.renderer.isRadarFullscreen = this.isRadarFullscreen;
     this.renderer.crates = this.crates;
     // Selected structure info for info panel + highlight
     this.renderer.selectedStructureIdx = this.selectedStructureIdx;
@@ -8072,9 +8264,8 @@ export class Game {
         this.evaMessages.push({ text: 'REFINERY INFILTRATED', tick: this.tick });
         break;
       case 'DOME':
-        // SP1/SP6: Radar spied — reveal entire map (simplified from C++ share-radar)
+        // SP2: Radar spied — share enemy's radar view (C++ share-radar), not full map reveal
         this.radarSpiedHouses.add(targetHouse);
-        this.map.revealAll();
         this.evaMessages.push({ text: 'RADAR INFILTRATED', tick: this.tick });
         break;
       case 'POWR':
@@ -8083,10 +8274,29 @@ export class Game {
         this.spiedHouses.add(targetHouse);
         this.evaMessages.push({ text: 'POWER PLANT INFILTRATED', tick: this.tick });
         break;
-      case 'SPEN':
-        // SP1: Grant Sonar Pulse superweapon to spy's owner
+      case 'SPEN': {
+        // SP4: Activate sonar pulse — start the sonar superweapon timer for spy's house
+        const spyHouse = spy.house;
+        const sonarKey = `${spyHouse}:${SuperweaponType.SONAR_PULSE}`;
+        let sonarState = this.superweapons.get(sonarKey);
+        if (!sonarState) {
+          sonarState = {
+            type: SuperweaponType.SONAR_PULSE,
+            house: spyHouse,
+            chargeTick: 0,
+            ready: true,
+            structureIndex: -1,
+            fired: false,
+          };
+          this.superweapons.set(sonarKey, sonarState);
+        } else {
+          // If sonar already exists, make it ready immediately
+          sonarState.ready = true;
+          sonarState.chargeTick = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks;
+        }
         this.evaMessages.push({ text: 'SONAR PULSE ACQUIRED', tick: this.tick });
         break;
+      }
       case 'WEAP':
       case 'TENT':
       case 'BARR':
@@ -8257,8 +8467,8 @@ export class Game {
     }
   }
 
-  /** Agent 9: MAD Tank deploy + shockwave. 30-tick charge, 600 dmg to vehicles in 8 cells. */
-  static readonly MAD_TANK_CHARGE_TICKS = 30;
+  /** Agent 9: MAD Tank deploy + shockwave. 90-tick charge, 600 dmg to vehicles in 8 cells. */
+  static readonly MAD_TANK_CHARGE_TICKS = 90;
   static readonly MAD_TANK_DAMAGE = 600;
   static readonly MAD_TANK_RADIUS = 8;
 
@@ -8271,8 +8481,7 @@ export class Game {
       for (const other of this.entities) {
         if (!other.alive || other.id === entity.id || other.stats.isInfantry || other.isAirUnit) continue;
         if (worldDist(entity.pos, other.pos) <= radius) {
-          other.hp -= Game.MAD_TANK_DAMAGE; other.damageFlash = 4;
-          if (other.hp <= 0) { other.hp = 0; other.alive = false; other.mission = Mission.DIE; other.animState = AnimState.DIE; other.animFrame = 0; other.deathTick = 0; }
+          this.damageEntity(other, Game.MAD_TANK_DAMAGE, 'HE');
         }
       }
       this.effects.push({ type: 'explosion', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 20, size: 24 });
@@ -8287,12 +8496,24 @@ export class Game {
     entity.moveTarget = null; entity.target = null; entity.mission = Mission.GUARD;
   }
 
-  /** Agent 9: Demo Truck kamikaze — 1000 damage in 3-cell radius. */
+  /** Agent 9: Demo Truck kamikaze — 1000 damage in 3-cell radius, 45-tick fuse after reaching target. */
   static readonly DEMO_TRUCK_DAMAGE = 1000;
   static readonly DEMO_TRUCK_RADIUS = 3;
+  static readonly DEMO_TRUCK_FUSE_TICKS = 45;
 
   updateDemoTruck(entity: Entity): void {
     if (entity.type !== UnitType.V_DTRK || !entity.alive || entity.mission !== Mission.ATTACK) return;
+
+    // Fuse countdown — once armed, tick down to detonation
+    if (entity.fuseTimer > 0) {
+      entity.fuseTimer--;
+      entity.animState = AnimState.IDLE;
+      if (entity.fuseTimer <= 0) {
+        this.detonateDemoTruck(entity);
+      }
+      return;
+    }
+
     let targetPos: WorldPos | null = null;
     if (entity.target && entity.target.alive) { targetPos = entity.target.pos; }
     else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
@@ -8303,6 +8524,12 @@ export class Game {
     if (!targetPos) { entity.mission = Mission.GUARD; return; }
     const dist = worldDist(entity.pos, targetPos);
     if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward(targetPos, this.movementSpeed(entity)); return; }
+    // Reached target — arm the fuse
+    entity.fuseTimer = Game.DEMO_TRUCK_FUSE_TICKS;
+  }
+
+  /** Detonate Demo Truck — splash damage centered on truck position. */
+  private detonateDemoTruck(entity: Entity): void {
     const blastRadius = Game.DEMO_TRUCK_RADIUS;
     for (const other of this.entities) {
       if (!other.alive || other.id === entity.id) continue;
@@ -8329,7 +8556,7 @@ export class Game {
       case CloakState.UNCLOAKED:
         if (entity.sonarPulseTimer > 0) break;
         if (entity.mission === Mission.ATTACK) break;
-        if (entity.weapon && entity.attackCooldown > entity.weapon.rof * 0.5) break;
+        if (entity.weapon && entity.attackCooldown > 0) break;
         if (entity.hp / entity.maxHp < CONDITION_RED && Math.random() > 0.04) break;
         entity.cloakState = CloakState.CLOAKING; entity.cloakTimer = CLOAK_TRANSITION_FRAMES; break;
       case CloakState.CLOAKED: break;
@@ -8361,7 +8588,7 @@ export class Game {
       if (dist <= 1.5) {
         entity.animState = AnimState.ATTACK; entity.desiredFacing = directionTo(entity.pos, ht.pos); entity.tickRotation();
         if (entity.attackCooldown <= 0) {
-          const prev = ht.hp; ht.hp = Math.min(ht.maxHp, ht.hp + Game.MECHANIC_HEAL_AMOUNT); const healed = ht.hp - prev; entity.attackCooldown = 15;
+          const prev = ht.hp; ht.hp = Math.min(ht.maxHp, ht.hp + Game.MECHANIC_HEAL_AMOUNT); const healed = ht.hp - prev; entity.attackCooldown = entity.weapon?.rof ?? 80;
           if (healed > 0) { this.playSoundAt('heal', ht.pos.x, ht.pos.y); this.effects.push({ type: 'muzzle', x: ht.pos.x, y: ht.pos.y - 4, frame: 0, maxFrames: 6, size: 4, muzzleColor: '80,200,255' }); this.effects.push({ type: 'text', x: ht.pos.x, y: ht.pos.y - 8, frame: 0, maxFrames: 30, size: 0, text: `+${healed}`, textColor: 'rgba(80,200,255,1)' }); }
           if (ht.hp >= ht.maxHp) entity.healTarget = null;
         }

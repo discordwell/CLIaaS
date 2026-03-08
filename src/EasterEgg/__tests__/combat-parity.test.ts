@@ -353,10 +353,10 @@ describe('DG1: Dog instant-kill in takeDamage', () => {
 
     bystander.hp = 50;
     bystander.maxHp = 50;
-    // Dog attacking bystander (not its target) — no instant kill
+    // DG2: Dog collateral prevention — dogs do zero damage to non-targets
     const killed = bystander.takeDamage(1, 'Organic', dog);
     expect(killed).toBe(false);
-    expect(bystander.hp).toBe(49); // normal 1 damage
+    expect(bystander.hp).toBe(50); // DG2: no damage to non-target
   });
 
   it('non-dog attacker does NOT get instant-kill', () => {

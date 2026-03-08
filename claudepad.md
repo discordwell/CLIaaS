@@ -1,5 +1,16 @@
 # Session Summaries
 
+## 2026-03-07T23:45Z — Session 129: C++ Parity Mega-Fix (8 Phases, ~60 Items)
+- **Phase 1**: REPAIR_STEP=5, POWER_DRAIN table in types.ts, service depot 14-tick rate (already correct), silos-needed C++ threshold
+- **Phase 2**: Heal guard (distance+armor), dog instant kill (maxHp) + collateral prevention, AP vs infantry scatter, directional overshoot, arcing jitter, wall/ore destruction from splash
+- **Phase 3**: Continuous power penalty (max 0.5x), bail-based harvesting (28 bails, gold=35/gem=110), gem bonus bails, lump-sum unload (14-tick dump), repair cancel on no funds
+- **Phase 4**: Functional brownout (TSLA/GUN/SAM/AGUN skip firing), GAP generator shroud jamming (10-cell radius, power-gated, death cleanup)
+- **Phase 5**: Takeoff/landing +1/-1 px/tick, weapon-specific rearm timing, removed fabricated 3-point turn, health-gated cloak (96% stay uncloaked <25% HP), fixed cloak conditions (firing check, no proximity check)
+- **Phase 6**: Demo Truck 45-tick fuse self-destruct, MAD Tank 90-tick seismic wave, Mechanic vehicle-seeking AI, DOME spy radar-only, SPEN spy activates sonar, Camera weapon
+- **Phase 7**: Warhead-colored muzzle flash, size-matched building explosions, faction-colored minimap, minimap shroud/fog overlay, fog-gated minimap units, scroll arrow dimming, building damage frame cycling, per-building sell animation
+- **Phase 8**: Trigger events (NOFACTORIES), trigger actions (PLAY_MUSIC), cost-based threat scoring, EVA power gate (<25%), superweapon SFX, unit status line (ammo), fullscreen radar toggle, ParaBomb/Sonar/ICBM crates
+- All 2247 EasterEgg tests pass. Code review: ship-ready. MISSING_FEATURES.md updated.
+
 ## 2026-03-07T23:05Z — Session 128: C++ Speed Parity + Clock Overlay + Test Fixes
 - **Unit speeds**: All UNIT_STATS speeds updated to C++ MPH values from SPEED.H (udata/idata/vdata/aadata.cpp). Added `MPH_TO_PX` conversion constant (CELL_SIZE/LEPTON_SIZE = 0.09375) applied in `movementSpeed()`.
 - **Clock overlay**: Green clock sprites (`clock.png`) now rendered with `ctx.filter = 'brightness(0)'` + reduced globalAlpha to match C++ SHAPE_GHOST dark translucent effect. Fixed in both production-ready and unaffordable item overlays.

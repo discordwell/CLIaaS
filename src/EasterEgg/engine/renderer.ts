@@ -28,6 +28,21 @@ const HOUSE_TINT: Record<string, string> = {
   [House.Neutral]: 'rgba(0,0,0,0)',            // no tint
 };
 
+// Minimap blip colors per faction (C++ parity — each house has a unique radar color)
+const HOUSE_MINIMAP_COLOR: Record<string, string> = {
+  [House.Spain]:   '#FFD700', // gold
+  [House.USSR]:    '#FF3030', // red
+  [House.Greece]:  '#4080FF', // blue
+  [House.England]: '#40C040', // green
+  [House.France]:  '#60B0FF', // light blue
+  [House.Ukraine]: '#C060C0', // purple
+  [House.Germany]: '#A0A0A0', // gray
+  [House.Turkey]:  '#C8C864', // olive
+  [House.GoodGuy]: '#FFFF40', // yellow
+  [House.BadGuy]:  '#FF4040', // red
+  [House.Neutral]: '#FFFFFF', // white
+};
+
 // TEMPERATE.PAL palette index ranges for terrain rendering
 // These are the actual palette indices from the extracted TEMPERAT.PAL
 const PAL_GRASS_START = 144;  // indices 144-155: green terrain ramp (light→dark)
@@ -43,7 +58,7 @@ const PAL_RED_HP = 104;       // red [190,0,0]
 
 // Building frame layout table — maps structure type to idle/damage frame info.
 // Prevents generic halfFrames cycling from treating construction/fill-level frames as animation.
-const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: number; idleAnimCount: number }> = {
+export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: number; idleAnimCount: number }> = {
   // Static buildings (construction frames, NOT animation)
   fact: { idleFrame: 0, damageFrame: 26, idleAnimCount: 0 },   // 52 frames: construction sequence
   weap: { idleFrame: 0, damageFrame: 16, idleAnimCount: 0 },   // 32 frames: bay door frames
@@ -165,6 +180,8 @@ export class Renderer {
   leftStripScroll = 0;
   rightStripScroll = 0;
   hasRadar = false; // requires DOME building for minimap
+  /** U6: Fullscreen radar toggle — enlarged minimap overlay */
+  isRadarFullscreen = false;
   radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
   radarStaticCounter = 0;
   /** Pre-processed SHADOW.SHP: all pixels → semi-transparent black (shroud overlay) */
@@ -400,6 +417,10 @@ export class Renderer {
     this.renderOffscreenIndicators(camera, entities, selectedIds);
     this.renderSidebar(assets);
     this.renderMinimap(map, entities, structures, camera);
+    // U6: Fullscreen radar overlay
+    if (this.isRadarFullscreen && this.hasRadar) {
+      this.renderFullscreenRadar(map, entities, structures, camera);
+    }
     this.renderUnitInfo(entities, selectedIds);
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
@@ -1327,6 +1348,11 @@ export class Renderer {
               // Animated building — cycle through animation frames
               const baseFrame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
               frame = baseFrame + (Math.floor(tick / 8) % tableEntry.idleAnimCount);
+            } else if (damaged && tableEntry.damageFrame > 1) {
+              // R13: Static building damage — cycle through damage frame sequence (C++ parity).
+              // Damage frames run from damageFrame to (damageFrame * 2 - 1), same count as idle range.
+              const damageAnimCount = Math.min(tableEntry.damageFrame, totalFrames - tableEntry.damageFrame);
+              frame = tableEntry.damageFrame + (damageAnimCount > 1 ? Math.floor(tick / 8) % damageAnimCount : 0);
             } else {
               // Static building — single frame, no cycling
               frame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
@@ -2564,6 +2590,20 @@ export class Renderer {
       }
     }
 
+    // R18: Minimap shroud/fog overlay — darken explored-but-unseen areas (C++ parity)
+    for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 2) {
+      for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 2) {
+        const vis = map.getVisibility(cx, cy);
+        if (vis >= 2) continue; // fully visible — no overlay
+        const px = mmX + (cx - ox) * scale;
+        const py = mmY + (cy - oy) * scale;
+        const ps = Math.max(scale * 2, 1);
+        // Shroud (0) = near-black overlay, fog (1) = dim overlay
+        ctx.fillStyle = vis === 0 ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.4)';
+        ctx.fillRect(px, py, ps, ps);
+      }
+    }
+
     // Structure outlines (using actual footprint sizes)
     for (const s of structures) {
       if (!s.alive) continue;
@@ -2579,7 +2619,7 @@ export class Renderer {
       ctx.fillRect(sx, sy, sw, sh);
     }
 
-    // Unit dots — bright cyan for player (like original RA), red for enemies
+    // Unit dots — faction-colored blips on minimap (C++ parity)
     const blinkOn = Math.floor(Date.now() / 300) % 2 === 0; // blink cycle for selected
     for (const e of entities) {
       if (!e.alive) continue;
@@ -2587,18 +2627,18 @@ export class Renderer {
       const ecy = Math.floor(e.pos.y / CELL_SIZE);
       const vis = map.getVisibility(ecx, ecy);
       if (vis === 0) continue;
-      if (vis === 1 && !e.isPlayerUnit) continue;
+      // R14: Fog-gated minimap — hide non-player units in fog/shroud
+      if (vis < 2 && !e.isPlayerUnit) continue;
 
       // Selected units blink white on minimap
       const isSelected = this._selectedIds.has(e.id);
       if (isSelected && !blinkOn) {
         ctx.fillStyle = '#fff';
-      } else if (e.isPlayerUnit) {
-        ctx.fillStyle = '#40e0ff'; // cyan like original RA player color
       } else if (e.isCivilian) {
         ctx.fillStyle = '#c0c0c0'; // gray for civilians
       } else {
-        ctx.fillStyle = '#ff3030'; // bright red for enemies
+        // R17: Per-faction minimap color
+        ctx.fillStyle = HOUSE_MINIMAP_COLOR[e.house] ?? '#FFFFFF';
       }
       const dotSize = Math.max(scale, 2);
       ctx.fillRect(
@@ -2632,6 +2672,114 @@ export class Renderer {
       ctx.arc(ax, ay, 4, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // ─── Fullscreen Radar (U6) ──────────────────────────────
+
+  /** U6: Render enlarged radar overlay centered on screen (300x300) */
+  private renderFullscreenRadar(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera): void {
+    const ctx = this.ctx;
+    const radarSize = 300;
+    const viewW = this.width - this.sidebarW;
+    const centerX = viewW / 2 - radarSize / 2;
+    const centerY = this.height / 2 - radarSize / 2;
+    const scale = radarSize / Math.max(map.boundsW, map.boundsH);
+    const ox = map.boundsX;
+    const oy = map.boundsY;
+
+    // Semi-transparent background panel
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(centerX - 4, centerY - 4, radarSize + 8, radarSize + 8);
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(centerX - 4, centerY - 4, radarSize + 8, radarSize + 8);
+
+    // Terrain
+    for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 1) {
+      for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 1) {
+        const vis = map.getVisibility(cx, cy);
+        if (vis === 0) continue;
+        const terrain = map.getTerrain(cx, cy);
+        const px = centerX + (cx - ox) * scale;
+        const py = centerY + (cy - oy) * scale;
+        const ps = Math.max(scale, 1);
+
+        if (terrain === Terrain.WATER) {
+          ctx.fillStyle = vis === 2 ? '#1040a0' : '#081830';
+        } else if (terrain === Terrain.TREE) {
+          ctx.fillStyle = vis === 2 ? '#1a6020' : '#0d3010';
+        } else if (terrain === Terrain.ROCK || terrain === Terrain.WALL) {
+          ctx.fillStyle = vis === 2 ? '#707060' : '#383830';
+        } else {
+          ctx.fillStyle = vis === 2 ? '#486830' : '#243418';
+        }
+        ctx.fillRect(px, py, ps, ps);
+
+        // Fog overlay
+        if (vis < 2) {
+          ctx.fillStyle = vis === 0 ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.4)';
+          ctx.fillRect(px, py, ps, ps);
+        }
+      }
+    }
+
+    // Structures
+    for (const s of structures) {
+      if (!s.alive) continue;
+      const vis = map.getVisibility(s.cx, s.cy);
+      if (vis === 0) continue;
+      const isPlayer = this.playerHouses.has(s.house as House);
+      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      const sx = centerX + (s.cx - ox) * scale;
+      const sy = centerY + (s.cy - oy) * scale;
+      const sw = Math.max(fw * scale, 3);
+      const sh = Math.max(fh * scale, 3);
+      ctx.fillStyle = isPlayer ? 'rgba(80,220,255,0.85)' : 'rgba(220,50,50,0.85)';
+      ctx.fillRect(sx, sy, sw, sh);
+    }
+
+    // Units
+    const blinkOn = Math.floor(Date.now() / 300) % 2 === 0;
+    for (const e of entities) {
+      if (!e.alive) continue;
+      const ecx = Math.floor(e.pos.x / CELL_SIZE);
+      const ecy = Math.floor(e.pos.y / CELL_SIZE);
+      const vis = map.getVisibility(ecx, ecy);
+      if (vis === 0) continue;
+      if (vis < 2 && !e.isPlayerUnit) continue;
+
+      const isSelected = this._selectedIds.has(e.id);
+      if (isSelected && !blinkOn) {
+        ctx.fillStyle = '#fff';
+      } else if (e.isCivilian) {
+        ctx.fillStyle = '#c0c0c0';
+      } else {
+        ctx.fillStyle = HOUSE_MINIMAP_COLOR[e.house] ?? '#FFFFFF';
+      }
+      const dotSize = Math.max(scale * 1.5, 3);
+      ctx.fillRect(
+        centerX + (ecx - ox) * scale,
+        centerY + (ecy - oy) * scale,
+        dotSize, dotSize,
+      );
+    }
+
+    // Camera viewport
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(
+      centerX + (camera.x / CELL_SIZE - ox) * scale,
+      centerY + (camera.y / CELL_SIZE - oy) * scale,
+      (camera.viewWidth / CELL_SIZE) * scale,
+      (camera.viewHeight / CELL_SIZE) * scale,
+    );
+
+    // Title
+    ctx.font = 'bold 10px monospace';
+    ctx.fillStyle = '#FFD700';
+    ctx.textAlign = 'center';
+    ctx.fillText('TACTICAL MAP', centerX + radarSize / 2, centerY - 8);
+    ctx.textAlign = 'left';
   }
 
   // ─── Attack-Move Indicator ──────────────────────────────
@@ -3336,9 +3484,10 @@ export class Renderer {
     const maxScroll = Math.max(0, (items.length - maxVisible) * rowH);
     const btnY = Renderer.STRIP_START_Y + Renderer.SCROLL_BTN_Y_OFFSET;
 
-    // Up arrow (left button)
+    // Up arrow (left button) — R19: dim when disabled (C++ parity)
     const upDisabled = scroll <= 0;
     const upSheet = assets.getSheet('stripup');
+    if (upDisabled) ctx.globalAlpha = 0.3;
     if (upSheet) {
       const frame = upDisabled ? 1 : 0; // frame 0=enabled, 1=disabled
       assets.drawFrame(ctx, 'stripup', frame, stripX + Renderer.UP_X_OFFSET, btnY, { scale: 2 });
@@ -3348,10 +3497,12 @@ export class Renderer {
       ctx.textAlign = 'center';
       ctx.fillText('\u25B2', stripX + Renderer.UP_X_OFFSET + Renderer.SBUTTON_W / 2, btnY + Renderer.SBUTTON_H / 2 + 3);
     }
+    if (upDisabled) ctx.globalAlpha = 1.0;
 
-    // Down arrow (right button)
+    // Down arrow (right button) — R19: dim when disabled (C++ parity)
     const downDisabled = scroll >= maxScroll;
     const dnSheet = assets.getSheet('stripdn');
+    if (downDisabled) ctx.globalAlpha = 0.3;
     if (dnSheet) {
       const frame = downDisabled ? 1 : 0;
       assets.drawFrame(ctx, 'stripdn', frame, stripX + Renderer.DOWN_X_OFFSET, btnY, { scale: 2 });
@@ -3361,6 +3512,7 @@ export class Renderer {
       ctx.textAlign = 'center';
       ctx.fillText('\u25BC', stripX + Renderer.DOWN_X_OFFSET + Renderer.SBUTTON_W / 2, btnY + Renderer.SBUTTON_H / 2 + 3);
     }
+    if (downDisabled) ctx.globalAlpha = 1.0;
   }
 
   // ─── Button Row (Repair / Sell / Map — C++ English layout, SHP sprites) ──────
@@ -3373,7 +3525,7 @@ export class Renderer {
     const buttons: Array<{ sprite: string; active: boolean; label: string; x: number; w: number }> = [
       { sprite: 'repair', active: this.repairMode, label: 'FIX', x: Renderer.BUTTON_ONE_X, w: Renderer.BUTTON_ONE_W },
       { sprite: 'sell', active: this.sellMode, label: 'SELL', x: Renderer.BUTTON_TWO_X, w: Renderer.BUTTON_TWO_W },
-      { sprite: 'map_btn', active: false, label: 'MAP', x: Renderer.BUTTON_THREE_X, w: Renderer.BUTTON_THREE_W },
+      { sprite: 'map_btn', active: this.isRadarFullscreen, label: 'MAP', x: Renderer.BUTTON_THREE_X, w: Renderer.BUTTON_THREE_W },
     ];
 
     for (const btn of buttons) {
@@ -3794,8 +3946,11 @@ export class Renderer {
     if (selected.length === 0) return;
 
     const panelW = 160;
+    // U5: Expand panel height for harvester or ammo-carrying units
+    const singleUnit = selected.length === 1 ? selected[0] : null;
+    const needsExtraRow = singleUnit && (singleUnit.type === UnitType.V_HARV || (singleUnit.maxAmmo > 0));
     const panelH = selected.length === 1
-      ? (selected[0].type === UnitType.V_HARV ? 50 : 38)
+      ? (needsExtraRow ? 50 : 38)
       : 38;
     const px = 6;
     const py = this.height - panelH - 6;
@@ -3882,6 +4037,14 @@ export class Renderer {
         ctx.fillRect(barX, barY, barW, barH);
         ctx.fillStyle = oreRatio > 0.5 ? '#c8a030' : '#806020';
         ctx.fillRect(barX, barY, barW * oreRatio, barH);
+      }
+      // U5: Ammo count for aircraft/units with limited ammo
+      if (unit.maxAmmo > 0 && unit.type !== UnitType.V_HARV) {
+        ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+        ctx.font = '9px monospace';
+        const ammoColor = unit.ammo > 0 ? '#8cf' : '#f66';
+        ctx.fillStyle = ammoColor;
+        ctx.fillText(`Ammo: ${unit.ammo}/${unit.maxAmmo}`, px + 8, py + 34);
       }
     }
   }

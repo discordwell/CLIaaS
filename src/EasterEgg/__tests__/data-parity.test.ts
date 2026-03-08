@@ -886,8 +886,8 @@ describe('WARHEAD_META parity', () => {
     expect(WARHEAD_META.SA).toEqual({ spreadFactor: 3 });
   });
 
-  it('HE — spreadFactor=6, destroysWalls, destroysWood', () => {
-    expect(WARHEAD_META.HE).toEqual({ spreadFactor: 6, destroysWalls: true, destroysWood: true });
+  it('HE — spreadFactor=6, destroysWalls, destroysWood, destroysOre', () => {
+    expect(WARHEAD_META.HE).toEqual({ spreadFactor: 6, destroysWalls: true, destroysWood: true, destroysOre: true });
   });
 
   it('AP — spreadFactor=3, destroysWalls, destroysWood', () => {
@@ -1525,7 +1525,7 @@ describe('Scalar constants parity', () => {
   it('MAP_CELLS = 128', () => expect(MAP_CELLS).toBe(128));
   it('GAME_TICKS_PER_SEC = 15', () => expect(GAME_TICKS_PER_SEC).toBe(15));
   it('MAX_DAMAGE = 1000', () => expect(MAX_DAMAGE).toBe(1000));
-  it('REPAIR_STEP = 7', () => expect(REPAIR_STEP).toBe(7));
+  it('REPAIR_STEP = 5', () => expect(REPAIR_STEP).toBe(5));
   it('REPAIR_PERCENT = 0.20', () => expect(REPAIR_PERCENT).toBe(0.20));
   it('CONDITION_RED = 0.25', () => expect(CONDITION_RED).toBe(0.25));
   it('CONDITION_YELLOW = 0.5', () => expect(CONDITION_YELLOW).toBe(0.5));

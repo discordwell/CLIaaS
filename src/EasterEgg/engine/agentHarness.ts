@@ -406,6 +406,9 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           if (e.type === 'MCV') {
             const ok = game.deployMCV(e);
             results.push({ cmd: 'deploy', ok, error: ok ? undefined : 'cannot deploy here' });
+          } else if (e.type === 'QTNK') {
+            game.deployMADTank(e);
+            results.push({ cmd: 'deploy', ok: true });
           } else {
             results.push({ cmd: 'deploy', ok: false, error: `unit type ${e.type} cannot deploy` });
           }

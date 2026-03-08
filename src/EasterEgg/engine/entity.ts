@@ -232,6 +232,7 @@ export class Entity {
   chronoCooldown = 0;       // Chrono Tank teleport cooldown
   isDeployed = false;       // for MAD Tank deployment state
   deployTimer = 0;          // deployment charge-up timer
+  fuseTimer = 0;            // Demo Truck fuse countdown (45 ticks)
 
   // Aircraft state machine
   ammo = -1;                    // -1 = unlimited
@@ -434,9 +435,14 @@ export class Entity {
   takeDamage(amount: number, warhead?: string, attacker?: Entity, warheadPropsOverride?: WarheadProps): boolean {
     if (!this.alive) return false;
     if (this.isInvulnerable) return false; // invulnerability (crate or Iron Curtain)
+    // DG2: Dog collateral prevention — dogs only hurt their designated target (C++ combat.cpp)
+    if (attacker && attacker.alive && attacker.type === UnitType.I_DOG && attacker.target !== this) {
+      return false; // not the dog's target, no damage
+    }
     // DG1: Dog instant-kill — if attacker is a living dog and this is the dog's target, instant kill
+    // Use maxHp to guarantee kill even for high-HP targets like 200hp spies (C++ infantry.cpp)
     if (attacker && attacker.alive && attacker.type === UnitType.I_DOG && attacker.target === this) {
-      amount = this.hp; // override damage to kill instantly
+      amount = this.maxHp; // override damage to guaranteed kill (not this.hp which could leave at 0)
     }
     // CR2: Apply armor bias (damage reduction multiplier from crate, default 1.0)
     if (this.armorBias > 1.0 && amount > 0) {
@@ -661,18 +667,8 @@ export class Entity {
 
     // Vehicles: stop-rotate-move (don't slide sideways while turning)
     // Aircraft always move forward — never stop to rotate in flight
+    // Note: C++ three-point turn code (drive.cpp:339) is behind #ifdef TOFIX — NOT compiled
     if (!this.stats.isInfantry && !this.stats.isAircraft && !facingAligned) {
-      // M5: Three-point turn for JEEP (C++ drive.cpp:339 — wheeled vehicles)
-      // When the JEEP needs a large turn (>= 90 degrees), drift backward slightly
-      // during rotation to simulate a three-point turn maneuver.
-      if (this.type === UnitType.V_JEEP) {
-        const diff8 = (this.desiredFacing - oldFacing + 8) % 8;
-        const absDiff = diff8 <= 4 ? diff8 : 8 - diff8;
-        if (absDiff >= 4) {
-          this.pos.x -= DIR_DX[this.facing] * 0.3;
-          this.pos.y -= DIR_DY[this.facing] * 0.3;
-        }
-      }
       return false; // still rotating — don't move yet
     }
 
@@ -720,9 +716,8 @@ export function threatScore(
   }
 
   // AI2: Base score = cost-proportional scoring (C++ techno.cpp:1449-1763)
-  // Estimate value from unit properties: HP contributes base, weapon damage adds threat value
-  // (UnitStats doesn't carry cost directly; this approximation tracks C++ behavior)
-  let value = target.stats.strength + (target.weapon?.damage ?? 0) * 5;
+  // Use unit cost when available (C++ Risk_Value = cost), fallback to HP+damage approximation
+  let value = target.stats.cost ?? (target.stats.strength + (target.weapon?.damage ?? 0) * 5);
 
   // Kill count bonus: experienced enemies are more dangerous
   value += target.kills * 50;
