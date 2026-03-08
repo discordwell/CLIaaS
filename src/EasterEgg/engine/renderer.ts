@@ -3683,6 +3683,9 @@ export class Renderer {
         [SuperweaponType.NUKE]: '#f44',
         [SuperweaponType.GPS_SATELLITE]: '#4df',
         [SuperweaponType.SONAR_PULSE]: '#4fa',
+        [SuperweaponType.PARABOMB]: '#f80',
+        [SuperweaponType.PARAINFANTRY]: '#8f4',
+        [SuperweaponType.SPY_PLANE]: '#8cf',
       };
       ctx.fillStyle = iconColors[sw.type] ?? '#fff';
       ctx.beginPath();

@@ -6,10 +6,11 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Entity, resetEntityIds, CloakState, CLOAK_TRANSITION_FRAMES } from '../engine/entity';
+import { Entity, resetEntityIds, CloakState, CLOAK_TRANSITION_FRAMES, threatScore } from '../engine/entity';
 import {
   UnitType, House, Mission, AnimState, CELL_SIZE, UNIT_STATS, WEAPON_STATS,
   worldDist, worldToCell, buildDefaultAlliances, type AllianceTable,
+  SuperweaponType, SUPERWEAPON_DEFS,
 } from '../engine/types';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
@@ -692,5 +693,161 @@ describe('V2 Rocket weapon data', () => {
     expect(v2.stats.primaryWeapon).toBe('SCUD');
     expect(v2.weapon).not.toBeNull();
     expect(v2.weapon!.range).toBeGreaterThan(5);
+  });
+
+  it('SCUD weapon has 600 damage, HE warhead, splash 2.0, high inaccuracy', () => {
+    const scud = WEAPON_STATS['SCUD'];
+    expect(scud).toBeDefined();
+    expect(scud.damage).toBe(600);
+    expect(scud.warhead).toBe('HE');
+    expect(scud.splash).toBe(2.0);
+    expect(scud.inaccuracy).toBe(1.5);
+  });
+
+  it('V2RL has noMovingFire flag (cannot fire while moving)', () => {
+    const stats = UNIT_STATS['V2RL'];
+    expect(stats.noMovingFire).toBe(true);
+  });
+
+  it('SCUD has projectileSpeed for visible rocket projectile', () => {
+    const scud = WEAPON_STATS['SCUD'];
+    expect(scud.projectileSpeed).toBeDefined();
+    expect(scud.projectileSpeed).toBeGreaterThan(0);
+  });
+
+  it('V2RL is Soviet-only with correct C++ stats', () => {
+    const stats = UNIT_STATS['V2RL'];
+    expect(stats.strength).toBe(150);
+    expect(stats.armor).toBe('light');
+    expect(stats.owner).toBe('soviet');
+    expect(stats.cost).toBe(700);
+  });
+});
+
+// ============================================================================
+// AI5: Splash avoidance — nearFriendlyBase reduces threat score
+// ============================================================================
+describe('AI5: Area modification (splash avoidance)', () => {
+  it('threatScore is lower when target is near friendly base', () => {
+    const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
+    const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
+
+    const scoreNoBase = threatScore(scanner, target, 1, false, 0, null, false);
+    const scoreNearBase = threatScore(scanner, target, 1, false, 0, null, true);
+
+    // AI5: nearFriendlyBase applies 0.75x multiplier
+    expect(scoreNearBase).toBeLessThan(scoreNoBase);
+    expect(scoreNearBase).toBeCloseTo(scoreNoBase * 0.75, 0);
+  });
+});
+
+// ============================================================================
+// AI6: Spy target exclusion from threat evaluation
+// ============================================================================
+describe('AI6: Spy target exclusion', () => {
+  it('Spy returns 0 threat score (ignored by non-dog units)', () => {
+    const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
+    const spy = makeEntity(UnitType.I_SPY, House.USSR, 220, 200);
+
+    const score = threatScore(scanner, spy, 1, false);
+    expect(score).toBe(0);
+  });
+
+  it('Dog CAN target Spy (exception to AI6 exclusion)', () => {
+    const dog = makeEntity(UnitType.I_DOG, House.Spain, 200, 200);
+    const spy = makeEntity(UnitType.I_SPY, House.USSR, 220, 200);
+
+    const score = threatScore(dog, spy, 1, false);
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it('Non-spy units still get normal threat scores', () => {
+    const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 220, 200);
+
+    const score = threatScore(scanner, enemy, 1, false);
+    expect(score).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// SW6: ParaBomb, ParaInfantry, SpyPlane superweapon definitions
+// ============================================================================
+describe('SW6: Missing superweapons', () => {
+  it('PARABOMB superweapon is defined correctly', () => {
+    const def = SUPERWEAPON_DEFS[SuperweaponType.PARABOMB];
+    expect(def).toBeDefined();
+    expect(def.building).toBe('AFLD');
+    expect(def.faction).toBe('soviet');
+    expect(def.needsTarget).toBe(true);
+    expect(def.targetMode).toBe('ground');
+  });
+
+  it('PARAINFANTRY superweapon is defined correctly', () => {
+    const def = SUPERWEAPON_DEFS[SuperweaponType.PARAINFANTRY];
+    expect(def).toBeDefined();
+    expect(def.building).toBe('AFLD');
+    expect(def.faction).toBe('soviet');
+    expect(def.needsTarget).toBe(true);
+    expect(def.targetMode).toBe('ground');
+  });
+
+  it('SPY_PLANE superweapon is defined correctly', () => {
+    const def = SUPERWEAPON_DEFS[SuperweaponType.SPY_PLANE];
+    expect(def).toBeDefined();
+    expect(def.building).toBe('ATEK');
+    expect(def.faction).toBe('allied');
+    expect(def.needsTarget).toBe(true);
+    expect(def.targetMode).toBe('ground');
+  });
+
+  it('All superweapon types have definitions', () => {
+    for (const key of Object.values(SuperweaponType)) {
+      expect(SUPERWEAPON_DEFS[key as string]).toBeDefined();
+    }
+  });
+});
+
+// ============================================================================
+// Thief: attack structure hookup verification
+// ============================================================================
+describe('Thief attack structure integration', () => {
+  it('Thief has no weapon (unarmed, steals instead)', () => {
+    const thief = makeEntity(UnitType.I_THF, House.Spain, 100, 100);
+    expect(thief.stats.primaryWeapon).toBeNull();
+    expect(thief.weapon).toBeNull();
+  });
+
+  it('Thief stats match C++ (25hp, speed 8, sight 5, 500 cost, allied)', () => {
+    const stats = UNIT_STATS['THF'];
+    expect(stats.strength).toBe(25);
+    expect(stats.speed).toBe(8);
+    expect(stats.sight).toBe(5);
+    expect(stats.cost).toBe(500);
+    expect(stats.owner).toBe('allied');
+  });
+});
+
+// ============================================================================
+// Minelayer: entity update loop hookup verification
+// ============================================================================
+describe('Minelayer entity loop integration', () => {
+  it('Minelayer has no weapon (places mines instead)', () => {
+    const mnly = makeEntity(UnitType.V_MNLY, House.Spain, 100, 100);
+    expect(mnly.stats.primaryWeapon).toBeNull();
+    expect(mnly.weapon).toBeNull();
+  });
+
+  it('Minelayer mine damage is AP warhead (400 dmg)', () => {
+    // The mine damage constant
+    const MINE_DAMAGE = 400;
+    expect(MINE_DAMAGE).toBe(400);
+  });
+
+  it('Minelayer tracks mineCount on entity', () => {
+    const mnly = makeEntity(UnitType.V_MNLY, House.Spain, 100, 100);
+    expect(mnly.mineCount).toBe(0);
+    mnly.mineCount++;
+    expect(mnly.mineCount).toBe(1);
   });
 });

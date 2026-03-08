@@ -679,6 +679,7 @@ export enum SuperweaponType {
   SONAR_PULSE = 'SONAR_PULSE',
   PARABOMB = 'PARABOMB',
   PARAINFANTRY = 'PARAINFANTRY',
+  SPY_PLANE = 'SPY_PLANE',
 }
 
 export interface SuperweaponDef {
@@ -715,7 +716,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
   },
   [SuperweaponType.SONAR_PULSE]: {
     type: SuperweaponType.SONAR_PULSE, name: 'Sonar Pulse',
-    building: 'SPEN', rechargeTicks: 9000, faction: 'both',    // 10 min × 60 × 15 FPS
+    building: '', rechargeTicks: 9000, faction: 'both',    // spy-only — granted by spyInfiltrate() on SPEN
     requiresPower: true, needsTarget: false, targetMode: 'none',
   },
   [SuperweaponType.PARABOMB]: {
@@ -726,6 +727,11 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
   [SuperweaponType.PARAINFANTRY]: {
     type: SuperweaponType.PARAINFANTRY, name: 'Paratroopers',
     building: 'AFLD', rechargeTicks: 9000, faction: 'soviet',
+    requiresPower: true, needsTarget: true, targetMode: 'ground',
+  },
+  [SuperweaponType.SPY_PLANE]: {
+    type: SuperweaponType.SPY_PLANE, name: 'Spy Plane',
+    building: 'ATEK', rechargeTicks: 6300, faction: 'allied',  // 7 min × 60 × 15 FPS
     requiresPower: true, needsTarget: true, targetMode: 'ground',
   },
 };

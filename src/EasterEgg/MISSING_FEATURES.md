@@ -71,7 +71,7 @@ Weapon values verified against RULES.INI. All weapon stat values now match C++.
 - [x] [VERIFIED] **SHOK cost** — Fixed: 900 cost matches C++.
 - [x] [VERIFIED] **MECH** — Fixed: 60hp/950cost matches C++.
 - [x] [VERIFIED] **E7 Tanya** — Fixed: C4 planting on structures, Colt45 weapon, canSwim flag implemented.
-- [ ] **THF Thief** — Not implemented.
+- [x] [VERIFIED] **THF Thief** — Fixed: Steals 50% credits from enemy PROC/SILO, consumed after theft. Hooked into updateAttackStructure.
 
 ## UNIT STATS — VEHICLES
 
@@ -90,8 +90,8 @@ Weapon values verified against RULES.INI. All weapon stat values now match C++.
 - [x] [VERIFIED] **QTNK MAD Tank** — Fixed: 300hp matches C++.
 - [x] [VERIFIED] **DTRK Demo Truck** — Fixed: 110hp/light armor match C++.
 - [x] [VERIFIED] **STNK Phase Transport** — Fixed: cost=800/crusher=true/isCloakable=true match C++. HP=200 (C++ 110) still off.
-- [ ] **V2RL V2 Rocket** — Stub with SCUD weapon defined. No V2-specific launch arc/explosion mechanics.
-- [ ] **MNLY Minelayer** — Not implemented. No mine mechanics.
+- [x] [VERIFIED] **V2RL V2 Rocket** — Fixed: SCUD mapped to 'rocket' projStyle for visual arc. Large explosion + screen shake on impact (IsGigundo parity). noMovingFire=true.
+- [x] [VERIFIED] **MNLY Minelayer** — Fixed: Places AP mines (400 dmg) at move target, 50/house limit. tickMines() checks enemy entry. Hooked into entity update loop.
 - [REMOVED] **MRLS** — Removed. Tiberian Dawn unit, not in RA Aftermath.
 
 ## UNIT STATS — NAVAL
@@ -254,7 +254,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [x] [VERIFIED] **SW3d: Nuke recharge** — Fixed: 11700 ticks (13 min × 60 × 15 FPS). Matches rules.ini [Recharge] Nuke=13.
 - [x] [VERIFIED] **SW4: GPS Satellite building** — Fixed: SUPERWEAPON_DEFS assigns GPS_SATELLITE to 'ATEK' (Allied Tech Center). Matches C++ GPS building assignment.
 - [x] [VERIFIED] **SW5: Sonar Pulse building** — Fixed: SUPERWEAPON_DEFS assigns SONAR_PULSE to 'SPEN' (Sub Pen). Also granted via spyInfiltrate() on SPEN. Matches C++.
-- [ ] **SW6: Missing superweapons** — ParaBomb, ParaInfantry, SpyMission not implemented.
+- [x] [VERIFIED] **SW6: Superweapons** — Fixed: ParaBomb (7-bomb line strike), ParaInfantry (5 E1 paratroopers), SpyPlane (10-cell reveal) all implemented in activateSuperweapon. AI auto-fires ParaBomb/ParaInfantry.
 
 ## TRIGGER SYSTEM
 
@@ -270,15 +270,15 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [x] [VERIFIED] **AI2: Threat scoring formula** — Fixed: uses unit cost for threat scoring. Matches C++ cost-proportional `Value()` approach (techno.cpp:1449-1763). Note: designated enemy house +500/3x and zone modifiers still not implemented (see AI4).
 - [~] **AI3: AI house behavior** — Entirely custom phase-based system (economy/buildup/attack). Not a port of C++ AI. Acceptable since ants use separate `updateAntAI`.
 - [x] [VERIFIED] **AI4: Designated enemy house** — Fixed: `designatedEnemy` field on AIHouseState, +500 then 3x bonus in `threatScore()`. Matches C++ `House->Enemy`.
-- [ ] **AI5: Area modification (splash avoidance)** — C++ `Area_Modify()` reduces score for targets near friendly buildings to avoid splash. Not implemented.
-- [ ] **AI6: Spy target exclusion** — C++ excludes spies from general threat evaluation (except dogs). TS does not exclude spies from `threatScore()`.
+- [x] [VERIFIED] **AI5: Area modification (splash avoidance)** — Fixed: `nearFriendlyBase` computed in Game.threatScore() wrapper (checks target within 3 cells of friendly structures). Passed to entity.ts threatScore() which applies 0.75x multiplier.
+- [x] [VERIFIED] **AI6: Spy target exclusion** — Fixed: entity.ts threatScore() returns 0 for SPY targets (except DOG scanners). Lines 713-716.
 
 ## MISSING UNITS — SPECIAL ABILITIES
 
 - [x] [VERIFIED] **Tanya** — Fixed: C4 on buildings, swimming (canSwim), dual Colt45 weapon.
-- [ ] **Thief** — Not implemented (credit theft on entering enemy refinery/silo).
-- [~] **V2 Rocket Launcher** — Stub unit with SCUD weapon. No V2-specific launch arc/flight mechanics.
-- [ ] **Minelayer + mines** — Not implemented (AP mine placement, detection, damage, mine limit).
+- [x] [VERIFIED] **Thief** — Fixed: Credit theft (50% from PROC/SILO), consumed after theft. Wired into updateAttackStructure.
+- [x] [VERIFIED] **V2 Rocket Launcher** — Fixed: SCUD weapon with rocket projStyle, large explosion + screen shake on impact.
+- [x] [VERIFIED] **Minelayer + mines** — Fixed: AP mine placement (400 dmg), 50/house limit, tickMines() enemy entry detection.
 - [x] [VERIFIED] **Chrono Tank teleport** — Fixed: updateChronoTank() auto-teleports when moveTarget > 5 cells away. 180-tick cooldown, blue flash effects at origin/destination. Matches C++ self-teleport behavior.
 - [x] [VERIFIED] **MAD Tank deploy** — Fixed: 90-tick charge + 600 HE damage to vehicles within 8 cells. Matches C++ seismic weapon.
 - [x] [VERIFIED] **Demo Truck self-destruct** — Fixed: 45-tick fuse + splash explosion. Matches C++ kamikaze mechanic.
@@ -347,8 +347,8 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 | Warheads | 4 | 1 | 0 | 0 |
 | Scatter | 3 | 2 | 0 | 0 |
 | Weapons | 29 matched | 0 | 0 | 4 missing |
-| Infantry stats | 12 units OK | 0 | 0 | 2 missing |
-| Vehicle stats | 14 units OK | 0 | 0 | 2 missing |
+| Infantry stats | 13 units OK | 0 | 0 | 0 |
+| Vehicle stats | 16 units OK | 0 | 0 | 0 |
 | Naval stats | 6 units OK | 0 | 0 | 0 |
 | Aircraft stats | 5 units OK | 0 | 0 | 0 |
 | Structure stats | 8 | 1 | 0 | 0 |
@@ -364,11 +364,11 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 | Spy mechanics | 6 | 0 | 0 | 0 |
 | Engineer | 3 | 0 | 0 | 0 |
 | Crates | 7 | 2 | 0 | 0 |
-| Superweapons | 8 | 0 | 0 | 1 |
+| Superweapons | 9 | 0 | 0 | 0 |
 | Triggers | 2 | 3 | 0 | 0 |
-| AI/missions | 1 | 2 | 0 | 3 |
+| AI/missions | 3 | 2 | 0 | 0 |
 | Dog mechanics | 2 | 0 | 0 | 0 |
-| Special units | 5 | 1 | 0 | 3 |
+| Special units | 9 | 0 | 0 | 0 |
 | Gap generator | 1 | 0 | 0 | 0 |
 | Rendering | 16 | 0 | 0 | 0 |
 | Audio | 5 | 0 | 0 | 0 |
@@ -376,6 +376,20 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 | Power | 2 | 1 | 0 | 0 |
 
 ### Change Log
+
+**2026-03-08 — Unit behavior & superweapon parity (Thief, V2RL, Minelayer, SW6, AI5, AI6)**
+
+- THF Thief: Hooked updateThief into updateAttackStructure — now intercepts structure attack for PROC/SILO credit theft.
+- V2RL: SCUD weapon mapped to 'rocket' projStyle for visual arc. Large explosion (size 20, 22 frames) + screen shake (12) on impact.
+- MNLY Minelayer: Hooked updateMinelayer into entity update loop — places mines at move destination.
+- SW6 ParaBomb: Implemented in activateSuperweapon — 7-bomb line strike (200 dmg each) with staggered detonation effects.
+- SW6 ParaInfantry: Implemented in activateSuperweapon — drops 5 E1 rifle infantry with parachute visual markers.
+- SW6 SpyPlane: New SuperweaponType.SPY_PLANE — reveals 10-cell radius at target. ATEK building, allied faction.
+- AI auto-fire: AI uses ParaBomb (targets player's best cluster) and ParaInfantry (drops near own base).
+- AI5: Verified already implemented — nearFriendlyBase computed in Game.threatScore() wrapper, 0.75x applied in entity.ts.
+- AI6: Verified already implemented — Spy exclusion at entity.ts:713-716 (0 threat except for dogs).
+- Renderer: Added PARABOMB/PARAINFANTRY/SPY_PLANE to superweapon icon color map.
+- Tests: 8 new tests for V2RL stats, AI5 splash avoidance, AI6 spy exclusion, SW6 defs, Thief/Minelayer hookup.
 
 **2026-03-08 — Wrong-items cleanup (6 [!] → [x])**
 

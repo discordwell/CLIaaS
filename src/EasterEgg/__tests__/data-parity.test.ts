@@ -971,8 +971,8 @@ describe('STRUCTURE_MAX_HP parity', () => {
 // SUPERWEAPON_DEFS parity
 // ============================================================
 describe('SUPERWEAPON_DEFS parity', () => {
-  it('covers all 7 superweapon types', () => {
-    expect(Object.keys(SUPERWEAPON_DEFS)).toHaveLength(7);
+  it('covers all 8 superweapon types', () => {
+    expect(Object.keys(SUPERWEAPON_DEFS)).toHaveLength(8);
   });
 
   it('CHRONOSPHERE — all fields', () => {

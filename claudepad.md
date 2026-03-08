@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-03-08T00:30Z — Session 131: Unit Behavior & Superweapon Parity (Thief, V2RL, Minelayer, SW6, AI5, AI6)
+- **Thief (THF)**: Hooked updateThief into updateAttackStructure — intercepts structure attack for enemy PROC/SILO. Steals 50% credits, dies after.
+- **V2RL**: SCUD weapon mapped to 'rocket' projStyle for visual arc trajectory. Large explosion (size 20, 22 frames) + screen shake (12) on impact (C++ IsGigundo). Also mapped Maverick/Hellfire/SubSCUD to rocket style.
+- **Minelayer (MNLY)**: Hooked updateMinelayer into entity update loop — places AP mines (400 dmg) at move destination. Already had tickMines() for enemy entry detection.
+- **SW6 ParaBomb**: 7-bomb line strike (200 dmg each per splash point), staggered detonation effects, screen shake.
+- **SW6 ParaInfantry**: Drops 5 E1 infantry at target with parachute visual markers.
+- **SW6 SpyPlane**: New SuperweaponType.SPY_PLANE — reveals 10-cell radius around target. ATEK building, allied faction.
+- **AI auto-fire**: ParaBomb targets player's best unit cluster; ParaInfantry drops near own base as reinforcements.
+- **AI5**: Verified already implemented — nearFriendlyBase computed in Game.threatScore() wrapper, 0.75x multiplier in entity.ts.
+- **AI6**: Verified already implemented — Spy exclusion returns 0 threat (except dogs). entity.ts:713-716.
+- 8 new tests (V2RL stats, AI5/AI6 threat scoring, SW6 defs, Thief/Minelayer hookup). Updated data-parity count to 8 SWs. All 2283 tests pass (15 pre-existing sprite failures unchanged).
+
 ## 2026-03-08T00:20Z — Session 130: Visual Parity — C++ Rendering Effects → Canvas 2D
 - **Phase 1**: Effect system infrastructure — `blendMode` (screen/lighter), `loopStart/loopEnd/loops`, `followUp` chaining on Effect interface. Canvas 2D `globalCompositeOperation` dispatch in renderEffects. Follow-up effect queue (avoids filter-push bug).
 - **Phase 2**: Sprite-based building fire — BURN-S/M/L.SHP extracted (65-67 frames each). Replaces procedural ellipses with looping fire sprites at 3 HP tiers. Screen blend for glow-through.

@@ -224,6 +224,8 @@ export class Game {
   /** Active superweapon cursor mode (player selecting target) */
   superweaponCursorMode: SuperweaponType | null = null;
   superweaponCursorHouse: House | null = null;
+  /** Chrono Tank deploy targeting (D key → click to teleport) */
+  chronoTankTargeting: Entity | null = null;
   /** Nuke launch sequence tracking */
   private nukePendingTarget: WorldPos | null = null;
   private nukePendingTick = 0;
@@ -425,6 +427,7 @@ export class Game {
     this.superweapons.clear();
     this.superweaponCursorMode = null;
     this.superweaponCursorHouse = null;
+    this.chronoTankTargeting = null;
     this.nukePendingTarget = null;
     this.nukePendingTick = 0;
     this.nukePendingSource = null;
@@ -767,6 +770,10 @@ export class Game {
       }
       if (entity.alive && entity.stats.isCloakable && !entity.stats.isVessel) {
         this.updateVehicleCloak(entity);
+      }
+      // Minelayer: place mines when reaching move destination
+      if (entity.alive && entity.type === UnitType.V_MNLY && entity.moveTarget) {
+        this.updateMinelayer(entity);
       }
 
       // S5: Update wasMoving — entity moved this tick if position changed from prevPos
@@ -2233,7 +2240,7 @@ export class Game {
     switch (name) {
       case 'FireballLauncher': case 'Flamer': case 'Napalm': return 'fireball';
       case '75mm': case '90mm': case '105mm': case '120mm': case '155mm': return 'shell';
-      case 'Dragon': case 'RedEye': case 'MammothTusk': return 'rocket';
+      case 'Dragon': case 'RedEye': case 'MammothTusk': case 'SCUD': case 'Maverick': case 'Hellfire': case 'SubSCUD': return 'rocket';
       case 'Grenade': return 'grenade';
       default: return 'bullet';
     }
@@ -4385,6 +4392,12 @@ export class Game {
         return;
       }
 
+      // Thief: steals credits from enemy PROC/SILO
+      if (entity.type === UnitType.I_THF) {
+        this.updateThief(entity);
+        return;
+      }
+
       entity.desiredFacing = directionTo(entity.pos, structPos);
       entity.tickRotation();
       if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
@@ -5385,8 +5398,14 @@ export class Game {
 
       // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
       const projImpactSprite = this.getWarheadProps(proj.weapon.warhead)?.explosionSet ?? 'veh-hit1';
+      // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
+      const isScud = proj.weapon.name === 'SCUD';
       this.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
-        frame: 0, maxFrames: 17, size: 8, sprite: projImpactSprite, spriteStart: 0 });
+        frame: 0, maxFrames: isScud ? 22 : 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 });
+      if (isScud) {
+        this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
+        this.playSoundAt('building_explode', proj.impactX, proj.impactY);
+      }
     }
   }
 
@@ -7032,6 +7051,22 @@ export class Game {
         }
       }
       // AI does not use Chronosphere (too complex for basic AI)
+      else if (state.type === SuperweaponType.PARABOMB) {
+        // AI Parabomb: target player's largest unit cluster
+        const target = this.findBestNukeTarget(state.house);
+        if (target) {
+          this.activateSuperweapon(SuperweaponType.PARABOMB, state.house, target);
+        }
+      } else if (state.type === SuperweaponType.PARAINFANTRY) {
+        // AI Paratroopers: drop near own base as reinforcements
+        const aiStructs = this.structures.filter(s => s.alive && s.house === state.house);
+        if (aiStructs.length > 0) {
+          const base = aiStructs[0];
+          const tx = base.cx * CELL_SIZE + CELL_SIZE * 3;
+          const ty = base.cy * CELL_SIZE + CELL_SIZE * 3;
+          this.activateSuperweapon(SuperweaponType.PARAINFANTRY, state.house, { x: tx, y: ty });
+        }
+      }
     }
   }
 
@@ -7123,6 +7158,94 @@ export class Game {
             // Warn player when enemy launches nuke
             this.pushEva('Warning: nuclear launch detected');
           }
+        }
+        break;
+      }
+      case SuperweaponType.PARABOMB: {
+        // SW6: Parabomb — Badger bomber drops bombs in a line across target area
+        const bombCount = 7;
+        const spacing = CELL_SIZE;
+        for (let i = -Math.floor(bombCount / 2); i <= Math.floor(bombCount / 2); i++) {
+          const bx = target.x + i * spacing;
+          const by = target.y;
+          const delay = (i + Math.floor(bombCount / 2)) * 5; // staggered detonation
+          // Deferred bomb explosion — uses timed effects
+          this.effects.push({
+            type: 'explosion', x: bx, y: by,
+            frame: -delay, maxFrames: 17 + delay, size: 14,
+          });
+          // Damage entities at each bomb point after delay (approximate via immediate splash)
+          for (const e of this.entities) {
+            if (!e.alive) continue;
+            const d = worldDist(e.pos, { x: bx, y: by });
+            if (d <= 1.5) {
+              const falloff = Math.max(0.3, 1 - d / 1.5);
+              this.damageEntity(e, Math.round(200 * falloff), 'HE');
+            }
+          }
+          for (const s of this.structures) {
+            if (!s.alive) continue;
+            const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+            const sx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
+            const sy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
+            const d = worldDist({ x: bx, y: by }, { x: sx, y: sy });
+            if (d <= 1.5) this.damageStructure(s, Math.round(200 * Math.max(0.3, 1 - d / 1.5)));
+          }
+        }
+        this.renderer.screenShake = Math.max(this.renderer.screenShake, 10);
+        this.audio.play('explode_lg');
+        if (this.isAllied(house, this.playerHouse)) {
+          this.pushEva('Parabombs away');
+        }
+        break;
+      }
+      case SuperweaponType.PARAINFANTRY: {
+        // SW6: Paratroopers — drop 5 rifle infantry at target location
+        const paraTypes = [
+          UnitType.I_E1, UnitType.I_E1, UnitType.I_E1,
+          UnitType.I_E1, UnitType.I_E1,
+        ];
+        for (let i = 0; i < paraTypes.length; i++) {
+          const px = target.x + ((i % 3) - 1) * CELL_SIZE;
+          const py = target.y + Math.floor(i / 3) * CELL_SIZE;
+          const pc = worldToCell(px, py);
+          if (!this.map.isPassable(pc.cx, pc.cy)) continue;
+          const inf = new Entity(paraTypes[i], house, px, py);
+          inf.mission = Mission.GUARD;
+          this.entities.push(inf);
+          this.entityById.set(inf.id, inf);
+          // Parachute drop visual
+          this.effects.push({
+            type: 'marker', x: px, y: py,
+            frame: 0, maxFrames: 20, size: 14, markerColor: 'rgba(200,200,255,0.8)',
+          });
+        }
+        this.audio.play('eva_reinforcements');
+        if (this.isAllied(house, this.playerHouse)) {
+          this.pushEva('Reinforcements have arrived');
+        }
+        break;
+      }
+      case SuperweaponType.SPY_PLANE: {
+        // SW6: Spy Plane — reveals 10-cell radius around target for 150 ticks
+        const revealRadius = 10;
+        const tc = worldToCell(target.x, target.y);
+        const r2 = revealRadius * revealRadius;
+        for (let dy = -revealRadius; dy <= revealRadius; dy++) {
+          for (let dx = -revealRadius; dx <= revealRadius; dx++) {
+            if (dx * dx + dy * dy <= r2) {
+              this.map.setVisibility(tc.cx + dx, tc.cy + dy, 2);
+            }
+          }
+        }
+        // Visual flyover effect — marker sweeps across reveal zone
+        this.effects.push({
+          type: 'marker', x: target.x, y: target.y,
+          frame: 0, maxFrames: 30, size: 20, markerColor: 'rgba(100,200,255,0.5)',
+        });
+        this.audio.play('eva_acknowledged');
+        if (this.isAllied(house, this.playerHouse)) {
+          this.pushEva('Spy plane ready');
         }
         break;
       }
