@@ -68,6 +68,10 @@ export function findPath(
 
   let nodesExplored = 0;
 
+  // PF4: Track closest-to-goal explored cell for nearest-reachable fallback
+  let closestNode: AStarNode | null = null;
+  let closestH = Infinity;
+
   while (open.length > 0 && nodesExplored < MAX_SEARCH) {
     nodesExplored++;
 
@@ -83,6 +87,12 @@ export function findPath(
     const ck = key(current.cx, current.cy);
     openMap.delete(ck);
     closed.add(ck);
+
+    // Track closest-to-goal node for fallback
+    if (current.h < closestH) {
+      closestH = current.h;
+      closestNode = current;
+    }
 
     // Check if we reached the goal
     if (current.cx === goal.cx && current.cy === goal.cy) {
@@ -109,14 +119,15 @@ export function findPath(
         }
       }
 
+      // PF1: Hard-block occupied cells (C++ pathfinding — occupied cells are impassable)
+      // ignoreOccupancy=true bypasses this for initial path calculation and special cases
+      if (!ignoreOccupancy && map.getOccupancy(nx, ny) > 0) {
+        continue; // skip occupied cells entirely
+      }
+
       // Terrain speed modifiers: roads are cheaper, trees are expensive
       const speedMult = map.getSpeedMultiplier(nx, ny, speedClass);
-      let moveCost = Math.round(((dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST) / speedMult);
-      // Occupancy: add soft cost for occupied cells instead of hard blocking
-      // This allows routing through tight corridors while preferring empty cells
-      if (!ignoreOccupancy && map.getOccupancy(nx, ny) > 0) {
-        moveCost += 20; // penalty makes occupied cells expensive but not impassable
-      }
+      const moveCost = Math.round(((dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST) / speedMult);
       const g = current.g + moveCost;
 
       const existing = openMap.get(nk);
@@ -141,6 +152,11 @@ export function findPath(
       open.push(node);
       openMap.set(nk, node);
     }
+  }
+
+  // PF4: Nearest-reachable fallback — if no path to goal, return path to closest explored cell
+  if (closestNode && closestNode.h < startNode.h) {
+    return reconstructPath(closestNode);
   }
 
   return []; // no path found

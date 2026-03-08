@@ -7,9 +7,9 @@ import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
   type WarheadMeta, type WarheadProps,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
-  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX,
+  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
-	  Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
+	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, type StripType, getStripSide,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
@@ -27,11 +27,12 @@ import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatSc
 import { GameMap, Terrain } from './map';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
+import { TRACKS, selectTrack, usesTrackMovement } from './tracks';
 import {
   loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
-  checkTriggerEvent, executeTriggerAction, houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
+  checkTriggerEvent, executeTriggerAction, houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_POWERED,
   saveCarryover, TIME_UNIT_TICKS,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
@@ -216,7 +217,7 @@ export class Game {
   /** Strategic AI state per non-player house (skip ant missions) */
   private aiStates = new Map<House, AIHouseState>();
   /** Production queue: active build + queued repeats per category (max 5 total) */
-  productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
+  productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number }> = new Map();
   /** Structure placement: waiting to be placed on map */
   pendingPlacement: ProductionItem | null = null;
   wallPlacementPrepaid = false; // tracks whether first wall cost was prepaid by production
@@ -928,8 +929,8 @@ export class Game {
       this.processTriggers();
     }
 
-    // Repair structures (C++ rules.cpp:228-229 RepairStep, RepairPercent)
-    if (this.tick % 15 === 0) {
+    // RP3: Repair structures (C++ rules.cpp:228-229 RepairStep, RepairPercent) — 14 tick interval
+    if (this.tick % 14 === 0) {
       for (const idx of this.repairingStructures) {
         const s = this.structures[idx];
         if (!s || !s.alive || s.hp >= s.maxHp || s.sellProgress !== undefined) {
@@ -1796,7 +1797,7 @@ export class Game {
           if (unit?.alive) units.push(unit);
         }
         // Formation movement for attack-move orders
-        const positions = this.calculateFormation(world.x, world.y, units.length);
+        const positions = this.calculateFormation(world.x, world.y, units.length, units);
         for (let i = 0; i < units.length; i++) {
           const unit = units[i];
           const pos = positions[i];
@@ -1931,7 +1932,7 @@ export class Game {
             if (u?.alive) units.push(u);
           }
           // Formation movement for minimap orders
-          const positions = this.calculateFormation(wx, wy, units.length);
+          const positions = this.calculateFormation(wx, wy, units.length, units);
           for (let i = 0; i < units.length; i++) {
             const u = units[i];
             const pos = positions[i];
@@ -2091,7 +2092,7 @@ export class Game {
         }
       } else if (selectedUnits.length > 0) {
         // Move orders: use formation spread
-        const positions = this.calculateFormation(world.x, world.y, selectedUnits.length);
+        const positions = this.calculateFormation(world.x, world.y, selectedUnits.length, selectedUnits);
         for (let i = 0; i < selectedUnits.length; i++) {
           const unit = selectedUnits[i];
           const pos = positions[i];
@@ -2572,6 +2573,66 @@ export class Game {
         break;
       case Mission.SLEEP:
         // Dormant — do nothing until explicitly given a new mission
+        entity.animState = AnimState.IDLE;
+        break;
+      // AI1: New C++ parity missions
+      case Mission.ENTER:
+        // Entering transport — handled by transport loading code (updateMove with transport target)
+        this.updateMove(entity);
+        break;
+      case Mission.CAPTURE:
+        // Engineer capture — handled by updateAttack with targetStructure
+        this.updateAttack(entity);
+        break;
+      case Mission.HARVEST:
+        // Harvester cycle — handled by updateHarvester() called from the harvester update path
+        entity.animState = AnimState.IDLE;
+        break;
+      case Mission.UNLOAD:
+        // Transport unload / MAD deploy — handled by existing deploy/unload code
+        entity.animState = AnimState.IDLE;
+        break;
+      case Mission.RETREAT:
+        // Move to nearest map edge and exit the map
+        this.updateRetreat(entity);
+        break;
+      case Mission.AMBUSH:
+        // Sleep until enemy enters sight range, then switch to HUNT
+        this.updateAmbush(entity);
+        break;
+      case Mission.STICKY:
+        // Guard mode with isRecruitable=false (won't join AI teams)
+        this.updateGuard(entity);
+        break;
+      case Mission.REPAIR:
+        // Seek nearest FIX structure and move to it
+        this.updateRepairMission(entity);
+        break;
+      case Mission.STOP:
+        // Hold position — do nothing
+        entity.animState = AnimState.IDLE;
+        break;
+      case Mission.HARMLESS:
+        // Like guard but never attacks
+        entity.animState = AnimState.IDLE;
+        break;
+      case Mission.QMOVE:
+        // Queued move — same as MOVE (C++ foot.cpp:339)
+        this.updateMove(entity);
+        break;
+      case Mission.RETURN:
+        // Return to base (aircraft rearm) — already handled by aircraft state machine
+        entity.animState = AnimState.IDLE;
+        break;
+      case Mission.RESCUE:
+        // Same as HUNT (C++ rescue mission acts as hunt)
+        this.updateHunt(entity);
+        break;
+      case Mission.MISSILE:
+      case Mission.SABOTAGE:
+      case Mission.CONSTRUCTION:
+      case Mission.DECONSTRUCTION:
+        // Stub missions — handled by specific subsystems
         entity.animState = AnimState.IDLE;
         break;
     }
@@ -3441,17 +3502,36 @@ export class Game {
           entity.moveTarget = null;
           entity.path = [];
           entity.pathIndex = 0;
+          entity.trackNumber = -1; // MV1: reset track on repath
           entity.mission = this.idleMission(entity);
           entity.animState = AnimState.IDLE;
           return;
         }
         entity.path = newPath;
         entity.pathIndex = 0;
+        entity.trackNumber = -1; // MV1: reset track on repath
         return;
       }
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
       const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
       if (occ > 0 && occ !== entity.id && entity.moveTarget) {
+        // PF2: "Tell blocking unit to move" (C++ drive.cpp — nudge idle friendly units aside)
+        const blocker = this.entities.find(e => e.id === occ && e.alive);
+        if (blocker && this.entitiesAllied(entity, blocker) &&
+            blocker.mission !== Mission.MOVE && blocker.mission !== Mission.ATTACK &&
+            !blocker.moveTarget) {
+          // Find adjacent free cell for the blocker to step into
+          for (const [ndx, ndy] of [[0,-1],[1,0],[0,1],[-1,0],[1,-1],[1,1],[-1,1],[-1,-1]]) {
+            const adjX = blocker.cell.cx + ndx;
+            const adjY = blocker.cell.cy + ndy;
+            if (this.map.isPassable(adjX, adjY) && this.map.getOccupancy(adjX, adjY) === 0) {
+              blocker.moveTarget = { x: adjX * CELL_SIZE + CELL_SIZE / 2, y: adjY * CELL_SIZE + CELL_SIZE / 2 };
+              blocker.mission = Mission.MOVE;
+              blocker.animState = AnimState.WALK;
+              break;
+            }
+          }
+        }
         if (this.tick - entity.lastPathRecalc > 15) {
           entity.lastPathRecalc = this.tick;
           const newPath = findPath(
@@ -3465,15 +3545,44 @@ export class Game {
           }
           entity.path = newPath;
           entity.pathIndex = 0;
+          entity.trackNumber = -1; // MV1: reset track on repath
         }
       }
       const target: WorldPos = {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
         y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
       };
-      // M1: terrain speed by SpeedClass, M2: damage-based speed reduction
-      if (entity.moveToward(target, this.movementSpeed(entity))) {
-        entity.pathIndex++;
+      const speed = this.movementSpeed(entity);
+      // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
+      if (entity.trackNumber >= 0) {
+        // Currently following a track — advance along it
+        if (this.followTrackStep(entity, speed)) {
+          // Track complete — snap to cell center and advance path
+          entity.pos.x = target.x;
+          entity.pos.y = target.y;
+          entity.pathIndex++;
+        }
+      } else if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
+        // Initiate a new track for this cell-to-cell segment
+        const dirToTarget = directionTo(entity.pos, target);
+        const desiredFacing32 = dirToTarget * 4;
+        const currentFacing32 = entity.bodyFacing32;
+        entity.trackNumber = selectTrack(currentFacing32, desiredFacing32);
+        entity.trackIndex = 0;
+        entity.trackStartX = entity.pos.x;
+        entity.trackStartY = entity.pos.y;
+        entity.trackBaseFacing = currentFacing32;
+        // Follow first step this tick
+        if (this.followTrackStep(entity, speed)) {
+          entity.pos.x = target.x;
+          entity.pos.y = target.y;
+          entity.pathIndex++;
+        }
+      } else {
+        // Infantry/aircraft: free-form movement (FOOT speedClass exempt from tracks)
+        if (entity.moveToward(target, speed)) {
+          entity.pathIndex++;
+        }
       }
     } else if (entity.moveTarget) {
       // C++ drive.cpp only accepts "close enough" as a fallback when pathing is blocked.
@@ -3713,11 +3822,20 @@ export class Game {
           entity.burstCount--;
           entity.burstDelay = 3; // 3 ticks between burst shots (C++ standard)
         } else {
-          // New burst — set cooldown on the appropriate weapon timer
+          // CF12: IsSecondShot cadence for dual-weapon units (C++ techno.cpp:2857-2870)
+          // First shot: 3-tick rearm (quick follow-up). Second shot: full ROF (reload delay).
+          const isDualWeapon = entity.weapon && entity.weapon2;
+          let rearmTime = activeWeapon.rof;
+          if (isDualWeapon) {
+            if (!entity.isSecondShot) {
+              rearmTime = 3; // first shot: quick 3-tick rearm
+            }
+            entity.isSecondShot = !entity.isSecondShot;
+          }
           if (isSecondary) {
-            entity.attackCooldown2 = activeWeapon.rof;
+            entity.attackCooldown2 = rearmTime;
           } else {
-            entity.attackCooldown = activeWeapon.rof;
+            entity.attackCooldown = rearmTime;
           }
           entity.burstCount = burst - 1; // remaining shots after this one
           if (entity.burstCount > 0) entity.burstDelay = 3;
@@ -3740,13 +3858,24 @@ export class Game {
         if (activeWeapon.warhead === 'AP' && entity.target.stats.isInfantry && effectiveInaccuracy <= 0) {
           effectiveInaccuracy = 0.5;
         }
+        // WH5: IsInaccurate flag — forced scatter on every shot (C++ bullet.h)
+        if (activeWeapon.isInaccurate && effectiveInaccuracy <= 0) {
+          effectiveInaccuracy = 1.0;
+        }
         if (effectiveInaccuracy > 0) {
-          // C2: Distance-dependent scatter (C++ bullet.cpp:717-729)
-          // Scatter radius scales with distance — close shots are more accurate
+          // SC3: Exact C++ scatter formula (bullet.cpp:710-730)
+          // distance in leptons (1 cell = 256 leptons), convert from cells
           const targetDist = worldDist(entity.pos, entity.target.pos);
-          const distFactor = Math.min(1.0, targetDist / activeWeapon.range);
-          const scatter = effectiveInaccuracy * CELL_SIZE * distFactor;
-          const dist = Math.random() * scatter;
+          const distLeptons = targetDist * LEPTON_SIZE;
+          // C++ formula: scatterMax = max(0, (distance / 16) - 64)
+          let scatterMax = Math.max(0, (distLeptons / 16) - 64);
+          // Cap at HomingScatter(512) for homing, BallisticScatter(256) for ballistic
+          const isHoming = (activeWeapon.projectileROT ?? 0) > 0;
+          const scatterCap = isHoming ? 512 : 256;
+          scatterMax = Math.min(scatterMax, scatterCap);
+          // Convert scatter from leptons back to pixels: leptons * CELL_SIZE / LEPTON_SIZE
+          const scatterPx = scatterMax * CELL_SIZE / LEPTON_SIZE;
+          const dist = Math.random() * scatterPx;
           if (activeWeapon.isArcing) {
             // SC5+SC2: Arcing projectiles — circular scatter with ±5° angular jitter (C++ bullet.cpp:722)
             const baseAngle = Math.random() * Math.PI * 2;
@@ -4367,12 +4496,10 @@ export class Game {
     // Use origin position for distance checks so guards defend their post, not where they wandered
     const scanPos = origin;
     const scanCell = worldToCell(scanPos.x, scanPos.y);
-    // A4: Area guard configurable range (C++ Threat_Range(1)/2 from origin)
-    const guardRange = entity.stats.guardRange ?? entity.stats.sight;
-    const scanRange = guardRange * 1.5;
-    // C++ foot.cpp leash distance: units return when > guardRange*2 cells from origin
-    // (double the scan range gives more room to chase before snapping back)
-    const leashRange = guardRange * 2;
+    // AG1: C++ foot.cpp:996-1001 — leash = Threat_Range(1)/2 = weapon.range/2 from origin
+    const weaponRange = entity.weapon?.range ?? entity.stats.sight;
+    const leashRange = weaponRange / 2;
+    const scanRange = Math.max(leashRange, entity.stats.sight);
 
     // If too far from origin (> leash range), return home — but still attack enemies en route
     const distFromOrigin = worldDist(entity.pos, origin);
@@ -4391,13 +4518,26 @@ export class Game {
         entity.animState = AnimState.WALK;
         return;
       }
-      entity.mission = Mission.MOVE;
+      // AG1: Return home but stay in AREA_GUARD (C++ Assign_Destination, not Assign_Mission)
       entity.moveTarget = { x: origin.x, y: origin.y };
       entity.target = null;
       entity.targetStructure = null;
       entity.path = findPath(this.map, ec, worldToCell(origin.x, origin.y), true, entity.isNavalUnit, entity.stats.speedClass);
       entity.pathIndex = 0;
+      entity.animState = AnimState.WALK;
       return;
+    }
+
+    // If moving back toward origin, continue moving
+    if (entity.moveTarget) {
+      const distToMove = worldDist(entity.pos, entity.moveTarget);
+      if (distToMove > 1.0) {
+        entity.animState = AnimState.WALK;
+        entity.moveToward(entity.moveTarget, this.movementSpeed(entity));
+        return;
+      }
+      entity.moveTarget = null;
+      entity.path = [];
     }
 
     // A5: Look for enemies within scan range from HOME position (C++ foot.cpp:967)
@@ -4417,6 +4557,89 @@ export class Game {
     if (bestTarget) {
       entity.mission = Mission.ATTACK;
       entity.target = bestTarget;
+    }
+  }
+
+  /** AI1: RETREAT mission — move to nearest map edge and exit the map (C++ foot.cpp) */
+  private updateRetreat(entity: Entity): void {
+    // If already at a move target, continue moving
+    if (entity.moveTarget) {
+      entity.animState = AnimState.WALK;
+      const arrived = entity.moveToward(entity.moveTarget, this.movementSpeed(entity));
+      if (arrived) {
+        // Reached map edge — remove entity
+        entity.alive = false;
+        entity.mission = Mission.DIE;
+      }
+      return;
+    }
+    // Find nearest map edge
+    const ec = entity.cell;
+    const distLeft = ec.cx - this.map.boundsX;
+    const distRight = (this.map.boundsX + this.map.boundsW - 1) - ec.cx;
+    const distTop = ec.cy - this.map.boundsY;
+    const distBottom = (this.map.boundsY + this.map.boundsH - 1) - ec.cy;
+    const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+    let tx = ec.cx, ty = ec.cy;
+    if (minDist === distLeft) tx = this.map.boundsX;
+    else if (minDist === distRight) tx = this.map.boundsX + this.map.boundsW - 1;
+    else if (minDist === distTop) ty = this.map.boundsY;
+    else ty = this.map.boundsY + this.map.boundsH - 1;
+    entity.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
+    entity.path = findPath(this.map, ec, { cx: tx, cy: ty }, true, entity.isNavalUnit, entity.stats.speedClass);
+    entity.pathIndex = 0;
+  }
+
+  /** AI1: AMBUSH mission — sleep until enemy enters sight range, then HUNT */
+  private updateAmbush(entity: Entity): void {
+    entity.animState = AnimState.IDLE;
+    // Scan for enemies within sight range
+    const scanDelay = entity.stats.scanDelay ?? 15;
+    if (this.tick - entity.lastGuardScan < scanDelay) return;
+    entity.lastGuardScan = this.tick;
+    const ec = entity.cell;
+    for (const other of this.entities) {
+      if (!other.alive || this.entitiesAllied(entity, other)) continue;
+      if (worldDist(entity.pos, other.pos) > entity.stats.sight) continue;
+      const oc = other.cell;
+      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
+      // Enemy spotted — switch to HUNT
+      entity.mission = Mission.HUNT;
+      entity.target = other;
+      return;
+    }
+  }
+
+  /** AI1: REPAIR mission — seek nearest FIX (Service Depot) and move to it */
+  private updateRepairMission(entity: Entity): void {
+    // If already moving to a target, continue
+    if (entity.moveTarget) {
+      entity.animState = AnimState.WALK;
+      const arrived = entity.moveToward(entity.moveTarget, this.movementSpeed(entity));
+      if (arrived) {
+        // Reached depot — switch to guard (depot auto-repair handles the rest)
+        entity.mission = Mission.GUARD;
+        entity.moveTarget = null;
+      }
+      return;
+    }
+    // Find nearest FIX structure
+    let bestDist = Infinity;
+    let bestPos: WorldPos | null = null;
+    for (const s of this.structures) {
+      if (!s.alive || s.type !== 'FIX') continue;
+      if (!this.isAllied(s.house, entity.house)) continue;
+      const sp: WorldPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+      const d = worldDist(entity.pos, sp);
+      if (d < bestDist) { bestDist = d; bestPos = sp; }
+    }
+    if (bestPos) {
+      entity.moveTarget = bestPos;
+      entity.path = findPath(this.map, entity.cell, worldToCell(bestPos.x, bestPos.y), true, entity.isNavalUnit, entity.stats.speedClass);
+      entity.pathIndex = 0;
+    } else {
+      // No depot found — fall back to guard
+      entity.mission = Mission.GUARD;
     }
   }
 
@@ -4638,8 +4861,7 @@ export class Game {
   /** Turreted structure types (GUN/SAM) — turret rotates to face target */
   private static readonly TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
   private static readonly DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'PBOX', 'SAM', 'AGUN']);
-  /** Powered defense structures — disabled during any power deficit (C++ parity PW1/PW3) */
-  private static readonly POWERED_DEFENSES = new Set(['TSLA', 'GUN', 'SAM', 'AGUN']);
+  // PW2: Powered structures use STRUCTURE_POWERED from scenario.ts (C++ per-building IsPowered flag)
 
   private updateStructureCombat(): void {
     const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
@@ -4647,7 +4869,7 @@ export class Game {
       if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
       // C++ parity PW1/PW3: powered defenses (TSLA, GUN, SAM, AGUN) cannot fire during any power deficit.
       // Unpowered defenses (PBOX, HBOX, FTUR) always fire regardless of power.
-      if (isLowPower && Game.POWERED_DEFENSES.has(s.type)) {
+      if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
         continue;
       }
       // C++ building.cpp:882-883 — ammo instantly reloads to MaxAmmo each AI tick
@@ -5397,6 +5619,55 @@ export class Game {
     return entity.stats.speed * MPH_TO_PX * speedFraction
       * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
       * this.damageSpeedFactor(entity);
+  }
+
+  // MV1: Precomputed cos/sin for 8 cardinal rotations (facing32 / 4 = 0..7)
+  private static readonly TRACK_COS = [1, 0.7071, 0, -0.7071, -1, -0.7071, 0, 0.7071];
+  private static readonly TRACK_SIN = [0, 0.7071, 1, 0.7071, 0, -0.7071, -1, -0.7071];
+
+  /** MV1: Follow one tick of track-table movement. Returns true when track is complete.
+   *  Vehicles follow pre-computed curved paths for smooth turning (C++ drive.cpp track tables).
+   *  Track offsets are rotated from North-reference to match the vehicle's starting facing. */
+  private followTrackStep(entity: Entity, speed: number): boolean {
+    const track = TRACKS[entity.trackNumber];
+    const rotIdx = Math.floor(entity.trackBaseFacing / 4) % 8;
+    const cos = Game.TRACK_COS[rotIdx];
+    const sin = Game.TRACK_SIN[rotIdx];
+
+    let remaining = speed;
+    while (remaining > 0.5 && entity.trackIndex < track.length) {
+      const step = track[entity.trackIndex];
+      // Rotate track offset from North-reference to actual facing
+      const rx = step.x * cos - step.y * sin;
+      const ry = step.x * sin + step.y * cos;
+      const tx = entity.trackStartX + rx;
+      const ty = entity.trackStartY + ry;
+
+      const dx = tx - entity.pos.x;
+      const dy = ty - entity.pos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Update visual facing from track step (rotated by base facing)
+      entity.bodyFacing32 = (step.facing + entity.trackBaseFacing) % 32;
+      entity.facing = Math.floor(entity.bodyFacing32 / 4) as Dir;
+
+      if (dist <= remaining) {
+        entity.pos.x = tx;
+        entity.pos.y = ty;
+        remaining -= dist;
+        entity.trackIndex++;
+      } else {
+        entity.pos.x += (dx / dist) * remaining;
+        entity.pos.y += (dy / dist) * remaining;
+        remaining = 0;
+      }
+    }
+
+    if (entity.trackIndex >= track.length) {
+      entity.trackNumber = -1;
+      return true;
+    }
+    return false;
   }
 
   /** Retreat away from a target position, clamped to map bounds (artillery min-range) */
@@ -6383,14 +6654,17 @@ export class Game {
     });
   }
 
-  /** Start building an item (called from sidebar click) */
+  /** Start building an item (called from sidebar click).
+   *  PR3: C++ incremental cost — don't deduct full cost upfront; deduct per-tick during tickProduction.
+   *  Players can start building with partial funds; production pauses when broke. */
   startProduction(item: ProductionItem): void {
     const category = getStripSide(item);
-    const effectiveCost = this.getEffectiveCost(item);
     const existing = this.productionQueue.get(category);
     if (existing) {
       // Already building — queue another of the same item (max 5 total)
+      // Queued items still require full cost upfront (only active build is incremental)
       if (existing.item.type === item.type && existing.queueCount < 5) {
+        const effectiveCost = this.getEffectiveCost(item);
         if (this.credits < effectiveCost) {
           this.playEva('eva_insufficient_funds');
           return;
@@ -6400,12 +6674,12 @@ export class Game {
       }
       return;
     }
-    if (this.credits < effectiveCost) {
+    // PR3: Only check if player has ANY credits (can start building with partial funds)
+    if (this.credits <= 0) {
       this.playEva('eva_insufficient_funds');
       return;
     }
-    this.credits -= effectiveCost;
-    this.productionQueue.set(category, { item, progress: 0, queueCount: 1 });
+    this.productionQueue.set(category, { item, progress: 0, queueCount: 1, costPaid: 0 });
     this.audio.play('eva_building');
   }
 
@@ -6415,18 +6689,18 @@ export class Game {
     if (!entry) return;
     const effectiveCost = this.getEffectiveCost(entry.item);
     if (entry.queueCount > 1) {
-      // Dequeue one — refund full cost of queued item
+      // Dequeue one — refund full cost of queued item (queued items were paid upfront)
       entry.queueCount--;
       this.addCredits(effectiveCost, true);
     } else {
-      // Cancel active build — refund based on remaining progress
-      const refund = Math.floor(effectiveCost * (1 - entry.progress / entry.item.buildTime));
-      this.addCredits(refund, true);
+      // PR3: Cancel active build — refund costPaid (incremental deduction)
+      this.addCredits(entry.costPaid, true);
       this.productionQueue.delete(category);
     }
   }
 
-  /** Advance production queues each tick */
+  /** Advance production queues each tick.
+   *  PR3: C++ incremental cost — deducts costPerTick each tick; pauses if insufficient funds. */
   private tickProduction(): void {
     // Continuous power penalty (C++ parity): multiplier = powerFraction, clamped to [0.5, 1.0]
     // At 100%+ power: normal speed. At 50% power: 2x slower. Below 50%: capped at 2x slower.
@@ -6440,6 +6714,20 @@ export class Game {
       if (!this.hasBuilding(entry.item.prerequisite)) {
         this.cancelProduction(category);
         continue;
+      }
+      // PR3: Incremental cost deduction — deduct costPerTick each tick
+      const effectiveCost = this.getEffectiveCost(entry.item);
+      const costPerTick = effectiveCost / entry.item.buildTime;
+      const costThisTick = costPerTick; // deduct one tick's worth of cost
+      if (entry.costPaid < effectiveCost) {
+        if (this.credits >= costThisTick) {
+          const deduct = Math.min(costThisTick, effectiveCost - entry.costPaid);
+          this.credits -= deduct;
+          entry.costPaid += deduct;
+        } else {
+          // PR3: Insufficient funds — pause production (don't advance progress)
+          continue;
+        }
       }
       // Multi-factory linear speedup (C++ parity): N factories = Nx speed
       const factoryCount = this.countPlayerBuildings(entry.item.prerequisite);
@@ -6461,6 +6749,7 @@ export class Game {
           if (entry.queueCount > 1) {
             entry.queueCount--;
             entry.progress = 0;
+            entry.costPaid = 0; // reset for next queued item
           } else {
             this.productionQueue.delete(category);
           }
@@ -6986,7 +7275,7 @@ export class Game {
         this.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: this.tick });
         break;
       case 'speed':
-        // 1.5× speed boost (M7 parity)
+        // CR7: 1.5× speed boost — C++ rules.cpp SpeedBias=1.5 (verified)
         unit.speedBias = 1.5;
         this.evaMessages.push({ text: 'SPEED UPGRADE', tick: this.tick });
         break;
@@ -7838,26 +8127,30 @@ export class Game {
     this.onPostRender?.();
   }
 
-  /** Calculate formation positions for a group move order.
-   *  Returns array of offset positions centered on the target. */
-  private calculateFormation(centerX: number, centerY: number, count: number): WorldPos[] {
-    if (count <= 1) return [{ x: centerX, y: centerY }];
+  /** U3: Calculate formation positions for a group move order.
+   *  C++ foot.h:139-175 XFormOffset/YFormOffset — stable offsets from leader position.
+   *  Also stores formationOffset on each unit for maintaining relative positions. */
+  private calculateFormation(centerX: number, centerY: number, count: number, units?: Entity[]): WorldPos[] {
+    if (count <= 1) {
+      if (units?.[0]) units[0].formationOffset = { x: 0, y: 0 };
+      return [{ x: centerX, y: centerY }];
+    }
     const cols = Math.ceil(Math.sqrt(count));
-    const rows = Math.ceil(count / cols);
     const positions: WorldPos[] = [];
     for (let i = 0; i < count; i++) {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      // Center the grid on the target point
+      // Center the grid on the target point — stable offsets (no jitter)
       const offsetX = (col - (cols - 1) / 2) * CELL_SIZE;
-      const offsetY = (row - (rows - 1) / 2) * CELL_SIZE;
-      // Add slight jitter to avoid robotic alignment
-      const jitterX = (Math.random() - 0.5) * CELL_SIZE * 0.5;
-      const jitterY = (Math.random() - 0.5) * CELL_SIZE * 0.5;
+      const offsetY = (row - Math.floor((count - 1) / cols) / 2) * CELL_SIZE;
       positions.push({
-        x: centerX + offsetX + jitterX,
-        y: centerY + offsetY + jitterY,
+        x: centerX + offsetX,
+        y: centerY + offsetY,
       });
+      // Store formation offset on entity for maintaining relative position
+      if (units?.[i]) {
+        units[i].formationOffset = { x: offsetX, y: offsetY };
+      }
     }
     return positions;
   }
@@ -8155,7 +8448,7 @@ export class Game {
           }
           if (blocksExit) continue;
 
-          // Check adjacency to existing house structure (dist ≤ 4 cells)
+          // BP3: Check adjacency to existing house structure (dist ≤ 2 cells, C++ default adjacency=1 + buffer)
           let adjacent = false;
           for (const s of this.structures) {
             if (!s.alive || s.house !== house) continue;
@@ -8164,7 +8457,7 @@ export class Game {
             const scy = s.cy + sh / 2;
             const pcx = cx + fw / 2;
             const pcy = cy + fh / 2;
-            if (Math.abs(pcx - scx) <= 4 && Math.abs(pcy - scy) <= 4) {
+            if (Math.abs(pcx - scx) <= 2 && Math.abs(pcy - scy) <= 2) {
               adjacent = true;
               break;
             }
@@ -9237,6 +9530,24 @@ export class Game {
 
   deployMADTank(entity: Entity): void {
     if (entity.isDeployed) return;
+    // C++ unit.cpp:2667-2685 — eject INFANTRY_C1 technician before detonation
+    const ec = entity.cell;
+    const DIR_OFFSETS = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];
+    for (const [dx, dy] of DIR_OFFSETS) {
+      const nx = ec.cx + dx, ny = ec.cy + dy;
+      if (this.map.isPassable(nx, ny) && this.map.getOccupancy(nx, ny) === 0) {
+        const crew = new Entity(UnitType.I_C1, entity.house,
+          nx * CELL_SIZE + CELL_SIZE / 2, ny * CELL_SIZE + CELL_SIZE / 2);
+        crew.mission = Mission.MOVE;
+        // Move away from tank
+        const awayX = crew.pos.x + dx * CELL_SIZE * 3;
+        const awayY = crew.pos.y + dy * CELL_SIZE * 3;
+        crew.moveTarget = { x: awayX, y: awayY };
+        this.entities.push(crew);
+        this.entityById.set(crew.id, crew);
+        break;
+      }
+    }
     entity.isDeployed = true; entity.deployTimer = Game.MAD_TANK_CHARGE_TICKS;
     entity.moveTarget = null; entity.target = null; entity.mission = Mission.GUARD;
   }

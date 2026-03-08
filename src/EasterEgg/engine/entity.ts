@@ -80,8 +80,9 @@ export class Entity {
   maxHp: number;
   alive = true;
 
-  // Mission / AI
+  // Mission / AI (AI1: 22-mission system with queue)
   mission: Mission = Mission.GUARD;
+  missionQueue: Mission | null = null; // AI1: next mission to promote at cell center
   stance: Stance = Stance.AGGRESSIVE; // default aggressive (like original RA)
   target: Entity | null = null;
   healTarget: Entity | null = null;  // medic auto-heal target (C++ infantry.cpp AI)
@@ -138,6 +139,10 @@ export class Entity {
   burstCount = 0;   // remaining shots in current burst
   burstDelay = 0;   // ticks between burst shots (3 ticks between each)
 
+  // CF12: Dual-weapon IsSecondShot cadence (C++ techno.cpp:2857-2870)
+  // For dual-weapon units: first shot gets 3-tick rearm, second shot gets full ROF
+  isSecondShot = false;
+
   // Moving-platform tracking (C++ techno.cpp:3106-3108 — units firing while moving get extra inaccuracy)
   prevPos: WorldPos = { x: 0, y: 0 }; // position from previous tick, for detecting movement
 
@@ -159,6 +164,16 @@ export class Entity {
 
   // Area Guard: remember spawn origin so unit returns if it strays too far
   guardOrigin: WorldPos | null = null; // set when unit spawns with Area Guard mission
+
+  // U3: Formation movement offset (C++ foot.h:139-175 XFormOffset/YFormOffset)
+  formationOffset: WorldPos | null = null;
+
+  // MV1: Track-table movement state (C++ drive.cpp — vehicles follow pre-computed turn tracks)
+  trackNumber = -1;    // current track index (0-12), -1 = not on a track
+  trackIndex = 0;      // current step within the track (0-7)
+  trackStartX = 0;     // world X at start of current track segment
+  trackStartY = 0;     // world Y at start of current track segment
+  trackBaseFacing = 0; // bodyFacing32 when track was initiated (for rotating track offsets)
 
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
   // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination
@@ -203,6 +218,10 @@ export class Entity {
   // Superweapon effect timers
   ironCurtainTick = 0;  // ticks remaining for Iron Curtain invulnerability
   chronoShiftTick = 0;  // visual effect timer after being chronoshifted
+
+  // IA1: Infantry fidget randomization (C++ infantry.cpp:1748-1821)
+  fidgetDelay = Math.floor(Math.random() * 20) + 12; // random 12-31 frames
+  fidgetVariant = Math.random(); // selects idle1 vs idle2 animation
 
   // Fear/Prone system (C++ infantry.cpp — FearType 0-255)
   // Fear increases on damage, decrements 1/tick. IsProne when fear >= FEAR_ANXIOUS (10).
@@ -402,10 +421,11 @@ export class Entity {
             const d = anim.prone;
             return d.frame + sdir * d.jump;
           }
-          // Idle fidget after a variable delay (per-unit)
-          const fidgetDelay = 12 + (this.id * 7) % 20; // 12-31 frames
-          if (anim.idle && this.animFrame > fidgetDelay) {
-            const d = anim.idle;
+          // IA1: Idle fidget after random delay (C++ infantry.cpp:1748-1821 — Random_Pick timing)
+          if (anim.idle && this.animFrame > this.fidgetDelay) {
+            // C++ selects between idle1 and idle2 randomly
+            const useIdle2 = anim.idle2 && this.fidgetVariant >= 0.5;
+            const d = useIdle2 ? anim.idle2! : anim.idle;
             return d.frame + (this.animFrame % d.count);
           }
           const d = anim.ready;

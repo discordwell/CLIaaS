@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-08T10:50Z — Session 135: Full C++ Parity Plan (Phases 7b/7c + MISSING_FEATURES update)
+- **Phase 7b: Track-table movement**: Created `tracks.ts` with 13 track types from C++ drive.cpp (straight, 45°/90°/180° turns). Added `followTrackStep()` to Game with rotated offsets (TRACK_COS/TRACK_SIN precomputed). Track state on Entity: trackNumber/trackIndex/trackStartX/Y/trackBaseFacing. Infantry exempt (FOOT speedClass). Vehicles follow curved paths instead of straight-line moveToward between cells.
+- **Phase 7c: Pathfinding**: Hard-block occupied cells (skip instead of +20 penalty). "Tell blocking unit to move" — idle friendly units nudged to adjacent free cell. Nearest-reachable fallback — tracks closest-to-goal explored cell during A*, returns partial path when goal unreachable.
+- **MISSING_FEATURES.md**: Updated all [~] items implemented across Phases 1-7 to [x] [VERIFIED]. Updated stats summary table. Replaced parity plan section with completion summary. ~176 [x], ~11 [~], 0 [!] (~94% exact parity).
+- **Tests**: 42 new tests in cpp-parity-plan.test.ts covering tracks, missions, BulletTypeClass, IsPowered, fidget, scatter formula. Updated terrain-passability tests for nearest-reachable fallback behavior. All pass.
+- **Previous session work** (same plan, earlier context): Phases 1a-6 completed — MAD Tank crew ejection, area guard boundary retreat, infantry fidget, AI adjacency, IsSecondShot, scatter formula, trigger audit, IsPowered, incremental cost, formation offsets, BulletTypeClass, 22-mission system.
+
 ## 2026-03-08T06:10Z — Session 133: Enemy AI C++ Parity Port (6 Phases)
 - **Phase 1**: IQ (0-3) + TechLevel + MaxUnit/MaxInfantry/MaxBuilding parsed from INI per house. IQ gates: 0=no AI, 1=basic production, 2=targeting/defense, 3=repair/sell/retreat/superweapons. TechLevel filters production items. Cap enforcement prevents overproduction.
 - **Phase 2**: Fixed TEVENT_BUILD_UNIT/INFANTRY/AIRCRAFT — now check specific type from event.data via C++ enum index lookup tables. Wired PREFERRED_TARGET action to aiPickAttackTarget() with proper StructType mapping.

@@ -518,6 +518,13 @@ export interface WeaponStats {
   isSubSurface?: boolean;   // travels underwater, only hits naval units (torpedoes)
   isAntiSub?: boolean;      // can hit submerged submarines (depth charges)
   isAntiAir?: boolean;      // can target airborne aircraft (SAM missiles, AA guns)
+  // WH5: BulletTypeClass properties (C++ bullet.h)
+  isInaccurate?: boolean;   // forced scatter on every shot regardless of weapon inaccuracy
+  isFueled?: boolean;       // projectile has fuel counter; detonates when empty
+  isInvisible?: boolean;    // instant-hit, no projectile visual (light-speed weapons)
+  isDropping?: boolean;     // vertical drop trajectory (parabombs)
+  isParachuted?: boolean;   // parachute visual during descent
+  isGigundo?: boolean;      // large explosion sprite on impact (V2RL, nukes)
 }
 
 // C6: Warhead splash falloff properties — warhead.cpp:72
@@ -622,22 +629,22 @@ export const UNIT_STATS: Record<string, UnitStats> = {
 // projSpeed: per-weapon projectile visual speed in cells/second (C++ BulletClass::AI Speed field)
 export const WEAPON_STATS: Record<string, WeaponStats> = {
   // Infantry weapons
-  M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 40 },
+  M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 40, isInvisible: true },
   Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 12 },
   Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 15 },
   RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15, isAntiAir: true },
   Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20 },
-  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40 },
+  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40, isInvisible: true },
   Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 40 },
-  Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 40 },
+  Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true },
   // Vehicle weapons
-  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 40 },
+  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 40, isInvisible: true },
   '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
   '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
   '105mm':          { name: '105mm',             damage: 30,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
   '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30, burst: 2 },
   MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 15 },
-  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12 },
+  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true },
   TeslaCannon:      { name: 'TeslaCannon',       damage: 100, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
   PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 40 }, // Shock Trooper
@@ -659,9 +666,9 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   // New parity weapons
   '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 30, isArcing: true, inaccuracy: 1.0 },  // Cruiser main gun
   '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 40 },  // Gunboat weapon
-  Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 40 },  // Tanya's dual pistols
+  Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true },  // Tanya's dual pistols
   Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 40 },  // Stavros/civilian
-  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5 },  // V2 Rocket (C++ FROG: speed=25, High=yes, Proximity=yes)
+  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5, isGigundo: true, isFueled: true },  // V2 Rocket (C++ FROG: speed=25, High=yes, Proximity=yes, Gigundo=yes, Fueled=yes)
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super', projSpeed: 40 }, // C++: Warhead=Super (combat.cpp confirms)
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
@@ -873,8 +880,9 @@ export const SUB_CELL_OFFSETS: { x: number; y: number }[] = [
   { x: 7, y: 7 },     // 4: bottom-right
 ];
 
-// === Entity Mission States ===
+// === Entity Mission States (AI1: full C++ 22-mission system from mission.h) ===
 export enum Mission {
+  // Original 7 — fully implemented
   GUARD = 'GUARD',
   AREA_GUARD = 'AREA_GUARD', // patrol/defend spawn area — return if straying too far
   MOVE = 'MOVE',
@@ -882,7 +890,62 @@ export enum Mission {
   HUNT = 'HUNT',
   SLEEP = 'SLEEP',
   DIE = 'DIE',
+  // New C++ parity missions
+  ENTER = 'ENTER',           // entering a transport or building
+  CAPTURE = 'CAPTURE',       // engineer capturing a building
+  HARVEST = 'HARVEST',       // harvester ore collection cycle
+  UNLOAD = 'UNLOAD',         // transport unloading passengers / MAD Tank deploy
+  RETREAT = 'RETREAT',       // move to nearest map edge and exit
+  AMBUSH = 'AMBUSH',         // sleep until enemy enters sight range, then HUNT
+  STICKY = 'STICKY',         // guard with IsRecruitable=false (won't join teams)
+  REPAIR = 'REPAIR',         // seek nearest FIX structure and move to it
+  STOP = 'STOP',             // hold position, cease all action
+  HARMLESS = 'HARMLESS',     // like guard but never attacks
+  QMOVE = 'QMOVE',          // queued move — same as MOVE (C++ foot.cpp:339)
+  RETURN = 'RETURN',         // return to base/pad (aircraft rearm)
+  RESCUE = 'RESCUE',         // same as HUNT (C++ rescue mission acts as hunt)
+  MISSILE = 'MISSILE',       // missile launch sequence (nuke silo)
+  SABOTAGE = 'SABOTAGE',     // Tanya C4 planting mission
+  CONSTRUCTION = 'CONSTRUCTION', // building under construction
+  DECONSTRUCTION = 'DECONSTRUCTION', // building being sold/deconstructed
 }
+
+// AI1: MissionControl metadata per mission (C++ mission.cpp MissionClass::Is_*)
+export interface MissionControl {
+  isNoThreat: boolean;     // unit is not considered a threat by others
+  isZombie: boolean;       // unit doesn't auto-acquire targets
+  isRecruitable: boolean;  // unit can be added to AI teams
+  isParalyzed: boolean;    // unit cannot move
+  isRetaliate: boolean;    // unit retaliates when attacked
+  isScatter: boolean;      // unit scatters when attacked
+}
+
+export const MISSION_CONTROL: Record<string, MissionControl> = {
+  [Mission.GUARD]:          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },
+  [Mission.AREA_GUARD]:     { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },
+  [Mission.MOVE]:           { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },
+  [Mission.ATTACK]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false },
+  [Mission.HUNT]:           { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false },
+  [Mission.SLEEP]:          { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
+  [Mission.DIE]:            { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
+  [Mission.ENTER]:          { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
+  [Mission.CAPTURE]:        { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
+  [Mission.HARVEST]:        { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
+  [Mission.UNLOAD]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },
+  [Mission.RETREAT]:        { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
+  [Mission.AMBUSH]:         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: true,  isScatter: false },
+  [Mission.STICKY]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },
+  [Mission.REPAIR]:         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
+  [Mission.STOP]:           { isNoThreat: false, isZombie: true,  isRecruitable: true,  isParalyzed: true,  isRetaliate: false, isScatter: false },
+  [Mission.HARMLESS]:       { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  },
+  [Mission.QMOVE]:          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },
+  [Mission.RETURN]:         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
+  [Mission.RESCUE]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false },
+  [Mission.MISSILE]:        { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
+  [Mission.SABOTAGE]:       { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
+  [Mission.CONSTRUCTION]:   { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
+  [Mission.DECONSTRUCTION]: { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
+};
 
 // === Unit Stance (affects guard/pursuit behavior) ===
 export enum Stance {

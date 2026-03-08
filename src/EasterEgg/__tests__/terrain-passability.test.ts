@@ -129,7 +129,10 @@ describe('Pathfinding through ROUGH and BEACH terrain', () => {
       map.setTerrain(x, 1, Terrain.ROCK);
     }
     const path = findPath(map, { cx: 2, cy: 0 }, { cx: 8, cy: 0 });
-    expect(path.length).toBe(0); // no path through water
+    // PF4: nearest-reachable fallback — returns partial path to closest explored cell,
+    // but the path should NOT cross through water (cell 5,0 should not be in path)
+    const crossesWater = path.some(c => c.cx === 5 && c.cy === 0);
+    expect(crossesWater).toBe(false); // no path THROUGH water
   });
 
   it('A* does NOT path through RIVER terrain', () => {
@@ -140,7 +143,9 @@ describe('Pathfinding through ROUGH and BEACH terrain', () => {
       map.setTerrain(x, 1, Terrain.ROCK);
     }
     const path = findPath(map, { cx: 2, cy: 0 }, { cx: 8, cy: 0 });
-    expect(path.length).toBe(0);
+    // PF4: nearest-reachable fallback returns partial path, but not through river
+    const crossesRiver = path.some(c => c.cx === 5 && c.cy === 0);
+    expect(crossesRiver).toBe(false);
   });
 
   it('A* routes around WATER when BEACH provides an alternate path', () => {

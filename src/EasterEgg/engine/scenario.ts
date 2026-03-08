@@ -1067,6 +1067,12 @@ export const STRUCTURE_MAX_HP: Record<string, number> = {
   ...mapStructureHp(CIVILIAN_STRUCTURE_TYPES, 400),
 };
 
+// PW2: Per-building IsPowered flag (C++ building.cpp — disabled during power deficit)
+// Only powered structures lose functionality when power is low
+export const STRUCTURE_POWERED: Set<string> = new Set([
+  'GUN', 'TSLA', 'SAM', 'AGUN', 'GAP', 'PDOX', 'IRON', 'MSLO',
+]);
+
 export interface ScenarioResult {
   map: GameMap;
   entities: Entity[];
