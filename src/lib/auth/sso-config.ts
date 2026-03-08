@@ -112,17 +112,19 @@ export function getProvider(id: string): SSOProvider | undefined {
   return getInMemoryProviders().find((p) => p.id === id);
 }
 
-export async function getProviderAsync(id: string): Promise<SSOProvider | undefined> {
+export async function getProviderAsync(id: string, workspaceId?: string): Promise<SSOProvider | undefined> {
   const conn = await tryDb();
   if (conn && conn.schema.ssoProviders) {
     try {
-      const { eq } = await import('drizzle-orm');
+      const { eq, and } = await import('drizzle-orm');
+      const conditions = [eq(conn.schema.ssoProviders.id, id)];
+      if (workspaceId) conditions.push(eq(conn.schema.ssoProviders.workspaceId, workspaceId));
       const [row] = await conn.db.select().from(conn.schema.ssoProviders)
-        .where(eq(conn.schema.ssoProviders.id, id)).limit(1);
+        .where(and(...conditions)).limit(1);
       if (row) return dbRowToProvider(row);
     } catch { /* fall through */ }
   }
-  return getInMemoryProviders().find((p) => p.id === id);
+  return getInMemoryProviders().find((p) => p.id === id && (!workspaceId || p.workspaceId === workspaceId));
 }
 
 export async function createProviderAsync(
@@ -151,6 +153,8 @@ export async function createProviderAsync(
         domainHint: input.domainHint ?? null,
         defaultRole: input.defaultRole ?? null,
         jitEnabled: input.jitEnabled ?? true,
+        forceAuthn: input.forceAuthn ?? false,
+        signedAssertions: input.signedAssertions ?? false,
       }).returning();
       return dbRowToProvider(row);
     } catch { /* fall through */ }
@@ -191,24 +195,27 @@ export function createProvider(
 export async function updateProviderAsync(
   id: string,
   updates: Partial<Omit<SSOProvider, 'id' | 'createdAt'>>,
+  workspaceId?: string,
 ): Promise<SSOProvider | null> {
   const conn = await tryDb();
   if (conn && conn.schema.ssoProviders) {
     try {
-      const { eq } = await import('drizzle-orm');
+      const { eq, and } = await import('drizzle-orm');
       const set: Record<string, unknown> = { updatedAt: new Date() };
       for (const [k, v] of Object.entries(updates)) {
         if (k !== 'updatedAt') set[k] = v ?? null;
       }
+      const conditions = [eq(conn.schema.ssoProviders.id, id)];
+      if (workspaceId) conditions.push(eq(conn.schema.ssoProviders.workspaceId, workspaceId));
       const [row] = await conn.db.update(conn.schema.ssoProviders)
-        .set(set).where(eq(conn.schema.ssoProviders.id, id)).returning();
+        .set(set).where(and(...conditions)).returning();
       if (row) return dbRowToProvider(row);
     } catch { /* fall through */ }
   }
 
   // JSONL fallback
   const providers = getInMemoryProviders();
-  const idx = providers.findIndex((p) => p.id === id);
+  const idx = providers.findIndex((p) => p.id === id && (!workspaceId || p.workspaceId === workspaceId));
   if (idx === -1) return null;
   providers[idx] = { ...providers[idx], ...updates, updatedAt: new Date().toISOString() };
   persistProviders();
@@ -228,19 +235,21 @@ export function updateProvider(
   return providers[idx];
 }
 
-export async function deleteProviderAsync(id: string): Promise<boolean> {
+export async function deleteProviderAsync(id: string, workspaceId?: string): Promise<boolean> {
   const conn = await tryDb();
   if (conn && conn.schema.ssoProviders) {
     try {
-      const { eq } = await import('drizzle-orm');
+      const { eq, and } = await import('drizzle-orm');
+      const conditions = [eq(conn.schema.ssoProviders.id, id)];
+      if (workspaceId) conditions.push(eq(conn.schema.ssoProviders.workspaceId, workspaceId));
       const result = await conn.db.delete(conn.schema.ssoProviders)
-        .where(eq(conn.schema.ssoProviders.id, id));
+        .where(and(...conditions));
       if (result.rowCount && result.rowCount > 0) return true;
     } catch { /* fall through */ }
   }
 
   const providers = getInMemoryProviders();
-  const idx = providers.findIndex((p) => p.id === id);
+  const idx = providers.findIndex((p) => p.id === id && (!workspaceId || p.workspaceId === workspaceId));
   if (idx === -1) return false;
   providers.splice(idx, 1);
   persistProviders();

@@ -4,9 +4,9 @@ import { getAgentStats } from '@/lib/ai/agent';
 import { getROIMetrics } from '@/lib/ai/roi-tracker';
 import { getPendingApprovals } from '@/lib/ai/approval-queue';
 import {
-  getCircuitBreakerStatus,
-  getAuditTrail,
-  getChannelPolicies,
+  getCircuitBreakerStatusAsync,
+  getAuditTrailAsync,
+  getChannelPoliciesAsync,
   type CircuitBreakerState,
 } from '@/lib/ai/admin-controls';
 
@@ -17,13 +17,14 @@ export const dynamic = 'force-dynamic';
 // ---------------------------------------------------------------------------
 
 async function loadDashboardData() {
-  const config = await getAgentConfig('demo-workspace');
+  const workspaceId = 'demo-workspace';
+  const config = await getAgentConfig(workspaceId);
   const agentStats = getAgentStats();
   const roi = getROIMetrics();
   const pendingApprovals = await getPendingApprovals();
-  const circuitBreaker = getCircuitBreakerStatus();
-  const { entries: auditEntries } = getAuditTrail({ limit: 5 });
-  const channelPolicies = getChannelPolicies();
+  const circuitBreaker = await getCircuitBreakerStatusAsync(workspaceId);
+  const { entries: auditEntries } = await getAuditTrailAsync({ workspaceId, limit: 5 });
+  const channelPolicies = await getChannelPoliciesAsync(workspaceId);
 
   const activeChannels = channelPolicies.filter(p => p.enabled).length;
 

@@ -2,13 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { validateSCIMAuth, requireSCIMAuth } from '../auth';
 import { applyUserPatchOps, applyGroupPatchOps, type SCIMPatchOp, SCIM_SCHEMAS } from '../schema';
 
-vi.mock('../../jsonl-store', () => ({
+vi.mock('@/lib/jsonl-store', () => ({
   readJsonlFile: vi.fn().mockReturnValue([]),
   writeJsonlFile: vi.fn(),
   appendJsonlLine: vi.fn(),
 }));
 
-vi.mock('../../store-helpers', () => ({
+vi.mock('@/lib/store-helpers', () => ({
   withRls: vi.fn().mockResolvedValue(null),
   tryDb: vi.fn().mockResolvedValue(null),
 }));

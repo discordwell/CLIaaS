@@ -24,7 +24,7 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const provider = await getProviderAsync(id);
+    const provider = await getProviderAsync(id, auth.user.workspaceId);
     if (!provider) {
       return NextResponse.json(
         { error: 'SSO provider not found' },
@@ -75,6 +75,10 @@ export async function PATCH(
       'tokenUrl',
       'userInfoUrl',
       'domainHint',
+      'jitEnabled',
+      'defaultRole',
+      'signedAssertions',
+      'forceAuthn',
     ] as const;
 
     for (const field of allowedFields) {
@@ -85,7 +89,7 @@ export async function PATCH(
     }
 
     // Prevent removing certificate from SAML providers or switching to SAML without one
-    const existing = await getProviderAsync(id);
+    const existing = await getProviderAsync(id, auth.user.workspaceId);
     if (existing) {
       const resultProtocol = updates.protocol ?? existing.protocol;
       const resultCert = updates.certificate !== undefined ? updates.certificate : existing.certificate;
@@ -97,7 +101,7 @@ export async function PATCH(
       }
     }
 
-    const updated = await updateProviderAsync(id, updates);
+    const updated = await updateProviderAsync(id, updates, auth.user.workspaceId);
     if (!updated) {
       return NextResponse.json(
         { error: 'SSO provider not found' },
@@ -127,7 +131,7 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    const deleted = await deleteProviderAsync(id);
+    const deleted = await deleteProviderAsync(id, auth.user.workspaceId);
     if (!deleted) {
       return NextResponse.json(
         { error: 'SSO provider not found' },

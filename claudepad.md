@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-03-07T23:05Z — Session 128: C++ Speed Parity + Clock Overlay + Test Fixes
+- **Unit speeds**: All UNIT_STATS speeds updated to C++ MPH values from SPEED.H (udata/idata/vdata/aadata.cpp). Added `MPH_TO_PX` conversion constant (CELL_SIZE/LEPTON_SIZE = 0.09375) applied in `movementSpeed()`.
+- **Clock overlay**: Green clock sprites (`clock.png`) now rendered with `ctx.filter = 'brightness(0)'` + reduced globalAlpha to match C++ SHAPE_GHOST dark translucent effect. Fixed in both production-ready and unaffordable item overlays.
+- **Test updates**: 50 speed assertions updated across `data-parity.test.ts`, `air-combat.test.ts`, `ant-combat-parity.test.ts`. All 2247 Easter Egg tests pass.
+- Deployed to cliaas.com.
+
+## 2026-03-07T22:00Z — Session 127: Plan 21 Post-Merge Sync (8 Boundary Fixes)
+- **F3**: Added 'assignment' to ruleTypeEnum in schema.ts + migration 0030
+- **F4**: Added createdAt/updatedAt timestamps to voiceAgents table in schema.ts (already in DB via migration 0029)
+- **F1+F2**: Plugin DELETE route — check `uninstalled.deleted` (not truthy object), return dependents warning, pass workspaceId
+- **F5+F6**: SSO routes — added jitEnabled/defaultRole/signedAssertions/forceAuthn to PATCH allowedFields + POST; added workspaceId to all async store calls; extended store functions (getProviderAsync, updateProviderAsync, deleteProviderAsync) with optional workspaceId
+- **F7**: AI dashboard pages — switched getCircuitBreakerStatus/getAuditTrail/getChannelPolicies from sync to async variants with workspace scoping
+- **F8**: SCIM test mock paths — standardized to @/lib/ aliases
+- Build clean, 356/361 test files pass (5 pre-existing Easter Egg/AppNav failures)
+
+## 2026-03-07T20:15Z — Session 126: Command Palette + Nav Cleanup
+- **Problem**: Topbar had 26 flat links overflowing off-screen; Security/Enterprise/Billing/Docs completely invisible
+- **Solution**: Option C — minimal topbar (Dashboard, Tickets, Chat, AI + ⌘K trigger) + dark terminal-style command palette
+- **CommandPalette.tsx** (new): Fuzzy search, 5 color-coded groups (Core/Automate/Engage/Insights/Configure + Actions), keyboard nav (↑↓/Enter/Esc), HERE badge, localStorage recents, RBAC filtering, ARIA a11y (dialog/combobox/listbox/option roles)
+- **Code review fixes**: Stale closure in ⌘K toggle (functional updater), mutable render counter → pre-computed index map, highlight indices only applied when match was against label, full ARIA roles
+- **Tests**: 28 passing (11 new CommandPalette + 17 updated AppNav/AppNavWrapper)
+- **Deployed** to cliaas.com, wet tested: ⌘K shortcut, button click, fuzzy search, keyboard nav, recents, backdrop close
+
 ## 2026-03-07T15:10Z — Session 125: Sell Animation Fix (C++ RA Parity)
 - **Sell animation**: Replaced mock clip/fade with proper construction frame cycling in reverse. During sell, building cycles frames damageFrame-1→0 as sellProgress 0→1. Also added construction frame cycling (0→damageFrame-1) as a bonus.
 - Frame override in `renderer.ts:1341-1356`, only for buildings with damageFrame > 1. Clip/fade/scanline visuals kept.

@@ -55,6 +55,7 @@ export const ruleTypeEnum = pgEnum('rule_type', [
   'trigger',
   'automation',
   'sla',
+  'assignment',
 ]);
 
 export const templateScopeEnum = pgEnum('template_scope', ['personal', 'shared']);
@@ -907,6 +908,8 @@ export const ssoProviders = pgTable(
     domainHint: text('domain_hint'),
     defaultRole: text('default_role').default('agent'),
     jitEnabled: boolean('jit_enabled').notNull().default(true),
+    forceAuthn: boolean('force_authn').notNull().default(false),
+    signedAssertions: boolean('signed_assertions').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -3576,6 +3579,8 @@ export const voiceAgents = pgTable(
     status: voiceAgentStatusEnum('status').notNull().default('offline'),
     currentCallId: uuid('current_call_id'),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   table => ({
     voiceAgentsWorkspaceIdx: index('voice_agents_workspace_idx').on(table.workspaceId),

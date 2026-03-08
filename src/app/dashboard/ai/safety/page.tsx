@@ -1,6 +1,6 @@
 import {
-  getCircuitBreakerStatus,
-  getAuditTrail,
+  getCircuitBreakerStatusAsync,
+  getAuditTrailAsync,
   getUsageSummary,
 } from '@/lib/ai/admin-controls';
 import SafetyActions from './_actions';
@@ -37,9 +37,10 @@ const QUOTAS = {
 // ---------------------------------------------------------------------------
 
 export default async function AISafetyPage() {
-  const circuitBreaker = getCircuitBreakerStatus();
-  const usage = getUsageSummary('default');
-  const { entries: auditEntries } = getAuditTrail({ limit: 20 });
+  const workspaceId = 'demo-workspace';
+  const circuitBreaker = await getCircuitBreakerStatusAsync(workspaceId);
+  const usage = getUsageSummary(workspaceId);
+  const { entries: auditEntries } = await getAuditTrailAsync({ workspaceId, limit: 20 });
 
   // Circuit breaker visual config
   const cbColor: Record<string, string> = {

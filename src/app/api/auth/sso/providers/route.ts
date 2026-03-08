@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    const providers = await getProvidersAsync();
+    const providers = await getProvidersAsync(auth.user.workspaceId);
 
     // Strip secrets from the response
     const safe = providers.map(sanitize);
@@ -71,10 +71,13 @@ export async function POST(request: NextRequest) {
       name,
       protocol,
       enabled: enabled ?? true,
+      workspaceId: auth.user.workspaceId,
       // SAML fields
       entityId: body.entityId,
       ssoUrl: body.ssoUrl,
       certificate: body.certificate,
+      signedAssertions: body.signedAssertions,
+      forceAuthn: body.forceAuthn,
       // OIDC fields
       clientId: body.clientId,
       clientSecret: body.clientSecret,
@@ -84,6 +87,8 @@ export async function POST(request: NextRequest) {
       userInfoUrl: body.userInfoUrl,
       // Common
       domainHint: body.domainHint,
+      jitEnabled: body.jitEnabled,
+      defaultRole: body.defaultRole,
     });
 
     return NextResponse.json({ provider: sanitize(provider) }, { status: 201 });

@@ -18,7 +18,7 @@ export async function GET(
 
   try {
     // Try new store first
-    const installation = await getInstallation(id);
+    const installation = await getInstallation(id, auth.user.workspaceId);
     if (installation) {
       return NextResponse.json({ installation });
     }
@@ -77,9 +77,15 @@ export async function DELETE(
 
   try {
     // Try new store first
-    const uninstalled = await uninstallPlugin(id);
-    if (uninstalled) {
-      return NextResponse.json({ ok: true });
+    const uninstalled = await uninstallPlugin(id, auth.user.workspaceId);
+    if (uninstalled.deleted) {
+      return NextResponse.json({
+        ok: true,
+        ...(uninstalled.dependents.length > 0 && {
+          warning: `The following plugins depended on this one: ${uninstalled.dependents.join(', ')}`,
+          dependents: uninstalled.dependents,
+        }),
+      });
     }
 
     // Fall back to legacy registry
