@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import EmptyState from "@/components/EmptyState";
 
 interface SLAPolicy {
   id: string;
@@ -574,11 +575,12 @@ export default function SLAPageContent() {
           </div>
         </section>
       ) : (
-        <section className="mt-8 border-2 border-zinc-950 bg-white p-8 text-center">
-          <p className="text-lg font-bold">No SLA policies found</p>
-          <p className="mt-2 text-sm text-zinc-600">
-            Create SLA policies to enforce response and resolution targets.
-          </p>
+        <section className="mt-8 border-2 border-zinc-950 bg-white">
+          <EmptyState
+            title="No SLA policies configured"
+            description="SLA policies define how quickly your team should respond to and resolve tickets. Set targets by priority level and get alerted before breaches happen."
+            action={{ label: "Create your first policy", href: "/sla" }}
+          />
         </section>
       )}
 

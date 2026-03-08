@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { loadCustomers, loadOrganizations } from "@/lib/data";
+import CustomerTableClient from "@/components/CustomerTableClient";
 
 const sourceColor: Record<string, string> = {
   zendesk: "bg-emerald-100 text-emerald-800",
@@ -106,64 +107,15 @@ export default async function CustomersPage({
       )}
 
       {/* CUSTOMER TABLE */}
-      <section className="mt-8 border-2 border-zinc-950 bg-white">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b-2 border-zinc-200 bg-zinc-50 text-left">
-                <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">
-                  Name
-                </th>
-                <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">
-                  Email
-                </th>
-                <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">
-                  Source
-                </th>
-                <th className="px-4 py-3 font-mono text-xs font-bold uppercase text-zinc-500">
-                  Created
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {customers.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-b border-zinc-100 transition-colors hover:bg-zinc-50"
-                >
-                  <td className="px-4 py-3 font-medium">
-                    <Link href={`/customers/${c.id}`} className="hover:underline">
-                      {c.name || "—"}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-600">
-                    {c.email || "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-block px-2 py-0.5 font-mono text-xs font-bold uppercase ${sourceColor[c.source] ?? "bg-zinc-200 text-zinc-700"}`}
-                    >
-                      {c.source}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">
-                    {c.createdAt
-                      ? new Date(c.createdAt).toLocaleDateString()
-                      : "—"}
-                  </td>
-                </tr>
-              ))}
-              {customers.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">
-                    No customers found. Export data from your helpdesk connectors first.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <CustomerTableClient
+        customers={customers.map((c) => ({
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          source: c.source,
+          createdAt: c.createdAt,
+        }))}
+      />
     </main>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import RuleForm, { type RuleFormData } from "./_components/RuleForm";
+import EmptyState from "@/components/EmptyState";
 
 interface Rule {
   id: string;
@@ -265,11 +266,12 @@ export default function RulesPage() {
           </div>
         </section>
       ) : (
-        <section className="mt-8 border-2 border-zinc-950 bg-white p-8 text-center">
-          <p className="text-lg font-bold">No rules found</p>
-          <p className="mt-2 text-sm text-zinc-600">
-            Create automation rules to streamline your workflow.
-          </p>
+        <section className="mt-8 border-2 border-zinc-950 bg-white">
+          <EmptyState
+            title="No automation rules yet"
+            description="Rules let you auto-assign tickets, apply tags, send notifications, and escalate issues based on conditions you define. Start with a simple trigger to see how it works."
+            action={{ label: "Create your first rule", href: "/rules" }}
+          />
         </section>
       )}
     </main>

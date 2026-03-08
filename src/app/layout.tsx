@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import EasterEggProvider from "@/EasterEgg/EasterEggProvider";
-import AppNavWrapper from "@/components/AppNavWrapper";
+import AppShell from "@/components/AppShell";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 
@@ -42,8 +42,9 @@ export default function RootLayout({
       <body
         className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased`}
       >
-        <AppNavWrapper />
-        <EasterEggProvider>{children}</EasterEggProvider>
+        <EasterEggProvider>
+          <AppShell>{children}</AppShell>
+        </EasterEggProvider>
         <ServiceWorkerRegistration />
         <PWAInstallPrompt />
       </body>

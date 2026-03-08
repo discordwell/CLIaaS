@@ -44,10 +44,17 @@ export default function TicketActions({
 
   const broadcastActivity = useCallback(
     (activity: "typing" | "viewing") => {
+      // Legacy presence endpoint (SSE-based)
       fetch("/api/presence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticketId, activity }),
+      }).catch(() => {});
+      // New ticket-scoped presence endpoint (polling-based)
+      fetch(`/api/tickets/${encodeURIComponent(ticketId)}/presence`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: activity === "typing" ? "replying" : "viewing" }),
       }).catch(() => {});
     },
     [ticketId]

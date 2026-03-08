@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import PresenceIndicator from "./PresenceIndicator";
 
 interface Viewer {
   userId: string;
   userName: string;
   activity: string;
+}
+
+interface PresenceEntry {
+  userId: string;
+  userName: string;
+  status: "viewing" | "replying";
+  since: string;
 }
 
 export default function CollisionDetector({
@@ -15,6 +23,7 @@ export default function CollisionDetector({
 }) {
   const [viewers, setViewers] = useState<Viewer[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [replyingUsers, setReplyingUsers] = useState<PresenceEntry[]>([]);
 
   // Register presence on mount (single POST to get userId + initial viewers)
   const registerPresence = useCallback(async () => {
@@ -112,41 +121,79 @@ export default function CollisionDetector({
     };
   }, [ticketId, currentUserId, registerPresence]);
 
-  if (viewers.length === 0) return null;
+  const handleCollisionDetected = useCallback((users: PresenceEntry[]) => {
+    setReplyingUsers(users);
+  }, []);
+
+  const hasViewers = viewers.length > 0;
+  const hasReplyingUsers = replyingUsers.length > 0;
+
+  if (!hasViewers && !hasReplyingUsers) {
+    return (
+      <div className="mb-4">
+        <PresenceIndicator
+          ticketId={ticketId}
+          onCollisionDetected={handleCollisionDetected}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-center gap-2 border-2 border-amber-400 bg-amber-50 px-4 py-2">
-      <span className="relative flex h-2 w-2">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
-      </span>
-      <div className="flex items-center gap-2">
-        {viewers.map((v) => (
-          <span
-            key={v.userId}
-            className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 font-mono text-xs font-bold text-amber-800"
-          >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-[10px] font-bold text-white">
-              {v.userName.charAt(0).toUpperCase()}
-            </span>
-            {v.userName}
-            {v.activity === "typing" ? (
-              <svg className="h-3 w-3 animate-pulse" viewBox="0 0 12 12" fill="currentColor">
-                <circle cx="2" cy="6" r="1.5" />
-                <circle cx="6" cy="6" r="1.5" />
-                <circle cx="10" cy="6" r="1.5" />
-              </svg>
-            ) : (
-              <svg className="h-3 w-3" viewBox="0 0 12 12" fill="currentColor">
-                <path d="M6 2C3.5 2 1.4 3.6.5 6c.9 2.4 3 4 5.5 4s4.6-1.6 5.5-4C10.6 3.6 8.5 2 6 2zm0 6.5C4.6 8.5 3.5 7.4 3.5 6S4.6 3.5 6 3.5 8.5 4.6 8.5 6 7.4 8.5 6 8.5zM6 5a1 1 0 100 2 1 1 0 000-2z" />
-              </svg>
-            )}
-          </span>
-        ))}
-        <span className="font-mono text-xs font-bold text-amber-800">
-          {viewers.length === 1 ? "is" : "are"} also on this ticket
+    <div className="mb-4 space-y-2">
+      {/* Presence indicator (polling-based, shows avatars with dots) */}
+      <div className="flex items-center gap-3 border-2 border-amber-400 bg-amber-50 px-4 py-2">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
         </span>
+        <div className="flex items-center gap-2">
+          {viewers.map((v) => (
+            <span
+              key={v.userId}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 font-mono text-xs font-bold text-amber-800"
+            >
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+                  v.activity === "typing" ? "bg-red-600" : "bg-amber-600"
+                }`}
+              >
+                {v.userName.charAt(0).toUpperCase()}
+              </span>
+              {v.userName}
+              {v.activity === "typing" ? (
+                <svg className="h-3 w-3 animate-pulse" viewBox="0 0 12 12" fill="currentColor">
+                  <circle cx="2" cy="6" r="1.5" />
+                  <circle cx="6" cy="6" r="1.5" />
+                  <circle cx="10" cy="6" r="1.5" />
+                </svg>
+              ) : (
+                <svg className="h-3 w-3" viewBox="0 0 12 12" fill="currentColor">
+                  <path d="M6 2C3.5 2 1.4 3.6.5 6c.9 2.4 3 4 5.5 4s4.6-1.6 5.5-4C10.6 3.6 8.5 2 6 2zm0 6.5C4.6 8.5 3.5 7.4 3.5 6S4.6 3.5 6 3.5 8.5 4.6 8.5 6 7.4 8.5 6 8.5zM6 5a1 1 0 100 2 1 1 0 000-2z" />
+                </svg>
+              )}
+            </span>
+          ))}
+          <span className="font-mono text-xs font-bold text-amber-800">
+            {viewers.length === 1 ? "is" : "are"} also on this ticket
+          </span>
+        </div>
+        <div className="ml-auto">
+          <PresenceIndicator
+            ticketId={ticketId}
+            onCollisionDetected={handleCollisionDetected}
+          />
+        </div>
       </div>
+
+      {/* Collision warning: someone else is replying */}
+      {hasReplyingUsers && (
+        <div className="border-2 border-amber-400 bg-amber-50 px-4 py-2 font-mono text-sm text-amber-800">
+          <span className="mr-1">&#9888;</span>
+          {replyingUsers.map((u) => u.userName).join(", ")}{" "}
+          {replyingUsers.length === 1 ? "is" : "are"} also replying to this ticket
+        </div>
+      )}
     </div>
   );
 }

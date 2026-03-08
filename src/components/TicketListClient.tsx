@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import TicketLink from "./TicketLink";
 import TicketMergeBar from "./TicketMergeBar";
 import BulkActions from "./BulkActions";
 
@@ -117,20 +118,20 @@ export default function TicketListClient({ tickets }: { tickets: TicketRow[] }) 
                     />
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/tickets/${t.id}`}
+                    <TicketLink
+                      ticketId={t.id}
                       className="font-mono text-xs font-bold text-blue-600 hover:underline"
                     >
                       {t.externalId}
-                    </Link>
+                    </TicketLink>
                   </td>
                   <td className="max-w-xs px-4 py-3">
-                    <Link
-                      href={`/tickets/${t.id}`}
+                    <TicketLink
+                      ticketId={t.id}
                       className="font-medium hover:underline"
                     >
                       {t.subject}
-                    </Link>
+                    </TicketLink>
                     {t.mergedIntoTicketId && (
                       <span className="ml-2 inline-block bg-zinc-200 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-zinc-600">
                         merged

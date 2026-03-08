@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useDensity } from "@/components/DensityProvider";
+import DensityToggle from "@/components/DensityToggle";
 
 interface KBArticle {
   id: string;
@@ -38,6 +40,24 @@ const VISIBILITY_OPTIONS = [
   { value: "draft", label: "Draft" },
 ];
 
+const articlePadding = {
+  spacious: "p-8",
+  comfortable: "p-6",
+  compact: "p-3",
+} as const;
+
+const articleTitleSize = {
+  spacious: "text-lg",
+  comfortable: "text-lg",
+  compact: "text-sm",
+} as const;
+
+const articleBodyHeight = {
+  spacious: "max-h-40",
+  comfortable: "max-h-40",
+  compact: "max-h-16",
+} as const;
+
 export default function KBPage() {
   const [articles, setArticles] = useState<KBArticle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +65,7 @@ export default function KBPage() {
   const [brandId, setBrandId] = useState("");
   const [visibility, setVisibility] = useState("");
   const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([]);
+  const { density } = useDensity();
 
   const loadArticles = useCallback(async () => {
     setLoading(true);
@@ -143,6 +164,8 @@ export default function KBPage() {
 
         {/* Filters */}
         <div className="mt-6 flex flex-wrap items-center gap-3">
+          <DensityToggle />
+          <span className="mx-1 self-center text-zinc-300">|</span>
           {/* Locale filter */}
           <select
             value={locale}
@@ -256,34 +279,36 @@ export default function KBPage() {
             </div>
             <div className="divide-y divide-zinc-200">
               {catArticles.map((article) => (
-                <div key={article.id} className="p-6">
+                <div key={article.id} className={articlePadding[density]}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="text-lg font-bold">{article.title}</h3>
-                      <div className="mt-1 flex items-center gap-2">
-                        <span className="font-mono text-xs text-zinc-500">
+                      <h3 className={`${articleTitleSize[density]} font-bold`}>{article.title}</h3>
+                      <div className={`${density === "compact" ? "mt-0.5" : "mt-1"} flex items-center gap-2`}>
+                        <span className={`font-mono ${density === "compact" ? "text-[10px]" : "text-xs"} text-zinc-500`}>
                           {article.categoryPath?.join(" / ")}
                         </span>
                         {article.locale && (
-                          <span className="border border-zinc-300 px-1.5 py-0.5 font-mono text-xs uppercase text-zinc-500">
+                          <span className={`border border-zinc-300 font-mono uppercase text-zinc-500 ${density === "compact" ? "px-1 py-0 text-[9px]" : "px-1.5 py-0.5 text-xs"}`}>
                             {article.locale}
                           </span>
                         )}
                         {article.visibility && article.visibility !== "public" && (
-                          <span className="border border-amber-400 bg-amber-50 px-1.5 py-0.5 font-mono text-xs font-bold uppercase text-amber-700">
+                          <span className={`border border-amber-400 bg-amber-50 font-mono font-bold uppercase text-amber-700 ${density === "compact" ? "px-1 py-0 text-[9px]" : "px-1.5 py-0.5 text-xs"}`}>
                             {article.visibility}
                           </span>
                         )}
                         {getTranslationBadge(article)}
                       </div>
                     </div>
-                    <span className="shrink-0 font-mono text-xs text-zinc-400">
-                      {article.id}
-                    </span>
+                    {density !== "compact" && (
+                      <span className="shrink-0 font-mono text-xs text-zinc-400">
+                        {article.id}
+                      </span>
+                    )}
                   </div>
-                  <div className="mt-4 max-h-40 overflow-hidden text-sm leading-relaxed text-zinc-600">
-                    {article.body.slice(0, 500)}
-                    {article.body.length > 500 && "..."}
+                  <div className={`${density === "compact" ? "mt-1" : "mt-4"} ${articleBodyHeight[density]} overflow-hidden ${density === "compact" ? "text-xs" : "text-sm"} leading-relaxed text-zinc-600`}>
+                    {article.body.slice(0, density === "compact" ? 200 : 500)}
+                    {article.body.length > (density === "compact" ? 200 : 500) && "..."}
                   </div>
                 </div>
               ))}

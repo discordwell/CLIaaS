@@ -6,6 +6,11 @@ import AppNav from "./AppNav";
 import PublicNav from "./PublicNav";
 import CommandPalette from "./CommandPalette";
 
+/**
+ * @deprecated Replaced by AppShell which provides the sidebar layout.
+ * Kept for reference. AppShell is now used in layout.tsx instead.
+ */
+
 /** Routes that render NO nav at all (they have their own or need none). */
 const NO_NAV_PREFIXES = ["/portal", "/sign-in", "/sign-up", "/chat/embed", "/demo-recording"];
 const NO_NAV_EXACT = ["/"];

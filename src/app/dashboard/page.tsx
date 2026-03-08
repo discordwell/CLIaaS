@@ -7,7 +7,7 @@ import type { SLACheckResult } from "@/lib/sla";
 import { detectKBGapsLocal } from "@/lib/kb/content-gaps";
 import { computeAnalytics } from "@/lib/analytics";
 import type { Ticket } from "@/lib/data";
-import LiveMetricCard from "@/components/LiveMetricCard";
+import LiveMetricStrip from "@/components/LiveMetricStrip";
 import NumberCard from "@/components/charts/NumberCard";
 
 export const dynamic = "force-dynamic";
@@ -190,15 +190,6 @@ export default async function DashboardPage() {
     (c) => c.configured || c.hasExport,
   );
 
-  const now = new Date();
-  const timestamp = now.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-
   // ---- Empty state tier ----
   const tier =
     totalTickets === 0 ? "empty" : totalTickets < 10 ? "sparse" : "full";
@@ -211,9 +202,6 @@ export default async function DashboardPage() {
           <p className="font-mono text-xs font-bold uppercase tracking-[0.2em]">
             Control Plane
           </p>
-          <span className="font-mono text-[11px] text-muted">
-            as of {timestamp}
-          </span>
         </div>
         <Link
           href="/settings"
@@ -263,33 +251,16 @@ export default async function DashboardPage() {
           )}
         </section>
       ) : (
-        <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <LiveMetricCard
-            label="Open Queue"
-            value={openCount}
-            alert={openCount > 20}
-          />
-          <LiveMetricCard
-            label="SLA Breached"
-            value={slaBreaches}
-            alert={slaBreaches > 0}
-          />
-          <LiveMetricCard
-            label="SLA At Risk"
-            value={slaWarnings}
-            alert={slaWarnings > 3}
-          />
-          <LiveMetricCard
-            label="Unassigned"
-            value={unassigned}
-            alert={unassigned > 5}
-          />
-          <LiveMetricCard
-            label="Agents Online"
-            value={availCounts.online}
-            alert={availCounts.online === 0 && openCount > 0}
-          />
-        </section>
+        <LiveMetricStrip
+          serverValues={{
+            openCount,
+            slaBreaches,
+            slaWarnings,
+            unassigned,
+            agentsOnline: availCounts.online,
+            openCountAlert: openCount > 20,
+          }}
+        />
       )}
 
       {/* ===== ZONE C: Actionable Tickets ===== */}
