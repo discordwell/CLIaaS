@@ -3461,6 +3461,7 @@ export class Game {
         entity.target = bestTarget;
         entity.mission = Mission.ATTACK;
         entity.animState = AnimState.ATTACK;
+        entity.trackNumber = -1; // MV1: reset track on mission interrupt
         return;
       }
     }
@@ -3516,8 +3517,8 @@ export class Game {
       const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
       if (occ > 0 && occ !== entity.id && entity.moveTarget) {
         // PF2: "Tell blocking unit to move" (C++ drive.cpp — nudge idle friendly units aside)
-        const blocker = this.entities.find(e => e.id === occ && e.alive);
-        if (blocker && this.entitiesAllied(entity, blocker) &&
+        const blocker = this.entityById.get(occ);
+        if (blocker?.alive && this.entitiesAllied(entity, blocker) &&
             blocker.mission !== Mission.MOVE && blocker.mission !== Mission.ATTACK &&
             !blocker.moveTarget) {
           // Find adjacent free cell for the blocker to step into
