@@ -381,3 +381,70 @@ describe('INI Parity: Unit Cost (UNIT_STATS)', () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 13. Owner/Faction Parity
+// ---------------------------------------------------------------------------
+
+// INI Owner= uses "allies"/"soviet"/"allies,soviet"/"soviet,allies" → TS 'allied'/'soviet'/'both'
+function iniOwnerToFaction(owner: string): 'allied' | 'soviet' | 'both' | null {
+  const lower = owner.toLowerCase();
+  const parts = lower.split(',').map(s => s.trim());
+  const hasAllies = parts.includes('allies');
+  const hasSoviet = parts.includes('soviet');
+  if (hasAllies && hasSoviet) return 'both';
+  if (hasAllies) return 'allied';
+  if (hasSoviet) return 'soviet';
+  return null; // country-specific or unrecognized
+}
+
+describe('INI Parity: Unit Owner/Faction', () => {
+  for (const item of PRODUCTION_ITEMS) {
+    const iniData = ini[item.type];
+    if (!iniData?.Owner) continue;
+    const expected = iniOwnerToFaction(iniData.Owner);
+    if (!expected) continue; // skip country-specific owners
+
+    it(`${item.type} faction = ${expected} (INI Owner=${iniData.Owner})`, () => {
+      expect(item.faction, `INI Owner=${iniData.Owner}`).toBe(expected);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 14. Tracked/Crusher Parity
+// ---------------------------------------------------------------------------
+
+// INI Tracked=yes implies crusher=true in C++ (DriveClass crusher behavior)
+describe('INI Parity: Tracked → Crusher', () => {
+  for (const [unit, stats] of Object.entries(UNIT_STATS)) {
+    if (EXEMPT_UNITS.has(unit)) continue;
+    const iniData = ini[unit];
+    if (!iniData?.Tracked) continue;
+    const iniTracked = iniData.Tracked.toLowerCase() === 'yes';
+
+    if (iniTracked) {
+      it(`${unit} crusher = true (INI Tracked=yes)`, () => {
+        expect(stats.crusher, `INI Tracked=yes → should be crusher`).toBe(true);
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 15. Crushable Override Parity
+// ---------------------------------------------------------------------------
+
+// INI Crushable=no overrides default (most infantry are crushable by default)
+describe('INI Parity: Crushable Override', () => {
+  for (const [unit, stats] of Object.entries(UNIT_STATS)) {
+    if (EXEMPT_UNITS.has(unit)) continue;
+    const iniData = ini[unit];
+    if (!iniData?.Crushable) continue;
+    const iniCrushable = iniData.Crushable.toLowerCase() !== 'no';
+
+    it(`${unit} crushable = ${iniCrushable} (INI Crushable=${iniData.Crushable})`, () => {
+      expect(!!stats.crushable, `INI Crushable=${iniData.Crushable}`).toBe(iniCrushable);
+    });
+  }
+});

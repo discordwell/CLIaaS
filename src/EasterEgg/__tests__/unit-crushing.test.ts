@@ -18,9 +18,10 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 
 // === 1. Crusher stats are correctly set for heavy tracked vehicles ===
 describe('crusher flag on UNIT_STATS', () => {
-  const expectedCrushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'HARV', 'MCV', 'CTNK', 'TTNK', 'QTNK'];
+  // C++ INI: Tracked=yes → crusher. APC/ARTY/V2RL/MNLY are tracked per rules.ini
+  const expectedCrushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'HARV', 'MCV', 'CTNK', 'TTNK', 'QTNK', 'APC', 'ARTY', 'V2RL', 'MNLY'];
   const expectedCrushersExpansion = ['STNK']; // Phase Transport has crusher per C++ parity
-  const expectedNonCrushers = ['JEEP', 'APC', 'ARTY', 'TRUK', 'DTRK', 'TRAN', 'LST'];
+  const expectedNonCrushers = ['JEEP', 'TRUK', 'DTRK', 'TRAN', 'LST'];
 
   it.each(expectedCrushers)('%s has crusher=true', (unitKey) => {
     expect(UNIT_STATS[unitKey].crusher).toBe(true);
@@ -31,16 +32,22 @@ describe('crusher flag on UNIT_STATS', () => {
   });
 });
 
-// === 2. All infantry types are marked crushable ===
+// === 2. Most infantry types are marked crushable (SHOK is exception per C++ aftrmath.ini Crushable=no) ===
 describe('crushable flag on infantry', () => {
-  const infantryKeys = Object.keys(UNIT_STATS).filter(k => UNIT_STATS[k].isInfantry);
+  const crushableInfantry = Object.keys(UNIT_STATS).filter(
+    k => UNIT_STATS[k].isInfantry && k !== 'SHOK'
+  );
 
-  it('there are infantry types defined', () => {
-    expect(infantryKeys.length).toBeGreaterThan(0);
+  it('there are crushable infantry types defined', () => {
+    expect(crushableInfantry.length).toBeGreaterThan(0);
   });
 
-  it.each(infantryKeys)('%s (infantry) has crushable=true', (unitKey) => {
+  it.each(crushableInfantry)('%s (infantry) has crushable=true', (unitKey) => {
     expect(UNIT_STATS[unitKey].crushable).toBe(true);
+  });
+
+  it('SHOK (Shock Trooper) is NOT crushable (C++ aftrmath.ini Crushable=no)', () => {
+    expect(UNIT_STATS.SHOK.crushable).toBeFalsy();
   });
 });
 
@@ -157,14 +164,14 @@ describe('non-crusher vehicles do NOT crush', () => {
     expect(infantry.alive).toBe(true);
   });
 
-  it('APC should NOT have crusher flag — cannot crush infantry', () => {
+  it('APC IS a crusher (C++ INI Tracked=yes)', () => {
     const apc = makeEntity(UnitType.V_APC, House.Spain, 100, 100);
-    expect(apc.stats.crusher).toBeFalsy();
+    expect(apc.stats.crusher).toBe(true);
   });
 
-  it('Artillery should NOT have crusher flag — cannot crush infantry', () => {
+  it('Artillery IS a crusher (C++ INI Tracked=yes)', () => {
     const arty = makeEntity(UnitType.V_ARTY, House.Spain, 100, 100);
-    expect(arty.stats.crusher).toBeFalsy();
+    expect(arty.stats.crusher).toBe(true);
   });
 
   it('Supply Truck should NOT have crusher flag', () => {

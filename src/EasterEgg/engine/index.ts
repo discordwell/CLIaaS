@@ -964,21 +964,24 @@ export class Game {
       }
     }
 
-    // Service Depot (FIX): dock-based repair — one vehicle at a time, costs credits
+    // Service Depot (FIX): dock-based repair + rearm — one vehicle at a time, costs credits
     // C++ parity: repair tick interval ~14 ticks (matches building self-repair rate).
-    // REPAIR_STEP (5 HP) per tick stays the same; only interval changed from 3 to 14.
+    // REPAIR_STEP (7 HP) per tick stays the same; only interval changed from 3 to 14.
     if (this.tick % 14 === 0) {
       for (const s of this.structures) {
         if (!s.alive || s.type !== 'FIX') continue;
         if (!this.isAllied(s.house, this.playerHouse)) continue;
         const sx = s.cx * CELL_SIZE + CELL_SIZE;
         const sy = s.cy * CELL_SIZE + CELL_SIZE;
-        // Find ONE docked vehicle (closest damaged vehicle within 1 cell of depot center)
+        // Find ONE docked vehicle (closest damaged OR depleted vehicle within 1 cell of depot center)
         let docked: Entity | null = null;
         let bestDist = Infinity;
         for (const e of this.entities) {
-          if (!e.alive || !this.isPlayerControlled(e) || e.hp >= e.maxHp) continue;
-          if (e.stats.isInfantry) continue; // depot only repairs vehicles
+          if (!e.alive || !this.isPlayerControlled(e)) continue;
+          if (e.stats.isInfantry) continue; // depot only services vehicles
+          const needsRepair = e.hp < e.maxHp;
+          const needsRearm = e.maxAmmo > 0 && e.ammo < e.maxAmmo;
+          if (!needsRepair && !needsRearm) continue;
           const dist = worldDist({ x: sx, y: sy }, e.pos);
           if (dist < 1.5 && dist < bestDist) { // worldDist returns cells
             docked = e;
@@ -986,25 +989,37 @@ export class Game {
           }
         }
         if (docked) {
-          // Repair cost per step: same formula as building repair
-          const unitCost = this.scenarioProductionItems.find(p => p.type === docked!.type)?.cost ?? 400;
-          const repairCost = Math.ceil((unitCost * REPAIR_PERCENT) / (docked.maxHp / REPAIR_STEP));
-          if (this.credits >= repairCost) {
-            this.credits -= repairCost;
-            docked.hp = Math.min(docked.maxHp, docked.hp + REPAIR_STEP);
-            // Visual spark effect on each repair tick
-            this.effects.push({
-              type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
-              frame: 0, maxFrames: 5, size: 3, sprite: 'piff', spriteStart: 0,
-            });
-          } else {
-            // C++ parity: cancel repair when insufficient funds (player must re-initiate)
-            // Eject unit from depot pad so it won't be auto-repaired next tick
-            docked.mission = Mission.GUARD;
-            docked.moveTarget = {
-              x: docked.pos.x + CELL_SIZE * 3,
-              y: docked.pos.y + CELL_SIZE * 3,
-            };
+          const needsRepair = docked.hp < docked.maxHp;
+          if (needsRepair) {
+            // Repair cost per step: same formula as building repair
+            const unitCost = this.scenarioProductionItems.find(p => p.type === docked!.type)?.cost ?? 400;
+            const repairCost = Math.ceil((unitCost * REPAIR_PERCENT) / (docked.maxHp / REPAIR_STEP));
+            if (this.credits >= repairCost) {
+              this.credits -= repairCost;
+              docked.hp = Math.min(docked.maxHp, docked.hp + REPAIR_STEP);
+              // Visual spark effect on each repair tick
+              this.effects.push({
+                type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
+                frame: 0, maxFrames: 5, size: 3, sprite: 'piff', spriteStart: 0,
+              });
+            } else {
+              // C++ parity: cancel repair when insufficient funds (player must re-initiate)
+              // Eject unit from depot pad so it won't be auto-repaired next tick
+              docked.mission = Mission.GUARD;
+              docked.moveTarget = {
+                x: docked.pos.x + CELL_SIZE * 3,
+                y: docked.pos.y + CELL_SIZE * 3,
+              };
+            }
+          }
+          // C++ parity: service depot reloads ammo (ReloadRate=.04 min = 36 ticks per ammo)
+          // Rearm happens alongside repair, free of charge
+          if (docked.maxAmmo > 0 && docked.ammo < docked.maxAmmo) {
+            docked.rearmTimer = (docked.rearmTimer ?? 0) - 1;
+            if (docked.rearmTimer <= 0) {
+              docked.ammo++;
+              docked.rearmTimer = 36; // C++ ReloadRate=.04 min → 0.04 × 60 × 15 = 36 ticks
+            }
           }
         }
       }
@@ -4766,6 +4781,8 @@ export class Game {
         const destroyed = this.damageStructure(s, damage);
         entity.attackCooldown = entity.weapon.rof;
         if (entity.hasTurret) entity.isInRecoilState = true; // M6
+        // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
+        if (entity.ammo > 0) entity.ammo--;
         this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
         // Muzzle + impact effects (color by warhead — C++ parity)
         this.effects.push({
@@ -4782,6 +4799,13 @@ export class Game {
         });
         if (destroyed) {
           if (this.isPlayerControlled(entity)) this.killCount++;
+        }
+        // Out of ammo — stop attacking (C++ parity: unit must rearm at service depot)
+        if (entity.ammo === 0 && entity.maxAmmo > 0 && !entity.isAirUnit) {
+          entity.targetStructure = null;
+          entity.mission = Mission.GUARD;
+          entity.animState = AnimState.IDLE;
+          return;
         }
       }
     } else {
@@ -4810,6 +4834,8 @@ export class Game {
       if (entity.attackCooldown <= 0 && entity.weapon) {
         entity.attackCooldown = entity.weapon.rof;
         if (entity.hasTurret) entity.isInRecoilState = true; // M6
+        // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
+        if (entity.ammo > 0) entity.ammo--;
 
         // Apply scatter
         let impactX = target.x;
@@ -4855,6 +4881,13 @@ export class Game {
         });
         const tc = worldToCell(impactX, impactY);
         this.map.addDecal(tc.cx, tc.cy, 3, 0.3);
+        // Out of ammo — stop attacking (C++ parity: unit must rearm at service depot)
+        if (entity.ammo === 0 && entity.maxAmmo > 0 && !entity.isAirUnit) {
+          entity.target = null;
+          entity.mission = Mission.GUARD;
+          entity.animState = AnimState.IDLE;
+          return;
+        }
       }
     } else {
       entity.animState = AnimState.WALK;
@@ -9435,11 +9468,14 @@ export class Game {
     const targetCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
     const dist = worldDist(entity.pos, entity.moveTarget);
     if (dist > 0.5) { entity.animState = AnimState.WALK; entity.moveToward(entity.moveTarget, this.movementSpeed(entity)); return; }
+    // C++ parity: minelayer carries limited ammo (Ammo=5 in rules.ini)
+    if (entity.ammo === 0 && entity.maxAmmo > 0) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
     const houseMines = this.mines.filter(m => m.house === entity.house).length;
     if (houseMines >= Game.MAX_MINES_PER_HOUSE) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
     if (!this.mines.find(m => m.cx === targetCell.cx && m.cy === targetCell.cy)) {
       this.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: 1000 });
       entity.mineCount++;
+      if (entity.ammo > 0) entity.ammo--;
     }
     entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE;
   }
