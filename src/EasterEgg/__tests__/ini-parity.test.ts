@@ -278,9 +278,6 @@ describe('INI Parity: General Settings', () => {
 // 7. Production Cost Parity
 // ---------------------------------------------------------------------------
 
-// Build a lookup from PRODUCTION_ITEMS for fast access
-const prodByType = new Map(PRODUCTION_ITEMS.map(p => [p.type, p]));
-
 describe('INI Parity: Production Cost', () => {
   for (const item of PRODUCTION_ITEMS) {
     const iniData = ini[item.type];
