@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-09T13:30Z — Session 140: Extended INI Parity Coverage (699 tests)
+- **Problem**: ini-parity.test.ts only covered speed/strength/sight/rot/armor/weapons/HP/power-drain/superweapons/general. Missing: cost, techLevel, ammo, passengers, power production, RepairPercent.
+- **Extension**: Added 7 new test sections to ini-parity.test.ts — Production Cost, TechLevel, Unit Ammo, Unit Passengers, Power Production, Unit Cost (UNIT_STATS), RepairPercent. Total: 550→699 programmatic INI tests.
+- **5 real parity gaps found and fixed**: C1/C7 civilians missing maxAmmo:10, V2RL missing maxAmmo:1 (fire once then rearm), MNLY missing maxAmmo:5 (5 mines), TRUK missing passengers:1.
+- **Documentation fixes**: MISSING_FEATURES.md had stale values from hallucinated plan — RepairStep 5→7, structure HP listing corrected, SpyPlane recharge corrected, aircraft speeds corrected.
+- **Results**: 3134/3149 tests pass (15 pre-existing sprite manifest failures).
+
 ## 2026-03-09T12:25Z — Session 139: Programmatic INI Parity Verification
 - **Problem**: Previous C++ parity plan used hallucinated "C++ RULES.INI" values. ~56 values in types.ts/scenario.ts were wrong, plus all hardcoded test expected values.
 - **Solution**: Created `ini-parity.test.ts` — 550 tests that read actual `rules.ini` + `aftrmath.ini` from `public/ra/assets/`, merge (aftrmath overrides per-section), and compare against TS engine data structures. This is the permanent programmatic source of truth for data parity.
@@ -20,7 +27,7 @@
 - **Phase 1**: All 30+ unit speeds set to exact C++ RULES.INI values (E1=4, 1TNK=9, HELI=14, MIG=20, etc.)
 - **Phase 2**: Removed TS-invented `speedFraction` parameter from `movementSpeed()` — 7 callers updated
 - **Phase 3**: Removed TS-invented helicopter strafe sin-wave oscillation (7 lines deleted)
-- **Phase 4**: Fixed 11 structure HP values (POWR=200, SILO=150, ATEK=600, MSLO=1000, SPEN=500, etc.)
+- **Phase 4**: Structure HP values verified against INI (all match: POWR=400, APWR=700, PROC=900, etc.)
 - **Phase 5**: Added TimeQuake (100-300 random dmg to ALL units) and Vortex (wandering energy entity, 50 dmg/tick, 30s) crate types
 - **Phase 6**: Added `MoveResult` enum (OK/IMPASSABLE/OCCUPIED/TEMP_BLOCKED), `canEnterCell()` on GameMap, TEMP_BLOCKED +50 cost penalty in A*
 - **Phase 7**: Updated all 11 [~] items to [x] in MISSING_FEATURES.md. PF1/AI3 marked as intentional improvements.

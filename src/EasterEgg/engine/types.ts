@@ -570,7 +570,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   ARTY:   { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 5, rot: 2, isInfantry: false, primaryWeapon: '155mm', noMovingFire: true, scanDelay: 20 },
   HARV:   { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
   MCV:    { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
-  TRUK:   { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null },
+  TRUK:   { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 1 },
   // Infantry (C++ idata.cpp MPH values) — all infantry are crushable
   E1:   { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'M1Carbine', crushable: true },
   E2:   { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Grenade', crushable: true, owner: 'soviet' },
@@ -583,13 +583,13 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true },
   CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   // Civilians — crushable
-  C1: { type: UnitType.I_C1, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true },
+  C1: { type: UnitType.I_C1, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, maxAmmo: 10 },
   C2: { type: UnitType.I_C2, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C3: { type: UnitType.I_C3, name: 'Civilian', image: 'c2', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C4: { type: UnitType.I_C4, name: 'Civilian', image: 'c2', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C5: { type: UnitType.I_C5, name: 'Civilian', image: 'c2', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C6: { type: UnitType.I_C6, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  C7: { type: UnitType.I_C7, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true },
+  C7: { type: UnitType.I_C7, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, maxAmmo: 10 },
   C8: { type: UnitType.I_C8, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C9: { type: UnitType.I_C9, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   C10: { type: UnitType.I_C10, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
@@ -621,8 +621,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e1', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true },
   THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500 },
   // Expansion vehicles (V2 Rocket, Minelayer)
-  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true },
-  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800 },
+  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1 },
+  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800, maxAmmo: 5 },
 };
 
 // Weapon stats from RULES.INI — real RA values

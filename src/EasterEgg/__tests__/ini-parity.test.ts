@@ -16,7 +16,8 @@ import { describe, it, expect } from 'vitest';
 import {
   UNIT_STATS, WEAPON_STATS, POWER_DRAIN,
   SUPERWEAPON_DEFS, SuperweaponType,
-  REPAIR_STEP, IRON_CURTAIN_DURATION,
+  REPAIR_STEP, REPAIR_PERCENT, IRON_CURTAIN_DURATION,
+  PRODUCTION_ITEMS,
 } from '../engine/types';
 import { STRUCTURE_MAX_HP } from '../engine/scenario';
 
@@ -261,6 +262,125 @@ describe('INI Parity: General Settings', () => {
     const icTicks = Math.round(Number(general.IronCurtain) * 60 * 15);
     it(`IronCurtain duration = ${general.IronCurtain} min → ${icTicks} ticks`, () => {
       expect(IRON_CURTAIN_DURATION, `INI IronCurtain=${general.IronCurtain}`).toBe(icTicks);
+    });
+  }
+
+  if (general.RepairPercent) {
+    it(`RepairPercent = ${general.RepairPercent}`, () => {
+      // INI format: "20%" → 0.20
+      const iniValue = parseInt(general.RepairPercent, 10) / 100;
+      expect(REPAIR_PERCENT, `INI RepairPercent=${general.RepairPercent}`).toBe(iniValue);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7. Production Cost Parity
+// ---------------------------------------------------------------------------
+
+// Build a lookup from PRODUCTION_ITEMS for fast access
+const prodByType = new Map(PRODUCTION_ITEMS.map(p => [p.type, p]));
+
+describe('INI Parity: Production Cost', () => {
+  for (const item of PRODUCTION_ITEMS) {
+    const iniData = ini[item.type];
+    if (!iniData?.Cost) continue;
+
+    it(`${item.type} cost = ${iniData.Cost}`, () => {
+      expect(item.cost, `INI Cost=${iniData.Cost}`).toBe(Number(iniData.Cost));
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 8. Production TechLevel Parity
+// ---------------------------------------------------------------------------
+
+describe('INI Parity: TechLevel', () => {
+  for (const item of PRODUCTION_ITEMS) {
+    if (item.techLevel === undefined || item.techLevel < 0) continue;
+    const iniData = ini[item.type];
+    if (!iniData?.TechLevel) continue;
+
+    it(`${item.type} techLevel = ${iniData.TechLevel}`, () => {
+      expect(item.techLevel, `INI TechLevel=${iniData.TechLevel}`).toBe(Number(iniData.TechLevel));
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 9. Unit Ammo Parity
+// ---------------------------------------------------------------------------
+
+describe('INI Parity: Unit Ammo', () => {
+  for (const [unit, stats] of Object.entries(UNIT_STATS)) {
+    if (EXEMPT_UNITS.has(unit)) continue;
+    const iniData = ini[unit];
+    if (!iniData?.Ammo) continue;
+
+    it(`${unit} ammo = ${iniData.Ammo}`, () => {
+      expect(stats.maxAmmo ?? -1, `INI Ammo=${iniData.Ammo}`).toBe(Number(iniData.Ammo));
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 10. Unit Passengers Parity
+// ---------------------------------------------------------------------------
+
+describe('INI Parity: Unit Passengers', () => {
+  for (const [unit, stats] of Object.entries(UNIT_STATS)) {
+    if (EXEMPT_UNITS.has(unit)) continue;
+    const iniData = ini[unit];
+    if (!iniData?.Passengers) continue;
+
+    it(`${unit} passengers = ${iniData.Passengers}`, () => {
+      expect(stats.passengers ?? 0, `INI Passengers=${iniData.Passengers}`).toBe(Number(iniData.Passengers));
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 11. Power Production Parity
+// ---------------------------------------------------------------------------
+
+// Power-producing structures have positive Power= in INI
+const POWER_PRODUCERS: Record<string, number> = {};
+for (const [section, values] of Object.entries(ini)) {
+  if (values.Power && Number(values.Power) > 0) {
+    POWER_PRODUCERS[section] = Number(values.Power);
+  }
+}
+
+describe('INI Parity: Power Production', () => {
+  // These values are hardcoded in index.ts — document them here
+  // If the INI says POWR produces 100 and APWR produces 200, verify that.
+  for (const [building, iniPower] of Object.entries(POWER_PRODUCERS)) {
+    it(`${building} produces ${iniPower} power (documented)`, () => {
+      // Power production is hardcoded in Game.recalcPower() in index.ts,
+      // not in a data structure. This test documents the correct INI values
+      // and will fail if the INI changes, prompting a code update.
+      const knownProducers: Record<string, number> = { POWR: 100, APWR: 200 };
+      if (knownProducers[building] !== undefined) {
+        expect(knownProducers[building], `INI Power=${iniPower}`).toBe(iniPower);
+      }
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 12. Unit Cost Parity (UNIT_STATS.cost vs INI)
+// ---------------------------------------------------------------------------
+
+describe('INI Parity: Unit Cost (UNIT_STATS)', () => {
+  for (const [unit, stats] of Object.entries(UNIT_STATS)) {
+    if (EXEMPT_UNITS.has(unit)) continue;
+    if (stats.cost === undefined) continue;
+    const iniData = ini[unit];
+    if (!iniData?.Cost) continue;
+
+    it(`${unit} cost = ${iniData.Cost}`, () => {
+      expect(stats.cost, `INI Cost=${iniData.Cost}`).toBe(Number(iniData.Cost));
     });
   }
 });

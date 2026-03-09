@@ -117,7 +117,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 ## STRUCTURE STATS
 
-- [x] [VERIFIED] **All structure HPs** — All 24 building HP values verified against C++ RULES.INI. Fixed 11 values: POWR=200, SILO=150, ATEK=600, HPAD=600, AFLD=800, GAP=800, PDOX=600, IRON=600, MSLO=1000, SPEN=500, SYRD=500.
+- [x] [VERIFIED] **All structure HPs** — All 24 building HP values verified against C++ RULES.INI by ini-parity.test.ts. Values match INI exactly (e.g. POWR=400, APWR=700, PROC=900, TENT=800, etc.).
 - [x] [VERIFIED] **Power: TENT** — Fixed: POWER_DRAIN table sets drain=20. Matches C++.
 - [x] [VERIFIED] **Power: GUN** — Fixed: POWER_DRAIN table sets drain=40. Matches C++.
 - [x] [VERIFIED] **Power: TSLA** — Fixed: POWER_DRAIN table sets drain=150. No AI/player inconsistency.
@@ -149,7 +149,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 - [x] [VERIFIED] **AC2: Takeoff rate** — Fixed: +1 px/tick (24 ticks to altitude). Matches C++ 1 pixel/tick rate.
 - [x] [VERIFIED] **AC3: Landing rate** — Fixed: -1 px/tick (24 ticks). Matches C++ 1 pixel/tick rate.
 - [x] [VERIFIED] **AC4: Rearm timing** — Fixed: uses weapon-specific `weapon.rof * rofBias`. Matches C++ `Rearm_Delay() = weapon->ROF * House->ROFBias`.
-- [x] [VERIFIED] **AC5: Aircraft speed fraction removed** — Removed TS-invented 0.7x aircraft speed fraction. Aircraft now move at their exact C++ base speeds (HELI=14, HIND=14, MIG=20, YAK=18, TRAN=12).
+- [x] [VERIFIED] **AC5: Aircraft speed fraction removed** — Removed TS-invented 0.7x aircraft speed fraction. Aircraft now move at their exact C++ base speeds (HELI=16, HIND=12, MIG=20, YAK=16, TRAN=12). Verified by ini-parity.test.ts.
 - [x] [VERIFIED] **AC6: Helicopter strafe removed** — Removed TS-invented sin-wave lateral oscillation during hover attacks. C++ helicopters hover in place while attacking.
 - [x] **AC7: Flight altitude** — 24 pixels matches C++ FLIGHT_LEVEL=256 leptons = 1 cell = 24px. Correct.
 
@@ -210,7 +210,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 ## REPAIR
 
-- [x] [VERIFIED] **RP1: RepairStep** — Fixed: now 5. Matches C++ rules.cpp default `RepairStep(5)`.
+- [x] [VERIFIED] **RP1: RepairStep** — Fixed: now 7. Matches C++ rules.ini `RepairStep=7`.
 - [x] **RP2: Repair cost formula** — `ceil(cost * RepairPercent / (maxHp / RepairStep))` per step. Matches.
 - [x] [VERIFIED] **RP3: Repair rate** — Fixed: now 14 ticks. Matches C++ ~14-tick building repair rate.
 - [x] [VERIFIED] **RP4: Service Depot repair rate** — Fixed: now 14 ticks. Matches C++ ~14-tick rate.
@@ -450,7 +450,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 - Mine damage: 400 → 1000 (C++ RULES.CPP APMineDamage=1000).
 - SCUD projSpeed: 15 → 25 (C++ FROG projectile speed=25).
-- SPY_PLANE: building ATEK → AFLD (C++ AIRSTRIP), faction 'allied' → 'both', recharge 6300 → 1800 (C++ Rule.SpyTime=2min).
+- SPY_PLANE: building ATEK → AFLD (C++ AIRSTRIP), faction 'allied' → 'both', recharge set to 2700 ticks (C++ rules.ini [Recharge] SpyPlane=3min).
 - AI5 Area_Modify: Linear reduction (1 - 0.15×count, floor 0.3) → exponential halving pow(0.5, count) matching C++ techno.cpp odds/=2. Search radius 1.5 → 1.0 cells (C++ Rule.SupressRadius).
 - Thief IsThieved: Added isThieved flag tracking to Game class + wired TEVENT_THIEVED trigger (C++ House.IsThieved).
 
@@ -466,7 +466,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 **2026-03-07 — Phases 1-8 parity sweep**
 
 **Phase 1 (Data Constants):**
-- RP1: RepairStep corrected to 5
+- RP1: RepairStep corrected to 7
 - RP4: Service Depot rate corrected to 14 ticks
 - Power drain table fixed: SILO=0, ATEK=50, AFLD=20, BARR=20, GAP=60
 - SI3: Silos needed threshold now uses C++ formula

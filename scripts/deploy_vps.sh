@@ -86,6 +86,8 @@ rsync -az --delete -e "$RSYNC_SSH" \
   --exclude '.env' \
   --exclude '.env.local' \
   --exclude 'test-results' \
+  --exclude '.claude' \
+  --exclude 'build-wasm' \
   "$PROJECT_ROOT/" "$VPS_SSH:$REMOTE_APP_DIR/"
 
 echo "[3/6] Installing dependencies + build on remote host..."
