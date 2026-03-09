@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-09T13:45Z — Session 140b: Ground Ammo, Crusher/Owner Parity (778 INI tests)
+- **Ground ammo consumption**: V2RL now fires once then stops (maxAmmo=1), MNLY depletes 5 mines, C1/C7 civilians fire 10 shots. Added `if (entity.ammo > 0) entity.ammo--` to both ground fire paths (unit attack + structure attack) + out-of-ammo guard transition.
+- **Service depot rearm**: FIX structure now rearms docked vehicles at 36 ticks/ammo (C++ ReloadRate=.04 min). Extended existing repair loop to also check `ammo < maxAmmo`.
+- **Minelayer ammo**: `updateMinelayer()` now checks `entity.ammo > 0` before placing mine and decrements after.
+- **Crusher fixes**: APC/ARTY/V2RL/MNLY now `crusher: true` (INI Tracked=yes). SHOK now NOT crushable (aftrmath.ini Crushable=no).
+- **INI parity tests**: Added sections 13 (Owner/Faction), 14 (Tracked→Crusher), 15 (Crushable Override). Total: 699→778 tests.
+- **New test file**: `ground-ammo.test.ts` — 15 tests for ammo mechanics.
+- **Updated**: `unit-crushing.test.ts` to match C++ INI data.
+- **Results**: 3231/3245 tests pass (14 pre-existing sprite failures).
+
 ## 2026-03-09T13:30Z — Session 140: Extended INI Parity Coverage (699 tests)
 - **Problem**: ini-parity.test.ts only covered speed/strength/sight/rot/armor/weapons/HP/power-drain/superweapons/general. Missing: cost, techLevel, ammo, passengers, power production, RepairPercent.
 - **Extension**: Added 7 new test sections to ini-parity.test.ts — Production Cost, TechLevel, Unit Ammo, Unit Passengers, Power Production, Unit Cost (UNIT_STATS), RepairPercent. Total: 550→699 programmatic INI tests.
