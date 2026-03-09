@@ -630,6 +630,7 @@ export class Game {
     for (let i = 0; i < n && this.state === 'playing'; i++) {
       this.update();
     }
+    this.renderer.interpolationAlpha = 1; // agent step: show latest state, no interpolation
     this.render();
     if (wasPaused && this.state === 'playing') this.state = 'paused';
   }
@@ -652,6 +653,7 @@ export class Game {
         return;
       }
       // Render but don't tick — still show pause overlay
+      this.renderer.interpolationAlpha = 1;
       this.render();
       this.timerId = window.setTimeout(this.gameLoop, 100); // slow render rate while paused
       return;
@@ -680,6 +682,12 @@ export class Game {
     if (ticksThisFrame >= maxTicksPerFrame && this.accumulator > this.tickInterval) {
       this.accumulator = 0;
     }
+
+    // Render interpolation: fraction of tick elapsed since last update (0-1)
+    // Smooths entity movement between 20fps game ticks for 60fps visual rendering
+    this.renderer.interpolationAlpha = this.tickInterval > 0
+      ? Math.min(1, this.accumulator / this.tickInterval)
+      : 1;
 
     this.render();
     this.scheduleNext();

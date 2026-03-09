@@ -175,6 +175,9 @@ export class Renderer {
   showHelp = false;     // F1 help overlay
   difficulty: 'easy' | 'normal' | 'hard' = 'normal';
   idleCount = 0;        // number of idle player units
+  /** Render interpolation alpha (0-1): fraction of tick elapsed since last update.
+   *  Used to interpolate entity positions between game ticks for smooth 60fps rendering. */
+  interpolationAlpha = 1;
   minimapAlerts: Array<{ cx: number; cy: number; tick: number }> = [];
   // Sidebar data (set by game each frame)
   sidebarCredits = 0;  // animated display credits
@@ -1727,18 +1730,23 @@ export class Renderer {
       // Don't render enemy entities in fog (only player units visible in fog)
       if (map.getVisibility(ecx, ecy) === 1 && !entity.isPlayerUnit) continue;
 
+      // Render interpolation: smooth position between ticks for 60fps visual
+      const alpha = this.interpolationAlpha;
+      const renderX = entity.prevPos.x + (entity.pos.x - entity.prevPos.x) * alpha;
+      const renderY = entity.prevPos.y + (entity.pos.y - entity.prevPos.y) * alpha;
+
       // Apply infantry sub-cell offset
       const subOff = entity.stats.isInfantry ? (SUB_CELL_OFFSETS[entity.subCell] ?? SUB_CELL_OFFSETS[0]) : SUB_CELL_OFFSETS[0];
       // Air units: apply flight altitude offset (renders higher, shadow at ground level)
       const altY = entity.isAirUnit ? entity.flightAltitude : 0;
-      const screen = camera.worldToScreen(entity.pos.x + subOff.x, entity.pos.y + subOff.y);
+      const screen = camera.worldToScreen(renderX + subOff.x, renderY + subOff.y);
       const sheet = assets.getSheet(entity.stats.image);
       const spriteW = sheet ? sheet.meta.frameWidth : (entity.stats.isInfantry ? 50 : 24);
       const spriteH = sheet ? sheet.meta.frameHeight : (entity.stats.isInfantry ? 39 : 24);
 
       if (!camera.isVisible(
-        entity.pos.x - spriteW / 2,
-        entity.pos.y - spriteH / 2,
+        renderX - spriteW / 2,
+        renderY - spriteH / 2,
         spriteW, spriteH
       )) continue;
 
