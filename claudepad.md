@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-09T14:35Z — Session 140c: Behavioral Parity Verification Pipeline (195 tests)
+- **4 new test files** for non-INI behavioral parity:
+  1. `combat-formula-parity.test.ts` (97 tests): modifyDamage formula, all 45 WARHEAD_VS_ARMOR multipliers vs C++ Verses=, WARHEAD_META spreadFactor/destruction flags, distance falloff (distFactor clamp [0,16]), MinDamage=1 threshold (distFactor<4), MaxDamage=1000 cap, scatter formula (HomingScatter=512, BallisticScatter=256 caps), calcProjectileTravelFrames.
+  2. `track-movement-parity.test.ts` (55 tests): 7 tracks × 8 steps structure, straight track Y progression, left/right symmetry (45L=-45R, 90L=-90R, 180L=-180R), endpoint cell displacement, facing progression (32-step ring), selectTrack angular thresholds (≤4=45°, ≤12=90°, >12=180°), rotateTrackOffset all 8 directions with cardinal integer exactness, 360° composition, usesTrackMovement eligibility, LP conversion.
+  3. `crate-weights-parity.test.ts` (20 tests): All 14 crate types with exact share weights, total=136, probability distribution properties, 10K-roll statistical simulation.
+  4. `projspeed-parity.test.ts` (23 tests): C++ leptons/tick ↔ TS cells/sec conversion, per-weapon projSpeed by tier (hitscan=40, cannon=30, missile=15, arcing=12), pixelsPerTick derivation, travel time at combat ranges, all weapons have projSpeed defined.
+- **Results**: 3426/3440 tests pass (14 pre-existing sprite failures).
+
 ## 2026-03-09T13:45Z — Session 140b: Ground Ammo, Crusher/Owner Parity (778 INI tests)
 - **Ground ammo consumption**: V2RL now fires once then stops (maxAmmo=1), MNLY depletes 5 mines, C1/C7 civilians fire 10 shots. Added `if (entity.ammo > 0) entity.ammo--` to both ground fire paths (unit attack + structure attack) + out-of-ammo guard transition.
 - **Service depot rearm**: FIX structure now rearms docked vehicles at 36 ticks/ammo (C++ ReloadRate=.04 min). Extended existing repair loop to also check `ammo < maxAmmo`.
