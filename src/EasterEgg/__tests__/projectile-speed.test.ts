@@ -39,9 +39,9 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       const frames = calcProjectileTravelFrames(distPixels, rocketSpeed);
 
       // 5 cells * 24 px/cell = 120 px
-      // pixels/tick = 15 * 24 / 15 = 24
-      // frames = ceil(120 / 24) = 5
-      expect(frames).toBe(5);
+      // pixels/tick = 15 * 24 / 20 = 18
+      // frames = ceil(120 / 18) = 7
+      expect(frames).toBe(7);
       expect(frames).toBeGreaterThan(1);
     });
 
@@ -169,12 +169,12 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       const projSpeed = 15; // cells/sec
       const dist = 5 * CELL_SIZE; // 120 pixels
       const pixelsPerTick = projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
-      // 15 * 24 / 15 = 24 pixels/tick
-      expect(pixelsPerTick).toBe(24);
+      // 15 * 24 / 20 = 18 pixels/tick
+      expect(pixelsPerTick).toBe(18);
 
       const expected = Math.max(1, Math.ceil(dist / pixelsPerTick));
-      // ceil(120 / 24) = 5
-      expect(expected).toBe(5);
+      // ceil(120 / 18) = 7
+      expect(expected).toBe(7);
 
       const actual = calcProjectileTravelFrames(dist, projSpeed);
       expect(actual).toBe(expected);

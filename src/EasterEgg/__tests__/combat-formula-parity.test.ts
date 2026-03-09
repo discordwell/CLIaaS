@@ -349,9 +349,9 @@ describe('calcProjectileTravelFrames — projSpeed parity', () => {
   });
 
   it('conversion formula: pixelsPerTick = projSpeed × CELL_SIZE / GAME_TICKS_PER_SEC', () => {
-    // projSpeed=15 cells/sec → pixelsPerTick = 15 * 24 / 15 = 24.0 px/tick
+    // projSpeed=15 cells/sec → pixelsPerTick = 15 * 24 / 20 = 18.0 px/tick
     const pixelsPerTick = 15 * CELL_SIZE / GAME_TICKS_PER_SEC;
-    expect(pixelsPerTick).toBe(24);
+    expect(pixelsPerTick).toBe(18);
   });
 
   it('short distance, fast projectile = 1 tick minimum', () => {
@@ -393,7 +393,7 @@ describe('unit system constants', () => {
     expect(LEPTON_SIZE).toBe(256);
   });
 
-  it('GAME_TICKS_PER_SEC = 15 (C++ game loop frequency)', () => {
-    expect(GAME_TICKS_PER_SEC).toBe(15);
+  it('GAME_TICKS_PER_SEC = 20 (C++ default GameSpeed=3: 60/3)', () => {
+    expect(GAME_TICKS_PER_SEC).toBe(20);
   });
 });

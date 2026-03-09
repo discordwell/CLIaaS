@@ -3,7 +3,7 @@
  *
  * Documents the mapping between C++ Speed= (leptons/tick) and TS projSpeed
  * (cells/second). These use different unit systems:
- *   C++ Speed=  : leptons per game tick (1 cell = 256 leptons, 15 ticks/sec)
+ *   C++ Speed=  : leptons per game tick (1 cell = 256 leptons, 20 ticks/sec at default GameSpeed=3)
  *   TS projSpeed: cells per second
  *
  * Conversion: projSpeed_cells_per_sec = (C++_Speed * GAME_TICKS_PER_SEC) / LEPTON_SIZE
@@ -41,10 +41,11 @@ describe('unit system conversion: C++ leptons/tick ↔ TS cells/sec', () => {
     expect(tsProjSpeedToCppSpeed(tsSpeed)).toBeCloseTo(cppSpeed, 10);
   });
 
-  it('C++ ROCKET speed (60 MPH) → ~3.5 cells/sec', () => {
+  it('C++ ROCKET speed (60 MPH) → ~4.69 cells/sec', () => {
     // This is the speed constant, not the weapon Speed field
+    // 60 * 20 / 256 = 4.6875
     const result = cppSpeedToTSProjSpeed(60);
-    expect(result).toBeCloseTo(3.515625, 3);
+    expect(result).toBeCloseTo(4.6875, 3);
   });
 });
 
@@ -132,24 +133,24 @@ describe('pixelsPerTick derivation from projSpeed', () => {
     return projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
   }
 
-  it('projSpeed=40 → 64 pixels/tick (instant-feel)', () => {
-    expect(pixelsPerTick(40)).toBe(64);
+  it('projSpeed=40 → 48 pixels/tick (instant-feel)', () => {
+    expect(pixelsPerTick(40)).toBe(48);
   });
 
-  it('projSpeed=30 → 48 pixels/tick (tank shells)', () => {
-    expect(pixelsPerTick(30)).toBe(48);
+  it('projSpeed=30 → 36 pixels/tick (tank shells)', () => {
+    expect(pixelsPerTick(30)).toBe(36);
   });
 
-  it('projSpeed=15 → 24 pixels/tick (missiles)', () => {
-    expect(pixelsPerTick(15)).toBe(24);
+  it('projSpeed=15 → 18 pixels/tick (missiles)', () => {
+    expect(pixelsPerTick(15)).toBe(18);
   });
 
-  it('projSpeed=12 → 19.2 pixels/tick (arcing)', () => {
-    expect(pixelsPerTick(12)).toBeCloseTo(19.2, 5);
+  it('projSpeed=12 → 14.4 pixels/tick (arcing)', () => {
+    expect(pixelsPerTick(12)).toBeCloseTo(14.4, 5);
   });
 
-  it('projSpeed=5 → 8 pixels/tick (parabombs)', () => {
-    expect(pixelsPerTick(5)).toBe(8);
+  it('projSpeed=5 → 6 pixels/tick (parabombs)', () => {
+    expect(pixelsPerTick(5)).toBe(6);
   });
 });
 
@@ -169,9 +170,10 @@ describe('travel time at typical combat ranges', () => {
     expect(calcProjectileTravelFrames(dist, 30)).toBe(expected);
   });
 
-  it('missile at 5 cells: projSpeed=15 → 5 ticks', () => {
+  it('missile at 5 cells: projSpeed=15 → 7 ticks', () => {
     const dist = 5 * CELL_SIZE;
-    expect(calcProjectileTravelFrames(dist, 15)).toBe(5);
+    // pixPerTick = 15*24/20 = 18, ceil(120/18) = 7
+    expect(calcProjectileTravelFrames(dist, 15)).toBe(7);
   });
 
   it('artillery at 6 cells: projSpeed=12 → 8 ticks', () => {

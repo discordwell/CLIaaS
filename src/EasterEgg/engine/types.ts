@@ -13,7 +13,8 @@ export const LEPTON_SIZE = 256; // leptons per cell
 /** Convert C++ MPH (leptons/tick) to pixels/tick: MPH * CELL_SIZE / LEPTON_SIZE */
 export const MPH_TO_PX = CELL_SIZE / LEPTON_SIZE; // 0.09375
 export const MAP_CELLS = 128; // cells per map side
-export const GAME_TICKS_PER_SEC = 15; // original game ran at ~15 FPS
+/** C++ default GameSpeed=3 → DesiredFrameRate = 60/3 = 20 (queue.cpp:1425, options.cpp:91) */
+export const GAME_TICKS_PER_SEC = 20;
 
 // TEMPERATE theatre template type ranges (from TEMPERAT.INI)
 export const TEMPLATE_ROAD_MIN = 173;

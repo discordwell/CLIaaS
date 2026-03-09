@@ -1523,7 +1523,7 @@ describe('Scalar constants parity', () => {
   it('CELL_SIZE = 24', () => expect(CELL_SIZE).toBe(24));
   it('LEPTON_SIZE = 256', () => expect(LEPTON_SIZE).toBe(256));
   it('MAP_CELLS = 128', () => expect(MAP_CELLS).toBe(128));
-  it('GAME_TICKS_PER_SEC = 15', () => expect(GAME_TICKS_PER_SEC).toBe(15));
+  it('GAME_TICKS_PER_SEC = 20 (C++ default GameSpeed=3: 60/3)', () => expect(GAME_TICKS_PER_SEC).toBe(20));
   it('MAX_DAMAGE = 1000', () => expect(MAX_DAMAGE).toBe(1000));
   it('REPAIR_STEP = 7', () => expect(REPAIR_STEP).toBe(7));
   it('REPAIR_PERCENT = 0.20', () => expect(REPAIR_PERCENT).toBe(0.20));

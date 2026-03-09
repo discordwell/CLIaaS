@@ -255,9 +255,9 @@ export class MusicPlayer {
       const trackIdx = actionIndices[Math.floor(Math.random() * actionIndices.length)];
       this.playTrack(trackIdx);
     } else if (!inCombat && this.combatMode) {
-      // Leave combat with 30-second cooldown (called once per tick at 15fps)
+      // Leave combat with cooldown (called once per tick)
       this.combatCooldown++;
-      if (this.combatCooldown >= 450) { // 450 ticks = 30 seconds at 15fps
+      if (this.combatCooldown >= 450) { // 450 ticks ≈ 22.5s at 20fps
         this.combatMode = false;
         this.combatModeChangeTime = now;
         // Switch to calm track

@@ -211,13 +211,13 @@ describe('CR6: Crate lifetime range (5-20 minutes)', () => {
   it('minimum lifetime is 5 minutes in ticks', () => {
     const minLifetimeMinutes = 5;
     const minLifetimeTicks = minLifetimeMinutes * 60 * GAME_TICKS_PER_SEC;
-    expect(minLifetimeTicks).toBe(5 * 60 * 15); // 4500 ticks
+    expect(minLifetimeTicks).toBe(5 * 60 * 20); // 6000 ticks
   });
 
   it('maximum lifetime is 20 minutes in ticks', () => {
     const maxLifetimeMinutes = 20;
     const maxLifetimeTicks = maxLifetimeMinutes * 60 * GAME_TICKS_PER_SEC;
-    expect(maxLifetimeTicks).toBe(20 * 60 * 15); // 18000 ticks
+    expect(maxLifetimeTicks).toBe(20 * 60 * 20); // 24000 ticks
   });
 
   it('lifetime range is correct per C++ Random(CrateTime/2, CrateTime*2)', () => {
@@ -229,8 +229,8 @@ describe('CR6: Crate lifetime range (5-20 minutes)', () => {
     // In ticks:
     const minTicks = minLifetime * 60 * GAME_TICKS_PER_SEC;
     const maxTicks = maxLifetime * 60 * GAME_TICKS_PER_SEC;
-    expect(minTicks).toBe(4500);
-    expect(maxTicks).toBe(18000);
+    expect(minTicks).toBe(6000);
+    expect(maxTicks).toBe(24000);
   });
 
   it('random lifetime always falls within 5-20 minute range', () => {
@@ -241,8 +241,8 @@ describe('CR6: Crate lifetime range (5-20 minutes)', () => {
     for (let i = 0; i < 100; i++) {
       const lifetimeMinutes = minLifetime + Math.random() * (maxLifetime - minLifetime);
       const lifetimeTicks = Math.floor(lifetimeMinutes * 60 * GAME_TICKS_PER_SEC);
-      expect(lifetimeTicks).toBeGreaterThanOrEqual(4500);  // 5 min
-      expect(lifetimeTicks).toBeLessThanOrEqual(18000);     // 20 min
+      expect(lifetimeTicks).toBeGreaterThanOrEqual(6000);  // 5 min
+      expect(lifetimeTicks).toBeLessThanOrEqual(24000);     // 20 min
     }
   });
 });

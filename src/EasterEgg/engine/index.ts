@@ -689,7 +689,7 @@ export class Game {
   private scheduleNext(): void {
     if (this.state !== 'playing') return;
     // Use setTimeout as the primary timer — immune to Chrome RAF throttling.
-    // 16ms ≈ 60fps render rate, game ticks at fixed 15fps inside.
+    // 16ms ≈ 60fps render rate, game ticks at fixed 20fps inside (C++ default GameSpeed=3).
     this.timerId = window.setTimeout(this.gameLoop, 16);
   }
 
@@ -1116,7 +1116,7 @@ export class Game {
       }
     }
     this.entities = this.entities.filter(
-      e => e.alive || e.deathTick < 45 // ~3 seconds at 15fps
+      e => e.alive || e.deathTick < 45 // ~2.25 seconds at 20fps
     );
     if (this.entities.length < before) {
       this.entityById.clear();
@@ -2341,7 +2341,7 @@ export class Game {
     this.audio.playAt(name, worldX, worldY, this.camera.x, this.camera.viewWidth);
   }
 
-  /** Play EVA announcement with 3-second throttle (45 ticks at 15fps) */
+  /** Play EVA announcement with throttle (~45 ticks) */
   private playEva(sound: SoundName): void {
     // AU4: EVA power gate — skip EVA playback when power fraction < 0.25 (critically low power)
     if (this.powerConsumed > 0 && this.powerProduced > 0) {
