@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-09T12:25Z — Session 139: Programmatic INI Parity Verification
+- **Problem**: Previous C++ parity plan used hallucinated "C++ RULES.INI" values. ~56 values in types.ts/scenario.ts were wrong, plus all hardcoded test expected values.
+- **Solution**: Created `ini-parity.test.ts` — 550 tests that read actual `rules.ini` + `aftrmath.ini` from `public/ra/assets/`, merge (aftrmath overrides per-section), and compare against TS engine data structures. This is the permanent programmatic source of truth for data parity.
+- **Data fixes**: THF speed 5→4, REPAIR_STEP 5→7, ParaBomb recharge 9000→12600, ParaInfantry recharge 9000→6300, SpyPlane recharge 1800→2700, plus 35 unit speeds and 11 structure HPs corrected in prior context.
+- **Test cleanup**: Removed redundant Phase 1/Phase 4 from cpp-parity-100.test.ts. Updated hardcoded expected values in 8 test files (data-parity, air-combat, superweapons, ai-base-intelligence, full-ai, power-super-parity, production-parity, new-units-parity) to match INI-verified values.
+- **Results**: 2987/3001 tests pass. 14 remaining failures are pre-existing sprite manifest issues (ant-sprite-manifest, structure-sprite-coverage).
+- **Key design decision**: All C++ data parity is now verified programmatically by ini-parity.test.ts. No more hardcoded "expected" values that can drift.
+
 ## 2026-03-08T14:00Z — Session 138: 8 Major UX Improvements (Competitive Parity)
 - **Trigger**: User said "the whole site feels kinda mid" — competitive analysis vs Zendesk, Freshdesk, Intercom, Help Scout, Front, Linear identified 8 key gaps
 - **Method**: 8 parallel Opus agents in git worktrees, merged all into main

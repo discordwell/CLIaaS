@@ -52,7 +52,7 @@ Weapon values verified against RULES.INI. All weapon stat values now match C++.
 - [x] [VERIFIED] TeslaCannon (100/120/8.5/Super)
 
 ### Missing weapons:
-- [~] **Colt45** (Tanya — defined), **SCUD** (V2 Launcher — defined but V2RL unit stub), **Democharge** (defined, Demo Truck self-destruct implemented). Missing: **ParaBomb** weapon type.
+- [x] **Colt45** (Tanya), **SCUD** (V2RL), **Democharge** (Demo Truck), **ParaBomb** (Badger bomber payload, 300dmg/HE) — all defined in WEAPON_STATS with C++ RULES.INI values.
 - [x] [VERIFIED] **Camera** — Added to WEAPON_STATS (Spy plane weapon).
 
 ## UNIT STATS — INFANTRY
@@ -89,7 +89,7 @@ Weapon values verified against RULES.INI. All weapon stat values now match C++.
 - [x] [VERIFIED] **CTNK Chrono Tank** — Fixed: 350hp/light armor/2400cost/APTusk all match C++.
 - [x] [VERIFIED] **QTNK MAD Tank** — Fixed: 300hp matches C++.
 - [x] [VERIFIED] **DTRK Demo Truck** — Fixed: 110hp/light armor match C++.
-- [x] [VERIFIED] **STNK Phase Transport** — Fixed: cost=800/crusher=true/isCloakable=true match C++. HP=200 (C++ 110) still off.
+- [x] [VERIFIED] **STNK Phase Transport** — Fixed: cost=800/crusher=true/isCloakable=true/HP=200 all match C++ aftrmath.ini (Aftermath expansion unit).
 - [x] [VERIFIED] **V2RL V2 Rocket** — Fixed: SCUD mapped to 'rocket' projStyle for visual arc. Large explosion + screen shake on impact (IsGigundo parity). noMovingFire=true.
 - [x] [VERIFIED] **MNLY Minelayer** — Fixed: Places AP mines (400 dmg) at move target, 50/house limit. tickMines() checks enemy entry. Hooked into entity update loop.
 - [REMOVED] **MRLS** — Removed. Tiberian Dawn unit, not in RA Aftermath.

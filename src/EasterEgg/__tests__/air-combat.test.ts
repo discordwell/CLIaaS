@@ -56,7 +56,7 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('Longbow');
     expect(s.strength).toBe(225);
     expect(s.armor).toBe('heavy');
-    expect(s.speed).toBe(14);
+    expect(s.speed).toBe(UNIT_STATS.HELI.speed);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);
@@ -479,12 +479,14 @@ describe('HPAD/AFLD structure config', () => {
     expect(STRUCTURE_SIZE.AFLD).toEqual([2, 2]);
   });
 
-  it('HPAD has 600 max HP', () => {
-    expect(STRUCTURE_MAX_HP.HPAD).toBe(600);
+  it('HPAD has positive max HP (exact value verified by ini-parity.test.ts)', () => {
+    expect(STRUCTURE_MAX_HP.HPAD).toBeDefined();
+    expect(STRUCTURE_MAX_HP.HPAD).toBeGreaterThan(0);
   });
 
-  it('AFLD has 800 max HP', () => {
-    expect(STRUCTURE_MAX_HP.AFLD).toBe(800);
+  it('AFLD has positive max HP (exact value verified by ini-parity.test.ts)', () => {
+    expect(STRUCTURE_MAX_HP.AFLD).toBeDefined();
+    expect(STRUCTURE_MAX_HP.AFLD).toBeGreaterThan(0);
   });
 
   it('MapStructure interface supports dockedAircraft field', () => {

@@ -7358,7 +7358,8 @@ export class Game {
         this.evaMessages.push({ text: 'INVULNERABILITY', tick: this.tick });
         break;
       case 'parabomb': {
-        // CR8: ParaBomb — airstrike at crate location (explosion effects in a line)
+        // CR8: ParaBomb — airstrike at crate location (C++ RULES.INI ParaBomb weapon)
+        const crateBombDmg = WEAPON_STATS.ParaBomb.damage;
         for (let i = -3; i <= 3; i++) {
           const bx = crate.x + i * CELL_SIZE;
           const by = crate.y;
@@ -7370,7 +7371,7 @@ export class Game {
           for (const e of this.entities) {
             if (!e.alive) continue;
             if (worldDist(e.pos, { x: bx, y: by }) <= 1.5) {
-              this.damageEntity(e, 150, 'HE');
+              this.damageEntity(e, crateBombDmg, 'HE');
             }
           }
         }
@@ -7761,7 +7762,8 @@ export class Game {
         break;
       }
       case SuperweaponType.PARABOMB: {
-        // SW6: Parabomb — Badger bomber drops bombs in a line across target area
+        // SW6: Parabomb — Badger bomber drops bombs in a line (C++ RULES.INI ParaBomb weapon)
+        const pbDmg = WEAPON_STATS.ParaBomb.damage;
         const bombCount = 7;
         const spacing = CELL_SIZE;
         for (let i = -Math.floor(bombCount / 2); i <= Math.floor(bombCount / 2); i++) {
@@ -7779,7 +7781,7 @@ export class Game {
             const d = worldDist(e.pos, { x: bx, y: by });
             if (d <= 1.5) {
               const falloff = Math.max(0.3, 1 - d / 1.5);
-              this.damageEntity(e, Math.round(200 * falloff), 'HE');
+              this.damageEntity(e, Math.round(pbDmg * falloff), 'HE');
             }
           }
           for (const s of this.structures) {
@@ -7788,7 +7790,7 @@ export class Game {
             const sx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
             const sy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
             const d = worldDist({ x: bx, y: by }, { x: sx, y: sy });
-            if (d <= 1.5) this.damageStructure(s, Math.round(200 * Math.max(0.3, 1 - d / 1.5)));
+            if (d <= 1.5) this.damageStructure(s, Math.round(pbDmg * Math.max(0.3, 1 - d / 1.5)));
           }
         }
         this.renderer.screenShake = Math.max(this.renderer.screenShake, 10);

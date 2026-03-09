@@ -218,12 +218,12 @@ describe('Superweapon recharge times match updated values', () => {
     expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(9000);
   });
 
-  it('ParaBomb recharges in 9000 ticks (600 seconds)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.PARABOMB].rechargeTicks).toBe(9000);
+  it('ParaBomb recharges in 12600 ticks (C++ rules.ini ParaBomb=14 min)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.PARABOMB].rechargeTicks).toBe(12600);
   });
 
-  it('ParaInfantry recharges in 9000 ticks (600 seconds)', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.PARAINFANTRY].rechargeTicks).toBe(9000);
+  it('ParaInfantry recharges in 6300 ticks (C++ rules.ini Paratrooper=7 min)', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.PARAINFANTRY].rechargeTicks).toBe(6300);
   });
 });
 

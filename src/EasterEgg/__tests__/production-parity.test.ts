@@ -178,8 +178,8 @@ describe('RP4: Service depot repair rate (~14 tick interval)', () => {
     expect(firingTicks).toEqual([0, 14, 28, 42, 56, 70, 84, 98]);
   });
 
-  it('repair amount is REPAIR_STEP (5) per tick', () => {
-    expect(REPAIR_STEP).toBe(5);
+  it('repair amount is REPAIR_STEP (7) per tick (C++ rules.ini RepairStep=7)', () => {
+    expect(REPAIR_STEP).toBe(7);
   });
 
   it('~14 tick interval matches building self-repair rate', () => {
@@ -195,20 +195,20 @@ describe('RP4: Service depot repair rate (~14 tick interval)', () => {
     const unitCost = 800; // e.g. medium tank
     const maxHp = 400;
     const totalRepairCost = unitCost * REPAIR_PERCENT; // 160
-    const steps = maxHp / REPAIR_STEP; // 400/5 = 80
-    const costPerStep = Math.ceil(totalRepairCost / steps); // ceil(160/80) = ceil(2) = 2
-    expect(costPerStep).toBe(2);
+    const steps = maxHp / REPAIR_STEP; // 400/7 ≈ 57.14
+    const costPerStep = Math.ceil(totalRepairCost / steps); // ceil(160/57.14) = ceil(2.8) = 3
+    expect(costPerStep).toBe(3);
   });
 
-  it('time to repair 100 HP at 14-tick interval is ~18.67 seconds', () => {
-    // 100 HP / 5 HP per step = 20 steps
-    // 20 steps * 14 ticks/step = 280 ticks
-    // 280 ticks / 15 FPS ≈ 18.67 seconds
+  it('time to repair 100 HP at 14-tick interval', () => {
+    // 100 HP / 7 HP per step ≈ 14.29 steps
+    // 14.29 steps * 14 ticks/step ≈ 200 ticks
+    // 200 ticks / 15 FPS ≈ 13.33 seconds
     const hp = 100;
     const steps = hp / REPAIR_STEP;
     const totalTicks = steps * 14;
     const seconds = totalTicks / 15;
-    expect(seconds).toBeCloseTo(18.67, 1);
+    expect(seconds).toBeCloseTo(13.33, 1);
   });
 });
 
@@ -243,12 +243,12 @@ describe('RP5: Repair cancel on insufficient funds', () => {
   it('unit with sufficient credits continues repair normally', () => {
     // When credits >= repairCost, repair proceeds normally
     const credits = 500;
-    const repairCost = 2;
+    const repairCost = 3;
     expect(credits >= repairCost).toBe(true);
     // HP increases by REPAIR_STEP
     const hp = 100;
     const newHp = Math.min(400, hp + REPAIR_STEP);
-    expect(newHp).toBe(105);
+    expect(newHp).toBe(107);
   });
 });
 
