@@ -36,16 +36,6 @@ describe('ParaBomb weapon stats match C++ RULES.INI', () => {
   });
 });
 
-// === Phase 5: TimeQuake and Vortex crate types exist ===
-
-describe('Phase 5: TimeQuake and Vortex crate types', () => {
-  it('CrateType union includes timequake and vortex', () => {
-    // We verify via CRATE_SHARES since it's the runtime data
-    // The types are 'timequake' | 'vortex' in the union — tested via import
-    expect(true).toBe(true); // Type-level check — compile success = pass
-  });
-});
-
 // === Phase 6: MoveResult enum and canEnterCell ===
 
 describe('Phase 6: MoveResult passability nuance', () => {

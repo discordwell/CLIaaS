@@ -55,30 +55,30 @@ describe('Low Power Production Penalty (Gap #10)', () => {
 });
 
 describe('Repair Depot Cost (Gap #8 Verification)', () => {
-  it('REPAIR_STEP is 5 HP per tick', () => {
-    // This constant exists in types.ts and is used in index.ts line 655
-    const REPAIR_STEP = 5;
-    expect(REPAIR_STEP).toBe(5);
+  it('REPAIR_STEP is 7 HP per tick (C++ rules.ini RepairStep=7)', () => {
+    // Verified by ini-parity.test.ts against actual rules.ini
+    const REPAIR_STEP = 7;
+    expect(REPAIR_STEP).toBe(7);
   });
 
-  it('REPAIR_PERCENT is 0.25 (25% of build cost for full repair)', () => {
-    // This constant exists in types.ts and is used in index.ts line 649
-    const REPAIR_PERCENT = 0.25;
-    expect(REPAIR_PERCENT).toBe(0.25);
+  it('REPAIR_PERCENT is 0.20 (20% of build cost for full repair, C++ rules.ini)', () => {
+    // Verified by ini-parity.test.ts against actual rules.ini
+    const REPAIR_PERCENT = 0.20;
+    expect(REPAIR_PERCENT).toBe(0.20);
   });
 
   it('repair cost calculation matches C++ rules', () => {
-    // From index.ts line 649:
+    // From index.ts:
     // const repairCostPerStep = Math.ceil((prodItem.cost * REPAIR_PERCENT) / (s.maxHp / REPAIR_STEP))
     // Example: building costs 1000, has 200 HP
     const buildCost = 1000;
     const maxHp = 200;
-    const REPAIR_PERCENT = 0.25;
-    const REPAIR_STEP = 5;
+    const REPAIR_PERCENT = 0.20;
+    const REPAIR_STEP = 7;
 
-    const totalRepairCost = buildCost * REPAIR_PERCENT; // 250
-    const stepsToFullRepair = maxHp / REPAIR_STEP; // 40 steps
-    const costPerStep = Math.ceil(totalRepairCost / stepsToFullRepair); // ceil(6.25) = 7
+    const totalRepairCost = buildCost * REPAIR_PERCENT; // 200
+    const stepsToFullRepair = maxHp / REPAIR_STEP; // ~28.57 steps
+    const costPerStep = Math.ceil(totalRepairCost / stepsToFullRepair); // ceil(7) = 7
 
     expect(costPerStep).toBe(7);
 

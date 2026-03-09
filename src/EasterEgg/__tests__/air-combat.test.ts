@@ -56,7 +56,7 @@ describe('Aircraft type definitions', () => {
     expect(s.name).toBe('Longbow');
     expect(s.strength).toBe(225);
     expect(s.armor).toBe('heavy');
-    expect(s.speed).toBe(UNIT_STATS.HELI.speed);
+    expect(s.speed).toBe(16);
     expect(s.speedClass).toBe(SpeedClass.WINGED);
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);

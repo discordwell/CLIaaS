@@ -509,7 +509,7 @@ describe('Sonar Pulse', () => {
     expect(sub.sonarPulseTimer).toBe(0);
   });
 
-  it('Spy Plane has fastest recharge (1800 ticks, C++ Rule.SpyTime=2min)', () => {
+  it('Spy Plane has fastest recharge (2700 ticks, C++ rules.ini SpyPlane=3min)', () => {
     const spyTicks = SUPERWEAPON_DEFS[SuperweaponType.SPY_PLANE].rechargeTicks;
     for (const def of Object.values(SUPERWEAPON_DEFS)) {
       expect(spyTicks).toBeLessThanOrEqual(def.rechargeTicks);
