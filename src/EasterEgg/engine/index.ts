@@ -660,6 +660,7 @@ export class Game {
     }
     if (this.state !== 'playing') {
       // Still render final frame but stop ticking
+      this.renderer.interpolationAlpha = 1;
       this.render();
       return;
     }
@@ -7732,6 +7733,8 @@ export class Game {
           const origin = { x: unit.pos.x, y: unit.pos.y };
           unit.pos.x = target.x;
           unit.pos.y = target.y;
+          unit.prevPos.x = target.x;
+          unit.prevPos.y = target.y;
           unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
           // Blue flash effects at origin and destination
           this.effects.push({
@@ -9605,9 +9608,11 @@ export class Game {
       frame: 0, maxFrames: 20, size: 24,
       sprite: 'litning', spriteStart: 0,
     });
-    // Teleport
+    // Teleport — also snap prevPos to prevent interpolation swoosh
     entity.pos.x = target.x;
     entity.pos.y = target.y;
+    entity.prevPos.x = target.x;
+    entity.prevPos.y = target.y;
     // Blue flash at destination
     this.effects.push({
       type: 'explosion', x: entity.pos.x, y: entity.pos.y,
