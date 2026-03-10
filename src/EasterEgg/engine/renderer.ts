@@ -1506,11 +1506,11 @@ export class Renderer {
           ctx.fillRect(screenX - 2, revealY - 1, dfw + 4, 2);
         }
         if (isSelling) {
-          // Red sell scanline at the shrinking edge
+          // Red sell scanline at the shrinking edge — drawn before restore to stay within clip
           const shrinkY = screenY + dfh / 2 - Math.floor(dfh * (1 - s.sellProgress!));
-          ctx.restore();
           ctx.fillStyle = `rgba(255,80,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
           ctx.fillRect(screenX - 2, shrinkY - 1, dfw + 4, 2);
+          ctx.restore();
         }
         if (vis === 1) ctx.globalAlpha = 1;
       } else {

@@ -10,7 +10,7 @@ import {
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
 	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
-	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex,
+	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   PRODUCTION_ITEMS, type ProductionItem, CursorType, type StripType, getStripSide,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames, modifyDamage,
@@ -1360,17 +1360,39 @@ export class Game {
           const wy = s.cy * CELL_SIZE + CELL_SIZE;
           this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
             sprite: 'veh-hit1', spriteStart: 0 });
-          // Spawn infantry at the building site — type depends on building sold
-          // Advanced tech buildings spawn engineers, barracks spawn grenadiers, etc.
-          const sellInfType = s.type === 'TSLA' || s.type === 'DOME' || s.type === 'APWR'
-            ? UnitType.I_E6  // Engineer from tech buildings
-            : s.type === 'TENT' ? UnitType.I_E2  // Grenadier from barracks
-            : s.type === 'WEAP' || s.type === 'FIX' ? UnitType.I_E3  // Rocket from factory
-            : UnitType.I_E1; // Rifleman from everything else
-          const inf = new Entity(sellInfType, s.house, wx, wy);
-          inf.mission = Mission.GUARD;
-          this.entities.push(inf);
-          this.entityById.set(inf.id, inf);
+          // SL4: Spawn infantry survivors (C++ building.cpp How_Many_Survivors + Crew_Type)
+          // Count: (buildingCost * SurvivorFraction) / E1_cost, clamped 1-5
+          const E1_COST = 100;
+          const SURVIVOR_FRACTION = 0.5; // rules.cpp:177 SurvivorFraction(fixed(1,2))
+          const buildCost = prodItem?.cost ?? 300;
+          const survivorCount = Math.min(5, Math.max(1,
+            Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
+          for (let si = 0; si < survivorCount; si++) {
+            // C++ Crew_Type: per-building type with random variance
+            let crewType: UnitType;
+            switch (s.type) {
+              case 'SILO': // STRUCT_STORAGE: 50% C1 or C7 (civilians)
+                crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+                break;
+              case 'FACT': // STRUCT_CONST: 25% engineer if human-owned
+                crewType = Math.random() < 0.25 ? UnitType.I_E6 : UnitType.I_E1;
+                break;
+              case 'KENN': // STRUCT_KENNEL: 50% dog, 50% nothing
+                if (Math.random() < 0.5) continue; // no survivor this iteration
+                crewType = UnitType.I_DOG;
+                break;
+              case 'TENT': case 'BARR': // Barracks: always E1
+                crewType = UnitType.I_E1;
+                break;
+              default: // TechnoClass::Crew_Type: E1, with 15% civilian chance if no weapon
+                crewType = UnitType.I_E1;
+                break;
+            }
+            const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
+            inf.mission = Mission.GUARD;
+            this.entities.push(inf);
+            this.entityById.set(inf.id, inf);
+          }
         }
       }
     }
@@ -4203,7 +4225,8 @@ export class Game {
           } else {
             impactSprite = this.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 'veh-hit1';
           }
-          this.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0, maxFrames: 17, size: 8,
+          this.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0,
+            maxFrames: EXPLOSION_FRAMES[impactSprite] ?? 17, size: 8,
             sprite: impactSprite, spriteStart: 0 });
         }
 
@@ -4943,7 +4966,7 @@ export class Game {
         const structImpactSprite = this.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
         this.effects.push({
           type: 'explosion', x: structPos.x, y: structPos.y,
-          frame: 0, maxFrames: 10, size: 8,
+          frame: 0, maxFrames: EXPLOSION_FRAMES[structImpactSprite] ?? 17, size: 8,
           sprite: structImpactSprite, spriteStart: 0,
         });
         if (destroyed) {
@@ -5026,7 +5049,7 @@ export class Game {
         const ffImpactSprite = this.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
         this.effects.push({
           type: 'explosion', x: impactX, y: impactY,
-          frame: 0, maxFrames: 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,
+          frame: 0, maxFrames: EXPLOSION_FRAMES[ffImpactSprite] ?? 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,
         });
         const tc = worldToCell(impactX, impactY);
         this.map.addDecal(tc.cx, tc.cy, 3, 0.3);
@@ -6001,7 +6024,7 @@ export class Game {
       // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
       const isScud = proj.weapon.name === 'SCUD';
       this.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
-        frame: 0, maxFrames: isScud ? 22 : 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 });
+        frame: 0, maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 });
       if (isScud) {
         this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
         this.playSoundAt('building_explode', proj.impactX, proj.impactY);
@@ -6444,7 +6467,7 @@ export class Game {
           if (wp) {
             const wx = wp.cx * CELL_SIZE + CELL_SIZE / 2;
             const wy = wp.cy * CELL_SIZE + CELL_SIZE / 2;
-            this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 20, size: 24, sprite: 'art-exp1', spriteStart: 0 });
+            this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'], size: 24, sprite: 'art-exp1', spriteStart: 0 });
             for (const e of this.entities) {
               if (!e.alive) continue;
               if (worldDist(e.pos, { x: wx, y: wy }) <= 4) this.damageEntity(e, 200, 'HE'); // worldDist returns cells
@@ -6456,7 +6479,7 @@ export class Game {
         if (result.nuke) {
           const cx = (this.map.boundsX + this.map.boundsW / 2) * CELL_SIZE;
           const cy = (this.map.boundsY + this.map.boundsH / 2) * CELL_SIZE;
-          this.effects.push({ type: 'explosion', x: cx, y: cy, frame: 0, maxFrames: 30, size: 48, sprite: 'art-exp1', spriteStart: 0 });
+          this.effects.push({ type: 'explosion', x: cx, y: cy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'], size: 48, sprite: 'art-exp1', spriteStart: 0 });
           for (const e of this.entities) {
             if (!e.alive) continue;
             if (worldDist(e.pos, { x: cx, y: cy }) <= 8) this.damageEntity(e, 500, 'HE'); // worldDist returns cells
@@ -7482,7 +7505,7 @@ export class Game {
             this.damageEntity(e, 200, 'HE');
           }
         }
-        this.effects.push({ type: 'explosion', x: crate.x, y: crate.y, frame: 0, maxFrames: 17, size: 20, sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen' });
+        this.effects.push({ type: 'explosion', x: crate.x, y: crate.y, frame: 0, maxFrames: EXPLOSION_FRAMES.atomsfx, size: 20, sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen' });
         this.evaMessages.push({ text: 'BOOBY TRAP!', tick: this.tick });
         break;
       }
@@ -7517,7 +7540,7 @@ export class Game {
           for (let dx = -1; dx <= 1; dx++) {
             const fx = crate.x + dx * CELL_SIZE;
             const fy = crate.y + dy * CELL_SIZE;
-            this.effects.push({ type: 'explosion', x: fx, y: fy, frame: 0, maxFrames: 15, size: 12, sprite: 'napalm1', spriteStart: 0, blendMode: 'screen' });
+            this.effects.push({ type: 'explosion', x: fx, y: fy, frame: 0, maxFrames: EXPLOSION_FRAMES.napalm1, size: 12, sprite: 'napalm1', spriteStart: 0, blendMode: 'screen' });
             // Damage units in each cell
             for (const e of this.entities) {
               if (!e.alive) continue;
@@ -8196,7 +8219,7 @@ export class Game {
     this.renderer.repairingStructures = this.repairingStructures;
     this.renderer.corpses = this.corpses;
     // Sidebar data
-    this.renderer.sidebarCredits = this.displayCredits;
+    this.renderer.sidebarCredits = Math.floor(this.displayCredits);
     this.renderer.sidebarSiloCapacity = this.siloCapacity;
     this.renderer.sidebarPowerProduced = this.powerProduced;
     this.renderer.sidebarPowerConsumed = this.powerConsumed;

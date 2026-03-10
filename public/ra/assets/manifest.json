@@ -1241,6 +1241,24 @@
     "sheetWidth": 384,
     "sheetHeight": 72
   },
+  "barl": {
+    "frameWidth": 12,
+    "frameHeight": 10,
+    "frameCount": 3,
+    "columns": 3,
+    "rows": 1,
+    "sheetWidth": 36,
+    "sheetHeight": 10
+  },
+  "brl3": {
+    "frameWidth": 24,
+    "frameHeight": 22,
+    "frameCount": 3,
+    "columns": 3,
+    "rows": 1,
+    "sheetWidth": 72,
+    "sheetHeight": 22
+  },
   "minp": {
     "frameWidth": 24,
     "frameHeight": 24,
@@ -2675,7 +2693,7 @@
   "ant1": {
     "frameWidth": 24,
     "frameHeight": 24,
-    "frameCount": 104,
+    "frameCount": 112,
     "columns": 16,
     "rows": 7,
     "sheetWidth": 384,
@@ -2684,7 +2702,7 @@
   "ant2": {
     "frameWidth": 24,
     "frameHeight": 24,
-    "frameCount": 104,
+    "frameCount": 112,
     "columns": 16,
     "rows": 7,
     "sheetWidth": 384,
@@ -2693,29 +2711,11 @@
   "ant3": {
     "frameWidth": 24,
     "frameHeight": 24,
-    "frameCount": 104,
+    "frameCount": 112,
     "columns": 16,
     "rows": 7,
     "sheetWidth": 384,
     "sheetHeight": 168
-  },
-  "barl": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 2,
-    "columns": 2,
-    "rows": 1,
-    "sheetWidth": 48,
-    "sheetHeight": 24
-  },
-  "brl3": {
-    "frameWidth": 24,
-    "frameHeight": 24,
-    "frameCount": 2,
-    "columns": 2,
-    "rows": 1,
-    "sheetWidth": 48,
-    "sheetHeight": 24
   },
   "antdie": {
     "frameWidth": 48,

@@ -258,7 +258,9 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'BARB.SHP', 'barb'],    // Barbed wire
   ['CONQUER.MIX', 'WOOD.SHP', 'wood'],    // Wooden fence
   ['CONQUER.MIX', 'CYCL.SHP', 'cycl'],    // Cyclone fence
-  // Overlays — mines and crates
+  // Overlays — barrels, mines and crates
+  ['CONQUER.MIX', 'BARL.SHP', 'barl'],    // Explosive barrel (destroyable)
+  ['CONQUER.MIX', 'BRL3.SHP', 'brl3'],    // Bridge barrel
   ['CONQUER.MIX', 'MINP.SHP', 'minp'],    // Anti-personnel mine
   ['CONQUER.MIX', 'MINV.SHP', 'minv'],    // Anti-vehicle mine
   ['CONQUER.MIX', 'WCRATE.SHP', 'wcrate'], // Wooden crate
@@ -803,12 +805,16 @@ async function main(): Promise<void> {
     log(`WARNING: generate-ant-sprites failed: ${e}`);
   }
 
-  // 2. Procedural barrel sprites (barl/brl3 — always works, no external deps)
-  log('\n--- Running generate-barrel-sprites.ts ---');
-  try {
-    execSync(`${tsx} ${join(scriptsDir, 'generate-barrel-sprites.ts')}`, { stdio: 'inherit' });
-  } catch (e) {
-    log(`WARNING: generate-barrel-sprites failed: ${e}`);
+  // 2. Procedural barrel sprites — only if real ones weren't extracted from CONQUER.MIX
+  if (!existsSync(join(OUTPUT_DIR, 'barl.png')) || !existsSync(join(OUTPUT_DIR, 'brl3.png'))) {
+    log('\n--- Running generate-barrel-sprites.ts (fallback — no extracted barrels) ---');
+    try {
+      execSync(`${tsx} ${join(scriptsDir, 'generate-barrel-sprites.ts')}`, { stdio: 'inherit' });
+    } catch (e) {
+      log(`WARNING: generate-barrel-sprites failed: ${e}`);
+    }
+  } else {
+    log('\nSkipping generate-barrel-sprites.ts — real barrel sprites already extracted.');
   }
 
   // 3. Original ant SHP assets (ant1-3, lar1-2, quee, antdie from EXPAND2 unpack)

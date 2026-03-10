@@ -23,7 +23,7 @@ const ASSETS_DIR = join(ROOT, 'public/ra/assets');
 const FRAME_W = 24;
 const FRAME_H = 24;
 const COLS = 16;
-const FRAME_COUNT = 104;
+const FRAME_COUNT = 112; // 8 stand + 64 walk + 32 attack + 8 death
 const ROWS = Math.ceil(FRAME_COUNT / COLS);
 const SHEET_W = COLS * FRAME_W;
 const SHEET_H = ROWS * FRAME_H;
@@ -183,7 +183,7 @@ const ANT_DEFS: Record<string, AntColor> = {
 };
 
 // Animation state type for drawing
-type AntAnimState = 'stand' | 'walk' | 'attack';
+type AntAnimState = 'stand' | 'walk' | 'attack' | 'die';
 
 function drawAntOnCanvas(
   pc: PixelCanvas,
@@ -202,6 +202,39 @@ function drawAntOnCanvas(
   const rot = (lx: number, ly: number): [number, number] => {
     return [cx + lx * cos - ly * sin, cy + lx * sin + ly * cos];
   };
+
+  // --- Death animation: ant curls up and legs splay out ---
+  if (animState === 'die') {
+    const deathProgress = animPhase; // 0 = just died, 1 = fully dead
+    // Body shrinks and darkens
+    const shrink = 1 - deathProgress * 0.3;
+    const darken = 1 - deathProgress * 0.6;
+    const dr = (c: number) => Math.floor(c * darken);
+    // Abdomen rotates upward (curling)
+    const abd = rot(0, 3 * shrink);
+    pc.fillEllipse(abd[0], abd[1], 3.5 * shrink, 4 * shrink, dr(colors.body[0]), dr(colors.body[1]), dr(colors.body[2]));
+    // Thorax
+    const thx = rot(0, 0);
+    pc.fillCircle(thx[0], thx[1], 2.5 * shrink, dr(colors.body[0]), dr(colors.body[1]), dr(colors.body[2]));
+    // Head droops
+    const hd = rot(0, -4 + deathProgress * 2);
+    pc.fillCircle(hd[0], hd[1], 2.5 * shrink, dr(colors.head[0]), dr(colors.head[1]), dr(colors.head[2]));
+    // Legs splay outward
+    for (const leg of [
+      { y: -1, outLen: 5, angle: -0.5 },
+      { y: 1, outLen: 5, angle: 0 },
+      { y: 3, outLen: 5, angle: 0.5 },
+    ]) {
+      const splay = deathProgress * 1.5;
+      const lBase = rot(-2, leg.y * shrink);
+      const lTip = rot(-2 - leg.outLen * Math.cos(leg.angle - splay), leg.y * shrink - leg.outLen * Math.sin(leg.angle) - splay);
+      pc.drawLine(lBase[0], lBase[1], lTip[0], lTip[1], dr(colors.legs[0]), dr(colors.legs[1]), dr(colors.legs[2]));
+      const rBase = rot(2, leg.y * shrink);
+      const rTip = rot(2 + leg.outLen * Math.cos(leg.angle - splay), leg.y * shrink - leg.outLen * Math.sin(leg.angle) - splay);
+      pc.drawLine(rBase[0], rBase[1], rTip[0], rTip[1], dr(colors.legs[0]), dr(colors.legs[1]), dr(colors.legs[2]));
+    }
+    return;
+  }
 
   // --- Leg animation ---
   // Walking: legs cycle in alternating tripod gait
@@ -287,7 +320,7 @@ function drawAntOnCanvas(
 }
 
 // --- Main ---
-console.log('Generating ant sprite sheets (104 frames)...\n');
+console.log('Generating ant sprite sheets (112 frames)...\n');
 
 for (const [name, colors] of Object.entries(ANT_DEFS)) {
   const pc = new PixelCanvas(SHEET_W, SHEET_H);
@@ -331,6 +364,17 @@ for (const [name, colors] of Object.entries(ANT_DEFS)) {
       drawAntOnCanvas(pc, ox, oy, angle, colors, 'attack', phase);
       frameIdx++;
     }
+  }
+
+  // Frames 104-111: Death (8 frames — direction-independent, progressive death sequence)
+  for (let f = 0; f < 8; f++) {
+    const col = frameIdx % COLS;
+    const row = Math.floor(frameIdx / COLS);
+    const ox = col * FRAME_W;
+    const oy = row * FRAME_H;
+    const phase = f / 7; // 0 = just died, 1 = fully dead
+    drawAntOnCanvas(pc, ox, oy, 0, colors, 'die', phase);
+    frameIdx++;
   }
 
   const outPath = join(ASSETS_DIR, `${name}.png`);
