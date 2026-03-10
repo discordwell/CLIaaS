@@ -8,7 +8,8 @@
  * Usage: pnpm extract-assets
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { MixFile } from './ra-assets/mix.js';
@@ -788,6 +789,101 @@ async function main(): Promise<void> {
 
   log(`Done! Extracted ${extracted} sprites, skipped ${skipped}`);
   log(`Assets written to ${OUTPUT_DIR}`);
+
+  // --- Run generator scripts that merge into manifest ---
+  // These read the manifest we just wrote, generate PNGs, and add their entries.
+  const scriptsDir = dirname(fileURLToPath(import.meta.url));
+  const tsx = 'tsx';
+
+  // 1. Procedural ant sprites (ant1/ant2/ant3 — always works, no external deps)
+  log('\n--- Running generate-ant-sprites.ts ---');
+  try {
+    execSync(`${tsx} ${join(scriptsDir, 'generate-ant-sprites.ts')}`, { stdio: 'inherit' });
+  } catch (e) {
+    log(`WARNING: generate-ant-sprites failed: ${e}`);
+  }
+
+  // 2. Procedural barrel sprites (barl/brl3 — always works, no external deps)
+  log('\n--- Running generate-barrel-sprites.ts ---');
+  try {
+    execSync(`${tsx} ${join(scriptsDir, 'generate-barrel-sprites.ts')}`, { stdio: 'inherit' });
+  } catch (e) {
+    log(`WARNING: generate-barrel-sprites failed: ${e}`);
+  }
+
+  // 3. Original ant SHP assets (ant1-3, lar1-2, quee, antdie from EXPAND2 unpack)
+  //    Requires the unpacked Aftermath directory — skips gracefully if missing.
+  const antSourceDir = process.env.ANT_SOURCE_DIR || '/tmp/ra_ant_extract/am_expand2_unpack';
+  if (existsSync(antSourceDir)) {
+    log(`\n--- Running extract-original-ant-assets.ts (source: ${antSourceDir}) ---`);
+    try {
+      execSync(`${tsx} ${join(scriptsDir, 'extract-original-ant-assets.ts')} "${antSourceDir}"`, { stdio: 'inherit' });
+    } catch (e) {
+      log(`WARNING: extract-original-ant-assets failed: ${e}`);
+    }
+  } else {
+    log(`\nSkipping extract-original-ant-assets.ts (${antSourceDir} not found)`);
+    log('  Set ANT_SOURCE_DIR to the EXPAND2 unpack directory to include original ant assets.');
+  }
+
+  // --- Reconcile: add manifest entries for PNGs that exist but weren't generated this run ---
+  // Sprites from optional sources (EXPAND2.MIX, original ant SHPs) may already be on disk
+  // from a previous extraction. Rather than silently leave them unregistered, read the
+  // manifest back, detect orphaned PNGs, and merge entries from a known-good supplement.
+  reconcileManifest(OUTPUT_DIR);
+}
+
+// Known metadata for sprites from optional sources (EXPAND2.MIX, original ant SHPs).
+// If the PNG exists on disk but wasn't generated this run, merge these entries so the
+// manifest stays complete regardless of which source files are available.
+const SUPPLEMENTAL_MANIFEST: Record<string, object> = {
+  antdie:   { frameWidth: 48, frameHeight: 48, frameCount: 8, columns: 8, rows: 1, sheetWidth: 384, sheetHeight: 48 },
+  carr:     { frameWidth: 30, frameHeight: 30, frameCount: 10, columns: 10, rows: 1, sheetWidth: 300, sheetHeight: 30 },
+  ctnk:     { frameWidth: 48, frameHeight: 48, frameCount: 32, columns: 16, rows: 2, sheetWidth: 768, sheetHeight: 96 },
+  dtrk:     { frameWidth: 24, frameHeight: 24, frameCount: 32, columns: 16, rows: 2, sheetWidth: 384, sheetHeight: 48 },
+  lar1:     { frameWidth: 24, frameHeight: 24, frameCount: 3, columns: 3, rows: 1, sheetWidth: 72, sheetHeight: 24 },
+  lar2:     { frameWidth: 24, frameHeight: 24, frameCount: 3, columns: 3, rows: 1, sheetWidth: 72, sheetHeight: 24 },
+  mech:     { frameWidth: 50, frameHeight: 39, frameCount: 256, columns: 16, rows: 16, sheetWidth: 800, sheetHeight: 624 },
+  msub:     { frameWidth: 56, frameHeight: 56, frameCount: 16, columns: 16, rows: 1, sheetWidth: 896, sheetHeight: 56 },
+  msubicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
+  qtnk:     { frameWidth: 48, frameHeight: 48, frameCount: 96, columns: 16, rows: 6, sheetWidth: 768, sheetHeight: 288 },
+  quee:     { frameWidth: 48, frameHeight: 24, frameCount: 20, columns: 16, rows: 2, sheetWidth: 768, sheetHeight: 48 },
+  stnkicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
+  ttnk:     { frameWidth: 48, frameHeight: 48, frameCount: 64, columns: 16, rows: 4, sheetWidth: 768, sheetHeight: 192 },
+};
+
+// PNGs that are NOT sprite sheets and should never get manifest entries
+const NON_SPRITE_PNGS = new Set(['tileset', 'snow_tileset', 'interior_tileset', 'title', 'prolog']);
+
+function reconcileManifest(outputDir: string): void {
+  const manifestPath = join(outputDir, 'manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  const existingKeys = new Set(Object.keys(manifest));
+
+  const pngs = readdirSync(outputDir)
+    .filter(f => f.endsWith('.png'))
+    .map(f => f.replace('.png', ''));
+
+  let added = 0;
+  for (const name of pngs) {
+    if (existingKeys.has(name) || NON_SPRITE_PNGS.has(name)) continue;
+    const entry = SUPPLEMENTAL_MANIFEST[name];
+    if (entry) {
+      manifest[name] = entry;
+      added++;
+      log(`  Reconciled: ${name} (from supplemental manifest)`);
+    } else {
+      log(`  WARNING: ${name}.png has no manifest entry and no supplemental data`);
+    }
+  }
+
+  if (added > 0) {
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    log(`Reconciled ${added} supplemental entries into manifest`);
+  } else {
+    log('No supplemental entries needed');
+  }
+  log(`Final manifest: ${Object.keys(manifest).length} entries`);
 }
 
 function makeDefaultPalette(): Palette {

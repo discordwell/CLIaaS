@@ -2699,15 +2699,6 @@
     "sheetWidth": 384,
     "sheetHeight": 168
   },
-  "antdie": {
-    "frameWidth": 48,
-    "frameHeight": 48,
-    "frameCount": 8,
-    "columns": 8,
-    "rows": 1,
-    "sheetWidth": 384,
-    "sheetHeight": 48
-  },
   "barl": {
     "frameWidth": 24,
     "frameHeight": 24,
@@ -2725,6 +2716,15 @@
     "rows": 1,
     "sheetWidth": 48,
     "sheetHeight": 24
+  },
+  "antdie": {
+    "frameWidth": 48,
+    "frameHeight": 48,
+    "frameCount": 8,
+    "columns": 8,
+    "rows": 1,
+    "sheetWidth": 384,
+    "sheetHeight": 48
   },
   "carr": {
     "frameWidth": 30,
