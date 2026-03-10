@@ -128,7 +128,7 @@ Aircraft HP, ROT, ammo, and weapon assignments now match C++. Sight=0 correctly 
 
 ## MOVEMENT
 
-- [x] [VERIFIED] **MV1: Track-table movement** — Fixed: 7 North-reference track types ported from C++ drive.cpp (straight, 45°/90°/180° turns), rotated at runtime via exact coordinate transforms matching C++ drive.cpp tables. Vehicles follow pre-computed curved paths via `followTrackStep()`. Infantry exempt (FOOT speedClass keeps free-form moveToward). Track state on Entity: trackNumber/trackIndex/trackStart/trackBaseFacing.
+- [x] [VERIFIED] **MV1: Track-table movement** — Fixed: All 13 C++ track arrays faithfully decoded from drive.cpp hex data. TrackControl[67] table maps all 64 facing pairs + 3 special entries. Smooth_Turn flag transformations (F_T/F_X/F_Y/F_D) match C++. SpeedAccum lepton budget system. Track offsets relative to target cell center (Head_To_Coord pattern). Short tracks (7-10) for starting from rest. Track state on Entity: trackNumber/trackIndex/trackFlags/speedAccum.
 - [x] [VERIFIED] **MV2: Damage speed — single tier** — Fixed: removed fabricated ConditionRed 0.5x tier. Now only one tier: <=50% HP = 0.75x speed, matching C++ drive.cpp:1157-1161.
 - [x] [VERIFIED] **MV3: Close-enough distance unit bug** — Fixed: removed erroneous `CELL_SIZE *` multipliers from 6 worldDist() comparisons. worldDist() returns cells, so comparisons now use bare cell values (2, 3, 5, 8, 10, 12).
 - [x] [VERIFIED] **MV4: Three-point turns removed** — Fixed: removed fabricated 3-point turn code. C++ code was behind `#ifdef TOFIX` and `IsThreePoint=false` — never compiled in released game (drive.cpp:328-361).

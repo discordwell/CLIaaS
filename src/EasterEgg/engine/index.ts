@@ -27,7 +27,11 @@ import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatSc
 import { GameMap, Terrain } from './map';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
-import { TRACKS, selectTrack, usesTrackMovement, rotateTrackOffset } from './tracks';
+import {
+  usesTrackMovement, lookupTrackControl, getEffectiveTrack, getTrackArray,
+  smoothTurn, LP, PIXEL_LEPTON_W, F_D,
+  type TrackControlEntry,
+} from './tracks';
 import {
   loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
@@ -3777,65 +3781,42 @@ export class Game {
       };
       const speed = this.movementSpeed(entity);
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
-      // After track completion, vehicles smoothly approach the cell center instead
-      // of teleporting (handles diagonal movement where tracks cover < full distance).
-      if (entity.trackNumber >= 0) {
+      // Uses C++ TrackControl table to select pre-computed curved paths.
+      // Track offsets are relative to target cell center, transformed via Smooth_Turn flags.
+      if (entity.trackNumber > 0) {
         // Currently following a track — advance along it
-        if (this.followTrackStep(entity, speed)) {
-          // Track complete — snap only if very close to cell center
-          const cdx = target.x - entity.pos.x;
-          const cdy = target.y - entity.pos.y;
-          if (cdx * cdx + cdy * cdy <= 4) {
-            entity.pos.x = target.x;
-            entity.pos.y = target.y;
-            entity.pathIndex++;
-          }
-          // else: residual distance handled below on next tick
+        if (this.followTrackStep(entity, speed, target.x, target.y)) {
+          // Track complete — vehicle is at target cell center
+          entity.pathIndex++;
         }
       } else if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
-        const cdx = target.x - entity.pos.x;
-        const cdy = target.y - entity.pos.y;
-        const cdistSq = cdx * cdx + cdy * cdy;
+        // Initiate a new track for this cell-to-cell segment
+        const nextFacing8 = directionTo(entity.pos, target);
+        const currentFacing8 = entity.facing;
+        const ctrl = lookupTrackControl(currentFacing8, nextFacing8);
+        const effectiveTrack = getEffectiveTrack(ctrl);
 
-        if (cdistSq <= 4) {
-          // Already at cell center — snap and advance
-          entity.pos.x = target.x;
-          entity.pos.y = target.y;
-          entity.pathIndex++;
-        } else if (cdistSq < CELL_SIZE * CELL_SIZE) {
-          // Post-track residual: smooth direct approach to cell center
-          // (Diagonal tracks cover ~70% of cell distance; this fills the gap)
-          const cdist = Math.sqrt(cdistSq);
-          entity.desiredFacing = directionTo(entity.pos, target);
-          entity.tickRotation();
-          const step = Math.min(speed * entity.speedBias, cdist);
-          entity.pos.x += (cdx / cdist) * step;
-          entity.pos.y += (cdy / cdist) * step;
-          if (step >= cdist - 0.5) {
-            entity.pos.x = target.x;
-            entity.pos.y = target.y;
+        if (effectiveTrack > 0) {
+          // Valid track — start following it
+          entity.trackNumber = effectiveTrack;
+          entity.trackFlags = ctrl.flag & ~F_D; // strip F_D (only F_T|F_X|F_Y for geometry)
+          entity.trackIndex = 0;
+          entity.speedAccum = 0;
+          // Follow first step this tick
+          if (this.followTrackStep(entity, speed, target.x, target.y)) {
             entity.pathIndex++;
           }
         } else {
-          // Initiate a new track for this cell-to-cell segment
-          const dirToTarget = directionTo(entity.pos, target);
-          const desiredFacing32 = dirToTarget * 4;
-          const currentFacing32 = entity.bodyFacing32;
-          entity.trackNumber = selectTrack(currentFacing32, desiredFacing32);
-          entity.trackIndex = 0;
-          entity.trackStartX = entity.pos.x;
-          entity.trackStartY = entity.pos.y;
-          entity.trackBaseFacing = currentFacing32;
-          // Follow first step this tick
-          if (this.followTrackStep(entity, speed)) {
-            const cdx2 = target.x - entity.pos.x;
-            const cdy2 = target.y - entity.pos.y;
-            if (cdx2 * cdx2 + cdy2 * cdy2 <= 4) {
-              entity.pos.x = target.x;
-              entity.pos.y = target.y;
+          // Impossible turn (Track=0) — free-form fallback with rotation
+          entity.desiredFacing = nextFacing8;
+          entity.tickRotation();
+          if (entity.facing === nextFacing8) {
+            // Facing correct, now move
+            if (entity.moveToward(target, speed)) {
               entity.pathIndex++;
             }
           }
+          // else: wait for rotation to complete before moving
         }
       } else {
         // Infantry/aircraft: free-form movement (FOOT speedClass exempt from tracks)
@@ -5925,45 +5906,61 @@ export class Game {
       * this.damageSpeedFactor(entity);
   }
 
-  /** MV1: Follow one tick of track-table movement. Returns true when track is complete.
-   *  Vehicles follow pre-computed curved paths for smooth turning (C++ drive.cpp track tables).
-   *  Track offsets are rotated from North-reference via rotateTrackOffset() — exact integer
-   *  transforms for cardinal directions, √2/2 for diagonals (matching C++ coord tables). */
-  private followTrackStep(entity: Entity, speed: number): boolean {
-    const track = TRACKS[entity.trackNumber];
-    const facing8 = Math.floor(entity.trackBaseFacing / 4) % 8;
-
-    let remaining = speed;
-    while (remaining > 0.5 && entity.trackIndex < track.length) {
-      const step = track[entity.trackIndex];
-      const [rx, ry] = rotateTrackOffset(step.x, step.y, facing8);
-      const tx = entity.trackStartX + rx;
-      const ty = entity.trackStartY + ry;
-
-      const dx = tx - entity.pos.x;
-      const dy = ty - entity.pos.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      // Update visual facing from track step (rotated by base facing)
-      entity.bodyFacing32 = (step.facing + entity.trackBaseFacing) % 32;
-      entity.facing = Math.floor(entity.bodyFacing32 / 4) as Dir;
-
-      if (dist <= remaining) {
-        entity.pos.x = tx;
-        entity.pos.y = ty;
-        remaining -= dist;
-        entity.trackIndex++;
-      } else {
-        entity.pos.x += (dx / dist) * remaining;
-        entity.pos.y += (dy / dist) * remaining;
-        remaining = 0;
-      }
-    }
-
-    if (entity.trackIndex >= track.length) {
+  /** MV1: Follow one tick of track-table movement (C++ drive.cpp While_Moving).
+   *  Steps through pre-computed track coordinates. Each step costs PIXEL_LEPTON_W leptons
+   *  of movement budget. Position = targetCellCenter + Smooth_Turn(offset, flags).
+   *  Returns true when track is complete (reached target cell center). */
+  private followTrackStep(entity: Entity, speedPixels: number, targetX: number, targetY: number): boolean {
+    const track = getTrackArray(entity.trackNumber);
+    if (!track) {
       entity.trackNumber = -1;
       return true;
     }
+    const flags = entity.trackFlags;
+
+    // Convert pixel speed to lepton budget + accumulator (C++ SpeedAccum pattern)
+    let actual = entity.speedAccum + (speedPixels / LP);
+
+    while (actual > PIXEL_LEPTON_W) {
+      actual -= PIXEL_LEPTON_W;
+
+      if (entity.trackIndex >= track.length) {
+        entity.pos.x = targetX;
+        entity.pos.y = targetY;
+        entity.trackNumber = -1;
+        entity.trackIndex = 0;
+        entity.speedAccum = 0;
+        return true;
+      }
+
+      const step = track[entity.trackIndex];
+
+      // End marker: offset (0,0) and trackIndex > 0 (C++ drive.cpp:712)
+      if (step.x === 0 && step.y === 0 && entity.trackIndex > 0) {
+        entity.pos.x = targetX;
+        entity.pos.y = targetY;
+        entity.trackNumber = -1;
+        entity.trackIndex = 0;
+        entity.speedAccum = 0;
+        return true;
+      }
+
+      // Apply Smooth_Turn: transform offset with F_T/F_X/F_Y flags
+      const result = smoothTurn(step.x, step.y, step.facing, flags);
+
+      // Position = target cell center + transformed lepton offset (converted to pixels)
+      entity.pos.x = targetX + result.x * LP;
+      entity.pos.y = targetY + result.y * LP;
+
+      // Update facing from transformed DirType → 32-step → 8-dir
+      const dir32 = Math.floor(result.facing / 8);
+      entity.bodyFacing32 = dir32;
+      entity.facing = Math.floor(dir32 / 4) as Dir;
+
+      entity.trackIndex++;
+    }
+
+    entity.speedAccum = actual; // carry remainder to next tick
     return false;
   }
 

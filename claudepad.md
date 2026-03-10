@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-10T15:05Z — Session 140n: C++ Track Movement Parity Rewrite
+- **Faithful C++ port**: User rejected smoothing approach ("I would rather have original C++ than smoothing over a bug with a fake implementation"). Complete rewrite of tracks.ts to faithfully port all 13 C++ track arrays from drive.cpp hex data, TrackControl[67] table, and Smooth_Turn flag transformations (F_T, F_X, F_Y, F_D).
+- **Key architecture change**: Track offsets are now relative to TARGET cell center (Head_To_Coord), decreasing to (0,0), matching C++. Old system used offsets from START position.
+- **Entity fields updated**: Replaced trackStartX/trackStartY/trackBaseFacing with trackFlags (Smooth_Turn flags) and speedAccum (C++ SpeedAccum lepton budget pattern).
+- **Movement system rewritten**: followTrackStep now uses C++ SpeedAccum pattern (pixel speed → leptons, PIXEL_LEPTON_W=10 cost per step). Position = targetXY + smoothTurn(stepXY) * LP.
+- **Tests**: 94 tests across 3 files verify hex decoding, all 8 straight directions, TrackControl mapping, flag transformations, short track displacement bounds, entity fields.
+- **Bug fixes**: Track3 comment said 56 steps but C++ has 55. smoothTurn -0 normalization (JS artifact from negating 0).
+- **Files**: tracks.ts (complete rewrite), entity.ts (field changes), index.ts (movement logic), track-movement.test.ts, track-movement-parity.test.ts, cpp-parity-plan.test.ts.
+
 ## 2026-03-10T13:55Z — Session 140m: HIRES Icon Restore + Smooth Vehicle Movement
 - **HIRES icons restored**: 65 sidebar cameo icons (64×48) were accidentally reverted to LORES (32×24) in commit d3daa3d when asset extraction ran without HIRES.MIX. Restored from git history (commit 1ba5a71). Updated manifest.json icon entries. Added 202 verification tests checking frame dimensions and file sizes (>1500 bytes) to prevent regression.
 - **Vehicle movement jank eliminated**: Three sources of position teleportation fixed:

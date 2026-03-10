@@ -171,11 +171,10 @@ export class Entity {
   formationOffset: WorldPos | null = null;
 
   // MV1: Track-table movement state (C++ drive.cpp — vehicles follow pre-computed turn tracks)
-  trackNumber = -1;    // current track index (0-6), -1 = not on a track
-  trackIndex = 0;      // current step within the track (0-7)
-  trackStartX = 0;     // world X at start of current track segment
-  trackStartY = 0;     // world Y at start of current track segment
-  trackBaseFacing = 0; // bodyFacing32 when track was initiated (for rotating track offsets)
+  trackNumber = -1;    // C++ track number (1-13), -1 = not on a track
+  trackIndex = 0;      // current step within the track
+  trackFlags = 0;      // TrackControl flags (F_T|F_X|F_Y) for Smooth_Turn transformation
+  speedAccum = 0;      // C++ SpeedAccum: sub-pixel movement remainder (leptons)
 
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
   // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination

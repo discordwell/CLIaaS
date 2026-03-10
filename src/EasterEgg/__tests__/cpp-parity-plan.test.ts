@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TRACKS, selectTrack, usesTrackMovement, rotateTrackOffset, type TrackStep } from '../engine/tracks';
+import { usesTrackMovement, TRACK_DATA, TRACK_CONTROL, lookupTrackControl, getEffectiveTrack, F_, F_D } from '../engine/tracks';
 import { Entity } from '../engine/entity';
 import {
   Mission, SpeedClass, CELL_SIZE, LEPTON_SIZE, UnitType, House,
@@ -16,86 +16,37 @@ import { STRUCTURE_POWERED } from '../engine/scenario';
 
 // === Phase 7b: Track-table movement ===
 
-describe('Track-table movement (Phase 7b)', () => {
-  it('has 7 track types (straight + 3 turn magnitudes × left/right)', () => {
-    expect(TRACKS).toHaveLength(7);
+describe('Track-table movement — C++ parity (Phase 7b)', () => {
+  it('has 13 C++ tracks decoded from drive.cpp', () => {
+    expect(TRACK_DATA).toHaveLength(13);
   });
 
-  it('each track has at least 8 steps (C++ base + optional smoothing extensions)', () => {
-    for (let i = 0; i < TRACKS.length; i++) {
-      expect(TRACKS[i].length).toBeGreaterThanOrEqual(8);
-    }
+  it('TrackControl has 67 entries (64 facing pairs + 3 special)', () => {
+    expect(TRACK_CONTROL).toHaveLength(67);
   });
 
-  it('track 0 (straight) moves exactly 1 cell northward', () => {
-    const track = TRACKS[0];
-    const lastStep = track[track.length - 1];
-    expect(lastStep.x).toBeCloseTo(0, 5);
-    expect(lastStep.y).toBeCloseTo(-CELL_SIZE, 5);
-    for (const step of track) {
-      expect(step.facing).toBe(0);
-    }
+  it('lookupTrackControl maps facing pairs correctly', () => {
+    // N→N: straight, Track1
+    const nn = lookupTrackControl(0, 0);
+    expect(nn.track).toBe(1);
+    expect(nn.flag).toBe(F_);
+    // N→E: 90° turn, Track4 with F_D
+    const ne = lookupTrackControl(0, 2);
+    expect(ne.track).toBe(4);
+    expect(ne.flag).toBe(F_D);
   });
 
-  it('track 1 (45° right) ends at facing 4 (NE)', () => {
-    const lastStep = TRACKS[1][TRACKS[1].length - 1];
-    expect(lastStep.facing).toBe(4);
+  it('getEffectiveTrack returns StartTrack for F_D entries', () => {
+    // N→NE: Track3 → StartTrack7
+    expect(getEffectiveTrack(TRACK_CONTROL[1])).toBe(7);
+    // N→E: Track4 → StartTrack9
+    expect(getEffectiveTrack(TRACK_CONTROL[2])).toBe(9);
   });
 
-  it('track 2 (45° left) ends at facing 28 (NW)', () => {
-    const lastStep = TRACKS[2][TRACKS[2].length - 1];
-    expect(lastStep.facing).toBe(28);
-  });
-
-  it('track 3 (90° right N→E) ends at facing 8 (E)', () => {
-    const lastStep = TRACKS[3][TRACKS[3].length - 1];
-    expect(lastStep.facing).toBe(8);
-  });
-
-  it('track 4 (90° left N→W) ends at facing 24 (W)', () => {
-    const lastStep = TRACKS[4][TRACKS[4].length - 1];
-    expect(lastStep.facing).toBe(24);
-  });
-
-  it('track 5 (180° right) ends at facing 16 (S)', () => {
-    const lastStep = TRACKS[5][TRACKS[5].length - 1];
-    expect(lastStep.facing).toBe(16);
-  });
-
-  it('selectTrack returns 0 for same facing (straight)', () => {
-    expect(selectTrack(0, 0)).toBe(0);
-    expect(selectTrack(8, 8)).toBe(0);
-    expect(selectTrack(16, 16)).toBe(0);
-  });
-
-  it('selectTrack returns 1 for small right turn (45°)', () => {
-    expect(selectTrack(0, 4)).toBe(1);   // N → NE
-    expect(selectTrack(0, 2)).toBe(1);   // small right
-  });
-
-  it('selectTrack returns 2 for small left turn (45°)', () => {
-    expect(selectTrack(0, 28)).toBe(2);  // N → NW
-    expect(selectTrack(0, 30)).toBe(2);  // small left
-  });
-
-  it('selectTrack returns 3 for 90° right turn', () => {
-    expect(selectTrack(0, 8)).toBe(3);   // N → E
-    expect(selectTrack(0, 12)).toBe(3);  // N → SE
-  });
-
-  it('selectTrack returns 4 for 90° left turn', () => {
-    expect(selectTrack(0, 24)).toBe(4);  // N → W
-    expect(selectTrack(0, 20)).toBe(4);  // N → SW
-  });
-
-  it('selectTrack returns 5 for 180° right turn', () => {
-    expect(selectTrack(0, 16)).toBe(5);  // N → S (exact 180°)
-    expect(selectTrack(0, 14)).toBe(5);  // near-180° right
-  });
-
-  it('selectTrack returns 6 for 180° left turn', () => {
-    // diff = (17 - 0 + 32) % 32 = 17, isRight = false (17 > 16)
-    expect(selectTrack(0, 17)).toBe(6);
+  it('impossible turns (N→SE, N→S, N→SW) have track=0', () => {
+    expect(TRACK_CONTROL[3].track).toBe(0);
+    expect(TRACK_CONTROL[4].track).toBe(0);
+    expect(TRACK_CONTROL[5].track).toBe(0);
   });
 
   it('usesTrackMovement: vehicles use tracks', () => {
@@ -113,58 +64,12 @@ describe('Track-table movement (Phase 7b)', () => {
     expect(usesTrackMovement(SpeedClass.WINGED, false, true)).toBe(false);
   });
 
-  // rotateTrackOffset: exact coordinate transforms for all 8 directions
-  it('rotateTrackOffset: N (facing8=0) is identity', () => {
-    const [rx, ry] = rotateTrackOffset(10, -24, 0);
-    expect(rx).toBe(10);
-    expect(ry).toBe(-24);
-  });
-
-  it('rotateTrackOffset: E (facing8=2) is exact 90° CW', () => {
-    // (x,y) → (-y, x)
-    const [rx, ry] = rotateTrackOffset(0, -24, 2);
-    expect(rx).toBe(24);  // -(-24) = 24
-    expect(ry).toBe(0);   // exact integer
-  });
-
-  it('rotateTrackOffset: S (facing8=4) is exact 180°', () => {
-    const [rx, ry] = rotateTrackOffset(0, -24, 4);
-    expect(rx).toBeCloseTo(0, 10);
-    expect(ry).toBe(24);
-  });
-
-  it('rotateTrackOffset: W (facing8=6) is exact 270° CW', () => {
-    // (x,y) → (y, -x)
-    const [rx, ry] = rotateTrackOffset(0, -24, 6);
-    expect(rx).toBe(-24);
-    expect(ry).toBeCloseTo(0, 10);
-  });
-
-  it('rotateTrackOffset: NE (facing8=1) uses √2/2 scaling', () => {
-    // (x-y)·S, (x+y)·S where S = √2/2
-    const [rx, ry] = rotateTrackOffset(0, -24, 1);
-    const S = Math.SQRT2 / 2;
-    expect(rx).toBeCloseTo((0 - (-24)) * S, 10); // 24·√2/2 ≈ 16.97
-    expect(ry).toBeCloseTo((0 + (-24)) * S, 10); // -24·√2/2 ≈ -16.97
-  });
-
-  it('rotateTrackOffset: cardinal transforms are exact integers (no float drift)', () => {
-    // For any input, cardinal rotations should produce exact values
-    const [ex, ey] = rotateTrackOffset(7, -13, 2); // E: (-y, x)
-    expect(ex).toBe(13);
-    expect(ey).toBe(7);
-    const [sx, sy] = rotateTrackOffset(7, -13, 4); // S: (-x, -y)
-    expect(sx).toBe(-7);
-    expect(sy).toBe(13);
-  });
-
-  it('Entity has track state fields initialized correctly', () => {
+  it('Entity has C++ track state fields initialized correctly', () => {
     const e = new Entity(UnitType.V_1TNK, House.Spain, 100, 100);
     expect(e.trackNumber).toBe(-1);
     expect(e.trackIndex).toBe(0);
-    expect(e.trackStartX).toBe(0);
-    expect(e.trackStartY).toBe(0);
-    expect(e.trackBaseFacing).toBe(0);
+    expect(e.trackFlags).toBe(0);
+    expect(e.speedAccum).toBe(0);
   });
 });
 

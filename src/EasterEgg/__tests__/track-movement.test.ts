@@ -1,145 +1,252 @@
 /**
- * Track-table movement verification tests.
+ * Track-table movement C++ parity tests.
  *
- * Verifies:
- * 1. Track endpoints in North reference frame match target cell centers
- * 2. Track step continuity (no large gaps between consecutive steps)
- * 3. Post-track residual is bounded (diagonal movement handled smoothly)
- * 4. Track selection logic for different angular differences
- * 5. Vehicle/infantry track usage classification
+ * Verifies faithful port of C++ drive.cpp track system:
+ * 1. All 13 track arrays decoded correctly from hex
+ * 2. TrackControl[67] table maps facing transitions correctly
+ * 3. Smooth_Turn flag transformations (F_T, F_X, F_Y)
+ * 4. Short tracks (7-10) cover single-cell movement
+ * 5. Track endpoints all reach (0,0) = target cell center
+ * 6. Vehicle/infantry track usage classification
  */
 
 import { describe, it, expect } from 'vitest';
-import { TRACKS, selectTrack, rotateTrackOffset, usesTrackMovement } from '../engine/tracks';
+import {
+  TRACK_DATA, TRACK_CONTROL, RAW_TRACKS,
+  lookupTrackControl, getEffectiveTrack, getTrackArray,
+  smoothTurn, usesTrackMovement,
+  LP, PIXEL_LEPTON_W, F_, F_T, F_X, F_Y, F_D,
+} from '../engine/tracks';
 import { CELL_SIZE, SpeedClass } from '../engine/types';
 
-describe('Track table endpoints (North reference)', () => {
-  // In North reference frame, all tracks should reach exact cell centers
-  const expectedEndpoints: [number, number][] = [
-    [0, -CELL_SIZE],           // track 0: straight N
-    [CELL_SIZE, -CELL_SIZE],   // track 1: 45° right → NE (extended)
-    [-CELL_SIZE, -CELL_SIZE],  // track 2: 45° left → NW (extended)
-    [CELL_SIZE, 0],            // track 3: 90° right → E
-    [-CELL_SIZE, 0],           // track 4: 90° left → W
-    [0, CELL_SIZE],            // track 5: 180° right → S
-    [0, CELL_SIZE],            // track 6: 180° left → S
-  ];
+describe('C++ Track Data (13 tracks)', () => {
+  it('has exactly 13 tracks', () => {
+    expect(TRACK_DATA).toHaveLength(13);
+  });
 
-  for (let trackNum = 0; trackNum < TRACKS.length; trackNum++) {
-    it(`track ${trackNum} endpoint matches target cell center`, () => {
-      const track = TRACKS[trackNum];
-      const lastStep = track[track.length - 1];
-      const [expectedX, expectedY] = expectedEndpoints[trackNum];
-      const [rx, ry] = rotateTrackOffset(lastStep.x, lastStep.y, 0);
+  it('Track1 (straight N) has 24 steps', () => {
+    expect(TRACK_DATA[0]).toHaveLength(24);
+  });
 
-      expect(rx).toBeCloseTo(expectedX, 4);
-      expect(ry).toBeCloseTo(expectedY, 4);
-    });
-  }
-});
+  it('Track2 (straight NE diagonal) has 32 steps', () => {
+    expect(TRACK_DATA[1]).toHaveLength(32);
+  });
 
-describe('Post-track residual bounds', () => {
-  it('all track endpoints have bounded snap distance for all 8 directions', () => {
-    // After track completion + rotation, the remaining distance to cell center
-    // must be small enough for smooth residual approach (< CELL_SIZE/2 = 12px).
-    // The residual approach code in updateMove handles this smoothly.
-    for (let facing8 = 0; facing8 < 8; facing8++) {
-      for (let trackNum = 0; trackNum < TRACKS.length; trackNum++) {
-        const track = TRACKS[trackNum];
-        const lastStep = track[track.length - 1];
-        const [rx, ry] = rotateTrackOffset(lastStep.x, lastStep.y, facing8);
+  it('Track3 (long 2-cell N→NE) has 55 steps', () => {
+    expect(TRACK_DATA[2]).toHaveLength(55);
+  });
 
-        const cellsX = Math.round(rx / CELL_SIZE);
-        const cellsY = Math.round(ry / CELL_SIZE);
-        const snapX = Math.abs(rx - cellsX * CELL_SIZE);
-        const snapY = Math.abs(ry - cellsY * CELL_SIZE);
-        const snapDist = Math.sqrt(snapX * snapX + snapY * snapY);
+  it('Track7 (short 45° curve) has 28 steps', () => {
+    expect(TRACK_DATA[6]).toHaveLength(28);
+  });
 
-        // Residual must be < CELL_SIZE/2 for smooth approach
-        expect(snapDist, `track ${trackNum} facing ${facing8}: snap ${snapDist.toFixed(1)}px`)
-          .toBeLessThan(CELL_SIZE / 2);
-      }
+  it('Track9 (short 90° curve) has 31 steps', () => {
+    expect(TRACK_DATA[8]).toHaveLength(31);
+  });
+
+  it('every track ends at (0,0) — target cell center', () => {
+    for (let i = 0; i < TRACK_DATA.length; i++) {
+      const track = TRACK_DATA[i];
+      const last = track[track.length - 1];
+      expect(last.x, `Track${i + 1} last step X`).toBe(0);
+      expect(last.y, `Track${i + 1} last step Y`).toBe(0);
     }
   });
 
-  it('cardinal-facing straight tracks have zero snap', () => {
-    // When facing N/E/S/W, the straight track should reach cell center exactly
-    for (const facing8 of [0, 2, 4, 6]) {
-      const track = TRACKS[0]; // straight
-      const lastStep = track[track.length - 1];
-      const [rx, ry] = rotateTrackOffset(lastStep.x, lastStep.y, facing8);
-      const cellsX = Math.round(rx / CELL_SIZE);
-      const cellsY = Math.round(ry / CELL_SIZE);
-      const snap = Math.sqrt(
-        Math.pow(rx - cellsX * CELL_SIZE, 2) +
-        Math.pow(ry - cellsY * CELL_SIZE, 2)
-      );
-      expect(snap, `straight track facing ${facing8}`).toBeLessThan(0.01);
+  it('Track1 step 0 is (0, 245) leptons — 245 leptons south of target', () => {
+    expect(TRACK_DATA[0][0].x).toBe(0);
+    expect(TRACK_DATA[0][0].y).toBe(245); // 0x00F5
+    expect(TRACK_DATA[0][0].facing).toBe(0); // DIR_N
+  });
+
+  it('Track1 steps decrease by ~11 leptons (PIXEL_LEPTON_W+1)', () => {
+    const track = TRACK_DATA[0];
+    for (let i = 1; i < track.length - 1; i++) {
+      const delta = track[i - 1].y - track[i].y;
+      expect(delta).toBe(11);
+    }
+  });
+
+  it('Track2 step 0 is (-248, 248) leptons — NE diagonal start', () => {
+    expect(TRACK_DATA[1][0].x).toBe(-248); // 0xFF08 signed
+    expect(TRACK_DATA[1][0].y).toBe(248);  // 0x00F8
+    expect(TRACK_DATA[1][0].facing).toBe(32); // DIR_NE
+  });
+
+  it('Track2 all steps have facing=32 (DIR_NE)', () => {
+    for (const step of TRACK_DATA[1]) {
+      expect(step.facing).toBe(32);
     }
   });
 });
 
-describe('Track selection', () => {
-  it('same facing selects straight track', () => {
-    expect(selectTrack(0, 0)).toBe(0);
-    expect(selectTrack(16, 16)).toBe(0);
+describe('RawTracks metadata', () => {
+  it('has 13 entries', () => {
+    expect(RAW_TRACKS).toHaveLength(13);
   });
 
-  it('small angle selects 45° turn', () => {
-    expect(selectTrack(0, 4)).toBe(1);   // N→NE = 45° right
-    expect(selectTrack(0, 28)).toBe(2);  // N→NW = 45° left
-    expect(selectTrack(8, 12)).toBe(1);  // E→SE = 45° right
+  it('Track3 has Jump@37, Entry@12, Cell@22', () => {
+    expect(RAW_TRACKS[2]).toEqual({ jump: 37, entry: 12, cell: 22 });
   });
 
-  it('medium angle selects 90° turn', () => {
-    expect(selectTrack(0, 8)).toBe(3);   // N→E = 90° right
-    expect(selectTrack(0, 24)).toBe(4);  // N→W = 90° left
+  it('Track4 has Jump@26, Entry@11, Cell@19', () => {
+    expect(RAW_TRACKS[3]).toEqual({ jump: 26, entry: 11, cell: 19 });
   });
 
-  it('large angle selects 180° turn', () => {
-    expect(selectTrack(0, 16)).toBe(5);  // N→S = 180° right
-    // N→SSW (20): diff=20, isRight=false, absDiff=12 → 90° range
-    expect(selectTrack(0, 20)).toBe(4);  // falls in 90° range (absDiff=12)
-    // For actual 180° left: diff must be > 12 from left
-    expect(selectTrack(4, 20)).toBe(5);  // NE→S: diff=16, right, absDiff=16 → 180°
+  it('single-cell tracks have jump=-1, entry=0', () => {
+    for (const idx of [0, 1, 6, 7, 8, 9, 10, 11, 12]) {
+      expect(RAW_TRACKS[idx].jump, `Track${idx + 1} jump`).toBe(-1);
+      expect(RAW_TRACKS[idx].entry, `Track${idx + 1} entry`).toBe(0);
+    }
   });
 });
 
-describe('Track step continuity (anti-jank)', () => {
-  it('consecutive track steps have bounded gaps (< 10px)', () => {
-    // Steps should be close together for smooth movement.
-    // The max gap occurs in the 90° turn track's last step (large radius).
-    const maxGap = 10;
-
-    for (let trackNum = 0; trackNum < TRACKS.length; trackNum++) {
-      const track = TRACKS[trackNum];
-      let prevX = 0, prevY = 0;
-
-      for (let i = 0; i < track.length; i++) {
-        const [rx, ry] = rotateTrackOffset(track[i].x, track[i].y, 0);
-        const dx = rx - prevX;
-        const dy = ry - prevY;
-        const gap = Math.sqrt(dx * dx + dy * dy);
-
-        expect(gap, `track ${trackNum} step ${i}: ${gap.toFixed(2)}px gap`).toBeLessThan(maxGap);
-        prevX = rx;
-        prevY = ry;
-      }
-    }
+describe('TrackControl table', () => {
+  it('has 67 entries (64 facing pairs + 3 special)', () => {
+    expect(TRACK_CONTROL).toHaveLength(67);
   });
 
-  it('45° turn tracks have smooth extension (no sudden direction change)', () => {
-    // The extension steps after the curve should maintain the diagonal direction
-    for (const trackNum of [1, 2]) {
-      const track = TRACKS[trackNum];
-      // Steps after index 7 are the extension
-      for (let i = 8; i < track.length; i++) {
-        const prev = track[i - 1];
-        const curr = track[i];
-        // Extension steps should maintain the same facing
-        expect(curr.facing).toBe(prev.facing);
-      }
+  it('N→N (index 0) uses Track1 straight with no flags', () => {
+    const ctrl = TRACK_CONTROL[0];
+    expect(ctrl.track).toBe(1);
+    expect(ctrl.flag).toBe(F_);
+    expect(ctrl.facing).toBe(0); // DIR_N
+  });
+
+  it('N→NE (index 1) uses Track3 with F_D flag', () => {
+    const ctrl = TRACK_CONTROL[1];
+    expect(ctrl.track).toBe(3);
+    expect(ctrl.startTrack).toBe(7);
+    expect(ctrl.flag).toBe(F_D);
+  });
+
+  it('NE→NE (index 9) uses Track2 diagonal with no flags', () => {
+    const ctrl = TRACK_CONTROL[9];
+    expect(ctrl.track).toBe(2);
+    expect(ctrl.flag).toBe(F_);
+  });
+
+  it('E→E (index 18) uses Track1 with F_T|F_X', () => {
+    const ctrl = TRACK_CONTROL[18];
+    expect(ctrl.track).toBe(1);
+    expect(ctrl.flag).toBe(F_T | F_X);
+  });
+
+  it('S→S (index 36) uses Track1 with F_Y', () => {
+    const ctrl = TRACK_CONTROL[36];
+    expect(ctrl.track).toBe(1);
+    expect(ctrl.flag).toBe(F_Y);
+  });
+
+  it('impossible turns have track=0', () => {
+    // N→SE (0-3), N→S (0-4), N→SW (0-5) are all impossible
+    expect(TRACK_CONTROL[3].track).toBe(0);
+    expect(TRACK_CONTROL[4].track).toBe(0);
+    expect(TRACK_CONTROL[5].track).toBe(0);
+  });
+
+  it('lookupTrackControl returns correct entry for facing pair', () => {
+    const ctrl = lookupTrackControl(0, 2); // N→E
+    expect(ctrl.track).toBe(4);
+    expect(ctrl.flag).toBe(F_D);
+  });
+});
+
+describe('getEffectiveTrack — short track selection', () => {
+  it('straight movements use main track (no F_D)', () => {
+    // N→N: Track1, no F_D → returns 1
+    expect(getEffectiveTrack(TRACK_CONTROL[0])).toBe(1);
+    // NE→NE: Track2, no F_D → returns 2
+    expect(getEffectiveTrack(TRACK_CONTROL[9])).toBe(2);
+  });
+
+  it('F_D entries use StartTrack (short version)', () => {
+    // N→NE: Track3 → StartTrack7
+    expect(getEffectiveTrack(TRACK_CONTROL[1])).toBe(7);
+    // N→E: Track4 → StartTrack9
+    expect(getEffectiveTrack(TRACK_CONTROL[2])).toBe(9);
+    // NE→SE: Track5 → StartTrack10
+    expect(getEffectiveTrack(TRACK_CONTROL[11])).toBe(10);
+    // NE→E: Track6 → StartTrack8
+    expect(getEffectiveTrack(TRACK_CONTROL[10])).toBe(8);
+  });
+
+  it('impossible turns return 0', () => {
+    expect(getEffectiveTrack(TRACK_CONTROL[3])).toBe(0); // N→SE
+    expect(getEffectiveTrack(TRACK_CONTROL[4])).toBe(0); // N→S
+  });
+});
+
+describe('Smooth_Turn flag transformations', () => {
+  it('F_ (no flags) is identity', () => {
+    const r = smoothTurn(100, -200, 0, F_);
+    expect(r.x).toBe(100);
+    expect(r.y).toBe(-200);
+    expect(r.facing).toBe(0);
+  });
+
+  it('F_T transposes X↔Y and adjusts direction', () => {
+    const r = smoothTurn(100, -200, 0, F_T);
+    expect(r.x).toBe(-200); // y
+    expect(r.y).toBe(100);  // x
+    expect(r.facing).toBe(192); // DIR_W - 0 = 192
+  });
+
+  it('F_X negates X and reverses direction', () => {
+    const r = smoothTurn(100, -200, 32, F_X);
+    expect(r.x).toBe(-100);
+    expect(r.y).toBe(-200);
+    expect(r.facing).toBe(224); // (-32) & 0xFF = 224 = DIR_NW
+  });
+
+  it('F_Y negates Y and adjusts direction', () => {
+    const r = smoothTurn(100, -200, 0, F_Y);
+    expect(r.x).toBe(100);
+    expect(r.y).toBe(200);
+    expect(r.facing).toBe(128); // DIR_S - 0 = 128
+  });
+
+  it('F_T|F_X combined: E→E straight uses Track1 data correctly', () => {
+    // Track1 step 0: x=0, y=245, dir=0 (N). With F_T|F_X:
+    // F_T: swap → x=245, y=0; dir = 192-0 = 192 (W)
+    // F_X: x=-245; dir = -192 & 0xFF = 64 (E)
+    const r = smoothTurn(0, 245, 0, F_T | F_X);
+    expect(r.x).toBe(-245);
+    expect(r.y).toBe(0);
+    expect(r.facing).toBe(64); // DIR_E
+  });
+
+  it('F_Y: S→S straight uses Track1 data with inverted Y', () => {
+    // Track1 step 0: x=0, y=245, dir=0 (N). With F_Y:
+    // y=-245, dir = 128-0 = 128 (S)
+    const r = smoothTurn(0, 245, 0, F_Y);
+    expect(r.x).toBe(0);
+    expect(r.y).toBe(-245);
+    expect(r.facing).toBe(128); // DIR_S
+  });
+});
+
+describe('Short track single-cell coverage', () => {
+  it('Track7 (short 45°) max displacement is < 8 pixels', () => {
+    let maxDist = 0;
+    for (const step of TRACK_DATA[6]) {
+      const px = step.x * LP;
+      const py = step.y * LP;
+      const dist = Math.sqrt(px * px + py * py);
+      maxDist = Math.max(maxDist, dist);
     }
+    expect(maxDist).toBeLessThan(8);
+  });
+
+  it('Track9 (short 90°) max displacement is reasonable (< 15px)', () => {
+    let maxDist = 0;
+    for (const step of TRACK_DATA[8]) {
+      const px = step.x * LP;
+      const py = step.y * LP;
+      const dist = Math.sqrt(px * px + py * py);
+      maxDist = Math.max(maxDist, dist);
+    }
+    expect(maxDist).toBeLessThan(15);
   });
 });
 
@@ -162,5 +269,23 @@ describe('Vehicle track movement classification', () => {
 
   it('aircraft do NOT use track movement', () => {
     expect(usesTrackMovement(SpeedClass.WINGED, false, true)).toBe(false);
+  });
+});
+
+describe('Constants', () => {
+  it('LP = CELL_SIZE/256 = 0.09375', () => {
+    expect(LP).toBeCloseTo(CELL_SIZE / 256, 10);
+  });
+
+  it('PIXEL_LEPTON_W = 10 (C++ integer division 256/24)', () => {
+    expect(PIXEL_LEPTON_W).toBe(10);
+  });
+
+  it('flag constants match C++ drive.h', () => {
+    expect(F_).toBe(0x00);
+    expect(F_T).toBe(0x01);
+    expect(F_X).toBe(0x02);
+    expect(F_Y).toBe(0x04);
+    expect(F_D).toBe(0x08);
   });
 });
