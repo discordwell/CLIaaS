@@ -3027,7 +3027,7 @@ export class Renderer {
     ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 10);
     ctx.font = '12px monospace';
     ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
-    ctx.fillText('Press P to resume', this.width / 2, this.height / 2 + 15);
+    ctx.fillText('Press P or Esc to resume', this.width / 2, this.height / 2 + 15);
     ctx.textAlign = 'left';
   }
 

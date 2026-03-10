@@ -594,6 +594,8 @@ export class Game {
       this.state = 'paused';
       this.audio.music.pause();
       this.onStateChange?.('paused');
+      // Start paused render loop (scheduleNext bails when not 'playing')
+      this.timerId = window.setTimeout(this.gameLoop, 100);
     } else if (this.state === 'paused') {
       this.state = 'playing';
       this.audio.music.resume();
@@ -609,6 +611,7 @@ export class Game {
       this.state = 'paused';
       this.audio.music.pause();
       this.onStateChange?.('paused');
+      this.timerId = window.setTimeout(this.gameLoop, 100);
     }
   }
 
