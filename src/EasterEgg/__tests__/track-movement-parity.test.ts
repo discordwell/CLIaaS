@@ -27,9 +27,9 @@ describe('track data structure', () => {
     expect(TRACKS.length).toBe(7);
   });
 
-  it('each track has exactly 8 steps', () => {
+  it('each track has at least 8 steps (original C++ steps + optional extensions)', () => {
     for (let i = 0; i < TRACKS.length; i++) {
-      expect(TRACKS[i].length, `track ${i} should have 8 steps`).toBe(8);
+      expect(TRACKS[i].length, `track ${i} should have >= 8 steps`).toBeGreaterThanOrEqual(8);
     }
   });
 
@@ -63,15 +63,15 @@ describe('track 0 — straight movement', () => {
 
   it('Y progresses from -32LP to -256LP (one full cell North)', () => {
     expect(TRACKS[0][0].y).toBeCloseTo(-32 * LP, 10);
-    expect(TRACKS[0][7].y).toBeCloseTo(-256 * LP, 10);
+    expect(TRACKS[0][TRACKS[0].length - 1].y).toBeCloseTo(-256 * LP, 10);
   });
 
   it('last step Y = -CELL_SIZE (moved exactly one cell)', () => {
-    expect(TRACKS[0][7].y).toBeCloseTo(-CELL_SIZE, 10);
+    expect(TRACKS[0][TRACKS[0].length - 1].y).toBeCloseTo(-CELL_SIZE, 10);
   });
 
   it('Y is monotonically decreasing (always moving North)', () => {
-    for (let i = 1; i < 8; i++) {
+    for (let i = 1; i < TRACKS[0].length; i++) {
       expect(TRACKS[0][i].y).toBeLessThan(TRACKS[0][i - 1].y);
     }
   });
@@ -81,41 +81,44 @@ describe('track 0 — straight movement', () => {
 // Section 3: Track symmetry — left mirrors right
 // ============================================================
 describe('track symmetry — left mirrors right', () => {
-  // Track 1 (45R) and Track 2 (45L) should be X-mirrored
+  // Track 1 (45R) and Track 2 (45L) should be X-mirrored (same step count)
   it('45° tracks: 45L.x = -45R.x at each step', () => {
-    for (let i = 0; i < 8; i++) {
+    expect(TRACKS[1].length).toBe(TRACKS[2].length);
+    for (let i = 0; i < TRACKS[1].length; i++) {
       expect(TRACKS[2][i].x).toBeCloseTo(-TRACKS[1][i].x, 10);
     }
   });
 
   it('45° tracks: same Y values', () => {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < TRACKS[1].length; i++) {
       expect(TRACKS[2][i].y).toBeCloseTo(TRACKS[1][i].y, 10);
     }
   });
 
   // Track 3 (90R) and Track 4 (90L) should be X-mirrored
   it('90° tracks: 90L.x = -90R.x at each step', () => {
-    for (let i = 0; i < 8; i++) {
+    expect(TRACKS[3].length).toBe(TRACKS[4].length);
+    for (let i = 0; i < TRACKS[3].length; i++) {
       expect(TRACKS[4][i].x).toBeCloseTo(-TRACKS[3][i].x, 10);
     }
   });
 
   it('90° tracks: same Y values', () => {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < TRACKS[3].length; i++) {
       expect(TRACKS[4][i].y).toBeCloseTo(TRACKS[3][i].y, 10);
     }
   });
 
   // Track 5 (180R) and Track 6 (180L) should be X-mirrored
   it('180° tracks: 180L.x = -180R.x at each step', () => {
-    for (let i = 0; i < 8; i++) {
+    expect(TRACKS[5].length).toBe(TRACKS[6].length);
+    for (let i = 0; i < TRACKS[5].length; i++) {
       expect(TRACKS[6][i].x).toBeCloseTo(-TRACKS[5][i].x, 10);
     }
   });
 
   it('180° tracks: same Y values', () => {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < TRACKS[5].length; i++) {
       expect(TRACKS[6][i].y).toBeCloseTo(TRACKS[5][i].y, 10);
     }
   });
@@ -126,26 +129,26 @@ describe('track symmetry — left mirrors right', () => {
 // ============================================================
 describe('track endpoints — correct cell displacement', () => {
   it('track 0 (straight N): ends at (0, -1 cell)', () => {
-    const last = TRACKS[0][7];
+    const last = TRACKS[0][TRACKS[0].length - 1];
     expect(last.x).toBeCloseTo(0, 10);
     expect(last.y).toBeCloseTo(-CELL_SIZE, 10);
   });
 
-  it('track 1 (45R, N→NE): ends at approx (+0.5, -0.5 cell) diagonal', () => {
-    const last = TRACKS[1][7];
-    // 128 leptons in X = 0.5 cells, -128 leptons in Y = -0.5 cells
-    expect(last.x).toBeCloseTo(128 * LP, 10);
-    expect(last.y).toBeCloseTo(-128 * LP, 10);
+  it('track 1 (45R, N→NE): ends at (+1, -1 cell) diagonal', () => {
+    const last = TRACKS[1][TRACKS[1].length - 1];
+    // Extended to reach diagonal cell center: 256 LP on each axis
+    expect(last.x).toBeCloseTo(256 * LP, 10);
+    expect(last.y).toBeCloseTo(-256 * LP, 10);
   });
 
   it('track 3 (90R, N→E): ends at (+1 cell, 0)', () => {
-    const last = TRACKS[3][7];
+    const last = TRACKS[3][TRACKS[3].length - 1];
     expect(last.x).toBeCloseTo(256 * LP, 10);
     expect(last.y).toBeCloseTo(0, 10);
   });
 
   it('track 5 (180R, N→S): ends at (0, +1 cell)', () => {
-    const last = TRACKS[5][7];
+    const last = TRACKS[5][TRACKS[5].length - 1];
     expect(last.x).toBeCloseTo(0, 10);
     expect(last.y).toBeCloseTo(256 * LP, 10);
   });
@@ -162,27 +165,27 @@ describe('track facing progression', () => {
   });
 
   it('track 1 (45R): ends at facing 4 (NE in 32-step)', () => {
-    expect(TRACKS[1][7].facing).toBe(4);
+    expect(TRACKS[1][TRACKS[1].length - 1].facing).toBe(4);
   });
 
   it('track 2 (45L): ends at facing 28 (NW in 32-step)', () => {
-    expect(TRACKS[2][7].facing).toBe(28);
+    expect(TRACKS[2][TRACKS[2].length - 1].facing).toBe(28);
   });
 
   it('track 3 (90R): ends at facing 8 (E in 32-step)', () => {
-    expect(TRACKS[3][7].facing).toBe(8);
+    expect(TRACKS[3][TRACKS[3].length - 1].facing).toBe(8);
   });
 
   it('track 4 (90L): ends at facing 24 (W in 32-step)', () => {
-    expect(TRACKS[4][7].facing).toBe(24);
+    expect(TRACKS[4][TRACKS[4].length - 1].facing).toBe(24);
   });
 
   it('track 5 (180R): ends at facing 16 (S in 32-step)', () => {
-    expect(TRACKS[5][7].facing).toBe(16);
+    expect(TRACKS[5][TRACKS[5].length - 1].facing).toBe(16);
   });
 
   it('track 6 (180L): ends at facing 16 (S in 32-step)', () => {
-    expect(TRACKS[6][7].facing).toBe(16);
+    expect(TRACKS[6][TRACKS[6].length - 1].facing).toBe(16);
   });
 
   it('facing values never exceed 31', () => {

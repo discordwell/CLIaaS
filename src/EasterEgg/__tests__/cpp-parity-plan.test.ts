@@ -21,9 +21,9 @@ describe('Track-table movement (Phase 7b)', () => {
     expect(TRACKS).toHaveLength(7);
   });
 
-  it('each track has 8 steps', () => {
+  it('each track has at least 8 steps (C++ base + optional smoothing extensions)', () => {
     for (let i = 0; i < TRACKS.length; i++) {
-      expect(TRACKS[i]).toHaveLength(8);
+      expect(TRACKS[i].length).toBeGreaterThanOrEqual(8);
     }
   });
 

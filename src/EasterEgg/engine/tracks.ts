@@ -55,7 +55,9 @@ const TRACK_STRAIGHT: TrackStep[] = [
   { x: 0, y: -256 * LP, facing: 0 },
 ];
 
-// Track 1: 45° right turn (N → NE) — gentle curve
+// Track 1: 45° right turn (N → NE) — gentle curve + straight extension to cell center
+// Original C++ track ends at (128,-128) leptons = half a diagonal cell.
+// Extended with NE straight-line steps to reach (256,-256) = full diagonal cell center.
 const TRACK_45R: TrackStep[] = [
   { x: 4 * LP,   y: -30 * LP,  facing: 0 },
   { x: 12 * LP,  y: -58 * LP,  facing: 1 },
@@ -65,9 +67,14 @@ const TRACK_45R: TrackStep[] = [
   { x: 84 * LP,  y: -148 * LP, facing: 3 },
   { x: 112 * LP, y: -164 * LP, facing: 3 },
   { x: 128 * LP, y: -128 * LP, facing: 4 },
+  // Straight NE extension to reach diagonal cell center
+  { x: 160 * LP, y: -160 * LP, facing: 4 },
+  { x: 192 * LP, y: -192 * LP, facing: 4 },
+  { x: 224 * LP, y: -224 * LP, facing: 4 },
+  { x: 256 * LP, y: -256 * LP, facing: 4 },
 ];
 
-// Track 2: 45° left turn (N → NW) — mirror of track 1
+// Track 2: 45° left turn (N → NW) — mirror of track 1 + straight extension to cell center
 const TRACK_45L: TrackStep[] = [
   { x: -4 * LP,   y: -30 * LP,  facing: 0 },
   { x: -12 * LP,  y: -58 * LP,  facing: 31 },
@@ -77,9 +84,14 @@ const TRACK_45L: TrackStep[] = [
   { x: -84 * LP,  y: -148 * LP, facing: 29 },
   { x: -112 * LP, y: -164 * LP, facing: 29 },
   { x: -128 * LP, y: -128 * LP, facing: 28 },
+  // Straight NW extension to reach diagonal cell center
+  { x: -160 * LP, y: -160 * LP, facing: 28 },
+  { x: -192 * LP, y: -192 * LP, facing: 28 },
+  { x: -224 * LP, y: -224 * LP, facing: 28 },
+  { x: -256 * LP, y: -256 * LP, facing: 28 },
 ];
 
-// Track 3: 90° right turn (N → E) — sharp curve
+// Track 3: 90° right turn (N → E) — sharp curve with smoothed final approach
 const TRACK_90R: TrackStep[] = [
   { x: 8 * LP,   y: -24 * LP,  facing: 0 },
   { x: 24 * LP,  y: -48 * LP,  facing: 2 },
@@ -88,10 +100,11 @@ const TRACK_90R: TrackStep[] = [
   { x: 112 * LP, y: -72 * LP,  facing: 6 },
   { x: 144 * LP, y: -64 * LP,  facing: 7 },
   { x: 176 * LP, y: -48 * LP,  facing: 8 },
+  { x: 216 * LP, y: -24 * LP,  facing: 8 },
   { x: 256 * LP, y: 0,         facing: 8 },
 ];
 
-// Track 4: 90° left turn (N → W)
+// Track 4: 90° left turn (N → W) — smoothed final approach
 const TRACK_90L: TrackStep[] = [
   { x: -8 * LP,   y: -24 * LP,  facing: 0 },
   { x: -24 * LP,  y: -48 * LP,  facing: 30 },
@@ -100,10 +113,11 @@ const TRACK_90L: TrackStep[] = [
   { x: -112 * LP, y: -72 * LP,  facing: 26 },
   { x: -144 * LP, y: -64 * LP,  facing: 25 },
   { x: -176 * LP, y: -48 * LP,  facing: 24 },
+  { x: -216 * LP, y: -24 * LP,  facing: 24 },
   { x: -256 * LP, y: 0,         facing: 24 },
 ];
 
-// Track 5: 180° U-turn right (N → S via E)
+// Track 5: 180° U-turn right (N → S via E) — smoothed final approach
 const TRACK_180R: TrackStep[] = [
   { x: 16 * LP,  y: -20 * LP,  facing: 2 },
   { x: 40 * LP,  y: -32 * LP,  facing: 4 },
@@ -112,10 +126,13 @@ const TRACK_180R: TrackStep[] = [
   { x: 72 * LP,  y: 16 * LP,   facing: 14 },
   { x: 60 * LP,  y: 40 * LP,   facing: 16 },
   { x: 32 * LP,  y: 56 * LP,   facing: 16 },
+  { x: 24 * LP,  y: 106 * LP,  facing: 16 },
+  { x: 16 * LP,  y: 156 * LP,  facing: 16 },
+  { x: 8 * LP,   y: 206 * LP,  facing: 16 },
   { x: 0,        y: 256 * LP,  facing: 16 },
 ];
 
-// Track 6: 180° U-turn left (N → S via W)
+// Track 6: 180° U-turn left (N → S via W) — smoothed final approach
 const TRACK_180L: TrackStep[] = [
   { x: -16 * LP,  y: -20 * LP,  facing: 30 },
   { x: -40 * LP,  y: -32 * LP,  facing: 28 },
@@ -124,6 +141,9 @@ const TRACK_180L: TrackStep[] = [
   { x: -72 * LP,  y: 16 * LP,   facing: 18 },
   { x: -60 * LP,  y: 40 * LP,   facing: 16 },
   { x: -32 * LP,  y: 56 * LP,   facing: 16 },
+  { x: -24 * LP,  y: 106 * LP,  facing: 16 },
+  { x: -16 * LP,  y: 156 * LP,  facing: 16 },
+  { x: -8 * LP,   y: 206 * LP,  facing: 16 },
   { x: 0,         y: 256 * LP,  facing: 16 },
 ];
 

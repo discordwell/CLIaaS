@@ -3777,29 +3777,65 @@ export class Game {
       };
       const speed = this.movementSpeed(entity);
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
+      // After track completion, vehicles smoothly approach the cell center instead
+      // of teleporting (handles diagonal movement where tracks cover < full distance).
       if (entity.trackNumber >= 0) {
         // Currently following a track — advance along it
         if (this.followTrackStep(entity, speed)) {
-          // Track complete — snap to cell center and advance path
-          entity.pos.x = target.x;
-          entity.pos.y = target.y;
-          entity.pathIndex++;
+          // Track complete — snap only if very close to cell center
+          const cdx = target.x - entity.pos.x;
+          const cdy = target.y - entity.pos.y;
+          if (cdx * cdx + cdy * cdy <= 4) {
+            entity.pos.x = target.x;
+            entity.pos.y = target.y;
+            entity.pathIndex++;
+          }
+          // else: residual distance handled below on next tick
         }
       } else if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
-        // Initiate a new track for this cell-to-cell segment
-        const dirToTarget = directionTo(entity.pos, target);
-        const desiredFacing32 = dirToTarget * 4;
-        const currentFacing32 = entity.bodyFacing32;
-        entity.trackNumber = selectTrack(currentFacing32, desiredFacing32);
-        entity.trackIndex = 0;
-        entity.trackStartX = entity.pos.x;
-        entity.trackStartY = entity.pos.y;
-        entity.trackBaseFacing = currentFacing32;
-        // Follow first step this tick
-        if (this.followTrackStep(entity, speed)) {
+        const cdx = target.x - entity.pos.x;
+        const cdy = target.y - entity.pos.y;
+        const cdistSq = cdx * cdx + cdy * cdy;
+
+        if (cdistSq <= 4) {
+          // Already at cell center — snap and advance
           entity.pos.x = target.x;
           entity.pos.y = target.y;
           entity.pathIndex++;
+        } else if (cdistSq < CELL_SIZE * CELL_SIZE) {
+          // Post-track residual: smooth direct approach to cell center
+          // (Diagonal tracks cover ~70% of cell distance; this fills the gap)
+          const cdist = Math.sqrt(cdistSq);
+          entity.desiredFacing = directionTo(entity.pos, target);
+          entity.tickRotation();
+          const step = Math.min(speed * entity.speedBias, cdist);
+          entity.pos.x += (cdx / cdist) * step;
+          entity.pos.y += (cdy / cdist) * step;
+          if (step >= cdist - 0.5) {
+            entity.pos.x = target.x;
+            entity.pos.y = target.y;
+            entity.pathIndex++;
+          }
+        } else {
+          // Initiate a new track for this cell-to-cell segment
+          const dirToTarget = directionTo(entity.pos, target);
+          const desiredFacing32 = dirToTarget * 4;
+          const currentFacing32 = entity.bodyFacing32;
+          entity.trackNumber = selectTrack(currentFacing32, desiredFacing32);
+          entity.trackIndex = 0;
+          entity.trackStartX = entity.pos.x;
+          entity.trackStartY = entity.pos.y;
+          entity.trackBaseFacing = currentFacing32;
+          // Follow first step this tick
+          if (this.followTrackStep(entity, speed)) {
+            const cdx2 = target.x - entity.pos.x;
+            const cdy2 = target.y - entity.pos.y;
+            if (cdx2 * cdx2 + cdy2 * cdy2 <= 4) {
+              entity.pos.x = target.x;
+              entity.pos.y = target.y;
+              entity.pathIndex++;
+            }
+          }
         }
       } else {
         // Infantry/aircraft: free-form movement (FOOT speedClass exempt from tracks)
