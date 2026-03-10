@@ -231,6 +231,25 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'V19.SHP', 'v19'],      // Oil Derrick
   ['CONQUER.MIX', 'FCOM.SHP', 'fcom'],    // Forward Command
   ['CONQUER.MIX', 'HOSP.SHP', 'hosp'],    // Hospital
+  // Civilian structures (theater-specific .TEM in TEMPERAT.MIX)
+  ['TEMPERAT.MIX', 'V01.TEM', 'v01'],    // Church
+  ['TEMPERAT.MIX', 'V02.TEM', 'v02'],    // Fenced-in area
+  ['TEMPERAT.MIX', 'V03.TEM', 'v03'],    // Water tower
+  ['TEMPERAT.MIX', 'V04.TEM', 'v04'],    // Barn
+  ['TEMPERAT.MIX', 'V05.TEM', 'v05'],    // Small farmhouse
+  ['TEMPERAT.MIX', 'V06.TEM', 'v06'],    // Farmhouse
+  ['TEMPERAT.MIX', 'V07.TEM', 'v07'],    // Windmill
+  ['TEMPERAT.MIX', 'V08.TEM', 'v08'],    // Guard shack
+  ['TEMPERAT.MIX', 'V09.TEM', 'v09'],    // Oil tank
+  ['TEMPERAT.MIX', 'V10.TEM', 'v10'],    // Haystacks
+  ['TEMPERAT.MIX', 'V11.TEM', 'v11'],    // Haystack
+  ['TEMPERAT.MIX', 'V12.TEM', 'v12'],    // Outhouse
+  ['TEMPERAT.MIX', 'V13.TEM', 'v13'],    // Shed
+  ['TEMPERAT.MIX', 'V14.TEM', 'v14'],    // Greenhouse
+  ['TEMPERAT.MIX', 'V15.TEM', 'v15'],    // Greenhouse 2
+  ['TEMPERAT.MIX', 'V16.TEM', 'v16'],    // Well
+  ['TEMPERAT.MIX', 'V17.TEM', 'v17'],    // Steel drum
+  ['TEMPERAT.MIX', 'V18.TEM', 'v18'],    // Sandbags
   // Walls / fences
   ['CONQUER.MIX', 'FENC.SHP', 'fenc'],    // Chain-link fence
   ['CONQUER.MIX', 'BRIK.SHP', 'brik'],    // Concrete wall

@@ -5,7 +5,7 @@
  *
  * Bug fix: FCOM (Forward Command Post) in SCA03EA.ini was missing from all three
  * tables, causing a yellow/brown box to render instead of the building sprite.
- * Also broadened V-series skip to catch non-Neutral V01-V18 (no sprites exist).
+ * V01-V18 civilian structures now have sprites extracted from TEMPERAT.MIX.
  *
  * BARL/BRL3 (explosive/bridge barrels) now have procedurally generated sprites
  * via scripts/generate-barrel-sprites.ts with full STRUCTURE_IMAGES, BUILDING_FRAME_TABLE,
@@ -59,10 +59,6 @@ const BUILDING_FRAME_TABLE = extractBuildingFrameTable();
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD']);
 // Turret buildings handled by special rendering code
 const TURRET_TYPES = new Set(['GUN', 'SAM', 'AGUN']);
-// V-series without sprites (V01-V18 are skipped in scenario parser)
-const V_SERIES_NO_SPRITE = new Set(
-  Array.from({ length: 18 }, (_, i) => `V${String(i + 1).padStart(2, '0')}`)
-);
 // Bridge/barrel structures now have procedurally generated sprites
 const BRIDGE_TYPES = new Set<string>();  // empty — BARL/BRL3 now have full sprite coverage
 
@@ -75,9 +71,9 @@ describe('Structure sprite coverage for ant missions', () => {
     for (const t of parseIniStructureTypes(f)) allTypes.add(t);
   }
 
-  // Filter to types that need rendering (exclude skipped V-series and bridges without sprites)
+  // Filter to types that need rendering (exclude bridges without sprites)
   const renderableTypes = [...allTypes].filter(
-    t => !V_SERIES_NO_SPRITE.has(t) && !BRIDGE_TYPES.has(t)
+    t => !BRIDGE_TYPES.has(t)
   );
 
   it('FCOM is in STRUCTURE_IMAGES', () => {
@@ -172,20 +168,23 @@ describe('Structure sprite coverage for ant missions', () => {
     });
 
     if (!isWall && !isTurret) {
-      it(`${lower} is in BUILDING_FRAME_TABLE or has 2-frame fallback`, () => {
+      it(`${lower} is in BUILDING_FRAME_TABLE or has renderer fallback`, () => {
         const inTable = BUILDING_FRAME_TABLE.has(lower);
-        const hasTwoFrameFallback = manifest[lower]?.frameCount === 2;
+        // Renderer fallback: 2 frames → frame 0/1, >2 frames → frame 0 / floor(total/2)
+        const hasRendererFallback = manifest[lower]?.frameCount >= 2;
         expect(
-          inTable || hasTwoFrameFallback,
-          `${lower} not in BUILDING_FRAME_TABLE and doesn't have exactly 2 frames for auto-fallback`
+          inTable || hasRendererFallback,
+          `${lower} not in BUILDING_FRAME_TABLE and doesn't have ≥2 frames for renderer fallback`
         ).toBe(true);
       });
     }
   }
 
-  it('V01-V18 are skipped (no sprites exist in manifest)', () => {
-    for (const v of V_SERIES_NO_SPRITE) {
-      expect(manifest[v.toLowerCase()], `${v} should NOT be in manifest`).toBeUndefined();
+  it('V01-V18 civilian structures have sprites in manifest', () => {
+    for (let i = 1; i <= 18; i++) {
+      const key = `v${String(i).padStart(2, '0')}`;
+      expect(manifest[key], `${key} should be in manifest`).toBeDefined();
+      expect(manifest[key].frameCount).toBeGreaterThanOrEqual(2);
     }
   });
 });
