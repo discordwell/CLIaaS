@@ -13,20 +13,20 @@ const ASSETS_DIR = join(__dirname, '../../../public/ra/assets');
 const manifest = JSON.parse(readFileSync(join(ASSETS_DIR, 'manifest.json'), 'utf-8'));
 
 describe('Ant sprite manifest entries', () => {
-  // Generated ant sprites (from scripts/generate-ant-sprites.ts)
-  const GENERATED_ANTS = ['ant1', 'ant2', 'ant3'];
+  // Original ant sprites (extracted from EXPAND2.MIX via extract-original-ant-assets.ts)
+  const ANTS = ['ant1', 'ant2', 'ant3'];
 
-  for (const name of GENERATED_ANTS) {
-    it(`${name} has correct manifest entry (24x24, 112 frames)`, () => {
+  for (const name of ANTS) {
+    it(`${name} has correct manifest entry (48x48, 112 frames)`, () => {
       const entry = manifest[name];
       expect(entry, `${name} missing from manifest`).toBeDefined();
-      expect(entry.frameWidth).toBe(24);
-      expect(entry.frameHeight).toBe(24);
+      expect(entry.frameWidth).toBe(48);
+      expect(entry.frameHeight).toBe(48);
       expect(entry.frameCount).toBe(112);
       expect(entry.columns).toBe(16);
       expect(entry.rows).toBe(7);
-      expect(entry.sheetWidth).toBe(384);
-      expect(entry.sheetHeight).toBe(168);
+      expect(entry.sheetWidth).toBe(768);
+      expect(entry.sheetHeight).toBe(336);
     });
   }
 
