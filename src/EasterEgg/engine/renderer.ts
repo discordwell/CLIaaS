@@ -832,6 +832,26 @@ export class Renderer {
     ctx.textAlign = 'start'; // reset
   }
 
+  /** Draw a magenta checkerboard stub for missing entity/structure sprites. */
+  private renderMissingSpriteStub(
+    ctx: CanvasRenderingContext2D, sx: number, sy: number,
+    w: number, h: number, label: string,
+  ): void {
+    const halfW = w / 2;
+    const halfH = h / 2;
+    ctx.fillStyle = '#ff00ff';
+    ctx.fillRect(sx, sy, halfW, halfH);
+    ctx.fillRect(sx + halfW, sy + halfH, halfW, halfH);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(sx + halfW, sy, halfW, halfH);
+    ctx.fillRect(sx, sy + halfH, halfW, halfH);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, sx + w / 2, sy + h / 2 + 3);
+    ctx.textAlign = 'start';
+  }
+
   /** Try to draw a tile from the tileset atlas. Returns true if drawn. */
   private drawTileFromAtlas(
     ctx: CanvasRenderingContext2D,
@@ -1479,16 +1499,9 @@ export class Renderer {
         }
         if (vis === 1) ctx.globalAlpha = 1;
       } else {
-        // Fallback: colored rectangle for buildings without sprites
-        const isPlayer = s.house === 'Spain' || s.house === 'Greece';
-        ctx.fillStyle = isPlayer
-          ? this.palColor(PAL_ROCK_START + 2, 10)   // light gray for player
-          : this.palColor(PAL_DIRT_START + 6);       // brown for neutral/enemy
+        // Missing sprite stub: magenta checkerboard + label (matches missing tile pattern)
         if (vis === 1) ctx.globalAlpha = 0.6;
-        ctx.fillRect(screenX + 2, screenY + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(screenX + 2, screenY + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+        this.renderMissingSpriteStub(ctx, screenX, screenY, CELL_SIZE, CELL_SIZE, s.type);
         if (vis === 1) ctx.globalAlpha = 1;
       }
 
@@ -1977,10 +1990,9 @@ export class Renderer {
           ctx.fill();
         }
       } else {
-        // Fallback
-        const size = entity.stats.isInfantry ? 8 : 16;
-        ctx.fillStyle = entity.isPlayerUnit ? '#4a8' : '#d44';
-        ctx.fillRect(screen.x - size / 2, screen.y - size / 2, size, size);
+        // Missing sprite stub: magenta checkerboard + label (matches missing tile pattern)
+        const size = entity.stats.isInfantry ? 16 : 24;
+        this.renderMissingSpriteStub(ctx, screen.x - size / 2, screen.y - size / 2, size, size, entity.type);
       }
 
       // Damage flash overlay
