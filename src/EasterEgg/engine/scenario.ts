@@ -2007,14 +2007,9 @@ export function executeTriggerAction(
             entity.invulnTick = 90; // ~6 seconds at 15 FPS — enough to escape spawn zone
           }
           // Aircraft reinforcements: spawn at house edge, fly in to origin waypoint
-          // C++ ScenarioClass::Create_Army spawns aircraft at the map edge, not the origin.
-          // Only for pure aircraft teams (no infantry members) — teams with infantry use
-          // origin spawn so the transport unloads passengers at the intended position.
-          const hasInfantryMember = team.members.some(m => {
-            const ut = toUnitType(m.type);
-            return ut ? (UNIT_STATS[m.type]?.isInfantry ?? false) : false;
-          });
-          if (entity.stats.isAircraft && !hasInfantryMember && houseEdges && mapBounds) {
+          // C++ ScenarioClass::Create_Army spawns ALL aircraft at the map edge, including
+          // loaded transports (e.g. SCG01EA tanya team — Chinook flies in with Tanya).
+          if (entity.stats.isAircraft && houseEdges && mapBounds) {
             const teamHouse = houseIdToHouse(team.house);
             const edge = houseEdges.get(teamHouse)?.toLowerCase();
             if (edge) {

@@ -18,6 +18,12 @@ describe('security headers', () => {
     expect(headers['X-Frame-Options']).toBe('DENY');
   });
 
+  it('CSP allows archive.org media for FMV cutscenes', () => {
+    expect(headers['Content-Security-Policy']).toContain('media-src');
+    expect(headers['Content-Security-Policy']).toContain('https://archive.org');
+    expect(headers['Content-Security-Policy']).toContain('https://*.us.archive.org');
+  });
+
   it('includes all required headers', () => {
     const required = [
       'Content-Security-Policy',

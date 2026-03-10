@@ -8,7 +8,8 @@
  *   Campaign end: Win + ALLYEND/SOVFINAL (when EndOfGame=yes)
  */
 
-export const MOVIE_BASE_URL = 'https://archive.org/download/Red_Alert-Cutscenes/';
+/** FMV videos are self-hosted in public/ra/fmv/ (downloaded from archive.org via scripts/download-fmv.sh) */
+export const MOVIE_BASE_URL = '/ra/fmv/';
 
 export interface MissionMovies {
   intro?: string;   // intro FMV before briefing (e.g. BRDGTILT)
@@ -102,9 +103,9 @@ export const CAMPAIGN_END_MOVIES: Record<string, string> = {
   soviet: 'sovfinal',
 };
 
-/** Get the full archive.org URL for a movie name */
+/** Get the URL for an FMV video (self-hosted) */
 export function getMovieUrl(movieName: string): string {
-  return `${MOVIE_BASE_URL}${movieName}_512kb.mp4`;
+  return `${MOVIE_BASE_URL}${movieName}.mp4`;
 }
 
 /** Look up FMV movie data for a scenario ID (case-insensitive) */

@@ -21,6 +21,12 @@ describe('security headers', () => {
     expect(headers['Content-Security-Policy']).toContain("frame-ancestors 'none'");
   });
 
+  it('CSP allows archive.org media for FMV cutscenes', () => {
+    expect(headers['Content-Security-Policy']).toContain('media-src');
+    expect(headers['Content-Security-Policy']).toContain('https://archive.org');
+    expect(headers['Content-Security-Policy']).toContain('https://*.us.archive.org');
+  });
+
   it('includes HSTS with preload', () => {
     expect(headers['Strict-Transport-Security']).toContain('max-age=31536000');
     expect(headers['Strict-Transport-Security']).toContain('includeSubDomains');

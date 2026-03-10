@@ -291,10 +291,14 @@ export default function AntGame({ onExit }: AntGameProps) {
   const startCutscene = useCallback((mission: MissionInfo) => {
     if (!canvasRef.current) return;
 
-    // Clean up previous briefing if any
+    // Clean up previous briefing and movie player if any
     if (briefingRef.current) {
       briefingRef.current.stop();
       briefingRef.current = null;
+    }
+    if (moviePlayerRef.current) {
+      moviePlayerRef.current.destroy();
+      moviePlayerRef.current = null;
     }
 
     const movies = getMissionMovies(mission.id);

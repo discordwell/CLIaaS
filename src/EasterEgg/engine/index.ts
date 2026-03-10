@@ -2209,6 +2209,11 @@ export class Game {
             type: 'marker', x: target.pos.x, y: target.pos.y, frame: 0, maxFrames: 15, size: 8,
             markerColor: 'rgba(80,200,255,1)',
           });
+          // C++ parity: transport auto-evacuates when a civilian/VIP is loaded
+          if (target.stats.isAircraft &&
+              target.passengers.some(p => CIVILIAN_UNIT_TYPES.has(p.type))) {
+            this.orderTransportEvacuate(target);
+          }
         }
         return;
       }
@@ -2919,6 +2924,11 @@ export class Game {
             this.map.setOccupancy(entity.cell.cx, entity.cell.cy, 0);
             // Defer removal to avoid mutating array during iteration
             this._pendingTransportLoads.push(entity.id);
+            // C++ parity: transport auto-evacuates when a civilian/VIP is loaded
+            // (SCG01EA: Chinook auto-flies to map edge after Einstein boards)
+            if (CIVILIAN_UNIT_TYPES.has(entity.type) && other.stats.isAircraft) {
+              this.orderTransportEvacuate(other);
+            }
             break;
           }
         }
@@ -3094,6 +3104,12 @@ export class Game {
       }
 
       case Game.TMISSION_UNLOAD: {
+        // Aircraft transports must land before unloading (C++ AircraftClass::Mission_Unload)
+        // The Chinook flies in from the edge, reaches the origin WP, then naturally lands.
+        // Don't interfere with the flight — just wait for 'landed' state before unloading.
+        if (entity.stats.isAircraft && entity.aircraftState !== 'landed') {
+          return; // wait for landing to complete — don't advance teamMissionIndex
+        }
         // Unload passengers at current position
         if (entity.passengers.length > 0) {
           // LST door animation on unload
@@ -4782,6 +4798,40 @@ export class Game {
     entity.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
     entity.path = findPath(this.map, ec, { cx: tx, cy: ty }, true, entity.isNavalUnit, entity.stats.speedClass);
     entity.pathIndex = 0;
+  }
+
+  /** C++ parity: transport auto-evacuates when a civilian/VIP boards.
+   *  SCG01EA: after Einstein enters the Chinook, it flies to the nearest map edge
+   *  to trigger TEVENT_EVAC_CIVILIAN and win the mission. Clears team missions so
+   *  the LOOP script doesn't interfere with the player-triggered evacuation. */
+  private orderTransportEvacuate(transport: Entity): void {
+    // Compute nearest map edge exit point (one cell outside bounds for exit detection)
+    const ec = transport.cell;
+    const distLeft = ec.cx - this.map.boundsX;
+    const distRight = (this.map.boundsX + this.map.boundsW - 1) - ec.cx;
+    const distTop = ec.cy - this.map.boundsY;
+    const distBottom = (this.map.boundsY + this.map.boundsH - 1) - ec.cy;
+    const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+    let tx = ec.cx, ty = ec.cy;
+    // Target one cell OUTSIDE the bounds so the exit-map check triggers
+    if (minDist === distLeft) tx = this.map.boundsX - 1;
+    else if (minDist === distRight) tx = this.map.boundsX + this.map.boundsW;
+    else if (minDist === distTop) ty = this.map.boundsY - 1;
+    else ty = this.map.boundsY + this.map.boundsH;
+
+    // Clear team missions so LOOP scripts don't override the evacuation order
+    transport.teamMissions = [];
+    transport.teamMissionIndex = 0;
+    transport.mission = Mission.MOVE;
+    transport.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
+    transport.target = null;
+    transport.moveQueue = [];
+    // Aircraft: ensure takeoff if landed
+    if (transport.aircraftState === 'landed') {
+      transport.aircraftState = 'takeoff';
+    } else if (transport.aircraftState === 'returning' || transport.aircraftState === 'landing') {
+      transport.aircraftState = 'flying';
+    }
   }
 
   /** AI1: AMBUSH mission — sleep until enemy enters sight range, then HUNT */

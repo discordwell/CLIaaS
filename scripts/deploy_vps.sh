@@ -114,6 +114,13 @@ fi
 if [[ ! -f "$SHARED_DIR/.env" ]]; then
   cp .env.example "$SHARED_DIR/.env"
 fi
+
+# Symlink persistent FMV cutscenes into public dir (downloaded separately via scripts/download-fmv.sh)
+FMV_DIR="$(dirname "$APP_DIR")/fmv"
+if [[ -d "$FMV_DIR" ]]; then
+  mkdir -p "$APP_DIR/public/ra"
+  ln -sfn "$FMV_DIR" "$APP_DIR/public/ra/fmv"
+fi
 CMDS
 
 echo "[4/6] Installing systemd service..."

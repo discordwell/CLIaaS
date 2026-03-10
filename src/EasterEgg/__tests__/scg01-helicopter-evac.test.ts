@@ -152,13 +152,15 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(heli.moveTarget!.y).toBe(wp23World.y);
   });
 
-  it('team with infantry does NOT spawn aircraft at edge (tanya team)', () => {
-    // tanya team: Greece, origin=WP10(not in our waypoints — use WP0), E7 + TRAN, UNLOAD
+  it('team with infantry spawns aircraft at edge (tanya team flies in)', () => {
+    // tanya team: Greece, origin=WP0, E7 + TRAN, UNLOAD
+    // Original C++ RA spawns ALL aircraft reinforcements from house edge,
+    // including transports carrying infantry passengers.
     const tanyaTeam: TeamType = {
       name: 'tanya',
       house: 1, // Greece
       flags: 0,
-      origin: 0, // WP0 (using WP0 since WP10 not in our test waypoints)
+      origin: 0, // WP0
       members: [
         { type: 'E7', count: 1 },
         { type: 'TRAN', count: 1 },
@@ -179,17 +181,18 @@ describe('Aircraft reinforcement edge spawn', () => {
     const tran = result.spawned.find(e => e.type === UnitType.V_TRAN);
     expect(tran).toBeDefined();
 
-    // TRAN should be at origin waypoint (WP0), NOT at the edge
-    const wp0World = cellToWorld(WP0.cx, WP0.cy);
-    const distToOrigin = Math.sqrt(
-      (tran!.pos.x - wp0World.x) ** 2 + (tran!.pos.y - wp0World.y) ** 2
-    );
-    // Allow some spread from the random offset
-    expect(distToOrigin).toBeLessThan(50);
+    // TRAN should be at the east edge (Greece edge), NOT at origin waypoint
+    const eastEdgeX = (mapBounds.x + mapBounds.w - 1) * CELL_SIZE + CELL_SIZE / 2;
+    expect(tran!.pos.x).toBe(eastEdgeX);
 
-    // TRAN should be landed (default), not flying
-    expect(tran!.aircraftState).toBe('landed');
-    expect(tran!.flightAltitude).toBe(0);
+    // Should be airborne in flying state
+    expect(tran!.aircraftState).toBe('flying');
+    expect(tran!.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
+
+    // Move target should be the origin waypoint (WP0)
+    const wp0World = cellToWorld(WP0.cx, WP0.cy);
+    expect(tran!.moveTarget!.x).toBe(wp0World.x);
+    expect(tran!.moveTarget!.y).toBe(wp0World.y);
 
     // E7 (Tanya) should be loaded into TRAN (not in spawned list)
     expect(tran!.passengers.length).toBe(1);

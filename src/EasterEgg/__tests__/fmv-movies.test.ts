@@ -259,19 +259,11 @@ describe('FMV Movie Mapping', () => {
   });
 
   // === URL generation ===
-  it('generates correct archive.org URL', () => {
-    expect(getMovieUrl('ally1')).toBe(
-      'https://archive.org/download/Red_Alert-Cutscenes/ally1_512kb.mp4'
-    );
-    expect(getMovieUrl('allyend')).toBe(
-      'https://archive.org/download/Red_Alert-Cutscenes/allyend_512kb.mp4'
-    );
-    expect(getMovieUrl('antintro')).toBe(
-      'https://archive.org/download/Red_Alert-Cutscenes/antintro_512kb.mp4'
-    );
-    expect(getMovieUrl('antbrf')).toBe(
-      'https://archive.org/download/Red_Alert-Cutscenes/antbrf_512kb.mp4'
-    );
+  it('generates correct self-hosted URL', () => {
+    expect(getMovieUrl('ally1')).toBe('/ra/fmv/ally1.mp4');
+    expect(getMovieUrl('allyend')).toBe('/ra/fmv/allyend.mp4');
+    expect(getMovieUrl('antintro')).toBe('/ra/fmv/antintro.mp4');
+    expect(getMovieUrl('antbrf')).toBe('/ra/fmv/antbrf.mp4');
   });
 
   // === Case-insensitive lookup ===
@@ -328,14 +320,12 @@ describe('FMV Movie Mapping', () => {
       }
     });
 
-    it('all movie names generate valid archive.org URLs', () => {
+    it('all movie names generate valid self-hosted URLs', () => {
       const names = getAllMovieNames();
       for (const name of names) {
         const url = getMovieUrl(name);
-        expect(url, `URL for "${name}" should start with base URL`).toContain(
-          'https://archive.org/download/Red_Alert-Cutscenes/'
-        );
-        expect(url, `URL for "${name}" should end with _512kb.mp4`).toMatch(/_512kb\.mp4$/);
+        expect(url, `URL for "${name}" should start with /ra/fmv/`).toContain('/ra/fmv/');
+        expect(url, `URL for "${name}" should end with .mp4`).toMatch(/\.mp4$/);
       }
     });
 

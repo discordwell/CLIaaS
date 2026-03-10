@@ -1,7 +1,7 @@
 /**
  * HTML5 video player for FMV briefing cutscenes.
  * Manages a <video> element with CRT scanline overlay.
- * Videos are lazy-loaded from archive.org.
+ * Videos are self-hosted in public/ra/fmv/.
  *
  * IMPORTANT: Pre-mission FMV must be started synchronously from the user's
  * click handler via `playImmediate()` to preserve Chrome's user gesture
@@ -14,7 +14,7 @@ import { getMovieUrl } from './movies';
 
 export type MoviePlayerState = 'idle' | 'loading' | 'playing' | 'ended' | 'error';
 
-const LOAD_TIMEOUT_MS = 8000;
+const LOAD_TIMEOUT_MS = 30000;
 const VIDEO_Z = 100020;
 const SCANLINE_Z = 100021;
 const CLICK_OVERLAY_Z = 100022;
@@ -89,8 +89,9 @@ export class MoviePlayer {
   playImmediate(movieName: string): void {
     const url = getMovieUrl(movieName);
 
-    // Only set src if different from preloaded
-    if (this.video.src !== url) {
+    // Only set src if different from preloaded (endsWith handles
+    // browser resolving relative paths to absolute URLs)
+    if (!this.video.src.endsWith(url)) {
       this.video.src = url;
       this.video.load();
     }
@@ -98,13 +99,17 @@ export class MoviePlayer {
     this.mount();
     this.setState('loading');
 
-    // Timeout fallback for network issues
-    this.timeoutId = setTimeout(() => {
-      if (this.state === 'loading') {
-        console.warn(`[MoviePlayer] Load timeout for "${movieName}" after ${LOAD_TIMEOUT_MS}ms`);
-        this.handleError();
-      }
-    }, LOAD_TIMEOUT_MS);
+    // If video is already loaded (e.g. from preload), skip the timeout —
+    // play() should resolve almost immediately.
+    // readyState >= 3 (HAVE_FUTURE_DATA) means enough data to start playing.
+    if (this.video.readyState < 3) {
+      this.timeoutId = setTimeout(() => {
+        if (this.state === 'loading') {
+          console.warn(`[MoviePlayer] Load timeout for "${movieName}" after ${LOAD_TIMEOUT_MS}ms`);
+          this.handleError();
+        }
+      }, LOAD_TIMEOUT_MS);
+    }
 
     // Call play() synchronously — this is the critical line that must run
     // within the user gesture context (no setTimeout wrapping!)
@@ -116,6 +121,11 @@ export class MoviePlayer {
       this.removeClickOverlay();
       this.setState('playing');
     }).catch((err: unknown) => {
+      // Ignore rejections if we already handled the error (e.g. timeout fired
+      // and called handleError which unmounted the video, causing play() to
+      // reject with "interrupted by pause")
+      if (this.state === 'error') return;
+
       // Check for NotAllowedError by name property directly — DOMException
       // may not be `instanceof Error` in all environments (e.g. jsdom)
       const errName = (err as { name?: string })?.name;
@@ -138,8 +148,9 @@ export class MoviePlayer {
   async play(movieName: string): Promise<void> {
     const url = getMovieUrl(movieName);
 
-    // Only set src if different from preloaded
-    if (this.video.src !== url) {
+    // Only set src if different from preloaded (endsWith handles
+    // browser resolving relative paths to absolute URLs)
+    if (!this.video.src.endsWith(url)) {
       this.video.src = url;
       this.video.load();
     }
@@ -147,13 +158,15 @@ export class MoviePlayer {
     this.mount();
     this.setState('loading');
 
-    // Timeout fallback
-    this.timeoutId = setTimeout(() => {
-      if (this.state === 'loading') {
-        console.warn(`[MoviePlayer] Load timeout for "${movieName}" after ${LOAD_TIMEOUT_MS}ms`);
-        this.handleError();
-      }
-    }, LOAD_TIMEOUT_MS);
+    // Timeout fallback — skip if video is already loaded from preload
+    if (this.video.readyState < 3) {
+      this.timeoutId = setTimeout(() => {
+        if (this.state === 'loading') {
+          console.warn(`[MoviePlayer] Load timeout for "${movieName}" after ${LOAD_TIMEOUT_MS}ms`);
+          this.handleError();
+        }
+      }, LOAD_TIMEOUT_MS);
+    }
 
     try {
       await this.video.play();
@@ -161,6 +174,7 @@ export class MoviePlayer {
       this.removeClickOverlay();
       this.setState('playing');
     } catch (err: unknown) {
+      if (this.state === 'error') return; // already handled by timeout
       // Check for NotAllowedError by name property directly on the caught
       // object — DOMException may not be `instanceof Error` in all environments
       const errName = (err as { name?: string })?.name;

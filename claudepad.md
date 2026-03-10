@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-03-10T02:40Z — Session 140k: FMV Playback + SCG01EA Gameplay Fixes
+- **FMV timeout fix**: Increased LOAD_TIMEOUT_MS from 8s→30s. Skip timeout entirely when video already preloaded (`readyState >= 3`). Added `state === 'error'` guard in catch handler to prevent double handleError. Clean up stale MoviePlayer at start of `startCutscene`.
+- **Tanya spawn fix**: Removed `hasInfantryMember` check in scenario.ts reinforcement spawning. ALL aircraft now spawn from house edge (matching original C++ behavior), including transports carrying infantry passengers like Tanya's Chinook.
+- **TMISSION_UNLOAD fix**: Added guard to wait for aircraft to land (`aircraftState !== 'landed'`) before executing unload. Previously unloaded passengers while aircraft was still airborne.
+- **Auto-evacuate civilians**: Added `orderTransportEvacuate()` method to Game class. When Einstein (or any civilian) loads into an aircraft transport, it automatically takes off and flies to nearest map edge exit. Handles both right-click load and proximity auto-load paths.
+- **Test updates**: fmv-autoplay.test.ts timeout values updated (8001→30001, 10000→31000). scg01-helicopter-evac.test.ts updated to expect all aircraft spawning at edge.
+- **Files**: moviePlayer.ts, AntGame.tsx, scenario.ts, index.ts, fmv-autoplay.test.ts, scg01-helicopter-evac.test.ts.
+- **Results**: 3614 tests pass (91 test files). Deployed to cliaas.com.
+
+## 2026-03-10T00:45Z — Session 140j: Six Visual/Gameplay Parity Fixes
+- **Barrel sprites**: Extracted real BARL.SHP and BRL3.SHP from CONQUER.MIX instead of procedural generation. Made generator conditional on extraction success.
+- **Explosion frame counts**: Added `EXPLOSION_FRAMES` map in types.ts with per-sprite frame counts (piff=4, veh-hit1=17, napalm1=14, atomsfx=27, etc.). Updated ~8 explosion spawn sites to use map instead of hardcoded 17.
+- **Ant death animation**: Extended ant sprites from 104 to 112 frames, adding 8 death frames (curling body, splayed legs, drooping head, darkening). Updated generate-ant-sprites.ts.
+- **Sell scanline fix**: Moved red scanline draw BEFORE `ctx.restore()` so it stays within the clip region of the building sprite.
+- **Sell survivor parity**: Implemented C++ `How_Many_Survivors()` (cost×0.5/E1_cost, clamped 1-5) and `Crew_Type()` per-building overrides (SILO→civilians, FACT→25% engineer, KENN→50% dog).
+- **Credits display**: Added `Math.floor()` to `displayCredits` before passing to renderer to prevent fractional display.
+- **Files**: index.ts, renderer.ts, types.ts, extract-ra-assets.ts, generate-ant-sprites.ts, all asset PNGs + manifest.json.
+- **Results**: 3603 tests pass (90 test files). Deployed to cliaas.com.
+
 ## 2026-03-10T00:01Z — Session 140i: In-Game Pause Menu
 - **Pause menu**: Replaced bare "PAUSED" text overlay with interactive canvas-rendered options menu (6 items: Resume, Music slider, Sound slider, Speed cycle, Restart, Abort).
 - **Split volume API**: Added `getSfxVolume()`/`setSfxVolume()` and `getMusicVolume()`/`setMusicVolume()` to AudioManager. Existing `setVolume()`/`getVolume()` kept for backward compat.

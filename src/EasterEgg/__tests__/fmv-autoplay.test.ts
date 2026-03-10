@@ -96,7 +96,7 @@ describe('MoviePlayer autoplay fix', () => {
     it('sets correct video src from movie name', () => {
       player.playImmediate('ally1');
       const video = player.getVideoElement();
-      expect(video.src).toContain('ally1_512kb.mp4');
+      expect(video.src).toContain('ally1.mp4');
     });
 
     it('reuses preloaded src without calling load() again', () => {
@@ -178,8 +178,8 @@ describe('MoviePlayer autoplay fix', () => {
 
       player.playImmediate('ally1');
 
-      // Advance past load timeout (8000ms)
-      vi.advanceTimersByTime(8001);
+      // Advance past load timeout (30000ms)
+      vi.advanceTimersByTime(30001);
 
       expect(errorSpy).toHaveBeenCalledWith('Failed to load video');
     });
@@ -188,7 +188,7 @@ describe('MoviePlayer autoplay fix', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       player.playImmediate('ally1');
 
-      vi.advanceTimersByTime(8001);
+      vi.advanceTimersByTime(30001);
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Load timeout')
@@ -207,7 +207,7 @@ describe('MoviePlayer autoplay fix', () => {
       await flushMicrotasks();
 
       // Advance past timeout — should NOT fire error
-      vi.advanceTimersByTime(10000);
+      vi.advanceTimersByTime(31000);
       expect(errorSpy).not.toHaveBeenCalled();
     });
   });
