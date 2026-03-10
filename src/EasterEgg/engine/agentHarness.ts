@@ -193,6 +193,17 @@ export function serializeState(game: Game): AgentState {
     },
     killCount: game.killCount,
     lossCount: game.lossCount,
+    // Debug fields for trigger/timer diagnostics (safe access for test mocks)
+    missionTimer: ((game as unknown as Record<string, unknown>).missionTimer as number) ?? 0,
+    missionTimerExpired: ((game as unknown as Record<string, unknown>).missionTimerExpired as boolean) ?? false,
+    allowWin: ((game as unknown as Record<string, unknown>).allowWin as boolean) ?? false,
+    globals: [...((game as unknown as Record<string, unknown>).globals as Set<number> ?? [])],
+    unitsLeftMap: ((game as unknown as Record<string, unknown>).unitsLeftMap as number) ?? 0,
+    triggers: (game.triggers ?? []).map(t => ({
+      name: t.name, fired: t.fired, house: t.house,
+      e1: t.event1.type, e1d: t.event1.data,
+      a1: t.action1.action, a1d: t.action1.data,
+    })),
   };
 }
 
@@ -432,6 +443,7 @@ export function installHarness(game: Game): void {
   const w = window as unknown as Record<string, unknown>;
 
   w.__agentReady = true;
+  w.__agentGame = game; // Expose for debug/testing
 
   w.__agentState = () => serializeState(game);
 

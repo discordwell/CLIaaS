@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-10T08:10Z — Session 140l: SCG02EA "Five to One" — Convoy Win Condition
+- **Off-map waypoint pathfinding**: TMISSION_MOVE now clamps off-map waypoints (like WP25 at cy=89) to the nearest edge cell for pathfinding, while keeping moveTarget pointing off-map so the edge exit check fires correctly. Previously findPath rejected off-map goals (terrain=ROCK) and TRUKs got stuck.
+- **Frozen river fix**: SNOW theatre rivers (templates 112-130, 229-234) are now classified as CLEAR (passable ice) instead of WATER. In TEMPERATE they remain water. Added `theatre` parameter to `classifyOutdoorTerrain()`.
+- **IsSuicide team fix**: Teams with flags=2 (IsSuicide) no longer get forced to `Mission.HUNT`. In C++, IsSuicide means "don't retreat" — it doesn't override the team mission script. Added `entity.isSuicide` flag instead.
+- **Debug harness**: Added missionTimer, globals, triggers, unitsLeftMap to agent state serialization. Exposed `__agentGame` reference for test-time entity manipulation.
+- **Trigger chain verified**: ctdn(SET_TIMER 250) → truk(TIMER_EXPIRED → SET_GLOBAL 1,2) → cnvy(GLOBAL_SET 2 → REINFORCEMENTS trks) → 3 TRUKs spawn → traverse WP0→WP1→WP2→WP3→WP4→WP25 → exit map → LEAVES_MAP → WIN. Timer=30000 ticks (250×120). Alternative win: destroy all enemies (win2).
+- **Files**: index.ts, scenario.ts, entity.ts, agentHarness.ts, new scg02-convoy-exit.test.ts (13 tests).
+- **Results**: 3627 tests pass (92 test files). VPS down — deploy pending.
+
 ## 2026-03-10T02:40Z — Session 140k: FMV Playback + SCG01EA Gameplay Fixes
 - **FMV timeout fix**: Increased LOAD_TIMEOUT_MS from 8s→30s. Skip timeout entirely when video already preloaded (`readyState >= 3`). Added `state === 'error'` guard in catch handler to prevent double handleError. Clean up stale MoviePlayer at start of `startCutscene`.
 - **Tanya spawn fix**: Removed `hasInfantryMember` check in scenario.ts reinforcement spawning. ALL aircraft now spawn from house edge (matching original C++ behavior), including transports carrying infantry passengers like Tanya's Chinook.

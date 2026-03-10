@@ -217,6 +217,9 @@ export class Entity {
   cloakTick = 0;    // ticks remaining for cloak invisibility (from crate)
   invulnTick = 0;   // ticks remaining for invulnerability (from crate)
 
+  // Team behavior flags
+  isSuicide = false; // IsSuicide team flag: don't retreat, fight to death
+
   // Superweapon effect timers
   ironCurtainTick = 0;  // ticks remaining for Iron Curtain invulnerability
   chronoShiftTick = 0;  // visual effect timer after being chronoshifted

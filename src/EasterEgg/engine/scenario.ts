@@ -1553,8 +1553,8 @@ function decodeMapPack(base64Data: string, map: GameMap, theatre: string): void 
     if (theatre === 'INTERIOR') {
       classifyInteriorTerrain(map, templateType);
     } else {
-      // TEMPERATE and SNOW share the same template ID ranges
-      classifyOutdoorTerrain(map, templateType, templateIcon);
+      // TEMPERATE and SNOW share the same template ID ranges (but SNOW has frozen rivers)
+      classifyOutdoorTerrain(map, templateType, templateIcon, theatre);
     }
   } catch {
     // MapPack decode failed — terrain stays at default
@@ -1562,12 +1562,14 @@ function decodeMapPack(base64Data: string, map: GameMap, theatre: string): void 
 }
 
 /** Classify TEMPERATE/SNOW terrain from MapPack template types.
- *  Both theatres share identical template ID ranges. */
+ *  Both theatres share identical template ID ranges, but SNOW has frozen rivers. */
 function classifyOutdoorTerrain(
   map: GameMap,
   templateType: Uint16Array,
   templateIcon: Uint8Array,
+  theatre = 'TEMPERATE',
 ): void {
+  const isSnow = theatre === 'SNOW';
   // TEMPERATE/SNOW template type IDs (from RA TEMPERAT.INI / OpenRA temperat.yaml):
   //   0, 0xFFFF: Clear/grass (default)
   //   1-2: Pure water body tiles
@@ -1604,9 +1606,17 @@ function classifyOutdoorTerrain(
         if (icon < 4) {
           map.setTerrain(cx, cy, Terrain.WATER);
         }
-      } else if ((tmpl >= 59 && tmpl <= 96) || (tmpl >= 112 && tmpl <= 130) ||
-                 (tmpl >= 229 && tmpl <= 234)) {
+      } else if (tmpl >= 59 && tmpl <= 96) {
+        // Water cliff edges — always water
         map.setTerrain(cx, cy, Terrain.WATER);
+      } else if ((tmpl >= 112 && tmpl <= 130) || (tmpl >= 229 && tmpl <= 234)) {
+        // River segments (112-130) and river crossings (229-234):
+        // In SNOW theatre, rivers are frozen (ice) — passable to ground units.
+        // In TEMPERATE, rivers are liquid water — impassable.
+        if (!isSnow) {
+          map.setTerrain(cx, cy, Terrain.WATER);
+        }
+        // SNOW: stays CLEAR (default) — frozen river is passable
       } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 97 && tmpl <= 110) ||
                  (tmpl >= 131 && tmpl <= 172)) {
         map.setTerrain(cx, cy, Terrain.ROCK);
@@ -1997,9 +2007,12 @@ export function executeTriggerAction(
             }));
             entity.teamMissionIndex = 0;
           }
-          // IsSuicide teams (flags bit 1) fight to the death — use HUNT mission
+          // IsSuicide teams (flags bit 1): don't retreat, fight to the death.
+          // In C++, IsSuicide does NOT override the team mission script — units still
+          // follow TMISSION_MOVE/ATTACK. The flag only prevents automatic retreat.
+          // Team missions take priority in the AI update loop (updateTeamMission).
           if (team.flags & 2) {
-            entity.mission = Mission.HUNT;
+            entity.isSuicide = true;
           }
           // VIP spawn protection — civilians/VIPs spawned in hostile zones get brief invulnerability
           // so they can start moving before being killed (C++ building-exit protection equivalent)

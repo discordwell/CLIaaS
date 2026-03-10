@@ -3001,7 +3001,21 @@ export class Game {
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.target = null;
-          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
+
+          // Off-map waypoints (e.g. convoy exit WP25 in SCG02EA): path to nearest
+          // map edge cell instead, keeping moveTarget off-map so the edge exit check
+          // in processTick fires when the unit reaches the boundary.
+          let pathGoal = { cx: wp.cx, cy: wp.cy };
+          if (!this.map.inBounds(wp.cx, wp.cy) && !entity.stats.isAircraft) {
+            const bx = this.map.boundsX, by = this.map.boundsY;
+            const bw = this.map.boundsW, bh = this.map.boundsH;
+            pathGoal = {
+              cx: Math.max(bx, Math.min(bx + bw - 1, wp.cx)),
+              cy: Math.max(by, Math.min(by + bh - 1, wp.cy)),
+            };
+          }
+
+          entity.path = findPath(this.map, entity.cell, pathGoal, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
         }
         break;
