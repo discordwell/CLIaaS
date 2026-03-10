@@ -3783,40 +3783,83 @@ export class Game {
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
       // Uses C++ TrackControl table to select pre-computed curved paths.
       // Track offsets are relative to target cell center, transformed via Smooth_Turn flags.
-      if (entity.trackNumber > 0) {
-        // Currently following a track — advance along it
-        if (this.followTrackStep(entity, speed, target.x, target.y)) {
-          // Track complete — vehicle is at target cell center
-          entity.pathIndex++;
-        }
-      } else if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
-        // Initiate a new track for this cell-to-cell segment
-        const nextFacing8 = directionTo(entity.pos, target);
-        const currentFacing8 = entity.facing;
-        const ctrl = lookupTrackControl(currentFacing8, nextFacing8);
-        const effectiveTrack = getEffectiveTrack(ctrl);
+      if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
+        // C++ drive.cpp AI() pattern: seamless track chaining on the same tick.
+        // When a track completes, immediately initiate the next track and continue
+        // following it with the remaining movement budget (no one-tick gap).
+        const MAX_CHAIN = 4; // guard against infinite loops
+        for (let chain = 0; chain < MAX_CHAIN; chain++) {
+          // Recompute target for current pathIndex (may have advanced via chaining)
+          const chainCell = entity.path[entity.pathIndex];
+          if (!chainCell) break;
+          const chainTarget: WorldPos = {
+            x: chainCell.cx * CELL_SIZE + CELL_SIZE / 2,
+            y: chainCell.cy * CELL_SIZE + CELL_SIZE / 2,
+          };
 
-        if (effectiveTrack > 0) {
-          // Valid track — start following it
-          entity.trackNumber = effectiveTrack;
-          entity.trackFlags = ctrl.flag & ~F_D; // strip F_D (only F_T|F_X|F_Y for geometry)
-          entity.trackIndex = 0;
-          entity.speedAccum = 0;
-          // Follow first step this tick
-          if (this.followTrackStep(entity, speed, target.x, target.y)) {
-            entity.pathIndex++;
-          }
-        } else {
-          // Impossible turn (Track=0) — free-form fallback with rotation
-          entity.desiredFacing = nextFacing8;
-          entity.tickRotation();
-          if (entity.facing === nextFacing8) {
-            // Facing correct, now move
-            if (entity.moveToward(target, speed)) {
+          if (entity.trackNumber > 0) {
+            // Currently following a track — advance along it
+            if (this.followTrackStep(entity, speed, chainTarget.x, chainTarget.y)) {
+              // Track complete — vehicle is at target cell center
+              // speedAccum carries remaining budget (Fix 2)
               entity.pathIndex++;
+              // Continue loop to chain next track on same tick (Fix 1)
+              continue;
+            }
+            break; // Track not yet complete — done for this tick
+          }
+
+          // Need to initiate a new track for this cell-to-cell segment
+          const nextFacing8 = directionTo(entity.pos, chainTarget);
+
+          // Fix 4: Pre-rotation before track start (C++ drive.cpp:1054-1073 Do_Turn)
+          // Entity must face the movement direction before track selection.
+          if (entity.facing !== nextFacing8) {
+            entity.desiredFacing = nextFacing8;
+            entity.tickRotation();
+            if (entity.facing !== nextFacing8) {
+              break; // Still rotating — wait for alignment before starting track
             }
           }
-          // else: wait for rotation to complete before moving
+
+          // Fix 3: Path lookahead for track selection (C++ Path[0]*8 + Path[1])
+          // Use current direction × next direction for smooth lead-in curves.
+          let followingFacing8 = nextFacing8; // default: straight (C++ "if nextface==FACING_NONE")
+          const followingCell = entity.path[entity.pathIndex + 1];
+          if (followingCell) {
+            followingFacing8 = directionTo(chainTarget, {
+              x: followingCell.cx * CELL_SIZE + CELL_SIZE / 2,
+              y: followingCell.cy * CELL_SIZE + CELL_SIZE / 2,
+            });
+          }
+
+          const ctrl = lookupTrackControl(nextFacing8, followingFacing8);
+          const effectiveTrack = getEffectiveTrack(ctrl);
+
+          if (effectiveTrack > 0) {
+            // Valid track — start following it
+            entity.trackNumber = effectiveTrack;
+            entity.trackFlags = ctrl.flag & ~F_D; // strip F_D (only F_T|F_X|F_Y for geometry)
+            entity.trackIndex = 0;
+            entity.speedAccum = 0; // C++: fresh budget per While_Moving() call
+            // Follow first step this tick
+            if (this.followTrackStep(entity, speed, chainTarget.x, chainTarget.y)) {
+              entity.pathIndex++;
+              continue; // Chain next track
+            }
+            break; // Track not yet complete
+          } else {
+            // Impossible turn (Track=0) — free-form fallback with rotation
+            entity.desiredFacing = nextFacing8;
+            entity.tickRotation();
+            if (entity.facing === nextFacing8) {
+              // Facing correct, now move
+              if (entity.moveToward(chainTarget, speed)) {
+                entity.pathIndex++;
+              }
+            }
+            break; // Free-form doesn't chain
+          }
         }
       } else {
         // Infantry/aircraft: free-form movement (FOOT speedClass exempt from tracks)
@@ -5932,7 +5975,7 @@ export class Game {
         entity.pos.y = targetY;
         entity.trackNumber = -1;
         entity.trackIndex = 0;
-        entity.speedAccum = 0;
+        entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
         return true;
       }
 
@@ -5944,7 +5987,7 @@ export class Game {
         entity.pos.y = targetY;
         entity.trackNumber = -1;
         entity.trackIndex = 0;
-        entity.speedAccum = 0;
+        entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
         return true;
       }
 

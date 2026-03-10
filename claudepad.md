@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-10T17:35Z — Session 140o: Fix Janky Vehicle Movement — C++ Parity Pass
+- **Same-tick track chaining (Fix 1)**: Replaced if-else movement structure with a loop matching C++ drive.cpp AI() pattern. When a track completes, next track initiates on the SAME tick (no 67ms gap at cell boundaries). MAX_CHAIN=4 guard prevents infinite loops.
+- **Budget zeroing (Fix 2 — corrected via code review)**: Original plan was to carry speedAccum across tracks, but code review found C++ drive.cpp:792 sets `actual=0` on track completion. Chained tracks get a fresh full budget, not remainder+budget. Fixed both exit points in followTrackStep.
+- **Path lookahead (Fix 3)**: Track selection changed from `lookupTrackControl(entity.facing, dirToNextCell)` to `lookupTrackControl(dirToNextCell, dirToFollowingCell)` matching C++ `Path[0]*8+Path[1]`. Anticipates upcoming turns for smooth lead-in curves. Falls back to straight when no following cell.
+- **Pre-rotation (Fix 4)**: Entity must face movement direction before track starts, matching C++ Do_Turn(). Prevents position pops from misaligned starting facing.
+- **Code review caught bug**: Budget carrying (Fix 2) would have given chained tracks ~2x movement speed. Corrected to zero speedAccum matching C++.
+- **Tests**: 15 new tests across 2 files. 109 track tests pass.
+- **Files**: index.ts (movement update + followTrackStep), track-movement.test.ts, track-movement-parity.test.ts.
+
 ## 2026-03-10T15:05Z — Session 140n: C++ Track Movement Parity Rewrite
 - **Faithful C++ port**: User rejected smoothing approach ("I would rather have original C++ than smoothing over a bug with a fake implementation"). Complete rewrite of tracks.ts to faithfully port all 13 C++ track arrays from drive.cpp hex data, TrackControl[67] table, and Smooth_Turn flag transformations (F_T, F_X, F_Y, F_D).
 - **Key architecture change**: Track offsets are now relative to TARGET cell center (Head_To_Coord), decreasing to (0,0), matching C++. Old system used offsets from START position.

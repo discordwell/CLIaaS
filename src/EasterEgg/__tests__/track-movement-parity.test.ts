@@ -98,6 +98,47 @@ describe('TrackControl coverage', () => {
   });
 });
 
+describe('Path lookahead track selection parity (C++ Path[0]*8+Path[1])', () => {
+  // C++ drive.cpp:1175-1190: TrackNumber = Path[0]*8 + Path[1]
+  // Path[0] = current movement direction, Path[1] = next movement direction
+  // This creates smooth lead-in curves that anticipate upcoming turns.
+
+  const LOOKAHEAD_CASES: [string, number, number, number][] = [
+    // [description, currentDir, nextDir, expectedTrack (after getEffectiveTrack)]
+    ['N then NE: 45° curve',  0, 1, 7],  // Track7 short 45°
+    ['N then E: 90° curve',   0, 2, 9],  // Track9 short 90°
+    ['NE then E: 45° curve',  1, 2, 8],  // Track8 short 45°
+    ['NE then SE: 90° curve', 1, 3, 10], // Track10 short 90°
+    ['N then N: straight',    0, 0, 1],  // Track1 straight
+    ['NE then NE: diagonal',  1, 1, 2],  // Track2 diagonal
+  ];
+
+  for (const [desc, curDir, nextDir, expectedTrack] of LOOKAHEAD_CASES) {
+    it(`${desc} → Track${expectedTrack}`, () => {
+      const ctrl = lookupTrackControl(curDir, nextDir);
+      expect(getEffectiveTrack(ctrl)).toBe(expectedTrack);
+    });
+  }
+
+  it('lookahead vs no-lookahead: curves vs straight for N→NE transition', () => {
+    // Old code: lookupTrackControl(entity.facing, dirToNextCell) → N,N → straight
+    // New code: lookupTrackControl(dirToNextCell, dirToFollowingCell) → N,NE → curve
+    const oldBehavior = getEffectiveTrack(lookupTrackControl(0, 0)); // N→N straight
+    const newBehavior = getEffectiveTrack(lookupTrackControl(0, 1)); // N→NE curve
+    expect(oldBehavior).toBe(1); // Track1 straight
+    expect(newBehavior).toBe(7); // Track7 curve — smoother transition
+    expect(newBehavior).not.toBe(oldBehavior);
+  });
+
+  it('all 8 directions have valid straight self-lookahead', () => {
+    // When no following cell exists, C++ defaults nextface = facing → straight track.
+    for (let d = 0; d < 8; d++) {
+      const ctrl = lookupTrackControl(d, d);
+      expect(getEffectiveTrack(ctrl), `dir ${d}`).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('End facing parity', () => {
   it('N→NE turn ends facing NE (DirType 32)', () => {
     expect(TRACK_CONTROL[1].facing).toBe(32);

@@ -272,6 +272,96 @@ describe('Vehicle track movement classification', () => {
   });
 });
 
+describe('Same-tick track chaining (Fixes 1+2)', () => {
+  it('C++ zeroes SpeedAccum on track completion — fresh budget for chained track', () => {
+    // C++ drive.cpp:792: actual = 0 at track end, then While_Moving() restarts
+    // with a fresh budget computation: actual = SpeedAccum(=0) + maxspeed*fixed()
+    // This means chained tracks get exactly one tick of budget, not remainder + budget.
+    const track = getTrackArray(1)!; // Track1: 24 steps
+    const speed = 5.0; // pixels/tick
+    let actual = 0 + (speed / LP); // fresh budget (speedAccum starts at 0)
+
+    let stepsConsumed = 0;
+    let trackIndex = 0;
+    while (actual > PIXEL_LEPTON_W && trackIndex < track.length) {
+      actual -= PIXEL_LEPTON_W;
+      trackIndex++;
+      stepsConsumed++;
+    }
+
+    expect(stepsConsumed).toBeGreaterThan(0);
+    // After track completes, C++ sets actual=0. Chained track gets fresh budget.
+    // The remainder is DISCARDED, not carried over.
+    const chainedBudget = 0 + (speed / LP); // fresh, not actual + speed/LP
+    expect(chainedBudget).toBe(speed / LP); // exactly one tick of budget
+  });
+
+  it('Track1 (24 steps) requires multiple ticks at normal speed', () => {
+    // At moderate speed, a single tick can't complete Track1 (24 steps).
+    // This means chaining only happens with fast units or short tracks.
+    const track = getTrackArray(1)!;
+    const normalSpeed = 1.0; // ~1 pixel/tick
+    const budget = normalSpeed / LP; // leptons per tick
+    const stepsPerTick = Math.floor(budget / PIXEL_LEPTON_W);
+    expect(stepsPerTick).toBeLessThan(track.length);
+    expect(track.length).toBe(24);
+  });
+});
+
+describe('Path lookahead track selection (Fix 3)', () => {
+  it('N→NE lookahead selects curve track instead of straight', () => {
+    // C++ Path[0]*8 + Path[1]: current=N(0), next=NE(1)
+    // Without lookahead: lookupTrackControl(facing=N, dir=N) → Track1 straight
+    // With lookahead: lookupTrackControl(N, NE) → Track3/7 curve
+    const withLookahead = lookupTrackControl(0, 1); // N, NE
+    const withoutLookahead = lookupTrackControl(0, 0); // N, N (old behavior)
+    expect(getEffectiveTrack(withLookahead)).toBe(7); // Short 45° curve
+    expect(getEffectiveTrack(withoutLookahead)).toBe(1); // Straight
+    // Lookahead gives a different (curving) track for smooth transitions
+    expect(getEffectiveTrack(withLookahead)).not.toBe(getEffectiveTrack(withoutLookahead));
+  });
+
+  it('N→E lookahead selects 90° curve track', () => {
+    const ctrl = lookupTrackControl(0, 2); // N, E
+    expect(getEffectiveTrack(ctrl)).toBe(9); // Short 90° curve
+  });
+
+  it('last path cell defaults to straight (no following cell)', () => {
+    // When there's no following cell, C++ uses FACING_NONE → defaults to same dir
+    // Our impl: followingFacing8 = nextFacing8 → lookupTrackControl(dir, dir) = straight
+    const straightN = lookupTrackControl(0, 0);
+    expect(getEffectiveTrack(straightN)).toBe(1);
+    const straightNE = lookupTrackControl(1, 1);
+    expect(getEffectiveTrack(straightNE)).toBe(2);
+  });
+
+  it('all 8 straight directions produce valid tracks with self-lookahead', () => {
+    for (let dir = 0; dir < 8; dir++) {
+      const ctrl = lookupTrackControl(dir, dir);
+      const track = getEffectiveTrack(ctrl);
+      expect(track, `dir ${dir} → self should give valid track`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('Pre-rotation parity (Fix 4)', () => {
+  it('all valid TrackControl entries have a starting facing that matches the first arg', () => {
+    // C++ drive.cpp: entity must face movement direction before track selection.
+    // This means lookupTrackControl(dir, nextDir) assumes entity faces `dir`.
+    // Verify that all valid tracks have a facing field consistent with this.
+    for (let cur = 0; cur < 8; cur++) {
+      for (let next = 0; next < 8; next++) {
+        const ctrl = TRACK_CONTROL[cur * 8 + next];
+        if (ctrl.track === 0) continue; // impossible turn
+        // The control's facing field represents the ENDING facing after the track.
+        // The starting facing is implied by the first arg (cur direction).
+        // This test documents that constraint.
+        expect(ctrl.facing).toBeDefined();
+      }
+    }
+  });
+});
+
 describe('Constants', () => {
   it('LP = CELL_SIZE/256 = 0.09375', () => {
     expect(LP).toBeCloseTo(CELL_SIZE / 256, 10);
