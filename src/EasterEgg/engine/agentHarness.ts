@@ -64,6 +64,13 @@ export interface AgentState {
   mapBounds: { x: number; y: number; w: number; h: number };
   killCount: number;
   lossCount: number;
+  // Debug fields for trigger/timer diagnostics
+  missionTimer: number;
+  missionTimerExpired: boolean;
+  allowWin: boolean;
+  globals: number[];
+  unitsLeftMap: number;
+  triggers: { name: string; fired: boolean; house: number; e1: number; e1d: number; a1: number; a1d: number }[];
 }
 
 export type AgentCommand =
@@ -199,7 +206,7 @@ export function serializeState(game: Game): AgentState {
     allowWin: ((game as unknown as Record<string, unknown>).allowWin as boolean) ?? false,
     globals: [...((game as unknown as Record<string, unknown>).globals as Set<number> ?? [])],
     unitsLeftMap: ((game as unknown as Record<string, unknown>).unitsLeftMap as number) ?? 0,
-    triggers: (game.triggers ?? []).map(t => ({
+    triggers: (((game as unknown as Record<string, unknown>).triggers as Array<{ name: string; fired: boolean; house: number; event1: { type: number; data: number }; action1: { action: number; data: number } }>) ?? []).map(t => ({
       name: t.name, fired: t.fired, house: t.house,
       e1: t.event1.type, e1d: t.event1.data,
       a1: t.action1.action, a1d: t.action1.data,

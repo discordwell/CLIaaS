@@ -9186,6 +9186,7 @@ export class Game {
     for (const e of this.entities) {
       if (!e.alive || this.isPlayerControlled(e)) continue;
       if (e.isAnt) continue; // ants never retreat
+      if (e.isSuicide) continue; // IsSuicide teams fight to the death
 
       const state = this.aiStates.get(e.house);
       if (!state) continue;
