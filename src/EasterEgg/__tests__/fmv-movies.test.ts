@@ -4,7 +4,7 @@
  * Covers all 5 fields: intro, brief, action, win, lose.
  */
 import { describe, it, expect } from 'vitest';
-import { getMissionMovies, hasFMV, getMovieUrl, CAMPAIGN_END_MOVIES } from '../engine/movies';
+import { getMissionMovies, hasFMV, getMovieUrl, CAMPAIGN_END_MOVIES, getAllMovieNames } from '../engine/movies';
 
 describe('FMV Movie Mapping', () => {
   // === Allied Campaign — full 5-field mapping ===
@@ -110,11 +110,11 @@ describe('FMV Movie Mapping', () => {
 
   // === Ant Missions ===
   describe('Ant Missions', () => {
-    it('SCA01EA has intro (antintro) and nothing else', () => {
+    it('SCA01EA has intro (antintro) and brief (antbrf)', () => {
       const movies = getMissionMovies('SCA01EA');
       expect(movies).toBeDefined();
       expect(movies!.intro).toBe('antintro');
-      expect(movies!.brief).toBeUndefined();
+      expect(movies!.brief).toBe('antbrf');
       expect(movies!.action).toBeUndefined();
       expect(movies!.win).toBeUndefined();
       expect(movies!.lose).toBeUndefined();
@@ -140,7 +140,7 @@ describe('FMV Movie Mapping', () => {
       expect(movies!.lose).toBeUndefined();
     });
 
-    it('SCA01EA has FMV (intro), SCA02/03 do not', () => {
+    it('SCA01EA has FMV (intro+brief), SCA02/03 do not', () => {
       expect(hasFMV('SCA01EA')).toBe(true);
       expect(hasFMV('SCA02EA')).toBe(false);
       expect(hasFMV('SCA03EA')).toBe(false);
@@ -269,6 +269,9 @@ describe('FMV Movie Mapping', () => {
     expect(getMovieUrl('antintro')).toBe(
       'https://archive.org/download/Red_Alert-Cutscenes/antintro_512kb.mp4'
     );
+    expect(getMovieUrl('antbrf')).toBe(
+      'https://archive.org/download/Red_Alert-Cutscenes/antbrf_512kb.mp4'
+    );
   });
 
   // === Case-insensitive lookup ===
@@ -285,7 +288,7 @@ describe('FMV Movie Mapping', () => {
   it('hasFMV returns true when only win/lose exist (no brief/action)', () => {
     // Counterstrike — only win+lose
     expect(hasFMV('SCG20EA')).toBe(true);
-    // SCA01EA — only intro
+    // SCA01EA — intro + brief
     expect(hasFMV('SCA01EA')).toBe(true);
     // SCA04EA — only win
     expect(hasFMV('SCA04EA')).toBe(true);
@@ -297,6 +300,49 @@ describe('FMV Movie Mapping', () => {
     expect(hasFMV('SCA03EA')).toBe(false);
     // Unknown mission
     expect(hasFMV('SCG99EA')).toBe(false);
+  });
+
+  // === Movie name validation ===
+  describe('Movie Name Validation', () => {
+    it('all movie names are non-empty strings', () => {
+      const names = getAllMovieNames();
+      expect(names.length).toBeGreaterThan(0);
+      for (const name of names) {
+        expect(name, `movie name should be non-empty`).toBeTruthy();
+        expect(typeof name, `movie name should be string`).toBe('string');
+        expect(name.trim(), `movie name "${name}" should not be whitespace-only`).toBe(name);
+      }
+    });
+
+    it('all movie names are lowercase (no uppercase letters)', () => {
+      const names = getAllMovieNames();
+      for (const name of names) {
+        expect(name, `"${name}" should be lowercase`).toBe(name.toLowerCase());
+      }
+    });
+
+    it('all movie names contain only valid characters (a-z, 0-9, underscore)', () => {
+      const names = getAllMovieNames();
+      for (const name of names) {
+        expect(name, `"${name}" should match [a-z0-9_]+`).toMatch(/^[a-z0-9_]+$/);
+      }
+    });
+
+    it('all movie names generate valid archive.org URLs', () => {
+      const names = getAllMovieNames();
+      for (const name of names) {
+        const url = getMovieUrl(name);
+        expect(url, `URL for "${name}" should start with base URL`).toContain(
+          'https://archive.org/download/Red_Alert-Cutscenes/'
+        );
+        expect(url, `URL for "${name}" should end with _512kb.mp4`).toMatch(/_512kb\.mp4$/);
+      }
+    });
+
+    it('antbrf is included in the full movie name list', () => {
+      const names = getAllMovieNames();
+      expect(names).toContain('antbrf');
+    });
   });
 
   // === Total scenario count ===

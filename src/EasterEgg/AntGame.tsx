@@ -19,7 +19,7 @@ interface AntGameProps {
 }
 
 type Screen = 'main_menu' | 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing'
-  | 'faction_select' | 'campaign_select'
+  | 'faction_select' | 'campaign_select' | 'map_select'
   | 'fmv_intro' | 'fmv_briefing' | 'fmv_action' | 'objectives_interstitial'
   | 'fmv_win' | 'fmv_lose' | 'fmv_campaign_end';
 
@@ -226,8 +226,10 @@ export default function AntGame({ onExit }: AntGameProps) {
     }
   }, [difficulty, activeCampaign, campaignMissionIndex, playPostMissionFMV, isFinalCampaignMission, getCampaignFaction]);
 
-  /** Helper: play an FMV and call onDone when complete (or fallback to procedural) */
-  const playFMV = useCallback((movieName: string, screenState: Screen, _mission: MissionInfo, onDone: () => void) => {
+  /** Helper: play an FMV and call onDone when complete (or fallback to procedural).
+   *  When `immediate` is true, uses playImmediate() to preserve user gesture context
+   *  for autoplay with sound. Otherwise falls back to async play(). */
+  const playFMV = useCallback((movieName: string, screenState: Screen, _mission: MissionInfo, onDone: () => void, immediate = false) => {
     if (!containerRef.current) { onDone(); return; }
 
     // Reuse preloaded player or create new one
@@ -245,12 +247,25 @@ export default function AntGame({ onExit }: AntGameProps) {
       onDone(); // skip on error
     };
     setScreen(screenState);
-    player.play(movieName);
+
+    // Use playImmediate() when called directly from a click handler to
+    // preserve Chrome's user gesture context for autoplay with sound.
+    if (immediate) {
+      player.playImmediate(movieName);
+    } else {
+      player.play(movieName);
+    }
   }, []);
 
   /** Start the animated briefing cutscene before launching the mission.
    *  Flow: Intro → Brief → Objectives → Action → gameplay
-   *  Any missing step is skipped. */
+   *  Any missing step is skipped.
+   *
+   *  IMPORTANT: When an intro FMV exists, video.play() is called synchronously
+   *  from the user's click handler (via playImmediate) BEFORE the fade transition
+   *  starts. The video plays behind the fade overlay (z-index 200000 vs 100020),
+   *  so it's invisible until the fade lifts. This preserves Chrome's user gesture
+   *  context so autoplay with sound works. */
   const startCutscene = useCallback((mission: MissionInfo) => {
     if (!canvasRef.current) return;
 
@@ -308,13 +323,56 @@ export default function AntGame({ onExit }: AntGameProps) {
 
     // Start the chain: Intro → Brief → Objectives → Action → gameplay
     if (movies?.intro && containerRef.current) {
-      transitionTo(() => {
-        playFMV(movies.intro!, 'fmv_intro', mission, afterIntro);
-      });
+      // Start video playback IMMEDIATELY (synchronously from click handler)
+      // to preserve Chrome's user gesture context for autoplay with sound.
+      // The video plays behind the fade overlay (z-index 200000 > 100020),
+      // so the user sees: fade-to-black → video revealed when fade lifts.
+      playFMV(movies.intro!, 'fmv_intro', mission, afterIntro, /* immediate */ true);
+      // Run the fade transition in parallel — it just fades to black then
+      // fades back in, revealing the already-playing video underneath.
+      setFadeActive(true);
+      setFadeOpacity(1);
+      setTimeout(() => {
+        setFadeOpacity(0);
+        setTimeout(() => {
+          setFadeActive(false);
+        }, 500);
+      }, 400);
     } else if (movies?.brief && containerRef.current) {
-      transitionTo(() => afterIntro());
+      // Brief-only missions (no intro): start video immediately, fade around it.
+      // Can't use playFMV here because we need custom error handling (fallback
+      // to procedural briefing rather than just skipping).
+      let player = moviePlayerRef.current;
+      if (!player && containerRef.current) {
+        player = new MoviePlayer(containerRef.current);
+        moviePlayerRef.current = player;
+      }
+      if (player) {
+        player.onComplete = () => {
+          setScreen('objectives_interstitial');
+        };
+        player.onError = () => {
+          // Fallback to procedural briefing on error
+          moviePlayerRef.current?.destroy();
+          moviePlayerRef.current = null;
+          goToObjectivesOrProcedural();
+        };
+        setScreen('fmv_briefing');
+        player.playImmediate(movies.brief!);
+      } else {
+        goToObjectivesOrProcedural();
+      }
+      // Run the fade transition in parallel
+      setFadeActive(true);
+      setFadeOpacity(1);
+      setTimeout(() => {
+        setFadeOpacity(0);
+        setTimeout(() => {
+          setFadeActive(false);
+        }, 500);
+      }, 400);
     } else {
-      // No FMV — procedural path
+      // No FMV — procedural path (no autoplay concern, use normal transition)
       transitionTo(() => goToObjectivesOrProcedural());
     }
   }, [launchMission, transitionTo, playFMV]);
@@ -411,23 +469,44 @@ export default function AntGame({ onExit }: AntGameProps) {
     transitionTo(() => setScreen('briefing'));
   }, [transitionTo]);
 
-  const handleNextMission = useCallback(() => {
+  /** Advance from map_select to the next mission briefing */
+  const advanceFromMapSelect = useCallback(() => {
     if (activeCampaign) {
-      // Campaign mode: advance to next campaign mission
       const nextIdx = campaignMissionIndex + 1;
       if (nextIdx < activeCampaign.missions.length) {
         const cm = activeCampaign.missions[nextIdx];
+        setCampaignMissionIndex(nextIdx);
+        const realBriefing = getMissionBriefing(cm.id);
+        const missionInfo: MissionInfo = {
+          id: cm.id,
+          title: cm.title,
+          briefing: realBriefing || cm.briefing,
+          objective: cm.objective,
+        };
+        setSelectedMission(missionInfo);
+        transitionTo(() => setScreen('briefing'));
+      }
+    } else {
+      // Ant mission mode
+      const nextIdx = missionIndex + 1;
+      if (nextIdx < MISSIONS.length) {
+        const mission = MISSIONS[nextIdx];
+        if (mission) {
+          setMissionIndex(nextIdx);
+          setSelectedMission(mission);
+          transitionTo(() => setScreen('briefing'));
+        }
+      }
+    }
+  }, [missionIndex, activeCampaign, campaignMissionIndex, transitionTo]);
+
+  const handleNextMission = useCallback(() => {
+    if (activeCampaign) {
+      // Campaign mode: advance to next campaign mission via map select
+      const nextIdx = campaignMissionIndex + 1;
+      if (nextIdx < activeCampaign.missions.length) {
         transitionTo(() => {
-          setCampaignMissionIndex(nextIdx);
-          const realBriefing = getMissionBriefing(cm.id);
-          const missionInfo: MissionInfo = {
-            id: cm.id,
-            title: cm.title,
-            briefing: realBriefing || cm.briefing,
-            objective: cm.objective,
-          };
-          setSelectedMission(missionInfo);
-          setScreen('briefing');
+          setScreen('map_select');
         });
       } else {
         // All campaign missions complete
@@ -440,16 +519,11 @@ export default function AntGame({ onExit }: AntGameProps) {
         });
       }
     } else {
-      // Ant mission mode
+      // Ant mission mode — show map select between missions
       const nextIdx = missionIndex + 1;
       if (nextIdx < MISSIONS.length) {
-        const mission = MISSIONS[nextIdx];
         transitionTo(() => {
-          if (mission) {
-            setMissionIndex(nextIdx);
-            setSelectedMission(mission);
-            setScreen('briefing');
-          }
+          setScreen('map_select');
         });
       } else {
         transitionTo(() => {
@@ -715,6 +789,9 @@ export default function AntGame({ onExit }: AntGameProps) {
           if (briefingRef.current) {
             briefingRef.current.skip();
           }
+        } else if (screen === 'map_select') {
+          // ESC on map select → skip to campaign/mission select
+          setScreen(activeCampaign ? 'campaign_select' : 'select');
         } else if (screen === 'briefing') {
           setScreen(activeCampaign ? 'campaign_select' : 'select');
         } else if (screen === 'campaign_select') {
@@ -752,6 +829,10 @@ export default function AntGame({ onExit }: AntGameProps) {
         const idx = parseInt(e.key) - 1;
         if (idx <= unlockedMissions) selectMission(idx);
       }
+      if (screen === 'map_select' && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        advanceFromMapSelect();
+      }
       if (screen === 'briefing' && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
         if (selectedMission) {
@@ -761,7 +842,7 @@ export default function AntGame({ onExit }: AntGameProps) {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, continueFromObjectives, onExit, activeCampaign, campaignMissionIndex]);
+  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, continueFromObjectives, advanceFromMapSelect, onExit, activeCampaign, campaignMissionIndex]);
 
   // Handle canvas resize
   useEffect(() => {
@@ -1167,6 +1248,305 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
+      {/* ── Map Selection Screen ── */}
+      {!testMode && !qaMode && screen === 'map_select' && (
+        <div
+          data-testid="map-select-screen"
+          onClick={() => advanceFromMapSelect()}
+          style={{
+            position: 'absolute',
+            top: 0, left: 0, width: '100%', height: '100%',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            background: '#000',
+            zIndex: 100000, fontFamily: 'monospace',
+            cursor: 'pointer',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Faction-specific map content */}
+          {(() => {
+            // Determine which map to show based on campaign type
+            const isAnt = !activeCampaign;
+            const faction = activeCampaign?.faction;
+            const isSoviet = faction === 'soviet';
+
+            // Current mission index (what was just completed)
+            const completedIdx = activeCampaign ? campaignMissionIndex : missionIndex;
+            const nextIdx = completedIdx + 1;
+            const totalMissions = activeCampaign ? activeCampaign.missions.length : MISSIONS.length;
+            const nextMission = activeCampaign
+              ? activeCampaign.missions[nextIdx]
+              : MISSIONS[nextIdx];
+
+            // Color scheme
+            const accentColor = isAnt ? '#ffaa00' : isSoviet ? '#cc4444' : '#4488cc';
+            const accentGlow = isAnt ? 'rgba(255,170,0,0.5)' : isSoviet ? 'rgba(200,60,60,0.5)' : 'rgba(80,120,200,0.5)';
+            const gridColor = isAnt ? 'rgba(255,170,0,0.06)' : isSoviet ? 'rgba(200,60,60,0.06)' : 'rgba(80,120,200,0.06)';
+            const lineColor = isAnt ? 'rgba(255,170,0,0.2)' : isSoviet ? 'rgba(200,60,60,0.2)' : 'rgba(80,120,200,0.2)';
+
+            // Ant mission map locations (themed terrain progression)
+            const antLocations = [
+              { x: 20, y: 70, label: 'Outpost Alpha', subtitle: 'Remote outpost' },
+              { x: 38, y: 50, label: 'Twin Villages', subtitle: 'Civilian sector' },
+              { x: 58, y: 35, label: 'Ant Nests', subtitle: 'Surface colony' },
+              { x: 78, y: 20, label: 'The Tunnels', subtitle: 'Underground network' },
+            ];
+
+            // Allied campaign map locations (European theater, roughly west to east)
+            const alliedLocations = [
+              { x: 30, y: 55, label: 'Rescue' },       // M1: In the Thick of It
+              { x: 35, y: 48, label: 'Defense' },       // M2: Five to One
+              { x: 28, y: 40, label: 'Convoy' },        // M3: Dead End
+              { x: 40, y: 42, label: 'Infiltration' },  // M4: Tanya's Tale
+              { x: 45, y: 35, label: 'Nuclear' },       // M5: Paradox Equation
+              { x: 50, y: 50, label: 'Base Defense' },  // M6: Situation Critical
+              { x: 42, y: 60, label: 'Chemical' },      // M7: Sarin Gas 1
+              { x: 48, y: 65, label: 'Sub Pen' },       // M8: Sarin Gas 2
+              { x: 55, y: 55, label: 'Plant' },         // M9: Sarin Gas 3
+              { x: 60, y: 45, label: 'Spy Op' },        // M10: Suspicion
+              { x: 65, y: 38, label: 'Counter' },       // M11: Aftermath
+              { x: 70, y: 42, label: 'Strike' },        // M12: Focused Blast
+              { x: 75, y: 35, label: 'Capture' },       // M13: Negotiations
+              { x: 82, y: 28, label: 'Moscow' },        // M14: No Remorse
+            ];
+
+            // Soviet campaign map locations (expanding westward from Moscow)
+            const sovietLocations = [
+              { x: 78, y: 30, label: 'Village' },       // M1: Lesson in Blood
+              { x: 72, y: 35, label: 'Tesla Lab' },     // M2: Tesla's Spark
+              { x: 68, y: 40, label: 'Cleanup' },       // M3: Covert Cleanup
+              { x: 62, y: 38, label: 'Supply' },        // M4: Behind the Lines
+              { x: 58, y: 45, label: 'Forward Base' },  // M5: Distant Thunder
+              { x: 52, y: 50, label: 'Bridge' },        // M6: Bridge over Grotz
+              { x: 48, y: 42, label: 'Strike' },        // M7: Core of the Matter
+              { x: 42, y: 55, label: 'Island' },        // M8: Elba Island
+              { x: 38, y: 48, label: 'Occupation' },    // M9: Overseer
+              { x: 35, y: 40, label: 'Wasteland' },     // M10: Wasteland
+              { x: 30, y: 52, label: 'Missile' },       // M11: Ground Zero
+              { x: 25, y: 45, label: 'Trap' },          // M12: Mousetrap
+              { x: 22, y: 38, label: 'Tesla' },         // M13: Legacy of Tesla
+              { x: 18, y: 30, label: 'London' },        // M14: Soviet Supremacy
+            ];
+
+            // Pick the right locations array
+            const locations = isAnt ? antLocations
+              : (activeCampaign?.id === 'allied' || activeCampaign?.id === 'counterstrike_allied')
+                ? alliedLocations.slice(0, totalMissions)
+                : sovietLocations.slice(0, totalMissions);
+
+            return (
+              <>
+                {/* Animated background grid */}
+                <div style={{
+                  position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                  backgroundImage: `
+                    linear-gradient(${gridColor} 1px, transparent 1px),
+                    linear-gradient(90deg, ${gridColor} 1px, transparent 1px)
+                  `,
+                  backgroundSize: '40px 40px',
+                }} />
+
+                {/* Radar sweep animation */}
+                <div style={{
+                  position: 'absolute', top: '50%', left: '50%',
+                  width: '120%', height: '120%',
+                  transform: 'translate(-50%, -50%)',
+                  background: `conic-gradient(from 0deg, transparent 0deg, ${accentGlow} 15deg, transparent 30deg)`,
+                  animation: 'radarSweep 6s linear infinite',
+                  opacity: 0.15,
+                }} />
+
+                {/* Map title */}
+                <div style={{
+                  position: 'absolute', top: '4%', left: '50%', transform: 'translateX(-50%)',
+                  textAlign: 'center', zIndex: 2,
+                }}>
+                  <div style={{
+                    color: accentColor, fontSize: '10px', letterSpacing: '6px',
+                    textTransform: 'uppercase', opacity: 0.7, marginBottom: '4px',
+                  }}>
+                    {isAnt ? 'Theater of Operations' : isSoviet ? 'Soviet Command' : 'Allied Command'}
+                  </div>
+                  <div style={{
+                    color: accentColor, fontSize: '22px', fontWeight: 'bold',
+                    letterSpacing: '3px', textShadow: `0 0 15px ${accentGlow}`,
+                  }}>
+                    {isAnt ? 'ANT CAMPAIGN' : activeCampaign?.title.toUpperCase()}
+                  </div>
+                </div>
+
+                {/* Map area with mission nodes */}
+                <div style={{
+                  position: 'relative',
+                  width: '80%', maxWidth: '700px',
+                  height: '55%', maxHeight: '400px',
+                  border: `1px solid ${lineColor}`,
+                  borderRadius: '4px',
+                  zIndex: 2,
+                }}>
+                  {/* Connection lines (SVG) */}
+                  <svg style={{
+                    position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                    pointerEvents: 'none',
+                  }}>
+                    {locations.map((loc, i) => {
+                      if (i === 0) return null;
+                      const prev = locations[i - 1];
+                      const completed = i <= completedIdx;
+                      const isNextLine = i === nextIdx;
+                      return (
+                        <line
+                          key={`line-${i}`}
+                          x1={`${prev.x}%`} y1={`${prev.y}%`}
+                          x2={`${loc.x}%`} y2={`${loc.y}%`}
+                          stroke={completed ? accentColor : isNextLine ? accentColor : 'rgba(255,255,255,0.08)'}
+                          strokeWidth={completed || isNextLine ? 2 : 1}
+                          strokeDasharray={completed ? 'none' : '6 4'}
+                          opacity={completed ? 0.7 : isNextLine ? 0.5 : 0.3}
+                        />
+                      );
+                    })}
+                  </svg>
+
+                  {/* Mission nodes */}
+                  {locations.map((loc, i) => {
+                    const completed = i <= completedIdx;
+                    const isNext = i === nextIdx;
+                    const isFuture = i > nextIdx;
+                    const nodeSize = isNext ? 16 : completed ? 12 : 8;
+
+                    return (
+                      <div
+                        key={`node-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${loc.x}%`, top: `${loc.y}%`,
+                          transform: 'translate(-50%, -50%)',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center',
+                          zIndex: isNext ? 10 : 5,
+                        }}
+                      >
+                        {/* Node dot */}
+                        <div style={{
+                          width: `${nodeSize}px`, height: `${nodeSize}px`,
+                          borderRadius: '50%',
+                          background: completed ? accentColor : isNext ? accentColor : 'rgba(255,255,255,0.15)',
+                          border: `2px solid ${completed ? accentColor : isNext ? accentColor : 'rgba(255,255,255,0.2)'}`,
+                          boxShadow: isNext ? `0 0 12px ${accentGlow}, 0 0 24px ${accentGlow}` : completed ? `0 0 6px ${accentGlow}` : 'none',
+                          animation: isNext ? 'mapNodePulse 1.5s ease-in-out infinite' : 'none',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {completed && !isNext && (
+                            <span style={{ color: '#000', fontSize: '8px', fontWeight: 'bold', lineHeight: 1 }}>
+                              {'\u2713'}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Label */}
+                        {(completed || isNext) && (
+                          <div style={{
+                            position: 'absolute',
+                            top: `${nodeSize / 2 + 6}px`,
+                            whiteSpace: 'nowrap',
+                            textAlign: 'center',
+                          }}>
+                            <div style={{
+                              color: isNext ? accentColor : 'rgba(255,255,255,0.5)',
+                              fontSize: isNext ? '11px' : '9px',
+                              fontWeight: isNext ? 'bold' : 'normal',
+                              letterSpacing: '1px',
+                              textShadow: isNext ? `0 0 8px ${accentGlow}` : 'none',
+                            }}>
+                              {loc.label}
+                            </div>
+                            {isAnt && isNext && 'subtitle' in loc && (
+                              <div style={{
+                                color: 'rgba(255,255,255,0.3)', fontSize: '8px', marginTop: '1px',
+                              }}>
+                                {(loc as { subtitle: string }).subtitle}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Future node — just a dim dot, no label */}
+                        {isFuture && (
+                          <div style={{
+                            position: 'absolute',
+                            top: `${nodeSize / 2 + 4}px`,
+                            color: 'rgba(255,255,255,0.15)',
+                            fontSize: '7px',
+                          }}>
+                            ?
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Coordinate labels along edges */}
+                  {[0, 25, 50, 75, 100].map(pct => (
+                    <span key={`x-${pct}`} style={{
+                      position: 'absolute', bottom: '-16px', left: `${pct}%`,
+                      transform: 'translateX(-50%)',
+                      color: 'rgba(255,255,255,0.1)', fontSize: '8px',
+                    }}>
+                      {Math.round(pct * 1.28)}
+                    </span>
+                  ))}
+                  {[0, 25, 50, 75, 100].map(pct => (
+                    <span key={`y-${pct}`} style={{
+                      position: 'absolute', left: '-20px', top: `${pct}%`,
+                      transform: 'translateY(-50%)',
+                      color: 'rgba(255,255,255,0.1)', fontSize: '8px',
+                    }}>
+                      {Math.round(pct * 0.96)}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Next mission info panel */}
+                <div style={{
+                  position: 'absolute', bottom: '8%', left: '50%', transform: 'translateX(-50%)',
+                  textAlign: 'center', zIndex: 2,
+                }}>
+                  <div style={{
+                    color: accentColor, fontSize: '13px', fontWeight: 'bold',
+                    letterSpacing: '2px', marginBottom: '4px',
+                    textShadow: `0 0 10px ${accentGlow}`,
+                  }}>
+                    NEXT: {nextMission ? (isAnt ? (nextMission as MissionInfo).title : (nextMission as CampaignMission).title) : 'UNKNOWN'}
+                  </div>
+                  <div style={{
+                    color: 'rgba(255,255,255,0.3)', fontSize: '10px', letterSpacing: '1px',
+                  }}>
+                    Mission {nextIdx + 1} of {totalMissions}
+                  </div>
+                  <div style={{
+                    color: 'rgba(255,255,255,0.2)', fontSize: '10px', marginTop: '12px',
+                  }}>
+                    Click or press ENTER to continue
+                  </div>
+                </div>
+
+                {/* CSS Animations */}
+                <style>{`
+                  @keyframes radarSweep {
+                    from { transform: translate(-50%, -50%) rotate(0deg); }
+                    to { transform: translate(-50%, -50%) rotate(360deg); }
+                  }
+                  @keyframes mapNodePulse {
+                    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                    50% { transform: translate(-50%, -50%) scale(1.4); opacity: 0.7; }
+                  }
+                `}</style>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* ── Campaign Select Screen ── */}
       {!testMode && !qaMode && screen === 'campaign_select' && activeCampaign && (
         <div style={{
@@ -1439,8 +1819,46 @@ export default function AntGame({ onExit }: AntGameProps) {
       )}
 
       {/* ── Mission Briefing Screen ── */}
-      {!testMode && !qaMode && screen === 'briefing' && selectedMission && (
+      {!testMode && !qaMode && screen === 'briefing' && selectedMission && (() => {
+        // Faction theming: allied=blue/green, soviet=red/black, ants=amber/orange
+        const faction: 'allied' | 'soviet' | 'ants' = activeCampaign ? activeCampaign.faction : 'ants';
+        const theme = {
+          allied: {
+            primary: '#4488cc', accent: '#88ccff', dim: '#2a4466',
+            bg: 'rgba(10,25,50,0.85)', border: '#335577', glow: 'rgba(68,136,204,0.4)',
+            stamp: '#3366aa', headerBg: 'rgba(20,40,80,0.9)',
+            launchBg: '#1a3355', launchColor: '#66bbff', launchBorder: '#4488cc',
+            docBg: 'rgba(15,30,55,0.6)', docBorder: '#2a4466',
+            objColor: '#66ccff', insigniaColor: '#4488cc',
+            classification: 'ALLIED COMMAND',
+          },
+          soviet: {
+            primary: '#cc4444', accent: '#ff6666', dim: '#662222',
+            bg: 'rgba(40,10,10,0.85)', border: '#663333', glow: 'rgba(204,68,68,0.4)',
+            stamp: '#aa3333', headerBg: 'rgba(60,15,15,0.9)',
+            launchBg: '#441111', launchColor: '#ff6666', launchBorder: '#cc4444',
+            docBg: 'rgba(45,15,15,0.6)', docBorder: '#552222',
+            objColor: '#ff8888', insigniaColor: '#cc4444',
+            classification: 'SOVIET COMMAND',
+          },
+          ants: {
+            primary: '#ff8800', accent: '#ffaa33', dim: '#664400',
+            bg: 'rgba(30,20,5,0.85)', border: '#664400', glow: 'rgba(255,136,0,0.4)',
+            stamp: '#cc6600', headerBg: 'rgba(50,30,10,0.9)',
+            launchBg: '#442200', launchColor: '#ffaa33', launchBorder: '#ff8800',
+            docBg: 'rgba(40,25,10,0.6)', docBorder: '#553311',
+            objColor: '#ffcc44', insigniaColor: '#ff8800',
+            classification: 'FIELD COMMAND',
+          },
+        }[faction];
+        const missionNum = activeCampaign
+          ? `${campaignMissionIndex + 1} of ${activeCampaign.missions.length}`
+          : `${missionIndex + 1} of ${MISSIONS.length}`;
+        const missionLabel = activeCampaign ? 'OPERATION' : 'MISSION';
+
+        return (
         <div
+          data-testid="briefing-screen"
           style={{
             position: 'absolute',
             top: 0,
@@ -1453,162 +1871,380 @@ export default function AntGame({ onExit }: AntGameProps) {
             justifyContent: 'center',
             background: 'radial-gradient(ellipse at center, #0a0a00 0%, #000000 70%)',
             zIndex: 100000,
-            fontFamily: 'monospace',
+            fontFamily: '"Courier New", Courier, monospace',
             cursor: 'pointer',
+            overflow: 'hidden',
           }}
           onClick={() => startCutscene(selectedMission)}
         >
+          {/* CRT scanline overlay */}
           <div style={{
-            color: activeCampaign ? (activeCampaign.faction === 'allied' ? '#4488cc' : '#cc4444') : '#ff4400',
-            fontSize: '12px',
-            letterSpacing: '6px',
-            textTransform: 'uppercase',
-            marginBottom: '8px',
-          }}>
-            {activeCampaign ? 'Command Briefing' : 'Mission Briefing'}
-          </div>
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)',
+            pointerEvents: 'none',
+            zIndex: 100010,
+          }} />
 
-          <h1 style={{
-            color: activeCampaign ? (activeCampaign.faction === 'allied' ? '#88aadd' : '#dd6666') : '#ff6633',
-            fontSize: '32px',
-            fontWeight: 'bold',
-            textShadow: `0 0 15px ${activeCampaign ? (activeCampaign.faction === 'allied' ? 'rgba(80,120,200,0.5)' : 'rgba(200,60,60,0.5)') : 'rgba(255,68,0,0.5)'}`,
-            letterSpacing: '2px',
-            marginBottom: '6px',
-          }}>
-            {selectedMission.title}
-          </h1>
-
+          {/* Vignette overlay */}
           <div style={{
-            color: activeCampaign ? '#666' : '#cc3300',
-            fontSize: '13px',
-            letterSpacing: '2px',
-            marginBottom: '30px',
-          }}>
-            {activeCampaign
-              ? `Mission ${campaignMissionIndex + 1} of ${activeCampaign.missions.length}`
-              : `Mission ${missionIndex + 1} of ${MISSIONS.length}`}
-          </div>
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.6) 100%)',
+            pointerEvents: 'none',
+            zIndex: 100009,
+          }} />
 
+          {/* ── Dossier container ── */}
           <div style={{
-            maxWidth: '550px',
-            padding: '24px 28px',
-            background: 'rgba(40,25,10,0.4)',
-            border: '1px solid #442200',
-            marginBottom: '24px',
+            position: 'relative',
+            width: '580px',
+            maxWidth: '90%',
+            background: theme.bg,
+            border: `2px solid ${theme.border}`,
+            boxShadow: `0 0 30px ${theme.glow}, inset 0 0 60px rgba(0,0,0,0.5)`,
+            padding: 0,
+            zIndex: 100001,
           }}>
+            {/* Corner markings */}
+            {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => {
+              const isTop = corner.includes('top');
+              const isLeft = corner.includes('left');
+              return (
+                <div key={corner} style={{
+                  position: 'absolute',
+                  [isTop ? 'top' : 'bottom']: '-1px',
+                  [isLeft ? 'left' : 'right']: '-1px',
+                  width: '12px',
+                  height: '12px',
+                  borderTop: isTop ? `2px solid ${theme.accent}` : 'none',
+                  borderBottom: !isTop ? `2px solid ${theme.accent}` : 'none',
+                  borderLeft: isLeft ? `2px solid ${theme.accent}` : 'none',
+                  borderRight: !isLeft ? `2px solid ${theme.accent}` : 'none',
+                  zIndex: 2,
+                }} />
+              );
+            })}
+
+            {/* ── Header bar ── */}
             <div style={{
-              color: '#ccaa88',
-              fontSize: '14px',
-              lineHeight: '1.8',
-              marginBottom: '16px',
+              background: theme.headerBg,
+              borderBottom: `1px solid ${theme.border}`,
+              padding: '12px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
             }}>
-              {selectedMission.briefing}
-            </div>
-            <div style={{
-              borderTop: '1px solid #332211',
-              paddingTop: '12px',
-            }}>
-              <span style={{ color: '#886633', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
-                Objective:
-              </span>
-              <span style={{ color: '#ffaa44', fontSize: '13px', marginLeft: '8px' }}>
-                {selectedMission.objective}
-              </span>
-            </div>
-          </div>
+              {/* Faction insignia (CSS-only) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  border: `2px solid ${theme.insigniaColor}`,
+                  borderRadius: faction === 'soviet' ? '0' : faction === 'allied' ? '50%' : '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px',
+                  color: theme.insigniaColor,
+                  fontWeight: 'bold',
+                  position: 'relative',
+                  transform: faction === 'soviet' ? 'rotate(45deg)' : 'none',
+                  boxShadow: `0 0 8px ${theme.glow}`,
+                }}>
+                  <span style={{ transform: faction === 'soviet' ? 'rotate(-45deg)' : 'none' }}>
+                    {faction === 'allied' ? '\u2605' : faction === 'soviet' ? '\u2620' : '\u26A0'}
+                  </span>
+                </div>
+                <div>
+                  <div style={{
+                    color: theme.accent,
+                    fontSize: '10px',
+                    letterSpacing: '3px',
+                    textTransform: 'uppercase',
+                    opacity: 0.7,
+                  }}>
+                    {theme.classification}
+                  </div>
+                  <div style={{
+                    color: theme.primary,
+                    fontSize: '11px',
+                    letterSpacing: '4px',
+                    textTransform: 'uppercase',
+                  }}>
+                    {activeCampaign ? 'COMMAND BRIEFING' : 'MISSION BRIEFING'}
+                  </div>
+                </div>
+              </div>
 
-          <div style={{
-            display: 'flex',
-            gap: '16px',
-            alignItems: 'center',
-          }}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setScreen(activeCampaign ? 'campaign_select' : 'select');
-              }}
-              style={{
-                background: '#222',
-                color: '#888',
-                border: '1px solid #444',
-                padding: '10px 20px',
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                cursor: 'pointer',
-              }}
-            >
-              Back
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                startCutscene(selectedMission);
-              }}
-              style={{
-                background: '#441100',
-                color: '#ff6633',
-                border: '1px solid #663300',
-                padding: '10px 32px',
-                fontFamily: 'monospace',
-                fontSize: '14px',
+              {/* Classification stamp */}
+              <div style={{
+                border: `2px solid ${theme.stamp}`,
+                padding: '2px 10px',
+                color: theme.stamp,
+                fontSize: '10px',
+                letterSpacing: '3px',
                 fontWeight: 'bold',
-                cursor: 'pointer',
-                letterSpacing: '2px',
-                animation: 'glow 2s ease-in-out infinite',
-              }}
-            >
-              LAUNCH MISSION
-            </button>
-          </div>
+                transform: 'rotate(-3deg)',
+                opacity: 0.8,
+                textTransform: 'uppercase',
+              }}>
+                TOP SECRET
+              </div>
+            </div>
 
-          {/* Difficulty selector */}
-          <div style={{
-            display: 'flex',
-            gap: '8px',
-            marginTop: '20px',
-            alignItems: 'center',
-          }}>
-            <span style={{ color: '#886633', fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase' }}>
-              Difficulty:
-            </span>
-            {DIFFICULTIES.map(d => (
+            {/* ── Mission designation ── */}
+            <div style={{
+              padding: '16px 20px 8px',
+              borderBottom: `1px dashed ${theme.dim}`,
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+              }}>
+                <div>
+                  <span style={{
+                    color: theme.dim,
+                    fontSize: '10px',
+                    letterSpacing: '3px',
+                    textTransform: 'uppercase',
+                  }}>
+                    {missionLabel} {missionNum}
+                  </span>
+                </div>
+                <div style={{
+                  color: theme.dim,
+                  fontSize: '9px',
+                  letterSpacing: '2px',
+                  fontStyle: 'italic',
+                }}>
+                  {selectedMission.id}
+                </div>
+              </div>
+              <h1 style={{
+                color: theme.accent,
+                fontSize: '22px',
+                fontWeight: 'bold',
+                letterSpacing: '2px',
+                margin: '6px 0 10px',
+                textShadow: `0 0 12px ${theme.glow}`,
+                textTransform: 'uppercase',
+                fontFamily: '"Courier New", Courier, monospace',
+              }}>
+                {selectedMission.title}
+              </h1>
+            </div>
+
+            {/* ── Briefing text area (aged document style) ── */}
+            <div style={{
+              margin: '14px 20px',
+              padding: '16px 18px',
+              background: theme.docBg,
+              border: `1px solid ${theme.docBorder}`,
+              position: 'relative',
+              maxHeight: '180px',
+              overflowY: 'auto',
+            }}>
+              {/* Faint ruled lines */}
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                background: 'repeating-linear-gradient(180deg, transparent, transparent 23px, rgba(255,255,255,0.02) 23px, rgba(255,255,255,0.02) 24px)',
+                pointerEvents: 'none',
+              }} />
+              <div style={{
+                color: '#ccbb99',
+                fontSize: '13px',
+                lineHeight: '24px',
+                position: 'relative',
+                whiteSpace: 'pre-wrap',
+              }}>
+                {selectedMission.briefing}
+              </div>
+            </div>
+
+            {/* ── Objective callout ── */}
+            <div style={{
+              margin: '0 20px 14px',
+              padding: '10px 14px',
+              background: `linear-gradient(90deg, ${theme.docBg}, transparent)`,
+              borderLeft: `3px solid ${theme.primary}`,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px',
+            }}>
+              <div style={{
+                color: theme.dim,
+                fontSize: '10px',
+                letterSpacing: '2px',
+                textTransform: 'uppercase',
+                fontWeight: 'bold',
+                whiteSpace: 'nowrap',
+                paddingTop: '2px',
+              }}>
+                PRIMARY OBJECTIVE
+              </div>
+              <div style={{
+                color: theme.objColor,
+                fontSize: '13px',
+                fontWeight: 'bold',
+                lineHeight: '1.4',
+              }}>
+                {selectedMission.objective}
+              </div>
+            </div>
+
+            {/* ── Difficulty selector ── */}
+            <div style={{
+              margin: '0 20px 14px',
+              padding: '10px 14px',
+              borderTop: `1px solid ${theme.dim}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+            }}>
+              <span style={{
+                color: theme.dim,
+                fontSize: '10px',
+                letterSpacing: '2px',
+                textTransform: 'uppercase',
+                fontWeight: 'bold',
+              }}>
+                THREAT LEVEL
+              </span>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {DIFFICULTIES.map(d => {
+                  const isActive = d === difficulty;
+                  const diffColors = {
+                    easy: { bg: isActive ? '#1a3322' : 'transparent', color: isActive ? '#55dd55' : '#445544', border: isActive ? '#338833' : '#333' },
+                    normal: { bg: isActive ? '#332b1a' : 'transparent', color: isActive ? '#ddaa33' : '#554433', border: isActive ? '#886622' : '#333' },
+                    hard: { bg: isActive ? '#331a1a' : 'transparent', color: isActive ? '#dd5555' : '#554444', border: isActive ? '#883333' : '#333' },
+                  }[d];
+                  return (
+                    <button
+                      key={d}
+                      onClick={(e) => { e.stopPropagation(); setDifficulty(d); }}
+                      data-testid={`difficulty-${d}`}
+                      style={{
+                        background: diffColors.bg,
+                        color: diffColors.color,
+                        border: `1px solid ${diffColors.border}`,
+                        padding: '3px 12px',
+                        fontFamily: '"Courier New", Courier, monospace',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        textTransform: 'uppercase',
+                        letterSpacing: '1px',
+                        fontWeight: isActive ? 'bold' : 'normal',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {d}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Action bar ── */}
+            <div style={{
+              padding: '12px 20px 16px',
+              borderTop: `1px solid ${theme.border}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}>
               <button
-                key={d}
-                onClick={(e) => { e.stopPropagation(); setDifficulty(d); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setScreen(activeCampaign ? 'campaign_select' : 'select');
+                }}
+                data-testid="briefing-back"
                 style={{
-                  background: d === difficulty ? (d === 'easy' ? '#224422' : d === 'hard' ? '#442222' : '#443311') : '#1a1a1a',
-                  color: d === difficulty ? (d === 'easy' ? '#66ff66' : d === 'hard' ? '#ff6666' : '#ffaa44') : '#555',
-                  border: `1px solid ${d === difficulty ? '#664400' : '#333'}`,
-                  padding: '4px 14px',
-                  fontFamily: 'monospace',
-                  fontSize: '12px',
+                  background: 'rgba(30,30,30,0.8)',
+                  color: '#888',
+                  border: '1px solid #444',
+                  padding: '8px 20px',
+                  fontFamily: '"Courier New", Courier, monospace',
+                  fontSize: '11px',
                   cursor: 'pointer',
+                  letterSpacing: '2px',
                   textTransform: 'uppercase',
-                  letterSpacing: '1px',
                 }}
               >
-                {d}
+                ABORT
               </button>
-            ))}
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startCutscene(selectedMission);
+                }}
+                data-testid="briefing-launch"
+                style={{
+                  background: `linear-gradient(180deg, ${theme.launchBg}, ${theme.launchBg}dd)`,
+                  color: theme.launchColor,
+                  border: `2px solid ${theme.launchBorder}`,
+                  padding: '10px 32px',
+                  fontFamily: '"Courier New", Courier, monospace',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  letterSpacing: '3px',
+                  textTransform: 'uppercase',
+                  animation: 'briefingGlow 2s ease-in-out infinite',
+                  position: 'relative',
+                  boxShadow: `0 0 15px ${theme.glow}`,
+                }}
+              >
+                LAUNCH MISSION
+              </button>
+            </div>
           </div>
 
+          {/* ── Footer hints ── */}
           <div style={{
-            color: '#555',
-            fontSize: '11px',
-            marginTop: '12px',
+            color: '#444',
+            fontSize: '10px',
+            marginTop: '16px',
+            letterSpacing: '2px',
+            animation: 'briefingBlink 3s ease-in-out infinite',
           }}>
-            Press ENTER to launch | ESC to go back
+            PRESS ENTER TO LAUNCH | ESC TO ABORT
           </div>
 
           <style>{`
+            @keyframes briefingGlow {
+              0%, 100% { box-shadow: 0 0 8px ${theme.glow}; }
+              50% { box-shadow: 0 0 25px ${theme.glow}, 0 0 50px ${theme.glow}44; }
+            }
             @keyframes glow {
               0%, 100% { box-shadow: 0 0 8px rgba(255,68,0,0.3); }
               50% { box-shadow: 0 0 20px rgba(255,68,0,0.6); }
             }
+            @keyframes briefingBlink {
+              0%, 100% { opacity: 0.6; }
+              50% { opacity: 0.3; }
+            }
+            @keyframes briefingFlicker {
+              0%, 97%, 100% { opacity: 1; }
+              98% { opacity: 0.85; }
+              99% { opacity: 0.95; }
+            }
           `}</style>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── Loading Overlay ── */}
       {!testMode && !qaMode && screen === 'loading' && (

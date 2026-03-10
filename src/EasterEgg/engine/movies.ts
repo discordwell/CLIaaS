@@ -72,7 +72,7 @@ const MISSION_MOVIES: Record<string, MissionMovies> = {
   // SCU14EA win is handled by campaign ending (SOVFINAL)
 
   // === Ant Missions ===
-  'SCA01EA': { intro: 'antintro' },
+  'SCA01EA': { intro: 'antintro', brief: 'antbrf' },
   'SCA02EA': {},
   'SCA03EA': {},
   'SCA04EA': { win: 'antend' },
@@ -117,4 +117,18 @@ export function hasFMV(scenarioId: string): boolean {
   const movies = MISSION_MOVIES[scenarioId.toUpperCase()];
   if (!movies) return false;
   return !!(movies.intro || movies.brief || movies.action || movies.win || movies.lose);
+}
+
+/** Return all unique movie names referenced across all mission and campaign-end mappings */
+export function getAllMovieNames(): string[] {
+  const names = new Set<string>();
+  for (const movies of Object.values(MISSION_MOVIES)) {
+    for (const field of ['intro', 'brief', 'action', 'win', 'lose'] as const) {
+      if (movies[field]) names.add(movies[field]!);
+    }
+  }
+  for (const name of Object.values(CAMPAIGN_END_MOVIES)) {
+    names.add(name);
+  }
+  return [...names].sort();
 }

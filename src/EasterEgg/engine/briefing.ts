@@ -28,6 +28,42 @@ interface MissionBriefing {
   steps: BriefingStep[];
 }
 
+// Original briefing text from scenario INI files, verbatim.
+// @@ is the original game's paragraph separator; text is split on @@ for display.
+// Typos (e.g. "recieved") are authentic to the original data files.
+
+/** Raw INI briefing text keyed by scenario ID — exported for test verification */
+export const INI_BRIEFING_TEXT: Record<string, string> = {
+  SCA01EA: 'We\'ve lost contact with one of our outposts. Before it went off-line, we recieved a brief communique about giant ants. We\'re unsure what to make of this report, so we want you to investigate.@@Scout the area, bring the outpost back on-line, and report your findings. If there is a threat, reinforcements will be sent in to help you.@@Keep the base functional and radio contact open -- we don\'t want to lose the outpost again.',
+  SCA02EA: 'Who would\'ve believed it -- Giant Ants.@@Now that your MCV has arrived, we must evacuate the civilians in the area -- they don\'t stand a chance against these ants.@@There are two villages in your immediate area. Locate them and evacuate the civilians to the island in the northwest. You\'ll also have to take out all the bridges in this area to stop the ants from completely overrunning you.@@You must destroy the bridges, and evac at least one civilian from each town for the mission to be a success.',
+  SCA03EA: 'The source of the ant\'s activity has been pinpointed in this area. We suspect that their nests are in this area -- they must be destroyed @@A team of civilian specialists are en-route to your location. Use them to gas all the ant nests in the area. In addition, destroy all ants that you encounter.@@Be careful -- these things can chew through anything. Good luck.',
+  SCA04EA: 'We\'ve discovered a series of tunnels underneath the ruined base. Now that we\'ve cut off their escape routes, the ants have nowhere left to run to.@@Perform a sweep and clear of all the tunnels, and find the cause of these abominations. Destroy anything that isn\'t human!@@The power to the tunnel lights has been knocked out, which will limit visibility. Find the generator controls, and you can re-activate the lights.',
+};
+
+/** Split raw INI text into display lines: @@ → empty-line paragraph break, then word-wrap */
+function briefingTextToLines(raw: string, maxWidth = 38): string[] {
+  const paragraphs = raw.split(/@@/);
+  const lines: string[] = [];
+  for (let i = 0; i < paragraphs.length; i++) {
+    if (i > 0) lines.push(''); // paragraph break
+    const trimmed = paragraphs[i].trim();
+    if (trimmed) {
+      const words = trimmed.split(/\s+/);
+      let current = '';
+      for (const word of words) {
+        if (current.length + word.length + 1 > maxWidth) {
+          if (current) lines.push(current);
+          current = word;
+        } else {
+          current = current ? current + ' ' + word : word;
+        }
+      }
+      if (current) lines.push(current);
+    }
+  }
+  return lines;
+}
+
 const BRIEFINGS: Record<string, MissionBriefing> = {
   SCA01EA: {
     steps: [
@@ -35,23 +71,17 @@ const BRIEFINGS: Record<string, MissionBriefing> = {
       { duration: 2.5, text: [], visual: 'classified' },
       {
         duration: 4.0,
-        text: [
-          'We\'ve lost contact with one of our',
-          'outposts. The last transmission mentioned',
-          'something about... giant ants.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA01EA.split('@@')[0],
+        ),
         visual: 'radar',
         label: 'ALLIED COMMAND — PRIORITY ALPHA',
       },
       {
         duration: 4.0,
-        text: [
-          'Scout the area and bring the outpost',
-          'back online. Eliminate any threat.',
-          '',
-          'Keep radio contact open — we can\'t',
-          'afford to lose another post.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA01EA.split('@@').slice(1).join('@@'),
+        ),
         visual: 'map_outpost',
         label: 'MISSION OBJECTIVE',
       },
@@ -63,25 +93,17 @@ const BRIEFINGS: Record<string, MissionBriefing> = {
       { duration: 1.2, text: [], visual: 'static_burst', label: 'INCOMING TRANSMISSION' },
       {
         duration: 4.0,
-        text: [
-          'Giant ants confirmed. God help us.',
-          '',
-          'Two civilian villages are in the',
-          'immediate area. They won\'t survive.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA02EA.split('@@').slice(0, 2).join('@@'),
+        ),
         visual: 'map_villages',
         label: 'ALLIED COMMAND — EMERGENCY',
       },
       {
         duration: 4.5,
-        text: [
-          'Evacuate civilians to the island',
-          'in the northwest. Destroy all bridges',
-          'to halt the ant advance.',
-          '',
-          'At least one civilian from each',
-          'town must make it out alive.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA02EA.split('@@').slice(2).join('@@'),
+        ),
         visual: 'map_villages',
         label: 'EVACUATION ORDER',
       },
@@ -93,32 +115,25 @@ const BRIEFINGS: Record<string, MissionBriefing> = {
       { duration: 1.2, text: [], visual: 'static_burst', label: 'INTELLIGENCE REPORT' },
       {
         duration: 3.5,
-        text: [
-          'The source of ant activity has been',
-          'pinpointed. Their nests are in this',
-          'sector — they must be destroyed.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA03EA.split('@@')[0],
+        ),
         visual: 'map_nests',
         label: 'TARGET ANALYSIS',
       },
       {
         duration: 3.0,
-        text: [
-          'A team of civilian specialists',
-          'are en route with gas equipment.',
-          'Use them to fumigate all nests.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA03EA.split('@@')[1],
+        ),
         visual: 'specialist',
-        label: 'CHAN SPECIALIST UNIT',
+        label: 'SPECIALIST UNIT',
       },
       {
         duration: 3.0,
-        text: [
-          'Be careful — these things can',
-          'chew through anything.',
-          '',
-          'Good luck, Commander.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA03EA.split('@@')[2],
+        ),
         visual: 'gas_canister',
         label: 'WEAPONS AUTHORIZATION',
       },
@@ -130,33 +145,25 @@ const BRIEFINGS: Record<string, MissionBriefing> = {
       { duration: 1.5, text: [], visual: 'static_burst', label: 'FINAL BRIEFING' },
       {
         duration: 3.5,
-        text: [
-          'We\'ve discovered tunnels beneath',
-          'the ruined base. Their escape',
-          'routes have been sealed.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA04EA.split('@@')[0],
+        ),
         visual: 'dark_tunnel',
         label: 'SUBTERRANEAN SURVEY',
       },
       {
         duration: 3.0,
-        text: [
-          'Tunnel power is offline.',
-          'Visibility will be limited.',
-          'Find the generator controls.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA04EA.split('@@')[2],
+        ),
         visual: 'power_warning',
         label: 'WARNING — POWER OFFLINE',
       },
       {
         duration: 4.0,
-        text: [
-          'Sweep and clear all tunnels.',
-          'Find the source of these',
-          'abominations.',
-          '',
-          'Destroy anything that isn\'t human.',
-        ],
+        text: briefingTextToLines(
+          INI_BRIEFING_TEXT.SCA04EA.split('@@')[1],
+        ),
         visual: 'queen_reveal',
         label: 'SEARCH AND DESTROY',
       },
