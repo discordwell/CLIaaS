@@ -5918,8 +5918,11 @@ export class Game {
     }
     const flags = entity.trackFlags;
 
+    // C++ drive.cpp:664: maxspeed * SpeedBias * House->GroundspeedBias
+    const biasedSpeed = speedPixels * entity.speedBias * entity.groundspeedBias;
+
     // Convert pixel speed to lepton budget + accumulator (C++ SpeedAccum pattern)
-    let actual = entity.speedAccum + (speedPixels / LP);
+    let actual = entity.speedAccum + (biasedSpeed / LP);
 
     while (actual > PIXEL_LEPTON_W) {
       actual -= PIXEL_LEPTON_W;

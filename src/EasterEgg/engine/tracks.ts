@@ -264,7 +264,7 @@ const Track12 = buildTrack([
 const Track13 = buildTrack(
   Array.from({ length: 35 }, (_, i) => {
     const py = -(35 - i); // -35 to -1
-    const ly = Math.floor((py * 256 + (py < 0 ? -12 : 12)) / 24); // C++ integer rounding
+    const ly = Math.trunc((py * 256 + 12) / 24); // C++ Pixel_To_Lepton: always +12, truncate toward zero
     return [(ly & 0xFFFF) << 16, DIR_S] as const;
   }).concat([[0x00000000, DIR_S]])
 );
