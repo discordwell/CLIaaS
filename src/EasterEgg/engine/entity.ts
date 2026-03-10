@@ -117,7 +117,9 @@ export class Entity {
   // 32-step visual facing for smooth vehicle rotation (C++ Dir_To_32)
   // Game logic uses 8-dir `facing`; visual rendering uses 32-step for smooth sprite animation
   bodyFacing32 = 0;   // 0-31, initialized to facing * 4
+  prevBodyFacing32 = 0;   // previous tick bodyFacing32 for visual interpolation
   turretFacing32 = 0; // 0-31, initialized to turretFacing * 4
+  prevTurretFacing32 = 0; // previous tick turretFacing32 for visual interpolation
 
   // Recoil (C++ unit.cpp:125 Recoil_Adjust — 1-tick visual kickback on fire)
   isInRecoilState = false;
@@ -276,7 +278,9 @@ export class Entity {
       : null;
     // Initialize 32-step visual facing from 8-dir facing
     this.bodyFacing32 = this.facing * 4;
+    this.prevBodyFacing32 = this.bodyFacing32;
     this.turretFacing32 = this.turretFacing * 4;
+    this.prevTurretFacing32 = this.turretFacing32;
     // Initialize prevPos to starting position (C5: moving-platform inaccuracy detection)
     this.prevPos = { x, y };
     // Aircraft init: set ammo from stats, start landed

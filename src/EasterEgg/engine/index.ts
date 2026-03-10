@@ -339,11 +339,11 @@ export class Game {
   private builtAircraftTypes = new Set<string>();
 
   // Turbo mode (for E2E test runner)
-  turboMultiplier = 1;
+  turboMultiplier = 2;
   // Trigger debug logging
   debugTriggers = false;
-  // Player game speed (cycles 1→2→4→1 with backtick key)
-  gameSpeed = 1;
+  // Player game speed (cycles 1→2→4→1 with backtick key) — default 2× (C++ GameSpeed=1 feel)
+  gameSpeed = 2;
   // Mission stats
   structuresBuilt = 0;
   structuresLost = 0;
@@ -486,8 +486,8 @@ export class Game {
     this.evaMessages = [];
     this.unitsLeftMap = 0;
     this.civiliansEvacuated = 0;
-    this.gameSpeed = 1;
-    this.turboMultiplier = 1;
+    this.gameSpeed = 2;
+    this.turboMultiplier = 2;
     this.structuresBuilt = 0;
     this.structuresLost = 0;
     this.bridgeCellCount = this.map.countBridgeCells();
@@ -655,6 +655,13 @@ export class Game {
         this.togglePause();
         return;
       }
+      // Allow speed changes while paused
+      if (keys.has('`')) {
+        this.gameSpeed = this.gameSpeed === 1 ? 2 : this.gameSpeed === 2 ? 4 : 1;
+        if (this.turboMultiplier <= 4) this.turboMultiplier = this.gameSpeed;
+        keys.delete('`');
+      }
+      this.renderer.gameSpeed = this.gameSpeed;
       // Render but don't tick — still show pause overlay
       this.renderer.interpolationAlpha = 1;
       this.render();
@@ -801,6 +808,9 @@ export class Game {
       const wasMovingBefore = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
       entity.prevPos.x = entity.pos.x;
       entity.prevPos.y = entity.pos.y;
+      // Save previous facing for visual interpolation (smooth 60fps rotation rendering)
+      entity.prevBodyFacing32 = entity.bodyFacing32;
+      entity.prevTurretFacing32 = entity.turretFacing32;
 
       if (!entity.alive) {
         entity.tickAnimation();

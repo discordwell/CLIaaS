@@ -1,5 +1,30 @@
 # Session Summaries
 
+## 2026-03-09T23:10Z — Session 140f: Speed/Pathing Fix + Visual Rotation Interpolation
+- **Default speed 2×**: Changed `gameSpeed` and `turboMultiplier` from 1 to 2. This matches C++ GameSpeed=1 feel (the typical play speed) rather than GameSpeed=3 (slowest practical). Units move twice as fast out of the box.
+- **Speed control while paused**: Backtick key now works during pause state. Pause overlay shows current speed + hint (`Speed: 2×  ( \` to change )`).
+- **Always-visible speed indicator**: `renderGameSpeed()` now renders at all speeds (was only >1×) with color coding: gray=1×, yellow=2×, orange=4×.
+- **Visual facing interpolation**: Added `prevBodyFacing32`/`prevTurretFacing32` to Entity. Renderer uses `lerpFacing32()` ring interpolation to smoothly animate vehicle body and turret rotation between 20fps game ticks at 60fps render rate. Fixes jerky stop-rotate-move appearance.
+- **Shadow consistency**: Shadow frame also uses interpolated facing (matches sprite frame).
+- **Files changed**: `entity.ts` (2 new fields + init), `index.ts` (default speed, paused key handling, prev facing save), `renderer.ts` (lerpFacing32 helper, interpolated frame calc, pause overlay, speed indicator).
+- **New test**: `speed-and-interpolation.test.ts` (9 tests) — entity interpolation fields, ring interpolation correctness (CW, CCW, wrap, edge cases).
+- **Results**: 3499 tests pass (84 test files).
+
+## 2026-03-09T22:30Z — Session 140e: Civilian Structure Sprites Extracted
+- **Problem**: Magenta checkerboard stubs (from session 140d) revealed 8 civilian structures missing on Ant Mission maps: V01, V02, V03, V06, V08, V09, V10, V11. These were never extracted from TEMPERAT.MIX.
+- **Fix**: Added all 18 V-series civilian structures (V01-V18) as .TEM entries in `extract-ra-assets.ts`. Ran extraction, generated PNGs, added manifest entries. Also re-added 18 manually-managed manifest entries (ant1-3, antdie, barl, brl3, aftermath vehicles, etc.) that got wiped by the extraction script's full manifest regeneration.
+- **Manifest**: Now 315 total entries (297 from extraction + 18 manual). Only 5 PNGs remain unregistered (tilesets + splash images — loaded via separate paths).
+- **Test update**: `structure-sprite-coverage.test.ts` — removed V_SERIES_NO_SPRITE exclusion, now verifies V01-V18 ARE in manifest. Relaxed BUILDING_FRAME_TABLE check to accept any ≥2-frame fallback (V04/V05/V07 have 4 frames).
+- **Caveat**: Extraction script regenerates manifest.json from scratch. EXPAND2.MIX not present at expected path, so aftermath vehicles/ant sprites remain manual manifest entries. Running `pnpm extract-assets` will wipe them — must re-add manually after extraction.
+- **Browser verified**: All magenta blocks gone, civilian structures render properly.
+- **Results**: 3487 tests pass (82 test files).
+
+## 2026-03-09T18:10Z — Session 140d: Yellow Boxes + Jerky Motion Fix
+- **Yellow boxes fixed**: 18 missing sprite entries added to `manifest.json` — ant sprites (ant1/ant2/ant3, antdie), ant structures (quee, lar1, lar2, barl, brl3), Aftermath vehicles (ctnk, dtrk, ttnk, qtnk), naval (msub, carr), infantry (mech), icons (msubicon, stnkicon). PNGs already existed on disk but manifest was missing entries.
+- **Jerky motion fixed**: Added render interpolation to smooth entity movement. Game ticks at 20fps, canvas renders at ~60fps. Uses existing `prevPos` field for linear interpolation: `renderPos = prevPos + (pos - prevPos) * alpha` where `alpha = accumulator / tickInterval`. Sub-pixel movement (JEEP: 0.9375 px/tick) now appears smooth instead of stuttering between integer pixels.
+- **Files changed**: `renderer.ts` (interpolationAlpha property, interpolated entity positions), `index.ts` (alpha computation in game loop), `manifest.json` (18 entries), new test `render-interpolation.test.ts` (8 tests).
+- **Results**: 3454 Easter Egg tests pass (81 test files).
+
 ## 2026-03-09T14:35Z — Session 140c: Behavioral Parity Verification Pipeline (195 tests)
 - **4 new test files** for non-INI behavioral parity:
   1. `combat-formula-parity.test.ts` (97 tests): modifyDamage formula, all 45 WARHEAD_VS_ARMOR multipliers vs C++ Verses=, WARHEAD_META spreadFactor/destruction flags, distance falloff (distFactor clamp [0,16]), MinDamage=1 threshold (distFactor<4), MaxDamage=1000 cap, scatter formula (HomingScatter=512, BallisticScatter=256 caps), calcProjectileTravelFrames.

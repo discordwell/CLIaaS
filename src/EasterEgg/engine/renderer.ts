@@ -13,6 +13,16 @@ import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { SHADOW_TABLE, cellShadowIndex } from './shadow';
 
+/** Interpolate between two values on a 0-31 ring (shortest path).
+ *  Used for smooth 60fps visual rotation between 20fps game ticks. */
+function lerpFacing32(prev: number, curr: number, alpha: number): number {
+  if (prev === curr) return curr;
+  let diff = (curr - prev + 32) % 32;
+  if (diff > 16) diff -= 32; // shortest path (may go negative for CCW)
+  const result = prev + diff * alpha;
+  return ((Math.round(result) % 32) + 32) % 32;
+}
+
 // House color tints (used for unit sprite remapping)
 const HOUSE_TINT: Record<string, string> = {
   [House.Spain]:   'rgba(255,255,80,0.25)',   // yellow/gold — player allied
@@ -1802,7 +1812,13 @@ export class Renderer {
       if (entity.alive && sheet) {
         const shadowSheet = assets.getShadowSheet(entity.stats.image);
         if (shadowSheet) {
-          const frame = entity.spriteFrame % sheet.meta.frameCount;
+          let frame: number;
+          if (!entity.stats.isInfantry && !entity.isAnt) {
+            const interpBody = lerpFacing32(entity.prevBodyFacing32, entity.bodyFacing32, alpha);
+            frame = (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
+          } else {
+            frame = entity.spriteFrame % sheet.meta.frameCount;
+          }
           ctx.globalCompositeOperation = 'multiply';
           ctx.globalAlpha = Math.min(1.0, preShadowAlpha);
           if (entity.isAirUnit && altY > 0) {
@@ -1882,7 +1898,14 @@ export class Renderer {
 
       // Draw sprite with house-color remapping
       if (sheet) {
-        const frame = entity.spriteFrame % sheet.meta.frameCount;
+        // Interpolate vehicle facing for smooth 60fps rotation rendering
+        let frame: number;
+        if (!entity.stats.isInfantry && !entity.isAnt) {
+          const interpBody = lerpFacing32(entity.prevBodyFacing32, entity.bodyFacing32, alpha);
+          frame = (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
+        } else {
+          frame = entity.spriteFrame % sheet.meta.frameCount;
+        }
         // Compute recoil offset (C++ Recoil_Adjust — 1px kickback for 1 tick)
         let recoilDx = 0, recoilDy = 0;
         if (entity.isInRecoilState && !entity.stats.isInfantry) {
@@ -1902,7 +1925,8 @@ export class Renderer {
         }
         // Draw turret layer for turreted vehicles (frames 32-63)
         if (entity.hasTurret && sheet.meta.frameCount >= 64) {
-          const turretFrame = entity.turretFrame % sheet.meta.frameCount;
+          const interpTurret = lerpFacing32(entity.prevTurretFacing32, entity.turretFacing32, alpha);
+          const turretFrame = (32 + (BODY_SHAPE[interpTurret] ?? 0)) % sheet.meta.frameCount;
           // JEEP turret y-offset (C++ udata.cpp Turret_Adjust)
           const turretOffY = entity.type === UnitType.V_JEEP ? -4 : 0;
           if (remapped) {
@@ -3004,14 +3028,21 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
-  /** Render game speed indicator when not at 1x */
+  /** Render game speed indicator — always shown so users know speed is adjustable */
   renderGameSpeed(): void {
-    if (this.gameSpeed <= 1) return;
     const ctx = this.ctx;
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'left';
-    ctx.fillStyle = this.gameSpeed >= 4 ? 'rgba(255,100,50,0.8)' : 'rgba(255,200,50,0.8)';
-    ctx.fillText(`▸▸ ${this.gameSpeed}×`, 6, this.height - 6);
+    if (this.gameSpeed >= 4) {
+      ctx.fillStyle = 'rgba(255,100,50,0.8)';
+      ctx.fillText(`▸▸▸ ${this.gameSpeed}×`, 6, this.height - 6);
+    } else if (this.gameSpeed >= 2) {
+      ctx.fillStyle = 'rgba(255,200,50,0.8)';
+      ctx.fillText(`▸▸ ${this.gameSpeed}×`, 6, this.height - 6);
+    } else {
+      ctx.fillStyle = 'rgba(180,180,180,0.5)';
+      ctx.fillText(`▸ ${this.gameSpeed}×`, 6, this.height - 6);
+    }
     ctx.textAlign = 'left';
   }
 
@@ -3024,10 +3055,14 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.font = 'bold 20px monospace';
     ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-    ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 10);
+    ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 20);
     ctx.font = '12px monospace';
     ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
-    ctx.fillText('Press P or Esc to resume', this.width / 2, this.height / 2 + 15);
+    ctx.fillText('Press P or Esc to resume', this.width / 2, this.height / 2 + 5);
+    // Show current speed and hint
+    ctx.font = '10px monospace';
+    ctx.fillStyle = this.gameSpeed >= 4 ? 'rgba(255,100,50,0.9)' : this.gameSpeed >= 2 ? 'rgba(255,200,50,0.9)' : 'rgba(180,180,180,0.9)';
+    ctx.fillText(`Speed: ${this.gameSpeed}×   ( \` to change )`, this.width / 2, this.height / 2 + 25);
     ctx.textAlign = 'left';
   }
 
