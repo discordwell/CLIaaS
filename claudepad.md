@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-10T00:15Z — Session 140g: Building Footprint Gray Slab Fix
+- **Problem**: Civilian buildings (V01-V18) and player structures appeared on gray "concrete slab" backgrounds. Transparent areas of building sprites showed gray instead of terrain.
+- **Root cause**: Scenario loader marks all building footprint cells as `Terrain.WALL`. The `renderTerrain()` WALL case filled non-wall-type cells with gray from `PAL_ROCK_START` palette ramp — visible through transparent sprite areas.
+- **Fix**: Changed WALL case (renderer.ts:1153-1157) to draw grass instead of gray for non-INTERIOR, non-wall-type cells. Tries tileset atlas grass (CLEAR1, template 255 icon 0) first, falls back to procedural `renderGrassCell()`.
+- **Files changed**: `renderer.ts` (WALL terrain case), new test `building-footprint-terrain.test.ts` (9 tests).
+- **Browser verified**: Buildings now show natural grass terrain through transparent areas.
+- **Results**: 3498 tests pass (84 test files, 1 pre-existing failure in campaign-system edge case).
+
 ## 2026-03-09T23:10Z — Session 140f: Speed/Pathing Fix + Visual Rotation Interpolation
 - **Default speed 2×**: Changed `gameSpeed` and `turboMultiplier` from 1 to 2. This matches C++ GameSpeed=1 feel (the typical play speed) rather than GameSpeed=3 (slowest practical). Units move twice as fast out of the box.
 - **Speed control while paused**: Backtick key now works during pause state. Pause overlay shows current speed + hint (`Speed: 2×  ( \` to change )`).

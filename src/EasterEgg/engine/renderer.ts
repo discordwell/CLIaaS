@@ -1153,7 +1153,9 @@ export class Renderer {
             } else {
               // Building footprint cells — draw grass so terrain shows through
               // transparent areas of structure sprites (not gray concrete slabs)
-              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+              if (!useTileset || !this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
+                this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+              }
             }
             break;
           }
