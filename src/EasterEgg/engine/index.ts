@@ -1147,7 +1147,7 @@ export class Game {
               // Visual spark effect on each repair tick
               this.effects.push({
                 type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
-                frame: 0, maxFrames: 5, size: 3, sprite: 'piff', spriteStart: 0,
+                frame: 0, maxFrames: EXPLOSION_FRAMES['piff'] ?? 4, size: 3, sprite: 'piff', spriteStart: 0,
               });
             } else {
               // C++ parity: cancel repair when insufficient funds (player must re-initiate)
@@ -1358,7 +1358,7 @@ export class Game {
           s.sellHpAtStart = undefined;
           const wx = s.cx * CELL_SIZE + CELL_SIZE;
           const wy = s.cy * CELL_SIZE + CELL_SIZE;
-          this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: 17, size: 12,
+          this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: EXPLOSION_FRAMES['veh-hit1'] ?? 17, size: 12,
             sprite: 'veh-hit1', spriteStart: 0 });
           // SL4: Spawn infantry survivors (C++ building.cpp How_Many_Survivors + Crew_Type)
           // Count: (buildingCost * SurvivorFraction) / E1_cost, clamped 1-5
@@ -2675,7 +2675,7 @@ export class Game {
       const deathExplosionRadius = Math.round(maxDimPx * 0.6);
       this.effects.push({
         type: 'explosion', x: wx, y: wy,
-        frame: 0, maxFrames: 22, size: deathExplosionRadius,
+        frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: deathExplosionRadius,
         sprite: 'fball1', spriteStart: 0,
       });
       // Flying debris
@@ -6467,7 +6467,7 @@ export class Game {
           if (wp) {
             const wx = wp.cx * CELL_SIZE + CELL_SIZE / 2;
             const wy = wp.cy * CELL_SIZE + CELL_SIZE / 2;
-            this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'], size: 24, sprite: 'art-exp1', spriteStart: 0 });
+            this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'] ?? 22, size: 24, sprite: 'art-exp1', spriteStart: 0 });
             for (const e of this.entities) {
               if (!e.alive) continue;
               if (worldDist(e.pos, { x: wx, y: wy }) <= 4) this.damageEntity(e, 200, 'HE'); // worldDist returns cells
@@ -6479,7 +6479,7 @@ export class Game {
         if (result.nuke) {
           const cx = (this.map.boundsX + this.map.boundsW / 2) * CELL_SIZE;
           const cy = (this.map.boundsY + this.map.boundsH / 2) * CELL_SIZE;
-          this.effects.push({ type: 'explosion', x: cx, y: cy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'], size: 48, sprite: 'art-exp1', spriteStart: 0 });
+          this.effects.push({ type: 'explosion', x: cx, y: cy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'] ?? 22, size: 48, sprite: 'art-exp1', spriteStart: 0 });
           for (const e of this.entities) {
             if (!e.alive) continue;
             if (worldDist(e.pos, { x: cx, y: cy }) <= 8) this.damageEntity(e, 500, 'HE'); // worldDist returns cells
@@ -7570,7 +7570,7 @@ export class Game {
           const by = crate.y;
           this.effects.push({
             type: 'explosion', x: bx, y: by,
-            frame: 0, maxFrames: 18, size: 16,
+            frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'] ?? 22, size: 16,
             sprite: 'art-exp1', spriteStart: 0,
           });
           for (const e of this.entities) {
@@ -8111,7 +8111,7 @@ export class Game {
         }
         this.effects.push({
           type: 'explosion', x: sx, y: sy,
-          frame: 0, maxFrames: 20, size: 32,
+          frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: 32,
           sprite: 'fball1', spriteStart: 0,
         });
       }

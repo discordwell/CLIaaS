@@ -3,10 +3,11 @@
  * Generate procedural pixel-art ant sprites as PNG sprite sheets.
  * Creates ANT1 (warrior/red), ANT2 (fire/orange), ANT3 (scout/green).
  *
- * 104 frames per ant matching RA's ant unit layout:
- *   Frames  0-7:   Standing (8 directions × 1 frame)
- *   Frames  8-71:  Walking  (8 directions × 8 walk frames, with leg animation)
- *   Frames 72-103: Attacking (8 directions × 4 attack frames, with mandible animation)
+ * 112 frames per ant matching RA's ant unit layout:
+ *   Frames  0-7:    Standing (8 directions × 1 frame)
+ *   Frames  8-71:   Walking  (8 directions × 8 walk frames, with leg animation)
+ *   Frames 72-103:  Attacking (8 directions × 4 attack frames, with mandible animation)
+ *   Frames 104-111: Dying (8-frame shared death sequence)
  *
  * Uses pure Node.js — writes raw PNG with no dependencies.
  */

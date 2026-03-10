@@ -114,14 +114,14 @@ describe('Structure sprite coverage for ant missions', () => {
     expect(BUILDING_FRAME_TABLE.has('brl3')).toBe(true);
   });
 
-  it('barl sprite exists in manifest with 2 frames', () => {
+  it('barl sprite exists in manifest with 3 frames', () => {
     expect(manifest['barl']).toBeDefined();
-    expect(manifest['barl'].frameCount).toBe(2);
+    expect(manifest['barl'].frameCount).toBe(3);
   });
 
-  it('brl3 sprite exists in manifest with 2 frames', () => {
+  it('brl3 sprite exists in manifest with 3 frames', () => {
     expect(manifest['brl3']).toBeDefined();
-    expect(manifest['brl3'].frameCount).toBe(2);
+    expect(manifest['brl3'].frameCount).toBe(3);
   });
 
   it('BARL/BRL3 are 1x1 in STRUCTURE_SIZE', () => {
