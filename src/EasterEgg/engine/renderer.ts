@@ -3026,21 +3026,14 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
-  /** Render game speed indicator — always shown so users know speed is adjustable */
+  /** Render game speed indicator when above default 2× (matches original RA behavior) */
   renderGameSpeed(): void {
+    if (this.gameSpeed <= 2) return;
     const ctx = this.ctx;
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'left';
-    if (this.gameSpeed >= 4) {
-      ctx.fillStyle = 'rgba(255,100,50,0.8)';
-      ctx.fillText(`▸▸▸ ${this.gameSpeed}×`, 6, this.height - 6);
-    } else if (this.gameSpeed >= 2) {
-      ctx.fillStyle = 'rgba(255,200,50,0.8)';
-      ctx.fillText(`▸▸ ${this.gameSpeed}×`, 6, this.height - 6);
-    } else {
-      ctx.fillStyle = 'rgba(180,180,180,0.5)';
-      ctx.fillText(`▸ ${this.gameSpeed}×`, 6, this.height - 6);
-    }
+    ctx.fillStyle = this.gameSpeed >= 4 ? 'rgba(255,100,50,0.8)' : 'rgba(255,200,50,0.8)';
+    ctx.fillText(`▸▸ ${this.gameSpeed}×`, 6, this.height - 6);
     ctx.textAlign = 'left';
   }
 
