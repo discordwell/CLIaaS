@@ -1,8 +1,7 @@
 /**
- * Speed defaults and visual facing interpolation tests.
+ * Visual facing interpolation tests.
  *
  * Verifies:
- * - Default game speed is 2× (not 1×) for a faster feel out of the box
  * - Entity prevBodyFacing32/prevTurretFacing32 fields exist for interpolation
  * - Ring interpolation logic (lerpFacing32) handles wrapping correctly
  */

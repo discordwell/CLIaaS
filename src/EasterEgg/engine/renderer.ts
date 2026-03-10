@@ -215,7 +215,7 @@ export class Renderer {
   missionName = ''; // mission title shown as overlay at start
   theatre = 'TEMPERATE'; // map theatre (affects terrain colors)
   musicTrack = ''; // currently playing music track name
-  gameSpeed = 1; // player game speed (1/2/4x)
+  gameSpeed = 2; // player game speed (1/2/4x) — synced from Game each frame
   // Custom cursor state
   cursorType: CursorType = CursorType.DEFAULT;
   cursorX = 0;
@@ -1151,13 +1151,9 @@ export class Renderer {
               ctx.lineWidth = 1;
               ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
             } else {
-              // Walls using palette gray ramp (non-wall structures like buildings)
-              const palIdx = PAL_ROCK_START + 5 + (h % 4);
-              ctx.fillStyle = this.palColor(palIdx);
-              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-              ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-              ctx.lineWidth = 1;
-              ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
+              // Building footprint cells — draw grass so terrain shows through
+              // transparent areas of structure sprites (not gray concrete slabs)
+              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
             }
             break;
           }
