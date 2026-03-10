@@ -239,6 +239,13 @@ export class Renderer {
   superweaponCursorMode: SuperweaponType | null = null;
   chronoTankTargeting = false;
 
+  // Pause menu state (set by Game each frame)
+  pauseMenuOpen = false;
+  pauseMenuHighlight = 0; // keyboard nav index (0-5)
+  pauseMenuMusicVolume = 0.4;
+  pauseMenuSfxVolume = 0.35;
+  pauseMenuGameSpeed = 2;
+
   // Power bar animation state (C++ power.cpp parity)
   private powerHeight = 0;          // current animated height (px)
   private drainHeight = 0;          // current animated height (px)
@@ -3039,22 +3046,152 @@ export class Renderer {
 
   // ─── Pause Overlay ──────────────────────────────────────
 
+  /** Menu item count for pause menu */
+  static readonly PAUSE_MENU_ITEMS = 6;
+
   renderPauseOverlay(): void {
+    if (!this.pauseMenuOpen) {
+      // Legacy "PAUSED" text for comparison mode
+      const ctx = this.ctx;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, this.width, this.height);
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 20px monospace';
+      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
+      ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 20);
+      ctx.font = '12px monospace';
+      ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
+      ctx.fillText('Press P or Esc to resume', this.width / 2, this.height / 2 + 5);
+      ctx.textAlign = 'left';
+      return;
+    }
+
     const ctx = this.ctx;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    // Darken background
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(0, 0, this.width, this.height);
+
+    const layout = this.getPauseMenuLayout();
+    const { px, py, w, h, itemH, titleH, sliderTrackW, sliderTrackX, items } = layout;
+
+    // Panel background
+    ctx.fillStyle = 'rgba(0,0,0,0.88)';
+    ctx.fillRect(px, py, w, h);
+    ctx.strokeStyle = '#664400';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, py, w, h);
+
+    // Title bar
+    ctx.fillStyle = 'rgba(255,68,0,0.15)';
+    ctx.fillRect(px + 1, py + 1, w - 2, titleH);
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = '#ff6633';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 20px monospace';
-    ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-    ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 20);
-    ctx.font = '12px monospace';
-    ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
-    ctx.fillText('Press P or Esc to resume', this.width / 2, this.height / 2 + 5);
-    // Show current speed and hint
-    ctx.font = '10px monospace';
-    ctx.fillStyle = this.gameSpeed >= 4 ? 'rgba(255,100,50,0.9)' : this.gameSpeed >= 2 ? 'rgba(255,200,50,0.9)' : 'rgba(180,180,180,0.9)';
-    ctx.fillText(`Speed: ${this.gameSpeed}×   ( \` to change )`, this.width / 2, this.height / 2 + 25);
+    ctx.fillText('OPTIONS', px + w / 2, py + titleH - 4);
+
+    // Render each item
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const iy = item.y;
+      const isHighlighted = i === this.pauseMenuHighlight;
+
+      // Highlight bar
+      if (isHighlighted) {
+        ctx.fillStyle = 'rgba(255,170,68,0.12)';
+        ctx.fillRect(px + 2, iy, w - 4, itemH);
+      }
+
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'left';
+
+      if (item.type === 'button') {
+        const textColor = isHighlighted ? '#ffaa44' :
+          i === 5 ? '#ff5544' : '#bbb'; // Abort is red
+        ctx.fillStyle = textColor;
+        const label = i === 3 ? `SPEED: ${this.pauseMenuGameSpeed}×` : item.label;
+        ctx.fillText(label, px + 16, iy + itemH - 5);
+
+        // Arrow indicator for highlighted button
+        if (isHighlighted) {
+          ctx.fillStyle = '#ffaa44';
+          ctx.fillText('▸', px + 6, iy + itemH - 5);
+        }
+      } else if (item.type === 'slider') {
+        const textColor = isHighlighted ? '#ffaa44' : '#bbb';
+        ctx.fillStyle = textColor;
+        ctx.fillText(item.label, px + 16, iy + itemH - 5);
+
+        // Slider track
+        const vol = i === 1 ? this.pauseMenuMusicVolume : this.pauseMenuSfxVolume;
+        const trackY = iy + itemH / 2;
+        const trackH = 6;
+
+        // Track background
+        ctx.fillStyle = 'rgba(100,68,0,0.4)';
+        ctx.fillRect(sliderTrackX, trackY - trackH / 2, sliderTrackW, trackH);
+
+        // Filled portion
+        const fillW = Math.round(vol * sliderTrackW);
+        ctx.fillStyle = isHighlighted ? '#ffaa44' : '#aa7722';
+        ctx.fillRect(sliderTrackX, trackY - trackH / 2, fillW, trackH);
+
+        // Track border
+        ctx.strokeStyle = isHighlighted ? '#ffaa44' : '#664400';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sliderTrackX, trackY - trackH / 2, sliderTrackW, trackH);
+
+        // Percentage label
+        ctx.fillStyle = isHighlighted ? '#ffcc88' : '#888';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${Math.round(vol * 100)}%`, px + w - 10, iy + itemH - 5);
+      }
+    }
+
     ctx.textAlign = 'left';
+  }
+
+  /** Compute pause menu layout constants */
+  private getPauseMenuLayout() {
+    const w = 240;
+    const titleH = 18;
+    const itemH = 24;
+    const padBottom = 6;
+    const itemCount = Renderer.PAUSE_MENU_ITEMS;
+    const h = titleH + itemCount * itemH + padBottom;
+    const px = (this.width - w) / 2;
+    const py = (this.height - h) / 2;
+    const sliderTrackW = 100;
+    const sliderTrackX = px + w - sliderTrackW - 40; // right-aligned with room for %
+
+    const items: Array<{ y: number; type: 'button' | 'slider'; label: string }> = [
+      { y: py + titleH + 0 * itemH, type: 'button', label: 'RESUME GAME' },
+      { y: py + titleH + 1 * itemH, type: 'slider', label: 'MUSIC' },
+      { y: py + titleH + 2 * itemH, type: 'slider', label: 'SOUND' },
+      { y: py + titleH + 3 * itemH, type: 'button', label: `SPEED: ${this.pauseMenuGameSpeed}×` },
+      { y: py + titleH + 4 * itemH, type: 'button', label: 'RESTART MISSION' },
+      { y: py + titleH + 5 * itemH, type: 'button', label: 'ABORT MISSION' },
+    ];
+
+    return { px, py, w, h, itemH, titleH, sliderTrackW, sliderTrackX, items };
+  }
+
+  /** Returns hit areas for pause menu click testing */
+  getPauseMenuHitAreas(): Array<{ x: number; y: number; w: number; h: number; type: 'button' | 'slider'; index: number }> {
+    const layout = this.getPauseMenuLayout();
+    const { px, w, itemH, items, sliderTrackX, sliderTrackW } = layout;
+
+    return items.map((item, i) => {
+      if (item.type === 'slider') {
+        return { x: sliderTrackX, y: item.y, w: sliderTrackW, h: itemH, type: 'slider' as const, index: i };
+      }
+      return { x: px, y: item.y, w, h: itemH, type: 'button' as const, index: i };
+    });
+  }
+
+  /** Convert a click X position on a slider hit area to a 0-1 value */
+  sliderValueFromClick(clickX: number, hitArea: { x: number; w: number }): number {
+    return Math.max(0, Math.min(1, (clickX - hitArea.x) / hitArea.w));
   }
 
   // ─── Help Overlay ──────────────────────────────────────

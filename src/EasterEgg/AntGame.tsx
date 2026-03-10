@@ -165,6 +165,16 @@ export default function AntGame({ onExit }: AntGameProps) {
       setStatus(`Loading sprites... (${loaded}/${total})`);
     };
 
+    game.onMenuAction = (action) => {
+      if (action === 'restart' && selectedMission) {
+        launchMission(selectedMission);
+      } else if (action === 'abort') {
+        game.stop();
+        gameRef.current = null;
+        transitionTo(() => setScreen(activeCampaign ? 'campaign_select' : 'select'));
+      }
+    };
+
     game.onStateChange = (state) => {
       setGameState(state);
       if (state === 'playing') {
@@ -211,12 +221,24 @@ export default function AntGame({ onExit }: AntGameProps) {
 
     try {
       await game.start(mission.id, difficulty);
-      // Restore saved audio settings
+      // Restore saved audio settings (backward compat: old 'volume' key → both)
       try {
         const saved = localStorage.getItem('antmissions_settings');
         if (saved) {
           const settings = JSON.parse(saved);
-          if (typeof settings.volume === 'number') game.audio.setVolume(settings.volume);
+          if (typeof settings.musicVolume === 'number') {
+            game.audio.setMusicVolume(settings.musicVolume);
+          } else if (typeof settings.volume === 'number') {
+            game.audio.setMusicVolume(settings.volume);
+          }
+          if (typeof settings.sfxVolume === 'number') {
+            game.audio.setSfxVolume(settings.sfxVolume);
+          } else if (typeof settings.volume === 'number') {
+            game.audio.setSfxVolume(settings.volume);
+          }
+          if (typeof settings.gameSpeed === 'number') {
+            game.gameSpeed = settings.gameSpeed;
+          }
           if (settings.muted) game.audio.toggleMute();
         }
       } catch { /* ignore */ }
@@ -224,7 +246,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       setError(`Failed to load mission: ${e instanceof Error ? e.message : String(e)}`);
       setScreen(activeCampaign ? 'campaign_select' : 'select');
     }
-  }, [difficulty, activeCampaign, campaignMissionIndex, playPostMissionFMV, isFinalCampaignMission, getCampaignFaction]);
+  }, [difficulty, activeCampaign, campaignMissionIndex, playPostMissionFMV, isFinalCampaignMission, getCampaignFaction, selectedMission, transitionTo]);
 
   /** Helper: play an FMV and call onDone when complete (or fallback to procedural).
    *  When `immediate` is true, uses playImmediate() to preserve user gesture context
@@ -756,10 +778,17 @@ export default function AntGame({ onExit }: AntGameProps) {
     };
   }, []);
 
-  // Save settings to localStorage when they change
+  // Save settings to localStorage when difficulty changes
   useEffect(() => {
     try {
-      const settings = { difficulty, volume: gameRef.current?.audio?.getVolume(), muted: gameRef.current?.audio?.isMuted() };
+      const audio = gameRef.current?.audio;
+      const settings = {
+        difficulty,
+        musicVolume: audio?.getMusicVolume(),
+        sfxVolume: audio?.getSfxVolume(),
+        muted: audio?.isMuted(),
+        gameSpeed: gameRef.current?.gameSpeed,
+      };
       localStorage.setItem('antmissions_settings', JSON.stringify(settings));
     } catch { /* ignore */ }
   }, [difficulty]);

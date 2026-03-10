@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-03-10T00:01Z — Session 140i: In-Game Pause Menu
+- **Pause menu**: Replaced bare "PAUSED" text overlay with interactive canvas-rendered options menu (6 items: Resume, Music slider, Sound slider, Speed cycle, Restart, Abort).
+- **Split volume API**: Added `getSfxVolume()`/`setSfxVolume()` and `getMusicVolume()`/`setMusicVolume()` to AudioManager. Existing `setVolume()`/`getVolume()` kept for backward compat.
+- **Menu rendering**: Matches help overlay aesthetic — rgba(0,0,0,0.88) panel, #664400 border, #ffaa44 highlight. Hit areas exposed via `getPauseMenuHitAreas()` for click testing.
+- **Input handling**: Keyboard nav (arrows + Enter), mouse click on buttons/sliders, Escape/P to close. Volume sliders adjustable by 0.05 increments with arrow keys or click-to-set.
+- **Game actions**: `onMenuAction` callback fires 'restart' or 'abort'. AntGame.tsx wires restart→relaunch mission, abort→return to mission select.
+- **Settings persistence**: localStorage now stores `{musicVolume, sfxVolume, muted, gameSpeed}`. Backward compat reads old `{volume}` format.
+- **Files**: audio.ts, renderer.ts, index.ts, AntGame.tsx, new pause-menu.test.ts (15 tests).
+- **Results**: 15 new tests pass. All existing Easter Egg tests pass (1 pre-existing flaky campaign-system edge case).
+
+## 2026-03-10T03:40Z — Session 140h: FMV Cutscenes, Original Briefings, Styled UI, Map Selection
+- **FMV autoplay fix**: `transitionTo()` deferred `video.play()` via 400ms setTimeout, losing Chrome user gesture context. Added `playImmediate()` method to MoviePlayer that calls play() synchronously from click handler. Added click-to-play fallback overlay for blocked autoplay. Fixed z-index conflict (React skip overlay was 100022, same as click-to-play — lowered to 100019).
+- **Original briefing text**: Replaced custom BriefingRenderer text with verbatim INI `[Briefing]` sections for all 4 ant missions (including authentic "recieved" typo). Added `INI_BRIEFING_TEXT` constant + `briefingTextToLines()` helper for `@@` paragraph splitting.
+- **antbrf FMV mapped**: Added `brief: 'antbrf'` to SCA01EA movies. Flow: antintro → antbrf → objectives → gameplay. Verified both antbrf and snowbomb exist on archive.org.
+- **Military dossier briefing screen**: Replaced plain React overlay with faction-themed classified document UI (Allied=blue, Soviet=red, Ants=amber). TOP SECRET stamp, corner brackets, CRT scanlines, THREAT LEVEL difficulty selector.
+- **Campaign map selection screen**: Added `map_select` screen between campaign missions. Radar sweep animation, SVG connection lines, mission nodes with completion state. 3 faction layouts: Ant (4-node linear), Allied (14-node west→east Europe), Soviet (14-node east→west).
+- **Files**: AntGame.tsx, moviePlayer.ts, movies.ts, briefing.ts, scenario.ts + 4 new test files.
+- **Results**: 3587 tests pass (89 test files). Deployed to cliaas.com.
+
 ## 2026-03-10T00:15Z — Session 140g: Building Footprint Gray Slab Fix
 - **Problem**: Civilian buildings (V01-V18) and player structures appeared on gray "concrete slab" backgrounds. Transparent areas of building sprites showed gray instead of terrain.
 - **Root cause**: Scenario loader marks all building footprint cells as `Terrain.WALL`. The `renderTerrain()` WALL case filled non-wall-type cells with gray from `PAL_ROCK_START` palette ramp — visible through transparent sprite areas.

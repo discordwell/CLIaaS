@@ -364,6 +364,11 @@ export class Game {
   fogDisabled = false;
   fogReEnableTick = 0; // ticks until fog re-enables after spy infiltration
 
+  // Pause menu state
+  pauseMenuOpen = false;
+  pauseMenuHighlight = 0; // keyboard nav index (0-5)
+  onMenuAction?: (action: 'restart' | 'abort') => void;
+
   // Callbacks
   onStateChange?: (state: GameState) => void;
   onLoadProgress?: (loaded: number, total: number) => void;
@@ -592,17 +597,141 @@ export class Game {
   togglePause(): void {
     if (this.state === 'playing') {
       this.state = 'paused';
+      this.pauseMenuOpen = true;
+      this.pauseMenuHighlight = 0;
+      this.renderer.showHelp = false; // close help when opening pause menu
       this.audio.music.pause();
       this.onStateChange?.('paused');
       // Start paused render loop (scheduleNext bails when not 'playing')
       this.timerId = window.setTimeout(this.gameLoop, 100);
     } else if (this.state === 'paused') {
       this.state = 'playing';
+      this.pauseMenuOpen = false;
       this.audio.music.resume();
       this.onStateChange?.('playing');
       this.lastTime = performance.now();
       this.scheduleNext();
     }
+  }
+
+  /** Process input while pause menu is open */
+  private processPauseMenuInput(): void {
+    const { keys, leftClick } = this.input.state;
+    const itemCount = 6; // RESUME, MUSIC, SOUND, SPEED, RESTART, ABORT
+
+    // Escape/P: close menu + resume
+    if (keys.has('p') || keys.has('Escape')) {
+      keys.delete('p');
+      keys.delete('Escape');
+      this.togglePause();
+      return;
+    }
+
+    // Arrow up/down: move highlight
+    if (keys.has('ArrowUp')) {
+      this.pauseMenuHighlight = (this.pauseMenuHighlight - 1 + itemCount) % itemCount;
+      keys.delete('ArrowUp');
+    }
+    if (keys.has('ArrowDown')) {
+      this.pauseMenuHighlight = (this.pauseMenuHighlight + 1) % itemCount;
+      keys.delete('ArrowDown');
+    }
+
+    // Left/Right on sliders: adjust volume by 0.05
+    if (keys.has('ArrowLeft')) {
+      if (this.pauseMenuHighlight === 1) {
+        this.audio.setMusicVolume(this.audio.getMusicVolume() - 0.05);
+        this.saveSettings();
+      } else if (this.pauseMenuHighlight === 2) {
+        this.audio.setSfxVolume(this.audio.getSfxVolume() - 0.05);
+        this.saveSettings();
+      }
+      keys.delete('ArrowLeft');
+    }
+    if (keys.has('ArrowRight')) {
+      if (this.pauseMenuHighlight === 1) {
+        this.audio.setMusicVolume(this.audio.getMusicVolume() + 0.05);
+        this.saveSettings();
+      } else if (this.pauseMenuHighlight === 2) {
+        this.audio.setSfxVolume(this.audio.getSfxVolume() + 0.05);
+        this.saveSettings();
+      }
+      keys.delete('ArrowRight');
+    }
+
+    // Enter: activate highlighted item
+    if (keys.has('Enter')) {
+      keys.delete('Enter');
+      this.activatePauseMenuItem(this.pauseMenuHighlight);
+      return;
+    }
+
+    // Backtick: cycle speed (legacy shortcut still works)
+    if (keys.has('`')) {
+      this.gameSpeed = this.gameSpeed === 1 ? 2 : this.gameSpeed === 2 ? 4 : 1;
+      if (this.turboMultiplier <= 4) this.turboMultiplier = this.gameSpeed;
+      this.saveSettings();
+      keys.delete('`');
+    }
+
+    // Mouse click: hit-test menu items
+    if (leftClick) {
+      const hitAreas = this.renderer.getPauseMenuHitAreas();
+      for (const area of hitAreas) {
+        if (leftClick.x >= area.x && leftClick.x <= area.x + area.w &&
+            leftClick.y >= area.y && leftClick.y <= area.y + area.h) {
+          if (area.type === 'slider') {
+            const val = this.renderer.sliderValueFromClick(leftClick.x, area);
+            if (area.index === 1) {
+              this.audio.setMusicVolume(val);
+            } else if (area.index === 2) {
+              this.audio.setSfxVolume(val);
+            }
+            this.pauseMenuHighlight = area.index;
+            this.saveSettings();
+          } else {
+            this.pauseMenuHighlight = area.index;
+            this.activatePauseMenuItem(area.index);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  /** Activate a pause menu item by index */
+  private activatePauseMenuItem(index: number): void {
+    switch (index) {
+      case 0: // RESUME
+        this.togglePause();
+        break;
+      case 3: // SPEED
+        this.gameSpeed = this.gameSpeed === 1 ? 2 : this.gameSpeed === 2 ? 4 : 1;
+        if (this.turboMultiplier <= 4) this.turboMultiplier = this.gameSpeed;
+        this.saveSettings();
+        break;
+      case 4: // RESTART
+        this.pauseMenuOpen = false;
+        this.onMenuAction?.('restart');
+        break;
+      case 5: // ABORT
+        this.pauseMenuOpen = false;
+        this.onMenuAction?.('abort');
+        break;
+    }
+  }
+
+  /** Persist game settings to localStorage */
+  saveSettings(): void {
+    try {
+      const settings = {
+        musicVolume: this.audio.getMusicVolume(),
+        sfxVolume: this.audio.getSfxVolume(),
+        muted: this.audio.isMuted(),
+        gameSpeed: this.gameSpeed,
+      };
+      localStorage.setItem('antmissions_settings', JSON.stringify(settings));
+    } catch { /* ignore */ }
   }
 
   /** Pause for comparison mode (does not toggle — sets paused state) */
@@ -647,24 +776,18 @@ export class Game {
   /** Main game loop — uses setTimeout fallback when RAF is throttled */
   private gameLoop = (): void => {
     if (this.state === 'paused') {
-      // Check for unpause key
-      const { keys } = this.input.state;
-      if (keys.has('p') || keys.has('Escape')) {
-        keys.delete('p');
-        keys.delete('Escape');
-        this.togglePause();
-        return;
-      }
-      // Allow speed changes while paused
-      if (keys.has('`')) {
-        this.gameSpeed = this.gameSpeed === 1 ? 2 : this.gameSpeed === 2 ? 4 : 1;
-        if (this.turboMultiplier <= 4) this.turboMultiplier = this.gameSpeed;
-        keys.delete('`');
-      }
+      this.processPauseMenuInput();
+      // Sync pause menu state to renderer
+      this.renderer.pauseMenuOpen = this.pauseMenuOpen;
+      this.renderer.pauseMenuHighlight = this.pauseMenuHighlight;
+      this.renderer.pauseMenuMusicVolume = this.audio.getMusicVolume();
+      this.renderer.pauseMenuSfxVolume = this.audio.getSfxVolume();
+      this.renderer.pauseMenuGameSpeed = this.gameSpeed;
       this.renderer.gameSpeed = this.gameSpeed;
       // Render but don't tick — still show pause overlay
       this.renderer.interpolationAlpha = 1;
       this.render();
+      this.input.clearEvents(); // prevent double-processing
       this.timerId = window.setTimeout(this.gameLoop, 100); // slow render rate while paused
       return;
     }

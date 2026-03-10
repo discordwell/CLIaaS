@@ -450,6 +450,23 @@ export class AudioManager {
     this.music.setVolume(v);
   }
 
+  /** Get SFX volume (master gain level, independent of music) */
+  getSfxVolume(): number { return this.volume; }
+
+  /** Set SFX volume only (does not affect music) */
+  setSfxVolume(v: number): void {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : this.volume;
+  }
+
+  /** Get music volume */
+  getMusicVolume(): number { return this.music.getVolume(); }
+
+  /** Set music volume only (does not affect SFX) */
+  setMusicVolume(v: number): void {
+    this.music.setVolume(Math.max(0, Math.min(1, v)));
+  }
+
   toggleMute(): boolean {
     this.muted = !this.muted;
     if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : this.volume;
