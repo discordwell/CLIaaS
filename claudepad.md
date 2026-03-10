@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-10T13:55Z — Session 140m: HIRES Icon Restore + Smooth Vehicle Movement
+- **HIRES icons restored**: 65 sidebar cameo icons (64×48) were accidentally reverted to LORES (32×24) in commit d3daa3d when asset extraction ran without HIRES.MIX. Restored from git history (commit 1ba5a71). Updated manifest.json icon entries. Added 202 verification tests checking frame dimensions and file sizes (>1500 bytes) to prevent regression.
+- **Vehicle movement jank eliminated**: Three sources of position teleportation fixed:
+  1. **45° turn tracks extended**: Original C++ tracks ended at (128,-128) leptons = half diagonal distance. Added 4 straight-line extension steps to reach full (256,-256) = diagonal cell center.
+  2. **90°/180° turn tracks smoothed**: Added intermediate steps to eliminate 8.7px (90°) and 19px (180°) jumps in final track steps.
+  3. **Post-track residual approach**: After track completion, vehicles now smoothly glide to cell center via `moveToward` instead of snapping. Handles diagonal straight movement where rotated tracks cover < full cell distance (~7px gap).
+- **Code review fixes**: `isSuicide` flag wired into `updateAIRetreat()`. `AgentState` interface updated with debug fields. Private `triggers` access uses proper cast.
+- **Files**: tracks.ts, index.ts, agentHarness.ts, entity.ts, manifest.json, 65 icon PNGs, new hires-icons.test.ts (202 tests), new track-movement.test.ts (20 tests), updated track-movement-parity.test.ts + cpp-parity-plan.test.ts.
+- **Results**: 3849 tests pass (94 test files). Deployed to cliaas.com.
+
 ## 2026-03-10T08:10Z — Session 140l: SCG02EA "Five to One" — Convoy Win Condition
 - **Off-map waypoint pathfinding**: TMISSION_MOVE now clamps off-map waypoints (like WP25 at cy=89) to the nearest edge cell for pathfinding, while keeping moveTarget pointing off-map so the edge exit check fires correctly. Previously findPath rejected off-map goals (terrain=ROCK) and TRUKs got stuck.
 - **Frozen river fix**: SNOW theatre rivers (templates 112-130, 229-234) are now classified as CLEAR (passable ice) instead of WATER. In TEMPERATE they remain water. Added `theatre` parameter to `classifyOutdoorTerrain()`.
