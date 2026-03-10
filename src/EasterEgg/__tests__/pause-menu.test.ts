@@ -31,12 +31,13 @@ function createMockGame() {
     gameSpeed: 2,
     getPauseMenuHitAreas: () => [
       { x: 200, y: 140, w: 240, h: 24, type: 'button' as const, index: 0 },
-      { x: 260, y: 164, w: 100, h: 24, type: 'slider' as const, index: 1 },
-      { x: 260, y: 188, w: 100, h: 24, type: 'slider' as const, index: 2 },
+      { x: 200, y: 164, w: 240, h: 24, type: 'slider' as const, index: 1 },
+      { x: 200, y: 188, w: 240, h: 24, type: 'slider' as const, index: 2 },
       { x: 200, y: 212, w: 240, h: 24, type: 'button' as const, index: 3 },
       { x: 200, y: 236, w: 240, h: 24, type: 'button' as const, index: 4 },
       { x: 200, y: 260, w: 240, h: 24, type: 'button' as const, index: 5 },
     ],
+    getSliderTrackInfo: () => ({ x: 260, w: 100 }),
     sliderValueFromClick: (x: number, area: { x: number; w: number }) =>
       Math.max(0, Math.min(1, (x - area.x) / area.w)),
   };
@@ -138,14 +139,16 @@ function createMockGame() {
         for (const area of hitAreas) {
           if (leftClick.x >= area.x && leftClick.x <= area.x + area.w &&
               leftClick.y >= area.y && leftClick.y <= area.y + area.h) {
+            this.pauseMenuHighlight = area.index;
             if (area.type === 'slider') {
-              const val = this.renderer.sliderValueFromClick(leftClick.x, area);
-              if (area.index === 1) this.audio.setMusicVolume(val);
-              else if (area.index === 2) this.audio.setSfxVolume(val);
-              this.pauseMenuHighlight = area.index;
-              this.saveSettings();
+              const trackInfo = this.renderer.getSliderTrackInfo();
+              if (leftClick.x >= trackInfo.x) {
+                const val = this.renderer.sliderValueFromClick(leftClick.x, trackInfo);
+                if (area.index === 1) this.audio.setMusicVolume(val);
+                else if (area.index === 2) this.audio.setSfxVolume(val);
+                this.saveSettings();
+              }
             } else {
-              this.pauseMenuHighlight = area.index;
               this.activatePauseMenuItem(area.index);
             }
             break;
@@ -387,6 +390,18 @@ describe('Pause menu', () => {
       expect(area.w).toBeGreaterThan(0);
       expect(area.h).toBeGreaterThan(0);
     }
+  });
+
+  it('clicking slider label highlights row but does not change volume', () => {
+    const game = createMockGame();
+    game.togglePause();
+    const initialMusic = game.audio.getMusicVolume();
+
+    // Click on label area (x=210, which is left of track start at x=260)
+    game.processPauseMenuInput(new Set(), { x: 210, y: 175 });
+
+    expect(game.pauseMenuHighlight).toBe(1); // highlighted
+    expect(game.audio.getMusicVolume()).toBe(initialMusic); // volume unchanged
   });
 
   it('resume button click resumes game', () => {

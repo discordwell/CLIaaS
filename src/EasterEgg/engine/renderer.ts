@@ -3182,11 +3182,16 @@ export class Renderer {
     const { px, w, itemH, items, sliderTrackX, sliderTrackW } = layout;
 
     return items.map((item, i) => {
-      if (item.type === 'slider') {
-        return { x: sliderTrackX, y: item.y, w: sliderTrackW, h: itemH, type: 'slider' as const, index: i };
-      }
-      return { x: px, y: item.y, w, h: itemH, type: 'button' as const, index: i };
+      // Sliders use full row width for click detection; sliderValueFromClick
+      // handles clamping when clicks land outside the track area
+      return { x: px, y: item.y, w, h: itemH, type: item.type, index: i };
     });
+  }
+
+  /** Returns the slider track position and width for click testing */
+  getSliderTrackInfo(): { x: number; w: number } {
+    const layout = this.getPauseMenuLayout();
+    return { x: layout.sliderTrackX, w: layout.sliderTrackW };
   }
 
   /** Convert a click X position on a slider hit area to a 0-1 value */

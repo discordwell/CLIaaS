@@ -781,13 +781,20 @@ export default function AntGame({ onExit }: AntGameProps) {
   // Save settings to localStorage when difficulty changes
   useEffect(() => {
     try {
-      const audio = gameRef.current?.audio;
+      if (!gameRef.current) {
+        // No game running — only update difficulty, preserve other settings
+        const existing = JSON.parse(localStorage.getItem('antmissions_settings') || '{}');
+        existing.difficulty = difficulty;
+        localStorage.setItem('antmissions_settings', JSON.stringify(existing));
+        return;
+      }
+      const audio = gameRef.current.audio;
       const settings = {
         difficulty,
-        musicVolume: audio?.getMusicVolume(),
-        sfxVolume: audio?.getSfxVolume(),
-        muted: audio?.isMuted(),
-        gameSpeed: gameRef.current?.gameSpeed,
+        musicVolume: audio.getMusicVolume(),
+        sfxVolume: audio.getSfxVolume(),
+        muted: audio.isMuted(),
+        gameSpeed: gameRef.current.gameSpeed,
       };
       localStorage.setItem('antmissions_settings', JSON.stringify(settings));
     } catch { /* ignore */ }

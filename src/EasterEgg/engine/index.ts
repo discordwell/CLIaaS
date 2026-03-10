@@ -680,17 +680,17 @@ export class Game {
       for (const area of hitAreas) {
         if (leftClick.x >= area.x && leftClick.x <= area.x + area.w &&
             leftClick.y >= area.y && leftClick.y <= area.y + area.h) {
+          this.pauseMenuHighlight = area.index;
           if (area.type === 'slider') {
-            const val = this.renderer.sliderValueFromClick(leftClick.x, area);
-            if (area.index === 1) {
-              this.audio.setMusicVolume(val);
-            } else if (area.index === 2) {
-              this.audio.setSfxVolume(val);
+            // Only adjust volume if click is on/near the slider track
+            const trackInfo = this.renderer.getSliderTrackInfo();
+            if (leftClick.x >= trackInfo.x) {
+              const val = this.renderer.sliderValueFromClick(leftClick.x, trackInfo);
+              if (area.index === 1) this.audio.setMusicVolume(val);
+              else if (area.index === 2) this.audio.setSfxVolume(val);
+              this.saveSettings();
             }
-            this.pauseMenuHighlight = area.index;
-            this.saveSettings();
           } else {
-            this.pauseMenuHighlight = area.index;
             this.activatePauseMenuItem(area.index);
           }
           break;
@@ -712,10 +712,12 @@ export class Game {
         break;
       case 4: // RESTART
         this.pauseMenuOpen = false;
+        if (this.timerId) { clearTimeout(this.timerId); this.timerId = 0; }
         this.onMenuAction?.('restart');
         break;
       case 5: // ABORT
         this.pauseMenuOpen = false;
+        if (this.timerId) { clearTimeout(this.timerId); this.timerId = 0; }
         this.onMenuAction?.('abort');
         break;
     }
@@ -1679,13 +1681,15 @@ export class Game {
       keys.delete('F1');
     }
 
-    // Volume controls: +/- and M for mute
+    // Volume controls: +/- and M for mute (adjust music and SFX independently)
     if (keys.has('+') || keys.has('=')) {
-      this.audio.setVolume(this.audio.getVolume() + 0.1);
+      this.audio.setSfxVolume(this.audio.getSfxVolume() + 0.1);
+      this.audio.setMusicVolume(this.audio.getMusicVolume() + 0.1);
       keys.delete('+'); keys.delete('=');
     }
     if (keys.has('-') || keys.has('_')) {
-      this.audio.setVolume(this.audio.getVolume() - 0.1);
+      this.audio.setSfxVolume(this.audio.getSfxVolume() - 0.1);
+      this.audio.setMusicVolume(this.audio.getMusicVolume() - 0.1);
       keys.delete('-'); keys.delete('_');
     }
     if (keys.has('m')) {
