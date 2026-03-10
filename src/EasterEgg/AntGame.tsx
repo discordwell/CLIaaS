@@ -2228,19 +2228,11 @@ export default function AntGame({ onExit }: AntGameProps) {
               0%, 100% { box-shadow: 0 0 8px ${theme.glow}; }
               50% { box-shadow: 0 0 25px ${theme.glow}, 0 0 50px ${theme.glow}44; }
             }
-            @keyframes glow {
-              0%, 100% { box-shadow: 0 0 8px rgba(255,68,0,0.3); }
-              50% { box-shadow: 0 0 20px rgba(255,68,0,0.6); }
-            }
             @keyframes briefingBlink {
               0%, 100% { opacity: 0.6; }
               50% { opacity: 0.3; }
             }
-            @keyframes briefingFlicker {
-              0%, 97%, 100% { opacity: 1; }
-              98% { opacity: 0.85; }
-              99% { opacity: 0.95; }
-            }
+
           `}</style>
         </div>
         );
@@ -2503,7 +2495,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             left: 0,
             width: '100%',
             height: '100%',
-            zIndex: 100022,
+            zIndex: 100019,
             cursor: 'pointer',
           }}
         />
