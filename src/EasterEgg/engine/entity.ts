@@ -174,6 +174,7 @@ export class Entity {
   trackNumber = -1;    // C++ track number (1-13), -1 = not on a track
   trackIndex = 0;      // current step within the track
   trackFlags = 0;      // TrackControl flags (F_T|F_X|F_Y) for Smooth_Turn transformation
+  trackCellSpan = 1;   // cells covered by current track: 1=short, 2=long 2-cell track
   speedAccum = 0;      // C++ SpeedAccum: sub-pixel movement remainder (leptons)
 
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)

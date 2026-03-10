@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-03-10T18:30Z — Session 140p: Long 2-Cell Tracks — Eliminate Curve Position Pops
+- **Long tracks implemented**: When F_D flag is set in TrackControl AND a following cell exists, use the long 2-cell track (tracks 3-6) instead of short StartTrack (tracks 7-10). Long tracks span 2 cells with step 0 starting ~1px from entity position (vs 23px mismatch with short tracks).
+- **trackCellSpan field**: Added `trackCellSpan` (1 or 2) to entity. Long tracks target the cell AFTER chainCell and advance pathIndex by 2 on completion.
+- **Wet test results**: maxDelta dropped from 33.48px → 1.14px. Zero pauses, zero big jumps (>5px), avg 1.02px/tick. Track6→Track2 transition had only 1.03px delta. Essentially pixel-perfect movement.
+- **Files**: entity.ts (trackCellSpan field), index.ts (long track selection + 2-cell target computation).
+
 ## 2026-03-10T17:35Z — Session 140o: Fix Janky Vehicle Movement — C++ Parity Pass
 - **Same-tick track chaining (Fix 1)**: Replaced if-else movement structure with a loop matching C++ drive.cpp AI() pattern. When a track completes, next track initiates on the SAME tick (no 67ms gap at cell boundaries). MAX_CHAIN=4 guard prevents infinite loops.
 - **Budget zeroing (Fix 2 — corrected via code review)**: Original plan was to carry speedAccum across tracks, but code review found C++ drive.cpp:792 sets `actual=0` on track completion. Chained tracks get a fresh full budget, not remainder+budget. Fixed both exit points in followTrackStep.

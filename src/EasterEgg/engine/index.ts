@@ -29,7 +29,7 @@ import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
 import {
   usesTrackMovement, lookupTrackControl, getEffectiveTrack, getTrackArray,
-  smoothTurn, LP, PIXEL_LEPTON_W, F_D,
+  smoothTurn, LP, PIXEL_LEPTON_W, F_D, RAW_TRACKS,
   type TrackControlEntry,
 } from './tracks';
 import {
@@ -3688,6 +3688,7 @@ export class Game {
         entity.mission = Mission.ATTACK;
         entity.animState = AnimState.ATTACK;
         entity.trackNumber = -1; // MV1: reset track on mission interrupt
+        entity.trackCellSpan = 1;
         return;
       }
     }
@@ -3730,6 +3731,7 @@ export class Game {
           entity.path = [];
           entity.pathIndex = 0;
           entity.trackNumber = -1; // MV1: reset track on repath
+          entity.trackCellSpan = 1;
           entity.mission = this.idleMission(entity);
           entity.animState = AnimState.IDLE;
           return;
@@ -3737,6 +3739,7 @@ export class Game {
         entity.path = newPath;
         entity.pathIndex = 0;
         entity.trackNumber = -1; // MV1: reset track on repath
+        entity.trackCellSpan = 1;
         return;
       }
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
@@ -3773,6 +3776,7 @@ export class Game {
           entity.path = newPath;
           entity.pathIndex = 0;
           entity.trackNumber = -1; // MV1: reset track on repath
+          entity.trackCellSpan = 1;
         }
       }
       const target: WorldPos = {
@@ -3799,10 +3803,15 @@ export class Game {
 
           if (entity.trackNumber > 0) {
             // Currently following a track — advance along it
-            if (this.followTrackStep(entity, speed, chainTarget.x, chainTarget.y)) {
+            // Long 2-cell tracks target the cell AFTER chainCell (entity.trackCellSpan=2)
+            const trackTarget = entity.trackCellSpan === 2 && entity.path[entity.pathIndex + 1]
+              ? { x: entity.path[entity.pathIndex + 1].cx * CELL_SIZE + CELL_SIZE / 2,
+                  y: entity.path[entity.pathIndex + 1].cy * CELL_SIZE + CELL_SIZE / 2 }
+              : chainTarget;
+            if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
               // Track complete — vehicle is at target cell center
-              // speedAccum carries remaining budget (Fix 2)
-              entity.pathIndex++;
+              entity.pathIndex += entity.trackCellSpan;
+              entity.trackCellSpan = 1; // reset for next track
               // Continue loop to chain next track on same tick (Fix 1)
               continue;
             }
@@ -3834,17 +3843,30 @@ export class Game {
           }
 
           const ctrl = lookupTrackControl(nextFacing8, followingFacing8);
-          const effectiveTrack = getEffectiveTrack(ctrl);
+
+          // Long 2-cell tracks: when F_D is set and a following cell exists,
+          // use the full long track (ctrl.track) targeting the SECOND cell ahead.
+          // Step 0 of long tracks starts ~2 cells from target, which matches the
+          // entity's current position (~1px offset vs 23px for short tracks).
+          const useLongTrack = !!(ctrl.flag & F_D) && followingCell && ctrl.track > 0;
+          const effectiveTrack = useLongTrack ? ctrl.track : getEffectiveTrack(ctrl);
 
           if (effectiveTrack > 0) {
             // Valid track — start following it
             entity.trackNumber = effectiveTrack;
             entity.trackFlags = ctrl.flag & ~F_D; // strip F_D (only F_T|F_X|F_Y for geometry)
             entity.trackIndex = 0;
+            entity.trackCellSpan = useLongTrack ? 2 : 1;
             entity.speedAccum = 0; // C++: fresh budget per While_Moving() call
+            // Long tracks target the SECOND cell ahead; short tracks target the next cell
+            const trackTarget = useLongTrack
+              ? { x: followingCell!.cx * CELL_SIZE + CELL_SIZE / 2,
+                  y: followingCell!.cy * CELL_SIZE + CELL_SIZE / 2 }
+              : chainTarget;
             // Follow first step this tick
-            if (this.followTrackStep(entity, speed, chainTarget.x, chainTarget.y)) {
-              entity.pathIndex++;
+            if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
+              entity.pathIndex += entity.trackCellSpan;
+              entity.trackCellSpan = 1;
               continue; // Chain next track
             }
             break; // Track not yet complete
@@ -5957,6 +5979,7 @@ export class Game {
     const track = getTrackArray(entity.trackNumber);
     if (!track) {
       entity.trackNumber = -1;
+      entity.trackCellSpan = 1;
       return true;
     }
     const flags = entity.trackFlags;
