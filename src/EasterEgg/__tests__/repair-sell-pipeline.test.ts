@@ -35,7 +35,7 @@
  *   - Edge cases: repair + damage race, sell already-selling, zero-credit repair
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
@@ -48,6 +48,12 @@ import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../engine/scenario';
 import { BUILDING_FRAME_TABLE } from '../engine/renderer';
+import type { Effect } from '../engine/renderer';
+import {
+  type PlacementContext,
+  deployMCV,
+} from '../engine/placement';
+import { GameMap, Terrain } from '../engine/map';
 import {
   type RepairSellContext,
   toggleRepair,
@@ -171,6 +177,31 @@ function powerOutput(type: string, hp: number, maxHp: number): number {
 
 /** Wall types (from engine) */
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
+
+/** Create a minimal PlacementContext for deployMCV behavioral testing */
+function makePlacementCtx(overrides: Partial<PlacementContext> = {}): PlacementContext {
+  const m = new GameMap();
+  m.setBounds(0, 0, 128, 128);
+  return {
+    structures: [],
+    entities: [],
+    entityById: new Map(),
+    credits: 5000,
+    tick: 100,
+    playerHouse: House.Greece,
+    pendingPlacement: null,
+    wallPlacementPrepaid: false,
+    cachedAvailableItems: null,
+    evaMessages: [],
+    effects: [] as Effect[],
+    map: m,
+    isAllied: (a, b) => a === b,
+    playSound: vi.fn(),
+    getAvailableItems: () => [],
+    findPassableSpawn: (cx, cy) => ({ cx, cy }),
+    ...overrides,
+  };
+}
 
 /** Create a minimal RepairSellContext for behavioral testing */
 function makeMockRepairSellContext(overrides: Partial<RepairSellContext> = {}): RepairSellContext {
@@ -918,21 +949,28 @@ describe('REPAIR mission — units seeking depot', () => {
 // 11. MCV Deployment
 // =========================================================================
 describe('MCV Deployment — deployMCV', () => {
-  it('deployMCV source validates entity type is V_MCV', () => {
-    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
-    const chunk = placementSource.slice(idx, idx + 300);
-    expect(chunk).toContain('V_MCV');
-    expect(chunk).toContain('return false');
+  it('deployMCV rejects non-MCV entity types', () => {
+    const jeep = new Entity(UnitType.V_JEEP, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
+    const ctx = makePlacementCtx();
+    expect(deployMCV(ctx, jeep)).toBe(false);
+    expect(ctx.structures).toHaveLength(0);
+    // MCV should succeed
+    const mcv = new Entity(UnitType.V_MCV, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
+    expect(deployMCV(ctx, mcv)).toBe(true);
   });
 
   it('deployMCV validates 3x3 clear area around MCV cell', () => {
-    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
-    const chunk = placementSource.slice(idx, idx + 500);
-    expect(chunk).toContain('dy = -1');
-    expect(chunk).toContain('dy <= 1');
-    expect(chunk).toContain('dx = -1');
-    expect(chunk).toContain('dx <= 1');
-    expect(chunk).toContain('isPassable');
+    const mcv = new Entity(UnitType.V_MCV, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
+    const ctx = makePlacementCtx();
+    // Block one cell in the 3x3 area (cell 49,49 is part of the check)
+    ctx.map.setTerrain(49, 49, Terrain.ROCK);
+    expect(deployMCV(ctx, mcv)).toBe(false);
+    expect(ctx.structures).toHaveLength(0);
+    expect(mcv.alive).toBe(true);
+    // Clear the blocked cell and verify success
+    ctx.map.setTerrain(49, 49, Terrain.CLEAR);
+    expect(deployMCV(ctx, mcv)).toBe(true);
+    expect(ctx.structures).toHaveLength(1);
   });
 
   it('deployMCV kills the MCV entity', () => {

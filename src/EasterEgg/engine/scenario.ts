@@ -1001,7 +1001,7 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
 };
 
 // Building type → sprite image name (only include buildings we have sprites for)
-const STRUCTURE_IMAGES: Record<string, string> = {
+export const STRUCTURE_IMAGES: Record<string, string> = {
   FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
   WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
   GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',

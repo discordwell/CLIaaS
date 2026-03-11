@@ -26,7 +26,7 @@
  *   - addCredits bypass silo cap for refunds
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   PRODUCTION_ITEMS, type ProductionItem, getStripSide,
   House, UnitType, CELL_SIZE, COUNTRY_BONUSES, POWER_DRAIN,
@@ -35,6 +35,12 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../engine/scenario';
+import type { Effect } from '../engine/renderer';
+import {
+  type PlacementContext,
+  deployMCV,
+} from '../engine/placement';
+import { GameMap, Terrain } from '../engine/map';
 import {
   type ProductionContext,
   tickProduction,
@@ -102,6 +108,31 @@ function calcPowerMult(powerProduced: number, powerConsumed: number): number {
     return Math.max(0.5, powerFraction);
   }
   return 1.0;
+}
+
+/** Create a minimal PlacementContext for deployMCV behavioral testing */
+function makePlacementCtx(overrides: Partial<PlacementContext> = {}): PlacementContext {
+  const m = new GameMap();
+  m.setBounds(0, 0, 128, 128);
+  return {
+    structures: [],
+    entities: [],
+    entityById: new Map(),
+    credits: 5000,
+    tick: 100,
+    playerHouse: House.Greece,
+    pendingPlacement: null,
+    wallPlacementPrepaid: false,
+    cachedAvailableItems: null,
+    evaMessages: [],
+    effects: [] as Effect[],
+    map: m,
+    isAllied: (a, b) => a === b,
+    playSound: vi.fn(),
+    getAvailableItems: () => [],
+    findPassableSpawn: (cx, cy) => ({ cx, cy }),
+    ...overrides,
+  };
 }
 
 function calculateSiloCapacity(structures: MapStructure[]): number {
@@ -1049,31 +1080,25 @@ describe('MCV deployment (deployMCV)', () => {
     expect(mcv.mission).toBe(Mission.DIE);
   });
 
-  it('deployMCV source code validates 3x3 clear area', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts'), 'utf-8',
-    );
-    const idx = src.indexOf('deployMCV(ctx: PlacementContext, entity');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = src.slice(idx, idx + 500);
-    // Checks for 3x3 clear area (-1 to 1 in both dx and dy)
-    expect(chunk).toContain('dy = -1');
-    expect(chunk).toContain('dx = -1');
-    expect(chunk).toContain('isPassable');
+  it('deployMCV validates 3x3 clear area', () => {
+    const mcv = new Entity(UnitType.V_MCV, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
+    const ctx = makePlacementCtx();
+    // Block one cell in the 3x3 area around MCV cell (50,50) — checks (49-51, 49-51)
+    ctx.map.setTerrain(51, 51, Terrain.ROCK);
+    expect(deployMCV(ctx, mcv)).toBe(false);
+    expect(ctx.structures).toHaveLength(0);
+    // Clear it and verify success
+    ctx.map.setTerrain(51, 51, Terrain.CLEAR);
+    expect(deployMCV(ctx, mcv)).toBe(true);
+    expect(ctx.structures).toHaveLength(1);
+    expect(ctx.structures[0].type).toBe('FACT');
   });
 
   it('only V_MCV can be deployed', () => {
-    // deployMCV checks entity.type !== UnitType.V_MCV -> return false
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts'), 'utf-8',
-    );
-    const idx = src.indexOf('deployMCV(ctx: PlacementContext, entity');
-    const chunk = src.slice(idx, idx + 200);
-    expect(chunk).toContain('V_MCV');
+    const jeep = new Entity(UnitType.V_JEEP, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
+    const ctx = makePlacementCtx();
+    expect(deployMCV(ctx, jeep)).toBe(false);
+    expect(ctx.structures).toHaveLength(0);
   });
 
   it('FACT max HP is correct', () => {

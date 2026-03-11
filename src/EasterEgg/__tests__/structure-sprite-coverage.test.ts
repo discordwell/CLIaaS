@@ -18,26 +18,9 @@ import { join } from 'path';
 const ASSETS_DIR = join(__dirname, '../../../public/ra/assets');
 const manifest = JSON.parse(readFileSync(join(ASSETS_DIR, 'manifest.json'), 'utf-8'));
 
-// Import the tables under test
-import { STRUCTURE_SIZE, STRUCTURE_MAX_HP } from '../engine/scenario';
-
-// Read source files to extract table keys (since STRUCTURE_IMAGES and BUILDING_FRAME_TABLE aren't exported)
-const scenarioSrc = readFileSync(join(__dirname, '../engine/scenario.ts'), 'utf-8');
-const rendererSrc = readFileSync(join(__dirname, '../engine/renderer.ts'), 'utf-8');
-
-function extractStructureImages(): Set<string> {
-  const match = scenarioSrc.match(/const STRUCTURE_IMAGES[^{]*\{([^}]+)\}/s);
-  if (!match) throw new Error('Could not find STRUCTURE_IMAGES');
-  const keys = [...match[1].matchAll(/(\w+):/g)].map(m => m[1]);
-  return new Set(keys);
-}
-
-function extractBuildingFrameTable(): Set<string> {
-  const match = rendererSrc.match(/const BUILDING_FRAME_TABLE[^{]*\{([\s\S]*?)\n\};/);
-  if (!match) throw new Error('Could not find BUILDING_FRAME_TABLE');
-  const keys = [...match[1].matchAll(/^\s+(\w+):\s*\{/gm)].map(m => m[1]);
-  return new Set(keys);
-}
+// Import the tables under test directly (no source parsing needed)
+import { STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_IMAGES as _STRUCTURE_IMAGES } from '../engine/scenario';
+import { BUILDING_FRAME_TABLE as _BUILDING_FRAME_TABLE } from '../engine/renderer';
 
 // Structure types actually placed in ant mission INI [STRUCTURES] sections
 function parseIniStructureTypes(filename: string): Set<string> {
@@ -52,8 +35,8 @@ function parseIniStructureTypes(filename: string): Set<string> {
   return types;
 }
 
-const STRUCTURE_IMAGES = extractStructureImages();
-const BUILDING_FRAME_TABLE = extractBuildingFrameTable();
+const STRUCTURE_IMAGES = new Set(Object.keys(_STRUCTURE_IMAGES));
+const BUILDING_FRAME_TABLE = new Set(Object.keys(_BUILDING_FRAME_TABLE));
 
 // Wall types handled by separate rendering code (not BUILDING_FRAME_TABLE)
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD']);
