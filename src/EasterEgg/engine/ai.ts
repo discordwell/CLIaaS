@@ -141,7 +141,6 @@ export interface AIContext {
   isAllied(a: House, b: House): boolean;
   isPlayerControlled(e: Entity): boolean;
   clearStructureFootprint(s: MapStructure): void;
-  findPassableSpawn(initialCX: number, initialCY: number, structCX: number, structCY: number, fw: number, fh: number): { cx: number; cy: number };
 }
 
 // ── Pure helper functions ────────────────────────────────────────────────

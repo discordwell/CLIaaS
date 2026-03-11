@@ -878,7 +878,6 @@ export class Game {
       isAllied: (a, b) => this.isAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
       clearStructureFootprint: (s) => this.clearStructureFootprint(s),
-      findPassableSpawn: (cx, cy, scx, scy, fw, fh) => this.findPassableSpawn(cx, cy, scx, scy, fw, fh),
     };
   }
 
