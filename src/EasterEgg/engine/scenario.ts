@@ -179,7 +179,7 @@ export interface ScenarioTrigger {
   timerTick: number;      // game tick when timer started (for TIME events)
   playerEntered: boolean; // has a player unit entered a cell with this trigger?
   forceFirePending: boolean; // set by FORCE_TRIGGER — fires on next check regardless of events
-  destroyedConsumed: boolean; // C++ Spring() parity: DESTROYED event consumed, needs new death to re-fire
+  pendingDestroyedCount: number; // C++ Spring() parity: count of unprocessed deaths (fires once per death)
   triggeringEntityIds: number[]; // C++ parity: entity IDs that triggered this (for DESTROY_OBJECT with cell triggers)
 }
 
@@ -745,7 +745,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         timerTick: 0,
         playerEntered: false,
         forceFirePending: false,
-        destroyedConsumed: false,
+        pendingDestroyedCount: 0,
         triggeringEntityIds: [],
       });
     }
@@ -1774,7 +1774,7 @@ export interface TriggerGameState {
   fakesExist: boolean;           // do any fake structures still exist?
   spiedBuildings: Set<string>;   // trigger names of spied buildings
   isThieved: boolean;            // C++ House.IsThieved — a Thief has infiltrated a building
-  destroyedConsumed: boolean;    // C++ Spring() parity: DESTROYED already consumed, needs new death
+  pendingDestroyedCount: number; // C++ Spring() parity: count of unprocessed deaths for this trigger
 }
 
 export function checkTriggerEvent(
@@ -1806,10 +1806,8 @@ export function checkTriggerEvent(
       // N enemy units have been killed (event.data = threshold)
       return state.enemyKillCount >= event.data;
     case TEVENT_DESTROYED:
-      // Specific object destroyed — fires when the attached structure/unit is destroyed.
-      // C++ Spring() parity: once consumed, needs a NEW death to re-fire (persistent triggers).
-      if (state.destroyedConsumed) return false;
-      return state.destroyedTriggerNames.has(state.triggerName);
+      // C++ Spring() parity: fires once per death. pendingDestroyedCount tracks unprocessed deaths.
+      return state.pendingDestroyedCount > 0 && state.destroyedTriggerNames.has(state.triggerName);
     case TEVENT_MISSION_TIMER_EXPIRED:
       return state.missionTimerExpired;
     case TEVENT_BUILDING_EXISTS: {

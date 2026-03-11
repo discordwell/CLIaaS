@@ -6385,7 +6385,7 @@ export class Game {
       fakesExist: shared.fakesExist,
       spiedBuildings: this.spiedBuildingTriggers,
       isThieved: this.isThieved,
-      destroyedConsumed: trigger.destroyedConsumed,
+      pendingDestroyedCount: trigger.pendingDestroyedCount,
     };
   }
 
@@ -6459,12 +6459,12 @@ export class Game {
       buildingsDestroyedByHouse, fakesExist,
     };
 
-    // C++ Spring() parity: detect NEW entity/structure deaths and clear destroyedConsumed.
-    // Each dead entity/structure is processed exactly once (triggerDeathProcessed flag).
+    // C++ Spring() parity: count NEW deaths per trigger name.
+    // Each death increments pendingDestroyedCount so the trigger fires once per death.
     for (const e of this.entities) {
       if (!e.alive && e.triggerName && !e.triggerDeathProcessed) {
         for (const t of this.triggers) {
-          if (t.name === e.triggerName) t.destroyedConsumed = false;
+          if (t.name === e.triggerName) t.pendingDestroyedCount++;
         }
         e.triggerDeathProcessed = true;
       }
@@ -6472,7 +6472,7 @@ export class Game {
     for (const s of this.structures) {
       if (!s.alive && s.triggerName && !s.triggerDeathProcessed) {
         for (const t of this.triggers) {
-          if (t.name === s.triggerName) t.destroyedConsumed = false;
+          if (t.name === s.triggerName) t.pendingDestroyedCount++;
         }
         s.triggerDeathProcessed = true;
       }
@@ -6508,10 +6508,9 @@ export class Game {
       }
       trigger.fired = true;
 
-      // C++ Spring() parity: mark DESTROYED event as consumed so persistent triggers
-      // don't re-fire every tick. Cleared when a new entity with this triggerName dies.
+      // C++ Spring() parity: decrement pending death count so each death fires once.
       if (trigger.event1.type === 7 || trigger.event2.type === 7) { // 7 = TEVENT_DESTROYED
-        trigger.destroyedConsumed = true;
+        trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
       }
 
       // Persistent triggers: reset timer so TIME events must elapse again
@@ -6770,6 +6769,31 @@ export class Game {
       executeAction(trigger.action1);
       if (trigger.actionControl === 1) {
         executeAction(trigger.action2);
+      }
+
+      // C++ Spring() parity: if multiple entities with this triggerName died
+      // simultaneously, fire once per death (C++ calls Spring() per-entity).
+      let extraFires = 8; // guard against infinite loops
+      while (trigger.persistence === 2 && trigger.pendingDestroyedCount > 0 && extraFires-- > 0) {
+        const reState = this.buildTriggerState(trigger, shared);
+        const re1 = checkTriggerEvent(trigger.event1, reState);
+        const re2 = checkTriggerEvent(trigger.event2, reState);
+        let reFire = false;
+        switch (trigger.eventControl) {
+          case 0: reFire = re1; break;
+          case 1: reFire = re1 && re2; break;
+          case 2: reFire = re1 || re2; break;
+        }
+        if (!reFire) break;
+        if (this.debugTriggers) {
+          console.log(`[TRIGGER] ${trigger.name} re-fired (pending=${trigger.pendingDestroyedCount})`);
+        }
+        trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
+        trigger.timerTick = this.tick;
+        executeAction(trigger.action1);
+        if (trigger.actionControl === 1) {
+          executeAction(trigger.action2);
+        }
       }
     }
 

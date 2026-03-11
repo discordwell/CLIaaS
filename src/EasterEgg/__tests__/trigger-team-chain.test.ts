@@ -58,7 +58,7 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     fakesExist: false,
     spiedBuildings: new Set(),
     isThieved: false,
-    destroyedConsumed: false,
+    pendingDestroyedCount: 0,
     ...overrides,
   };
 }
@@ -89,7 +89,7 @@ describe('TeamType trigger field parsing', () => {
         action1: { action: 0, team: -1, trigger: -1, data: 0 },
         action2: { action: 0, team: -1, trigger: -1, data: 0 },
         fired: false, timerTick: 0, playerEntered: false, forceFirePending: false,
-        destroyedConsumed: false,
+        pendingDestroyedCount: 0, triggeringEntityIds: [],
       });
     }
 
@@ -128,7 +128,7 @@ describe('TeamType trigger field parsing', () => {
       action1: { action: 0, team: -1, trigger: -1, data: 0 },
       action2: { action: 0, team: -1, trigger: -1, data: 0 },
       fired: false, timerTick: 0, playerEntered: false, forceFirePending: false,
-      destroyedConsumed: false,
+      pendingDestroyedCount: 0, triggeringEntityIds: [],
     }];
 
     const teamTypes: TeamType[] = [{
@@ -152,24 +152,24 @@ describe('TeamType trigger field parsing', () => {
   });
 });
 
-describe('DESTROYED event — C++ Spring() parity', () => {
+describe('DESTROYED event — C++ Spring() parity (count-based)', () => {
   // TEVENT_DESTROYED = 7
   const DESTROYED_EVENT = { type: 7, team: -1, data: 0 };
 
-  it('fires when trigger name is in destroyed set and not consumed', () => {
+  it('fires when pendingDestroyedCount > 0 and name in destroyed set', () => {
     const state = createState({
       triggerName: 'ant5',
       destroyedTriggerNames: new Set(['ant5']),
-      destroyedConsumed: false,
+      pendingDestroyedCount: 1,
     });
     expect(checkTriggerEvent(DESTROYED_EVENT, state)).toBe(true);
   });
 
-  it('does NOT fire when consumed (C++ Spring already consumed)', () => {
+  it('does NOT fire when pendingDestroyedCount is 0 (all deaths processed)', () => {
     const state = createState({
       triggerName: 'ant5',
       destroyedTriggerNames: new Set(['ant5']),
-      destroyedConsumed: true,
+      pendingDestroyedCount: 0,
     });
     expect(checkTriggerEvent(DESTROYED_EVENT, state)).toBe(false);
   });
@@ -178,35 +178,28 @@ describe('DESTROYED event — C++ Spring() parity', () => {
     const state = createState({
       triggerName: 'ant5',
       destroyedTriggerNames: new Set(['ant6']),
-      destroyedConsumed: false,
+      pendingDestroyedCount: 1,
     });
     expect(checkTriggerEvent(DESTROYED_EVENT, state)).toBe(false);
   });
 
-  it('re-fires after consumed flag is cleared by new death', () => {
-    // First check: fires (not consumed)
-    const state1 = createState({
+  it('fires for each pending death (3 deaths = 3 fires)', () => {
+    // Simulates 3 simultaneous ant deaths — trigger should fire 3 times
+    for (let count = 3; count > 0; count--) {
+      const state = createState({
+        triggerName: 'ant5',
+        destroyedTriggerNames: new Set(['ant5']),
+        pendingDestroyedCount: count,
+      });
+      expect(checkTriggerEvent(DESTROYED_EVENT, state)).toBe(true);
+    }
+    // After all 3 processed, count is 0 → no more fires
+    const stateDone = createState({
       triggerName: 'ant5',
       destroyedTriggerNames: new Set(['ant5']),
-      destroyedConsumed: false,
+      pendingDestroyedCount: 0,
     });
-    expect(checkTriggerEvent(DESTROYED_EVENT, state1)).toBe(true);
-
-    // After trigger fires: consumed
-    const state2 = createState({
-      triggerName: 'ant5',
-      destroyedTriggerNames: new Set(['ant5']),
-      destroyedConsumed: true,
-    });
-    expect(checkTriggerEvent(DESTROYED_EVENT, state2)).toBe(false);
-
-    // New death clears consumed: fires again
-    const state3 = createState({
-      triggerName: 'ant5',
-      destroyedTriggerNames: new Set(['ant5']),
-      destroyedConsumed: false,
-    });
-    expect(checkTriggerEvent(DESTROYED_EVENT, state3)).toBe(true);
+    expect(checkTriggerEvent(DESTROYED_EVENT, stateDone)).toBe(false);
   });
 });
 
@@ -244,7 +237,7 @@ describe('SCA02EA trigger chain structure', () => {
         action1: { action: 7, team: 4, trigger: -1, data: -1 }, // REINFORCEMENTS
         action2: { action: 0, team: -1, trigger: -1, data: 0 },
         fired: false, timerTick: 0, playerEntered: false, forceFirePending: false,
-        destroyedConsumed: false,
+        pendingDestroyedCount: 0, triggeringEntityIds: [],
       });
     }
 
