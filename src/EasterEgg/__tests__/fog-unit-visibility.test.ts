@@ -6,6 +6,8 @@
  *   cell.cpp:1275 — objects drawn if IsMapped (vis >= 1)
  *   techno.cpp:4159-4194 — Visual_Character() uses cloaking, NOT fog
  *   display.cpp:2136-2146 — fog only dims terrain, doesn't hide units
+ *   Fog dimming: SHADOW.SHP overlay (renderFogOfWar) handles visual darkening;
+ *     no entity-level alpha reduction needed.
  *
  * Bug: renderer.ts had `if (vis === 1 && !entity.isPlayerUnit) continue;`
  * which incorrectly hid enemy units in fogged cells.
@@ -31,10 +33,12 @@ describe('Fog of war unit visibility (C++ parity)', () => {
     expect(rendererSource).toMatch(shroudSkip);
   });
 
-  it('applies fog dimming (globalAlpha) to units in fogged cells', () => {
-    // Units in fog should be dimmed (matching structure fog dimming behavior)
-    expect(rendererSource).toContain('inFog');
-    // Should multiply alpha, not replace it (preserves death fade, cloak, etc.)
-    expect(rendererSource).toMatch(/if\s*\(inFog\)\s*\{[\s\S]*?globalAlpha\s*\*=/);
+  it('does NOT double-dim entities in fog (shadow overlay handles dimming)', () => {
+    // C++ renders objects at full brightness; SHADOW.SHP overlay provides fog darkening.
+    // Entity-level alpha reduction (globalAlpha *= 0.6) would cause double-dimming
+    // since renderFogOfWar draws shadow overlays on top of entities.
+    // Verify no "inFog" alpha reduction exists in the entity rendering loop.
+    const doubleDimPattern = /inFog[\s\S]{0,100}globalAlpha\s*\*=/;
+    expect(rendererSource).not.toMatch(doubleDimPattern);
   });
 });

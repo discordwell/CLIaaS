@@ -1782,11 +1782,18 @@ export class Renderer {
       const ecx = Math.floor(entity.pos.x / CELL_SIZE);
       const ecy = Math.floor(entity.pos.y / CELL_SIZE);
 
-      // Don't render entities in shroud (unexplored)
-      if (map.getVisibility(ecx, ecy) === 0) continue;
+      // Don't render entities in shroud (unexplored).
+      // Check center cell AND immediate neighbors to prevent blinking at cell
+      // boundaries — sprites span multiple cells, so an entity whose center is
+      // barely in shroud may visually overlap explored territory.
+      const vis = map.getVisibility(ecx, ecy);
+      if (vis === 0 &&
+          map.getVisibility(ecx - 1, ecy) === 0 &&
+          map.getVisibility(ecx + 1, ecy) === 0 &&
+          map.getVisibility(ecx, ecy - 1) === 0 &&
+          map.getVisibility(ecx, ecy + 1) === 0) continue;
       // C++ (cell.cpp:1275): objects drawn in any IsMapped cell — fog only dims terrain,
       // not units. Enemy units remain visible in explored-but-not-in-sight cells.
-      const inFog = map.getVisibility(ecx, ecy) === 1;
 
       // Render interpolation: smooth position between ticks for 60fps visual
       const alpha = this.interpolationAlpha;
@@ -1840,10 +1847,9 @@ export class Renderer {
         }
       }
 
-      // Dim units in fog (explored but not in sight range) — C++ display.cpp:2136
-      if (inFog) {
-        ctx.globalAlpha *= 0.6;
-      }
+      // C++ fog dimming: objects rendered at full brightness; the SHADOW.SHP overlay
+      // (renderFogOfWar, drawn after entities) handles the visual darkening for fogged cells.
+      // No entity-level alpha reduction needed — avoids double-dimming.
 
       // Unit shadow — sprite-shaped silhouette (C++ SHAPE_GHOST + UnitShadow)
       // Uses 'multiply' blend: dark gray shadow darkens terrain proportionally
