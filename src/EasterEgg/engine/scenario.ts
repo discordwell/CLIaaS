@@ -147,6 +147,7 @@ export interface TeamType {
   house: number;        // house ID
   flags: number;        // bitfield: bit1=IsSuicide, bit2=IsAutocreate, etc.
   origin: number;       // starting waypoint
+  trigger: number;      // trigger index to assign to spawned members (-1 = none)
   members: TeamMember[];
   missions: TeamMission[];
 }
@@ -178,6 +179,8 @@ export interface ScenarioTrigger {
   timerTick: number;      // game tick when timer started (for TIME events)
   playerEntered: boolean; // has a player unit entered a cell with this trigger?
   forceFirePending: boolean; // set by FORCE_TRIGGER — fires on next check regardless of events
+  destroyedConsumed: boolean; // C++ Spring() parity: DESTROYED event consumed, needs new death to re-fire
+  triggeringEntityId?: number; // C++ parity: entity ID that triggered this (for DESTROY_OBJECT with cell triggers)
 }
 
 // === Mission Metadata ===
@@ -693,6 +696,7 @@ export function parseScenarioINI(text: string): ScenarioData {
       const house = parseInt(parts[0]);
       const flags = parseInt(parts[1]) || 0;
       const origin = parseInt(parts[5]);
+      const trigger = parseInt(parts[6]);  // trigger index assigned to spawned members (-1 = none)
       const classCount = parseInt(parts[7]);
 
       const members: TeamMember[] = [];
@@ -713,7 +717,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         missions.push({ mission: parseInt(mId), data: parseInt(mData) || 0 });
       }
 
-      teamTypes.push({ name, house, flags, origin, members, missions });
+      teamTypes.push({ name, house, flags, origin, trigger, members, missions });
     }
   }
 
@@ -741,6 +745,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         timerTick: 0,
         playerEntered: false,
         forceFirePending: false,
+        destroyedConsumed: false,
       });
     }
   }
@@ -973,6 +978,7 @@ export interface MapStructure {
   maxAmmo: number;           // max ammo for reload (C++ building.cpp:882-883)
   dockedAircraft?: number;   // entity ID of docked aircraft (-1 or undefined = empty)
   triggerName?: string;      // attached trigger name (from INI)
+  triggerDeathProcessed?: boolean; // C++ Spring() parity: death already detected by trigger system
   buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
   sellHpAtStart?: number;    // HP when sell was initiated (for health-scaled refund)
@@ -1767,6 +1773,7 @@ export interface TriggerGameState {
   fakesExist: boolean;           // do any fake structures still exist?
   spiedBuildings: Set<string>;   // trigger names of spied buildings
   isThieved: boolean;            // C++ House.IsThieved — a Thief has infiltrated a building
+  destroyedConsumed: boolean;    // C++ Spring() parity: DESTROYED already consumed, needs new death
 }
 
 export function checkTriggerEvent(
@@ -1798,7 +1805,9 @@ export function checkTriggerEvent(
       // N enemy units have been killed (event.data = threshold)
       return state.enemyKillCount >= event.data;
     case TEVENT_DESTROYED:
-      // Specific object destroyed — fires when the attached structure/unit is destroyed
+      // Specific object destroyed — fires when the attached structure/unit is destroyed.
+      // C++ Spring() parity: once consumed, needs a NEW death to re-fire (persistent triggers).
+      if (state.destroyedConsumed) return false;
       return state.destroyedTriggerNames.has(state.triggerName);
     case TEVENT_MISSION_TIMER_EXPIRED:
       return state.missionTimerExpired;
@@ -2013,6 +2022,11 @@ export function executeTriggerAction(
           // Team missions take priority in the AI update loop (updateTeamMission).
           if (team.flags & 2) {
             entity.isSuicide = true;
+          }
+          // C++ parity: assign team's trigger to each spawned member (ScenarioClass::Create_Army)
+          // This enables DESTROYED event chains — when these units die, the trigger fires.
+          if (team.trigger >= 0 && team.trigger < triggers.length) {
+            entity.triggerName = triggers[team.trigger].name;
           }
           // VIP spawn protection — civilians/VIPs spawned in hostile zones get brief invulnerability
           // so they can start moving before being killed (C++ building-exit protection equivalent)

@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-11T00:00Z — Session 140r: Trigger System Debug — 3 Critical C++ Parity Bugs Fixed
+- **Bug 1: Team trigger field not parsed** (CRITICAL): TeamType.trigger (parts[6] in INI) was never stored. C++ ScenarioClass::Create_Army assigns team.Trigger to each spawned member — enables DESTROYED event chains (kill ants → trigger fires → spawn more ants). Without this, SCA02EA ant wave chains were completely broken.
+- **Bug 2: DESTROYED event not one-shot** (CRITICAL): DESTROYED was a persistent state check (cumulative dead set) instead of C++ Spring() one-shot event. Persistent triggers would fire every 15 ticks while dead ants existed. Fixed with per-entity `triggerDeathProcessed` flag and per-trigger `destroyedConsumed` flag — each death fires the trigger exactly once.
+- **Bug 3: DESTROY_OBJECT broken for cell triggers**: `TACTION_DESTROY_OBJECT` searched for entities with `triggerName === trigger.name`, but cell triggers don't set entity triggerName. Fixed by tracking `triggeringEntityId` when player enters cell trigger, then killing that specific entity. Fixes SCA02EA die1 trigger (ant nest death zone).
+- **Files**: scenario.ts (TeamType.trigger, destroyedConsumed, triggeringEntityId, triggerDeathProcessed on MapStructure), entity.ts (triggerDeathProcessed field), index.ts (Spring parity detection loop, DESTROY_OBJECT cell trigger fix), trigger-team-chain.test.ts (8 new tests).
+- **SCA02EA trigger chain decoded**: ant1(TIME) → spawn ants → kill → ant3-7(DESTROYED) → respawn (via team.trigger field). civ1-6(PLAYER_ENTERED) → SET_GLOBAL chain. win1(GLOBAL_SET(6) AND ALL_BRIDGES_DESTROYED) → WIN. g5(TIME(0)) sets global 7 immediately, g4(ALL_BRIDGES_DESTROYED) clears it.
+
 ## 2026-03-10T21:00Z — Session 140q: Fog of War C++ Parity + Ant Sprite Extraction + Visual Fixes
 - **Fog of war fix**: Removed incorrect `if (vis === 1 && !entity.isPlayerUnit) continue;` that hid enemy units in fogged cells. C++ (cell.cpp:1275, techno.cpp:4159) shows units visible in any mapped cell — fog only dims terrain, not units. Added `inFog` flag with `globalAlpha *= 0.6` dimming. Test: fog-unit-visibility.test.ts.
 - **Ant sprites extracted**: Replaced procedural green 24x24 sprites with real 48x48 C++ SHP extractions from EXPAND2.MIX (Aftermath). Brown/olive colors. 112 frames (8 stand + 64 walk + 32 attack + 8 death).

@@ -129,6 +129,7 @@ export class Entity {
 
   // Trigger attachment (from INI — for TEVENT_DESTROYED on entities)
   triggerName?: string;
+  triggerDeathProcessed = false; // C++ Spring() parity: death already detected by trigger system
 
   // Combat
   attackCooldown = 0;

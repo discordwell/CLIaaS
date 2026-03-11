@@ -6328,6 +6328,7 @@ export class Game {
       for (const trigger of this.triggers) {
         if (trigger.name === trigName) {
           trigger.playerEntered = true;
+          trigger.triggeringEntityId = entity.id; // C++ parity: track which entity triggered (for DESTROY_OBJECT)
           // For persistent triggers that have fired, reset so they can re-evaluate
           if (trigger.persistence === 2 && trigger.fired) {
             trigger.fired = false;
@@ -6384,6 +6385,7 @@ export class Game {
       fakesExist: shared.fakesExist,
       spiedBuildings: this.spiedBuildingTriggers,
       isThieved: this.isThieved,
+      destroyedConsumed: trigger.destroyedConsumed,
     };
   }
 
@@ -6457,6 +6459,25 @@ export class Game {
       buildingsDestroyedByHouse, fakesExist,
     };
 
+    // C++ Spring() parity: detect NEW entity/structure deaths and clear destroyedConsumed.
+    // Each dead entity/structure is processed exactly once (triggerDeathProcessed flag).
+    for (const e of this.entities) {
+      if (!e.alive && e.triggerName && !e.triggerDeathProcessed) {
+        for (const t of this.triggers) {
+          if (t.name === e.triggerName) t.destroyedConsumed = false;
+        }
+        e.triggerDeathProcessed = true;
+      }
+    }
+    for (const s of this.structures) {
+      if (!s.alive && s.triggerName && !s.triggerDeathProcessed) {
+        for (const t of this.triggers) {
+          if (t.name === s.triggerName) t.destroyedConsumed = false;
+        }
+        s.triggerDeathProcessed = true;
+      }
+    }
+
     for (const trigger of this.triggers) {
       // Volatile (0) and semi-persistent (1): skip once fired
       // Persistent (2): allowed to re-fire after timer reset
@@ -6486,6 +6507,12 @@ export class Game {
         console.log(`[TRIGGER] ${trigger.name} fired | event1=${trigger.event1.type} action1=${trigger.action1.action}${trigger.action2 ? ' action2=' + trigger.action2.action : ''}`);
       }
       trigger.fired = true;
+
+      // C++ Spring() parity: mark DESTROYED event as consumed so persistent triggers
+      // don't re-fire every tick. Cleared when a new entity with this triggerName dies.
+      if (trigger.event1.type === 7 || trigger.event2.type === 7) { // 7 = TEVENT_DESTROYED
+        trigger.destroyedConsumed = true;
+      }
 
       // Persistent triggers: reset timer so TIME events must elapse again
       if (trigger.persistence === 2) {
@@ -6699,21 +6726,39 @@ export class Game {
             });
           }
         }
-        // Destroy the attached object (entity/structure with matching triggerName)
+        // Destroy the attached object (entity/structure with matching triggerName,
+        // OR the triggering entity for cell triggers — C++ TACTION_DESTROY_OBJECT)
         if (result.destroyTriggeringUnit) {
-          for (const e of this.entities) {
-            if (e.alive && e.triggerName === trigger.name) {
-              e.takeDamage(9999);
+          let destroyed = false;
+          // First: try triggering entity (cell triggers set this)
+          if (trigger.triggeringEntityId !== undefined) {
+            const te = this.entityById.get(trigger.triggeringEntityId);
+            if (te && te.alive) {
+              te.takeDamage(9999);
               this.effects.push({
-                type: 'explosion', x: e.pos.x, y: e.pos.y,
+                type: 'explosion', x: te.pos.x, y: te.pos.y,
                 frame: 0, maxFrames: 18, size: 12,
                 sprite: 'fball1', spriteStart: 0,
               });
+              destroyed = true;
             }
           }
-          for (const s of this.structures) {
-            if (s.alive && s.triggerName === trigger.name) {
-              this.damageStructure(s, s.maxHp + 1);
+          // Fallback: destroy entities/structures with matching triggerName
+          if (!destroyed) {
+            for (const e of this.entities) {
+              if (e.alive && e.triggerName === trigger.name) {
+                e.takeDamage(9999);
+                this.effects.push({
+                  type: 'explosion', x: e.pos.x, y: e.pos.y,
+                  frame: 0, maxFrames: 18, size: 12,
+                  sprite: 'fball1', spriteStart: 0,
+                });
+              }
+            }
+            for (const s of this.structures) {
+              if (s.alive && s.triggerName === trigger.name) {
+                this.damageStructure(s, s.maxHp + 1);
+              }
             }
           }
         }
