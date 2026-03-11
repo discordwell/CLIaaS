@@ -840,7 +840,7 @@ export class Game {
   private _runCrate<T>(fn: (ctx: CrateContext) => T): T {
     const ctx = this._crateCtx;
     const result = fn(ctx);
-    this.credits = ctx.credits;
+    // Note: credits flow through ctx.addCredits() callback — no scalar sync needed
     this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
     return result;
   }
@@ -1104,6 +1104,12 @@ export class Game {
         const cx = Math.floor(e.pos.x / CELL_SIZE);
         const cy = Math.floor(e.pos.y / CELL_SIZE);
         this.revealAroundCell(cx, cy, 15);
+      }
+    }
+    // C++ parity: player-owned structures reveal fog at game start (building sight range ~8 cells)
+    for (const s of this.structures) {
+      if (s.alive && this.isAllied(s.house, this.playerHouse)) {
+        this.revealAroundCell(s.cx, s.cy, 10);
       }
     }
 
@@ -1597,8 +1603,8 @@ export class Game {
     });
     if (followUpEffects.length > 0) this.effects.push(...followUpEffects);
 
-    // Crate spawning (every 60-90 seconds, max 3 on map)
-    if (this.tick >= this.nextCrateTick && this.crates.length < 3) {
+    // Crate spawning (every 60-90 seconds, max 3 on map) — disabled for ant missions
+    if (!this.scenarioId.startsWith('SCA') && this.tick >= this.nextCrateTick && this.crates.length < 3) {
       this.spawnCrate();
       this.nextCrateTick = this.tick + GAME_TICKS_PER_SEC * (60 + Math.floor(Math.random() * 30));
     }
