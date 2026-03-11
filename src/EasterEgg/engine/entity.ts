@@ -586,7 +586,13 @@ export class Entity {
     const defaultWalk = 3;
     const defaultAttack = 5;
     const defaultIdle = 4;
-    const rate = this.animState === AnimState.WALK ? (typeAnim?.walkRate ?? defaultWalk) :
+    // Ants: faster walk animation (1 frame/tick) — C++ ties body frames to track steps,
+    // but our animation is decoupled. Rate 1 matches their fast movement speed.
+    const antWalk = 1;
+    const antAttack = 3;
+    const rate = this.isAnt
+      ? (this.animState === AnimState.WALK ? antWalk : this.animState === AnimState.ATTACK ? antAttack : defaultIdle)
+      : this.animState === AnimState.WALK ? (typeAnim?.walkRate ?? defaultWalk) :
                  this.animState === AnimState.ATTACK ? (typeAnim?.attackRate ?? defaultAttack) :
                  (typeAnim?.idleRate ?? defaultIdle);
     if (this.animTick >= rate) {

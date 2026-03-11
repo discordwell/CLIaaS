@@ -111,6 +111,20 @@ export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFra
   spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet Sub Pen
 };
 
+// Building foundation bibs (C++ bib.cpp): [width, height] in cells.
+// Buildings have a concrete pad drawn under them to fill transparent floor areas.
+// BIB1=4x2 for large buildings, BIB2=3x2 for medium, BIB3=2x2 for small.
+const BIB_SIZES: Record<string, [number, number]> = {
+  // BIB1: 4-wide buildings (total footprint includes bib rows)
+  FACT: [4, 3], WEAP: [3, 3], AFLD: [3, 2], SYRD: [3, 3], SPEN: [3, 3],
+  // BIB2: 3-wide buildings
+  PROC: [3, 3], DOME: [2, 2], HPAD: [2, 2], FIX: [3, 3],
+  // BIB3: 2-wide buildings
+  POWR: [2, 2], APWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
+  ATEK: [2, 2], STEK: [2, 2], IRON: [2, 2], PDOX: [2, 2],
+  KENN: [2, 2], BIO: [2, 2], MISS: [2, 2], FCOM: [2, 2], HOSP: [2, 2],
+};
+
 // Wall types that use auto-connection sprites
 const WALL_SPRITE_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
 
@@ -1472,6 +1486,21 @@ export class Renderer {
         const drawMeta = (useSheet !== s.image ? assets.getSheet(useSheet)?.meta : null) ?? sheet.meta;
         const dfw = drawMeta.frameWidth;
         const dfh = drawMeta.frameHeight;
+        // Building foundation bib: concrete pad under buildings (C++ bib.cpp)
+        // Fills transparent areas of building sprites that expect a foundation underneath.
+        // BIB1=4x2 cells, BIB2=3x2 cells, BIB3=2x2 cells — bottom 2 rows of building footprint.
+        const bibSize = BIB_SIZES[s.type];
+        if (bibSize && !isConstructing && !isSelling) {
+          const bibAlpha = vis === 1 ? 0.6 : 1;
+          ctx.globalAlpha = bibAlpha;
+          ctx.fillStyle = '#8C8464'; // concrete/sand color matching TEMPERAT palette
+          // Bib covers the bottom 2 cell rows of the building footprint
+          const bibW = bibSize[0] * CELL_SIZE;
+          const bibH = 2 * CELL_SIZE;
+          const bibY = screenY + (bibSize[1] - 2) * CELL_SIZE;
+          ctx.fillRect(screenX, bibY, bibW, bibH);
+          ctx.globalAlpha = 1;
+        }
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
         const hasMakeSheet = useSheet !== s.image; // true when dedicated buildup sprite exists
         // Construction: make sheet plays frames naturally; fallback uses clip+scanline reveal
