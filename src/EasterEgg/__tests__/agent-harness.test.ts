@@ -38,6 +38,7 @@ function makeGame(overrides: Partial<MockGame> = {}): MockGame {
     lossCount: 1,
     productionQueue: new Map(),
     pendingPlacement: null,
+    superweapons: new Map(),
     fogDisabled: true,
     map: {
       boundsX: 40,
@@ -104,7 +105,7 @@ describe('serializeState', () => {
     expect(s.tick).toBe(100);
     expect(s.state).toBe('paused');
     expect(s.credits).toBe(5000);
-    expect(s.power).toEqual({ produced: 200, consumed: 100 });
+    expect(s.power).toEqual({ produced: 200, consumed: 100, multiplier: 1.0 });
     expect(s.siloCapacity).toBe(2000);
     expect(s.killCount).toBe(3);
     expect(s.lossCount).toBe(1);
@@ -193,9 +194,10 @@ describe('serializeState', () => {
   it('includes production queue', () => {
     const game = makeGame();
     (game as unknown as { productionQueue: Map<string, unknown> }).productionQueue.set('right', {
-      item: { type: '2TNK', name: 'Medium Tank', buildTime: 100 },
+      item: { type: '2TNK', name: 'Medium Tank', buildTime: 100, cost: 800 },
       progress: 50,
       queueCount: 2,
+      costPaid: 400,
     });
 
     const s = serializeState(game as unknown as Parameters<typeof serializeState>[0]);
@@ -203,6 +205,8 @@ describe('serializeState', () => {
     expect(s.production[0].t).toBe('2TNK');
     expect(s.production[0].prog).toBeCloseTo(0.5);
     expect(s.production[0].q).toBe(2);
+    expect(s.production[0].cost).toBe(800);
+    expect(s.production[0].paid).toBe(400);
   });
 
   it('includes pending placement type', () => {

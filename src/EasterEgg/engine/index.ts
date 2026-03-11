@@ -65,6 +65,7 @@ import {
   launchProjectile as _launchProjectile,
   updateInflightProjectiles as _updateInflightProjectiles,
   applySplashDamage as _applySplashDamage,
+  structureDamage as _structureDamage,
   SPLASH_RADIUS,
 } from './combat';
 import {
@@ -513,6 +514,14 @@ export class Game {
       scenarioWarheadProps: this.scenarioWarheadProps,
       attackedTriggerNames: this.attackedTriggerNames,
       map: this.map,
+      // damageStructure state
+      aiStates: this.aiStates as Map<House, { lastBaseAttackTick: number; underAttack: boolean; iq: number }>,
+      lastBaseAttackEva: this.lastBaseAttackEva,
+      gameTicksPerSec: GAME_TICKS_PER_SEC,
+      gapGeneratorCells: this.gapGeneratorCells,
+      nBuildingsDestroyedCount: this.nBuildingsDestroyedCount,
+      structuresLost: this.structuresLost,
+      bridgeCellCount: this.bridgeCellCount,
       isAllied: (a, b) => this.isAllied(a, b),
       entitiesAllied: (a, b) => this.entitiesAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
@@ -523,6 +532,10 @@ export class Game {
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       damageStructure: (s, d) => this.damageStructure(s, d),
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
+      // damageStructure callbacks
+      clearStructureFootprint: (s) => this.clearStructureFootprint(s),
+      recalculateSiloCapacity: () => this.recalculateSiloCapacity(),
+      showEvaMessage: (id) => this.showEvaMessage(id),
       get screenShake() { return 0; },
       set screenShake(v: number) { /* set on return */ },
       get screenFlash() { return 0; },
@@ -551,6 +564,11 @@ export class Game {
     this.killCount = ctx.killCount;
     this.lossCount = ctx.lossCount;
     this.inflightProjectiles = ctx.inflightProjectiles;
+    // damageStructure mutable state sync
+    this.lastBaseAttackEva = ctx.lastBaseAttackEva;
+    this.nBuildingsDestroyedCount = ctx.nBuildingsDestroyedCount;
+    this.structuresLost = ctx.structuresLost;
+    this.bridgeCellCount = ctx.bridgeCellCount;
     return result;
   }
 
@@ -2844,103 +2862,7 @@ export class Game {
 
   /** Damage a structure, return true if destroyed */
   private damageStructure(s: MapStructure, damage: number): boolean {
-    if (!s.alive) return false;
-    s.hp = Math.max(0, s.hp - damage);
-    // Track attacked trigger names for TEVENT_ATTACKED
-    if (s.triggerName) this.attackedTriggerNames.add(s.triggerName);
-    // Record base attack for AI defense system
-    const aiState = this.aiStates.get(s.house);
-    if (aiState) {
-      aiState.lastBaseAttackTick = this.tick;
-      aiState.underAttack = true;
-    }
-    // EVA "base under attack" for player structures (throttled)
-    if (this.isAllied(s.house, this.playerHouse) &&
-        this.tick - this.lastBaseAttackEva > GAME_TICKS_PER_SEC * 5) {
-      this.lastBaseAttackEva = this.tick;
-      this.audio.play('eva_base_attack');
-      this.minimapAlert(s.cx, s.cy);
-    }
-    if (s.hp <= 0) {
-      s.alive = false;
-      s.rubble = true;
-      // GAP1: unjam shroud when Gap Generator is destroyed
-      if (s.type === 'GAP') {
-        const si = this.structures.indexOf(s);
-        if (si >= 0 && this.gapGeneratorCells.has(si)) {
-          const prev = this.gapGeneratorCells.get(si)!;
-          this.map.unjamRadius(prev.cx, prev.cy, prev.radius);
-          this.gapGeneratorCells.delete(si);
-        }
-      }
-      // Track enemy building destruction count (excluding walls)
-      if (!this.isAllied(s.house, this.playerHouse) && !WALL_TYPES.has(s.type)) {
-        this.nBuildingsDestroyedCount++;
-      }
-      // Clear terrain footprint so units can walk through rubble
-      this.clearStructureFootprint(s);
-      // Spawn destruction explosion chain — small pops then big blast (like original RA)
-      const wx = s.cx * CELL_SIZE + CELL_SIZE;
-      const wy = s.cy * CELL_SIZE + CELL_SIZE;
-      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      // Small pre-explosions scattered across the building footprint (scale with building size)
-      const numPreExplosions = Math.max(3, Math.min(6, fw * fh));
-      for (let i = 0; i < numPreExplosions; i++) {
-        const ox = (Math.random() - 0.5) * fw * CELL_SIZE;
-        const oy = (Math.random() - 0.5) * fh * CELL_SIZE;
-        this.effects.push({
-          type: 'explosion', x: wx + ox, y: wy + oy,
-          frame: -i * 3, maxFrames: 12, size: 8, // staggered start via negative frame
-          sprite: 'veh-hit1', spriteStart: 0,
-        });
-      }
-      // Final large explosion — size-matched to building footprint (C++ parity)
-      const maxDimPx = Math.max(fw, fh) * CELL_SIZE;
-      const deathExplosionRadius = Math.round(maxDimPx * 0.6);
-      this.effects.push({
-        type: 'explosion', x: wx, y: wy,
-        frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: deathExplosionRadius,
-        sprite: 'fball1', spriteStart: 0,
-      });
-      // Flying debris
-      this.effects.push({
-        type: 'debris', x: wx, y: wy,
-        frame: 0, maxFrames: 20, size: fw * CELL_SIZE * 0.8,
-      });
-      // Screen shake proportional to building size (1x1=8, 2x2=12, 3x3=16)
-      const shakeIntensity = Math.min(20, 4 + Math.max(fw, fh) * 4);
-      this.renderer.screenShake = Math.max(this.renderer.screenShake, shakeIntensity);
-      this.renderer.screenFlash = Math.max(this.renderer.screenFlash, Math.min(8, fw * 2));
-      this.playSoundAt('building_explode', wx, wy);
-      if (this.isAllied(s.house, this.playerHouse)) {
-        this.structuresLost++;
-        this.playEva('eva_unit_lost'); // reuse unit_lost for building destruction
-        // C++ parity: recalculate silo capacity when storage structure destroyed
-        if (s.type === 'PROC' || s.type === 'SILO') {
-          this.recalculateSiloCapacity();
-        }
-      }
-      // Structure explosion damages nearby units (2-cell radius, ~100 base damage)
-      const blastRadius = 2;
-      for (const e of this.entities) {
-        if (!e.alive) continue;
-        const dist = worldDist({ x: wx, y: wy }, e.pos);
-        if (dist > blastRadius) continue;
-        const falloff = 1 - (dist / blastRadius) * 0.6;
-        const blastDmg = Math.max(1, Math.round(100 * falloff));
-        this.damageEntity(e, blastDmg, 'HE');
-      }
-      // Leave large scorch mark
-      this.map.addDecal(s.cx, s.cy, 14, 0.6);
-      // Bridge destruction: convert nearby bridge template cells to water
-      if (s.type === 'BARL' || s.type === 'BRL3') {
-        this.map.destroyBridge(s.cx, s.cy, 3);
-        this.bridgeCellCount = this.map.countBridgeCells();
-        this.showEvaMessage(7); // "Bridge destroyed."
-      }
-      return true;
-    }
-    return false;
+    return this._runCombat(ctx => _structureDamage(ctx, s, damage));
   }
 
   /** Update a single entity's AI and movement */

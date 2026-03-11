@@ -25,7 +25,7 @@ import {
   SPLASH_RADIUS,
   getWarheadMult, getWarheadMeta, getWarheadProps,
   damageEntity, aiScatterOnDamage, damageSpeedFactor,
-  fireWeaponAt, fireWeaponAtStructure,
+  fireWeaponAt, fireWeaponAtStructure, structureDamage,
   handleUnitDeath, triggerRetaliation,
   checkVehicleCrush, launchProjectile,
   updateInflightProjectiles, applySplashDamage,
@@ -78,6 +78,18 @@ function makeMockCombatContext(overrides: Partial<CombatContext> = {}): CombatCo
     getFirepowerBias: (house: House) => COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0,
     damageStructure: () => false,
     aiIQ: () => 3,
+    // damageStructure state
+    aiStates: new Map(),
+    lastBaseAttackEva: -Infinity,
+    gameTicksPerSec: 15,
+    gapGeneratorCells: new Map(),
+    nBuildingsDestroyedCount: 0,
+    structuresLost: 0,
+    bridgeCellCount: 0,
+    // damageStructure callbacks
+    clearStructureFootprint: () => {},
+    recalculateSiloCapacity: () => {},
+    showEvaMessage: () => {},
     screenShake: 0,
     screenFlash: 0,
     ...overrides,
@@ -211,83 +223,77 @@ describe('damageEntity behavior (via Entity.takeDamage)', () => {
 // 3. damageStructure — HP reduction, destruction, power system
 // =========================================================================
 describe('damageStructure behavior', () => {
-  it('source code reduces structure HP with Math.max(0, hp - damage)', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private damageStructure(');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 400);
-    expect(chunk).toContain('s.hp = Math.max(0, s.hp - damage)');
+  function makeStructure(overrides: Partial<MapStructure> = {}): MapStructure {
+    return {
+      type: 'POWR', image: 'powr', house: House.USSR,
+      cx: 5, cy: 5, hp: 256, maxHp: 256, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+      ...overrides,
+    };
+  }
+
+  it('reduces structure HP with Math.max(0, hp - damage)', () => {
+    const s = makeStructure({ hp: 100 });
+    const ctx = makeMockCombatContext();
+    structureDamage(ctx, s, 30);
+    expect(s.hp).toBe(70);
+    // HP should never go below 0
+    structureDamage(ctx, s, 200);
+    expect(s.hp).toBe(0);
   });
 
-  it('source code sets alive=false and rubble=true on structure death', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private damageStructure(');
-    const chunk = src.slice(startIdx, startIdx + 1200);
-    expect(chunk).toContain('s.alive = false');
-    expect(chunk).toContain('s.rubble = true');
+  it('sets alive=false and rubble=true on structure death', () => {
+    const s = makeStructure({ hp: 50 });
+    const ctx = makeMockCombatContext();
+    const destroyed = structureDamage(ctx, s, 100);
+    expect(destroyed).toBe(true);
+    expect(s.alive).toBe(false);
+    expect(s.rubble).toBe(true);
   });
 
-  it('source code returns false when structure is already dead', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private damageStructure(');
-    const chunk = src.slice(startIdx, startIdx + 200);
-    expect(chunk).toContain('if (!s.alive) return false');
+  it('returns false when structure is already dead', () => {
+    const s = makeStructure({ alive: false, hp: 0 });
+    const ctx = makeMockCombatContext();
+    const result = structureDamage(ctx, s, 50);
+    expect(result).toBe(false);
   });
 
-  it('source code records AI base attack on structure damage', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private damageStructure(');
-    const chunk = src.slice(startIdx, startIdx + 500);
-    expect(chunk).toContain('aiStates');
-    expect(chunk).toContain('lastBaseAttackTick');
-    expect(chunk).toContain('underAttack');
+  it('records AI base attack on structure damage', () => {
+    const s = makeStructure({ house: House.USSR });
+    const aiState = { lastBaseAttackTick: -1, underAttack: false, iq: 3 };
+    const aiStates = new Map<House, { lastBaseAttackTick: number; underAttack: boolean; iq: number }>();
+    aiStates.set(House.USSR, aiState);
+    const ctx = makeMockCombatContext({ aiStates, tick: 42 });
+    structureDamage(ctx, s, 10);
+    expect(aiState.lastBaseAttackTick).toBe(42);
+    expect(aiState.underAttack).toBe(true);
   });
 
   it('destroyed structure explosion damages nearby units in 2-cell radius', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private damageStructure(');
-    const chunk = src.slice(startIdx, startIdx + 4500);
-    expect(chunk).toContain('blastRadius');
-    expect(chunk).toContain('damageEntity(e, blastDmg');
+    const s = makeStructure({ hp: 10, cx: 5, cy: 5 });
+    // Place a unit near the structure center (structure center = cx*24+24, cy*24+24 = 144, 144)
+    // Unit at cell (6,5) center = 156, 132 — about 1 cell away
+    const nearby = makeEntity(UnitType.I_E1, House.Greece, 6 * CELL_SIZE + CELL_SIZE / 2, 5 * CELL_SIZE + CELL_SIZE);
+    const hpBefore = nearby.hp;
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, nearby);
+    const destroyed = structureDamage(ctx, s, 100);
+    expect(destroyed).toBe(true);
+    // Unit within 2-cell blast radius should take damage
+    expect(nearby.hp).toBeLessThan(hpBefore);
   });
 
   it('fireWeaponAtStructure uses concrete armor for warhead mult', () => {
     const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
-    const structure: MapStructure = {
-      type: 'POWR', image: 'powr', house: House.USSR,
-      cx: 5, cy: 5, hp: 256, maxHp: 256, alive: true, rubble: false,
-      attackCooldown: 0, ammo: -1, maxAmmo: -1,
-    };
-    let receivedDamage = 0;
-    const ctx = makeMockCombatContext({
-      damageStructure: (s, d) => { receivedDamage = d; return false; },
-    });
+    const structure = makeStructure();
+    const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker);
     const weapon = WEAPON_STATS['90mm']; // AP warhead, 30 damage
+    const hpBefore = structure.hp;
     fireWeaponAtStructure(ctx, attacker, structure, weapon);
     // AP vs concrete = 0.5, houseBias=1.0, spreadFactor=1
     // damage = modifyDamage(30, 'AP', 'concrete', 0, 1.0, 0.5, 1) = round(30*0.5) = 15
-    expect(receivedDamage).toBe(15);
+    expect(structure.hp).toBe(hpBefore - 15);
   });
 });
 

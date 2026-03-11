@@ -12,7 +12,7 @@ import {
   House, Mission, AnimState, EXPLOSION_FRAMES,
 } from './types';
 import { type Entity } from './entity';
-import { type MapStructure } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
 
@@ -20,6 +20,8 @@ import { type GameMap, Terrain } from './map';
 
 /** CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2) */
 export const SPLASH_RADIUS = 1.5;
+
+const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
@@ -36,6 +38,13 @@ export interface InflightProjectile {
   impactX: number;       // final impact position (may be scattered)
   impactY: number;
   attackerIsPlayer: boolean;
+}
+
+/** Minimal AI state slice needed by damageStructure */
+export interface AiStateSlice {
+  lastBaseAttackTick: number;
+  underAttack: boolean;
+  iq: number;
 }
 
 /** Context object providing combat functions access to game state and callbacks */
@@ -56,6 +65,15 @@ export interface CombatContext {
   attackedTriggerNames: Set<string>;
   map: GameMap;
 
+  // damageStructure state
+  aiStates: Map<House, AiStateSlice>;
+  lastBaseAttackEva: number;
+  gameTicksPerSec: number;
+  gapGeneratorCells: Map<number, { cx: number; cy: number; radius: number }>;
+  nBuildingsDestroyedCount: number;
+  structuresLost: number;
+  bridgeCellCount: number;
+
   // Callbacks
   isAllied(a: House, b: House): boolean;
   entitiesAllied(a: Entity, b: Entity): boolean;
@@ -67,6 +85,11 @@ export interface CombatContext {
   getFirepowerBias(house: House): number;
   damageStructure(s: MapStructure, damage: number): boolean;
   aiIQ(house: House): number;
+
+  // damageStructure callbacks
+  clearStructureFootprint(s: MapStructure): void;
+  recalculateSiloCapacity(): void;
+  showEvaMessage(id: number): void;
 
   // Renderer access
   screenShake: number;
@@ -201,7 +224,7 @@ export function fireWeaponAtStructure(
   const houseBias = ctx.getFirepowerBias(attacker.house);
   const whMult = getWarheadMult(wh, 'concrete', ctx.warheadOverrides);
   const damage = modifyDamage(weapon.damage, wh, 'concrete', 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
-  const destroyed = ctx.damageStructure(s, damage);
+  const destroyed = structureDamage(ctx, s, damage);
   if (destroyed) attacker.creditKill();
   ctx.effects.push({
     type: 'muzzle',
@@ -520,4 +543,108 @@ export function applySplashDamage(
       }
     }
   }
+}
+
+/** Damage a structure, return true if destroyed.
+ *  Extracted from Game class (index.ts) — handles HP reduction, destruction effects,
+ *  AI base attack tracking, EVA alerts, gap generator unjam, footprint clearing,
+ *  bridge destruction, and structure explosion blast damage to nearby units. */
+export function structureDamage(ctx: CombatContext, s: MapStructure, damage: number): boolean {
+  if (!s.alive) return false;
+  s.hp = Math.max(0, s.hp - damage);
+  // Track attacked trigger names for TEVENT_ATTACKED
+  if (s.triggerName) ctx.attackedTriggerNames.add(s.triggerName);
+  // Record base attack for AI defense system
+  const aiState = ctx.aiStates.get(s.house);
+  if (aiState) {
+    aiState.lastBaseAttackTick = ctx.tick;
+    aiState.underAttack = true;
+  }
+  // EVA "base under attack" for player structures (throttled)
+  if (ctx.isAllied(s.house, ctx.playerHouse) &&
+      ctx.tick - ctx.lastBaseAttackEva > ctx.gameTicksPerSec * 5) {
+    ctx.lastBaseAttackEva = ctx.tick;
+    ctx.playEva('eva_base_attack');
+    ctx.minimapAlert(s.cx, s.cy);
+  }
+  if (s.hp <= 0) {
+    s.alive = false;
+    s.rubble = true;
+    // GAP1: unjam shroud when Gap Generator is destroyed
+    if (s.type === 'GAP') {
+      const si = ctx.structures.indexOf(s);
+      if (si >= 0 && ctx.gapGeneratorCells.has(si)) {
+        const prev = ctx.gapGeneratorCells.get(si)!;
+        ctx.map.unjamRadius(prev.cx, prev.cy, prev.radius);
+        ctx.gapGeneratorCells.delete(si);
+      }
+    }
+    // Track enemy building destruction count (excluding walls)
+    if (!ctx.isAllied(s.house, ctx.playerHouse) && !WALL_TYPES.has(s.type)) {
+      ctx.nBuildingsDestroyedCount++;
+    }
+    // Clear terrain footprint so units can walk through rubble
+    ctx.clearStructureFootprint(s);
+    // Spawn destruction explosion chain — small pops then big blast (like original RA)
+    const wx = s.cx * CELL_SIZE + CELL_SIZE;
+    const wy = s.cy * CELL_SIZE + CELL_SIZE;
+    const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+    // Small pre-explosions scattered across the building footprint (scale with building size)
+    const numPreExplosions = Math.max(3, Math.min(6, fw * fh));
+    for (let i = 0; i < numPreExplosions; i++) {
+      const ox = (Math.random() - 0.5) * fw * CELL_SIZE;
+      const oy = (Math.random() - 0.5) * fh * CELL_SIZE;
+      ctx.effects.push({
+        type: 'explosion', x: wx + ox, y: wy + oy,
+        frame: -i * 3, maxFrames: 12, size: 8, // staggered start via negative frame
+        sprite: 'veh-hit1', spriteStart: 0,
+      } as Effect);
+    }
+    // Final large explosion — size-matched to building footprint (C++ parity)
+    const maxDimPx = Math.max(fw, fh) * CELL_SIZE;
+    const deathExplosionRadius = Math.round(maxDimPx * 0.6);
+    ctx.effects.push({
+      type: 'explosion', x: wx, y: wy,
+      frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: deathExplosionRadius,
+      sprite: 'fball1', spriteStart: 0,
+    } as Effect);
+    // Flying debris
+    ctx.effects.push({
+      type: 'debris', x: wx, y: wy,
+      frame: 0, maxFrames: 20, size: fw * CELL_SIZE * 0.8,
+    } as Effect);
+    // Screen shake proportional to building size (1x1=8, 2x2=12, 3x3=16)
+    const shakeIntensity = Math.min(20, 4 + Math.max(fw, fh) * 4);
+    ctx.screenShake = Math.max(ctx.screenShake, shakeIntensity);
+    ctx.screenFlash = Math.max(ctx.screenFlash, Math.min(8, fw * 2));
+    ctx.playSoundAt('building_explode', wx, wy);
+    if (ctx.isAllied(s.house, ctx.playerHouse)) {
+      ctx.structuresLost++;
+      ctx.playEva('eva_unit_lost'); // reuse unit_lost for building destruction
+      // C++ parity: recalculate silo capacity when storage structure destroyed
+      if (s.type === 'PROC' || s.type === 'SILO') {
+        ctx.recalculateSiloCapacity();
+      }
+    }
+    // Structure explosion damages nearby units (2-cell radius, ~100 base damage)
+    const blastRadius = 2;
+    for (const e of ctx.entities) {
+      if (!e.alive) continue;
+      const dist = worldDist({ x: wx, y: wy }, e.pos);
+      if (dist > blastRadius) continue;
+      const falloff = 1 - (dist / blastRadius) * 0.6;
+      const blastDmg = Math.max(1, Math.round(100 * falloff));
+      damageEntity(ctx, e, blastDmg, 'HE');
+    }
+    // Leave large scorch mark
+    ctx.map.addDecal(s.cx, s.cy, 14, 0.6);
+    // Bridge destruction: convert nearby bridge template cells to water
+    if (s.type === 'BARL' || s.type === 'BRL3') {
+      ctx.map.destroyBridge(s.cx, s.cy, 3);
+      ctx.bridgeCellCount = ctx.map.countBridgeCells();
+      ctx.showEvaMessage(7); // "Bridge destroyed."
+    }
+    return true;
+  }
+  return false;
 }

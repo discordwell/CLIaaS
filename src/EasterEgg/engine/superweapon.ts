@@ -11,7 +11,7 @@ import {
   IRON_CURTAIN_DURATION, NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
   NUKE_MIN_FALLOFF, CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS,
   worldDist, worldToCell, type WarheadType,
-  WEAPON_STATS, EXPLOSION_FRAMES,
+  WEAPON_STATS,
 } from './types';
 import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -538,25 +538,7 @@ export function detonateNuke(ctx: SuperweaponContext, target: WorldPos): void {
     if (dist > blastRadius) continue;
     const falloff = Math.max(NUKE_MIN_FALLOFF, 1 - dist / blastRadius);
     const dmg = Math.max(1, Math.round(NUKE_DAMAGE * falloff));
-    s.hp -= dmg;
-    if (s.hp <= 0) {
-      s.hp = 0;
-      s.alive = false;
-      // GAP1: unjam shroud when Gap Generator is nuked
-      if (s.type === 'GAP') {
-        const si = ctx.structures.indexOf(s);
-        if (si >= 0 && ctx.gapGeneratorCells.has(si)) {
-          const prev = ctx.gapGeneratorCells.get(si)!;
-          ctx.map.unjamRadius(prev.cx, prev.cy, prev.radius);
-          ctx.gapGeneratorCells.delete(si);
-        }
-      }
-      ctx.effects.push({
-        type: 'explosion', x: sx, y: sy,
-        frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: 32,
-        sprite: 'fball1', spriteStart: 0,
-      });
-    }
+    ctx.damageStructure(s, dmg);
   }
 
   // Mushroom cloud effect (large, long-lasting)

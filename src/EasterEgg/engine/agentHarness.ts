@@ -7,9 +7,11 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { House, Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, getStripSide } from './types';
+import { House, Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, SUPERWEAPON_DEFS, getStripSide } from './types';
 import { findPath } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
+import { getEffectiveCost } from './production';
+import { powerMultiplier } from './repairSell';
 
 // === Serialized state types ===
 
@@ -28,6 +30,14 @@ export interface AgentUnit {
   ally: boolean;   // player-controlled
   wpn?: string;    // weapon name
   rng?: number;    // weapon range
+  // Combat readiness
+  ammo?: number;   // current ammo (-1 = unlimited, omitted if unlimited)
+  mammo?: number;  // max ammo (omitted if unlimited)
+  acd?: number;    // attack cooldown ticks remaining (omitted if 0)
+  wpn2?: string;   // secondary weapon name
+  rng2?: number;   // secondary weapon range
+  dmg?: number;    // primary weapon base damage
+  wh?: string;     // primary weapon warhead type
 }
 
 export interface AgentStructure {
@@ -47,13 +57,35 @@ export interface AgentQueueItem {
   name: string;    // display name
   prog: number;    // 0-1 progress
   q: number;       // queue count
+  cost: number;    // effective cost (with country bonus)
+  paid: number;    // cost paid so far (incremental deduction)
+}
+
+/** Available production item summary */
+export interface AgentAvailableItem {
+  t: string;       // item type
+  name: string;    // display name
+  cost: number;    // effective cost (with country bonus)
+  time: number;    // build time in ticks
+  side: string;    // 'left' (structures) or 'right' (units)
+  isStruct: boolean; // is structure
+}
+
+/** Superweapon status summary */
+export interface AgentSuperweapon {
+  type: string;    // SuperweaponType enum value
+  name: string;    // display name
+  charge: number;  // 0-1 charge progress
+  ready: boolean;  // fully charged and activatable
+  fired: boolean;  // one-shot already used (GPS)
+  needsTarget: boolean; // requires player to select target
 }
 
 export interface AgentState {
   tick: number;
   state: string;
   credits: number;
-  power: { produced: number; consumed: number };
+  power: { produced: number; consumed: number; multiplier: number };
   siloCapacity: number;
   units: AgentUnit[];
   enemies: AgentUnit[];
@@ -61,6 +93,8 @@ export interface AgentState {
   production: AgentQueueItem[];
   pending?: string;
   available: string[];
+  availableItems: AgentAvailableItem[];
+  superweapons: AgentSuperweapon[];
   mapBounds: { x: number; y: number; w: number; h: number };
   killCount: number;
   lossCount: number;
@@ -123,6 +157,19 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
   if (e.weapon) {
     u.wpn = e.weapon.name;
     u.rng = e.weapon.range;
+    u.dmg = e.weapon.damage;
+    u.wh = e.weapon.warhead;
+  }
+  if (e.weapon2) {
+    u.wpn2 = e.weapon2.name;
+    u.rng2 = e.weapon2.range;
+  }
+  if (e.maxAmmo > 0) {
+    u.ammo = e.ammo;
+    u.mammo = e.maxAmmo;
+  }
+  if (e.attackCooldown > 0) {
+    u.acd = e.attackCooldown;
   }
   return u;
 }
@@ -175,16 +222,47 @@ export function serializeState(game: Game): AgentState {
       name: entry.item.name,
       prog: entry.item.buildTime > 0 ? entry.progress / entry.item.buildTime : 1,
       q: entry.queueCount,
+      cost: getEffectiveCost(entry.item, game.playerHouse),
+      paid: entry.costPaid,
     });
   }
 
-  const available = game.getAvailableItems().map(i => i.type);
+  const availableRaw = game.getAvailableItems();
+  const available = availableRaw.map(i => i.type);
+  const availableItems: AgentAvailableItem[] = availableRaw.map(i => ({
+    t: i.type,
+    name: i.name,
+    cost: getEffectiveCost(i, game.playerHouse),
+    time: i.buildTime,
+    side: getStripSide(i),
+    isStruct: !!i.isStructure,
+  }));
+
+  // Superweapon status for player-allied houses
+  const superweapons: AgentSuperweapon[] = [];
+  for (const [, swState] of game.superweapons) {
+    if (!game.isAllied(swState.house, game.playerHouse)) continue;
+    const def = SUPERWEAPON_DEFS[swState.type];
+    if (!def) continue;
+    // Skip GPS after fired (one-shot)
+    if (swState.fired && swState.type === 'GPS_SATELLITE') continue;
+    superweapons.push({
+      type: swState.type,
+      name: def.name,
+      charge: def.rechargeTicks > 0 ? Math.min(1, swState.chargeTick / def.rechargeTicks) : 1,
+      ready: swState.ready,
+      fired: swState.fired,
+      needsTarget: def.needsTarget,
+    });
+  }
+
+  const pwrMult = powerMultiplier(game.powerProduced, game.powerConsumed);
 
   return {
     tick: game.tick,
     state: game.state,
     credits: game.credits,
-    power: { produced: game.powerProduced, consumed: game.powerConsumed },
+    power: { produced: game.powerProduced, consumed: game.powerConsumed, multiplier: pwrMult },
     siloCapacity: game.siloCapacity,
     units,
     enemies,
@@ -192,6 +270,8 @@ export function serializeState(game: Game): AgentState {
     production,
     pending: game.pendingPlacement?.type,
     available,
+    availableItems,
+    superweapons,
     mapBounds: {
       x: game.map.boundsX,
       y: game.map.boundsY,

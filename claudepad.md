@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-03-11T02:00Z — Session 141b: Subsystem Extraction — Bug Fix + Commit + Deploy
+- **Dual-write credit bug fixed**: `ctx.addCredits(amount, true)` → `ctx.credits += amount` in repairSell.ts (wall sell), specialUnits.ts (thief steal), production.ts (cancel refund). Prevents `_run*` state sync from overwriting callback-applied credit changes.
+- **Test updated**: special-unit-pipeline.test.ts thief test now checks `ctx.credits === 1500` instead of `ctx.addCredits.toHaveBeenCalledWith(500, true)`.
+- **Committed**: f09d840, pushed to main, deployed to cliaas.com.
+- **Plan file deleted** (completed).
+
 ## 2026-03-11T01:45Z — Session 141: Game Class Subsystem Extraction (Phase 1-3)
 - **Extracted 6 subsystem modules** from 10K-line Game class (`engine/index.ts`): `combat.ts` (523L), `fog.ts` (177L), `repairSell.ts` (227L), `specialUnits.ts` (545L), `superweapon.ts` (628L), `production.ts` (273L)
 - **Architecture**: Each module defines a typed context interface (5-20 fields + callbacks). Game class delegates via `_run*` helpers that create context, run subsystem function, sync mutable state (credits, killCount, screenShake etc.) back.
