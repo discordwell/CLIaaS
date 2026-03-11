@@ -204,6 +204,17 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
+  // AA gate: ground units can't attack airborne aircraft without AA weapons
+  if (entity.target && entity.target.isAirUnit && entity.target.flightAltitude > 0) {
+    const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
+    if (!hasAA) {
+      entity.target = null;
+      entity.mission = ctx.idleMission(entity);
+      entity.animState = AnimState.IDLE;
+      return;
+    }
+  }
+
   // Force-uncloak submarine when attacking
   if (entity.stats.isCloakable && (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) && entity.target) {
     entity.cloakState = CloakState.UNCLOAKING;
@@ -545,6 +556,11 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     for (const other of ctx.entities) {
       if (!other.alive || ctx.entitiesAllied(entity, other)) continue;
       if (!canTargetNaval(entity, other)) continue;
+      // AA gate: ground units on hunt can't target airborne aircraft without AA weapons
+      if (other.isAirUnit && other.flightAltitude > 0) {
+        const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
+        if (!hasAA) continue;
+      }
       const dist = worldDist(entity.pos, other.pos);
       if (dist > huntRange) continue;
       if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;

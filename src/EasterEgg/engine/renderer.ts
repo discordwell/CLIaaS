@@ -2294,6 +2294,7 @@ export class Renderer {
     const ctx = this.ctx;
     for (const entity of entities) {
       if (!entity.alive || !selectedIds.has(entity.id)) continue;
+      if (entity.isAirUnit) continue; // C++ RA doesn't show target lines for aircraft
       if (!entity.target?.alive) continue;
       // Draw thin dashed line from attacker to target
       const from = camera.worldToScreen(entity.pos.x, entity.pos.y);

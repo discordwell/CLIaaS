@@ -663,9 +663,9 @@ describe('WEAPON_STATS parity', () => {
     expect(w.warhead).toBe('AP');
   });
 
-  it('105mm — damage=30, rof=70, range=4.75, warhead=AP', () => {
+  it('105mm — damage=40, rof=70, range=4.75, warhead=AP (C++ RULES.INI)', () => {
     const w = WEAPON_STATS['105mm'];
-    expect(w.damage).toBe(30);
+    expect(w.damage).toBe(40);
     expect(w.rof).toBe(70);
     expect(w.range).toBe(4.75);
     expect(w.warhead).toBe('AP');

@@ -144,6 +144,11 @@ const EXEMPT_WEAPONS = new Set([
   'Tomahawk', 'SeaSerpent', // Custom naval weapons
 ]);
 
+// C++ compiled-in defaults that differ from INI file values (we follow the C++ source)
+const CPP_DAMAGE_OVERRIDES: Record<string, number> = {
+  '105mm': 40, // INI says 30, C++ RULES.INI compiled default is 40 (3TNK Heavy Tank)
+};
+
 describe('INI Parity: Weapon Stats', () => {
   for (const [weapon, stats] of Object.entries(WEAPON_STATS)) {
     if (EXEMPT_WEAPONS.has(weapon)) continue;
@@ -153,7 +158,8 @@ describe('INI Parity: Weapon Stats', () => {
     describe(weapon, () => {
       if (iniData.Damage !== undefined) {
         it('damage', () => {
-          expect(stats.damage, `INI Damage=${iniData.Damage}`).toBe(Number(iniData.Damage));
+          const expected = CPP_DAMAGE_OVERRIDES[weapon] ?? Number(iniData.Damage);
+          expect(stats.damage, `Expected Damage=${expected} (INI=${iniData.Damage})`).toBe(expected);
         });
       }
       if (iniData.ROF !== undefined) {

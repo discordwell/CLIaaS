@@ -16,6 +16,7 @@ import { type Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
+import { canTargetNaval } from './aircraft';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -296,6 +297,13 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   if (victim.target && victim.target.alive) return;
   // Don't interrupt scripted team missions (except HUNT which already attacks)
   if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
+  // AA gate: ground units can't retaliate against airborne aircraft without AA weapons
+  if (attacker.isAirUnit && attacker.flightAltitude > 0) {
+    const hasAA = victim.weapon?.isAntiAir || victim.weapon2?.isAntiAir;
+    if (!hasAA) return;
+  }
+  // Naval gate: can't retaliate against untargetable naval units
+  if (!canTargetNaval(victim, attacker)) return;
   victim.target = attacker;
   victim.mission = Mission.ATTACK;
   victim.animState = AnimState.ATTACK;
@@ -647,11 +655,13 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
     }
     // Leave large scorch mark
     ctx.map.addDecal(s.cx, s.cy, 14, 0.6);
-    // Bridge destruction: convert nearby bridge template cells to water
+    // Barrel explosion: barrels always explode. Only destroy bridge if barrel is near bridge cells.
     if (s.type === 'BARL' || s.type === 'BRL3') {
-      ctx.map.destroyBridge(s.cx, s.cy, 3);
-      ctx.bridgeCellCount = ctx.map.countBridgeCells();
-      ctx.showEvaMessage(7); // "Bridge destroyed."
+      const destroyed = ctx.map.destroyBridge(s.cx, s.cy, 3);
+      if (destroyed > 0) {
+        ctx.bridgeCellCount = ctx.map.countBridgeCells();
+        ctx.showEvaMessage(7); // "Bridge destroyed."
+      }
     }
     return true;
   }
@@ -702,6 +712,8 @@ export function updateStructureCombat(ctx: CombatContext): void {
     for (const e of ctx.entities) {
       if (!e.alive) continue;
       if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
+      // AA gate: non-AA structures can't target airborne aircraft
+      if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon!.isAntiAir) continue;
       const dist = worldDist(structPos, e.pos);
       if (dist >= range) continue;
       // LOS check

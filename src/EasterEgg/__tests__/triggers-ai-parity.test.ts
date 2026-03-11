@@ -326,7 +326,7 @@ describe('TR5: Event index mapping matches C++ tevent.h', () => {
 describe('AI2: threatScore uses cost-proportional scoring', () => {
   it('higher-value unit scores higher than lower-value at same distance', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
-    // V_3TNK: strength=400 + 105mm damage(30)*5 = 550 base value
+    // V_3TNK: strength=400 + 105mm damage(40)*5 = 600 base value
     // I_E1: strength=50 + M1Carbine damage(15)*5 = 125 base value
     const heavyTank = makeEntity(UnitType.V_3TNK, House.USSR, 200, 100);
     const rifleman = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
