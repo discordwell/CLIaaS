@@ -6389,6 +6389,18 @@ export class Game {
     };
   }
 
+  /** Evaluate whether a trigger's events are met based on eventControl mode */
+  private checkTriggerEvents(trigger: ScenarioTrigger, state: TriggerGameState): boolean {
+    const e1 = checkTriggerEvent(trigger.event1, state);
+    const e2 = checkTriggerEvent(trigger.event2, state);
+    switch (trigger.eventControl) {
+      case 0: return e1;            // only event1
+      case 1: return e1 && e2;      // AND
+      case 2: return e1 || e2;      // OR
+      default: return e1;
+    }
+  }
+
   /** Process trigger system — check conditions and fire actions */
   private processTriggers(): void {
     // Tick mission timer (processTriggers runs every 15 ticks, so decrement by 15)
@@ -6491,15 +6503,7 @@ export class Game {
       } else {
         // Check event conditions
         const state = this.buildTriggerState(trigger, shared);
-        const e1Met = checkTriggerEvent(trigger.event1, state);
-        const e2Met = checkTriggerEvent(trigger.event2, state);
-
-        switch (trigger.eventControl) {
-          case 0: shouldFire = e1Met; break;            // only event1
-          case 1: shouldFire = e1Met && e2Met; break;   // AND
-          case 2: shouldFire = e1Met || e2Met; break;   // OR
-          default: shouldFire = e1Met; break;
-        }
+        shouldFire = this.checkTriggerEvents(trigger, state);
       }
 
       if (!shouldFire) continue;
@@ -6509,8 +6513,13 @@ export class Game {
       trigger.fired = true;
 
       // C++ Spring() parity: decrement pending death count so each death fires once.
+      // Non-persistent triggers drain fully (they won't re-fire anyway).
       if (trigger.event1.type === 7 || trigger.event2.type === 7) { // 7 = TEVENT_DESTROYED
-        trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
+        if (trigger.persistence < 2) {
+          trigger.pendingDestroyedCount = 0;
+        } else {
+          trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
+        }
       }
 
       // Persistent triggers: reset timer so TIME events must elapse again
@@ -6776,15 +6785,7 @@ export class Game {
       let extraFires = 8; // guard against infinite loops
       while (trigger.persistence === 2 && trigger.pendingDestroyedCount > 0 && extraFires-- > 0) {
         const reState = this.buildTriggerState(trigger, shared);
-        const re1 = checkTriggerEvent(trigger.event1, reState);
-        const re2 = checkTriggerEvent(trigger.event2, reState);
-        let reFire = false;
-        switch (trigger.eventControl) {
-          case 0: reFire = re1; break;
-          case 1: reFire = re1 && re2; break;
-          case 2: reFire = re1 || re2; break;
-        }
-        if (!reFire) break;
+        if (!this.checkTriggerEvents(trigger, reState)) break;
         if (this.debugTriggers) {
           console.log(`[TRIGGER] ${trigger.name} re-fired (pending=${trigger.pendingDestroyedCount})`);
         }
