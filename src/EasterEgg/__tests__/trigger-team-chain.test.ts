@@ -252,7 +252,7 @@ describe('SCA02EA trigger chain structure', () => {
 
     expect(result.spawned.length).toBe(1);
     expect(result.spawned[0].triggerName).toBe('ant5');
-    // This entity, when killed, will put "ant5" back in the destroyed set,
-    // allowing the ant5 trigger to fire again (after destroyedConsumed is cleared).
+    // This entity, when killed, will increment pendingDestroyedCount,
+    // allowing the ant5 trigger to fire again.
   });
 });
