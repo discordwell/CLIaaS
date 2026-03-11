@@ -1782,10 +1782,11 @@ export class Renderer {
       const ecx = Math.floor(entity.pos.x / CELL_SIZE);
       const ecy = Math.floor(entity.pos.y / CELL_SIZE);
 
-      // Don't render entities in shroud
+      // Don't render entities in shroud (unexplored)
       if (map.getVisibility(ecx, ecy) === 0) continue;
-      // Don't render enemy entities in fog (only player units visible in fog)
-      if (map.getVisibility(ecx, ecy) === 1 && !entity.isPlayerUnit) continue;
+      // C++ (cell.cpp:1275): objects drawn in any IsMapped cell — fog only dims terrain,
+      // not units. Enemy units remain visible in explored-but-not-in-sight cells.
+      const inFog = map.getVisibility(ecx, ecy) === 1;
 
       // Render interpolation: smooth position between ticks for 60fps visual
       const alpha = this.interpolationAlpha;
@@ -1837,6 +1838,11 @@ export class Renderer {
           const progress = 1 - (entity.cloakTimer / CLOAK_TRANSITION_FRAMES);
           ctx.globalAlpha = 0.15 + progress * 0.85;
         }
+      }
+
+      // Dim units in fog (explored but not in sight range) — C++ display.cpp:2136
+      if (inFog) {
+        ctx.globalAlpha *= 0.6;
       }
 
       // Unit shadow — sprite-shaped silhouette (C++ SHAPE_GHOST + UnitShadow)

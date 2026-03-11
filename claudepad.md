@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-10T21:00Z — Session 140q: Fog of War C++ Parity + Ant Sprite Extraction + Visual Fixes
+- **Fog of war fix**: Removed incorrect `if (vis === 1 && !entity.isPlayerUnit) continue;` that hid enemy units in fogged cells. C++ (cell.cpp:1275, techno.cpp:4159) shows units visible in any mapped cell — fog only dims terrain, not units. Added `inFog` flag with `globalAlpha *= 0.6` dimming. Test: fog-unit-visibility.test.ts.
+- **Ant sprites extracted**: Replaced procedural green 24x24 sprites with real 48x48 C++ SHP extractions from EXPAND2.MIX (Aftermath). Brown/olive colors. 112 frames (8 stand + 64 walk + 32 attack + 8 death).
+- **Ant animation speed**: Walk rate changed from 3 ticks/frame → 1 tick/frame to match fast WHEEL speed movement.
+- **Building bibs**: Added concrete foundation pads under buildings (BIB1=4x2, BIB2=3x2, BIB3=2x2) matching C++ bib.cpp. Fills transparent floor areas of building sprites.
+- **Files**: renderer.ts (fog fix, bibs), entity.ts (ant animation), manifest.json + ant PNGs (48x48 originals), fog-unit-visibility.test.ts, ant-sprite-manifest.test.ts.
+
 ## 2026-03-10T18:30Z — Session 140p: Long 2-Cell Tracks — Eliminate Curve Position Pops
 - **Long tracks implemented**: When F_D flag is set in TrackControl AND a following cell exists, use the long 2-cell track (tracks 3-6) instead of short StartTrack (tracks 7-10). Long tracks span 2 cells with step 0 starting ~1px from entity position (vs 23px mismatch with short tracks).
 - **trackCellSpan field**: Added `trackCellSpan` (1 or 2) to entity. Long tracks target the cell AFTER chainCell and advance pathIndex by 2 on completion.
