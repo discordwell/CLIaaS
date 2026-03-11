@@ -3,11 +3,11 @@
  * explored-but-not-in-sight (fogged) cells, matching C++ behavior.
  *
  * C++ reference:
- *   cell.cpp:1275 — objects drawn if IsMapped (vis >= 1)
+ *   display.cpp:2113-2151 — Redraw_Icons only calls Draw_It for IsMapped cells
+ *   cell.cpp:1275 — Draw_It renders objects if Visual_Character == VISUAL_NORMAL
  *   techno.cpp:4159-4194 — Visual_Character() uses cloaking, NOT fog
- *   display.cpp:2136-2146 — fog only dims terrain, doesn't hide units
- *   Fog dimming: SHADOW.SHP overlay (renderFogOfWar) handles visual darkening;
- *     no entity-level alpha reduction needed.
+ *   Fog dimming: SHADOW.SHP overlay (Redraw_Shadow / renderFogOfWar) handles
+ *     visual darkening; objects rendered at full brightness underneath.
  *
  * Bug: renderer.ts had `if (vis === 1 && !entity.isPlayerUnit) continue;`
  * which incorrectly hid enemy units in fogged cells.
@@ -27,9 +27,10 @@ describe('Fog of war unit visibility (C++ parity)', () => {
     expect(rendererSource).not.toMatch(bugPattern);
   });
 
-  it('still skips rendering entities in shroud (vis=0)', () => {
-    // Entities in unexplored cells should never be rendered
-    const shroudSkip = /getVisibility.*===\s*0\)\s*continue/;
+  it('skips rendering entities in shroud (vis=0) — single cell check, no neighbors', () => {
+    // C++ (display.cpp:2113): only the cell containing the object is checked.
+    // IsMapped must be true. No neighboring cell lookups.
+    const shroudSkip = /getVisibility\(ecx, ecy\) === 0\) continue/;
     expect(rendererSource).toMatch(shroudSkip);
   });
 
@@ -37,8 +38,17 @@ describe('Fog of war unit visibility (C++ parity)', () => {
     // C++ renders objects at full brightness; SHADOW.SHP overlay provides fog darkening.
     // Entity-level alpha reduction (globalAlpha *= 0.6) would cause double-dimming
     // since renderFogOfWar draws shadow overlays on top of entities.
-    // Verify no "inFog" alpha reduction exists in the entity rendering loop.
     const doubleDimPattern = /inFog[\s\S]{0,100}globalAlpha\s*\*=/;
     expect(rendererSource).not.toMatch(doubleDimPattern);
+  });
+
+  it('does NOT check neighboring cells for entity visibility', () => {
+    // C++ checks only the object's own cell. No neighbor lookups.
+    // Verify the shroud check doesn't reference ecx-1, ecx+1, etc.
+    const neighborPattern = /ecx\s*[-+]\s*1|ecy\s*[-+]\s*1/;
+    // Find lines near the visibility check (first 20 lines of entity loop)
+    const entityLoop = rendererSource.match(/for \(const entity of sorted\)[\s\S]{0,800}Render interpolation/);
+    expect(entityLoop).toBeTruthy();
+    expect(entityLoop![0]).not.toMatch(neighborPattern);
   });
 });

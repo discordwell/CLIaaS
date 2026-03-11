@@ -1782,16 +1782,9 @@ export class Renderer {
       const ecx = Math.floor(entity.pos.x / CELL_SIZE);
       const ecy = Math.floor(entity.pos.y / CELL_SIZE);
 
-      // Don't render entities in shroud (unexplored).
-      // Check center cell AND immediate neighbors to prevent blinking at cell
-      // boundaries — sprites span multiple cells, so an entity whose center is
-      // barely in shroud may visually overlap explored territory.
-      const vis = map.getVisibility(ecx, ecy);
-      if (vis === 0 &&
-          map.getVisibility(ecx - 1, ecy) === 0 &&
-          map.getVisibility(ecx + 1, ecy) === 0 &&
-          map.getVisibility(ecx, ecy - 1) === 0 &&
-          map.getVisibility(ecx, ecy + 1) === 0) continue;
+      // Don't render entities in unmapped cells (C++ cell.cpp:1275 — Draw_It
+      // only called when cellptr->IsMapped is true; single-cell check, no neighbors)
+      if (map.getVisibility(ecx, ecy) === 0) continue;
       // C++ (cell.cpp:1275): objects drawn in any IsMapped cell — fog only dims terrain,
       // not units. Enemy units remain visible in explored-but-not-in-sight cells.
 
