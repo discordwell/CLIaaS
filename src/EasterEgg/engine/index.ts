@@ -6328,7 +6328,7 @@ export class Game {
       for (const trigger of this.triggers) {
         if (trigger.name === trigName) {
           trigger.playerEntered = true;
-          trigger.triggeringEntityId = entity.id; // C++ parity: track which entity triggered (for DESTROY_OBJECT)
+          trigger.triggeringEntityIds.push(entity.id); // C++ parity: track entities that triggered (for DESTROY_OBJECT)
           // For persistent triggers that have fired, reset so they can re-evaluate
           if (trigger.persistence === 2 && trigger.fired) {
             trigger.fired = false;
@@ -6730,18 +6730,21 @@ export class Game {
         // OR the triggering entity for cell triggers — C++ TACTION_DESTROY_OBJECT)
         if (result.destroyTriggeringUnit) {
           let destroyed = false;
-          // First: try triggering entity (cell triggers set this)
-          if (trigger.triggeringEntityId !== undefined) {
-            const te = this.entityById.get(trigger.triggeringEntityId);
-            if (te && te.alive) {
-              te.takeDamage(9999);
-              this.effects.push({
-                type: 'explosion', x: te.pos.x, y: te.pos.y,
-                frame: 0, maxFrames: 18, size: 12,
-                sprite: 'fball1', spriteStart: 0,
-              });
-              destroyed = true;
+          // First: kill ALL triggering entities (cell triggers accumulate IDs)
+          if (trigger.triggeringEntityIds.length > 0) {
+            for (const eid of trigger.triggeringEntityIds) {
+              const te = this.entityById.get(eid);
+              if (te && te.alive) {
+                te.takeDamage(9999);
+                this.effects.push({
+                  type: 'explosion', x: te.pos.x, y: te.pos.y,
+                  frame: 0, maxFrames: 18, size: 12,
+                  sprite: 'fball1', spriteStart: 0,
+                });
+                destroyed = true;
+              }
             }
+            trigger.triggeringEntityIds = [];
           }
           // Fallback: destroy entities/structures with matching triggerName
           if (!destroyed) {

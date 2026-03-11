@@ -180,7 +180,7 @@ export interface ScenarioTrigger {
   playerEntered: boolean; // has a player unit entered a cell with this trigger?
   forceFirePending: boolean; // set by FORCE_TRIGGER — fires on next check regardless of events
   destroyedConsumed: boolean; // C++ Spring() parity: DESTROYED event consumed, needs new death to re-fire
-  triggeringEntityId?: number; // C++ parity: entity ID that triggered this (for DESTROY_OBJECT with cell triggers)
+  triggeringEntityIds: number[]; // C++ parity: entity IDs that triggered this (for DESTROY_OBJECT with cell triggers)
 }
 
 // === Mission Metadata ===
@@ -746,6 +746,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         playerEntered: false,
         forceFirePending: false,
         destroyedConsumed: false,
+        triggeringEntityIds: [],
       });
     }
   }
