@@ -30,6 +30,7 @@ export interface FogContext {
   tick: number;
   playerHouse: House;
   fogDisabled: boolean;
+  baseDiscovered: boolean;
   powerProduced: number;
   powerConsumed: number;
   gapGeneratorCells: Map<number, { cx: number; cy: number; radius: number }>;
@@ -62,13 +63,18 @@ export function updateFogOfWar(ctx: FogContext): void {
     }
   }
 
-  for (const s of ctx.structures) {
-    if (s.alive && ctx.isAllied(s.house, ctx.playerHouse)) {
-      const baseSight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
-      const sight = (s.hp / s.maxHp) < CONDITION_RED ? 1 : baseSight;
-      const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
-      const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
-      units.push({ x: wx, y: wy, sight });
+  // Structures only reveal fog after the player has discovered their base.
+  // In ant missions, the base is hidden until a unit gets close (checkBaseDiscovery).
+  // C++ All_To_Look(units_only=true) at init skips buildings; per-tick sight includes them.
+  if (ctx.baseDiscovered) {
+    for (const s of ctx.structures) {
+      if (s.alive && ctx.isAllied(s.house, ctx.playerHouse)) {
+        const baseSight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
+        const sight = (s.hp / s.maxHp) < CONDITION_RED ? 1 : baseSight;
+        const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
+        const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
+        units.push({ x: wx, y: wy, sight });
+      }
     }
   }
 

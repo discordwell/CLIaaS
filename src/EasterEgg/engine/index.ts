@@ -570,6 +570,7 @@ export class Game {
       tick: this.tick,
       playerHouse: this.playerHouse,
       fogDisabled: this.fogDisabled,
+      baseDiscovered: this.baseDiscovered,
       powerProduced: this.powerProduced,
       powerConsumed: this.powerConsumed,
       gapGeneratorCells: this.gapGeneratorCells,
@@ -1098,18 +1099,13 @@ export class Game {
     this.updateFogOfWar();
 
     // Generous initial reveal — player should see a wide area at mission start
-    // (C++ reveals all cells the camera can see on mission load)
+    // C++ All_To_Look(units_only=true) — only reveals around units, NOT buildings.
+    // Buildings are intentionally hidden until player explores (base discovery mechanic).
     for (const e of this.entities) {
       if (e.isPlayerUnit) {
         const cx = Math.floor(e.pos.x / CELL_SIZE);
         const cy = Math.floor(e.pos.y / CELL_SIZE);
         this.revealAroundCell(cx, cy, 15);
-      }
-    }
-    // C++ parity: player-owned structures reveal fog at game start (building sight range ~8 cells)
-    for (const s of this.structures) {
-      if (s.alive && this.isAllied(s.house, this.playerHouse)) {
-        this.revealAroundCell(s.cx, s.cy, 10);
       }
     }
 

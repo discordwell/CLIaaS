@@ -66,6 +66,7 @@ function makeMockFogContext(overrides: Partial<FogContext> = {}): FogContext {
     tick: 0,
     playerHouse: House.Greece,
     fogDisabled: false,
+    baseDiscovered: true,
     powerProduced: 200,
     powerConsumed: 100,
     gapGeneratorCells: new Map(),
@@ -415,6 +416,63 @@ describe('Fog disabled mode', () => {
 
     // Far-away cell remains shroud
     expect(map.getVisibility(10, 10)).toBe(0);
+  });
+});
+
+// ========================================================================
+// 5b. Base discovery gate — C++ All_To_Look(units_only=true)
+// ========================================================================
+
+describe('Base discovery fog gate', () => {
+  it('structures do NOT reveal fog when baseDiscovered is false', () => {
+    setPlayerHouses(new Set([House.Greece]));
+    const map = createClearMap();
+    const s = mockStructure('FACT', 64, 64, House.Greece);
+    const ctx = makeMockFogContext({
+      map,
+      baseDiscovered: false,
+      structures: [s],
+      entities: [],
+    });
+
+    updateFogOfWar(ctx);
+
+    // No cells should be visible — no units and structures gated behind baseDiscovered
+    expect(countVis(map, 2)).toBe(0);
+  });
+
+  it('structures DO reveal fog when baseDiscovered is true', () => {
+    setPlayerHouses(new Set([House.Greece]));
+    const map = createClearMap();
+    const s = mockStructure('FACT', 64, 64, House.Greece);
+    const ctx = makeMockFogContext({
+      map,
+      baseDiscovered: true,
+      structures: [s],
+      entities: [],
+    });
+
+    updateFogOfWar(ctx);
+
+    // Structure should reveal cells around it
+    expect(countVis(map, 2)).toBeGreaterThan(0);
+  });
+
+  it('units still reveal fog even when baseDiscovered is false', () => {
+    setPlayerHouses(new Set([House.Greece]));
+    const map = createClearMap();
+    const e = new Entity(UnitType.V_JEEP, House.Greece, 64 * CELL_SIZE, 64 * CELL_SIZE);
+    const ctx = makeMockFogContext({
+      map,
+      baseDiscovered: false,
+      entities: [e],
+      structures: [],
+    });
+
+    updateFogOfWar(ctx);
+
+    // Unit sight should still work
+    expect(countVis(map, 2)).toBeGreaterThan(0);
   });
 });
 

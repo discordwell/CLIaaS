@@ -144,6 +144,7 @@ function makeFogContext(overrides?: Partial<FogContext>): FogContext {
     tick: 0,
     playerHouse: House.Spain,
     fogDisabled: false,
+    baseDiscovered: true,
     powerProduced: 100,
     powerConsumed: 50,
     gapGeneratorCells: new Map(),

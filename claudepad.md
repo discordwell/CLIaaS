@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-03-11T04:15Z — Session 142b: Behavioral Tests for Phase 2 Modules
+- **6 new test files** covering all Phase 2 extracted modules: placement (19), crates (25), harvester (16), aircraft (40), ai (79), missionAI (45) = **224 behavioral tests**
+- Tests call exported functions with mock contexts — no source-string pattern matching
+- Removed dead `AIContext.findPassableSpawn` (code review finding)
+- **121/121 test files pass (14,608 tests)**. Committed 87df343, pushed, deployed.
+
 ## 2026-03-11T02:00Z — Session 141b: Subsystem Extraction — Bug Fix + Commit + Deploy
 - **Dual-write credit bug fixed**: `ctx.addCredits(amount, true)` → `ctx.credits += amount` in repairSell.ts (wall sell), specialUnits.ts (thief steal), production.ts (cancel refund). Prevents `_run*` state sync from overwriting callback-applied credit changes.
 - **Test updated**: special-unit-pipeline.test.ts thief test now checks `ctx.credits === 1500` instead of `ctx.addCredits.toHaveBeenCalledWith(500, true)`.
