@@ -47,6 +47,111 @@ export { preloadAssets } from './assets';
 export { getMissionMovies, hasFMV, getMovieUrl, CAMPAIGN_END_MOVIES } from './movies';
 export { MoviePlayer } from './moviePlayer';
 
+// Subsystem module imports
+import {
+  type CombatContext,
+  type InflightProjectile as InflightProjectileType,
+  getWarheadMult as _getWarheadMult,
+  getWarheadMeta as _getWarheadMeta,
+  getWarheadProps as _getWarheadProps,
+  damageSpeedFactor as _damageSpeedFactor,
+  damageEntity as _damageEntity,
+  aiScatterOnDamage as _aiScatterOnDamage,
+  fireWeaponAt as _fireWeaponAt,
+  fireWeaponAtStructure as _fireWeaponAtStructure,
+  handleUnitDeath as _handleUnitDeath,
+  triggerRetaliation as _triggerRetaliation,
+  checkVehicleCrush as _checkVehicleCrush,
+  launchProjectile as _launchProjectile,
+  updateInflightProjectiles as _updateInflightProjectiles,
+  applySplashDamage as _applySplashDamage,
+  SPLASH_RADIUS,
+} from './combat';
+import {
+  type FogContext,
+  updateFogOfWar as _updateFogOfWar,
+  updateSubDetection as _updateSubDetection,
+  revealAroundCell as _revealAroundCell,
+  updateGapGenerators as _updateGapGenerators,
+  GAP_RADIUS, GAP_UPDATE_INTERVAL, DEFENSE_TYPES as FOG_DEFENSE_TYPES,
+} from './fog';
+import {
+  type RepairSellContext,
+  repairCostPerStep as _repairCostPerStep,
+  toggleRepair as _toggleRepair,
+  isStructureRepairing as _isStructureRepairing,
+  sellStructureByIndex as _sellStructureByIndex,
+  tickRepairs as _tickRepairs,
+  tickServiceDepot as _tickServiceDepot,
+  calculateSiloCapacity as _calculateSiloCapacity,
+  calculatePowerGrid as _calculatePowerGrid,
+} from './repairSell';
+import {
+  type SpecialUnitsContext,
+  updateTanyaC4 as _updateTanyaC4,
+  tickC4Timers as _tickC4Timers,
+  updateThief as _updateThief,
+  updateMinelayer as _updateMinelayer,
+  tickMines as _tickMines,
+  updateChronoTank as _updateChronoTank,
+  teleportChronoTank as _teleportChronoTank,
+  updateMADTank as _updateMADTank,
+  deployMADTank as _deployMADTank,
+  updateDemoTruck as _updateDemoTruck,
+  updateVehicleCloak as _updateVehicleCloak,
+  updateMechanicUnit as _updateMechanicUnit,
+  updateMedic as _updateMedic,
+  tickVortices as _tickVortices,
+  MAX_MINES_PER_HOUSE as _MAX_MINES_PER_HOUSE,
+  CHRONO_TANK_COOLDOWN as _CHRONO_TANK_COOLDOWN,
+  MAD_TANK_CHARGE_TICKS as _MAD_TANK_CHARGE_TICKS,
+  MAD_TANK_DAMAGE as _MAD_TANK_DAMAGE,
+  MAD_TANK_RADIUS as _MAD_TANK_RADIUS,
+  DEMO_TRUCK_DAMAGE as _DEMO_TRUCK_DAMAGE,
+  DEMO_TRUCK_RADIUS as _DEMO_TRUCK_RADIUS,
+  DEMO_TRUCK_FUSE_TICKS as _DEMO_TRUCK_FUSE_TICKS,
+  MECHANIC_HEAL_RANGE as _MECHANIC_HEAL_RANGE,
+  MECHANIC_HEAL_AMOUNT as _MECHANIC_HEAL_AMOUNT,
+} from './specialUnits';
+import {
+  type SuperweaponContext,
+  updateSuperweapons as _updateSuperweapons,
+  activateSuperweapon as _activateSuperweapon,
+  detonateNuke as _detonateNuke,
+  findBestNukeTarget as _findBestNukeTarget,
+} from './superweapon';
+import {
+  type ProductionContext,
+  getEffectiveCost as _getEffectiveCost,
+  countPlayerBuildings as _countPlayerBuildings,
+  getAvailableItems as _getAvailableItems,
+  startProduction as _startProduction,
+  cancelProduction as _cancelProduction,
+  tickProduction as _tickProduction,
+  spawnProducedUnit as _spawnProducedUnit,
+} from './production';
+
+// Re-export subsystem types and functions for external consumers
+export type { InflightProjectileType as InflightProjectile };
+export { SPLASH_RADIUS } from './combat';
+export {
+  repairCostPerStep, sellRefund, powerOutput, calculatePowerGrid,
+  powerMultiplier, calculateSiloCapacity,
+} from './repairSell';
+export {
+  getWarheadMult, getWarheadMeta, getWarheadProps, damageSpeedFactor,
+} from './combat';
+export {
+  GAP_RADIUS, GAP_UPDATE_INTERVAL, DEFENSE_TYPES,
+} from './fog';
+export {
+  MAX_MINES_PER_HOUSE, DEMO_TRUCK_DAMAGE, DEMO_TRUCK_RADIUS,
+  DEMO_TRUCK_FUSE_TICKS, CHRONO_TANK_COOLDOWN,
+  MAD_TANK_CHARGE_TICKS, MAD_TANK_DAMAGE, MAD_TANK_RADIUS,
+  MECHANIC_HEAL_RANGE, MECHANIC_HEAL_AMOUNT,
+} from './specialUnits';
+export { getEffectiveCost, countPlayerBuildings } from './production';
+
 export type { SuperweaponState } from './types';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
@@ -140,20 +245,8 @@ interface Crate {
   lifetime: number; // CR6: ticks until expiry
 }
 
-/** In-flight projectile for deferred damage */
-interface InflightProjectile {
-  attackerId: number;
-  targetId: number;
-  weapon: WeaponStats;
-  damage: number;
-  speed: number;         // cells per tick
-  travelFrames: number;  // total frames to travel
-  currentFrame: number;
-  directHit: boolean;    // was the shot accurate (for inaccurate weapons)
-  impactX: number;       // final impact position (may be scattered)
-  impactY: number;
-  attackerIsPlayer: boolean;
-}
+/** In-flight projectile for deferred damage — defined in combat.ts */
+type InflightProjectile = InflightProjectileType;
 
 export class Game {
   // Core systems
@@ -397,6 +490,248 @@ export class Game {
     this.map = new GameMap();
     this.renderer = new Renderer(canvas);
     canvas.style.cursor = 'none'; // hide native cursor — we draw our own
+  }
+
+  // ─── Subsystem context accessors ─────────────────────────────────
+  // These create thin adapter objects that satisfy subsystem context interfaces,
+  // binding Game's private methods as callbacks. Used by delegating methods below.
+
+  private get _combatCtx(): CombatContext {
+    return {
+      entities: this.entities,
+      entityById: this.entityById,
+      structures: this.structures,
+      inflightProjectiles: this.inflightProjectiles,
+      effects: this.effects,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      scenarioId: this.scenarioId,
+      killCount: this.killCount,
+      lossCount: this.lossCount,
+      warheadOverrides: this.warheadOverrides,
+      scenarioWarheadMeta: this.scenarioWarheadMeta,
+      scenarioWarheadProps: this.scenarioWarheadProps,
+      attackedTriggerNames: this.attackedTriggerNames,
+      map: this.map,
+      isAllied: (a, b) => this.isAllied(a, b),
+      entitiesAllied: (a, b) => this.entitiesAllied(a, b),
+      isPlayerControlled: (e) => this.isPlayerControlled(e),
+      playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
+      playEva: (n) => this.playEva(n as SoundName),
+      minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
+      movementSpeed: (e) => this.movementSpeed(e),
+      getFirepowerBias: (h) => this.getFirepowerBias(h),
+      damageStructure: (s, d) => this.damageStructure(s, d),
+      aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
+      get screenShake() { return 0; },
+      set screenShake(v: number) { /* set on return */ },
+      get screenFlash() { return 0; },
+      set screenFlash(v: number) { /* set on return */ },
+    };
+  }
+
+  /** Run a combat subsystem function with proper renderer state sync */
+  private _runCombat<T>(fn: (ctx: CombatContext) => T): T {
+    const ctx = this._combatCtx;
+    // Proxy screenShake/screenFlash through renderer
+    let shake = this.renderer.screenShake;
+    let flash = this.renderer.screenFlash;
+    Object.defineProperty(ctx, 'screenShake', {
+      get: () => shake,
+      set: (v: number) => { shake = v; this.renderer.screenShake = Math.max(this.renderer.screenShake, v); },
+      configurable: true,
+    });
+    Object.defineProperty(ctx, 'screenFlash', {
+      get: () => flash,
+      set: (v: number) => { flash = v; this.renderer.screenFlash = Math.max(this.renderer.screenFlash, v); },
+      configurable: true,
+    });
+    const result = fn(ctx);
+    // Sync mutable state back
+    this.killCount = ctx.killCount;
+    this.lossCount = ctx.lossCount;
+    this.inflightProjectiles = ctx.inflightProjectiles;
+    return result;
+  }
+
+  private get _fogCtx(): FogContext {
+    return {
+      entities: this.entities,
+      structures: this.structures,
+      map: this.map,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      fogDisabled: this.fogDisabled,
+      powerProduced: this.powerProduced,
+      powerConsumed: this.powerConsumed,
+      gapGeneratorCells: this.gapGeneratorCells,
+      isAllied: (a, b) => this.isAllied(a, b),
+      entitiesAllied: (a, b) => this.entitiesAllied(a, b),
+    };
+  }
+
+  private get _repairSellCtx(): RepairSellContext {
+    return {
+      structures: this.structures,
+      entities: this.entities,
+      credits: this.credits,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      repairingStructures: this.repairingStructures,
+      scenarioProductionItems: this.scenarioProductionItems,
+      effects: this.effects,
+      siloCapacity: this.siloCapacity,
+      gapGeneratorCells: this.gapGeneratorCells,
+      isAllied: (a, b) => this.isAllied(a, b),
+      isPlayerControlled: (e) => this.isPlayerControlled(e),
+      addCredits: (a, b) => this.addCredits(a, b),
+      playEva: (n) => this.playEva(n as SoundName),
+      playSound: (n) => this.audio.play(n as SoundName),
+      playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
+      clearStructureFootprint: (s) => this.clearStructureFootprint(s),
+      recalculateSiloCapacity: () => this.recalculateSiloCapacity(),
+      mapUnjamRadius: (cx, cy, r) => this.map.unjamRadius(cx, cy, r),
+    };
+  }
+
+  /** Run repair/sell function with credit sync */
+  private _runRepairSell<T>(fn: (ctx: RepairSellContext) => T): T {
+    const ctx = this._repairSellCtx;
+    const result = fn(ctx);
+    this.credits = ctx.credits;
+    return result;
+  }
+
+  private get _specialUnitsCtx(): SpecialUnitsContext {
+    return {
+      entities: this.entities,
+      entityById: this.entityById,
+      structures: this.structures,
+      mines: this.mines,
+      activeVortices: this.activeVortices,
+      effects: this.effects,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      credits: this.credits,
+      houseCredits: this.houseCredits,
+      map: this.map,
+      evaMessages: this.evaMessages,
+      isThieved: this.isThieved,
+      isAllied: (a, b) => this.isAllied(a, b),
+      entitiesAllied: (a, b) => this.entitiesAllied(a, b),
+      isPlayerControlled: (e) => this.isPlayerControlled(e),
+      playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
+      playSound: (n) => this.audio.play(n as SoundName),
+      movementSpeed: (e) => this.movementSpeed(e),
+      damageEntity: (t, a, w) => this.damageEntity(t, a, w as WarheadType),
+      damageStructure: (s, d) => this.damageStructure(s, d),
+      addCredits: (a, b) => this.addCredits(a, b),
+      addEntity: (e) => { this.entities.push(e); this.entityById.set(e.id, e); },
+      screenShake: this.renderer.screenShake,
+    };
+  }
+
+  /** Run special units function with state sync */
+  private _runSpecialUnits<T>(fn: (ctx: SpecialUnitsContext) => T): T {
+    const ctx = this._specialUnitsCtx;
+    const result = fn(ctx);
+    this.credits = ctx.credits;
+    this.isThieved = ctx.isThieved;
+    this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
+    return result;
+  }
+
+  private get _superweaponCtx(): SuperweaponContext {
+    return {
+      structures: this.structures,
+      entities: this.entities,
+      entityById: this.entityById,
+      superweapons: this.superweapons,
+      effects: this.effects,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      powerProduced: this.powerProduced,
+      powerConsumed: this.powerConsumed,
+      killCount: this.killCount,
+      lossCount: this.lossCount,
+      map: this.map,
+      gapGeneratorCells: this.gapGeneratorCells,
+      sonarSpiedTarget: this.sonarSpiedTarget,
+      nukePendingTarget: this.nukePendingTarget,
+      nukePendingTick: this.nukePendingTick,
+      nukePendingSource: this.nukePendingSource,
+      isAllied: (a, b) => this.isAllied(a, b),
+      isPlayerControlled: (e) => this.isPlayerControlled(e),
+      pushEva: (t) => this.pushEva(t),
+      playSound: (n) => this.audio.play(n as SoundName),
+      playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
+      damageEntity: (t, a, w) => this.damageEntity(t, a, w as WarheadType),
+      damageStructure: (s, d) => this.damageStructure(s, d),
+      addEntity: (e) => { this.entities.push(e); this.entityById.set(e.id, e); },
+      aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
+      getWarheadMult: (w, a) => this.getWarheadMult(w as WarheadType, a as ArmorType),
+      cameraX: this.camera.x,
+      cameraY: this.camera.y,
+      cameraViewWidth: this.camera.viewWidth,
+      screenShake: this.renderer.screenShake,
+      screenFlash: this.renderer.screenFlash,
+    };
+  }
+
+  /** Run superweapon function with state sync */
+  private _runSuperweapon<T>(fn: (ctx: SuperweaponContext) => T): T {
+    const ctx = this._superweaponCtx;
+    const result = fn(ctx);
+    this.killCount = ctx.killCount;
+    this.lossCount = ctx.lossCount;
+    this.nukePendingTarget = ctx.nukePendingTarget;
+    this.nukePendingTick = ctx.nukePendingTick;
+    this.nukePendingSource = ctx.nukePendingSource;
+    this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
+    this.renderer.screenFlash = Math.max(this.renderer.screenFlash, ctx.screenFlash);
+    return result;
+  }
+
+  private get _productionCtx(): ProductionContext {
+    return {
+      structures: this.structures,
+      entities: this.entities,
+      entityById: this.entityById,
+      credits: this.credits,
+      playerHouse: this.playerHouse,
+      playerFaction: this.playerFaction,
+      playerTechLevel: this.playerTechLevel,
+      baseDiscovered: this.baseDiscovered,
+      scenarioProductionItems: this.scenarioProductionItems,
+      productionQueue: this.productionQueue,
+      pendingPlacement: this.pendingPlacement,
+      wallPlacementPrepaid: this.wallPlacementPrepaid,
+      map: this.map,
+      tick: this.tick,
+      powerProduced: this.powerProduced,
+      powerConsumed: this.powerConsumed,
+      builtUnitTypes: this.builtUnitTypes,
+      builtInfantryTypes: this.builtInfantryTypes,
+      builtAircraftTypes: this.builtAircraftTypes,
+      rallyPoints: this.rallyPoints,
+      isAllied: (a, b) => this.isAllied(a, b),
+      hasBuilding: (t) => this.hasBuilding(t),
+      playSound: (n) => this.audio.play(n as SoundName),
+      playEva: (n) => this.playEva(n as SoundName),
+      addCredits: (a, b) => this.addCredits(a, b),
+      addEntity: (e) => { this.entities.push(e); this.entityById.set(e.id, e); },
+      findPassableSpawn: (cx, cy, scx, scy, fw, fh) => this.findPassableSpawn(cx, cy, scx, scy, fw, fh),
+    };
+  }
+
+  /** Run production function with state sync */
+  private _runProduction<T>(fn: (ctx: ProductionContext) => T): T {
+    const ctx = this._productionCtx;
+    const result = fn(ctx);
+    this.credits = ctx.credits;
+    this.pendingPlacement = ctx.pendingPlacement;
+    this.wallPlacementPrepaid = ctx.wallPlacementPrepaid;
+    return result;
   }
 
   /** Load assets and start a scenario */
@@ -1083,30 +1418,12 @@ export class Game {
       this.processTriggers();
     }
 
-    // RP3: Repair structures (C++ rules.cpp:228-229 RepairStep, RepairPercent) — 14 tick interval
+    // RP3: Repair structures — delegates to repairSell.ts (14 tick interval)
     if (this.tick % 14 === 0) {
-      for (const idx of this.repairingStructures) {
-        const s = this.structures[idx];
-        if (!s || !s.alive || s.hp >= s.maxHp || s.sellProgress !== undefined) {
-          this.repairingStructures.delete(idx);
-          continue;
-        }
-        const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
-        const repairCostPerStep = prodItem ? Math.ceil((prodItem.cost * REPAIR_PERCENT) / (s.maxHp / REPAIR_STEP)) : 1;
-        if (this.credits < repairCostPerStep) {
-          // RP5: cancel repair on insufficient funds (C++ parity — player must re-initiate)
-          this.repairingStructures.delete(idx);
-          this.playEva('eva_insufficient_funds');
-          continue;
-        }
-        this.credits -= repairCostPerStep;
-        s.hp = Math.min(s.maxHp, s.hp + REPAIR_STEP);
-        this.audio.play('repair');
-      }
+      this._runRepairSell(ctx => _tickRepairs(ctx));
     }
 
     // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 60 ticks (~4 seconds)
-    // C++ building.cpp SelfHealing — same rate as other self-healing buildings (once per slow cycle)
     if (this.tick % 60 === 0) {
       for (const s of this.structures) {
         if (s.alive && s.type === 'QUEE' && s.hp < s.maxHp) {
@@ -1115,65 +1432,9 @@ export class Game {
       }
     }
 
-    // Service Depot (FIX): dock-based repair + rearm — one vehicle at a time, costs credits
-    // C++ parity: repair tick interval ~14 ticks (matches building self-repair rate).
-    // REPAIR_STEP (7 HP) per tick stays the same; only interval changed from 3 to 14.
+    // Service Depot — delegates to repairSell.ts (14 tick interval)
     if (this.tick % 14 === 0) {
-      for (const s of this.structures) {
-        if (!s.alive || s.type !== 'FIX') continue;
-        if (!this.isAllied(s.house, this.playerHouse)) continue;
-        const sx = s.cx * CELL_SIZE + CELL_SIZE;
-        const sy = s.cy * CELL_SIZE + CELL_SIZE;
-        // Find ONE docked vehicle (closest damaged OR depleted vehicle within 1 cell of depot center)
-        let docked: Entity | null = null;
-        let bestDist = Infinity;
-        for (const e of this.entities) {
-          if (!e.alive || !this.isPlayerControlled(e)) continue;
-          if (e.stats.isInfantry) continue; // depot only services vehicles
-          const needsRepair = e.hp < e.maxHp;
-          const needsRearm = e.maxAmmo > 0 && e.ammo < e.maxAmmo;
-          if (!needsRepair && !needsRearm) continue;
-          const dist = worldDist({ x: sx, y: sy }, e.pos);
-          if (dist < 1.5 && dist < bestDist) { // worldDist returns cells
-            docked = e;
-            bestDist = dist;
-          }
-        }
-        if (docked) {
-          const needsRepair = docked.hp < docked.maxHp;
-          if (needsRepair) {
-            // Repair cost per step: same formula as building repair
-            const unitCost = this.scenarioProductionItems.find(p => p.type === docked!.type)?.cost ?? 400;
-            const repairCost = Math.ceil((unitCost * REPAIR_PERCENT) / (docked.maxHp / REPAIR_STEP));
-            if (this.credits >= repairCost) {
-              this.credits -= repairCost;
-              docked.hp = Math.min(docked.maxHp, docked.hp + REPAIR_STEP);
-              // Visual spark effect on each repair tick
-              this.effects.push({
-                type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
-                frame: 0, maxFrames: EXPLOSION_FRAMES['piff'] ?? 4, size: 3, sprite: 'piff', spriteStart: 0,
-              });
-            } else {
-              // C++ parity: cancel repair when insufficient funds (player must re-initiate)
-              // Eject unit from depot pad so it won't be auto-repaired next tick
-              docked.mission = Mission.GUARD;
-              docked.moveTarget = {
-                x: docked.pos.x + CELL_SIZE * 3,
-                y: docked.pos.y + CELL_SIZE * 3,
-              };
-            }
-          }
-          // C++ parity: service depot reloads ammo (ReloadRate=.04 min = 36 ticks per ammo)
-          // Rearm happens alongside repair, free of charge
-          if (docked.maxAmmo > 0 && docked.ammo < docked.maxAmmo) {
-            docked.rearmTimer = (docked.rearmTimer ?? 0) - 1;
-            if (docked.rearmTimer <= 0) {
-              docked.ammo++;
-              docked.rearmTimer = 36; // C++ ReloadRate=.04 min → 0.04 × 60 × 15 = 36 ticks
-            }
-          }
-        }
-      }
+      this._runRepairSell(ctx => _tickServiceDepot(ctx));
     }
 
     // Defensive structure auto-fire
@@ -1413,60 +1674,14 @@ export class Game {
     this.checkVictoryConditions();
   }
 
-  /** Update fog of war based on player unit and structure positions.
-   *  C++ TechnoClass::Sight_Range (techno.cpp): sight is reduced to 1 cell
-   *  when HP drops below ConditionRed (25% HP) — damaged sensors/optics. */
+  /** Update fog of war — delegates to fog.ts */
   private updateFogOfWar(): void {
-    if (this.fogDisabled) {
-      this.map.revealAll();
-      return;
-    }
-    const units: Array<{x: number; y: number; sight: number}> = [];
-    // Player units — apply damaged sight reduction (C++ TechnoClass::Sight_Range)
-    for (const e of this.entities) {
-      if (e.alive && e.isPlayerUnit) {
-        const sight = (e.hp / e.maxHp) < CONDITION_RED ? 1 : e.stats.sight;
-        units.push({ x: e.pos.x, y: e.pos.y, sight });
-      }
-    }
-    // Player structures (defense buildings get 7, others get 5)
-    // Also apply damaged sight reduction when HP < ConditionRed
-    const DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'SAM', 'PBOX', 'GAP', 'AGUN']);
-    for (const s of this.structures) {
-      if (s.alive && this.isAllied(s.house, this.playerHouse)) {
-        const baseSight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
-        const sight = (s.hp / s.maxHp) < CONDITION_RED ? 1 : baseSight;
-        const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
-        const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
-        units.push({ x: wx, y: wy, sight });
-      }
-    }
-    this.map.updateFogOfWar(units);
-
-    // Destroyer sub detection — anti-sub units reveal cloaked subs within sight range
-    this.updateSubDetection();
+    _updateFogOfWar(this._fogCtx);
   }
 
-  /** Destroyers (isAntiSub) detect and force-reveal cloaked subs within sight range */
+  /** Sub detection — delegates to fog.ts */
   private updateSubDetection(): void {
-    for (const dd of this.entities) {
-      if (!dd.alive || !dd.stats.isAntiSub) continue;
-      const sight = dd.stats.sight;
-      for (const sub of this.entities) {
-        if (!sub.alive || !sub.stats.isCloakable) continue;
-        if (this.entitiesAllied(dd, sub)) continue;
-        if (sub.cloakState !== CloakState.CLOAKED && sub.cloakState !== CloakState.CLOAKING) continue;
-        const dist = worldDist(dd.pos, sub.pos);
-        if (dist <= sight) {
-          // Force uncloak and set sonar pulse timer to prevent recloak
-          sub.sonarPulseTimer = SONAR_PULSE_DURATION;
-          if (sub.cloakState === CloakState.CLOAKED || sub.cloakState === CloakState.CLOAKING) {
-            sub.cloakState = CloakState.UNCLOAKING;
-            sub.cloakTimer = CLOAK_TRANSITION_FRAMES;
-          }
-        }
-      }
-    }
+    _updateSubDetection(this._fogCtx);
   }
 
   /** Check if a screen click is on the minimap; if so, scroll camera there */
@@ -3311,33 +3526,9 @@ export class Game {
    *  the crushable unit dies instantly. Only crusher vehicles crush; only crushable targets are affected.
    *  Infantry and ants are crushable; vehicles are not. The crusher does NOT stop — it drives through.
    *  C++ checks IsAFriend() — friendly/allied infantry are NOT crushed. */
+  /** Vehicle crush — delegates to combat.ts */
   private checkVehicleCrush(vehicle: Entity): void {
-    const vc = vehicle.cell;
-    for (const other of this.entities) {
-      if (!other.alive || other.id === vehicle.id) continue;
-      if (!other.stats.crushable) continue; // only crushable targets (infantry, ants)
-      if (this.isAllied(vehicle.house, other.house)) continue; // C++ IsAFriend — don't crush allies
-      const oc = other.cell;
-      if (oc.cx === vc.cx && oc.cy === vc.cy) {
-        this.damageEntity(other, other.hp + 10, 'Super'); // instant kill, always die2
-        vehicle.creditKill();
-        this.effects.push({
-          type: 'blood', x: other.pos.x, y: other.pos.y,
-          frame: 0, maxFrames: 6, size: 4, sprite: 'piffpiff', spriteStart: 0,
-        });
-        // Use appropriate death sound based on unit type
-        const crushSound = other.isAnt ? 'die_ant' : 'die_infantry';
-        this.playSoundAt(crushSound, other.pos.x, other.pos.y);
-        this.map.addDecal(oc.cx, oc.cy, 3, 0.3);
-        if (this.isPlayerControlled(vehicle)) this.killCount++;
-        else {
-          this.lossCount++;
-          this.playEva('eva_unit_lost');
-          const alertCell = other.cell;
-          this.minimapAlert(alertCell.cx, alertCell.cy);
-        }
-      }
-    }
+    this._runCombat(ctx => _checkVehicleCrush(ctx, vehicle));
   }
 
   /** Check if a mission represents an idle/guard state (GUARD or AREA_GUARD) */
@@ -4662,132 +4853,7 @@ export class Game {
    *  move toward them, and heal when adjacent. Medics are non-combat units
    *  and never attack enemies. They flee when frightened (fear/prone system). */
   private updateMedic(entity: Entity): void {
-    // Tick down heal cooldown every frame (not rate-limited by scan delay)
-    if (entity.attackCooldown > 0) {
-      entity.attackCooldown--;
-    }
-
-    // Medics flee when frightened (C++ infantry.cpp fear system) — run from nearest enemy
-    if (entity.fear >= Entity.FEAR_SCARED) {
-      let nearestEnemyDist = Infinity;
-      let nearestEnemyPos: WorldPos | null = null;
-      for (const other of this.entities) {
-        if (!other.alive || this.entitiesAllied(entity, other)) continue;
-        const dist = worldDist(entity.pos, other.pos);
-        if (dist < entity.stats.sight && dist < nearestEnemyDist) {
-          nearestEnemyDist = dist;
-          nearestEnemyPos = other.pos;
-        }
-      }
-      if (nearestEnemyPos) {
-        // Flee in opposite direction
-        const dx = entity.pos.x - nearestEnemyPos.x;
-        const dy = entity.pos.y - nearestEnemyPos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const fleeX = entity.pos.x + (dx / dist) * CELL_SIZE * 3;
-        const fleeY = entity.pos.y + (dy / dist) * CELL_SIZE * 3;
-        entity.animState = AnimState.WALK;
-        entity.moveToward({ x: fleeX, y: fleeY }, this.movementSpeed(entity));
-        entity.healTarget = null; // drop heal target when fleeing
-        return;
-      }
-    }
-
-    // Validate existing heal target: must still be alive, friendly infantry, damaged, and in range
-    if (entity.healTarget) {
-      const ht = entity.healTarget;
-      if (!ht.alive || ht.hp >= ht.maxHp ||
-          !this.isAllied(entity.house, ht.house) || !ht.stats.isInfantry ||
-          ht.id === entity.id) {
-        entity.healTarget = null;
-      }
-    }
-
-    // Scan for heal target (rate-limited by scan delay)
-    const healScanDelay = entity.stats.scanDelay ?? 15;
-    if (!entity.healTarget && this.tick - entity.lastGuardScan >= healScanDelay) {
-      entity.lastGuardScan = this.tick;
-
-      let bestTarget: Entity | null = null;
-      let lowestHpRatio = 1.0;
-      let bestDist = Infinity;
-      const healScanRange = entity.stats.sight * 1.5; // C++ sight * 1.5 for medic search
-
-      for (const other of this.entities) {
-        if (!other.alive || other.id === entity.id) continue;
-        if (!this.isAllied(entity.house, other.house)) continue;
-        if (!other.stats.isInfantry) continue;
-        if (other.hp >= other.maxHp) continue;
-        // Don't heal ants (they are infantry-like but not player infantry)
-        if (other.isAnt) continue;
-        const dist = worldDist(entity.pos, other.pos);
-        if (dist > healScanRange) continue;
-        // Prefer most damaged unit (lowest HP ratio), then closest
-        const hpRatio = other.hp / other.maxHp;
-        if (hpRatio < lowestHpRatio || (hpRatio === lowestHpRatio && dist < bestDist)) {
-          lowestHpRatio = hpRatio;
-          bestDist = dist;
-          bestTarget = other;
-        }
-      }
-
-      if (bestTarget) {
-        entity.healTarget = bestTarget;
-      }
-    }
-
-    // Act on heal target
-    if (entity.healTarget) {
-      const ht = entity.healTarget;
-      const dist = worldDist(entity.pos, ht.pos);
-
-      if (dist <= 1.5) {
-        // Adjacent — perform heal
-        entity.animState = AnimState.ATTACK; // heal animation (MedicDoControls fire anim)
-        entity.desiredFacing = directionTo(entity.pos, ht.pos);
-        entity.tickRotation();
-
-        if (entity.attackCooldown <= 0) {
-          // Heal amount: use weapon damage (negative = heal) or default 5 HP per tick
-          const healWeapon = entity.weapon;
-          const healAmount = healWeapon ? Math.abs(healWeapon.damage) : 5;
-          const healRof = healWeapon?.rof ?? 15;
-
-          const prevHp = ht.hp;
-          ht.hp = Math.min(ht.maxHp, ht.hp + healAmount);
-          const healed = ht.hp - prevHp;
-          entity.attackCooldown = healRof;
-
-          if (healed > 0) {
-            this.playSoundAt('heal', ht.pos.x, ht.pos.y);
-            // Green heal sparkle on target
-            this.effects.push({
-              type: 'muzzle', x: ht.pos.x, y: ht.pos.y - 4,
-              frame: 0, maxFrames: 6, size: 4, muzzleColor: '80,255,80',
-            });
-            // Floating "+HP" text effect
-            this.effects.push({
-              type: 'text', x: ht.pos.x, y: ht.pos.y - 8,
-              frame: 0, maxFrames: 30, size: 0,
-              text: `+${healed}`, textColor: 'rgba(80,255,80,1)',
-            });
-          }
-
-          // Check if target is fully healed — clear and scan for next
-          if (ht.hp >= ht.maxHp) {
-            entity.healTarget = null;
-          }
-        }
-      } else {
-        // Move toward heal target
-        entity.animState = AnimState.WALK;
-        entity.moveToward(ht.pos, this.movementSpeed(entity));
-      }
-      return;
-    }
-
-    // No heal target — idle
-    entity.animState = AnimState.IDLE;
+    this._runSpecialUnits(ctx => _updateMedic(ctx, entity));
   }
 
   /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
@@ -5797,47 +5863,17 @@ export class Game {
     return true;
   }
 
-  /** Fire weapon at entity target (helper for aircraft) — uses full damage pipeline */
+  /** Fire weapon at entity target — delegates to combat.ts */
   private fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void {
-    const houseBias = this.getFirepowerBias(attacker.house);
-    const whMult = this.getWarheadMult(weapon.warhead, target.stats.armor);
-    const damage = modifyDamage(weapon.damage, weapon.warhead, target.stats.armor, 0, houseBias, whMult, this.getWarheadMeta(weapon.warhead).spreadFactor);
-    const killed = this.damageEntity(target, damage, weapon.warhead, attacker);
-    if (killed) {
-      attacker.creditKill();
-      this.handleUnitDeath(target, {
-        screenShake: 8, explosionSize: 16, debris: true,
-        decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
-        explodeLgSound: false,
-        attackerIsPlayer: this.isPlayerControlled(attacker),
-        trackLoss: true,
-      });
-    }
-    // Fire effect
-    this.effects.push({
-      type: 'muzzle',
-      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
-      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
-    });
+    this._runCombat(ctx => _fireWeaponAt(ctx, attacker, target, weapon));
   }
 
-  /** Fire weapon at structure target (helper for aircraft) — uses full damage pipeline */
+  /** Fire weapon at structure target — delegates to combat.ts */
   private fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void {
-    const wh = (weapon.warhead ?? 'HE') as WarheadType;
-    const houseBias = this.getFirepowerBias(attacker.house);
-    const whMult = this.getWarheadMult(wh, 'concrete');
-    const damage = modifyDamage(weapon.damage, wh, 'concrete', 0, houseBias, whMult, this.getWarheadMeta(wh).spreadFactor);
-    const destroyed = this.damageStructure(s, damage);
-    if (destroyed) attacker.creditKill();
-    this.effects.push({
-      type: 'muzzle',
-      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
-      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
-    });
+    this._runCombat(ctx => _fireWeaponAtStructure(ctx, attacker, s, weapon));
   }
 
-  /** Shared death aftermath — explosion, debris, decal, sound, kill/loss tracking.
-   *  Parameterized to handle the 4 death contexts (direct, defense, projectile, splash). */
+  /** Unit death aftermath — delegates to combat.ts */
   private handleUnitDeath(victim: Entity, opts: {
     screenShake: number;
     explosionSize: number;
@@ -5848,36 +5884,7 @@ export class Game {
     trackLoss: boolean;
     friendlyFireLoss?: boolean;
   }): void {
-    const kx = victim.pos.x;
-    const ky = victim.pos.y;
-    this.effects.push({ type: 'explosion', x: kx, y: ky, frame: 0, maxFrames: 18,
-      size: opts.explosionSize, sprite: 'fball1', spriteStart: 0 });
-    if (opts.debris && !victim.stats.isInfantry) {
-      this.effects.push({ type: 'debris', x: kx, y: ky, frame: 0, maxFrames: 12, size: 18 });
-    }
-    this.renderer.screenShake = Math.max(this.renderer.screenShake, opts.screenShake);
-    if (opts.decal) {
-      const tc = worldToCell(kx, ky);
-      this.map.addDecal(tc.cx, tc.cy,
-        victim.stats.isInfantry ? opts.decal.infantry : opts.decal.vehicle, opts.decal.opacity);
-    }
-    if (victim.isAnt) this.playSoundAt('die_ant', kx, ky);
-    else if (victim.stats.isInfantry) this.playSoundAt('die_infantry', kx, ky);
-    else this.playSoundAt('die_vehicle', kx, ky);
-    if (opts.explodeLgSound) this.playSoundAt('explode_lg', kx, ky);
-    if (opts.attackerIsPlayer) this.killCount++;
-    if (opts.trackLoss && this.isPlayerControlled(victim)) {
-      this.lossCount++;
-      this.playEva('eva_unit_lost');
-      const tc = worldToCell(kx, ky);
-      this.minimapAlert(tc.cx, tc.cy);
-    }
-    if (opts.friendlyFireLoss) {
-      this.lossCount++;
-      this.playEva('eva_unit_lost');
-      const tc = worldToCell(kx, ky);
-      this.minimapAlert(tc.cx, tc.cy);
-    }
+    this._runCombat(ctx => _handleUnitDeath(ctx, victim, opts));
   }
 
   private threatScore(scanner: Entity, target: Entity, dist: number): number {
@@ -5908,60 +5915,29 @@ export class Game {
   }
 
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
-    const idx = armorIndex(armor);
-    const overridden = this.warheadOverrides[warhead];
-    if (overridden) return overridden[idx] ?? 1;
-    return WARHEAD_VS_ARMOR[warhead]?.[idx] ?? 1;
+    return _getWarheadMult(warhead, armor, this.warheadOverrides);
   }
 
   private getWarheadMeta(warhead: WarheadType): WarheadMeta {
-    return this.scenarioWarheadMeta[warhead] ?? WARHEAD_META[warhead] ?? { spreadFactor: 1 };
+    return _getWarheadMeta(warhead, this.scenarioWarheadMeta);
   }
 
   private getWarheadProps(warhead: WarheadType | string | undefined): WarheadProps | undefined {
-    if (!warhead) return undefined;
-    return this.scenarioWarheadProps[warhead] ?? WARHEAD_PROPS[warhead as WarheadType];
+    return _getWarheadProps(warhead as WarheadType, this.scenarioWarheadProps);
   }
 
   private damageEntity(target: Entity, amount: number, warhead: WarheadType, attacker?: Entity): boolean {
-    const killed = target.takeDamage(amount, warhead, attacker, this.getWarheadProps(warhead));
-    if (target.triggerName) this.attackedTriggerNames.add(target.triggerName);
-    // AI scatter: idle AI units dodge to random adjacent cell when hit (IQ >= 2)
-    if (!killed && target.alive) this.aiScatterOnDamage(target);
-    return killed;
+    return this._runCombat(ctx => _damageEntity(ctx, target, amount, warhead, attacker));
   }
 
-  /** AI scatter — idle AI units move to random adjacent cell when attacked (IQ >= 2, C++ techno.cpp) */
+  /** AI scatter — delegates to combat.ts */
   private aiScatterOnDamage(entity: Entity): void {
-    if (entity.isPlayerUnit) return;
-    if (entity.mission !== Mission.GUARD && entity.mission !== Mission.AREA_GUARD) return;
-
-    const state = this.aiStates.get(entity.house);
-    if (!state || state.iq < 2) return;
-
-    // Move to random adjacent cell
-    const dx = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
-    const dy = Math.floor(Math.random() * 3) - 1;
-    if (dx === 0 && dy === 0) return;
-
-    const targetX = entity.pos.x + dx * CELL_SIZE;
-    const targetY = entity.pos.y + dy * CELL_SIZE;
-
-    // Check passability
-    const tcx = Math.floor(targetX / CELL_SIZE);
-    const tcy = Math.floor(targetY / CELL_SIZE);
-    if (!this.map.isPassable(tcx, tcy)) return;
-
-    entity.moveTarget = { x: targetX, y: targetY };
-    entity.mission = Mission.MOVE;
+    _aiScatterOnDamage(this._combatCtx, entity);
   }
 
-  /** Damage-based speed reduction (C++ drive.cpp:1157-1161).
-   *  Single tier only: <=50% HP = 75% speed (ConditionYellow). C++ has no ConditionRed speed tier. */
+  /** Damage-based speed reduction — delegates to combat.ts */
   private damageSpeedFactor(entity: Entity): number {
-    const ratio = entity.hp / entity.maxHp;
-    if (ratio <= CONDITION_YELLOW) return 0.75; // ConditionYellow (50%): three-quarters speed
-    return 1.0;
+    return _damageSpeedFactor(entity);
   }
 
   /** M1+M2: Compute movement speed with terrain and damage multipliers.
@@ -6064,19 +6040,9 @@ export class Game {
     return this.isAllied(e.house, this.playerHouse);
   }
 
-  /** Trigger retaliation: a damaged unit without a target attacks the shooter.
-   *  In original RA, idle/moving units always counter-attack when hit. */
+  /** Trigger retaliation — delegates to combat.ts */
   private triggerRetaliation(victim: Entity, attacker: Entity): void {
-    if (!victim.alive || !attacker.alive) return;
-    if (this.entitiesAllied(victim, attacker)) return; // no friendly retaliation
-    if (!victim.weapon) return; // unarmed units can't retaliate
-    // Only retarget if no current target or current target is dead
-    if (victim.target && victim.target.alive) return;
-    // Don't interrupt scripted team missions (except HUNT which already attacks)
-    if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
-    victim.target = attacker;
-    victim.mission = Mission.ATTACK;
-    victim.animState = AnimState.ATTACK;
+    _triggerRetaliation(this._combatCtx, victim, attacker);
   }
 
   /** Infantry scatter: push infantry slightly away from attacker on direct hit.
@@ -6095,222 +6061,25 @@ export class Game {
     }
   }
 
-  /** Launch a projectile with travel time — damage is deferred until arrival */
+  /** Launch a projectile — delegates to combat.ts */
   private launchProjectile(
     attacker: Entity, target: Entity | null, weapon: WeaponStats,
     damage: number, impactX: number, impactY: number, directHit: boolean,
   ): void {
-    const dist = worldDist(attacker.pos, { x: impactX, y: impactY });
-    const speed = weapon.projectileSpeed!;
-    const travelFrames = Math.max(1, Math.round(dist / speed));
-
-    this.inflightProjectiles.push({
-      attackerId: attacker.id,
-      targetId: target?.id ?? -1,
-      weapon,
-      damage,
-      speed,
-      travelFrames,
-      currentFrame: 0,
-      directHit,
-      impactX,
-      impactY,
-      attackerIsPlayer: this.isPlayerControlled(attacker),
-    });
+    _launchProjectile(this._combatCtx, attacker, target, weapon, damage, impactX, impactY, directHit);
   }
 
-  /** Advance in-flight projectiles; apply damage + splash on arrival */
+  /** Advance in-flight projectiles — delegates to combat.ts */
   private updateInflightProjectiles(): void {
-    const arrived: InflightProjectile[] = [];
-
-    for (const proj of this.inflightProjectiles) {
-      proj.currentFrame++;
-
-      // C9/C10: Homing projectile tracking (C++ bullet.cpp:368,517)
-      // projectileROT = homing turn rate. C10: homing updates every other frame.
-      const target = this.entityById.get(proj.targetId);
-      if (target && target.alive) {
-        const rot = proj.weapon.projectileROT ?? 0;
-        if (rot > 0) {
-          // C10: Only update homing every other frame (C++ bullet.cpp:368)
-          if (proj.currentFrame % 2 === 0) {
-            // Homing: strong tracking based on ROT (higher ROT = better tracking)
-            const trackFactor = Math.min(1.0, rot * 0.15);
-            proj.impactX += (target.pos.x - proj.impactX) * trackFactor;
-            proj.impactY += (target.pos.y - proj.impactY) * trackFactor;
-          }
-        }
-        // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
-      }
-
-      if (proj.currentFrame >= proj.travelFrames) {
-        arrived.push(proj);
-      }
-    }
-
-    // Remove arrived projectiles
-    this.inflightProjectiles = this.inflightProjectiles.filter(p => p.currentFrame < p.travelFrames);
-
-    // Apply damage for arrived projectiles
-    for (const proj of arrived) {
-      const target = this.entityById.get(proj.targetId);
-      const attacker = this.entityById.get(proj.attackerId);
-
-      if (proj.directHit && target && target.alive) {
-        const killed = this.damageEntity(target, proj.damage, proj.weapon.warhead, attacker);
-
-        if (!killed && attacker) {
-          this.triggerRetaliation(target, attacker);
-          this.scatterInfantry(target, { x: proj.impactX, y: proj.impactY });
-        }
-
-        if (killed) {
-          if (attacker) attacker.creditKill();
-          this.handleUnitDeath(target, {
-            screenShake: 8, explosionSize: 16, debris: true,
-            decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
-            explodeLgSound: false,
-            attackerIsPlayer: proj.attackerIsPlayer,
-            trackLoss: true,
-          });
-        }
-      }
-
-      // Splash damage at impact point
-      if (proj.weapon.splash && proj.weapon.splash > 0) {
-        const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? this.playerHouse : House.USSR);
-        this.applySplashDamage(
-          { x: proj.impactX, y: proj.impactY }, proj.weapon,
-          proj.directHit && target ? target.id : -1,
-          attackerHouse, attacker ?? undefined,
-        );
-      }
-
-      // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-      const projImpactSprite = this.getWarheadProps(proj.weapon.warhead)?.explosionSet ?? 'veh-hit1';
-      // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
-      const isScud = proj.weapon.name === 'SCUD';
-      this.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
-        frame: 0, maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 });
-      if (isScud) {
-        this.renderer.screenShake = Math.max(this.renderer.screenShake, 12);
-        this.playSoundAt('building_explode', proj.impactX, proj.impactY);
-      }
-    }
+    this._runCombat(ctx => _updateInflightProjectiles(ctx));
   }
 
-  /** Apply AOE splash damage to entities near an impact point.
-   *  CF2/CF3: Uses fixed 1.5-cell radius and C++ inverse-proportional falloff via modifyDamage. */
+  /** Apply AOE splash damage — delegates to combat.ts */
   private applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
     primaryTargetId: number, attackerHouse: House, attacker?: Entity,
   ): void {
-    // CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2)
-    const splashRange = Game.SPLASH_RADIUS;
-    const splashRangePixels = splashRange * CELL_SIZE;
-    const attackerIsPlayerControlled = this.isAllied(attackerHouse, this.playerHouse);
-
-    for (const other of this.entities) {
-      if (!other.alive || other.id === primaryTargetId) continue;
-      // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
-      const isFriendly = this.isAllied(other.house, attackerHouse);
-      const distCells = worldDist(center, other.pos);
-      if (distCells > splashRange) continue;
-
-      // CF2: C++ inverse-proportional falloff via modifyDamage (combat.cpp:106-125)
-      const distPixels = distCells * CELL_SIZE;
-      const whMult = this.getWarheadMult(weapon.warhead, other.stats.armor);
-      const splashDmg = modifyDamage(weapon.damage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, this.getWarheadMeta(weapon.warhead).spreadFactor);
-      if (splashDmg <= 0) continue;
-      const killed = this.damageEntity(other, splashDmg, weapon.warhead, attacker);
-
-      // Retaliation from splash damage
-      if (!killed && attacker) {
-        this.triggerRetaliation(other, attacker);
-      }
-
-      // Infantry scatter: push nearby infantry away from explosion
-      if (other.alive && other.stats.isInfantry && distCells < splashRange * 0.8) {
-        const angle = Math.atan2(other.pos.y - center.y, other.pos.x - center.x);
-        const pushDist = CELL_SIZE * (1 - distCells / splashRange);
-        const scatterX = other.pos.x + Math.cos(angle) * pushDist;
-        const scatterY = other.pos.y + Math.sin(angle) * pushDist;
-        // Only scatter to passable terrain
-        const sc = worldToCell(scatterX, scatterY);
-        if (this.map.isPassable(sc.cx, sc.cy)) {
-          other.pos.x = scatterX;
-          other.pos.y = scatterY;
-        }
-      }
-
-      if (killed) {
-        if (!isFriendly && attacker) attacker.creditKill();
-        this.handleUnitDeath(other, {
-          screenShake: 4, explosionSize: 12, debris: false,
-          decal: null,
-          explodeLgSound: false,
-          attackerIsPlayer: !isFriendly && attackerIsPlayerControlled,
-          trackLoss: !isFriendly,
-          friendlyFireLoss: isFriendly && attackerIsPlayerControlled,
-        });
-      }
-    }
-
-    // Terrain destruction: large explosions (splash >= 1.5) can destroy trees, walls, and ore in the blast radius
-    const whMeta = this.getWarheadMeta(weapon.warhead);
-    if (splashRange >= 1.5 && weapon.damage >= 30) {
-      const cc = worldToCell(center.x, center.y);
-      const r = Math.ceil(splashRange);
-      for (let dy = -r; dy <= r; dy++) {
-        for (let dx = -r; dx <= r; dx++) {
-          if (dx * dx + dy * dy > splashRange * splashRange) continue;
-          const tx = cc.cx + dx;
-          const ty = cc.cy + dy;
-          if (this.map.getTerrain(tx, ty) === Terrain.TREE) {
-            // 40% chance to destroy tree per explosion
-            if (Math.random() < 0.4) {
-              this.map.setTerrain(tx, ty, Terrain.CLEAR);
-              this.map.clearTreeType(tx, ty);
-              this.map.addDecal(tx, ty, 6, 0.4); // stump/scorch mark
-              this.effects.push({
-                type: 'explosion',
-                x: tx * CELL_SIZE + CELL_SIZE / 2,
-                y: ty * CELL_SIZE + CELL_SIZE / 2,
-                frame: 0, maxFrames: 10, size: 8,
-                sprite: 'piffpiff', spriteStart: 0,
-              });
-            }
-          }
-          // CF8: Wall destruction from splash — warheads with IsWallDestroyer flag (C++ combat.cpp:244-270)
-          if (whMeta.destroysWalls && this.map.getWallType(tx, ty) !== '') {
-            this.map.clearWallType(tx, ty);
-            this.map.addDecal(tx, ty, 4, 0.3); // rubble decal
-            this.effects.push({
-              type: 'explosion',
-              x: tx * CELL_SIZE + CELL_SIZE / 2,
-              y: ty * CELL_SIZE + CELL_SIZE / 2,
-              frame: 0, maxFrames: 8, size: 6,
-              sprite: 'piffpiff', spriteStart: 0,
-            });
-          }
-          // CF9: Ore destruction from splash — warheads with IsTiberiumDestroyer flag (C++ combat.cpp)
-          if (whMeta.destroysOre) {
-            const oreIdx = ty * MAP_CELLS + tx;
-            if (tx >= 0 && tx < MAP_CELLS && ty >= 0 && ty < MAP_CELLS) {
-              const ovl = this.map.overlay[oreIdx];
-              if (ovl >= 0x03 && ovl <= 0x12) {
-                // Reduce ore density by one level; fully depleted if at minimum
-                if (ovl === 0x03 || ovl === 0x0F) {
-                  this.map.overlay[oreIdx] = 0xFF; // fully depleted
-                } else {
-                  this.map.overlay[oreIdx] = ovl - 1;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    this._runCombat(ctx => _applySplashDamage(ctx, center, weapon, primaryTargetId, attackerHouse, attacker));
   }
 
   /** Check cell triggers — fire when player units enter trigger cells */
@@ -6832,20 +6601,9 @@ export class Game {
     this.audio.play('eva_acknowledged');
   }
 
-  /** Reveal map around a specific cell with given radius */
+  /** Reveal map around a specific cell — delegates to fog.ts */
   private revealAroundCell(cx: number, cy: number, radius: number): void {
-    const r2 = radius * radius;
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (dx * dx + dy * dy <= r2) {
-          const rx = cx + dx;
-          const ry = cy + dy;
-          if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
-            this.map.setVisibility(rx, ry, 2);
-          }
-        }
-      }
-    }
+    _revealAroundCell(this.map, cx, cy, radius);
   }
 
   /** Check if a player unit has discovered the base (enables production) */
@@ -7016,14 +6774,7 @@ export class Game {
    *  C++ parity: HouseClass::Adjust_Capacity() — PROC provides 1000, SILO provides 1500.
    *  (C++ building.cpp Capacity(): PROC=1000, SILO=1500) */
   calculateSiloCapacity(): number {
-    let capacity = 0;
-    for (const s of this.structures) {
-      if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
-      if (s.buildProgress !== undefined && s.buildProgress < 1) continue; // under construction
-      if (s.type === 'PROC') capacity += 1000;
-      else if (s.type === 'SILO') capacity += 1500;
-    }
-    return capacity;
+    return _calculateSiloCapacity(this.structures, this.playerHouse, (a, b) => this.isAllied(a, b));
   }
 
   /** Recalculate silo capacity when storage changes.
@@ -7060,8 +6811,7 @@ export class Game {
 
   /** Get effective cost for an item, applying country bonus multiplier */
   getEffectiveCost(item: ProductionItem): number {
-    const bonus = COUNTRY_BONUSES[this.playerHouse] ?? COUNTRY_BONUSES.Neutral;
-    return Math.max(1, Math.round(item.cost * bonus.costMult));
+    return _getEffectiveCost(item, this.playerHouse);
   }
 
   /** Get firepower bias for a house, with ant mission overrides.
@@ -7076,134 +6826,30 @@ export class Game {
 
   /** Get buildable items based on current structures + faction + tech prereqs */
   getAvailableItems(): ProductionItem[] {
-    // No production until player discovers their base
-    if (!this.baseDiscovered) return [];
-    return this.scenarioProductionItems.filter(item => {
-      // Must have primary prerequisite building
-      if (!this.hasBuilding(item.prerequisite)) return false;
-      // Faction filter: player only sees items matching their faction or 'both'
-      if (item.faction !== 'both' && item.faction !== this.playerFaction) return false;
-      // Tech prerequisite (e.g. Artillery needs Radar Dome)
-      if (item.techPrereq && !this.hasBuilding(item.techPrereq)) return false;
-      // TechLevel filter: items above player's scenario tech level are hidden
-      if (item.techLevel !== undefined && (item.techLevel < 0 || item.techLevel > this.playerTechLevel)) return false;
-      return true;
-    });
+    return _getAvailableItems(this._productionCtx);
   }
 
   /** Start building an item (called from sidebar click).
    *  PR3: C++ incremental cost — don't deduct full cost upfront; deduct per-tick during tickProduction.
    *  Players can start building with partial funds; production pauses when broke. */
   startProduction(item: ProductionItem): void {
-    const category = getStripSide(item);
-    const existing = this.productionQueue.get(category);
-    if (existing) {
-      // Already building — queue another of the same item (max 5 total)
-      // Queued items still require full cost upfront (only active build is incremental)
-      if (existing.item.type === item.type && existing.queueCount < 5) {
-        const effectiveCost = this.getEffectiveCost(item);
-        if (this.credits < effectiveCost) {
-          this.playEva('eva_insufficient_funds');
-          return;
-        }
-        this.credits -= effectiveCost;
-        existing.queueCount++;
-      }
-      return;
-    }
-    // PR3: Only check if player has ANY credits (can start building with partial funds)
-    if (this.credits <= 0) {
-      this.playEva('eva_insufficient_funds');
-      return;
-    }
-    this.productionQueue.set(category, { item, progress: 0, queueCount: 1, costPaid: 0 });
-    this.audio.play('eva_building');
+    this._runProduction(ctx => _startProduction(ctx, item));
   }
 
   /** Cancel production in a category — removes one from queue, or cancels active build */
   cancelProduction(category: string): void {
-    const entry = this.productionQueue.get(category);
-    if (!entry) return;
-    const effectiveCost = this.getEffectiveCost(entry.item);
-    if (entry.queueCount > 1) {
-      // Dequeue one — refund full cost of queued item (queued items were paid upfront)
-      entry.queueCount--;
-      this.addCredits(effectiveCost, true);
-    } else {
-      // PR3: Cancel active build — refund costPaid (incremental deduction)
-      this.addCredits(entry.costPaid, true);
-      this.productionQueue.delete(category);
-    }
+    this._runProduction(ctx => _cancelProduction(ctx, category));
   }
 
   /** Advance production queues each tick.
    *  PR3: C++ incremental cost — deducts costPerTick each tick; pauses if insufficient funds. */
   private tickProduction(): void {
-    // Continuous power penalty (C++ parity): multiplier = powerFraction, clamped to [0.5, 1.0]
-    // At 100%+ power: normal speed. At 50% power: 2x slower. Below 50%: capped at 2x slower.
-    let powerMult = 1.0;
-    if (this.powerConsumed > this.powerProduced && this.powerProduced > 0) {
-      const powerFraction = this.powerProduced / this.powerConsumed;
-      powerMult = Math.max(0.5, powerFraction);
-    }
-    for (const [category, entry] of this.productionQueue) {
-      // Check prerequisite still exists
-      if (!this.hasBuilding(entry.item.prerequisite)) {
-        this.cancelProduction(category);
-        continue;
-      }
-      // PR3: Incremental cost deduction — deduct costPerTick each tick
-      const effectiveCost = this.getEffectiveCost(entry.item);
-      const costPerTick = effectiveCost / entry.item.buildTime;
-      const costThisTick = costPerTick; // deduct one tick's worth of cost
-      if (entry.costPaid < effectiveCost) {
-        if (this.credits >= costThisTick) {
-          const deduct = Math.min(costThisTick, effectiveCost - entry.costPaid);
-          this.credits -= deduct;
-          entry.costPaid += deduct;
-        } else {
-          // PR3: Insufficient funds — pause production (don't advance progress)
-          continue;
-        }
-      }
-      // Multi-factory linear speedup (C++ parity): N factories = Nx speed
-      const factoryCount = this.countPlayerBuildings(entry.item.prerequisite);
-      const speedMult = Math.max(1, factoryCount);
-      entry.progress += speedMult * powerMult;
-      if (entry.progress >= entry.item.buildTime) {
-        // Build complete
-        if (entry.item.isStructure) {
-          // Structure: go into placement mode
-          this.pendingPlacement = entry.item;
-          this.wallPlacementPrepaid = WALL_TYPES.has(entry.item.type);
-          this.productionQueue.delete(category);
-          this.audio.play('eva_construction_complete');
-        } else {
-          // Unit: spawn at the producing structure
-          this.spawnProducedUnit(entry.item);
-          this.audio.play('eva_unit_ready');
-          // If more queued, restart for next unit; otherwise remove
-          if (entry.queueCount > 1) {
-            entry.queueCount--;
-            entry.progress = 0;
-            entry.costPaid = 0; // reset for next queued item
-          } else {
-            this.productionQueue.delete(category);
-          }
-        }
-      }
-    }
+    this._runProduction(ctx => _tickProduction(ctx));
   }
 
   /** Count alive player buildings of a given type */
   private countPlayerBuildings(type: string): number {
-    let count = 0;
-    for (const s of this.structures) {
-      if (s.alive && s.type === type && this.isAllied(s.house, this.playerHouse)) {
-        count++;
-      }
-    }
-    return count;
+    return _countPlayerBuildings(this.structures, type, this.playerHouse, (a, b) => this.isAllied(a, b));
   }
 
   /** AI base rebuild — compare alive structures against blueprint, rebuild missing ones.
@@ -7394,77 +7040,7 @@ export class Game {
 
   /** Spawn a produced unit at its factory */
   private spawnProducedUnit(item: ProductionItem): void {
-    const factoryType = item.prerequisite;
-    // Find the factory building
-    let factory: MapStructure | null = null;
-    for (const s of this.structures) {
-      if (s.alive && s.type === factoryType && this.isAllied(s.house, this.playerHouse)) {
-        factory = s;
-        break;
-      }
-    }
-    if (!factory) return;
-
-    const unitType = item.type as UnitType;
-    const unitStats = UNIT_STATS[item.type];
-    const [factW, factH] = STRUCTURE_SIZE[factory.type] ?? [3, 2];
-
-    // Aircraft production: spawn at pad center, docked
-    let spawnX: number, spawnY: number;
-    if (unitStats?.isAircraft) {
-      const [padW, padH] = STRUCTURE_SIZE[factory.type] ?? [2, 2];
-      spawnX = (factory.cx + padW / 2) * CELL_SIZE;
-      spawnY = (factory.cy + padH / 2) * CELL_SIZE;
-      const entity = new Entity(unitType, this.playerHouse, spawnX, spawnY);
-      entity.mission = Mission.GUARD;
-      entity.aircraftState = 'landed';
-      entity.flightAltitude = 0;
-      // Dock at factory
-      for (let i = 0; i < this.structures.length; i++) {
-        if (this.structures[i] === factory) {
-          entity.landedAtStructure = i;
-          factory.dockedAircraft = entity.id;
-          break;
-        }
-      }
-      this.entities.push(entity);
-      this.entityById.set(entity.id, entity);
-      this.builtAircraftTypes.add(item.type);
-      return;
-    }
-
-    // Naval production: spawn vessel at adjacent water cell
-    if (unitStats?.isVessel) {
-      const waterCell = this.map.findAdjacentWaterCell(factory.cx, factory.cy, factW, factH);
-      if (!waterCell) return; // no water cell found — production stalls
-      spawnX = waterCell.cx * CELL_SIZE + CELL_SIZE / 2;
-      spawnY = waterCell.cy * CELL_SIZE + CELL_SIZE / 2;
-    } else {
-      const spawn = this.findPassableSpawn(factory.cx + 1, factory.cy + 2, factory.cx, factory.cy, factW, factH);
-      spawnX = spawn.cx * CELL_SIZE + CELL_SIZE / 2;
-      spawnY = spawn.cy * CELL_SIZE + CELL_SIZE / 2;
-    }
-    const entity = new Entity(unitType, this.playerHouse, spawnX, spawnY);
-    entity.mission = Mission.GUARD;
-    this.entities.push(entity);
-    this.entityById.set(entity.id, entity);
-    // Track built unit types for TEVENT_BUILD_UNIT / TEVENT_BUILD_INFANTRY
-    if (unitStats?.isInfantry) this.builtInfantryTypes.add(item.type);
-    else this.builtUnitTypes.add(item.type);
-
-    // If harvester, set it to auto-harvest
-    if (unitType === UnitType.V_HARV) {
-      entity.harvesterState = 'idle';
-    }
-
-    // Auto-move to rally point if set
-    const rally = this.rallyPoints.get(factoryType);
-    if (rally && unitType !== UnitType.V_HARV) {
-      entity.mission = Mission.MOVE;
-      entity.moveTarget = { x: rally.x, y: rally.y };
-      entity.path = findPath(this.map, entity.cell, worldToCell(rally.x, rally.y), true, entity.isNavalUnit, entity.stats.speedClass);
-      entity.pathIndex = 0;
-    }
+    this._runProduction(ctx => _spawnProducedUnit(ctx, item));
   }
 
   /** Place a completed structure on the map */
@@ -7885,541 +7461,22 @@ export class Game {
 
   /** Scan structures for superweapon buildings, update charge, auto-fire GPS/Sonar */
   updateSuperweapons(): void {
-    const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
-    const activeBuildings = new Set<string>(); // track which sw keys have active buildings
-
-    // Scan structures for superweapon buildings
-    for (let i = 0; i < this.structures.length; i++) {
-      const s = this.structures[i];
-      if (!s.alive || (s.buildProgress !== undefined && s.buildProgress < 1)) continue;
-
-      // Check each superweapon def to see if this structure provides it
-      for (const def of Object.values(SUPERWEAPON_DEFS)) {
-        if (s.type !== def.building) continue;
-
-        const key = `${s.house}:${def.type}`;
-        activeBuildings.add(key);
-
-        let state = this.superweapons.get(key);
-        if (!state) {
-          state = {
-            type: def.type,
-            house: s.house,
-            chargeTick: 0,
-            ready: false,
-            structureIndex: i,
-            fired: false,
-          };
-          this.superweapons.set(key, state);
-        }
-        state.structureIndex = i;
-
-        // Charge: increment if building is alive and powered
-        if (!state.ready && !state.fired) {
-          const chargeRate = (def.requiresPower && isLowPower &&
-            this.isAllied(s.house, this.playerHouse)) ? 0.25 : 1;
-          state.chargeTick = Math.min(state.chargeTick + chargeRate, def.rechargeTicks);
-          if (state.chargeTick >= def.rechargeTicks) {
-            state.ready = true;
-            // EVA announcement for player
-            if (this.isAllied(s.house, this.playerHouse)) {
-              this.pushEva(`${def.name} ready`);
-            }
-          }
-        }
-
-        // Auto-fire GPS Satellite (one-shot)
-        if (def.type === SuperweaponType.GPS_SATELLITE && state.ready && !state.fired) {
-          this.map.revealAll();
-          state.fired = true;
-          state.ready = false;
-          if (this.isAllied(s.house, this.playerHouse)) {
-            this.pushEva('GPS satellite launched');
-            // GPS sweep visual
-            this.effects.push({
-              type: 'marker', x: this.camera.x + this.camera.viewWidth / 2,
-              y: this.camera.y, frame: 0, maxFrames: 60, size: 2,
-              markerColor: 'rgba(80,200,255,0.3)',
-            });
-          }
-        }
-
-        // Auto-fire Sonar Pulse
-        if (def.type === SuperweaponType.SONAR_PULSE && state.ready) {
-          // Reveal all enemy submarines for 450 ticks
-          for (const e of this.entities) {
-            if (!e.alive || !e.stats.isCloakable) continue;
-            if (this.isAllied(e.house, s.house)) continue;
-            e.sonarPulseTimer = SONAR_REVEAL_TICKS;
-          }
-          state.ready = false;
-          state.chargeTick = 0;
-          // AU5: Sonar SFX — play sonar ping sound
-          this.audio.play('cannon'); // sonar ping approximation
-          if (this.isAllied(s.house, this.playerHouse)) {
-            this.pushEva('Sonar pulse activated');
-          }
-        }
-      }
-    }
-
-    // Spy-granted sonar pulse: charge, auto-fire, and maintenance (C++ house.cpp:1605-1627)
-    for (const [key, state] of this.superweapons) {
-      if (state.type !== SuperweaponType.SONAR_PULSE) continue;
-      // Maintenance: check if spied enemy SPEN still exists (C++ house.cpp:1611-1625)
-      const spyHouse = state.house as House;
-      const targetHouse = this.sonarSpiedTarget.get(spyHouse);
-      if (targetHouse !== undefined) {
-        const enemySpenAlive = this.structures.some(s =>
-          s.alive && s.house === targetHouse && s.type === 'SPEN'
-        );
-        if (!enemySpenAlive) {
-          this.superweapons.delete(key);
-          this.sonarSpiedTarget.delete(spyHouse);
-          if (this.isAllied(spyHouse, this.playerHouse)) {
-            this.pushEva('Sonar pulse lost');
-          }
-          continue;
-        }
-      }
-      activeBuildings.add(key); // prevent cleanup from deleting spy-granted sonar
-      if (!state.ready && !state.fired) {
-        const chargeRate = (isLowPower && this.isAllied(state.house as House, this.playerHouse)) ? 0.25 : 1;
-        state.chargeTick = Math.min(state.chargeTick + chargeRate, SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks);
-        if (state.chargeTick >= SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks) {
-          state.ready = true;
-          if (this.isAllied(state.house as House, this.playerHouse)) {
-            this.pushEva('Sonar pulse ready');
-          }
-        }
-      }
-      if (state.ready) {
-        for (const e of this.entities) {
-          if (!e.alive || !e.stats.isCloakable) continue;
-          if (this.isAllied(e.house, state.house as House)) continue;
-          e.sonarPulseTimer = SONAR_REVEAL_TICKS;
-        }
-        state.ready = false;
-        state.chargeTick = 0;
-        this.audio.play('cannon');
-        if (this.isAllied(state.house as House, this.playerHouse)) {
-          this.pushEva('Sonar pulse activated');
-        }
-      }
-    }
-
-    // Remove entries for destroyed buildings (spy-granted sonar exempted above)
-    for (const [key] of this.superweapons) {
-      if (!activeBuildings.has(key)) {
-        this.superweapons.delete(key);
-      }
-    }
-
-    // AI superweapon usage — C++ parity: IQ >= 3 houses fire superweapons automatically
-    for (const [, state] of this.superweapons) {
-      if (!state.ready) continue;
-      if (this.isAllied(state.house as House, this.playerHouse)) continue;
-      const def = SUPERWEAPON_DEFS[state.type];
-      if (!def.needsTarget) continue; // GPS/Sonar auto-fire handled above
-
-      // IQ gate: AI must have IQ >= 3 to use superweapons
-      const aiState = this.aiStates.get(state.house as House);
-      if (aiState && aiState.iq < 3) continue;
-
-      if (state.type === SuperweaponType.NUKE) {
-        // AI nuke: target player's highest-value structure cluster
-        const target = this.findBestNukeTarget(state.house);
-        if (target) {
-          this.activateSuperweapon(SuperweaponType.NUKE, state.house, target);
-        }
-      } else if (state.type === SuperweaponType.IRON_CURTAIN) {
-        // AI Iron Curtain: prefer attacking units, fall back to most expensive unit
-        let bestUnit: Entity | null = null;
-        let bestScore = 0;
-        for (const e of this.entities) {
-          if (!e.alive || e.house !== state.house || e.stats.isInfantry) continue;
-          // Prefer units currently attacking or hunting — they benefit most from invulnerability
-          const missionBonus = (e.mission === Mission.ATTACK || e.mission === Mission.HUNT) ? 2 : 1;
-          const value = (e.stats.cost ?? e.stats.strength) * missionBonus;
-          if (value > bestScore) {
-            bestScore = value;
-            bestUnit = e;
-          }
-        }
-        if (bestUnit) {
-          this.activateSuperweapon(SuperweaponType.IRON_CURTAIN, state.house, bestUnit.pos);
-        }
-      } else if (state.type === SuperweaponType.CHRONOSPHERE) {
-        // AI Chronosphere: teleport best tank near enemy base (IQ >= 3)
-        if (aiState && aiState.iq >= 3) {
-          let bestTank: Entity | null = null;
-          let bestValue = 0;
-          for (const e of this.entities) {
-            if (!e.alive || e.house !== state.house) continue;
-            if (e.stats.isInfantry || e.stats.isAircraft || e.stats.isVessel) continue;
-            if (e.type === UnitType.V_HARV || e.type === UnitType.V_MCV || e.type === UnitType.V_CTNK) continue;
-            const val = e.stats.cost ?? e.stats.strength;
-            if (val > bestValue) { bestValue = val; bestTank = e; }
-          }
-          if (bestTank) {
-            // Find enemy base structure to teleport near
-            let targetPos: WorldPos | null = null;
-            for (const s of this.structures) {
-              if (!s.alive || this.isAllied(s.house, state.house as House)) continue;
-              if (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'PROC') {
-                const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-                targetPos = {
-                  x: (s.cx + w / 2) * CELL_SIZE,
-                  y: (s.cy + h / 2 + 2) * CELL_SIZE, // 2 cells below structure
-                };
-                break;
-              }
-            }
-            if (targetPos) {
-              // Mark the tank as "selected" temporarily so activateSuperweapon can find it
-              bestTank.selected = true;
-              this.activateSuperweapon(SuperweaponType.CHRONOSPHERE, state.house as House, targetPos);
-              bestTank.selected = false;
-            }
-          }
-        }
-      } else if (state.type === SuperweaponType.PARABOMB) {
-        // AI Parabomb: target player's largest unit cluster
-        const target = this.findBestNukeTarget(state.house);
-        if (target) {
-          this.activateSuperweapon(SuperweaponType.PARABOMB, state.house, target);
-        }
-      } else if (state.type === SuperweaponType.PARAINFANTRY) {
-        // AI Paratroopers: drop near own base as reinforcements
-        const aiStructs = this.structures.filter(s => s.alive && s.house === state.house);
-        if (aiStructs.length > 0) {
-          const base = aiStructs[0];
-          const tx = base.cx * CELL_SIZE + CELL_SIZE * 3;
-          const ty = base.cy * CELL_SIZE + CELL_SIZE * 3;
-          this.activateSuperweapon(SuperweaponType.PARAINFANTRY, state.house, { x: tx, y: ty });
-        }
-      } else if (state.type === SuperweaponType.SPY_PLANE) {
-        // AI Spy Plane: reveal area around enemy base
-        for (const s of this.structures) {
-          if (!s.alive || this.isAllied(s.house, state.house as House)) continue;
-          const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-          const target = {
-            x: (s.cx + w / 2) * CELL_SIZE,
-            y: (s.cy + h / 2) * CELL_SIZE,
-          };
-          this.activateSuperweapon(SuperweaponType.SPY_PLANE, state.house as House, target);
-          break; // one target is enough
-        }
-      }
-    }
+    this._runSuperweapon(ctx => _updateSuperweapons(ctx));
   }
 
   /** Activate a superweapon at a target position */
   activateSuperweapon(type: SuperweaponType, house: House, target: WorldPos): void {
-    const key = `${house}:${type}`;
-    const state = this.superweapons.get(key);
-    if (!state || !state.ready) return;
-
-    const def = SUPERWEAPON_DEFS[type];
-    state.ready = false;
-    state.chargeTick = 0;
-
-    switch (type) {
-      case SuperweaponType.CHRONOSPHERE: {
-        // Teleport first selected player unit to target (C++: CTNK excluded — has own teleport)
-        const selected = this.entities.filter(e =>
-          e.alive && e.selected && e.house === house && !e.stats.isInfantry
-          && e.type !== UnitType.V_CTNK
-        );
-        const unit = selected[0];
-        if (unit) {
-          const origin = { x: unit.pos.x, y: unit.pos.y };
-          unit.pos.x = target.x;
-          unit.pos.y = target.y;
-          unit.prevPos.x = target.x;
-          unit.prevPos.y = target.y;
-          unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
-          // Blue flash effects at origin and destination
-          this.effects.push({
-            type: 'explosion', x: origin.x, y: origin.y,
-            frame: 0, maxFrames: 20, size: 24,
-            sprite: 'litning', spriteStart: 0,
-          });
-          this.effects.push({
-            type: 'explosion', x: target.x, y: target.y,
-            frame: 0, maxFrames: 20, size: 24,
-            sprite: 'litning', spriteStart: 0,
-          });
-          this.audio.play('chrono');
-          if (this.isAllied(house, this.playerHouse)) {
-            this.pushEva('Chronosphere activated');
-          }
-        }
-        break;
-      }
-      case SuperweaponType.IRON_CURTAIN: {
-        // Find unit or structure nearest to target
-        let bestEntity: Entity | null = null;
-        let bestDist = Infinity;
-        for (const e of this.entities) {
-          if (!e.alive || !this.isAllied(e.house, house)) continue;
-          const d = worldDist(e.pos, target);
-          if (d < bestDist && d < 3) {
-            bestDist = d;
-            bestEntity = e;
-          }
-        }
-        if (bestEntity) {
-          bestEntity.ironCurtainTick = IRON_CURTAIN_DURATION;
-          this.effects.push({
-            type: 'explosion', x: bestEntity.pos.x, y: bestEntity.pos.y,
-            frame: 0, maxFrames: 15, size: 20,
-          });
-          this.audio.play('iron_curtain');
-          if (this.isAllied(house, this.playerHouse)) {
-            this.pushEva('Iron Curtain activated');
-          }
-        }
-        break;
-      }
-      case SuperweaponType.NUKE: {
-        // Launch missile from MSLO — arrives after 45 ticks
-        const s = this.structures[state.structureIndex];
-        if (s) {
-          this.nukePendingTarget = { x: target.x, y: target.y };
-          this.nukePendingTick = NUKE_FLIGHT_TICKS;
-          this.nukePendingSource = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-          // Rising missile effect from silo
-          this.effects.push({
-            type: 'projectile',
-            x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE,
-            startX: s.cx * CELL_SIZE + CELL_SIZE, startY: s.cy * CELL_SIZE + CELL_SIZE,
-            endX: target.x, endY: target.y,
-            frame: 0, maxFrames: 45, size: 4,
-            projStyle: 'rocket',
-          });
-          this.audio.play('nuke_launch');
-          if (this.isAllied(house, this.playerHouse)) {
-            this.pushEva('Nuclear warhead launched');
-          } else {
-            // Warn player when enemy launches nuke
-            this.pushEva('Warning: nuclear launch detected');
-          }
-        }
-        break;
-      }
-      case SuperweaponType.PARABOMB: {
-        // SW6: Parabomb — Badger bomber drops bombs in a line (C++ RULES.INI ParaBomb weapon)
-        const pbDmg = WEAPON_STATS.ParaBomb.damage;
-        const bombCount = 7;
-        const spacing = CELL_SIZE;
-        for (let i = -Math.floor(bombCount / 2); i <= Math.floor(bombCount / 2); i++) {
-          const bx = target.x + i * spacing;
-          const by = target.y;
-          const delay = (i + Math.floor(bombCount / 2)) * 5; // staggered detonation
-          // Deferred bomb explosion — uses timed effects
-          this.effects.push({
-            type: 'explosion', x: bx, y: by,
-            frame: -delay, maxFrames: 17 + delay, size: 14,
-          });
-          // Damage entities at each bomb point after delay (approximate via immediate splash)
-          for (const e of this.entities) {
-            if (!e.alive) continue;
-            const d = worldDist(e.pos, { x: bx, y: by });
-            if (d <= 1.5) {
-              const falloff = Math.max(0.3, 1 - d / 1.5);
-              this.damageEntity(e, Math.round(pbDmg * falloff), 'HE');
-            }
-          }
-          for (const s of this.structures) {
-            if (!s.alive) continue;
-            const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-            const sx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
-            const sy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
-            const d = worldDist({ x: bx, y: by }, { x: sx, y: sy });
-            if (d <= 1.5) this.damageStructure(s, Math.round(pbDmg * Math.max(0.3, 1 - d / 1.5)));
-          }
-        }
-        this.renderer.screenShake = Math.max(this.renderer.screenShake, 10);
-        this.audio.play('explode_lg');
-        if (this.isAllied(house, this.playerHouse)) {
-          this.pushEva('Parabombs away');
-        }
-        break;
-      }
-      case SuperweaponType.PARAINFANTRY: {
-        // SW6: Paratroopers — drop 5 rifle infantry at target location
-        const paraTypes = [
-          UnitType.I_E1, UnitType.I_E1, UnitType.I_E1,
-          UnitType.I_E1, UnitType.I_E1,
-        ];
-        for (let i = 0; i < paraTypes.length; i++) {
-          const px = target.x + ((i % 3) - 1) * CELL_SIZE;
-          const py = target.y + Math.floor(i / 3) * CELL_SIZE;
-          const pc = worldToCell(px, py);
-          if (!this.map.isPassable(pc.cx, pc.cy)) continue;
-          const inf = new Entity(paraTypes[i], house, px, py);
-          inf.mission = Mission.GUARD;
-          this.entities.push(inf);
-          this.entityById.set(inf.id, inf);
-          // Parachute drop visual
-          this.effects.push({
-            type: 'marker', x: px, y: py,
-            frame: 0, maxFrames: 20, size: 14, markerColor: 'rgba(200,200,255,0.8)',
-          });
-        }
-        this.audio.play('eva_reinforcements');
-        if (this.isAllied(house, this.playerHouse)) {
-          this.pushEva('Reinforcements have arrived');
-        }
-        break;
-      }
-      case SuperweaponType.SPY_PLANE: {
-        // SW6: Spy Plane — permanently reveals 10-cell radius around target (matches C++ fog behavior)
-        const revealRadius = 10;
-        const tc = worldToCell(target.x, target.y);
-        const r2 = revealRadius * revealRadius;
-        for (let dy = -revealRadius; dy <= revealRadius; dy++) {
-          for (let dx = -revealRadius; dx <= revealRadius; dx++) {
-            if (dx * dx + dy * dy <= r2) {
-              this.map.setVisibility(tc.cx + dx, tc.cy + dy, 2);
-            }
-          }
-        }
-        // Visual flyover effect — marker sweeps across reveal zone
-        this.effects.push({
-          type: 'marker', x: target.x, y: target.y,
-          frame: 0, maxFrames: 30, size: 20, markerColor: 'rgba(100,200,255,0.5)',
-        });
-        this.audio.play('eva_acknowledged');
-        if (this.isAllied(house, this.playerHouse)) {
-          this.pushEva('Spy plane mission complete');
-        }
-        break;
-      }
-    }
+    this._runSuperweapon(ctx => _activateSuperweapon(ctx, type, house, target));
   }
 
   /** Detonate nuclear warhead at target position */
   private detonateNuke(target: WorldPos): void {
-    // AU5: Nuke detonation SFX
-    this.audio.play('nuke_explode');
-    // Intense screen flash + extended shake (C++ nuke visual impact)
-    this.renderer.screenFlash = 30;
-    this.renderer.screenShake = 30;
-
-    // Apply nuke damage in blast radius using Super warhead
-    const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS;
-    const nukeWeapon = { damage: NUKE_DAMAGE, warhead: 'Super' as WarheadType, splash: blastRadius };
-
-    // Damage entities in splash radius
-    for (const e of this.entities) {
-      if (!e.alive) continue;
-      const dist = worldDist(e.pos, target);
-      if (dist > blastRadius) continue;
-      const falloff = Math.max(NUKE_MIN_FALLOFF, 1 - dist / blastRadius);
-      const mult = this.getWarheadMult('Super', e.stats.armor);
-      const dmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff));
-      const killed = this.damageEntity(e, dmg, 'Super');
-      if (killed) {
-        if (e.isPlayerUnit) this.lossCount++;
-        else this.killCount++;
-      }
-    }
-
-    // Damage structures in blast radius
-    for (const s of this.structures) {
-      if (!s.alive) continue;
-      const sx = s.cx * CELL_SIZE + CELL_SIZE;
-      const sy = s.cy * CELL_SIZE + CELL_SIZE;
-      const dist = worldDist({ x: sx, y: sy }, target);
-      if (dist > blastRadius) continue;
-      const falloff = Math.max(NUKE_MIN_FALLOFF, 1 - dist / blastRadius);
-      const dmg = Math.max(1, Math.round(NUKE_DAMAGE * falloff));
-      s.hp -= dmg;
-      if (s.hp <= 0) {
-        s.hp = 0;
-        s.alive = false;
-        // GAP1: unjam shroud when Gap Generator is nuked
-        if (s.type === 'GAP') {
-          const si = this.structures.indexOf(s);
-          if (si >= 0 && this.gapGeneratorCells.has(si)) {
-            const prev = this.gapGeneratorCells.get(si)!;
-            this.map.unjamRadius(prev.cx, prev.cy, prev.radius);
-            this.gapGeneratorCells.delete(si);
-          }
-        }
-        this.effects.push({
-          type: 'explosion', x: sx, y: sy,
-          frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: 32,
-          sprite: 'fball1', spriteStart: 0,
-        });
-      }
-    }
-
-    // Mushroom cloud effect (large, long-lasting)
-    this.effects.push({
-      type: 'explosion', x: target.x, y: target.y,
-      frame: 0, maxFrames: 45, size: 48,
-      sprite: 'atomsfx', spriteStart: 0,
-      blendMode: 'screen',
-    });
-
-    // Secondary ground explosions — ring of staggered blasts around impact (C++ large explosion radius)
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2 + Math.random() * 0.5;
-      const dist = CELL_SIZE * (1.5 + Math.random() * 2);
-      const gx = target.x + Math.cos(angle) * dist;
-      const gy = target.y + Math.sin(angle) * dist;
-      this.effects.push({
-        type: 'explosion', x: gx, y: gy,
-        frame: -i * 3, maxFrames: 20, size: 16,
-        sprite: 'fball1', spriteStart: 0,
-      });
-    }
-
-    // Scorched earth at ground zero
-    const tc = worldToCell(target.x, target.y);
-    for (let dy = -3; dy <= 3; dy++) {
-      for (let dx = -3; dx <= 3; dx++) {
-        if (dx * dx + dy * dy > 9) continue;
-        const cx = tc.cx + dx;
-        const cy = tc.cy + dy;
-        if (this.map.inBounds(cx, cy)) {
-          this.map.setTerrain(cx, cy, Terrain.ROCK);
-        }
-      }
-    }
-
-    this.audio.play('nuke_explode');
+    this._runSuperweapon(ctx => _detonateNuke(ctx, target));
   }
 
   /** Find the best nuke target for an AI house — cluster of player structures */
   private findBestNukeTarget(aiHouse: House): WorldPos | null {
-    let bestScore = 0;
-    let bestPos: WorldPos | null = null;
-
-    for (const s of this.structures) {
-      if (!s.alive) continue;
-      if (this.isAllied(s.house, aiHouse)) continue;
-      // Count nearby structures within 5 cells
-      let score = 0;
-      const sx = s.cx * CELL_SIZE + CELL_SIZE;
-      const sy = s.cy * CELL_SIZE + CELL_SIZE;
-      for (const other of this.structures) {
-        if (!other.alive) continue;
-        if (this.isAllied(other.house, aiHouse)) continue;
-        const ox = other.cx * CELL_SIZE + CELL_SIZE;
-        const oy = other.cy * CELL_SIZE + CELL_SIZE;
-        const dist = worldDist({ x: sx, y: sy }, { x: ox, y: oy });
-        if (dist < 5) score++;
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        bestPos = { x: sx, y: sy };
-      }
-    }
-    return bestPos;
+    return _findBestNukeTarget(this._superweaponCtx, aiHouse);
   }
 
   /** Push an EVA message */
@@ -9813,371 +8870,93 @@ export class Game {
 
   // === Agent 9: New Units & Special Abilities ===
 
-  /** Agent 9: Tanya C4 placement — plants C4 on building, explodes after 45 ticks. */
+  /** Agent 9: Tanya C4 placement — delegates to specialUnits.ts */
   updateTanyaC4(entity: Entity): void {
-    if (entity.type !== UnitType.I_TANYA || !entity.alive) return;
-    if (!entity.targetStructure || !(entity.targetStructure as MapStructure).alive) return;
-    const s = entity.targetStructure as MapStructure;
-    const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-    const scx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
-    const scy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
-    const dist = worldDist(entity.pos, { x: scx, y: scy });
-    if (dist > 1.5) {
-      entity.animState = AnimState.WALK;
-      entity.moveToward({ x: scx, y: scy }, this.movementSpeed(entity));
-      return;
-    }
-    entity.animState = AnimState.ATTACK;
-    const sAny = s as MapStructure & { c4Timer?: number };
-    if (sAny.c4Timer === undefined || sAny.c4Timer <= 0) {
-      sAny.c4Timer = 45;
-      this.playSoundAt('building_explode', scx, scy);
-      this.evaMessages.push({ text: 'C4 PLANTED', tick: this.tick });
-    }
-    entity.targetStructure = null;
-    entity.target = null;
-    entity.mission = Mission.GUARD;
+    this._runSpecialUnits(ctx => _updateTanyaC4(ctx, entity));
   }
 
-  /** Agent 9: Tick C4 timers on structures. */
+  /** Agent 9: Tick C4 timers on structures — delegates to specialUnits.ts */
   tickC4Timers(): void {
-    for (const s of this.structures) {
-      if (!s.alive) continue;
-      const sAny = s as MapStructure & { c4Timer?: number };
-      if (sAny.c4Timer && sAny.c4Timer > 0) {
-        sAny.c4Timer--;
-        if (sAny.c4Timer <= 0) this.damageStructure(s, 9999);
-      }
-    }
+    this._runSpecialUnits(ctx => _tickC4Timers(ctx));
   }
 
-  /** Agent 9: Thief steals 50% credits from enemy PROC/SILO, then dies. */
+  /** Agent 9: Thief steals credits — delegates to specialUnits.ts */
   updateThief(entity: Entity): void {
-    if (entity.type !== UnitType.I_THF || !entity.alive) return;
-    if (!entity.targetStructure || !(entity.targetStructure as MapStructure).alive) return;
-    const s = entity.targetStructure as MapStructure;
-    if (s.type !== 'PROC' && s.type !== 'SILO') { entity.targetStructure = null; entity.mission = Mission.GUARD; return; }
-    if (this.isAllied(entity.house, s.house)) { entity.targetStructure = null; entity.mission = Mission.GUARD; return; }
-    const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-    const scx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
-    const scy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
-    const dist = worldDist(entity.pos, { x: scx, y: scy });
-    if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward({ x: scx, y: scy }, this.movementSpeed(entity)); return; }
-    const enemyCredits = this.houseCredits.get(s.house) ?? 0;
-    const stolen = Math.floor(enemyCredits * 0.5);
-    if (stolen > 0) {
-      this.houseCredits.set(s.house, enemyCredits - stolen);
-      if (entity.isPlayerUnit) { this.addCredits(stolen, true); } else { this.houseCredits.set(entity.house, (this.houseCredits.get(entity.house) ?? 0) + stolen); }
-      this.evaMessages.push({ text: `CREDITS STOLEN: ${stolen}`, tick: this.tick });
-    }
-    this.isThieved = true;  // C++ House.IsThieved — for TEVENT_THIEVED trigger
-    entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
+    this._runSpecialUnits(ctx => _updateThief(ctx, entity));
   }
 
-  /** Agent 9: Minelayer places AP mines. Mine limit: 50/house. */
-  static readonly MAX_MINES_PER_HOUSE = 50;
+  /** Agent 9: Minelayer places AP mines — delegates to specialUnits.ts */
+  static readonly MAX_MINES_PER_HOUSE = _MAX_MINES_PER_HOUSE;
   mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
 
   updateMinelayer(entity: Entity): void {
-    if (entity.type !== UnitType.V_MNLY || !entity.alive || !entity.moveTarget) return;
-    const targetCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
-    const dist = worldDist(entity.pos, entity.moveTarget);
-    if (dist > 0.5) { entity.animState = AnimState.WALK; entity.moveToward(entity.moveTarget, this.movementSpeed(entity)); return; }
-    // C++ parity: minelayer carries limited ammo (Ammo=5 in rules.ini)
-    if (entity.ammo === 0 && entity.maxAmmo > 0) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
-    const houseMines = this.mines.filter(m => m.house === entity.house).length;
-    if (houseMines >= Game.MAX_MINES_PER_HOUSE) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
-    if (!this.mines.find(m => m.cx === targetCell.cx && m.cy === targetCell.cy)) {
-      this.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: 1000 });
-      entity.mineCount++;
-      if (entity.ammo > 0) entity.ammo--;
-    }
-    entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE;
+    this._runSpecialUnits(ctx => _updateMinelayer(ctx, entity));
   }
 
-  /** Agent 9: Mine trigger check — enemy enters mined cell. */
+  /** Agent 9: Mine trigger check — delegates to specialUnits.ts */
   tickMines(): void {
-    for (let i = this.mines.length - 1; i >= 0; i--) {
-      const mine = this.mines[i];
-      for (const e of this.entities) {
-        if (!e.alive || this.isAllied(e.house, mine.house) || e.isAirUnit) continue;
-        const ec = e.cell;
-        if (ec.cx === mine.cx && ec.cy === mine.cy) {
-          this.damageEntity(e, mine.damage, 'AP');
-          this.effects.push({ type: 'explosion', x: mine.cx * CELL_SIZE + CELL_SIZE / 2, y: mine.cy * CELL_SIZE + CELL_SIZE / 2, frame: 0, maxFrames: 12, size: 10 });
-          this.playSoundAt('building_explode', mine.cx * CELL_SIZE, mine.cy * CELL_SIZE);
-          this.mines.splice(i, 1);
-          break;
-        }
-      }
-    }
+    this._runSpecialUnits(ctx => _tickMines(ctx));
   }
 
-  /** CR8: Tick active vortex entities — wander randomly, damage nearby units */
+  /** CR8: Tick active vortices — delegates to specialUnits.ts */
   private tickVortices(): void {
-    for (let i = this.activeVortices.length - 1; i >= 0; i--) {
-      const v = this.activeVortices[i];
-      v.ticksLeft--;
-      if (v.ticksLeft <= 0) {
-        this.activeVortices.splice(i, 1);
-        continue;
-      }
-      // Random wandering — adjust angle slightly each tick
-      v.angle += (Math.random() - 0.5) * 0.4;
-      v.x += Math.cos(v.angle) * CELL_SIZE * 0.15;
-      v.y += Math.sin(v.angle) * CELL_SIZE * 0.15;
-      // Clamp to map bounds
-      const minX = this.map.boundsX * CELL_SIZE;
-      const maxX = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
-      const minY = this.map.boundsY * CELL_SIZE;
-      const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
-      if (v.x < minX || v.x > maxX) { v.angle = Math.PI - v.angle; v.x = Math.max(minX, Math.min(maxX, v.x)); }
-      if (v.y < minY || v.y > maxY) { v.angle = -v.angle; v.y = Math.max(minY, Math.min(maxY, v.y)); }
-      // Damage units and structures within 1 cell radius — 50 damage every 3 ticks (~250 DPS)
-      if (v.ticksLeft % 3 === 0) {
-        for (const e of this.entities) {
-          if (!e.alive) continue;
-          const dx = e.pos.x - v.x;
-          const dy = e.pos.y - v.y;
-          if (dx * dx + dy * dy <= CELL_SIZE * CELL_SIZE) {
-            this.damageEntity(e, 50, 'Super');
-          }
-        }
-        for (const s of this.structures) {
-          if (!s.alive) continue;
-          const sx = s.cx * CELL_SIZE + CELL_SIZE / 2;
-          const sy = s.cy * CELL_SIZE + CELL_SIZE / 2;
-          const dx = sx - v.x;
-          const dy = sy - v.y;
-          if (dx * dx + dy * dy <= CELL_SIZE * CELL_SIZE) {
-            this.damageStructure(s, 50);
-          }
-        }
-      }
-      // Visual effect — rotating translucent circle
-      this.effects.push({
-        type: 'explosion', x: v.x, y: v.y,
-        frame: 0, maxFrames: 2, size: 18,
-        sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen',
-      });
-    }
+    this._runSpecialUnits(ctx => _tickVortices(ctx));
   }
 
-  /** Agent 9: Gap Generator shroud — jams enemy vision in 10-cell radius. Power-gated. */
-  static readonly GAP_RADIUS = 10;
-  static readonly GAP_UPDATE_INTERVAL = 90;
+  /** Agent 9: Gap Generator shroud — delegates to fog.ts */
+  static readonly GAP_RADIUS = GAP_RADIUS;
+  static readonly GAP_UPDATE_INTERVAL = GAP_UPDATE_INTERVAL;
   gapGeneratorCells = new Map<number, { cx: number; cy: number; radius: number }>();
 
   updateGapGenerators(): void {
-    if (this.tick % Game.GAP_UPDATE_INTERVAL !== 0) return;
-    const pf = this.powerProduced > 0 ? this.powerProduced / Math.max(this.powerConsumed, 1) : 0;
-    const activeGaps = new Set<number>();
-    for (let si = 0; si < this.structures.length; si++) {
-      const s = this.structures[si];
-      if (s.type !== 'GAP' || !s.alive) continue;
-      if (pf < 1.0) {
-        if (this.gapGeneratorCells.has(si)) { const prev = this.gapGeneratorCells.get(si)!; this.map.unjamRadius(prev.cx, prev.cy, prev.radius); this.gapGeneratorCells.delete(si); }
-        continue;
-      }
-      activeGaps.add(si);
-      if (this.gapGeneratorCells.has(si)) continue;
-      const [gw, gh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      const cx = s.cx + Math.floor(gw / 2); const cy = s.cy + Math.floor(gh / 2);
-      const r = Game.GAP_RADIUS; const r2 = r * r;
-      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r2) this.map.jamCell(cx + dx, cy + dy);
-      this.gapGeneratorCells.set(si, { cx, cy, radius: r });
-    }
-    for (const [si, prev] of this.gapGeneratorCells) {
-      if (!activeGaps.has(si)) { this.map.unjamRadius(prev.cx, prev.cy, prev.radius); this.gapGeneratorCells.delete(si); }
-    }
+    _updateGapGenerators(this._fogCtx);
   }
 
-  /** Chrono Tank cooldown: C++ ChronoTankDuration=0x300 (3.0) × TICKS_PER_MINUTE(900) = 2700 ticks. */
-  static readonly CHRONO_TANK_COOLDOWN = 2700;
+  /** Chrono Tank cooldown — delegates to specialUnits.ts */
+  static readonly CHRONO_TANK_COOLDOWN = _CHRONO_TANK_COOLDOWN;
 
-  /** Tick Chrono Tank cooldown only — teleport is player-initiated via D key + click. */
   updateChronoTank(entity: Entity): void {
-    if (entity.type !== UnitType.V_CTNK || !entity.alive) return;
-    if (entity.chronoCooldown > 0) entity.chronoCooldown--;
+    this._runSpecialUnits(ctx => _updateChronoTank(ctx, entity));
   }
 
-  /** Execute Chrono Tank teleport to target position. C++ SPC_CHRONO2 handler (house.cpp:2808). */
+  /** Execute Chrono Tank teleport — delegates to specialUnits.ts */
   teleportChronoTank(entity: Entity, target: WorldPos): void {
-    if (!entity.alive || entity.chronoCooldown > 0) return;
-    const tc = worldToCell(target.x, target.y);
-    if (!this.map.isPassable(tc.cx, tc.cy)) return;
-    // Blue flash at origin
-    this.effects.push({
-      type: 'explosion', x: entity.pos.x, y: entity.pos.y,
-      frame: 0, maxFrames: 20, size: 24,
-      sprite: 'litning', spriteStart: 0,
-    });
-    // Teleport — also snap prevPos to prevent interpolation swoosh
-    entity.pos.x = target.x;
-    entity.pos.y = target.y;
-    entity.prevPos.x = target.x;
-    entity.prevPos.y = target.y;
-    // Blue flash at destination
-    this.effects.push({
-      type: 'explosion', x: entity.pos.x, y: entity.pos.y,
-      frame: 0, maxFrames: 20, size: 24,
-      sprite: 'litning', spriteStart: 0,
-    });
-    entity.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
-    entity.chronoCooldown = Game.CHRONO_TANK_COOLDOWN;
-    entity.moveTarget = null;
-    entity.target = null;
-    entity.mission = Mission.GUARD;
-    this.audio.play('chrono');
+    this._runSpecialUnits(ctx => _teleportChronoTank(ctx, entity, target));
   }
 
-  /** Agent 9: MAD Tank deploy + shockwave. 90-tick charge, 600 dmg to vehicles in 8 cells. */
-  static readonly MAD_TANK_CHARGE_TICKS = 90;
-  static readonly MAD_TANK_DAMAGE = 600;
-  static readonly MAD_TANK_RADIUS = 8;
+  /** Agent 9: MAD Tank deploy + shockwave — delegates to specialUnits.ts */
+  static readonly MAD_TANK_CHARGE_TICKS = _MAD_TANK_CHARGE_TICKS;
+  static readonly MAD_TANK_DAMAGE = _MAD_TANK_DAMAGE;
+  static readonly MAD_TANK_RADIUS = _MAD_TANK_RADIUS;
 
   updateMADTank(entity: Entity): void {
-    if (!entity.alive || !entity.isDeployed) return;
-    entity.deployTimer--;
-    entity.animState = AnimState.IDLE;
-    if (entity.deployTimer <= 0) {
-      const radius = Game.MAD_TANK_RADIUS;
-      for (const other of this.entities) {
-        if (!other.alive || other.id === entity.id || other.stats.isInfantry || other.isAirUnit) continue;
-        if (worldDist(entity.pos, other.pos) <= radius) {
-          this.damageEntity(other, Game.MAD_TANK_DAMAGE, 'HE');
-        }
-      }
-      this.effects.push({ type: 'explosion', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 20, size: 24 });
-      this.playSoundAt('building_explode', entity.pos.x, entity.pos.y);
-      entity.hp = 0; entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
-    }
+    this._runSpecialUnits(ctx => _updateMADTank(ctx, entity));
   }
 
   deployMADTank(entity: Entity): void {
-    if (entity.isDeployed) return;
-    // C++ unit.cpp:2667-2685 — eject INFANTRY_C1 technician before detonation
-    const ec = entity.cell;
-    const DIR_OFFSETS = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];
-    for (const [dx, dy] of DIR_OFFSETS) {
-      const nx = ec.cx + dx, ny = ec.cy + dy;
-      if (this.map.isPassable(nx, ny) && this.map.getOccupancy(nx, ny) === 0) {
-        const crew = new Entity(UnitType.I_C1, entity.house,
-          nx * CELL_SIZE + CELL_SIZE / 2, ny * CELL_SIZE + CELL_SIZE / 2);
-        crew.mission = Mission.MOVE;
-        // Move away from tank
-        const awayX = crew.pos.x + dx * CELL_SIZE * 3;
-        const awayY = crew.pos.y + dy * CELL_SIZE * 3;
-        crew.moveTarget = { x: awayX, y: awayY };
-        this.entities.push(crew);
-        this.entityById.set(crew.id, crew);
-        break;
-      }
-    }
-    entity.isDeployed = true; entity.deployTimer = Game.MAD_TANK_CHARGE_TICKS;
-    entity.moveTarget = null; entity.target = null; entity.mission = Mission.GUARD;
+    this._runSpecialUnits(ctx => _deployMADTank(ctx, entity));
   }
 
-  /** Agent 9: Demo Truck kamikaze — 1000 damage in 3-cell radius, 45-tick fuse after reaching target. */
-  static readonly DEMO_TRUCK_DAMAGE = 1000;
-  static readonly DEMO_TRUCK_RADIUS = 3;
-  static readonly DEMO_TRUCK_FUSE_TICKS = 45;
+  /** Agent 9: Demo Truck — delegates to specialUnits.ts */
+  static readonly DEMO_TRUCK_DAMAGE = _DEMO_TRUCK_DAMAGE;
+  static readonly DEMO_TRUCK_RADIUS = _DEMO_TRUCK_RADIUS;
+  static readonly DEMO_TRUCK_FUSE_TICKS = _DEMO_TRUCK_FUSE_TICKS;
 
   updateDemoTruck(entity: Entity): void {
-    if (entity.type !== UnitType.V_DTRK || !entity.alive || entity.mission !== Mission.ATTACK) return;
-
-    // Fuse countdown — once armed, tick down to detonation
-    if (entity.fuseTimer > 0) {
-      entity.fuseTimer--;
-      entity.animState = AnimState.IDLE;
-      if (entity.fuseTimer <= 0) {
-        this.detonateDemoTruck(entity);
-      }
-      return;
-    }
-
-    let targetPos: WorldPos | null = null;
-    if (entity.target && entity.target.alive) { targetPos = entity.target.pos; }
-    else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
-      const s = entity.targetStructure as MapStructure;
-      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      targetPos = { x: s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2, y: s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2 };
-    }
-    if (!targetPos) { entity.mission = Mission.GUARD; return; }
-    const dist = worldDist(entity.pos, targetPos);
-    if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward(targetPos, this.movementSpeed(entity)); return; }
-    // Reached target — arm the fuse
-    entity.fuseTimer = Game.DEMO_TRUCK_FUSE_TICKS;
+    this._runSpecialUnits(ctx => _updateDemoTruck(ctx, entity));
   }
 
-  /** Detonate Demo Truck — splash damage centered on truck position. */
-  private detonateDemoTruck(entity: Entity): void {
-    const blastRadius = Game.DEMO_TRUCK_RADIUS;
-    for (const other of this.entities) {
-      if (!other.alive || other.id === entity.id) continue;
-      const d = worldDist(entity.pos, other.pos);
-      if (d <= blastRadius) { this.damageEntity(other, Math.round(Game.DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)), 'Nuke'); }
-    }
-    for (const s of this.structures) {
-      if (!s.alive) continue;
-      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      const d = worldDist(entity.pos, { x: s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2, y: s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2 });
-      if (d <= blastRadius) this.damageStructure(s, Math.round(Game.DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)));
-    }
-    this.effects.push({ type: 'explosion', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 20, size: 24 });
-    this.playSoundAt('building_explode', entity.pos.x, entity.pos.y);
-    entity.hp = 0; entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
-  }
-
-  /** Agent 9: Vehicle cloak — same as sub cloak but for non-vessel cloakable (STNK). */
+  /** Agent 9: Vehicle cloak — delegates to specialUnits.ts */
   updateVehicleCloak(entity: Entity): void {
-    if (!entity.stats.isCloakable || entity.stats.isVessel) return;
-    switch (entity.cloakState) {
-      case CloakState.CLOAKING: entity.cloakTimer--; if (entity.cloakTimer <= 0) { entity.cloakState = CloakState.CLOAKED; entity.cloakTimer = 0; } break;
-      case CloakState.UNCLOAKING: entity.cloakTimer--; if (entity.cloakTimer <= 0) { entity.cloakState = CloakState.UNCLOAKED; entity.cloakTimer = 0; } break;
-      case CloakState.UNCLOAKED:
-        if (entity.sonarPulseTimer > 0) break;
-        if (entity.mission === Mission.ATTACK) break;
-        if (entity.weapon && entity.attackCooldown > 0) break;
-        if (entity.hp / entity.maxHp < CONDITION_RED && Math.random() > 0.04) break;
-        entity.cloakState = CloakState.CLOAKING; entity.cloakTimer = CLOAK_TRANSITION_FRAMES; break;
-      case CloakState.CLOAKED: break;
-    }
+    this._runSpecialUnits(ctx => _updateVehicleCloak(ctx, entity));
   }
 
-  /** Agent 9: Mechanic — auto-heals vehicles, 5 HP/tick, 6-cell scan range. */
-  static readonly MECHANIC_HEAL_RANGE = 6;
-  static readonly MECHANIC_HEAL_AMOUNT = 5;
+  /** Agent 9: Mechanic auto-heal — delegates to specialUnits.ts */
+  static readonly MECHANIC_HEAL_RANGE = _MECHANIC_HEAL_RANGE;
+  static readonly MECHANIC_HEAL_AMOUNT = _MECHANIC_HEAL_AMOUNT;
 
   updateMechanicUnit(entity: Entity): void {
-    if (entity.type !== UnitType.I_MECH || !entity.alive) return;
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.fear >= Entity.FEAR_SCARED) {
-      let ned = Infinity; let nep: WorldPos | null = null;
-      for (const o of this.entities) { if (!o.alive || this.entitiesAllied(entity, o)) continue; const d = worldDist(entity.pos, o.pos); if (d < entity.stats.sight && d < ned) { ned = d; nep = o.pos; } }
-      if (nep) { const dx = entity.pos.x - nep.x; const dy = entity.pos.y - nep.y; const d = Math.sqrt(dx * dx + dy * dy) || 1; entity.animState = AnimState.WALK; entity.moveToward({ x: entity.pos.x + (dx / d) * CELL_SIZE * 3, y: entity.pos.y + (dy / d) * CELL_SIZE * 3 }, this.movementSpeed(entity)); entity.healTarget = null; return; }
-    }
-    if (entity.healTarget) { const ht = entity.healTarget; if (!ht.alive || ht.hp >= ht.maxHp || !this.isAllied(entity.house, ht.house) || ht.stats.isInfantry || ht.isAirUnit || ht.id === entity.id) entity.healTarget = null; }
-    const hsd = entity.stats.scanDelay ?? 15;
-    if (!entity.healTarget && this.tick - entity.lastGuardScan >= hsd) {
-      entity.lastGuardScan = this.tick;
-      let best: Entity | null = null; let lhr = 1.0; let bd = Infinity; const sr = Game.MECHANIC_HEAL_RANGE;
-      for (const o of this.entities) { if (!o.alive || o.id === entity.id || !this.isAllied(entity.house, o.house) || o.stats.isInfantry || o.isAirUnit || o.hp >= o.maxHp) continue; const d = worldDist(entity.pos, o.pos); if (d > sr) continue; const hr = o.hp / o.maxHp; if (hr < lhr || (hr === lhr && d < bd)) { lhr = hr; bd = d; best = o; } }
-      if (best) entity.healTarget = best;
-    }
-    if (entity.healTarget) {
-      const ht = entity.healTarget; const dist = worldDist(entity.pos, ht.pos);
-      if (dist <= 1.5) {
-        entity.animState = AnimState.ATTACK; entity.desiredFacing = directionTo(entity.pos, ht.pos); entity.tickRotation();
-        if (entity.attackCooldown <= 0) {
-          const prev = ht.hp; ht.hp = Math.min(ht.maxHp, ht.hp + Game.MECHANIC_HEAL_AMOUNT); const healed = ht.hp - prev; entity.attackCooldown = entity.weapon?.rof ?? 80;
-          if (healed > 0) { this.playSoundAt('heal', ht.pos.x, ht.pos.y); this.effects.push({ type: 'muzzle', x: ht.pos.x, y: ht.pos.y - 4, frame: 0, maxFrames: 6, size: 4, muzzleColor: '80,200,255' }); this.effects.push({ type: 'text', x: ht.pos.x, y: ht.pos.y - 8, frame: 0, maxFrames: 30, size: 0, text: `+${healed}`, textColor: 'rgba(80,200,255,1)' }); }
-          if (ht.hp >= ht.maxHp) entity.healTarget = null;
-        }
-      } else { entity.animState = AnimState.WALK; entity.moveToward(ht.pos, this.movementSpeed(entity)); }
-      return;
-    }
-    entity.animState = AnimState.IDLE;
+    this._runSpecialUnits(ctx => _updateMechanicUnit(ctx, entity));
   }
 
   // === Other Stubbed Systems (not needed for ant missions) ===
@@ -10201,38 +8980,16 @@ export class Game {
 
   /** Toggle repair on a structure by index. Returns true if repair is now active. */
   toggleRepair(idx: number): boolean {
-    const s = this.structures[idx];
-    if (!s || !s.alive || !this.isAllied(s.house, this.playerHouse)) return false;
-    if (this.repairingStructures.has(idx)) {
-      this.repairingStructures.delete(idx);
-      return false;
-    }
-    if (s.hp < s.maxHp) {
-      this.repairingStructures.add(idx);
-      return true;
-    }
-    return false;
+    return _toggleRepair(this._repairSellCtx, idx);
   }
 
   /** Initiate sell on a structure by index. Returns true if sell started. */
   sellStructureByIndex(idx: number): boolean {
-    const s = this.structures[idx];
-    if (!s || !s.alive || s.sellProgress !== undefined) return false;
-    if (!this.isAllied(s.house, this.playerHouse)) return false;
-    if (WALL_TYPES.has(s.type)) {
-      s.alive = false;
-      this.clearStructureFootprint(s);
-      const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
-      if (prodItem) this.addCredits(Math.floor(prodItem.cost * 0.5), true);
-      return true;
-    }
-    s.sellProgress = 0;
-    s.sellHpAtStart = s.hp;
-    return true;
+    return _sellStructureByIndex(this._repairSellCtx, idx);
   }
 
   /** Check if a structure is currently being repaired. */
   isStructureRepairing(idx: number): boolean {
-    return this.repairingStructures.has(idx);
+    return _isStructureRepairing(this._repairSellCtx, idx);
   }
 }

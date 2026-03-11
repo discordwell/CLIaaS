@@ -68,6 +68,7 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     fakesExist: true,
     spiedBuildings: new Set(),
     isThieved: false,
+    pendingDestroyedCount: 0,
     ...overrides,
   };
 }
@@ -214,15 +215,23 @@ describe('checkTriggerEvent — full event coverage', () => {
   // TEVENT_DESTROYED (7) — attached object destroyed
   it('TEVENT_DESTROYED (7) fires when triggerName is in destroyedTriggerNames', () => {
     const event: TriggerEvent = { type: 7, team: -1, data: 0 };
-    // Not destroyed
+    // Not destroyed (name not in set)
     expect(checkTriggerEvent(event, createState({
       triggerName: 'myUnit',
       destroyedTriggerNames: new Set(['otherUnit']),
+      pendingDestroyedCount: 1,
     }))).toBe(false);
-    // Destroyed
+    // Name in set but no pending deaths
     expect(checkTriggerEvent(event, createState({
       triggerName: 'myUnit',
       destroyedTriggerNames: new Set(['myUnit']),
+      pendingDestroyedCount: 0,
+    }))).toBe(false);
+    // Destroyed: name in set AND pendingDestroyedCount > 0
+    expect(checkTriggerEvent(event, createState({
+      triggerName: 'myUnit',
+      destroyedTriggerNames: new Set(['myUnit']),
+      pendingDestroyedCount: 1,
     }))).toBe(true);
   });
 
@@ -1600,14 +1609,16 @@ describe('Complex multi-trigger scenarios', () => {
     const s1 = createState({
       triggerName: 'guard',
       destroyedTriggerNames: new Set(),
+      pendingDestroyedCount: 0,
       bridgesAlive: 3,
     });
     expect(checkTriggerEvent(trigger.event1, s1) || checkTriggerEvent(trigger.event2, s1)).toBe(false);
 
-    // Only event1 met (entity destroyed)
+    // Only event1 met (entity destroyed — pendingDestroyedCount > 0 required)
     const s2 = createState({
       triggerName: 'guard',
       destroyedTriggerNames: new Set(['guard']),
+      pendingDestroyedCount: 1,
       bridgesAlive: 3,
     });
     expect(checkTriggerEvent(trigger.event1, s2) || checkTriggerEvent(trigger.event2, s2)).toBe(true);
@@ -1616,6 +1627,7 @@ describe('Complex multi-trigger scenarios', () => {
     const s3 = createState({
       triggerName: 'guard',
       destroyedTriggerNames: new Set(),
+      pendingDestroyedCount: 0,
       bridgesAlive: 0,
     });
     expect(checkTriggerEvent(trigger.event1, s3) || checkTriggerEvent(trigger.event2, s3)).toBe(true);
@@ -1624,6 +1636,7 @@ describe('Complex multi-trigger scenarios', () => {
     const s4 = createState({
       triggerName: 'guard',
       destroyedTriggerNames: new Set(['guard']),
+      pendingDestroyedCount: 1,
       bridgesAlive: 0,
     });
     expect(checkTriggerEvent(trigger.event1, s4) || checkTriggerEvent(trigger.event2, s4)).toBe(true);

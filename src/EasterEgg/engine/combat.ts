@@ -1,0 +1,523 @@
+/**
+ * Combat subsystem — damage calculation, projectiles, splash, and unit death.
+ * Extracted from Game class (index.ts) to isolate combat logic.
+ */
+
+import {
+  type WorldPos, type WeaponStats, type ArmorType, type WarheadType,
+  type WarheadMeta, type WarheadProps,
+  CELL_SIZE, MAP_CELLS, CONDITION_YELLOW,
+  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META,
+  armorIndex, worldDist, worldToCell, modifyDamage,
+  House, Mission, AnimState, EXPLOSION_FRAMES,
+} from './types';
+import { type Entity } from './entity';
+import { type MapStructure } from './scenario';
+import { type Effect } from './renderer';
+import { type GameMap, Terrain } from './map';
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+/** CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2) */
+export const SPLASH_RADIUS = 1.5;
+
+// ── Interfaces ─────────────────────────────────────────────────────────────────
+
+/** In-flight projectile for deferred damage */
+export interface InflightProjectile {
+  attackerId: number;
+  targetId: number;
+  weapon: WeaponStats;
+  damage: number;
+  speed: number;         // cells per tick
+  travelFrames: number;  // total frames to travel
+  currentFrame: number;
+  directHit: boolean;    // was the shot accurate (for inaccurate weapons)
+  impactX: number;       // final impact position (may be scattered)
+  impactY: number;
+  attackerIsPlayer: boolean;
+}
+
+/** Context object providing combat functions access to game state and callbacks */
+export interface CombatContext {
+  entities: Entity[];
+  entityById: Map<number, Entity>;
+  structures: MapStructure[];
+  inflightProjectiles: InflightProjectile[];
+  effects: Effect[];
+  tick: number;
+  playerHouse: House;
+  scenarioId: string;
+  killCount: number;
+  lossCount: number;
+  warheadOverrides: Record<string, [number, number, number, number, number]>;
+  scenarioWarheadMeta: Record<string, WarheadMeta>;
+  scenarioWarheadProps: Record<string, WarheadProps>;
+  attackedTriggerNames: Set<string>;
+  map: GameMap;
+
+  // Callbacks
+  isAllied(a: House, b: House): boolean;
+  entitiesAllied(a: Entity, b: Entity): boolean;
+  isPlayerControlled(e: Entity): boolean;
+  playSoundAt(name: string, x: number, y: number): void;
+  playEva(name: string): void;
+  minimapAlert(cx: number, cy: number): void;
+  movementSpeed(entity: Entity): number;
+  getFirepowerBias(house: House): number;
+  damageStructure(s: MapStructure, damage: number): boolean;
+  aiIQ(house: House): number;
+
+  // Renderer access
+  screenShake: number;
+  screenFlash: number;
+}
+
+// ── Pure Functions ─────────────────────────────────────────────────────────────
+
+/** Warhead vs armor multiplier — checks scenario overrides first */
+export function getWarheadMult(
+  warhead: WarheadType, armor: ArmorType,
+  warheadOverrides: Record<string, [number, number, number, number, number]>,
+): number {
+  const idx = armorIndex(armor);
+  const overridden = warheadOverrides[warhead];
+  if (overridden) return overridden[idx] ?? 1;
+  return WARHEAD_VS_ARMOR[warhead]?.[idx] ?? 1;
+}
+
+/** Warhead meta — checks scenario overrides first */
+export function getWarheadMeta(
+  warhead: WarheadType,
+  scenarioWarheadMeta: Record<string, WarheadMeta>,
+): WarheadMeta {
+  return scenarioWarheadMeta[warhead] ?? WARHEAD_META[warhead] ?? { spreadFactor: 1 };
+}
+
+/** Warhead props — checks scenario overrides first */
+export function getWarheadProps(
+  warhead: WarheadType | string | undefined,
+  scenarioWarheadProps: Record<string, WarheadProps>,
+): WarheadProps | undefined {
+  if (!warhead) return undefined;
+  return scenarioWarheadProps[warhead] ?? WARHEAD_PROPS[warhead as WarheadType];
+}
+
+/** Damage-based speed reduction (C++ drive.cpp:1157-1161).
+ *  Single tier: <=50% HP = 75% speed (ConditionYellow). */
+export function damageSpeedFactor(entity: Entity): number {
+  const ratio = entity.hp / entity.maxHp;
+  if (ratio <= CONDITION_YELLOW) return 0.75;
+  return 1.0;
+}
+
+// ── Internal Helpers (not exported) ────────────────────────────────────────────
+
+/** Infantry scatter: push infantry slightly away from attacker on direct hit.
+ *  In original RA, infantry move randomly when shot at. */
+function scatterInfantry(ctx: CombatContext, victim: Entity, attackerPos: WorldPos): void {
+  if (!victim.alive || !victim.stats.isInfantry || victim.isAnt) return;
+  if (Math.random() > 0.4) return; // 40% chance to scatter per hit
+  const angle = Math.atan2(victim.pos.y - attackerPos.y, victim.pos.x - attackerPos.x);
+  const jitter = (Math.random() - 0.5) * 1.2; // add randomness to scatter direction
+  const scatterX = victim.pos.x + Math.cos(angle + jitter) * CELL_SIZE * 0.5;
+  const scatterY = victim.pos.y + Math.sin(angle + jitter) * CELL_SIZE * 0.5;
+  const sc = worldToCell(scatterX, scatterY);
+  if (ctx.map.isPassable(sc.cx, sc.cy)) {
+    victim.pos.x = scatterX;
+    victim.pos.y = scatterY;
+  }
+}
+
+// ── Mutating Functions ─────────────────────────────────────────────────────────
+
+/** Apply damage to entity, track triggers, scatter idle AI units on hit */
+export function damageEntity(
+  ctx: CombatContext, target: Entity, amount: number,
+  warhead: WarheadType, attacker?: Entity,
+): boolean {
+  const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
+  const killed = target.takeDamage(amount, warhead, attacker, whProps);
+  if (target.triggerName) ctx.attackedTriggerNames.add(target.triggerName);
+  if (!killed && target.alive) aiScatterOnDamage(ctx, target);
+  return killed;
+}
+
+/** AI scatter — idle AI units move to random adjacent cell when attacked (IQ >= 2, C++ techno.cpp) */
+export function aiScatterOnDamage(ctx: CombatContext, entity: Entity): void {
+  if (entity.isPlayerUnit) return;
+  if (entity.mission !== Mission.GUARD && entity.mission !== Mission.AREA_GUARD) return;
+
+  if (ctx.aiIQ(entity.house) < 2) return;
+
+  // Move to random adjacent cell
+  const dx = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+  const dy = Math.floor(Math.random() * 3) - 1;
+  if (dx === 0 && dy === 0) return;
+
+  const targetX = entity.pos.x + dx * CELL_SIZE;
+  const targetY = entity.pos.y + dy * CELL_SIZE;
+
+  // Check passability
+  const tcx = Math.floor(targetX / CELL_SIZE);
+  const tcy = Math.floor(targetY / CELL_SIZE);
+  if (!ctx.map.isPassable(tcx, tcy)) return;
+
+  entity.moveTarget = { x: targetX, y: targetY };
+  entity.mission = Mission.MOVE;
+}
+
+/** Fire weapon at entity target (helper for aircraft) — uses full damage pipeline */
+export function fireWeaponAt(
+  ctx: CombatContext, attacker: Entity, target: Entity, weapon: WeaponStats,
+): void {
+  const houseBias = ctx.getFirepowerBias(attacker.house);
+  const whMult = getWarheadMult(weapon.warhead, target.stats.armor, ctx.warheadOverrides);
+  const damage = modifyDamage(weapon.damage, weapon.warhead, target.stats.armor, 0, houseBias, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
+  const killed = damageEntity(ctx, target, damage, weapon.warhead, attacker);
+  if (killed) {
+    attacker.creditKill();
+    handleUnitDeath(ctx, target, {
+      screenShake: 8, explosionSize: 16, debris: true,
+      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
+      explodeLgSound: false,
+      attackerIsPlayer: ctx.isPlayerControlled(attacker),
+      trackLoss: true,
+    });
+  }
+  // Fire effect
+  ctx.effects.push({
+    type: 'muzzle',
+    x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
+    frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
+  } as Effect);
+}
+
+/** Fire weapon at structure target (helper for aircraft) — uses full damage pipeline */
+export function fireWeaponAtStructure(
+  ctx: CombatContext, attacker: Entity, s: MapStructure, weapon: WeaponStats,
+): void {
+  const wh = (weapon.warhead ?? 'HE') as WarheadType;
+  const houseBias = ctx.getFirepowerBias(attacker.house);
+  const whMult = getWarheadMult(wh, 'concrete', ctx.warheadOverrides);
+  const damage = modifyDamage(weapon.damage, wh, 'concrete', 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
+  const destroyed = ctx.damageStructure(s, damage);
+  if (destroyed) attacker.creditKill();
+  ctx.effects.push({
+    type: 'muzzle',
+    x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
+    frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
+  } as Effect);
+}
+
+/** Shared death aftermath — explosion, debris, decal, sound, kill/loss tracking.
+ *  Parameterized to handle the 4 death contexts (direct, defense, projectile, splash). */
+export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
+  screenShake: number;
+  explosionSize: number;
+  debris: boolean;
+  decal: { infantry: number; vehicle: number; opacity: number } | null;
+  explodeLgSound: boolean;
+  attackerIsPlayer: boolean;
+  trackLoss: boolean;
+  friendlyFireLoss?: boolean;
+}): void {
+  const kx = victim.pos.x;
+  const ky = victim.pos.y;
+  ctx.effects.push({ type: 'explosion', x: kx, y: ky, frame: 0, maxFrames: 18,
+    size: opts.explosionSize, sprite: 'fball1', spriteStart: 0 } as Effect);
+  if (opts.debris && !victim.stats.isInfantry) {
+    ctx.effects.push({ type: 'debris', x: kx, y: ky, frame: 0, maxFrames: 12, size: 18 } as Effect);
+  }
+  ctx.screenShake = Math.max(ctx.screenShake, opts.screenShake);
+  if (opts.decal) {
+    const tc = worldToCell(kx, ky);
+    ctx.map.addDecal(tc.cx, tc.cy,
+      victim.stats.isInfantry ? opts.decal.infantry : opts.decal.vehicle, opts.decal.opacity);
+  }
+  if (victim.isAnt) ctx.playSoundAt('die_ant', kx, ky);
+  else if (victim.stats.isInfantry) ctx.playSoundAt('die_infantry', kx, ky);
+  else ctx.playSoundAt('die_vehicle', kx, ky);
+  if (opts.explodeLgSound) ctx.playSoundAt('explode_lg', kx, ky);
+  if (opts.attackerIsPlayer) ctx.killCount++;
+  if (opts.trackLoss && ctx.isPlayerControlled(victim)) {
+    ctx.lossCount++;
+    ctx.playEva('eva_unit_lost');
+    const tc = worldToCell(kx, ky);
+    ctx.minimapAlert(tc.cx, tc.cy);
+  }
+  if (opts.friendlyFireLoss) {
+    ctx.lossCount++;
+    ctx.playEva('eva_unit_lost');
+    const tc = worldToCell(kx, ky);
+    ctx.minimapAlert(tc.cx, tc.cy);
+  }
+}
+
+/** Trigger retaliation: a damaged unit without a target attacks the shooter.
+ *  In original RA, idle/moving units always counter-attack when hit. */
+export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker: Entity): void {
+  if (!victim.alive || !attacker.alive) return;
+  if (ctx.entitiesAllied(victim, attacker)) return; // no friendly retaliation
+  if (!victim.weapon) return; // unarmed units can't retaliate
+  // Only retarget if no current target or current target is dead
+  if (victim.target && victim.target.alive) return;
+  // Don't interrupt scripted team missions (except HUNT which already attacks)
+  if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
+  victim.target = attacker;
+  victim.mission = Mission.ATTACK;
+  victim.animState = AnimState.ATTACK;
+}
+
+/** Vehicle crush — heavy tracked vehicles (crusher=true) instantly kill crushable units on cell entry.
+ *  C++ DriveClass::Ok_To_Move (drive.cpp): when a Crusher vehicle enters a cell with a Crushable unit,
+ *  the crushable unit dies instantly. Only crusher vehicles crush; only crushable targets are affected.
+ *  Infantry and ants are crushable; vehicles are not. The crusher does NOT stop — it drives through.
+ *  C++ checks IsAFriend() — friendly/allied infantry are NOT crushed. */
+export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
+  const vc = vehicle.cell;
+  for (const other of ctx.entities) {
+    if (!other.alive || other.id === vehicle.id) continue;
+    if (!other.stats.crushable) continue; // only crushable targets (infantry, ants)
+    if (ctx.isAllied(vehicle.house, other.house)) continue; // C++ IsAFriend — don't crush allies
+    const oc = other.cell;
+    if (oc.cx === vc.cx && oc.cy === vc.cy) {
+      damageEntity(ctx, other, other.hp + 10, 'Super'); // instant kill, always die2
+      vehicle.creditKill();
+      ctx.effects.push({
+        type: 'blood', x: other.pos.x, y: other.pos.y,
+        frame: 0, maxFrames: 6, size: 4, sprite: 'piffpiff', spriteStart: 0,
+      } as Effect);
+      // Use appropriate death sound based on unit type
+      const crushSound = other.isAnt ? 'die_ant' : 'die_infantry';
+      ctx.playSoundAt(crushSound, other.pos.x, other.pos.y);
+      ctx.map.addDecal(oc.cx, oc.cy, 3, 0.3);
+      if (ctx.isPlayerControlled(vehicle)) ctx.killCount++;
+      else {
+        ctx.lossCount++;
+        ctx.playEva('eva_unit_lost');
+        const alertCell = other.cell;
+        ctx.minimapAlert(alertCell.cx, alertCell.cy);
+      }
+    }
+  }
+}
+
+/** Launch a projectile with travel time — damage is deferred until arrival */
+export function launchProjectile(
+  ctx: CombatContext, attacker: Entity, target: Entity | null, weapon: WeaponStats,
+  damage: number, impactX: number, impactY: number, directHit: boolean,
+): void {
+  const dist = worldDist(attacker.pos, { x: impactX, y: impactY });
+  const speed = weapon.projectileSpeed!;
+  const travelFrames = Math.max(1, Math.round(dist / speed));
+
+  ctx.inflightProjectiles.push({
+    attackerId: attacker.id,
+    targetId: target?.id ?? -1,
+    weapon,
+    damage,
+    speed,
+    travelFrames,
+    currentFrame: 0,
+    directHit,
+    impactX,
+    impactY,
+    attackerIsPlayer: ctx.isPlayerControlled(attacker),
+  });
+}
+
+/** Advance in-flight projectiles; apply damage + splash on arrival */
+export function updateInflightProjectiles(ctx: CombatContext): void {
+  const arrived: InflightProjectile[] = [];
+
+  for (const proj of ctx.inflightProjectiles) {
+    proj.currentFrame++;
+
+    // C9/C10: Homing projectile tracking (C++ bullet.cpp:368,517)
+    // projectileROT = homing turn rate. C10: homing updates every other frame.
+    const target = ctx.entityById.get(proj.targetId);
+    if (target && target.alive) {
+      const rot = proj.weapon.projectileROT ?? 0;
+      if (rot > 0) {
+        // C10: Only update homing every other frame (C++ bullet.cpp:368)
+        if (proj.currentFrame % 2 === 0) {
+          // Homing: strong tracking based on ROT (higher ROT = better tracking)
+          const trackFactor = Math.min(1.0, rot * 0.15);
+          proj.impactX += (target.pos.x - proj.impactX) * trackFactor;
+          proj.impactY += (target.pos.y - proj.impactY) * trackFactor;
+        }
+      }
+      // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
+    }
+
+    if (proj.currentFrame >= proj.travelFrames) {
+      arrived.push(proj);
+    }
+  }
+
+  // Remove arrived projectiles
+  ctx.inflightProjectiles = ctx.inflightProjectiles.filter(p => p.currentFrame < p.travelFrames);
+
+  // Apply damage for arrived projectiles
+  for (const proj of arrived) {
+    const target = ctx.entityById.get(proj.targetId);
+    const attacker = ctx.entityById.get(proj.attackerId);
+
+    if (proj.directHit && target && target.alive) {
+      const killed = damageEntity(ctx, target, proj.damage, proj.weapon.warhead, attacker);
+
+      if (!killed && attacker) {
+        triggerRetaliation(ctx, target, attacker);
+        scatterInfantry(ctx, target, { x: proj.impactX, y: proj.impactY });
+      }
+
+      if (killed) {
+        if (attacker) attacker.creditKill();
+        handleUnitDeath(ctx, target, {
+          screenShake: 8, explosionSize: 16, debris: true,
+          decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
+          explodeLgSound: false,
+          attackerIsPlayer: proj.attackerIsPlayer,
+          trackLoss: true,
+        });
+      }
+    }
+
+    // Splash damage at impact point
+    if (proj.weapon.splash && proj.weapon.splash > 0) {
+      const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
+      applySplashDamage(
+        ctx, { x: proj.impactX, y: proj.impactY }, proj.weapon,
+        proj.directHit && target ? target.id : -1,
+        attackerHouse, attacker ?? undefined,
+      );
+    }
+
+    // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
+    const projImpactSprite = getWarheadProps(proj.weapon.warhead, ctx.scenarioWarheadProps)?.explosionSet ?? 'veh-hit1';
+    // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
+    const isScud = proj.weapon.name === 'SCUD';
+    ctx.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
+      frame: 0, maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 } as Effect);
+    if (isScud) {
+      ctx.screenShake = Math.max(ctx.screenShake, 12);
+      ctx.playSoundAt('building_explode', proj.impactX, proj.impactY);
+    }
+  }
+}
+
+/** Apply AOE splash damage to entities near an impact point.
+ *  CF2/CF3: Uses fixed 1.5-cell radius and C++ inverse-proportional falloff via modifyDamage. */
+export function applySplashDamage(
+  ctx: CombatContext,
+  center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
+  primaryTargetId: number, attackerHouse: House, attacker?: Entity,
+): void {
+  // CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2)
+  const splashRange = SPLASH_RADIUS;
+  const splashRangePixels = splashRange * CELL_SIZE;
+  const attackerIsPlayerControlled = ctx.isAllied(attackerHouse, ctx.playerHouse);
+
+  for (const other of ctx.entities) {
+    if (!other.alive || other.id === primaryTargetId) continue;
+    // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
+    const isFriendly = ctx.isAllied(other.house, attackerHouse);
+    const distCells = worldDist(center, other.pos);
+    if (distCells > splashRange) continue;
+
+    // CF2: C++ inverse-proportional falloff via modifyDamage (combat.cpp:106-125)
+    const distPixels = distCells * CELL_SIZE;
+    const whMult = getWarheadMult(weapon.warhead, other.stats.armor, ctx.warheadOverrides);
+    const splashDmg = modifyDamage(weapon.damage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
+    if (splashDmg <= 0) continue;
+    const killed = damageEntity(ctx, other, splashDmg, weapon.warhead, attacker);
+
+    // Retaliation from splash damage
+    if (!killed && attacker) {
+      triggerRetaliation(ctx, other, attacker);
+    }
+
+    // Infantry scatter: push nearby infantry away from explosion
+    if (other.alive && other.stats.isInfantry && distCells < splashRange * 0.8) {
+      const angle = Math.atan2(other.pos.y - center.y, other.pos.x - center.x);
+      const pushDist = CELL_SIZE * (1 - distCells / splashRange);
+      const scatterX = other.pos.x + Math.cos(angle) * pushDist;
+      const scatterY = other.pos.y + Math.sin(angle) * pushDist;
+      // Only scatter to passable terrain
+      const sc = worldToCell(scatterX, scatterY);
+      if (ctx.map.isPassable(sc.cx, sc.cy)) {
+        other.pos.x = scatterX;
+        other.pos.y = scatterY;
+      }
+    }
+
+    if (killed) {
+      if (!isFriendly && attacker) attacker.creditKill();
+      handleUnitDeath(ctx, other, {
+        screenShake: 4, explosionSize: 12, debris: false,
+        decal: null,
+        explodeLgSound: false,
+        attackerIsPlayer: !isFriendly && attackerIsPlayerControlled,
+        trackLoss: !isFriendly,
+        friendlyFireLoss: isFriendly && attackerIsPlayerControlled,
+      });
+    }
+  }
+
+  // Terrain destruction: large explosions (splash >= 1.5) can destroy trees, walls, and ore in the blast radius
+  const whMeta = getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta);
+  if (splashRange >= 1.5 && weapon.damage >= 30) {
+    const cc = worldToCell(center.x, center.y);
+    const r = Math.ceil(splashRange);
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > splashRange * splashRange) continue;
+        const tx = cc.cx + dx;
+        const ty = cc.cy + dy;
+        if (ctx.map.getTerrain(tx, ty) === Terrain.TREE) {
+          // 40% chance to destroy tree per explosion
+          if (Math.random() < 0.4) {
+            ctx.map.setTerrain(tx, ty, Terrain.CLEAR);
+            ctx.map.clearTreeType(tx, ty);
+            ctx.map.addDecal(tx, ty, 6, 0.4); // stump/scorch mark
+            ctx.effects.push({
+              type: 'explosion',
+              x: tx * CELL_SIZE + CELL_SIZE / 2,
+              y: ty * CELL_SIZE + CELL_SIZE / 2,
+              frame: 0, maxFrames: 10, size: 8,
+              sprite: 'piffpiff', spriteStart: 0,
+            } as Effect);
+          }
+        }
+        // CF8: Wall destruction from splash — warheads with IsWallDestroyer flag (C++ combat.cpp:244-270)
+        if (whMeta.destroysWalls && ctx.map.getWallType(tx, ty) !== '') {
+          ctx.map.clearWallType(tx, ty);
+          ctx.map.addDecal(tx, ty, 4, 0.3); // rubble decal
+          ctx.effects.push({
+            type: 'explosion',
+            x: tx * CELL_SIZE + CELL_SIZE / 2,
+            y: ty * CELL_SIZE + CELL_SIZE / 2,
+            frame: 0, maxFrames: 8, size: 6,
+            sprite: 'piffpiff', spriteStart: 0,
+          } as Effect);
+        }
+        // CF9: Ore destruction from splash — warheads with IsTiberiumDestroyer flag (C++ combat.cpp)
+        if (whMeta.destroysOre) {
+          const oreIdx = ty * MAP_CELLS + tx;
+          if (tx >= 0 && tx < MAP_CELLS && ty >= 0 && ty < MAP_CELLS) {
+            const ovl = ctx.map.overlay[oreIdx];
+            if (ovl >= 0x03 && ovl <= 0x12) {
+              // Reduce ore density by one level; fully depleted if at minimum
+              if (ovl === 0x03 || ovl === 0x0F) {
+                ctx.map.overlay[oreIdx] = 0xFF; // fully depleted
+              } else {
+                ctx.map.overlay[oreIdx] = ovl - 1;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

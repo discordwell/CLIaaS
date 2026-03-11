@@ -1,11 +1,11 @@
 /**
  * Comprehensive superweapon pipeline tests — covers all 8 SuperweaponType variants
  * and their mechanical details: activation dispatch, damage formulas, cooldown/charge
- * system, entity state mutations, source-code structure verification, and edge cases.
+ * system, entity state mutations, behavioral verification, and edge cases.
  *
  * Avoids duplicating tests already in superweapons.test.ts and power-super-parity.test.ts.
- * Focuses on behavioral correctness, damage math, edge cases, and source-code verification
- * of Game methods (activateSuperweapon, detonateNuke, updateSuperweapons).
+ * Focuses on behavioral correctness, damage math, edge cases, and behavioral verification
+ * of superweapon functions (activateSuperweapon, detonateNuke, updateSuperweapons).
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -20,6 +20,13 @@ import {
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, worldDist, getWarheadMultiplier,
   type WarheadType, type ArmorType,
 } from '../engine/types';
+import {
+  activateSuperweapon, detonateNuke, updateSuperweapons, findBestNukeTarget,
+  type SuperweaponContext,
+} from '../engine/superweapon';
+import { type MapStructure, STRUCTURE_SIZE } from '../engine/scenario';
+import { type Effect } from '../engine/renderer';
+import { Terrain } from '../engine/map';
 
 beforeEach(() => resetEntityIds());
 
@@ -29,18 +36,11 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
 }
 
-/** Read engine/index.ts source for structural verification */
+/** Read engine/index.ts source for structural verification (still used by non-superweapon tests) */
 function readIndexSource(): string {
   return readFileSync(
     join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
   );
-}
-
-/** Extract a method body from source (up to maxLen chars from start marker) */
-function extractMethod(src: string, signature: string, maxLen = 1500): string {
-  const idx = src.indexOf(signature);
-  if (idx === -1) return '';
-  return src.slice(idx, idx + maxLen);
 }
 
 /** Simulate SuperweaponState for testing */
@@ -59,41 +59,190 @@ function makeSwState(
   };
 }
 
+/** Create a mock MapStructure */
+function makeStructure(
+  type: string, house: House, cx: number, cy: number,
+  overrides: Partial<MapStructure> = {},
+): MapStructure {
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp: 256,
+    maxHp: 256,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    ...overrides,
+  } as MapStructure;
+}
+
+/** Create a mock SuperweaponContext with sensible defaults */
+function makeMockSuperweaponContext(
+  overrides: Partial<SuperweaponContext> = {},
+): SuperweaponContext {
+  const evaMessages: string[] = [];
+  const sounds: string[] = [];
+  const soundsAt: Array<{ name: string; x: number; y: number }> = [];
+  const addedEntities: Entity[] = [];
+  const damagedEntities: Array<{ target: Entity; amount: number; warhead: string; killed: boolean }> = [];
+  const damagedStructures: Array<{ s: MapStructure; damage: number; killed: boolean }> = [];
+  const visibilityCells: Array<{ cx: number; cy: number; v: number }> = [];
+  const terrainCells: Array<{ cx: number; cy: number; terrain: Terrain }> = [];
+  let revealedAll = false;
+  const unjammedCells: Array<{ cx: number; cy: number; radius: number }> = [];
+
+  const ctx: SuperweaponContext = {
+    structures: [],
+    entities: [],
+    entityById: new Map(),
+    superweapons: new Map(),
+    effects: [],
+    tick: 0,
+    playerHouse: House.Spain,
+    powerProduced: 100,
+    powerConsumed: 50,
+    killCount: 0,
+    lossCount: 0,
+    map: {
+      revealAll() { revealedAll = true; },
+      isPassable(_cx: number, _cy: number) { return true; },
+      setVisibility(cx: number, cy: number, v: number) { visibilityCells.push({ cx, cy, v }); },
+      inBounds(_cx: number, _cy: number) { return true; },
+      setTerrain(cx: number, cy: number, terrain: Terrain) { terrainCells.push({ cx, cy, terrain }); },
+      unjamRadius(cx: number, cy: number, radius: number) { unjammedCells.push({ cx, cy, radius }); },
+    },
+    sonarSpiedTarget: new Map(),
+    gapGeneratorCells: new Map(),
+    nukePendingTarget: null,
+    nukePendingTick: 0,
+    nukePendingSource: null,
+    isAllied(a: House, b: House) { return a === b; },
+    isPlayerControlled(e: Entity) { return e.house === House.Spain; },
+    pushEva(text: string) { evaMessages.push(text); },
+    playSound(name: string) { sounds.push(name); },
+    playSoundAt(name: string, x: number, y: number) { soundsAt.push({ name, x, y }); },
+    damageEntity(target: Entity, amount: number, warhead: string) {
+      const killed = target.takeDamage(amount, warhead);
+      damagedEntities.push({ target, amount, warhead, killed });
+      return killed;
+    },
+    damageStructure(s: MapStructure, damage: number) {
+      s.hp -= damage;
+      const killed = s.hp <= 0;
+      if (killed) { s.hp = 0; s.alive = false; }
+      damagedStructures.push({ s, damage, killed });
+      return killed;
+    },
+    addEntity(e: Entity) { addedEntities.push(e); },
+    aiIQ(_house: House) { return 5; },
+    getWarheadMult(warhead: string, armor: string) {
+      return getWarheadMultiplier(warhead as WarheadType, armor as ArmorType);
+    },
+    cameraX: 0,
+    cameraY: 0,
+    cameraViewWidth: 640,
+    screenShake: 0,
+    screenFlash: 0,
+    ...overrides,
+  };
+
+  // Attach tracking arrays for test assertions
+  (ctx as any)._evaMessages = evaMessages;
+  (ctx as any)._sounds = sounds;
+  (ctx as any)._soundsAt = soundsAt;
+  (ctx as any)._addedEntities = addedEntities;
+  (ctx as any)._damagedEntities = damagedEntities;
+  (ctx as any)._damagedStructures = damagedStructures;
+  (ctx as any)._visibilityCells = visibilityCells;
+  (ctx as any)._terrainCells = terrainCells;
+  (ctx as any)._revealedAll = () => revealedAll;
+  (ctx as any)._unjammedCells = unjammedCells;
+
+  return ctx;
+}
+
 // ═══════════════════════════════════════════════════════════
-// 1. activateSuperweapon — Dispatch Structure Verification
+// 1. activateSuperweapon — Dispatch Behavioral Verification
 // ═══════════════════════════════════════════════════════════
 describe('activateSuperweapon dispatch', () => {
-  const src = readIndexSource();
-  const method = extractMethod(src, 'activateSuperweapon(type: SuperweaponType', 5500);
 
   it('method exists in Game class', () => {
-    expect(method.length).toBeGreaterThan(0);
+    // activateSuperweapon is exported from superweapon.ts
+    expect(typeof activateSuperweapon).toBe('function');
   });
 
   it('dispatches via switch on all expected SuperweaponType cases', () => {
-    // Full method is ~7600 chars; extract a large enough window to see all cases
-    const fullMethod = extractMethod(src, 'activateSuperweapon(type: SuperweaponType', 7600);
-    expect(fullMethod).toContain('case SuperweaponType.CHRONOSPHERE');
-    expect(fullMethod).toContain('case SuperweaponType.IRON_CURTAIN');
-    expect(fullMethod).toContain('case SuperweaponType.NUKE');
-    expect(fullMethod).toContain('case SuperweaponType.PARABOMB');
-    expect(fullMethod).toContain('case SuperweaponType.PARAINFANTRY');
-    expect(fullMethod).toContain('case SuperweaponType.SPY_PLANE');
+    // Verify that activateSuperweapon handles all 6 target-based superweapon types
+    // by calling each one and checking it has an effect
+    const types = [
+      SuperweaponType.CHRONOSPHERE,
+      SuperweaponType.IRON_CURTAIN,
+      SuperweaponType.NUKE,
+      SuperweaponType.PARABOMB,
+      SuperweaponType.PARAINFANTRY,
+      SuperweaponType.SPY_PLANE,
+    ];
+    for (const swType of types) {
+      const ctx = makeMockSuperweaponContext();
+      const struct = makeStructure(SUPERWEAPON_DEFS[swType].building || 'MSLO', House.Spain, 5, 5);
+      ctx.structures.push(struct);
+      const state = makeSwState(swType, House.Spain, { ready: true });
+      ctx.superweapons.set(`${House.Spain}:${swType}`, state);
+      // For Chronosphere, need a selected unit
+      if (swType === SuperweaponType.CHRONOSPHERE) {
+        const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+        tank.selected = true;
+        ctx.entities.push(tank);
+        ctx.entityById.set(tank.id, tank);
+      }
+      activateSuperweapon(ctx, swType, House.Spain, { x: 200, y: 200 });
+      // After activation, state.ready should be false (proves it was handled)
+      expect(state.ready, `${swType} should reset ready`).toBe(false);
+    }
   });
 
   it('resets ready and chargeTick on activation', () => {
-    // Source should set state.ready = false and state.chargeTick = 0
-    expect(method).toContain('state.ready = false');
-    expect(method).toContain('state.chargeTick = 0');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('MSLO', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.NUKE, House.Spain, { ready: true, chargeTick: 11700 });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.NUKE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.NUKE, House.Spain, { x: 200, y: 200 });
+    expect(state.ready).toBe(false);
+    expect(state.chargeTick).toBe(0);
   });
 
   it('guards against missing or non-ready state', () => {
-    // Should bail if state is missing or not ready
-    expect(method).toContain('!state || !state.ready');
+    const ctx = makeMockSuperweaponContext();
+    // No state at all — should not throw
+    activateSuperweapon(ctx, SuperweaponType.NUKE, House.Spain, { x: 200, y: 200 });
+    expect(ctx.effects).toHaveLength(0);
+
+    // State exists but not ready — should be a no-op
+    const state = makeSwState(SuperweaponType.NUKE, House.Spain, { ready: false });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.NUKE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.NUKE, House.Spain, { x: 200, y: 200 });
+    expect(ctx.effects).toHaveLength(0);
   });
 
   it('looks up state by house:type composite key', () => {
-    expect(method).toContain('`${house}:${type}`');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('MSLO', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    // Put state under USSR key
+    const state = makeSwState(SuperweaponType.NUKE, House.USSR, { ready: true });
+    ctx.superweapons.set(`${House.USSR}:${SuperweaponType.NUKE}`, state);
+    // Try activating with Spain — should not find state
+    activateSuperweapon(ctx, SuperweaponType.NUKE, House.Spain, { x: 200, y: 200 });
+    expect(state.ready).toBe(true); // still ready, not found by Spain
+    // Now activate with USSR
+    activateSuperweapon(ctx, SuperweaponType.NUKE, House.USSR, { x: 200, y: 200 });
+    expect(state.ready).toBe(false); // found and consumed
   });
 });
 
@@ -101,17 +250,21 @@ describe('activateSuperweapon dispatch', () => {
 // 2. Nuclear Strike — detonateNuke Damage Pipeline
 // ═══════════════════════════════════════════════════════════
 describe('Nuclear Strike — detonateNuke mechanics', () => {
-  const src = readIndexSource();
-  const method = extractMethod(src, 'private detonateNuke(', 2500);
 
   it('detonateNuke method exists', () => {
-    expect(method.length).toBeGreaterThan(0);
+    expect(typeof detonateNuke).toBe('function');
   });
 
   it('uses NUKE_DAMAGE (1000) and Super warhead', () => {
     expect(NUKE_DAMAGE).toBe(1000);
-    expect(method).toContain('NUKE_DAMAGE');
-    expect(method).toContain("'Super'");
+    // Behavioral check: detonateNuke damages entities with Super warhead
+    const ctx = makeMockSuperweaponContext();
+    const tank = makeEntity(UnitType.V_2TNK, House.USSR, 200, 200);
+    ctx.entities.push(tank);
+    detonateNuke(ctx, { x: 200, y: 200 });
+    const damaged = (ctx as any)._damagedEntities;
+    expect(damaged.length).toBeGreaterThan(0);
+    expect(damaged[0].warhead).toBe('Super');
   });
 
   it('Super warhead has 1.0 multiplier against all armor types', () => {
@@ -212,34 +365,65 @@ describe('Nuclear Strike — detonateNuke mechanics', () => {
     expect(mammoth.hp).toBe(mammoth.maxHp - edgeDmg);
   });
 
-  it('detonateNuke source credits kills (lossCount/killCount)', () => {
-    expect(method).toContain('this.lossCount++');
-    expect(method).toContain('this.killCount++');
+  it('detonateNuke credits kills (lossCount/killCount)', () => {
+    // Player unit killed — lossCount increments (Spain is a player house by default)
+    const ctx = makeMockSuperweaponContext();
+    const playerUnit = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    expect(playerUnit.isPlayerUnit).toBe(true); // Spain is in default _playerHouses
+    ctx.entities.push(playerUnit);
+    detonateNuke(ctx, { x: 200, y: 200 });
+    expect(ctx.lossCount).toBeGreaterThan(0);
+
+    // Enemy unit killed — killCount increments (USSR is not a player house)
+    const ctx2 = makeMockSuperweaponContext();
+    const enemyUnit = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    expect(enemyUnit.isPlayerUnit).toBe(false); // USSR is not in default _playerHouses
+    ctx2.entities.push(enemyUnit);
+    detonateNuke(ctx2, { x: 200, y: 200 });
+    expect(ctx2.killCount).toBeGreaterThan(0);
   });
 
   it('detonateNuke creates mushroom cloud effect (atomsfx sprite)', () => {
-    expect(method).toContain("'atomsfx'");
+    const ctx = makeMockSuperweaponContext();
+    detonateNuke(ctx, { x: 200, y: 200 });
+    const atomsfx = ctx.effects.find(e => e.sprite === 'atomsfx');
+    expect(atomsfx).toBeDefined();
   });
 
   it('detonateNuke sets screen flash and shake', () => {
-    expect(method).toContain('this.renderer.screenFlash = 30');
-    expect(method).toContain('this.renderer.screenShake = 30');
+    const ctx = makeMockSuperweaponContext();
+    detonateNuke(ctx, { x: 200, y: 200 });
+    expect(ctx.screenFlash).toBe(30);
+    expect(ctx.screenShake).toBe(30);
   });
 
   it('detonateNuke damages structures in blast radius', () => {
-    expect(method).toContain('for (const s of this.structures)');
-    expect(method).toContain('s.hp -= dmg');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('WEAP', House.USSR, 8, 8);
+    struct.hp = 256;
+    ctx.structures.push(struct);
+    // Place nuke near the structure
+    const sx = struct.cx * CELL_SIZE + CELL_SIZE;
+    const sy = struct.cy * CELL_SIZE + CELL_SIZE;
+    detonateNuke(ctx, { x: sx, y: sy });
+    expect(struct.hp).toBeLessThan(256);
   });
 
   it('nuke launch sets pending target with flight delay', () => {
-    const nukeCase = extractMethod(src, "case SuperweaponType.NUKE:", 500);
-    expect(nukeCase).toContain('this.nukePendingTarget');
-    expect(nukeCase).toContain('NUKE_FLIGHT_TICKS');
-    expect(nukeCase).toContain('this.nukePendingTick');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('MSLO', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.NUKE, House.Spain, { ready: true, structureIndex: 0 });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.NUKE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.NUKE, House.Spain, { x: 200, y: 200 });
+    expect(ctx.nukePendingTarget).toEqual({ x: 200, y: 200 });
+    expect(ctx.nukePendingTick).toBe(NUKE_FLIGHT_TICKS);
+    expect(ctx.nukePendingSource).not.toBeNull();
   });
 
   it('nuke pending tick countdown triggers detonation', () => {
-    // Verify the update loop decrements nukePendingTick and detonates at 0
+    // This logic remains in index.ts — verify via source
+    const src = readIndexSource();
     const updateChunk = src.indexOf('this.nukePendingTick--');
     expect(updateChunk).toBeGreaterThan(-1);
     const context = src.slice(updateChunk - 100, updateChunk + 200);
@@ -251,7 +435,6 @@ describe('Nuclear Strike — detonateNuke mechanics', () => {
 // 3. GPS Satellite — Map Reveal
 // ═══════════════════════════════════════════════════════════
 describe('GPS Satellite — map reveal mechanics', () => {
-  const src = readIndexSource();
 
   it('GPS auto-fires when ready (no player target needed)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE];
@@ -260,20 +443,31 @@ describe('GPS Satellite — map reveal mechanics', () => {
   });
 
   it('updateSuperweapons calls map.revealAll() on GPS ready', () => {
-    const updateMethod = extractMethod(src, 'updateSuperweapons(): void', 3000);
-    expect(updateMethod).toContain('this.map.revealAll()');
-    // Should be inside GPS_SATELLITE case
-    expect(updateMethod).toContain('SuperweaponType.GPS_SATELLITE');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('ATEK', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    // Create a fully charged GPS state
+    const state = makeSwState(SuperweaponType.GPS_SATELLITE, House.Spain, {
+      chargeTick: SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks,
+      ready: true,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.GPS_SATELLITE}`, state);
+    updateSuperweapons(ctx);
+    expect((ctx as any)._revealedAll()).toBe(true);
   });
 
   it('GPS sets fired=true and ready=false after activation (one-shot)', () => {
-    const updateMethod = extractMethod(src, 'updateSuperweapons(): void', 3000);
-    // Within the GPS block, fired should be set to true
-    const gpsIdx = updateMethod.indexOf('GPS_SATELLITE');
-    expect(gpsIdx).toBeGreaterThan(-1);
-    const gpsChunk = updateMethod.slice(gpsIdx, gpsIdx + 300);
-    expect(gpsChunk).toContain('state.fired = true');
-    expect(gpsChunk).toContain('state.ready = false');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('ATEK', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.GPS_SATELLITE, House.Spain, {
+      chargeTick: SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks,
+      ready: true,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.GPS_SATELLITE}`, state);
+    updateSuperweapons(ctx);
+    expect(state.fired).toBe(true);
+    expect(state.ready).toBe(false);
   });
 
   it('GPS one-shot: fired flag prevents recharging', () => {
@@ -284,15 +478,27 @@ describe('GPS Satellite — map reveal mechanics', () => {
   });
 
   it('GPS excluded from sidebar after firing (source verification)', () => {
-    // getPlayerSuperweapons skips GPS when fired
-    const sidebarMethod = extractMethod(src, 'getPlayerSuperweapons():', 500);
+    // getPlayerSuperweapons is in index.ts — still verify via source
+    const src = readIndexSource();
+    const sidebarMethod = src.slice(
+      src.indexOf('getPlayerSuperweapons():'),
+      src.indexOf('getPlayerSuperweapons():') + 500,
+    );
     expect(sidebarMethod).toContain('GPS_SATELLITE');
     expect(sidebarMethod).toContain('state.fired');
   });
 
   it('GPS pushes EVA announcement on activation', () => {
-    const updateMethod = extractMethod(src, 'updateSuperweapons(): void', 3000);
-    expect(updateMethod).toContain('GPS satellite launched');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('ATEK', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.GPS_SATELLITE, House.Spain, {
+      chargeTick: SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks,
+      ready: true,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.GPS_SATELLITE}`, state);
+    updateSuperweapons(ctx);
+    expect((ctx as any)._evaMessages).toContain('GPS satellite launched');
   });
 });
 
@@ -300,22 +506,50 @@ describe('GPS Satellite — map reveal mechanics', () => {
 // 4. Chronosphere — Teleportation Mechanics
 // ═══════════════════════════════════════════════════════════
 describe('Chronosphere — teleportation mechanics', () => {
-  const src = readIndexSource();
-  const chronoCase = extractMethod(src, 'case SuperweaponType.CHRONOSPHERE:', 1300);
 
   it('teleports first selected non-infantry unit to target', () => {
-    expect(chronoCase).toContain('e.selected');
-    expect(chronoCase).toContain('!e.stats.isInfantry');
-    expect(chronoCase).toContain('unit.pos.x = target.x');
-    expect(chronoCase).toContain('unit.pos.y = target.y');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('PDOX', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    tank.selected = true;
+    ctx.entities.push(tank);
+    ctx.entityById.set(tank.id, tank);
+    const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
+    expect(tank.pos.x).toBe(300);
+    expect(tank.pos.y).toBe(400);
   });
 
   it('excludes Chrono Tank (CTNK) — has its own teleport', () => {
-    expect(chronoCase).toContain('UnitType.V_CTNK');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('PDOX', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const ctnk = makeEntity(UnitType.V_CTNK, House.Spain, 100, 100);
+    ctnk.selected = true;
+    ctx.entities.push(ctnk);
+    ctx.entityById.set(ctnk.id, ctnk);
+    const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
+    // CTNK should NOT be teleported
+    expect(ctnk.pos.x).toBe(100);
+    expect(ctnk.pos.y).toBe(100);
   });
 
   it('sets chronoShiftTick for visual flash', () => {
-    expect(chronoCase).toContain('CHRONO_SHIFT_VISUAL_TICKS');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('PDOX', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    tank.selected = true;
+    ctx.entities.push(tank);
+    ctx.entityById.set(tank.id, tank);
+    const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
+    expect(tank.chronoShiftTick).toBe(CHRONO_SHIFT_VISUAL_TICKS);
     expect(CHRONO_SHIFT_VISUAL_TICKS).toBe(30);
   });
 
@@ -335,16 +569,47 @@ describe('Chronosphere — teleportation mechanics', () => {
   });
 
   it('creates lightning effects at origin and destination', () => {
-    expect(chronoCase).toContain("sprite: 'litning'");
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('PDOX', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    tank.selected = true;
+    ctx.entities.push(tank);
+    ctx.entityById.set(tank.id, tank);
+    const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
+    const litningEffects = ctx.effects.filter(e => e.sprite === 'litning');
+    expect(litningEffects).toHaveLength(2); // origin and destination
   });
 
   it('plays chrono sound effect', () => {
-    expect(chronoCase).toContain("this.audio.play('chrono')");
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('PDOX', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    tank.selected = true;
+    ctx.entities.push(tank);
+    ctx.entityById.set(tank.id, tank);
+    const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
+    expect((ctx as any)._sounds).toContain('chrono');
   });
 
   it('teleport updates prevPos to match new position (no interpolation jitter)', () => {
-    expect(chronoCase).toContain('unit.prevPos.x = target.x');
-    expect(chronoCase).toContain('unit.prevPos.y = target.y');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('PDOX', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    tank.selected = true;
+    ctx.entities.push(tank);
+    ctx.entityById.set(tank.id, tank);
+    const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
+    expect(tank.prevPos.x).toBe(300);
+    expect(tank.prevPos.y).toBe(400);
   });
 
   it('Chronosphere is allied faction', () => {
@@ -352,7 +617,8 @@ describe('Chronosphere — teleportation mechanics', () => {
   });
 
   it('chronoShiftTick decrements in game update loop', () => {
-    // Source code should decrement in update
+    // This decrement is still in index.ts
+    const src = readIndexSource();
     expect(src).toContain('e.chronoShiftTick > 0) e.chronoShiftTick--');
   });
 });
@@ -361,8 +627,6 @@ describe('Chronosphere — teleportation mechanics', () => {
 // 5. Iron Curtain — Invulnerability Application
 // ═══════════════════════════════════════════════════════════
 describe('Iron Curtain — invulnerability mechanics', () => {
-  const src = readIndexSource();
-  const icCase = extractMethod(src, 'case SuperweaponType.IRON_CURTAIN:', 1000);
 
   it('Iron Curtain duration is 675 ticks (45 seconds at 15 FPS)', () => {
     expect(IRON_CURTAIN_DURATION).toBe(675);
@@ -370,14 +634,34 @@ describe('Iron Curtain — invulnerability mechanics', () => {
   });
 
   it('sets ironCurtainTick = IRON_CURTAIN_DURATION on target', () => {
-    expect(icCase).toContain('IRON_CURTAIN_DURATION');
-    expect(icCase).toContain('bestEntity.ironCurtainTick');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('IRON', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    ctx.entities.push(tank);
+    ctx.entityById.set(tank.id, tank);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    activateSuperweapon(ctx, SuperweaponType.IRON_CURTAIN, House.Spain, { x: 100, y: 100 });
+    expect(tank.ironCurtainTick).toBe(IRON_CURTAIN_DURATION);
   });
 
   it('finds nearest allied unit within IC_TARGET_RANGE cells', () => {
     expect(IC_TARGET_RANGE).toBe(3);
-    expect(icCase).toContain('d < 3');
-    expect(icCase).toContain('this.isAllied(e.house, house)');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('IRON', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    // Tank within 3 cell range
+    const nearTank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    ctx.entities.push(nearTank);
+    // Tank far away — should NOT be affected
+    const farTank = makeEntity(UnitType.V_2TNK, House.Spain, 500, 500);
+    ctx.entities.push(farTank);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    activateSuperweapon(ctx, SuperweaponType.IRON_CURTAIN, House.Spain, { x: 100, y: 100 });
+    expect(nearTank.ironCurtainTick).toBe(IRON_CURTAIN_DURATION);
+    expect(farTank.ironCurtainTick).toBe(0);
   });
 
   it('ironCurtainTick blocks all damage types', () => {
@@ -409,6 +693,8 @@ describe('Iron Curtain — invulnerability mechanics', () => {
   });
 
   it('ironCurtainTick decrements in game update loop', () => {
+    // This decrement is still in index.ts
+    const src = readIndexSource();
     expect(src).toContain('e.ironCurtainTick > 0) e.ironCurtainTick--');
   });
 
@@ -430,7 +716,16 @@ describe('Iron Curtain — invulnerability mechanics', () => {
   });
 
   it('plays iron_curtain sound on activation', () => {
-    expect(icCase).toContain("this.audio.play('iron_curtain')");
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('IRON', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    ctx.entities.push(tank);
+    ctx.entityById.set(tank.id, tank);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    activateSuperweapon(ctx, SuperweaponType.IRON_CURTAIN, House.Spain, { x: 100, y: 100 });
+    expect((ctx as any)._sounds).toContain('iron_curtain');
   });
 
   it('Iron Curtain targets unit mode (clicks on units)', () => {
@@ -443,30 +738,71 @@ describe('Iron Curtain — invulnerability mechanics', () => {
 // 6. Paratroopers (ParaInfantry) — Unit Spawning
 // ═══════════════════════════════════════════════════════════
 describe('Paratroopers — unit spawning mechanics', () => {
-  const src = readIndexSource();
-  const paraCase = extractMethod(src, 'case SuperweaponType.PARAINFANTRY:', 1200);
 
   it('spawns 5 E1 rifle infantry', () => {
-    expect(paraCase).toContain('UnitType.I_E1');
-    // Pattern: array of 5 E1 units
-    expect(paraCase).toContain('paraTypes.length');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARAINFANTRY, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARAINFANTRY}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARAINFANTRY, House.Spain, { x: 200, y: 200 });
+    const added = (ctx as any)._addedEntities as Entity[];
+    expect(added).toHaveLength(5);
+    for (const e of added) {
+      expect(e.type).toBe(UnitType.I_E1);
+    }
   });
 
   it('spawned infantry get GUARD mission', () => {
-    expect(paraCase).toContain('inf.mission = Mission.GUARD');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARAINFANTRY, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARAINFANTRY}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARAINFANTRY, House.Spain, { x: 200, y: 200 });
+    const added = (ctx as any)._addedEntities as Entity[];
+    for (const e of added) {
+      expect(e.mission).toBe(Mission.GUARD);
+    }
   });
 
   it('spawned infantry are added to entities list and entityById', () => {
-    expect(paraCase).toContain('this.entities.push(inf)');
-    expect(paraCase).toContain('this.entityById.set(inf.id, inf)');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARAINFANTRY, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARAINFANTRY}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARAINFANTRY, House.Spain, { x: 200, y: 200 });
+    const added = (ctx as any)._addedEntities as Entity[];
+    expect(added.length).toBeGreaterThan(0);
+    // entityById should have entries for each added unit
+    for (const e of added) {
+      expect(ctx.entityById.has(e.id)).toBe(true);
+    }
   });
 
   it('creates parachute visual markers', () => {
-    expect(paraCase).toContain("type: 'marker'");
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARAINFANTRY, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARAINFANTRY}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARAINFANTRY, House.Spain, { x: 200, y: 200 });
+    const markers = ctx.effects.filter(e => e.type === 'marker');
+    expect(markers.length).toBeGreaterThan(0);
   });
 
   it('checks map passability before spawning', () => {
-    expect(paraCase).toContain('this.map.isPassable');
+    const ctx = makeMockSuperweaponContext();
+    // Make map impassable
+    ctx.map.isPassable = () => false;
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARAINFANTRY, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARAINFANTRY}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARAINFANTRY, House.Spain, { x: 200, y: 200 });
+    const added = (ctx as any)._addedEntities as Entity[];
+    expect(added).toHaveLength(0); // none spawned on impassable terrain
   });
 
   it('E1 infantry stats are correct', () => {
@@ -478,12 +814,28 @@ describe('Paratroopers — unit spawning mechanics', () => {
   });
 
   it('spawned infantry belong to the activating house', () => {
-    // The code does: new Entity(paraTypes[i], house, px, py)
-    expect(paraCase).toContain('house, px, py');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.USSR, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARAINFANTRY, House.USSR, { ready: true });
+    ctx.superweapons.set(`${House.USSR}:${SuperweaponType.PARAINFANTRY}`, state);
+    ctx.isAllied = (a, b) => a === b;
+    activateSuperweapon(ctx, SuperweaponType.PARAINFANTRY, House.USSR, { x: 200, y: 200 });
+    const added = (ctx as any)._addedEntities as Entity[];
+    for (const e of added) {
+      expect(e.house).toBe(House.USSR);
+    }
   });
 
   it('plays reinforcements EVA', () => {
-    expect(paraCase).toContain("'Reinforcements have arrived'");
+    const ctx = makeMockSuperweaponContext({ playerHouse: House.USSR });
+    ctx.isAllied = (a, b) => a === b;
+    const struct = makeStructure('AFLD', House.USSR, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARAINFANTRY, House.USSR, { ready: true });
+    ctx.superweapons.set(`${House.USSR}:${SuperweaponType.PARAINFANTRY}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARAINFANTRY, House.USSR, { x: 200, y: 200 });
+    expect((ctx as any)._evaMessages).toContain('Reinforcements have arrived');
   });
 });
 
@@ -491,12 +843,21 @@ describe('Paratroopers — unit spawning mechanics', () => {
 // 7. ParaBomb — Airstrike Mechanics
 // ═══════════════════════════════════════════════════════════
 describe('ParaBomb — airstrike mechanics', () => {
-  const src = readIndexSource();
-  const pbCase = extractMethod(src, 'case SuperweaponType.PARABOMB:', 1900);
 
   it('drops 7 bombs in a line', () => {
-    expect(pbCase).toContain('bombCount = 7');
-    expect(pbCase).toContain('spacing = CELL_SIZE');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARABOMB, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARABOMB}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARABOMB, House.Spain, { x: 200, y: 200 });
+    // Should produce 7 explosion effects (one per bomb)
+    const explosions = ctx.effects.filter(e => e.type === 'explosion');
+    expect(explosions).toHaveLength(7);
+    // All at the same y coordinate (line pattern)
+    for (const e of explosions) {
+      expect(e.y).toBe(200);
+    }
   });
 
   it('uses ParaBomb weapon stats (300 damage, HE warhead)', () => {
@@ -523,17 +884,52 @@ describe('ParaBomb — airstrike mechanics', () => {
   });
 
   it('bombs are staggered with 5-tick delays', () => {
-    expect(pbCase).toContain('delay');
-    expect(pbCase).toContain('* 5');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARABOMB, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARABOMB}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARABOMB, House.Spain, { x: 200, y: 200 });
+    // Explosion effects should have staggered negative frame values (delayed detonation)
+    const explosions = ctx.effects.filter(e => e.type === 'explosion');
+    const frames = explosions.map(e => e.frame);
+    // Bombs are staggered with 5-tick intervals between them
+    // Verify consistent 5-tick spacing between consecutive bombs
+    for (let i = 1; i < frames.length; i++) {
+      expect(frames[i] - frames[i - 1]).toBe(-5);
+    }
   });
 
   it('damages both entities and structures', () => {
-    expect(pbCase).toContain('this.damageEntity(');
-    expect(pbCase).toContain('this.damageStructure(');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    // Place an entity and a structure at target
+    const tank = makeEntity(UnitType.V_2TNK, House.USSR, 200, 200);
+    ctx.entities.push(tank);
+    const target_struct = makeStructure('WEAP', House.USSR, 8, 8);
+    // Position the structure center close to the bomb line
+    const [sw, sh] = STRUCTURE_SIZE['WEAP'] ?? [2, 2];
+    target_struct.cx = Math.floor(200 / CELL_SIZE) - Math.floor(sw / 2);
+    target_struct.cy = Math.floor(200 / CELL_SIZE) - Math.floor(sh / 2);
+    ctx.structures.push(target_struct);
+    const state = makeSwState(SuperweaponType.PARABOMB, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARABOMB}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARABOMB, House.Spain, { x: 200, y: 200 });
+    const damagedEnts = (ctx as any)._damagedEntities;
+    const damagedStructs = (ctx as any)._damagedStructures;
+    expect(damagedEnts.length).toBeGreaterThan(0);
+    expect(damagedStructs.length).toBeGreaterThan(0);
   });
 
   it('applies screen shake on detonation', () => {
-    expect(pbCase).toContain('this.renderer.screenShake');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.PARABOMB, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARABOMB}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARABOMB, House.Spain, { x: 200, y: 200 });
+    expect(ctx.screenShake).toBeGreaterThanOrEqual(10);
   });
 
   it('ParaBomb is soviet faction', () => {
@@ -551,19 +947,59 @@ describe('ParaBomb — airstrike mechanics', () => {
 // 8. Spy Plane — Temporary Map Reveal
 // ═══════════════════════════════════════════════════════════
 describe('Spy Plane — map reveal mechanics', () => {
-  const src = readIndexSource();
-  const spCase = extractMethod(src, 'case SuperweaponType.SPY_PLANE:', 1000);
 
   it('reveals 10-cell radius around target', () => {
-    expect(spCase).toContain('revealRadius = 10');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.SPY_PLANE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SPY_PLANE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.SPY_PLANE, House.Spain, { x: 240, y: 240 });
+    const visCells = (ctx as any)._visibilityCells;
+    // Should reveal cells within 10-cell radius (circular)
+    expect(visCells.length).toBeGreaterThan(0);
+    // Check the max distance from center cell
+    const tc = { cx: Math.floor(240 / CELL_SIZE), cy: Math.floor(240 / CELL_SIZE) };
+    for (const c of visCells) {
+      const dx = c.cx - tc.cx;
+      const dy = c.cy - tc.cy;
+      expect(dx * dx + dy * dy).toBeLessThanOrEqual(100); // 10^2
+    }
   });
 
   it('uses circular reveal (dx*dx + dy*dy <= r2)', () => {
-    expect(spCase).toContain('dx * dx + dy * dy <= r2');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.SPY_PLANE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SPY_PLANE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.SPY_PLANE, House.Spain, { x: 240, y: 240 });
+    const visCells = (ctx as any)._visibilityCells;
+    // Verify it's NOT a square pattern — corner cells should be excluded
+    const tc = { cx: Math.floor(240 / CELL_SIZE), cy: Math.floor(240 / CELL_SIZE) };
+    // Corner (10, 10) should NOT be revealed: 10*10 + 10*10 = 200 > 100
+    const corner = visCells.find((c: any) =>
+      c.cx === tc.cx + 10 && c.cy === tc.cy + 10
+    );
+    expect(corner).toBeUndefined();
+    // But (7, 7) should be: 49+49 = 98 <= 100
+    const midDiag = visCells.find((c: any) =>
+      c.cx === tc.cx + 7 && c.cy === tc.cy + 7
+    );
+    expect(midDiag).toBeDefined();
   });
 
   it('sets visibility to 2 (fully revealed)', () => {
-    expect(spCase).toContain('this.map.setVisibility(');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.SPY_PLANE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SPY_PLANE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.SPY_PLANE, House.Spain, { x: 240, y: 240 });
+    const visCells = (ctx as any)._visibilityCells;
+    for (const c of visCells) {
+      expect(c.v).toBe(2);
+    }
   });
 
   it('Spy Plane is available to both factions', () => {
@@ -585,7 +1021,13 @@ describe('Spy Plane — map reveal mechanics', () => {
   });
 
   it('pushes EVA message on activation', () => {
-    expect(spCase).toContain("'Spy plane mission complete'");
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.SPY_PLANE, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SPY_PLANE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.SPY_PLANE, House.Spain, { x: 240, y: 240 });
+    expect((ctx as any)._evaMessages).toContain('Spy plane mission complete');
   });
 });
 
@@ -593,7 +1035,6 @@ describe('Spy Plane — map reveal mechanics', () => {
 // 9. Sonar Pulse — Submarine Detection
 // ═══════════════════════════════════════════════════════════
 describe('Sonar Pulse — submarine detection mechanics', () => {
-  const src = readIndexSource();
 
   it('SONAR_REVEAL_TICKS = 450 (30 seconds at 15 FPS)', () => {
     expect(SONAR_REVEAL_TICKS).toBe(450);
@@ -610,16 +1051,46 @@ describe('Sonar Pulse — submarine detection mechanics', () => {
     expect(sub.sonarPulseTimer).toBe(0);
   });
 
-  it('sonarPulseTimer is set to SONAR_REVEAL_TICKS on activation (source check)', () => {
-    const updateMethod = extractMethod(src, 'updateSuperweapons(): void', 3000);
-    expect(updateMethod).toContain('SONAR_REVEAL_TICKS');
+  it('sonarPulseTimer is set to SONAR_REVEAL_TICKS on activation', () => {
+    const ctx = makeMockSuperweaponContext();
+    // Create an SPEN building for sonar pulse
+    const struct = makeStructure('SPEN', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    // Create a cloakable enemy sub
+    const sub = makeEntity(UnitType.V_SS, House.USSR, 200, 200);
+    ctx.entities.push(sub);
+    // Set up superweapon state as ready
+    const state = makeSwState(SuperweaponType.SONAR_PULSE, House.Spain, {
+      chargeTick: SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks,
+      ready: true,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SONAR_PULSE}`, state);
+    updateSuperweapons(ctx);
+    expect(sub.sonarPulseTimer).toBe(SONAR_REVEAL_TICKS);
   });
 
   it('sonar pulse only reveals cloakable enemy units', () => {
-    const updateMethod = extractMethod(src, 'updateSuperweapons(): void', 3000);
-    // Should check isCloakable and not allied
-    expect(updateMethod).toContain('e.stats.isCloakable');
-    expect(updateMethod).toContain('this.isAllied(e.house');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('SPEN', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    // Cloakable enemy sub — should be revealed
+    const sub = makeEntity(UnitType.V_SS, House.USSR, 200, 200);
+    ctx.entities.push(sub);
+    // Non-cloakable enemy tank — should NOT be set
+    const tank = makeEntity(UnitType.V_2TNK, House.USSR, 300, 300);
+    ctx.entities.push(tank);
+    // Allied sub — should NOT be revealed
+    const alliedSub = makeEntity(UnitType.V_SS, House.Spain, 400, 400);
+    ctx.entities.push(alliedSub);
+    const state = makeSwState(SuperweaponType.SONAR_PULSE, House.Spain, {
+      chargeTick: SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks,
+      ready: true,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SONAR_PULSE}`, state);
+    updateSuperweapons(ctx);
+    expect(sub.sonarPulseTimer).toBe(SONAR_REVEAL_TICKS);
+    expect(tank.sonarPulseTimer).toBe(0);
+    expect(alliedSub.sonarPulseTimer).toBe(0);
   });
 
   it('Sonar Pulse is spy-granted (empty building string)', () => {
@@ -627,19 +1098,37 @@ describe('Sonar Pulse — submarine detection mechanics', () => {
   });
 
   it('sonarPulseTimer decrements in entity update', () => {
+    // This decrement is still in index.ts
+    const src = readIndexSource();
     expect(src).toContain('entity.sonarPulseTimer > 0) entity.sonarPulseTimer--');
   });
 
   it('submarine cloaking is blocked while sonarPulseTimer > 0 (source check)', () => {
-    // The sub cloaking code should check sonarPulseTimer
+    // This logic is still in index.ts
+    const src = readIndexSource();
     expect(src).toContain('entity.sonarPulseTimer > 0');
   });
 
   it('spy-granted sonar removed when target SPEN destroyed', () => {
-    const updateMethod = extractMethod(src, 'updateSuperweapons(): void', 5000);
-    expect(updateMethod).toContain("s.type === 'SPEN'");
-    expect(updateMethod).toContain('this.superweapons.delete(key)');
-    expect(updateMethod).toContain('Sonar pulse lost');
+    const ctx = makeMockSuperweaponContext();
+    // Create an enemy SPEN that was spied on
+    const enemySpen = makeStructure('SPEN', House.USSR, 10, 10);
+    ctx.structures.push(enemySpen);
+    // Set up spy-granted sonar for Spain
+    ctx.sonarSpiedTarget.set(House.Spain, House.USSR);
+    const state = makeSwState(SuperweaponType.SONAR_PULSE, House.Spain, {
+      chargeTick: 0,
+      ready: false,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SONAR_PULSE}`, state);
+    // SPEN is alive — sonar should persist
+    updateSuperweapons(ctx);
+    expect(ctx.superweapons.has(`${House.Spain}:${SuperweaponType.SONAR_PULSE}`)).toBe(true);
+    // Now destroy the SPEN
+    enemySpen.alive = false;
+    updateSuperweapons(ctx);
+    expect(ctx.superweapons.has(`${House.Spain}:${SuperweaponType.SONAR_PULSE}`)).toBe(false);
+    expect((ctx as any)._evaMessages).toContain('Sonar pulse lost');
   });
 });
 
@@ -647,21 +1136,49 @@ describe('Sonar Pulse — submarine detection mechanics', () => {
 // 10. Superweapon Cooldown & Charging System
 // ═══════════════════════════════════════════════════════════
 describe('Superweapon cooldown and charging system', () => {
-  const src = readIndexSource();
-  const updateMethod = extractMethod(src, 'updateSuperweapons(): void', 3000);
 
   it('charging increments chargeTick up to rechargeTicks', () => {
-    expect(updateMethod).toContain('Math.min(state.chargeTick + chargeRate, def.rechargeTicks)');
+    const ctx = makeMockSuperweaponContext();
+    const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
+    const struct = makeStructure(def.building, House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { chargeTick: 0 });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    updateSuperweapons(ctx);
+    // chargeTick should have incremented by 1
+    expect(state.chargeTick).toBe(1);
+    // Should not exceed rechargeTicks
+    state.chargeTick = def.rechargeTicks - 0.5;
+    updateSuperweapons(ctx);
+    expect(state.chargeTick).toBe(def.rechargeTicks);
   });
 
   it('ready flag set when chargeTick >= rechargeTicks', () => {
-    expect(updateMethod).toContain('state.chargeTick >= def.rechargeTicks');
-    expect(updateMethod).toContain('state.ready = true');
+    const ctx = makeMockSuperweaponContext();
+    const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
+    const struct = makeStructure(def.building, House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, {
+      chargeTick: def.rechargeTicks - 1,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    updateSuperweapons(ctx);
+    expect(state.chargeTick).toBe(def.rechargeTicks);
+    expect(state.ready).toBe(true);
   });
 
   it('low power reduces charge rate to 0.25 for player', () => {
-    expect(updateMethod).toContain('0.25');
-    expect(updateMethod).toContain('isLowPower');
+    const ctx = makeMockSuperweaponContext({
+      powerProduced: 50,
+      powerConsumed: 100, // low power
+    });
+    const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
+    const struct = makeStructure(def.building, House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { chargeTick: 0 });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    updateSuperweapons(ctx);
+    expect(state.chargeTick).toBe(0.25); // reduced charge rate
   });
 
   it('charge simulation: normal power reaches ready in exactly rechargeTicks', () => {
@@ -701,22 +1218,47 @@ describe('Superweapon cooldown and charging system', () => {
   });
 
   it('activation resets chargeTick to 0 and ready to false', () => {
-    const activateMethod = extractMethod(src, 'activateSuperweapon(type: SuperweaponType', 500);
-    expect(activateMethod).toContain('state.ready = false');
-    expect(activateMethod).toContain('state.chargeTick = 0');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('MSLO', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.NUKE, House.Spain, {
+      ready: true,
+      chargeTick: SUPERWEAPON_DEFS[SuperweaponType.NUKE].rechargeTicks,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.NUKE}`, state);
+    activateSuperweapon(ctx, SuperweaponType.NUKE, House.Spain, { x: 200, y: 200 });
+    expect(state.ready).toBe(false);
+    expect(state.chargeTick).toBe(0);
   });
 
   it('destroyed buildings remove superweapon state (cleanup)', () => {
-    expect(updateMethod).toContain('activeBuildings');
-    // Cleanup loop
-    const cleanupIdx = src.indexOf('Remove entries for destroyed buildings');
-    expect(cleanupIdx).toBeGreaterThan(-1);
-    const cleanupChunk = src.slice(cleanupIdx, cleanupIdx + 200);
-    expect(cleanupChunk).toContain('this.superweapons.delete(key)');
+    const ctx = makeMockSuperweaponContext();
+    // Create a building and corresponding superweapon state
+    const struct = makeStructure('IRON', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { chargeTick: 100 });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    // First update — building alive, state should persist
+    updateSuperweapons(ctx);
+    expect(ctx.superweapons.has(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`)).toBe(true);
+    // Destroy the building
+    struct.alive = false;
+    updateSuperweapons(ctx);
+    // State should be cleaned up
+    expect(ctx.superweapons.has(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`)).toBe(false);
   });
 
   it('EVA announces when superweapon becomes ready', () => {
-    expect(updateMethod).toContain('`${def.name} ready`');
+    const ctx = makeMockSuperweaponContext();
+    const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
+    const struct = makeStructure(def.building, House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, {
+      chargeTick: def.rechargeTicks - 1,
+    });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
+    updateSuperweapons(ctx);
+    expect((ctx as any)._evaMessages).toContain(`${def.name} ready`);
   });
 
   it('all superweapons require power (requiresPower = true)', () => {
@@ -817,21 +1359,39 @@ describe('Superweapon availability — tech and structure requirements', () => {
 // 12. Kill Crediting — Superweapon Kills
 // ═══════════════════════════════════════════════════════════
 describe('Kill crediting — superweapon kills', () => {
-  const src = readIndexSource();
-  const nukeMethod = extractMethod(src, 'private detonateNuke(', 1500);
 
   it('nuke credits player losses (lossCount) for killed player units', () => {
-    expect(nukeMethod).toContain('e.isPlayerUnit');
-    expect(nukeMethod).toContain('this.lossCount++');
+    const ctx = makeMockSuperweaponContext();
+    // Spain is a player house by default, so Spain units are player units
+    const playerUnit = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    expect(playerUnit.isPlayerUnit).toBe(true);
+    ctx.entities.push(playerUnit);
+    detonateNuke(ctx, { x: 200, y: 200 });
+    expect(ctx.lossCount).toBeGreaterThan(0);
   });
 
   it('nuke credits enemy kills (killCount) for killed non-player units', () => {
-    expect(nukeMethod).toContain('this.killCount++');
+    const ctx = makeMockSuperweaponContext();
+    // USSR is not a player house, so USSR units are enemies
+    const enemyUnit = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    expect(enemyUnit.isPlayerUnit).toBe(false);
+    ctx.entities.push(enemyUnit);
+    detonateNuke(ctx, { x: 200, y: 200 });
+    expect(ctx.killCount).toBeGreaterThan(0);
   });
 
   it('parabomb uses damageEntity which handles kill crediting', () => {
-    const pbCase = extractMethod(src, 'case SuperweaponType.PARABOMB:', 1900);
-    expect(pbCase).toContain('this.damageEntity(');
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('AFLD', House.Spain, 5, 5);
+    ctx.structures.push(struct);
+    const tank = makeEntity(UnitType.V_2TNK, House.USSR, 200, 200);
+    ctx.entities.push(tank);
+    const state = makeSwState(SuperweaponType.PARABOMB, House.Spain, { ready: true });
+    ctx.superweapons.set(`${House.Spain}:${SuperweaponType.PARABOMB}`, state);
+    activateSuperweapon(ctx, SuperweaponType.PARABOMB, House.Spain, { x: 200, y: 200 });
+    const damagedEnts = (ctx as any)._damagedEntities;
+    expect(damagedEnts.length).toBeGreaterThan(0);
+    // damageEntity was called (which handles kill crediting in the real game)
   });
 
   it('isPlayerUnit getter works correctly for allied houses', () => {
@@ -873,27 +1433,73 @@ describe('Trigger interaction — superweapon charging', () => {
 // 14. AI Superweapon Usage
 // ═══════════════════════════════════════════════════════════
 describe('AI superweapon usage', () => {
-  const src = readIndexSource();
-  const aiIdx = src.indexOf('AI superweapon usage');
-  const aiChunk = src.slice(aiIdx, aiIdx + 5000);
 
   it('AI fires superweapons when ready and IQ >= 3', () => {
-    expect(aiChunk).toContain('state.ready');
-    // Should not fire for player-allied houses
-    expect(aiChunk).toContain('this.isAllied(state.house as House, this.playerHouse)');
+    // AI should fire nuke at player structure cluster when ready
+    const ctx = makeMockSuperweaponContext();
+    const aiStruct = makeStructure('MSLO', House.USSR, 5, 5);
+    ctx.structures.push(aiStruct);
+    // Player structure to target
+    const playerStruct = makeStructure('WEAP', House.Spain, 20, 20);
+    ctx.structures.push(playerStruct);
+    const state = makeSwState(SuperweaponType.NUKE, House.USSR, { ready: true, structureIndex: 0 });
+    ctx.superweapons.set(`${House.USSR}:${SuperweaponType.NUKE}`, state);
+    // Ensure AI IQ is >= 3
+    ctx.aiIQ = () => 5;
+    updateSuperweapons(ctx);
+    // State should no longer be ready (AI fired it)
+    expect(state.ready).toBe(false);
   });
 
   it('AI handles all activatable superweapon types', () => {
-    expect(aiChunk).toContain('SuperweaponType.NUKE');
-    expect(aiChunk).toContain('SuperweaponType.IRON_CURTAIN');
-    expect(aiChunk).toContain('SuperweaponType.CHRONOSPHERE');
-    expect(aiChunk).toContain('SuperweaponType.PARABOMB');
-    expect(aiChunk).toContain('SuperweaponType.PARAINFANTRY');
-    expect(aiChunk).toContain('SuperweaponType.SPY_PLANE');
+    // Test that AI can fire each activatable type by setting up appropriate conditions
+    const activatableTypes = [
+      SuperweaponType.NUKE,
+      SuperweaponType.IRON_CURTAIN,
+      SuperweaponType.CHRONOSPHERE,
+      SuperweaponType.PARABOMB,
+      SuperweaponType.PARAINFANTRY,
+      SuperweaponType.SPY_PLANE,
+    ];
+    for (const swType of activatableTypes) {
+      const ctx = makeMockSuperweaponContext();
+      const building = SUPERWEAPON_DEFS[swType].building || 'MSLO';
+      const aiStruct = makeStructure(building, House.USSR, 5, 5);
+      ctx.structures.push(aiStruct);
+      // Player structure for targeting
+      const playerStruct = makeStructure('FACT', House.Spain, 20, 20);
+      ctx.structures.push(playerStruct);
+      // For Iron Curtain, need an AI unit
+      if (swType === SuperweaponType.IRON_CURTAIN) {
+        const aiTank = makeEntity(UnitType.V_3TNK, House.USSR, 200, 200);
+        ctx.entities.push(aiTank);
+      }
+      // For Chronosphere, need a selected AI tank and enemy structure
+      if (swType === SuperweaponType.CHRONOSPHERE) {
+        const aiTank = makeEntity(UnitType.V_2TNK, House.USSR, 200, 200);
+        ctx.entities.push(aiTank);
+      }
+      const state = makeSwState(swType, House.USSR, { ready: true, structureIndex: 0 });
+      ctx.superweapons.set(`${House.USSR}:${swType}`, state);
+      ctx.aiIQ = () => 5;
+      updateSuperweapons(ctx);
+      expect(state.ready, `AI should fire ${swType}`).toBe(false);
+    }
   });
 
   it('AI activates superweapons via activateSuperweapon call', () => {
-    expect(aiChunk).toContain('this.activateSuperweapon(');
+    // Verify AI nuke produces nuke pending state (proves activateSuperweapon was called)
+    const ctx = makeMockSuperweaponContext();
+    const aiStruct = makeStructure('MSLO', House.USSR, 5, 5);
+    ctx.structures.push(aiStruct);
+    const playerStruct = makeStructure('WEAP', House.Spain, 20, 20);
+    ctx.structures.push(playerStruct);
+    const state = makeSwState(SuperweaponType.NUKE, House.USSR, { ready: true, structureIndex: 0 });
+    ctx.superweapons.set(`${House.USSR}:${SuperweaponType.NUKE}`, state);
+    ctx.aiIQ = () => 5;
+    updateSuperweapons(ctx);
+    // activateSuperweapon for nuke sets nukePendingTarget
+    expect(ctx.nukePendingTarget).not.toBeNull();
   });
 });
 
@@ -1060,9 +1666,16 @@ describe('Nuke damage vs armor types (Super warhead)', () => {
   });
 
   it('nuke damage formula: max(1, round(NUKE_DAMAGE * mult * falloff))', () => {
-    const src = readIndexSource();
-    const nukeMethod = extractMethod(src, 'private detonateNuke(', 2500);
-    expect(nukeMethod).toContain('Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff))');
+    // Behavioral test: verify detonateNuke applies the formula correctly
+    const ctx = makeMockSuperweaponContext();
+    const tank = makeEntity(UnitType.V_2TNK, House.USSR, 200, 200);
+    ctx.entities.push(tank);
+    detonateNuke(ctx, { x: 200, y: 200 });
+    // At ground zero, damage = max(1, round(1000 * 1.0 * 1.0)) = 1000
+    const damaged = (ctx as any)._damagedEntities;
+    expect(damaged.length).toBeGreaterThan(0);
+    expect(damaged[0].amount).toBe(1000);
+    expect(damaged[0].warhead).toBe('Super');
   });
 
   it('nuke minimum damage is always at least 1 (max(1, ...))', () => {
@@ -1072,12 +1685,20 @@ describe('Nuke damage vs armor types (Super warhead)', () => {
   });
 
   it('structure nuke damage ignores warhead multiplier (raw NUKE_DAMAGE * falloff)', () => {
-    const src = readIndexSource();
-    const nukeMethod = extractMethod(src, 'private detonateNuke(', 2500);
-    // For structures, the code uses: Math.max(1, Math.round(NUKE_DAMAGE * falloff))
-    // without the warhead mult
-    const structDmgLine = nukeMethod.match(/Math\.max\(1, Math\.round\(NUKE_DAMAGE \* falloff\)\)/);
-    expect(structDmgLine).not.toBeNull();
+    // Behavioral test: verify detonateNuke damages structures with NUKE_DAMAGE * falloff only
+    const ctx = makeMockSuperweaponContext();
+    const struct = makeStructure('WEAP', House.USSR, 8, 8);
+    struct.hp = 256;
+    ctx.structures.push(struct);
+    // Place nuke at the structure center
+    const sx = struct.cx * CELL_SIZE + CELL_SIZE;
+    const sy = struct.cy * CELL_SIZE + CELL_SIZE;
+    detonateNuke(ctx, { x: sx, y: sy });
+    // Structure should take damage = max(1, round(NUKE_DAMAGE * falloff))
+    // At ground zero, falloff = 1.0, so damage = 1000
+    // struct.hp should be 256 - 1000 = negative, clamped to 0 (dead)
+    expect(struct.hp).toBeLessThanOrEqual(0);
+    expect(struct.alive).toBe(false);
   });
 });
 

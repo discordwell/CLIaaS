@@ -30,11 +30,18 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   PRODUCTION_ITEMS, type ProductionItem, getStripSide,
   House, UnitType, CELL_SIZE, COUNTRY_BONUSES, POWER_DRAIN,
-  UNIT_STATS, Mission,
+  Mission, type WorldPos,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../engine/scenario';
+import {
+  type ProductionContext,
+  tickProduction,
+  startProduction,
+  cancelProduction,
+  spawnProducedUnit,
+} from '../engine/production';
 
 // =========================================================================
 // Helpers — mirror Game internals for isolated unit testing
@@ -190,6 +197,72 @@ function findItem(type: string): ProductionItem {
   const item = PRODUCTION_ITEMS.find(i => i.type === type);
   if (!item) throw new Error(`Production item not found: ${type}`);
   return item;
+}
+
+/** Create a minimal mock ProductionContext for behavioral testing of production.ts functions */
+function makeMockProductionContext(overrides: Partial<ProductionContext> = {}): ProductionContext {
+  const structures: MapStructure[] = overrides.structures ?? [
+    makeStructure('FACT', House.Spain),
+    makeStructure('POWR', House.Spain, 12, 10),
+    makeStructure('TENT', House.Spain, 14, 10),
+    makeStructure('PROC', House.Spain, 16, 10),
+  ];
+  const entities: Entity[] = overrides.entities ?? [];
+  const entityById = overrides.entityById ?? new Map<number, Entity>();
+  const playerHouses = new Set([House.Spain, House.Greece]);
+  const alt: Record<string, string> = { TENT: 'BARR', BARR: 'TENT', SYRD: 'SPEN', SPEN: 'SYRD' };
+
+  const ctx: ProductionContext = {
+    structures,
+    entities,
+    entityById,
+    credits: overrides.credits ?? 50000,
+    playerHouse: overrides.playerHouse ?? House.Spain,
+    playerFaction: overrides.playerFaction ?? 'allied',
+    playerTechLevel: overrides.playerTechLevel ?? 10,
+    baseDiscovered: overrides.baseDiscovered ?? true,
+    scenarioProductionItems: overrides.scenarioProductionItems ?? PRODUCTION_ITEMS,
+    productionQueue: overrides.productionQueue ?? new Map(),
+    pendingPlacement: overrides.pendingPlacement ?? null,
+    wallPlacementPrepaid: overrides.wallPlacementPrepaid ?? false,
+    map: overrides.map ?? {
+      findAdjacentWaterCell: () => ({ cx: 20, cy: 20 }),
+    } as any,
+    tick: overrides.tick ?? 0,
+    powerProduced: overrides.powerProduced ?? 200,
+    powerConsumed: overrides.powerConsumed ?? 50,
+    builtUnitTypes: overrides.builtUnitTypes ?? new Set<string>(),
+    builtInfantryTypes: overrides.builtInfantryTypes ?? new Set<string>(),
+    builtAircraftTypes: overrides.builtAircraftTypes ?? new Set<string>(),
+    rallyPoints: overrides.rallyPoints ?? new Map<string, WorldPos>(),
+    isAllied: overrides.isAllied ?? ((a: House, b: House) => playerHouses.has(a) && playerHouses.has(b)),
+    hasBuilding: overrides.hasBuilding ?? ((type: string) => {
+      const altType = alt[type];
+      return structures.some(s =>
+        s.alive && (s.type === type || (altType !== undefined && s.type === altType)) &&
+        playerHouses.has(s.house),
+      );
+    }),
+    playSound: overrides.playSound ?? (() => {}),
+    playEva: overrides.playEva ?? (() => {}),
+    addCredits: () => 0, // placeholder, assigned below
+    addEntity: () => {},  // placeholder, assigned below
+    findPassableSpawn: overrides.findPassableSpawn ?? ((cx: number, cy: number) => ({ cx, cy })),
+  };
+
+  // Default addCredits mutates ctx.credits
+  ctx.addCredits = overrides.addCredits ?? ((amount: number, _bypassSiloCap?: boolean) => {
+    ctx.credits += amount;
+    return amount;
+  });
+
+  // Default addEntity pushes to ctx.entities and ctx.entityById
+  ctx.addEntity = overrides.addEntity ?? ((entity: Entity) => {
+    ctx.entities.push(entity);
+    ctx.entityById.set(entity.id, entity);
+  });
+
+  return ctx;
 }
 
 beforeEach(() => resetEntityIds());
@@ -1143,119 +1216,265 @@ describe('getAvailableItems — tech tree filtering', () => {
 });
 
 // =========================================================================
-// 12. Source verification — tickProduction in Game class
+// 12. Behavioral verification — production.ts exported functions
 // =========================================================================
-describe('Source verification — tickProduction implementation', () => {
-  let src: string;
-
-  beforeEach(() => {
+describe('Behavioral verification — production.ts exported functions', () => {
+  it('tickProduction is called every game tick from update()', () => {
+    // This still verifies the Game class delegation (index.ts still has the call)
     const { readFileSync } = require('fs');
     const { join } = require('path');
-    src = readFileSync(
+    const src = readFileSync(
       join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
     );
-  });
-
-  it('tickProduction is called every game tick from update()', () => {
     expect(src).toContain('this.tickProduction()');
   });
 
-  it('tickProduction calculates powerMult from powerProduced/powerConsumed', () => {
-    const idx = src.indexOf('private tickProduction');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = src.slice(idx, idx + 600);
-    expect(chunk).toContain('powerProduced');
-    expect(chunk).toContain('powerConsumed');
-    expect(chunk).toContain('Math.max(0.5');
+  it('tickProduction applies power penalty: 75% power → 0.75 progress per tick', () => {
+    const e1 = findItem('E1');
+    const ctx = makeMockProductionContext({
+      powerProduced: 75,
+      powerConsumed: 100,
+    });
+    startProduction(ctx, e1);
+    tickProduction(ctx);
+    const entry = ctx.productionQueue.get('right');
+    expect(entry).toBeDefined();
+    expect(entry!.progress).toBeCloseTo(0.75);
+  });
+
+  it('tickProduction applies power penalty clamped at 0.5 (never slower than 2x)', () => {
+    const e1 = findItem('E1');
+    const ctx = makeMockProductionContext({
+      powerProduced: 25,
+      powerConsumed: 100,
+    });
+    startProduction(ctx, e1);
+    tickProduction(ctx);
+    const entry = ctx.productionQueue.get('right');
+    expect(entry).toBeDefined();
+    expect(entry!.progress).toBeCloseTo(0.5);
   });
 
   it('tickProduction deducts costPerTick incrementally (PR3)', () => {
-    const idx = src.indexOf('private tickProduction');
-    const chunk = src.slice(idx, idx + 1200);
-    expect(chunk).toContain('costPerTick');
-    expect(chunk).toContain('entry.costPaid');
+    const e1 = findItem('E1'); // cost=100, buildTime=45
+    const ctx = makeMockProductionContext({ credits: 5000 });
+    startProduction(ctx, e1);
+    const creditsBefore = ctx.credits;
+    tickProduction(ctx);
+    const entry = ctx.productionQueue.get('right')!;
+    const expectedPerTick = 100 / e1.buildTime;
+    expect(creditsBefore - ctx.credits).toBeCloseTo(expectedPerTick, 5);
+    expect(entry.costPaid).toBeCloseTo(expectedPerTick, 5);
   });
 
   it('tickProduction uses countPlayerBuildings for multi-factory speedup', () => {
-    const idx = src.indexOf('private tickProduction');
-    const chunk = src.slice(idx, idx + 2500);
-    expect(chunk).toContain('countPlayerBuildings');
-    expect(chunk).toContain('speedMult * powerMult');
+    const e1 = findItem('E1'); // prerequisite=TENT
+    const ctx = makeMockProductionContext({
+      structures: [
+        makeStructure('FACT', House.Spain),
+        makeStructure('POWR', House.Spain, 12, 10),
+        makeStructure('TENT', House.Spain, 14, 10),
+        makeStructure('TENT', House.Spain, 16, 10), // 2nd barracks
+        makeStructure('PROC', House.Spain, 18, 10),
+      ],
+    });
+    startProduction(ctx, e1);
+    tickProduction(ctx);
+    const entry = ctx.productionQueue.get('right')!;
+    // 2 barracks * 1.0 power mult = 2x speed
+    expect(entry.progress).toBe(2);
   });
 
-  it('tickProduction checks hasBuilding for prerequisite validity', () => {
-    const idx = src.indexOf('private tickProduction');
-    const chunk = src.slice(idx, idx + 2500);
-    expect(chunk).toContain('hasBuilding');
-    expect(chunk).toContain('cancelProduction');
+  it('tickProduction cancels production when prerequisite building is destroyed', () => {
+    const e1 = findItem('E1');
+    const ctx = makeMockProductionContext();
+    startProduction(ctx, e1);
+    expect(ctx.productionQueue.has('right')).toBe(true);
+
+    // Destroy the barracks (TENT)
+    const tent = ctx.structures.find(s => s.type === 'TENT');
+    tent!.alive = false;
+    tickProduction(ctx);
+    // Production should be cancelled
+    expect(ctx.productionQueue.has('right')).toBe(false);
   });
 
-  it('unit completion calls spawnProducedUnit, structure sets pendingPlacement', () => {
-    const idx = src.indexOf('private tickProduction');
-    const chunk = src.slice(idx, idx + 2500);
-    expect(chunk).toContain('spawnProducedUnit');
-    expect(chunk).toContain('pendingPlacement');
+  it('unit completion spawns entity, structure completion sets pendingPlacement', () => {
+    // Unit completion: E1 completes and entity is spawned
+    const e1 = findItem('E1');
+    const ctx = makeMockProductionContext({ credits: 50000 });
+    startProduction(ctx, e1);
+    // Fast-forward to completion
+    for (let i = 0; i < e1.buildTime + 1; i++) {
+      tickProduction(ctx);
+    }
+    // Unit should have been spawned (entity added)
+    expect(ctx.entities.length).toBeGreaterThan(0);
+    expect(ctx.entities[0].type).toBe('E1');
+    // Queue should be cleared
+    expect(ctx.productionQueue.has('right')).toBe(false);
+
+    // Structure completion: POWR completes and sets pendingPlacement
+    const powr = findItem('POWR');
+    const ctx2 = makeMockProductionContext({ credits: 50000 });
+    startProduction(ctx2, powr);
+    for (let i = 0; i < powr.buildTime + 1; i++) {
+      tickProduction(ctx2);
+    }
+    expect(ctx2.pendingPlacement).not.toBeNull();
+    expect(ctx2.pendingPlacement!.type).toBe('POWR');
   });
 
   it('completed queued items restart with progress=0 and costPaid=0', () => {
-    const idx = src.indexOf('private tickProduction');
-    const chunk = src.slice(idx, idx + 2500);
-    expect(chunk).toContain('queueCount > 1');
-    expect(chunk).toContain('progress = 0');
-    expect(chunk).toContain('costPaid = 0');
+    const e1 = findItem('E1'); // buildTime=45
+    const ctx = makeMockProductionContext({ credits: 50000 });
+    // Start production and queue a second
+    startProduction(ctx, e1);
+    startProduction(ctx, e1); // queues second (queueCount=2)
+    const entry = ctx.productionQueue.get('right')!;
+    expect(entry.queueCount).toBe(2);
+
+    // Tick exactly buildTime ticks — first item completes on the last tick
+    for (let i = 0; i < e1.buildTime; i++) {
+      tickProduction(ctx);
+    }
+    // After first completes: queueCount decremented, progress and costPaid reset for next
+    const entryAfter = ctx.productionQueue.get('right');
+    expect(entryAfter).toBeDefined();
+    expect(entryAfter!.queueCount).toBe(1);
+    expect(entryAfter!.progress).toBe(0);
+    expect(entryAfter!.costPaid).toBe(0);
+    // First unit should have been spawned
+    expect(ctx.entities.length).toBeGreaterThan(0);
   });
 
   it('startProduction allows partial funds (PR3: only checks credits > 0)', () => {
-    // Find the method declaration (not a call site)
-    const idx = src.indexOf('startProduction(item: ProductionItem)');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = src.slice(idx, idx + 800);
-    expect(chunk).toContain('credits <= 0');
+    const e1 = findItem('E1'); // cost=100
+    const ctx = makeMockProductionContext({ credits: 1 }); // just 1 credit
+    startProduction(ctx, e1);
+    // Should have started production despite only 1 credit
+    expect(ctx.productionQueue.has('right')).toBe(true);
+  });
+
+  it('startProduction blocks when credits are exactly 0', () => {
+    const e1 = findItem('E1');
+    const ctx = makeMockProductionContext({ credits: 0 });
+    startProduction(ctx, e1);
+    // Should NOT have started production
+    expect(ctx.productionQueue.has('right')).toBe(false);
   });
 
   it('cancelProduction refunds costPaid for active build', () => {
-    const idx = src.indexOf('cancelProduction(category: string)');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = src.slice(idx, idx + 600);
-    expect(chunk).toContain('costPaid');
-    expect(chunk).toContain('addCredits');
+    const e1 = findItem('E1'); // cost=100, buildTime=45
+    const ctx = makeMockProductionContext({ credits: 5000 });
+    startProduction(ctx, e1);
+    // Tick 20 times to accumulate partial costPaid
+    for (let i = 0; i < 20; i++) {
+      tickProduction(ctx);
+    }
+    const entry = ctx.productionQueue.get('right')!;
+    const costPaid = entry.costPaid;
+    expect(costPaid).toBeGreaterThan(0);
+    expect(costPaid).toBeLessThan(100);
+    const creditsBeforeCancel = ctx.credits;
+    cancelProduction(ctx, 'right');
+    // Refund should equal costPaid
+    expect(ctx.credits).toBeCloseTo(creditsBeforeCancel + costPaid);
+    expect(ctx.productionQueue.has('right')).toBe(false);
   });
 
-  it('spawnProducedUnit finds factory and creates Entity', () => {
-    const idx = src.indexOf('private spawnProducedUnit');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = src.slice(idx, idx + 2000);
-    expect(chunk).toContain('new Entity');
-    expect(chunk).toContain('entities.push');
+  it('spawnProducedUnit finds factory and creates Entity at spawn point', () => {
+    const e1 = findItem('E1'); // prerequisite=TENT
+    const ctx = makeMockProductionContext();
+    spawnProducedUnit(ctx, e1);
+    expect(ctx.entities.length).toBe(1);
+    const unit = ctx.entities[0];
+    expect(unit.type).toBe('E1');
+    expect(unit.alive).toBe(true);
+    expect(unit.mission).toBe(Mission.GUARD);
   });
 
   it('spawnProducedUnit auto-moves to rally point if set', () => {
-    const idx = src.indexOf('private spawnProducedUnit');
-    const chunk = src.slice(idx, idx + 4500);
-    expect(chunk).toContain('rallyPoints');
-    expect(chunk).toContain('Mission.MOVE');
+    const e1 = findItem('E1'); // prerequisite=TENT
+    const rallyPoints = new Map<string, WorldPos>();
+    rallyPoints.set('TENT', { x: 500, y: 500 });
+    const ctx = makeMockProductionContext({
+      rallyPoints,
+      map: {
+        findAdjacentWaterCell: () => null,
+        isTerrainPassable: () => false, // findPath returns [] but rally is still set
+        isWaterPassable: () => false,
+      } as any,
+    });
+    spawnProducedUnit(ctx, e1);
+    expect(ctx.entities.length).toBe(1);
+    const unit = ctx.entities[0];
+    expect(unit.mission).toBe(Mission.MOVE);
+    expect(unit.moveTarget).toBeDefined();
+    expect(unit.moveTarget!.x).toBe(500);
+    expect(unit.moveTarget!.y).toBe(500);
   });
 
   it('spawnProducedUnit sets harvester to auto-harvest', () => {
-    const idx = src.indexOf('private spawnProducedUnit');
-    const chunk = src.slice(idx, idx + 4500);
-    expect(chunk).toContain('V_HARV');
-    expect(chunk).toContain('harvesterState');
+    const harv = findItem('HARV'); // prerequisite=WEAP
+    const ctx = makeMockProductionContext({
+      structures: [
+        makeStructure('FACT', House.Spain),
+        makeStructure('POWR', House.Spain, 12, 10),
+        makeStructure('WEAP', House.Spain, 14, 10),
+        makeStructure('PROC', House.Spain, 16, 10),
+      ],
+    });
+    spawnProducedUnit(ctx, harv);
+    expect(ctx.entities.length).toBe(1);
+    const unit = ctx.entities[0];
+    expect(unit.type).toBe('HARV');
+    expect(unit.harvesterState).toBe('idle');
   });
 
   it('spawnProducedUnit handles aircraft: docks at pad', () => {
-    const idx = src.indexOf('private spawnProducedUnit');
-    const chunk = src.slice(idx, idx + 2000);
-    expect(chunk).toContain('isAircraft');
-    expect(chunk).toContain('landedAtStructure');
-    expect(chunk).toContain('dockedAircraft');
+    const heli = findItem('HELI'); // prerequisite=HPAD, isAircraft
+    const helipad = makeStructure('HPAD', House.Spain, 14, 10);
+    const ctx = makeMockProductionContext({
+      structures: [
+        makeStructure('FACT', House.Spain),
+        makeStructure('POWR', House.Spain, 12, 10),
+        helipad,
+        makeStructure('PROC', House.Spain, 16, 10),
+      ],
+    });
+    spawnProducedUnit(ctx, heli);
+    expect(ctx.entities.length).toBe(1);
+    const unit = ctx.entities[0];
+    expect(unit.type).toBe('HELI');
+    expect(unit.aircraftState).toBe('landed');
+    expect(unit.flightAltitude).toBe(0);
+    expect(unit.landedAtStructure).toBeDefined();
+    expect(helipad.dockedAircraft).toBe(unit.id);
+    expect(ctx.builtAircraftTypes.has('HELI')).toBe(true);
   });
 
   it('spawnProducedUnit handles naval: spawns at adjacent water cell', () => {
-    const idx = src.indexOf('private spawnProducedUnit');
-    const chunk = src.slice(idx, idx + 2000);
-    expect(chunk).toContain('isVessel');
-    expect(chunk).toContain('findAdjacentWaterCell');
+    const dd = findItem('DD'); // prerequisite=SYRD, isVessel
+    const waterCell = { cx: 25, cy: 25 };
+    const ctx = makeMockProductionContext({
+      structures: [
+        makeStructure('FACT', House.Spain),
+        makeStructure('POWR', House.Spain, 12, 10),
+        makeStructure('SYRD', House.Spain, 14, 10),
+        makeStructure('PROC', House.Spain, 16, 10),
+      ],
+      map: {
+        findAdjacentWaterCell: () => waterCell,
+      } as any,
+    });
+    spawnProducedUnit(ctx, dd);
+    expect(ctx.entities.length).toBe(1);
+    const unit = ctx.entities[0];
+    expect(unit.type).toBe('DD');
+    // Verify it spawned at the water cell position
+    expect(unit.pos.x).toBe(waterCell.cx * CELL_SIZE + CELL_SIZE / 2);
+    expect(unit.pos.y).toBe(waterCell.cy * CELL_SIZE + CELL_SIZE / 2);
   });
 });
 

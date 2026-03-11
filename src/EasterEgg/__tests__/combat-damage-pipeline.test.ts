@@ -1,17 +1,16 @@
 /**
  * Combat & Damage Pipeline Tests — comprehensive verification of the
- * Game class combat system: damage application, warhead multipliers,
+ * combat subsystem: damage application, warhead multipliers,
  * projectile lifecycle, crush mechanics, structure damage, overkill,
  * retaliation, and kill tracking.
  *
- * Tests use Entity/types directly and source-code verification for
- * Game-class private methods (same pattern as unit-crushing.test.ts
- * and combat-parity.test.ts).
+ * Behavioral tests import and call functions from combat.ts directly,
+ * using a mock CombatContext for game-state dependencies.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, UNIT_STATS, WEAPON_STATS, CELL_SIZE,
+  UnitType, House, UNIT_STATS, WEAPON_STATS, CELL_SIZE, MAP_CELLS,
   WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
   COUNTRY_BONUSES, ANT_HOUSES,
   type WarheadType, type ArmorType, type WeaponStats, type WarheadProps,
@@ -21,6 +20,19 @@ import {
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { Game } from '../engine/index';
+import {
+  type CombatContext, type InflightProjectile,
+  SPLASH_RADIUS,
+  getWarheadMult, getWarheadMeta, getWarheadProps,
+  damageEntity, aiScatterOnDamage, damageSpeedFactor,
+  fireWeaponAt, fireWeaponAtStructure,
+  handleUnitDeath, triggerRetaliation,
+  checkVehicleCrush, launchProjectile,
+  updateInflightProjectiles, applySplashDamage,
+} from '../engine/combat';
+import { GameMap } from '../engine/map';
+import type { MapStructure } from '../engine/scenario';
+import type { Effect } from '../engine/renderer';
 
 beforeEach(() => resetEntityIds());
 
@@ -32,6 +44,50 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 function isAllied(a: House, b: House): boolean {
   const alliances = buildDefaultAlliances();
   return alliances.get(a)?.has(b) ?? false;
+}
+
+/** Create a minimal mock CombatContext with sensible defaults and no-op callbacks */
+function makeMockCombatContext(overrides: Partial<CombatContext> = {}): CombatContext {
+  const map = new GameMap();
+  const entities: Entity[] = [];
+  const entityById = new Map<number, Entity>();
+  const alliances = buildDefaultAlliances();
+  return {
+    entities,
+    entityById,
+    structures: [],
+    inflightProjectiles: [],
+    effects: [] as Effect[],
+    tick: 0,
+    playerHouse: House.Spain,
+    scenarioId: 'SCG01EA',
+    killCount: 0,
+    lossCount: 0,
+    warheadOverrides: {},
+    scenarioWarheadMeta: {},
+    scenarioWarheadProps: {},
+    attackedTriggerNames: new Set<string>(),
+    map,
+    isAllied: (a: House, b: House) => alliances.get(a)?.has(b) ?? false,
+    entitiesAllied: (a: Entity, b: Entity) => alliances.get(a.house)?.has(b.house) ?? false,
+    isPlayerControlled: (e: Entity) => alliances.get(e.house)?.has(House.Spain) ?? false,
+    playSoundAt: () => {},
+    playEva: () => {},
+    minimapAlert: () => {},
+    movementSpeed: () => 1,
+    getFirepowerBias: (house: House) => COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0,
+    damageStructure: () => false,
+    aiIQ: () => 3,
+    screenShake: 0,
+    screenFlash: 0,
+    ...overrides,
+  };
+}
+
+/** Register entities into a mock context (sets entities array + entityById map) */
+function registerEntities(ctx: CombatContext, ...ents: Entity[]): void {
+  ctx.entities.push(...ents);
+  for (const e of ents) ctx.entityById.set(e.id, e);
 }
 
 // =========================================================================
@@ -71,30 +127,29 @@ describe('fireWeaponAt damage pipeline', () => {
     expect(damage).toBe(40); // 40 * 1.0 * 1.0 = 40
   });
 
-  it('fireWeaponAt source code calls modifyDamage with correct args', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private fireWeaponAt(');
-    expect(startIdx, 'fireWeaponAt method found').toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('getFirepowerBias(attacker.house)');
-    expect(chunk).toContain('getWarheadMult(weapon.warhead');
-    expect(chunk).toContain('modifyDamage(');
-    expect(chunk).toContain('damageEntity(target, damage');
+  it('fireWeaponAt applies modifyDamage with houseBias, warhead mult, and spreadFactor', () => {
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 124, 100);
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    const weapon = WEAPON_STATS['90mm']; // AP warhead, 30 damage
+    const hpBefore = target.hp;
+    fireWeaponAt(ctx, attacker, target, weapon);
+    // AP vs none = 0.3, houseBias=1.0, spreadFactor=1, distance=0
+    // damage = modifyDamage(30, 'AP', 'none', 0, 1.0, 0.3, 1) = round(30*0.3*1.0) = 9
+    expect(target.hp).toBe(hpBefore - 9);
   });
 
   it('fireWeaponAt credits kill on entity death', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private fireWeaponAt(');
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('creditKill()');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 124, 100);
+    target.hp = 1; // ensure kill
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    expect(attacker.kills).toBe(0);
+    fireWeaponAt(ctx, attacker, target, WEAPON_STATS['90mm']);
+    expect(target.alive).toBe(false);
+    expect(attacker.kills).toBe(1);
   });
 });
 
@@ -129,29 +184,26 @@ describe('damageEntity behavior (via Entity.takeDamage)', () => {
     expect(target.hp).toBe(0);
   });
 
-  it('damageEntity source code calls aiScatterOnDamage for non-killed units', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private damageEntity(');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 600);
-    expect(chunk).toContain('takeDamage(amount, warhead, attacker');
-    expect(chunk).toContain('aiScatterOnDamage');
+  it('damageEntity calls aiScatterOnDamage for non-killed AI units', () => {
+    const target = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    target.mission = Mission.GUARD;
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, target);
+    const hpBefore = target.hp;
+    damageEntity(ctx, target, 5, 'SA');
+    expect(target.hp).toBe(hpBefore - 5);
+    expect(target.alive).toBe(true);
+    // aiScatterOnDamage sets mission to MOVE for GUARD-mission AI units
+    expect(target.mission).toBe(Mission.MOVE);
   });
 
   it('damageEntity tracks attacked trigger names', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private damageEntity(');
-    const chunk = src.slice(startIdx, startIdx + 300);
-    expect(chunk).toContain('triggerName');
-    expect(chunk).toContain('attackedTriggerNames');
+    const target = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    target.triggerName = 'atk1';
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, target);
+    damageEntity(ctx, target, 5, 'SA');
+    expect(ctx.attackedTriggerNames.has('atk1')).toBe(true);
   });
 });
 
@@ -220,16 +272,22 @@ describe('damageStructure behavior', () => {
   });
 
   it('fireWeaponAtStructure uses concrete armor for warhead mult', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private fireWeaponAtStructure(');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 600);
-    expect(chunk).toContain("'concrete'");
-    expect(chunk).toContain('damageStructure(s, damage)');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const structure: MapStructure = {
+      type: 'POWR', image: 'powr', house: House.USSR,
+      cx: 5, cy: 5, hp: 256, maxHp: 256, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    };
+    let receivedDamage = 0;
+    const ctx = makeMockCombatContext({
+      damageStructure: (s, d) => { receivedDamage = d; return false; },
+    });
+    registerEntities(ctx, attacker);
+    const weapon = WEAPON_STATS['90mm']; // AP warhead, 30 damage
+    fireWeaponAtStructure(ctx, attacker, structure, weapon);
+    // AP vs concrete = 0.5, houseBias=1.0, spreadFactor=1
+    // damage = modifyDamage(30, 'AP', 'concrete', 0, 1.0, 0.5, 1) = round(30*0.5) = 15
+    expect(receivedDamage).toBe(15);
   });
 });
 
@@ -298,17 +356,15 @@ describe('getWarheadMult — warhead vs armor modifiers', () => {
     }
   });
 
-  it('Game.getWarheadMult supports scenario overrides via warheadOverrides', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private getWarheadMult(');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 300);
-    expect(chunk).toContain('warheadOverrides');
-    expect(chunk).toContain('WARHEAD_VS_ARMOR');
+  it('getWarheadMult supports scenario overrides via warheadOverrides', () => {
+    // Without overrides, SA vs none = 1.0
+    expect(getWarheadMult('SA', 'none', {})).toBe(1.0);
+    // With overrides, use the override table
+    const overrides = { SA: [0.5, 0.6, 0.7, 0.8, 0.9] as [number, number, number, number, number] };
+    expect(getWarheadMult('SA', 'none', overrides)).toBe(0.5); // index 0 = none
+    expect(getWarheadMult('SA', 'heavy', overrides)).toBe(0.8); // index 3 = heavy
+    // Non-overridden warhead still uses WARHEAD_VS_ARMOR
+    expect(getWarheadMult('AP', 'heavy', overrides)).toBe(1.0);
   });
 });
 
@@ -342,19 +398,19 @@ describe('checkVehicleCrush — crush execution', () => {
     expect(ant.alive).toBe(false);
   });
 
-  it('crush skips allied units — source code has isAllied guard', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private checkVehicleCrush(');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 600);
-    expect(chunk).toContain('isAllied(vehicle.house, other.house)');
-    expect(chunk).toContain('continue');
-    // Verify it only applies to crushable units
-    expect(chunk).toContain('crushable');
+  it('crush skips allied units — isAllied guard prevents friendly crush', () => {
+    const tank = makeEntity(UnitType.V_3TNK, House.Spain, 100, 100);
+    const friendlyInf = makeEntity(UnitType.I_E1, House.Greece, 100, 100); // Greece allied with Spain
+    expect(tank.stats.crusher).toBe(true);
+    expect(friendlyInf.stats.crushable).toBe(true);
+    expect(isAllied(House.Spain, House.Greece)).toBe(true);
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, tank, friendlyInf);
+    const hpBefore = friendlyInf.hp;
+    checkVehicleCrush(ctx, tank);
+    // Allied infantry should NOT be crushed
+    expect(friendlyInf.alive).toBe(true);
+    expect(friendlyInf.hp).toBe(hpBefore);
   });
 
   it('crusher credits a kill after crushing', () => {
@@ -393,41 +449,37 @@ describe('checkVehicleCrush — crush execution', () => {
 // 6. Projectile lifecycle — creation, travel, impact, splash
 // =========================================================================
 describe('Projectile lifecycle', () => {
-  it('InflightProjectile interface has all required fields', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('interface InflightProjectile');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 600);
-    expect(chunk).toContain('attackerId');
-    expect(chunk).toContain('targetId');
-    expect(chunk).toContain('weapon');
-    expect(chunk).toContain('damage');
-    expect(chunk).toContain('speed');
-    expect(chunk).toContain('travelFrames');
-    expect(chunk).toContain('currentFrame');
-    expect(chunk).toContain('directHit');
-    expect(chunk).toContain('impactX');
-    expect(chunk).toContain('impactY');
-    expect(chunk).toContain('attackerIsPlayer');
+  it('InflightProjectile has all required fields', () => {
+    const proj: InflightProjectile = {
+      attackerId: 1, targetId: 2, weapon: WEAPON_STATS['90mm'],
+      damage: 30, speed: 2, travelFrames: 3, currentFrame: 0,
+      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+    };
+    expect(proj.attackerId).toBe(1);
+    expect(proj.targetId).toBe(2);
+    expect(proj.weapon).toBeDefined();
+    expect(proj.damage).toBe(30);
+    expect(proj.speed).toBe(2);
+    expect(proj.travelFrames).toBe(3);
+    expect(proj.currentFrame).toBe(0);
+    expect(proj.directHit).toBe(true);
+    expect(proj.impactX).toBe(200);
+    expect(proj.impactY).toBe(100);
+    expect(proj.attackerIsPlayer).toBe(true);
   });
 
   it('launchProjectile computes travelFrames from distance and speed', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private launchProjectile(');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 400);
-    // Must compute travelFrames based on distance and speed
-    expect(chunk).toContain('worldDist');
-    expect(chunk).toContain('travelFrames');
-    expect(chunk).toContain('inflightProjectiles.push');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 220, 100);
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    const weapon = { ...WEAPON_STATS['90mm'], projectileSpeed: 2.0 };
+    launchProjectile(ctx, attacker, target, weapon, 30, 220, 100, true);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    const proj = ctx.inflightProjectiles[0];
+    // dist = worldDist({100,100}, {220,100}) = 120/24 = 5.0 cells, travelFrames = round(5.0/2.0) = 3
+    expect(proj.travelFrames).toBe(3);
+    expect(proj.currentFrame).toBe(0);
   });
 
   it('projectile travel frames = max(1, round(dist / speed))', () => {
@@ -442,66 +494,98 @@ describe('Projectile lifecycle', () => {
   });
 
   it('updateInflightProjectiles increments currentFrame each tick', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private updateInflightProjectiles');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 500);
-    expect(chunk).toContain('proj.currentFrame++');
+    const ctx = makeMockCombatContext();
+    const proj: InflightProjectile = {
+      attackerId: 1, targetId: 2, weapon: WEAPON_STATS['90mm'],
+      damage: 30, speed: 2, travelFrames: 5, currentFrame: 0,
+      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+    };
+    ctx.inflightProjectiles.push(proj);
+    updateInflightProjectiles(ctx);
+    // After one update, currentFrame should be 1 (and not yet arrived since travelFrames=5)
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].currentFrame).toBe(1);
   });
 
-  it('arrived projectiles apply damage via damageEntity and credit kills', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('// Apply damage for arrived projectiles');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('damageEntity(target, proj.damage');
-    expect(chunk).toContain('attacker.creditKill()');
+  it('arrived projectiles apply damage and credit kills', () => {
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
+    target.hp = 5; // ensure kill on arrival
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    const proj: InflightProjectile = {
+      attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
+      damage: 30, speed: 2, travelFrames: 1, currentFrame: 0,
+      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+    };
+    ctx.inflightProjectiles.push(proj);
+    updateInflightProjectiles(ctx);
+    expect(target.alive).toBe(false);
+    expect(attacker.kills).toBe(1);
+    expect(ctx.killCount).toBe(1);
   });
 
-  it('arrived projectiles with splash trigger applySplashDamage', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('// Apply damage for arrived projectiles');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 1200);
-    expect(chunk).toContain('applySplashDamage');
-    expect(chunk).toContain('proj.weapon.splash');
+  it('arrived projectiles with splash trigger splash damage to nearby units', () => {
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
+    const bystander = makeEntity(UnitType.I_E1, House.USSR, 200 + CELL_SIZE, 100); // 1 cell away from impact
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target, bystander);
+    const weapon = { ...WEAPON_STATS.MammothTusk, splash: 1.5 }; // HE warhead with splash
+    const proj: InflightProjectile = {
+      attackerId: attacker.id, targetId: target.id, weapon,
+      damage: 75, speed: 2, travelFrames: 1, currentFrame: 0,
+      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+    };
+    ctx.inflightProjectiles.push(proj);
+    const bystanderHpBefore = bystander.hp;
+    updateInflightProjectiles(ctx);
+    // Bystander should take splash damage (within 1.5-cell radius)
+    expect(bystander.hp).toBeLessThan(bystanderHpBefore);
   });
 
   it('homing projectiles update impactX/Y based on target movement', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private updateInflightProjectiles');
-    const chunk = src.slice(startIdx, startIdx + 1200);
-    expect(chunk).toContain('projectileROT');
-    expect(chunk).toContain('trackFactor');
-    expect(chunk).toContain('proj.impactX');
-    expect(chunk).toContain('proj.impactY');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    const weapon = { ...WEAPON_STATS.MammothTusk, projectileROT: 10, projectileSpeed: 2 };
+    const proj: InflightProjectile = {
+      attackerId: attacker.id, targetId: target.id, weapon,
+      damage: 75, speed: 2, travelFrames: 10, currentFrame: 0,
+      directHit: true, impactX: 180, impactY: 100, attackerIsPlayer: true,
+    };
+    ctx.inflightProjectiles.push(proj);
+    // Move target to a new position
+    target.pos.x = 250;
+    // Advance two frames (homing updates on even frames)
+    updateInflightProjectiles(ctx);
+    updateInflightProjectiles(ctx);
+    // impactX should have moved toward target's new position (250)
+    expect(ctx.inflightProjectiles[0].impactX).toBeGreaterThan(180);
   });
 
   it('homing updates only every other frame (C++ bullet.cpp:368)', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private updateInflightProjectiles');
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('currentFrame % 2 === 0');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 300, 100);
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    const weapon = { ...WEAPON_STATS.MammothTusk, projectileROT: 10, projectileSpeed: 2 };
+    const proj: InflightProjectile = {
+      attackerId: attacker.id, targetId: target.id, weapon,
+      damage: 75, speed: 2, travelFrames: 10, currentFrame: 0,
+      directHit: true, impactX: 150, impactY: 100, attackerIsPlayer: true,
+    };
+    ctx.inflightProjectiles.push(proj);
+    target.pos.x = 350; // move target away
+    // Frame 1 (odd) — no homing update
+    updateInflightProjectiles(ctx);
+    const afterOdd = ctx.inflightProjectiles[0].impactX;
+    expect(afterOdd).toBe(150); // unchanged on odd frame
+    // Frame 2 (even) — homing update applies
+    updateInflightProjectiles(ctx);
+    const afterEven = ctx.inflightProjectiles[0].impactX;
+    expect(afterEven).toBeGreaterThan(150); // moved toward target on even frame
   });
 });
 
@@ -649,33 +733,32 @@ describe('Overkill handling', () => {
 // =========================================================================
 describe('Friendly fire rules', () => {
   it('splash damage hits ALL units in radius regardless of alliance (C++ parity)', () => {
-    // This is documented in applySplashDamage source
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private applySplashDamage(');
-    const chunk = src.slice(startIdx, startIdx + 2500);
-    // Must NOT have an "if allied continue" before damage application
-    // It should track isFriendly for kill credit but not for damage prevention
-    expect(chunk).toContain('H2: Splash damage hits ALL units');
-    // Friendly check is for kill credit, not damage prevention
-    expect(chunk).toContain('isFriendly');
-    expect(chunk).toContain('if (!isFriendly && attacker) attacker.creditKill()');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const friendly = makeEntity(UnitType.I_E1, House.Greece, 124, 100); // 1 cell from center, allied
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 100, 124); // 1 cell from center, enemy
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, friendly, enemy);
+    const friendlyHpBefore = friendly.hp;
+    const enemyHpBefore = enemy.hp;
+    applySplashDamage(ctx, { x: 100, y: 100 },
+      { damage: 100, warhead: 'HE', splash: 1.5 }, -1, House.Spain, attacker);
+    // Both friendly and enemy should take damage (splash hits everyone)
+    expect(friendly.hp).toBeLessThan(friendlyHpBefore);
+    expect(enemy.hp).toBeLessThan(enemyHpBefore);
   });
 
   it('friendly kill from splash does NOT credit kill to attacker', () => {
-    // Source code: only credits kill when !isFriendly
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private applySplashDamage(');
-    const chunk = src.slice(startIdx, startIdx + 2500);
-    // The condition guards the kill credit
-    expect(chunk).toContain('if (!isFriendly && attacker) attacker.creditKill()');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const friendly = makeEntity(UnitType.I_E1, House.Greece, 112, 100); // close to center, allied
+    friendly.hp = 1; // will be killed by splash
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, friendly);
+    expect(attacker.kills).toBe(0);
+    applySplashDamage(ctx, { x: 100, y: 100 },
+      { damage: 200, warhead: 'HE', splash: 1.5 }, -1, House.Spain, attacker);
+    expect(friendly.alive).toBe(false);
+    // Friendly kill should NOT credit kill
+    expect(attacker.kills).toBe(0);
   });
 
   it('default alliances: Spain and Greece are allied', () => {
@@ -699,88 +782,109 @@ describe('Friendly fire rules', () => {
 // 10. Retaliation — attacked units switching to ATTACK mission
 // =========================================================================
 describe('Retaliation system — triggerRetaliation', () => {
-  it('source code checks alive for both victim and attacker', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private triggerRetaliation(');
-    expect(startIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(startIdx, startIdx + 500);
-    expect(chunk).toContain('!victim.alive');
-    expect(chunk).toContain('!attacker.alive');
+  it('does nothing when victim or attacker is dead', () => {
+    const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    const ctx = makeMockCombatContext();
+    // Dead victim does not retaliate
+    victim.alive = false;
+    triggerRetaliation(ctx, victim, attacker);
+    expect(victim.mission).not.toBe(Mission.ATTACK);
+    // Dead attacker does not trigger retaliation
+    const victim2 = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    attacker.alive = false;
+    triggerRetaliation(ctx, victim2, attacker);
+    expect(victim2.target).toBeNull();
   });
 
-  it('source code prevents allied retaliation', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private triggerRetaliation(');
-    const chunk = src.slice(startIdx, startIdx + 500);
-    expect(chunk).toContain('entitiesAllied(victim, attacker)');
+  it('prevents allied retaliation', () => {
+    const victim = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
+    const attacker = makeEntity(UnitType.I_E1, House.Greece, 200, 200); // allied
+    const ctx = makeMockCombatContext();
+    expect(isAllied(House.Spain, House.Greece)).toBe(true);
+    triggerRetaliation(ctx, victim, attacker);
+    expect(victim.target).toBeNull();
+    expect(victim.mission).not.toBe(Mission.ATTACK);
   });
 
-  it('source code only retargets if no current living target', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private triggerRetaliation(');
-    const chunk = src.slice(startIdx, startIdx + 500);
-    expect(chunk).toContain('victim.target && victim.target.alive');
+  it('only retargets if no current living target', () => {
+    const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const existingTarget = makeEntity(UnitType.I_E1, House.Spain, 150, 150);
+    const newAttacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    victim.target = existingTarget;
+    existingTarget.alive = true;
+    const ctx = makeMockCombatContext();
+    triggerRetaliation(ctx, victim, newAttacker);
+    // Should NOT retarget because victim already has a living target
+    expect(victim.target).toBe(existingTarget);
   });
 
-  it('source code sets victim.mission to ATTACK and target to attacker', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private triggerRetaliation(');
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('victim.target = attacker');
-    expect(chunk).toContain('victim.mission = Mission.ATTACK');
+  it('sets victim.mission to ATTACK and target to attacker', () => {
+    const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    victim.target = null;
+    victim.mission = Mission.GUARD;
+    const ctx = makeMockCombatContext();
+    triggerRetaliation(ctx, victim, attacker);
+    expect(victim.target).toBe(attacker);
+    expect(victim.mission).toBe(Mission.ATTACK);
+    expect(victim.animState).toBe(AnimState.ATTACK);
   });
 
   it('unarmed units cannot retaliate', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private triggerRetaliation(');
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('!victim.weapon');
+    const victim = makeEntity(UnitType.V_MCV, House.USSR, 100, 100); // MCV has no weapon
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    expect(victim.weapon).toBeNull();
+    const ctx = makeMockCombatContext();
+    triggerRetaliation(ctx, victim, attacker);
+    expect(victim.target).toBeNull();
+    expect(victim.mission).not.toBe(Mission.ATTACK);
   });
 
   it('scripted team mission units do not retarget (except HUNT)', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private triggerRetaliation(');
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('teamMissions');
-    expect(chunk).toContain('Mission.HUNT');
+    const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    victim.teamMissions = [{ type: 'MOVE', target: { x: 50, y: 50 } }];
+    victim.mission = Mission.MOVE;
+    const ctx = makeMockCombatContext();
+    triggerRetaliation(ctx, victim, attacker);
+    // Should NOT retarget because unit has scripted team missions and is not HUNT
+    expect(victim.target).toBeNull();
+
+    // HUNT mission units DO retaliate even with team missions
+    const hunter = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    hunter.teamMissions = [{ type: 'HUNT' }];
+    hunter.mission = Mission.HUNT;
+    triggerRetaliation(ctx, hunter, attacker);
+    expect(hunter.target).toBe(attacker);
+    expect(hunter.mission).toBe(Mission.ATTACK);
   });
 
-  it('retaliation is called from direct hit combat path', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    // Verify triggerRetaliation is called after direct damage in the instant-hit path
-    expect(src).toContain('triggerRetaliation(entity.target, entity)');
-    // And in the projectile arrival path
-    expect(src).toContain('triggerRetaliation(target, attacker)');
-    // And in the splash damage path
-    expect(src).toContain('triggerRetaliation(other, attacker)');
+  it('retaliation triggers from projectile arrival and splash damage paths', () => {
+    // Projectile arrival path: target retaliates against attacker
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
+    target.mission = Mission.GUARD;
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    const proj: InflightProjectile = {
+      attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
+      damage: 5, speed: 2, travelFrames: 1, currentFrame: 0,
+      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+    };
+    ctx.inflightProjectiles.push(proj);
+    updateInflightProjectiles(ctx);
+    expect(target.alive).toBe(true);
+    expect(target.target).toBe(attacker);
+    expect(target.mission).toBe(Mission.ATTACK);
+
+    // Splash damage path: nearby unit retaliates
+    const splashVictim = makeEntity(UnitType.I_E1, House.USSR, 300, 100);
+    splashVictim.mission = Mission.GUARD;
+    registerEntities(ctx, splashVictim);
+    applySplashDamage(ctx, { x: 300 + CELL_SIZE / 2, y: 100 },
+      { damage: 50, warhead: 'HE', splash: 1.5 }, -1, House.Spain, attacker);
+    expect(splashVictim.target).toBe(attacker);
   });
 });
 
@@ -807,40 +911,49 @@ describe('Kill tracking / creditKill', () => {
     expect(e.kills).toBe(10);
   });
 
-  it('kill credit happens on direct hit kill (source verification)', () => {
-    // In the instant-hit path: if (killed) { entity.creditKill(); ... }
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private fireWeaponAt(');
-    const chunk = src.slice(startIdx, startIdx + 800);
-    expect(chunk).toContain('attacker.creditKill()');
+  it('kill credit happens on direct hit kill via fireWeaponAt', () => {
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 124, 100);
+    target.hp = 1;
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    expect(attacker.kills).toBe(0);
+    fireWeaponAt(ctx, attacker, target, WEAPON_STATS['90mm']);
+    expect(target.alive).toBe(false);
+    expect(attacker.kills).toBe(1);
   });
 
   it('kill credit happens on projectile kill', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    // In updateInflightProjectiles: if (attacker) attacker.creditKill()
-    const startIdx = src.indexOf('// Apply damage for arrived projectiles');
-    const chunk = src.slice(startIdx, startIdx + 600);
-    expect(chunk).toContain('attacker.creditKill()');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
+    target.hp = 1;
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, target);
+    const proj: InflightProjectile = {
+      attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
+      damage: 30, speed: 2, travelFrames: 1, currentFrame: 0,
+      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+    };
+    ctx.inflightProjectiles.push(proj);
+    updateInflightProjectiles(ctx);
+    expect(target.alive).toBe(false);
+    expect(attacker.kills).toBe(1);
   });
 
   it('splash kill only credits for enemy kills (not friendly)', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private applySplashDamage(');
-    const chunk = src.slice(startIdx, startIdx + 2500);
-    expect(chunk).toContain('!isFriendly && attacker');
-    expect(chunk).toContain('creditKill()');
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 112, 100);
+    enemy.hp = 1;
+    const friendly = makeEntity(UnitType.I_E1, House.Greece, 100, 112);
+    friendly.hp = 1;
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, enemy, friendly);
+    applySplashDamage(ctx, { x: 100, y: 100 },
+      { damage: 200, warhead: 'HE', splash: 1.5 }, -1, House.Spain, attacker);
+    expect(enemy.alive).toBe(false);
+    expect(friendly.alive).toBe(false);
+    // Only enemy kill credited, not friendly kill
+    expect(attacker.kills).toBe(1);
   });
 });
 
@@ -1209,28 +1322,38 @@ describe('Splash damage — radius and falloff', () => {
     expect(Game.SPLASH_RADIUS).toBe(1.5);
   });
 
-  it('applySplashDamage uses Game.SPLASH_RADIUS (not weapon.splash)', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private applySplashDamage(');
-    const chunk = src.slice(startIdx, startIdx + 600);
-    expect(chunk).toContain('Game.SPLASH_RADIUS');
-    expect(chunk).toContain('splashRange * CELL_SIZE');
+  it('applySplashDamage uses fixed SPLASH_RADIUS of 1.5 cells (not weapon.splash)', () => {
+    // SPLASH_RADIUS constant is 1.5
+    expect(SPLASH_RADIUS).toBe(1.5);
+    // Unit at exactly 1.5 cells away should NOT take splash damage (exclusive boundary)
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const nearUnit = makeEntity(UnitType.I_E1, House.USSR, 100 + CELL_SIZE, 100); // 1 cell away
+    const farUnit = makeEntity(UnitType.I_E1, House.USSR, 100 + CELL_SIZE * 2, 100); // 2 cells away
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, nearUnit, farUnit);
+    const nearHpBefore = nearUnit.hp;
+    const farHpBefore = farUnit.hp;
+    applySplashDamage(ctx, { x: 100, y: 100 },
+      { damage: 100, warhead: 'HE', splash: 5 }, -1, House.Spain, attacker); // weapon.splash=5 but radius is capped at 1.5
+    expect(nearUnit.hp).toBeLessThan(nearHpBefore); // 1 cell = within 1.5
+    expect(farUnit.hp).toBe(farHpBefore); // 2 cells = outside 1.5
   });
 
-  it('splash uses modifyDamage for falloff calculation', () => {
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
-    );
-    const startIdx = src.indexOf('private applySplashDamage(');
-    const chunk = src.slice(startIdx, startIdx + 1500);
-    expect(chunk).toContain('modifyDamage(');
-    expect(chunk).toContain('distPixels');
+  it('splash uses inverse-proportional falloff via modifyDamage', () => {
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const closeUnit = makeEntity(UnitType.V_2TNK, House.USSR, 100 + 4, 100); // ~0.17 cells
+    const farUnit = makeEntity(UnitType.V_2TNK, House.USSR, 100 + CELL_SIZE, 100); // 1 cell
+    const ctx = makeMockCombatContext();
+    registerEntities(ctx, attacker, closeUnit, farUnit);
+    const closeHpBefore = closeUnit.hp;
+    const farHpBefore = farUnit.hp;
+    applySplashDamage(ctx, { x: 100, y: 100 },
+      { damage: 100, warhead: 'HE', splash: 1.5 }, -1, House.Spain, attacker);
+    const closeDmg = closeHpBefore - closeUnit.hp;
+    const farDmg = farHpBefore - farUnit.hp;
+    // Close unit takes more damage than far unit (inverse falloff)
+    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(farDmg).toBeGreaterThan(0);
   });
 
   it('modifyDamage at point-blank (0 distance) returns full damage', () => {

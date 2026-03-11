@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-03-11T01:45Z — Session 141: Game Class Subsystem Extraction (Phase 1-3)
+- **Extracted 6 subsystem modules** from 10K-line Game class (`engine/index.ts`): `combat.ts` (523L), `fog.ts` (177L), `repairSell.ts` (227L), `specialUnits.ts` (545L), `superweapon.ts` (628L), `production.ts` (273L)
+- **Architecture**: Each module defines a typed context interface (5-20 fields + callbacks). Game class delegates via `_run*` helpers that create context, run subsystem function, sync mutable state (credits, killCount, screenShake etc.) back.
+- **index.ts reduced** from 10,120 → 8,995 lines (-1,125 lines). All public API unchanged — Game methods become one-line delegates.
+- **Test rewrites**: Replaced ~230 source-string tests (readFileSync+toContain) with behavioral tests calling exported functions with mock contexts. All 8 pipeline test files pass (1,059 tests).
+- **Full suite**: 108/111 pass. 3 failures are pre-existing (projectile-speed, projspeed-parity, triggers-extended).
+- **Files created**: engine/combat.ts, fog.ts, repairSell.ts, specialUnits.ts, superweapon.ts, production.ts
+- **Files modified**: engine/index.ts, 8 test files in __tests__/
+
+## 2026-03-11T01:00Z — Session 140s: Trigger Parity Cleanup — Count-Based DESTROYED + Multi-Entity Cell Triggers
+- **Count-based DESTROYED (C++ Spring parity)**: Replaced boolean `destroyedConsumed` with `pendingDestroyedCount: number`. Each death increments the trigger's count. Each fire decrements it. For persistent triggers, a re-fire loop processes remaining deaths on the same tick (up to 8 iterations with guard). Matches C++ Spring() calling per-entity.
+- **Multi-entity cell triggers**: Changed `triggeringEntityId: number` to `triggeringEntityIds: number[]` array. When multiple units enter a hazard zone simultaneously, DESTROY_OBJECT kills ALL of them (not just the last one).
+- **Tests**: 8 tests pass — count>0 fires, count=0 doesn't, fires for each pending death (3 deaths = 3 fires), team trigger assignment, SCA02EA chain structure.
+
 ## 2026-03-11T00:00Z — Session 140r: Trigger System Debug — 3 Critical C++ Parity Bugs Fixed
 - **Bug 1: Team trigger field not parsed** (CRITICAL): TeamType.trigger (parts[6] in INI) was never stored. C++ ScenarioClass::Create_Army assigns team.Trigger to each spawned member — enables DESTROYED event chains (kill ants → trigger fires → spawn more ants). Without this, SCA02EA ant wave chains were completely broken.
 - **Bug 2: DESTROYED event not one-shot** (CRITICAL): DESTROYED was a persistent state check (cumulative dead set) instead of C++ Spring() one-shot event. Persistent triggers would fire every 15 ticks while dead ants existed. Fixed with per-entity `triggerDeathProcessed` flag and per-trigger `destroyedConsumed` flag — each death fires the trigger exactly once.

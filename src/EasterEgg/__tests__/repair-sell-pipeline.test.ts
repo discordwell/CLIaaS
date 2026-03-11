@@ -48,6 +48,16 @@ import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../engine/scenario';
 import { BUILDING_FRAME_TABLE } from '../engine/renderer';
+import {
+  type RepairSellContext,
+  toggleRepair,
+  isStructureRepairing,
+  sellStructureByIndex,
+  tickRepairs,
+  tickServiceDepot,
+  repairCostPerStep as _repairCostPerStep,
+  sellRefund as _sellRefund,
+} from '../engine/repairSell';
 
 // =========================================================================
 // Helpers — mirror Game internals for isolated unit testing
@@ -134,54 +144,100 @@ function powerOutput(type: string, hp: number, maxHp: number): number {
 /** Wall types (from engine) */
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
 
+/** Create a minimal RepairSellContext for behavioral testing */
+function makeMockRepairSellContext(overrides: Partial<RepairSellContext> = {}): RepairSellContext {
+  const evaCalls: string[] = [];
+  const soundCalls: string[] = [];
+  const clearedFootprints: MapStructure[] = [];
+  const addedCredits: { amount: number; bypass: boolean }[] = [];
+  return {
+    structures: [],
+    entities: [],
+    credits: 5000,
+    tick: 0,
+    playerHouse: House.Spain,
+    repairingStructures: new Set<number>(),
+    scenarioProductionItems: PRODUCTION_ITEMS as ProductionItem[],
+    effects: [],
+    siloCapacity: 2000,
+    gapGeneratorCells: new Map(),
+    isAllied: (a, b) => a === b,
+    isPlayerControlled: (e) => e.house === House.Spain,
+    addCredits: (amount, bypass) => {
+      addedCredits.push({ amount, bypass: !!bypass });
+      return amount;
+    },
+    playEva: (name) => { evaCalls.push(name); },
+    playSound: (name) => { soundCalls.push(name); },
+    playSoundAt: (name, _x, _y) => { soundCalls.push(name); },
+    clearStructureFootprint: (s) => { clearedFootprints.push(s); },
+    recalculateSiloCapacity: () => {},
+    mapUnjamRadius: () => {},
+    // Expose call logs for assertions (attached as expando properties)
+    ...overrides,
+    _evaCalls: evaCalls,
+    _soundCalls: soundCalls,
+    _clearedFootprints: clearedFootprints,
+    _addedCredits: addedCredits,
+  } as RepairSellContext & {
+    _evaCalls: string[];
+    _soundCalls: string[];
+    _clearedFootprints: MapStructure[];
+    _addedCredits: { amount: number; bypass: boolean }[];
+  };
+}
+
 // =========================================================================
 // 1. Structure Repair — toggleRepair / isStructureRepairing
 // =========================================================================
 describe('Structure Repair — toggle & query', () => {
   it('toggleRepair enables repair on damaged structure', () => {
-    // Source-level verification: toggleRepair adds idx to repairingStructures set
-    const idx = indexSource.indexOf('toggleRepair(idx: number)');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 500);
-    expect(chunk).toContain('repairingStructures.add(idx)');
-    expect(chunk).toContain('repairingStructures.delete(idx)');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    const result = toggleRepair(ctx, 0);
+    expect(result).toBe(true);
+    expect(ctx.repairingStructures.has(0)).toBe(true);
   });
 
   it('toggleRepair returns false for full-HP structure (nothing to repair)', () => {
-    // Source: if (s.hp < s.maxHp) { add } else return false
-    const idx = indexSource.indexOf('toggleRepair(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 500);
-    expect(chunk).toContain('s.hp < s.maxHp');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain)]; // full HP
+    const result = toggleRepair(ctx, 0);
+    expect(result).toBe(false);
+    expect(ctx.repairingStructures.has(0)).toBe(false);
   });
 
   it('toggleRepair returns false for dead structure', () => {
-    const idx = indexSource.indexOf('toggleRepair(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 500);
-    expect(chunk).toContain('!s.alive');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { alive: false, hp: 100 })];
+    const result = toggleRepair(ctx, 0);
+    expect(result).toBe(false);
   });
 
   it('toggleRepair returns false for non-allied structure', () => {
-    const idx = indexSource.indexOf('toggleRepair(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 500);
-    expect(chunk).toContain('isAllied');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.USSR, 10, 10, { hp: 200 })];
+    const result = toggleRepair(ctx, 0);
+    expect(result).toBe(false);
   });
 
   it('isStructureRepairing checks the repairingStructures set', () => {
-    const idx = indexSource.indexOf('isStructureRepairing(idx: number)');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 200);
-    expect(chunk).toContain('repairingStructures.has(idx)');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    expect(isStructureRepairing(ctx, 0)).toBe(false);
+    toggleRepair(ctx, 0);
+    expect(isStructureRepairing(ctx, 0)).toBe(true);
   });
 
   it('toggling repair twice returns to non-repairing state', () => {
-    // First toggle: add → returns true
-    // Second toggle: has(idx) → delete → returns false
-    const idx = indexSource.indexOf('toggleRepair(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 500);
-    // Confirms the has/delete/add pattern
-    expect(chunk).toContain('repairingStructures.has(idx)');
-    expect(chunk).toContain('repairingStructures.delete(idx)');
-    expect(chunk).toContain('return false');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    const first = toggleRepair(ctx, 0);
+    expect(first).toBe(true);
+    expect(isStructureRepairing(ctx, 0)).toBe(true);
+    const second = toggleRepair(ctx, 0);
+    expect(second).toBe(false);
+    expect(isStructureRepairing(ctx, 0)).toBe(false);
   });
 });
 
@@ -261,38 +317,56 @@ describe('Structure Repair — rate, cost, and tick intervals', () => {
   });
 
   it('repair stops when structure reaches full HP', () => {
-    // Source: if s.hp >= s.maxHp → delete from repairingStructures
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 400);
-    expect(chunk).toContain('s.hp >= s.maxHp');
-    expect(chunk).toContain('repairingStructures.delete(idx)');
+    const ctx = makeMockRepairSellContext();
+    // Structure only 3 HP below max — one REPAIR_STEP (+7) will cap it
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 397 })];
+    ctx.repairingStructures.add(0);
+    tickRepairs(ctx);
+    expect(ctx.structures[0].hp).toBe(400); // capped at maxHp
+    // Next tick should auto-remove from repairing set
+    tickRepairs(ctx);
+    expect(ctx.repairingStructures.has(0)).toBe(false);
   });
 
   it('repair stops when credits run out (RP5: insufficient funds)', () => {
-    // Source: if (this.credits < repairCostPerStep) → cancel repair
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 1100);
-    expect(chunk).toContain('this.credits < repairCostPerStep');
-    expect(chunk).toContain('repairingStructures.delete(idx)');
-    expect(chunk).toContain('eva_insufficient_funds');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    ctx.credits = 0; // no credits
+    ctx.repairingStructures.add(0);
+    tickRepairs(ctx);
+    // Should cancel repair and play EVA warning
+    expect(ctx.repairingStructures.has(0)).toBe(false);
+    expect((ctx as any)._evaCalls).toContain('eva_insufficient_funds');
+    expect(ctx.structures[0].hp).toBe(200); // unchanged
   });
 
   it('repair skips structures mid-sell (sellProgress !== undefined)', () => {
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 400);
-    expect(chunk).toContain('sellProgress !== undefined');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200, sellProgress: 0.5 })];
+    ctx.repairingStructures.add(0);
+    tickRepairs(ctx);
+    // Structure being sold should be removed from repair set
+    expect(ctx.repairingStructures.has(0)).toBe(false);
+    expect(ctx.structures[0].hp).toBe(200); // unchanged
   });
 
   it('repair deducts credits on each pulse', () => {
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 1100);
-    expect(chunk).toContain('this.credits -= repairCostPerStep');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    ctx.credits = 5000;
+    ctx.repairingStructures.add(0);
+    const creditsBefore = ctx.credits;
+    tickRepairs(ctx);
+    const costPerStep = repairCostPerStep('POWR'); // 2
+    expect(ctx.credits).toBe(creditsBefore - costPerStep);
   });
 
   it('repair plays "repair" audio on each pulse', () => {
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 1100);
-    expect(chunk).toContain("audio.play('repair')");
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    ctx.repairingStructures.add(0);
+    tickRepairs(ctx);
+    expect((ctx as any)._soundCalls).toContain('repair');
   });
 });
 
@@ -308,9 +382,17 @@ describe('Multiple simultaneous structure repairs', () => {
   });
 
   it('repair loop iterates all entries in repairingStructures', () => {
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 400);
-    expect(chunk).toContain('for (const idx of this.repairingStructures)');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [
+      makeStructure('POWR', House.Spain, 10, 10, { hp: 200 }),
+      makeStructure('WEAP', House.Spain, 20, 20, { hp: 500 }),
+    ];
+    ctx.repairingStructures.add(0);
+    ctx.repairingStructures.add(1);
+    tickRepairs(ctx);
+    // Both structures should have gained HP
+    expect(ctx.structures[0].hp).toBe(200 + REPAIR_STEP);
+    expect(ctx.structures[1].hp).toBe(500 + REPAIR_STEP);
   });
 
   it('each repair pulse costs independently (2 structures = 2x credit drain)', () => {
@@ -322,12 +404,19 @@ describe('Multiple simultaneous structure repairs', () => {
   });
 
   it('if one structure is fully repaired, only the other continues', () => {
-    // First struct reaches maxHp → gets removed from Set → second continues
-    // Verified by the delete-on-full-HP logic inside the for loop
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 400);
-    // The delete is inside the loop, so other entries continue
-    expect(chunk).toContain('continue');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [
+      makeStructure('POWR', House.Spain, 10, 10, { hp: 400 }), // full HP
+      makeStructure('POWR', House.Spain, 20, 20, { hp: 200 }), // damaged
+    ];
+    ctx.repairingStructures.add(0);
+    ctx.repairingStructures.add(1);
+    tickRepairs(ctx);
+    // First structure was full HP, should be removed from set
+    expect(ctx.repairingStructures.has(0)).toBe(false);
+    // Second structure should still be repairing
+    expect(ctx.repairingStructures.has(1)).toBe(true);
+    expect(ctx.structures[1].hp).toBe(200 + REPAIR_STEP);
   });
 });
 
@@ -389,30 +478,31 @@ describe('Power plant repair — power output restoration', () => {
 // =========================================================================
 describe('Structure Selling — sellStructureByIndex', () => {
   it('sellStructureByIndex sets sellProgress = 0 and captures sellHpAtStart', () => {
-    const idx = indexSource.indexOf('sellStructureByIndex(idx: number)');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 600);
-    expect(chunk).toContain('s.sellProgress = 0');
-    expect(chunk).toContain('s.sellHpAtStart = s.hp');
+    const ctx = makeMockRepairSellContext();
+    const s = makeStructure('POWR', House.Spain, 10, 10, { hp: 300 });
+    ctx.structures = [s];
+    const result = sellStructureByIndex(ctx, 0);
+    expect(result).toBe(true);
+    expect(s.sellProgress).toBe(0);
+    expect(s.sellHpAtStart).toBe(300);
   });
 
   it('sellStructureByIndex returns false for dead structure', () => {
-    const idx = indexSource.indexOf('sellStructureByIndex(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 400);
-    expect(chunk).toContain('!s.alive');
-    expect(chunk).toContain('return false');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { alive: false })];
+    expect(sellStructureByIndex(ctx, 0)).toBe(false);
   });
 
   it('sellStructureByIndex returns false for already-selling structure', () => {
-    const idx = indexSource.indexOf('sellStructureByIndex(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 400);
-    expect(chunk).toContain('s.sellProgress !== undefined');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { sellProgress: 0.5 })];
+    expect(sellStructureByIndex(ctx, 0)).toBe(false);
   });
 
   it('sellStructureByIndex returns false for non-allied structure', () => {
-    const idx = indexSource.indexOf('sellStructureByIndex(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 400);
-    expect(chunk).toContain('isAllied');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.USSR, 10, 10)];
+    expect(sellStructureByIndex(ctx, 0)).toBe(false);
   });
 });
 
@@ -610,33 +700,65 @@ describe('Power grid after selling power plant', () => {
 // 9. Service Depot Vehicle Repair
 // =========================================================================
 describe('Service Depot — vehicle repair', () => {
-  it('service depot repair runs every 14 ticks', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    expect(depotSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(depotSection, depotSection + 400);
-    expect(chunk).toContain('tick % 14 === 0');
+  /** Create a depot + vehicle context for tickServiceDepot tests.
+   *  FIX structure center is at (cx*CELL_SIZE + CELL_SIZE, cy*CELL_SIZE + CELL_SIZE).
+   *  Vehicle must be within 1.5 cells of that center. */
+  function makeDepotContext(vehicleHp: number, vehicleMaxHp: number, credits = 5000) {
+    const depot = makeStructure('FIX', House.Spain, 10, 10);
+    // Depot center: (10*24+24, 10*24+24) = (264, 264)
+    const vehicle = new Entity(UnitType.V_JEEP, House.Spain, 264, 264);
+    vehicle.hp = vehicleHp;
+    vehicle.maxHp = vehicleMaxHp;
+    const ctx = makeMockRepairSellContext({ credits });
+    ctx.structures = [depot];
+    ctx.entities = [vehicle];
+    return { ctx, depot, vehicle };
+  }
+
+  it('service depot repairs damaged vehicle docked within range', () => {
+    const { ctx, vehicle } = makeDepotContext(50, 110);
+    tickServiceDepot(ctx);
+    expect(vehicle.hp).toBe(50 + REPAIR_STEP);
   });
 
   it('depot only services vehicles (not infantry)', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 1200);
-    expect(chunk).toContain('isInfantry');
-    expect(chunk).toContain('continue');
+    const depot = makeStructure('FIX', House.Spain, 10, 10);
+    const infantry = new Entity(UnitType.I_E1, House.Spain, 264, 264);
+    infantry.hp = 10;
+    infantry.maxHp = 50;
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [depot];
+    ctx.entities = [infantry];
+    tickServiceDepot(ctx);
+    // Infantry should NOT be repaired
+    expect(infantry.hp).toBe(10);
   });
 
   it('depot finds closest damaged/depleted vehicle within 1.5 cells', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 1200);
-    expect(chunk).toContain('dist < 1.5');
-    expect(chunk).toContain('bestDist');
+    const depot = makeStructure('FIX', House.Spain, 10, 10);
+    // Vehicle right at depot center (distance = 0 < 1.5)
+    const close = new Entity(UnitType.V_JEEP, House.Spain, 264, 264);
+    close.hp = 50; close.maxHp = 110;
+    // Vehicle far away (distance >> 1.5 cells)
+    const far = new Entity(UnitType.V_JEEP, House.Spain, 500, 500);
+    far.hp = 50; far.maxHp = 110;
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [depot];
+    ctx.entities = [close, far];
+    tickServiceDepot(ctx);
+    // Close vehicle gets repaired, far one does not
+    expect(close.hp).toBe(50 + REPAIR_STEP);
+    expect(far.hp).toBe(50);
   });
 
   it('vehicle repair uses same cost formula as building repair', () => {
-    // Source: repairCost = ceil((unitCost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP))
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 1800);
-    expect(chunk).toContain('REPAIR_PERCENT');
-    expect(chunk).toContain('REPAIR_STEP');
+    // JEEP: cost=600, maxHp=110
+    // Cost per step = ceil(600 * 0.20 / (110 / 7)) = 8
+    const { ctx, vehicle } = makeDepotContext(50, 110, 5000);
+    const creditsBefore = ctx.credits;
+    tickServiceDepot(ctx);
+    const expectedCost = Math.ceil((600 * REPAIR_PERCENT) / (110 / REPAIR_STEP)); // 8
+    expect(ctx.credits).toBe(creditsBefore - expectedCost);
   });
 
   it('vehicle repair cost: JEEP (cost=600, maxHp=110)', () => {
@@ -656,45 +778,85 @@ describe('Service Depot — vehicle repair', () => {
   });
 
   it('insufficient funds ejects vehicle from depot pad', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 3000);
-    // On insufficient funds: eject unit from depot
-    expect(chunk).toContain('Mission.GUARD');
-    expect(chunk).toContain('docked.pos.x + CELL_SIZE * 3');
+    const { ctx, vehicle } = makeDepotContext(50, 110, 0); // 0 credits
+    const originalHp = vehicle.hp;
+    tickServiceDepot(ctx);
+    // Vehicle HP unchanged (no repair), ejected with GUARD mission and moveTarget set
+    expect(vehicle.hp).toBe(originalHp);
+    expect(vehicle.mission).toBe(Mission.GUARD);
+    expect(vehicle.moveTarget).not.toBeNull();
+    expect(vehicle.moveTarget!.x).toBe(vehicle.pos.x + CELL_SIZE * 3);
+    expect(vehicle.moveTarget!.y).toBe(vehicle.pos.y + CELL_SIZE * 3);
   });
 
   it('depot creates spark visual effect during repair', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 3000);
-    expect(chunk).toContain("'piff'");
-    expect(chunk).toContain("type: 'muzzle'");
+    const { ctx } = makeDepotContext(50, 110);
+    tickServiceDepot(ctx);
+    // Should have a 'piff' muzzle effect
+    const piffEffect = ctx.effects.find(e => (e as any).sprite === 'piff');
+    expect(piffEffect).toBeDefined();
+    expect(piffEffect!.type).toBe('muzzle');
   });
 
   it('depot rearms ammo (ReloadRate = 36 ticks per ammo)', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 3000);
-    expect(chunk).toContain('docked.ammo++');
-    expect(chunk).toContain('36');
+    const depot = makeStructure('FIX', House.Spain, 10, 10);
+    // Create a vehicle that needs rearm but NOT repair (full HP)
+    const vehicle = new Entity(UnitType.V_JEEP, House.Spain, 264, 264);
+    vehicle.hp = vehicle.maxHp; // full HP
+    vehicle.maxAmmo = 4;
+    vehicle.ammo = 2; // depleted
+    vehicle.rearmTimer = 1; // about to fire
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [depot];
+    ctx.entities = [vehicle];
+    tickServiceDepot(ctx);
+    // Timer decremented to 0, so ammo should increment and timer resets to 36
+    expect(vehicle.ammo).toBe(3);
+    expect(vehicle.rearmTimer).toBe(36);
   });
 
   it('rearm happens alongside repair, free of charge', () => {
-    const depotSection = indexSource.indexOf('depot reloads ammo');
-    const chunk = indexSource.slice(depotSection, depotSection + 500);
-    // No credits deduction for rearm — only for repair
-    expect(chunk).not.toContain('credits -=');
+    const depot = makeStructure('FIX', House.Spain, 10, 10);
+    const vehicle = new Entity(UnitType.V_JEEP, House.Spain, 264, 264);
+    vehicle.hp = 50; vehicle.maxHp = 110; // needs repair
+    vehicle.maxAmmo = 4; vehicle.ammo = 2; // needs rearm
+    vehicle.rearmTimer = 1; // about to fire
+    const ctx = makeMockRepairSellContext({ credits: 5000 });
+    ctx.structures = [depot];
+    ctx.entities = [vehicle];
+    const creditsBefore = ctx.credits;
+    tickServiceDepot(ctx);
+    // Both repair and rearm happen, but only repair costs credits
+    expect(vehicle.hp).toBe(50 + REPAIR_STEP);
+    expect(vehicle.ammo).toBe(3);
+    const repairCost = Math.ceil((600 * REPAIR_PERCENT) / (110 / REPAIR_STEP));
+    expect(ctx.credits).toBe(creditsBefore - repairCost); // only repair cost, no rearm cost
   });
 
   it('depot only services player-controlled vehicles', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 1200);
-    expect(chunk).toContain('isPlayerControlled');
+    const depot = makeStructure('FIX', House.Spain, 10, 10);
+    // Enemy vehicle near depot
+    const enemy = new Entity(UnitType.V_JEEP, House.USSR, 264, 264);
+    enemy.hp = 50; enemy.maxHp = 110;
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [depot];
+    ctx.entities = [enemy];
+    tickServiceDepot(ctx);
+    // Enemy vehicle should NOT be repaired
+    expect(enemy.hp).toBe(50);
   });
 
   it('depot only services allied depots', () => {
-    const depotSection = indexSource.indexOf('Service Depot (FIX): dock-based repair');
-    const chunk = indexSource.slice(depotSection, depotSection + 600);
-    expect(chunk).toContain('isAllied');
-    expect(chunk).toContain('playerHouse');
+    // Enemy depot with player vehicle
+    const enemyDepot = makeStructure('FIX', House.USSR, 10, 10);
+    const vehicle = new Entity(UnitType.V_JEEP, House.Spain, 264, 264);
+    vehicle.hp = 50; vehicle.maxHp = 110;
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [enemyDepot];
+    ctx.entities = [vehicle];
+    tickServiceDepot(ctx);
+    // Player vehicle near enemy depot should NOT be repaired
+    expect(vehicle.hp).toBe(50);
   });
 });
 
@@ -798,11 +960,16 @@ describe('Wall Sell — instant removal + refund', () => {
   });
 
   it('sellStructureByIndex sells walls instantly (no animation)', () => {
-    const idx = indexSource.indexOf('sellStructureByIndex(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 600);
-    expect(chunk).toContain('WALL_TYPES.has(s.type)');
-    expect(chunk).toContain('s.alive = false');
-    expect(chunk).toContain('clearStructureFootprint');
+    const ctx = makeMockRepairSellContext();
+    const wall = makeStructure('SBAG', House.Spain, 5, 5);
+    ctx.structures = [wall];
+    const result = sellStructureByIndex(ctx, 0);
+    expect(result).toBe(true);
+    // Wall sell is instant: alive=false, no sellProgress
+    expect(wall.alive).toBe(false);
+    expect(wall.sellProgress).toBeUndefined();
+    // Footprint cleared
+    expect((ctx as any)._clearedFootprints).toContain(wall);
   });
 
   it('wall sell refund is 50% of cost (same as normal structures)', () => {
@@ -1003,11 +1170,14 @@ describe('Edge Cases', () => {
   });
 
   it('zero-credit repair attempt cancels immediately', () => {
-    // Source: if (this.credits < repairCostPerStep) → cancel + EVA warning
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 1100);
-    expect(chunk).toContain('this.credits < repairCostPerStep');
-    // This fires eva_insufficient_funds and deletes from set
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    ctx.credits = 0;
+    ctx.repairingStructures.add(0);
+    tickRepairs(ctx);
+    // Repair cancelled, EVA warning fired
+    expect(ctx.repairingStructures.has(0)).toBe(false);
+    expect((ctx as any)._evaCalls).toContain('eva_insufficient_funds');
   });
 
   it('structure at 1 HP — repair cost for single step', () => {
@@ -1021,15 +1191,11 @@ describe('Edge Cases', () => {
 
   it('selling construction yard is allowed (no special block for player)', () => {
     // Unlike AI which never sells FACT, player CAN sell their ConYard
-    // sellStructureByIndex does NOT check for FACT type
-    const idx = indexSource.indexOf('sellStructureByIndex(idx: number)');
-    const chunk = indexSource.slice(idx, idx + 600);
-    // Confirm there is no FACT-specific guard
-    const factCheck = chunk.indexOf("'FACT'");
-    // If FACT appears, it's only in the wall check context, not a sell block
-    // Actually, FACT should not appear in this function at all
-    // The function only checks: !s, !s.alive, sellProgress !== undefined, !isAllied, WALL_TYPES
-    expect(chunk).toContain('WALL_TYPES');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('FACT', House.Spain, 10, 10)];
+    const result = sellStructureByIndex(ctx, 0);
+    expect(result).toBe(true);
+    expect(ctx.structures[0].sellProgress).toBe(0);
   });
 
   it('sell refinery impacts economy (reduces silo capacity)', () => {
@@ -1346,11 +1512,17 @@ describe('Engineer Repair vs Toggle Repair distinction', () => {
 // =========================================================================
 describe('Repair + Sell Interaction', () => {
   it('starting sell while repairing cancels repair', () => {
-    // When sellProgress is set, the repair loop detects it and removes from set
-    const repairSection = indexSource.indexOf('RP3: Repair structures');
-    const chunk = indexSource.slice(repairSection, repairSection + 400);
-    expect(chunk).toContain('s.sellProgress !== undefined');
-    expect(chunk).toContain('repairingStructures.delete(idx)');
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [makeStructure('POWR', House.Spain, 10, 10, { hp: 200 })];
+    // Start repairing
+    toggleRepair(ctx, 0);
+    expect(ctx.repairingStructures.has(0)).toBe(true);
+    // Start selling — sets sellProgress
+    sellStructureByIndex(ctx, 0);
+    expect(ctx.structures[0].sellProgress).toBe(0);
+    // Next repair tick should detect sellProgress and remove from set
+    tickRepairs(ctx);
+    expect(ctx.repairingStructures.has(0)).toBe(false);
   });
 
   it('selling refines structure gives refund AND reduces silo capacity', () => {
@@ -1400,9 +1572,18 @@ describe('Timing Constants', () => {
   });
 
   it('depot rearm rate is 36 ticks per ammo', () => {
-    const depotSection = indexSource.indexOf('ReloadRate=.04 min');
-    expect(depotSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(depotSection, depotSection + 200);
-    expect(chunk).toContain('36');
+    // Vehicle at depot with depleted ammo — rearmTimer resets to 36 after each reload
+    const depot = makeStructure('FIX', House.Spain, 10, 10);
+    const vehicle = new Entity(UnitType.V_JEEP, House.Spain, 264, 264);
+    vehicle.hp = vehicle.maxHp; // full HP — only needs rearm
+    vehicle.maxAmmo = 4;
+    vehicle.ammo = 2;
+    vehicle.rearmTimer = 1; // will decrement to 0, triggering reload
+    const ctx = makeMockRepairSellContext();
+    ctx.structures = [depot];
+    ctx.entities = [vehicle];
+    tickServiceDepot(ctx);
+    // After reload, timer should reset to 36
+    expect(vehicle.rearmTimer).toBe(36);
   });
 });
