@@ -53,7 +53,6 @@ export interface SpecialUnitsContext {
   movementSpeed(entity: Entity): number;
   damageEntity(target: Entity, amount: number, warhead: string): boolean;
   damageStructure(s: MapStructure, damage: number): boolean;
-  addCredits(amount: number, bypassSiloCap?: boolean): number;
   addEntity(entity: Entity): void;
 
   // Renderer

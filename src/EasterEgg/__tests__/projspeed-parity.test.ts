@@ -92,11 +92,16 @@ describe('weapon projSpeed values — all defined weapons', () => {
   });
 
   // Tier: arcing/slow projectiles (projSpeed=12 cells/sec)
-  const ARCING_WEAPONS = ['Grenade', '155mm', 'DepthCharge', 'Napalm'];
+  const ARCING_WEAPONS = ['155mm', 'DepthCharge', 'Napalm'];
   it('arcing/slow weapons have projSpeed=12', () => {
     for (const name of ARCING_WEAPONS) {
       expect(WEAPON_STATS[name]?.projSpeed, `${name} projSpeed`).toBe(12);
     }
+  });
+
+  // Grenade: arcing but slower (C++ Speed=5, Lobbed)
+  it('Grenade has projSpeed=5', () => {
+    expect(WEAPON_STATS.Grenade?.projSpeed, 'Grenade projSpeed').toBe(5);
   });
 
   // Special: Flamer (projSpeed=20)

@@ -70,6 +70,34 @@ try {
 } catch {
   indexSource = '';
 }
+const COMBAT_PATH = join(process.cwd(), 'src', 'EasterEgg', 'engine', 'combat.ts');
+let combatSource: string;
+try {
+  combatSource = readFileSync(COMBAT_PATH, 'utf-8');
+} catch {
+  combatSource = '';
+}
+const PLACEMENT_PATH = join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts');
+let placementSource: string;
+try {
+  placementSource = readFileSync(PLACEMENT_PATH, 'utf-8');
+} catch {
+  placementSource = '';
+}
+const AI_PATH = join(process.cwd(), 'src', 'EasterEgg', 'engine', 'ai.ts');
+let aiSource: string;
+try {
+  aiSource = readFileSync(AI_PATH, 'utf-8');
+} catch {
+  aiSource = '';
+}
+const MISSION_AI_PATH = join(process.cwd(), 'src', 'EasterEgg', 'engine', 'missionAI.ts');
+let missionAISource: string;
+try {
+  missionAISource = readFileSync(MISSION_AI_PATH, 'utf-8');
+} catch {
+  missionAISource = '';
+}
 
 beforeEach(() => {
   resetEntityIds();
@@ -865,22 +893,22 @@ describe('Service Depot — vehicle repair', () => {
 // =========================================================================
 describe('REPAIR mission — units seeking depot', () => {
   it('REPAIR mission seeks nearest FIX structure', () => {
-    const idx = indexSource.indexOf('private updateRepairMission(entity');
+    const idx = missionAISource.indexOf('export function updateRepairMission(ctx: MissionAIContext, entity');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 1500);
+    const chunk = missionAISource.slice(idx, idx + 1500);
     expect(chunk).toContain("'FIX'");
   });
 
   it('unit switches to GUARD on arrival at depot', () => {
-    const idx = indexSource.indexOf('private updateRepairMission(entity');
-    const chunk = indexSource.slice(idx, idx + 1500);
+    const idx = missionAISource.indexOf('export function updateRepairMission(ctx: MissionAIContext, entity');
+    const chunk = missionAISource.slice(idx, idx + 1500);
     expect(chunk).toContain('Mission.GUARD');
     expect(chunk).toContain('moveTarget = null');
   });
 
   it('fallback to GUARD if no depot exists', () => {
-    const idx = indexSource.indexOf('private updateRepairMission(entity');
-    const chunk = indexSource.slice(idx, idx + 1500);
+    const idx = missionAISource.indexOf('export function updateRepairMission(ctx: MissionAIContext, entity');
+    const chunk = missionAISource.slice(idx, idx + 1500);
     expect(chunk).toContain('No depot');
     expect(chunk).toContain('Mission.GUARD');
   });
@@ -891,15 +919,15 @@ describe('REPAIR mission — units seeking depot', () => {
 // =========================================================================
 describe('MCV Deployment — deployMCV', () => {
   it('deployMCV source validates entity type is V_MCV', () => {
-    const idx = indexSource.indexOf('deployMCV(entity: Entity)');
-    const chunk = indexSource.slice(idx, idx + 300);
+    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
+    const chunk = placementSource.slice(idx, idx + 300);
     expect(chunk).toContain('V_MCV');
     expect(chunk).toContain('return false');
   });
 
   it('deployMCV validates 3x3 clear area around MCV cell', () => {
-    const idx = indexSource.indexOf('deployMCV(entity: Entity)');
-    const chunk = indexSource.slice(idx, idx + 500);
+    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
+    const chunk = placementSource.slice(idx, idx + 500);
     expect(chunk).toContain('dy = -1');
     expect(chunk).toContain('dy <= 1');
     expect(chunk).toContain('dx = -1');
@@ -908,15 +936,15 @@ describe('MCV Deployment — deployMCV', () => {
   });
 
   it('deployMCV kills the MCV entity', () => {
-    const idx = indexSource.indexOf('deployMCV(entity: Entity)');
-    const chunk = indexSource.slice(idx, idx + 500);
+    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
+    const chunk = placementSource.slice(idx, idx + 500);
     expect(chunk).toContain('entity.alive = false');
     expect(chunk).toContain('Mission.DIE');
   });
 
   it('deployMCV places FACT at (cx-1, cy-1)', () => {
-    const idx = indexSource.indexOf('deployMCV(entity: Entity)');
-    const chunk = indexSource.slice(idx, idx + 1000);
+    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
+    const chunk = placementSource.slice(idx, idx + 1000);
     expect(chunk).toContain('ec.cx - 1');
     expect(chunk).toContain('ec.cy - 1');
     expect(chunk).toContain("type: 'FACT'");
@@ -934,14 +962,14 @@ describe('MCV Deployment — deployMCV', () => {
   });
 
   it('deployed FACT uses playerHouse', () => {
-    const idx = indexSource.indexOf('deployMCV(entity: Entity)');
-    const chunk = indexSource.slice(idx, idx + 700);
-    expect(chunk).toContain('this.playerHouse');
+    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
+    const chunk = placementSource.slice(idx, idx + 700);
+    expect(chunk).toContain('ctx.playerHouse');
   });
 
   it('deployment returns false if any surrounding cell is impassable', () => {
-    const idx = indexSource.indexOf('deployMCV(entity: Entity)');
-    const chunk = indexSource.slice(idx, idx + 400);
+    const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
+    const chunk = placementSource.slice(idx, idx + 400);
     expect(chunk).toContain('return false');
     expect(chunk).toContain('isPassable');
   });
@@ -1006,46 +1034,46 @@ describe('Wall Sell — instant removal + refund', () => {
 // =========================================================================
 describe('AI Auto-Repair — updateAIRepair', () => {
   it('AI repair requires IQ >= 3', () => {
-    const idx = indexSource.indexOf('private updateAIRepair(): void');
+    const idx = aiSource.indexOf('export function updateAIRepair');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 1200);
+    const chunk = aiSource.slice(idx, idx + 1200);
     expect(chunk).toContain('state.iq < 3');
   });
 
   it('AI repair runs every 15 ticks (once per second)', () => {
-    const idx = indexSource.indexOf('private updateAIRepair(): void');
-    const chunk = indexSource.slice(idx, idx + 200);
+    const idx = aiSource.indexOf('export function updateAIRepair');
+    const chunk = aiSource.slice(idx, idx + 200);
     expect(chunk).toContain('tick % 15 !== 0');
   });
 
   it('AI only repairs structures below 80% HP', () => {
-    const idx = indexSource.indexOf('private updateAIRepair(): void');
-    const chunk = indexSource.slice(idx, idx + 1200);
+    const idx = aiSource.indexOf('export function updateAIRepair');
+    const chunk = aiSource.slice(idx, idx + 1200);
     expect(chunk).toContain('s.hp >= s.maxHp * 0.8');
   });
 
   it('AI deducts repair cost from houseCredits (not player credits)', () => {
-    const idx = indexSource.indexOf('private updateAIRepair(): void');
-    const chunk = indexSource.slice(idx, idx + 1200);
+    const idx = aiSource.indexOf('export function updateAIRepair');
+    const chunk = aiSource.slice(idx, idx + 1200);
     expect(chunk).toContain('houseCredits.set');
     expect(chunk).toContain('currentCredits - repairCostPerStep');
   });
 
   it('AI skips repair if house credits < 10', () => {
-    const idx = indexSource.indexOf('private updateAIRepair(): void');
-    const chunk = indexSource.slice(idx, idx + 600);
+    const idx = aiSource.indexOf('export function updateAIRepair');
+    const chunk = aiSource.slice(idx, idx + 600);
     expect(chunk).toContain('credits < 10');
   });
 
   it('AI skips structures being sold', () => {
-    const idx = indexSource.indexOf('private updateAIRepair(): void');
-    const chunk = indexSource.slice(idx, idx + 1200);
+    const idx = aiSource.indexOf('export function updateAIRepair');
+    const chunk = aiSource.slice(idx, idx + 1200);
     expect(chunk).toContain('sellProgress !== undefined');
   });
 
   it('AI repair uses same REPAIR_STEP and REPAIR_PERCENT as player repair', () => {
-    const idx = indexSource.indexOf('private updateAIRepair(): void');
-    const chunk = indexSource.slice(idx, idx + 1200);
+    const idx = aiSource.indexOf('export function updateAIRepair');
+    const chunk = aiSource.slice(idx, idx + 1200);
     expect(chunk).toContain('REPAIR_STEP');
     expect(chunk).toContain('REPAIR_PERCENT');
   });
@@ -1056,56 +1084,56 @@ describe('AI Auto-Repair — updateAIRepair', () => {
 // =========================================================================
 describe('AI Auto-Sell — updateAISellDamaged', () => {
   it('AI sell requires IQ >= 3', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 1500);
+    const chunk = aiSource.slice(idx, idx + 1500);
     expect(chunk).toContain('state.iq < 3');
   });
 
   it('AI sell runs every 75 ticks (5 seconds)', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
-    const chunk = indexSource.slice(idx, idx + 200);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 200);
     expect(chunk).toContain('tick % 75 !== 0');
   });
 
   it('AI sells structures at CONDITION_RED HP threshold', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
-    const chunk = indexSource.slice(idx, idx + 1500);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 1500);
     expect(chunk).toContain('CONDITION_RED');
     expect(CONDITION_RED).toBe(0.25);
   });
 
   it('AI never sells Construction Yard (FACT)', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
-    const chunk = indexSource.slice(idx, idx + 1500);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 1500);
     expect(chunk).toContain("s.type === 'FACT'");
     expect(chunk).toContain('continue');
   });
 
   it('AI never sells last power plant', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
-    const chunk = indexSource.slice(idx, idx + 1500);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 1500);
     expect(chunk).toContain("s.type === 'POWR' || s.type === 'APWR'");
     expect(chunk).toContain('powerCount <= 1');
   });
 
   it('AI sell refund = floor(cost * 0.5 * hpRatio) — health-scaled unlike player', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
-    const chunk = indexSource.slice(idx, idx + 2000);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 2000);
     expect(chunk).toContain('hpRatio');
     expect(chunk).toContain('prodItem.cost * 0.5 * hpRatio');
   });
 
   it('AI sell grants refund to houseCredits (not player credits)', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
-    const chunk = indexSource.slice(idx, idx + 2000);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 2000);
     expect(chunk).toContain('houseCredits.set');
     expect(chunk).toContain('current + refund');
   });
 
   it('AI sell is instant (no animation), sets rubble=true', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged(): void');
-    const chunk = indexSource.slice(idx, idx + 2000);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 2000);
     expect(chunk).toContain('s.alive = false');
     expect(chunk).toContain('s.rubble = true');
     expect(chunk).toContain('clearStructureFootprint');
@@ -1433,10 +1461,10 @@ describe('Sidebar Repair/Sell Buttons', () => {
 // =========================================================================
 describe('Structure Defense During Sell', () => {
   it('defensive structures skip combat while being sold', () => {
-    // In updateStructureCombat, structures with sellProgress are skipped
-    const idx = indexSource.indexOf('private updateStructureCombat');
+    // In updateStructureCombat (combat.ts), structures with sellProgress are skipped
+    const idx = combatSource.indexOf('export function updateStructureCombat');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 3000);
+    const chunk = combatSource.slice(idx, idx + 3000);
     expect(chunk).toContain('sellProgress');
   });
 });
@@ -1454,28 +1482,28 @@ describe('Wall Placement and Sell', () => {
 
   it('walls appear instantly (no construction animation)', () => {
     // In placeStructure: isWall → buildProgress = undefined (instant)
-    const idx = indexSource.indexOf('buildProgress: isWall');
+    const idx = placementSource.indexOf('buildProgress: isWall');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 100);
+    const chunk = placementSource.slice(idx, idx + 100);
     expect(chunk).toContain('undefined');
   });
 
   it('walls support continuous placement (pendingPlacement stays active)', () => {
-    const idx = indexSource.indexOf('For walls: keep pendingPlacement active');
+    const idx = placementSource.indexOf('For walls: keep pendingPlacement active');
     expect(idx).toBeGreaterThan(-1);
   });
 
   it('wall placement does not require adjacency (unlike normal structures)', () => {
-    const idx = indexSource.indexOf('Walls can be placed anywhere passable');
+    const idx = placementSource.indexOf('Walls can be placed anywhere passable');
     expect(idx).toBeGreaterThan(-1);
   });
 
   it('first wall cost is prepaid at production start, subsequent walls deducted on placement', () => {
-    const idx = indexSource.indexOf('wallPlacementPrepaid');
+    const idx = placementSource.indexOf('wallPlacementPrepaid');
     expect(idx).toBeGreaterThan(-1);
     // Verify the prepaid/deduction logic
-    const placeIdx = indexSource.indexOf('For walls: keep pendingPlacement active');
-    const chunk = indexSource.slice(placeIdx, placeIdx + 300);
+    const placeIdx = placementSource.indexOf('For walls: keep pendingPlacement active');
+    const chunk = placementSource.slice(placeIdx, placeIdx + 300);
     expect(chunk).toContain('wallPlacementPrepaid');
     expect(chunk).toContain('getEffectiveCost');
   });
@@ -1486,16 +1514,16 @@ describe('Wall Placement and Sell', () => {
 // =========================================================================
 describe('Engineer Repair vs Toggle Repair distinction', () => {
   it('engineer repair heals to FULL HP instantly (not step-based)', () => {
-    const idx = indexSource.indexOf('EN1: Friendly repair');
+    const idx = missionAISource.indexOf('EN1: Friendly repair');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 200);
+    const chunk = missionAISource.slice(idx, idx + 200);
     expect(chunk).toContain('s.hp = s.maxHp');
   });
 
   it('engineer is consumed after repair', () => {
-    const idx = indexSource.indexOf('Engineer consumed on repair');
+    const idx = missionAISource.indexOf('Engineer consumed on repair');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 200);
+    const chunk = missionAISource.slice(idx, idx + 200);
     expect(chunk).toContain('entity.alive = false');
     expect(chunk).toContain('Mission.DIE');
   });
@@ -1553,14 +1581,14 @@ describe('Timing Constants', () => {
   });
 
   it('AI sell check interval is 75 ticks (5 seconds)', () => {
-    const idx = indexSource.indexOf('private updateAISellDamaged');
-    const chunk = indexSource.slice(idx, idx + 200);
+    const idx = aiSource.indexOf('export function updateAISellDamaged');
+    const chunk = aiSource.slice(idx, idx + 200);
     expect(chunk).toContain('tick % 75 !== 0');
   });
 
   it('AI repair check interval is 15 ticks (1 second)', () => {
-    const idx = indexSource.indexOf('private updateAIRepair');
-    const chunk = indexSource.slice(idx, idx + 200);
+    const idx = aiSource.indexOf('export function updateAIRepair');
+    const chunk = aiSource.slice(idx, idx + 200);
     expect(chunk).toContain('tick % 15 !== 0');
   });
 

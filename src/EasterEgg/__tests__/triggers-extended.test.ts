@@ -49,6 +49,7 @@ describe('Extended Trigger Events', () => {
     fakesExist: true,
     spiedBuildings: new Set(),
     isThieved: false,
+    pendingDestroyedCount: 0,
     ...overrides,
   });
 
@@ -117,7 +118,7 @@ describe('Extended Trigger Events', () => {
     const event: TriggerEvent = { type: 7, team: -1, data: 0 }; // C++ TEVENT_DESTROYED = 7
     // Trigger named 'eins' — entity with triggerName='eins' was destroyed
     const stateNotDestroyed = createState({ triggerName: 'eins', destroyedTriggerNames: new Set() });
-    const stateDestroyed = createState({ triggerName: 'eins', destroyedTriggerNames: new Set(['eins']) });
+    const stateDestroyed = createState({ triggerName: 'eins', destroyedTriggerNames: new Set(['eins']), pendingDestroyedCount: 1 });
 
     expect(checkTriggerEvent(event, stateNotDestroyed)).toBe(false);
     expect(checkTriggerEvent(event, stateDestroyed)).toBe(true);

@@ -456,8 +456,8 @@ describe('Edge-based reinforcement spawning', () => {
     expect(result.spawned.length).toBeGreaterThan(0);
     // East edge: cx should be bx + bw - 1 = 89, cellToWorld adds CELL_SIZE/2
     for (const unit of result.spawned) {
-      // pos.x = cx * 24 + 12 + offsetX; cx=89 → base ~2148, allow spread
-      expect(unit.pos.x).toBeGreaterThanOrEqual(89 * 24);
+      // pos.x = cx * 24 + 12 + offsetX (±24 random scatter); cx=89 → base ~2148
+      expect(unit.pos.x).toBeGreaterThanOrEqual(89 * 24 - 24);
       expect(unit.pos.x).toBeLessThan(90 * 24 + 24);
     }
   });

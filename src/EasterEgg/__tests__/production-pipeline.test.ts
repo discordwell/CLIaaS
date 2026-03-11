@@ -1018,9 +1018,9 @@ describe('Structure placement validation', () => {
     const { readFileSync } = require('fs');
     const { join } = require('path');
     const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
+      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts'), 'utf-8',
     );
-    const placeIdx = src.indexOf('placeStructure(cx: number, cy: number)');
+    const placeIdx = src.indexOf('placeStructure(ctx: PlacementContext, cx: number, cy: number)');
     expect(placeIdx).toBeGreaterThan(-1);
     const chunk = src.slice(placeIdx, placeIdx + 5000);
     expect(chunk).toContain("'PROC'");
@@ -1053,9 +1053,9 @@ describe('MCV deployment (deployMCV)', () => {
     const { readFileSync } = require('fs');
     const { join } = require('path');
     const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
+      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts'), 'utf-8',
     );
-    const idx = src.indexOf('deployMCV(entity');
+    const idx = src.indexOf('deployMCV(ctx: PlacementContext, entity');
     expect(idx).toBeGreaterThan(-1);
     const chunk = src.slice(idx, idx + 500);
     // Checks for 3x3 clear area (-1 to 1 in both dx and dy)
@@ -1069,9 +1069,9 @@ describe('MCV deployment (deployMCV)', () => {
     const { readFileSync } = require('fs');
     const { join } = require('path');
     const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
+      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts'), 'utf-8',
     );
-    const idx = src.indexOf('deployMCV(entity');
+    const idx = src.indexOf('deployMCV(ctx: PlacementContext, entity');
     const chunk = src.slice(idx, idx + 200);
     expect(chunk).toContain('V_MCV');
   });
@@ -1664,13 +1664,13 @@ describe('Full production cycle integration', () => {
     const { readFileSync } = require('fs');
     const { join } = require('path');
     const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'), 'utf-8',
+      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts'), 'utf-8',
     );
-    const idx = src.indexOf('placeStructure(cx: number, cy: number)');
+    const idx = src.indexOf('placeStructure(ctx: PlacementContext, cx: number, cy: number)');
     expect(idx).toBeGreaterThan(-1);
     const chunk = src.slice(idx, idx + 3000);
     // Wall path: pendingPlacement is NOT set to null
-    // Non-wall path: this.pendingPlacement = null
+    // Non-wall path: ctx.pendingPlacement = null
     expect(chunk).toContain('pendingPlacement = null');
     // Verify wall keeps it active: the null assignment is inside an else-block
     // meaning walls skip it

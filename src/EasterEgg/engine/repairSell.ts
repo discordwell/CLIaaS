@@ -32,13 +32,10 @@ export interface RepairSellContext {
   // Callbacks
   isAllied(a: House, b: House): boolean;
   isPlayerControlled(e: Entity): boolean;
-  addCredits(amount: number, bypassSiloCap?: boolean): number;
   playEva(name: string): void;
   playSound(name: string): void;
   playSoundAt(name: string, x: number, y: number): void;
   clearStructureFootprint(s: MapStructure): void;
-  recalculateSiloCapacity(): void;
-  mapUnjamRadius(cx: number, cy: number, radius: number): void;
 }
 
 // ---------------------------------------------------------------------------

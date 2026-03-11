@@ -9,10 +9,11 @@ import {
   CELL_SIZE, MAP_CELLS, CONDITION_YELLOW,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META,
   armorIndex, worldDist, worldToCell, modifyDamage,
+  directionTo, calcProjectileTravelFrames,
   House, Mission, AnimState, EXPLOSION_FRAMES,
 } from './types';
 import { type Entity } from './entity';
-import { type MapStructure, STRUCTURE_SIZE } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
 
@@ -22,6 +23,9 @@ import { type GameMap, Terrain } from './map';
 export const SPLASH_RADIUS = 1.5;
 
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
+
+/** Turreted structure types — turret rotates to face target (GUN/SAM) */
+const TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
@@ -74,6 +78,10 @@ export interface CombatContext {
   structuresLost: number;
   bridgeCellCount: number;
 
+  // Structure combat state
+  powerConsumed: number;
+  powerProduced: number;
+
   // Callbacks
   isAllied(a: House, b: House): boolean;
   entitiesAllied(a: Entity, b: Entity): boolean;
@@ -85,6 +93,7 @@ export interface CombatContext {
   getFirepowerBias(house: House): number;
   damageStructure(s: MapStructure, damage: number): boolean;
   aiIQ(house: House): number;
+  warheadMuzzleColor(warhead: string): string;
 
   // damageStructure callbacks
   clearStructureFootprint(s: MapStructure): void;
@@ -647,4 +656,163 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
     return true;
   }
   return false;
+}
+
+/** Structure auto-fire — pillboxes, guard towers, tesla coils, SAM/AGUN fire at nearby enemies.
+ *  Extracted from Game.updateStructureCombat (index.ts). */
+export function updateStructureCombat(ctx: CombatContext): void {
+  const isLowPower = ctx.powerConsumed > ctx.powerProduced && ctx.powerProduced > 0;
+  for (const s of ctx.structures) {
+    if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
+    // C++ parity PW1/PW3: powered defenses (TSLA, GUN, SAM, AGUN) cannot fire during any power deficit.
+    // Unpowered defenses (PBOX, HBOX, FTUR) always fire regardless of power.
+    if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
+      continue;
+    }
+    // C++ building.cpp:882-883 — ammo instantly reloads to MaxAmmo each AI tick
+    if (s.ammo === 0 && s.maxAmmo > 0) { s.ammo = s.maxAmmo; }
+    if (s.ammo === 0) continue; // out of ammo (shouldn't reach here after reload)
+
+    // Turret rotation tick (every frame, independent of cooldown)
+    if (TURRETED_STRUCTURES.has(s.type)) {
+      if (s.turretDir === undefined) s.turretDir = 4; // default: South
+      if (s.desiredTurretDir === undefined) s.desiredTurretDir = s.turretDir;
+      if (s.turretDir !== s.desiredTurretDir) {
+        const diff = (s.desiredTurretDir - s.turretDir + 8) % 8;
+        s.turretDir = diff <= 4
+          ? (s.turretDir + 1) % 8
+          : (s.turretDir + 7) % 8;
+      }
+      if (s.firingFlash !== undefined && s.firingFlash > 0) s.firingFlash--;
+    }
+
+    if (s.attackCooldown > 0) {
+      if (!isLowPower || ctx.tick % 2 === 0) s.attackCooldown--;
+      continue;
+    }
+
+    const sx = s.cx * CELL_SIZE + CELL_SIZE;
+    const sy = s.cy * CELL_SIZE + CELL_SIZE;
+    const structPos: WorldPos = { x: sx, y: sy };
+    const range = s.weapon.range;
+
+    // Find highest-threat enemy in range (C++ building.cpp — prioritize dangerous targets, not just closest)
+    let bestTarget: Entity | null = null;
+    let bestScore = -Infinity;
+    for (const e of ctx.entities) {
+      if (!e.alive) continue;
+      if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
+      const dist = worldDist(structPos, e.pos);
+      if (dist >= range) continue;
+      // LOS check
+      const ec = e.cell;
+      if (!ctx.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
+      // Threat scoring: prioritize dangerous/wounded enemies over merely close ones
+      const isAttackingAlly = e.targetStructure?.alive && ctx.isAllied(s.house, (e.targetStructure.house as House) ?? House.Neutral);
+      let score = e.stats.isInfantry ? 10 : 25;
+      score += (e.weapon?.damage ?? 0) * 0.2;
+      if (e.hp < e.maxHp * 0.5) score *= 1.5; // wounded bonus
+      if (isAttackingAlly) score *= 2; // retaliation
+      score *= Math.max(0.3, 1 - (dist / range) * 0.7); // distance weighting
+      if (score > bestScore) {
+        bestTarget = e;
+        bestScore = score;
+      }
+    }
+
+    // AA override: SAM/AGUN prefer airborne aircraft over ground targets
+    if (s.weapon.isAntiAir && bestTarget) {
+      let bestAirTarget: Entity | null = null;
+      let bestAirDist = Infinity;
+      for (const e of ctx.entities) {
+        if (!e.alive || !e.isAirUnit || e.flightAltitude <= 0) continue;
+        if (ctx.isAllied(s.house, e.house)) continue;
+        const dist = worldDist(structPos, e.pos);
+        if (dist < range && dist < bestAirDist) {
+          bestAirTarget = e;
+          bestAirDist = dist;
+        }
+      }
+      if (bestAirTarget) {
+        bestTarget = bestAirTarget;
+      }
+    }
+
+    if (bestTarget) {
+      // Update turret direction for turreted structures
+      if (TURRETED_STRUCTURES.has(s.type)) {
+        s.desiredTurretDir = directionTo(structPos, bestTarget.pos);
+      }
+      // H1: Buildings with Ammo>1 fire rapidly (1-tick rearm) then recharge (C++ techno.cpp:2861)
+      if (s.ammo > 0) {
+        s.ammo--;
+        s.attackCooldown = s.ammo > 0 ? 1 : s.weapon.rof; // rapid-fire until last shot
+      } else {
+        s.attackCooldown = s.weapon.rof; // unlimited ammo (-1) uses normal ROF
+      }
+      if (TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
+      // CF1: Apply C++ Modify_Damage — structure direct hit at distance 0
+      const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
+      const houseBias = ctx.getFirepowerBias(s.house);
+      const whMult = getWarheadMult(wh, bestTarget.stats.armor, ctx.warheadOverrides);
+      const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
+      const killed = damageEntity(ctx, bestTarget, damage, wh);
+
+      // Fire effects — color by warhead type (C++ parity)
+      ctx.effects.push({
+        type: 'muzzle', x: sx, y: sy,
+        frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
+        muzzleColor: ctx.warheadMuzzleColor(wh),
+      } as Effect);
+
+      // Tesla coil and Queen Ant get special effect
+      if (s.type === 'TSLA' || s.type === 'QUEE') {
+        ctx.effects.push({
+          type: 'tesla', x: bestTarget.pos.x, y: bestTarget.pos.y,
+          frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
+          startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
+          blendMode: 'screen',
+        } as Effect);
+        ctx.playSoundAt('teslazap', sx, sy);
+      } else {
+        // Projectile from structure to target — per-weapon projectile speed
+        const structDistPx = Math.sqrt((bestTarget.pos.x - sx) ** 2 + (bestTarget.pos.y - sy) ** 2);
+        const structTravelFrames = calcProjectileTravelFrames(structDistPx, s.weapon.projSpeed);
+        ctx.effects.push({
+          type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: structTravelFrames, size: 3,
+          startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
+          projStyle: 'bullet',
+        } as Effect);
+        // AA weapons hitting aircraft use flak burst sprite (C++ FLAK.SHP)
+        const aaImpactSprite = (s.weapon.isAntiAir && bestTarget.isAirUnit && bestTarget.flightAltitude > 0)
+          ? 'flak'
+          : (getWarheadProps(wh, ctx.scenarioWarheadProps)?.explosionSet ?? 'veh-hit1');
+        ctx.effects.push({
+          type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
+          frame: 0, maxFrames: 10, size: 6,
+          sprite: aaImpactSprite, spriteStart: 0,
+        } as Effect);
+        ctx.playSoundAt('machinegun', sx, sy);
+      }
+
+      // Splash damage
+      if (s.weapon.splash && s.weapon.splash > 0) {
+        applySplashDamage(
+          ctx, bestTarget.pos,
+          { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
+          bestTarget.id, s.house,
+        );
+      }
+
+      if (killed) {
+        handleUnitDeath(ctx, bestTarget, {
+          screenShake: 4, explosionSize: 16, debris: false,
+          decal: { infantry: 4, vehicle: 8, opacity: 0.5 },
+          explodeLgSound: false,
+          attackerIsPlayer: ctx.isAllied(s.house, ctx.playerHouse),
+          trackLoss: false,
+        });
+      }
+    }
+  }
 }

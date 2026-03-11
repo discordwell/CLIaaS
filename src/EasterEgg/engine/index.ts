@@ -36,7 +36,7 @@ import {
   loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
-  checkTriggerEvent, executeTriggerAction, houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_POWERED,
+  checkTriggerEvent, executeTriggerAction, houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
   saveCarryover, TIME_UNIT_TICKS,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
@@ -66,6 +66,7 @@ import {
   updateInflightProjectiles as _updateInflightProjectiles,
   applySplashDamage as _applySplashDamage,
   structureDamage as _structureDamage,
+  updateStructureCombat as _updateStructureCombat,
   SPLASH_RADIUS,
 } from './combat';
 import {
@@ -131,6 +132,67 @@ import {
   tickProduction as _tickProduction,
   spawnProducedUnit as _spawnProducedUnit,
 } from './production';
+import {
+  type HarvesterContext,
+  updateHarvester as _updateHarvester,
+} from './harvester';
+import {
+  type PlacementContext,
+  placeStructure as _placeStructure,
+  deployMCV as _deployMCV,
+} from './placement';
+import {
+  type AircraftContext,
+  canTargetNaval as _canTargetNaval,
+  findLandingPad as _findLandingPad,
+  getAircraftTargetPos as _getAircraftTargetPos,
+  updateAircraft as _updateAircraft,
+  updateFixedWingAttackRun as _updateFixedWingAttackRun,
+  updateHelicopterAttack as _updateHelicopterAttack,
+} from './aircraft';
+import {
+  type CrateContext,
+  type CrateType, type Crate,
+  spawnCrate as _spawnCrate,
+  pickupCrate as _pickupCrate,
+} from './crates';
+import {
+  type AIContext,
+  type AIHouseState,
+  DIFFICULTY_MODS,
+  createAIHouseState as _createAIHouseState,
+  getAIBuildOrder as _getAIBuildOrder,
+  aiPlaceStructure as _aiPlaceStructure,
+  updateAIConstruction as _updateAIConstruction,
+  updateAIStrategicPlanner as _updateAIStrategicPlanner,
+  updateAIHarvesters as _updateAIHarvesters,
+  updateAIAttackGroups as _updateAIAttackGroups,
+  launchAIAttack as _launchAIAttack,
+  aiPickAttackTarget as _aiPickAttackTarget,
+  updateAIDefense as _updateAIDefense,
+  updateAIRetreat as _updateAIRetreat,
+  updateAIRepair as _updateAIRepair,
+  updateAISellDamaged as _updateAISellDamaged,
+  updateAIIncome as _updateAIIncome,
+  updateAIProduction as _updateAIProduction,
+  updateAIAutocreateTeams as _updateAIAutocreateTeams,
+  updateBaseRebuild as _updateBaseRebuild,
+  spawnAIStructure as _spawnAIStructure,
+  spawnAIUnit as _spawnAIUnit,
+} from './ai';
+import {
+  type MissionAIContext,
+  updateAttack as _updateAttack,
+  updateAttackStructure as _updateAttackStructure,
+  updateForceFireGround as _updateForceFireGround,
+  updateHunt as _updateHunt,
+  updateGuard as _updateGuard,
+  updateAreaGuard as _updateAreaGuard,
+  updateRetreat as _updateRetreat,
+  updateAmbush as _updateAmbush,
+  updateRepairMission as _updateRepairMission,
+  orderTransportEvacuate as _orderTransportEvacuate,
+} from './missionAI';
 
 // Re-export subsystem types and functions for external consumers
 export type { InflightProjectileType as InflightProjectile };
@@ -159,12 +221,7 @@ export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
 
-/** Difficulty modifiers for queen spawn rate and ant composition */
-const DIFFICULTY_MODS: Record<Difficulty, { spawnInterval: number; maxAnts: number; fireAntChance: number; waveSize: number }> = {
-  easy:   { spawnInterval: 45, maxAnts: 15, fireAntChance: 0.15, waveSize: 0.7 },
-  normal: { spawnInterval: 30, maxAnts: 20, fireAntChance: 0.33, waveSize: 1.0 },
-  hard:   { spawnInterval: 20, maxAnts: 28, fireAntChance: 0.50, waveSize: 1.3 },
-};
+// DIFFICULTY_MODS, AIHouseState imported from ./ai
 
 /** Defensive structure types that ants prioritize attacking */
 const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 'AGUN', 'FTUR']);
@@ -172,79 +229,8 @@ const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 
 /** Wall structure types that use 1x1 placement mode */
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
 
-/** AI house strategic state — drives decision-making for non-player houses */
-interface AIHouseState {
-  house: House;
-  phase: 'economy' | 'buildup' | 'attack';
-  // Production gate — in campaign missions, AI only produces after BEGIN_PRODUCTION trigger
-  productionEnabled: boolean;
-  // Build order
-  buildQueue: string[];
-  lastBuildTick: number;
-  buildCooldown: number;       // ticks between build attempts
-  // Attack groups
-  attackPool: Set<number>;     // entity IDs staging for attack
-  attackThreshold: number;     // units needed before launching
-  lastAttackTick: number;
-  attackCooldownTicks: number; // min ticks between attacks
-  // Economy cache
-  harvesterCount: number;
-  refineryCount: number;
-  // Defense
-  lastBaseAttackTick: number;
-  underAttack: boolean;
-  // Difficulty modifiers
-  incomeMult: number;
-  buildSpeedMult: number;
-  aggressionMult: number;
-  // AI4: Designated enemy house — gets massive threat bonus in targeting
-  designatedEnemy: House | null;
-  // AI preferred target structure type index (set by TACTION_PREFERRED_TARGET)
-  preferredTarget: number | null;
-  // C++ IQ system: gates AI behaviors (0=no AI, 1=build only, 2=+attack/defense, 3=+retreat)
-  iq: number;
-  // C++ TechLevel: gates which production items are available
-  techLevel: number;
-  // C++ unit caps: -1 = unlimited
-  maxUnit: number;       // max vehicle units
-  maxInfantry: number;   // max infantry units
-  maxBuilding: number;   // max buildings
-}
 
-/** AI difficulty modifiers — scale economy, build speed, and aggression */
-const AI_DIFFICULTY_MODS: Record<Difficulty, {
-  incomeMult: number;
-  buildSpeedMult: number;
-  attackThreshold: number;
-  attackCooldown: number;
-  productionInterval: number;
-  aggressionMult: number;
-  retreatHpPercent: number;
-}> = {
-  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30 },
-  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25 },
-  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15 },
-};
 
-/** Structure type → sprite image name mapping (shared by base rebuild and AI construction) */
-const STRUCTURE_IMAGES: Record<string, string> = {
-  FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
-  WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
-  GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
-  GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
-  ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
-  QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
-};
-
-/** Crate bonus types */
-type CrateType = 'money' | 'heal' | 'unit' | 'armor' | 'firepower' | 'speed' | 'reveal' | 'darkness' | 'explosion' | 'squad' | 'heal_base' | 'napalm' | 'cloak' | 'invulnerability' | 'parabomb' | 'sonar' | 'icbm' | 'timequake' | 'vortex';
-interface Crate {
-  x: number;
-  y: number;
-  type: CrateType;
-  tick: number; // tick when spawned
-  lifetime: number; // CR6: ticks until expiry
-}
 
 /** In-flight projectile for deferred damage — defined in combat.ts */
 type InflightProjectile = InflightProjectileType;
@@ -522,6 +508,9 @@ export class Game {
       nBuildingsDestroyedCount: this.nBuildingsDestroyedCount,
       structuresLost: this.structuresLost,
       bridgeCellCount: this.bridgeCellCount,
+      // Structure combat state
+      powerConsumed: this.powerConsumed,
+      powerProduced: this.powerProduced,
       isAllied: (a, b) => this.isAllied(a, b),
       entitiesAllied: (a, b) => this.entitiesAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
@@ -532,6 +521,7 @@ export class Game {
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       damageStructure: (s, d) => this.damageStructure(s, d),
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
+      warheadMuzzleColor: (w) => this.warheadMuzzleColor(w as WarheadType),
       // damageStructure callbacks
       clearStructureFootprint: (s) => this.clearStructureFootprint(s),
       recalculateSiloCapacity: () => this.recalculateSiloCapacity(),
@@ -602,13 +592,10 @@ export class Game {
       gapGeneratorCells: this.gapGeneratorCells,
       isAllied: (a, b) => this.isAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
-      addCredits: (a, b) => this.addCredits(a, b),
       playEva: (n) => this.playEva(n as SoundName),
       playSound: (n) => this.audio.play(n as SoundName),
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
       clearStructureFootprint: (s) => this.clearStructureFootprint(s),
-      recalculateSiloCapacity: () => this.recalculateSiloCapacity(),
-      mapUnjamRadius: (cx, cy, r) => this.map.unjamRadius(cx, cy, r),
     };
   }
 
@@ -643,7 +630,6 @@ export class Game {
       movementSpeed: (e) => this.movementSpeed(e),
       damageEntity: (t, a, w) => this.damageEntity(t, a, w as WarheadType),
       damageStructure: (s, d) => this.damageStructure(s, d),
-      addCredits: (a, b) => this.addCredits(a, b),
       addEntity: (e) => { this.entities.push(e); this.entityById.set(e.id, e); },
       screenShake: this.renderer.screenShake,
     };
@@ -736,7 +722,6 @@ export class Game {
       hasBuilding: (t) => this.hasBuilding(t),
       playSound: (n) => this.audio.play(n as SoundName),
       playEva: (n) => this.playEva(n as SoundName),
-      addCredits: (a, b) => this.addCredits(a, b),
       addEntity: (e) => { this.entities.push(e); this.entityById.set(e.id, e); },
       findPassableSpawn: (cx, cy, scx, scy, fw, fh) => this.findPassableSpawn(cx, cy, scx, scy, fw, fh),
     };
@@ -749,6 +734,217 @@ export class Game {
     this.credits = ctx.credits;
     this.pendingPlacement = ctx.pendingPlacement;
     this.wallPlacementPrepaid = ctx.wallPlacementPrepaid;
+    return result;
+  }
+
+  private get _harvesterCtx(): HarvesterContext {
+    return {
+      entities: this.entities,
+      structures: this.structures,
+      houseCredits: this.houseCredits,
+      map: this.map,
+      isAllied: (a, b) => this.isAllied(a, b),
+      isPlayerControlled: (e) => this.isPlayerControlled(e),
+      playSound: (n) => this.audio.play(n as SoundName),
+      addCredits: (amount) => this.addCredits(amount),
+    };
+  }
+
+  /** Run harvester function (no mutable scalar state to sync — credits flow through addCredits callback) */
+  private _runHarvester<T>(fn: (ctx: HarvesterContext) => T): T {
+    return fn(this._harvesterCtx);
+  }
+
+  private get _placementCtx(): PlacementContext {
+    return {
+      structures: this.structures,
+      entities: this.entities,
+      entityById: this.entityById,
+      credits: this.credits,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      pendingPlacement: this.pendingPlacement,
+      wallPlacementPrepaid: this.wallPlacementPrepaid,
+      cachedAvailableItems: this.cachedAvailableItems,
+      evaMessages: this.evaMessages,
+      effects: this.effects,
+      map: this.map,
+      isAllied: (a, b) => this.isAllied(a, b),
+      playSound: (n) => this.audio.play(n as SoundName),
+      getAvailableItems: () => this.getAvailableItems(),
+      findPassableSpawn: (cx, cy, scx, scy, fw, fh) => this.findPassableSpawn(cx, cy, scx, scy, fw, fh),
+    };
+  }
+
+  /** Run placement function with state sync */
+  private _runPlacement<T>(fn: (ctx: PlacementContext) => T): T {
+    const ctx = this._placementCtx;
+    const result = fn(ctx);
+    this.credits = ctx.credits;
+    this.pendingPlacement = ctx.pendingPlacement;
+    this.wallPlacementPrepaid = ctx.wallPlacementPrepaid;
+    this.cachedAvailableItems = ctx.cachedAvailableItems;
+    return result;
+  }
+
+  private get _aircraftCtx(): AircraftContext {
+    return {
+      structures: this.structures,
+      map: this.map,
+      unitsLeftMap: this.unitsLeftMap,
+      civiliansEvacuated: this.civiliansEvacuated,
+      isAllied: (a, b) => this.isAllied(a, b),
+      movementSpeed: (e) => this.movementSpeed(e),
+      idleMission: (e) => this.idleMission(e),
+      fireWeaponAt: (a, t, w) => this.fireWeaponAt(a, t, w),
+      fireWeaponAtStructure: (a, s, w) => this.fireWeaponAtStructure(a, s, w),
+    };
+  }
+
+  /** Run aircraft subsystem function with mutable state sync */
+  private _runAircraft<T>(fn: (ctx: AircraftContext) => T): T {
+    const ctx = this._aircraftCtx;
+    const result = fn(ctx);
+    this.unitsLeftMap = ctx.unitsLeftMap;
+    this.civiliansEvacuated = ctx.civiliansEvacuated;
+    return result;
+  }
+
+  private get _crateCtx(): CrateContext {
+    return {
+      crates: this.crates,
+      entities: this.entities,
+      entityById: this.entityById,
+      structures: this.structures,
+      effects: this.effects,
+      evaMessages: this.evaMessages,
+      activeVortices: this.activeVortices,
+      visionaryHouses: this.visionaryHouses,
+      credits: this.credits,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      screenShake: this.renderer.screenShake,
+      map: this.map,
+      crateOverrides: this.crateOverrides,
+      addCredits: (amount, showMessage) => this.addCredits(amount, showMessage),
+      playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
+      playSound: (n) => this.audio.play(n as SoundName),
+      damageEntity: (t, a, w) => this.damageEntity(t, a, w as WarheadType),
+      damageStructure: (s, d) => this.damageStructure(s, d),
+      detonateNuke: (target) => this.detonateNuke(target),
+      isAllied: (a, b) => this.isAllied(a, b),
+    };
+  }
+
+  /** Run crate function with state sync */
+  private _runCrate<T>(fn: (ctx: CrateContext) => T): T {
+    const ctx = this._crateCtx;
+    const result = fn(ctx);
+    this.credits = ctx.credits;
+    this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
+    return result;
+  }
+
+  private get _aiCtx(): AIContext {
+    return {
+      entities: this.entities,
+      entityById: this.entityById,
+      structures: this.structures,
+      map: this.map,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      scenarioId: this.scenarioId,
+      difficulty: this.difficulty,
+      aiStates: this.aiStates,
+      houseCredits: this.houseCredits,
+      houseIQs: this.houseIQs,
+      houseTechLevels: this.houseTechLevels,
+      houseMaxUnits: this.houseMaxUnits,
+      houseMaxInfantry: this.houseMaxInfantry,
+      houseMaxBuildings: this.houseMaxBuildings,
+      baseBlueprint: this.baseBlueprint,
+      baseRebuildQueue: this.baseRebuildQueue,
+      baseRebuildCooldown: this.baseRebuildCooldown,
+      scenarioProductionItems: this.scenarioProductionItems,
+      scenarioUnitStats: this.scenarioUnitStats,
+      scenarioWeaponStats: this.scenarioWeaponStats,
+      nextWaveId: this.nextWaveId,
+      autocreateEnabled: this.autocreateEnabled,
+      teamTypes: this.teamTypes,
+      destroyedTeams: this.destroyedTeams,
+      waypoints: this.waypoints,
+      houseEdges: this.houseEdges,
+      effects: this.effects as AIContext['effects'],
+      isAllied: (a, b) => this.isAllied(a, b),
+      isPlayerControlled: (e) => this.isPlayerControlled(e),
+      clearStructureFootprint: (s) => this.clearStructureFootprint(s),
+      findPassableSpawn: (cx, cy, scx, scy, fw, fh) => this.findPassableSpawn(cx, cy, scx, scy, fw, fh),
+    };
+  }
+
+  /** Run an AI subsystem function with state sync */
+  private _runAI<T>(fn: (ctx: AIContext) => T): T {
+    const ctx = this._aiCtx;
+    const result = fn(ctx);
+    // Sync mutable scalars back
+    this.baseRebuildCooldown = ctx.baseRebuildCooldown;
+    this.nextWaveId = ctx.nextWaveId;
+    return result;
+  }
+
+  private get _missionAICtx(): MissionAIContext {
+    return {
+      entities: this.entities,
+      structures: this.structures,
+      effects: this.effects,
+      map: this.map,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      killCount: this.killCount,
+      evaMessages: this.evaMessages,
+      warheadOverrides: this.warheadOverrides,
+      scenarioWarheadMeta: this.scenarioWarheadMeta,
+      scenarioWarheadProps: this.scenarioWarheadProps,
+      isAllied: (a, b) => this.isAllied(a, b),
+      entitiesAllied: (a, b) => this.entitiesAllied(a, b),
+      isPlayerControlled: (e) => this.isPlayerControlled(e),
+      movementSpeed: (e) => this.movementSpeed(e),
+      playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
+      playEva: (n) => this.playEva(n as SoundName),
+      playSound: (n) => this.audio.play(n as SoundName),
+      weaponSound: (n) => this.audio.weaponSound(n),
+      damageEntity: (t, a, w, att) => this.damageEntity(t, a, w, att),
+      damageStructure: (s, d) => this.damageStructure(s, d),
+      triggerRetaliation: (v, a) => this.triggerRetaliation(v, a),
+      handleUnitDeath: (v, o) => this.handleUnitDeath(v, o),
+      launchProjectile: (a, t, w, d, ix, iy, dh) => this.launchProjectile(a, t, w, d, ix, iy, dh),
+      applySplashDamage: (c, w, pid, ah, att) => this.applySplashDamage(c, w, pid, ah, att),
+      getFirepowerBias: (h) => this.getFirepowerBias(h),
+      getWarheadMult: (w, a) => this.getWarheadMult(w, a),
+      getWarheadMeta: (w) => this.getWarheadMeta(w),
+      getWarheadProps: (w) => this.getWarheadProps(w as WarheadType),
+      warheadMuzzleColor: (w) => this.warheadMuzzleColor(w as WarheadType),
+      weaponProjectileStyle: (n) => this.weaponProjectileStyle(n),
+      idleMission: (e) => this.idleMission(e),
+      retreatFromTarget: (e, p) => this.retreatFromTarget(e, p),
+      threatScore: (s, t, d) => this.threatScore(s, t, d),
+      updateDemoTruck: (e) => this.updateDemoTruck(e),
+      updateMedic: (e) => this.updateMedic(e),
+      updateMechanicUnit: (e) => this.updateMechanicUnit(e),
+      updateTanyaC4: (e) => this.updateTanyaC4(e),
+      updateThief: (e) => this.updateThief(e),
+      spyDisguise: (s, t) => this.spyDisguise(s, t),
+      spyInfiltrate: (s, st) => this.spyInfiltrate(s, st),
+      minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
+    };
+  }
+
+  /** Run a mission AI subsystem function with state sync */
+  private _runMissionAI<T>(fn: (ctx: MissionAIContext) => T): T {
+    const ctx = this._missionAICtx;
+    const result = fn(ctx);
+    // Sync mutable scalars back
+    this.killCount = ctx.killCount;
     return result;
   }
 
@@ -1456,7 +1652,7 @@ export class Game {
     }
 
     // Defensive structure auto-fire
-    this.updateStructureCombat();
+    this._runCombat(ctx => _updateStructureCombat(ctx));
 
     // Tick C4 timers on structures (Tanya plants)
     this.tickC4Timers();
@@ -2881,7 +3077,7 @@ export class Game {
     }
 
     // Aircraft state machine — intercept before normal mission processing
-    if (entity.isAirUnit && this.updateAircraft(entity)) {
+    if (entity.isAirUnit && this._runAircraft(ctx => _updateAircraft(ctx, entity))) {
       return; // aircraft state machine handled this tick
     }
 
@@ -3017,7 +3213,7 @@ export class Game {
     // Gate allows GUARD, AREA_GUARD (idle/arrival), and MOVE (seeking/returning with timeout tracking)
     if (entity.alive && entity.type === UnitType.V_HARV &&
         !entity.target && entity.mission !== Mission.ATTACK && entity.mission !== Mission.DIE) {
-      this.updateHarvester(entity);
+      this._runHarvester(ctx => _updateHarvester(ctx, entity));
     }
 
     // M2: Turret returns to body facing when idle (C++ unit.cpp:554-559)
@@ -3453,226 +3649,7 @@ export class Game {
     this._runCombat(ctx => _checkVehicleCrush(ctx, vehicle));
   }
 
-  /** Check if a mission represents an idle/guard state (GUARD or AREA_GUARD) */
-  private isIdleMission(mission: Mission): boolean {
-    return mission === Mission.GUARD || mission === Mission.AREA_GUARD;
-  }
 
-  /** Harvester AI — seek ore, harvest, return to refinery, unload */
-  private updateHarvester(entity: Entity): void {
-    switch (entity.harvesterState) {
-      case 'idle': {
-        // Only start auto-harvest from idle mission (GUARD/AREA_GUARD), not during manual MOVE
-        if (!this.isIdleMission(entity.mission)) break;
-        // Find nearest ore cell — AI harvesters spread to avoid clustering
-        const ec = entity.cell;
-        const oreCell = this.findHarvesterOre(entity, ec.cx, ec.cy, 30);
-        if (oreCell) {
-          entity.harvesterState = 'seeking';
-          entity.mission = Mission.MOVE;
-          entity.moveTarget = { x: oreCell.cx * CELL_SIZE + CELL_SIZE / 2, y: oreCell.cy * CELL_SIZE + CELL_SIZE / 2 };
-          entity.path = findPath(this.map, ec, oreCell, true);
-          entity.pathIndex = 0;
-        }
-        break;
-      }
-      case 'seeking': {
-        // Check if we've arrived at ore
-        const ec = entity.cell;
-        const ovl = this.map.overlay[ec.cy * MAP_CELLS + ec.cx];
-        if (ovl >= 0x03 && ovl <= 0x12) {
-          entity.harvesterState = 'harvesting';
-          entity.harvestTick = 0;
-          entity.mission = Mission.GUARD;
-          entity.animState = AnimState.IDLE;
-        } else if (this.isIdleMission(entity.mission)) {
-          // Arrived (move completed → GUARD/AREA_GUARD) but no ore here — re-seek
-          entity.harvesterState = 'idle';
-        } else if (entity.mission === Mission.MOVE && entity.path.length === 0 && entity.pathIndex >= 0) {
-          // Path exhausted or failed but still in MOVE — stuck seeking.
-          // Use harvestTick as a timeout counter (30 ticks = 2s grace).
-          entity.harvestTick++;
-          if (entity.harvestTick > 30) {
-            entity.harvesterState = entity.oreLoad > 0 ? 'returning' : 'idle';
-            entity.mission = Mission.GUARD;
-            entity.harvestTick = 0;
-          }
-        }
-        break;
-      }
-      case 'harvesting': {
-        entity.harvestTick++;
-        // Harvest every 10 ticks (~0.67s)
-        if (entity.harvestTick % 10 === 0) {
-          const ec = entity.cell;
-          const bailCredits = this.map.depleteOre(ec.cx, ec.cy);
-          if (bailCredits > 0) {
-            // EC3: bail-based capacity — track bail count, not credit amount
-            entity.oreLoad += 1;
-            entity.oreCreditValue += bailCredits;
-            // EC4: gem bonus bails — C++ unit.cpp:2306-2308, 2 extra bails per gem harvest
-            if (bailCredits >= 110) {
-              entity.oreLoad += 2;
-              entity.oreCreditValue += 220; // 2 bonus bails × 110 credits
-            }
-          }
-          // Check if full or current cell depleted
-          if (entity.oreLoad >= Entity.BAIL_COUNT) {
-            entity.harvesterState = 'returning';
-          } else if (bailCredits === 0) {
-            // No more ore at this cell — look for adjacent ore
-            const newOre = this.map.findNearestOre(ec.cx, ec.cy, 20);
-            if (newOre && entity.oreLoad < Entity.BAIL_COUNT) {
-              entity.harvesterState = 'seeking';
-              entity.mission = Mission.MOVE;
-              entity.moveTarget = { x: newOre.cx * CELL_SIZE + CELL_SIZE / 2, y: newOre.cy * CELL_SIZE + CELL_SIZE / 2 };
-              entity.path = findPath(this.map, ec, newOre, true);
-              entity.pathIndex = 0;
-            } else {
-              // No more ore nearby — return with whatever we have
-              entity.harvesterState = entity.oreLoad > 0 ? 'returning' : 'idle';
-            }
-          }
-        }
-        break;
-      }
-      case 'returning': {
-        // Pathfinding timeout: if stuck in MOVE with empty path, fall back to idle after 45 ticks (3s)
-        if (entity.mission === Mission.MOVE && entity.path.length === 0 && entity.pathIndex >= 0) {
-          entity.harvestTick++;
-          if (entity.harvestTick > 45) {
-            entity.harvesterState = 'idle';
-            entity.mission = Mission.GUARD;
-            entity.harvestTick = 0;
-          }
-          break;
-        }
-        // When move completes (mission returns to GUARD/AREA_GUARD), transition to unloading or re-seek
-        if (!this.isIdleMission(entity.mission)) break; // still moving, wait
-        // Check if we're near a refinery
-        const ec = entity.cell;
-        let bestProc: MapStructure | null = null;
-        let bestDist = Infinity;
-        for (const s of this.structures) {
-          if (!s.alive || s.type !== 'PROC') continue;
-          if (!this.isAllied(s.house, entity.house)) continue;
-          const dx = s.cx - ec.cx;
-          const dy = s.cy - ec.cy;
-          const dist = dx * dx + dy * dy;
-          if (dist < bestDist) { bestDist = dist; bestProc = s; }
-        }
-        if (!bestProc) {
-          // No refinery — idle with ore
-          entity.harvesterState = 'idle';
-          break;
-        }
-        // Check if we're adjacent to refinery footprint (distance to nearest edge ≤ 1)
-        const [procW, procH] = STRUCTURE_SIZE[bestProc.type] ?? [3, 2];
-        const nearX = Math.max(bestProc.cx, Math.min(ec.cx, bestProc.cx + procW - 1));
-        const nearY = Math.max(bestProc.cy, Math.min(ec.cy, bestProc.cy + procH - 1));
-        const edgeDist = Math.abs(nearX - ec.cx) + Math.abs(nearY - ec.cy);
-        if (edgeDist <= 1) {
-          // Arrived at refinery — start unloading
-          entity.harvesterState = 'unloading';
-          entity.harvestTick = 0;
-        } else {
-          // Not there yet — move to dock cell below refinery entrance (C++ behavior)
-          const target = { cx: bestProc.cx + 1, cy: bestProc.cy + procH };
-          entity.mission = Mission.MOVE;
-          entity.moveTarget = { x: target.cx * CELL_SIZE + CELL_SIZE / 2, y: target.cy * CELL_SIZE + CELL_SIZE / 2 };
-          entity.path = findPath(this.map, ec, target, true);
-          entity.pathIndex = 0;
-          entity.harvestTick = 0;
-        }
-        break;
-      }
-      case 'unloading': {
-        // EC5: lump-sum unload after 14-tick dump animation (C++ parity)
-        entity.harvestTick++;
-        // Credit sound every 5 ticks during dump animation
-        if (entity.harvestTick % 5 === 0 && this.isPlayerControlled(entity)) {
-          this.audio.play('heal');
-        }
-        if (entity.harvestTick >= 14) {
-          // Dump all credits at once after animation completes
-          const totalCredits = entity.oreCreditValue;
-          if (totalCredits > 0) {
-            if (this.isPlayerControlled(entity)) {
-              this.addCredits(totalCredits);
-            } else {
-              // AI harvester — deposit into houseCredits
-              const cur = this.houseCredits.get(entity.house) ?? 0;
-              this.houseCredits.set(entity.house, cur + totalCredits);
-            }
-          }
-          entity.oreLoad = 0;
-          entity.oreCreditValue = 0;
-          entity.harvesterState = 'idle';
-          entity.harvestTick = 0;
-        }
-        break;
-      }
-    }
-  }
-
-  /** Find nearest ore for a harvester, with spread logic for AI harvesters.
-   *  C++ parity: AI harvesters avoid ore cells that another friendly harvester is already targeting,
-   *  preventing all AI harvesters from clustering on the same ore patch. */
-  private findHarvesterOre(entity: Entity, cx: number, cy: number, maxRange: number): { cx: number; cy: number } | null {
-    // Player harvesters use simple nearest-ore (no spreading needed — player manages them)
-    if (this.isPlayerControlled(entity)) {
-      return this.map.findNearestOre(cx, cy, maxRange);
-    }
-
-    // Build set of cells targeted by other friendly harvesters (within 2-cell radius counts as same patch)
-    const friendlyTargets: { cx: number; cy: number }[] = [];
-    for (const other of this.entities) {
-      if (other === entity || !other.alive || other.house !== entity.house) continue;
-      if (other.type !== UnitType.V_HARV) continue;
-      if (other.moveTarget) {
-        friendlyTargets.push({
-          cx: Math.floor(other.moveTarget.x / CELL_SIZE),
-          cy: Math.floor(other.moveTarget.y / CELL_SIZE),
-        });
-      } else if (other.harvesterState === 'harvesting') {
-        friendlyTargets.push(other.cell);
-      }
-    }
-
-    // Search for nearest ore that isn't within 3 cells of another harvester's target
-    let bestDist = Infinity;
-    let best: { cx: number; cy: number } | null = null;
-    const r = maxRange;
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const rx = cx + dx;
-        const ry = cy + dy;
-        if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
-        const ovl = this.map.overlay[ry * MAP_CELLS + rx];
-        if (ovl < 0x03 || ovl > 0x12) continue; // not ore
-        const dist = dx * dx + dy * dy;
-        if (dist >= bestDist) continue;
-
-        // Check if another friendly harvester is already targeting nearby
-        let isTargeted = false;
-        for (const ft of friendlyTargets) {
-          const tdx = Math.abs(ft.cx - rx);
-          const tdy = Math.abs(ft.cy - ry);
-          if (tdx <= 3 && tdy <= 3) { isTargeted = true; break; }
-        }
-        if (isTargeted) continue;
-
-        bestDist = dist;
-        best = { cx: rx, cy: ry };
-      }
-    }
-
-    // Fallback: if all ore is targeted, just use nearest ore (better than doing nothing)
-    if (!best) {
-      return this.map.findNearestOre(cx, cy, maxRange);
-    }
-    return best;
-  }
 
   /** Ant AI — hunt nearest visible player unit (fog-aware, LOS-aware) */
   private updateAntAI(entity: Entity): void {
@@ -4072,666 +4049,17 @@ export class Game {
 
   /** Attack target */
   private updateAttack(entity: Entity): void {
-    // Demo Truck kamikaze — intercepts normal attack to drive-and-explode
-    if (entity.type === UnitType.V_DTRK) {
-      this.updateDemoTruck(entity);
-      return;
-    }
-
-    // Handle structure targets
-    if (entity.targetStructure) {
-      if (!entity.targetStructure.alive) {
-        entity.targetStructure = null;
-        entity.mission = this.idleMission(entity);
-        entity.animState = AnimState.IDLE;
-        return;
-      }
-      this.updateAttackStructure(entity, entity.targetStructure as MapStructure);
-      return;
-    }
-
-    // Handle force-fire on ground (no entity target)
-    if (entity.forceFirePos && !entity.target) {
-      this.updateForceFireGround(entity);
-      return;
-    }
-
-    if (!entity.target?.alive) {
-      entity.target = null;
-      entity.forceFirePos = null;
-      // Resume saved move destination (AI units interrupted MOVE to attack)
-      if (entity.savedMoveTarget) {
-        const saved = entity.savedMoveTarget;
-        entity.savedMoveTarget = null;
-        entity.mission = Mission.MOVE;
-        entity.moveTarget = { x: saved.x, y: saved.y };
-        entity.path = findPath(this.map, entity.cell, worldToCell(saved.x, saved.y), true, entity.isNavalUnit, entity.stats.speedClass);
-        entity.pathIndex = 0;
-        return;
-      }
-      // Return to guard origin if player unit was auto-engaging (not given explicit attack order)
-      if (entity.isPlayerUnit && entity.guardOrigin) {
-        const d = worldDist(entity.pos, entity.guardOrigin);
-        if (d > 1.5) { // worldDist returns cells
-          entity.mission = Mission.MOVE;
-          entity.moveTarget = { x: entity.guardOrigin.x, y: entity.guardOrigin.y };
-          entity.path = findPath(this.map, entity.cell, worldToCell(entity.guardOrigin.x, entity.guardOrigin.y), true, entity.isNavalUnit, entity.stats.speedClass);
-          entity.pathIndex = 0;
-          return;
-        }
-      }
-      entity.mission = this.idleMission(entity);
-      entity.animState = AnimState.IDLE;
-      return;
-    }
-
-    // Naval target filtering
-    if (entity.target) {
-      // Submerged subs (cloaked) can only be targeted by weapons with isAntiSub
-      if (entity.target.cloakState === CloakState.CLOAKED || entity.target.cloakState === CloakState.CLOAKING) {
-        const canHitSub = (entity.weapon?.isAntiSub || entity.weapon2?.isAntiSub);
-        if (!canHitSub) {
-          entity.target = null;
-          entity.mission = this.idleMission(entity);
-          entity.animState = AnimState.IDLE;
-          return;
-        }
-      }
-      // Cruisers cannot target infantry (C++ vessel.cpp:1248 — exclude THREAT_INFANTRY)
-      if (entity.type === UnitType.V_CA && entity.target.stats.isInfantry) {
-        entity.target = null;
-        entity.mission = this.idleMission(entity);
-        entity.animState = AnimState.IDLE;
-        return;
-      }
-      // Torpedoes (isSubSurface) can only hit naval units
-      if (entity.weapon?.isSubSurface && !entity.target.isNavalUnit) {
-        // Try secondary weapon if available
-        if (entity.weapon2 && !entity.weapon2.isSubSurface) {
-          // Can use secondary weapon — let selectWeapon handle it
-        } else {
-          entity.target = null;
-          entity.mission = this.idleMission(entity);
-          entity.animState = AnimState.IDLE;
-          return;
-        }
-      }
-    }
-
-    // Force-uncloak submarine when attacking
-    if (entity.stats.isCloakable && (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) && entity.target) {
-      entity.cloakState = CloakState.UNCLOAKING;
-      entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
-    }
-
-    // Minimum range check: artillery can't fire at point-blank
-    if (entity.weapon?.minRange && entity.target) {
-      const dist = worldDist(entity.pos, entity.target.pos);
-      if (dist < entity.weapon.minRange) {
-        this.retreatFromTarget(entity, entity.target.pos);
-        return;
-      }
-    }
-
-    if (entity.inRange(entity.target)) {
-      // Check line of sight — can't fire through walls/rocks
-      const ec = entity.cell;
-      const tc = entity.target.cell;
-      if (!this.map.hasLineOfSight(ec.cx, ec.cy, tc.cx, tc.cy)) {
-        // LOS blocked — move toward target to get clear shot
-        entity.animState = AnimState.WALK;
-        entity.moveToward(entity.target.pos, this.movementSpeed(entity));
-        if (entity.attackCooldown > 0) entity.attackCooldown--;
-        if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
-        return;
-      }
-
-      // Turreted vehicles: turret tracks target, body may stay still
-      if (entity.hasTurret) {
-        entity.desiredTurretFacing = directionTo(entity.pos, entity.target.pos);
-        entity.tickTurretRotation();
-      } else {
-        entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
-        const facingReady = entity.tickRotation();
-        // NoMovingFire units must face target before attacking.
-        // Exception: melee weapons (range <= 2) bypass facing check to prevent
-        // rotation lock where ants never catch up to moving targets.
-        const isMelee = entity.weapon && entity.weapon.range <= 2;
-        if (entity.stats.noMovingFire && !facingReady && !isMelee) {
-          entity.animState = AnimState.IDLE;
-          return;
-        }
-      }
-      entity.animState = AnimState.ATTACK;
-
-      // S5: NoMovingFire setup time (C++ unit.cpp:1760-1764 — Arm = Rearm_Delay(true)/4 when stopping)
-      // When a NoMovingFire unit transitions from moving to stationary, add ROF/4 warmup delay
-      if (entity.stats.noMovingFire && entity.wasMoving && entity.weapon) {
-        const setupTime = Math.floor(entity.weapon.rof / 4);
-        if (entity.attackCooldown < setupTime) {
-          entity.attackCooldown = setupTime;
-        }
-        entity.wasMoving = false; // consume the transition — only apply once
-      }
-
-      // C1: Burst fire continuation (C++ weapon.cpp:78 Weapon.Burst)
-      // Between burst shots, count down burstDelay instead of using full ROF cooldown
-      if (entity.burstCount > 0 && entity.burstDelay > 0) {
-        entity.burstDelay--;
-        if (entity.burstDelay > 0) return; // waiting between burst shots
-        // burstDelay reached 0 — fire next burst shot (fall through to fire logic)
-      }
-
-      // Dual-weapon selection (C++ TechnoClass::Fire_At / Can_Fire):
-      // Select the best weapon based on target armor effectiveness and cooldown state.
-      // Only one weapon fires per tick — they alternate based on cooldowns and effectiveness.
-      const selectedWeapon = entity.selectWeapon(
-        entity.target, (wh, ar) => this.getWarheadMult(wh, ar),
-      );
-
-      // If a burst is in progress, continue with the primary weapon (burst belongs to primary)
-      const activeWeapon = entity.burstCount > 0 ? entity.weapon : selectedWeapon;
-      const isSecondary = activeWeapon === entity.weapon2;
-
-      if (activeWeapon && ((isSecondary ? entity.attackCooldown2 : entity.attackCooldown) <= 0)) {
-        // C1: Set burst count for multi-shot weapons (e.g. MammothTusk burst: 2)
-        const burst = activeWeapon.burst ?? 1;
-        if (entity.burstCount > 0) {
-          // Continuing burst — decrement
-          entity.burstCount--;
-          entity.burstDelay = 3; // 3 ticks between burst shots (C++ standard)
-        } else {
-          // CF12: IsSecondShot cadence for dual-weapon units (C++ techno.cpp:2857-2870)
-          // First shot: 3-tick rearm (quick follow-up). Second shot: full ROF (reload delay).
-          const isDualWeapon = entity.weapon && entity.weapon2;
-          let rearmTime = activeWeapon.rof;
-          if (isDualWeapon) {
-            if (!entity.isSecondShot) {
-              rearmTime = 3; // first shot: quick 3-tick rearm
-            }
-            entity.isSecondShot = !entity.isSecondShot;
-          }
-          if (isSecondary) {
-            entity.attackCooldown2 = rearmTime;
-          } else {
-            entity.attackCooldown = rearmTime;
-          }
-          entity.burstCount = burst - 1; // remaining shots after this one
-          if (entity.burstCount > 0) entity.burstDelay = 3;
-        }
-        // M6: C++ techno.cpp:3114-3117 — recoil only for turreted units
-        if (entity.hasTurret) entity.isInRecoilState = true;
-
-        // Gap #4: Reset spy disguise when attacking
-        if (entity.disguisedAs) entity.disguisedAs = null;
-
-        // Apply weapon inaccuracy — scatter the impact point
-        let impactX = entity.target.pos.x;
-        let impactY = entity.target.pos.y;
-        let directHit = true;
-        // C5: Moving-platform inaccuracy (C++ techno.cpp:3106-3108)
-        const isMoving = entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
-        const baseInaccuracy = activeWeapon.inaccuracy ?? 0;
-        let effectiveInaccuracy = isMoving ? Math.max(baseInaccuracy, 1.0) : baseInaccuracy;
-        // SC1: AP warheads force scatter vs infantry even with 0 weapon inaccuracy (C++ bullet.cpp:709-710)
-        if (activeWeapon.warhead === 'AP' && entity.target.stats.isInfantry && effectiveInaccuracy <= 0) {
-          effectiveInaccuracy = 0.5;
-        }
-        // WH5: IsInaccurate flag — forced scatter on every shot (C++ bullet.h)
-        if (activeWeapon.isInaccurate && effectiveInaccuracy <= 0) {
-          effectiveInaccuracy = 1.0;
-        }
-        if (effectiveInaccuracy > 0) {
-          // SC3: Exact C++ scatter formula (bullet.cpp:710-730)
-          // distance in leptons (1 cell = 256 leptons), convert from cells
-          const targetDist = worldDist(entity.pos, entity.target.pos);
-          const distLeptons = targetDist * LEPTON_SIZE;
-          // C++ formula: scatterMax = max(0, (distance / 16) - 64)
-          let scatterMax = Math.max(0, (distLeptons / 16) - 64);
-          // Cap at HomingScatter(512) for homing, BallisticScatter(256) for ballistic
-          const isHoming = (activeWeapon.projectileROT ?? 0) > 0;
-          const scatterCap = isHoming ? 512 : 256;
-          scatterMax = Math.min(scatterMax, scatterCap);
-          // Convert scatter from leptons back to pixels: leptons * CELL_SIZE / LEPTON_SIZE
-          const scatterPx = scatterMax * CELL_SIZE / LEPTON_SIZE;
-          const dist = Math.random() * scatterPx;
-          if (activeWeapon.isArcing) {
-            // SC5+SC2: Arcing projectiles — circular scatter with ±5° angular jitter (C++ bullet.cpp:722)
-            const baseAngle = Math.random() * Math.PI * 2;
-            const jitterDeg = (Math.random() * 10 - 5); // ±5 degrees (C++ Random_Pick(0,10)-5)
-            const angle = baseAngle + (jitterDeg * Math.PI / 180);
-            impactX += Math.cos(angle) * dist;
-            impactY += Math.sin(angle) * dist;
-          } else {
-            // SC2: Non-arcing projectiles — scatter along firing direction (overshoot/undershoot)
-            const firingAngle = Math.atan2(
-              entity.target.pos.y - entity.pos.y,
-              entity.target.pos.x - entity.pos.x,
-            );
-            impactX += Math.cos(firingAngle) * dist;
-            impactY += Math.sin(firingAngle) * dist;
-          }
-          // Check if scattered shot still hits the target (within half-cell)
-          const dx = impactX - entity.target.pos.x;
-          const dy = impactY - entity.target.pos.y;
-          directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
-        }
-
-        // CF7: Heal guard — negative damage weapons must pass proximity and armor checks (C++ combat.cpp:86-96)
-        if (activeWeapon.damage < 0) {
-          const healDist = worldDist(entity.pos, entity.target.pos);
-          if (activeWeapon.warhead === 'Mechanical') {
-            // GoodWrench/Mechanic: only heals armored targets (armor !== 'none') within 0.75 cells
-            if (healDist >= 0.75 || entity.target.stats.armor === 'none') return;
-          } else {
-            // Heal warhead (Organic): only heals unarmored targets (armor === 'none') within 0.75 cells
-            if (healDist >= 0.75 || entity.target.stats.armor !== 'none') return;
-          }
-          // Apply healing directly — modifyDamage clamps negative values to 0
-          const healAmount = Math.abs(activeWeapon.damage);
-          entity.target.hp = Math.min(entity.target.maxHp, entity.target.hp + healAmount);
-          return;
-        }
-
-        // CF1: Apply C++ Modify_Damage formula — direct hit at distance 0 gets full damage
-        const houseBias = this.getFirepowerBias(entity.house);
-        const whMult = this.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
-        let damage = modifyDamage(activeWeapon.damage, activeWeapon.warhead, entity.target.stats.armor, 0, houseBias, whMult, this.getWarheadMeta(activeWeapon.warhead).spreadFactor);
-        if (damage <= 0) {
-          // This weapon can't hurt the target. If dual-weapon, don't give up —
-          // the other weapon might work. Only give up if neither weapon can damage.
-          if (entity.weapon2 && !isSecondary) {
-            // Primary can't hurt, but secondary might — don't clear target
-          } else if (entity.weapon && isSecondary) {
-            // Secondary can't hurt, but primary might — don't clear target
-          } else {
-            entity.target = null; // can't hurt this target with any weapon, give up
-          }
-          return;
-        }
-
-        if (activeWeapon.projectileSpeed) {
-          // Deferred damage: projectile must travel to target
-          this.launchProjectile(entity, entity.target, activeWeapon, damage, impactX, impactY, directHit);
-        } else {
-          // Instant damage (melee, hitscan weapons)
-          const killed = directHit ? this.damageEntity(entity.target, damage, activeWeapon.warhead, entity) : false;
-
-          if (directHit && !killed) {
-            this.triggerRetaliation(entity.target, entity);
-            this.scatterInfantry(entity.target, entity.pos);
-          }
-
-          if (activeWeapon.splash && activeWeapon.splash > 0) {
-            const splashCenter = { x: impactX, y: impactY };
-            this.applySplashDamage(
-              splashCenter, activeWeapon, directHit ? entity.target.id : -1,
-              entity.house, entity,
-            );
-          }
-
-          if (killed) {
-            entity.creditKill();
-            this.handleUnitDeath(entity.target, {
-              screenShake: 8, explosionSize: 16, debris: true,
-              decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
-              explodeLgSound: true,
-              attackerIsPlayer: this.isPlayerControlled(entity),
-              trackLoss: true,
-            });
-          }
-        }
-
-        // Armor-based hit indicator at impact point (fires immediately regardless of projectile travel)
-        {
-          const armor = entity.target.stats.armor;
-          if (armor === 'heavy') {
-            this.effects.push({ type: 'muzzle', x: impactX, y: impactY,
-              frame: 0, maxFrames: 3, size: 3, muzzleColor: '255,255,200' });
-          } else if (armor === 'light') {
-            this.effects.push({ type: 'muzzle', x: impactX, y: impactY,
-              frame: 0, maxFrames: 4, size: 2, muzzleColor: '180,160,120' });
-          }
-        }
-
-        // Play weapon sound (spatially positioned)
-        this.playSoundAt(this.audio.weaponSound(activeWeapon.name), entity.pos.x, entity.pos.y);
-
-        // Spawn attack effects + projectiles (use activeWeapon for correct muzzle color/projectile style)
-        const tx = entity.target.pos.x;
-        const ty = entity.target.pos.y;
-        const sx = entity.pos.x;
-        const sy = entity.pos.y;
-
-        if (entity.isAnt && (activeWeapon.name === 'TeslaZap' || activeWeapon.name === 'TeslaCannon')) {
-          this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
-            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty, blendMode: 'screen' });
-        } else if (entity.isAnt && activeWeapon.name === 'Napalm') {
-          // Napalm ant: fire burst at target
-          this.effects.push({ type: 'explosion', x: tx, y: ty, frame: 0, maxFrames: 10, size: 10,
-            sprite: 'piffpiff', spriteStart: 0, muzzleColor: '255,140,30' });
-        } else if (entity.isAnt) {
-          this.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 8, size: 6,
-            sprite: 'piffpiff', spriteStart: 0 });
-        } else if (activeWeapon.name === 'TeslaCannon' || activeWeapon.name === 'TeslaZap') {
-          // Tesla weapons: lightning bolt arc from source to target
-          this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
-            sprite: 'piff', spriteStart: 0, muzzleColor: '120,180,255' });
-          this.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
-            sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty, blendMode: 'screen' });
-        } else {
-          // Muzzle flash at attacker — vehicles use GUNFIRE.SHP with screen blend (C++ isTranslucent)
-          const muzzleSprite = (!entity.stats.isInfantry && activeWeapon.warhead !== 'Fire') ? 'gunfire' : 'piff';
-          const muzzleBlend = (muzzleSprite === 'gunfire') ? 'screen' as const : undefined;
-          this.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
-            sprite: muzzleSprite, spriteStart: 0, muzzleColor: this.warheadMuzzleColor(activeWeapon.warhead),
-            blendMode: muzzleBlend });
-
-          // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
-          const projStyle = this.weaponProjectileStyle(activeWeapon.name);
-          if (projStyle !== 'bullet' || worldDist(entity.pos, entity.target.pos) > 2) {
-            // Per-weapon projectile speed: compute travel frames from distance and projSpeed
-            const projDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
-            const travelFrames = calcProjectileTravelFrames(projDistPx, activeWeapon.projSpeed);
-            this.effects.push({
-              type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
-              startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
-            });
-          }
-
-          // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-          // Water terrain uses water splash sprites (C++ bullet.cpp:1032)
-          const impactCell = worldToCell(impactX, impactY);
-          const isWaterImpact = this.map.getTerrain(impactCell.cx, impactCell.cy) === Terrain.WATER
-            && !entity.target.isNavalUnit; // vessel targets still use normal explosions
-          let impactSprite: string;
-          if (isWaterImpact) {
-            const waterSprites = ['h2o_exp1', 'h2o_exp2', 'h2o_exp3'];
-            impactSprite = waterSprites[Math.floor(Math.random() * 3)];
-          } else {
-            impactSprite = this.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 'veh-hit1';
-          }
-          this.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0,
-            maxFrames: EXPLOSION_FRAMES[impactSprite] ?? 17, size: 8,
-            sprite: impactSprite, spriteStart: 0 });
-        }
-
-      }
-    } else {
-      // M5: Defensive stance: chase if target within weapon range of guard origin (C++ Threat_Range)
-      // Only give up if target is too far from the home position, not current position
-      if (entity.stance === Stance.DEFENSIVE) {
-        const weaponRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || 2;
-        const origin = entity.guardOrigin ?? entity.pos;
-        const distFromHome = worldDist(origin, entity.target.pos);
-        if (distFromHome > weaponRange + 1) {
-          // Target fled beyond guard perimeter — disengage
-          entity.target = null;
-          entity.forceFirePos = null;
-          entity.targetStructure = null;
-          entity.mission = this.idleMission(entity);
-          entity.animState = AnimState.IDLE;
-        } else {
-          // Target still within guard perimeter — pursue briefly
-          entity.animState = AnimState.WALK;
-          entity.moveToward(entity.target.pos, this.movementSpeed(entity));
-        }
-      } else {
-        entity.animState = AnimState.WALK;
-        entity.moveToward(entity.target.pos, this.movementSpeed(entity));
-      }
-    }
-
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    this._runMissionAI(ctx => _updateAttack(ctx, entity));
   }
 
-  /** Hunt mode — move toward target and attack (C++ foot.cpp:654-703)
-   *  Actively calls Target_Something_Nearby when target is null or dead. */
+  /** Hunt mode — delegates to missionAI.ts */
   private updateHunt(entity: Entity): void {
-    if (!entity.target?.alive) {
-      entity.target = null;
-      // C++ foot.cpp:654-703 — Hunt actively scans for new targets with extended range
-      const huntRange = entity.stats.sight * 2; // hunt has wider scan than guard
-      const ec = entity.cell;
-      let bestTarget: Entity | null = null;
-      let bestScore = -Infinity;
-      for (const other of this.entities) {
-        if (!other.alive || this.entitiesAllied(entity, other)) continue;
-        if (!this.canTargetNaval(entity, other)) continue;
-        const dist = worldDist(entity.pos, other.pos);
-        if (dist > huntRange) continue;
-        if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
-        const score = this.threatScore(entity, other, dist);
-        if (score > bestScore) { bestScore = score; bestTarget = other; }
-      }
-      if (bestTarget) {
-        // Found a new target — continue hunting
-        entity.target = bestTarget;
-      } else {
-        // M3: No mobile targets — scan structures (C++ Target_Something_Nearby includes buildings)
-        let bestStruct: MapStructure | null = null;
-        let bestStructDist = huntRange;
-        for (const s of this.structures) {
-          if (!s.alive) continue;
-          if (s.house === House.Neutral) continue;
-          if (this.isAllied(entity.house, s.house)) continue;
-          const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-          const dist = worldDist(entity.pos, sPos);
-          if (dist < bestStructDist) {
-            bestStructDist = dist;
-            bestStruct = s;
-          }
-        }
-        if (bestStruct) {
-          entity.mission = Mission.ATTACK;
-          entity.targetStructure = bestStruct;
-          return;
-        }
-        // No targets found — resume move or return to idle
-        if (entity.moveTarget) {
-          entity.mission = Mission.MOVE;
-          // Only recalc path if we don't have a valid one already
-          if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
-            entity.path = findPath(this.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true, entity.isNavalUnit, entity.stats.speedClass);
-            entity.pathIndex = 0;
-          }
-        } else {
-          entity.mission = this.idleMission(entity);
-        }
-        return;
-      }
-    }
-
-    if (entity.inRange(entity.target)) {
-      entity.mission = Mission.ATTACK;
-      entity.animState = AnimState.ATTACK;
-    } else {
-      entity.animState = AnimState.WALK;
-      // Use pathfinding to reach target (recalc only when path is exhausted or target moved significantly)
-      const targetCell = worldToCell(entity.target.pos.x, entity.target.pos.y);
-      const pathExhausted = entity.path.length === 0 || entity.pathIndex >= entity.path.length;
-      // Only recalc on timer if target has moved >3 cells from path endpoint
-      let targetMovedFar = false;
-      if (!pathExhausted && ((this.tick + entity.id) % 15 === 0) && entity.path.length > 0) {
-        const lastWp = entity.path[entity.path.length - 1];
-        const dtx = lastWp.cx - targetCell.cx;
-        const dty = lastWp.cy - targetCell.cy;
-        targetMovedFar = (dtx * dtx + dty * dty) > 9; // >3 cells
-      }
-      if (pathExhausted || targetMovedFar) {
-        entity.path = findPath(this.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
-        entity.pathIndex = 0;
-      }
-      if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-        const nextCell = entity.path[entity.pathIndex];
-        const wp: WorldPos = {
-          x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
-          y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
-        };
-        if (entity.moveToward(wp, this.movementSpeed(entity))) {
-          entity.pathIndex++;
-        }
-      } else {
-        // No path found — move directly
-        entity.moveToward(entity.target.pos, this.movementSpeed(entity));
-      }
-    }
+    this._runMissionAI(ctx => _updateHunt(ctx, entity));
   }
 
-  /** Guard mode — attack nearby enemies or auto-heal (rate-limited to every 15 ticks) */
+  /** Guard mode — delegates to missionAI.ts */
   private updateGuard(entity: Entity): void {
-    entity.animState = AnimState.IDLE;
-
-    // Save guard origin when first entering guard stance (for return-after-chase)
-    if (entity.isPlayerUnit && !entity.guardOrigin) {
-      entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
-    }
-
-    // Medic auto-heal: handled by updateMedic() — medics are non-combat, skip enemy targeting
-    if (entity.type === UnitType.I_MEDI) {
-      this.updateMedic(entity);
-      return;
-    }
-
-    // Mechanic auto-heal: mirrors medic but for vehicles — non-combat, skip enemy targeting
-    if (entity.type === UnitType.I_MECH) {
-      this.updateMechanicUnit(entity);
-      return;
-    }
-
-    // A3: Type-specific scan delays (C++ foot.cpp:589-612)
-    const guardScanDelay = entity.stats.scanDelay ?? 15;
-    if (this.tick - entity.lastGuardScan < guardScanDelay) return;
-    entity.lastGuardScan = this.tick;
-
-    // Civilians auto-flee nearby ants (SCA02EA evacuation behavior)
-    if (entity.isCivilian && entity.isPlayerUnit) {
-      let nearestAntDist = Infinity;
-      let nearestAntPos: WorldPos | null = null;
-      for (const other of this.entities) {
-        if (!other.alive || !other.isAnt) continue;
-        const dist = worldDist(entity.pos, other.pos);
-        if (dist < 5 && dist < nearestAntDist) {
-          nearestAntDist = dist;
-          nearestAntPos = other.pos;
-        }
-      }
-      if (nearestAntPos && !entity.moveTarget) {
-        // Flee in opposite direction
-        const dx = entity.pos.x - nearestAntPos.x;
-        const dy = entity.pos.y - nearestAntPos.y;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        const fleeDist = 4 * CELL_SIZE;
-        const fleeX = entity.pos.x + (dx / len) * fleeDist;
-        const fleeY = entity.pos.y + (dy / len) * fleeDist;
-        // Clamp to map bounds
-        const bx0 = this.map.boundsX * CELL_SIZE;
-        const by0 = this.map.boundsY * CELL_SIZE;
-        const bx1 = (this.map.boundsX + this.map.boundsW) * CELL_SIZE;
-        const by1 = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
-        entity.moveTarget = {
-          x: Math.max(bx0 + CELL_SIZE, Math.min(bx1 - CELL_SIZE, fleeX)),
-          y: Math.max(by0 + CELL_SIZE, Math.min(by1 - CELL_SIZE, fleeY)),
-        };
-        entity.mission = Mission.MOVE;
-        entity.path = [];
-        entity.pathIndex = 0;
-      }
-      return; // civilians don't auto-attack
-    }
-
-    // Hold fire stance: never auto-engage
-    if (entity.stance === Stance.HOLD_FIRE) return;
-
-    // Harvesters have no weapon — don't auto-engage (would chase forever)
-    if (entity.type === UnitType.V_HARV) return;
-
-    // Gap #4: Auto-disguise spies near enemies
-    if (entity.type === UnitType.I_SPY && entity.alive && !entity.disguisedAs && entity.isPlayerUnit) {
-      for (const other of this.entities) {
-        if (!other.alive || this.entitiesAllied(entity, other)) continue;
-        if (worldDist(entity.pos, other.pos) <= 4) { // worldDist returns cells
-          this.spyDisguise(entity, other);
-          break;
-        }
-      }
-    }
-
-    // Gap #4: Dog spy detection — dogs auto-target enemy spies within 3 cells
-    if (entity.type === 'DOG' && entity.alive) {
-      for (const other of this.entities) {
-        if (!other.alive || other.type !== UnitType.I_SPY) continue;
-        if (this.entitiesAllied(entity, other)) continue;
-        if (worldDist(entity.pos, other.pos) <= 3) { // worldDist returns cells
-          entity.target = other;
-          entity.mission = Mission.ATTACK;
-          return;
-        }
-      }
-    }
-
-    const ec = entity.cell;
-    const isDog = entity.type === 'DOG';
-    // Guard scan range: use guardRange if defined (from INI GuardRange=N), else sight
-    // Defensive stance: reduced to weapon range only
-    const baseRange = entity.stats.guardRange ?? entity.stats.sight;
-    const scanRange = entity.stance === Stance.DEFENSIVE
-      ? Math.min(baseRange, (entity.weapon?.range ?? 2) + 1)
-      : baseRange;
-    let bestTarget: Entity | null = null;
-    let bestScore = -Infinity;
-    for (const other of this.entities) {
-      if (!other.alive) continue;
-      if (this.entitiesAllied(entity, other)) continue;
-      // M8: Dogs ONLY target infantry (C++ techno.cpp:2017-2026 — THREAT_INFANTRY)
-      if (isDog && !other.stats.isInfantry) continue;
-      // Naval combat target filtering
-      if (!this.canTargetNaval(entity, other)) continue;
-      // Air combat target filtering: ground units without AA weapons skip aircraft
-      if (other.isAirUnit && other.flightAltitude > 0) {
-        const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
-        if (!hasAA) continue;
-      }
-      const dist = worldDist(entity.pos, other.pos);
-      if (dist >= scanRange) continue;
-      // Check line of sight — can't target through walls (aircraft skip LOS check)
-      if (!(other.isAirUnit && other.flightAltitude > 0)) {
-        const oc = other.cell;
-        if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
-      }
-
-      const score = this.threatScore(entity, other, dist);
-      if (score > bestScore) {
-        bestTarget = other; bestScore = score;
-      }
-    }
-    if (bestTarget) {
-      entity.mission = Mission.ATTACK;
-      entity.target = bestTarget;
-      return;
-    }
-
-    // M4: No mobile targets — check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
-    if (!isDog && entity.weapon) {
-      let bestStruct: MapStructure | null = null;
-      let bestStructDist = scanRange;
-      for (const s of this.structures) {
-        if (!s.alive) continue;
-        if (s.house === House.Neutral) continue;
-        if (this.isAllied(entity.house, s.house)) continue;
-        const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-        const dist = worldDist(entity.pos, sPos);
-        if (dist < bestStructDist) {
-          bestStructDist = dist;
-          bestStruct = s;
-        }
-      }
-      if (bestStruct) {
-        entity.mission = Mission.ATTACK;
-        entity.targetStructure = bestStruct;
-      }
-    }
+    this._runMissionAI(ctx => _updateGuard(ctx, entity));
   }
 
   /** Submarine cloaking state machine — manages cloak transitions for SS/MSUB.
@@ -4778,593 +4106,44 @@ export class Game {
     this._runSpecialUnits(ctx => _updateMedic(ctx, entity));
   }
 
-  /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
+  /** Area Guard — delegates to missionAI.ts */
   private updateAreaGuard(entity: Entity): void {
-    entity.animState = AnimState.IDLE;
-    // A3: Type-specific scan delays (C++ foot.cpp:589-612)
-    const areaGuardScanDelay = entity.stats.scanDelay ?? 15;
-    if (this.tick - entity.lastGuardScan < areaGuardScanDelay) return;
-    entity.lastGuardScan = this.tick;
-
-    const origin = entity.guardOrigin ?? entity.pos;
-    // A5: Scan from home position (C++ foot.cpp:967 — temporarily swaps coords)
-    // Use origin position for distance checks so guards defend their post, not where they wandered
-    const scanPos = origin;
-    const scanCell = worldToCell(scanPos.x, scanPos.y);
-    // AG1: C++ foot.cpp:996-1001 — leash = Threat_Range(1)/2 = weapon.range/2 from origin
-    const weaponRange = entity.weapon?.range ?? entity.stats.sight;
-    const leashRange = weaponRange / 2;
-    const scanRange = Math.max(leashRange, entity.stats.sight);
-
-    // If too far from origin (> leash range), return home — but still attack enemies en route
-    const distFromOrigin = worldDist(entity.pos, origin);
-    const ec = entity.cell;
-    if (distFromOrigin > leashRange) {
-      // Check for enemies while returning
-      for (const other of this.entities) {
-        if (!other.alive || this.entitiesAllied(entity, other)) continue;
-        const dist = worldDist(entity.pos, other.pos);
-        if (dist > entity.stats.sight) continue;
-        const oc2 = other.cell;
-        if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc2.cx, oc2.cy)) continue;
-        // Found an enemy — attack it
-        entity.mission = Mission.ATTACK;
-        entity.target = other;
-        entity.animState = AnimState.WALK;
-        return;
-      }
-      // AG1: Return home but stay in AREA_GUARD (C++ Assign_Destination, not Assign_Mission)
-      entity.moveTarget = { x: origin.x, y: origin.y };
-      entity.target = null;
-      entity.targetStructure = null;
-      entity.path = findPath(this.map, ec, worldToCell(origin.x, origin.y), true, entity.isNavalUnit, entity.stats.speedClass);
-      entity.pathIndex = 0;
-      entity.animState = AnimState.WALK;
-      return;
-    }
-
-    // If moving back toward origin, continue moving
-    if (entity.moveTarget) {
-      const distToMove = worldDist(entity.pos, entity.moveTarget);
-      if (distToMove > 1.0) {
-        entity.animState = AnimState.WALK;
-        entity.moveToward(entity.moveTarget, this.movementSpeed(entity));
-        return;
-      }
-      entity.moveTarget = null;
-      entity.path = [];
-    }
-
-    // A5: Look for enemies within scan range from HOME position (C++ foot.cpp:967)
-    let bestTarget: Entity | null = null;
-    let bestScore = -Infinity;
-    for (const other of this.entities) {
-      if (!other.alive || this.entitiesAllied(entity, other)) continue;
-      // A5: Use scanPos (home) for distance check, not entity's current position
-      const dist = worldDist(scanPos, other.pos);
-      if (dist > scanRange) continue;
-      const oc = other.cell;
-      if (!this.map.hasLineOfSight(scanCell.cx, scanCell.cy, oc.cx, oc.cy)) continue;
-      const score = this.threatScore(entity, other, dist);
-      if (score > bestScore) { bestScore = score; bestTarget = other; }
-    }
-
-    if (bestTarget) {
-      entity.mission = Mission.ATTACK;
-      entity.target = bestTarget;
-    }
+    this._runMissionAI(ctx => _updateAreaGuard(ctx, entity));
   }
 
-  /** AI1: RETREAT mission — move to nearest map edge and exit the map (C++ foot.cpp) */
+  /** Retreat — delegates to missionAI.ts */
   private updateRetreat(entity: Entity): void {
-    // If already at a move target, continue moving
-    if (entity.moveTarget) {
-      entity.animState = AnimState.WALK;
-      const arrived = entity.moveToward(entity.moveTarget, this.movementSpeed(entity));
-      if (arrived) {
-        // Reached map edge — remove entity
-        entity.alive = false;
-        entity.mission = Mission.DIE;
-      }
-      return;
-    }
-    // Find nearest map edge
-    const ec = entity.cell;
-    const distLeft = ec.cx - this.map.boundsX;
-    const distRight = (this.map.boundsX + this.map.boundsW - 1) - ec.cx;
-    const distTop = ec.cy - this.map.boundsY;
-    const distBottom = (this.map.boundsY + this.map.boundsH - 1) - ec.cy;
-    const minDist = Math.min(distLeft, distRight, distTop, distBottom);
-    let tx = ec.cx, ty = ec.cy;
-    if (minDist === distLeft) tx = this.map.boundsX;
-    else if (minDist === distRight) tx = this.map.boundsX + this.map.boundsW - 1;
-    else if (minDist === distTop) ty = this.map.boundsY;
-    else ty = this.map.boundsY + this.map.boundsH - 1;
-    entity.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
-    entity.path = findPath(this.map, ec, { cx: tx, cy: ty }, true, entity.isNavalUnit, entity.stats.speedClass);
-    entity.pathIndex = 0;
+    this._runMissionAI(ctx => _updateRetreat(ctx, entity));
   }
 
-  /** C++ parity: transport auto-evacuates when a civilian/VIP boards.
-   *  SCG01EA: after Einstein enters the Chinook, it flies to the nearest map edge
-   *  to trigger TEVENT_EVAC_CIVILIAN and win the mission. Clears team missions so
-   *  the LOOP script doesn't interfere with the player-triggered evacuation. */
+  /** Transport evacuate — delegates to missionAI.ts */
   private orderTransportEvacuate(transport: Entity): void {
-    // Compute nearest map edge exit point (one cell outside bounds for exit detection)
-    const ec = transport.cell;
-    const distLeft = ec.cx - this.map.boundsX;
-    const distRight = (this.map.boundsX + this.map.boundsW - 1) - ec.cx;
-    const distTop = ec.cy - this.map.boundsY;
-    const distBottom = (this.map.boundsY + this.map.boundsH - 1) - ec.cy;
-    const minDist = Math.min(distLeft, distRight, distTop, distBottom);
-    let tx = ec.cx, ty = ec.cy;
-    // Target one cell OUTSIDE the bounds so the exit-map check triggers
-    if (minDist === distLeft) tx = this.map.boundsX - 1;
-    else if (minDist === distRight) tx = this.map.boundsX + this.map.boundsW;
-    else if (minDist === distTop) ty = this.map.boundsY - 1;
-    else ty = this.map.boundsY + this.map.boundsH;
-
-    // Clear team missions so LOOP scripts don't override the evacuation order
-    transport.teamMissions = [];
-    transport.teamMissionIndex = 0;
-    transport.mission = Mission.MOVE;
-    transport.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
-    transport.target = null;
-    transport.moveQueue = [];
-    // Aircraft: ensure takeoff if landed
-    if (transport.aircraftState === 'landed') {
-      transport.aircraftState = 'takeoff';
-    } else if (transport.aircraftState === 'returning' || transport.aircraftState === 'landing') {
-      transport.aircraftState = 'flying';
-    }
+    this._runMissionAI(ctx => _orderTransportEvacuate(ctx, transport));
   }
 
-  /** AI1: AMBUSH mission — sleep until enemy enters sight range, then HUNT */
+  /** Ambush — delegates to missionAI.ts */
   private updateAmbush(entity: Entity): void {
-    entity.animState = AnimState.IDLE;
-    // Scan for enemies within sight range
-    const scanDelay = entity.stats.scanDelay ?? 15;
-    if (this.tick - entity.lastGuardScan < scanDelay) return;
-    entity.lastGuardScan = this.tick;
-    const ec = entity.cell;
-    for (const other of this.entities) {
-      if (!other.alive || this.entitiesAllied(entity, other)) continue;
-      if (worldDist(entity.pos, other.pos) > entity.stats.sight) continue;
-      const oc = other.cell;
-      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
-      // Enemy spotted — switch to HUNT
-      entity.mission = Mission.HUNT;
-      entity.target = other;
-      return;
-    }
+    this._runMissionAI(ctx => _updateAmbush(ctx, entity));
   }
 
-  /** AI1: REPAIR mission — seek nearest FIX (Service Depot) and move to it */
+  /** Repair mission — delegates to missionAI.ts */
   private updateRepairMission(entity: Entity): void {
-    // If already moving to a target, continue
-    if (entity.moveTarget) {
-      entity.animState = AnimState.WALK;
-      const arrived = entity.moveToward(entity.moveTarget, this.movementSpeed(entity));
-      if (arrived) {
-        // Reached depot — switch to guard (depot auto-repair handles the rest)
-        entity.mission = Mission.GUARD;
-        entity.moveTarget = null;
-      }
-      return;
-    }
-    // Find nearest FIX structure
-    let bestDist = Infinity;
-    let bestPos: WorldPos | null = null;
-    for (const s of this.structures) {
-      if (!s.alive || s.type !== 'FIX') continue;
-      if (!this.isAllied(s.house, entity.house)) continue;
-      const sp: WorldPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-      const d = worldDist(entity.pos, sp);
-      if (d < bestDist) { bestDist = d; bestPos = sp; }
-    }
-    if (bestPos) {
-      entity.moveTarget = bestPos;
-      entity.path = findPath(this.map, entity.cell, worldToCell(bestPos.x, bestPos.y), true, entity.isNavalUnit, entity.stats.speedClass);
-      entity.pathIndex = 0;
-    } else {
-      // No depot found — fall back to guard
-      entity.mission = Mission.GUARD;
-    }
+    this._runMissionAI(ctx => _updateRepairMission(ctx, entity));
   }
 
-  /** Attack a structure (building) — engineers capture instead */
+  /** Attack structure — delegates to missionAI.ts */
   private updateAttackStructure(entity: Entity, s: MapStructure): void {
-    const structPos: WorldPos = {
-      x: s.cx * CELL_SIZE + CELL_SIZE,
-      y: s.cy * CELL_SIZE + CELL_SIZE,
-    };
-    const dist = worldDist(entity.pos, structPos);
-    const range = entity.weapon?.range ?? 2;
-
-    // Minimum range check: artillery can't fire at point-blank structures
-    if (entity.weapon?.minRange && dist < entity.weapon.minRange) {
-      this.retreatFromTarget(entity, structPos);
-      return;
-    }
-
-    if (dist <= range) {
-      // Engineer capture/damage (C++ infantry.cpp:618 — capture requires ConditionRed)
-      if (entity.type === UnitType.I_E6 && entity.isPlayerUnit) {
-        // EN1: Friendly repair — engineer heals to FULL HP (C++ Renovate() behavior)
-        if (this.isAllied(s.house, this.playerHouse) && s.hp < s.maxHp) {
-          s.hp = s.maxHp;
-          // Engineer consumed on repair
-          entity.alive = false;
-          entity.mission = Mission.DIE;
-          entity.targetStructure = null;
-          this.audio.play('repair');
-          this.effects.push({
-            type: 'explosion', x: structPos.x, y: structPos.y,
-            frame: 0, maxFrames: 10, size: 8, sprite: 'piffpiff', spriteStart: 0,
-          });
-          this.evaMessages.push({ text: 'BUILDING REPAIRED', tick: this.tick });
-          return;
-        }
-        // Enemy capture/damage (existing logic below)
-        if (s.hp / s.maxHp <= CONDITION_RED) {
-          // Capture: building at red health — convert to player
-          s.house = this.playerHouse;
-          s.hp = s.maxHp;
-          this.playEva('eva_building_captured');
-        } else {
-          // Damage: deal MaxStrength/3 (capped to Strength-1) (C++ infantry.cpp:631)
-          const engDamage = Math.min(Math.floor(s.maxHp / 3), s.hp - 1);
-          if (engDamage > 0) s.hp -= engDamage;
-        }
-        // Kill the engineer (consumed either way)
-        entity.alive = false;
-        entity.mission = Mission.DIE;
-        entity.targetStructure = null;
-        this.audio.play('eva_acknowledged');
-        // Flash effect
-        this.effects.push({
-          type: 'explosion', x: structPos.x, y: structPos.y,
-          frame: 0, maxFrames: 10, size: 10, sprite: 'piffpiff', spriteStart: 0,
-        });
-        return;
-      }
-
-      // Spy infiltration: spy enters enemy building for special effects
-      if (entity.type === UnitType.I_SPY && entity.isPlayerUnit) {
-        if (!this.isAllied(s.house, this.playerHouse)) {
-          this.spyInfiltrate(entity, s);
-          return;
-        }
-      }
-
-      // CHAN nest-gas: consume specialist, destroy LAR1/LAR2 nest (SCA03EA mechanic)
-      if (entity.type === UnitType.I_CHAN && (s.type === 'LAR1' || s.type === 'LAR2')) {
-        // Consume the CHAN specialist
-        entity.alive = false;
-        entity.mission = Mission.DIE;
-        entity.targetStructure = null;
-        // Destroy the nest
-        this.damageStructure(s, s.maxHp + 1);
-        this.killCount++;
-        this.audio.play('eva_acknowledged');
-        // Green gas cloud effect — multiple expanding puffs
-        for (let i = 0; i < 5; i++) {
-          const ox = (Math.random() - 0.5) * 20;
-          const oy = (Math.random() - 0.5) * 20;
-          this.effects.push({
-            type: 'explosion', x: structPos.x + ox, y: structPos.y + oy,
-            frame: 0, maxFrames: 14, size: 10 + i * 2,
-            sprite: 'smokey', spriteStart: 0,
-          });
-        }
-        return;
-      }
-
-      // Tanya C4: plants C4 on structure instead of shooting it
-      if (entity.type === UnitType.I_TANYA) {
-        this.updateTanyaC4(entity);
-        return;
-      }
-
-      // Thief: steals credits from enemy PROC/SILO
-      if (entity.type === UnitType.I_THF) {
-        this.updateThief(entity);
-        return;
-      }
-
-      entity.desiredFacing = directionTo(entity.pos, structPos);
-      entity.tickRotation();
-      if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
-        entity.animState = AnimState.IDLE;
-        return;
-      }
-      entity.animState = AnimState.ATTACK;
-      if (entity.attackCooldown <= 0 && entity.weapon) {
-        // C++ parity: use warhead-vs-armor lookup (structures have 'concrete' armor)
-        const wh = entity.weapon.warhead as WarheadType;
-        const mult = this.getWarheadMult(wh, 'concrete');
-        const structHouseBias = this.getFirepowerBias(entity.house);
-        const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * structHouseBias));
-        const destroyed = this.damageStructure(s, damage);
-        entity.attackCooldown = entity.weapon.rof;
-        if (entity.hasTurret) entity.isInRecoilState = true; // M6
-        // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
-        if (entity.ammo > 0) entity.ammo--;
-        this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
-        // Muzzle + impact effects (color by warhead — C++ parity)
-        this.effects.push({
-          type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
-          frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-          muzzleColor: this.warheadMuzzleColor(entity.weapon.warhead),
-        });
-        // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-        const structImpactSprite = this.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
-        this.effects.push({
-          type: 'explosion', x: structPos.x, y: structPos.y,
-          frame: 0, maxFrames: EXPLOSION_FRAMES[structImpactSprite] ?? 17, size: 8,
-          sprite: structImpactSprite, spriteStart: 0,
-        });
-        if (destroyed) {
-          if (this.isPlayerControlled(entity)) this.killCount++;
-        }
-        // Out of ammo — stop attacking (C++ parity: unit must rearm at service depot)
-        if (entity.ammo === 0 && entity.maxAmmo > 0 && !entity.isAirUnit) {
-          entity.targetStructure = null;
-          entity.mission = Mission.GUARD;
-          entity.animState = AnimState.IDLE;
-          return;
-        }
-      }
-    } else {
-      entity.animState = AnimState.WALK;
-      entity.moveToward(structPos, this.movementSpeed(entity));
-    }
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    this._runMissionAI(ctx => _updateAttackStructure(ctx, entity, s));
   }
 
-  /** Force-fire on ground — fire at a location with no target entity */
+  /** Force-fire on ground — delegates to missionAI.ts */
   private updateForceFireGround(entity: Entity): void {
-    const target = entity.forceFirePos!;
-    const dist = worldDist(entity.pos, target);
-    const range = entity.weapon?.range ?? 2;
-
-    if (dist <= range) {
-      entity.desiredFacing = directionTo(entity.pos, target);
-      const facingReady = entity.tickRotation();
-      if (entity.stats.noMovingFire && !facingReady) {
-        entity.animState = AnimState.IDLE;
-        return;
-      }
-      entity.animState = AnimState.ATTACK;
-
-      if (entity.attackCooldown <= 0 && entity.weapon) {
-        entity.attackCooldown = entity.weapon.rof;
-        if (entity.hasTurret) entity.isInRecoilState = true; // M6
-        // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
-        if (entity.ammo > 0) entity.ammo--;
-
-        // Apply scatter
-        let impactX = target.x;
-        let impactY = target.y;
-        if (entity.weapon.inaccuracy && entity.weapon.inaccuracy > 0) {
-          const scatter = entity.weapon.inaccuracy * CELL_SIZE;
-          const angle = Math.random() * Math.PI * 2;
-          const d = Math.random() * scatter;
-          impactX += Math.cos(angle) * d;
-          impactY += Math.sin(angle) * d;
-        }
-
-        // Splash damage at impact
-        if (entity.weapon.splash && entity.weapon.splash > 0) {
-          this.applySplashDamage(
-            { x: impactX, y: impactY }, entity.weapon, -1,
-            entity.house, entity,
-          );
-        }
-
-        // Weapon sound + effects (spatially positioned)
-        this.playSoundAt(this.audio.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
-        const sx = entity.pos.x;
-        const sy = entity.pos.y;
-        this.effects.push({
-          type: 'muzzle', x: sx, y: sy,
-          frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-          muzzleColor: this.warheadMuzzleColor(entity.weapon.warhead),
-        });
-        const projStyle = this.weaponProjectileStyle(entity.weapon.name);
-        // Per-weapon projectile speed: compute travel frames from distance and projSpeed
-        const ffDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
-        const travelFrames = calcProjectileTravelFrames(ffDistPx, entity.weapon.projSpeed);
-        this.effects.push({
-          type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
-          startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
-        });
-        // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-        const ffImpactSprite = this.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
-        this.effects.push({
-          type: 'explosion', x: impactX, y: impactY,
-          frame: 0, maxFrames: EXPLOSION_FRAMES[ffImpactSprite] ?? 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,
-        });
-        const tc = worldToCell(impactX, impactY);
-        this.map.addDecal(tc.cx, tc.cy, 3, 0.3);
-        // Out of ammo — stop attacking (C++ parity: unit must rearm at service depot)
-        if (entity.ammo === 0 && entity.maxAmmo > 0 && !entity.isAirUnit) {
-          entity.target = null;
-          entity.mission = Mission.GUARD;
-          entity.animState = AnimState.IDLE;
-          return;
-        }
-      }
-    } else {
-      entity.animState = AnimState.WALK;
-      entity.moveToward(target, this.movementSpeed(entity));
-    }
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    this._runMissionAI(ctx => _updateForceFireGround(ctx, entity));
   }
 
   /** Defensive structure auto-fire — pillboxes, guard towers, tesla coils fire at nearby enemies */
-  /** Turreted structure types (GUN/SAM) — turret rotates to face target */
-  private static readonly TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
-  private static readonly DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'PBOX', 'SAM', 'AGUN']);
-  // PW2: Powered structures use STRUCTURE_POWERED from scenario.ts (C++ per-building IsPowered flag)
-
   private updateStructureCombat(): void {
-    const isLowPower = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
-    for (const s of this.structures) {
-      if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
-      // C++ parity PW1/PW3: powered defenses (TSLA, GUN, SAM, AGUN) cannot fire during any power deficit.
-      // Unpowered defenses (PBOX, HBOX, FTUR) always fire regardless of power.
-      if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
-        continue;
-      }
-      // C++ building.cpp:882-883 — ammo instantly reloads to MaxAmmo each AI tick
-      if (s.ammo === 0 && s.maxAmmo > 0) { s.ammo = s.maxAmmo; }
-      if (s.ammo === 0) continue; // out of ammo (shouldn't reach here after reload)
-
-      // Turret rotation tick (every frame, independent of cooldown)
-      if (Game.TURRETED_STRUCTURES.has(s.type)) {
-        if (s.turretDir === undefined) s.turretDir = 4; // default: South
-        if (s.desiredTurretDir === undefined) s.desiredTurretDir = s.turretDir;
-        if (s.turretDir !== s.desiredTurretDir) {
-          const diff = (s.desiredTurretDir - s.turretDir + 8) % 8;
-          s.turretDir = diff <= 4
-            ? (s.turretDir + 1) % 8
-            : (s.turretDir + 7) % 8;
-        }
-        if (s.firingFlash !== undefined && s.firingFlash > 0) s.firingFlash--;
-      }
-
-      if (s.attackCooldown > 0) {
-        if (!isLowPower || this.tick % 2 === 0) s.attackCooldown--;
-        continue;
-      }
-
-      const sx = s.cx * CELL_SIZE + CELL_SIZE;
-      const sy = s.cy * CELL_SIZE + CELL_SIZE;
-      const structPos: WorldPos = { x: sx, y: sy };
-      const range = s.weapon.range;
-
-      // Find highest-threat enemy in range (C++ building.cpp — prioritize dangerous targets, not just closest)
-      let bestTarget: Entity | null = null;
-      let bestScore = -Infinity;
-      for (const e of this.entities) {
-        if (!e.alive) continue;
-        if (this.isAllied(s.house, e.house)) continue; // don't shoot friendlies
-        const dist = worldDist(structPos, e.pos);
-        if (dist >= range) continue;
-        // LOS check
-        const ec = e.cell;
-        if (!this.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
-        // Threat scoring: prioritize dangerous/wounded enemies over merely close ones
-        const isAttackingAlly = e.targetStructure?.alive && this.isAllied(s.house, (e.targetStructure.house as House) ?? House.Neutral);
-        let score = e.stats.isInfantry ? 10 : 25;
-        score += (e.weapon?.damage ?? 0) * 0.2;
-        if (e.hp < e.maxHp * 0.5) score *= 1.5; // wounded bonus
-        if (isAttackingAlly) score *= 2; // retaliation
-        score *= Math.max(0.3, 1 - (dist / range) * 0.7); // distance weighting
-        if (score > bestScore) {
-          bestTarget = e;
-          bestScore = score;
-        }
-      }
-
-      // AA override: SAM/AGUN prefer airborne aircraft over ground targets
-      if (s.weapon.isAntiAir && bestTarget) {
-        let bestAirTarget: Entity | null = null;
-        let bestAirDist = Infinity;
-        for (const e of this.entities) {
-          if (!e.alive || !e.isAirUnit || e.flightAltitude <= 0) continue;
-          if (this.isAllied(s.house, e.house)) continue;
-          const dist = worldDist(structPos, e.pos);
-          if (dist < range && dist < bestAirDist) {
-            bestAirTarget = e;
-            bestAirDist = dist;
-          }
-        }
-        if (bestAirTarget) {
-          bestTarget = bestAirTarget;
-        }
-      }
-
-      if (bestTarget) {
-        // Update turret direction for turreted structures
-        if (Game.TURRETED_STRUCTURES.has(s.type)) {
-          s.desiredTurretDir = directionTo(structPos, bestTarget.pos);
-        }
-        // H1: Buildings with Ammo>1 fire rapidly (1-tick rearm) then recharge (C++ techno.cpp:2861)
-        if (s.ammo > 0) {
-          s.ammo--;
-          s.attackCooldown = s.ammo > 0 ? 1 : s.weapon.rof; // rapid-fire until last shot
-        } else {
-          s.attackCooldown = s.weapon.rof; // unlimited ammo (-1) uses normal ROF
-        }
-        if (Game.TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
-        // CF1: Apply C++ Modify_Damage — structure direct hit at distance 0
-        const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
-        const houseBias = this.getFirepowerBias(s.house);
-        const whMult = this.getWarheadMult(wh, bestTarget.stats.armor);
-        const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult, this.getWarheadMeta(wh).spreadFactor);
-        const killed = this.damageEntity(bestTarget, damage, wh);
-
-        // Fire effects — color by warhead type (C++ parity)
-        this.effects.push({
-          type: 'muzzle', x: sx, y: sy,
-          frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-          muzzleColor: this.warheadMuzzleColor(wh),
-        });
-
-        // Tesla coil and Queen Ant get special effect
-        if (s.type === 'TSLA' || s.type === 'QUEE') {
-          this.effects.push({
-            type: 'tesla', x: bestTarget.pos.x, y: bestTarget.pos.y,
-            frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
-            startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
-            blendMode: 'screen',
-          });
-          this.playSoundAt('teslazap', sx, sy);
-        } else {
-          // Projectile from structure to target — per-weapon projectile speed
-          const structDistPx = Math.sqrt((bestTarget.pos.x - sx) ** 2 + (bestTarget.pos.y - sy) ** 2);
-          const structTravelFrames = calcProjectileTravelFrames(structDistPx, s.weapon.projSpeed);
-          this.effects.push({
-            type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: structTravelFrames, size: 3,
-            startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
-            projStyle: 'bullet',
-          });
-          // AA weapons hitting aircraft use flak burst sprite (C++ FLAK.SHP)
-          const aaImpactSprite = (s.weapon.isAntiAir && bestTarget.isAirUnit && bestTarget.flightAltitude > 0)
-            ? 'flak'
-            : (this.getWarheadProps(wh)?.explosionSet ?? 'veh-hit1');
-          this.effects.push({
-            type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
-            frame: 0, maxFrames: 10, size: 6,
-            sprite: aaImpactSprite, spriteStart: 0,
-          });
-          this.playSoundAt('machinegun', sx, sy);
-        }
-
-        // Splash damage
-        if (s.weapon.splash && s.weapon.splash > 0) {
-          this.applySplashDamage(
-            bestTarget.pos,
-            { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
-            bestTarget.id, s.house,
-          );
-        }
-
-        if (killed) {
-          this.handleUnitDeath(bestTarget, {
-            screenShake: 4, explosionSize: 16, debris: false,
-            decal: { infantry: 4, vehicle: 8, opacity: 0.5 },
-            explodeLgSound: false,
-            attackerIsPlayer: this.isAllied(s.house, this.playerHouse),
-            trackLoss: false,
-          });
-        }
-      }
-    }
+    this._runCombat(ctx => _updateStructureCombat(ctx));
   }
 
   /** Queen Ant spawns ants periodically (rate/composition affected by difficulty) */
@@ -5422,367 +4201,32 @@ export class Game {
    *  - Torpedoes (isSubSurface) only hit naval
    *  - Cruisers can't target infantry */
   private canTargetNaval(scanner: Entity, target: Entity): boolean {
-    // Cloaked subs only targetable by isAntiSub weapons
-    if (target.cloakState === CloakState.CLOAKED || target.cloakState === CloakState.CLOAKING) {
-      if (!scanner.weapon?.isAntiSub && !scanner.weapon2?.isAntiSub) return false;
-    }
-    // Cruisers cannot target infantry
-    if (scanner.type === UnitType.V_CA && target.stats.isInfantry) return false;
-    // Torpedo-only units can't target land units
-    if (scanner.weapon?.isSubSurface && !scanner.weapon2 && !target.isNavalUnit) return false;
-    return true;
+    return _canTargetNaval(scanner, target);
   }
 
   /** Find a landing pad for this aircraft. Returns structure index or -1. */
   private findLandingPad(entity: Entity): number {
-    const padType = entity.stats.landingBuilding;
-    if (!padType) return -1;
-    let bestIdx = -1;
-    let bestDist = Infinity;
-    for (let i = 0; i < this.structures.length; i++) {
-      const s = this.structures[i];
-      if (!s.alive || s.type !== padType) continue;
-      if (!this.isAllied(entity.house, s.house)) continue;
-      if (s.dockedAircraft !== undefined && s.dockedAircraft > 0) continue; // occupied
-      const sx = s.cx * CELL_SIZE + CELL_SIZE;
-      const sy = s.cy * CELL_SIZE + CELL_SIZE;
-      const dist = worldDist(entity.pos, { x: sx, y: sy });
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
-    return bestIdx;
+    return _findLandingPad(this._aircraftCtx, entity);
   }
 
   /** Get target position for an aircraft's current target (entity or structure) */
   private getAircraftTargetPos(entity: Entity): WorldPos | null {
-    if (entity.target?.alive) return entity.target.pos;
-    if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
-      const s = entity.targetStructure as MapStructure;
-      return { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-    }
-    return null;
+    return _getAircraftTargetPos(entity);
   }
 
   /** Aircraft state machine — returns true if aircraft handled this tick (skip normal update) */
   private updateAircraft(entity: Entity): boolean {
-    // Only process aircraft with active state
-    if (!entity.stats.isAircraft) return false;
-
-    // Decrement attack cooldowns — aircraft skip normal mission processing
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
-
-    switch (entity.aircraftState) {
-      case 'landed': {
-        // On pad, flightAltitude=0. Wait for attack/move order
-        entity.flightAltitude = 0;
-        entity.animState = AnimState.IDLE;
-        if (entity.mission === Mission.ATTACK && (entity.target?.alive || entity.targetStructure)) {
-          entity.aircraftState = 'takeoff';
-        } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
-          entity.aircraftState = 'takeoff';
-        }
-        return true;
-      }
-
-      case 'takeoff': {
-        // Ascend 1px/tick until at flight altitude (C++ AIRCRAFT.CPP — 24 ticks to reach altitude)
-        entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 1);
-        entity.animState = AnimState.WALK;
-        // Undock from pad
-        if (entity.landedAtStructure >= 0 && entity.landedAtStructure < this.structures.length) {
-          this.structures[entity.landedAtStructure].dockedAircraft = undefined;
-        }
-        entity.landedAtStructure = -1;
-        if (entity.flightAltitude >= Entity.FLIGHT_ALTITUDE) {
-          entity.aircraftState = 'flying';
-        }
-        return true;
-      }
-
-      case 'flying': {
-        entity.animState = AnimState.WALK;
-        // If we have an attack target, close to weapon range
-        if (entity.mission === Mission.ATTACK) {
-          const targetPos = this.getAircraftTargetPos(entity);
-          if (!targetPos) {
-            // Target lost — RTB
-            entity.aircraftState = 'returning';
-            return true;
-          }
-          const dist = worldDist(entity.pos, targetPos);
-          const weaponRange = entity.weapon?.range ?? 5;
-          if (dist <= weaponRange) {
-            entity.aircraftState = 'attacking';
-            entity.attackRunPhase = 'approach';
-            return true;
-          }
-          // Fly toward target
-          entity.moveToward(targetPos, this.movementSpeed(entity));
-        } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
-          // Check if aircraft is at map edge with out-of-bounds target — exit map
-          const ec = entity.cell;
-          const tc = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
-          if (!this.map.inBounds(tc.cx, tc.cy) &&
-              (ec.cx <= this.map.boundsX || ec.cx >= this.map.boundsX + this.map.boundsW - 1 ||
-               ec.cy <= this.map.boundsY || ec.cy >= this.map.boundsY + this.map.boundsH - 1)) {
-            entity.alive = false;
-            entity.mission = Mission.DIE;
-            this.unitsLeftMap++;
-            if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
-              this.civiliansEvacuated++;
-            }
-            if (entity.passengers && entity.passengers.length > 0) {
-              for (const p of entity.passengers) {
-                p.alive = false;
-                this.unitsLeftMap++;
-                if (CIVILIAN_UNIT_TYPES.has(p.type)) {
-                  this.civiliansEvacuated++;
-                }
-              }
-              entity.passengers = [];
-            }
-            return true;
-          }
-          // Simple move — fly to destination
-          if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
-            // Arrived — check if destination was out of bounds (aircraft map exit)
-            const arrCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
-            if (!this.map.inBounds(arrCell.cx, arrCell.cy)) {
-              entity.alive = false;
-              entity.mission = Mission.DIE;
-              this.unitsLeftMap++;
-              if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
-                this.civiliansEvacuated++;
-              }
-              if (entity.passengers && entity.passengers.length > 0) {
-                for (const p of entity.passengers) {
-                  p.alive = false;
-                  this.unitsLeftMap++;
-                  if (CIVILIAN_UNIT_TYPES.has(p.type)) {
-                    this.civiliansEvacuated++;
-                  }
-                }
-                entity.passengers = [];
-              }
-              return true;
-            }
-            entity.moveTarget = null;
-            if (entity.moveQueue.length > 0) {
-              entity.moveTarget = entity.moveQueue.shift()!;
-            } else {
-              entity.mission = this.idleMission(entity);
-              entity.aircraftState = 'returning';
-            }
-          }
-        } else {
-          // No mission — return to base
-          entity.aircraftState = 'returning';
-        }
-        return true;
-      }
-
-      case 'attacking': {
-        if (entity.isFixedWing) {
-          return this.updateFixedWingAttackRun(entity);
-        } else {
-          return this.updateHelicopterAttack(entity);
-        }
-      }
-
-      case 'returning': {
-        // Check for new orders — break out of return-to-base
-        if ((entity.mission === Mission.MOVE && entity.moveTarget) ||
-            (entity.mission === Mission.ATTACK && (entity.target?.alive || entity.targetStructure))) {
-          entity.aircraftState = 'flying';
-          return true;
-        }
-        entity.animState = AnimState.WALK;
-        // Find home pad
-        const padIdx = this.findLandingPad(entity);
-        if (padIdx < 0) {
-          // No pad available — transport helicopters land on the ground (C++ aircraft.cpp)
-          // Chinooks can land anywhere; combat aircraft orbit until a pad frees up
-          if (entity.isTransport) {
-            entity.aircraftState = 'landing';
-            entity.landedAtStructure = -1;
-          }
-          // Combat aircraft orbit in place
-          return true;
-        }
-        const pad = this.structures[padIdx];
-        const [pw, ph] = STRUCTURE_SIZE[pad.type] ?? [2, 2];
-        const padPos = { x: (pad.cx + pw / 2) * CELL_SIZE, y: (pad.cy + ph / 2) * CELL_SIZE };
-        const dist = worldDist(entity.pos, padPos);
-        if (dist <= CELL_SIZE) {
-          entity.pos.x = padPos.x;
-          entity.pos.y = padPos.y;
-          entity.aircraftState = 'landing';
-          entity.landedAtStructure = padIdx;
-          pad.dockedAircraft = entity.id;
-        } else {
-          entity.moveToward(padPos, this.movementSpeed(entity));
-        }
-        return true;
-      }
-
-      case 'landing': {
-        // Descend 1px/tick (C++ AIRCRAFT.CPP — matches takeoff rate)
-        entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
-        entity.animState = AnimState.IDLE;
-        if (entity.flightAltitude <= 0) {
-          entity.flightAltitude = 0;
-          if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
-            entity.aircraftState = 'rearming';
-            // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
-            const rofBias = COUNTRY_BONUSES[entity.house]?.rofMult ?? 1.0;
-            entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * rofBias));
-          } else {
-            entity.aircraftState = 'landed';
-          }
-          entity.mission = Mission.GUARD;
-        }
-        return true;
-      }
-
-      case 'rearming': {
-        entity.flightAltitude = 0;
-        entity.animState = AnimState.IDLE;
-        entity.rearmTimer--;
-        if (entity.rearmTimer <= 0) {
-          entity.ammo++;
-          if (entity.ammo >= entity.maxAmmo) {
-            entity.aircraftState = 'landed';
-          } else {
-            // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
-            const nextRofBias = COUNTRY_BONUSES[entity.house]?.rofMult ?? 1.0;
-            entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * nextRofBias));
-          }
-        }
-        return true;
-      }
-
-      default:
-        return false;
-    }
+    return this._runAircraft(ctx => _updateAircraft(ctx, entity));
   }
 
-  /** Fixed-wing attack run: approach → fire → pullaway → circle back or RTB */
+  /** Fixed-wing attack run — delegates to aircraft.ts */
   private updateFixedWingAttackRun(entity: Entity): boolean {
-    const targetPos = this.getAircraftTargetPos(entity);
-
-    if (!targetPos) {
-      entity.aircraftState = 'returning';
-      entity.mission = Mission.GUARD;
-      return true;
-    }
-
-    const speed = this.movementSpeed(entity);
-    const dist = worldDist(entity.pos, targetPos);
-    const weaponRange = entity.weapon?.range ?? 5;
-
-    switch (entity.attackRunPhase) {
-      case 'approach':
-        entity.animState = AnimState.WALK;
-        entity.moveToward(targetPos, speed);
-        if (dist <= weaponRange) {
-          entity.attackRunPhase = 'firing';
-        }
-        break;
-
-      case 'firing':
-        entity.animState = AnimState.ATTACK;
-        // Keep moving forward (fixed-wing can't stop)
-        entity.moveToward(targetPos, speed);
-        // Fire weapon if cooldown ready, then transition to pullaway
-        if (entity.attackCooldown <= 0 && entity.weapon) {
-          if (entity.target?.alive) {
-            this.fireWeaponAt(entity, entity.target, entity.weapon);
-          } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
-            this.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, entity.weapon);
-          }
-          entity.attackCooldown = entity.weapon.rof;
-          if (entity.ammo > 0) entity.ammo--;
-          entity.attackRunPhase = 'pullaway';
-        }
-        break;
-
-      case 'pullaway':
-        entity.animState = AnimState.WALK;
-        // Overshoot ~3 cells past target
-        const overshootDist = 3 * CELL_SIZE;
-        const dx = entity.pos.x - targetPos.x;
-        const dy = entity.pos.y - targetPos.y;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        const overshootPos = {
-          x: targetPos.x + (dx / len) * overshootDist,
-          y: targetPos.y + (dy / len) * overshootDist,
-        };
-        entity.moveToward(overshootPos, speed);
-        if (worldDist(entity.pos, targetPos) > overshootDist * 0.8) {
-          if (entity.ammo > 0 && (entity.target?.alive || entity.targetStructure)) {
-            // Circle back for another pass
-            entity.attackRunPhase = 'approach';
-          } else {
-            // Out of ammo or target dead — RTB
-            entity.aircraftState = 'returning';
-            entity.mission = Mission.GUARD;
-            entity.target = null;
-            entity.targetStructure = null;
-          }
-        }
-        break;
-    }
-    return true;
+    return this._runAircraft(ctx => _updateFixedWingAttackRun(ctx, entity));
   }
 
-  /** Helicopter hover attack: close to weapon range, face target, fire */
+  /** Helicopter hover attack — delegates to aircraft.ts */
   private updateHelicopterAttack(entity: Entity): boolean {
-    const targetPos = this.getAircraftTargetPos(entity);
-
-    if (!targetPos) {
-      entity.aircraftState = 'returning';
-      entity.mission = Mission.GUARD;
-      return true;
-    }
-
-    const dist = worldDist(entity.pos, targetPos);
-    const weaponRange = entity.weapon?.range ?? 5;
-
-    if (dist > weaponRange) {
-      // Close to weapon range
-      entity.animState = AnimState.WALK;
-      entity.moveToward(targetPos, this.movementSpeed(entity));
-      return true;
-    }
-
-    // In range — hover and fire
-    entity.animState = AnimState.ATTACK;
-    entity.desiredFacing = directionTo(entity.pos, targetPos);
-    entity.tickRotation();
-
-    // Fire on cooldown
-    if (entity.attackCooldown <= 0 && entity.weapon) {
-      if (entity.target?.alive) {
-        this.fireWeaponAt(entity, entity.target, entity.weapon);
-      } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
-        this.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, entity.weapon);
-      }
-      entity.attackCooldown = entity.weapon.rof;
-      if (entity.ammo > 0) entity.ammo--;
-    }
-
-    // Out of ammo — RTB
-    if (entity.ammo === 0) {
-      entity.aircraftState = 'returning';
-      entity.mission = Mission.GUARD;
-      entity.target = null;
-      entity.targetStructure = null;
-    }
-
-    return true;
+    return this._runAircraft(ctx => _updateHelicopterAttack(ctx, entity));
   }
 
   /** Fire weapon at entity target — delegates to combat.ts */
@@ -5965,22 +4409,6 @@ export class Game {
   /** Trigger retaliation — delegates to combat.ts */
   private triggerRetaliation(victim: Entity, attacker: Entity): void {
     _triggerRetaliation(this._combatCtx, victim, attacker);
-  }
-
-  /** Infantry scatter: push infantry slightly away from attacker on direct hit.
-   *  In original RA, infantry move randomly when shot at. */
-  private scatterInfantry(victim: Entity, attackerPos: WorldPos): void {
-    if (!victim.alive || !victim.stats.isInfantry || victim.isAnt) return;
-    if (Math.random() > 0.4) return; // 40% chance to scatter per hit
-    const angle = Math.atan2(victim.pos.y - attackerPos.y, victim.pos.x - attackerPos.x);
-    const jitter = (Math.random() - 0.5) * 1.2; // add randomness to scatter direction
-    const scatterX = victim.pos.x + Math.cos(angle + jitter) * CELL_SIZE * 0.5;
-    const scatterY = victim.pos.y + Math.sin(angle + jitter) * CELL_SIZE * 0.5;
-    const sc = worldToCell(scatterX, scatterY);
-    if (this.map.isPassable(sc.cx, sc.cy)) {
-      victim.pos.x = scatterX;
-      victim.pos.y = scatterY;
-    }
   }
 
   /** Launch a projectile — delegates to combat.ts */
@@ -6774,102 +5202,9 @@ export class Game {
     return _countPlayerBuildings(this.structures, type, this.playerHouse, (a, b) => this.isAllied(a, b));
   }
 
-  /** AI base rebuild — compare alive structures against blueprint, rebuild missing ones.
-   *  C++ parity: IQ >= 2 required, credit cost deducted, priority ordering (power > econ > military > tech). */
+  /** AI base rebuild — delegates to ai.ts */
   private updateBaseRebuild(): void {
-    if (this.baseBlueprint.length === 0) return;
-
-    // Only rebuild if any AI house has IQ >= 2 (C++ parity — low-IQ AI cannot rebuild)
-    let anyIqOk = false;
-    for (const [, st] of this.aiStates) { if (st.iq >= 2) { anyIqOk = true; break; } }
-    if (!anyIqOk) return;
-
-    // Cooldown between rebuilds (30 seconds = 450 ticks)
-    if (this.baseRebuildCooldown > 0) {
-      this.baseRebuildCooldown--;
-      return;
-    }
-
-    // Check every 5 seconds (75 ticks)
-    if (this.tick % 75 !== 0) return;
-
-    // Find AI houses that have a ConYard (FACT) — required to rebuild
-    const aiHousesWithFact = new Set<House>();
-    for (const s of this.structures) {
-      if (s.alive && s.type === 'FACT' && !this.isAllied(s.house, this.playerHouse)) {
-        aiHousesWithFact.add(s.house);
-      }
-    }
-    if (aiHousesWithFact.size === 0) return;
-
-    // Build set of alive structures (type+cell as key)
-    const aliveSet = new Set<string>();
-    for (const s of this.structures) {
-      if (s.alive) aliveSet.add(`${s.type}:${s.cx},${s.cy}`);
-    }
-
-    // Queue missing structures from blueprint
-    if (this.baseRebuildQueue.length === 0) {
-      for (const bp of this.baseBlueprint) {
-        if (!aiHousesWithFact.has(bp.house)) continue;
-        const pos = { cx: bp.cell % MAP_CELLS, cy: Math.floor(bp.cell / MAP_CELLS) };
-        const key = `${bp.type}:${pos.cx},${pos.cy}`;
-        if (!aliveSet.has(key)) {
-          // Check if cell is available (not blocked by another structure)
-          const [fw, fh] = STRUCTURE_SIZE[bp.type] ?? [1, 1];
-          let blocked = false;
-          for (let dy = 0; dy < fh && !blocked; dy++) {
-            for (let dx = 0; dx < fw && !blocked; dx++) {
-              for (const s of this.structures) {
-                if (s.alive && s.cx === pos.cx + dx && s.cy === pos.cy + dy) {
-                  blocked = true;
-                  break;
-                }
-              }
-            }
-          }
-          if (!blocked) {
-            this.baseRebuildQueue.push(bp);
-          }
-        }
-      }
-      // Priority ordering: POWR/APWR first, then PROC, then production, then defenses, then tech
-      const REBUILD_PRIORITY: Record<string, number> = {
-        'POWR': 0, 'APWR': 0,
-        'PROC': 1,
-        'WEAP': 2, 'TENT': 2, 'BARR': 2,
-        'GUN': 3, 'TSLA': 3, 'SAM': 3, 'AGUN': 3, 'PBOX': 3, 'HBOX': 3, 'FTUR': 3,
-        'DOME': 4, 'FIX': 4, 'SILO': 4,
-        'ATEK': 5, 'STEK': 5, 'HPAD': 5, 'AFLD': 5,
-      };
-      this.baseRebuildQueue.sort((a, b) =>
-        (REBUILD_PRIORITY[a.type] ?? 6) - (REBUILD_PRIORITY[b.type] ?? 6)
-      );
-    }
-
-    // Process one rebuild per cycle
-    if (this.baseRebuildQueue.length > 0) {
-      const bp = this.baseRebuildQueue.shift()!;
-      if (!aiHousesWithFact.has(bp.house)) return;
-
-      // Check IQ gate for this specific house (C++ parity)
-      const aiState = this.aiStates.get(bp.house);
-      if (aiState && aiState.iq < 2) return;
-
-      // Deduct credit cost for rebuild (C++ parity — AI pays for reconstructions)
-      const prodItem = this.scenarioProductionItems.find(p => p.type === bp.type && p.isStructure);
-      if (prodItem) {
-        const credits = this.houseCredits.get(bp.house) ?? 0;
-        if (credits < prodItem.cost) return; // insufficient funds, try next cycle
-        this.houseCredits.set(bp.house, credits - prodItem.cost);
-      }
-
-      const pos = { cx: bp.cell % MAP_CELLS, cy: Math.floor(bp.cell / MAP_CELLS) };
-      this.spawnAIStructure(bp.type, bp.house, pos.cx, pos.cy);
-
-      // Set 30s rebuild cooldown
-      this.baseRebuildCooldown = GAME_TICKS_PER_SEC * 30;
-    }
+    this._runAI(ctx => _updateBaseRebuild(ctx));
   }
 
   /** Find nearest passable cell near a structure's exit, expanding in rings up to 3 cells out.
@@ -6890,41 +5225,12 @@ export class Game {
     return { cx: initialCX, cy: initialCY };
   }
 
-  /** Spawn an AI structure: look up image/hp, push to structures[], mark footprint impassable.
-   *  Extracted from updateBaseRebuild and updateAIConstruction to eliminate duplication. */
+  /** Spawn an AI structure — delegates to ai.ts */
   private spawnAIStructure(type: string, house: House, cx: number, cy: number): void {
-    const image = STRUCTURE_IMAGES[type] ?? type.toLowerCase();
-    const maxHp = STRUCTURE_MAX_HP[type] ?? 256;
-
-    this.structures.push({
-      type,
-      image,
-      house,
-      cx,
-      cy,
-      hp: maxHp,
-      maxHp,
-      alive: true,
-      rubble: false,
-      weapon: STRUCTURE_WEAPONS[type],
-      attackCooldown: 0,
-      ammo: -1,
-      maxAmmo: -1,
-      buildProgress: 0,
-    });
-
-    // Mark footprint as impassable
-    const [fw, fh] = STRUCTURE_SIZE[type] ?? [1, 1];
-    for (let dy = 0; dy < fh; dy++) {
-      for (let dx = 0; dx < fw; dx++) {
-        this.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
-      }
-    }
+    _spawnAIStructure(this._aiCtx, type, house, cx, cy);
   }
 
-  /** Spawn an AI unit from a factory: find factory, calculate spawn pos, create entity.
-   *  Extracted from updateAIHarvesters and updateAIProduction to eliminate duplication.
-   *  Infantry factories (TENT/BARR) use 2x2 footprint offsets; vehicle factories (WEAP) use 3x2. */
+  /** Spawn an AI unit from a factory — delegates to ai.ts */
   private spawnAIUnit(
     house: House,
     unitType: UnitType,
@@ -6932,32 +5238,7 @@ export class Game {
     mission: Mission = Mission.GUARD,
     guardOrigin?: WorldPos,
   ): Entity | null {
-    const isInfantry = factoryType === 'TENT' || factoryType === 'BARR';
-    const factory = this.structures.find(s =>
-      s.alive && s.house === house && (isInfantry ? (s.type === 'TENT' || s.type === 'BARR') : s.type === factoryType)
-    );
-    if (!factory) return null;
-
-    let sx: number;
-    let sy: number;
-    if (isInfantry) {
-      // Infantry: spawn at cx+1 cell, cy+2 cells, with random horizontal scatter
-      sx = factory.cx * CELL_SIZE + CELL_SIZE + (Math.random() - 0.5) * 24;
-      sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
-    } else {
-      // Vehicle: spawn at cx+2 cells, cy+2 cells, offset down by CELL_SIZE
-      sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
-      sy = factory.cy * CELL_SIZE + CELL_SIZE * 2 + CELL_SIZE;
-    }
-
-    const unit = new Entity(unitType, house, sx, sy);
-    unit.mission = mission;
-    if (guardOrigin) {
-      unit.guardOrigin = guardOrigin;
-    }
-    this.entities.push(unit);
-    this.entityById.set(unit.id, unit);
-    return unit;
+    return _spawnAIUnit(this._aiCtx, house, unitType, factoryType, mission, guardOrigin);
   }
 
   /** Spawn a produced unit at its factory */
@@ -6967,416 +5248,21 @@ export class Game {
 
   /** Place a completed structure on the map */
   placeStructure(cx: number, cy: number): boolean {
-    if (!this.pendingPlacement) return false;
-    const item = this.pendingPlacement;
-    const isWall = WALL_TYPES.has(item.type);
-    // Walls after the first need to check credits (first wall paid at production start)
-    if (isWall && this.credits < item.cost) return false;
-    const [fw, fh] = STRUCTURE_SIZE[item.type] ?? [2, 2];
-    // Validate: cells must be passable and within bounds
-    for (let dy = 0; dy < fh; dy++) {
-      for (let dx = 0; dx < fw; dx++) {
-        if (!this.map.isPassable(cx + dx, cy + dy)) return false;
-      }
-    }
-    // Walls can be placed anywhere passable (C++ parity — no adjacency requirement for walls)
-    // Non-wall structures must be adjacent to an existing player structure (footprint-based AABB)
-    if (!isWall) {
-      let adjacent = false;
-      for (const s of this.structures) {
-        if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
-        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-        const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
-        const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
-        if (nL < exR && nR > exL && nT < exB && nB > exT) { adjacent = true; break; }
-      }
-      if (!adjacent) return false;
-    }
-
-    const image = item.type.toLowerCase();
-    const maxHp = STRUCTURE_MAX_HP[item.type] ?? 256;
-    // Create structure with construction animation
-    const newStruct: MapStructure = {
-      type: item.type,
-      image,
-      house: this.playerHouse,
-      cx, cy,
-      hp: maxHp,
-      maxHp,
-      alive: true,
-      rubble: false,
-      weapon: STRUCTURE_WEAPONS[item.type],
-      attackCooldown: 0,
-      ammo: -1,
-      maxAmmo: -1,
-      buildProgress: isWall ? undefined : 0, // walls appear instantly
-    };
-    this.structures.push(newStruct);
-    // Mark cells as impassable
-    for (let dy = 0; dy < fh; dy++) {
-      for (let dx = 0; dx < fw; dx++) {
-        this.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
-      }
-    }
-    // Store wall type for auto-connection sprite rendering
-    if (isWall) {
-      this.map.setWallType(cx, cy, item.type);
-    }
-    // For walls: keep pendingPlacement active for continuous placement
-    if (isWall) {
-      if (this.wallPlacementPrepaid) {
-        this.wallPlacementPrepaid = false; // first wall was paid at production start
-      } else {
-        this.credits -= this.getEffectiveCost(item); // subsequent walls deducted on placement
-      }
-    } else {
-      this.pendingPlacement = null;
-    }
-
-    this.audio.play('building_placed');
-    this.audio.play('eva_building');
-    // Check if placing this structure unlocks new production items
-    const oldItems = this.cachedAvailableItems ?? [];
-    this.cachedAvailableItems = null; // force recompute
-    const newItems = this.getAvailableItems();
-    if (newItems.length > oldItems.length) {
-      this.audio.play('eva_new_options');
-      this.evaMessages.push({ text: 'NEW CONSTRUCTION OPTIONS', tick: this.tick });
-    }
-    // Spawn free harvester with refinery
-    if (item.type === 'PROC') {
-      const harvSpawn = this.findPassableSpawn(cx + 1, cy + fh, cx, cy, fw, fh);
-      const harv = new Entity(UnitType.V_HARV, this.playerHouse,
-        harvSpawn.cx * CELL_SIZE + CELL_SIZE / 2, harvSpawn.cy * CELL_SIZE + CELL_SIZE / 2);
-      harv.harvesterState = 'idle';
-      this.entities.push(harv);
-      this.entityById.set(harv.id, harv);
-    }
-    return true;
+    return this._runPlacement(ctx => _placeStructure(ctx, cx, cy));
   }
 
   /** Deploy MCV at its current location → FACT structure */
   deployMCV(entity: Entity): boolean {
-    if (entity.type !== UnitType.V_MCV || !entity.alive) return false;
-    const ec = entity.cell;
-    // Need a 3x3 clear area
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (!this.map.isPassable(ec.cx + dx, ec.cy + dy)) return false;
-      }
-    }
-    // Remove the MCV entity
-    entity.alive = false;
-    entity.mission = Mission.DIE;
-    // Place a Construction Yard
-    const cx = ec.cx - 1;
-    const cy = ec.cy - 1;
-    const factMaxHp = STRUCTURE_MAX_HP['FACT'] ?? 256;
-    const newStruct: MapStructure = {
-      type: 'FACT',
-      image: 'fact',
-      house: this.playerHouse,
-      cx, cy,
-      hp: factMaxHp,
-      maxHp: factMaxHp,
-      alive: true,
-      rubble: false,
-      attackCooldown: 0,
-      ammo: -1,
-      maxAmmo: -1,
-    };
-    this.structures.push(newStruct);
-    // Mark 3x3 footprint
-    for (let dy = 0; dy < 3; dy++) {
-      for (let dx = 0; dx < 3; dx++) {
-        this.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
-      }
-    }
-    this.audio.play('eva_acknowledged');
-    this.effects.push({
-      type: 'explosion', x: entity.pos.x, y: entity.pos.y,
-      frame: 0, maxFrames: 15, size: 10, sprite: 'piffpiff', spriteStart: 0,
-    });
-    return true;
-  }
-
-  /** Map INI crate reward name to our CrateType */
-  private static readonly CRATE_NAME_MAP: Record<string, CrateType> = {
-    money: 'money', heal: 'heal', veterancy: 'heal', unit: 'unit',
-    armor: 'armor', firepower: 'firepower', speed: 'speed',
-    reveal: 'reveal', darkness: 'darkness', explosion: 'explosion',
-    squad: 'squad', heal_base: 'heal_base', napalm: 'napalm',
-    cloak: 'cloak', invulnerability: 'invulnerability',
-    parabomb: 'parabomb', sonar: 'sonar', icbm: 'icbm',
-    timequake: 'timequake', vortex: 'vortex',
-  };
-
-    /** CR9: Weighted crate share distribution (C++ CrateShares from rules.ini) */
-  private static readonly CRATE_SHARES: Array<{ type: CrateType; shares: number }> = [
-    { type: 'money', shares: 50 },
-    { type: 'unit', shares: 20 },
-    { type: 'speed', shares: 10 },
-    { type: 'firepower', shares: 10 },
-    { type: 'armor', shares: 10 },
-    { type: 'reveal', shares: 5 },
-    { type: 'cloak', shares: 3 },
-    { type: 'heal', shares: 15 },
-    { type: 'explosion', shares: 5 },
-    { type: 'parabomb', shares: 3 },
-    { type: 'sonar', shares: 2 },
-    { type: 'icbm', shares: 1 },
-    { type: 'timequake', shares: 1 },
-    { type: 'vortex', shares: 1 },
-  ];
-
-  /** CR9: Select a crate type using weighted random distribution */
-  private static weightedCrateType(): CrateType {
-    const shares = Game.CRATE_SHARES;
-    const totalShares = shares.reduce((sum, s) => sum + s.shares, 0);
-    let roll = Math.random() * totalShares;
-    for (const entry of shares) {
-      roll -= entry.shares;
-      if (roll <= 0) return entry.type;
-    }
-    return shares[shares.length - 1].type; // fallback
+    return this._runPlacement(ctx => _deployMCV(ctx, entity));
   }
 
   private spawnCrate(): void {
-    // CR9: Use weighted CrateShares distribution (C++ rules.ini)
-    let type = Game.weightedCrateType();
-    // Apply INI crate overrides if present
-    if (this.crateOverrides.silver) {
-      const t = Game.CRATE_NAME_MAP[this.crateOverrides.silver];
-      if (t) type = t;
-    }
-    // CR6: Crate lifetime = Random(CrateTime/2, CrateTime*2) in minutes, default CrateTime=10
-    // So 5-20 minutes, converted to ticks (x 15 FPS x 60 seconds/min)
-    const crateTimeMin = 10; // minutes (C++ default CrateTime)
-    const minLifetime = Math.floor(crateTimeMin / 2); // 5 minutes
-    const maxLifetime = crateTimeMin * 2; // 20 minutes
-    const lifetimeMinutes = minLifetime + Math.random() * (maxLifetime - minLifetime);
-    const lifetimeTicks = Math.floor(lifetimeMinutes * 60 * GAME_TICKS_PER_SEC);
-    // Try up to 20 random cells to find a valid spawn
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const cx = this.map.boundsX + Math.floor(Math.random() * this.map.boundsW);
-      const cy = this.map.boundsY + Math.floor(Math.random() * this.map.boundsH);
-      if (!this.map.isPassable(cx, cy)) continue;
-      if (this.map.getVisibility(cx, cy) === 0) continue; // must be explored
-      const x = cx * CELL_SIZE + CELL_SIZE / 2;
-      const y = cy * CELL_SIZE + CELL_SIZE / 2;
-      this.crates.push({ x, y, type, tick: this.tick, lifetime: lifetimeTicks });
-      return;
-    }
+    this._runCrate(ctx => _spawnCrate(ctx));
   }
 
   /** Apply crate bonus to the unit that picked it up */
   private pickupCrate(crate: Crate, unit: Entity): void {
-    this.playSoundAt('crate_pickup', crate.x, crate.y);
-    this.effects.push({
-      type: 'explosion', x: crate.x, y: crate.y,
-      frame: 0, maxFrames: 10, size: 8, sprite: 'piffpiff', spriteStart: 0,
-    });
-    switch (crate.type) {
-      case 'money':
-        // CR1: C++ solo play gives 2000 credits from money crate
-        this.addCredits(2000, true);
-        this.evaMessages.push({ text: 'MONEY CRATE', tick: this.tick });
-        break;
-      case 'heal':
-        unit.hp = unit.maxHp;
-        this.evaMessages.push({ text: 'UNIT HEALED', tick: this.tick });
-        break;
-      case 'unit': {
-        // Spawn a random unit nearby — includes expansion units
-        const types = [
-          UnitType.I_E1, UnitType.I_E2, UnitType.I_E3, UnitType.I_E4,
-          UnitType.I_SHOK, UnitType.I_MECH,          // CS/Aftermath infantry
-          UnitType.V_JEEP, UnitType.V_1TNK,            // base vehicles
-          UnitType.V_STNK, UnitType.V_CTNK,           // CS expansion vehicles
-        ];
-        const uType = types[Math.floor(Math.random() * types.length)];
-        const bonus = new Entity(uType, this.playerHouse, crate.x + CELL_SIZE, crate.y);
-        bonus.mission = Mission.GUARD;
-        this.entities.push(bonus);
-        this.entityById.set(bonus.id, bonus);
-        this.evaMessages.push({ text: 'REINFORCEMENTS', tick: this.tick });
-        break;
-      }
-      case 'armor':
-        // CR2: Set armorBias = 2 (half damage taken) — C++ ArmorBias, NOT double maxHp
-        unit.armorBias = 2;
-        this.evaMessages.push({ text: 'ARMOR UPGRADE', tick: this.tick });
-        break;
-      case 'firepower':
-        // CR3: Set firepowerBias = 2 (double damage output) — C++ FirepowerBias
-        unit.firepowerBias = 2;
-        this.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: this.tick });
-        break;
-      case 'speed':
-        // CR7: 1.5× speed boost — C++ rules.cpp SpeedBias=1.5 (verified)
-        unit.speedBias = 1.5;
-        this.evaMessages.push({ text: 'SPEED UPGRADE', tick: this.tick });
-        break;
-      case 'reveal':
-        // CR4: Reveal entire map for the player's house (C++ IsVisionary equivalent)
-        this.visionaryHouses.add(unit.house);
-        this.map.revealAll();
-        this.evaMessages.push({ text: 'MAP REVEALED', tick: this.tick });
-        break;
-      case 'darkness': {
-        // Shroud 7x7 cells around crate
-        const cc = worldToCell(crate.x, crate.y);
-        for (let dy = -3; dy <= 3; dy++) {
-          for (let dx = -3; dx <= 3; dx++) {
-            this.map.setVisibility(cc.cx + dx, cc.cy + dy, 0);
-          }
-        }
-        this.evaMessages.push({ text: 'DARKNESS', tick: this.tick });
-        break;
-      }
-      case 'explosion': {
-        // 200 HP damage to all units in 3-cell radius
-        for (const e of this.entities) {
-          if (!e.alive) continue;
-          const d = worldDist(e.pos, { x: crate.x, y: crate.y });
-          if (d <= 3) {
-            this.damageEntity(e, 200, 'HE');
-          }
-        }
-        this.effects.push({ type: 'explosion', x: crate.x, y: crate.y, frame: 0, maxFrames: EXPLOSION_FRAMES.atomsfx, size: 20, sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen' });
-        this.evaMessages.push({ text: 'BOOBY TRAP!', tick: this.tick });
-        break;
-      }
-      case 'squad': {
-        // Spawn 5 random infantry at crate location
-        const infTypes = [UnitType.I_E1, UnitType.I_E2, UnitType.I_E3, UnitType.I_E4, UnitType.I_E1];
-        for (let i = 0; i < 5; i++) {
-          const t = infTypes[Math.floor(Math.random() * infTypes.length)];
-          const ox = (Math.random() - 0.5) * CELL_SIZE * 2;
-          const oy = (Math.random() - 0.5) * CELL_SIZE * 2;
-          const inf = new Entity(t, this.playerHouse, crate.x + ox, crate.y + oy);
-          inf.mission = Mission.GUARD;
-          this.entities.push(inf);
-          this.entityById.set(inf.id, inf);
-        }
-        this.evaMessages.push({ text: 'SQUAD REINFORCEMENT', tick: this.tick });
-        break;
-      }
-      case 'heal_base': {
-        // Heal all player structures +20% HP
-        for (const s of this.structures) {
-          if (s.alive && this.isAllied(s.house, this.playerHouse)) {
-            s.hp = Math.min(s.maxHp, s.hp + Math.ceil(s.maxHp * 0.2));
-          }
-        }
-        this.evaMessages.push({ text: 'BASE REPAIRED', tick: this.tick });
-        break;
-      }
-      case 'napalm': {
-        // Fire effects in 3x3 grid
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const fx = crate.x + dx * CELL_SIZE;
-            const fy = crate.y + dy * CELL_SIZE;
-            this.effects.push({ type: 'explosion', x: fx, y: fy, frame: 0, maxFrames: EXPLOSION_FRAMES.napalm1, size: 12, sprite: 'napalm1', spriteStart: 0, blendMode: 'screen' });
-            // Damage units in each cell
-            for (const e of this.entities) {
-              if (!e.alive) continue;
-              const d = worldDist(e.pos, { x: fx, y: fy });
-              if (d <= 1) this.damageEntity(e, 80, 'Fire');
-            }
-          }
-        }
-        this.evaMessages.push({ text: 'NAPALM STRIKE', tick: this.tick });
-        break;
-      }
-      case 'cloak':
-        // CR5: Permanent cloaking ability (C++ IsCloakable from crate)
-        unit.isCloakable = true;
-        this.evaMessages.push({ text: 'UNIT CLOAKED', tick: this.tick });
-        break;
-      case 'invulnerability':
-        // 20 seconds invincibility (300 ticks)
-        unit.invulnTick = 300;
-        this.evaMessages.push({ text: 'INVULNERABILITY', tick: this.tick });
-        break;
-      case 'parabomb': {
-        // CR8: ParaBomb — airstrike at crate location (C++ RULES.INI ParaBomb weapon)
-        const crateBombDmg = WEAPON_STATS.ParaBomb.damage;
-        for (let i = -3; i <= 3; i++) {
-          const bx = crate.x + i * CELL_SIZE;
-          const by = crate.y;
-          this.effects.push({
-            type: 'explosion', x: bx, y: by,
-            frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'] ?? 22, size: 16,
-            sprite: 'art-exp1', spriteStart: 0,
-          });
-          for (const e of this.entities) {
-            if (!e.alive) continue;
-            if (worldDist(e.pos, { x: bx, y: by }) <= 1.5) {
-              this.damageEntity(e, crateBombDmg, 'HE');
-            }
-          }
-        }
-        this.audio.play('explode_lg');
-        this.evaMessages.push({ text: 'PARABOMB STRIKE', tick: this.tick });
-        break;
-      }
-      case 'sonar':
-        // CR8: Sonar — activate sonar pulse (reveal all subs for SONAR_PULSE_DURATION ticks)
-        for (const e of this.entities) {
-          if (!e.alive || !e.stats.isCloakable) continue;
-          if (this.isAllied(e.house, unit.house)) continue;
-          e.sonarPulseTimer = SONAR_PULSE_DURATION;
-        }
-        this.audio.play('cannon'); // sonar ping
-        this.evaMessages.push({ text: 'SONAR PULSE', tick: this.tick });
-        break;
-      case 'icbm': {
-        // CR8: ICBM — trigger a nuke strike at a random enemy structure
-        const enemyStructs = this.structures.filter(s =>
-          s.alive && !this.isAllied(s.house, unit.house)
-        );
-        if (enemyStructs.length > 0) {
-          const target = enemyStructs[Math.floor(Math.random() * enemyStructs.length)];
-          const tx = target.cx * CELL_SIZE + CELL_SIZE;
-          const ty = target.cy * CELL_SIZE + CELL_SIZE;
-          this.detonateNuke({ x: tx, y: ty });
-          this.evaMessages.push({ text: 'ICBM LAUNCHED', tick: this.tick });
-        } else {
-          // No enemy structures — fallback to money crate
-          this.addCredits(2000, true);
-          this.evaMessages.push({ text: 'MONEY CRATE', tick: this.tick });
-        }
-        break;
-      }
-      case 'timequake': {
-        // CR8: TimeQuake — damages ALL units AND structures on map (friend and foe) for 100-300 random damage
-        for (const e of this.entities) {
-          if (!e.alive) continue;
-          const dmg = 100 + Math.floor(Math.random() * 201); // 100-300
-          this.damageEntity(e, dmg, 'HE');
-        }
-        for (const s of this.structures) {
-          if (!s.alive) continue;
-          const dmg = 100 + Math.floor(Math.random() * 201);
-          this.damageStructure(s, dmg);
-        }
-        this.renderer.screenShake = Math.max(this.renderer.screenShake, 15);
-        this.audio.play('explode_lg');
-        this.evaMessages.push({ text: 'TIME QUAKE', tick: this.tick });
-        break;
-      }
-      case 'vortex': {
-        // CR8: Vortex — spawns a wandering energy vortex that damages nearby units for ~30 seconds
-        this.activeVortices.push({
-          x: crate.x, y: crate.y, angle: Math.random() * Math.PI * 2, ticksLeft: 450, id: this.tick,
-        });
-        this.audio.play('teslazap');
-        this.evaMessages.push({ text: 'VORTEX SPAWNED', tick: this.tick });
-        break;
-      }
-    }
+    this._runCrate(ctx => _pickupCrate(ctx, crate, unit));
   }
 
   // ─── Superweapon System ─────────────────────────────────
@@ -7605,1108 +5491,66 @@ export class Game {
   }
 
 
-  // === Full AI — Strategic Opponent ===
+  // === Full AI — Strategic Opponent (delegates to ai.ts) ===
 
   /** Create initial AIHouseState for a house, applying difficulty modifiers */
   private createAIHouseState(house: House): AIHouseState {
-    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-    return {
-      house,
-      phase: 'economy',
-      productionEnabled: false, // C++ parity: AI only produces after BEGIN_PRODUCTION trigger
-      buildQueue: [],
-      lastBuildTick: 0,
-      buildCooldown: 0,
-      attackPool: new Set(),
-      attackThreshold: mods.attackThreshold,
-      lastAttackTick: 0,
-      attackCooldownTicks: mods.attackCooldown,
-      harvesterCount: 0,
-      refineryCount: 0,
-      lastBaseAttackTick: 0,
-      underAttack: false,
-      incomeMult: mods.incomeMult,
-      buildSpeedMult: mods.buildSpeedMult,
-      aggressionMult: mods.aggressionMult,
-      designatedEnemy: null, // AI4: set by triggers or AI logic
-      preferredTarget: null,
-      iq: this.houseIQs.get(house) ?? 3,             // default IQ 3 = full AI
-      techLevel: this.houseTechLevels.get(house) ?? 10, // default tech 10 = everything
-      maxUnit: this.houseMaxUnits.get(house) ?? -1,   // -1 = unlimited
-      maxInfantry: this.houseMaxInfantry.get(house) ?? -1,
-      maxBuilding: this.houseMaxBuildings.get(house) ?? -1,
-    };
-  }
-
-  /** Count alive structures of a given type for a house */
-  private aiCountStructure(house: House, type: string): number {
-    let count = 0;
-    for (const s of this.structures) {
-      if (s.alive && s.house === house && s.type === type) count++;
-    }
-    return count;
-  }
-
-  /** Calculate power produced by a house's structures */
-  private aiPowerProduced(house: House): number {
-    let power = 0;
-    for (const s of this.structures) {
-      if (!s.alive || s.house !== house) continue;
-      if (s.type === 'POWR') power += 100;
-      else if (s.type === 'APWR') power += 200;
-    }
-    return power;
-  }
-
-  /** Calculate power consumed by a house's structures */
-  private aiPowerConsumed(house: House): number {
-    let power = 0;
-    for (const s of this.structures) {
-      if (!s.alive || s.house !== house) continue;
-      // Power consumption by structure type — rules.ini Power= values
-      switch (s.type) {
-        case 'TENT': case 'BARR': power += 20; break;
-        case 'WEAP': power += 30; break;
-        case 'PROC': power += 30; break;
-        case 'DOME': power += 40; break;
-        case 'GUN': power += 40; break;
-        case 'PBOX': case 'HBOX': power += 15; break;
-        case 'TSLA': power += 150; break;
-        case 'SAM': power += 20; break;
-        case 'AGUN': power += 50; break;
-        case 'ATEK': power += 200; break;
-        case 'STEK': power += 100; break;
-        case 'HPAD': power += 10; break;
-        case 'AFLD': power += 30; break;
-        case 'GAP': power += 60; break;
-        case 'FIX': power += 30; break;
-        case 'FTUR': power += 20; break;
-        case 'SILO': power += 10; break;
-        case 'KENN': power += 10; break;
-        case 'SYRD': case 'SPEN': power += 30; break;
-        case 'IRON': case 'PDOX': power += 200; break;
-        case 'MSLO': power += 100; break;
-      }
-    }
-    return power;
-  }
-
-  /** Check if AI house has a prerequisite structure */
-  private aiHasPrereq(house: House, prereq: string): boolean {
-    if (prereq === 'TENT') {
-      // Accept either TENT or BARR
-      return this.structures.some(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
-    }
-    return this.structures.some(s => s.alive && s.house === house && s.type === prereq);
-  }
-
-  /** Generate priority-ordered build queue for AI house */
-  private getAIBuildOrder(house: House, _state: AIHouseState): string[] {
-    const queue: string[] = [];
-    const faction = HOUSE_FACTION[house] ?? 'both';
-    const produced = this.aiPowerProduced(house);
-    const consumed = this.aiPowerConsumed(house);
-    const credits = this.houseCredits.get(house) ?? 0;
-
-    // 1. POWR if power deficit
-    if (consumed >= produced) {
-      queue.push('POWR');
-    }
-    // 2. TENT/BARR if none (need infantry production)
-    if (!this.aiHasPrereq(house, 'TENT')) {
-      queue.push('TENT');
-    }
-    // 3. PROC if < 2 refineries (need economy)
-    if (this.aiCountStructure(house, 'PROC') < 2) {
-      queue.push('PROC');
-    }
-    // 4. WEAP if none (need vehicle production)
-    if (this.aiCountStructure(house, 'WEAP') === 0) {
-      queue.push('WEAP');
-    }
-    // 5. POWR if power margin < 100 (preemptive)
-    if (produced - consumed < 100 && !queue.includes('POWR')) {
-      queue.push('POWR');
-    }
-    // 6. DOME if none and credits > 1000 (tech unlock)
-    if (this.aiCountStructure(house, 'DOME') === 0 && credits > 1000) {
-      queue.push('DOME');
-    }
-    // 7. Defense structures (faction-dependent)
-    const defType = faction === 'soviet' ? 'TSLA' : 'GUN';
-    const defType2 = faction === 'soviet' ? 'TSLA' : 'HBOX';
-    const totalDef = this.aiCountStructure(house, defType) + this.aiCountStructure(house, defType2);
-    if (totalDef < 2) {
-      queue.push(defType);
-    }
-    // 8. Tech center if none and has DOME
-    if (this.aiHasPrereq(house, 'DOME')) {
-      const techType = faction === 'soviet' ? 'STEK' : 'ATEK';
-      if (this.aiCountStructure(house, techType) === 0) {
-        queue.push(techType);
-      }
-    }
-    // 9. Air production if has tech center
-    const hasTech = faction === 'soviet'
-      ? this.aiHasPrereq(house, 'STEK')
-      : this.aiHasPrereq(house, 'ATEK');
-    if (hasTech) {
-      const airType = faction === 'soviet' ? 'AFLD' : 'HPAD';
-      if (this.aiCountStructure(house, airType) === 0) {
-        queue.push(airType);
-      }
-    }
-    // 10. Extra PROC if harvester count > refinery count
-    if (_state.harvesterCount > _state.refineryCount) {
-      queue.push('PROC');
-    }
-
-    return queue;
+    return _createAIHouseState(this._aiCtx, house);
   }
 
   /** AI strategic planner — phase transitions every 150 ticks (~10s) */
   private updateAIStrategicPlanner(): void {
-    if (this.tick % 150 !== 0) return;
-
-    for (const [house, state] of this.aiStates) {
-      // C++ IQ 0 = no AI at all
-      if (state.iq === 0) continue;
-      // Update economy cache
-      state.harvesterCount = 0;
-      state.refineryCount = 0;
-      for (const e of this.entities) {
-        if (e.alive && e.house === house && (e.type === UnitType.V_HARV)) {
-          state.harvesterCount++;
-        }
-      }
-      for (const s of this.structures) {
-        if (s.alive && s.house === house && s.type === 'PROC') {
-          state.refineryCount++;
-        }
-      }
-
-      // Clear underAttack if no damage in 150 ticks (~10s)
-      if (state.underAttack && this.tick - state.lastBaseAttackTick > 150) {
-        state.underAttack = false;
-      }
-
-      // Phase transitions
-      switch (state.phase) {
-        case 'economy': {
-          const hasBarracks = this.aiHasPrereq(house, 'TENT');
-          const hasWeap = this.aiCountStructure(house, 'WEAP') > 0;
-          const hasPower = this.aiCountStructure(house, 'POWR') + this.aiCountStructure(house, 'APWR') >= 2;
-          if (hasBarracks && hasWeap && hasPower) {
-            state.phase = 'buildup';
-          }
-          break;
-        }
-        case 'buildup': {
-          if (state.attackPool.size >= state.attackThreshold) {
-            state.phase = 'attack';
-          }
-          break;
-        }
-        case 'attack': {
-          // After launch, transition back to buildup
-          if (state.attackPool.size === 0) {
-            state.phase = 'buildup';
-          }
-          break;
-        }
-      }
-    }
-  }
-
-  /** Get centroid of alive structures for an AI house */
-  private aiGetBaseCenter(house: House): { cx: number; cy: number } | null {
-    let sumX = 0, sumY = 0, count = 0;
-    for (const s of this.structures) {
-      if (!s.alive || s.house !== house) continue;
-      const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-      sumX += s.cx + w / 2;
-      sumY += s.cy + h / 2;
-      count++;
-    }
-    if (count === 0) return null;
-    return { cx: Math.floor(sumX / count), cy: Math.floor(sumY / count) };
-  }
-
-  /** Check if a cell is a factory exit zone (below WEAP/TENT/BARR/PROC) */
-  private aiIsFactoryExit(cx: number, cy: number, house: House): boolean {
-    const exitTypes = ['WEAP', 'TENT', 'BARR', 'PROC'];
-    for (const s of this.structures) {
-      if (!s.alive || s.house !== house || !exitTypes.includes(s.type)) continue;
-      const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-      // Exit row is directly below the structure
-      if (cy === s.cy + h && cx >= s.cx && cx < s.cx + w) return true;
-    }
-    return false;
-  }
-
-  /** Spiral scan outward from base center to find valid placement for a structure */
-  private aiPlaceStructure(house: House, type: string): { cx: number; cy: number } | null {
-    const center = this.aiGetBaseCenter(house);
-    if (!center) return null;
-
-    const [fw, fh] = STRUCTURE_SIZE[type] ?? [1, 1];
-
-    for (let ring = 1; ring <= 6; ring++) {
-      // Scan cells in this ring, preferring perimeter positions for defenses
-      const candidates: { cx: number; cy: number; dist: number }[] = [];
-
-      for (let dy = -ring; dy <= ring; dy++) {
-        for (let dx = -ring; dx <= ring; dx++) {
-          // Only check ring perimeter (not interior, which was already checked)
-          if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue;
-
-          const cx = center.cx + dx;
-          const cy = center.cy + dy;
-
-          // Bounds check
-          if (cx < this.map.boundsX || cy < this.map.boundsY ||
-              cx + fw > this.map.boundsX + this.map.boundsW ||
-              cy + fh > this.map.boundsY + this.map.boundsH) continue;
-
-          // Check all footprint cells are passable
-          let valid = true;
-          for (let fy = 0; fy < fh && valid; fy++) {
-            for (let fx = 0; fx < fw && valid; fx++) {
-              const t = this.map.getTerrain(cx + fx, cy + fy);
-              if (t === Terrain.WALL || t === Terrain.WATER) valid = false;
-              // Check no existing structure overlaps
-              for (const s of this.structures) {
-                if (!s.alive) continue;
-                const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-                if (cx + fx >= s.cx && cx + fx < s.cx + sw &&
-                    cy + fy >= s.cy && cy + fy < s.cy + sh) {
-                  valid = false;
-                  break;
-                }
-              }
-            }
-          }
-          if (!valid) continue;
-
-          // Don't block factory exits
-          let blocksExit = false;
-          for (let fy = 0; fy < fh && !blocksExit; fy++) {
-            for (let fx = 0; fx < fw && !blocksExit; fx++) {
-              if (this.aiIsFactoryExit(cx + fx, cy + fy, house)) blocksExit = true;
-            }
-          }
-          if (blocksExit) continue;
-
-          // BP3: Check adjacency to existing house structure (dist ≤ 2 cells, C++ default adjacency=1 + buffer)
-          let adjacent = false;
-          for (const s of this.structures) {
-            if (!s.alive || s.house !== house) continue;
-            const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-            const scx = s.cx + sw / 2;
-            const scy = s.cy + sh / 2;
-            const pcx = cx + fw / 2;
-            const pcy = cy + fh / 2;
-            if (Math.abs(pcx - scx) <= 2 && Math.abs(pcy - scy) <= 2) {
-              adjacent = true;
-              break;
-            }
-          }
-          if (!adjacent) continue;
-
-          const dist = dx * dx + dy * dy;
-          candidates.push({ cx, cy, dist });
-        }
-      }
-
-      if (candidates.length > 0) {
-        // For defense structures, prefer perimeter (largest dist); otherwise closest
-        const isDefense = type === 'GUN' || type === 'HBOX' || type === 'TSLA' || type === 'SAM';
-        candidates.sort((a, b) => isDefense ? b.dist - a.dist : a.dist - b.dist);
-        return { cx: candidates[0].cx, cy: candidates[0].cy };
-      }
-    }
-    return null;
+    this._runAI(ctx => _updateAIStrategicPlanner(ctx));
   }
 
   /** AI base construction — build new structures from build queue */
   private updateAIConstruction(): void {
-    if (this.tick % 90 !== 0) return; // every 6 seconds
-
-    for (const [house, state] of this.aiStates) {
-      // C++ parity: AI only builds structures after BEGIN_PRODUCTION trigger
-      if (!state.productionEnabled) continue;
-      // C++ IQ < 1 = no building
-      if (state.iq < 1) continue;
-      // Need a ConYard
-      if (this.aiCountStructure(house, 'FACT') === 0) continue;
-
-      // C++ MaxBuilding cap — count alive buildings for this house
-      if (state.maxBuilding >= 0) {
-        let buildingCount = 0;
-        for (const s of this.structures) {
-          if (s.alive && s.house === house) buildingCount++;
-        }
-        if (buildingCount >= state.maxBuilding) continue;
-      }
-
-      // Cooldown
-      if (state.buildCooldown > 0) {
-        state.buildCooldown--;
-        continue;
-      }
-
-      const credits = this.houseCredits.get(house) ?? 0;
-      if (credits <= 0) continue;
-
-      // Refresh build queue if empty
-      if (state.buildQueue.length === 0) {
-        state.buildQueue = this.getAIBuildOrder(house, state);
-      }
-      if (state.buildQueue.length === 0) continue;
-
-      const buildType = state.buildQueue[0];
-      const prodItem = this.scenarioProductionItems.find(p => p.type === buildType && p.isStructure);
-      if (!prodItem) {
-        state.buildQueue.shift();
-        continue;
-      }
-
-      if (credits < prodItem.cost) continue;
-
-      const pos = this.aiPlaceStructure(house, buildType);
-      if (!pos) {
-        state.buildQueue.shift(); // can't place, skip
-        continue;
-      }
-
-      // Deduct credits
-      this.houseCredits.set(house, credits - prodItem.cost);
-      state.buildQueue.shift();
-
-      // Spawn structure
-      this.spawnAIStructure(buildType, house, pos.cx, pos.cy);
-
-      // Set cooldown scaled by difficulty
-      const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-      state.buildCooldown = Math.floor(6 * mods.buildSpeedMult); // 6 cycles base × speed mult
-      state.lastBuildTick = this.tick;
-    }
-  }
-
-  /** Get staging area for AI house — base center offset toward nearest enemy */
-  private aiStagingArea(house: House): WorldPos | null {
-    const center = this.aiGetBaseCenter(house);
-    if (!center) return null;
-
-    // Find nearest enemy structure
-    let nearestDist = Infinity;
-    let enemyCx = center.cx;
-    let enemyCy = center.cy;
-    for (const s of this.structures) {
-      if (!s.alive || this.isAllied(s.house, house)) continue;
-      const dx = s.cx - center.cx;
-      const dy = s.cy - center.cy;
-      const dist = dx * dx + dy * dy;
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        enemyCx = s.cx;
-        enemyCy = s.cy;
-      }
-    }
-
-    // Offset 5 cells toward enemy from base center
-    const dx = enemyCx - center.cx;
-    const dy = enemyCy - center.cy;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    const stageCx = center.cx + Math.round(dx / len * 5);
-    const stageCy = center.cy + Math.round(dy / len * 5);
-
-    return {
-      x: stageCx * CELL_SIZE + CELL_SIZE / 2,
-      y: stageCy * CELL_SIZE + CELL_SIZE / 2,
-    };
-  }
-
-  /** Weighted production pick based on composition targets */
-  private getAIProductionPick(house: House, category: 'infantry' | 'vehicle'): ProductionItem | null {
-    const faction = HOUSE_FACTION[house] ?? 'both';
-    const prereq = category === 'infantry' ? 'TENT' : 'WEAP';
-
-    const aiTechLevel = this.aiStates.get(house)?.techLevel ?? 10;
-    const items = this.scenarioProductionItems.filter(p =>
-      (p.prerequisite === prereq || (category === 'infantry' && p.prerequisite === 'BARR')) &&
-      !p.isStructure &&
-      (p.faction === 'both' || p.faction === faction) &&
-      (p.techLevel === undefined || (p.techLevel >= 0 && p.techLevel <= aiTechLevel)) &&
-      // Check tech prereq
-      (!p.techPrereq || this.aiHasPrereq(house, p.techPrereq))
-    );
-
-    if (items.length === 0) return null;
-
-    // Count current composition
-    let antiArmor = 0, infantry = 0, total = 0;
-    for (const e of this.entities) {
-      if (!e.alive || e.house !== house || e.isAnt) continue;
-      total++;
-      if (e.type === UnitType.I_E3 || e.type === UnitType.V_2TNK ||
-          e.type === UnitType.V_3TNK || e.type === UnitType.V_4TNK ||
-          e.type === UnitType.V_1TNK) {
-        antiArmor++;
-      }
-      if (e.type === UnitType.I_E1 || e.type === UnitType.I_E2) {
-        infantry++;
-      }
-    }
-
-    // Weight items based on composition gaps
-    const antiArmorRatio = total > 0 ? antiArmor / total : 0;
-    const infantryRatio = total > 0 ? infantry / total : 0;
-
-    const weighted: { item: ProductionItem; weight: number }[] = items.map(item => {
-      let weight = 1;
-      const isAntiArmor = item.type === 'E3' || item.type === '2TNK' || item.type === '3TNK' ||
-                          item.type === '4TNK' || item.type === '1TNK';
-      const isInfantry = item.type === 'E1' || item.type === 'E2';
-
-      if (isAntiArmor && antiArmorRatio < 0.4) weight = 3;
-      if (isInfantry && infantryRatio < 0.3) weight = 2;
-      // Don't overproduce engineers
-      if (item.type === 'E6') weight = 0.2;
-      // Don't overproduce medics
-      if (item.type === 'MEDI') weight = 0.3;
-      // Prefer harvesters if economy needs it — but that's handled separately
-      if (item.type === 'HARV') weight = 0.1;
-
-      return { item, weight };
-    });
-
-    // Weighted random pick
-    const totalWeight = weighted.reduce((sum, w) => sum + w.weight, 0);
-    if (totalWeight <= 0) return items[0];
-    let roll = Math.random() * totalWeight;
-    for (const w of weighted) {
-      roll -= w.weight;
-      if (roll <= 0) return w.item;
-    }
-    return items[0];
+    this._runAI(ctx => _updateAIConstruction(ctx));
   }
 
   /** Update AI harvester counts and force-produce if needed */
   private updateAIHarvesters(): void {
-    if (this.tick % 60 !== 0) return;
-
-    for (const [house, state] of this.aiStates) {
-      // Count harvesters and refineries
-      state.harvesterCount = 0;
-      for (const e of this.entities) {
-        if (e.alive && e.house === house && e.type === UnitType.V_HARV) {
-          state.harvesterCount++;
-        }
-      }
-      state.refineryCount = this.aiCountStructure(house, 'PROC');
-
-      // C++ parity: AI only force-produces harvesters after BEGIN_PRODUCTION trigger
-      if (!state.productionEnabled) continue;
-
-      // If 0 harvesters and has refinery + war factory → force-produce
-      if (state.harvesterCount === 0 && state.refineryCount > 0 &&
-          this.aiCountStructure(house, 'WEAP') > 0) {
-        const credits = this.houseCredits.get(house) ?? 0;
-        const harvItem = this.scenarioProductionItems.find(p => p.type === 'HARV');
-        if (harvItem && credits >= harvItem.cost) {
-          const unit = this.spawnAIUnit(house, UnitType.V_HARV, 'WEAP');
-          if (unit) {
-            this.houseCredits.set(house, credits - harvItem.cost);
-          }
-        }
-      }
-    }
+    this._runAI(ctx => _updateAIHarvesters(ctx));
   }
 
   /** AI attack group management — accumulate pool and launch coordinated attacks */
   private updateAIAttackGroups(): void {
-    if (this.tick % 120 !== 0) return; // every 8 seconds
-
-    for (const [house, state] of this.aiStates) {
-      // C++ parity: attack groups only form after BEGIN_PRODUCTION trigger
-      if (!state.productionEnabled) continue;
-      // C++ IQ < 2 = no attack coordination
-      if (state.iq < 2) continue;
-      if (state.phase !== 'buildup' && state.phase !== 'attack') continue;
-
-      const staging = this.aiStagingArea(house);
-      if (!staging) continue;
-
-      // Pool accumulation: scan entities with AREA_GUARD near staging area
-      for (const e of this.entities) {
-        if (!e.alive || e.house !== house) continue;
-        if (e.type === UnitType.V_HARV) continue; // never recruit harvesters
-        if (e.mission !== Mission.AREA_GUARD && e.mission !== Mission.GUARD) continue;
-        // Already in pool
-        if (state.attackPool.has(e.id)) continue;
-        // Within 8 cells of staging area
-        const dist = worldDist(e.pos, staging);
-        if (dist < 8) {
-          state.attackPool.add(e.id);
-        }
-      }
-
-      // Prune dead/missing from pool
-      for (const id of state.attackPool) {
-        const e = this.entityById.get(id);
-        if (!e || !e.alive) state.attackPool.delete(id);
-      }
-
-      // Launch check (aggressionMult reduces threshold and cooldown)
-      const effectiveThreshold = Math.max(2, Math.floor(state.attackThreshold / state.aggressionMult));
-      const effectiveCooldown = Math.floor(state.attackCooldownTicks / state.aggressionMult);
-      if (state.attackPool.size >= effectiveThreshold &&
-          this.tick - state.lastAttackTick > effectiveCooldown) {
-        this.launchAIAttack(house, state);
-      }
-    }
-  }
-
-  /** Launch a coordinated AI attack */
-  private launchAIAttack(house: House, state: AIHouseState): void {
-    const target = this.aiPickAttackTarget(house);
-    if (!target) return;
-
-    const waveId = this.nextWaveId++;
-    const rallyTick = this.tick + 30; // 2s rally before advance
-
-    for (const id of state.attackPool) {
-      const e = this.entityById.get(id);
-      if (!e || !e.alive) continue;
-      e.mission = Mission.HUNT;
-      e.moveTarget = target;
-      e.waveId = waveId;
-      e.waveRallyTick = rallyTick;
-    }
-
-    state.lastAttackTick = this.tick;
-    state.attackPool.clear();
-    // Phase transitions back to buildup via strategic planner
-  }
-
-  /** Pick best attack target for AI house */
-  private aiPickAttackTarget(house: House): WorldPos | null {
-    // Check preferred target from TACTION_PREFERRED_TARGET
-    const ptState = this.aiStates.get(house);
-    if (ptState?.preferredTarget != null) {
-      const STRUCT_TYPES: Record<number, string> = {
-        0: 'ATEK', 1: 'IRON', 2: 'WEAP', 3: 'PDOX', 4: 'PBOX', 5: 'HBOX',
-        6: 'DOME', 7: 'GAP', 8: 'GUN', 9: 'AGUN', 10: 'FTUR', 11: 'FACT',
-        12: 'PROC', 13: 'SILO', 14: 'HPAD', 15: 'SAM', 16: 'AFLD', 17: 'POWR',
-        18: 'APWR', 19: 'STEK', 20: 'HOSP', 21: 'BARR', 22: 'TENT', 23: 'KENN',
-        24: 'FIX', 25: 'BIO', 26: 'MISS', 27: 'SYRD', 28: 'SPEN', 29: 'MSLO',
-        30: 'FCOM', 31: 'TSLA', 32: 'QUEE', 33: 'LAR1', 34: 'LAR2',
-      };
-      const prefType = STRUCT_TYPES[ptState.preferredTarget];
-      if (prefType) {
-        for (const s of this.structures) {
-          if (!s.alive || this.isAllied(s.house, house)) continue;
-          if (s.type === prefType) {
-            const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-            return { x: (s.cx + w / 2) * CELL_SIZE, y: (s.cy + h / 2) * CELL_SIZE };
-          }
-        }
-      }
-    }
-
-    // Priority: FACT > WEAP > PROC > nearest structure > nearest unit cluster
-    const priorities = ['FACT', 'WEAP', 'PROC'];
-    for (const type of priorities) {
-      for (const s of this.structures) {
-        if (!s.alive || this.isAllied(s.house, house)) continue;
-        if (s.type === type) {
-          const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-          return {
-            x: (s.cx + w / 2) * CELL_SIZE,
-            y: (s.cy + h / 2) * CELL_SIZE,
-          };
-        }
-      }
-    }
-
-    // Nearest enemy structure
-    const center = this.aiGetBaseCenter(house);
-    if (!center) return null;
-
-    let bestDist = Infinity;
-    let bestPos: WorldPos | null = null;
-
-    for (const s of this.structures) {
-      if (!s.alive || this.isAllied(s.house, house)) continue;
-      const dx = s.cx - center.cx;
-      const dy = s.cy - center.cy;
-      const dist = dx * dx + dy * dy;
-      if (dist < bestDist) {
-        bestDist = dist;
-        const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-        bestPos = { x: (s.cx + w / 2) * CELL_SIZE, y: (s.cy + h / 2) * CELL_SIZE };
-      }
-    }
-    if (bestPos) return bestPos;
-
-    // Nearest enemy unit
-    for (const e of this.entities) {
-      if (!e.alive || this.isAllied(e.house, house)) continue;
-      const dx = e.pos.x / CELL_SIZE - center.cx;
-      const dy = e.pos.y / CELL_SIZE - center.cy;
-      const dist = dx * dx + dy * dy;
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestPos = { x: e.pos.x, y: e.pos.y };
-      }
-    }
-
-    return bestPos;
-  }
-
-  /** Recall up to half the attack pool as defenders when base is under attack */
-  private aiRecallDefenders(house: House, state: AIHouseState): void {
-    const center = this.aiGetBaseCenter(house);
-    if (!center) return;
-
-    const centerPos = { x: center.cx * CELL_SIZE + CELL_SIZE / 2, y: center.cy * CELL_SIZE + CELL_SIZE / 2 };
-    let recalled = 0;
-    const maxRecall = Math.ceil(state.attackPool.size / 2);
-
-    for (const id of state.attackPool) {
-      if (recalled >= maxRecall) break;
-      const e = this.entityById.get(id);
-      if (!e || !e.alive) continue;
-      e.mission = Mission.HUNT;
-      e.moveTarget = centerPos;
-      state.attackPool.delete(id);
-      recalled++;
-    }
+    this._runAI(ctx => _updateAIAttackGroups(ctx));
   }
 
   /** AI defense — detect base attacks and rally defenders */
   private updateAIDefense(): void {
-    if (this.tick % 45 !== 0) return; // every 3 seconds
-
-    for (const [house, state] of this.aiStates) {
-      if (!state.underAttack) continue;
-      // C++ IQ < 2 = no defensive rallying
-      if (state.iq < 2) continue;
-
-      // Recall defenders if attack pool has units
-      if (state.attackPool.size > 0) {
-        this.aiRecallDefenders(house, state);
-      }
-
-      // Rally idle units near base to hunt the attacker
-      const center = this.aiGetBaseCenter(house);
-      if (!center) continue;
-      const centerPos = { x: center.cx * CELL_SIZE + CELL_SIZE / 2, y: center.cy * CELL_SIZE + CELL_SIZE / 2 };
-
-      for (const e of this.entities) {
-        if (!e.alive || e.house !== house) continue;
-        if (e.type === UnitType.V_HARV) continue;
-        if (e.mission !== Mission.AREA_GUARD && e.mission !== Mission.GUARD) continue;
-        // Only rally units close to base (within 10 cells)
-        const dist = worldDist(e.pos, centerPos);
-        if (dist < 10) {
-          // Find nearest enemy near base
-          let nearestEnemy: Entity | null = null;
-          let nearestDist = Infinity;
-          for (const enemy of this.entities) {
-            if (!enemy.alive || this.isAllied(enemy.house, house)) continue;
-            const eDist = worldDist(enemy.pos, centerPos);
-            if (eDist < 12 && eDist < nearestDist) {
-              nearestDist = eDist;
-              nearestEnemy = enemy;
-            }
-          }
-          if (nearestEnemy) {
-            e.mission = Mission.HUNT;
-            e.moveTarget = { x: nearestEnemy.pos.x, y: nearestEnemy.pos.y };
-          }
-        }
-      }
-    }
+    this._runAI(ctx => _updateAIDefense(ctx));
   }
 
   /** AI retreat — damaged units fall back to repair depot or base */
   private updateAIRetreat(): void {
-    if (this.tick % 30 !== 0) return; // every 2 seconds
-
-    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-    const retreatPercent = mods.retreatHpPercent;
-
-    for (const e of this.entities) {
-      if (!e.alive || this.isPlayerControlled(e)) continue;
-      if (e.isAnt) continue; // ants never retreat
-      if (e.isSuicide) continue; // IsSuicide teams fight to the death
-
-      const state = this.aiStates.get(e.house);
-      if (!state) continue;
-      // C++ IQ < 3 = no retreat intelligence
-      if (state.iq < 3) continue;
-
-      // Emergency harvester return: HP < 30% → force return to nearest refinery
-      if (e.type === UnitType.V_HARV) {
-        const hpRatio = e.hp / e.maxHp;
-        if (hpRatio >= 0.3) continue;
-        // Already returning or unloading — don't interrupt
-        if (e.harvesterState === 'returning' || e.harvesterState === 'unloading') continue;
-        if (e.mission === Mission.MOVE && e.moveTarget) continue;
-        // Find nearest refinery
-        let nearestProc: MapStructure | null = null;
-        let nearestDist = Infinity;
-        for (const s of this.structures) {
-          if (!s.alive || s.house !== e.house || s.type !== 'PROC') continue;
-          const [w, h] = STRUCTURE_SIZE[s.type] ?? [3, 2];
-          const sx = (s.cx + w / 2) * CELL_SIZE;
-          const sy = (s.cy + h / 2) * CELL_SIZE;
-          const d = (e.pos.x - sx) ** 2 + (e.pos.y - sy) ** 2;
-          if (d < nearestDist) { nearestDist = d; nearestProc = s; }
-        }
-        if (nearestProc) {
-          const [w, h] = STRUCTURE_SIZE[nearestProc.type] ?? [3, 2];
-          e.harvesterState = 'returning';
-          e.mission = Mission.MOVE;
-          e.moveTarget = {
-            x: (nearestProc.cx + w / 2) * CELL_SIZE,
-            y: (nearestProc.cy + h / 2) * CELL_SIZE,
-          };
-          e.harvestTick = 0;
-        }
-        continue; // harvesters don't go to FIX — they return to refinery
-      }
-
-      const hpRatio = e.hp / e.maxHp;
-      if (hpRatio >= retreatPercent) continue;
-
-      // Already retreating (MOVE back to base)
-      if (e.mission === Mission.MOVE && e.moveTarget) continue;
-
-      const center = this.aiGetBaseCenter(e.house);
-      if (!center) continue;
-
-      // HP < 25% (scaled): find nearest FIX (depot) first
-      let retreatTarget: WorldPos | null = null;
-      for (const s of this.structures) {
-        if (!s.alive || s.house !== e.house || s.type !== 'FIX') continue;
-        const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-        retreatTarget = {
-          x: (s.cx + w / 2) * CELL_SIZE,
-          y: (s.cy + h / 2) * CELL_SIZE,
-        };
-        break;
-      }
-
-      // No FIX → retreat to base center
-      if (!retreatTarget) {
-        retreatTarget = {
-          x: center.cx * CELL_SIZE + CELL_SIZE / 2,
-          y: center.cy * CELL_SIZE + CELL_SIZE / 2,
-        };
-      }
-
-      e.mission = Mission.MOVE;
-      e.moveTarget = retreatTarget;
-      // Remove from attack pool if in one
-      state.attackPool.delete(e.id);
-    }
+    this._runAI(ctx => _updateAIRetreat(ctx));
   }
 
-  /** AI auto-repair — IQ >= 3 houses repair damaged structures using their own credits.
-   *  C++ parity: AI repairs buildings below 80% HP, deducting from houseCredits. */
+  /** AI auto-repair — IQ >= 3 houses repair damaged structures using their own credits */
   private updateAIRepair(): void {
-    if (this.tick % 15 !== 0) return; // same rate as player repair (once per second)
-
-    for (const [house, state] of this.aiStates) {
-      if (state.iq < 3) continue;
-
-      const credits = this.houseCredits.get(house) ?? 0;
-      if (credits < 10) continue; // minimum credits to repair
-
-      for (const s of this.structures) {
-        if (!s.alive || s.house !== house) continue;
-        if (s.hp >= s.maxHp) continue;
-        if (s.sellProgress !== undefined) continue; // don't repair while selling
-        if (s.hp >= s.maxHp * 0.8) continue; // only repair if below 80% HP
-
-        // C++ parity: RepairStep=5, RepairPercent=0.20 (from rules.cpp:228-229)
-        const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
-        const repairCostPerStep = prodItem
-          ? Math.ceil((prodItem.cost * REPAIR_PERCENT) / (s.maxHp / REPAIR_STEP))
-          : 1;
-        const currentCredits = this.houseCredits.get(house) ?? 0;
-        if (currentCredits >= repairCostPerStep) {
-          s.hp = Math.min(s.maxHp, s.hp + REPAIR_STEP);
-          this.houseCredits.set(house, currentCredits - repairCostPerStep);
-        }
-      }
-    }
+    this._runAI(ctx => _updateAIRepair(ctx));
   }
 
-  /** AI auto-sell — IQ >= 3 houses sell near-death structures for partial refund.
-   *  C++ parity: sells buildings at CONDITION_RED HP, grants 50% * hpRatio refund to houseCredits. */
+  /** AI auto-sell — IQ >= 3 houses sell near-death structures for partial refund */
   private updateAISellDamaged(): void {
-    if (this.tick % 75 !== 0) return; // every 5 seconds
-
-    for (const [house, state] of this.aiStates) {
-      if (state.iq < 3) continue;
-
-      for (const s of this.structures) {
-        if (!s.alive || s.house !== house) continue;
-        if (s.sellProgress !== undefined) continue; // already selling
-        if (s.hp >= s.maxHp * CONDITION_RED) continue; // not critical
-
-        // Don't sell ConYard (essential for rebuilds)
-        if (s.type === 'FACT') continue;
-
-        // Don't sell last power plant — would cripple the base
-        if (s.type === 'POWR' || s.type === 'APWR') {
-          let powerCount = 0;
-          for (const ps of this.structures) {
-            if (ps.alive && ps.house === house && (ps.type === 'POWR' || ps.type === 'APWR')) {
-              powerCount++;
-            }
-          }
-          if (powerCount <= 1) continue;
-        }
-
-        // Sell: grant partial refund scaled by remaining HP, then destroy
-        const prodItem = this.scenarioProductionItems.find(p => p.type === s.type && p.isStructure);
-        if (prodItem) {
-          const hpRatio = s.hp / s.maxHp;
-          const refund = Math.floor(prodItem.cost * 0.5 * hpRatio);
-          const current = this.houseCredits.get(house) ?? 0;
-          this.houseCredits.set(house, current + refund);
-        }
-        // Destroy the structure (instant sell — no animation for AI)
-        s.alive = false;
-        s.rubble = true;
-        this.clearStructureFootprint(s);
-      }
-    }
+    this._runAI(ctx => _updateAISellDamaged(ctx));
   }
 
   /** AI passive income — AI houses earn credits from refineries */
   private updateAIIncome(): void {
-    if (this.tick % 450 !== 0) return; // every 30 seconds
-    for (const s of this.structures) {
-      if (!s.alive || s.type !== 'PROC') continue;
-      if (this.isAllied(s.house, this.playerHouse)) continue;
-      const current = this.houseCredits.get(s.house) ?? 0;
-      const aiState = this.aiStates.get(s.house);
-      const incomeMult = aiState ? aiState.incomeMult : 1.0;
-      this.houseCredits.set(s.house, current + Math.floor(100 * incomeMult));
-    }
+    this._runAI(ctx => _updateAIIncome(ctx));
   }
 
-  /** AI army building — AI houses produce units when they have credits and barracks/factory.
-   *  Faction-aware: AI builds units matching its own faction from PRODUCTION_ITEMS. */
+  /** AI army building — AI houses produce units when they have credits and barracks/factory */
   private updateAIProduction(): void {
-    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-    if (this.tick % mods.productionInterval !== 0) return;
-
-    // For ant missions, respect ant cap using old random production
-    if (this.scenarioId.startsWith('SCA')) {
-      const diffMods = DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal;
-      const antCount = this.entities.filter(e => e.alive && e.isAnt).length;
-      if (antCount >= diffMods.maxAnts) return;
-    }
-
-    // For each AI house, check if they have production buildings and credits
-    for (const [house, credits] of this.houseCredits) {
-      if (credits <= 0) continue;
-      if (this.isAllied(house, this.playerHouse)) continue;
-
-      const state = this.aiStates.get(house);
-      // C++ parity: strategic AI houses only produce after BEGIN_PRODUCTION trigger fires
-      if (state && !state.productionEnabled) continue;
-      const hasTent = this.aiHasPrereq(house, 'TENT');
-      const hasWeap = this.structures.some(s => s.alive && s.house === house && s.type === 'WEAP');
-
-      // Strategic AI: Harvester priority — if harvesterCount < refineryCount
-      if (state && hasWeap && state.harvesterCount < state.refineryCount) {
-        const harvItem = this.scenarioProductionItems.find(p => p.type === 'HARV');
-        if (harvItem && credits >= harvItem.cost) {
-          const unit = this.spawnAIUnit(house, UnitType.V_HARV, 'WEAP');
-          if (unit) {
-            this.houseCredits.set(house, credits - harvItem.cost);
-            continue; // one production per house per tick
-          }
-        }
-      }
-
-      // Staging area for new units (strategic AI) or barracks fallback
-      const staging = state ? this.aiStagingArea(house) : null;
-
-      // C++ MaxInfantry cap — skip infantry production if at limit
-      let skipInfantry = false;
-      if (state && state.maxInfantry >= 0) {
-        let infCount = 0;
-        for (const e of this.entities) {
-          if (e.alive && e.house === house && e.stats.isInfantry) infCount++;
-        }
-        if (infCount >= state.maxInfantry) skipInfantry = true;
-      }
-
-      if (hasTent && credits >= 100 && !skipInfantry) {
-        const pick = state
-          ? this.getAIProductionPick(house, 'infantry')
-          : (() => {
-              const houseFaction = HOUSE_FACTION[house] ?? 'both';
-              const infItems = this.scenarioProductionItems.filter(p =>
-                (p.prerequisite === 'TENT' || p.prerequisite === 'BARR') &&
-                !p.isStructure &&
-                (p.faction === 'both' || p.faction === houseFaction) &&
-                (p.techLevel === undefined || p.techLevel >= 0)
-              );
-              return infItems.length > 0 ? infItems[Math.floor(Math.random() * infItems.length)] : null;
-            })();
-        if (pick && credits >= pick.cost) {
-          const unitType = pick.type as UnitType;
-          const unit = this.spawnAIUnit(house, unitType, 'TENT', Mission.AREA_GUARD,
-            staging ?? undefined);
-          if (unit) {
-            if (!staging) {
-              // Guard origin defaults to spawn position
-              unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
-            } else {
-              unit.moveTarget = staging;
-              unit.mission = Mission.MOVE;
-            }
-            this.houseCredits.set(house, credits - pick.cost);
-          }
-        }
-      }
-
-      // C++ MaxUnit cap — skip vehicle production if at limit
-      let skipVehicle = false;
-      if (state && state.maxUnit >= 0) {
-        let vehCount = 0;
-        for (const e of this.entities) {
-          if (e.alive && e.house === house && !e.stats.isInfantry && !e.isAnt && !e.stats.isAircraft && !e.stats.isVessel) vehCount++;
-        }
-        if (vehCount >= state.maxUnit) skipVehicle = true;
-      }
-
-      const currentCredits = this.houseCredits.get(house) ?? 0;
-      if (hasWeap && currentCredits >= 600 && !skipVehicle) {
-        const pick = state
-          ? this.getAIProductionPick(house, 'vehicle')
-          : (() => {
-              const houseFaction = HOUSE_FACTION[house] ?? 'both';
-              const vehItems = this.scenarioProductionItems.filter(p =>
-                p.prerequisite === 'WEAP' &&
-                !p.isStructure &&
-                (p.faction === 'both' || p.faction === houseFaction) &&
-                (p.techLevel === undefined || p.techLevel >= 0)
-              );
-              return vehItems.length > 0 ? vehItems[Math.floor(Math.random() * vehItems.length)] : null;
-            })();
-        if (pick && currentCredits >= pick.cost) {
-          const unitType = pick.type as UnitType;
-          const unit = this.spawnAIUnit(house, unitType, 'WEAP', Mission.AREA_GUARD,
-            staging ?? undefined);
-          if (unit) {
-            if (!staging) {
-              // Guard origin defaults to spawn position
-              unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
-            } else {
-              unit.moveTarget = staging;
-              unit.mission = Mission.MOVE;
-            }
-            this.houseCredits.set(house, (this.houseCredits.get(house) ?? 0) - pick.cost);
-          }
-        }
-      }
-    }
+    this._runAI(ctx => _updateAIProduction(ctx));
   }
 
-  /** AI autocreate teams — periodically assemble and deploy teams from autocreate-flagged TeamTypes.
-   *  C++ parity: TeamTypeClass::AI() checks IsAutocreate flag and spawns team members
-   *  at the house edge when autocreate is enabled (via TACTION_AUTOCREATE trigger). */
+  /** AI autocreate teams — periodically assemble and deploy teams from autocreate-flagged TeamTypes */
   private updateAIAutocreateTeams(): void {
-    if (!this.autocreateEnabled) return;
-    if (this.tick % 120 !== 0) return; // every 8 seconds at 15 FPS
-
-    for (const [house, state] of this.aiStates) {
-      if (!state.productionEnabled) continue;
-      if (state.iq < 2) continue; // need IQ 2+ for autocreate
-
-      const credits = this.houseCredits.get(house) ?? 0;
-      if (credits < 500) continue; // need minimum credits
-
-      // Find autocreate-flagged TeamTypes for this house
-      for (let teamIdx = 0; teamIdx < this.teamTypes.length; teamIdx++) {
-        const team = this.teamTypes[teamIdx];
-        if (!(team.flags & 4)) continue; // bit 2 = IsAutocreate
-        if (houseIdToHouse(team.house) !== house) continue;
-        if (this.destroyedTeams.has(teamIdx)) continue;
-
-        // Compute spawn position from house edge
-        const edge = this.houseEdges.get(house)?.toLowerCase();
-        let spawnPos: { cx: number; cy: number } | null = null;
-
-        if (edge) {
-          const bx = this.map.boundsX, by = this.map.boundsY;
-          const bw = this.map.boundsW, bh = this.map.boundsH;
-          const randOffset = Math.floor(Math.random() * Math.max(bw, bh));
-          switch (edge) {
-            case 'north': spawnPos = { cx: bx + (randOffset % bw), cy: by }; break;
-            case 'south': spawnPos = { cx: bx + (randOffset % bw), cy: by + bh - 1 }; break;
-            case 'east':  spawnPos = { cx: bx + bw - 1, cy: by + (randOffset % bh) }; break;
-            case 'west':  spawnPos = { cx: bx, cy: by + (randOffset % bh) }; break;
-          }
-        }
-
-        if (!spawnPos) {
-          // Fallback: use team origin waypoint
-          const wp = this.waypoints.get(team.origin);
-          if (wp) spawnPos = wp;
-          else continue;
-        }
-
-        const world = { x: spawnPos.cx * CELL_SIZE + CELL_SIZE / 2, y: spawnPos.cy * CELL_SIZE + CELL_SIZE / 2 };
-
-        // Spawn team members
-        for (const member of team.members) {
-          if (!UNIT_STATS[member.type]) continue;
-          const unitType = member.type as UnitType;
-          for (let i = 0; i < member.count; i++) {
-            const offsetX = (Math.random() - 0.5) * 48;
-            const offsetY = (Math.random() - 0.5) * 48;
-            const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
-            entity.facing = Math.floor(Math.random() * 8);
-            entity.bodyFacing32 = entity.facing * 4;
-
-            // Assign team mission script to each member
-            if (team.missions.length > 0) {
-              entity.teamMissions = team.missions.map(m => ({
-                mission: m.mission,
-                data: m.data,
-              }));
-              entity.teamMissionIndex = 0;
-            } else {
-              // No missions → default to HUNT
-              entity.mission = Mission.HUNT;
-            }
-
-            // IsSuicide teams (flags bit 1) fight to the death — use HUNT mission
-            if (team.flags & 2) {
-              entity.mission = Mission.HUNT;
-            }
-
-            applyScenarioOverrides([entity], this.scenarioUnitStats, this.scenarioWeaponStats);
-            this.entities.push(entity);
-            this.entityById.set(entity.id, entity);
-          }
-        }
-
-        break; // One team per house per cycle
-      }
-    }
+    this._runAI(ctx => _updateAIAutocreateTeams(ctx));
   }
 
 // === Spy Mechanics (Gap #4) ===

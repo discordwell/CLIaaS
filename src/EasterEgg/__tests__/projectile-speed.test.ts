@@ -125,8 +125,8 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       expect(WEAPON_STATS.PortaTesla.projSpeed).toBe(40);
     });
 
-    it('grenade has slow projSpeed (12)', () => {
-      expect(WEAPON_STATS.Grenade.projSpeed).toBe(12);
+    it('grenade has slow projSpeed (5)', () => {
+      expect(WEAPON_STATS.Grenade.projSpeed).toBe(5);
     });
 
     it('artillery (155mm) has slow projSpeed (12)', () => {

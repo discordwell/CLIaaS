@@ -49,7 +49,6 @@ export interface ProductionContext {
   hasBuilding(type: string): boolean;
   playSound(name: string): void;
   playEva(name: string): void;
-  addCredits(amount: number, bypassSiloCap?: boolean): number;
   addEntity(entity: Entity): void;
   findPassableSpawn(cx: number, cy: number, structCX: number, structCY: number, fw: number, fh: number): { cx: number; cy: number };
 }
