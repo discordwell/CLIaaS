@@ -316,3 +316,38 @@ describe('ants are NOT crushers', () => {
     expect(UNIT_STATS.ANT3.crusher).toBeFalsy();
   });
 });
+
+// === 14. Friendly crush immunity — C++ DriveClass::Ok_To_Move checks IsAFriend() ===
+describe('friendly crush immunity (C++ IsAFriend parity)', () => {
+  it('checkVehicleCrush has isAllied guard (source code check)', () => {
+    // Verify the isAllied guard exists in checkVehicleCrush to prevent friendly crushing.
+    // C++ drive.cpp: crusher only crushes enemy infantry, not friendly/allied.
+    const { readFileSync } = require('fs');
+    const { join } = require('path');
+    const src = readFileSync(
+      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'index.ts'),
+      'utf-8',
+    );
+    // Extract the method definition (not the call site)
+    const startIdx = src.indexOf('private checkVehicleCrush');
+    expect(startIdx, 'checkVehicleCrush method found in source').toBeGreaterThan(-1);
+    const methodChunk = src.slice(startIdx, startIdx + 800);
+    expect(
+      methodChunk,
+      'checkVehicleCrush must check isAllied to skip friendly units',
+    ).toContain('isAllied');
+    expect(
+      methodChunk,
+      'isAllied check must continue (skip allied units)',
+    ).toMatch(/isAllied.*continue/);
+  });
+
+  it('friendly infantry and enemy infantry have same crushable flag', () => {
+    // Both allied and enemy infantry are crushable — the difference is the
+    // runtime isAllied check in checkVehicleCrush, not the stats.
+    const friendlyInf = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
+    const enemyInf = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    expect(friendlyInf.stats.crushable).toBe(true);
+    expect(enemyInf.stats.crushable).toBe(true);
+  });
+});

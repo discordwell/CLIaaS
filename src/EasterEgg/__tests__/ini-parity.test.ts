@@ -184,6 +184,30 @@ describe('INI Parity: Weapon Stats', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 3b. Slow Projectile Speed Parity (arcing/lobbed/parachute weapons)
+// ---------------------------------------------------------------------------
+
+// For slow arcing projectiles, C++ Speed maps 1:1 to TS projSpeed.
+// This covers Lobbed, Ballistic, Bomblet, Parachute, Catapult types.
+const SLOW_PROJ_WEAPONS: Record<string, string> = {
+  Grenade: 'Lobbed',     // C++ Projectile=Lobbed
+  '155mm': 'Ballistic',  // C++ Projectile=Ballistic
+  ParaBomb: 'Parachute', // C++ Projectile=Parachute
+};
+
+describe('INI Parity: Slow Projectile Speed', () => {
+  for (const [weapon, projType] of Object.entries(SLOW_PROJ_WEAPONS)) {
+    const iniData = ini[weapon];
+    const stats = WEAPON_STATS[weapon];
+    if (!iniData?.Speed || !stats?.projSpeed) continue;
+
+    it(`${weapon} (${projType}) projSpeed = C++ Speed ${iniData.Speed}`, () => {
+      expect(stats.projSpeed, `INI Speed=${iniData.Speed}`).toBe(Number(iniData.Speed));
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 4. Power Drain Parity
 // ---------------------------------------------------------------------------
 

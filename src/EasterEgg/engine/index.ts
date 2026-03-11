@@ -3309,13 +3309,14 @@ export class Game {
   /** Vehicle crush — heavy tracked vehicles (crusher=true) instantly kill crushable units on cell entry.
    *  C++ DriveClass::Ok_To_Move (drive.cpp): when a Crusher vehicle enters a cell with a Crushable unit,
    *  the crushable unit dies instantly. Only crusher vehicles crush; only crushable targets are affected.
-   *  Infantry and ants are crushable; vehicles are not. The crusher does NOT stop — it drives through. */
+   *  Infantry and ants are crushable; vehicles are not. The crusher does NOT stop — it drives through.
+   *  C++ checks IsAFriend() — friendly/allied infantry are NOT crushed. */
   private checkVehicleCrush(vehicle: Entity): void {
     const vc = vehicle.cell;
     for (const other of this.entities) {
       if (!other.alive || other.id === vehicle.id) continue;
       if (!other.stats.crushable) continue; // only crushable targets (infantry, ants)
-      // C++ drive.cpp: RA1 crushes ALL crushable units including allies (no friendly immunity)
+      if (this.isAllied(vehicle.house, other.house)) continue; // C++ IsAFriend — don't crush allies
       const oc = other.cell;
       if (oc.cx === vc.cx && oc.cy === vc.cy) {
         this.damageEntity(other, other.hp + 10, 'Super'); // instant kill, always die2
