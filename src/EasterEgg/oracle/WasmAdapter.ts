@@ -89,6 +89,7 @@ const MIME_TYPES: Record<string, string> = {
 
 export class WasmAdapter {
   readonly name = 'ra-wasm';
+  private static readonly MAX_AGENT_STEP_TICKS = 15;
   private config: Required<WasmAdapterConfig>;
   private browser: Browser | null = null;
   private page: Page | null = null;
@@ -120,6 +121,7 @@ export class WasmAdapter {
     if (this.config.autoplay) {
       url.searchParams.set('autoplay', this.config.ants ? 'ants' : '1');
     }
+    url.searchParams.set('agentharness', '1');
     if (this.config.scenario) {
       // Ensure .INI extension — the compiled WASM's URL parser may not append it
       let scenario = this.config.scenario;
@@ -175,19 +177,26 @@ export class WasmAdapter {
 
   /** Step N ticks with optional commands via agent_step() */
   async step(n = 15, commands?: string): Promise<AgentStepResult> {
-    this.ensurePage();
-    // agent_step calls Main_Loop() which uses emscripten_sleep → Asyncify.
-    // ccall with {async:true} returns a Promise that resolves after rewind.
-    return await this.page!.evaluate(async ({ ticks, cmds }) => {
-      const Module = (window as any).Module;
-      const json = await Module.ccall(
-        'agent_step', 'string',
-        ['number', 'string'],
-        [ticks, cmds || ''],
-        { async: true },
-      );
-      return JSON.parse(json);
-    }, { ticks: n, cmds: commands ?? '' });
+    const totalTicks = Math.max(1, n);
+    let remainingTicks = totalTicks;
+    let firstChunk = true;
+    let commandResults: AgentStepResult['results'] = [];
+    let finalResult: AgentStepResult | null = null;
+
+    while (remainingTicks > 0) {
+      const chunkTicks = Math.min(remainingTicks, WasmAdapter.MAX_AGENT_STEP_TICKS);
+      finalResult = await this.rawStep(chunkTicks, firstChunk ? commands : undefined);
+      if (firstChunk) {
+        commandResults = finalResult.results;
+      }
+      remainingTicks -= chunkTicks;
+      firstChunk = false;
+    }
+
+    return {
+      results: commandResults,
+      state: finalResult!.state,
+    };
   }
 
   /** Send semantic commands via agent_command() */
@@ -334,6 +343,22 @@ export class WasmAdapter {
     if (!this.page) throw new Error('Not connected — call connect() first');
   }
 
+  private async rawStep(n: number, commands?: string): Promise<AgentStepResult> {
+    this.ensurePage();
+    // agent_step calls Main_Loop() which uses emscripten_sleep → Asyncify.
+    // ccall with {async:true} returns a Promise that resolves after rewind.
+    return await this.page!.evaluate(async ({ ticks, cmds }) => {
+      const Module = (window as any).Module;
+      const json = await Module.ccall(
+        'agent_step', 'string',
+        ['number', 'string'],
+        [ticks, cmds || ''],
+        { async: true },
+      );
+      return JSON.parse(json);
+    }, { ticks: n, cmds: commands ?? '' });
+  }
+
   /**
    * Wait for the game to reach the gameplay loop, then verify agent_get_state works.
    *
@@ -382,8 +407,11 @@ export class WasmAdapter {
         if (!Module || typeof Module.ccall !== 'function') return false;
         const json = Module.ccall('agent_get_state', 'string', [], []);
         const state = JSON.parse(json);
-        (window as any).__agentStatus = `tick=${state.tick} error=${state.error || 'none'}`;
-        return state.tick > 0 && !state.error;
+        const hasScenarioState =
+          Array.isArray(state.units) && state.units.length > 0 ||
+          Array.isArray(state.structures) && state.structures.length > 0;
+        (window as any).__agentStatus = `tick=${state.tick} loaded=${hasScenarioState ? 'yes' : 'no'} error=${state.error || 'none'}`;
+        return hasScenarioState && !state.error;
       } catch {
         return false;
       }

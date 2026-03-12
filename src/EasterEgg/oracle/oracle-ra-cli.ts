@@ -145,11 +145,13 @@ async function testAgentHarness(adapter: WasmAdapter, maxTicks: number) {
   // 4. Run a longer simulation
   console.log(`\nRunning ${maxTicks} ticks of simulation...`);
   let state = step1.state;
-  const ticksBatch = 60;
-  for (let totalTicks = step1.state.tick; totalTicks < maxTicks + step1.state.tick; totalTicks += ticksBatch) {
-    const result = await adapter.step(ticksBatch);
+  // Large batches can hang once combat starts; 30-tick batches remain stable.
+  const ticksBatch = 30;
+  for (let elapsedTicks = 0; elapsedTicks < maxTicks; elapsedTicks += ticksBatch) {
+    const stepTicks = Math.min(ticksBatch, maxTicks - elapsedTicks);
+    const result = await adapter.step(stepTicks);
     state = result.state;
-    if (totalTicks % 300 === 0 || totalTicks === step1.state.tick) {
+    if (elapsedTicks % 300 === 0 || elapsedTicks === 0) {
       console.log(`  tick=${state.tick} credits=${state.credits} units=${state.units.length} enemies=${state.enemies.length} structures=${state.structures.length}`);
     }
   }

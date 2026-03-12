@@ -21,6 +21,11 @@ function getAutoplayModeFromQuery() {
   return params.get('autoplay') || params.get('agentautoplay');
 }
 
+function getAgentHarnessModeFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  return params.get('agentharness') === '1';
+}
+
 function getStartupScenarioFromQuery() {
   var params = new URLSearchParams(window.location.search);
   var scenario = params.get('scenario');
@@ -790,7 +795,16 @@ var Module = {
   //     any blocking dialogs (WWMessageBox, BGMessageBox) are reached
   onRuntimeInitialized: function() {
     var autoplay = getAutoplayModeFromQuery();
+    var agentHarness = getAgentHarnessModeFromQuery();
     var startupScenario = getStartupScenarioFromQuery();
+    if (agentHarness) {
+      if (typeof Module._set_agent_harness_mode === 'function') {
+        Module._set_agent_harness_mode(1);
+        console.log('[AGENT] harness mode enabled before main');
+      } else {
+        console.error('[AGENT] Module._set_agent_harness_mode not available at onRuntimeInitialized');
+      }
+    }
     if (startupScenario && typeof Module.ccall === 'function') {
       var antsEnabled = autoplay === 'ants' || /^SCA/i.test(startupScenario);
       var configured = Module.ccall(

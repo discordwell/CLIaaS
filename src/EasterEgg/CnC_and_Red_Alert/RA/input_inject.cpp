@@ -24,6 +24,7 @@ extern void Update_Mouse_Pos(int x, int y);
 ** (as if OK was pressed). Set via set_autoplay(1) from JavaScript.
 */
 int g_autoplay_mode = 0;
+int g_agent_harness_mode = 0;
 char g_startup_scenario_name[_MAX_FNAME + _MAX_EXT] = "";
 int g_startup_scenario_ants = 0;
 
@@ -43,6 +44,25 @@ int set_autoplay(int mode)
     g_autoplay_mode = mode;
     // Force GameInFocus=true so focus-wait loops don't block
     if (mode) GameInFocus = true;
+    return prev;
+}
+
+/*
+** set_agent_harness_mode: Enable/disable dormant runtime mode for the oracle
+** harness. When enabled, Main_Game exits with a live runtime after scenario
+** setup so JS can drive Main_Loop() exclusively through agent_step().
+*/
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int set_agent_harness_mode(int mode)
+{
+    int prev = g_agent_harness_mode;
+    g_agent_harness_mode = mode ? 1 : 0;
+    if (g_agent_harness_mode) {
+        g_autoplay_mode = 1;
+        GameInFocus = true;
+    }
     return prev;
 }
 

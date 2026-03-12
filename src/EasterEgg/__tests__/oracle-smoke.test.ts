@@ -27,16 +27,17 @@ describe('Oracle smoke test (WASM)', { timeout: 240_000 }, () => {
     await adapter.connect();
 
     const state = await adapter.observe();
-    expect(state.tick).toBeGreaterThan(0);
+    expect(state.tick).toBeGreaterThanOrEqual(0);
     expect(state.units.length).toBeGreaterThan(0);
     expect(state.error).toBeUndefined();
   }, 200_000);
 
   it('issues a move command and unit responds', async () => {
-    const state0 = await adapter.observe();
-    expect(state0.units.length).toBeGreaterThan(0);
+    // Match the CLI harness sequence: step once, issue a command, then keep stepping.
+    const step0 = await adapter.step(30);
+    expect(step0.state.units.length).toBeGreaterThan(0);
 
-    const unit = state0.units[0];
+    const unit = step0.state.units[0];
     const targetX = unit.cx + 3;
     const targetY = unit.cy + 3;
 
@@ -47,9 +48,12 @@ describe('Oracle smoke test (WASM)', { timeout: 240_000 }, () => {
     expect(cmdResult.length).toBeGreaterThan(0);
     expect(cmdResult[0].ok).toBe(true);
 
-    // Step to let the unit start moving
+    // Step repeatedly to ensure the adapter survives chained agent_step calls.
     const stepResult = await adapter.step(60);
     const movedUnit = stepResult.state.units.find((u) => u.id === unit.id);
+    const finalStep = await adapter.step(10);
+    expect(finalStep.state.tick).toBeGreaterThan(stepResult.state.tick);
+
     // Unit should have changed position or mission (may not have reached target yet)
     if (movedUnit) {
       const moved = movedUnit.cx !== unit.cx || movedUnit.cy !== unit.cy || movedUnit.m !== unit.m;
