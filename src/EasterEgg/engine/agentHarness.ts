@@ -84,6 +84,8 @@ export interface AgentSuperweapon {
 export interface AgentState {
   tick: number;
   state: string;
+  playerHouse: string;
+  alliedHouses: string[];
   credits: number;
   power: { produced: number; consumed: number; multiplier: number };
   siloCapacity: number;
@@ -194,6 +196,17 @@ function serializeStructure(s: MapStructure, idx: number, isAlly: boolean, repai
 export function serializeState(game: Game): AgentState {
   const units: AgentUnit[] = [];
   const enemies: AgentUnit[] = [];
+  const isAlliedFn = (game as unknown as {
+    isAllied?: (house: House, playerHouse: House) => boolean;
+  }).isAllied;
+  const isAlliedHouse = (house: House) => (
+    typeof isAlliedFn === 'function'
+      ? isAlliedFn.call(game, house, game.playerHouse)
+      : house === game.playerHouse
+  );
+  const alliedHouses = Object.values(House).filter((house) => {
+    return isAlliedHouse(house);
+  });
 
   for (const e of game.entities) {
     if (!e.alive) continue;
@@ -208,9 +221,7 @@ export function serializeState(game: Game): AgentState {
   for (let i = 0; i < game.structures.length; i++) {
     const s = game.structures[i];
     if (!s.alive) continue;
-    const isAlly = typeof game.isAllied === 'function'
-      ? game.isAllied(s.house, game.playerHouse)
-      : s.house === game.playerHouse;
+    const isAlly = isAlliedHouse(s.house);
     const reportAsAlly = isAlly || s.house === House.Neutral;
     structures.push(serializeStructure(s, i, reportAsAlly, game.isStructureRepairing(i)));
   }
@@ -241,7 +252,7 @@ export function serializeState(game: Game): AgentState {
   // Superweapon status for player-allied houses
   const superweapons: AgentSuperweapon[] = [];
   for (const [, swState] of game.superweapons) {
-    if (!game.isAllied(swState.house, game.playerHouse)) continue;
+    if (!isAlliedHouse(swState.house)) continue;
     const def = SUPERWEAPON_DEFS[swState.type];
     if (!def) continue;
     // Skip GPS after fired (one-shot)
@@ -261,6 +272,8 @@ export function serializeState(game: Game): AgentState {
   return {
     tick: game.tick,
     state: game.state,
+    playerHouse: game.playerHouse,
+    alliedHouses,
     credits: game.credits,
     power: { produced: game.powerProduced, consumed: game.powerConsumed, multiplier: pwrMult },
     siloCapacity: game.siloCapacity,

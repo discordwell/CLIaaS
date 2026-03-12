@@ -1,0 +1,38 @@
+{
+  "timestamp": "2026-03-12T16:14:59.463Z",
+  "baseUrl": "http://localhost:3001",
+  "startedServer": true,
+  "maxTicks": 900,
+  "stepTicks": 30,
+  "screenshotInterval": 150,
+  "missions": [
+    {
+      "id": "SCG01EA",
+      "title": "In the Thick of It",
+      "outcome": "lost",
+      "elapsedTicks": 884,
+      "finalTick": 885,
+      "iterations": 30,
+      "screenshots": [
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00001-start.png",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00151-periodic.png",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00301-periodic.png",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00451-periodic.png",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00601-periodic.png",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00751-periodic.png",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00885-lost.png"
+      ],
+      "snapshots": [
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00001-start.json",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00151-periodic.json",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00301-periodic.json",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00451-periodic.json",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00601-periodic.json",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00751-periodic.json",
+        "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/00885-lost.json"
+      ],
+      "consoleLogFile": "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/console.log",
+      "pageErrorFile": "test-results/campaign-wet/2026-03-12T16-14-37-772Z-SCG01EA/SCG01EA/page-errors.log"
+    }
+  ]
+}

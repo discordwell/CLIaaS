@@ -1,0 +1,52 @@
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://192.168.0.200:3001
+- Environments: .env
+- Experiments (use with caution):
+  · clientTraceMetadata
+
+✓ Starting...
+Failed to benchmark file I/O: No such file or directory (os error 2)
+○ Compiling instrumentation Node.js ...
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+✓ Ready in 10s
+[09:14:48.568] [32mINFO[39m (5369): [36mRedis not available — workers not started (inline fallback active)[39m
+    [35mmodule[39m: "queue:workers"
+{ module: 'middleware' } {
+  method: 'GET',
+  pathname: '/',
+  requestId: '92be2605-b1c7-4709-bac3-800d6ddbeb21'
+} 'Incoming request'
+○ Compiling / ...
+ GET / 200 in 7.8s (compile: 7.3s, proxy.ts: 89ms, render: 436ms)
+{ module: 'middleware' } {
+  method: 'GET',
+  pathname: '/',
+  requestId: 'd922bf68-9ca7-44b5-82d8-75c8d026123e'
+} 'Incoming request'
+ GET /?anttest=agent&scenario=SCG01EA&difficulty=normal 200 in 73ms (compile: 4ms, proxy.ts: 8ms, render: 61ms)
+⚠ ./node_modules/.pnpm/bullmq@5.70.1/node_modules/bullmq/dist/esm/classes
+Package ioredis can't be external
+The request ioredis/built/utils matches serverExternalPackages (or the default list).
+The request could not be resolved by Node.js from the importing module. The way Node.js resolves modules is slightly different from the way Next.js resolves modules. Next.js was able to resolve it, while Node.js would not be able to.
+Try to remove this package from serverExternalPackages.
+Or update the import side to use a compatible request that can be resolved by Node.js.
+
+
+⚠ ./node_modules/.pnpm/bullmq@5.70.1/node_modules/bullmq/dist/esm/utils
+Package ioredis can't be external
+The request ioredis/built/utils matches serverExternalPackages (or the default list).
+The request could not be resolved by Node.js from the importing module. The way Node.js resolves modules is slightly different from the way Next.js resolves modules. Next.js was able to resolve it, while Node.js would not be able to.
+Try to remove this package from serverExternalPackages.
+Or update the import side to use a compatible request that can be resolved by Node.js.
+
+
+{ module: 'middleware' } {
+  method: 'GET',
+  pathname: '/offline',
+  requestId: '7bad0b16-7547-4f8b-9297-888272afda75'
+} 'Incoming request'
+(node:5369) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ GET /offline 200 in 1253ms (compile: 1174ms, proxy.ts: 2ms, render: 77ms)
+[?25h

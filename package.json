@@ -27,6 +27,7 @@
     "extract-assets": "tsx scripts/extract-ra-assets.ts",
     "extract-tiles": "tsx scripts/extract-ra-tiles.ts",
     "extract-ant-originals": "bash scripts/extract-freeware-ant-originals.sh",
+    "wet:campaign": "tsx scripts/run-ts-campaign-wet-test.ts",
     "parity:source": "tsx scripts/report-ra-source-parity.ts",
     "parity:agent": "tsx scripts/report-ra-agent-parity.ts",
     "mcp:dev": "tsx cli/mcp/server.ts",

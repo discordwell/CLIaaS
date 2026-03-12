@@ -478,6 +478,8 @@ describe('backward compatibility', () => {
     expect(s.missionTimer).toBeDefined();
 
     // New fields
+    expect(s.playerHouse).toBeDefined();
+    expect(s.alliedHouses).toBeDefined();
     expect(s.power.multiplier).toBeDefined();
     expect(s.availableItems).toBeDefined();
     expect(s.superweapons).toBeDefined();
@@ -492,6 +494,18 @@ describe('backward compatibility', () => {
 
     const s = serializeState(castGame(game));
     expect(s.available).toEqual(s.availableItems.map(i => i.t));
+  });
+
+  it('reports player house and allied houses for campaign automation', () => {
+    const game = makeGame({
+      playerHouse: House.England,
+      isAllied: (house: House, playerHouse: House) =>
+        house === playerHouse || house === House.France || house === House.Germany,
+    });
+
+    const s = serializeState(castGame(game));
+    expect(s.playerHouse).toBe(House.England);
+    expect(s.alliedHouses).toEqual([House.England, House.France, House.Germany]);
   });
 });
 
