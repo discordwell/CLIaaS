@@ -806,6 +806,11 @@ var Module = {
         Module._set_autoplay(1);
         console.log('[AUTOPLAY] g_autoplay_mode SET TO 1 via onRuntimeInitialized (before main)');
         document.title = 'RA:AUTOPLAY=ON';
+        // No need to call _autoplay_tick() — the C++ g_autoplay_mode flag
+        // auto-dismisses all modal dialogs (WWMessageBox, BGMessageBox,
+        // difficulty dialog, briefing) and the game loop drives itself via
+        // Emscripten's main(). Calling _autoplay_tick() from JS timers would
+        // trigger Asyncify unwind and corrupt the WASM state.
       } else {
         console.error('[AUTOPLAY] Module._set_autoplay not available at onRuntimeInitialized');
         document.title = 'RA:AUTOPLAY=FAIL-NO-EXPORT';

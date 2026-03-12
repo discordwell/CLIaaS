@@ -1,5 +1,36 @@
 # Session Summaries
 
+## 2026-03-12T03:45Z — Session 144: Red Alert Oracle — WASM Adapter + Strategy
+- **Goal**: Get oracle playing RA missions autonomously: launch WASM → load SCG01EA → observe → decide → act.
+- **WasmAdapter.ts** (major rewrite): Embedded static HTTP server (port 0, COOP/COEP headers, streaming for 43MB gamedata.data). Two-phase connect: Phase 1 waits for `__autoplayReady` via `waitForFunction`, Phase 2 waits for `agent_get_state` valid data. `agent_step` uses `{async: true}` ccall for Asyncify compatibility.
+- **Key discoveries**: (1) `page.evaluate()` hangs during Asyncify — CDP round-trips miss 1ms yield windows; `waitForFunction` runs in-page and works. (2) Compiled WASM URL parser doesn't append `.INI` to scenario names — fixed by ensuring extension in URL params. (3) `_autoplay_tick()` from JS timers corrupts WASM state — C++ `g_autoplay_mode` handles all dialog dismissal natively.
+- **OracleStrategy.ts** (new): Rule-based strategy — idle units attack-move nearest enemy, injured retreat to base, explore when no enemies, produce LTNK (prefer) or E1. Fixed double-production bug from code review.
+- **oracle-ra-cli.ts** (rewritten): Wired OracleStrategy into `runOracle()`, periodic screenshots, state summary logging, exit codes (0=victory, 1=defeat, 2=timeout).
+- **oracle-smoke.test.ts** (new): 3 tests — connect+observe, move command, screenshot. All pass in ~1s.
+- **3/3 smoke tests pass**.
+
+## 2026-03-11T11:34Z — Session 143: Soviet Mission 1 Bug Fixes (8 bugs)
+- **Fix 1**: Barrel explosion — `destroyBridge()` return value now checked; "Bridge destroyed" EVA only fires when bridge cells actually destroyed (was unconditional for all BARL/BRL3).
+- **Fix 2**: Retaliation AA gate — `triggerRetaliation()` now skips airborne aircraft for non-AA units.
+- **Fix 3**: Structure combat AA gate — `updateStructureCombat()` non-AA structures (TSLA, PBOX, etc.) no longer target airborne aircraft.
+- **Fix 5**: 105mm damage 30→40 matching C++ RA source (Heavy Tank 25% underpowered).
+- **Fix 7**: Retaliation naval gate — `triggerRetaliation()` now calls `canTargetNaval()`.
+- **Fix 8**: Hunt mode AA gate — `updateHunt()` ground units skip airborne aircraft without AA weapons.
+- **Fix 4**: Aircraft target lines — `renderTargetLines()` skips aircraft (C++ parity).
+- **Fix 6**: Aircraft health bars — verified NOT a bug (screen.y already altitude-adjusted at line 1879).
+- **Attack AA gate**: `updateAttack()` in missionAI.ts clears airborne aircraft targets for non-AA units.
+- **INI parity**: Added `CPP_DAMAGE_OVERRIDES` map for values where C++ compiled defaults differ from INI.
+- **2 new test files**: barrel-bridge-bug.test.ts (5 tests), targeting-aa-gates.test.ts (7 tests).
+- **123/123 test files pass (14,623 tests)**. Committed eda09f5, pushed, deployed.
+
+## 2026-03-11T04:48Z — Session 142c: baseDiscovered Fog Gate (C++ All_To_Look parity)
+- **Bug fix**: Structures were revealing fog at mission start before player explored. C++ calls `All_To_Look(units_only=true)` at init — buildings excluded from initial visibility.
+- **fog.ts**: Gated structure fog reveal behind `ctx.baseDiscovered` flag. When false, only units reveal fog.
+- **index.ts**: Initial reveal at game start now only iterates `entities` (not structures).
+- **3 new behavioral tests** in fog-of-war-pipeline.test.ts: structures hidden when !baseDiscovered, visible when true, units always visible.
+- **Mock updates**: Added `baseDiscovered: true` default to FogContext mocks in 3 test files.
+- **121/121 test files pass (14,611 tests)**. Committed 0d93d93, pushed. VPS deploy failed (SSH refused).
+
 ## 2026-03-11T04:15Z — Session 142b: Behavioral Tests for Phase 2 Modules
 - **6 new test files** covering all Phase 2 extracted modules: placement (19), crates (25), harvester (16), aircraft (40), ai (79), missionAI (45) = **224 behavioral tests**
 - Tests call exported functions with mock contexts — no source-string pattern matching
