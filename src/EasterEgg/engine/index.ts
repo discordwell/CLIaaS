@@ -3283,11 +3283,13 @@ export class Game {
   private static readonly TMISSION_GUARD = 5;
   private static readonly TMISSION_LOOP = 6;
   private static readonly TMISSION_UNLOAD = 8;
+  private static readonly TMISSION_DEPLOY = 9;      // deploy MCV / minelayer mine-drop (C++ TMission_Deploy)
   private static readonly TMISSION_HOUND_DOG = 10;   // move to waypoint then guard (C++ TMission_Hound_Dog)
   private static readonly TMISSION_DO = 11;          // assign mission to members (C++ Coordinate_Do)
   private static readonly TMISSION_SET_GLOBAL = 12;  // set global variable (C++ TMission_Set_Global)
   private static readonly TMISSION_IDLE = 13;        // idle at position
   private static readonly TMISSION_LOAD = 14;
+  private static readonly TMISSION_SPY = 15;         // infiltrate building at waypoint (C++ TMission_Spy)
   private static readonly TMISSION_PATROL = 16;
 
   /** Map C++ MissionType enum index to TS Mission enum (C++ defines.h:979-1008) */
@@ -3537,6 +3539,49 @@ export class Game {
         break;
       }
 
+      case Game.TMISSION_DEPLOY: {
+        // C++ team.cpp: TMission_Deploy sets MCV/minelayer to unload at the current location.
+        // The TS engine does not have a generic unload handler for these units, so perform the
+        // deploy action directly and advance once it has resolved.
+        if (entity.type === UnitType.V_MCV) {
+          if (this.deployMCV(entity) || !entity.alive) {
+            entity.teamMissionIndex++;
+          }
+          break;
+        }
+
+        if (entity.type === UnitType.V_MNLY) {
+          if (entity.ammo === 0) {
+            entity.teamMissionIndex++;
+            break;
+          }
+
+          const structureHere = this.findStructureAt(entity.pos);
+          if (!structureHere) {
+            entity.target = null;
+            entity.targetStructure = null;
+            entity.moveTarget = {
+              x: entity.cell.cx * CELL_SIZE + CELL_SIZE / 2,
+              y: entity.cell.cy * CELL_SIZE + CELL_SIZE / 2,
+            };
+            this.updateMinelayer(entity);
+          }
+          entity.teamMissionIndex++;
+          break;
+        }
+
+        if (entity.type === UnitType.V_QTNK) {
+          if (!entity.isDeployed) {
+            this.deployMADTank(entity);
+          }
+          entity.teamMissionIndex++;
+          break;
+        }
+
+        entity.teamMissionIndex++;
+        break;
+      }
+
       case Game.TMISSION_LOAD: {
         // Load nearby infantry into this transport
         if (entity.isTransport) {
@@ -3606,6 +3651,55 @@ export class Game {
         break;
       }
 
+      case Game.TMISSION_SPY: {
+        // C++ team.cpp: TMission_Spy treats the waypoint as the building cell to infiltrate.
+        // If there is no building at that waypoint, the mission degenerates into a move.
+        const wp = this.waypoints.get(tm.data);
+        if (!wp) {
+          entity.teamMissionIndex++;
+          return;
+        }
+
+        if (entity.targetStructure?.alive && entity.mission === Mission.CAPTURE) {
+          return;
+        }
+
+        const structure = this.findSpyMissionTarget(entity, wp.cx, wp.cy);
+        if (structure) {
+          const [sw, sh] = STRUCTURE_SIZE[structure.type] ?? [2, 2];
+          entity.mission = Mission.CAPTURE;
+          entity.target = null;
+          entity.targetStructure = structure;
+          entity.moveTarget = {
+            x: structure.cx * CELL_SIZE + (sw * CELL_SIZE) / 2,
+            y: structure.cy * CELL_SIZE + (sh * CELL_SIZE) / 2,
+          };
+          entity.path = findPath(
+            this.map,
+            entity.cell,
+            { cx: structure.cx, cy: structure.cy },
+            true,
+            entity.isNavalUnit,
+            entity.stats.speedClass,
+          );
+          entity.pathIndex = 0;
+          return;
+        }
+
+        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+        if (worldDist(entity.pos, target) < 2) {
+          entity.teamMissionIndex++;
+        } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          entity.mission = Mission.MOVE;
+          entity.target = null;
+          entity.targetStructure = null;
+          entity.moveTarget = target;
+          entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
+          entity.pathIndex = 0;
+        }
+        break;
+      }
+
       case Game.TMISSION_HOUND_DOG: {
         // Hound Dog: move to waypoint then guard (C++ team.cpp TMission_Hound_Dog)
         // Used by Einstein and other VIP escorts — move to rally point then hold position
@@ -3633,6 +3727,33 @@ export class Game {
         entity.teamMissionIndex++;
         break;
     }
+  }
+
+  private findSpyMissionTarget(entity: Entity, cx: number, cy: number): MapStructure | null {
+    let match: MapStructure | null = null;
+    let bestDist = Infinity;
+
+    for (const structure of this.structures) {
+      if (!structure.alive || this.isAllied(structure.house, entity.house)) continue;
+      const [sw, sh] = STRUCTURE_SIZE[structure.type] ?? [2, 2];
+      const inSpyBox = (
+        cx >= structure.cx - 1 &&
+        cx <= structure.cx + sw &&
+        cy >= structure.cy - 1 &&
+        cy <= structure.cy + sh
+      );
+      if (!inSpyBox) continue;
+
+      const centerX = structure.cx + sw / 2;
+      const centerY = structure.cy + sh / 2;
+      const dist = Math.hypot(centerX - cx, centerY - cy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        match = structure;
+      }
+    }
+
+    return match;
   }
 
   /** Add a flashing alert on the minimap at a cell position */

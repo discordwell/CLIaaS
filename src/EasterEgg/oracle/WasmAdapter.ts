@@ -17,6 +17,9 @@ import * as path from 'node:path';
 export interface RAGameState {
   tick: number;
   credits: number;
+  playerHouse?: string;
+  alliedHouses?: string[];
+  globals?: number[];
   power: { produced: number; consumed: number };
   units: RAEntity[];
   enemies: RAEntity[];
@@ -28,6 +31,7 @@ export interface RAGameState {
 export interface RAEntity {
   id: number;
   t: string;   // type name (e.g. "MTNK", "E1")
+  house?: string;
   cx: number;  // cell X
   cy: number;  // cell Y
   hp: number;

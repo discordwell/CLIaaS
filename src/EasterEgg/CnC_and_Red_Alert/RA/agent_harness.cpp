@@ -70,6 +70,12 @@ static void buf_cat(const char* fmt, ...)
 	}
 }
 
+static const char* agent_house_name(HousesType house)
+{
+	if (house < HOUSE_FIRST || house >= HOUSE_COUNT) return "None";
+	return HouseTypeClass::As_Reference(house).Name();
+}
+
 /* --- Object lookup from AGENT_ID --- */
 static TechnoClass* agent_lookup(int id)
 {
@@ -92,10 +98,12 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 
 	COORDINATE coord = obj->Center_Coord();
 	CELL cell = Coord_Cell(coord);
+	HousesType house = obj->Owner();
 
-	buf_cat("{\"id\":%d,\"t\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s}",
+	buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s}",
 		AGENT_ID(rtti, idx),
 		obj->Class_Of().Name(),
+		agent_house_name(house),
 		Cell_X(cell), Cell_Y(cell),
 		(int)obj->Strength,
 		(int)obj->Class_Of().MaxStrength,
@@ -319,15 +327,38 @@ char* agent_get_state(void)
 	int power_produced = agent_power_produced();
 	int power_consumed = agent_power_consumed();
 
-	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"power\":{\"produced\":%d,\"consumed\":%d},",
+	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",",
 		Frame,
 		(long)(PlayerPtr->Credits + PlayerPtr->Tiberium),
+		agent_house_name(player_house));
+
+	buf_cat("\"alliedHouses\":[");
+	bool first = true;
+	for (HousesType house = HOUSE_FIRST; house < HOUSE_COUNT; house++) {
+		if (!PlayerPtr->Is_Ally(house)) continue;
+		if (!first) buf_cat(",");
+		first = false;
+		buf_cat("\"%s\"", agent_house_name(house));
+	}
+	buf_cat("],");
+
+	buf_cat("\"globals\":[");
+	first = true;
+	for (int global = 0; global < (int)ARRAY_SIZE(Scen.GlobalFlags); global++) {
+		if (!Scen.GlobalFlags[global]) continue;
+		if (!first) buf_cat(",");
+		first = false;
+		buf_cat("%d", global);
+	}
+	buf_cat("],");
+
+	buf_cat("\"power\":{\"produced\":%d,\"consumed\":%d},",
 		power_produced,
 		power_consumed);
 
 	/* --- Friendly mobile units --- */
 	buf_cat("\"units\":[");
-	bool first = true;
+	first = true;
 
 	for (int i = 0; i < Units.Count(); i++) {
 		UnitClass* u = Units.Ptr(i);
@@ -406,10 +437,12 @@ char* agent_get_state(void)
 
 		COORDINATE coord = b->Center_Coord();
 		CELL cell = Coord_Cell(coord);
+		HousesType house = b->Owner();
 
-		buf_cat("{\"id\":%d,\"t\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"ally\":%s,\"repairing\":%s}",
+		buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"ally\":%s,\"repairing\":%s}",
 			AGENT_ID(RTTI_BUILDING, i),
 			b->Class_Of().Name(),
+			agent_house_name(house),
 			Cell_X(cell), Cell_Y(cell),
 			(int)b->Strength,
 			(int)b->Class_Of().MaxStrength,

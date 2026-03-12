@@ -30,6 +30,8 @@
     "wet:campaign": "tsx scripts/run-ts-campaign-wet-test.ts",
     "parity:source": "tsx scripts/report-ra-source-parity.ts",
     "parity:agent": "tsx scripts/report-ra-agent-parity.ts",
+    "parity:allied-missions": "tsx scripts/report-ra-allied-mission-agents.ts --strict",
+    "parity:campaign-missions": "tsx scripts/report-ra-campaign-mission-agents.ts --strict",
     "mcp:dev": "tsx cli/mcp/server.ts",
     "mcp:test": "pnpm cliaas mcp test",
     "test": "vitest run",

@@ -66,7 +66,7 @@ async function main() {
     } else if (values['test-agent']) {
       await testAgentHarness(adapter, maxTicks);
     } else if (values.oracle) {
-      const result = await runOracle(adapter, maxTicks);
+      const result = await runOracle(adapter, maxTicks, scenario);
       exitCode = result === 'victory' ? 0 : result === 'defeat' ? 1 : 2;
     } else {
       // Default: test both agent harness and clicks
@@ -271,11 +271,40 @@ async function testMouseClicks(adapter: WasmAdapter) {
 
 // ─── Oracle Loop ──────────────────────────────────────────────────────
 
-async function runOracle(adapter: WasmAdapter, maxTicks: number): Promise<OracleResult> {
+async function saveOracleSnapshot(
+  adapter: WasmAdapter,
+  artifactsDir: string,
+  stem: string,
+  state: RAGameState,
+): Promise<void> {
+  fs.writeFileSync(
+    path.join(artifactsDir, `${stem}.json`),
+    `${JSON.stringify(state, null, 2)}\n`,
+  );
+
+  const canvas = await adapter.gameScreenshot();
+  if (canvas.startsWith('data:image/png;base64,')) {
+    fs.writeFileSync(
+      path.join(artifactsDir, `${stem}.png`),
+      Buffer.from(canvas.replace(/^data:image\/png;base64,/, ''), 'base64'),
+    );
+    return;
+  }
+
+  const page = await adapter.screenshot();
+  fs.writeFileSync(path.join(artifactsDir, `${stem}.png`), page);
+}
+
+async function runOracle(
+  adapter: WasmAdapter,
+  maxTicks: number,
+  scenario: string,
+): Promise<OracleResult> {
   console.log('\n=== Oracle Loop (observe → decide → act) ===\n');
 
-  const strategy = new OracleStrategy();
-  const artifactsDir = path.join(process.cwd(), 'artifacts');
+  const strategy = new OracleStrategy(scenario);
+  const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${scenario.replace(/[^\w.-]+/g, '_')}`;
+  const artifactsDir = path.join(process.cwd(), 'artifacts', runId);
   fs.mkdirSync(artifactsDir, { recursive: true });
 
   let iteration = 0;
@@ -297,10 +326,10 @@ async function runOracle(adapter: WasmAdapter, maxTicks: number): Promise<Oracle
     const decision = strategy.decide(state);
 
     // 4. Act
-    const cmdJson = decision.commands.length > 0
-      ? JSON.stringify(decision.commands)
-      : undefined;
-    const stepResult = await adapter.step(30, cmdJson);
+    if (decision.commands.length > 0) {
+      await adapter.command(decision.commands);
+    }
+    const stepResult = await adapter.step(30);
     totalGameTicks += 30;
 
     // 5. Report (every 10 iterations)
@@ -308,11 +337,14 @@ async function runOracle(adapter: WasmAdapter, maxTicks: number): Promise<Oracle
       console.log(strategy.summarize(stepResult.state, iteration, decision));
     }
 
-    // 6. Periodic screenshots (every ~1000 game ticks ≈ 33 iterations)
-    if (iteration % 33 === 0) {
-      const ssPath = path.join(artifactsDir, `oracle-ra-tick${stepResult.state.tick}.png`);
-      const ss = await adapter.screenshot();
-      fs.writeFileSync(ssPath, ss);
+    // 6. Periodic snapshots for wet-test diffs
+    if (iteration % 10 === 0) {
+      await saveOracleSnapshot(
+        adapter,
+        artifactsDir,
+        `oracle-ra-tick${stepResult.state.tick}`,
+        stepResult.state,
+      );
     }
 
     iteration++;
@@ -323,11 +355,9 @@ async function runOracle(adapter: WasmAdapter, maxTicks: number): Promise<Oracle
     console.log(`[Oracle] Timeout after ${maxTicks} ticks`);
   }
 
-  // Final screenshot
-  const ssPath = path.join(artifactsDir, 'oracle-ra-final.png');
-  const ss = await adapter.screenshot();
-  fs.writeFileSync(ssPath, ss);
-  console.log(`\nFinal screenshot: ${ssPath}`);
+  const finalState = await adapter.observe();
+  await saveOracleSnapshot(adapter, artifactsDir, 'oracle-ra-final', finalState);
+  console.log(`\nArtifacts: ${artifactsDir}`);
   console.log(`[Oracle] Result: ${result} | ${iteration} iterations, ${totalGameTicks} game ticks`);
 
   return result;

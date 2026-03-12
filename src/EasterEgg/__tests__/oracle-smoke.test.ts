@@ -29,6 +29,10 @@ describe('Oracle smoke test (WASM)', { timeout: 240_000 }, () => {
     const state = await adapter.observe();
     expect(state.tick).toBeGreaterThanOrEqual(0);
     expect(state.units.length).toBeGreaterThan(0);
+    expect(state.playerHouse).toBeTruthy();
+    expect(state.alliedHouses?.length).toBeGreaterThan(0);
+    expect(state.globals).toBeInstanceOf(Array);
+    expect(state.units[0]?.house).toBeTruthy();
     expect(state.error).toBeUndefined();
   }, 200_000);
 

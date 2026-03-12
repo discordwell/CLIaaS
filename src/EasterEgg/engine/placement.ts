@@ -153,7 +153,7 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
   const newStruct: MapStructure = {
     type: 'FACT',
     image: 'fact',
-    house: ctx.playerHouse,
+    house: entity.house,
     cx, cy,
     hp: factMaxHp,
     maxHp: factMaxHp,
