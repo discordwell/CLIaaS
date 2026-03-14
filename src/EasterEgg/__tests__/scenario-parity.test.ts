@@ -82,18 +82,11 @@ const VALID_TMISSIONS = new Set([
 const MAX_CELL = MAP_CELLS * MAP_CELLS - 1;
 
 // Unit/infantry types not yet implemented in the TS engine (campaign-only)
-const EXEMPT_UNIT_TYPES = new Set([
-  'MGG',  // Mobile Gap Generator
-  'MRJ',  // Mobile Radar Jammer
-]);
+const EXEMPT_UNIT_TYPES = new Set<string>();
 
 // Aircraft/ship types used in team compositions but not in UNIT_STATS
 // (TS engine handles aircraft/ships separately or not yet)
 const EXEMPT_TEAM_MEMBER_TYPES = new Set([
-  'BADR', // Soviet bomber (aircraft)
-  'U2',   // Spy plane (aircraft)
-  'MGG',  // Mobile Gap Generator
-  'MRJ',  // Mobile Radar Jammer
   'DD',   // Destroyer (ship)
   'CA',   // Cruiser (ship)
   'SS',   // Submarine (ship)

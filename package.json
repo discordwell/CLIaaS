@@ -32,6 +32,8 @@
     "parity:agent": "tsx scripts/report-ra-agent-parity.ts",
     "parity:allied-missions": "tsx scripts/report-ra-allied-mission-agents.ts --strict",
     "parity:campaign-missions": "tsx scripts/report-ra-campaign-mission-agents.ts --strict",
+    "parity:campaign-start-state": "tsx scripts/report-ra-campaign-start-state.ts --strict",
+    "parity:campaign-trigger-spawns": "tsx scripts/report-ra-campaign-trigger-spawns.ts --strict",
     "mcp:dev": "tsx cli/mcp/server.ts",
     "mcp:test": "pnpm cliaas mcp test",
     "test": "vitest run",

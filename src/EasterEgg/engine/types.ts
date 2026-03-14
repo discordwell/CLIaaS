@@ -178,6 +178,8 @@ export enum UnitType {
   V_DTRK = 'DTRK', // Demolition Truck (kamikaze)
   V_V2RL = 'V2RL', // V2 Rocket Launcher
   V_MNLY = 'MNLY', // Minelayer
+  V_MRJ = 'MRJ',   // Mobile Radar Jammer
+  V_MGG = 'MGG',   // Mobile Gap Generator
   // Transport vehicles
   V_TRAN = 'TRAN', // Chinook transport helicopter
   V_LST = 'LST',   // Landing ship transport
@@ -188,6 +190,8 @@ export enum UnitType {
   V_PT = 'PT',     // Gunboat
   V_MSUB = 'MSUB', // Missile Submarine (Aftermath)
   // Aircraft
+  V_BADR = 'BADR', // Badger bomber (fixed-wing transport bomber)
+  V_U2 = 'U2',     // Spy plane (fixed-wing reconnaissance aircraft)
   V_MIG = 'MIG',   // MiG-29 fighter (fixed-wing)
   V_YAK = 'YAK',   // Yak attack plane (fixed-wing)
   V_HELI = 'HELI', // Longbow helicopter
@@ -613,6 +617,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true },
   QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
   DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge' },
+  MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600 },
+  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600 },
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true },
@@ -623,6 +629,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 7, rot: 7, isInfantry: false, primaryWeapon: '2Inch', secondaryWeapon: 'DepthCharge', isVessel: true },
   MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'SubSCUD', isVessel: true, isCloakable: true },
   // Aircraft (C++ aadata.cpp MPH values)
+  BADR: { type: UnitType.V_BADR, name: 'Badger', image: 'badr', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ParaBomb', passengers: 5, isAircraft: true, isFixedWing: true, maxAmmo: 5, owner: 'soviet', cost: 10 },
+  U2:   { type: UnitType.V_U2, name: 'Spy Plane', image: 'u2', strength: 2000, armor: 'heavy', speed: 40, speedClass: SpeedClass.WINGED, sight: 0, rot: 7, isInfantry: false, primaryWeapon: 'Camera', isAircraft: true, isFixedWing: true, maxAmmo: 1, owner: 'soviet', cost: 10 },
   MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 50, armor: 'light', speed: 20, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'Maverick', secondaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 3 },
   YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 15 },
   HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6 },

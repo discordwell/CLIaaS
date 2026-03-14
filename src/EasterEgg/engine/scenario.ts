@@ -947,6 +947,52 @@ export function houseIdToHouse(id: number): House {
   }
 }
 
+function normalizeHouseEdge(edge: string | undefined): string {
+  return (edge ?? 'North').toLowerCase();
+}
+
+export function calculateHouseEdgeSpawnCell(
+  house: House,
+  houseEdges: Map<House, string> | undefined,
+  mapBounds: { x: number; y: number; w: number; h: number } | undefined,
+  alignedCell?: CellPos,
+  random: () => number = Math.random,
+): CellPos | null {
+  if (!mapBounds) {
+    return null;
+  }
+
+  const edge = normalizeHouseEdge(houseEdges?.get(house));
+  const { x, y, w, h } = mapBounds;
+  const randOffset = Math.floor(random() * Math.max(w, h));
+  const alignedX = alignedCell ? Math.min(Math.max(alignedCell.cx, x), x + w - 1) : x + (randOffset % w);
+  const alignedY = alignedCell ? Math.min(Math.max(alignedCell.cy, y), y + h - 1) : y + (randOffset % h);
+
+  switch (edge) {
+    case 'north':
+      return { cx: alignedX, cy: y };
+    case 'south':
+      return { cx: alignedX, cy: y + h - 1 };
+    case 'east':
+      return { cx: x + w - 1, cy: alignedY };
+    case 'west':
+      return { cx: x, cy: alignedY };
+    default:
+      return null;
+  }
+}
+
+export function resolveTeamOriginCell(
+  origin: number,
+  house: House,
+  waypoints: Map<number, CellPos>,
+  houseEdges?: Map<House, string>,
+  mapBounds?: { x: number; y: number; w: number; h: number },
+  random: () => number = Math.random,
+): CellPos | null {
+  return waypoints.get(origin) ?? calculateHouseEdgeSpawnCell(house, houseEdges, mapBounds, undefined, random);
+}
+
 /** Check if a team is an ant team (contains ant units) */
 function isAntTeam(team: TeamType): boolean {
   return team.members.some(m => m.type.startsWith('ANT'));
@@ -1973,28 +2019,18 @@ export function executeTriggerAction(
       const team = teamTypes[action.team];
       if (!team) break;
 
-      // Find spawn waypoint from team origin, or compute from house Edge if origin=-1
-      let wp = waypoints.get(team.origin);
-      if (!wp && team.origin === -1 && houseEdges && mapBounds) {
-        const teamHouse = houseIdToHouse(team.house);
-        const edge = houseEdges.get(teamHouse)?.toLowerCase();
-        if (edge) {
-          const bx = mapBounds.x, by = mapBounds.y, bw = mapBounds.w, bh = mapBounds.h;
-          const randOffset = Math.floor(Math.random() * Math.max(bw, bh));
-          switch (edge) {
-            case 'north': wp = { cx: bx + (randOffset % bw), cy: by }; break;
-            case 'south': wp = { cx: bx + (randOffset % bw), cy: by + bh - 1 }; break;
-            case 'east':  wp = { cx: bx + bw - 1, cy: by + (randOffset % bh) }; break;
-            case 'west':  wp = { cx: bx, cy: by + (randOffset % bh) }; break;
-            default: console.warn(`Unknown house edge "${edge}" for ${teamHouse}`); break;
-          }
-        }
-      }
+      // Original RA falls back to the house edge when a team origin waypoint is undefined.
+      const teamHouse = houseIdToHouse(team.house);
+      const wp = resolveTeamOriginCell(team.origin, teamHouse, waypoints, houseEdges, mapBounds);
       if (!wp) break;
       const world = cellToWorld(wp.cx, wp.cy);
 
       // Spawn team members using the actual house from TeamType data
-      const house = houseIdToHouse(team.house);
+      const house = teamHouse;
+      const teamMissionScript = team.missions.length > 0 ? team.missions.map(m => ({
+        mission: m.mission,
+        data: m.data,
+      })) : null;
       let transport: Entity | null = null;
       const infantry: Entity[] = [];
       for (const member of team.members) {
@@ -2008,11 +2044,8 @@ export function executeTriggerAction(
           entity.facing = Math.floor(Math.random() * 8);
           entity.bodyFacing32 = entity.facing * 4;
           // Assign team mission script to each member
-          if (team.missions.length > 0) {
-            entity.teamMissions = team.missions.map(m => ({
-              mission: m.mission,
-              data: m.data,
-            }));
+          if (teamMissionScript) {
+            entity.teamMissions = teamMissionScript;
             entity.teamMissionIndex = 0;
           }
           // IsSuicide teams (flags bit 1): don't retreat, fight to the death.
@@ -2036,19 +2069,9 @@ export function executeTriggerAction(
           // C++ ScenarioClass::Create_Army spawns ALL aircraft at the map edge, including
           // loaded transports (e.g. SCG01EA tanya team — Chinook flies in with Tanya).
           if (entity.stats.isAircraft && houseEdges && mapBounds) {
-            const teamHouse = houseIdToHouse(team.house);
-            const edge = houseEdges.get(teamHouse)?.toLowerCase();
-            if (edge) {
-              const bx = mapBounds.x, by = mapBounds.y, bw = mapBounds.w, bh = mapBounds.h;
-              // Position at edge, roughly aligned with the origin waypoint
-              let edgeX = wp!.cx, edgeY = wp!.cy;
-              switch (edge) {
-                case 'north': edgeY = by; break;
-                case 'south': edgeY = by + bh - 1; break;
-                case 'east':  edgeX = bx + bw - 1; break;
-                case 'west':  edgeX = bx; break;
-              }
-              const edgeWorld = cellToWorld(edgeX, edgeY);
+            const edgeCell = calculateHouseEdgeSpawnCell(teamHouse, houseEdges, mapBounds, wp);
+            if (edgeCell) {
+              const edgeWorld = cellToWorld(edgeCell.cx, edgeCell.cy);
               entity.pos = { x: edgeWorld.x, y: edgeWorld.y };
               entity.prevPos = { x: edgeWorld.x, y: edgeWorld.y };
             }

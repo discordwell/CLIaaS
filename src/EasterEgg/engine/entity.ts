@@ -355,6 +355,7 @@ export class Entity {
       this.type !== UnitType.V_APC && this.type !== UnitType.V_HARV &&
       this.type !== UnitType.V_MCV && this.type !== UnitType.V_ARTY &&
       this.type !== UnitType.V_JEEP && this.type !== UnitType.V_TRUK &&
+      this.type !== UnitType.V_MRJ && this.type !== UnitType.V_MGG &&
       this.type !== UnitType.V_LST &&
       // CS/Aftermath expansion: non-turreted per C++ udata.cpp
       this.type !== UnitType.V_STNK && this.type !== UnitType.V_CTNK &&

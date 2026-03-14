@@ -98,6 +98,15 @@
     "sheetWidth": 384,
     "sheetHeight": 72
   },
+  "mrj": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 64,
+    "columns": 16,
+    "rows": 4,
+    "sheetWidth": 384,
+    "sheetHeight": 96
+  },
   "mgg": {
     "frameWidth": 40,
     "frameHeight": 40,
@@ -2095,6 +2104,15 @@
     "rows": 1,
     "sheetWidth": 64,
     "sheetHeight": 48
+  },
+  "mrjicon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
   },
   "mggicon": {
     "frameWidth": 64,

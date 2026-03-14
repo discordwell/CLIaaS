@@ -1111,6 +1111,26 @@ describe('Team spawning via REINFORCEMENTS/CREATE_TEAM', () => {
     expect(result.spawned.length).toBe(0);
   });
 
+  it('TACTION_CREATE_TEAM (4) with missing waypoint falls back to house edge when map context is available', () => {
+    const teamTypes: TeamType[] = [{
+      name: 'fallback',
+      house: 2,  // USSR
+      flags: 0,
+      origin: 5,  // waypoint 5 does not exist
+      members: [{ type: 'E1', count: 1 }],
+      missions: [],
+    }];
+    const houseEdges = new Map<House, string>([[House.USSR, 'North']]);
+    const mapBounds = { x: 40, y: 40, w: 50, h: 50 };
+    const action: TriggerAction = { action: 4, team: 0, trigger: -1, data: 0 };
+    const result = executeTriggerAction(
+      action, teamTypes, emptyWaypoints, emptyGlobals, emptyTriggers,
+      2, houseEdges, mapBounds,
+    );
+
+    expect(result.spawned.length).toBe(1);
+  });
+
   it('team with invalid unit type name skips that member', () => {
     const teamTypes: TeamType[] = [{
       name: 'badType',

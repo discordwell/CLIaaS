@@ -161,7 +161,7 @@ const SUPPORTED_TRIGGER_ACTIONS = new Set<number>([
 ]);
 
 export const SUPPORTED_TEAM_MISSIONS = new Set<number>([
-  0, 1, 3, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+  0, 1, 2, 3, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 ]);
 
 const EVENT_TYPES_WITH_TEAM_REFS = new Set<number>([
@@ -213,7 +213,7 @@ function actionName(id: number): string {
   return TACTION_NAMES[id] ?? `UNKNOWN_${id}`;
 }
 
-function formatMissionSequence(missions: TeamMission[]): string {
+export function formatMissionSequence(missions: TeamMission[]): string {
   return missions.map((mission) => `${missionName(mission.mission)}(${mission.data})`).join(' -> ');
 }
 
@@ -253,7 +253,7 @@ function isRealTriggerName(value: string | undefined): value is string {
   return normalized !== '' && normalized.toLowerCase() !== 'none' && normalized !== '<none>';
 }
 
-class MissionAuditContext {
+export class MissionAuditContext {
   readonly issues: MissionAuditIssue[] = [];
   readonly facts: MissionAuditFact[] = [];
   readonly triggerByName: Map<string, ScenarioTrigger>;

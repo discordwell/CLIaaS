@@ -1281,6 +1281,10 @@ export function updateAIAutocreateTeams(ctx: AIContext): void {
       }
 
       const world = { x: spawnPos.cx * CELL_SIZE + CELL_SIZE / 2, y: spawnPos.cy * CELL_SIZE + CELL_SIZE / 2 };
+      const teamMissionScript = team.missions.length > 0 ? team.missions.map(m => ({
+        mission: m.mission,
+        data: m.data,
+      })) : null;
 
       for (const member of team.members) {
         if (!UNIT_STATS[member.type]) continue;
@@ -1292,11 +1296,8 @@ export function updateAIAutocreateTeams(ctx: AIContext): void {
           entity.facing = Math.floor(Math.random() * 8);
           entity.bodyFacing32 = entity.facing * 4;
 
-          if (team.missions.length > 0) {
-            entity.teamMissions = team.missions.map(m => ({
-              mission: m.mission,
-              data: m.data,
-            }));
+          if (teamMissionScript) {
+            entity.teamMissions = teamMissionScript;
             entity.teamMissionIndex = 0;
           } else {
             entity.mission = Mission.HUNT;

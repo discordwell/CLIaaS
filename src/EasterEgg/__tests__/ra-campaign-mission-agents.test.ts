@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { runCampaignMissionAgents } from '../oracle/raAlliedMissionAgents';
+import { runCampaignMissionAgents } from '../oracle/raMainCampaignMissionAgents';
 
 describe('Campaign mission audit agents', () => {
-  it('cover Soviet 1-5 and Allied 1-10 without unresolved script parity errors', () => {
+  it('cover the full original RA main campaign without unresolved script parity errors', () => {
     const reports = runCampaignMissionAgents();
 
     expect(reports.map((report) => report.scenarioId)).toEqual([
@@ -22,6 +22,32 @@ describe('Campaign mission audit agents', () => {
       'SCG08EA',
       'SCG09EA',
       'SCG10EA',
+      'SCG03EB',
+      'SCG05EB',
+      'SCG06EB',
+      'SCG08EB',
+      'SCG09EB',
+      'SCG10EB',
+      'SCG11EA',
+      'SCG11EB',
+      'SCG12EA',
+      'SCG13EA',
+      'SCG14EA',
+      'SCU02EB',
+      'SCU04EB',
+      'SCU06EA',
+      'SCU06EB',
+      'SCU07EA',
+      'SCU08EA',
+      'SCU08EB',
+      'SCU09EA',
+      'SCU10EA',
+      'SCU11EA',
+      'SCU11EB',
+      'SCU12EA',
+      'SCU13EA',
+      'SCU13EB',
+      'SCU14EA',
     ]);
 
     for (const report of reports) {

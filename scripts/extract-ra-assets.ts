@@ -57,7 +57,7 @@ function generateIconAssets(): [string, string, string][] {
   const types = [
     // Vehicles
     '1TNK', '2TNK', '3TNK', '4TNK', 'JEEP', 'APC', 'HARV', 'MCV',
-    'ARTY', 'TRUK', 'MNLY', 'MGG', 'V2RL', 'MLRS', 'FTNK', 'STNK',
+    'ARTY', 'TRUK', 'MNLY', 'MRJ', 'MGG', 'V2RL', 'MLRS', 'FTNK', 'STNK',
     // Infantry
     'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'DOG', 'SPY', 'MEDI', 'THF',
     // Naval
@@ -103,6 +103,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'ARTY.SHP', 'arty'],    // Artillery
   ['CONQUER.MIX', 'TRUK.SHP', 'truk'],    // Supply truck / transport
   ['CONQUER.MIX', 'MNLY.SHP', 'mnly'],    // Minelayer
+  ['CONQUER.MIX', 'MRJ.SHP', 'mrj'],      // Mobile radar jammer
   ['CONQUER.MIX', 'MGG.SHP', 'mgg'],      // Mobile gap generator
   ['CONQUER.MIX', 'V2RL.SHP', 'v2rl'],    // V2 rocket launcher
   ['CONQUER.MIX', 'MLRS.SHP', 'mlrs'],    // Mobile Launcher Rocket System

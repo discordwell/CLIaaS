@@ -3279,6 +3279,7 @@ export class Game {
   // Team mission type constants (exact values from RA TEAMTYPE.H TeamMissionType enum)
   private static readonly TMISSION_ATTACK = 0;
   private static readonly TMISSION_ATT_WAYPT = 1;
+  private static readonly TMISSION_CHANGE_FORMATION = 2;
   private static readonly TMISSION_MOVE = 3;
   private static readonly TMISSION_GUARD = 5;
   private static readonly TMISSION_LOOP = 6;
@@ -3326,11 +3327,23 @@ export class Game {
     const tm = entity.teamMissions[entity.teamMissionIndex];
 
     switch (tm.mission) {
+      case Game.TMISSION_CHANGE_FORMATION: {
+        const members = this.getTeamFormationMembers(entity);
+        const offsets = this.calculateTeamMissionFormationOffsets(members.length, tm.data);
+
+        for (let i = 0; i < members.length; i++) {
+          members[i].formationOffset = offsets[i] ?? null;
+        }
+
+        entity.teamMissionIndex++;
+        break;
+      }
+
       case Game.TMISSION_MOVE: {
         // Move to waypoint — issue path command if not already moving there
         const wp = this.waypoints.get(tm.data);
         if (!wp) { entity.teamMissionIndex++; return; }
-        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+        const target = this.teamMissionWaypointTarget(entity, wp);
 
         // Check arrival first — aircraft may have already completed the move
         // (aircraftState machine clears moveTarget on arrival before team mission scans)
@@ -3392,7 +3405,7 @@ export class Game {
           entity.target = nearest;
         } else if (wp) {
           // No targets — move toward the waypoint
-          const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+          const target = this.teamMissionWaypointTarget(entity, wp);
           if (worldDist(entity.pos, target) > 3) {
             entity.mission = Mission.MOVE;
             entity.moveTarget = target;
@@ -3623,7 +3636,7 @@ export class Game {
         // Patrol to waypoint — same as move but attack enemies en route
         const wp = this.waypoints.get(tm.data);
         if (!wp) { entity.teamMissionIndex++; return; }
-        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+        const target = this.teamMissionWaypointTarget(entity, wp);
         // Check for enemies nearby while patrolling
         if (entity.mission !== Mission.ATTACK) {
           let nearest: Entity | null = null;
@@ -3686,7 +3699,7 @@ export class Game {
           return;
         }
 
-        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+        const target = this.teamMissionWaypointTarget(entity, wp);
         if (worldDist(entity.pos, target) < 2) {
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
@@ -3705,7 +3718,7 @@ export class Game {
         // Used by Einstein and other VIP escorts — move to rally point then hold position
         const wp = this.waypoints.get(tm.data);
         if (!wp) { entity.teamMissionIndex++; return; }
-        const target = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+        const target = this.teamMissionWaypointTarget(entity, wp);
 
         if (worldDist(entity.pos, target) < 2) {
           // Arrived — switch to guard mode and complete mission
@@ -5612,6 +5625,128 @@ export class Game {
     return positions;
   }
 
+  private getTeamFormationMembers(entity: Entity): Entity[] {
+    if (entity.teamMissions.length === 0) {
+      return [entity];
+    }
+
+    const members = this.entities
+      .filter((other) => other.alive && other.teamMissions === entity.teamMissions)
+      .sort((a, b) => a.id - b.id);
+
+    return members.length > 0 ? members : [entity];
+  }
+
+  private calculateTeamMissionFormationOffsets(count: number, formation: number): Array<WorldPos | null> {
+    if (count <= 0) {
+      return [];
+    }
+
+    if (formation === 0) {
+      return Array.from({ length: count }, () => null);
+    }
+
+    if (formation === 1) {
+      return Array.from({ length: count }, () => ({ x: 0, y: 0 }));
+    }
+
+    const offsets: WorldPos[] = [];
+    let xdir = 0;
+    let ydir = 0;
+    let evenOdd = true;
+    const pushOffset = (x: number, y: number): void => {
+      offsets.push({ x: x * CELL_SIZE, y: y * CELL_SIZE });
+    };
+
+    switch (formation) {
+      case 2: {
+        const cols = Math.ceil(Math.sqrt(count));
+        for (let i = 0; i < count; i++) {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          const offsetX = (col - (cols - 1) / 2) * CELL_SIZE;
+          const offsetY = (row - Math.floor((count - 1) / cols) / 2) * CELL_SIZE;
+          offsets.push({ x: offsetX, y: offsetY });
+        }
+        break;
+      }
+      case 3:
+        ydir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          xdir = -xdir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir -= 2;
+            ydir += 2;
+          }
+        }
+        break;
+      case 4:
+        xdir = Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          ydir = -ydir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir -= 2;
+            ydir -= 2;
+          }
+        }
+        break;
+      case 5:
+        ydir = Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          xdir = -xdir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir -= 2;
+            ydir -= 2;
+          }
+        }
+        break;
+      case 6:
+        xdir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          ydir = -ydir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir += 2;
+            ydir -= 2;
+          }
+        }
+        break;
+      case 7:
+        ydir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(0, ydir);
+          ydir += 2;
+        }
+        break;
+      case 8:
+        xdir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, 0);
+          xdir += 2;
+        }
+        break;
+      default:
+        return Array.from({ length: count }, () => ({ x: 0, y: 0 }));
+    }
+
+    return offsets;
+  }
+
+  private teamMissionWaypointTarget(entity: Entity, wp: { cx: number; cy: number }): WorldPos {
+    const offset = entity.formationOffset ?? { x: 0, y: 0 };
+    return {
+      x: wp.cx * CELL_SIZE + CELL_SIZE / 2 + offset.x,
+      y: wp.cy * CELL_SIZE + CELL_SIZE / 2 + offset.y,
+    };
+  }
+
 
   // === Full AI — Strategic Opponent (delegates to ai.ts) ===
 
@@ -5851,10 +5986,8 @@ export class Game {
   // These mechanics exist in the original RA engine but are unused in SCA01-04EA.
   // Explicitly stubbed so the absence is deliberate, not accidental.
 
-  // FORMATION MOVEMENT: Units can move in formation (CHANGE_FORMATION team mission).
-  // Not used by any ant mission TeamTypes. Units move individually instead.
-  // STUB: If a CHANGE_FORMATION team mission is encountered, it's skipped.
-  // (Already handled: scenario.ts TMISSION index 2 is commented "unused")
+  // FORMATION MOVEMENT: Original RA campaign teams can change formation before MOVE/PATROL
+  // orders. The ant missions do not rely on it, but the team mission path now honors it.
 
   // AFTERMATH VEHICLES: CTNK (Chrono Tank), DTRK (Demo Truck), CARR (Carrier),
   // MSUB (Missile Sub), QTNK (MAD Tank), STNK (Stealth Tank) — none appear in

@@ -144,4 +144,40 @@ describe('Team mission parity hooks', () => {
       ((game as unknown as { spiedBuildingTriggers: Set<string> }).spiedBuildingTriggers).has('SPYS'),
     ).toBe(true);
   });
+
+  it('TMISSION_CHANGE_FORMATION assigns stable offsets that later MOVE orders honor', () => {
+    const game = createGame();
+    const teamScript = [
+      { mission: 2, data: 7 }, // FORMATION_LINE_NS
+      { mission: 3, data: 6 },
+    ];
+
+    const lead = new Entity(UnitType.V_1TNK, House.USSR, 4 * CELL_SIZE, 4 * CELL_SIZE);
+    lead.teamMissions = teamScript;
+    const wing = new Entity(UnitType.V_1TNK, House.USSR, 5 * CELL_SIZE, 4 * CELL_SIZE);
+    wing.teamMissions = teamScript;
+
+    game.entities.push(lead, wing);
+    game.entityById.set(lead.id, lead);
+    game.entityById.set(wing.id, wing);
+    ((game as unknown as { waypoints: Map<number, { cx: number; cy: number }> }).waypoints).set(6, { cx: 12, cy: 12 });
+
+    callUpdateTeamMission(game, lead);
+    callUpdateTeamMission(game, wing);
+
+    expect(lead.teamMissionIndex).toBe(1);
+    expect(wing.teamMissionIndex).toBe(1);
+    expect(lead.formationOffset).not.toBeNull();
+    expect(wing.formationOffset).not.toBeNull();
+    expect(lead.formationOffset?.y).toBe(-CELL_SIZE);
+    expect(wing.formationOffset?.y).toBe(CELL_SIZE);
+
+    callUpdateTeamMission(game, lead);
+    callUpdateTeamMission(game, wing);
+
+    const baseX = 12 * CELL_SIZE + CELL_SIZE / 2;
+    const baseY = 12 * CELL_SIZE + CELL_SIZE / 2;
+    expect(lead.moveTarget).toEqual({ x: baseX, y: baseY - CELL_SIZE });
+    expect(wing.moveTarget).toEqual({ x: baseX, y: baseY + CELL_SIZE });
+  });
 });

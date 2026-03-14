@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
   formatAuditMarkdown,
   runCampaignMissionAgents,
-} from '../src/EasterEgg/oracle/raAlliedMissionAgents';
+} from '../src/EasterEgg/oracle/raMainCampaignMissionAgents';
 
 interface CampaignMissionAuditOutput {
   timestamp: string;
