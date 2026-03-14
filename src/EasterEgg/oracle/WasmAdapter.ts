@@ -20,6 +20,7 @@ export interface RAGameState {
   playerHouse?: string;
   alliedHouses?: string[];
   globals?: number[];
+  civEvacuated?: boolean;
   power: { produced: number; consumed: number };
   units: RAEntity[];
   enemies: RAEntity[];
@@ -38,6 +39,8 @@ export interface RAEntity {
   mhp: number; // max HP
   m: number;   // mission enum
   ally: boolean;
+  cargo?: number;
+  cargoTop?: string;
 }
 
 export interface RAStructure extends RAEntity {

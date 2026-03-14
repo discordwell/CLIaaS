@@ -70,7 +70,6 @@ describe('OracleStrategy mission logic', () => {
     expect(decision.commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ cmd: 'attack', ids: [7], target: 20 }),
-        expect.objectContaining({ cmd: 'move', ids: [8], cx: 57, cy: 74 }),
       ]),
     );
 
@@ -85,19 +84,26 @@ describe('OracleStrategy mission logic', () => {
     const strategy = new OracleStrategy('SCG01EA');
     const tanya = unit({ id: 7, t: 'E7', house: 'GoodGuy', cx: 62, cy: 61, hp: 90, mhp: 100 });
     const einstein = unit({ id: 11, t: 'EINSTEIN', house: 'GoodGuy', cx: 62, cy: 62, hp: 25, mhp: 25 });
+    const transport = unit({ id: 12, t: 'TRAN', house: 'GoodGuy', cx: 53, cy: 49, hp: 90, mhp: 90, m: 5 });
     const jeep = unit({ id: 10, t: 'JEEP', house: 'Greece', cx: 63, cy: 58, hp: 150, mhp: 150 });
 
     const decision = strategy.decide(state({
       globals: [1],
-      units: [jeep, tanya, einstein],
+      units: [jeep, tanya, einstein, transport],
       enemies: [],
     }));
 
     expect(decision.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ cmd: 'move', ids: [7, 11], cx: 57, cy: 74 }),
-        expect.objectContaining({ cmd: 'attack_move', ids: [10], cx: 60, cy: 68 }),
+        expect.objectContaining({ cmd: 'enter', ids: [11], target: 12 }),
+        expect.objectContaining({ cmd: 'move', ids: [7], cx: 56, cy: 52 }),
+        expect.objectContaining({ cmd: 'attack_move', ids: [10], cx: 56, cy: 52 }),
       ]),
     );
+  });
+
+  it('detects SCG01EA victory from civilian evacuation state', () => {
+    const strategy = new OracleStrategy('SCG01EA');
+    expect(strategy.checkResult(state({ civEvacuated: true }))).toBe('victory');
   });
 });

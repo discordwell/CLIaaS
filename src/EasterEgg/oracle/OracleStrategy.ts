@@ -26,14 +26,13 @@ const MISSION_GUARD_AREA = 18;
 const RETREAT_HP_FRACTION = 0.3;
 
 const NON_COMBAT_TYPES = new Set(['C7', 'C8', 'EINSTEIN', 'TRAN']);
-const EVAC_TYPES = new Set(['C7', 'C8', 'E7', 'EINSTEIN']);
 
 const SCG01EA_POWER_LINE_X = 67;
 const SCG01EA_PRISON: Point = { cx: 62, cy: 63 };
 const SCG01EA_PRISON_ASSAULT: Point = { cx: 63, cy: 60 };
 const SCG01EA_TANYA_STAGE: Point = { cx: 63, cy: 56 };
-const SCG01EA_FLARE: Point = { cx: 57, cy: 74 };
-const SCG01EA_ESCORT_POINT: Point = { cx: 60, cy: 68 };
+const SCG01EA_EVAC_POINT: Point = { cx: 53, cy: 49 };
+const SCG01EA_ESCORT_POINT: Point = { cx: 56, cy: 52 };
 
 // Exploration waypoints — spiral pattern covering 64x64 cell map
 const EXPLORE_WAYPOINTS = [
@@ -92,6 +91,10 @@ export class OracleStrategy {
   }
 
   checkResult(state: RAGameState): OracleResult {
+    if (this.scenario === 'SCG01EA' && state.civEvacuated) {
+      return 'victory';
+    }
+
     if (
       state.units.length === 0 &&
       state.structures.filter((s) => s.ally).length === 0 &&
@@ -198,10 +201,16 @@ export class OracleStrategy {
     const commands: Array<Record<string, unknown>> = [];
     const reasons: string[] = [];
 
-    const playerCombat = this.playerOwnedUnits(state).filter((u) => this.isCombatUnit(u));
+    const playerCombat = this.playerOwnedUnits(state).filter(
+      (u) => this.isCombatUnit(u) && u.t !== 'E7',
+    );
     const tanya = state.units.find((u) => u.t === 'E7');
-    const transport = state.units.find((u) => u.t === 'TRAN');
+    const einstein = state.units.find((u) => u.t === 'EINSTEIN');
     const rescueTriggered = this.isScg01eaRescueTriggered(state);
+    const transport = rescueTriggered ? this.pickScg01eaEvacTransport(state) : undefined;
+    const transportLoaded = Boolean(
+      transport && ((transport.cargo ?? 0) > 0 || transport.cargoTop === 'EINSTEIN'),
+    );
 
     const westPowerPlants = state.structures
       .filter((s) => !s.ally && s.t === 'POWR' && s.cx <= SCG01EA_POWER_LINE_X)
@@ -217,20 +226,10 @@ export class OracleStrategy {
     const escortCombat = playerCombat.filter((u) => this.distanceSq(u, SCG01EA_PRISON) <= 64);
     const flareThreats = state.enemies
       .filter((e) =>
-        this.distanceSq(e, SCG01EA_FLARE) <= 144 ||
+        this.distanceSq(e, SCG01EA_EVAC_POINT) <= 144 ||
         this.distanceSq(e, SCG01EA_ESCORT_POINT) <= 100,
       )
-      .sort((a, b) => this.distanceSq(a, SCG01EA_FLARE) - this.distanceSq(b, SCG01EA_FLARE));
-
-    if (transport && tanya && this.distanceSq(transport, SCG01EA_FLARE) > 9) {
-      commands.push({
-        cmd: 'move',
-        ids: [transport.id],
-        cx: SCG01EA_FLARE.cx,
-        cy: SCG01EA_FLARE.cy,
-      });
-      reasons.push('stage transport at flare');
-    }
+      .sort((a, b) => this.distanceSq(a, SCG01EA_EVAC_POINT) - this.distanceSq(b, SCG01EA_EVAC_POINT));
 
     if (tanya) {
       const tanyaHp = tanya.hp / tanya.mhp;
@@ -303,16 +302,43 @@ export class OracleStrategy {
         }
       }
     } else {
-      const evacUnits = state.units.filter((u) => EVAC_TYPES.has(u.t));
-      const evacPending = evacUnits.filter((u) => this.distanceSq(u, SCG01EA_FLARE) > 16);
-      if (evacPending.length > 0) {
+      if (transport && !transportLoaded && this.distanceSq(transport, SCG01EA_EVAC_POINT) > 4) {
         commands.push({
           cmd: 'move',
-          ids: evacPending.map((u) => u.id),
-          cx: SCG01EA_FLARE.cx,
-          cy: SCG01EA_FLARE.cy,
+          ids: [transport.id],
+          cx: SCG01EA_EVAC_POINT.cx,
+          cy: SCG01EA_EVAC_POINT.cy,
         });
-        reasons.push(`evacuate ${evacPending.length} unit(s)`);
+        reasons.push('stage evac helicopter');
+      }
+
+      if (einstein && transport && !transportLoaded) {
+        commands.push({
+          cmd: 'enter',
+          ids: [einstein.id],
+          target: transport.id,
+        });
+        reasons.push('board Einstein');
+      } else if (einstein && this.distanceSq(einstein, SCG01EA_EVAC_POINT) > 4) {
+        commands.push({
+          cmd: 'move',
+          ids: [einstein.id],
+          cx: SCG01EA_EVAC_POINT.cx,
+          cy: SCG01EA_EVAC_POINT.cy,
+        });
+        reasons.push('move Einstein to evac point');
+      } else if (transportLoaded) {
+        reasons.push('transport evacuating Einstein');
+      }
+
+      if (tanya && this.distanceSq(tanya, SCG01EA_ESCORT_POINT) > 9) {
+        commands.push({
+          cmd: 'move',
+          ids: [tanya.id],
+          cx: SCG01EA_ESCORT_POINT.cx,
+          cy: SCG01EA_ESCORT_POINT.cy,
+        });
+        reasons.push('Tanya escorts evac');
       }
 
       if (playerCombat.length > 0) {
@@ -330,7 +356,7 @@ export class OracleStrategy {
             cx: SCG01EA_ESCORT_POINT.cx,
             cy: SCG01EA_ESCORT_POINT.cy,
           });
-          reasons.push('escort moves to flare');
+          reasons.push('escort moves to evac zone');
         }
       }
     }
@@ -363,6 +389,34 @@ export class OracleStrategy {
 
   private isScg01eaRescueTriggered(state: RAGameState): boolean {
     return Boolean(state.globals?.includes(1) || state.units.some((u) => u.t === 'EINSTEIN'));
+  }
+
+  private pickScg01eaEvacTransport(state: RAGameState): RAEntity | undefined {
+    const transports = state.units.filter((u) => u.t === 'TRAN');
+    if (transports.length === 0) {
+      return undefined;
+    }
+
+    return transports
+      .slice()
+      .sort((a, b) => {
+        const aRank = this.scg01eaTransportRank(a, state.playerHouse);
+        const bRank = this.scg01eaTransportRank(b, state.playerHouse);
+        if (aRank !== bRank) {
+          return aRank - bRank;
+        }
+        return this.distanceSq(a, SCG01EA_EVAC_POINT) - this.distanceSq(b, SCG01EA_EVAC_POINT);
+      })[0];
+  }
+
+  private scg01eaTransportRank(transport: RAEntity, playerHouse?: string): number {
+    if (transport.house === 'GoodGuy') {
+      return 0;
+    }
+    if (playerHouse && transport.house && transport.house !== playerHouse) {
+      return 1;
+    }
+    return 2;
   }
 
   private nearestEnemy(from: RAEntity, enemies: RAEntity[]): RAEntity {

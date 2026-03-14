@@ -99,8 +99,9 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 	COORDINATE coord = obj->Center_Coord();
 	CELL cell = Coord_Cell(coord);
 	HousesType house = obj->Owner();
+	TechnoClass* tech = (TechnoClass*)obj;
 
-	buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s}",
+	buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s",
 		AGENT_ID(rtti, idx),
 		obj->Class_Of().Name(),
 		agent_house_name(house),
@@ -108,7 +109,19 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		(int)obj->Strength,
 		(int)obj->Class_Of().MaxStrength,
 		(int)obj->Get_Mission(),
-			ally ? "true" : "false");
+		ally ? "true" : "false");
+
+	if (tech->Techno_Type_Class()->Max_Passengers() > 0) {
+		buf_cat(",\"cargo\":%d", tech->How_Many());
+		if (tech->Is_Something_Attached()) {
+			FootClass* passenger = tech->Attached_Object();
+			if (passenger) {
+				buf_cat(",\"cargoTop\":\"%s\"", passenger->Class_Of().Name());
+			}
+		}
+	}
+
+	buf_cat("}");
 }
 
 static int agent_power_produced(void)
@@ -352,6 +365,8 @@ char* agent_get_state(void)
 	}
 	buf_cat("],");
 
+	buf_cat("\"civEvacuated\":%s,", PlayerPtr->IsCivEvacuated ? "true" : "false");
+
 	buf_cat("\"power\":{\"produced\":%d,\"consumed\":%d},",
 		power_produced,
 		power_consumed);
@@ -518,6 +533,15 @@ char* agent_command(char* json)
 				tech->Assign_Destination(dest);
 				tech->Assign_Mission(MISSION_HUNT);
 				any_ok = true;
+			}
+			else if (strcmp(cmd.cmd, "enter") == 0 && cmd.has_target) {
+				TechnoClass* tgt = agent_lookup(cmd.target);
+				if (tgt && !tgt->IsInLimbo && tgt->Strength > 0) {
+					tech->Assign_Target(TARGET_NONE);
+					tech->Assign_Destination(tgt->As_Target());
+					tech->Assign_Mission(MISSION_ENTER);
+					any_ok = true;
+				}
 			}
 			else if (strcmp(cmd.cmd, "stop") == 0) {
 				tech->Assign_Mission(MISSION_GUARD);
