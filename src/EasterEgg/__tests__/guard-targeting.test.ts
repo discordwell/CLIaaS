@@ -105,4 +105,15 @@ describe('threatScore — threat-weighted targeting', () => {
 
     expect(vehScore).toBeGreaterThan(infScore);
   });
+
+  it('civilian and VIP targets score below armed combat targets at the same distance', () => {
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const rifle = makeEntity(UnitType.I_E1, House.Greece, 150, 100);
+    const einstein = makeEntity(UnitType.I_EINSTEIN, House.Greece, 150, 100);
+
+    const rifleScore = threatScore(scanner, rifle, 2, false);
+    const einsteinScore = threatScore(scanner, einstein, 2, false);
+
+    expect(rifleScore).toBeGreaterThan(einsteinScore);
+  });
 });

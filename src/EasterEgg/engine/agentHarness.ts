@@ -28,6 +28,8 @@ export interface AgentUnit {
   mtx?: number;    // move target cell x
   mty?: number;    // move target cell y
   ally: boolean;   // player-controlled
+  cargo?: number;  // loaded passenger count for transports
+  cargoTop?: string; // first passenger type, if any
   wpn?: string;    // weapon name
   rng?: number;    // weapon range
   // Combat readiness
@@ -106,6 +108,7 @@ export interface AgentState {
   allowWin: boolean;
   globals: number[];
   unitsLeftMap: number;
+  civiliansEvacuated: number;
   triggers: { name: string; fired: boolean; house: number; e1: number; e1d: number; a1: number; a1d: number }[];
 }
 
@@ -155,6 +158,12 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
     const mc = worldToCell(e.moveTarget.x, e.moveTarget.y);
     u.mtx = mc.cx;
     u.mty = mc.cy;
+  }
+  if (e.isTransport) {
+    u.cargo = e.passengers.length;
+    if (e.passengers.length > 0) {
+      u.cargoTop = e.passengers[0].type;
+    }
   }
   if (e.weapon) {
     u.wpn = e.weapon.name;
@@ -299,6 +308,7 @@ export function serializeState(game: Game): AgentState {
     allowWin: ((game as unknown as Record<string, unknown>).allowWin as boolean) ?? false,
     globals: [...((game as unknown as Record<string, unknown>).globals as Set<number> ?? [])],
     unitsLeftMap: ((game as unknown as Record<string, unknown>).unitsLeftMap as number) ?? 0,
+    civiliansEvacuated: ((game as unknown as Record<string, unknown>).civiliansEvacuated as number) ?? 0,
     triggers: (((game as unknown as Record<string, unknown>).triggers as Array<{ name: string; fired: boolean; house: number; event1: { type: number; data: number }; action1: { action: number; data: number } }>) ?? []).map(t => ({
       name: t.name, fired: t.fired, house: t.house,
       e1: t.event1.type, e1d: t.event1.data,
@@ -336,9 +346,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
               e.path = [{ cx: c.cx, cy: c.cy }];
               e.pathIndex = 0;
             } else {
-              const path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
-              if (path.length === 0) { errs.push(`no path for ${id}`); continue; }
-              e.path = path;
+              e.path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
               e.pathIndex = 0;
             }
           }

@@ -51,6 +51,7 @@ next-env.d.ts
 /artifacts/
 /test-results/parity/ra-campaign-*.json
 /test-results/parity/ra-campaign-*.md
+/test-results/runtime-closure/
 *.zip
 
 # claude code

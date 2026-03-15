@@ -365,7 +365,11 @@ char* agent_get_state(void)
 	}
 	buf_cat("],");
 
+	buf_cat("\"missionTimer\":%ld,", (long)Scen.MissionTimer);
+	buf_cat("\"missionTimerActive\":%s,", Scen.MissionTimer.Is_Active() ? "true" : "false");
 	buf_cat("\"civEvacuated\":%s,", PlayerPtr->IsCivEvacuated ? "true" : "false");
+	buf_cat("\"winPending\":%s,", PlayerPtr->IsToWin ? "true" : "false");
+	buf_cat("\"losePending\":%s,", PlayerPtr->IsToLose ? "true" : "false");
 
 	buf_cat("\"power\":{\"produced\":%d,\"consumed\":%d},",
 		power_produced,

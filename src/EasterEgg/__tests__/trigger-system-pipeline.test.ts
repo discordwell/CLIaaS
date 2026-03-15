@@ -20,7 +20,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   checkTriggerEvent,
+  consumeSemiPersistentAttachment,
   executeTriggerAction,
+  initializeTriggerAttachmentCounts,
   TIME_UNIT_TICKS,
   type TriggerGameState,
   type TriggerEvent,
@@ -699,6 +701,22 @@ describe('Trigger persistence modes', () => {
     expect(trigger.fired && trigger.persistence <= 1).toBe(true);
   });
 
+  it('semi-persistent destroyed triggers wait for all attached objects to detach', () => {
+    const trigger = createTrigger({
+      name: 'eins',
+      persistence: 1,
+      event1: { type: 7, team: -1, data: 0 },
+    });
+    initializeTriggerAttachmentCounts([trigger], ['eins', 'eins']);
+
+    expect(trigger.attachCount).toBe(2);
+    expect(trigger.remainingAttachCount).toBe(2);
+    expect(consumeSemiPersistentAttachment(trigger, 1)).toBe(false);
+    expect(trigger.remainingAttachCount).toBe(1);
+    expect(consumeSemiPersistentAttachment(trigger, 1)).toBe(true);
+    expect(trigger.remainingAttachCount).toBe(0);
+  });
+
   it('persistent (persistence=2) trigger: CAN re-fire after being marked fired', () => {
     const trigger = createTrigger({
       persistence: 2,
@@ -1256,13 +1274,13 @@ describe('Timer actions and events', () => {
   });
 
   it('TEVENT_TIME correctly uses TIME_UNIT_TICKS conversion', () => {
-    // TIME_UNIT_TICKS = 6 * GAME_TICKS_PER_SEC = 6 * 20 = 120
-    expect(TIME_UNIT_TICKS).toBe(120);
+    // Original RA uses 1/10th-minute trigger units on a 15 Hz logic clock: 6 * 15 = 90.
+    expect(TIME_UNIT_TICKS).toBe(90);
 
-    // data=10 means 10 * 120 = 1200 ticks
+    // data=10 means 10 * 90 = 900 ticks
     const event: TriggerEvent = { type: 13, team: -1, data: 10 };
-    expect(checkTriggerEvent(event, createState({ gameTick: 1199, triggerStartTick: 0 }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ gameTick: 1200, triggerStartTick: 0 }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ gameTick: 899, triggerStartTick: 0 }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ gameTick: 900, triggerStartTick: 0 }))).toBe(true);
   });
 });
 
@@ -1566,31 +1584,31 @@ describe('Complex multi-trigger scenarios', () => {
   it('persistent timer trigger fires repeatedly on schedule', () => {
     const trigger = createTrigger({
       persistence: 2,
-      event1: { type: 13, team: -1, data: 1 }, // TIME: 1 unit = 120 ticks (6 * 20)
+      event1: { type: 13, team: -1, data: 1 }, // TIME: 1 unit = 90 ticks (6 seconds at 15 Hz)
       timerTick: 0,
     });
 
-    // Tick 119: not enough time
+    // Tick 89: not enough time
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: 119, triggerStartTick: 0,
+      gameTick: 89, triggerStartTick: 0,
     }))).toBe(false);
 
-    // Tick 120: fires
+    // Tick 90: fires
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: 120, triggerStartTick: 0,
+      gameTick: 90, triggerStartTick: 0,
     }))).toBe(true);
 
     // After firing, persistent trigger resets timerTick to current tick
-    trigger.timerTick = 120;
+    trigger.timerTick = 90;
 
-    // Tick 239: not enough time since reset
+    // Tick 179: not enough time since reset
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: 239, triggerStartTick: 120,
+      gameTick: 179, triggerStartTick: 90,
     }))).toBe(false);
 
-    // Tick 240: fires again
+    // Tick 180: fires again
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: 240, triggerStartTick: 120,
+      gameTick: 180, triggerStartTick: 90,
     }))).toBe(true);
   });
 

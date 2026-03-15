@@ -9,7 +9,7 @@ import {
   UNIT_STATS, WEAPON_STATS, CELL_SIZE,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
-  worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
+  CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
   armorIndex,
 } from './types';
 
@@ -784,6 +784,12 @@ export function threatScore(
   // Convert distance from cells to leptons: dist * 256
   const distLeptons = dist * 256;
   let score = (value * 32000) / (distLeptons + 1);
+
+  // Original RA strongly prefers armed combatants over VIP/civilian evac targets.
+  // Without this penalty, SCG01EA prison guards focus Einstein instead of the escort.
+  if ((target.isCivilian || CIVILIAN_UNIT_TYPES.has(target.type)) && !isTargetAttackingAlly) {
+    score *= 0.15;
+  }
 
   // Wounded bonus: finish off weakened targets (HP < 50% → 1.5x)
   if (target.hp < target.maxHp * 0.5) score *= 1.5;

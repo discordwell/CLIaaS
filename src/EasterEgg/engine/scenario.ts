@@ -6,7 +6,7 @@
 import {
   type CellPos, type UnitStats, type WeaponStats,
   CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
-  House, Mission, UnitType, AnimState, GAME_TICKS_PER_SEC,
+  House, Mission, UnitType, AnimState,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
 } from './types';
@@ -128,9 +128,10 @@ const TMISSION_LOAD = 14;        // Load infantry into transport
 // 15 = SPY (unused)
 const TMISSION_PATROL = 16;      // Patrol to waypoint (move + attack en route)
 
-// Time unit: Data.Value is in 1/10th minute increments (6 seconds each)
-// Convert to game ticks: value * 6 * GAME_TICKS_PER_SEC
-export const TIME_UNIT_TICKS = 6 * GAME_TICKS_PER_SEC; // 90 ticks per time unit
+// Time unit: trigger/team timer values are in 1/10th minute increments (6 seconds each).
+// Original RA evaluates these against a 15 Hz logic clock: 6 * 15 = 90 ticks.
+// Keep this separate from the TS renderer/update rate (20 Hz), which is used elsewhere.
+export const TIME_UNIT_TICKS = 90;
 
 export interface TeamMember {
   type: string;   // unit type name (e.g. 'ANT3')
@@ -181,6 +182,52 @@ export interface ScenarioTrigger {
   forceFirePending: boolean; // set by FORCE_TRIGGER — fires on next check regardless of events
   pendingDestroyedCount: number; // C++ Spring() parity: count of unprocessed deaths (fires once per death)
   triggeringEntityIds: number[]; // C++ parity: entity IDs that triggered this (for DESTROY_OBJECT with cell triggers)
+  attachCount?: number; // number of attached objects/cells at scenario start or after dynamic spawns
+  remainingAttachCount?: number; // semi-persistent detach countdown before the trigger may execute
+}
+
+export function initializeTriggerAttachmentCounts(
+  triggers: ScenarioTrigger[],
+  attachedTriggerNames: Iterable<string>,
+): void {
+  const counts = new Map<string, number>();
+  for (const triggerName of attachedTriggerNames) {
+    if (!triggerName) continue;
+    counts.set(triggerName, (counts.get(triggerName) ?? 0) + 1);
+  }
+  for (const trigger of triggers) {
+    const count = counts.get(trigger.name) ?? 0;
+    trigger.attachCount = count;
+    trigger.remainingAttachCount = count;
+  }
+}
+
+export function noteTriggerAttachment(
+  triggers: ScenarioTrigger[],
+  triggerName: string | undefined,
+  count = 1,
+): void {
+  if (!triggerName || count <= 0) return;
+  for (const trigger of triggers) {
+    if (trigger.name !== triggerName) continue;
+    trigger.attachCount = (trigger.attachCount ?? 0) + count;
+    trigger.remainingAttachCount = (trigger.remainingAttachCount ?? 0) + count;
+  }
+}
+
+export function consumeSemiPersistentAttachment(
+  trigger: ScenarioTrigger,
+  detachCount = 1,
+): boolean {
+  if (trigger.persistence !== 1 || detachCount <= 0) {
+    return true;
+  }
+  const remaining = trigger.remainingAttachCount ?? 0;
+  if (remaining <= 0) {
+    return true;
+  }
+  trigger.remainingAttachCount = Math.max(0, remaining - detachCount);
+  return trigger.remainingAttachCount === 0;
 }
 
 // === Mission Metadata ===
@@ -747,6 +794,8 @@ export function parseScenarioINI(text: string): ScenarioData {
         forceFirePending: false,
         pendingDestroyedCount: 0,
         triggeringEntityIds: [],
+        attachCount: 0,
+        remainingAttachCount: 0,
       });
     }
   }
@@ -951,6 +1000,21 @@ function normalizeHouseEdge(edge: string | undefined): string {
   return (edge ?? 'North').toLowerCase();
 }
 
+function inferClosestMapEdge(
+  alignedCell: CellPos,
+  mapBounds: { x: number; y: number; w: number; h: number },
+): 'north' | 'south' | 'east' | 'west' {
+  const relX = alignedCell.cx - mapBounds.x;
+  const relY = alignedCell.cy - mapBounds.y;
+  const xDist = Math.min(relX, -alignedCell.cx + (mapBounds.x + mapBounds.w));
+  const yDist = Math.min(relY, -alignedCell.cy + (mapBounds.y + mapBounds.h));
+
+  if (xDist < yDist) {
+    return relX < mapBounds.w / 2 ? 'west' : 'east';
+  }
+  return relY < mapBounds.h / 2 ? 'north' : 'south';
+}
+
 export function calculateHouseEdgeSpawnCell(
   house: House,
   houseEdges: Map<House, string> | undefined,
@@ -962,7 +1026,11 @@ export function calculateHouseEdgeSpawnCell(
     return null;
   }
 
-  const edge = normalizeHouseEdge(houseEdges?.get(house));
+  // Original RA infers the reinforcement edge from the origin waypoint when one exists
+  // (DisplayClass::Calculated_Cell), and only falls back to the house edge otherwise.
+  const edge = alignedCell
+    ? inferClosestMapEdge(alignedCell, mapBounds)
+    : normalizeHouseEdge(houseEdges?.get(house));
   const { x, y, w, h } = mapBounds;
   const randOffset = Math.floor(random() * Math.max(w, h));
   const alignedX = alignedCell ? Math.min(Math.max(alignedCell.cx, x), x + w - 1) : x + (randOffset % w);
@@ -1320,6 +1388,15 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       map.setWallType(pos.cx, pos.cy, s.type);
     }
   }
+
+  initializeTriggerAttachmentCounts(
+    data.triggers,
+    [
+      ...entities.flatMap((entity) => entity.triggerName ? [entity.triggerName] : []),
+      ...structures.flatMap((structure) => structure.triggerName ? [structure.triggerName] : []),
+      ...data.cellTriggers.values(),
+    ],
+  );
 
   // Add base structures from [Base] section (pre-placed buildings)
   for (const bs of data.baseStructures) {
@@ -2059,11 +2136,13 @@ export function executeTriggerAction(
           // This enables DESTROYED event chains — when these units die, the trigger fires.
           if (team.trigger >= 0 && team.trigger < triggers.length) {
             entity.triggerName = triggers[team.trigger].name;
+            noteTriggerAttachment(triggers, entity.triggerName);
           }
           // VIP spawn protection — civilians/VIPs spawned in hostile zones get brief invulnerability
-          // so they can start moving before being killed (C++ building-exit protection equivalent)
+          // so they can start moving before being killed (C++ building-exit protection equivalent).
+          // The TS engine runs at 20 Hz, so use 120 ticks to preserve the intended ~6 second window.
           if (CIVILIAN_UNIT_TYPES.has(member.type)) {
-            entity.invulnTick = 90; // ~6 seconds at 15 FPS — enough to escape spawn zone
+            entity.invulnTick = 120;
           }
           // Aircraft reinforcements: spawn at house edge, fly in to origin waypoint
           // C++ ScenarioClass::Create_Army spawns ALL aircraft at the map edge, including

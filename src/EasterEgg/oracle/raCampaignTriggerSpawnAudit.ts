@@ -211,39 +211,31 @@ function buildHouseEdges(data: ScenarioData): Map<House, string> {
   return houseEdges;
 }
 
-function resolveOriginCell(team: TeamType, data: ScenarioData, houseEdges: Map<House, string>): { cell?: { cx: number; cy: number }; issue?: string; edge?: string } {
+function resolveOriginCell(
+  team: TeamType,
+  data: ScenarioData,
+  houseEdges: Map<House, string>,
+): { cell?: { cx: number; cy: number }; entryCell?: { cx: number; cy: number }; issue?: string } {
   const house = houseIdToHouse(team.house);
-  const edge = (houseEdges.get(house) ?? 'North').toLowerCase();
   const cell = resolveTeamOriginCell(team.origin, house, data.waypoints, houseEdges, data.mapBounds, () => 0.5);
   if (cell) {
-    return { cell, edge };
+    return {
+      cell,
+      entryCell: calculateHouseEdgeSpawnCell(house, houseEdges, data.mapBounds, cell, () => 0.5) ?? cell,
+    };
   }
 
   const fallback = calculateHouseEdgeSpawnCell(house, houseEdges, data.mapBounds, undefined, () => 0.5);
   if (fallback) {
-    return { cell: fallback, edge };
+    return { cell: fallback, entryCell: fallback };
   }
 
-  return { issue: `house ${House[house] ?? team.house} uses unknown edge "${edge}"`, edge };
+  const edge = (houseEdges.get(house) ?? 'North').toLowerCase();
+  return { issue: `house ${House[house] ?? team.house} uses unknown edge "${edge}"` };
 }
 
 function cellsEqual(a: { cx: number; cy: number }, b: { cx: number; cy: number }): boolean {
   return a.cx === b.cx && a.cy === b.cy;
-}
-
-function isEdgeAligned(cell: { cx: number; cy: number }, edge: string, origin: { cx: number; cy: number }, bounds: ScenarioData['mapBounds']): boolean {
-  switch (edge) {
-    case 'north':
-      return cell.cy === bounds.y && cell.cx === origin.cx;
-    case 'south':
-      return cell.cy === bounds.y + bounds.h - 1 && cell.cx === origin.cx;
-    case 'east':
-      return cell.cx === bounds.x + bounds.w - 1 && cell.cy === origin.cy;
-    case 'west':
-      return cell.cx === bounds.x && cell.cy === origin.cy;
-    default:
-      return false;
-  }
 }
 
 function compareTeamMissions(expected: TeamMission[], actual: TeamMission[] | null | undefined): boolean {
@@ -431,11 +423,11 @@ function auditSpawnCheck(
     for (const entity of visibleEntities) {
       const cell = worldToCell(entity.pos.x, entity.pos.y);
       if (entity.stats.isAircraft) {
-        if (!isEdgeAligned(cell, origin.edge, origin.cell, data.mapBounds)) {
+        if (origin.entryCell && !cellsEqual(cell, origin.entryCell)) {
           issues.push({
             severity: 'error',
             code: 'aircraft-spawn-position-mismatch',
-            message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> aircraft team "${team.name}" spawned ${entity.type} at (${cell.cx},${cell.cy}) instead of the ${origin.edge} edge aligned to (${origin.cell.cx},${origin.cell.cy})`,
+            message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> aircraft team "${team.name}" spawned ${entity.type} at (${cell.cx},${cell.cy}) instead of (${origin.entryCell.cx},${origin.entryCell.cy})`,
           });
         }
         if (entity.mission !== Mission.MOVE || !entity.moveTarget || !cellsEqual(worldToCell(entity.moveTarget.x, entity.moveTarget.y), origin.cell)) {

@@ -36,7 +36,8 @@ import {
   loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
-  checkTriggerEvent, executeTriggerAction, houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
+  checkTriggerEvent, executeTriggerAction, houseIdToHouse, consumeSemiPersistentAttachment,
+  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
   saveCarryover, TIME_UNIT_TICKS,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
@@ -4751,8 +4752,10 @@ export class Game {
 
       // Force-fired triggers bypass event conditions
       let shouldFire = false;
+      let forcedFire = false;
       if (trigger.forceFirePending) {
         shouldFire = true;
+        forcedFire = true;
         trigger.forceFirePending = false;
       } else {
         // Check event conditions
@@ -4761,6 +4764,19 @@ export class Game {
       }
 
       if (!shouldFire) continue;
+      if (!forcedFire) {
+        const destroyedDetachCount =
+          trigger.event1.type === 7 || trigger.event2.type === 7
+            ? trigger.pendingDestroyedCount
+            : 0;
+        if (
+          destroyedDetachCount > 0 &&
+          !consumeSemiPersistentAttachment(trigger, destroyedDetachCount)
+        ) {
+          trigger.pendingDestroyedCount = 0;
+          continue;
+        }
+      }
       if (this.debugTriggers) {
         console.log(`[TRIGGER] ${trigger.name} fired | event1=${trigger.event1.type} action1=${trigger.action1.action}${trigger.action2 ? ' action2=' + trigger.action2.action : ''}`);
       }

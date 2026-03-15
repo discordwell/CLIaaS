@@ -10,6 +10,9 @@
  * 6. Trigger chain: eins → ein2 → ein3 → heli spawn → player loads → evac → win
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -17,8 +20,11 @@ import {
   cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES,
 } from '../engine/types';
 import {
+  calculateHouseEdgeSpawnCell,
   checkTriggerEvent,
+  initializeTriggerAttachmentCounts,
   executeTriggerAction,
+  parseScenarioINI,
   type TriggerGameState,
   type TriggerEvent,
   type TriggerAction,
@@ -82,6 +88,30 @@ const houseEdges = new Map<House, string>([
 ]);
 
 describe('SCG01EA Trigger Chain', () => {
+  it('counts both prison guards on the semi-persistent rescue trigger', () => {
+    const ini = fs.readFileSync(
+      path.join(process.cwd(), 'public', 'ra', 'assets', 'SCG01EA.ini'),
+      'utf8',
+    );
+    const parsed = parseScenarioINI(ini);
+    const trigger = parsed.triggers.find((entry) => entry.name === 'eins');
+
+    expect(trigger).toBeDefined();
+    initializeTriggerAttachmentCounts(
+      [trigger!],
+      [
+        ...parsed.units.flatMap((unit) => unit.trigger && unit.trigger !== 'None' ? [unit.trigger] : []),
+        ...parsed.infantry.flatMap((unit) => unit.trigger && unit.trigger !== 'None' ? [unit.trigger] : []),
+        ...parsed.structures.flatMap((structure) => structure.trigger && structure.trigger !== 'None' ? [structure.trigger] : []),
+        ...parsed.cellTriggers.values(),
+      ],
+    );
+
+    expect(trigger!.persistence).toBe(1);
+    expect(trigger!.attachCount).toBe(2);
+    expect(trigger!.remainingAttachCount).toBe(2);
+  });
+
   it('TEVENT_EVAC_CIVILIAN (18) fires when civiliansEvacuated > 0', () => {
     const event: TriggerEvent = { type: 18, team: -1, data: 0 };
 
@@ -104,6 +134,24 @@ describe('SCG01EA Trigger Chain', () => {
 
     executeTriggerAction(action, teams, waypoints, globals, triggers);
     expect(globals.has(1)).toBe(true);
+  });
+
+  it('Einstein reinforcement receives the full TS spawn-protection window', () => {
+    const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: -1 };
+    const teams: TeamType[] = [{
+      name: 'einst',
+      house: 1,
+      flags: 0,
+      origin: 7,
+      trigger: -1,
+      members: [{ type: 'EINSTEIN', count: 1 }],
+      missions: [{ mission: 3, data: 7 }],
+    }];
+
+    const result = executeTriggerAction(action, teams, waypoints, new Set(), []);
+    expect(result.spawned).toHaveLength(1);
+    expect(result.spawned[0].type).toBe(UnitType.I_EINSTEIN);
+    expect(result.spawned[0].invulnTick).toBe(120);
   });
 });
 
@@ -137,9 +185,11 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(heli.type).toBe(UnitType.V_TRAN);
     expect(heli.house).toBe(House.GoodGuy);
 
-    // Should be at the east edge, not at WP23
-    const eastEdgeX = (mapBounds.x + mapBounds.w - 1) * CELL_SIZE + CELL_SIZE / 2;
-    expect(heli.pos.x).toBe(eastEdgeX);
+    const spawnCell = calculateHouseEdgeSpawnCell(House.GoodGuy, houseEdges, mapBounds, WP23);
+    expect(spawnCell).toBeDefined();
+    const spawnWorld = cellToWorld(spawnCell!.cx, spawnCell!.cy);
+    expect(heli.pos.x).toBe(spawnWorld.x);
+    expect(heli.pos.y).toBe(spawnWorld.y);
 
     // Should be airborne in flying state
     expect(heli.aircraftState).toBe('flying');
@@ -181,9 +231,11 @@ describe('Aircraft reinforcement edge spawn', () => {
     const tran = result.spawned.find(e => e.type === UnitType.V_TRAN);
     expect(tran).toBeDefined();
 
-    // TRAN should be at the east edge (Greece edge), NOT at origin waypoint
-    const eastEdgeX = (mapBounds.x + mapBounds.w - 1) * CELL_SIZE + CELL_SIZE / 2;
-    expect(tran!.pos.x).toBe(eastEdgeX);
+    const spawnCell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, mapBounds, WP0);
+    expect(spawnCell).toBeDefined();
+    const spawnWorld = cellToWorld(spawnCell!.cx, spawnCell!.cy);
+    expect(tran!.pos.x).toBe(spawnWorld.x);
+    expect(tran!.pos.y).toBe(spawnWorld.y);
 
     // Should be airborne in flying state
     expect(tran!.aircraftState).toBe('flying');

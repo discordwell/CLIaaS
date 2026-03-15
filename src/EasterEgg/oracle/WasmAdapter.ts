@@ -20,7 +20,11 @@ export interface RAGameState {
   playerHouse?: string;
   alliedHouses?: string[];
   globals?: number[];
+  missionTimer?: number;
+  missionTimerActive?: boolean;
   civEvacuated?: boolean;
+  winPending?: boolean;
+  losePending?: boolean;
   power: { produced: number; consumed: number };
   units: RAEntity[];
   enemies: RAEntity[];
