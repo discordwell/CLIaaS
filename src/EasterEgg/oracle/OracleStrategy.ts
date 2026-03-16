@@ -6,7 +6,7 @@
  * sidebar production, so this strategy focuses on tactical control only.
  */
 
-import type { RAGameState, RAEntity, RAStructure, RABuildable } from './WasmAdapter.js';
+import type { RAGameState, RAEntity, RAStructure, RABuildable } from './WasmAdapter';
 
 export interface OracleDecision {
   commands: Array<Record<string, unknown>>;

@@ -3,17 +3,17 @@ import type {
   AgentState,
   AgentStructure,
   AgentUnit,
-} from '../engine/agentHarness.js';
+} from '../engine/agentHarness';
 import {
   OracleStrategy,
   type OracleDecision,
   type OracleResult,
-} from './OracleStrategy.js';
+} from './OracleStrategy';
 import type {
   RAGameState,
   RAEntity,
   RAStructure,
-} from './WasmAdapter.js';
+} from './WasmAdapter';
 
 const TS_STRUCTURE_ID_OFFSET = 1_000_000_000;
 

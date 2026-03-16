@@ -700,6 +700,91 @@ export default function AntGame({ onExit }: AntGameProps) {
       };
     }
 
+    // Oracle auto-play mode: Oracle strategy drives the player's units
+    if (anttest === 'oracle') {
+      setScreen('playing');
+
+      const canvas = canvasRef.current;
+      const game = new Game(canvas);
+      gameRef.current = game;
+      game.fogDisabled = true;
+
+      game.onLoadProgress = (loaded, total) => {
+        setLoadProgress(Math.round((loaded / total) * 100));
+      };
+      game.onStateChange = (s) => {
+        setStatus(s);
+        setGameState(s);
+        if (s === 'playing') canvasRef.current?.focus();
+      };
+
+      const scenarioId = params.get('scenario') || 'SCG01EA';
+      const diff = (params.get('difficulty') || 'normal') as Difficulty;
+
+      Promise.all([
+        import('./engine/agentHarness'),
+        import('./oracle/SharedOracleBridge'),
+      ]).then(([{ installHarness, serializeState, processCommands }, { SharedTsOracleStrategy }]) => {
+        game.start(scenarioId, diff).then(() => {
+          installHarness(game);
+          game.disableFog();
+          const oracle = new SharedTsOracleStrategy(scenarioId);
+          let totalTicks = 0;
+          let iteration = 0;
+          const maxTicks = Number(params.get('maxTicks')) || 30000;
+          const ticksPerStep = Number(params.get('tps')) || 15;
+          const w = window as unknown as Record<string, unknown>;
+          w.__autoPlayRunning = true;
+
+          const loop = () => {
+            if (!w.__autoPlayRunning || totalTicks >= maxTicks) {
+              console.log(`[Oracle] Auto-play stopped at tick ${totalTicks}`);
+              w.__autoPlayRunning = false;
+              return;
+            }
+
+            const state = serializeState(game);
+            const result = oracle.checkResult(state);
+            if (result !== 'playing') {
+              console.log(`[Oracle] Game ended: ${result} at tick ${totalTicks}`);
+              w.__autoPlayRunning = false;
+              w.__autoPlayResult = result;
+              return;
+            }
+
+            const decision = oracle.decide(state);
+            if (decision.commands.length > 0) {
+              processCommands(game, decision.commands);
+            }
+
+            const step = totalTicks < 3000 ? ticksPerStep : ticksPerStep * 2;
+            game.step(step);
+            totalTicks += step;
+            iteration++;
+
+            if (iteration % 10 === 0) {
+              console.log(oracle.summarize(state, iteration, decision));
+            }
+
+            requestAnimationFrame(loop);
+          };
+
+          game.resume();
+          loop();
+        }).catch((err) => {
+          console.error('Oracle mode: game start failed', err);
+          setError(String(err));
+        });
+      });
+
+      return () => {
+        const w = window as unknown as Record<string, unknown>;
+        w.__autoPlayRunning = false;
+        game.stop();
+        gameRef.current = null;
+      };
+    }
+
     // Play mode: direct launch into a scenario with no test overlay
     if (anttest === 'play') {
       setScreen('playing');
