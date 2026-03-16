@@ -32,9 +32,9 @@ extern TARGET As_Target(CELL cell);
 #define AGENT_IDX(id)       ((id) & 0xFFFF)
 
 /* --- Static output buffers --- */
-#define STATE_BUF_SIZE 65536
+#define STATE_BUF_SIZE 131072
 #define CMD_BUF_SIZE   4096
-#define STEP_BUF_SIZE  65536
+#define STEP_BUF_SIZE  131072
 
 static char s_state_buf[STATE_BUF_SIZE];
 static char s_cmd_buf[CMD_BUF_SIZE];
@@ -167,7 +167,10 @@ struct AgentCmd {
 	int  id_count;
 	int  cx, cy;
 	int  target;
+	int  rtti;
+	int  type_id;
 	bool has_cx, has_cy, has_target;
+	bool has_rtti, has_type_id;
 };
 
 static const char* skip_ws(const char* p)
@@ -298,6 +301,12 @@ static int parse_commands(const char* json, AgentCmd* cmds, int maxcmds)
 			} else if (strcmp(key, "target") == 0) {
 				p = jp_int(p, &c.target);
 				c.has_target = true;
+			} else if (strcmp(key, "rtti") == 0) {
+				p = jp_int(p, &c.rtti);
+				c.has_rtti = true;
+			} else if (strcmp(key, "type_id") == 0) {
+				p = jp_int(p, &c.type_id);
+				c.has_type_id = true;
 			} else {
 				p = jp_skip_value(p);
 			}
@@ -484,11 +493,66 @@ char* agent_get_state(void)
 		if (!obj) continue;
 		if (!first) buf_cat(",");
 		first = false;
-		buf_cat("{\"t\":\"%s\",\"prog\":%d}",
+		buf_cat("{\"t\":\"%s\",\"prog\":%d,\"rtti\":%d,\"done\":%s}",
 			obj->Class_Of().Name(),
-			factory->Completion());
+			factory->Completion(),
+			(int)prod_types[f],
+			factory->Has_Completed() ? "true" : "false");
 	}
-	buf_cat("]}");
+	buf_cat("],");
+
+	/* --- Buildable items --- */
+	buf_cat("\"buildable\":{\"structures\":[");
+	first = true;
+	for (int s = STRUCT_FIRST; s < STRUCT_COUNT; s++) {
+		BuildingTypeClass const & btype = BuildingTypeClass::As_Reference((StructType)s);
+		if (PlayerPtr->Can_Build(&btype, PlayerPtr->ActLike)) {
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("\"%s\"", btype.Name());
+		}
+	}
+	buf_cat("],\"units\":[");
+	first = true;
+	for (int u = UNIT_FIRST; u < UNIT_COUNT; u++) {
+		UnitTypeClass const & utype = UnitTypeClass::As_Reference((UnitType)u);
+		if (PlayerPtr->Can_Build(&utype, PlayerPtr->ActLike)) {
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("\"%s\"", utype.Name());
+		}
+	}
+	buf_cat("],\"infantry\":[");
+	first = true;
+	for (int inf = INFANTRY_FIRST; inf < INFANTRY_COUNT; inf++) {
+		InfantryTypeClass const & itype = InfantryTypeClass::As_Reference((InfantryType)inf);
+		if (PlayerPtr->Can_Build(&itype, PlayerPtr->ActLike)) {
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("\"%s\"", itype.Name());
+		}
+	}
+	buf_cat("],\"aircraft\":[");
+	first = true;
+	for (int a = AIRCRAFT_FIRST; a < AIRCRAFT_COUNT; a++) {
+		AircraftTypeClass const & atype = AircraftTypeClass::As_Reference((AircraftType)a);
+		if (PlayerPtr->Can_Build(&atype, PlayerPtr->ActLike)) {
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("\"%s\"", atype.Name());
+		}
+	}
+	buf_cat("],\"vessels\":[");
+	first = true;
+	for (int v = VESSEL_FIRST; v < VESSEL_COUNT; v++) {
+		VesselTypeClass const & vtype = VesselTypeClass::As_Reference((VesselType)v);
+		if (PlayerPtr->Can_Build(&vtype, PlayerPtr->ActLike)) {
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("\"%s\"", vtype.Name());
+		}
+	}
+	buf_cat("]}}");
 
 	return s_state_buf;
 }
@@ -512,48 +576,73 @@ char* agent_command(char* json)
 		AgentCmd& cmd = cmds[c];
 
 		bool any_ok = false;
-		for (int i = 0; i < cmd.id_count; i++) {
-			TechnoClass* tech = agent_lookup(cmd.ids[i]);
-			if (!tech || tech->IsInLimbo || tech->Strength <= 0) continue;
 
-			if (strcmp(cmd.cmd, "move") == 0 && cmd.has_cx && cmd.has_cy) {
-				CELL cell = XY_Cell(cmd.cx, cmd.cy);
-				TARGET dest = ::As_Target(cell);
-				tech->Assign_Destination(dest);
-				tech->Assign_Mission(MISSION_MOVE);
-				any_ok = true;
+		/* --- produce/place run once per command, not per-id --- */
+		if (strcmp(cmd.cmd, "produce") == 0 && cmd.has_rtti && cmd.has_type_id && PlayerPtr) {
+			ProdFailType result = PlayerPtr->Begin_Production((RTTIType)cmd.rtti, cmd.type_id);
+			any_ok = (result == PROD_OK);
+		}
+		else if (strcmp(cmd.cmd, "place") == 0 && cmd.has_rtti && PlayerPtr) {
+			CELL cell = -1;
+			if (cmd.has_cx && cmd.has_cy) {
+				cell = XY_Cell(cmd.cx, cmd.cy);
 			}
-			else if (strcmp(cmd.cmd, "attack") == 0 && cmd.has_target) {
-				TechnoClass* tgt = agent_lookup(cmd.target);
-				if (tgt && !tgt->IsInLimbo && tgt->Strength > 0) {
-					tech->Assign_Target(tgt->As_Target());
-					tech->Assign_Mission(MISSION_ATTACK);
+			any_ok = PlayerPtr->Place_Object((RTTIType)cmd.rtti, cell);
+		}
+		else {
+			/* --- per-id commands --- */
+			for (int i = 0; i < cmd.id_count; i++) {
+				TechnoClass* tech = agent_lookup(cmd.ids[i]);
+				if (!tech || tech->IsInLimbo || tech->Strength <= 0) continue;
+
+				if (strcmp(cmd.cmd, "move") == 0 && cmd.has_cx && cmd.has_cy) {
+					CELL cell = XY_Cell(cmd.cx, cmd.cy);
+					TARGET dest = ::As_Target(cell);
+					tech->Assign_Destination(dest);
+					tech->Assign_Mission(MISSION_MOVE);
 					any_ok = true;
 				}
-			}
-			else if (strcmp(cmd.cmd, "attack_move") == 0 && cmd.has_cx && cmd.has_cy) {
-				CELL cell = XY_Cell(cmd.cx, cmd.cy);
-				TARGET dest = ::As_Target(cell);
-				tech->Assign_Destination(dest);
-				tech->Assign_Mission(MISSION_HUNT);
-				any_ok = true;
-			}
-			else if (strcmp(cmd.cmd, "enter") == 0 && cmd.has_target) {
-				TechnoClass* tgt = agent_lookup(cmd.target);
-				if (tgt && !tgt->IsInLimbo && tgt->Strength > 0) {
-					tech->Assign_Target(TARGET_NONE);
-					tech->Assign_Destination(tgt->As_Target());
-					tech->Assign_Mission(MISSION_ENTER);
+				else if (strcmp(cmd.cmd, "attack") == 0 && cmd.has_target) {
+					TechnoClass* tgt = agent_lookup(cmd.target);
+					if (tgt && !tgt->IsInLimbo && tgt->Strength > 0) {
+						tech->Assign_Target(tgt->As_Target());
+						tech->Assign_Mission(MISSION_ATTACK);
+						any_ok = true;
+					}
+				}
+				else if (strcmp(cmd.cmd, "attack_move") == 0 && cmd.has_cx && cmd.has_cy) {
+					CELL cell = XY_Cell(cmd.cx, cmd.cy);
+					TARGET dest = ::As_Target(cell);
+					tech->Assign_Destination(dest);
+					tech->Assign_Mission(MISSION_HUNT);
 					any_ok = true;
 				}
-			}
-			else if (strcmp(cmd.cmd, "stop") == 0) {
-				tech->Assign_Mission(MISSION_GUARD);
-				any_ok = true;
-			}
-			else if (strcmp(cmd.cmd, "deploy") == 0) {
-				tech->Assign_Mission(MISSION_UNLOAD);
-				any_ok = true;
+				else if (strcmp(cmd.cmd, "enter") == 0 && cmd.has_target) {
+					TechnoClass* tgt = agent_lookup(cmd.target);
+					if (tgt && !tgt->IsInLimbo && tgt->Strength > 0) {
+						tech->Assign_Target(TARGET_NONE);
+						tech->Assign_Destination(tgt->As_Target());
+						tech->Assign_Mission(MISSION_ENTER);
+						any_ok = true;
+					}
+				}
+				else if (strcmp(cmd.cmd, "stop") == 0) {
+					tech->Assign_Mission(MISSION_GUARD);
+					any_ok = true;
+				}
+				else if (strcmp(cmd.cmd, "deploy") == 0) {
+					/* For MCVs, use MISSION_HUNT which calls Goto_Clear_Spot()
+					** to find a valid deployment location automatically.
+					** MISSION_UNLOAD tries the current cell and fails silently
+					** if blocked. */
+					if (tech->What_Am_I() == RTTI_UNIT &&
+						((UnitClass *)tech)->Class->Type == UNIT_MCV) {
+						tech->Assign_Mission(MISSION_HUNT);
+					} else {
+						tech->Assign_Mission(MISSION_UNLOAD);
+					}
+					any_ok = true;
+				}
 			}
 		}
 
