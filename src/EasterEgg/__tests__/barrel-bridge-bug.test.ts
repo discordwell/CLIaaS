@@ -228,7 +228,7 @@ describe('Barrel explosion bridge destruction fix', () => {
 
     expect(barrel.alive).toBe(false);
     // Building at cardinal cell should take exactly 200 damage from barrel fire-bullet
-    // (building also dies and chains, but HP was set high enough to verify the 200 hit)
+    // (HP set to 500 so it survives, letting us verify the exact 200 damage hit)
     expect(building.hp).toBeLessThanOrEqual(500 - 200);
   });
 
