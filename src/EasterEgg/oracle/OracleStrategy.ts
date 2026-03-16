@@ -46,7 +46,7 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },            // STRUCT_POWER — always first
   { names: ['PROC'],         type_ids: [12] },            // STRUCT_REFINERY — WEAP prerequisite
   { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
-  { names: ['POWR'],         type_ids: [17], maxCount: 3 }, // Extra power
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power — no cap
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
   { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks
   { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },         // Base defense
@@ -411,8 +411,19 @@ export class OracleStrategy {
       // Don't reset placementAttempts — keep advancing through offsets
       // so successive buildings don't land on the same cell
 
-      // Check if we need more power first
-      if (state.power.consumed > state.power.produced && buildable.structures.includes('POWR')) {
+      // Keep power healthy — in late game, maintain 1-3 large power plants above demand
+      // (200 = one APWR's worth of buffer)
+      const powerDeficit = state.power.consumed - state.power.produced;
+      const needMorePower = powerDeficit > 0 || (state.tick > 5000 && powerDeficit > -200);
+      if (needMorePower && buildable.structures.includes('APWR')) {
+        // Prefer APWR (200 power) over POWR (100 power) in late game
+        commands.push({
+          cmd: 'produce',
+          rtti: RTTI_BUILDINGTYPE,
+          type_id: 18, // STRUCT_ADVANCED_POWER
+        });
+        reasons.push(`produce APWR (power ${state.power.produced}/${state.power.consumed})`);
+      } else if (needMorePower && buildable.structures.includes('POWR')) {
         commands.push({
           cmd: 'produce',
           rtti: RTTI_BUILDINGTYPE,
