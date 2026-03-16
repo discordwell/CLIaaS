@@ -1,5 +1,39 @@
 # Session Summaries
 
+## 2026-03-16T19:30Z — Session 148: Oracle Strategy Iteration — M4/M8 Attempts
+- **M4 (SCG04EA)**: "Ten to one" — 1 JEEP + 1 E1 + MCV vs 5 heavy tanks. Brutally hard.
+  - Fixed MCV deploy: MISSION_HUNT instead of MISSION_UNLOAD (auto-finds clear spot)
+  - Fixed rules.ini: BARR/TENT Owner= lines were swapped (Allied got Soviet barracks)
+  - Added minelayer defense: 5 mine waypoints on enemy approach path
+  - Rush build order: POWR→PROC→WEAP (skip barracks until tanks online)
+  - Economy management: don't spam infantry when saving for WEAP
+  - Build order rebuild: scan from index 0 every tick (destroyed buildings get rebuilt)
+  - Critical mass attack: push with 3+ tanks regardless of force ratio
+  - Best result: survived to tick 17550, got 1 tank producing, but economy too slow for sustained production
+- **M8 (SCG08EA)**: "Chronoshift" — starts with full base, 24 units, 12000 credits.
+  - Fixed: don't rally army to MCV when existing base has structures
+  - Oracle crushes enemies (down to 3 units), produces Medium Tanks, micro-manages combat
+  - Loses because enemy destroys ATEK/PDOX (mission-specific lose trigger) while army is away
+  - Need: mission-objective awareness (protect critical structures)
+- **Browser fixes**: Mouse edge scrolling fixed (mouseenter/mouseleave tracking), frame pacing smoothed (emscripten_sleep replaces busy-wait)
+- **Key learning**: Each mission needs semi-custom strategy. Generic handles base+economy+micro, but mission objectives require specific logic. Defend base BEFORE attacking — defeat enemy waves piecemeal.
+
+## 2026-03-16T18:05Z — Session 147: Minelayer Support for Oracle Strategy
+- **Goal**: Add mine-laying support for MNLY units in the Red Alert oracle, targeting SCG04EA base defense.
+- **C++ research**: Minelayer uses `MISSION_UNLOAD` (deploy) to lay mines. Opens door, places STRUCT_AVMINE (allies) at current cell, decrements Ammo, closes door. Existing `deploy` harness command already handles this.
+- **Agent harness**: Added `ammo`/`maxAmmo` fields to `serialize_obj()` for units with `MaxAmmo > 0`. Minelayer starts with 5 mines.
+- **WasmAdapter.ts**: Added optional `ammo`/`maxAmmo` to `RAEntity` interface.
+- **OracleStrategy.ts**:
+  - New `dispatchMinelayers()` method: waypoint-based mine-laying (move -> arrive -> deploy -> next waypoint)
+  - 5 mine waypoints in defensive arc NW of player base on SCG04EA approach path
+  - Mine-laying starts during MCV deployment phase (no reason to wait)
+  - MNLY returns to base after all waypoints visited
+  - Fixed `MISSION_GUARD_AREA` enum (was 18, correct is 10)
+  - Added `MISSION_UNLOAD = 15` constant
+- **Tests**: 6 unit tests in `minelayer-oracle.test.ts` — all pass. Tests cover: move to waypoint, deploy at waypoint, advance to next, non-combat exclusion, empty ammo, MCV-phase dispatch.
+- **Oracle run**: SCG04EA runs, minelayer visits all 5 waypoints (wp0→wp4), mines deployed. Game still ends in defeat due to overwhelming enemy force (5 heavy tanks + 20+ infantry) — broader strategic issue beyond minelayer scope.
+- **Deploy**: VPS temporarily unreachable during deploy. Code committed and pushed to GitHub.
+
 ## 2026-03-16T12:20Z — Session 146: Autoplay Throttling + f=179 Investigation
 - **Autoplay CPU fix**: `emscripten_sleep(7)` per frame in Sync_Delay. Keeps browser responsive (screenshots work during gameplay). Previous `emscripten_sleep(1)` was effectively a no-op.
 - **Speak() bounds check**: Added `voice < VOX_COUNT && voice >= VOX_FIRST` to Speak() in audio.cpp — same pattern as Sound_Effect fix. Trigger `spk1` also has `TACTION_PLAY_SPEECH` with `Data.Speech = -213`.
