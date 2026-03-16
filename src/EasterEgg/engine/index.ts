@@ -3352,6 +3352,27 @@ export class Game {
         // Check arrival first — aircraft may have already completed the move
         // (aircraftState machine clears moveTarget on arrival before team mission scans)
         if (worldDist(entity.pos, target) < 2) {
+          // C++ parity: transport auto-loads nearby civilians on arrival (AircraftClass::Mission_Move)
+          // SCG01EA: Chinook arrives at wp24 near Einstein at wp0, auto-picks him up
+          if (entity.isTransport && entity.passengers.length < (entity.maxPassengers ?? 5)) {
+            for (const other of this.entities) {
+              if (!other.alive || other === entity) continue;
+              if (!CIVILIAN_UNIT_TYPES.has(other.type)) continue;
+              if (!this.alliances.get(entity.house)?.has(other.house)) continue;
+              if (worldDist(entity.pos, other.pos) > 3) continue;
+              // Load civilian into transport
+              entity.passengers.push(other);
+              other.alive = false;
+              other.mission = Mission.SLEEP;
+              this.map.setOccupancy(other.cell.cx, other.cell.cy, 0);
+              this._pendingTransportLoads.push(other.id);
+              // Auto-evacuate when civilian boards (same as player-initiated loading)
+              if (entity.stats.isAircraft) {
+                this.orderTransportEvacuate(entity);
+              }
+              break; // load one civilian per arrival
+            }
+          }
           // Arrived at waypoint — advance to next mission
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
