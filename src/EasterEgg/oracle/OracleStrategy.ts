@@ -567,9 +567,11 @@ export class OracleStrategy {
         reasons.push(`retreat ${injured.length} injured`);
       }
 
-      // Only attack if we have clear force advantage (1.5x enemy strength)
-      // or no visible enemies to worry about
-      if (healthy.length > 0 && state.enemies.length > 0 && friendlyStrength > enemyStrength * 1.5) {
+      // Attack if we have force advantage OR critical mass of tanks.
+      // Turtling lets the enemy grow — once we have 3+ tanks, push.
+      const tankCount = healthy.filter((u) => u.t.includes('TNK')).length;
+      const shouldAttack = friendlyStrength > enemyStrength * 1.5 || tankCount >= 3;
+      if (healthy.length > 0 && state.enemies.length > 0 && shouldAttack) {
         const micro = this.microManage(combatUnits, state.enemies, conYard);
         commands.push(...micro.commands);
         reasons.push(`attack ${healthy.length} (str ${friendlyStrength.toFixed(0)} vs ${enemyStrength.toFixed(0)})`);
