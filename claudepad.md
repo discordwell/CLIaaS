@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-16T23:40Z — Session 152: Fix Barrel Explosions & Yak Flight Behavior (C++ Parity)
+- **Barrel explosions**: Replaced generic 2-cell radial HE blast with C++ directional fire-bullet mechanic. Barrels now spawn 4 invisible 200-damage Fire warhead bullets in cardinal directions (N/E/S/W) only. Non-barrel structures keep the old radial HE blast. Chain explosions work along cardinal lines; diagonal barrels don't chain.
+- **Yak/MiG attack runs**: Rewrote `updateFixedWingAttackRun()` from 3-phase (approach/firing/pullaway) to C++ parity 5-phase state machine (flyToTarget/dropBombs/regroup). Added: facing check before firing (must be within 1 direction of 8), anti-circle breaker (30-tick timeout forces regroup), multi-shot per pass (fires every cooldown tick in dropBombs, not just once).
+- **Entity changes**: `attackRunPhase` type updated to `'flyToTarget' | 'dropBombs' | 'regroup'`, added `circleBreakTimer` field.
+- **Tests**: 106 tests pass across barrel-bridge-bug, air-combat, aircraft-behavioral. No regressions in full suite (10 pre-existing failures in unrelated files).
+- Files modified: combat.ts, aircraft.ts, entity.ts, barrel-bridge-bug.test.ts, air-combat.test.ts, aircraft-behavioral.test.ts
+
 ## 2026-03-16T22:00Z — Session 151: Oracle Mission Scorecard
 - **M1 (SCG01EA)**: 5/5 victories — Tanya rescue Einstein, custom strategy works perfectly
 - **M2 (SCG02EA)**: 1/3 victories — convoy escort, needs path clearing improvement

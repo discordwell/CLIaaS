@@ -523,7 +523,8 @@ describe('updateFixedWingAttackRun', () => {
     const fireWeaponAt = vi.fn();
     const ctx = makeAircraftContext({ fireWeaponAt });
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
-    const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 199); // North (same as default facing)
+    // 2 cells North — within weapon range but far enough not to arrive in 1 tick
+    const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 2 * 24);
     mig.target = enemy;
     mig.attackRunPhase = 'dropBombs';
     mig.attackCooldown = 0;
