@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-16T12:20Z — Session 146: Autoplay Throttling + f=179 Investigation
+- **Autoplay CPU fix**: `emscripten_sleep(7)` per frame in Sync_Delay. Keeps browser responsive (screenshots work during gameplay). Previous `emscripten_sleep(1)` was effectively a no-op.
+- **Speak() bounds check**: Added `voice < VOX_COUNT && voice >= VOX_FIRST` to Speak() in audio.cpp — same pattern as Sound_Effect fix. Trigger `spk1` also has `TACTION_PLAY_SPEECH` with `Data.Speech = -213`.
+- **Do_Win/Do_Lose guards**: In autoplay/harness mode, set `GameActive = false` and return immediately — the original code has `while(Is_Speaking()){}` busy-waits that block forever under Emscripten.
+- **Post-game-loop exit**: Added autoplay guard after the `for(;;) Main_Loop` breaks — returns from Main_Game immediately, skipping palette fades, score screens, campaign map (all have blocking loops).
+- **SDL_Event_Loop**: Disabled yield in autoplay mode — Sync_Delay handles all yielding. Multiple Asyncify yields per frame was suspected (not confirmed) as a corruption vector.
+- **KNOWN ISSUE — f=179 stall**: SCU03EA autoplay stalls at exactly frame 179 in the browser. The `emscripten_sleep` in Sync_Delay never resumes. Trigger `spk1` fires at frame 179 (TEVENT_TIME). Checkpoint analysis: game completes all logic (Logic.AI, Queue_AI, Call_Back), reaches Sync_Delay, but Asyncify sleep fails to rewind. Agent harness path (no Asyncify) works fine past frame 179. This is an Emscripten Asyncify edge case, not a game logic bug.
+- **Cache-bust versioning**: Bumped `?v=` strings in original.html for both rasdl.js and rasdl.wasm to force fresh loads after deploys.
+
 ## 2026-03-16T05:30Z — Session 145: SCU03EA Crash Root Cause — Sound_Effect OOB
 - **Bug**: SCU03EA (Covert Cleanup, SNOW theater) crashed with `RuntimeError: memory access out of bounds` on first `agent_step`.
 - **Root cause**: Trigger `spk1` has `TACTION_PLAY_SOUND` with `Data.Sound = -65418` (invalid VocType). `Sound_Effect()` at audio.cpp:410 accesses `SoundEffectName[-65418]` — array OOB in WASM.

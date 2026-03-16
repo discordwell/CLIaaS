@@ -30,6 +30,7 @@ export interface RAGameState {
   enemies: RAEntity[];
   structures: RAStructure[];
   production: RAProduction[];
+  buildable?: RABuildable;
   error?: string;
 }
 
@@ -54,6 +55,16 @@ export interface RAStructure extends RAEntity {
 export interface RAProduction {
   t: string;    // type being produced
   prog: number; // completion (0-100?)
+  rtti?: number;  // RTTIType enum value for the factory
+  done?: boolean; // true when production has completed
+}
+
+export interface RABuildable {
+  structures: string[];
+  units: string[];
+  infantry: string[];
+  aircraft?: string[];
+  vessels?: string[];
 }
 
 export interface AgentStepResult {

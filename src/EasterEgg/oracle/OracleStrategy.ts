@@ -6,7 +6,7 @@
  * sidebar production, so this strategy focuses on tactical control only.
  */
 
-import type { RAGameState, RAEntity, RAStructure } from './WasmAdapter.js';
+import type { RAGameState, RAEntity, RAStructure, RABuildable } from './WasmAdapter.js';
 
 export interface OracleDecision {
   commands: Array<Record<string, unknown>>;
@@ -26,6 +26,43 @@ const MISSION_GUARD_AREA = 18;
 const RETREAT_HP_FRACTION = 0.3;
 
 const NON_COMBAT_TYPES = new Set(['C7', 'C8', 'EINSTEIN', 'TRAN']);
+
+// RTTIType enum values from C++ defines.h (used for produce/place commands)
+const RTTI_BUILDINGTYPE = 6;
+const RTTI_UNITTYPE = 29;
+const RTTI_INFANTRYTYPE = 14;
+
+// Non-combat unit types excluded from attack orders
+const BASE_NON_COMBAT_TYPES = new Set(['MCV', 'HARV', 'MNLY', 'TRUK']);
+
+// Build order entries — alternatives array allows TENT/BARR flexibility
+interface BuildOrderEntry {
+  names: string[];     // acceptable type names (e.g. TENT or BARR)
+  type_ids: number[];  // matching StructType enum values
+}
+
+const BUILD_ORDER: BuildOrderEntry[] = [
+  { names: ['POWR'],         type_ids: [17] },   // STRUCT_POWER
+  { names: ['TENT', 'BARR'], type_ids: [22, 21] }, // STRUCT_TENT or STRUCT_BARRACKS
+  { names: ['PROC'],         type_ids: [12] },   // STRUCT_REFINERY
+  { names: ['WEAP'],         type_ids: [2] },    // STRUCT_WEAP
+];
+
+// Tank preference order (best to worst)
+const TANK_PREFERENCE = ['3TNK', '2TNK', '1TNK', '4TNK'];
+
+// Infantry production preference
+const INFANTRY_PREFERENCE = ['E3', 'E1', 'E2', 'E4'];
+
+// Spiral offsets for building placement around Construction Yard
+const PLACEMENT_OFFSETS: Point[] = [
+  { cx: 3, cy: 0 }, { cx: -3, cy: 0 }, { cx: 0, cy: 3 }, { cx: 0, cy: -3 },
+  { cx: 3, cy: 3 }, { cx: -3, cy: 3 }, { cx: 3, cy: -3 }, { cx: -3, cy: -3 },
+  { cx: 5, cy: 0 }, { cx: -5, cy: 0 }, { cx: 0, cy: 5 }, { cx: 0, cy: -5 },
+  { cx: 5, cy: 3 }, { cx: -5, cy: 3 }, { cx: 5, cy: -3 }, { cx: -5, cy: -3 },
+  { cx: 3, cy: 5 }, { cx: -3, cy: 5 }, { cx: 3, cy: -5 }, { cx: -3, cy: -5 },
+  { cx: 7, cy: 0 }, { cx: -7, cy: 0 }, { cx: 0, cy: 7 }, { cx: 0, cy: -7 },
+];
 
 const SCG01EA_POWER_LINE_X = 67;
 const SCG01EA_PRISON: Point = { cx: 62, cy: 63 };
@@ -86,6 +123,9 @@ export class OracleStrategy {
   private sawRescue = false;
   private sawScg02eaConvoy = false;
   private scg02eaAssaultIndex = 0;
+  private baseBuildIndex = 0;
+  private placementAttempts = 0;
+  private lastPlacementTick = 0;
 
   constructor(scenario = '') {
     this.scenario = scenario.replace(/\.[^.]+$/, '').toUpperCase();
@@ -177,26 +217,39 @@ export class OracleStrategy {
     const enemyTypes = this.countTypes(state.enemies);
     const globals = state.globals?.length ? ` globals=${state.globals.join(',')}` : '';
     const missionTimer = state.missionTimerActive ? ` timer=${state.missionTimer}` : '';
+    const prodItems = state.production.map(
+      (p) => `${p.t}:${p.prog}%${p.done ? '*' : ''}`,
+    ).join(',');
+    const prodStr = prodItems ? ` prod=[${prodItems}]` : '';
     return (
       `[Oracle] #${iteration} tick=${state.tick} ` +
       `units=${state.units.length}(${unitTypes}) ` +
       `enemies=${state.enemies.length}(${enemyTypes}) ` +
       `structs=${state.structures.length} ` +
       `credits=${state.credits} ` +
-      `power=${state.power.produced}/${state.power.consumed}${globals}${missionTimer} ` +
+      `power=${state.power.produced}/${state.power.consumed}${prodStr}${globals}${missionTimer} ` +
       `| ${decision.reason}`
     );
   }
 
   private decideGeneric(state: RAGameState): OracleDecision {
+    // Detect MCV or Construction Yard — switch to base-building mode
+    const playerUnits = this.playerOwnedUnits(state);
+    const hasMCV = playerUnits.some((u) => u.t === 'MCV');
+    const alliedStructures = state.structures.filter((s) => s.ally);
+    const hasConYard = alliedStructures.some((s) => s.t === 'FACT');
+
+    if (hasMCV || hasConYard) {
+      return this.decideBaseBuilding(state);
+    }
+
     const commands: Array<Record<string, unknown>> = [];
     const reasons: string[] = [];
-    const controlled = this.playerOwnedUnits(state).filter((u) => this.isCombatUnit(u));
+    const controlled = playerUnits.filter((u) => this.isCombatUnit(u));
 
     const injured = controlled.filter(
       (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
     );
-    const alliedStructures = state.structures.filter((s) => s.ally);
     if (injured.length > 0 && alliedStructures.length > 0) {
       const base = this.findBase(alliedStructures);
       commands.push({
@@ -213,6 +266,322 @@ export class OracleStrategy {
     if (state.enemies.length > 0 && healthy.length > 0) {
       // Command ALL healthy units, not just idle — units in ATTACK/MOVE/HUNT
       // states won't retask themselves and get stuck
+      const target = this.nearestEnemy(healthy[0], state.enemies);
+      commands.push({
+        cmd: 'attack_move',
+        ids: healthy.map((u) => u.id),
+        cx: target.cx,
+        cy: target.cy,
+      });
+      reasons.push(`attack ${healthy.length} → (${target.cx},${target.cy})`);
+    }
+
+    if (state.enemies.length === 0 && healthy.length > 0) {
+      if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
+        const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+        commands.push({
+          cmd: 'attack_move',
+          ids: healthy.map((u) => u.id),
+          cx: wp.cx,
+          cy: wp.cy,
+        });
+        this.exploreIndex++;
+        reasons.push(`explore → (${wp.cx},${wp.cy})`);
+      }
+    }
+
+    return {
+      commands,
+      reason: reasons.join('; ') || 'waiting',
+    };
+  }
+
+  /**
+   * Base-building strategy: deploy MCV, follow build order, produce units, combat.
+   */
+  private decideBaseBuilding(state: RAGameState): OracleDecision {
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+    const playerUnits = this.playerOwnedUnits(state);
+    const alliedStructures = state.structures.filter((s) => s.ally);
+    const buildable = state.buildable;
+
+    // --- Phase 1: DEPLOY MCV ---
+    const mcv = playerUnits.find((u) => u.t === 'MCV');
+    const conYard = alliedStructures.find((s) => s.t === 'FACT');
+
+    if (mcv && !conYard) {
+      // Only send deploy if MCV is idle — don't re-send if already deploying
+      if (this.isIdle(mcv)) {
+        commands.push({ cmd: 'deploy', ids: [mcv.id] });
+        reasons.push('deploy MCV');
+      } else {
+        reasons.push('MCV deploying...');
+      }
+      return { commands, reason: reasons.join('; ') };
+    }
+
+    if (!conYard) {
+      // No MCV, no ConYard — fall back to basic combat
+      return this.decideGenericCombat(state, playerUnits, alliedStructures);
+    }
+
+    // --- Phase 2: BUILD ORDER ---
+    // Check if something is currently in production (building type)
+    const buildingProduction = state.production.find(
+      (p) => p.rtti === RTTI_BUILDINGTYPE,
+    );
+
+    // Place completed buildings
+    if (buildingProduction?.done) {
+      const placeCx = conYard.cx + PLACEMENT_OFFSETS[this.placementAttempts % PLACEMENT_OFFSETS.length].cx;
+      const placeCy = conYard.cy + PLACEMENT_OFFSETS[this.placementAttempts % PLACEMENT_OFFSETS.length].cy;
+      commands.push({
+        cmd: 'place',
+        rtti: RTTI_BUILDINGTYPE,
+        cx: placeCx,
+        cy: placeCy,
+      });
+      // Cycle through placement offsets on repeated attempts
+      if (state.tick - this.lastPlacementTick > 60) {
+        this.placementAttempts++;
+        this.lastPlacementTick = state.tick;
+      }
+      reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
+    } else if (!buildingProduction && buildable) {
+      // Nothing building — find next item in build order
+      this.placementAttempts = 0; // reset placement cycle for next building
+
+      // Check if we need more power first
+      if (state.power.consumed > state.power.produced && buildable.structures.includes('POWR')) {
+        commands.push({
+          cmd: 'produce',
+          rtti: RTTI_BUILDINGTYPE,
+          type_id: 17, // STRUCT_POWER
+        });
+        reasons.push('produce POWR (power deficit)');
+      } else {
+        // Find next building in build order we don't have yet
+        let ordered = false;
+        for (let i = this.baseBuildIndex; i < BUILD_ORDER.length; i++) {
+          const entry = BUILD_ORDER[i];
+          // Check if we already have any of the alternatives
+          const alreadyHave = entry.names.some((n) =>
+            alliedStructures.some((s) => s.t === n),
+          );
+          if (alreadyHave) {
+            if (i === this.baseBuildIndex) this.baseBuildIndex = i + 1;
+            continue;
+          }
+          // Find the first buildable alternative
+          const buildableIdx = entry.names.findIndex((n) =>
+            buildable.structures.includes(n),
+          );
+          if (buildableIdx >= 0) {
+            commands.push({
+              cmd: 'produce',
+              rtti: RTTI_BUILDINGTYPE,
+              type_id: entry.type_ids[buildableIdx],
+            });
+            reasons.push(`produce ${entry.names[buildableIdx]}`);
+            ordered = true;
+            break;
+          } else {
+            // Can't build any alternative yet — prerequisites not met, skip for now
+            break;
+          }
+        }
+        // If build order complete and we have credits, build extra power or defenses
+        if (!ordered && this.baseBuildIndex >= BUILD_ORDER.length) {
+          if (state.power.consumed >= state.power.produced && buildable.structures.includes('POWR')) {
+            commands.push({
+              cmd: 'produce',
+              rtti: RTTI_BUILDINGTYPE,
+              type_id: 17, // STRUCT_POWER
+            });
+            reasons.push('produce POWR (expansion)');
+          }
+        }
+      }
+    }
+
+    // --- Phase 3: PRODUCE UNITS ---
+    const hasWarFactory = alliedStructures.some((s) => s.t === 'WEAP');
+    const hasBarracks = alliedStructures.some(
+      (s) => s.t === 'TENT' || s.t === 'BARR',
+    );
+
+    // Produce tanks from War Factory
+    const unitProduction = state.production.find(
+      (p) => p.rtti === RTTI_UNITTYPE,
+    );
+    if (hasWarFactory && !unitProduction && buildable && state.credits > 500) {
+      const tank = TANK_PREFERENCE.find((t) => buildable.units.includes(t));
+      if (tank) {
+        // Look up the type_id from the unit list
+        const unitTypeId = this.unitNameToTypeId(tank);
+        if (unitTypeId >= 0) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_UNITTYPE,
+            type_id: unitTypeId,
+          });
+          reasons.push(`produce ${tank}`);
+        }
+      }
+    }
+    // Place/exit completed units
+    if (unitProduction?.done) {
+      commands.push({
+        cmd: 'place',
+        rtti: RTTI_UNITTYPE,
+      });
+      reasons.push(`exit ${unitProduction.t}`);
+    }
+
+    // Produce infantry from Barracks
+    const infantryProduction = state.production.find(
+      (p) => p.rtti === RTTI_INFANTRYTYPE,
+    );
+    if (hasBarracks && !infantryProduction && buildable && state.credits > 200) {
+      const inf = INFANTRY_PREFERENCE.find((i) => buildable.infantry.includes(i));
+      if (inf) {
+        const infTypeId = this.infantryNameToTypeId(inf);
+        if (infTypeId >= 0) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_INFANTRYTYPE,
+            type_id: infTypeId,
+          });
+          reasons.push(`produce ${inf}`);
+        }
+      }
+    }
+    if (infantryProduction?.done) {
+      commands.push({
+        cmd: 'place',
+        rtti: RTTI_INFANTRYTYPE,
+      });
+      reasons.push(`exit ${infantryProduction.t}`);
+    }
+
+    // --- Phase 4: COMBAT ---
+    const combatUnits = playerUnits.filter(
+      (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
+    );
+
+    // Split into defenders and attackers
+    const defendersNeeded = 3;
+    const defenders = combatUnits.slice(0, Math.min(defendersNeeded, combatUnits.length));
+    const attackers = combatUnits.slice(defendersNeeded);
+
+    // Defenders stay near base
+    if (defenders.length > 0) {
+      const baseThreats = state.enemies.filter(
+        (e) => this.distanceSq(e, conYard) <= 225, // within 15 cells
+      );
+      if (baseThreats.length > 0) {
+        const threat = this.nearestEnemy(conYard as unknown as RAEntity, baseThreats);
+        commands.push({
+          cmd: 'attack_move',
+          ids: defenders.map((u) => u.id),
+          cx: threat.cx,
+          cy: threat.cy,
+        });
+        reasons.push(`defend base (${baseThreats.length} threats)`);
+      } else {
+        // Patrol near base
+        const defendersIdle = defenders.filter((u) => this.isIdle(u));
+        if (defendersIdle.length > 0) {
+          commands.push({
+            cmd: 'attack_move',
+            ids: defendersIdle.map((u) => u.id),
+            cx: conYard.cx + 2,
+            cy: conYard.cy + 2,
+          });
+          reasons.push('defenders patrol');
+        }
+      }
+    }
+
+    // Attackers go after enemies
+    if (attackers.length > 0) {
+      const injured = attackers.filter(
+        (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
+      );
+      const healthy = attackers.filter(
+        (u) => u.hp / u.mhp >= RETREAT_HP_FRACTION,
+      );
+
+      if (injured.length > 0) {
+        commands.push({
+          cmd: 'move',
+          ids: injured.map((u) => u.id),
+          cx: conYard.cx,
+          cy: conYard.cy,
+        });
+        reasons.push(`retreat ${injured.length} injured attackers`);
+      }
+
+      if (healthy.length > 0 && state.enemies.length > 0) {
+        const target = this.nearestEnemy(healthy[0], state.enemies);
+        commands.push({
+          cmd: 'attack_move',
+          ids: healthy.map((u) => u.id),
+          cx: target.cx,
+          cy: target.cy,
+        });
+        reasons.push(`attack ${healthy.length} → (${target.cx},${target.cy})`);
+      } else if (healthy.length > 0 && state.enemies.length === 0) {
+        if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
+          const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+          commands.push({
+            cmd: 'attack_move',
+            ids: healthy.map((u) => u.id),
+            cx: wp.cx,
+            cy: wp.cy,
+          });
+          this.exploreIndex++;
+          reasons.push(`explore → (${wp.cx},${wp.cy})`);
+        }
+      }
+    }
+
+    return {
+      commands: this.dedupeCommands(commands),
+      reason: reasons.join('; ') || 'base building — waiting',
+    };
+  }
+
+  /**
+   * Fallback combat logic when no MCV/ConYard available in base-building mode.
+   */
+  private decideGenericCombat(
+    state: RAGameState,
+    playerUnits: RAEntity[],
+    alliedStructures: RAStructure[],
+  ): OracleDecision {
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+    const controlled = playerUnits.filter((u) => this.isCombatUnit(u));
+
+    const injured = controlled.filter(
+      (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
+    );
+    if (injured.length > 0 && alliedStructures.length > 0) {
+      const base = this.findBase(alliedStructures);
+      commands.push({
+        cmd: 'move',
+        ids: injured.map((u) => u.id),
+        cx: base.cx,
+        cy: base.cy,
+      });
+      reasons.push(`retreat ${injured.length} injured`);
+    }
+
+    const healthy = controlled.filter((u) => u.hp / u.mhp >= RETREAT_HP_FRACTION);
+
+    if (state.enemies.length > 0 && healthy.length > 0) {
       const target = this.nearestEnemy(healthy[0], state.enemies);
       commands.push({
         cmd: 'attack_move',
@@ -927,6 +1296,51 @@ export class OracleStrategy {
       seen.add(key);
       return true;
     });
+  }
+
+  /**
+   * Map unit type name to UnitType enum index (for produce command).
+   * Based on defines.h UnitType enum order.
+   */
+  private unitNameToTypeId(name: string): number {
+    const UNIT_MAP: Record<string, number> = {
+      '4TNK': 0,  // UNIT_HTANK (Mammoth)
+      '3TNK': 1,  // UNIT_MTANK (Heavy)
+      '2TNK': 2,  // UNIT_MTANK2 (Medium)
+      '1TNK': 3,  // UNIT_LTANK (Light)
+      'APC':  4,  // UNIT_APC
+      'MNLY': 5,  // UNIT_MINELAYER
+      'JEEP': 6,  // UNIT_JEEP
+      'HARV': 7,  // UNIT_HARVESTER
+      'ARTY': 8,  // UNIT_ARTY
+      'MRJ':  9,  // UNIT_MRJ
+      'MGG':  10, // UNIT_MGG
+      'MCV':  11, // UNIT_MCV
+      'V2RL': 12, // UNIT_V2_LAUNCHER
+      'TRUK': 13, // UNIT_TRUCK
+    };
+    return UNIT_MAP[name] ?? -1;
+  }
+
+  /**
+   * Map infantry type name to InfantryType enum index (for produce command).
+   * Based on defines.h InfantryType enum order.
+   */
+  private infantryNameToTypeId(name: string): number {
+    const INFANTRY_MAP: Record<string, number> = {
+      'E1':   0,  // INFANTRY_E1 (mini-gun)
+      'E2':   1,  // INFANTRY_E2 (grenade)
+      'E3':   2,  // INFANTRY_E3 (rocket)
+      'E4':   3,  // INFANTRY_E4 (flamethrower)
+      'E6':   4,  // INFANTRY_RENOVATOR (engineer)
+      'E7':   5,  // INFANTRY_TANYA
+      'SPY':  6,  // INFANTRY_SPY
+      'THF':  7,  // INFANTRY_THIEF
+      'MEDI': 8,  // INFANTRY_MEDIC
+      'GNRL': 9,  // INFANTRY_GENERAL
+      'DOG':  10, // INFANTRY_DOG
+    };
+    return INFANTRY_MAP[name] ?? -1;
   }
 
   private countTypes(entities: RAEntity[]): string {
