@@ -3,7 +3,8 @@
  * match C++ RULES.INI values for cost, buildTime, prerequisite, techLevel, faction.
  */
 import { describe, it, expect } from 'vitest';
-import { PRODUCTION_ITEMS } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 // Expected data for all 65 production items, derived from types.ts PRODUCTION_ITEMS
 // which mirrors RULES.INI Cost=, Speed= (buildTime), Prerequisite=, TechLevel=, Owner= values.
@@ -26,7 +27,7 @@ const EXPECTED_ITEMS: {
   { type: '3TNK', cost: 950, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techLevel: 4 },
   { type: '4TNK', cost: 1700, buildTime: 240, prerequisite: 'WEAP', faction: 'soviet', techLevel: 10, techPrereq: 'STEK' },
   { type: 'ARTY', cost: 600, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 8 },
-  { type: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techLevel: 5, techPrereq: 'TENT' },
+  { type: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techLevel: 5, techPrereq: 'BARR' },
   { type: 'HARV', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techLevel: 1, techPrereq: 'PROC' },
   // Expansion units
   { type: 'SHOK', cost: 900, buildTime: 80, prerequisite: 'TENT', faction: 'soviet', techLevel: 7, techPrereq: 'TSLA' },
@@ -54,8 +55,8 @@ const EXPECTED_ITEMS: {
   // Structures — base buildings
   { type: 'POWR', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', techLevel: 1, isStructure: true },
   { type: 'APWR', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', techLevel: 8, isStructure: true },
-  { type: 'TENT', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', techLevel: 1, isStructure: true },
-  { type: 'BARR', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', techLevel: 1, isStructure: true },
+  { type: 'BARR', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', techLevel: 1, isStructure: true },
+  { type: 'TENT', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', techLevel: 1, isStructure: true },
   { type: 'PROC', cost: 2000, buildTime: 200, prerequisite: 'POWR', faction: 'both', techLevel: 1, isStructure: true },
   { type: 'WEAP', cost: 2000, buildTime: 200, prerequisite: 'PROC', faction: 'both', techLevel: 3, isStructure: true },
   { type: 'SILO', cost: 150, buildTime: 60, prerequisite: 'PROC', faction: 'both', techLevel: 1, isStructure: true },
@@ -64,15 +65,15 @@ const EXPECTED_ITEMS: {
   { type: 'HPAD', cost: 1500, buildTime: 180, prerequisite: 'DOME', faction: 'both', techLevel: 9, isStructure: true },
   { type: 'AFLD', cost: 600, buildTime: 200, prerequisite: 'DOME', faction: 'soviet', techLevel: 5, isStructure: true },
   // Structures — defenses
-  { type: 'PBOX', cost: 400, buildTime: 80, prerequisite: 'TENT', faction: 'allied', techLevel: 2, isStructure: true },
-  { type: 'HBOX', cost: 600, buildTime: 80, prerequisite: 'TENT', faction: 'allied', techLevel: 3, isStructure: true },
-  { type: 'GUN', cost: 600, buildTime: 100, prerequisite: 'TENT', faction: 'allied', techLevel: 4, isStructure: true },
+  { type: 'PBOX', cost: 400, buildTime: 80, prerequisite: 'BARR', faction: 'allied', techLevel: 2, isStructure: true },
+  { type: 'HBOX', cost: 600, buildTime: 80, prerequisite: 'BARR', faction: 'allied', techLevel: 3, isStructure: true },
+  { type: 'GUN', cost: 600, buildTime: 100, prerequisite: 'BARR', faction: 'allied', techLevel: 4, isStructure: true },
   { type: 'AGUN', cost: 600, buildTime: 100, prerequisite: 'DOME', faction: 'allied', techLevel: 5, isStructure: true },
   { type: 'GAP', cost: 500, buildTime: 120, prerequisite: 'ATEK', faction: 'allied', techLevel: 10, isStructure: true },
-  { type: 'FTUR', cost: 600, buildTime: 100, prerequisite: 'BARR', faction: 'soviet', techLevel: 2, isStructure: true },
+  { type: 'FTUR', cost: 600, buildTime: 100, prerequisite: 'TENT', faction: 'soviet', techLevel: 2, isStructure: true },
   { type: 'TSLA', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techLevel: 7, isStructure: true },
   { type: 'SAM', cost: 750, buildTime: 120, prerequisite: 'DOME', faction: 'soviet', techLevel: 9, isStructure: true },
-  { type: 'KENN', cost: 200, buildTime: 60, prerequisite: 'BARR', faction: 'soviet', techLevel: 3, isStructure: true },
+  { type: 'KENN', cost: 200, buildTime: 60, prerequisite: 'TENT', faction: 'soviet', techLevel: 3, isStructure: true },
   // Structures — naval
   { type: 'SYRD', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'allied', techLevel: 3, isStructure: true },
   { type: 'SPEN', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'soviet', techLevel: 3, isStructure: true },

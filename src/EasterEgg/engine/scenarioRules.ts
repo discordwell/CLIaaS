@@ -1,7 +1,5 @@
 import {
   type ArmorType,
-  type Faction,
-  PRODUCTION_ITEMS,
   type ProductionItem,
   type UnitStats,
   UNIT_STATS,
@@ -14,24 +12,16 @@ import {
   type WeaponStats,
   WEAPON_STATS,
 } from './types';
+import {
+  normalizeOwnerToFaction,
+  interpretProductionPrerequisites,
+  patchProductionItems,
+  type IniSections,
+} from './parseIni';
+import { getCanonicalProductionItems } from './rulesIniPipeline';
 
-const ALLIED_OWNERS = new Set([
-  'allies',
-  'england',
-  'france',
-  'germany',
-  'greece',
-  'spain',
-  'turkey',
-  'goodguy',
-]);
-
-const SOVIET_OWNERS = new Set([
-  'soviet',
-  'ussr',
-  'ukraine',
-  'badguy',
-]);
+// Re-export for any existing consumers
+export { normalizeOwnerToFaction, interpretProductionPrerequisites, parsePrerequisiteList } from './parseIni';
 
 export interface ScenarioRuleOverrides {
   scenarioUnitStats: Record<string, UnitStats>;
@@ -40,67 +30,6 @@ export interface ScenarioRuleOverrides {
   scenarioWarheadMeta: Record<string, WarheadMeta>;
   scenarioWarheadProps: Record<string, WarheadProps>;
   scenarioProductionItems: ProductionItem[];
-}
-
-export function parsePrerequisiteList(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(',')
-    .map(value => value.trim().toUpperCase())
-    .filter(Boolean);
-}
-
-export function normalizeOwnerToFaction(raw: string | undefined): Faction | undefined {
-  if (!raw) return undefined;
-  const owners = raw
-    .split(',')
-    .map(owner => owner.trim().toLowerCase())
-    .filter(Boolean);
-
-  let hasAllied = false;
-  let hasSoviet = false;
-  for (const owner of owners) {
-    if (ALLIED_OWNERS.has(owner)) hasAllied = true;
-    if (SOVIET_OWNERS.has(owner)) hasSoviet = true;
-  }
-
-  if (hasAllied && hasSoviet) return 'both';
-  if (hasAllied) return 'allied';
-  if (hasSoviet) return 'soviet';
-  return undefined;
-}
-
-export function interpretProductionPrerequisites(
-  item: ProductionItem,
-  raw: string | undefined,
-): Pick<ProductionItem, 'prerequisite' | 'techPrereq'> {
-  const prereqs = parsePrerequisiteList(raw);
-  if (prereqs.length === 0) {
-    return {
-      prerequisite: item.prerequisite,
-      techPrereq: undefined,
-    };
-  }
-
-  if (item.isStructure) {
-    return {
-      prerequisite: prereqs[0] ?? item.prerequisite,
-      techPrereq: prereqs[1],
-    };
-  }
-
-  const defaultFactory = item.prerequisite;
-  if (prereqs[0] === defaultFactory) {
-    return {
-      prerequisite: defaultFactory,
-      techPrereq: prereqs[1],
-    };
-  }
-
-  return {
-    prerequisite: defaultFactory,
-    techPrereq: prereqs[0],
-  };
 }
 
 function parseArmor(raw: string | undefined): ArmorType | undefined {
@@ -141,7 +70,12 @@ export function buildScenarioRuleOverrides(
   const scenarioWarheadVerses: Record<string, [number, number, number, number, number]> = {};
   const scenarioWarheadMeta: Record<string, WarheadMeta> = { ...WARHEAD_META };
   const scenarioWarheadProps: Record<string, WarheadProps> = { ...WARHEAD_PROPS };
-  const scenarioProductionItems = PRODUCTION_ITEMS.map(item => ({ ...item }));
+
+  // Start from rules.ini-patched items, then apply scenario-specific overrides
+  const scenarioProductionItems = patchProductionItems(
+    getCanonicalProductionItems(),
+    rawSections,
+  );
 
   for (const typeName of Object.keys(UNIT_STATS)) {
     const section = rawSections.get(typeName);
@@ -214,23 +148,6 @@ export function buildScenarioRuleOverrides(
     const props: WarheadProps = { ...(scenarioWarheadProps[warheadName] ?? { infantryDeath: 0, explosionSet: 'piff' }) };
     if (section.has('InfDeath')) props.infantryDeath = Number.parseInt(section.get('InfDeath')!, 10);
     scenarioWarheadProps[warheadName] = props;
-  }
-
-  for (const item of scenarioProductionItems) {
-    const section = rawSections.get(item.type);
-    if (!section) continue;
-
-    if (section.has('Cost')) item.cost = Number.parseInt(section.get('Cost')!, 10);
-    if (section.has('TechLevel')) item.techLevel = Number.parseInt(section.get('TechLevel')!, 10);
-    if (section.has('Owner')) {
-      const owner = normalizeOwnerToFaction(section.get('Owner'));
-      if (owner !== undefined) item.faction = owner;
-    }
-    if (section.has('Prerequisite')) {
-      const interpreted = interpretProductionPrerequisites(item, section.get('Prerequisite'));
-      item.prerequisite = interpreted.prerequisite;
-      item.techPrereq = interpreted.techPrereq;
-    }
   }
 
   return {

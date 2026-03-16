@@ -11,14 +11,17 @@ import {
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
 	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
-  PRODUCTION_ITEMS, type ProductionItem, CursorType, type StripType, getStripSide,
+  type ProductionItem, CursorType, type StripType, getStripSide,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames, modifyDamage,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
   IRON_CURTAIN_DURATION, NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
   NUKE_MIN_FALLOFF, CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
   CIVILIAN_UNIT_TYPES,
+  PRODUCTION_ITEMS,
 } from './types';
+// NOTE: For server-side code that needs rules.ini-derived faction data,
+// import from './rulesIniPipeline' instead of using PRODUCTION_ITEMS directly.
 import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';

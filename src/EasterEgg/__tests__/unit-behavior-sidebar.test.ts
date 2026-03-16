@@ -10,7 +10,9 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { Dir, UnitType, House, CELL_SIZE, UNIT_STATS, PRODUCTION_ITEMS, getStripSide } from '../engine/types';
+import { Dir, UnitType, House, CELL_SIZE, UNIT_STATS, getStripSide } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 beforeEach(() => resetEntityIds());
 

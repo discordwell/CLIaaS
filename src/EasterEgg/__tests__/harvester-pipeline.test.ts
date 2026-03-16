@@ -18,7 +18,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { GameMap, Terrain } from '../engine/map';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { findPath } from '../engine/pathfinding';
-import { MAP_CELLS, CELL_SIZE, UnitType, House, Mission, AnimState, UNIT_STATS, PRODUCTION_ITEMS } from '../engine/types';
+import { MAP_CELLS, CELL_SIZE, UnitType, House, Mission, AnimState, UNIT_STATS } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 import type { MapStructure } from '../engine/scenario';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────

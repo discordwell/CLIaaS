@@ -4,7 +4,8 @@
  * 2. Production filtering — expansion units need techPrereq so they don't appear in ant missions
  */
 import { describe, it, expect } from 'vitest';
-import { PRODUCTION_ITEMS } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 // ============================================================
 // Palette index 4 transparency (green shadow fix)

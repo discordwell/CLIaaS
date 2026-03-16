@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { PRODUCTION_ITEMS } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 describe('Wall Placement', () => {
   it('SBAG is in production items', () => {

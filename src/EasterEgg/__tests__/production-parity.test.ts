@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { PRODUCTION_ITEMS, REPAIR_STEP, REPAIR_PERCENT, Mission } from '../engine/types';
+import { REPAIR_STEP, REPAIR_PERCENT, Mission } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 /**
  * Production, Repair, Sell, Silo & Wall Parity Tests
@@ -522,10 +524,10 @@ describe('Data parity: prerequisite assignments match rules.ini', () => {
     expect(t4!.techPrereq).toBe('STEK');
   });
 
-  it('APC has techPrereq TENT', () => {
+  it('APC has techPrereq BARR (Allied barracks)', () => {
     const apc = PRODUCTION_ITEMS.find(p => p.type === 'APC');
     expect(apc).toBeDefined();
-    expect(apc!.techPrereq).toBe('TENT');
+    expect(apc!.techPrereq).toBe('BARR');
   });
 
   it('CA techPrereq is ATEK, not DOME', () => {

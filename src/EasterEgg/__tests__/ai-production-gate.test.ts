@@ -19,7 +19,8 @@ import {
   type TriggerAction,
   type ScenarioTrigger,
 } from '../engine/scenario';
-import { PRODUCTION_ITEMS } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 import * as fs from 'fs';
 import * as path from 'path';
 
