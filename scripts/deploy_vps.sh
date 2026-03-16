@@ -36,6 +36,7 @@ sed \
   -e "s|__APP_DIR__|$REMOTE_APP_DIR|g" \
   -e "s|__APP_PORT__|$APP_PORT|g" \
   -e "s|__ENV_FILE__|$REMOTE_SHARED_DIR/.env|g" \
+  -e "s|__SHARED_DIR__|$REMOTE_SHARED_DIR|g" \
   "$PROJECT_ROOT/deploy/cliaas.service" > "$TMP_SERVICE"
 
 sed \
