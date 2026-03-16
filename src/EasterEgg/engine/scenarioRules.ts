@@ -1,6 +1,7 @@
 import {
   type ArmorType,
   type ProductionItem,
+  PRODUCTION_ITEMS,
   type UnitStats,
   UNIT_STATS,
   type WarheadMeta,
@@ -16,9 +17,7 @@ import {
   normalizeOwnerToFaction,
   interpretProductionPrerequisites,
   patchProductionItems,
-  type IniSections,
 } from './parseIni';
-import { getCanonicalProductionItems } from './rulesIniPipeline';
 
 // Re-export for any existing consumers
 export { normalizeOwnerToFaction, interpretProductionPrerequisites, parsePrerequisiteList } from './parseIni';
@@ -71,9 +70,9 @@ export function buildScenarioRuleOverrides(
   const scenarioWarheadMeta: Record<string, WarheadMeta> = { ...WARHEAD_META };
   const scenarioWarheadProps: Record<string, WarheadProps> = { ...WARHEAD_PROPS };
 
-  // Start from rules.ini-patched items, then apply scenario-specific overrides
+  // Patch base items with any scenario-specific overrides
   const scenarioProductionItems = patchProductionItems(
-    getCanonicalProductionItems(),
+    PRODUCTION_ITEMS,
     rawSections,
   );
 
