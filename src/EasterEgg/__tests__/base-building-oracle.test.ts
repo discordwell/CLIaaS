@@ -127,7 +127,7 @@ describe('base building — build order', () => {
     expect(decision.reason).toContain('produce PROC');
   });
 
-  it('produces TENT after POWR and PROC exist (Soviet barracks)', () => {
+  it('produces BARR after POWR and PROC exist (Allied barracks preferred)', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const state = makeState({
       structures: [
@@ -136,7 +136,7 @@ describe('base building — build order', () => {
         makeStructure(102, 'PROC', 'Greece', 92, 52),
       ],
       power: { produced: 100, consumed: 40 },
-      buildable: { structures: ['PROC', 'POWR', 'TENT', 'SBAG'], units: [], infantry: [] },
+      buildable: { structures: ['PROC', 'POWR', 'BARR', 'SBAG'], units: [], infantry: [] },
     });
 
     const decision = strategy.decide(state);
@@ -144,8 +144,8 @@ describe('base building — build order', () => {
       (c) => c.cmd === 'produce' && c.rtti === RTTI_BUILDINGTYPE,
     );
     expect(prodCmd).toBeDefined();
-    expect(prodCmd!.type_id).toBe(22); // STRUCT_TENT
-    expect(decision.reason).toContain('produce TENT');
+    expect(prodCmd!.type_id).toBe(21); // STRUCT_BARRACKS
+    expect(decision.reason).toContain('produce BARR');
   });
 
   it('places completed building near ConYard', () => {

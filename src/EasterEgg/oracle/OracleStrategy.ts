@@ -44,12 +44,22 @@ interface BuildOrderEntry {
 const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },   // STRUCT_POWER
   { names: ['PROC'],         type_ids: [12] },   // STRUCT_REFINERY — income first
-  { names: ['TENT', 'BARR'], type_ids: [22, 21] }, // STRUCT_TENT or STRUCT_BARRACKS
+  { names: ['BARR', 'TENT'], type_ids: [21, 22] }, // STRUCT_BARRACKS (Allied) or STRUCT_TENT (Soviet)
+  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },  // Pillbox (Allied=4) or Flame Tower (Soviet=10)
   { names: ['WEAP'],         type_ids: [2] },    // STRUCT_WEAP
+  { names: ['POWR'],         type_ids: [17] },   // Extra power for war factory drain
+  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },  // Second defense turret
 ];
 
-// Tank preference order (best to worst)
-const TANK_PREFERENCE = ['3TNK', '2TNK', '1TNK', '4TNK'];
+// Tank preference order (best to worst — covers both Allied and Soviet)
+// 3TNK=Heavy(Soviet), 2TNK=Medium(Allied), 4TNK=Mammoth(Soviet), 1TNK=Light(both)
+const TANK_PREFERENCE = ['3TNK', '2TNK', '4TNK', '1TNK'];
+
+// Faction-aware house classification
+const SOVIET_HOUSES = new Set(['USSR', 'Ukraine', 'BadGuy']);
+function isSovietHouse(house: string | undefined): boolean {
+  return house != null && SOVIET_HOUSES.has(house);
+}
 
 // Infantry production preference
 const INFANTRY_PREFERENCE = ['E3', 'E1', 'E2', 'E4'];
@@ -365,7 +375,8 @@ export class OracleStrategy {
       reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
     } else if (!buildingProduction && buildable) {
       // Nothing building — find next item in build order
-      this.placementAttempts = 0; // reset placement cycle for next building
+      // Don't reset placementAttempts — keep advancing through offsets
+      // so successive buildings don't land on the same cell
 
       // Check if we need more power first
       if (state.power.consumed > state.power.produced && buildable.structures.includes('POWR')) {
@@ -388,7 +399,9 @@ export class OracleStrategy {
             if (i === this.baseBuildIndex) this.baseBuildIndex = i + 1;
             continue;
           }
-          // Find the first buildable alternative
+          // Find the first buildable alternative from the C++ Can_Build list
+          // Note: the C++ Can_Build may return cross-faction buildings (known bug)
+          // but the game accepts them, so trust the buildable list
           const buildableIdx = entry.names.findIndex((n) =>
             buildable.structures.includes(n),
           );
