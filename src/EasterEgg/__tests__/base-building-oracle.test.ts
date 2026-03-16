@@ -107,7 +107,7 @@ describe('base building — build order', () => {
     expect(decision.reason).toContain('produce POWR');
   });
 
-  it('produces TENT when POWR already exists (Soviet barracks)', () => {
+  it('produces PROC when POWR already exists (refinery before barracks)', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const state = makeState({
       structures: [
@@ -118,26 +118,25 @@ describe('base building — build order', () => {
       buildable: { structures: ['PROC', 'POWR', 'TENT', 'SBAG'], units: [], infantry: [] },
     });
 
-    // First call advances baseBuildIndex past POWR
     const decision = strategy.decide(state);
     const prodCmd = decision.commands.find(
       (c) => c.cmd === 'produce' && c.rtti === RTTI_BUILDINGTYPE,
     );
     expect(prodCmd).toBeDefined();
-    expect(prodCmd!.type_id).toBe(22); // STRUCT_TENT
-    expect(decision.reason).toContain('produce TENT');
+    expect(prodCmd!.type_id).toBe(12); // STRUCT_REFINERY
+    expect(decision.reason).toContain('produce PROC');
   });
 
-  it('produces BARR when available instead of TENT (Allied barracks)', () => {
+  it('produces TENT after POWR and PROC exist (Soviet barracks)', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const state = makeState({
       structures: [
         makeStructure(100, 'FACT', 'Greece', 89, 52),
         makeStructure(101, 'POWR', 'Greece', 86, 52),
+        makeStructure(102, 'PROC', 'Greece', 92, 52),
       ],
-      power: { produced: 100, consumed: 0 },
-      // Only BARR available, not TENT
-      buildable: { structures: ['PROC', 'POWR', 'BARR', 'SBAG'], units: [], infantry: [] },
+      power: { produced: 100, consumed: 40 },
+      buildable: { structures: ['PROC', 'POWR', 'TENT', 'SBAG'], units: [], infantry: [] },
     });
 
     const decision = strategy.decide(state);
@@ -145,8 +144,8 @@ describe('base building — build order', () => {
       (c) => c.cmd === 'produce' && c.rtti === RTTI_BUILDINGTYPE,
     );
     expect(prodCmd).toBeDefined();
-    expect(prodCmd!.type_id).toBe(21); // STRUCT_BARRACKS
-    expect(decision.reason).toContain('produce BARR');
+    expect(prodCmd!.type_id).toBe(22); // STRUCT_TENT
+    expect(decision.reason).toContain('produce TENT');
   });
 
   it('places completed building near ConYard', () => {
@@ -347,10 +346,15 @@ describe('base building — combat', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('base building — fallback to generic', () => {
-  it('falls back to generic attack when no MCV and no ConYard', () => {
+  it('falls back to generic combat when no MCV and no ConYard', () => {
     const strategy = new OracleStrategy('SCG04EA');
+    // Give friendly units clear force advantage (1.5x) so they attack
     const state = makeState({
-      units: [makeEntity(1, 'E1', 'Greece', 50, 50)],
+      units: [
+        makeEntity(1, 'E1', 'Greece', 50, 50),
+        makeEntity(2, 'E1', 'Greece', 51, 50),
+        makeEntity(3, 'E1', 'Greece', 52, 50),
+      ],
       enemies: [
         { ...makeEntity(50, 'E2', 'USSR', 55, 55), ally: false },
       ],

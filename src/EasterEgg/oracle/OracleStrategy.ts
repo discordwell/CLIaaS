@@ -43,8 +43,8 @@ interface BuildOrderEntry {
 
 const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },   // STRUCT_POWER
+  { names: ['PROC'],         type_ids: [12] },   // STRUCT_REFINERY — income first
   { names: ['TENT', 'BARR'], type_ids: [22, 21] }, // STRUCT_TENT or STRUCT_BARRACKS
-  { names: ['PROC'],         type_ids: [12] },   // STRUCT_REFINERY
   { names: ['WEAP'],         type_ids: [2] },    // STRUCT_WEAP
 ];
 
@@ -243,57 +243,8 @@ export class OracleStrategy {
       return this.decideBaseBuilding(state);
     }
 
-    const commands: Array<Record<string, unknown>> = [];
-    const reasons: string[] = [];
-    const controlled = playerUnits.filter((u) => this.isCombatUnit(u));
-
-    const injured = controlled.filter(
-      (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
-    );
-    if (injured.length > 0 && alliedStructures.length > 0) {
-      const base = this.findBase(alliedStructures);
-      commands.push({
-        cmd: 'move',
-        ids: injured.map((u) => u.id),
-        cx: base.cx,
-        cy: base.cy,
-      });
-      reasons.push(`retreat ${injured.length} injured`);
-    }
-
-    const healthy = controlled.filter((u) => u.hp / u.mhp >= RETREAT_HP_FRACTION);
-
-    if (state.enemies.length > 0 && healthy.length > 0) {
-      // Command ALL healthy units, not just idle — units in ATTACK/MOVE/HUNT
-      // states won't retask themselves and get stuck
-      const target = this.nearestEnemy(healthy[0], state.enemies);
-      commands.push({
-        cmd: 'attack_move',
-        ids: healthy.map((u) => u.id),
-        cx: target.cx,
-        cy: target.cy,
-      });
-      reasons.push(`attack ${healthy.length} → (${target.cx},${target.cy})`);
-    }
-
-    if (state.enemies.length === 0 && healthy.length > 0) {
-      if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
-        const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
-        commands.push({
-          cmd: 'attack_move',
-          ids: healthy.map((u) => u.id),
-          cx: wp.cx,
-          cy: wp.cy,
-        });
-        this.exploreIndex++;
-        reasons.push(`explore → (${wp.cx},${wp.cy})`);
-      }
-    }
-
-    return {
-      commands,
-      reason: reasons.join('; ') || 'waiting',
-    };
+    // No MCV/ConYard — use force-ratio-aware combat
+    return this.decideGenericCombat(state, playerUnits, alliedStructures);
   }
 
   /**
@@ -470,49 +421,41 @@ export class OracleStrategy {
       (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
     );
 
-    // Split into defenders and attackers
-    const defendersNeeded = 3;
-    const defenders = combatUnits.slice(0, Math.min(defendersNeeded, combatUnits.length));
-    const attackers = combatUnits.slice(defendersNeeded);
+    // Estimate combat strength (tanks=3, infantry=1)
+    const friendlyStrength = combatUnits.reduce(
+      (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
+    );
+    const enemyCombatUnits = state.enemies.filter(
+      (e) => e.t.includes('TNK') || e.t.includes('E') || e.t.includes('V2') || e.t.includes('ARTY'),
+    );
+    const enemyStrength = enemyCombatUnits.reduce(
+      (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
+    );
 
-    // Defenders stay near base
-    if (defenders.length > 0) {
-      const baseThreats = state.enemies.filter(
-        (e) => this.distanceSq(e, conYard) <= 225, // within 15 cells
-      );
-      if (baseThreats.length > 0) {
-        const threat = this.nearestEnemy(conYard as unknown as RAEntity, baseThreats);
-        commands.push({
-          cmd: 'attack_move',
-          ids: defenders.map((u) => u.id),
-          cx: threat.cx,
-          cy: threat.cy,
-        });
-        reasons.push(`defend base (${baseThreats.length} threats)`);
-      } else {
-        // Patrol near base
-        const defendersIdle = defenders.filter((u) => this.isIdle(u));
-        if (defendersIdle.length > 0) {
-          commands.push({
-            cmd: 'attack_move',
-            ids: defendersIdle.map((u) => u.id),
-            cx: conYard.cx + 2,
-            cy: conYard.cy + 2,
-          });
-          reasons.push('defenders patrol');
-        }
-      }
-    }
+    // Base threats — enemies within 15 cells of ConYard
+    const baseThreats = state.enemies.filter(
+      (e) => this.distanceSq(e, conYard) <= 225,
+    );
 
-    // Attackers go after enemies
-    if (attackers.length > 0) {
-      const injured = attackers.filter(
+    // ALL combat units defend base when threatened
+    if (baseThreats.length > 0 && combatUnits.length > 0) {
+      const threat = this.nearestEnemy(conYard as unknown as RAEntity, baseThreats);
+      commands.push({
+        cmd: 'attack_move',
+        ids: combatUnits.map((u) => u.id),
+        cx: threat.cx,
+        cy: threat.cy,
+      });
+      reasons.push(`defend base (${baseThreats.length} threats)`);
+    } else if (combatUnits.length > 0) {
+      const injured = combatUnits.filter(
         (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
       );
-      const healthy = attackers.filter(
+      const healthy = combatUnits.filter(
         (u) => u.hp / u.mhp >= RETREAT_HP_FRACTION,
       );
 
+      // Retreat injured to base
       if (injured.length > 0) {
         commands.push({
           cmd: 'move',
@@ -520,10 +463,12 @@ export class OracleStrategy {
           cx: conYard.cx,
           cy: conYard.cy,
         });
-        reasons.push(`retreat ${injured.length} injured attackers`);
+        reasons.push(`retreat ${injured.length} injured`);
       }
 
-      if (healthy.length > 0 && state.enemies.length > 0) {
+      // Only attack if we have clear force advantage (1.5x enemy strength)
+      // or no visible enemies to worry about
+      if (healthy.length > 0 && state.enemies.length > 0 && friendlyStrength > enemyStrength * 1.5) {
         const target = this.nearestEnemy(healthy[0], state.enemies);
         commands.push({
           cmd: 'attack_move',
@@ -531,18 +476,51 @@ export class OracleStrategy {
           cx: target.cx,
           cy: target.cy,
         });
-        reasons.push(`attack ${healthy.length} → (${target.cx},${target.cy})`);
-      } else if (healthy.length > 0 && state.enemies.length === 0) {
-        if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
-          const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+        reasons.push(`attack ${healthy.length} (str ${friendlyStrength.toFixed(0)} vs ${enemyStrength.toFixed(0)}) → (${target.cx},${target.cy})`);
+      } else if (healthy.length > 0 && state.enemies.length > 0) {
+        // Outnumbered — hold position near base, send one scout
+        const idleNearBase = healthy.filter(
+          (u) => this.isIdle(u) && this.distanceSq(u, conYard) > 100,
+        );
+        if (idleNearBase.length > 0) {
           commands.push({
-            cmd: 'attack_move',
-            ids: healthy.map((u) => u.id),
-            cx: wp.cx,
-            cy: wp.cy,
+            cmd: 'move',
+            ids: idleNearBase.map((u) => u.id),
+            cx: conYard.cx + 3,
+            cy: conYard.cy + 3,
           });
-          this.exploreIndex++;
-          reasons.push(`explore → (${wp.cx},${wp.cy})`);
+          reasons.push(`rally ${idleNearBase.length} to base (outgunned ${friendlyStrength.toFixed(0)} vs ${enemyStrength.toFixed(0)})`);
+        }
+        // Send cheapest unit to scout if we haven't seen enemies near base recently
+        if (baseThreats.length === 0 && this.ticksSinceLastEnemy > 150) {
+          const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
+          if (scout) {
+            const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+            commands.push({
+              cmd: 'attack_move',
+              ids: [scout.id],
+              cx: wp.cx,
+              cy: wp.cy,
+            });
+            this.exploreIndex++;
+            reasons.push(`scout ${scout.t} → (${wp.cx},${wp.cy})`);
+          }
+        }
+      } else if (healthy.length > 0 && state.enemies.length === 0) {
+        // No enemies visible — send a scout to find them
+        if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
+          const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
+          if (scout) {
+            const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+            commands.push({
+              cmd: 'attack_move',
+              ids: [scout.id],
+              cx: wp.cx,
+              cy: wp.cy,
+            });
+            this.exploreIndex++;
+            reasons.push(`scout ${scout.t} → (${wp.cx},${wp.cy})`);
+          }
         }
       }
     }
@@ -582,27 +560,56 @@ export class OracleStrategy {
     const healthy = controlled.filter((u) => u.hp / u.mhp >= RETREAT_HP_FRACTION);
 
     if (state.enemies.length > 0 && healthy.length > 0) {
-      const target = this.nearestEnemy(healthy[0], state.enemies);
-      commands.push({
-        cmd: 'attack_move',
-        ids: healthy.map((u) => u.id),
-        cx: target.cx,
-        cy: target.cy,
-      });
-      reasons.push(`attack ${healthy.length} → (${target.cx},${target.cy})`);
+      // Estimate force ratio before committing to an attack
+      const friendlyStr = healthy.reduce(
+        (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
+      );
+      const enemyStr = state.enemies.reduce(
+        (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
+      );
+
+      if (friendlyStr > enemyStr * 1.5) {
+        // Strong enough — attack
+        const target = this.nearestEnemy(healthy[0], state.enemies);
+        commands.push({
+          cmd: 'attack_move',
+          ids: healthy.map((u) => u.id),
+          cx: target.cx,
+          cy: target.cy,
+        });
+        reasons.push(`attack ${healthy.length} (${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)}) → (${target.cx},${target.cy})`);
+      } else {
+        // Outgunned — send one scout, keep rest defensive
+        const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[healthy.length - 1];
+        if (scout && (this.ticksSinceLastEnemy > 120 || this.isIdle(scout))) {
+          const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+          commands.push({
+            cmd: 'attack_move',
+            ids: [scout.id],
+            cx: wp.cx,
+            cy: wp.cy,
+          });
+          this.exploreIndex++;
+          reasons.push(`scout ${scout.t} (outgunned ${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)})`);
+        }
+      }
     }
 
     if (state.enemies.length === 0 && healthy.length > 0) {
       if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
-        const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
-        commands.push({
-          cmd: 'attack_move',
-          ids: healthy.map((u) => u.id),
-          cx: wp.cx,
-          cy: wp.cy,
-        });
-        this.exploreIndex++;
-        reasons.push(`explore → (${wp.cx},${wp.cy})`);
+        // Send one scout, not the whole army
+        const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
+        if (scout) {
+          const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+          commands.push({
+            cmd: 'attack_move',
+            ids: [scout.id],
+            cx: wp.cx,
+            cy: wp.cy,
+          });
+          this.exploreIndex++;
+          reasons.push(`scout ${scout.t} → (${wp.cx},${wp.cy})`);
+        }
       }
     }
 
