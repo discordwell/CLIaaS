@@ -303,9 +303,9 @@ describe('base building — combat', () => {
     });
 
     const decision = strategy.decide(state);
-    // Should have defender commands (attack_move toward threat) for some units
+    // Should have defender commands (attack with target via micro-management) for some units
     const defenderCmd = decision.commands.find(
-      (c) => c.cmd === 'attack_move',
+      (c) => c.cmd === 'attack' || c.cmd === 'attack_move',
     );
     expect(defenderCmd).toBeDefined();
     expect(decision.reason).toContain('defend base');
@@ -361,7 +361,10 @@ describe('base building — fallback to generic', () => {
     });
 
     const decision = strategy.decide(state);
-    const attackCmd = decision.commands.find((c) => c.cmd === 'attack_move');
+    // With micro-management, attack commands use 'attack' (with target) instead of 'attack_move'
+    const attackCmd = decision.commands.find(
+      (c) => c.cmd === 'attack' || c.cmd === 'attack_move',
+    );
     expect(attackCmd).toBeDefined();
     expect(decision.reason).toContain('attack');
   });

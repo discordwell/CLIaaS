@@ -54,6 +54,22 @@ const TANK_PREFERENCE = ['3TNK', '2TNK', '1TNK', '4TNK'];
 // Infantry production preference
 const INFANTRY_PREFERENCE = ['E3', 'E1', 'E2', 'E4'];
 
+// ── Tactical micro-management constants ──────────────────────────────────────
+
+type UnitRole = 'anti_infantry' | 'anti_armor' | 'general' | 'non_combat';
+
+const UNIT_ROLES: Record<string, UnitRole> = {
+  'E1': 'anti_infantry', 'E4': 'anti_infantry', 'DOG': 'anti_infantry', 'JEEP': 'anti_infantry',
+  'E3': 'anti_armor', 'ARTY': 'anti_armor', 'V2RL': 'anti_armor',
+  '1TNK': 'anti_armor', '2TNK': 'anti_armor', '3TNK': 'anti_armor', '4TNK': 'anti_armor',
+  'MCV': 'non_combat', 'HARV': 'non_combat', 'MNLY': 'non_combat', 'TRUK': 'non_combat', 'MEDI': 'non_combat',
+};
+
+const INFANTRY_TYPES = new Set(['E1','E2','E3','E4','E6','E7','SPY','THF','MEDI','GNRL','DOG',
+  'C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','EINSTEIN','CHAN','DELPHI']);
+
+function isInfantryByType(t: string): boolean { return INFANTRY_TYPES.has(t); }
+
 // Spiral offsets for building placement around Construction Yard
 const PLACEMENT_OFFSETS: Point[] = [
   { cx: 3, cy: 0 }, { cx: -3, cy: 0 }, { cx: 0, cy: 3 }, { cx: 0, cy: -3 },
@@ -437,16 +453,12 @@ export class OracleStrategy {
       (e) => this.distanceSq(e, conYard) <= 225,
     );
 
-    // ALL combat units defend base when threatened
+    // ALL combat units defend base when threatened — with micro-management
     if (baseThreats.length > 0 && combatUnits.length > 0) {
-      const threat = this.nearestEnemy(conYard as unknown as RAEntity, baseThreats);
-      commands.push({
-        cmd: 'attack_move',
-        ids: combatUnits.map((u) => u.id),
-        cx: threat.cx,
-        cy: threat.cy,
-      });
+      const micro = this.microManage(combatUnits, baseThreats, conYard);
+      commands.push(...micro.commands);
       reasons.push(`defend base (${baseThreats.length} threats)`);
+      reasons.push(...micro.reasons);
     } else if (combatUnits.length > 0) {
       const injured = combatUnits.filter(
         (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
@@ -469,14 +481,10 @@ export class OracleStrategy {
       // Only attack if we have clear force advantage (1.5x enemy strength)
       // or no visible enemies to worry about
       if (healthy.length > 0 && state.enemies.length > 0 && friendlyStrength > enemyStrength * 1.5) {
-        const target = this.nearestEnemy(healthy[0], state.enemies);
-        commands.push({
-          cmd: 'attack_move',
-          ids: healthy.map((u) => u.id),
-          cx: target.cx,
-          cy: target.cy,
-        });
-        reasons.push(`attack ${healthy.length} (str ${friendlyStrength.toFixed(0)} vs ${enemyStrength.toFixed(0)}) → (${target.cx},${target.cy})`);
+        const micro = this.microManage(combatUnits, state.enemies, conYard);
+        commands.push(...micro.commands);
+        reasons.push(`attack ${healthy.length} (str ${friendlyStrength.toFixed(0)} vs ${enemyStrength.toFixed(0)})`);
+        reasons.push(...micro.reasons);
       } else if (healthy.length > 0 && state.enemies.length > 0) {
         // Outnumbered — hold position near base, send one scout
         const idleNearBase = healthy.filter(
@@ -569,15 +577,14 @@ export class OracleStrategy {
       );
 
       if (friendlyStr > enemyStr * 1.5) {
-        // Strong enough — attack
-        const target = this.nearestEnemy(healthy[0], state.enemies);
-        commands.push({
-          cmd: 'attack_move',
-          ids: healthy.map((u) => u.id),
-          cx: target.cx,
-          cy: target.cy,
-        });
-        reasons.push(`attack ${healthy.length} (${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)}) → (${target.cx},${target.cy})`);
+        // Strong enough — attack with micro-management
+        const rallyPoint = alliedStructures.length > 0
+          ? this.findBase(alliedStructures) as Point
+          : this.centroid(healthy);
+        const micro = this.microManage(healthy, state.enemies, rallyPoint);
+        commands.push(...micro.commands);
+        reasons.push(`attack ${healthy.length} (${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)})`);
+        reasons.push(...micro.reasons);
       } else {
         // Outgunned — send one scout, keep rest defensive
         const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[healthy.length - 1];
@@ -1348,6 +1355,136 @@ export class OracleStrategy {
       'DOG':  10, // INFANTRY_DOG
     };
     return INFANTRY_MAP[name] ?? -1;
+  }
+
+  // ── Tactical micro-management ──────────────────────────────────────────────
+
+  /**
+   * Micro-manage combat units with weapon-type matching and focus fire.
+   * Returns commands + reasons to append to the caller's decision.
+   */
+  private microManage(
+    combatUnits: RAEntity[],
+    enemies: RAEntity[],
+    rallyPoint: Point,
+  ): { commands: Array<Record<string, unknown>>; reasons: string[] } {
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+
+    if (enemies.length === 0 || combatUnits.length === 0) {
+      return { commands, reasons };
+    }
+
+    // 1. Pullback — units below RETREAT_HP_FRACTION get move to rally
+    const retreating: RAEntity[] = [];
+    const healthy: RAEntity[] = [];
+    for (const u of combatUnits) {
+      if (u.hp > 0 && u.hp / u.mhp < RETREAT_HP_FRACTION) {
+        retreating.push(u);
+      } else {
+        healthy.push(u);
+      }
+    }
+
+    if (retreating.length > 0) {
+      commands.push({
+        cmd: 'move',
+        ids: retreating.map((u) => u.id),
+        cx: rallyPoint.cx,
+        cy: rallyPoint.cy,
+      });
+      reasons.push(`micro:retreat ${retreating.length}`);
+    }
+
+    if (healthy.length === 0) {
+      return { commands, reasons };
+    }
+
+    // 2. Classify healthy units by role
+    const antiInfantry: RAEntity[] = [];
+    const antiArmor: RAEntity[] = [];
+    const general: RAEntity[] = [];
+
+    for (const u of healthy) {
+      const role = UNIT_ROLES[u.t] ?? 'general';
+      if (role === 'anti_infantry') antiInfantry.push(u);
+      else if (role === 'anti_armor') antiArmor.push(u);
+      else if (role !== 'non_combat') general.push(u);
+    }
+
+    // 3. Classify enemies as infantry vs vehicles
+    const infantryTargets = enemies.filter((e) => isInfantryByType(e.t));
+    const vehicleTargets = enemies.filter((e) => !isInfantryByType(e.t));
+
+    const fromPoint = this.centroid(healthy);
+
+    // 4. Weapon-type matching + focus fire
+    // Anti-infantry → priority infantry target (fallback to vehicles)
+    if (antiInfantry.length > 0) {
+      const targets = infantryTargets.length > 0 ? infantryTargets : vehicleTargets;
+      if (targets.length > 0) {
+        const target = this.pickPriorityTarget(targets, fromPoint);
+        commands.push({
+          cmd: 'attack',
+          ids: antiInfantry.map((u) => u.id),
+          target: target.id,
+        });
+        reasons.push(`micro:ai ${antiInfantry.length}→${target.t}#${target.id}`);
+      }
+    }
+
+    // Anti-armor → priority vehicle target (fallback to infantry)
+    if (antiArmor.length > 0) {
+      const targets = vehicleTargets.length > 0 ? vehicleTargets : infantryTargets;
+      if (targets.length > 0) {
+        const target = this.pickPriorityTarget(targets, fromPoint);
+        commands.push({
+          cmd: 'attack',
+          ids: antiArmor.map((u) => u.id),
+          target: target.id,
+        });
+        reasons.push(`micro:aa ${antiArmor.length}→${target.t}#${target.id}`);
+      }
+    }
+
+    // General/unassigned → biggest remaining threat (prefer vehicles)
+    if (general.length > 0) {
+      const targets = vehicleTargets.length > 0 ? vehicleTargets : infantryTargets;
+      if (targets.length > 0) {
+        const target = this.pickPriorityTarget(targets, fromPoint);
+        commands.push({
+          cmd: 'attack',
+          ids: general.map((u) => u.id),
+          target: target.id,
+        });
+        reasons.push(`micro:gen ${general.length}→${target.t}#${target.id}`);
+      }
+    }
+
+    return { commands, reasons };
+  }
+
+  /**
+   * Pick the highest-priority target from a list: damaged first (HP bucket),
+   * then nearest to `fromPoint`.
+   */
+  private pickPriorityTarget(targets: RAEntity[], fromPoint: Point): RAEntity {
+    return targets.slice().sort((a, b) => {
+      // HP bucket: < 50% = 0 (highest priority), >= 50% = 1
+      const aBucket = a.hp / a.mhp < 0.5 ? 0 : 1;
+      const bBucket = b.hp / b.mhp < 0.5 ? 0 : 1;
+      if (aBucket !== bBucket) return aBucket - bBucket;
+      // Then nearest
+      return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
+    })[0];
+  }
+
+  /** Average cx/cy of a group of entities. */
+  private centroid(entities: RAEntity[]): Point {
+    if (entities.length === 0) return { cx: 0, cy: 0 };
+    let sx = 0, sy = 0;
+    for (const e of entities) { sx += e.cx; sy += e.cy; }
+    return { cx: Math.round(sx / entities.length), cy: Math.round(sy / entities.length) };
   }
 
   private countTypes(entities: RAEntity[]): string {
