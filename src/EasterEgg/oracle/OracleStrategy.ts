@@ -20,7 +20,7 @@ type Point = { cx: number; cy: number };
 // Mission enum values from C++ (MISSION_*)
 const MISSION_SLEEP = 0;
 const MISSION_GUARD = 5;
-const MISSION_GUARD_AREA = 18;
+const MISSION_GUARD_AREA = 10;
 
 // HP threshold for retreat (fraction of max HP)
 const RETREAT_HP_FRACTION = 0.3;
@@ -120,6 +120,20 @@ const SCG02EA_NON_COMBAT_TYPES = new Set(['MEDI', 'TRUK', 'MCV']);
 const SCG02EA_RETREAT_HP_FRACTION = 0.45;
 const SCG02EA_READY_HP_FRACTION = 0.75;
 
+// ── Minelayer defense waypoints ────────────────────────────────────────────
+// For SCG04EA: enemy base is NW (~40-50,40-50), player base is SE (~85-95,48-53).
+// Mines are laid in a defensive arc NW of the player base to delay enemy heavy tanks.
+const MINE_WAYPOINTS: Point[] = [
+  { cx: 72, cy: 48 },   // approach path center
+  { cx: 70, cy: 45 },   // north of approach
+  { cx: 74, cy: 51 },   // south of approach
+  { cx: 68, cy: 47 },   // further NW
+  { cx: 76, cy: 50 },   // closer to base, southern flank
+];
+
+// MISSION_UNLOAD enum value from C++ (used by minelayer deploy)
+const MISSION_UNLOAD = 15;
+
 // Exploration waypoints — spiral pattern covering 64x64 cell map
 const EXPLORE_WAYPOINTS = [
   { cx: 32, cy: 32 },
@@ -151,6 +165,9 @@ export class OracleStrategy {
   private baseBuildIndex = 0;
   private placementAttempts = 0;
   private lastPlacementTick = 0;
+  private mineWaypointIndex = 0;
+  private mineDeployPending = false;  // true when minelayer has arrived and should deploy
+  private minesLaid = 0;              // total mines laid so far
 
   constructor(scenario = '') {
     this.scenario = scenario.replace(/\.[^.]+$/, '').toUpperCase();
@@ -342,6 +359,8 @@ export class OracleStrategy {
           reasons.push(`rally ${strayEscorts.length} to MCV`);
         }
       }
+      // Start mine-laying even while MCV deploys — no reason to wait
+      this.dispatchMinelayers(playerUnits, mcv, commands, reasons);
       return { commands, reason: reasons.join('; ') };
     }
 
@@ -498,6 +517,9 @@ export class OracleStrategy {
       });
       reasons.push(`exit ${infantryProduction.t}`);
     }
+
+    // --- Phase 3.5: MINELAYER DEFENSE ---
+    this.dispatchMinelayers(playerUnits, conYard, commands, reasons);
 
     // --- Phase 4: COMBAT ---
     const combatUnits = playerUnits.filter(
@@ -1199,6 +1221,64 @@ export class OracleStrategy {
     }
     const owned = state.units.filter((u) => u.house === state.playerHouse);
     return owned.length > 0 ? owned : state.units;
+  }
+
+  /**
+   * Dispatch minelayers to lay defensive mines along approach-path waypoints.
+   * Workflow per waypoint: move → arrive → deploy → advance to next waypoint.
+   */
+  private dispatchMinelayers(
+    playerUnits: RAEntity[],
+    baseRef: Point | undefined,
+    commands: Array<Record<string, unknown>>,
+    reasons: string[],
+  ): void {
+    const minelayers = playerUnits.filter(
+      (u) => u.t === 'MNLY' && (u.ammo ?? 0) > 0,
+    );
+    for (const mnly of minelayers) {
+      if (this.mineWaypointIndex >= MINE_WAYPOINTS.length) {
+        // All waypoints visited — minelayer returns to guard near base
+        if (baseRef && this.isIdle(mnly) && this.distanceSq(mnly, baseRef) > 36) {
+          commands.push({
+            cmd: 'move',
+            ids: [mnly.id],
+            cx: baseRef.cx,
+            cy: baseRef.cy,
+          });
+          reasons.push('MNLY returns to base');
+        }
+        break;
+      }
+
+      const wp = MINE_WAYPOINTS[this.mineWaypointIndex];
+      const atWaypoint = this.distanceSq(mnly, wp) <= 4; // within ~2 cells
+
+      if (atWaypoint && mnly.m !== MISSION_UNLOAD) {
+        // At waypoint and not currently deploying — lay mine
+        commands.push({ cmd: 'deploy', ids: [mnly.id] });
+        this.minesLaid++;
+        this.mineDeployPending = false;
+        this.mineWaypointIndex++;
+        reasons.push(`MNLY deploys mine #${this.minesLaid} at (${wp.cx},${wp.cy})`);
+      } else if (atWaypoint) {
+        // Currently deploying — wait for completion
+        reasons.push(`MNLY deploying at wp${this.mineWaypointIndex}`);
+      } else if (!atWaypoint && this.isIdle(mnly)) {
+        // Move to next waypoint
+        commands.push({
+          cmd: 'move',
+          ids: [mnly.id],
+          cx: wp.cx,
+          cy: wp.cy,
+        });
+        this.mineDeployPending = true;
+        reasons.push(`MNLY → mine wp${this.mineWaypointIndex} (${wp.cx},${wp.cy})`);
+      } else if (!atWaypoint) {
+        // En route — don't interrupt
+        reasons.push(`MNLY en route to wp${this.mineWaypointIndex}`);
+      }
+    }
   }
 
   private isCombatUnit(unit: RAEntity): boolean {

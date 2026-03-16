@@ -46,6 +46,8 @@ export interface RAEntity {
   ally: boolean;
   cargo?: number;
   cargoTop?: string;
+  ammo?: number;     // current ammo (minelayer mines, etc.)
+  maxAmmo?: number;  // max ammo capacity
 }
 
 export interface RAStructure extends RAEntity {

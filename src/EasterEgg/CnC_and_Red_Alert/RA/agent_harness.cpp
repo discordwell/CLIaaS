@@ -121,6 +121,11 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		}
 	}
 
+	/* Expose ammo count for minelayer and other ammo-using units */
+	if (tech->Techno_Type_Class()->MaxAmmo > 0) {
+		buf_cat(",\"ammo\":%d,\"maxAmmo\":%d", tech->Ammo, tech->Techno_Type_Class()->MaxAmmo);
+	}
+
 	buf_cat("}");
 }
 

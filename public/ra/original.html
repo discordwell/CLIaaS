@@ -855,7 +855,7 @@ var Module = {
   // Cache bust WASM binary to avoid stale binaries after deploys
   locateFile: function(path, scriptDirectory) {
     if (path.endsWith('.wasm')) {
-      return scriptDirectory + path + '?v=20260316z6';
+      return scriptDirectory + path + '?v=20260316z7';
     }
     return scriptDirectory + path;
   }
@@ -1415,6 +1415,6 @@ document.getElementById('canvas').addEventListener('mouseleave', function() { wi
 })();
 </script>
 <script src="gamedata.js"></script>
-<script async src="rasdl.js?v=20260316z6"></script>
+<script async src="rasdl.js?v=20260316z7"></script>
 </body>
 </html>
