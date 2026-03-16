@@ -286,9 +286,8 @@ export class OracleStrategy {
     }
 
     // Early game before MCV arrives — stay defensive, don't scatter
-    // If we have units but no MCV/ConYard and the game just started,
-    // keep units near spawn and only fight nearby threats
-    if (state.tick < 1500 && playerUnits.length > 0 && !hasConYard) {
+    // But only if we DON'T have an existing base (if we do, decideGenericCombat handles it)
+    if (state.tick < 1500 && playerUnits.length > 0 && !hasConYard && alliedStructures.length === 0) {
       const commands: Array<Record<string, unknown>> = [];
       const reasons: string[] = [];
       const combat = playerUnits.filter(
@@ -326,40 +325,54 @@ export class OracleStrategy {
     const conYard = alliedStructures.find((s) => s.t === 'FACT');
 
     if (mcv && !conYard) {
-      // Only send deploy if MCV is idle — don't re-send if already deploying
+      // Deploy MCV — but DON'T rally the whole army to it.
+      // If we have an existing base, let combat units defend there instead.
       if (this.isIdle(mcv)) {
         commands.push({ cmd: 'deploy', ids: [mcv.id] });
         reasons.push('deploy MCV');
       } else {
         reasons.push('MCV deploying...');
       }
-      // Escort units defend the MCV while it deploys — don't scatter
-      const escorts = playerUnits.filter(
+
+      const combatEscorts = playerUnits.filter(
         (u) => u.id !== mcv.id && this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
       );
-      const nearbyThreats = state.enemies.filter(
-        (e) => this.distanceSq(e, mcv) <= 225,
-      );
-      if (nearbyThreats.length > 0 && escorts.length > 0) {
-        const micro = this.microManage(escorts, nearbyThreats, mcv);
-        commands.push(...micro.commands);
-        reasons.push(...micro.reasons);
-      } else if (escorts.length > 0) {
-        // No threats — keep escorts near MCV
-        const strayEscorts = escorts.filter(
-          (u) => this.distanceSq(u, mcv) > 36,
+
+      if (alliedStructures.length > 0) {
+        // We have a base — defend it, don't pull army to MCV
+        const baseCenter = this.findBase(alliedStructures);
+        const baseThreats = state.enemies.filter(
+          (e) => this.distanceSq(e, baseCenter) <= 400,
         );
-        if (strayEscorts.length > 0) {
-          commands.push({
-            cmd: 'move',
-            ids: strayEscorts.map((u) => u.id),
-            cx: mcv.cx,
-            cy: mcv.cy,
-          });
-          reasons.push(`rally ${strayEscorts.length} to MCV`);
+        if (baseThreats.length > 0 && combatEscorts.length > 0) {
+          const micro = this.microManage(combatEscorts, baseThreats, baseCenter);
+          commands.push(...micro.commands);
+          reasons.push(`defend base (${baseThreats.length} threats)`, ...micro.reasons);
+        }
+      } else {
+        // No base — escort the MCV
+        const nearbyThreats = state.enemies.filter(
+          (e) => this.distanceSq(e, mcv) <= 225,
+        );
+        if (nearbyThreats.length > 0 && combatEscorts.length > 0) {
+          const micro = this.microManage(combatEscorts, nearbyThreats, mcv);
+          commands.push(...micro.commands);
+          reasons.push(...micro.reasons);
+        } else if (combatEscorts.length > 0) {
+          const strayEscorts = combatEscorts.filter(
+            (u) => this.distanceSq(u, mcv) > 36,
+          );
+          if (strayEscorts.length > 0) {
+            commands.push({
+              cmd: 'move',
+              ids: strayEscorts.map((u) => u.id),
+              cx: mcv.cx,
+              cy: mcv.cy,
+            });
+            reasons.push(`rally ${strayEscorts.length} to MCV`);
+          }
         }
       }
-      // Start mine-laying even while MCV deploys — no reason to wait
       this.dispatchMinelayers(playerUnits, mcv, commands, reasons);
       return { commands, reason: reasons.join('; ') };
     }
