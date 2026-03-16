@@ -766,7 +766,7 @@ export default function AntGame({ onExit }: AntGameProps) {
               console.log(oracle.summarize(state, iteration, decision));
             }
 
-            requestAnimationFrame(loop);
+            setTimeout(loop, 0); // setTimeout instead of rAF to avoid Chrome background tab throttling
           };
 
           game.resume();
