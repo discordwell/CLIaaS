@@ -15,7 +15,7 @@ for tmpl in "$DEPLOY_DIR"/*; do
   filename="$(basename "$tmpl")"
 
   # Extract all unique __FOO__ placeholders from the template
-  placeholders=$(grep -oE '__[A-Z_]+__' "$tmpl" | sort -u)
+  placeholders=$(grep -oE '__[A-Z0-9_]+__' "$tmpl" | sort -u)
 
   for ph in $placeholders; do
     # Check that deploy_vps.sh has a sed substitution for this placeholder

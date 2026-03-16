@@ -8,8 +8,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, SpeedClass, UNIT_STATS, WEAPON_STATS,
-  PRODUCTION_ITEMS, CELL_SIZE,
+  CELL_SIZE,
 } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 import {
   STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS,
 } from '../engine/scenario';

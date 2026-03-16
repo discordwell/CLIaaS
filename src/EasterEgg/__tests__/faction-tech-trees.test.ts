@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   House, HOUSE_FACTION, COUNTRY_BONUSES, HOUSE_FIREPOWER_BIAS,
-  PRODUCTION_ITEMS, type ProductionItem, type Faction,
+  type ProductionItem, type Faction,
 } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 describe('Faction Tech Trees', () => {
   // === 1. House-to-faction mapping ===

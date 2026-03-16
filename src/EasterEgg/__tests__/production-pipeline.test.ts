@@ -28,10 +28,12 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
-  PRODUCTION_ITEMS, type ProductionItem, getStripSide,
+  type ProductionItem, getStripSide,
   House, UnitType, CELL_SIZE, COUNTRY_BONUSES, POWER_DRAIN,
   Mission, type WorldPos,
 } from '../engine/types';
+import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+const PRODUCTION_ITEMS = getCanonicalProductionItems();
 import { Entity, resetEntityIds } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../engine/scenario';
