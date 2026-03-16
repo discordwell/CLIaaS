@@ -37,17 +37,19 @@ const BASE_NON_COMBAT_TYPES = new Set(['MCV', 'HARV', 'MNLY', 'TRUK']);
 
 // Build order entries — alternatives array allows TENT/BARR flexibility
 interface BuildOrderEntry {
-  names: string[];     // acceptable type names (e.g. TENT or BARR)
-  type_ids: number[];  // matching StructType enum values
+  names: string[];
+  type_ids: number[];
+  maxCount?: number;  // build up to this many (default 1)
 }
 
 const BUILD_ORDER: BuildOrderEntry[] = [
-  { names: ['POWR'],         type_ids: [17] },   // STRUCT_POWER — always first
-  { names: ['PROC'],         type_ids: [12] },   // STRUCT_REFINERY — WEAP prerequisite + income
-  { names: ['WEAP'],         type_ids: [2] },    // STRUCT_WEAP — tanks ASAP
-  { names: ['POWR'],         type_ids: [17] },   // Extra power for factory drain
-  { names: ['BARR', 'TENT'], type_ids: [21, 22] }, // STRUCT_BARRACKS — infantry + defense prereq
-  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },  // Pillbox/Flame Tower — base defense
+  { names: ['POWR'],         type_ids: [17] },            // STRUCT_POWER — always first
+  { names: ['PROC'],         type_ids: [12] },            // STRUCT_REFINERY — WEAP prerequisite
+  { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 }, // Extra power
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
+  { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks
+  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },         // Base defense
 ];
 
 // Tank preference order (best to worst — covers both Allied and Soviet)
@@ -424,11 +426,12 @@ export class OracleStrategy {
         let ordered = false;
         for (let i = 0; i < BUILD_ORDER.length; i++) {
           const entry = BUILD_ORDER[i];
-          // Check if we already have any of the alternatives
-          const alreadyHave = entry.names.some((n) =>
-            alliedStructures.some((s) => s.t === n),
+          // Check if we already have enough of this building type
+          const maxCount = entry.maxCount ?? 1;
+          const existingCount = entry.names.reduce(
+            (count, n) => count + alliedStructures.filter((s) => s.t === n).length, 0,
           );
-          if (alreadyHave) {
+          if (existingCount >= maxCount) {
             continue;
           }
           // Find the first buildable alternative from the C++ Can_Build list
