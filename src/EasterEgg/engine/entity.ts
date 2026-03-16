@@ -362,6 +362,7 @@ export class Entity {
       this.type !== UnitType.V_STNK && this.type !== UnitType.V_CTNK &&
       this.type !== UnitType.V_TTNK && this.type !== UnitType.V_QTNK &&
       this.type !== UnitType.V_DTRK &&
+      this.type !== UnitType.V_V2RL && this.type !== UnitType.V_MNLY &&
       // Naval: SS, MSUB have no turret; DD, CA, PT do have turrets
       this.type !== UnitType.V_SS && this.type !== UnitType.V_MSUB;
   }
