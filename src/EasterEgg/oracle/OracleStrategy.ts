@@ -586,25 +586,43 @@ export class OracleStrategy {
         reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} defenders)`);
         reasons.push(...micro.reasons);
 
-        // Surplus can still attack if there are non-base enemies
-        const nonBaseEnemies = state.enemies.filter(
-          (e) => !baseThreats.includes(e),
+        // Surplus: attack enemies within leash range of base (30 cells),
+        // but don't chase into enemy territory. In survival mode, tighter leash (20 cells).
+        const isTimedSurvival = state.missionTimerActive && state.missionTimer > 0;
+        const leashSq = isTimedSurvival ? 400 : 900; // 20 or 30 cells
+        const nearbyEnemies = state.enemies.filter(
+          (e) => this.distanceSq(e, baseCenter) <= leashSq,
         );
-        if (surplus.length >= 3 && nonBaseEnemies.length > 0) {
-          const atkMicro = this.microManage(surplus, nonBaseEnemies, baseCenter);
+        if (surplus.length > 0 && nearbyEnemies.length > 0) {
+          const atkMicro = this.microManage(surplus, nearbyEnemies, baseCenter);
           commands.push(...atkMicro.commands);
-          reasons.push(`attack surplus ${surplus.length}`);
+          reasons.push(`attack nearby ${surplus.length}${isTimedSurvival ? ' (survival)' : ''}`);
+        } else if (surplus.length > 0) {
+          // No nearby enemies — surplus patrols near base
+          const stray = surplus.filter((u) => this.distanceSq(u, baseCenter) > 225);
+          if (stray.length > 0) {
+            commands.push({
+              cmd: 'move',
+              ids: stray.map((u) => u.id),
+              cx: baseCenter.cx,
+              cy: baseCenter.cy,
+            });
+            reasons.push(`patrol ${stray.length} to base`);
+          }
         }
       } else {
-        // No base threats — split: keep half defending, send half to attack
+        // No base threats — decide: attack or turtle?
+        // If there's a mission timer counting down, this is a survival mission — turtle.
+        const isTimedSurvival = state.missionTimerActive && state.missionTimer > 0;
         const tankCount = healthy.filter((u) => u.t.includes('TNK')).length;
-        const shouldAttack = tankCount >= 3 || healthy.length >= 6;
+        const shouldAttack = !isTimedSurvival && (tankCount >= 3 || healthy.length >= 6);
 
         if (shouldAttack && state.enemies.length > 0) {
-          // Keep half near base, send half to attack
+          // Keep half near base, send half to attack within leash range
           const defenderCount = Math.max(3, Math.floor(healthy.length / 2));
           const defenders = healthy.slice(0, defenderCount);
           const attackers = healthy.slice(defenderCount);
+          const leashSq2 = 900; // 30 cells from base
 
           // Defenders patrol near base
           const strayDefenders = defenders.filter(
@@ -620,12 +638,37 @@ export class OracleStrategy {
             reasons.push(`${strayDefenders.length} defend base`);
           }
 
-          // Attackers push with micro
-          if (attackers.length > 0) {
+          // Attackers only engage enemies within leash range
+          const leashEnemies = state.enemies.filter(
+            (e) => this.distanceSq(e, baseCenter) <= leashSq2,
+          );
+          if (attackers.length > 0 && leashEnemies.length > 0) {
+            const micro = this.microManage(attackers, leashEnemies, baseCenter);
+            commands.push(...micro.commands);
+            reasons.push(`attack ${attackers.length} (${tankCount} tanks, leashed)`);
+            reasons.push(...micro.reasons);
+          } else if (attackers.length > 0) {
+            // No enemies in range — all-out push
             const micro = this.microManage(attackers, state.enemies, baseCenter);
             commands.push(...micro.commands);
             reasons.push(`attack ${attackers.length} (${tankCount} tanks)`);
             reasons.push(...micro.reasons);
+          }
+        } else if (isTimedSurvival) {
+          // TURTLE MODE — survival mission, keep everyone near base
+          const stray = healthy.filter(
+            (u) => this.distanceSq(u, baseCenter) > 225,
+          );
+          if (stray.length > 0) {
+            commands.push({
+              cmd: 'move',
+              ids: stray.map((u) => u.id),
+              cx: baseCenter.cx,
+              cy: baseCenter.cy,
+            });
+            reasons.push(`turtle ${stray.length} to base (timer=${state.missionTimer})`);
+          } else {
+            reasons.push(`turtle mode (timer=${state.missionTimer})`);
           }
         } else if (state.enemies.length > 0) {
           // Not enough to attack — hold near base, send scout
@@ -641,7 +684,7 @@ export class OracleStrategy {
             });
             reasons.push(`rally ${stray.length} to base`);
           }
-          if (this.ticksSinceLastEnemy > 150) {
+          if (!isTimedSurvival && this.ticksSinceLastEnemy > 150) {
             const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
             if (scout) {
               const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
