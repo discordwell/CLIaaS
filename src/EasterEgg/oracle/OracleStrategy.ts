@@ -534,104 +534,129 @@ export class OracleStrategy {
     // --- Phase 3.5: MINELAYER DEFENSE ---
     this.dispatchMinelayers(playerUnits, conYard, commands, reasons);
 
-    // --- Phase 4: COMBAT ---
+    // --- Phase 4: COMBAT (defend-first, attack with surplus) ---
     const combatUnits = playerUnits.filter(
       (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
     );
 
-    // Estimate combat strength (tanks=3, infantry=1)
-    const friendlyStrength = combatUnits.reduce(
-      (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
-    );
-    const enemyCombatUnits = state.enemies.filter(
-      (e) => e.t.includes('TNK') || e.t.includes('E') || e.t.includes('V2') || e.t.includes('ARTY'),
-    );
-    const enemyStrength = enemyCombatUnits.reduce(
-      (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
-    );
+    // Base center = centroid of all allied structures (not just ConYard)
+    const baseCenter = alliedStructures.length > 0
+      ? this.centroid(alliedStructures as unknown as RAEntity[])
+      : { cx: conYard.cx, cy: conYard.cy };
 
-    // Base threats — enemies within 15 cells of ConYard
+    // Base threats — enemies near ANY allied structure (20 cell radius)
     const baseThreats = state.enemies.filter(
-      (e) => this.distanceSq(e, conYard) <= 225,
+      (e) => alliedStructures.some((s) => this.distanceSq(e, s) <= 400),
     );
 
-    // ALL combat units defend base when threatened — with micro-management
-    if (baseThreats.length > 0 && combatUnits.length > 0) {
-      const micro = this.microManage(combatUnits, baseThreats, conYard);
-      commands.push(...micro.commands);
-      reasons.push(`defend base (${baseThreats.length} threats)`);
-      reasons.push(...micro.reasons);
-    } else if (combatUnits.length > 0) {
-      const injured = combatUnits.filter(
-        (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
-      );
-      const healthy = combatUnits.filter(
-        (u) => u.hp / u.mhp >= RETREAT_HP_FRACTION,
-      );
+    // Retreat injured to base
+    const injured = combatUnits.filter(
+      (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
+    );
+    const healthy = combatUnits.filter(
+      (u) => u.hp / u.mhp >= RETREAT_HP_FRACTION,
+    );
+    if (injured.length > 0) {
+      commands.push({
+        cmd: 'move',
+        ids: injured.map((u) => u.id),
+        cx: baseCenter.cx,
+        cy: baseCenter.cy,
+      });
+      reasons.push(`retreat ${injured.length} injured`);
+    }
 
-      // Retreat injured to base
-      if (injured.length > 0) {
-        commands.push({
-          cmd: 'move',
-          ids: injured.map((u) => u.id),
-          cx: conYard.cx,
-          cy: conYard.cy,
-        });
-        reasons.push(`retreat ${injured.length} injured`);
-      }
-
-      // Attack if we have force advantage OR critical mass of tanks.
-      // Turtling lets the enemy grow — once we have 3+ tanks, push.
-      const tankCount = healthy.filter((u) => u.t.includes('TNK')).length;
-      const shouldAttack = friendlyStrength > enemyStrength * 1.5 || tankCount >= 3;
-      if (healthy.length > 0 && state.enemies.length > 0 && shouldAttack) {
-        const micro = this.microManage(combatUnits, state.enemies, conYard);
-        commands.push(...micro.commands);
-        reasons.push(`attack ${healthy.length} (str ${friendlyStrength.toFixed(0)} vs ${enemyStrength.toFixed(0)})`);
-        reasons.push(...micro.reasons);
-      } else if (healthy.length > 0 && state.enemies.length > 0) {
-        // Outnumbered — hold position near base, send one scout
-        const idleNearBase = healthy.filter(
-          (u) => this.isIdle(u) && this.distanceSq(u, conYard) > 100,
+    if (healthy.length > 0) {
+      // DEFEND FIRST: if base is threatened, send units to deal with threats
+      if (baseThreats.length > 0) {
+        // How many defenders do we need? Match the threat + buffer
+        const threatStr = baseThreats.reduce(
+          (s, e) => s + (e.t.includes('TNK') ? 3 : 1), 0,
         );
-        if (idleNearBase.length > 0) {
-          commands.push({
-            cmd: 'move',
-            ids: idleNearBase.map((u) => u.id),
-            cx: conYard.cx + 3,
-            cy: conYard.cy + 3,
-          });
-          reasons.push(`rally ${idleNearBase.length} to base (outgunned ${friendlyStrength.toFixed(0)} vs ${enemyStrength.toFixed(0)})`);
+        const defendersNeeded = Math.min(healthy.length, Math.ceil(threatStr * 1.5));
+        const defenders = healthy.slice(0, defendersNeeded);
+        const surplus = healthy.slice(defendersNeeded);
+
+        // Defenders engage base threats with micro
+        const micro = this.microManage(defenders, baseThreats, baseCenter);
+        commands.push(...micro.commands);
+        reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} defenders)`);
+        reasons.push(...micro.reasons);
+
+        // Surplus can still attack if there are non-base enemies
+        const nonBaseEnemies = state.enemies.filter(
+          (e) => !baseThreats.includes(e),
+        );
+        if (surplus.length >= 3 && nonBaseEnemies.length > 0) {
+          const atkMicro = this.microManage(surplus, nonBaseEnemies, baseCenter);
+          commands.push(...atkMicro.commands);
+          reasons.push(`attack surplus ${surplus.length}`);
         }
-        // Send cheapest unit to scout if we haven't seen enemies near base recently
-        if (baseThreats.length === 0 && this.ticksSinceLastEnemy > 150) {
-          const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
-          if (scout) {
-            const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+      } else {
+        // No base threats — split: keep half defending, send half to attack
+        const tankCount = healthy.filter((u) => u.t.includes('TNK')).length;
+        const shouldAttack = tankCount >= 3 || healthy.length >= 6;
+
+        if (shouldAttack && state.enemies.length > 0) {
+          // Keep half near base, send half to attack
+          const defenderCount = Math.max(3, Math.floor(healthy.length / 2));
+          const defenders = healthy.slice(0, defenderCount);
+          const attackers = healthy.slice(defenderCount);
+
+          // Defenders patrol near base
+          const strayDefenders = defenders.filter(
+            (u) => this.distanceSq(u, baseCenter) > 225,
+          );
+          if (strayDefenders.length > 0) {
             commands.push({
-              cmd: 'attack_move',
-              ids: [scout.id],
-              cx: wp.cx,
-              cy: wp.cy,
+              cmd: 'move',
+              ids: strayDefenders.map((u) => u.id),
+              cx: baseCenter.cx,
+              cy: baseCenter.cy,
             });
-            this.exploreIndex++;
-            reasons.push(`scout ${scout.t} → (${wp.cx},${wp.cy})`);
+            reasons.push(`${strayDefenders.length} defend base`);
           }
-        }
-      } else if (healthy.length > 0 && state.enemies.length === 0) {
-        // No enemies visible — send a scout to find them
-        if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
-          const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
-          if (scout) {
-            const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+
+          // Attackers push with micro
+          if (attackers.length > 0) {
+            const micro = this.microManage(attackers, state.enemies, baseCenter);
+            commands.push(...micro.commands);
+            reasons.push(`attack ${attackers.length} (${tankCount} tanks)`);
+            reasons.push(...micro.reasons);
+          }
+        } else if (state.enemies.length > 0) {
+          // Not enough to attack — hold near base, send scout
+          const stray = healthy.filter(
+            (u) => this.isIdle(u) && this.distanceSq(u, baseCenter) > 225,
+          );
+          if (stray.length > 0) {
             commands.push({
-              cmd: 'attack_move',
-              ids: [scout.id],
-              cx: wp.cx,
-              cy: wp.cy,
+              cmd: 'move',
+              ids: stray.map((u) => u.id),
+              cx: baseCenter.cx,
+              cy: baseCenter.cy,
             });
-            this.exploreIndex++;
-            reasons.push(`scout ${scout.t} → (${wp.cx},${wp.cy})`);
+            reasons.push(`rally ${stray.length} to base`);
+          }
+          if (this.ticksSinceLastEnemy > 150) {
+            const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
+            if (scout) {
+              const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+              commands.push({ cmd: 'attack_move', ids: [scout.id], cx: wp.cx, cy: wp.cy });
+              this.exploreIndex++;
+              reasons.push(`scout ${scout.t}`);
+            }
+          }
+        } else {
+          // No enemies — scout
+          if (this.ticksSinceLastEnemy > 90) {
+            const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
+            if (scout) {
+              const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
+              commands.push({ cmd: 'attack_move', ids: [scout.id], cx: wp.cx, cy: wp.cy });
+              this.exploreIndex++;
+              reasons.push(`scout ${scout.t}`);
+            }
           }
         }
       }
