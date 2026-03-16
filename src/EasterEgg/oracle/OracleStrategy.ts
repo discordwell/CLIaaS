@@ -42,13 +42,12 @@ interface BuildOrderEntry {
 }
 
 const BUILD_ORDER: BuildOrderEntry[] = [
-  { names: ['POWR'],         type_ids: [17] },   // STRUCT_POWER
-  { names: ['PROC'],         type_ids: [12] },   // STRUCT_REFINERY — income first
-  { names: ['BARR', 'TENT'], type_ids: [21, 22] }, // STRUCT_BARRACKS (Allied) or STRUCT_TENT (Soviet)
-  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },  // Pillbox (Allied=4) or Flame Tower (Soviet=10)
-  { names: ['WEAP'],         type_ids: [2] },    // STRUCT_WEAP
-  { names: ['POWR'],         type_ids: [17] },   // Extra power for war factory drain
-  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },  // Second defense turret
+  { names: ['POWR'],         type_ids: [17] },   // STRUCT_POWER — always first
+  { names: ['PROC'],         type_ids: [12] },   // STRUCT_REFINERY — WEAP prerequisite + income
+  { names: ['WEAP'],         type_ids: [2] },    // STRUCT_WEAP — tanks ASAP
+  { names: ['POWR'],         type_ids: [17] },   // Extra power for factory drain
+  { names: ['BARR', 'TENT'], type_ids: [21, 22] }, // STRUCT_BARRACKS — infantry + defense prereq
+  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },  // Pillbox/Flame Tower — base defense
 ];
 
 // Tank preference order (best to worst — covers both Allied and Soviet)
