@@ -757,16 +757,35 @@ export default function AntGame({ onExit }: AntGameProps) {
               processCommands(game, decision.commands);
             }
 
-            const step = totalTicks < 3000 ? ticksPerStep : ticksPerStep * 2;
-            game.step(step);
-            totalTicks += step;
-            iteration++;
+            // Batch multiple oracle iterations per callback to overcome Chrome's
+            // background tab throttling (setTimeout capped at ~1/sec in bg tabs)
+            const batchSize = document.hidden ? 20 : 1;
+            for (let b = 0; b < batchSize && w.__autoPlayRunning && totalTicks < maxTicks; b++) {
+              const step = totalTicks < 3000 ? ticksPerStep : ticksPerStep * 2;
+              game.step(step);
+              totalTicks += step;
+              iteration++;
 
-            if (iteration % 10 === 0) {
-              console.log(oracle.summarize(state, iteration, decision));
+              if (iteration % 10 === 0) {
+                console.log(oracle.summarize(state, iteration, decision));
+              }
+
+              // Re-evaluate oracle for each batch step after the first
+              if (b < batchSize - 1) {
+                const s2 = serializeState(game);
+                const r2 = oracle.checkResult(s2);
+                if (r2 !== 'playing') {
+                  console.log(`[Oracle] Game ended: ${r2} at tick ${totalTicks}`);
+                  w.__autoPlayRunning = false;
+                  w.__autoPlayResult = r2;
+                  return;
+                }
+                const d2 = oracle.decide(s2);
+                if (d2.commands.length > 0) processCommands(game, d2.commands);
+              }
             }
 
-            setTimeout(loop, 0); // setTimeout instead of rAF to avoid Chrome background tab throttling
+            setTimeout(loop, 0);
           };
 
           game.resume();
