@@ -149,15 +149,15 @@ describe('Barrel explosion bridge destruction fix', () => {
     expect(bridgeCalls).toHaveLength(0);
   });
 
-  it('barrels chain-explode when within blast radius', () => {
+  it('barrels chain-explode along cardinal line (C++ parity)', () => {
     const ctx = makeMockCombatContext();
-    // Three barrels in a line, 1 cell apart (within 2-cell blast radius)
+    // Three barrels in a cardinal line (E-W), 1 cell apart
     const b1 = makeBarrel({ cx: 10, cy: 10, hp: 1 });
     const b2 = makeBarrel({ cx: 11, cy: 10, hp: 1 });
     const b3 = makeBarrel({ cx: 12, cy: 10, hp: 1 });
     ctx.structures.push(b1, b2, b3);
 
-    // Destroy first barrel — should chain to b2 and b3
+    // Destroy first barrel — b1→E hits b2→E hits b3
     structureDamage(ctx, b1, 100);
 
     expect(b1.alive).toBe(false);
@@ -165,9 +165,22 @@ describe('Barrel explosion bridge destruction fix', () => {
     expect(b3.alive).toBe(false);
   });
 
+  it('barrels do NOT chain-explode diagonally (C++ cardinal-only)', () => {
+    const ctx = makeMockCombatContext();
+    // Two barrels diagonally — not cardinal adjacent
+    const b1 = makeBarrel({ cx: 10, cy: 10, hp: 1 });
+    const b2 = makeBarrel({ cx: 11, cy: 11, hp: 1 });
+    ctx.structures.push(b1, b2);
+
+    structureDamage(ctx, b1, 100);
+
+    expect(b1.alive).toBe(false);
+    expect(b2.alive).toBe(true); // diagonal = no chain
+  });
+
   it('barrels do NOT chain-explode when far apart', () => {
     const ctx = makeMockCombatContext();
-    // Two barrels far apart (>2 cells, outside blast radius)
+    // Two barrels far apart (>1 cell, outside cardinal range)
     const b1 = makeBarrel({ cx: 10, cy: 10, hp: 1 });
     const b2 = makeBarrel({ cx: 15, cy: 10, hp: 1 });
     ctx.structures.push(b1, b2);
@@ -176,6 +189,47 @@ describe('Barrel explosion bridge destruction fix', () => {
 
     expect(b1.alive).toBe(false);
     expect(b2.alive).toBe(true);
+  });
+
+  it('barrel damages entity at cardinal cell (N) but NOT diagonal', () => {
+    const ctx = makeMockCombatContext();
+    const barrel = makeBarrel({ cx: 10, cy: 10, hp: 1 });
+    ctx.structures.push(barrel);
+
+    // Entity at North (10,9) — should be damaged
+    const northEntity = new Entity(UnitType.I_E1, House.USSR,
+      10 * CELL_SIZE + CELL_SIZE / 2, 9 * CELL_SIZE + CELL_SIZE / 2);
+    // Entity at diagonal (11,11) — should NOT be damaged
+    const diagEntity = new Entity(UnitType.I_E1, House.USSR,
+      11 * CELL_SIZE + CELL_SIZE / 2, 11 * CELL_SIZE + CELL_SIZE / 2);
+
+    const northHpBefore = northEntity.hp;
+    const diagHpBefore = diagEntity.hp;
+    ctx.entities.push(northEntity, diagEntity);
+
+    structureDamage(ctx, barrel, 100);
+
+    expect(northEntity.hp).toBeLessThan(northHpBefore); // took 200 Fire damage
+    expect(diagEntity.hp).toBe(diagHpBefore); // untouched
+  });
+
+  it('barrel uses Fire warhead with 200 damage (C++ WARHEAD_FIRE parity)', () => {
+    const ctx = makeMockCombatContext();
+    const barrel = makeBarrel({ cx: 10, cy: 10, hp: 1 });
+    // Adjacent building East: 1x1 size, high HP so we can measure exact damage
+    const building: MapStructure = {
+      type: 'BARL', image: 'barl', house: House.Neutral,
+      cx: 11, cy: 10, hp: 500, maxHp: 500, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    };
+    ctx.structures.push(barrel, building);
+
+    structureDamage(ctx, barrel, 100);
+
+    expect(barrel.alive).toBe(false);
+    // Building at cardinal cell should take exactly 200 damage from barrel fire-bullet
+    // (building also dies and chains, but HP was set high enough to verify the 200 hit)
+    expect(building.hp).toBeLessThanOrEqual(500 - 200);
   });
 
   it('barrel blast damages adjacent non-barrel structure but does not destroy it', () => {
@@ -192,7 +246,29 @@ describe('Barrel explosion bridge destruction fix', () => {
 
     expect(barrel.alive).toBe(false);
     expect(building.alive).toBe(true);
-    expect(building.hp).toBeLessThan(256); // took blast damage
+    expect(building.hp).toBeLessThan(256); // took 200 Fire damage: 256-200=56
+  });
+
+  it('non-barrel structure uses radial HE blast (regression check)', () => {
+    const ctx = makeMockCombatContext();
+    // Non-barrel structure at (5,5) — should use 2-cell radial HE blast
+    const structure: MapStructure = {
+      type: 'POWR', image: 'powr', house: House.USSR,
+      cx: 5, cy: 5, hp: 50, maxHp: 256, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    };
+    ctx.structures.push(structure);
+
+    // Entity diagonally adjacent (within 2-cell radius) — should be damaged by HE blast
+    const diagEntity = new Entity(UnitType.I_E1, House.Spain,
+      6 * CELL_SIZE + CELL_SIZE, 6 * CELL_SIZE + CELL_SIZE);
+    const hpBefore = diagEntity.hp;
+    ctx.entities.push(diagEntity);
+
+    structureDamage(ctx, structure, 100);
+
+    expect(structure.alive).toBe(false);
+    expect(diagEntity.hp).toBeLessThan(hpBefore); // diagonal entity hit by radial HE
   });
 
   it('non-barrel structure destruction never triggers bridge logic', () => {

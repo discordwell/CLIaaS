@@ -265,7 +265,8 @@ export class Entity {
   landedAtStructure = -1;       // structure index, -1 = airborne
   aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' = 'idle';
   rearmTimer = 0;
-  attackRunPhase: 'approach' | 'firing' | 'pullaway' = 'approach';
+  attackRunPhase: 'flyToTarget' | 'dropBombs' | 'regroup' = 'flyToTarget';
+  circleBreakTimer = 0;
 
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;

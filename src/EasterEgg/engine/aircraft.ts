@@ -154,7 +154,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         const weaponRange = entity.weapon?.range ?? 5;
         if (dist <= weaponRange) {
           entity.aircraftState = 'attacking';
-          entity.attackRunPhase = 'approach';
+          entity.attackRunPhase = 'flyToTarget';
+          entity.circleBreakTimer = 0;
           return true;
         }
         // Fly toward target
@@ -277,7 +278,10 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
   }
 }
 
-/** Fixed-wing attack run: approach -> fire -> pullaway -> circle back or RTB */
+/** Fixed-wing attack run: C++ Mission_Hunt 5-phase state machine (building.cpp)
+ *  flyToTarget → dropBombs → regroup → (loop or RTB)
+ *  Key C++ behaviors: facing check before firing, anti-circle delay,
+ *  continuous fire during dropBombs, explicit regroup phase. */
 export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): boolean {
   const targetPos = getAircraftTargetPos(entity);
 
@@ -292,20 +296,50 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
   const weaponRange = entity.weapon?.range ?? 5;
 
   switch (entity.attackRunPhase) {
-    case 'approach':
+    case 'flyToTarget': {
+      // C++ FLY_TO_TARGET: fly toward target, check Can_Fire() result
       entity.animState = AnimState.WALK;
       entity.moveToward(targetPos, speed);
+
       if (dist <= weaponRange) {
-        entity.attackRunPhase = 'firing';
+        // Check facing alignment (C++ FIRE_FACING return — must face target within ~45°)
+        const targetDir = directionTo(entity.pos, targetPos);
+        const facingDiff = ((entity.facing - targetDir + 8) % 8 + 8) % 8;
+        const normalizedDiff = facingDiff > 4 ? 8 - facingDiff : facingDiff;
+
+        if (normalizedDiff <= 1) {
+          // Facing aligned — transition to dropBombs (C++ FIRE_OK)
+          entity.attackRunPhase = 'dropBombs';
+          entity.circleBreakTimer = 0;
+        } else {
+          // C++ anti-circle delay: in range but can't face target (tight circle)
+          // Wait ~30 ticks (2 seconds) then force regroup to break out
+          entity.circleBreakTimer++;
+          if (entity.circleBreakTimer > 30) {
+            entity.attackRunPhase = 'regroup';
+            entity.circleBreakTimer = 0;
+          }
+        }
+      } else {
+        entity.circleBreakTimer = 0;
       }
       break;
+    }
 
-    case 'firing':
+    case 'dropBombs': {
+      // C++ DROP_BOMBS: fire at target when Can_Fire returns FIRE_OK
+      // Continuous fire — fire every tick cooldown allows (multi-shot per pass)
       entity.animState = AnimState.ATTACK;
       // Keep moving forward (fixed-wing can't stop)
       entity.moveToward(targetPos, speed);
-      // Fire weapon if cooldown ready, then transition to pullaway
-      if (entity.attackCooldown <= 0 && entity.weapon) {
+
+      // Check facing alignment for continued firing
+      const targetDir = directionTo(entity.pos, targetPos);
+      const facingDiff = ((entity.facing - targetDir + 8) % 8 + 8) % 8;
+      const normalizedDiff = facingDiff > 4 ? 8 - facingDiff : facingDiff;
+
+      // Fire if cooldown ready and facing still OK (within 1 direction)
+      if (entity.attackCooldown <= 0 && entity.weapon && normalizedDiff <= 1) {
         if (entity.target?.alive) {
           ctx.fireWeaponAt(entity, entity.target, entity.weapon);
         } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
@@ -313,13 +347,20 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
         }
         entity.attackCooldown = entity.weapon.rof;
         if (entity.ammo > 0) entity.ammo--;
-        entity.attackRunPhase = 'pullaway';
+      }
+
+      // Transition out: ammo depleted, target lost, or facing drifted too far
+      const targetLost = !(entity.target?.alive) &&
+        !(entity.targetStructure && (entity.targetStructure as MapStructure).alive);
+      if (entity.ammo === 0 || targetLost || normalizedDiff > 2) {
+        entity.attackRunPhase = 'regroup';
       }
       break;
+    }
 
-    case 'pullaway':
+    case 'regroup': {
+      // C++ REGROUP: fly straight ~3 cells past target, then re-engage or RTB
       entity.animState = AnimState.WALK;
-      // Overshoot ~3 cells past target
       const overshootDist = 3 * CELL_SIZE;
       const dx = entity.pos.x - targetPos.x;
       const dy = entity.pos.y - targetPos.y;
@@ -330,9 +371,12 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
       };
       entity.moveToward(overshootPos, speed);
       if (worldDist(entity.pos, targetPos) > overshootDist * 0.8) {
-        if (entity.ammo > 0 && (entity.target?.alive || entity.targetStructure)) {
-          // Circle back for another pass
-          entity.attackRunPhase = 'approach';
+        const targetAlive = (entity.target?.alive) ||
+          (entity.targetStructure && (entity.targetStructure as MapStructure).alive);
+        if (entity.ammo > 0 && targetAlive) {
+          // Circle back for another pass (C++ re-enter LOOK_FOR_TARGET)
+          entity.attackRunPhase = 'flyToTarget';
+          entity.circleBreakTimer = 0;
         } else {
           // Out of ammo or target dead — RTB
           entity.aircraftState = 'returning';
@@ -342,6 +386,7 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
         }
       }
       break;
+    }
   }
   return true;
 }

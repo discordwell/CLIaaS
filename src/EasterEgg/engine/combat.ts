@@ -643,26 +643,60 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
         ctx.recalculateSiloCapacity();
       }
     }
-    // Structure explosion damages nearby units (2-cell radius, ~100 base damage)
-    const blastRadius = 2;
-    for (const e of ctx.entities) {
-      if (!e.alive) continue;
-      const dist = worldDist({ x: wx, y: wy }, e.pos);
-      if (dist > blastRadius) continue;
-      const falloff = 1 - (dist / blastRadius) * 0.6;
-      const blastDmg = Math.max(1, Math.round(100 * falloff));
-      damageEntity(ctx, e, blastDmg, 'HE');
-    }
-    // Structure explosion damages nearby structures (chain explosions for barrels)
-    for (const s2 of ctx.structures) {
-      if (!s2.alive || s2 === s) continue;
-      const s2wx = s2.cx * CELL_SIZE + CELL_SIZE;
-      const s2wy = s2.cy * CELL_SIZE + CELL_SIZE;
-      const dist = worldDist({ x: wx, y: wy }, { x: s2wx, y: s2wy });
-      if (dist > blastRadius) continue;
-      const falloff = 1 - (dist / blastRadius) * 0.6;
-      const blastDmg = Math.max(1, Math.round(100 * falloff));
-      structureDamage(ctx, s2, blastDmg);
+    // C++ parity: Barrel explosions use directional fire-bullet mechanic,
+    // non-barrel structures use generic radial HE blast.
+    if (s.type === 'BARL' || s.type === 'BRL3') {
+      // C++ building.cpp:1344-1369 — 4 invisible WARHEAD_FIRE bullets,
+      // 200 damage each, cardinal directions only (N/E/S/W, 1 cell away)
+      const cardinalOffsets = [
+        { dx: 0, dy: -1 }, // N
+        { dx: 1, dy: 0 },  // E
+        { dx: 0, dy: 1 },  // S
+        { dx: -1, dy: 0 }, // W
+      ];
+      for (const off of cardinalOffsets) {
+        const targetCx = s.cx + off.dx;
+        const targetCy = s.cy + off.dy;
+        // Damage entities in cardinal cell — flat 200 Fire damage, no falloff
+        for (const e of ctx.entities) {
+          if (!e.alive) continue;
+          const ec = e.cell;
+          if (ec.cx === targetCx && ec.cy === targetCy) {
+            damageEntity(ctx, e, 200, 'Fire');
+          }
+        }
+        // Damage structures whose footprint overlaps cardinal cell (chain explosions)
+        for (const s2 of ctx.structures) {
+          if (!s2.alive || s2 === s) continue;
+          const [s2w, s2h] = STRUCTURE_SIZE[s2.type] ?? [2, 2];
+          if (targetCx >= s2.cx && targetCx < s2.cx + s2w &&
+              targetCy >= s2.cy && targetCy < s2.cy + s2h) {
+            structureDamage(ctx, s2, 200);
+          }
+        }
+      }
+    } else {
+      // Non-barrel: generic 2-cell radial HE blast with distance falloff
+      const blastRadius = 2;
+      for (const e of ctx.entities) {
+        if (!e.alive) continue;
+        const dist = worldDist({ x: wx, y: wy }, e.pos);
+        if (dist > blastRadius) continue;
+        const falloff = 1 - (dist / blastRadius) * 0.6;
+        const blastDmg = Math.max(1, Math.round(100 * falloff));
+        damageEntity(ctx, e, blastDmg, 'HE');
+      }
+      // Non-barrel: structure-to-structure chain damage
+      for (const s2 of ctx.structures) {
+        if (!s2.alive || s2 === s) continue;
+        const s2wx = s2.cx * CELL_SIZE + CELL_SIZE;
+        const s2wy = s2.cy * CELL_SIZE + CELL_SIZE;
+        const dist = worldDist({ x: wx, y: wy }, { x: s2wx, y: s2wy });
+        if (dist > blastRadius) continue;
+        const falloff = 1 - (dist / blastRadius) * 0.6;
+        const blastDmg = Math.max(1, Math.round(100 * falloff));
+        structureDamage(ctx, s2, blastDmg);
+      }
     }
     // Leave large scorch mark
     ctx.map.addDecal(s.cx, s.cy, 14, 0.6);

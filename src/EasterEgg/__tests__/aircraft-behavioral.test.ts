@@ -519,13 +519,13 @@ describe('updateFixedWingAttackRun', () => {
     expect(mig.mission).toBe(Mission.GUARD);
   });
 
-  it('fires weapon when in range and cooldown ready', () => {
+  it('fires weapon when in range, cooldown ready, and facing aligned', () => {
     const fireWeaponAt = vi.fn();
     const ctx = makeAircraftContext({ fireWeaponAt });
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
-    const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 201, 200); // very close
+    const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 199); // North (same as default facing)
     mig.target = enemy;
-    mig.attackRunPhase = 'firing';
+    mig.attackRunPhase = 'dropBombs';
     mig.attackCooldown = 0;
 
     updateFixedWingAttackRun(ctx, mig);

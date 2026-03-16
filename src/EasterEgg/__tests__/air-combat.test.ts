@@ -349,13 +349,20 @@ describe('Aircraft state machine', () => {
 // === Part 7: Fixed-Wing vs Helicopter Differences ===
 
 describe('Fixed-wing vs helicopter', () => {
-  it('Fixed-wing has attack run phases', () => {
+  it('Fixed-wing has C++ parity attack run phases', () => {
     const mig = makeEntity(UnitType.V_MIG, House.Spain);
-    expect(mig.attackRunPhase).toBe('approach');
-    mig.attackRunPhase = 'firing';
-    expect(mig.attackRunPhase).toBe('firing');
-    mig.attackRunPhase = 'pullaway';
-    expect(mig.attackRunPhase).toBe('pullaway');
+    expect(mig.attackRunPhase).toBe('flyToTarget');
+    mig.attackRunPhase = 'dropBombs';
+    expect(mig.attackRunPhase).toBe('dropBombs');
+    mig.attackRunPhase = 'regroup';
+    expect(mig.attackRunPhase).toBe('regroup');
+  });
+
+  it('Fixed-wing has circleBreakTimer for anti-circle delay', () => {
+    const yak = makeEntity(UnitType.V_YAK, House.Spain);
+    expect(yak.circleBreakTimer).toBe(0);
+    yak.circleBreakTimer = 30;
+    expect(yak.circleBreakTimer).toBe(30);
   });
 
   it('MIG/YAK are fixed-wing, HELI/HIND are helicopters', () => {
