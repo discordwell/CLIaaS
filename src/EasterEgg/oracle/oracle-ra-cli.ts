@@ -334,6 +334,16 @@ async function runOracle(
     const stepResult = await adapter.step(stepTicks);
     totalGameTicks += stepTicks;
 
+    // Check step result for win/loss (might trigger mid-step)
+    if (stepResult.state) {
+      const midResult = strategy.checkResult(stepResult.state);
+      if (midResult !== 'playing') {
+        result = midResult;
+        console.log(`[Oracle] Game ended: ${result}`);
+        break;
+      }
+    }
+
     // 5. Report (every 10 iterations)
     if (iteration % 10 === 0) {
       console.log(strategy.summarize(stepResult.state, iteration, decision));

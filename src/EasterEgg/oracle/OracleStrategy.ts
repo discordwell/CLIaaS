@@ -206,6 +206,13 @@ export class OracleStrategy {
     return this.decideGeneric(state);
   }
 
+  // SCG08EA critical structures — lose if either is destroyed
+  // Human-requested design element: ATEK at (58,95), PDOX at (58,102)
+  private static readonly SCG08EA_CRITICAL: Point[] = [
+    { cx: 58, cy: 95 },   // ATEK (Allied Tech Center)
+    { cx: 58, cy: 102 },  // PDOX (Chronosphere)
+  ];
+
   checkResult(state: RAGameState): OracleResult {
     if (state.winPending) {
       return 'victory';
@@ -547,6 +554,37 @@ export class OracleStrategy {
 
     // --- Phase 3.5: MINELAYER DEFENSE ---
     this.dispatchMinelayers(playerUnits, conYard, commands, reasons);
+
+    // --- Phase 3.75: CRITICAL STRUCTURE GUARD (mission-specific) ---
+    // SCG08EA: always keep 3+ units near ATEK and PDOX — lose if destroyed
+    if (this.scenario === 'SCG08EA') {
+      const critGuards = playerUnits.filter(
+        (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) && u.hp / u.mhp >= 0.5,
+      );
+      for (const critPoint of OracleStrategy.SCG08EA_CRITICAL) {
+        const nearCrit = critGuards.filter((u) => this.distanceSq(u, critPoint) <= 100);
+        const critThreats = state.enemies.filter((e) => this.distanceSq(e, critPoint) <= 225);
+        if (critThreats.length > 0 && nearCrit.length > 0) {
+          const micro = this.microManage(nearCrit, critThreats, critPoint);
+          commands.push(...micro.commands);
+          reasons.push(`guard critical (${critThreats.length} threats)`);
+        } else if (nearCrit.length < 3 && critGuards.length > 6) {
+          // Station more guards near critical structure
+          const farUnits = critGuards
+            .filter((u) => this.distanceSq(u, critPoint) > 100)
+            .slice(0, 3 - nearCrit.length);
+          if (farUnits.length > 0) {
+            commands.push({
+              cmd: 'move',
+              ids: farUnits.map((u) => u.id),
+              cx: critPoint.cx,
+              cy: critPoint.cy,
+            });
+            reasons.push(`station ${farUnits.length} near critical`);
+          }
+        }
+      }
+    }
 
     // --- Phase 4: COMBAT (defend-first, attack with surplus) ---
     const combatUnits = playerUnits.filter(
