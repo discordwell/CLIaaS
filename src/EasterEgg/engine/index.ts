@@ -3369,6 +3369,7 @@ export class Game {
               // Auto-evacuate when civilian boards (same as player-initiated loading)
               if (entity.stats.isAircraft) {
                 this.orderTransportEvacuate(entity);
+                return; // evacuate immediately — don't advance team missions
               }
               break; // load one civilian per arrival
             }
