@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-17T00:15Z — Session 153: SCG01EA Victory — Transport Auto-Load + Evacuation Fix
+- **Bug fixes**: Tanya sprite (E7→e5), barrel chain explosions (structure blast loop), transport auto-loads nearby civilians on TMISSION_MOVE arrival, `return` after evacuate to prevent GUARD override.
+- **Root cause of Einstein evac failure**: Chinook arrives at waypoint but no TMISSION_LOAD in its script. C++ auto-loads civilians when transport arrives near them. TS engine was missing this. Added civilian auto-load in TMISSION_MOVE arrival + `orderTransportEvacuate` for aircraft.
+- **SCG01EA won** at tick 2445: cleared enemies (protect Tanya behind jeeps), killed prison guards, Einstein spawned full hp, boarded Chinook, flew to map edge, TEVENT_EVAC_CIVILIAN → WIN.
+- **Oracle auto-play mode**: Added `?anttest=oracle` URL param for in-browser Oracle loop. Fixed setTimeout vs rAF throttling, batch iterations when tab hidden.
+- **TIME_UNIT_TICKS**: Investigated 15Hz→20Hz discrepancy. Kept at 90 — everything runs proportionally faster together, triggers stay in sync with movement/combat.
+- **Gameplay lesson**: Barrel fire-bullets (200 damage cardinal) are lethal — clear area before triggering Einstein spawn. Tanya must stay behind jeeps. Step 15 ticks at a time for micro.
+
 ## 2026-03-16T23:40Z — Session 152: Fix Barrel Explosions & Yak Flight Behavior (C++ Parity)
 - **Barrel explosions**: Replaced generic 2-cell radial HE blast with C++ directional fire-bullet mechanic. Barrels now spawn 4 invisible 200-damage Fire warhead bullets in cardinal directions (N/E/S/W) only. Non-barrel structures keep the old radial HE blast. Chain explosions work along cardinal lines; diagonal barrels don't chain.
 - **Yak/MiG attack runs**: Rewrote `updateFixedWingAttackRun()` from 3-phase (approach/firing/pullaway) to C++ parity 5-phase state machine (flyToTarget/dropBombs/regroup). Added: facing check before firing (must be within 1 direction of 8), anti-circle breaker (30-tick timeout forces regroup), multi-shot per pass (fires every cooldown tick in dropBombs, not just once).
