@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-03-16T20:10Z — Session 150: Fix Onboarding Sample Data Seed Error
+- **Root cause**: Production `rules` table missing columns (`description`, `version`, `execution_order`, `last_executed_at`, `execution_count`) added to Drizzle schema but never pushed to prod DB. Drizzle INSERT includes ALL schema columns, hitting `column "description" does not exist`.
+- **Also fixed**: Demo data fixtures had broken cross-references — requesters used emails instead of externalIds, assignees used names, orgIds used `demo-org-*` instead of org externalIds, message authors used display names. Added 5 agent customer records for assignees.
+- **Prevention**: Added `drizzle-kit push --strict` step to `deploy_vps.sh` (step 3.5) so schema stays in sync.
+- **Tests**: Added 6 fixture integrity tests (manifest counts, valid JSON, requester refs, orgId refs, message author refs). All 9 tests pass.
+- **Wet test**: Full signup → seed → dashboard flow verified on cliaas.com. Dashboard shows 10 open tickets with correct assignee names and subjects.
+
+## 2026-03-16T19:15Z — Session 149: Fix Tanya Sprite, Barrel Chain Explosions
+- **Bug 1 (Tanya sprite)**: E7 had `image: 'e1'` (rifleman) — changed to `'e5'` (Tanya). Asset `e5.png` confirmed (660 frames, 50x39px). Wet tested on SCG03EB — `statsImage: "e5"` verified live.
+- **Bug 2 (Barrel chain explosions)**: `structureDamage()` blast loop only hit `ctx.entities`, never `ctx.structures`. Added structure blast loop after entity blast loop (same distance-based falloff). Re-entrancy safe: `s.alive = false` at line 588 before blast at 657. Wet tested on SCG01EA — destroyed 1 barrel, all 6 in cluster chain-exploded.
+- **Bug 3 (M1 enemy spawning)**: Still needs live gameplay observation. Suspect TIME_UNIT_TICKS=90 (15Hz) vs 20Hz game loop fires timers 33% early. Deferred to next session.
+- Tests: 378 asset tests + 8 barrel tests all pass. Code review: clean.
+- Commit a37ba1b pushed, deployed to VPS.
+
 ## 2026-03-16T19:30Z — Session 148: Oracle Strategy Iteration — M4/M8 Attempts
 - **M4 (SCG04EA)**: "Ten to one" — 1 JEEP + 1 E1 + MCV vs 5 heavy tanks. Brutally hard.
   - Fixed MCV deploy: MISSION_HUNT instead of MISSION_UNLOAD (auto-finds clear spot)

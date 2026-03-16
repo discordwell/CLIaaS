@@ -124,6 +124,24 @@ if [[ -d "$FMV_DIR" ]]; then
 fi
 CMDS
 
+echo "[3.5/6] Pushing database schema..."
+"${SSH_CMD[@]}" bash -s -- "$REMOTE_APP_DIR" "$REMOTE_SHARED_DIR" <<'CMDS'
+set -euo pipefail
+APP_DIR="$1"
+SHARED_DIR="$2"
+cd "$APP_DIR"
+
+if [[ -f "$SHARED_DIR/.env" ]]; then
+  set -a; source "$SHARED_DIR/.env"; set +a
+fi
+
+if [[ -n "${DATABASE_URL:-}" ]]; then
+  npx drizzle-kit push --force 2>&1 || echo "WARN: drizzle-kit push had issues (non-fatal)"
+else
+  echo "SKIP: DATABASE_URL not set"
+fi
+CMDS
+
 echo "[4/6] Installing systemd service..."
 rsync -az -e "$RSYNC_SSH" "$TMP_SERVICE" "$VPS_SSH:/tmp/${SERVICE_NAME}.service"
 "${SSH_CMD[@]}" bash -s -- "$SERVICE_NAME" "$SUDO" <<'CMDS'
