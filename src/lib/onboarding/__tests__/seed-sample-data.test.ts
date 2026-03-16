@@ -160,6 +160,37 @@ describe('demo-data fixtures integrity', () => {
     }
   });
 
+  it('ticket assignee values are present as customer externalIds', () => {
+    const customers = readFileSync(join(demoDir, 'customers.jsonl'), 'utf-8')
+      .split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+    const tickets = readFileSync(join(demoDir, 'tickets.jsonl'), 'utf-8')
+      .split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+
+    const customerExternalIds = new Set(customers.map((c: { externalId: string }) => c.externalId));
+    const assigneeIds = new Set(tickets.map((t: { assignee?: string }) => t.assignee).filter(Boolean));
+
+    for (const assignee of assigneeIds) {
+      expect(
+        customerExternalIds.has(assignee),
+        `Ticket assignee "${assignee}" should be a valid customer externalId`
+      ).toBe(true);
+    }
+  });
+
+  it('all tickets have updatedAt >= createdAt', () => {
+    const tickets = readFileSync(join(demoDir, 'tickets.jsonl'), 'utf-8')
+      .split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+
+    for (const ticket of tickets) {
+      const created = new Date(ticket.createdAt).getTime();
+      const updated = new Date(ticket.updatedAt).getTime();
+      expect(
+        updated >= created,
+        `Ticket ${ticket.id} has updatedAt (${ticket.updatedAt}) before createdAt (${ticket.createdAt})`
+      ).toBe(true);
+    }
+  });
+
   it('message authors reference customer or agent externalIds', () => {
     const customers = readFileSync(join(demoDir, 'customers.jsonl'), 'utf-8')
       .split('\n').filter(l => l.trim()).map(l => JSON.parse(l));

@@ -136,7 +136,10 @@ if [[ -f "$SHARED_DIR/.env" ]]; then
 fi
 
 if [[ -n "${DATABASE_URL:-}" ]]; then
-  npx drizzle-kit push --force 2>&1 || echo "WARN: drizzle-kit push had issues (non-fatal)"
+  if ! npx drizzle-kit push --force 2>&1; then
+    echo "ERROR: Schema push failed. Check database connectivity and schema compatibility."
+    echo "The service will still restart, but features requiring new columns may fail."
+  fi
 else
   echo "SKIP: DATABASE_URL not set"
 fi
