@@ -356,8 +356,8 @@ export class WasmAdapter {
 
   private async rawStep(n: number, commands?: string): Promise<AgentStepResult> {
     this.ensurePage();
-    // agent_step calls Main_Loop() which uses emscripten_sleep → Asyncify.
-    // ccall with {async:true} returns a Promise that resolves after rewind.
+    // agent_step is Asyncify-instrumented (emscripten_sleep in call graph), so
+    // ccall returns a Promise even when no actual sleep occurs. Must use async.
     return await this.page!.evaluate(async ({ ticks, cmds }) => {
       const Module = (window as any).Module;
       const json = await Module.ccall(

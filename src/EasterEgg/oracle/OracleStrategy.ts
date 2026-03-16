@@ -211,27 +211,24 @@ export class OracleStrategy {
     const healthy = controlled.filter((u) => u.hp / u.mhp >= RETREAT_HP_FRACTION);
 
     if (state.enemies.length > 0 && healthy.length > 0) {
-      const idle = healthy.filter((u) => this.isIdle(u));
-      if (idle.length > 0) {
-        const target = this.nearestEnemy(idle[0], state.enemies);
-        commands.push({
-          cmd: 'attack_move',
-          ids: idle.map((u) => u.id),
-          cx: target.cx,
-          cy: target.cy,
-        });
-        reasons.push(`attack ${idle.length} → (${target.cx},${target.cy})`);
-      }
+      // Command ALL healthy units, not just idle — units in ATTACK/MOVE/HUNT
+      // states won't retask themselves and get stuck
+      const target = this.nearestEnemy(healthy[0], state.enemies);
+      commands.push({
+        cmd: 'attack_move',
+        ids: healthy.map((u) => u.id),
+        cx: target.cx,
+        cy: target.cy,
+      });
+      reasons.push(`attack ${healthy.length} → (${target.cx},${target.cy})`);
     }
 
     if (state.enemies.length === 0 && healthy.length > 0) {
-      const idle = healthy.filter((u) => this.isIdle(u));
-      if (idle.length > 0 || this.ticksSinceLastEnemy > 300) {
-        const explorers = idle.length > 0 ? idle : healthy;
+      if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
         const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
         commands.push({
           cmd: 'attack_move',
-          ids: explorers.map((u) => u.id),
+          ids: healthy.map((u) => u.id),
           cx: wp.cx,
           cy: wp.cy,
         });

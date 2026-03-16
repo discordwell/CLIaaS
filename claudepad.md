@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-16T05:30Z — Session 145: SCU03EA Crash Root Cause — Sound_Effect OOB
+- **Bug**: SCU03EA (Covert Cleanup, SNOW theater) crashed with `RuntimeError: memory access out of bounds` on first `agent_step`.
+- **Root cause**: Trigger `spk1` has `TACTION_PLAY_SOUND` with `Data.Sound = -65418` (invalid VocType). `Sound_Effect()` at audio.cpp:410 accesses `SoundEffectName[-65418]` — array OOB in WASM.
+- **Investigation path**: Added printf checkpoints in Main_Loop → Logic.AI → trigger loop. Narrowed crash to trigger 32/38 (spk1, TEVENT_TIME) springing and calling Sound_Effect with garbage VocType.
+- **Fix**: Added bounds check `voc < VOC_FIRST || voc >= VOC_COUNT` to both `Sound_Effect` overloads in audio.cpp. Now returns -1 for invalid VocType values.
+- **Secondary fix**: SDL_Event_Loop in window.cpp now checks `g_agent_harness_mode` to skip `emscripten_sleep(0)` — prevents unnecessary Asyncify overhead in harness mode.
+- **Verified**: SCU03EA and SCU33EA (both EXECUTE missions) now run without crashes. SCG01EA still works. All debug checkpoints removed.
+
 ## 2026-03-12T03:45Z — Session 144: Red Alert Oracle — WASM Adapter + Strategy
 - **Goal**: Get oracle playing RA missions autonomously: launch WASM → load SCG01EA → observe → decide → act.
 - **WasmAdapter.ts** (major rewrite): Embedded static HTTP server (port 0, COOP/COEP headers, streaming for 43MB gamedata.data). Two-phase connect: Phase 1 waits for `__autoplayReady` via `waitForFunction`, Phase 2 waits for `agent_get_state` valid data. `agent_step` uses `{async: true}` ccall for Asyncify compatibility.
