@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-16T22:00Z — Session 151: Oracle Mission Scorecard
+- **M1 (SCG01EA)**: 5/5 victories — Tanya rescue Einstein, custom strategy works perfectly
+- **M2 (SCG02EA)**: 1/3 victories — convoy escort, needs path clearing improvement
+- **M4 (SCG04EA)**: 0/5 — too hard (1 JEEP + MCV vs 5 heavy tanks), needs minelayer kiting
+- **M8 (SCG08EA)**: 3/5 survive full timer — critical structure guards, leash defense, win detection issue
+- **Win detection**: Extended BorrowedTime in harness mode, added mid-step win check
+- **Power management**: Prefer APWR in late game, maintain surplus above demand
+- **Critical structure guards**: M8-specific defense of ATEK/PDOX positions
+
 ## 2026-03-16T20:10Z — Session 150: Fix Onboarding Sample Data Seed Error
 - **Root cause**: Production `rules` table missing columns (`description`, `version`, `execution_order`, `last_executed_at`, `execution_count`) added to Drizzle schema but never pushed to prod DB. Drizzle INSERT includes ALL schema columns, hitting `column "description" does not exist`.
 - **Also fixed**: Demo data fixtures had broken cross-references — requesters used emails instead of externalIds, assignees used names, orgIds used `demo-org-*` instead of org externalIds, message authors used display names. Added 5 agent customer records for assignees.
