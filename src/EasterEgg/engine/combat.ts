@@ -315,6 +315,8 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
  *  Infantry and ants are crushable; vehicles are not. The crusher does NOT stop — it drives through.
  *  C++ checks IsAFriend() — friendly/allied infantry are NOT crushed. */
 export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
+  // C++ drive.cpp:Ok_To_Move — only vehicles with Tracks=true (crusher flag) can crush infantry
+  if (!vehicle.stats.crusher) return;
   const vc = vehicle.cell;
   for (const other of ctx.entities) {
     if (!other.alive || other.id === vehicle.id) continue;
