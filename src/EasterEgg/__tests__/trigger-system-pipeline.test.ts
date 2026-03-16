@@ -125,7 +125,7 @@ describe('checkTriggerEvent — full event coverage', () => {
 
   // TEVENT_TIME (13) — elapsed time check
   it('TEVENT_TIME (13) fires when enough ticks have elapsed', () => {
-    const event: TriggerEvent = { type: 13, team: -1, data: 2 }; // 2 time units = 2 * TIME_UNIT_TICKS
+    const event: TriggerEvent = { type: 13, team: -1, data: 2 }; // 2 time units = 2 * 90 = 180 ticks
     const requiredTicks = 2 * TIME_UNIT_TICKS;
 
     // Not enough time
@@ -148,7 +148,7 @@ describe('checkTriggerEvent — full event coverage', () => {
   });
 
   it('TEVENT_TIME (13) respects triggerStartTick offset', () => {
-    const event: TriggerEvent = { type: 13, team: -1, data: 1 }; // 1 time unit = TIME_UNIT_TICKS
+    const event: TriggerEvent = { type: 13, team: -1, data: 1 }; // 1 time unit = 90 ticks
     const requiredTicks = TIME_UNIT_TICKS;
 
     // If trigger started at tick 100, need gameTick >= 190
@@ -1274,13 +1274,14 @@ describe('Timer actions and events', () => {
   });
 
   it('TEVENT_TIME correctly uses TIME_UNIT_TICKS conversion', () => {
-    // 1/10th-minute trigger units at 20 Hz engine tick rate: 6 * 20 = 120 ticks per unit.
-    expect(TIME_UNIT_TICKS).toBe(120);
+    // 1/10th-minute trigger units at 15 Hz basis: 6 * 15 = 90 ticks per unit.
+    // Kept at 90 so triggers stay proportional to movement/combat (also tick-based).
+    expect(TIME_UNIT_TICKS).toBe(90);
 
-    // data=10 means 10 * 120 = 1200 ticks
+    // data=10 means 10 * 90 = 900 ticks
     const event: TriggerEvent = { type: 13, team: -1, data: 10 };
-    expect(checkTriggerEvent(event, createState({ gameTick: 1199, triggerStartTick: 0 }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ gameTick: 1200, triggerStartTick: 0 }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ gameTick: 899, triggerStartTick: 0 }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ gameTick: 900, triggerStartTick: 0 }))).toBe(true);
   });
 });
 
@@ -1584,31 +1585,31 @@ describe('Complex multi-trigger scenarios', () => {
   it('persistent timer trigger fires repeatedly on schedule', () => {
     const trigger = createTrigger({
       persistence: 2,
-      event1: { type: 13, team: -1, data: 1 }, // TIME: 1 unit = 120 ticks (6 seconds at 20 Hz)
+      event1: { type: 13, team: -1, data: 1 }, // TIME: 1 unit = 90 ticks
       timerTick: 0,
     });
 
-    // 1 tick before threshold: not enough time
+    // Tick 89: not enough time
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: TIME_UNIT_TICKS - 1, triggerStartTick: 0,
+      gameTick: 89, triggerStartTick: 0,
     }))).toBe(false);
 
-    // Exactly at threshold: fires
+    // Tick 90: fires
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: TIME_UNIT_TICKS, triggerStartTick: 0,
+      gameTick: 90, triggerStartTick: 0,
     }))).toBe(true);
 
     // After firing, persistent trigger resets timerTick to current tick
-    trigger.timerTick = TIME_UNIT_TICKS;
+    trigger.timerTick = 90;
 
-    // 1 tick before second threshold: not enough time since reset
+    // Tick 179: not enough time since reset
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: TIME_UNIT_TICKS * 2 - 1, triggerStartTick: TIME_UNIT_TICKS,
+      gameTick: 179, triggerStartTick: 90,
     }))).toBe(false);
 
-    // Exactly at second threshold: fires again
+    // Tick 180: fires again
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: TIME_UNIT_TICKS * 2, triggerStartTick: TIME_UNIT_TICKS,
+      gameTick: 180, triggerStartTick: 90,
     }))).toBe(true);
   });
 

@@ -129,9 +129,10 @@ const TMISSION_LOAD = 14;        // Load infantry into transport
 const TMISSION_PATROL = 16;      // Patrol to waypoint (move + attack en route)
 
 // Time unit: trigger/team timer values are in 1/10th minute increments (6 seconds each).
-// Original RA ran at 15 Hz (6 * 15 = 90), but our engine runs at 20 Hz (GAME_TICKS_PER_SEC).
-// Must use our tick rate so timers fire at the correct real-world time: 6 * 20 = 120.
-export const TIME_UNIT_TICKS = 120;
+// Original RA ran at 15 Hz (6 * 15 = 90). Our engine runs at 20 Hz, so everything is
+// ~33% faster in wall-clock time, but keeping 90 preserves correct proportional pacing
+// relative to movement, combat, and build speeds (which are also tick-based at 20 Hz).
+export const TIME_UNIT_TICKS = 90;
 
 export interface TeamMember {
   type: string;   // unit type name (e.g. 'ANT3')
