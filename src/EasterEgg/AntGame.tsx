@@ -758,8 +758,9 @@ export default function AntGame({ onExit }: AntGameProps) {
             }
 
             // Batch multiple oracle iterations per callback to overcome Chrome's
-            // background tab throttling (setTimeout capped at ~1/sec in bg tabs)
-            const batchSize = document.hidden ? 20 : 1;
+            // background tab throttling (setTimeout capped at ~1/sec in bg tabs).
+            // Only batch after tick 3000 — early game needs precise micro every step.
+            const batchSize = (document.hidden && totalTicks > 3000) ? 10 : 1;
             for (let b = 0; b < batchSize && w.__autoPlayRunning && totalTicks < maxTicks; b++) {
               const step = totalTicks < 3000 ? ticksPerStep : ticksPerStep * 2;
               game.step(step);
