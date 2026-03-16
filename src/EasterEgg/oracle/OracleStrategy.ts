@@ -387,16 +387,17 @@ export class OracleStrategy {
         });
         reasons.push('produce POWR (power deficit)');
       } else {
-        // Find next building in build order we don't have yet
+        // Find next building in build order we don't have yet.
+        // Always scan from the start — buildings can be destroyed and
+        // need rebuilding. Skip ones that currently exist on the map.
         let ordered = false;
-        for (let i = this.baseBuildIndex; i < BUILD_ORDER.length; i++) {
+        for (let i = 0; i < BUILD_ORDER.length; i++) {
           const entry = BUILD_ORDER[i];
           // Check if we already have any of the alternatives
           const alreadyHave = entry.names.some((n) =>
             alliedStructures.some((s) => s.t === n),
           );
           if (alreadyHave) {
-            if (i === this.baseBuildIndex) this.baseBuildIndex = i + 1;
             continue;
           }
           // Find the first buildable alternative from the C++ Can_Build list
@@ -439,14 +440,23 @@ export class OracleStrategy {
       (s) => s.t === 'TENT' || s.t === 'BARR',
     );
 
-    // Produce tanks from War Factory
+    // --- Unit production priority: tanks > infantry, save money for structures ---
     const unitProduction = state.production.find(
       (p) => p.rtti === RTTI_UNITTYPE,
     );
-    if (hasWarFactory && !unitProduction && buildable && state.credits > 500) {
+    const infantryProduction = state.production.find(
+      (p) => p.rtti === RTTI_INFANTRYTYPE,
+    );
+
+    // Check if we're still saving for a building (don't drain credits)
+    const savingForBuilding = buildingProduction != null ||
+      (this.baseBuildIndex < BUILD_ORDER.length && !hasWarFactory);
+    const minCreditsForInfantry = savingForBuilding ? 1500 : 300;
+
+    // Produce tanks from War Factory (top priority when available)
+    if (hasWarFactory && !unitProduction && buildable && state.credits > 700) {
       const tank = TANK_PREFERENCE.find((t) => buildable.units.includes(t));
       if (tank) {
-        // Look up the type_id from the unit list
         const unitTypeId = this.unitNameToTypeId(tank);
         if (unitTypeId >= 0) {
           commands.push({
@@ -467,11 +477,8 @@ export class OracleStrategy {
       reasons.push(`exit ${unitProduction.t}`);
     }
 
-    // Produce infantry from Barracks
-    const infantryProduction = state.production.find(
-      (p) => p.rtti === RTTI_INFANTRYTYPE,
-    );
-    if (hasBarracks && !infantryProduction && buildable && state.credits > 200) {
+    // Produce infantry only if we have spare credits (don't starve tank/building production)
+    if (hasBarracks && !infantryProduction && buildable && state.credits > minCreditsForInfantry) {
       const inf = INFANTRY_PREFERENCE.find((i) => buildable.infantry.includes(i));
       if (inf) {
         const infTypeId = this.infantryNameToTypeId(inf);
