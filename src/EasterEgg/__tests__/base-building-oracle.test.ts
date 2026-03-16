@@ -349,7 +349,9 @@ describe('base building — fallback to generic', () => {
   it('falls back to generic combat when no MCV and no ConYard', () => {
     const strategy = new OracleStrategy('SCG04EA');
     // Give friendly units clear force advantage (1.5x) so they attack
+    // tick > 1500 to bypass early-game holding pattern
     const state = makeState({
+      tick: 2000,
       units: [
         makeEntity(1, 'E1', 'Greece', 50, 50),
         makeEntity(2, 'E1', 'Greece', 51, 50),

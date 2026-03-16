@@ -259,6 +259,28 @@ export class OracleStrategy {
       return this.decideBaseBuilding(state);
     }
 
+    // Early game before MCV arrives — stay defensive, don't scatter
+    // If we have units but no MCV/ConYard and the game just started,
+    // keep units near spawn and only fight nearby threats
+    if (state.tick < 1500 && playerUnits.length > 0 && !hasConYard) {
+      const commands: Array<Record<string, unknown>> = [];
+      const reasons: string[] = [];
+      const combat = playerUnits.filter(
+        (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
+      );
+      const nearbyEnemies = state.enemies.filter(
+        (e) => combat.some((u) => this.distanceSq(u, e) <= 225),
+      );
+      if (nearbyEnemies.length > 0 && combat.length > 0) {
+        const micro = this.microManage(combat, nearbyEnemies, this.centroid(combat));
+        commands.push(...micro.commands);
+        reasons.push('early defense', ...micro.reasons);
+      } else {
+        reasons.push('holding position — waiting for MCV');
+      }
+      return { commands, reason: reasons.join('; ') };
+    }
+
     // No MCV/ConYard — use force-ratio-aware combat
     return this.decideGenericCombat(state, playerUnits, alliedStructures);
   }
@@ -284,6 +306,32 @@ export class OracleStrategy {
         reasons.push('deploy MCV');
       } else {
         reasons.push('MCV deploying...');
+      }
+      // Escort units defend the MCV while it deploys — don't scatter
+      const escorts = playerUnits.filter(
+        (u) => u.id !== mcv.id && this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
+      );
+      const nearbyThreats = state.enemies.filter(
+        (e) => this.distanceSq(e, mcv) <= 225,
+      );
+      if (nearbyThreats.length > 0 && escorts.length > 0) {
+        const micro = this.microManage(escorts, nearbyThreats, mcv);
+        commands.push(...micro.commands);
+        reasons.push(...micro.reasons);
+      } else if (escorts.length > 0) {
+        // No threats — keep escorts near MCV
+        const strayEscorts = escorts.filter(
+          (u) => this.distanceSq(u, mcv) > 36,
+        );
+        if (strayEscorts.length > 0) {
+          commands.push({
+            cmd: 'move',
+            ids: strayEscorts.map((u) => u.id),
+            cx: mcv.cx,
+            cy: mcv.cy,
+          });
+          reasons.push(`rally ${strayEscorts.length} to MCV`);
+        }
       }
       return { commands, reason: reasons.join('; ') };
     }

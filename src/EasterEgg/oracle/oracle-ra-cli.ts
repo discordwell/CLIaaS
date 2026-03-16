@@ -329,8 +329,10 @@ async function runOracle(
     if (decision.commands.length > 0) {
       await adapter.command(decision.commands);
     }
-    const stepResult = await adapter.step(30);
-    totalGameTicks += 30;
+    // Faster ticks early game for snappier reactions, normal pace later
+    const stepTicks = totalGameTicks < 3000 ? 15 : 30;
+    const stepResult = await adapter.step(stepTicks);
+    totalGameTicks += stepTicks;
 
     // 5. Report (every 10 iterations)
     if (iteration % 10 === 0) {
