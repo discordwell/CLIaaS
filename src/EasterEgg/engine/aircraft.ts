@@ -370,7 +370,8 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
         y: targetPos.y + (dy / len) * overshootDist,
       };
       entity.moveToward(overshootPos, speed);
-      if (worldDist(entity.pos, targetPos) > overshootDist * 0.8) {
+      // worldDist returns cells; compare in cells (3 cells overshoot * 0.8 threshold)
+      if (worldDist(entity.pos, targetPos) > 3 * 0.8) {
         const targetAlive = (entity.target?.alive) ||
           (entity.targetStructure && (entity.targetStructure as MapStructure).alive);
         if (entity.ammo > 0 && targetAlive) {
