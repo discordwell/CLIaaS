@@ -855,12 +855,18 @@ var Module = {
   // Cache bust WASM binary to avoid stale binaries after deploys
   locateFile: function(path, scriptDirectory) {
     if (path.endsWith('.wasm')) {
-      return scriptDirectory + path + '?v=20260316z3';
+      return scriptDirectory + path + '?v=20260316z5';
     }
     return scriptDirectory + path;
   }
 };
 Module.setStatus('Downloading...');
+
+// Track whether mouse is over the canvas — used by C++ scroll edge detection
+window.__mouseInCanvas = false;
+Module.canvas = document.getElementById('canvas');
+document.getElementById('canvas').addEventListener('mouseenter', function() { window.__mouseInCanvas = true; });
+document.getElementById('canvas').addEventListener('mouseleave', function() { window.__mouseInCanvas = false; });
 
 // === Diagnostic: wrap dynCall_iiii to trace mouse callback execution ===
 // The mousedown handler calls dynCall_iiii(callbackfunc, eventType, eventStruct, userData).
@@ -1409,6 +1415,6 @@ Module.setStatus('Downloading...');
 })();
 </script>
 <script src="gamedata.js"></script>
-<script async src="rasdl.js?v=20260316z3"></script>
+<script async src="rasdl.js?v=20260316z5"></script>
 </body>
 </html>
