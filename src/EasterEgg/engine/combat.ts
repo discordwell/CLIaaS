@@ -653,6 +653,17 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
       const blastDmg = Math.max(1, Math.round(100 * falloff));
       damageEntity(ctx, e, blastDmg, 'HE');
     }
+    // Structure explosion damages nearby structures (chain explosions for barrels)
+    for (const s2 of ctx.structures) {
+      if (!s2.alive || s2 === s) continue;
+      const s2wx = s2.cx * CELL_SIZE + CELL_SIZE;
+      const s2wy = s2.cy * CELL_SIZE + CELL_SIZE;
+      const dist = worldDist({ x: wx, y: wy }, { x: s2wx, y: s2wy });
+      if (dist > blastRadius) continue;
+      const falloff = 1 - (dist / blastRadius) * 0.6;
+      const blastDmg = Math.max(1, Math.round(100 * falloff));
+      structureDamage(ctx, s2, blastDmg);
+    }
     // Leave large scorch mark
     ctx.map.addDecal(s.cx, s.cy, 14, 0.6);
     // Barrel explosion: barrels always explode. Only destroy bridge if barrel is near bridge cells.

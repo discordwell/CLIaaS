@@ -1088,7 +1088,7 @@ describe('Counterstrike/Aftermath expansion unit sprites', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 21. Units sharing sprites (GNRL, CHAN, E7, THF → e1; MECH → medi; etc.)
+// 21. Units sharing sprites (GNRL, CHAN, THF → e1; E7 → e5; MECH → medi; etc.)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Unit types that share sprites', () => {
@@ -1100,8 +1100,8 @@ describe('Unit types that share sprites', () => {
     expect(UNIT_STATS.CHAN.image).toBe('e1');
   });
 
-  it('E7 (Tanya) uses e1 sprite', () => {
-    expect(UNIT_STATS.E7.image).toBe('e1');
+  it('E7 (Tanya) uses e5 sprite', () => {
+    expect(UNIT_STATS.E7.image).toBe('e5');
   });
 
   it('THF (Thief) uses e1 sprite', () => {

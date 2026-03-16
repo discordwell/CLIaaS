@@ -149,6 +149,52 @@ describe('Barrel explosion bridge destruction fix', () => {
     expect(bridgeCalls).toHaveLength(0);
   });
 
+  it('barrels chain-explode when within blast radius', () => {
+    const ctx = makeMockCombatContext();
+    // Three barrels in a line, 1 cell apart (within 2-cell blast radius)
+    const b1 = makeBarrel({ cx: 10, cy: 10, hp: 1 });
+    const b2 = makeBarrel({ cx: 11, cy: 10, hp: 1 });
+    const b3 = makeBarrel({ cx: 12, cy: 10, hp: 1 });
+    ctx.structures.push(b1, b2, b3);
+
+    // Destroy first barrel — should chain to b2 and b3
+    structureDamage(ctx, b1, 100);
+
+    expect(b1.alive).toBe(false);
+    expect(b2.alive).toBe(false);
+    expect(b3.alive).toBe(false);
+  });
+
+  it('barrels do NOT chain-explode when far apart', () => {
+    const ctx = makeMockCombatContext();
+    // Two barrels far apart (>2 cells, outside blast radius)
+    const b1 = makeBarrel({ cx: 10, cy: 10, hp: 1 });
+    const b2 = makeBarrel({ cx: 15, cy: 10, hp: 1 });
+    ctx.structures.push(b1, b2);
+
+    structureDamage(ctx, b1, 100);
+
+    expect(b1.alive).toBe(false);
+    expect(b2.alive).toBe(true);
+  });
+
+  it('barrel blast damages adjacent non-barrel structure but does not destroy it', () => {
+    const ctx = makeMockCombatContext();
+    const barrel = makeBarrel({ cx: 10, cy: 10, hp: 1 });
+    const building: MapStructure = {
+      type: 'POWR', image: 'powr', house: House.USSR,
+      cx: 11, cy: 10, hp: 256, maxHp: 256, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    };
+    ctx.structures.push(barrel, building);
+
+    structureDamage(ctx, barrel, 100);
+
+    expect(barrel.alive).toBe(false);
+    expect(building.alive).toBe(true);
+    expect(building.hp).toBeLessThan(256); // took blast damage
+  });
+
   it('non-barrel structure destruction never triggers bridge logic', () => {
     const showEvaMessage = vi.fn();
     const map = new GameMap();
