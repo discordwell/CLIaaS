@@ -46,10 +46,10 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },            // STRUCT_POWER — always first
   { names: ['PROC'],         type_ids: [12] },            // STRUCT_REFINERY — WEAP prerequisite
   { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
-  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power — no cap
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
   { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks
   { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },         // Base defense
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power — no cap (after core infra)
 ];
 
 // Tank preference order (best to worst — covers both Allied and Soviet)
@@ -136,6 +136,13 @@ const MINE_WAYPOINTS: Point[] = [
 // MISSION_UNLOAD enum value from C++ (used by minelayer deploy)
 const MISSION_UNLOAD = 15;
 
+// ── SCG03EA "Dead End" — destroy two bridges with Tanya ─────────────────────
+// Bridge targets (converted from cell numbers: cell%128=cx, cell/128=cy)
+const SCG03EA_BRIDGE_V04: Point = { cx: 54, cy: 52 };  // cell 6710 = western bridge
+const SCG03EA_BRIDGE_V07: Point = { cx: 53, cy: 57 };  // cell 7349 = central bridge
+const SCG03EA_FALLBACK: Point = { cx: 62, cy: 49 };    // cell 6334 = starting area
+const SCG03EA_ARTY_POS: Point = { cx: 54, cy: 55 };    // cell 7094 = central fire support
+
 // Exploration waypoints — spiral pattern covering 64x64 cell map
 const EXPLORE_WAYPOINTS = [
   { cx: 32, cy: 32 },
@@ -167,9 +174,12 @@ export class OracleStrategy {
   private baseBuildIndex = 0;
   private placementAttempts = 0;
   private lastPlacementTick = 0;
+  private scg03eaBridgeIndex = 0;  // 0 = first bridge, 1 = second, 2 = done
   private mineWaypointIndex = 0;
   private mineDeployPending = false;  // true when minelayer has arrived and should deploy
   private minesLaid = 0;              // total mines laid so far
+  private mcvSpawnTick = 0;           // tick when MCV first appeared
+  private mcvDeployAttempts = 0;      // how many times we've tried deploying
 
   constructor(scenario = '') {
     this.scenario = scenario.replace(/\.[^.]+$/, '').toUpperCase();
@@ -201,6 +211,9 @@ export class OracleStrategy {
     }
     if (this.scenario === 'SCG02EA') {
       return this.decideScg02ea(state);
+    }
+    if (this.scenario === 'SCG03EA') {
+      return this.decideScg03ea(state);
     }
 
     return this.decideGeneric(state);
@@ -234,7 +247,7 @@ export class OracleStrategy {
       return 'defeat';
     }
 
-    if (this.scenario === 'SCG01EA' && this.sawTanya && state.tick > 240) {
+    if ((this.scenario === 'SCG01EA' || this.scenario === 'SCG03EA') && this.sawTanya && state.tick > 240) {
       const tanyaAlive = state.units.some((u) => u.t === 'E7');
       if (!tanyaAlive) {
         return 'defeat';
@@ -334,13 +347,24 @@ export class OracleStrategy {
     const conYard = alliedStructures.find((s) => s.t === 'FACT');
 
     if (mcv && !conYard) {
-      // Deploy MCV — but DON'T rally the whole army to it.
-      // If we have an existing base, let combat units defend there instead.
+      // Track MCV spawn time for stuck detection
+      if (this.mcvSpawnTick === 0) this.mcvSpawnTick = state.tick;
+      const mcvAge = state.tick - this.mcvSpawnTick;
+
+      // MCV may be moving to a scenario-scripted position. Don't interrupt movement.
+      // Once idle, issue deploy. If deploy doesn't take after many attempts,
+      // try a small nudge then deploy next tick.
       if (this.isIdle(mcv)) {
         commands.push({ cmd: 'deploy', ids: [mcv.id] });
-        reasons.push('deploy MCV');
+        this.mcvDeployAttempts++;
+        reasons.push(mcvAge > 300 ? `deploy MCV (idle, ${mcvAge} ticks)` : 'deploy MCV');
+      } else if (mcvAge > 2000 && this.mcvDeployAttempts === 0) {
+        // MCV never became idle — force deploy anyway (might be in non-idle guard state)
+        commands.push({ cmd: 'deploy', ids: [mcv.id] });
+        this.mcvDeployAttempts++;
+        reasons.push(`force deploy MCV (never idle, ${mcvAge} ticks)`);
       } else {
-        reasons.push('MCV deploying...');
+        reasons.push('MCV moving to position...');
       }
 
       const combatEscorts = playerUnits.filter(
@@ -418,12 +442,14 @@ export class OracleStrategy {
       // Don't reset placementAttempts — keep advancing through offsets
       // so successive buildings don't land on the same cell
 
-      // Keep power healthy — in late game, maintain 1-3 large power plants above demand
-      // (200 = one APWR's worth of buffer)
+      // Keep power healthy — only build power when actually in deficit,
+      // or when consumption is high and surplus is thin (<100 buffer).
+      // Don't waste credits on power when we barely consume any.
       const powerDeficit = state.power.consumed - state.power.produced;
-      const needMorePower = powerDeficit > 0 || (state.tick > 5000 && powerDeficit > -200);
+      const needMorePower = powerDeficit > 0 ||
+        (state.power.consumed >= 200 && powerDeficit > -100);
       if (needMorePower && buildable.structures.includes('APWR')) {
-        // Prefer APWR (200 power) over POWR (100 power) in late game
+        // Prefer APWR (200 power) over POWR (100 power) when available
         commands.push({
           cmd: 'produce',
           rtti: RTTI_BUILDINGTYPE,
@@ -505,18 +531,40 @@ export class OracleStrategy {
       (this.baseBuildIndex < BUILD_ORDER.length && !hasWarFactory);
     const minCreditsForInfantry = savingForBuilding ? 1500 : 300;
 
-    // Produce tanks from War Factory (top priority when available)
-    if (hasWarFactory && !unitProduction && buildable && state.credits > 700) {
-      const tank = TANK_PREFERENCE.find((t) => buildable.units.includes(t));
-      if (tank) {
-        const unitTypeId = this.unitNameToTypeId(tank);
-        if (unitTypeId >= 0) {
+    // Produce units from War Factory — priority: harvester replacement > tanks
+    const tankCount = playerUnits.filter((u) => u.t.includes('TNK')).length;
+    const harvCount = playerUnits.filter((u) => u.t === 'HARV').length;
+    const refCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+    const needHarvester = harvCount < refCount && buildable?.units.includes('HARV');
+
+    if (hasWarFactory && !unitProduction && buildable) {
+      if (needHarvester && state.credits > 600) {
+        // Replace lost harvester — economy dies without it
+        const harvTypeId = this.unitNameToTypeId('HARV');
+        if (harvTypeId >= 0) {
           commands.push({
             cmd: 'produce',
             rtti: RTTI_UNITTYPE,
-            type_id: unitTypeId,
+            type_id: harvTypeId,
           });
-          reasons.push(`produce ${tank}`);
+          reasons.push('produce HARV (replacement)');
+        }
+      } else {
+        // Tank production — first few tanks are critical, lower credit threshold
+        const tankCreditThreshold = tankCount < 3 ? 400 : 700;
+        if (state.credits > tankCreditThreshold) {
+          const tank = TANK_PREFERENCE.find((t) => buildable.units.includes(t));
+          if (tank) {
+            const unitTypeId = this.unitNameToTypeId(tank);
+            if (unitTypeId >= 0) {
+              commands.push({
+                cmd: 'produce',
+                rtti: RTTI_UNITTYPE,
+                type_id: unitTypeId,
+              });
+              reasons.push(`produce ${tank}`);
+            }
+          }
         }
       }
     }
@@ -1348,6 +1396,133 @@ export class OracleStrategy {
       commands: this.dedupeCommands(commands),
       reason: reasons.join('; ') || 'hold position',
     };
+  }
+
+  /**
+   * SCG03EA "Dead End": Destroy two bridges with Tanya while keeping her alive.
+   * ARTY provides fire support, medics heal Tanya.
+   */
+  private decideScg03ea(state: RAGameState): OracleDecision {
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+    const playerUnits = this.playerOwnedUnits(state);
+
+    const tanya = playerUnits.find((u) => u.t === 'E7');
+    const arty = playerUnits.find((u) => u.t === 'ARTY');
+    const medics = playerUnits.filter((u) => u.t === 'MEDI');
+    const engineer = playerUnits.find((u) => u.t === 'E6');
+    const bridges = [SCG03EA_BRIDGE_V04, SCG03EA_BRIDGE_V07];
+
+    if (!tanya) {
+      reasons.push('Tanya dead — mission lost');
+      return { commands, reason: reasons.join('; ') };
+    }
+
+    const tanyaHpFrac = tanya.hp / tanya.mhp;
+    const currentBridge = bridges[this.scg03eaBridgeIndex];
+
+    // --- Medics follow Tanya ---
+    if (medics.length > 0) {
+      const farMedics = medics.filter((m) => this.distanceSq(m, tanya) > 64);
+      if (farMedics.length > 0) {
+        commands.push({
+          cmd: 'move',
+          ids: farMedics.map((m) => m.id),
+          cx: tanya.cx,
+          cy: tanya.cy,
+        });
+        reasons.push(`medics follow Tanya`);
+      }
+    }
+
+    // --- ARTY fire support ---
+    if (arty) {
+      const nearbyEnemies = state.enemies.filter(
+        (e) => this.distanceSq(e, arty) <= 400,
+      );
+      if (nearbyEnemies.length > 0) {
+        // ARTY attacks nearest enemy
+        const target = this.nearestEnemy(arty, nearbyEnemies);
+        commands.push({
+          cmd: 'attack',
+          ids: [arty.id],
+          target: target.id,
+        });
+        reasons.push(`ARTY fires on ${target.t}`);
+      } else if (this.distanceSq(arty, SCG03EA_ARTY_POS) > 36) {
+        // Move ARTY to fire position
+        commands.push({
+          cmd: 'move',
+          ids: [arty.id],
+          cx: SCG03EA_ARTY_POS.cx,
+          cy: SCG03EA_ARTY_POS.cy,
+        });
+        reasons.push('ARTY to fire pos');
+      }
+    }
+
+    // --- Engineer stays near Tanya for support ---
+    if (engineer && this.distanceSq(engineer, tanya) > 100) {
+      commands.push({
+        cmd: 'move',
+        ids: [engineer.id],
+        cx: tanya.cx,
+        cy: tanya.cy,
+      });
+      reasons.push('engineer follows');
+    }
+
+    // --- Tanya: bridge assault state machine ---
+    if (this.scg03eaBridgeIndex >= bridges.length) {
+      // All bridges blown — hold position, clear nearby threats
+      reasons.push('all bridges blown — waiting for victory');
+      // Clear nearby threats
+      const nearbyThreats = state.enemies.filter(
+        (e) => this.distanceSq(e, tanya) <= 144,
+      );
+      if (nearbyThreats.length > 0) {
+        commands.push({
+          cmd: 'attack_move',
+          ids: [tanya.id],
+          cx: nearbyThreats[0].cx,
+          cy: nearbyThreats[0].cy,
+        });
+        reasons.push(`Tanya clears ${nearbyThreats.length} nearby`);
+      }
+      return { commands, reason: reasons.join('; ') };
+    }
+
+    // Retreat if Tanya is badly hurt — wait for medics
+    if (tanyaHpFrac < 0.35) {
+      commands.push({
+        cmd: 'move',
+        ids: [tanya.id],
+        cx: SCG03EA_FALLBACK.cx,
+        cy: SCG03EA_FALLBACK.cy,
+      });
+      reasons.push(`Tanya retreats (${Math.round(tanyaHpFrac * 100)}% HP)`);
+      return { commands, reason: reasons.join('; ') };
+    }
+
+    // Bridges are overlays — Tanya destroys them with C4 (deploy on the cell)
+    const atBridge = this.distanceSq(tanya, currentBridge) <= 4;
+    if (atBridge) {
+      // On the bridge — deploy C4
+      commands.push({ cmd: 'deploy', ids: [tanya.id] });
+      this.scg03eaBridgeIndex++;
+      reasons.push(`Tanya C4 bridge ${this.scg03eaBridgeIndex}!`);
+    } else {
+      // Attack-move toward bridge — clears enemies en route
+      commands.push({
+        cmd: 'attack_move',
+        ids: [tanya.id],
+        cx: currentBridge.cx,
+        cy: currentBridge.cy,
+      });
+      reasons.push(`Tanya → bridge ${this.scg03eaBridgeIndex + 1} (${currentBridge.cx},${currentBridge.cy})`);
+    }
+
+    return { commands, reason: reasons.join('; ') };
   }
 
   private playerOwnedUnits(state: RAGameState): RAEntity[] {
