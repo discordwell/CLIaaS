@@ -69,7 +69,8 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
     scenarioUnitStats: {}, scenarioWeaponStats: {},
     nextWaveId: 0,
     autocreateEnabled: false, teamTypes: [],
-    destroyedTeams: new Set(), waypoints: new Map(),
+    destroyedTeams: new Set(), autocreateTeamCounts: new Map(),
+    waypoints: new Map(),
     houseEdges: new Map(), effects: [],
     isAllied: (a, b) => alliances.get(a)?.has(b) ?? false,
     isPlayerControlled: (e) => alliances.get(e.house)?.has(House.Spain) ?? false,
@@ -92,6 +93,7 @@ function makeTeamType(overrides: Partial<TeamType> = {}): TeamType {
     name: 'TestTeam',
     house: 2,       // USSR by default (houseIdToHouse(2) === House.USSR)
     flags: 4,       // autocreate flag set
+    maxAllowed: 1,  // C++ MaxAllowed — default 1 so most tests get deterministic counts
     origin: 0,      // waypoint 0
     trigger: -1,
     members: [{ type: '1TNK', count: 2 }],
@@ -385,27 +387,28 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
     expect(ctx.entities).toHaveLength(0);
   });
 
-  it('spawns only one team per house per cycle (break after first match)', () => {
+  it('can spawn multiple teams per house per cycle (C++ house.cpp:993)', () => {
     const ctx = makeMockAIContext({
       tick: 0,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
     ctx.houseCredits.set(House.USSR, 10000);
-    // Two autocreate teams for USSR
+    // Two autocreate teams for USSR, each with high maxAllowed
     ctx.teamTypes.push(
-      makeTeamType({ name: 'TeamA', members: [{ type: '1TNK', count: 1 }] }),
-      makeTeamType({ name: 'TeamB', members: [{ type: '2TNK', count: 1 }] }),
+      makeTeamType({ name: 'TeamA', maxAllowed: 5, members: [{ type: '1TNK', count: 1 }] }),
+      makeTeamType({ name: 'TeamB', maxAllowed: 5, members: [{ type: '2TNK', count: 1 }] }),
     );
     ctx.waypoints.set(0, { cx: 50, cy: 50 });
 
     updateAIAutocreateTeams(ctx);
 
-    // Only 1 entity from TeamA (first match), TeamB is skipped due to break
-    expect(ctx.entities).toHaveLength(1);
+    // C++ creates Random_Pick(2, (TechLevel-1)/3+1) teams per cycle
+    // With techLevel=10: Random_Pick(2, 4) = 2..4 teams
+    expect(ctx.entities.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('skips first team (destroyed) and spawns second team', () => {
+  it('skips destroyed team and spawns remaining eligible team', () => {
     const ctx = makeMockAIContext({
       tick: 0,
       autocreateEnabled: true,
@@ -421,7 +424,8 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 
     updateAIAutocreateTeams(ctx);
 
-    // TeamB spawns 1 unit
+    // Only TeamB is eligible (maxAllowed:1), spawns 1 unit per instance
+    // Multiple attempts to spawn hit maxAllowed cap after first instance
     expect(ctx.entities).toHaveLength(1);
     expect(ctx.entities[0].type).toBe(UnitType.V_2TNK);
   });

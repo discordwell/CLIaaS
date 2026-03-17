@@ -1911,7 +1911,7 @@ export function suggestedNewTeam(
 
     // C++ teamtype.cpp:434 — when alerted, only autocreate teams; when not alerted, only non-autocreate
     const isAutocreate = !!(ttype.flags & 4);
-    let maxnum = ttype.maxAllowed;
+    let maxnum = ttype.maxAllowed ?? 5; // default 5 if not set (legacy compatibility)
     if ((alerted && !isAutocreate) || (!alerted && isAutocreate)) {
       maxnum = 0;
     }

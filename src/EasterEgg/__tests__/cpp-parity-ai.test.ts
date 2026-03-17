@@ -159,6 +159,7 @@ function makeAIContext(overrides: Partial<AIContext> = {}): AIContext {
     autocreateEnabled: overrides.autocreateEnabled ?? false,
     teamTypes: overrides.teamTypes ?? [],
     destroyedTeams: overrides.destroyedTeams ?? new Set(),
+    autocreateTeamCounts: (overrides as any).autocreateTeamCounts ?? new Map(),
     waypoints: overrides.waypoints ?? new Map(),
     houseEdges: overrides.houseEdges ?? new Map(),
     effects: overrides.effects ?? [],
@@ -2798,7 +2799,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
   it('spawns team members at waypoint', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true });
     const team: TeamType = {
-      name: 'T1', house: 2, flags: 4, origin: 0, trigger: -1,
+      name: 'T1', house: 2, flags: 4, maxAllowed: 1, origin: 0, trigger: -1,
       members: [{ type: 'E1', count: 3 }],
       missions: [],
     };
@@ -2821,7 +2822,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
   it('team with no missions defaults to HUNT', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true });
     const team: TeamType = {
-      name: 'T1', house: 2, flags: 4, origin: 0, trigger: -1,
+      name: 'T1', house: 2, flags: 4, maxAllowed: 1, origin: 0, trigger: -1,
       members: [{ type: 'E1', count: 1 }],
       missions: [],
     };
@@ -2840,7 +2841,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
   it('team with missions assigns teamMissions script', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true });
     const team: TeamType = {
-      name: 'T1', house: 2, flags: 4, origin: 0, trigger: -1,
+      name: 'T1', house: 2, flags: 4, maxAllowed: 1, origin: 0, trigger: -1,
       members: [{ type: 'E1', count: 1 }],
       missions: [{ mission: 'MOVE', data: 5 }, { mission: 'ATTACK', data: 0 }],
     };
@@ -2918,7 +2919,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
   it('spawns at map edge when houseEdge is set', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true });
     const team: TeamType = {
-      name: 'T1', house: 2, flags: 4, origin: 0, trigger: -1,
+      name: 'T1', house: 2, flags: 4, maxAllowed: 1, origin: 0, trigger: -1,
       members: [{ type: 'E1', count: 1 }],
       missions: [],
     };
@@ -2947,7 +2948,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
   it('flag bit 1 (IsSuicide=2) forces HUNT mission', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true });
     const team: TeamType = {
-      name: 'T1', house: 2, flags: 4 | 2, origin: 0, trigger: -1, // autocreate + suicide
+      name: 'T1', house: 2, flags: 4 | 2, maxAllowed: 1, origin: 0, trigger: -1, // autocreate + suicide
       members: [{ type: 'E1', count: 1 }],
       missions: [{ mission: 'MOVE', data: 5 }],
     };
@@ -2964,16 +2965,16 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
     expect(ctx.entities[0].mission).toBe(Mission.HUNT);
   });
 
-  it('only one team per house per cycle', () => {
+  it('spawns multiple teams per house per cycle (C++ house.cpp:993)', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true });
     const team1: TeamType = {
-      name: 'T1', house: 2, flags: 4, origin: 0, trigger: -1,
-      members: [{ type: 'E1', count: 2 }],
+      name: 'T1', house: 2, flags: 4, maxAllowed: 5, origin: 0, trigger: -1,
+      members: [{ type: 'E1', count: 1 }],
       missions: [],
     };
     const team2: TeamType = {
-      name: 'T2', house: 2, flags: 4, origin: 0, trigger: -1,
-      members: [{ type: 'E3', count: 3 }],
+      name: 'T2', house: 2, flags: 4, maxAllowed: 5, origin: 0, trigger: -1,
+      members: [{ type: 'E3', count: 1 }],
       missions: [],
     };
     const ctx = makeAIContext({
@@ -2985,9 +2986,9 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
       waypoints: new Map([[0, { cx: 50, cy: 50 }]]),
     });
     updateAIAutocreateTeams(ctx);
-    // Only team1 should spawn (2 E1), team2 skipped due to one-per-cycle
-    expect(ctx.entities.length).toBe(2);
-    expect(ctx.entities.every(e => e.type === UnitType.I_E1)).toBe(true);
+    // C++ spawns Random_Pick(2, (TechLevel-1)/3+1) teams per cycle
+    // With default techLevel=10: Random_Pick(2, 4) = 2..4 teams
+    expect(ctx.entities.length).toBeGreaterThanOrEqual(2);
   });
 });
 
