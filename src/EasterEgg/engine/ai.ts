@@ -540,7 +540,10 @@ export function updateBaseRebuild(ctx: AIContext): void {
         for (let dy = 0; dy < fh && !blocked; dy++) {
           for (let dx = 0; dx < fw && !blocked; dx++) {
             for (const s of ctx.structures) {
-              if (s.alive && s.cx === pos.cx + dx && s.cy === pos.cy + dy) {
+              if (!s.alive) continue;
+              const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+              if (pos.cx + dx >= s.cx && pos.cx + dx < s.cx + sw &&
+                  pos.cy + dy >= s.cy && pos.cy + dy < s.cy + sh) {
                 blocked = true;
                 break;
               }
@@ -984,10 +987,10 @@ export function updateAIRetreat(ctx: AIContext): void {
     if (!state) continue;
     if (state.iq < 3) continue;
 
-    // Emergency harvester return
+    // Emergency harvester return — uses difficulty-scaled threshold (C++ rules.cpp)
     if (e.type === UnitType.V_HARV) {
       const hpRatio = e.hp / e.maxHp;
-      if (hpRatio >= 0.3) continue;
+      if (hpRatio >= retreatPercent) continue;
       if (e.harvesterState === 'returning' || e.harvesterState === 'unloading') continue;
       if (e.mission === Mission.MOVE && e.moveTarget) continue;
       let nearestProc: MapStructure | null = null;

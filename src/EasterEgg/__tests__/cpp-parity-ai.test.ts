@@ -1843,7 +1843,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     expect(suicide.mission).toBe(Mission.GUARD);
   });
 
-  it('emergency harvester return at < 30% HP', () => {
+  it('emergency harvester return below difficulty retreat threshold', () => {
     const state = makeAIState({ house: House.USSR, iq: 3 });
     const harv = entityAtCell(UnitType.V_HARV, House.USSR, 50, 50);
     harv.hp = Math.floor(harv.maxHp * 0.1); // 10% HP
@@ -1865,7 +1865,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     expect(harv.mission).toBe(Mission.MOVE);
   });
 
-  it('harvester at >= 30% HP does NOT emergency return', () => {
+  it('harvester at or above retreat threshold does NOT emergency return', () => {
     const state = makeAIState({ house: House.USSR, iq: 3 });
     const harv = entityAtCell(UnitType.V_HARV, House.USSR, 50, 50);
     harv.hp = Math.floor(harv.maxHp * 0.5); // 50% HP
@@ -3221,6 +3221,60 @@ describe('AI edge cases', () => {
     const before = ctx.structures.length;
     updateAIConstruction(ctx);
     expect(ctx.structures.length).toBe(before); // production disabled, no building
+  });
+
+  it('base rebuild blocked check considers full structure footprint, not just top-left', () => {
+    // Bug: updateBaseRebuild checked s.cx === pos.cx+dx (top-left only), missing
+    // structures whose footprint COVERS the cell. A 3x3 FACT at (10,10) occupying
+    // (10-12,10-12) should block rebuild at cell (11,10) even though s.cx=10 ≠ 11.
+    const state = makeAIState({ house: House.USSR, iq: 3 });
+    const ctx = makeAIContext({
+      tick: 75,
+      aiStates: new Map([[House.USSR, state]]),
+      structures: [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })], // 3x3: (10-12, 10-12)
+      baseBlueprint: [
+        // Try to rebuild a SILO at (11,10) — overlaps FACT footprint at cell (11,10)
+        { type: 'SILO', cell: 11 + 10 * MAP_CELLS, house: House.USSR },
+      ],
+      houseCredits: new Map([[House.USSR, 10000]]),
+      isAllied: (a, b) => a === b,
+    });
+    updateBaseRebuild(ctx);
+    // The SILO at (11,10) should NOT be rebuilt because it overlaps the FACT footprint
+    const silo = ctx.structures.find(s => s.type === 'SILO' && s.cx === 11 && s.cy === 10);
+    expect(silo, 'SILO should NOT be rebuilt on top of FACT footprint').toBeUndefined();
+  });
+
+  it('harvester emergency retreat threshold scales with difficulty (not hardcoded 0.3)', () => {
+    // Bug: harvester used hardcoded 0.3 threshold instead of difficulty-scaled retreatHpPercent
+    // On hard difficulty (retreatHpPercent=0.15), a harvester at 20% HP should retreat
+    // because 0.20 > 0.15 is above threshold — wait, that means it should NOT retreat.
+    // Actually, the retreat triggers when hpRatio < threshold.
+    // On hard (threshold=0.15): harvester at 20% should NOT retreat (20% >= 15%)
+    // On easy (threshold=0.30): harvester at 25% should retreat (25% < 30%)
+    // With hardcoded 0.3, hard difficulty harvester at 25% would retreat (25% < 30%)
+    // but it SHOULDN'T because hard retreatHpPercent is 0.15.
+    const state = makeAIState({ house: House.USSR, iq: 3 });
+    const harv = entityAtCell(UnitType.V_HARV, House.USSR, 50, 50);
+    harv.hp = Math.ceil(harv.maxHp * 0.20); // 20% HP
+    harv.mission = Mission.GUARD;
+    harv.harvesterState = 'harvesting';
+    const structures = [
+      makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 }),
+      makeStructure({ type: 'PROC', house: House.USSR, cx: 20, cy: 20 }),
+    ];
+    const ctx = makeAIContext({
+      tick: 30,
+      difficulty: 'hard', // retreatHpPercent = 0.15
+      entities: [harv],
+      aiStates: new Map([[House.USSR, state]]),
+      structures,
+      isPlayerControlled: () => false,
+    });
+    updateAIRetreat(ctx);
+    // On hard difficulty, 20% > 15% threshold → should NOT retreat
+    // (With hardcoded 0.3: 20% < 30% → WOULD retreat — this is the bug)
+    expect(harv.harvesterState, 'hard difficulty: 20% HP harvester should NOT emergency return').toBe('harvesting');
   });
 
   it('APWR counts toward 2-power-plant requirement', () => {
