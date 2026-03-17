@@ -461,8 +461,12 @@ export function applySplashDamage(
   const splashRangePixels = splashRange * CELL_SIZE;
   const attackerIsPlayerControlled = ctx.isAllied(attackerHouse, ctx.playerHouse);
 
+  // C++ combat.cpp:207 — splash excludes the FIRER (source), not the direct-hit target.
+  // The direct-hit target takes splash damage on top of its direct damage.
+  const sourceId = attacker?.id ?? -1;
+
   for (const other of ctx.entities) {
-    if (!other.alive || other.id === primaryTargetId) continue;
+    if (!other.alive || other.id === sourceId) continue;
     // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
     const isFriendly = ctx.isAllied(other.house, attackerHouse);
     const distCells = worldDist(center, other.pos);
@@ -505,6 +509,35 @@ export function applySplashDamage(
         friendlyFireLoss: isFriendly && attackerIsPlayerControlled,
       });
     }
+  }
+
+  // C++ parity: Explosion_Damage (combat.cpp:205-237) iterates Cell_Occupier() chains which
+  // include buildings. Structures within splash radius take damage proportional to distance.
+  // Buildings at the impact cell get distance=0 (full damage, combat.cpp:227-228).
+  const impactCell = worldToCell(center.x, center.y);
+  for (const s of ctx.structures) {
+    if (!s.alive) continue;
+    const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+    // Structure world center (matches structureDamage explosion origin)
+    const swx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
+    const swy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
+    // C++ combat.cpp:227-228: if building occupies the impact cell, distance = 0
+    const occupiesImpactCell =
+      impactCell.cx >= s.cx && impactCell.cx < s.cx + sw &&
+      impactCell.cy >= s.cy && impactCell.cy < s.cy + sh;
+    let distCells: number;
+    if (occupiesImpactCell) {
+      distCells = 0;
+    } else {
+      distCells = worldDist(center, { x: swx, y: swy });
+    }
+    if (distCells > splashRange) continue;
+    // Apply damage using concrete armor (all buildings use concrete armor)
+    const distPixels = distCells * CELL_SIZE;
+    const whMult = getWarheadMult(weapon.warhead, 'concrete', ctx.warheadOverrides);
+    const splashDmg = modifyDamage(weapon.damage, weapon.warhead, 'concrete', distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
+    if (splashDmg <= 0) continue;
+    structureDamage(ctx, s, splashDmg);
   }
 
   // Terrain destruction: large explosions (splash >= 1.5) can destroy trees, walls, and ore in the blast radius
