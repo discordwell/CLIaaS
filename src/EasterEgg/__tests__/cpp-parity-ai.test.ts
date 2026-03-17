@@ -829,9 +829,12 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     expect(ctx.structures.length).toBe(before); // no new structures
   });
 
-  it('IQ >= 1 allows construction', () => {
+  it('IQ >= 1 allows construction (populates build queue)', () => {
     const state = makeAIState({ house: House.USSR, iq: 1, productionEnabled: true });
-    const structures = [makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 })];
+    const structures = [
+      makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 }),
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 63, cy: 60 }),
+    ];
     const ctx = makeAIContext({
       tick: 90,
       aiStates: new Map([[House.USSR, state]]),
@@ -839,9 +842,11 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
       structures,
     });
     updateAIConstruction(ctx);
-    // Should have tried to build something (build queue populated from getAIBuildOrder)
-    // The result depends on placement; what matters is IQ >= 1 didn't skip
-    expect(state.buildQueue.length >= 0).toBe(true); // test that it entered the code path
+    // IQ >= 1 entered the code path: either built something or populated the build queue
+    const builtSomething = ctx.structures.length > 2;
+    const populatedQueue = state.buildQueue.length > 0 || state.lastBuildTick > 0;
+    expect(builtSomething || populatedQueue,
+      'IQ 1 should enter construction logic (build or populate queue)').toBe(true);
   });
 
   it('IQ < 2 skips attack groups', () => {
@@ -2477,7 +2482,10 @@ describe('updateAIConstruction (HOUSE.CPP construction system)', () => {
 
   it('sets buildCooldown after successful build based on difficulty', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true });
-    const structures = [makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 })];
+    const structures = [
+      makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 }),
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 63, cy: 60 }),
+    ];
     const ctx = makeAIContext({
       tick: 90,
       difficulty: 'hard',
@@ -2486,9 +2494,13 @@ describe('updateAIConstruction (HOUSE.CPP construction system)', () => {
       houseCredits: new Map([[House.USSR, 50000]]),
     });
     updateAIConstruction(ctx);
-    if (ctx.structures.length > 1) {
-      // Hard: buildSpeedMult=0.7, cooldown = floor(6 * 0.7) = 4
+    // If placement succeeded, buildCooldown should be set
+    // Hard: buildSpeedMult=0.7, cooldown = floor(6 * 0.7) = 4
+    if (ctx.structures.length > 2) {
       expect(state.buildCooldown).toBe(Math.floor(6 * 0.7));
+    } else {
+      // Placement may fail due to spiral scan constraints — verify no regression
+      expect(state.buildCooldown).toBe(0);
     }
   });
 });
@@ -2517,20 +2529,20 @@ describe('aiPlaceStructure — spiral scan placement (HOUSE.CPP)', () => {
   });
 
   it('avoids placing on existing structures', () => {
-    const structures = [makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 })];
-    const map = new GameMap();
-    const ctx = makeAIContext({ structures, map });
-    // Mark the FACT footprint as WALL
-    for (let dy = 0; dy < 3; dy++)
-      for (let dx = 0; dx < 3; dx++)
-        map.setTerrain(60 + dx, 60 + dy, Terrain.WALL);
-    const pos = aiPlaceStructure(ctx, House.USSR, 'POWR');
+    const structures = [
+      makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 }),
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 63, cy: 60 }),
+    ];
+    const ctx = makeAIContext({ structures });
+    const pos = aiPlaceStructure(ctx, House.USSR, 'SILO'); // 1x1 for easier placement
     if (pos) {
-      // Should not overlap with FACT at (60-62, 60-62)
-      const overlap = (pos.cx < 63 && pos.cx + 2 > 60 && pos.cy < 63 && pos.cy + 2 > 60);
-      // The placement function checks structure overlap directly, not terrain
-      // So we just verify it found a valid position
-      expect(pos.cx).toBeDefined();
+      // Verify no overlap with any existing structure footprint
+      for (const s of structures) {
+        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+        const overlaps = pos.cx >= s.cx && pos.cx < s.cx + sw &&
+                         pos.cy >= s.cy && pos.cy < s.cy + sh;
+        expect(overlaps, `placed at (${pos.cx},${pos.cy}) should not overlap ${s.type} at (${s.cx},${s.cy})`).toBe(false);
+      }
     }
   });
 
@@ -3150,6 +3162,65 @@ describe('AI edge cases', () => {
     });
     updateAIStrategicPlanner(ctx);
     expect(state.phase).toBe('buildup');
+  });
+
+  it('updateAIHarvesters only runs on tick % 60 === 0', () => {
+    const harv = entityAtCell(UnitType.V_HARV, House.USSR, 20, 20);
+    const state = makeAIState({ house: House.USSR });
+    state.harvesterCount = 99; // stale value
+    const ctx = makeAIContext({
+      tick: 59,
+      entities: [harv],
+      aiStates: new Map([[House.USSR, state]]),
+      structures: [],
+    });
+    updateAIHarvesters(ctx);
+    expect(state.harvesterCount).toBe(99); // not updated, tick not aligned
+  });
+
+  it('updateAIRepair only runs on tick % 15 === 0', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3 });
+    const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
+    const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
+    const ctx = makeAIContext({
+      tick: 14,
+      aiStates: new Map([[House.USSR, state]]),
+      structures: [s],
+      houseCredits: new Map([[House.USSR, 5000]]),
+    });
+    const hpBefore = s.hp;
+    updateAIRepair(ctx);
+    expect(s.hp).toBe(hpBefore); // not repaired, tick not aligned
+  });
+
+  it('updateAISellDamaged only runs on tick % 75 === 0', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3 });
+    const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1 });
+    const ctx = makeAIContext({
+      tick: 74,
+      aiStates: new Map([[House.USSR, state]]),
+      structures: [s],
+      houseCredits: new Map([[House.USSR, 0]]),
+    });
+    updateAISellDamaged(ctx);
+    expect(s.alive).toBe(true); // not sold, tick not aligned
+  });
+
+  it('updateAIConstruction skips when productionEnabled is false', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: false });
+    const structures = [
+      makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 }),
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 63, cy: 60 }),
+    ];
+    const ctx = makeAIContext({
+      tick: 90,
+      aiStates: new Map([[House.USSR, state]]),
+      structures,
+      houseCredits: new Map([[House.USSR, 50000]]),
+    });
+    const before = ctx.structures.length;
+    updateAIConstruction(ctx);
+    expect(ctx.structures.length).toBe(before); // production disabled, no building
   });
 
   it('APWR counts toward 2-power-plant requirement', () => {
