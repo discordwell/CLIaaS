@@ -442,10 +442,9 @@ describe('MaxDamage cap at 1000 (combat.cpp:127)', () => {
     expect(modifyDamage(500, 'Super', 'none', 0, 3.0)).toBe(1000);
   });
 
-  it('cap applies before rounding (1000.5 → 1000, not round then cap)', () => {
-    // This tests the order: min(damage, 1000) then round
-    // Actually min(1000.5, 1000) = 1000, round(1000) = 1000
-    expect(modifyDamage(1001, 'Super', 'none', 0)).toBe(1000);
+  it('cap applies before rounding: 667 * 1.5(bias) = 1000.5 → min(1000.5,1000)=1000', () => {
+    // Without cap: round(1000.5) = 1001. With cap: min(1000.5, 1000) = 1000, round(1000) = 1000.
+    expect(modifyDamage(667, 'Super', 'none', 0, 1.5)).toBe(1000);
   });
 });
 
@@ -802,4 +801,58 @@ describe('monotonic damage decrease across full distance range', () => {
       }
     });
   }
+});
+
+// ============================================================
+// Section 16: Additional edge cases from code review
+// ============================================================
+describe('additional edge cases', () => {
+  it('negative baseDamage at close range: MinDamage boosts to 1', () => {
+    // -100 * 1.0 = -100, distFactor=0 < 4, max(-100, 1) = 1
+    expect(modifyDamage(-100, 'Super', 'none', 0)).toBe(1);
+  });
+
+  it('negative baseDamage at far range: clamped to 0', () => {
+    // -50 * 0.9 = -45, distFactor=4 (NOT < 4), no MinDamage
+    // -45/4 = -11.25, max(0, round(-11.25)) = 0
+    expect(modifyDamage(-50, 'HE', 'none', 12)).toBe(0);
+  });
+
+  it('negative baseDamage at mid range: MinDamage still applies when distFactor < 4', () => {
+    // -50 * 0.9 = -45, distFactor=2 < 4, max(-45/2, 1) = max(-22.5, 1) = 1
+    expect(modifyDamage(-50, 'HE', 'none', 6)).toBe(1);
+  });
+
+  it('fractional distPixels: floor handles non-integer pixel distances', () => {
+    // distPixels=1.5, SA spread=3: floor(1.5*2/3)=floor(1.0)=1
+    // damage = 100/1 = 100, MinDmg → 100
+    expect(modifyDamage(100, 'SA', 'none', 1.5)).toBe(100);
+    // distPixels=2.5, SA spread=3: floor(2.5*2/3)=floor(1.667)=1
+    expect(modifyDamage(100, 'SA', 'none', 2.5)).toBe(100);
+    // distPixels=4.5, SA spread=3: floor(4.5*2/3)=floor(3.0)=3
+    // damage = 100/3 = 33.33, MinDmg → 33
+    expect(modifyDamage(100, 'SA', 'none', 4.5)).toBe(33);
+  });
+
+  it('negative houseBias at close range: MinDamage boosts to 1', () => {
+    // 100 * 1.0 * -1.0 = -100, distFactor=0 < 4, max(-100, 1) = 1
+    expect(modifyDamage(100, 'Super', 'none', 0, -1.0)).toBe(1);
+  });
+
+  it('negative houseBias at far range: clamped to 0', () => {
+    // 100 * 1.0 * -1.0 = -100, distFactor=16 (NOT < 4), -100/16=-6.25
+    // max(0, round(-6.25)) = 0
+    expect(modifyDamage(100, 'Super', 'none', 8, -1.0)).toBe(0);
+  });
+
+  it('zero houseBias: damage = 0 but baseDamage > 0 → MinDamage=1 at close range', () => {
+    // 100 * 1.0 * 0.0 = 0, distFactor=0 < 4, max(0, 1) = 1
+    expect(modifyDamage(100, 'Super', 'none', 0, 0.0)).toBe(1);
+  });
+
+  it('very large distPixels with spread=0: clamped to distFactor=16', () => {
+    // distPixels=1000, Mechanical spread=0: floor(1000*4)=4000, clamp→16
+    // damage = 100/16 = 6.25 → 6
+    expect(modifyDamage(100, 'Mechanical', 'none', 1000)).toBe(6);
+  });
 });
