@@ -155,7 +155,7 @@ export function sellStructureByIndex(ctx: RepairSellContext, idx: number): boole
 }
 
 /** Tick structure repairs — called every 14 ticks from game loop.
- *  C++ rules.cpp:228-229 RepairStep=7, RepairPercent=.02 */
+ *  C++ rules.cpp:228-229 RepairStep=5, RepairPercent=0.25 */
 export function tickRepairs(ctx: RepairSellContext): void {
   for (const idx of ctx.repairingStructures) {
     const s = ctx.structures[idx];
