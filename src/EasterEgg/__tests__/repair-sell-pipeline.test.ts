@@ -23,7 +23,7 @@
  *   - Repair stop conditions (full HP, insufficient credits, manual toggle off)
  *   - Multiple simultaneous structure repairs
  *   - Power plant repair (power output restores with HP)
- *   - Sell refund: flat 50% of cost (C++ parity)
+ *   - Sell refund: human 50%, AI 100% (C++ parity)
  *   - Sell animation duration (frame-count based)
  *   - Sell finalization: structure death, footprint clear, infantry survivors
  *   - Power grid recalculation after selling power plant
@@ -41,7 +41,8 @@ import { join } from 'path';
 import {
   PRODUCTION_ITEMS, type ProductionItem,
   House, UnitType, CELL_SIZE, Mission,
-  REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
+  REPAIR_STEP, REPAIR_PERCENT, UREPAIR_STEP, UREPAIR_PERCENT,
+  CONDITION_RED, CONDITION_YELLOW,
   POWER_DRAIN,
 } from '../engine/types';
 import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
@@ -602,11 +603,11 @@ describe('Sell Refund — flat 50% of building cost (C++ parity)', () => {
   });
 
   it('refund uses addCredits with bypassSiloCap=true', () => {
-    // Source at sell finalization: this.addCredits(Math.floor(prodItem.cost * 0.5), true)
-    const sellSection = indexSource.indexOf('Refund: flat 50% of building cost');
+    // Source at sell finalization: this.addCredits(sellRefund(prodItem.cost, isHuman), true)
+    const sellSection = indexSource.indexOf('Refund: C++ techno.cpp:5743-5761');
     expect(sellSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(sellSection, sellSection + 500);
-    expect(chunk).toContain('prodItem.cost * 0.5');
+    expect(chunk).toContain('sellRefund');
     expect(chunk).toContain('true'); // bypassSiloCap
   });
 });
@@ -660,8 +661,10 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
   });
 
   it('sell finalization recalculates silo capacity before adding refund', () => {
-    const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
-    const chunk = indexSource.slice(sellSection, sellSection + 1500);
+    // Look for recalculateSiloCapacity near the sell finalization section
+    const sellSection = indexSource.indexOf('Recalculate silo capacity BEFORE adding refund');
+    expect(sellSection).toBeGreaterThan(-1);
+    const chunk = indexSource.slice(sellSection, sellSection + 2500);
     expect(chunk).toContain('recalculateSiloCapacity');
     // Silo recalculation happens BEFORE addCredits
     const siloIdx = chunk.indexOf('recalculateSiloCapacity');
@@ -699,12 +702,15 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     expect(siloSurvivors).toBe(1);
   });
 
-  it('FACT sell spawns 25% chance engineer (Crew_Type)', () => {
-    const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
+  it('FACT sell reverts to MCV (C++ building.cpp:3509-3549 ConYard → MCV reversion)', () => {
+    // C++ parity: selling ConYard spawns an MCV instead of infantry survivors
+    // When MCV spawns: no infantry survivors, no sell refund
+    const sellSection = indexSource.indexOf('ConYard sell');
+    expect(sellSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(sellSection, sellSection + 1000);
     expect(chunk).toContain("'FACT'");
-    expect(chunk).toContain('I_E6'); // engineer
-    expect(chunk).toContain('0.25'); // 25% chance
+    expect(chunk).toContain('deployedFromMCV');
+    expect(chunk).toContain('V_MCV');
   });
 
   it('KENN sell spawns 50% dog (Crew_Type)', () => {
@@ -811,30 +817,33 @@ describe('Service Depot — vehicle repair', () => {
     expect(far.hp).toBe(50);
   });
 
-  it('vehicle repair uses same cost formula as building repair', () => {
+  it('vehicle repair uses UREPAIR_STEP/UREPAIR_PERCENT cost formula (C++ rules.cpp:230-231)', () => {
     // JEEP: cost=600, maxHp=110
-    // Cost per step = ceil(600 * 0.20 / (110 / 7)) = 8
+    // Cost per step = ceil(600 * UREPAIR_PERCENT / (110 / UREPAIR_STEP))
+    //               = ceil(600 * 0.25 / (110 / 5)) = ceil(150 / 22) = ceil(6.82) = 7
     const { ctx, vehicle } = makeDepotContext(50, 110, 5000);
     const creditsBefore = ctx.credits;
     tickServiceDepot(ctx);
-    const expectedCost = Math.ceil((600 * REPAIR_PERCENT) / (110 / REPAIR_STEP)); // 8
+    const expectedCost = Math.ceil((600 * UREPAIR_PERCENT) / (110 / UREPAIR_STEP)); // 7
     expect(ctx.credits).toBe(creditsBefore - expectedCost);
   });
 
   it('vehicle repair cost: JEEP (cost=600, maxHp=110)', () => {
-    // Cost per step = ceil(600 * 0.20 / (110 / 7)) = ceil(120 / 15.71) = ceil(7.64) = 8
+    // Cost per step = ceil(600 * UREPAIR_PERCENT / (110 / UREPAIR_STEP))
+    //               = ceil(600 * 0.25 / (110 / 5)) = ceil(150 / 22) = ceil(6.82) = 7
     const jeepItem = findItem('JEEP');
     const jeepMaxHp = 110; // from UNIT_STATS
-    const costPerStep = Math.ceil((jeepItem.cost * REPAIR_PERCENT) / (jeepMaxHp / REPAIR_STEP));
-    expect(costPerStep).toBe(8);
+    const costPerStep = Math.ceil((jeepItem.cost * UREPAIR_PERCENT) / (jeepMaxHp / UREPAIR_STEP));
+    expect(costPerStep).toBe(7);
   });
 
   it('vehicle repair cost: 3TNK Heavy Tank (cost=950, maxHp=400)', () => {
-    // Cost per step = ceil(950 * 0.20 / (400 / 7)) = ceil(190 / 57.14) = ceil(3.33) = 4
+    // Cost per step = ceil(950 * UREPAIR_PERCENT / (400 / UREPAIR_STEP))
+    //               = ceil(950 * 0.25 / (400 / 5)) = ceil(237.5 / 80) = ceil(2.97) = 3
     const item = findItem('3TNK');
     const maxHp = 400;
-    const costPerStep = Math.ceil((item.cost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP));
-    expect(costPerStep).toBe(4);
+    const costPerStep = Math.ceil((item.cost * UREPAIR_PERCENT) / (maxHp / UREPAIR_STEP));
+    expect(costPerStep).toBe(3);
   });
 
   it('insufficient funds ejects vehicle from depot pad', () => {
@@ -887,9 +896,9 @@ describe('Service Depot — vehicle repair', () => {
     const creditsBefore = ctx.credits;
     tickServiceDepot(ctx);
     // Both repair and rearm happen, but only repair costs credits
-    expect(vehicle.hp).toBe(50 + REPAIR_STEP);
+    expect(vehicle.hp).toBe(50 + UREPAIR_STEP);
     expect(vehicle.ammo).toBe(3);
-    const repairCost = Math.ceil((600 * REPAIR_PERCENT) / (110 / REPAIR_STEP));
+    const repairCost = Math.ceil((600 * UREPAIR_PERCENT) / (110 / UREPAIR_STEP));
     expect(ctx.credits).toBe(creditsBefore - repairCost); // only repair cost, no rearm cost
   });
 
@@ -1156,11 +1165,12 @@ describe('AI Auto-Sell — updateAISellDamaged', () => {
     expect(chunk).toContain('powerCount <= 1');
   });
 
-  it('AI sell refund = floor(cost * 0.5 * hpRatio) — health-scaled unlike player', () => {
+  it('AI sell refund = prodItem.cost (100% refund, no 50% penalty — C++ techno.cpp:5743-5761)', () => {
     const idx = aiSource.indexOf('export function updateAISellDamaged');
     const chunk = aiSource.slice(idx, idx + 2000);
-    expect(chunk).toContain('hpRatio');
-    expect(chunk).toContain('prodItem.cost * 0.5 * hpRatio');
+    // AI gets full refund: prodItem.cost (no 0.5 multiplier, no hpRatio scaling)
+    expect(chunk).toContain('prodItem.cost');
+    expect(chunk).not.toContain('prodItem.cost * 0.5');
   });
 
   it('AI sell grants refund to houseCredits (not player credits)', () => {
@@ -1178,16 +1188,16 @@ describe('AI Auto-Sell — updateAISellDamaged', () => {
     expect(chunk).toContain('clearStructureFootprint');
   });
 
-  it('AI sell refund calculation: POWR at 20% HP (cost=300)', () => {
-    // hpRatio = 0.20, refund = floor(300 * 0.5 * 0.20) = floor(30) = 30
-    const refund = Math.floor(300 * 0.5 * 0.20);
-    expect(refund).toBe(30);
+  it('AI sell refund calculation: POWR at any HP (cost=300) — gets full 300', () => {
+    // C++ parity: AI gets 100% refund regardless of HP
+    const refund = 300;
+    expect(refund).toBe(300);
   });
 
-  it('AI sell refund calculation: WEAP at 10% HP (cost=2000)', () => {
-    // hpRatio = 0.10, refund = floor(2000 * 0.5 * 0.10) = floor(100) = 100
-    const refund = Math.floor(2000 * 0.5 * 0.10);
-    expect(refund).toBe(100);
+  it('AI sell refund calculation: WEAP at any HP (cost=2000) — gets full 2000', () => {
+    // C++ parity: AI gets 100% refund regardless of HP
+    const refund = 2000;
+    expect(refund).toBe(2000);
   });
 });
 
@@ -1196,7 +1206,7 @@ describe('AI Auto-Sell — updateAISellDamaged', () => {
 // =========================================================================
 describe('Fire Sale — trigger-based sell all structures', () => {
   it('fire sale sets sellProgress=0 on all alive structures of trigger house', () => {
-    const idx = indexSource.indexOf('Fire sale: sell all buildings');
+    const idx = indexSource.indexOf('result.fireSale');
     expect(idx).toBeGreaterThan(-1);
     const chunk = indexSource.slice(idx, idx + 400);
     expect(chunk).toContain('s.sellProgress === undefined');
@@ -1211,7 +1221,8 @@ describe('Fire Sale — trigger-based sell all structures', () => {
   });
 
   it('fire sale skips already-selling structures', () => {
-    const idx = indexSource.indexOf('Fire sale: sell all buildings');
+    const idx = indexSource.indexOf('result.fireSale');
+    expect(idx).toBeGreaterThan(-1);
     const chunk = indexSource.slice(idx, idx + 400);
     expect(chunk).toContain('s.sellProgress === undefined');
   });
@@ -1265,9 +1276,10 @@ describe('Edge Cases', () => {
     expect(ctx.structures[0].sellProgress).toBe(0);
   });
 
-  it('sell refinery impacts economy (reduces silo capacity)', () => {
+  it('sell refinery impacts economy (reduces silo capacity, excess spilled)', () => {
     // PROC provides 1000 capacity. Selling triggers recalculateSiloCapacity.
-    const sellSection = indexSource.indexOf('Refund: flat 50% of building cost');
+    // C++ parity: excess credits beyond new capacity are LOST (spilled)
+    const sellSection = indexSource.indexOf('Recalculate silo capacity BEFORE adding refund');
     expect(sellSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(sellSection - 400, sellSection + 400);
     expect(chunk).toContain('recalculateSiloCapacity');
@@ -1593,11 +1605,11 @@ describe('Repair + Sell Interaction', () => {
     expect(ctx.repairingStructures.has(0)).toBe(false);
   });
 
-  it('selling refines structure gives refund AND reduces silo capacity', () => {
+  it('selling refinery gives refund AND reduces silo capacity', () => {
     // Both effects happen on sell finalization
-    const sellSection = indexSource.indexOf('Refund: flat 50% of building cost');
+    const sellSection = indexSource.indexOf('Recalculate silo capacity BEFORE adding refund');
     expect(sellSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(sellSection - 400, sellSection + 400);
+    const chunk = indexSource.slice(sellSection, sellSection + 2500);
     expect(chunk).toContain('recalculateSiloCapacity');
     expect(chunk).toContain('addCredits');
   });
