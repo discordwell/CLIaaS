@@ -64,7 +64,12 @@ export interface AIHouseState {
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
-/** AI difficulty modifiers — scale economy, build speed, and aggression */
+/** AI difficulty modifiers — scale economy, build speed, aggression, and combat stats.
+ *  Combat biases mirror C++ house.cpp:282-311 Assign_Handicap / rules.cpp Difficulty_Get.
+ *  firepowerBias: outgoing damage multiplier (>1 = more damage)
+ *  armorBias: damage resistance multiplier (>1 = less damage taken)
+ *  rofBias: rate-of-fire multiplier applied to attackCooldown (<1 = fires faster)
+ *  groundspeedBias: ground movement speed multiplier (>1 = faster) */
 export const AI_DIFFICULTY_MODS: Record<Difficulty, {
   incomeMult: number;
   buildSpeedMult: number;
@@ -73,10 +78,18 @@ export const AI_DIFFICULTY_MODS: Record<Difficulty, {
   productionInterval: number;
   aggressionMult: number;
   retreatHpPercent: number;
+  /** C++ Rule.Diff[handicap].FirepowerBias (house.cpp:289,299) */
+  firepowerBias: number;
+  /** C++ Rule.Diff[handicap].ArmorBias (house.cpp:292,302) */
+  armorBias: number;
+  /** C++ Rule.Diff[handicap].ROFBias (house.cpp:293,303) */
+  rofBias: number;
+  /** C++ Rule.Diff[handicap].GroundspeedBias (house.cpp:290,300) */
+  groundspeedBias: number;
 }> = {
-  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30 },
-  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25 },
-  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15 },
+  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30, firepowerBias: 0.8, armorBias: 0.8, rofBias: 1.2, groundspeedBias: 0.8 },
+  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25, firepowerBias: 1.0, armorBias: 1.0, rofBias: 1.0, groundspeedBias: 1.0 },
+  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15, firepowerBias: 1.2, armorBias: 1.2, rofBias: 0.8, groundspeedBias: 1.2 },
 };
 
 /** Structure type -> sprite image name mapping (shared by base rebuild and AI construction) */
@@ -143,6 +156,8 @@ export interface AIContext {
   autocreateEnabled: boolean;
   teamTypes: TeamType[];
   destroyedTeams: Set<number>;
+  /** C++ TeamTypeClass::Number — active instance count per team type index */
+  autocreateTeamCounts: Map<number, number>;
   waypoints: Map<number, { cx: number; cy: number }>;
   houseEdges: Map<House, string>;
 
@@ -1581,7 +1596,7 @@ export function updateAIDefense(ctx: AIContext): void {
         let nearestEnemy: Entity | null = null;
         let nearestDist = Infinity;
         for (const enemy of ctx.entities) {
-          if (!enemy.alive || ctx.isAllied(enemy.house, house)) continue;
+          if (!enemy.alive || enemy.inLimbo || ctx.isAllied(enemy.house, house)) continue;
           const eDist = worldDist(enemy.pos, centerPos);
           if (eDist < 12 && eDist < nearestDist) {
             nearestDist = eDist;
@@ -1703,7 +1718,8 @@ export function updateAIRepair(ctx: AIContext): void {
   }
 }
 
-/** AI auto-sell -- IQ >= 3 houses sell near-death structures for partial refund */
+/** AI auto-sell -- IQ >= 3 houses sell near-death structures for full refund
+ *  C++ techno.cpp:5743-5761: AI gets 100% refund (no Rule.RefundPercent penalty) */
 export function updateAISellDamaged(ctx: AIContext): void {
   if (ctx.tick % 75 !== 0) return;
 
@@ -1729,8 +1745,8 @@ export function updateAISellDamaged(ctx: AIContext): void {
 
       const prodItem = ctx.scenarioProductionItems.find(p => p.type === s.type && p.isStructure);
       if (prodItem) {
-        const hpRatio = s.hp / s.maxHp;
-        const refund = Math.floor(prodItem.cost * 0.5 * hpRatio);
+        // C++ techno.cpp:5743-5761: AI gets full refund (no 50% penalty)
+        const refund = prodItem.cost;
         const current = ctx.houseCredits.get(house) ?? 0;
         ctx.houseCredits.set(house, current + refund);
       }

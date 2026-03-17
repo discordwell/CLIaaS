@@ -166,6 +166,7 @@ import {
   type AIContext,
   type AIHouseState,
   DIFFICULTY_MODS,
+  AI_DIFFICULTY_MODS,
   createAIHouseState as _createAIHouseState,
   getAIBuildOrder as _getAIBuildOrder,
   aiPlaceStructure as _aiPlaceStructure,
@@ -552,6 +553,7 @@ export class Game {
       minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
       movementSpeed: (e) => this.movementSpeed(e),
       getFirepowerBias: (h) => this.getFirepowerBias(h),
+      getArmorBias: (h) => this.getArmorBias(h),
       damageStructure: (s, d) => this.damageStructure(s, d),
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
       warheadMuzzleColor: (w) => this.warheadMuzzleColor(w as WarheadType),
@@ -953,6 +955,8 @@ export class Game {
       launchProjectile: (a, t, w, d, ix, iy, dh) => this.launchProjectile(a, t, w, d, ix, iy, dh),
       applySplashDamage: (c, w, pid, ah, att) => this.applySplashDamage(c, w, pid, ah, att),
       getFirepowerBias: (h) => this.getFirepowerBias(h),
+      getArmorBias: (h) => this.getArmorBias(h),
+      getROFBias: (h) => this.getROFBias(h),
       getWarheadMult: (w, a) => this.getWarheadMult(w, a),
       getWarheadMeta: (w) => this.getWarheadMeta(w),
       getWarheadProps: (w) => this.getWarheadProps(w as WarheadType),
@@ -4628,11 +4632,13 @@ export class Game {
   }
 
   /** M1+M2: Compute movement speed with terrain and damage multipliers.
-   *  Speed values in UNIT_STATS are C++ MPH (leptons/tick); MPH_TO_PX converts to pixels/tick. */
+   *  Speed values in UNIT_STATS are C++ MPH (leptons/tick); MPH_TO_PX converts to pixels/tick.
+   *  C++ house.cpp:290,300: GroundspeedBias from difficulty applied per house. */
   private movementSpeed(entity: Entity): number {
     return entity.stats.speed * MPH_TO_PX
       * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
-      * this.damageSpeedFactor(entity);
+      * this.damageSpeedFactor(entity)
+      * this.getGroundspeedBias(entity.house);
   }
 
   /** MV1: Follow one tick of track-table movement (C++ drive.cpp While_Moving).
@@ -5812,13 +5818,56 @@ export class Game {
   }
 
   /** Get firepower bias for a house, with ant mission overrides.
-   *  In ant missions (SCA*), ant houses use special bias values instead of country bonuses. */
+   *  In ant missions (SCA*), ant houses use special bias values instead of country bonuses.
+   *  C++ house.cpp:289,299: FirepowerBias = hptr->FirepowerBias * Rule.Diff[handicap].FirepowerBias */
   getFirepowerBias(house: House): number {
     if (this.scenarioId.startsWith('SCA') && ANT_HOUSES.has(house)) {
       const ANT_BIAS: Record<string, number> = { USSR: 1.1, Ukraine: 1.0, Germany: 0.9 };
       return ANT_BIAS[house] ?? 1.0;
     }
-    return COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0;
+    const countryBias = COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0;
+    // C++ parity: non-player houses get difficulty-scaled firepower (house.cpp:289,299)
+    if (house !== this.playerHouse) {
+      const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+      return countryBias * diffMods.firepowerBias;
+    }
+    return countryBias;
+  }
+
+  /** Get armor bias for a house — difficulty-scaled damage resistance.
+   *  C++ house.cpp:292,302: ArmorBias = Rule.Diff[handicap].ArmorBias
+   *  Returns >1 for tougher (AI takes less damage on hard), <1 for weaker. */
+  getArmorBias(house: House): number {
+    const countryBias = COUNTRY_BONUSES[house]?.armorMult ?? 1.0;
+    if (house !== this.playerHouse) {
+      const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+      return countryBias * diffMods.armorBias;
+    }
+    return countryBias;
+  }
+
+  /** Get rate-of-fire bias for a house — difficulty-scaled fire rate.
+   *  C++ house.cpp:293,303: ROFBias = Rule.Diff[handicap].ROFBias
+   *  Returns <1 for faster fire (hard AI), >1 for slower fire (easy AI). */
+  getROFBias(house: House): number {
+    const countryBias = COUNTRY_BONUSES[house]?.rofMult ?? 1.0;
+    if (house !== this.playerHouse) {
+      const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+      return countryBias * diffMods.rofBias;
+    }
+    return countryBias;
+  }
+
+  /** Get ground speed bias for a house — difficulty-scaled movement speed.
+   *  C++ house.cpp:290,300: GroundspeedBias = Rule.Diff[handicap].GroundspeedBias
+   *  Returns >1 for faster movement (hard AI). */
+  getGroundspeedBias(house: House): number {
+    const countryBias = COUNTRY_BONUSES[house]?.groundspeedMult ?? 1.0;
+    if (house !== this.playerHouse) {
+      const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+      return countryBias * diffMods.groundspeedBias;
+    }
+    return countryBias;
   }
 
   /** Get buildable items based on current structures + faction + tech prereqs */

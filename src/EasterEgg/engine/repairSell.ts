@@ -49,9 +49,10 @@ export function repairCostPerStep(buildCost: number, maxHp: number): number {
   return Math.ceil((buildCost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP));
 }
 
-/** Calculate sell refund for a structure — flat 50% of build cost (C++ parity, no health scaling) */
-export function sellRefund(buildCost: number): number {
-  return Math.floor(buildCost * 0.5);
+/** Calculate sell refund for a structure — no health scaling.
+ *  C++ techno.cpp:5743-5761 Refund_Amount: AI gets 100% refund, human gets Rule.RefundPercent (50%). */
+export function sellRefund(buildCost: number, isHuman = true): number {
+  return isHuman ? Math.floor(buildCost * 0.5) : buildCost;
 }
 
 /** Calculate power output for a structure at given health.
@@ -146,7 +147,7 @@ export function sellStructureByIndex(ctx: RepairSellContext, idx: number): boole
     s.alive = false;
     ctx.clearStructureFootprint(s);
     const prodItem = ctx.scenarioProductionItems.find(p => p.type === s.type);
-    if (prodItem) ctx.credits += Math.floor(prodItem.cost * 0.5);
+    if (prodItem) ctx.credits += sellRefund(prodItem.cost, true); // sell mode = human
     return true;
   }
   s.sellProgress = 0;
