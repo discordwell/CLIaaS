@@ -505,8 +505,13 @@ describe('Projectile lifecycle', () => {
     const ctx = makeMockCombatContext();
     const proj: InflightProjectile = {
       attackerId: 1, targetId: 2, weapon: WEAPON_STATS['90mm'],
-      damage: 30, speed: 2, travelFrames: 5, currentFrame: 0,
+      damage: 30, strength: 30, speed: 2, travelFrames: 5, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+      isArcing: false, arcHeight: 0, arcRiser: 0,
+      startX: 100, startY: 100, dogRiderId: -1,
+      fuelTimer: 9, isFueled: false,
+      isDropping: false, dropHeight: 0,
+      isFlameEquipped: false, flameToggle: false,
     };
     ctx.inflightProjectiles.push(proj);
     updateInflightProjectiles(ctx);
@@ -523,8 +528,13 @@ describe('Projectile lifecycle', () => {
     registerEntities(ctx, attacker, target);
     const proj: InflightProjectile = {
       attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
-      damage: 30, speed: 2, travelFrames: 1, currentFrame: 0,
+      damage: 30, strength: 30, speed: 2, travelFrames: 1, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+      isArcing: false, arcHeight: 0, arcRiser: 0,
+      startX: 100, startY: 100, dogRiderId: -1,
+      fuelTimer: 5, isFueled: false,
+      isDropping: false, dropHeight: 0,
+      isFlameEquipped: false, flameToggle: false,
     };
     ctx.inflightProjectiles.push(proj);
     updateInflightProjectiles(ctx);
@@ -542,8 +552,13 @@ describe('Projectile lifecycle', () => {
     const weapon = { ...WEAPON_STATS.MammothTusk, splash: 1.5 }; // HE warhead with splash
     const proj: InflightProjectile = {
       attackerId: attacker.id, targetId: target.id, weapon,
-      damage: 75, speed: 2, travelFrames: 1, currentFrame: 0,
+      damage: 75, strength: 75, speed: 2, travelFrames: 1, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+      isArcing: false, arcHeight: 0, arcRiser: 0,
+      startX: 100, startY: 100, dogRiderId: -1,
+      fuelTimer: 5, isFueled: false,
+      isDropping: false, dropHeight: 0,
+      isFlameEquipped: false, flameToggle: false,
     };
     ctx.inflightProjectiles.push(proj);
     const bystanderHpBefore = bystander.hp;
@@ -560,8 +575,13 @@ describe('Projectile lifecycle', () => {
     const weapon = { ...WEAPON_STATS.MammothTusk, projectileROT: 10, projectileSpeed: 2 };
     const proj: InflightProjectile = {
       attackerId: attacker.id, targetId: target.id, weapon,
-      damage: 75, speed: 2, travelFrames: 10, currentFrame: 0,
+      damage: 75, strength: 75, speed: 2, travelFrames: 10, currentFrame: 0,
       directHit: true, impactX: 180, impactY: 100, attackerIsPlayer: true,
+      isArcing: false, arcHeight: 0, arcRiser: 0,
+      startX: 100, startY: 100, dogRiderId: -1,
+      fuelTimer: 14, isFueled: false,
+      isDropping: false, dropHeight: 0,
+      isFlameEquipped: false, flameToggle: false,
     };
     ctx.inflightProjectiles.push(proj);
     // Move target to a new position
@@ -581,8 +601,13 @@ describe('Projectile lifecycle', () => {
     const weapon = { ...WEAPON_STATS.MammothTusk, projectileROT: 10, projectileSpeed: 2 };
     const proj: InflightProjectile = {
       attackerId: attacker.id, targetId: target.id, weapon,
-      damage: 75, speed: 2, travelFrames: 10, currentFrame: 0,
+      damage: 75, strength: 75, speed: 2, travelFrames: 10, currentFrame: 0,
       directHit: true, impactX: 150, impactY: 100, attackerIsPlayer: true,
+      isArcing: false, arcHeight: 0, arcRiser: 0,
+      startX: 100, startY: 100, dogRiderId: -1,
+      fuelTimer: 14, isFueled: false,
+      isDropping: false, dropHeight: 0,
+      isFlameEquipped: false, flameToggle: false,
     };
     ctx.inflightProjectiles.push(proj);
     target.pos.x = 350; // move target away
@@ -939,8 +964,13 @@ describe('Kill tracking / creditKill', () => {
     registerEntities(ctx, attacker, target);
     const proj: InflightProjectile = {
       attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
-      damage: 30, speed: 2, travelFrames: 1, currentFrame: 0,
+      damage: 30, strength: 30, speed: 2, travelFrames: 1, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
+      isArcing: false, arcHeight: 0, arcRiser: 0,
+      startX: 100, startY: 100, dogRiderId: -1,
+      fuelTimer: 5, isFueled: false,
+      isDropping: false, dropHeight: 0,
+      isFlameEquipped: false, flameToggle: false,
     };
     ctx.inflightProjectiles.push(proj);
     updateInflightProjectiles(ctx);
