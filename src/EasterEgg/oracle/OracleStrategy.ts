@@ -46,8 +46,8 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },            // STRUCT_POWER — always first
   { names: ['PROC'],         type_ids: [12] },            // STRUCT_REFINERY — WEAP prerequisite
   { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
+  { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks — before 2nd refinery
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
-  { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks
   { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },         // Base defense
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power — no cap (after core infra)
 ];
@@ -133,8 +133,8 @@ const MINE_WAYPOINTS: Point[] = [
   { cx: 76, cy: 50 },   // closer to base, southern flank
 ];
 
-// MISSION_UNLOAD enum value from C++ (used by minelayer deploy)
-const MISSION_UNLOAD = 15;
+// MISSION_UNLOAD enum value from C++ (used by minelayer/MCV deploy)
+const MISSION_UNLOAD = 12;
 
 // ── SCG03EA "Dead End" — destroy two bridges with Tanya ─────────────────────
 // Bridge targets (converted from cell numbers: cell%128=cx, cell/128=cy)
@@ -180,6 +180,10 @@ export class OracleStrategy {
   private minesLaid = 0;              // total mines laid so far
   private mcvSpawnTick = 0;           // tick when MCV first appeared
   private mcvDeployAttempts = 0;      // how many times we've tried deploying
+  private lastTick = 0;
+  private currentTick = 0;
+  private lastUnitTargets = new Map<number, { targetId: number; cx: number; cy: number; tick: number }>();
+  private lastKnownEnemyCentroid: Point | null = null;
 
   constructor(scenario = '') {
     this.scenario = scenario.replace(/\.[^.]+$/, '').toUpperCase();
@@ -189,11 +193,14 @@ export class OracleStrategy {
     this.peakUnits = Math.max(this.peakUnits, state.units.length);
     this.peakStructures = Math.max(this.peakStructures, state.structures.length);
 
+    this.currentTick = state.tick;
+    const tickDelta = this.lastTick > 0 ? state.tick - this.lastTick : 15;
     if (state.enemies.length > 0) {
       this.ticksSinceLastEnemy = 0;
       this.lastEnemyCount = state.enemies.length;
+      this.lastKnownEnemyCentroid = this.centroid(state.enemies);
     } else {
-      this.ticksSinceLastEnemy += 30;
+      this.ticksSinceLastEnemy += tickDelta;
     }
 
     if (state.units.some((u) => u.t === 'E7')) {
@@ -206,17 +213,18 @@ export class OracleStrategy {
       this.sawScg02eaConvoy = true;
     }
 
+    let result: OracleDecision;
     if (this.scenario === 'SCG01EA') {
-      return this.decideScg01ea(state);
+      result = this.decideScg01ea(state);
+    } else if (this.scenario === 'SCG02EA') {
+      result = this.decideScg02ea(state);
+    } else if (this.scenario === 'SCG03EA') {
+      result = this.decideScg03ea(state);
+    } else {
+      result = this.decideGeneric(state);
     }
-    if (this.scenario === 'SCG02EA') {
-      return this.decideScg02ea(state);
-    }
-    if (this.scenario === 'SCG03EA') {
-      return this.decideScg03ea(state);
-    }
-
-    return this.decideGeneric(state);
+    this.lastTick = state.tick;
+    return result;
   }
 
   // SCG08EA critical structures — lose if either is destroyed
@@ -354,7 +362,10 @@ export class OracleStrategy {
       // MCV may be moving to a scenario-scripted position. Don't interrupt movement.
       // Once idle, issue deploy. If deploy doesn't take after many attempts,
       // try a small nudge then deploy next tick.
-      if (this.isIdle(mcv)) {
+      if (mcv.m === MISSION_UNLOAD) {
+        // MCV is already deploying (MISSION_UNLOAD) — don't re-send deploy
+        reasons.push('MCV deploying');
+      } else if (this.isIdle(mcv)) {
         commands.push({ cmd: 'deploy', ids: [mcv.id] });
         this.mcvDeployAttempts++;
         reasons.push(mcvAge > 300 ? `deploy MCV (idle, ${mcvAge} ticks)` : 'deploy MCV');
@@ -423,8 +434,19 @@ export class OracleStrategy {
 
     // Place completed buildings
     if (buildingProduction?.done) {
-      const placeCx = conYard.cx + PLACEMENT_OFFSETS[this.placementAttempts % PLACEMENT_OFFSETS.length].cx;
-      const placeCy = conYard.cy + PLACEMENT_OFFSETS[this.placementAttempts % PLACEMENT_OFFSETS.length].cy;
+      // Place refineries away from known enemies to protect harvesters
+      let offsets = PLACEMENT_OFFSETS;
+      if (buildingProduction.t === 'PROC' && this.lastKnownEnemyCentroid) {
+        const ec = this.lastKnownEnemyCentroid;
+        offsets = [...PLACEMENT_OFFSETS].sort((a, b) => {
+          const aDist = (conYard.cx + a.cx - ec.cx) ** 2 + (conYard.cy + a.cy - ec.cy) ** 2;
+          const bDist = (conYard.cx + b.cx - ec.cx) ** 2 + (conYard.cy + b.cy - ec.cy) ** 2;
+          return bDist - aDist; // furthest from enemy first
+        });
+      }
+      const offset = offsets[this.placementAttempts % offsets.length];
+      const placeCx = conYard.cx + offset.cx;
+      const placeCy = conYard.cy + offset.cy;
       commands.push({
         cmd: 'place',
         rtti: RTTI_BUILDINGTYPE,
@@ -494,8 +516,8 @@ export class OracleStrategy {
             ordered = true;
             break;
           } else {
-            // Can't build any alternative yet — prerequisites not met, skip for now
-            break;
+            // Can't build any alternative yet — prerequisites not met, try next entry
+            continue;
           }
         }
         // If build order complete and we have credits, build extra power or defenses
@@ -535,7 +557,8 @@ export class OracleStrategy {
     const tankCount = playerUnits.filter((u) => u.t.includes('TNK')).length;
     const harvCount = playerUnits.filter((u) => u.t === 'HARV').length;
     const refCount = alliedStructures.filter((s) => s.t === 'PROC').length;
-    const needHarvester = harvCount < refCount && buildable?.units.includes('HARV');
+    // Only replace harvesters when we have other units (PROC auto-spawns a free HARV)
+    const needHarvester = harvCount < refCount && playerUnits.length > 0 && buildable?.units.includes('HARV');
 
     if (hasWarFactory && !unitProduction && buildable) {
       if (needHarvester && state.credits > 600) {
@@ -703,7 +726,7 @@ export class OracleStrategy {
             commands.push(...atkMicro.commands);
             reasons.push(`attack nearby ${surplus.length}`);
           } else if (surplus.length > 0) {
-            const stray = surplus.filter((u) => this.distanceSq(u, baseCenter) > 225);
+            const stray = surplus.filter((u) => this.isIdle(u) && this.distanceSq(u, baseCenter) > 225);
             if (stray.length > 0) {
               commands.push({
                 cmd: 'move',
@@ -716,11 +739,28 @@ export class OracleStrategy {
           }
         }
       } else {
-        // No base threats — decide: attack or turtle?
+        // No base threats — check for unit-proximity engagement first
+        // Units should engage enemies near them regardless of full attack threshold
+        const unitThreats = state.enemies.filter(
+          (e) => healthy.some((u) => this.distanceSq(u, e) <= 225), // 15 cells
+        );
+        if (unitThreats.length > 0 && healthy.length >= 3) {
+          const micro = this.microManage(healthy, unitThreats, baseCenter);
+          commands.push(...micro.commands);
+          reasons.push(`defend units (${unitThreats.length} threats near units)`);
+          reasons.push(...micro.reasons);
+        } else {
+        // No base threats, no unit threats — decide: attack or turtle?
         // If there's a mission timer counting down, this is a survival mission — turtle.
         const isTimedSurvival = state.missionTimerActive && state.missionTimer > 0;
         const tankCount = healthy.filter((u) => u.t.includes('TNK')).length;
-        const shouldAttack = !isTimedSurvival && (tankCount >= 3 || healthy.length >= 6);
+        const friendlyStr = healthy.reduce(
+          (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
+        );
+        const enemyStr = state.enemies.reduce(
+          (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
+        );
+        const shouldAttack = !isTimedSurvival && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
 
         if (shouldAttack && state.enemies.length > 0) {
           // Keep half near base, send half to attack within leash range
@@ -729,9 +769,9 @@ export class OracleStrategy {
           const attackers = healthy.slice(defenderCount);
           const leashSq2 = 900; // 30 cells from base
 
-          // Defenders patrol near base
+          // Defenders patrol near base (only re-command idle ones)
           const strayDefenders = defenders.filter(
-            (u) => this.distanceSq(u, baseCenter) > 225,
+            (u) => this.isIdle(u) && this.distanceSq(u, baseCenter) > 225,
           );
           if (strayDefenders.length > 0) {
             commands.push({
@@ -760,9 +800,9 @@ export class OracleStrategy {
             reasons.push(...micro.reasons);
           }
         } else if (isTimedSurvival) {
-          // TURTLE MODE — survival mission, keep everyone near base
+          // TURTLE MODE — survival mission, keep idle units near base
           const stray = healthy.filter(
-            (u) => this.distanceSq(u, baseCenter) > 225,
+            (u) => this.isIdle(u) && this.distanceSq(u, baseCenter) > 225,
           );
           if (stray.length > 0) {
             commands.push({
@@ -776,7 +816,7 @@ export class OracleStrategy {
             reasons.push(`turtle mode (timer=${state.missionTimer})`);
           }
         } else if (state.enemies.length > 0) {
-          // Not enough to attack — hold near base, send scout
+          // Not enough to attack — build up force, hold near base, send scout
           const stray = healthy.filter(
             (u) => this.isIdle(u) && this.distanceSq(u, baseCenter) > 225,
           );
@@ -789,6 +829,7 @@ export class OracleStrategy {
             });
             reasons.push(`rally ${stray.length} to base`);
           }
+          reasons.push(`building up (${tankCount} tanks, ${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)})`);
           if (!isTimedSurvival && this.ticksSinceLastEnemy > 150) {
             const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
             if (scout) {
@@ -810,6 +851,7 @@ export class OracleStrategy {
             }
           }
         }
+        } // close unit-proximity else
       }
     }
 
@@ -1611,6 +1653,22 @@ export class OracleStrategy {
     );
   }
 
+  /**
+   * Returns true if a unit should receive a new command.
+   * Units busy executing a previous order are left alone to prevent
+   * command stuttering. Exceptions: idle units, dead targets, stale commands.
+   */
+  private shouldRecommand(unit: RAEntity, enemies: RAEntity[]): boolean {
+    if (this.isIdle(unit)) return true;
+    const last = this.lastUnitTargets.get(unit.id);
+    if (!last) return true;
+    // Target dead?
+    if (!enemies.some(e => e.id === last.targetId)) return true;
+    // Stale timeout (>90 ticks since last command)
+    if (this.currentTick - last.tick > 90) return true;
+    return false;
+  }
+
   private isScg01eaRescueTriggered(state: RAGameState): boolean {
     return Boolean(state.globals?.includes(1) || state.units.some((u) => u.t === 'EINSTEIN'));
   }
@@ -1865,25 +1923,68 @@ export class OracleStrategy {
       return { commands, reasons };
     }
 
-    // 2. Classify healthy units by role
+    // 2. Infantry scatter — move idle infantry away from enemy tanks
+    const enemyTanks = enemies.filter((e) => e.t.includes('TNK'));
+    const scatteredIds = new Set<number>();
+    if (enemyTanks.length > 0) {
+      const scatterCandidates = healthy.filter(
+        (u) => isInfantryByType(u.t) && this.isIdle(u) &&
+          enemyTanks.some((t) => this.distanceSq(u, t) <= 36), // 6 cells
+      );
+      for (const inf of scatterCandidates) {
+        const nearestTank = this.nearestEnemy(inf, enemyTanks);
+        let dx = inf.cx - nearestTank.cx;
+        let dy = inf.cy - nearestTank.cy;
+        // Fallback direction when infantry is on the same cell as tank
+        if (dx === 0 && dy === 0) {
+          dx = inf.id % 2 === 0 ? 1 : -1;
+          dy = inf.id % 3 === 0 ? 1 : -1;
+        }
+        // Perpendicular scatter — alternate direction by unit ID
+        const perpX = inf.id % 2 === 0 ? -dy : dy;
+        const perpY = inf.id % 2 === 0 ? dx : -dx;
+        const len = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+        commands.push({
+          cmd: 'move',
+          ids: [inf.id],
+          cx: Math.round(inf.cx + (perpX / len) * 4),
+          cy: Math.round(inf.cy + (perpY / len) * 4),
+        });
+        scatteredIds.add(inf.id);
+      }
+      if (scatteredIds.size > 0) {
+        reasons.push(`micro:scatter ${scatteredIds.size} inf`);
+      }
+    }
+
+    // 3. Idle-aware filter — only re-command units that need new orders
+    const commandable = healthy.filter(
+      (u) => !scatteredIds.has(u.id) && this.shouldRecommand(u, enemies),
+    );
+
+    if (commandable.length === 0) {
+      return { commands, reasons };
+    }
+
+    // 4. Classify commandable units by role
     const antiInfantry: RAEntity[] = [];
     const antiArmor: RAEntity[] = [];
     const general: RAEntity[] = [];
 
-    for (const u of healthy) {
+    for (const u of commandable) {
       const role = UNIT_ROLES[u.t] ?? 'general';
       if (role === 'anti_infantry') antiInfantry.push(u);
       else if (role === 'anti_armor') antiArmor.push(u);
       else if (role !== 'non_combat') general.push(u);
     }
 
-    // 3. Classify enemies as infantry vs vehicles
+    // 5. Classify enemies as infantry vs vehicles
     const infantryTargets = enemies.filter((e) => isInfantryByType(e.t));
     const vehicleTargets = enemies.filter((e) => !isInfantryByType(e.t));
 
-    const fromPoint = this.centroid(healthy);
+    const fromPoint = this.centroid(commandable);
 
-    // 4. Weapon-type matching + focus fire
+    // 6. Weapon-type matching + focus fire
     // Anti-infantry → priority infantry target (fallback to vehicles)
     if (antiInfantry.length > 0) {
       const targets = infantryTargets.length > 0 ? infantryTargets : vehicleTargets;
@@ -1895,6 +1996,9 @@ export class OracleStrategy {
           target: target.id,
         });
         reasons.push(`micro:ai ${antiInfantry.length}→${target.t}#${target.id}`);
+        for (const u of antiInfantry) {
+          this.lastUnitTargets.set(u.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick });
+        }
       }
     }
 
@@ -1909,6 +2013,9 @@ export class OracleStrategy {
           target: target.id,
         });
         reasons.push(`micro:aa ${antiArmor.length}→${target.t}#${target.id}`);
+        for (const u of antiArmor) {
+          this.lastUnitTargets.set(u.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick });
+        }
       }
     }
 
@@ -1923,6 +2030,9 @@ export class OracleStrategy {
           target: target.id,
         });
         reasons.push(`micro:gen ${general.length}→${target.t}#${target.id}`);
+        for (const u of general) {
+          this.lastUnitTargets.set(u.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick });
+        }
       }
     }
 

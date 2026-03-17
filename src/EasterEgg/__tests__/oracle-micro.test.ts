@@ -4,8 +4,8 @@ import type { RAGameState, RAEntity, RAStructure } from '../oracle/WasmAdapter.j
 
 /**
  * Tactical micro-management tests — verify the OracleStrategy's focus-fire,
- * weapon-matching, pullback, and priority-targeting behaviour using pure
- * data fixtures (no WASM or browser needed).
+ * weapon-matching, pullback, priority-targeting, idle filtering, scatter,
+ * and force-threshold behaviour using pure data fixtures (no WASM needed).
  */
 
 function makeEntity(
@@ -53,9 +53,9 @@ function makeState(overrides: Partial<RAGameState> = {}): RAGameState {
 describe('micro — focus fire', () => {
   it('all tanks target the same enemy (focus fire via attack+target)', () => {
     const strategy = new OracleStrategy('SCG04EA');
-    // 5 heavy tanks (str ~15) vs 2 light (str ~6) — clear 1.5x advantage
+    // 5 heavy tanks vs 2 light — enemies near FACT trigger base defense micro
     const state = makeState({
-      structures: [makeStructure(100, 'FACT', 'Greece', 89, 52)],
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
       units: [
         makeEntity(1, '3TNK', 'Greece', 50, 50),
         makeEntity(2, '3TNK', 'Greece', 51, 50),
@@ -94,7 +94,7 @@ describe('micro — pullback', () => {
   it('damaged units get move to rally, not attack', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const state = makeState({
-      structures: [makeStructure(100, 'FACT', 'Greece', 89, 52)],
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
       units: [
         // Badly damaged unit — should retreat
         makeEntity(1, '3TNK', 'Greece', 55, 55, 20, 100),
@@ -133,10 +133,9 @@ describe('micro — pullback', () => {
 describe('micro — weapon matching', () => {
   it('E3 rockets target tanks, E1 rifles target infantry', () => {
     const strategy = new OracleStrategy('SCG04EA');
-    // 4 E3 rockets (str=4) + 4 E1 rifles (str=4) + 2 tanks (str=6) = 14
-    // vs 1 tank (str=3) + 1 infantry (str=1) = 4   → 14 > 6 ✓
+    // Mixed force — enemies near FACT trigger base defense micro with role matching
     const state = makeState({
-      structures: [makeStructure(100, 'FACT', 'Greece', 89, 52)],
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
       units: [
         makeEntity(1, 'E3', 'Greece', 50, 50),  // anti-armor
         makeEntity(2, 'E1', 'Greece', 51, 50),  // anti-infantry
@@ -185,9 +184,8 @@ describe('micro — weapon matching', () => {
 describe('micro — fallback targeting', () => {
   it('anti-infantry units attack tanks when no infantry present', () => {
     const strategy = new OracleStrategy('SCG04EA');
-    // 6 E1 (str=6) + 2 tanks (str=6) = 12 vs 1 tank (str=3) → 12 > 4.5 ✓
     const state = makeState({
-      structures: [makeStructure(100, 'FACT', 'Greece', 89, 52)],
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
       units: [
         makeEntity(1, 'E1', 'Greece', 50, 50),
         makeEntity(2, 'E1', 'Greece', 51, 50),
@@ -226,9 +224,8 @@ describe('micro — fallback targeting', () => {
 describe('micro — priority targeting', () => {
   it('damaged enemy targeted before healthy one', () => {
     const strategy = new OracleStrategy('SCG04EA');
-    // 5 heavy tanks (str=15) vs 2 medium (str ~4.2) → 15 > 6.3 ✓
     const state = makeState({
-      structures: [makeStructure(100, 'FACT', 'Greece', 89, 52)],
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
       units: [
         makeEntity(1, '3TNK', 'Greece', 50, 50),
         makeEntity(2, '3TNK', 'Greece', 51, 50),
@@ -268,7 +265,7 @@ describe('micro — empty inputs', () => {
   it('no enemies returns no micro commands', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const state = makeState({
-      structures: [makeStructure(100, 'FACT', 'Greece', 89, 52)],
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
       units: [
         makeEntity(1, '3TNK', 'Greece', 50, 50),
       ],
@@ -281,5 +278,275 @@ describe('micro — empty inputs', () => {
       (c) => c.cmd === 'attack' && typeof c.target === 'number',
     );
     expect(attackWithTarget.length).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Idle Filter — busy units are not re-commanded
+// ═══════════════════════════════════════════════════════════
+
+describe('micro — idle filter', () => {
+  it('busy units (non-idle mission) are not re-commanded', () => {
+    const strategy = new OracleStrategy('SCG04EA');
+    const enemies = [
+      { ...makeEntity(60, '2TNK', 'USSR', 55, 55), ally: false },
+    ];
+
+    // First decide — all units idle (m=5), populates lastUnitTargets
+    const state1 = makeState({
+      tick: 100,
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 50, 50),
+        makeEntity(2, '3TNK', 'Greece', 51, 50),
+      ],
+      enemies,
+    });
+    const decision1 = strategy.decide(state1);
+    // Verify first decide DID issue attack commands
+    const firstAttacks = decision1.commands.filter(
+      (c) => c.cmd === 'attack' && typeof c.target === 'number',
+    );
+    expect(firstAttacks.length).toBeGreaterThan(0);
+
+    // Second decide — same enemies, units now busy (m=12 = MISSION_ATTACK)
+    const state2 = makeState({
+      tick: 105,
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 53, 53, 100, 100, 12), // busy attacking
+        makeEntity(2, '3TNK', 'Greece', 54, 53, 100, 100, 12), // busy attacking
+      ],
+      enemies,
+    });
+    const decision2 = strategy.decide(state2);
+
+    // Busy units with live target should NOT get new attack commands
+    const secondAttacks = decision2.commands.filter(
+      (c) => c.cmd === 'attack' && typeof c.target === 'number',
+    );
+    expect(secondAttacks.length).toBe(0);
+  });
+
+  it('busy units ARE re-commanded when target dies', () => {
+    const strategy = new OracleStrategy('SCG04EA');
+
+    // First decide — attack enemy 60
+    const state1 = makeState({
+      tick: 100,
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 50, 50),
+        makeEntity(2, '3TNK', 'Greece', 51, 50),
+      ],
+      enemies: [
+        { ...makeEntity(60, '2TNK', 'USSR', 55, 55), ally: false },
+      ],
+    });
+    strategy.decide(state1);
+
+    // Second decide — enemy 60 is dead, new enemy 70 appears
+    const state2 = makeState({
+      tick: 105,
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 53, 53, 100, 100, 12), // busy
+        makeEntity(2, '3TNK', 'Greece', 54, 53, 100, 100, 12), // busy
+      ],
+      enemies: [
+        { ...makeEntity(70, '2TNK', 'USSR', 55, 55), ally: false }, // new target
+      ],
+    });
+    const decision2 = strategy.decide(state2);
+
+    // Target died — should re-command even though mission is non-idle
+    const attacks = decision2.commands.filter(
+      (c) => c.cmd === 'attack' && typeof c.target === 'number',
+    );
+    expect(attacks.length).toBeGreaterThan(0);
+  });
+
+  it('busy units ARE re-commanded after 90-tick stale timeout', () => {
+    const strategy = new OracleStrategy('SCG04EA');
+    const enemies = [
+      { ...makeEntity(60, '2TNK', 'USSR', 55, 55), ally: false },
+    ];
+
+    // First decide — attack enemy 60
+    const state1 = makeState({
+      tick: 100,
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 50, 50),
+        makeEntity(2, '3TNK', 'Greece', 51, 50),
+      ],
+      enemies,
+    });
+    const d1 = strategy.decide(state1);
+    expect(d1.commands.filter(c => c.cmd === 'attack').length).toBeGreaterThan(0);
+
+    // Second decide at tick 105 — still within 90-tick window, should NOT re-command
+    const state2 = makeState({
+      tick: 105,
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 53, 53, 100, 100, 12),
+        makeEntity(2, '3TNK', 'Greece', 54, 53, 100, 100, 12),
+      ],
+      enemies,
+    });
+    const d2 = strategy.decide(state2);
+    expect(d2.commands.filter(c => c.cmd === 'attack' && typeof c.target === 'number').length).toBe(0);
+
+    // Third decide at tick 200 — 100 ticks since command, exceeds 90-tick timeout
+    const state3 = makeState({
+      tick: 200,
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 53, 53, 100, 100, 12),
+        makeEntity(2, '3TNK', 'Greece', 54, 53, 100, 100, 12),
+      ],
+      enemies,
+    });
+    const d3 = strategy.decide(state3);
+    // Stale timeout — should re-command even though target is alive and unit is busy
+    expect(d3.commands.filter(c => c.cmd === 'attack' && typeof c.target === 'number').length).toBeGreaterThan(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Infantry Scatter vs Tank Crush
+// ═══════════════════════════════════════════════════════════
+
+describe('micro — infantry scatter', () => {
+  it('idle infantry near enemy tanks scatter and are excluded from attack', () => {
+    const strategy = new OracleStrategy('SCG04EA');
+    const state = makeState({
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        // Infantry within 6 cells of enemy tank — should scatter
+        makeEntity(1, 'E1', 'Greece', 54, 54),
+        makeEntity(2, 'E3', 'Greece', 55, 54),
+        // Tanks — should get attack orders, not scatter
+        makeEntity(3, '3TNK', 'Greece', 50, 50),
+        makeEntity(4, '3TNK', 'Greece', 51, 50),
+      ],
+      enemies: [
+        { ...makeEntity(60, '3TNK', 'USSR', 55, 55), ally: false },
+      ],
+    });
+
+    const decision = strategy.decide(state);
+
+    // Scattered infantry should appear in move commands (scatter)
+    const moveCmds = decision.commands.filter(c => c.cmd === 'move');
+    const scatteredIds = new Set<number>();
+    for (const mc of moveCmds) {
+      const ids = mc.ids as number[];
+      for (const id of ids) {
+        if (id === 1 || id === 2) scatteredIds.add(id);
+      }
+    }
+    expect(scatteredIds.size).toBeGreaterThan(0);
+
+    // Scattered infantry should NOT appear in attack commands
+    const attackCmds = decision.commands.filter(
+      (c) => c.cmd === 'attack' && typeof c.target === 'number',
+    );
+    for (const cmd of attackCmds) {
+      const ids = cmd.ids as number[];
+      for (const sid of scatteredIds) {
+        expect(ids).not.toContain(sid);
+      }
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Force Threshold — need 6 tanks + 1.5x superiority to attack
+// ═══════════════════════════════════════════════════════════
+
+describe('micro — force threshold', () => {
+  it('5 tanks do not attack distant enemies', () => {
+    const strategy = new OracleStrategy('SCG04EA');
+    const state = makeState({
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 50, 50),
+        makeEntity(2, '3TNK', 'Greece', 51, 50),
+        makeEntity(3, '3TNK', 'Greece', 52, 50),
+        makeEntity(4, '3TNK', 'Greece', 53, 50),
+        makeEntity(5, '3TNK', 'Greece', 54, 50),
+      ],
+      enemies: [
+        // Distant enemies — not base threats, only attack threshold applies
+        { ...makeEntity(60, '3TNK', 'USSR', 90, 90), ally: false },
+      ],
+    });
+
+    const decision = strategy.decide(state);
+    // With only 5 tanks (threshold is 6), should NOT send attack orders
+    const attackCmds = decision.commands.filter(
+      (c) => c.cmd === 'attack' && typeof c.target === 'number',
+    );
+    expect(attackCmds.length).toBe(0);
+    // Should report building up
+    expect(decision.reason).toContain('building up');
+  });
+
+  it('6 tanks with 1.5x superiority triggers attack', () => {
+    const strategy = new OracleStrategy('SCG04EA');
+    const state = makeState({
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 50, 50),
+        makeEntity(2, '3TNK', 'Greece', 51, 50),
+        makeEntity(3, '3TNK', 'Greece', 52, 50),
+        makeEntity(4, '3TNK', 'Greece', 53, 50),
+        makeEntity(5, '3TNK', 'Greece', 54, 50),
+        makeEntity(6, '3TNK', 'Greece', 55, 50),
+      ],
+      enemies: [
+        // Distant enemies — 6 tanks (str=18) vs 2 light (str=6) → 18>9 → attack
+        { ...makeEntity(60, '1TNK', 'USSR', 90, 90), ally: false },
+        { ...makeEntity(61, '1TNK', 'USSR', 91, 90), ally: false },
+      ],
+    });
+
+    const decision = strategy.decide(state);
+    const attackCmds = decision.commands.filter(
+      (c) => c.cmd === 'attack' && typeof c.target === 'number',
+    );
+    expect(attackCmds.length).toBeGreaterThan(0);
+  });
+
+  it('6 tanks at exactly 1.5x do NOT attack (requires strictly greater)', () => {
+    const strategy = new OracleStrategy('SCG04EA');
+    // 6 heavy tanks (str=18) vs 4 heavy tanks (str=12). 18 > 12*1.5=18? No (not strictly >).
+    const state = makeState({
+      structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
+      units: [
+        makeEntity(1, '3TNK', 'Greece', 50, 50),
+        makeEntity(2, '3TNK', 'Greece', 51, 50),
+        makeEntity(3, '3TNK', 'Greece', 52, 50),
+        makeEntity(4, '3TNK', 'Greece', 53, 50),
+        makeEntity(5, '3TNK', 'Greece', 54, 50),
+        makeEntity(6, '3TNK', 'Greece', 55, 50),
+      ],
+      enemies: [
+        { ...makeEntity(60, '3TNK', 'USSR', 90, 90), ally: false },
+        { ...makeEntity(61, '3TNK', 'USSR', 91, 90), ally: false },
+        { ...makeEntity(62, '3TNK', 'USSR', 92, 90), ally: false },
+        { ...makeEntity(63, '3TNK', 'USSR', 93, 90), ally: false },
+      ],
+    });
+
+    const decision = strategy.decide(state);
+    const attackCmds = decision.commands.filter(
+      (c) => c.cmd === 'attack' && typeof c.target === 'number',
+    );
+    // Exactly 1.5x is NOT enough (strict >), should NOT attack
+    expect(attackCmds.length).toBe(0);
+    expect(decision.reason).toContain('building up');
   });
 });

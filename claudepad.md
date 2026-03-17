@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-17T06:00Z — Session 157: Oracle Tactical Overhaul — Idle-Aware Commands + Economy + Scatter
+- **Idle-aware command system**: Units busy executing orders are no longer re-commanded every tick. `shouldRecommand()` checks idle status, target alive, and 90-tick stale timeout. Prevents command stuttering at high decision frequency.
+- **Step size reduced to 5 ticks** (from 15/30): 6x faster reactions, safe because idle filter prevents stuttering.
+- **Force threshold raised**: Attack requires `tankCount >= 6 && friendlyStr > enemyStr * 1.5` (was `tankCount >= 3 || healthy.length >= 6`). Reports "building up" status while accumulating force.
+- **Infantry scatter vs tank crush**: Idle infantry within 6 cells of enemy tanks scatter perpendicular to approach. Scattered units excluded from subsequent attack commands (dedup).
+- **Directional PROC placement**: Refineries placed furthest from known enemy centroid to protect harvesters.
+- **Idle checks on rally/patrol/turtle**: Only idle units get rally-to-base commands. Busy units left alone.
+- **11 tests pass** (6 existing updated + 5 new: idle filter, target-death re-command, scatter dedup, force threshold x2).
+
 ## 2026-03-17T05:16Z — Session 156: AI State Machine C++ Parity Tests (206 tests)
 - **New test file**: `cpp-parity-ai.test.ts` — 206 tests covering the entire AI strategic subsystem (ai.ts, 1,319 lines).
 - **Coverage areas**: AI_DIFFICULTY_MODS constants (3 difficulties × 7 fields), DIFFICULTY_MODS (ant spawning), STRUCTURE_IMAGES (27 entries), createAIHouseState (difficulty modifier application, IQ/techLevel/caps), query functions (aiCountStructure, aiPowerProduced/Consumed — all 23 consumer types, aiHasPrereq, aiGetBaseCenter, aiIsFactoryExit, aiStagingArea), phase transitions (economy→buildup→attack, all conditions), IQ-gated behaviors (IQ 0-3 thresholds for planner/construction/attack groups/defense/retreat/repair/sell/autocreate), build order priority (10-step priority queue, faction-dependent defense/tech), placement (spiral scan, adjacency, exit avoidance, defense outer placement), spawning (structures + units), attack groups (pool accumulation, threshold, aggressionMult scaling, launch coordination with waveId/rallyTick), defense (recall half pool, rally to enemy), retreat (FIX→base center fallback, harvester emergency return, difficulty-varied thresholds, ant/suicide exclusion), repair (REPAIR_STEP=5, 80% HP cap, credit deduction), sell (CONDITION_RED, FACT protection, last-power-plant protection, partial refund), income (per-refinery, incomeMult scaling), harvester management (force-produce), unit caps (maxInfantry/maxUnit/maxBuilding), production pick (faction/tech filtering, weighted selection, anti-armor boost), autocreate teams (flag bits, edge spawning, mission scripts, one-per-cycle, destroyed team skipping).

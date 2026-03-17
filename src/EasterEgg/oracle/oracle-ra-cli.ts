@@ -329,8 +329,8 @@ async function runOracle(
     if (decision.commands.length > 0) {
       await adapter.command(decision.commands);
     }
-    // Faster ticks early game for snappier reactions, normal pace later
-    const stepTicks = totalGameTicks < 3000 ? 15 : 30;
+    // 5-tick steps: idle-aware commands prevent stuttering at high frequency
+    const stepTicks = 5;
     const stepResult = await adapter.step(stepTicks);
     totalGameTicks += stepTicks;
 
