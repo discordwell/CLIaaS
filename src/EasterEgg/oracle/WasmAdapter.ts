@@ -25,6 +25,7 @@ export interface RAGameState {
   civEvacuated?: boolean;
   winPending?: boolean;
   losePending?: boolean;
+  bridgeCount?: number;
   power: { produced: number; consumed: number };
   units: RAEntity[];
   enemies: RAEntity[];

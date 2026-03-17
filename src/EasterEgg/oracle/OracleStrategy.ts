@@ -289,6 +289,7 @@ export class OracleStrategy {
     const enemyTypes = this.countTypes(state.enemies);
     const globals = state.globals?.length ? ` globals=${state.globals.join(',')}` : '';
     const missionTimer = state.missionTimerActive ? ` timer=${state.missionTimer}` : '';
+    const bridges = state.bridgeCount != null ? ` bridges=${state.bridgeCount}` : '';
     const prodItems = state.production.map(
       (p) => `${p.t}:${p.prog}%${p.done ? '*' : ''}`,
     ).join(',');
@@ -299,7 +300,7 @@ export class OracleStrategy {
       `enemies=${state.enemies.length}(${enemyTypes}) ` +
       `structs=${state.structures.length} ` +
       `credits=${state.credits} ` +
-      `power=${state.power.produced}/${state.power.consumed}${prodStr}${globals}${missionTimer} ` +
+      `power=${state.power.produced}/${state.power.consumed}${prodStr}${globals}${missionTimer}${bridges} ` +
       `| ${decision.reason}`
     );
   }
@@ -1552,55 +1553,55 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // Tanya one-shots infantry — pick off nearby enemies before advancing.
-    // Bridges are destroyed by blowing up nearby barrels (BARL/BRL3).
-    const bridgeBarrels = state.structures.filter(
-      (s) => (s.t === 'BARL' || s.t === 'BRL3') && this.distanceSq(s, currentBridge) <= 100,
-    );
-    const atBridge = this.distanceSq(tanya, currentBridge) <= 64; // 8 cells
-    if (atBridge && bridgeBarrels.length > 0) {
-      // Near bridge — blow up a barrel to destroy the bridge
-      const barrel = bridgeBarrels[0];
-      commands.push({ cmd: 'attack', ids: [tanya.id], target: barrel.id });
-      reasons.push(`Tanya → barrel at (${barrel.cx},${barrel.cy})`);
-    } else if (atBridge && bridgeBarrels.length === 0) {
-      // Bridge barrels destroyed — bridge should be gone, advance
-      this.scg03eaBridgeIndex++;
-      reasons.push(`bridge ${this.scg03eaBridgeIndex} destroyed!`);
+    // Bridges are template cells — Tanya destroys them by firing at them.
+    // attack_move through the bridge position so her guns hit the template.
+    // Track bridgeCount from state to know when bridges are actually destroyed.
+    const bridgesLeft = state.bridgeCount ?? 99;
+    if (bridgesLeft === 0) {
+      this.scg03eaBridgeIndex = bridges.length; // all done
+      reasons.push('all bridges destroyed (bridgeCount=0)!');
     } else {
-      // Check for infantry near Tanya — she one-shots them
-      const nearbyInf = state.enemies.filter(
-        (e) => isInfantryByType(e.t) && this.distanceSq(e, tanya) <= 144, // 12 cells
-      );
-      // Check for vehicles near Tanya — she can't fight those, retreat
-      const nearbyVehicles = state.enemies.filter(
-        (e) => !isInfantryByType(e.t) && e.t !== 'LST' && this.distanceSq(e, tanya) <= 100,
-      );
-
-      if (nearbyVehicles.length > 0 && nearbyInf.length === 0) {
-        // Vehicle nearby, no infantry to screen — retreat from vehicle
-        const awayX = tanya.cx + (tanya.cx - nearbyVehicles[0].cx);
-        const awayY = tanya.cy + (tanya.cy - nearbyVehicles[0].cy);
+      const atBridge = this.distanceSq(tanya, currentBridge) <= 36; // 6 cells
+      if (atBridge) {
+        // Near bridge — use sabotage (C4) on the bridge hut cell
         commands.push({
-          cmd: 'move', ids: [tanya.id],
-          cx: Math.max(0, Math.min(127, awayX)),
-          cy: Math.max(0, Math.min(127, awayY)),
-        });
-        reasons.push(`Tanya dodges ${nearbyVehicles[0].t}`);
-      } else if (nearbyInf.length > 0) {
-        // Infantry nearby — pick off the nearest one (one-shot kill)
-        const target = this.nearestEnemy(tanya, nearbyInf);
-        commands.push({
-          cmd: 'attack', ids: [tanya.id], target: target.id,
-        });
-        reasons.push(`Tanya kills ${target.t} (${nearbyInf.length} nearby)`);
-      } else {
-        // Path is clear — advance toward bridge
-        commands.push({
-          cmd: 'move', ids: [tanya.id],
+          cmd: 'sabotage', ids: [tanya.id],
           cx: currentBridge.cx, cy: currentBridge.cy,
         });
-        reasons.push(`Tanya → bridge ${this.scg03eaBridgeIndex + 1}`);
+        reasons.push(`Tanya C4 bridge ${this.scg03eaBridgeIndex + 1} (bridges=${bridgesLeft})`);
+        // If Tanya goes idle, the sabotage either succeeded or failed
+        if (this.isIdle(tanya)) {
+          this.scg03eaBridgeIndex++;
+        }
+      } else {
+        // Not at bridge — clear path and advance
+        const nearbyInf = state.enemies.filter(
+          (e) => isInfantryByType(e.t) && this.distanceSq(e, tanya) <= 144,
+        );
+        const nearbyVehicles = state.enemies.filter(
+          (e) => !isInfantryByType(e.t) && e.t !== 'LST' && this.distanceSq(e, tanya) <= 100,
+        );
+
+        if (nearbyVehicles.length > 0 && nearbyInf.length === 0) {
+          const awayX = tanya.cx + (tanya.cx - nearbyVehicles[0].cx);
+          const awayY = tanya.cy + (tanya.cy - nearbyVehicles[0].cy);
+          commands.push({
+            cmd: 'move', ids: [tanya.id],
+            cx: Math.max(0, Math.min(127, awayX)),
+            cy: Math.max(0, Math.min(127, awayY)),
+          });
+          reasons.push(`Tanya dodges ${nearbyVehicles[0].t}`);
+        } else if (nearbyInf.length > 0) {
+          const target = this.nearestEnemy(tanya, nearbyInf);
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
+          reasons.push(`Tanya kills ${target.t} (${nearbyInf.length} nearby)`);
+        } else {
+          commands.push({
+            cmd: 'move', ids: [tanya.id],
+            cx: currentBridge.cx, cy: currentBridge.cy,
+          });
+          reasons.push(`Tanya → bridge ${this.scg03eaBridgeIndex + 1}`);
+        }
       }
     }
 
