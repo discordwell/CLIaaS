@@ -1387,7 +1387,7 @@ describe('Harvester Pipeline', () => {
       expect(path[path.length - 1].cx).toBe(55);
     });
 
-    it('findPath returns empty when goal is surrounded by ROCK terrain', () => {
+    it('findPath returns empty or partial path when goal is surrounded by ROCK terrain', () => {
       const map = makeMap();
       // Surround the goal cell with impassable rock on all sides
       const gx = 60, gy = 60;
@@ -1397,7 +1397,18 @@ describe('Harvester Pipeline', () => {
         }
       }
       const path = findPath(map, { cx: 50, cy: 50 }, { cx: gx, cy: gy }, true);
-      expect(path.length).toBe(0); // no path to rock-enclosed cell
+      // C++ LOS pathfinder (findpath.cpp:558) returns partial path when dest is
+      // impassable — it walks toward the goal and stops when blocked.
+      // The path should NOT include any impassable cells.
+      for (const cell of path) {
+        expect(map.isTerrainPassable(cell.cx, cell.cy),
+          `cell (${cell.cx},${cell.cy}) should be passable`).toBe(true);
+      }
+      // Goal itself should NOT be in the path (it's impassable)
+      if (path.length > 0) {
+        const last = path[path.length - 1];
+        expect(last.cx === gx && last.cy === gy).toBe(false);
+      }
     });
 
     it('findPath works on clear terrain for return-to-refinery route', () => {
