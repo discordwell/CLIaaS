@@ -285,9 +285,10 @@ describe('GUN AP warhead vs armor classes (RULES.INI)', () => {
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([gun], [tank]);
     updateStructureCombat(ctx);
-    // AP vs heavy = 1.0, base 40 damage, direct hit (dist=0)
-    // modifyDamage(40, AP, heavy, 0, 1.0) = 40
-    expect(hpBefore - tank.hp).toBe(40);
+    // AP vs heavy = 1.0, base 40 damage, direct hit (dist=0) + splash at dist=0
+    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
+    // direct: modifyDamage(40, AP, heavy, 0) = 40, splash: modifyDamage(40, AP, heavy, 0) = 40
+    expect(hpBefore - tank.hp).toBe(80);
   });
 
   it('deals reduced 0.3x damage to unarmored infantry', () => {
@@ -297,8 +298,9 @@ describe('GUN AP warhead vs armor classes (RULES.INI)', () => {
     const hpBefore = infantry.hp;
     const ctx = makeCombatCtx([gun], [infantry]);
     updateStructureCombat(ctx);
-    // AP vs none = 0.3, base 40 => 40*0.3 = 12
-    expect(hpBefore - infantry.hp).toBe(12);
+    // AP vs none = 0.3, base 40 => direct 40*0.3=12, splash 40*0.3=12, total=24
+    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
+    expect(hpBefore - infantry.hp).toBe(24);
   });
 
   it('deals 0.75x damage to light armor', () => {
@@ -308,8 +310,9 @@ describe('GUN AP warhead vs armor classes (RULES.INI)', () => {
     const hpBefore = jeep.hp;
     const ctx = makeCombatCtx([gun], [jeep]);
     updateStructureCombat(ctx);
-    // AP vs light = 0.75, base 40 => 40*0.75 = 30
-    expect(hpBefore - jeep.hp).toBe(30);
+    // AP vs light = 0.75, base 40 => direct 40*0.75=30, splash 40*0.75=30, total=60
+    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
+    expect(hpBefore - jeep.hp).toBe(60);
   });
 });
 

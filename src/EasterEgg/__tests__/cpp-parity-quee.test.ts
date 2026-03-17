@@ -220,8 +220,9 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     expect(hpBefore).toBeGreaterThan(60); // precondition: must survive the hit
     const ctx = makeCombatCtx([quee], [tank]);
     updateStructureCombat(ctx);
-    // Super vs heavy = 1.0 mult, damage 60 * 1.0 = 60
-    expect(hpBefore - tank.hp).toBe(60);
+    // Super vs heavy = 1.0 mult, direct 60 + splash at dist=0 = 60, total = 120
+    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
+    expect(hpBefore - tank.hp).toBe(120);
   });
 
   it('applies full 60 damage to light armor (Super = 1.0x vs all)', () => {
@@ -230,8 +231,9 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const hpBefore = apc.hp;
     const ctx = makeCombatCtx([quee], [apc]);
     updateStructureCombat(ctx);
-    // Super vs light = 1.0 mult, damage 60 * 1.0 = 60
-    expect(hpBefore - apc.hp).toBe(60);
+    // Super vs light = 1.0 mult, direct 60 + splash at dist=0 = 60, total = 120
+    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
+    expect(hpBefore - apc.hp).toBe(120);
   });
 
   it('does NOT fire at enemy outside range 5', () => {
