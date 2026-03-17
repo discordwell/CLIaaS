@@ -2,14 +2,13 @@
  * C++ behavioral parity tests for TEVENT_ENTERS_ZONE (type=24).
  *
  * C++ source: TEVENT.H — TEVENT_ENTERS_ZONE = 24
- * C++ behavior: TriggerClass::Spring() fires when a player unit enters
- *   a cell trigger zone. Internally identical to TEVENT_DISCOVERED (4) —
- *   both return state.playerEntered.
+ * C++ behavior: TriggerClass::Spring() fires when a matching-house unit enters
+ *   the same movement zone as the trigger's attached cell.
+ *   tevent.cpp:290-293 checks object->Owner() == Data.House.
+ *   foot.cpp:1447-1455 checks zone membership via Map[trigger->Cell].Zones[MZone].
  *
- * In the TS implementation, TEVENT_ENTERS_ZONE (24), TEVENT_DISCOVERED (4),
- * and TEVENT_PLAYER_ENTERED (1) all share the same code path: they check
- * state.playerEntered. This mirrors the C++ behavior where all three represent
- * "player unit entered a trigger zone."
+ * After parity fix #21, TEVENT_ENTERS_ZONE uses its own `enteredZone` flag,
+ * separate from TEVENT_PLAYER_ENTERED's `playerEntered`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -31,6 +30,11 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     triggerStartTick: 0,
     triggerName: 'test',
     playerEntered: false,
+    objectDiscovered: false,
+    houseDiscovered: new Map(),
+    enteredZone: false,
+    crossedHorizontal: false,
+    crossedVertical: false,
     enemyUnitsAlive: 0,
     enemyKillCount: 0,
     playerFactories: 0,
@@ -87,54 +91,53 @@ describe('TEVENT_ENTERS_ZONE (type=24) — C++ behavioral parity', () => {
     expect(TEVENT_ENTERS_ZONE).toBe(24);
   });
 
-  it('returns false when playerEntered is false', () => {
+  it('returns false when enteredZone is false', () => {
     const event = createEvent();
-    const state = createState({ playerEntered: false });
+    const state = createState({ enteredZone: false });
     expect(checkTriggerEvent(event, state)).toBe(false);
   });
 
-  it('returns true when playerEntered is true', () => {
+  it('returns true when enteredZone is true', () => {
     const event = createEvent();
-    const state = createState({ playerEntered: true });
+    const state = createState({ enteredZone: true });
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
 
-  it('shares playerEntered behavior with TEVENT_DISCOVERED (type=4) and TEVENT_PLAYER_ENTERED (type=1)', () => {
-    // In C++, TEVENT_PLAYER_ENTERED (1), TEVENT_DISCOVERED (4), and
-    // TEVENT_ENTERS_ZONE (24) all check House.IsDiscoveredByPlayer /
-    // cell trigger entry. The TS implementation mirrors this by routing
-    // all three through state.playerEntered.
+  it('uses enteredZone (not playerEntered) — C++ parity fix #21', () => {
+    // After fix #21, TEVENT_ENTERS_ZONE uses its own enteredZone flag.
+    // TEVENT_PLAYER_ENTERED still uses playerEntered.
+    // TEVENT_DISCOVERED uses objectDiscovered.
     const entersZoneEvent: TriggerEvent = { type: TEVENT_ENTERS_ZONE, team: -1, data: 0 };
     const discoveredEvent: TriggerEvent = { type: TEVENT_DISCOVERED, team: -1, data: 0 };
     const playerEnteredEvent: TriggerEvent = { type: TEVENT_PLAYER_ENTERED, team: -1, data: 0 };
 
-    // All false when playerEntered=false
-    const stateFalse = createState({ playerEntered: false });
-    expect(checkTriggerEvent(entersZoneEvent, stateFalse)).toBe(false);
-    expect(checkTriggerEvent(discoveredEvent, stateFalse)).toBe(false);
-    expect(checkTriggerEvent(playerEnteredEvent, stateFalse)).toBe(false);
+    // enteredZone=true, others false
+    const stateZoneOnly = createState({ enteredZone: true, playerEntered: false, objectDiscovered: false });
+    expect(checkTriggerEvent(entersZoneEvent, stateZoneOnly)).toBe(true);
+    expect(checkTriggerEvent(discoveredEvent, stateZoneOnly)).toBe(false);
+    expect(checkTriggerEvent(playerEnteredEvent, stateZoneOnly)).toBe(false);
 
-    // All true when playerEntered=true
-    const stateTrue = createState({ playerEntered: true });
-    expect(checkTriggerEvent(entersZoneEvent, stateTrue)).toBe(true);
-    expect(checkTriggerEvent(discoveredEvent, stateTrue)).toBe(true);
-    expect(checkTriggerEvent(playerEnteredEvent, stateTrue)).toBe(true);
+    // playerEntered=true, enteredZone=false
+    const statePlayerOnly = createState({ playerEntered: true, enteredZone: false, objectDiscovered: false });
+    expect(checkTriggerEvent(entersZoneEvent, statePlayerOnly)).toBe(false);
+    expect(checkTriggerEvent(playerEnteredEvent, statePlayerOnly)).toBe(true);
   });
 
-  it('event.data is ignored — only playerEntered matters', () => {
-    // C++ ENTERS_ZONE does not use the data parameter; verify arbitrary
-    // data values do not change the result.
+  it('event.data is not checked by checkTriggerEvent — only enteredZone matters', () => {
+    // C++ tevent.cpp:290-293 checks Data.House, but that ownership check happens
+    // in the engine layer (checkZoneAndCrossTriggers) before setting enteredZone.
+    // At the checkTriggerEvent level, only the boolean flag matters.
     for (const data of [0, 1, 42, 255, -1]) {
       const event = createEvent({ data });
-      expect(checkTriggerEvent(event, createState({ playerEntered: false }))).toBe(false);
-      expect(checkTriggerEvent(event, createState({ playerEntered: true }))).toBe(true);
+      expect(checkTriggerEvent(event, createState({ enteredZone: false }))).toBe(false);
+      expect(checkTriggerEvent(event, createState({ enteredZone: true }))).toBe(true);
     }
   });
 
   it('other state fields do not affect the result', () => {
-    // playerEntered=true with various other state mutations — should still return true
+    // enteredZone=true with various other state mutations — should still return true
     const stateTrue = createState({
-      playerEntered: true,
+      enteredZone: true,
       gameTick: 5000,
       enemyUnitsAlive: 10,
       enemyKillCount: 25,
@@ -147,9 +150,9 @@ describe('TEVENT_ENTERS_ZONE (type=24) — C++ behavioral parity', () => {
     });
     expect(checkTriggerEvent(createEvent(), stateTrue)).toBe(true);
 
-    // playerEntered=false with the same mutations — should still return false
+    // enteredZone=false with the same mutations — should still return false
     const stateFalse = createState({
-      playerEntered: false,
+      enteredZone: false,
       gameTick: 5000,
       enemyUnitsAlive: 10,
       enemyKillCount: 25,

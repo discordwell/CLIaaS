@@ -1,15 +1,13 @@
 /**
  * C++ Behavioral Parity Tests — TEVENT_CROSS_VERTICAL (type=26)
  *
- * C++ reference: TEVENT.H, TriggerClass::Spring() in TRIGGER.CPP
+ * C++ reference: TEVENT.H, foot.cpp:1434-1442, tevent.cpp:290-293
  *
- * TEVENT_CROSS_VERTICAL fires when a player unit crosses a vertical trigger
- * line on the map. The engine sets state.playerEntered = true for the
- * trigger's evaluation frame.
+ * TEVENT_CROSS_VERTICAL fires when a matching-house unit crosses the X column
+ * of the trigger's cell. tevent.cpp:290-293 checks object->Owner() == Data.House.
  *
- * Like TEVENT_CROSS_HORIZONTAL (type=25), this reuses the playerEntered flag.
- * The event ignores event.data — the only thing that matters is the boolean
- * flag on the game state.
+ * After parity fix #21, uses its own `crossedVertical` flag instead of
+ * the generic `playerEntered`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -34,6 +32,11 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     triggerStartTick: 0,
     triggerName: 'test',
     playerEntered: false,
+    objectDiscovered: false,
+    houseDiscovered: new Map(),
+    enteredZone: false,
+    crossedHorizontal: false,
+    crossedVertical: false,
     enemyUnitsAlive: 0,
     enemyKillCount: 0,
     playerFactories: 0,
@@ -79,29 +82,29 @@ function createEvent(overrides: Partial<TriggerEvent> = {}): TriggerEvent {
 // ============================================================================
 
 describe('TEVENT_CROSS_VERTICAL (type=26) — C++ parity', () => {
-  it('returns false when playerEntered is false', () => {
-    const state = createState({ playerEntered: false });
+  it('returns false when crossedVertical is false', () => {
+    const state = createState({ crossedVertical: false });
     const event = createEvent();
     expect(checkTriggerEvent(event, state)).toBe(false);
   });
 
-  it('returns true when playerEntered is true', () => {
-    const state = createState({ playerEntered: true });
+  it('returns true when crossedVertical is true', () => {
+    const state = createState({ crossedVertical: true });
     const event = createEvent();
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
 
   it('event.data is irrelevant — does not affect result', () => {
-    // With playerEntered=true, any data value should still return true
-    const stateTrue = createState({ playerEntered: true });
+    // With crossedVertical=true, any data value should still return true
+    const stateTrue = createState({ crossedVertical: true });
     expect(checkTriggerEvent(createEvent({ data: 0 }), stateTrue)).toBe(true);
     expect(checkTriggerEvent(createEvent({ data: 1 }), stateTrue)).toBe(true);
     expect(checkTriggerEvent(createEvent({ data: 42 }), stateTrue)).toBe(true);
     expect(checkTriggerEvent(createEvent({ data: -1 }), stateTrue)).toBe(true);
     expect(checkTriggerEvent(createEvent({ data: 9999 }), stateTrue)).toBe(true);
 
-    // With playerEntered=false, any data value should still return false
-    const stateFalse = createState({ playerEntered: false });
+    // With crossedVertical=false, any data value should still return false
+    const stateFalse = createState({ crossedVertical: false });
     expect(checkTriggerEvent(createEvent({ data: 0 }), stateFalse)).toBe(false);
     expect(checkTriggerEvent(createEvent({ data: 1 }), stateFalse)).toBe(false);
     expect(checkTriggerEvent(createEvent({ data: 42 }), stateFalse)).toBe(false);
@@ -109,9 +112,9 @@ describe('TEVENT_CROSS_VERTICAL (type=26) — C++ parity', () => {
   });
 
   it('other state fields do not affect result', () => {
-    // playerEntered=true with various other state mutations — should still return true
+    // crossedVertical=true with various other state mutations — should still return true
     const stateTrue = createState({
-      playerEntered: true,
+      crossedVertical: true,
       gameTick: 5000,
       enemyUnitsAlive: 10,
       enemyKillCount: 25,
@@ -124,9 +127,9 @@ describe('TEVENT_CROSS_VERTICAL (type=26) — C++ parity', () => {
     });
     expect(checkTriggerEvent(createEvent(), stateTrue)).toBe(true);
 
-    // playerEntered=false with the same mutations — should still return false
+    // crossedVertical=false with the same mutations — should still return false
     const stateFalse = createState({
-      playerEntered: false,
+      crossedVertical: false,
       gameTick: 5000,
       enemyUnitsAlive: 10,
       enemyKillCount: 25,
@@ -145,7 +148,7 @@ describe('TEVENT_CROSS_VERTICAL (type=26) — C++ parity', () => {
     expect(TEVENT_CROSS_VERTICAL).toBe(26);
 
     // Also verify checkTriggerEvent handles type=26 correctly by passing raw value
-    const state = createState({ playerEntered: true });
+    const state = createState({ crossedVertical: true });
     const event: TriggerEvent = { type: 26, team: -1, data: 0 };
     expect(checkTriggerEvent(event, state)).toBe(true);
   });

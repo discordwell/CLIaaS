@@ -24,6 +24,11 @@ describe('Extended Trigger Events', () => {
     triggerStartTick: 0,
     triggerName: 'test',
     playerEntered: false,
+    objectDiscovered: false,
+    houseDiscovered: new Map(),
+    enteredZone: false,
+    crossedHorizontal: false,
+    crossedVertical: false,
     enemyUnitsAlive: 0,
     enemyKillCount: 0,
     playerFactories: 0,
@@ -53,13 +58,13 @@ describe('Extended Trigger Events', () => {
     ...overrides,
   });
 
-  it('TEVENT_HOUSE_DISCOVERED (5): returns true when playerEntered is true', () => {
-    const event: TriggerEvent = { type: 5, team: -1, data: 0 }; // C++ TEVENT_HOUSE_DISCOVERED = 5
-    const stateNotEntered = createState({ playerEntered: false });
-    const stateEntered = createState({ playerEntered: true });
+  it('TEVENT_HOUSE_DISCOVERED (5): returns true when house is discovered', () => {
+    const event: TriggerEvent = { type: 5, team: -1, data: 0 }; // C++ TEVENT_HOUSE_DISCOVERED = 5, Data.House = 0
+    const stateNotDiscovered = createState({ houseDiscovered: new Map() });
+    const stateDiscovered = createState({ houseDiscovered: new Map([[0, true]]) });
 
-    expect(checkTriggerEvent(event, stateNotEntered)).toBe(false);
-    expect(checkTriggerEvent(event, stateEntered)).toBe(true);
+    expect(checkTriggerEvent(event, stateNotDiscovered)).toBe(false);
+    expect(checkTriggerEvent(event, stateDiscovered)).toBe(true);
   });
 
   it('TEVENT_LOW_POWER (30): returns true when isLowPower is true', () => {
@@ -79,22 +84,22 @@ describe('Extended Trigger Events', () => {
     expect(checkTriggerEvent(event, stateThieved)).toBe(true);
   });
 
-  it('TEVENT_CROSS_HORIZONTAL (25): returns true when playerEntered is true', () => {
+  it('TEVENT_CROSS_HORIZONTAL (25): returns true when crossedHorizontal is true', () => {
     const event: TriggerEvent = { type: 25, team: -1, data: 0 }; // C++ TEVENT_CROSS_HORIZONTAL = 25
-    const stateNotEntered = createState({ playerEntered: false });
-    const stateEntered = createState({ playerEntered: true });
+    const stateNotCrossed = createState({ crossedHorizontal: false });
+    const stateCrossed = createState({ crossedHorizontal: true });
 
-    expect(checkTriggerEvent(event, stateNotEntered)).toBe(false);
-    expect(checkTriggerEvent(event, stateEntered)).toBe(true);
+    expect(checkTriggerEvent(event, stateNotCrossed)).toBe(false);
+    expect(checkTriggerEvent(event, stateCrossed)).toBe(true);
   });
 
-  it('TEVENT_CROSS_VERTICAL (26): returns true when playerEntered is true', () => {
+  it('TEVENT_CROSS_VERTICAL (26): returns true when crossedVertical is true', () => {
     const event: TriggerEvent = { type: 26, team: -1, data: 0 }; // C++ TEVENT_CROSS_VERTICAL = 26
-    const stateNotEntered = createState({ playerEntered: false });
-    const stateEntered = createState({ playerEntered: true });
+    const stateNotCrossed = createState({ crossedVertical: false });
+    const stateCrossed = createState({ crossedVertical: true });
 
-    expect(checkTriggerEvent(event, stateNotEntered)).toBe(false);
-    expect(checkTriggerEvent(event, stateEntered)).toBe(true);
+    expect(checkTriggerEvent(event, stateNotCrossed)).toBe(false);
+    expect(checkTriggerEvent(event, stateCrossed)).toBe(true);
   });
 
   it('TEVENT_UNITS_DESTROYED (9): returns true when house units all destroyed (not buildings)', () => {

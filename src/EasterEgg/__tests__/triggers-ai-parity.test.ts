@@ -29,6 +29,11 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     triggerStartTick: 0,
     triggerName: 'test',
     playerEntered: false,
+    objectDiscovered: false,
+    houseDiscovered: new Map(),
+    enteredZone: false,
+    crossedHorizontal: false,
+    crossedVertical: false,
     enemyUnitsAlive: 0,
     enemyKillCount: 0,
     playerFactories: 0,
@@ -54,6 +59,7 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     fakesExist: true,
     spiedBuildings: new Set(),
     isThieved: false,
+    pendingDestroyedCount: 0,
     ...overrides,
   };
 }
@@ -260,12 +266,12 @@ describe('TR5: Event index mapping matches C++ tevent.h', () => {
 
   it('TEVENT_DISCOVERED at index 4 (C++ matches)', () => {
     const event: TriggerEvent = { type: 4, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState({ playerEntered: true }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ objectDiscovered: true }))).toBe(true);
   });
 
   it('TEVENT_HOUSE_DISCOVERED at index 5 (C++ matches, was 3)', () => {
     const event: TriggerEvent = { type: 5, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState({ playerEntered: true }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ houseDiscovered: new Map([[0, true]]) }))).toBe(true);
   });
 
   it('TEVENT_ANY at index 8 always fires', () => {
@@ -294,12 +300,12 @@ describe('TR5: Event index mapping matches C++ tevent.h', () => {
 
   it('TEVENT_CROSS_HORIZONTAL at index 25 (C++ matches, was 21)', () => {
     const event: TriggerEvent = { type: 25, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState({ playerEntered: true }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ crossedHorizontal: true }))).toBe(true);
   });
 
   it('TEVENT_CROSS_VERTICAL at index 26 (C++ matches, was 22)', () => {
     const event: TriggerEvent = { type: 26, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState({ playerEntered: true }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ crossedVertical: true }))).toBe(true);
   });
 
   it('TEVENT_GLOBAL_SET at index 27 (unchanged)', () => {

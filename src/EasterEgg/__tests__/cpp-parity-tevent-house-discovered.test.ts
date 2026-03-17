@@ -1,10 +1,14 @@
 /**
  * C++ Behavioral Parity Tests — TEVENT_HOUSE_DISCOVERED (type=5)
  *
- * C++ behavior: Returns true when state.playerEntered is true.
- * Same implementation as TEVENT_DISCOVERED — uses the playerEntered flag.
+ * C++ behavior: tevent.cpp:435-436 — hptr = HouseClass::As_Pointer(Data.House),
+ *   checks hptr->IsDiscovered. IsDiscovered is set in techno.cpp:792 when any
+ *   unit of that house is first seen by the player.
  *
- * Reference: SCENARIO.CPP — TriggerClass::Spring() switch on TEVENT_HOUSE_DISCOVERED
+ * After parity fix #21, uses `houseDiscovered` map keyed by RA house index
+ * instead of the generic `playerEntered` flag.
+ *
+ * Reference: tevent.cpp:417-436, techno.cpp:792
  */
 
 import { describe, it, expect } from 'vitest';
@@ -25,6 +29,11 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     triggerStartTick: 0,
     triggerName: 'test',
     playerEntered: false,
+    objectDiscovered: false,
+    houseDiscovered: new Map(),
+    enteredZone: false,
+    crossedHorizontal: false,
+    crossedVertical: false,
     enemyUnitsAlive: 0,
     enemyKillCount: 0,
     playerFactories: 0,
@@ -60,16 +69,25 @@ function makeEvent(type: number, data = 0): TriggerEvent {
 }
 
 describe('C++ parity — TEVENT_HOUSE_DISCOVERED (type=5)', () => {
-  it('returns false when playerEntered=false', () => {
-    const state = createState({ playerEntered: false });
-    const event = makeEvent(TEVENT_HOUSE_DISCOVERED);
+  it('returns false when the specified house is not discovered', () => {
+    // event.data = 2 (USSR), houseDiscovered map is empty
+    const state = createState({ houseDiscovered: new Map() });
+    const event = makeEvent(TEVENT_HOUSE_DISCOVERED, 2);
     expect(checkTriggerEvent(event, state)).toBe(false);
   });
 
-  it('returns true when playerEntered=true', () => {
-    const state = createState({ playerEntered: true });
-    const event = makeEvent(TEVENT_HOUSE_DISCOVERED);
+  it('returns true when the specified house is discovered', () => {
+    // C++ tevent.cpp:435-436: checks hptr->IsDiscovered for Data.House
+    const state = createState({ houseDiscovered: new Map([[2, true]]) });
+    const event = makeEvent(TEVENT_HOUSE_DISCOVERED, 2);
     expect(checkTriggerEvent(event, state)).toBe(true);
+  });
+
+  it('checks the specific house from event.data (Data.House)', () => {
+    // USSR (2) is discovered but Spain (0) is not
+    const state = createState({ houseDiscovered: new Map([[2, true]]) });
+    expect(checkTriggerEvent(makeEvent(TEVENT_HOUSE_DISCOVERED, 0), state)).toBe(false);
+    expect(checkTriggerEvent(makeEvent(TEVENT_HOUSE_DISCOVERED, 2), state)).toBe(true);
   });
 
   it('constant value is 5', () => {

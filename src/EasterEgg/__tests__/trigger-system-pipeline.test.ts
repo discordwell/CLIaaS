@@ -45,6 +45,11 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     triggerStartTick: 0,
     triggerName: 'test',
     playerEntered: false,
+    objectDiscovered: false,
+    houseDiscovered: new Map(),
+    enteredZone: false,
+    crossedHorizontal: false,
+    crossedVertical: false,
     enemyUnitsAlive: 0,
     enemyKillCount: 0,
     playerFactories: 0,
@@ -268,17 +273,20 @@ describe('checkTriggerEvent — full event coverage', () => {
     expect(checkTriggerEvent(event, createState({ bridgesAlive: 0 }))).toBe(true);
   });
 
-  // TEVENT_DISCOVERED (4) and TEVENT_ENTERS_ZONE (24) — both use playerEntered
-  it('TEVENT_DISCOVERED (4) and TEVENT_ENTERS_ZONE (24) share playerEntered flag', () => {
+  // TEVENT_DISCOVERED (4) uses objectDiscovered, TEVENT_ENTERS_ZONE (24) uses enteredZone
+  it('TEVENT_DISCOVERED (4) and TEVENT_ENTERS_ZONE (24) use distinct state flags (parity #21)', () => {
     const disc: TriggerEvent = { type: 4, team: -1, data: 0 };
     const zone: TriggerEvent = { type: 24, team: -1, data: 0 };
-    const stateEntered = createState({ playerEntered: true });
-    const stateNotEntered = createState({ playerEntered: false });
 
-    expect(checkTriggerEvent(disc, stateEntered)).toBe(true);
-    expect(checkTriggerEvent(zone, stateEntered)).toBe(true);
-    expect(checkTriggerEvent(disc, stateNotEntered)).toBe(false);
-    expect(checkTriggerEvent(zone, stateNotEntered)).toBe(false);
+    // objectDiscovered fires DISCOVERED but not ENTERS_ZONE
+    const stateDiscovered = createState({ objectDiscovered: true, enteredZone: false });
+    expect(checkTriggerEvent(disc, stateDiscovered)).toBe(true);
+    expect(checkTriggerEvent(zone, stateDiscovered)).toBe(false);
+
+    // enteredZone fires ENTERS_ZONE but not DISCOVERED
+    const stateZone = createState({ objectDiscovered: false, enteredZone: true });
+    expect(checkTriggerEvent(disc, stateZone)).toBe(false);
+    expect(checkTriggerEvent(zone, stateZone)).toBe(true);
   });
 
   // TEVENT_ATTACKED (6)

@@ -2,13 +2,13 @@
  * C++ behavioral parity tests for TEVENT_DISCOVERED (type=4).
  *
  * C++ source: TEVENT.H line 50 — TEVENT_DISCOVERED = 4
- * C++ behavior: TriggerClass::Spring() checks House.IsDiscoveredByPlayer,
- *   which maps to the playerEntered flag set via cell triggers.
+ * C++ behavior: fires when an object with this trigger attached is first
+ *   revealed by the opposing side. techno.cpp:786 calls
+ *   Trigger->Spring(TEVENT_DISCOVERED, this) from Revealed().
+ *   techno.cpp:3899 also calls it from Record_The_Kill().
  *
- * In the TS implementation, TEVENT_DISCOVERED (4) and TEVENT_ENTERS_ZONE (24)
- * share the same code path: both return state.playerEntered.
- * TEVENT_PLAYER_ENTERED (1) also checks state.playerEntered.
- * This is intentional — all three represent "player unit entered a trigger zone."
+ * After parity fix #21, TEVENT_DISCOVERED uses its own `objectDiscovered` flag,
+ * separate from TEVENT_PLAYER_ENTERED's `playerEntered`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -25,6 +25,11 @@ const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameStat
   triggerStartTick: 0,
   triggerName: 'test',
   playerEntered: false,
+  objectDiscovered: false,
+  houseDiscovered: new Map(),
+  enteredZone: false,
+  crossedHorizontal: false,
+  crossedVertical: false,
   enemyUnitsAlive: 0,
   enemyKillCount: 0,
   playerFactories: 0,
@@ -56,7 +61,6 @@ const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameStat
 
 const TEVENT_PLAYER_ENTERED = 1;
 const TEVENT_DISCOVERED = 4;
-const TEVENT_ENTERS_ZONE = 24;
 
 describe('TEVENT_DISCOVERED (type=4) — C++ behavioral parity', () => {
   it('constant value is 4 (C++ TEVENT.H enum index)', () => {
@@ -65,47 +69,43 @@ describe('TEVENT_DISCOVERED (type=4) — C++ behavioral parity', () => {
     expect(TEVENT_DISCOVERED).toBe(4);
   });
 
-  it('returns false when playerEntered is false', () => {
+  it('returns false when objectDiscovered is false', () => {
     const event: TriggerEvent = { type: TEVENT_DISCOVERED, team: -1, data: 0 };
-    const state = createState({ playerEntered: false });
+    const state = createState({ objectDiscovered: false });
     expect(checkTriggerEvent(event, state)).toBe(false);
   });
 
-  it('returns true when playerEntered is true', () => {
+  it('returns true when objectDiscovered is true', () => {
+    // C++ techno.cpp:786: Trigger->Spring(TEVENT_DISCOVERED, this)
     const event: TriggerEvent = { type: TEVENT_DISCOVERED, team: -1, data: 0 };
-    const state = createState({ playerEntered: true });
+    const state = createState({ objectDiscovered: true });
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
 
-  it('shares the same playerEntered behavior as TEVENT_PLAYER_ENTERED (type=1)', () => {
-    // In C++, TEVENT_PLAYER_ENTERED (1), TEVENT_DISCOVERED (4), and
-    // TEVENT_ENTERS_ZONE (24) all check House.IsDiscoveredByPlayer /
-    // cell trigger entry. The TS implementation mirrors this by routing
-    // all three through state.playerEntered.
+  it('uses objectDiscovered — independent from PLAYER_ENTERED (fix #21)', () => {
+    // After fix #21, TEVENT_DISCOVERED uses objectDiscovered, not playerEntered.
+    // TEVENT_PLAYER_ENTERED still uses playerEntered.
     const discoveredEvent: TriggerEvent = { type: TEVENT_DISCOVERED, team: -1, data: 0 };
     const playerEnteredEvent: TriggerEvent = { type: TEVENT_PLAYER_ENTERED, team: -1, data: 0 };
-    const entersZoneEvent: TriggerEvent = { type: TEVENT_ENTERS_ZONE, team: -1, data: 0 };
 
-    // All false when playerEntered=false
-    const stateFalse = createState({ playerEntered: false });
-    expect(checkTriggerEvent(discoveredEvent, stateFalse)).toBe(false);
-    expect(checkTriggerEvent(playerEnteredEvent, stateFalse)).toBe(false);
-    expect(checkTriggerEvent(entersZoneEvent, stateFalse)).toBe(false);
+    // objectDiscovered=true, playerEntered=false
+    const stateDiscOnly = createState({ objectDiscovered: true, playerEntered: false });
+    expect(checkTriggerEvent(discoveredEvent, stateDiscOnly)).toBe(true);
+    expect(checkTriggerEvent(playerEnteredEvent, stateDiscOnly)).toBe(false);
 
-    // All true when playerEntered=true
-    const stateTrue = createState({ playerEntered: true });
-    expect(checkTriggerEvent(discoveredEvent, stateTrue)).toBe(true);
-    expect(checkTriggerEvent(playerEnteredEvent, stateTrue)).toBe(true);
-    expect(checkTriggerEvent(entersZoneEvent, stateTrue)).toBe(true);
+    // playerEntered=true, objectDiscovered=false
+    const stateEnteredOnly = createState({ playerEntered: true, objectDiscovered: false });
+    expect(checkTriggerEvent(discoveredEvent, stateEnteredOnly)).toBe(false);
+    expect(checkTriggerEvent(playerEnteredEvent, stateEnteredOnly)).toBe(true);
   });
 
-  it('event.data is ignored — only playerEntered matters', () => {
-    // C++ DISCOVERED does not use the data parameter; verify arbitrary
-    // data values do not change the result.
+  it('event.data is ignored — only objectDiscovered matters', () => {
+    // C++ DISCOVERED does not use the data parameter in tevent.cpp operator();
+    // the gate check only requires event == TEVENT_DISCOVERED.
     for (const data of [0, 1, 42, 255, -1]) {
       const event: TriggerEvent = { type: TEVENT_DISCOVERED, team: -1, data };
-      expect(checkTriggerEvent(event, createState({ playerEntered: false }))).toBe(false);
-      expect(checkTriggerEvent(event, createState({ playerEntered: true }))).toBe(true);
+      expect(checkTriggerEvent(event, createState({ objectDiscovered: false }))).toBe(false);
+      expect(checkTriggerEvent(event, createState({ objectDiscovered: true }))).toBe(true);
     }
   });
 });
