@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-03-17T04:11Z — Session 155: Comprehensive Damage Formula Testing
+- **New test file**: `cpp-parity-damage-formula.test.ts` — 229 tests covering modifyDamage() across all 9 warheads x 5 armor types x multiple distances.
+- **C++ parity fix (types.ts:modifyDamage)**: Added `Math.floor(distFactor)` to match C++ integer truncation. Without floor, fractional distFactor (0 < df < 1) caused near-miss hits to deal MORE damage than direct hits — violating monotonic falloff. Also added `baseDamage === 0` early return matching C++ combat.cpp:74.
+- **Test coverage**: baseDamage=0 short-circuit, all 45 point-blank combos, distance curves for all 9 warheads, distFactor integer truncation, MinDamage boundary at distFactor=4, MaxDamage cap, distFactor clamping, override parameters, houseBias, rounding, cross-product spot checks, monotonic falloff verification.
+- **All 716 combat tests pass** (229 new + 487 existing). 15 pre-existing failures in unrelated files (hires-icons, ini-parity, unit-crushing, scenario entities).
+
 ## 2026-03-17T02:00Z — Session 154: Building Mission Strategy Improvements
 - **M8 survival defense**: Surplus units now help defend instead of chasing enemies. Win rate improved from ~10% baseline to ~25-30%.
 - **M4 analysis**: Generic strategy can't handle extreme starting conditions (1 JEEP + 1 E1 vs 7 heavy tanks). MCV deploys ~tick 900, first tank at ~tick 4800. Needs dedicated strategy.

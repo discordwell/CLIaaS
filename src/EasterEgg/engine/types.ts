@@ -1048,7 +1048,10 @@ export function modifyDamage(
   baseDamage: number, warhead: WarheadType, armor: ArmorType,
   distPixels: number, houseBias = 1.0, warheadMultOverride?: number, spreadFactorOverride?: number,
 ): number {
-  // Step 1: Warhead vs armor multiplier (combat.cpp:98)
+  // C++ combat.cpp:74 — zero damage short-circuit
+  if (baseDamage === 0) return 0;
+
+  // Step 1: Warhead vs armor multiplier (combat.cpp:98-101)
   const mult = warheadMultOverride ?? getWarheadMultiplier(warhead, armor);
   if (mult <= 0) return 0;
 
@@ -1058,6 +1061,7 @@ export function modifyDamage(
   // C++ converts pixel distance to a factor using SpreadFactor and PIXEL_LEPTON_W.
   // In pixel space: distFactor = distPixels * 2 / SpreadFactor (for SpreadFactor > 0)
   //                 distFactor = distPixels * 4               (for SpreadFactor == 0)
+  // C++ uses integer division — Math.floor matches the truncation behavior.
   const spreadFactor = spreadFactorOverride ?? WARHEAD_META[warhead]?.spreadFactor ?? 1;
   let distFactor: number;
   if (spreadFactor === 0) {
@@ -1065,10 +1069,11 @@ export function modifyDamage(
   } else {
     distFactor = (distPixels * 2) / spreadFactor;
   }
-  distFactor = Math.max(0, Math.min(16, distFactor)); // combat.cpp:117-118
+  distFactor = Math.floor(distFactor);                    // C++ integer truncation (combat.cpp:108-110)
+  distFactor = Math.max(0, Math.min(16, distFactor));     // combat.cpp:112 Bound(distance, 0, 16)
 
   if (distFactor > 0) {
-    damage = damage / distFactor; // combat.cpp:120
+    damage = damage / distFactor; // combat.cpp:114
   }
 
   // Step 3: MinDamage threshold — close enough = at least 1 damage (combat.cpp:122-124)
@@ -1076,7 +1081,7 @@ export function modifyDamage(
     damage = Math.max(damage, 1);
   }
 
-  // Step 4: MaxDamage cap (combat.cpp:126)
+  // Step 4: MaxDamage cap (combat.cpp:127)
   damage = Math.min(damage, MAX_DAMAGE);
 
   return Math.max(0, Math.round(damage));
