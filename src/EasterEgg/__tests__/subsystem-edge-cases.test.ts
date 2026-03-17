@@ -882,7 +882,7 @@ describe('tickRepairs credits exhaustion', () => {
     const powr = makeStructure('POWR', House.Spain, 5, 5, { hp: 200 });
     const ctx = makeRepairSellContext({
       structures: [powr],
-      credits: 1, // barely any credits
+      credits: 0, // no credits
       repairingStructures: new Set([0]),
     });
 
@@ -891,8 +891,8 @@ describe('tickRepairs credits exhaustion', () => {
 
     tickRepairs(ctx);
 
-    // Repair cost per step for POWR: ceil(300 * 0.20 / (400 / 7)) = ceil(60 / 57.14) = ceil(1.05) = 2
-    // We had 1 credit, cost is 2 — insufficient
+    // Repair cost per step for POWR: ceil(300 * 0.25 / (400 / 5)) = ceil(75 / 80) = ceil(0.9375) = 1
+    // We had 0 credits, cost is 1 — insufficient
     expect(ctx.repairingStructures.has(0)).toBe(false);
     expect(evaPlayed).toBe(true);
     expect(powr.hp).toBe(200); // unchanged
@@ -900,7 +900,7 @@ describe('tickRepairs credits exhaustion', () => {
 
   it('repairs one tick then stops when credits are exactly enough for one step', () => {
     const powr = makeStructure('POWR', House.Spain, 5, 5, { hp: 200 });
-    // POWR cost=300, maxHp=400: repairCostPerStep = ceil(300*0.20/(400/7)) = ceil(1.05) = 2
+    // POWR cost=300, maxHp=400: repairCostPerStep = ceil(300*0.25/(400/5)) = ceil(0.9375) = 1
     const cost = repairCostPerStep(300, 400);
     const ctx = makeRepairSellContext({
       structures: [powr],
@@ -1575,13 +1575,13 @@ describe('Fog disabled mode', () => {
 
 describe('repairCostPerStep formula edge cases', () => {
   it('very cheap structure with high HP gives cost of 1', () => {
-    // cost=25 (SBAG), maxHp=256: ceil(25*0.20 / (256/7)) = ceil(5/36.57) = ceil(0.137) = 1
+    // cost=25 (SBAG), maxHp=256: ceil(25*0.25 / (256/5)) = ceil(6.25/51.2) = ceil(0.122) = 1
     expect(repairCostPerStep(25, 256)).toBe(1);
   });
 
   it('expensive structure with low HP gives high per-step cost', () => {
-    // cost=2800 (PDOX), maxHp=400: ceil(2800*0.20 / (400/7)) = ceil(560/57.14) = ceil(9.8) = 10
-    expect(repairCostPerStep(2800, 400)).toBe(10);
+    // cost=2800 (PDOX), maxHp=400: ceil(2800*0.25 / (400/5)) = ceil(700/80) = ceil(8.75) = 9
+    expect(repairCostPerStep(2800, 400)).toBe(9);
   });
 });
 
