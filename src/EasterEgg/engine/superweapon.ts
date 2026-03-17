@@ -107,10 +107,13 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
       state.structureIndex = i;
 
       // Charge: increment if building is alive and powered
+      // C++ house.cpp:1410-1411: powered superweapons are fully suspended
+      // when Power_Fraction() < 1 — binary on/off, no fractional charging
       if (!state.ready && !state.fired) {
-        const chargeRate = (def.requiresPower && isLowPower &&
-          ctx.isAllied(s.house, ctx.playerHouse)) ? 0.25 : 1;
-        state.chargeTick = Math.min(state.chargeTick + chargeRate, def.rechargeTicks);
+        const suspended = def.requiresPower && isLowPower;
+        if (!suspended) {
+          state.chargeTick = Math.min(state.chargeTick + 1, def.rechargeTicks);
+        }
         if (state.chargeTick >= def.rechargeTicks) {
           state.ready = true;
           // EVA announcement for player
@@ -176,8 +179,11 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
     }
     activeBuildings.add(key); // prevent cleanup from deleting spy-granted sonar
     if (!state.ready && !state.fired) {
-      const chargeRate = (isLowPower && ctx.isAllied(state.house as House, ctx.playerHouse)) ? 0.25 : 1;
-      state.chargeTick = Math.min(state.chargeTick + chargeRate, SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks);
+      // C++ house.cpp:1410-1411: powered superweapons fully suspend at low power
+      const suspended = isLowPower;
+      if (!suspended) {
+        state.chargeTick = Math.min(state.chargeTick + 1, SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks);
+      }
       if (state.chargeTick >= SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks) {
         state.ready = true;
         if (ctx.isAllied(state.house as House, ctx.playerHouse)) {

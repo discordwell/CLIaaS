@@ -11,6 +11,7 @@ import {
   armorIndex, worldDist, worldToCell, modifyDamage,
   directionTo, calcProjectileTravelFrames,
   House, Mission, AnimState, EXPLOSION_FRAMES,
+  DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
 } from './types';
 import { type Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED } from './scenario';
@@ -180,32 +181,104 @@ export function damageEntity(
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
   const killed = target.takeDamage(amount, warhead, attacker, whProps);
   if (target.triggerName) ctx.attackedTriggerNames.add(target.triggerName);
-  if (!killed && target.alive) aiScatterOnDamage(ctx, target);
+  if (!killed && target.alive) aiScatterOnDamage(ctx, target, attacker);
   return killed;
 }
 
-/** AI scatter — idle AI units move to random adjacent cell when attacked (IQ >= 2, C++ techno.cpp) */
-export function aiScatterOnDamage(ctx: CombatContext, entity: Entity): void {
+/**
+ * AI scatter — infantry scatter per C++ infantry.cpp:1852-1929 (InfantryClass::Scatter).
+ *
+ * Key C++ behaviors:
+ *  - Called with forced=true from TakeDamage (C++ techno.cpp)
+ *  - IsDriving (already moving) → forced=false (line 1860)
+ *  - MissionControl[mission].isScatter must be true OR forced (line 1866)
+ *  - If not IsFraidyCat AND has valid combat target AND not forced → skip (line 1872)
+ *  - Must be forced OR IsFraidyCat to actually execute scatter (line 1885)
+ *  - Calculate direction AWAY from threat with random +-2 facing offset
+ *  - Try 8 directions starting from away-direction, pick first passable cell
+ *  - Only infantry scatters directionally (non-infantry uses old random scatter)
+ */
+export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?: Entity): void {
+  // Player units don't AI-scatter (C++ infantry.cpp:1883 — human house check)
   if (entity.isPlayerUnit) return;
-  if (entity.mission !== Mission.GUARD && entity.mission !== Mission.AREA_GUARD) return;
 
+  // AI IQ gate (C++ techno.cpp scatter requires IQ >= 2)
   if (ctx.aiIQ(entity.house) < 2) return;
 
-  // Move to random adjacent cell
-  const dx = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
-  const dy = Math.floor(Math.random() * 3) - 1;
-  if (dx === 0 && dy === 0) return;
+  // Only infantry uses directional scatter (C++ infantry.cpp override)
+  if (!entity.stats.isInfantry) {
+    // Non-infantry: old random scatter for guard/area_guard missions only
+    if (entity.mission !== Mission.GUARD && entity.mission !== Mission.AREA_GUARD) return;
+    const dx = Math.floor(Math.random() * 3) - 1;
+    const dy = Math.floor(Math.random() * 3) - 1;
+    if (dx === 0 && dy === 0) return;
+    const targetX = entity.pos.x + dx * CELL_SIZE;
+    const targetY = entity.pos.y + dy * CELL_SIZE;
+    const tcx = Math.floor(targetX / CELL_SIZE);
+    const tcy = Math.floor(targetY / CELL_SIZE);
+    if (!ctx.map.isPassable(tcx, tcy)) return;
+    entity.moveTarget = { x: targetX, y: targetY };
+    entity.mission = Mission.MOVE;
+    return;
+  }
 
-  const targetX = entity.pos.x + dx * CELL_SIZE;
-  const targetY = entity.pos.y + dy * CELL_SIZE;
+  // ── Infantry directional scatter (C++ infantry.cpp:1852-1929) ──
 
-  // Check passability
-  const tcx = Math.floor(targetX / CELL_SIZE);
-  const tcy = Math.floor(targetY / CELL_SIZE);
-  if (!ctx.map.isPassable(tcx, tcy)) return;
+  // C++ infantry.cpp:1860 — IsDriving: already moving → forced becomes false
+  // TakeDamage calls Scatter(threat, true), so forced starts as true
+  let forced = true;
+  if (entity.moveTarget !== null) forced = false;
 
-  entity.moveTarget = { x: targetX, y: targetY };
-  entity.mission = Mission.MOVE;
+  // C++ infantry.cpp:1866 — mission must allow scatter (MissionControl[Mission].IsScatter)
+  const mc = MISSION_CONTROL[entity.mission];
+  if (mc && !mc.isScatter && !forced) return;
+
+  // C++ infantry.cpp:1872 — non-FraidyCat with valid combat target doesn't scatter (unless forced)
+  if (!entity.stats.isFraidyCat && entity.target !== null && !forced) return;
+
+  // C++ infantry.cpp:1885 — must be forced OR IsFraidyCat to actually scatter
+  if (!forced && !entity.stats.isFraidyCat) return;
+
+  // Calculate scatter direction (C++ infantry.cpp:1888-1900)
+  let awayDir: number;
+  if (attacker) {
+    // C++ infantry.cpp:1889 — Dir_Facing(Direction8(threat, Coord))
+    // Direction from threat to infantry = away from threat
+    awayDir = directionTo(attacker.pos, entity.pos);
+  } else {
+    // No threat source — use entity's current facing (C++ infantry.cpp:1897)
+    awayDir = entity.facing;
+  }
+
+  // C++ infantry.cpp:1890 — Random_Pick(0,4)-2 → random +-2 facing offset
+  const offset = Math.floor(Math.random() * 5) - 2; // -2, -1, 0, 1, or 2
+  awayDir = ((awayDir + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
+
+  // C++ infantry.cpp:1905-1915 — try 8 directions starting from away-direction
+  const entityCX = Math.floor(entity.pos.x / CELL_SIZE);
+  const entityCY = Math.floor(entity.pos.y / CELL_SIZE);
+
+  let bestCell: { cx: number; cy: number } | null = null;
+  for (let face = 0; face < DIR_COUNT; face++) {
+    const newFace = (awayDir + face) % DIR_COUNT;
+    const ncx = entityCX + DIR_DX[newFace];
+    const ncy = entityCY + DIR_DY[newFace];
+
+    if (ncx >= 0 && ncx < MAP_CELLS && ncy >= 0 && ncy < MAP_CELLS &&
+        ctx.map.isPassable(ncx, ncy)) {
+      bestCell = { cx: ncx, cy: ncy };
+      break; // C++ infantry.cpp:1911 — take first passable cell
+    }
+  }
+
+  // C++ infantry.cpp:1924-1927 — assign MOVE mission to best cell
+  if (bestCell) {
+    entity.moveTarget = {
+      x: bestCell.cx * CELL_SIZE + CELL_SIZE / 2,
+      y: bestCell.cy * CELL_SIZE + CELL_SIZE / 2,
+    };
+    entity.mission = Mission.MOVE;
+  }
 }
 
 /** Fire weapon at entity target (helper for aircraft) — uses full damage pipeline */

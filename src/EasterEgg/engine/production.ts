@@ -1,7 +1,7 @@
 /**
  * Production queue subsystem — extracted from Game class (index.ts).
  * Handles building/unit production: availability checks, queue management,
- * incremental cost deduction, multi-factory speedup, and unit spawning.
+ * incremental cost deduction, and unit spawning.
  */
 
 import {
@@ -140,12 +140,17 @@ export function cancelProduction(ctx: ProductionContext, category: string): void
 /** Advance production queues each tick.
  *  PR3: C++ incremental cost — deducts costPerTick each tick; pauses if insufficient funds. */
 export function tickProduction(ctx: ProductionContext): void {
-  // Continuous power penalty (C++ parity): multiplier = powerFraction, clamped to [0.5, 1.0]
-  // At 100%+ power: normal speed. At 50% power: 2x slower. Below 50%: capped at 2x slower.
+  // Continuous power penalty (C++ parity): multiplier = powerFraction, clamped to [1/16, 1.0]
+  // C++ factory.cpp:434: rate = time / Bound(Power_Fraction(), fixed(1,16), fixed(1))
+  // At 100%+ power: normal speed. At 50% power: 2x slower. At 0% power: 16x slower.
   let powerMult = 1.0;
-  if (ctx.powerConsumed > ctx.powerProduced && ctx.powerProduced > 0) {
-    const powerFraction = ctx.powerProduced / ctx.powerConsumed;
-    powerMult = Math.max(0.5, powerFraction);
+  if (ctx.powerConsumed > ctx.powerProduced) {
+    if (ctx.powerProduced <= 0) {
+      powerMult = 1 / 16; // C++ Bound(0, fixed(1,16), fixed(1)) = 1/16
+    } else {
+      const powerFraction = ctx.powerProduced / ctx.powerConsumed;
+      powerMult = Math.max(1 / 16, powerFraction);
+    }
   }
   for (const [category, entry] of ctx.productionQueue) {
     // Check prerequisite still exists
@@ -167,10 +172,13 @@ export function tickProduction(ctx: ProductionContext): void {
         continue;
       }
     }
-    // Multi-factory linear speedup (C++ parity): N factories = Nx speed
-    const factoryCount = countPlayerBuildings(ctx.structures, entry.item.prerequisite, ctx.playerHouse, ctx.isAllied);
-    const speedMult = Math.max(1, factoryCount);
-    entry.progress += speedMult * powerMult;
+    // C++ parity (factory.cpp:206): each factory is an independent FactoryClass
+    // object. The AI() loop runs exactly once per tick per factory:
+    //   for (int index = 0; index < 1; index++) { ... }
+    // Multiple factories let you build multiple items simultaneously (separate
+    // queues), but do NOT speed up a single item's production. Progress
+    // advances by 1 per tick regardless of how many factories the player owns.
+    entry.progress += powerMult;
     if (entry.progress >= entry.item.buildTime) {
       // Build complete
       if (entry.item.isStructure) {

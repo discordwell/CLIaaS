@@ -85,10 +85,14 @@ export function calculatePowerGrid(
 }
 
 /** Calculate power production multiplier for tick-based systems.
- *  At 100%+ power: 1.0. At <100%: powerFraction clamped to [0.5, 1.0]. */
+ *  C++ factory.cpp:434: rate = time / Bound(Power_Fraction(), fixed(1,16), fixed(1))
+ *  C++ house.cpp:4160: Power_Fraction() returns Power/Drain (or 0 if no power).
+ *  At 100%+ power: 1.0. At <100%: powerFraction clamped to [1/16, 1.0].
+ *  At 0% power: clamped to 1/16 (0.0625) = 16x slower production. */
 export function powerMultiplier(produced: number, consumed: number): number {
-  if (consumed <= produced || produced <= 0) return 1.0;
-  return Math.max(0.5, produced / consumed);
+  if (consumed <= 0 || consumed <= produced) return 1.0;
+  if (produced <= 0) return 1 / 16; // C++ Bound(0, fixed(1,16), fixed(1)) = 1/16
+  return Math.max(1 / 16, produced / consumed);
 }
 
 /** Calculate silo storage capacity from structures.

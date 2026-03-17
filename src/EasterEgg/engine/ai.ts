@@ -26,6 +26,10 @@ import { type GameMap, Terrain } from './map';
 export interface AIHouseState {
   house: House;
   phase: 'economy' | 'buildup' | 'attack';
+  /** C++ STATE_BROKE — money < 25, stops construction (house.cpp:4754) */
+  broke: boolean;
+  /** C++ STATE_ENDGAME — no production buildings left, fire-sale + all-hunt (house.cpp:4749) */
+  endgame: boolean;
   productionEnabled: boolean;
   buildQueue: string[];
   lastBuildTick: number;
@@ -270,6 +274,8 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
   return {
     house,
     phase: 'economy',
+    broke: false,
+    endgame: false,
     productionEnabled: false,
     buildQueue: [],
     lastBuildTick: 0,
@@ -295,68 +301,300 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
   };
 }
 
-/** Generate priority-ordered build queue for AI house */
-export function getAIBuildOrder(ctx: AIContext, house: House, _state: AIHouseState): string[] {
-  const queue: string[] = [];
-  const faction = HOUSE_FACTION[house] ?? 'both';
+// ── Urgency-ranked building system (C++ house.cpp:5434-5773 AI_Building) ──
+
+/**
+ * C++ UrgencyType enum — determines build priority.
+ * Higher urgency wins when multiple candidates compete.
+ * Source: house.h UrgencyType enum
+ */
+export enum UrgencyType {
+  URGENCY_NONE     = 0,
+  URGENCY_LOW      = 1,
+  URGENCY_MEDIUM   = 2,
+  URGENCY_HIGH     = 3,
+  URGENCY_CRITICAL = 4,
+}
+
+/** C++ BuildChoiceClass — pairs a structure type with its urgency */
+export interface BuildChoice {
+  urgency: UrgencyType;
+  structure: string;
+}
+
+/**
+ * C++ rules.ini AI ratio/limit defaults (rules.cpp:104-121).
+ * Ratios are fractions of CurBuildings; limits are hard caps.
+ */
+export const AI_BUILD_RULES = {
+  refineryRatio:  0.16,
+  refineryLimit:  4,
+  barracksRatio:  0.16,
+  barracksLimit:  2,
+  warRatio:       0.10,
+  warLimit:       2,
+  defenseRatio:   0.50,
+  defenseLimit:   40,
+  aaRatio:        0.14,
+  aaLimit:        10,
+  teslaRatio:     0.16,
+  teslaLimit:     10,
+  helipadRatio:   0.12,
+  helipadLimit:   5,
+  airstripRatio:  0.12,
+  airstripLimit:  5,
+  powerSurplus:   50,
+  baseSizeAdd:    3,
+};
+
+/** Count alive enemy aircraft across all non-allied houses (C++ house.cpp:5620-5633) */
+export function aiCountEnemyAircraft(ctx: AIContext, house: House): number {
+  let count = 0;
+  for (const e of ctx.entities) {
+    if (!e.alive || e.house === house) continue;
+    if (ctx.isAllied(house, e.house)) continue;
+    if (e.stats.isAircraft) count++;
+  }
+  return count;
+}
+
+/** Check if any non-allied house has aircraft (C++ AScan check, house.cpp:5622) */
+export function aiEnemyHasAircraft(ctx: AIContext, house: House): boolean {
+  for (const e of ctx.entities) {
+    if (!e.alive || e.house === house) continue;
+    if (ctx.isAllied(house, e.house)) continue;
+    if (e.stats.isAircraft) return true;
+  }
+  return false;
+}
+
+/** Count all alive structures for a house (used as CurBuildings in C++) */
+export function aiCountAllStructures(ctx: AIContext, house: House): number {
+  let count = 0;
+  for (const s of ctx.structures) {
+    if (s.alive && s.house === house) count++;
+  }
+  return count;
+}
+
+/** C++ Round_Up equivalent — round to nearest integer, but at least 1 for positive inputs */
+function roundUp(value: number): number {
+  return Math.max(1, Math.ceil(value));
+}
+
+/** Power fraction >= 1 means power >= drain (C++ Power_Fraction()) */
+function powerFractionOk(ctx: AIContext, house: House): boolean {
   const produced = aiPowerProduced(ctx, house);
   const consumed = aiPowerConsumed(ctx, house);
-  const credits = ctx.houseCredits.get(house) ?? 0;
+  return consumed === 0 || produced >= consumed;
+}
 
-  // 1. POWR if power deficit
-  if (consumed >= produced) {
-    queue.push('POWR');
-  }
-  // 2. TENT/BARR if none (need infantry production)
-  if (!aiHasPrereq(ctx, house, 'TENT')) {
-    queue.push('TENT');
-  }
-  // 3. PROC if < 2 refineries (need economy)
-  if (aiCountStructure(ctx, house, 'PROC') < 2) {
-    queue.push('PROC');
-  }
-  // 4. WEAP if none (need vehicle production)
-  if (aiCountStructure(ctx, house, 'WEAP') === 0) {
-    queue.push('WEAP');
-  }
-  // 5. POWR if power margin < 100 (preemptive)
-  if (produced - consumed < 100 && !queue.includes('POWR')) {
-    queue.push('POWR');
-  }
-  // 6. DOME if none and credits > 1000 (tech unlock)
-  if (aiCountStructure(ctx, house, 'DOME') === 0 && credits > 1000) {
-    queue.push('DOME');
-  }
-  // 7. Defense structures (faction-dependent)
-  const defType = faction === 'soviet' ? 'TSLA' : 'GUN';
-  const defType2 = faction === 'soviet' ? 'TSLA' : 'HBOX';
-  const totalDef = aiCountStructure(ctx, house, defType) + aiCountStructure(ctx, house, defType2);
-  if (totalDef < 2) {
-    queue.push(defType);
-  }
-  // 8. Tech center if none and has DOME
-  if (aiHasPrereq(ctx, house, 'DOME')) {
-    const techType = faction === 'soviet' ? 'STEK' : 'ATEK';
-    if (aiCountStructure(ctx, house, techType) === 0) {
-      queue.push(techType);
+/**
+ * Generate priority-ordered build queue for AI house using urgency-ranked scoring.
+ *
+ * C++ parity: house.cpp:5434-5773 AI_Building()
+ * Each candidate building type is scored with an UrgencyType. Multiple candidates
+ * accumulate, then they are sorted by urgency (highest first). The caller pops
+ * items from the front of the returned array.
+ *
+ * Key differences from the old sequential system:
+ * - Uses ratio/limit params from rules.ini defaults
+ * - APWR preferred over POWR when available
+ * - AA defense only when enemy has aircraft
+ * - Kennel (max 1), Gap Generator (max 1)
+ * - Tesla requires power fraction >= 1
+ * - Tech center max 1, requires power
+ * - Helipad/Airstrip ratio-based, urgency boosted by enemy aircraft count
+ */
+export function getAIBuildOrder(ctx: AIContext, house: House, _state: AIHouseState): string[] {
+  const choices: BuildChoice[] = [];
+  const faction: Faction = HOUSE_FACTION[house] ?? 'both';
+  const money = ctx.houseCredits.get(house) ?? 0;
+  const produced = aiPowerProduced(ctx, house);
+  const consumed = aiPowerConsumed(ctx, house);
+  const curBuildings = aiCountAllStructures(ctx, house);
+  const refineryCount = aiCountStructure(ctx, house, 'PROC');
+  const hasIncome = refineryCount > 0 && _state.harvesterCount > 0;
+  const rules = AI_BUILD_RULES;
+
+  // ── Power (C++ house.cpp:5482-5496) ──
+  // Try APWR first, fallback to POWR. Urgency: MEDIUM if has refinery, LOW if not.
+  if (produced <= consumed + rules.powerSurplus) {
+    const powerUrgency = refineryCount === 0 ? UrgencyType.URGENCY_LOW : UrgencyType.URGENCY_MEDIUM;
+    // Prefer APWR if faction can build it (allied or both with tech)
+    if (faction !== 'soviet' && aiHasPrereq(ctx, house, 'POWR')) {
+      choices.push({ urgency: powerUrgency, structure: 'APWR' });
+    } else {
+      choices.push({ urgency: powerUrgency, structure: 'POWR' });
     }
   }
-  // 9. Air production if has tech center
-  const hasTech = faction === 'soviet'
-    ? aiHasPrereq(ctx, house, 'STEK')
-    : aiHasPrereq(ctx, house, 'ATEK');
-  if (hasTech) {
-    const airType = faction === 'soviet' ? 'AFLD' : 'HPAD';
-    if (aiCountStructure(ctx, house, airType) === 0) {
-      queue.push(airType);
+
+  // ── Refinery (C++ house.cpp:5501-5510) ──
+  // Uses RefineryRatio * CurBuildings, capped by RefineryLimit
+  {
+    const current = refineryCount;
+    if (current < roundUp(rules.refineryRatio * curBuildings) && current < rules.refineryLimit) {
+      if (money > 2000 || hasIncome) {
+        const urgency = current === 0 ? UrgencyType.URGENCY_HIGH : UrgencyType.URGENCY_MEDIUM;
+        choices.push({ urgency, structure: 'PROC' });
+      }
     }
   }
-  // 10. Extra PROC if harvester count > refinery count
-  if (_state.harvesterCount > _state.refineryCount) {
-    queue.push('PROC');
+
+  // ── Barracks / Tent (C++ house.cpp:5516-5533) ──
+  // Counts both BARR and TENT. Uses BarracksRatio, BarracksLimit.
+  {
+    const current = aiCountStructure(ctx, house, 'BARR') + aiCountStructure(ctx, house, 'TENT');
+    if (current < roundUp(rules.barracksRatio * curBuildings) && current < rules.barracksLimit && (money > 300 || hasIncome)) {
+      const urgency = current > 0 ? UrgencyType.URGENCY_LOW : UrgencyType.URGENCY_MEDIUM;
+      // Soviet builds TENT, Allied builds BARR
+      const barracksType = faction === 'soviet' ? 'TENT' : 'BARR';
+      choices.push({ urgency, structure: barracksType });
+    }
   }
 
-  return queue;
+  // ── Kennel (C++ house.cpp:5537-5547) ──
+  // Max 1, soviet only
+  if (faction === 'soviet') {
+    const current = aiCountStructure(ctx, house, 'KENN');
+    if (current < 1 && (money > 300 || hasIncome)) {
+      choices.push({ urgency: UrgencyType.URGENCY_MEDIUM, structure: 'KENN' });
+    }
+  }
+
+  // ── Gap Generator (C++ house.cpp:5552-5561) ──
+  // Max 1, requires power fraction >= 1 and income
+  if (faction !== 'soviet') {
+    const current = aiCountStructure(ctx, house, 'GAP');
+    if (current < 1 && powerFractionOk(ctx, house) && hasIncome) {
+      choices.push({ urgency: UrgencyType.URGENCY_MEDIUM, structure: 'GAP' });
+    }
+  }
+
+  // ── War Factory (C++ house.cpp:5567-5576) ──
+  // Uses WarRatio, WarLimit. Needs money > 2000 or income.
+  {
+    const current = aiCountStructure(ctx, house, 'WEAP');
+    if (current < roundUp(rules.warRatio * curBuildings) && current < rules.warLimit && (money > 2000 || hasIncome)) {
+      const urgency = current > 0 ? UrgencyType.URGENCY_LOW : UrgencyType.URGENCY_MEDIUM;
+      choices.push({ urgency, structure: 'WEAP' });
+    }
+  }
+
+  // ── Base Defense (C++ house.cpp:5580-5608) ──
+  // Counts PBOX + HBOX + GUN + FTUR. Uses DefenseRatio, DefenseLimit.
+  // Tries FTUR first (soviet), then PBOX/GUN (allied, random choice in C++).
+  {
+    const current = aiCountStructure(ctx, house, 'PBOX') +
+                    aiCountStructure(ctx, house, 'HBOX') +
+                    aiCountStructure(ctx, house, 'GUN') +
+                    aiCountStructure(ctx, house, 'FTUR');
+    if (current < roundUp(rules.defenseRatio * curBuildings) && current < rules.defenseLimit) {
+      if (faction === 'soviet') {
+        if (money > 600 || hasIncome) {
+          choices.push({ urgency: UrgencyType.URGENCY_MEDIUM, structure: 'FTUR' });
+        }
+      } else {
+        // Allied: alternate between PBOX and GUN (C++ uses Percent_Chance(50))
+        const defChoice = (current % 2 === 0) ? 'PBOX' : 'GUN';
+        if (money > 600 || hasIncome) {
+          choices.push({ urgency: UrgencyType.URGENCY_MEDIUM, structure: defChoice });
+        }
+      }
+    }
+  }
+
+  // ── AA Defense (C++ house.cpp:5610-5663) ──
+  // Only if enemy has aircraft. Uses AARatio, AALimit.
+  // Also builds radar (DOME) if needed for AA.
+  {
+    const current = aiCountStructure(ctx, house, 'SAM') + aiCountStructure(ctx, house, 'AGUN');
+    if (current < roundUp(rules.aaRatio * curBuildings) && current < rules.aaLimit) {
+      const enemyHasAir = aiEnemyHasAircraft(ctx, house);
+      if (enemyHasAir) {
+        const enemyAirCount = aiCountEnemyAircraft(ctx, house);
+
+        // Build radar first if we don't have one (C++ house.cpp:5638-5646)
+        if (aiCountStructure(ctx, house, 'DOME') === 0) {
+          if (money > 1000 || hasIncome) {
+            choices.push({ urgency: UrgencyType.URGENCY_HIGH, structure: 'DOME' });
+          }
+        }
+
+        // Soviet builds SAM, Allied builds AGUN
+        const aaType = faction === 'soviet' ? 'SAM' : 'AGUN';
+        const aaUrgency = current < enemyAirCount ? UrgencyType.URGENCY_HIGH : UrgencyType.URGENCY_MEDIUM;
+        if (money > 750 || hasIncome) {
+          choices.push({ urgency: aaUrgency, structure: aaType });
+        }
+      }
+    }
+  }
+
+  // ── Tesla Coil (C++ house.cpp:5669-5678) ──
+  // Soviet only. Uses TeslaRatio, TeslaLimit. Requires power fraction >= 1.
+  if (faction === 'soviet') {
+    const current = aiCountStructure(ctx, house, 'TSLA');
+    if (current < roundUp(rules.teslaRatio * curBuildings) && current < rules.teslaLimit) {
+      if ((money > 1500 || hasIncome) && powerFractionOk(ctx, house)) {
+        choices.push({ urgency: UrgencyType.URGENCY_MEDIUM, structure: 'TSLA' });
+      }
+    }
+  }
+
+  // ── Tech Center (C++ house.cpp:5683-5700) ──
+  // Max 1 (ATEK + STEK combined). Requires power fraction >= 1.
+  {
+    const current = aiCountStructure(ctx, house, 'ATEK') + aiCountStructure(ctx, house, 'STEK');
+    if (current < 1) {
+      const techType = faction === 'soviet' ? 'STEK' : 'ATEK';
+      if ((money > 1500 || hasIncome) && powerFractionOk(ctx, house)) {
+        choices.push({ urgency: UrgencyType.URGENCY_MEDIUM, structure: techType });
+      }
+    }
+  }
+
+  // ── Helipad (C++ house.cpp:5705-5719) ──
+  // Uses HelipadRatio, HelipadLimit. Urgency boosted if enemy has more aircraft.
+  {
+    const current = aiCountStructure(ctx, house, 'HPAD');
+    if (current < roundUp(rules.helipadRatio * curBuildings) && current < rules.helipadLimit) {
+      if (money > 1500 || hasIncome) {
+        const enemyAirCount = aiCountEnemyAircraft(ctx, house);
+        // Count our aircraft
+        let ourAircraft = 0;
+        for (const e of ctx.entities) {
+          if (e.alive && e.house === house && e.stats.isAircraft) ourAircraft++;
+        }
+        const urgency = ourAircraft < enemyAirCount ? UrgencyType.URGENCY_HIGH : UrgencyType.URGENCY_MEDIUM;
+        choices.push({ urgency, structure: 'HPAD' });
+      }
+    }
+  }
+
+  // ── Airstrip (C++ house.cpp:5724-5738) ──
+  // Soviet. Uses AirstripRatio, AirstripLimit. Urgency boosted if enemy has more aircraft.
+  if (faction === 'soviet') {
+    const current = aiCountStructure(ctx, house, 'AFLD');
+    if (current < roundUp(rules.airstripRatio * curBuildings) && current < rules.airstripLimit) {
+      if (money > 600 || hasIncome) {
+        const enemyAirCount = aiCountEnemyAircraft(ctx, house);
+        let ourAircraft = 0;
+        for (const e of ctx.entities) {
+          if (e.alive && e.house === house && e.stats.isAircraft) ourAircraft++;
+        }
+        const urgency = ourAircraft < enemyAirCount ? UrgencyType.URGENCY_HIGH : UrgencyType.URGENCY_MEDIUM;
+        choices.push({ urgency, structure: 'AFLD' });
+      }
+    }
+  }
+
+  // ── Pick highest urgency (C++ house.cpp:5759-5769) ──
+  // Sort all choices by urgency descending, return as ordered queue.
+  // C++ picks only the single best; we return a sorted list so the caller
+  // can fall through if placement fails.
+  choices.sort((a, b) => b.urgency - a.urgency);
+  return choices.filter(c => c.urgency > UrgencyType.URGENCY_NONE).map(c => c.structure);
 }
 
 /** Spiral scan outward from base center to find valid placement for a structure */
@@ -589,6 +827,65 @@ export function updateBaseRebuild(ctx: AIContext): void {
   }
 }
 
+/**
+ * C++ Fire_Sale() — house.cpp:7322
+ * Sell all buildings owned by this house. Returns true if any buildings were sold.
+ */
+export function aiFireSale(ctx: AIContext, house: House): boolean {
+  let sold = false;
+  for (const s of ctx.structures) {
+    if (!s.alive || s.house !== house) continue;
+    // C++ sells back every building: b->Sell_Back(1)
+    // In TS, we mark as dead/rubble and give partial refund
+    const prodItem = ctx.scenarioProductionItems.find(p => p.type === s.type && p.isStructure);
+    if (prodItem) {
+      const hpRatio = s.hp / s.maxHp;
+      const refund = Math.floor(prodItem.cost * 0.5 * hpRatio);
+      const current = ctx.houseCredits.get(house) ?? 0;
+      ctx.houseCredits.set(house, current + refund);
+    }
+    s.alive = false;
+    s.rubble = true;
+    ctx.clearStructureFootprint(s);
+    sold = true;
+  }
+  return sold;
+}
+
+/**
+ * C++ Do_All_To_Hunt() — house.cpp:7354
+ * Send all units and infantry of this house on HUNT mission.
+ */
+export function aiDoAllToHunt(ctx: AIContext, house: House): void {
+  for (const e of ctx.entities) {
+    if (!e.alive || e.house !== house) continue;
+    // C++ removes from team first, then assigns MISSION_HUNT
+    e.mission = Mission.HUNT;
+  }
+}
+
+/**
+ * C++ Check_Fire_Sale() — house.cpp:4976
+ * Check if AI has lost all production buildings (no ConYard, no Barracks/Tent,
+ * no War Factory, no Helipad, no Airstrip). If so, trigger endgame.
+ * Per C++: only triggers when State != STATE_ATTACKED and CurBuildings > 0.
+ */
+export function aiCheckEndgame(ctx: AIContext, house: House): boolean {
+  const productionTypes = ['FACT', 'TENT', 'BARR', 'WEAP', 'HPAD', 'AFLD'];
+  let hasBuildings = false;
+  let hasProductionBuilding = false;
+  for (const s of ctx.structures) {
+    if (!s.alive || s.house !== house) continue;
+    hasBuildings = true;
+    if (productionTypes.includes(s.type)) {
+      hasProductionBuilding = true;
+      break;
+    }
+  }
+  // C++: CurBuildings > 0 && no production buildings => fire sale
+  return hasBuildings && !hasProductionBuilding;
+}
+
 /** AI strategic planner -- phase transitions every 150 ticks (~10s) */
 export function updateAIStrategicPlanner(ctx: AIContext): void {
   if (ctx.tick % 150 !== 0) return;
@@ -610,6 +907,32 @@ export function updateAIStrategicPlanner(ctx: AIContext): void {
 
     if (state.underAttack && ctx.tick - state.lastBaseAttackTick > 150) {
       state.underAttack = false;
+    }
+
+    // ── C++ Expert_AI state machine (house.cpp:4749-4769) ──────────────
+    // ENDGAME: no production buildings left → fire-sale + all-hunt
+    if (state.endgame) {
+      aiFireSale(ctx, house);
+      aiDoAllToHunt(ctx, house);
+      continue; // Skip normal phase transitions
+    }
+
+    // Check for endgame trigger: lost all production buildings
+    // C++ Check_Fire_Sale (house.cpp:4976): not in ATTACKED state + has buildings + no factories
+    if (!state.underAttack && aiCheckEndgame(ctx, house)) {
+      state.endgame = true;
+      aiFireSale(ctx, house);
+      aiDoAllToHunt(ctx, house);
+      continue;
+    }
+
+    // BROKE state: money < 25 stops building (house.cpp:4753-4761)
+    const money = ctx.houseCredits.get(house) ?? 0;
+    if (!state.broke && money < 25) {
+      state.broke = true;
+    }
+    if (state.broke && money >= 25) {
+      state.broke = false;
     }
 
     switch (state.phase) {
@@ -645,6 +968,10 @@ export function updateAIConstruction(ctx: AIContext): void {
   for (const [house, state] of ctx.aiStates) {
     if (!state.productionEnabled) continue;
     if (state.iq < 1) continue;
+    // C++ STATE_BROKE: stop building suggestions (house.cpp:4754-4756)
+    if (state.broke) continue;
+    // C++ STATE_ENDGAME: no construction in endgame
+    if (state.endgame) continue;
     if (aiCountStructure(ctx, house, 'FACT') === 0) continue;
 
     if (state.maxBuilding >= 0) {
