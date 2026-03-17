@@ -737,7 +737,7 @@ export function findPathAStar(
   goal: CellPos,
   ignoreOccupancy = false,
   naval = false,
-  speedClass: SpeedClass = SpeedClass.WHEEL,
+  _speedClass: SpeedClass = SpeedClass.WHEEL,
   isMoving?: (entityId: number) => boolean,
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
@@ -813,8 +813,11 @@ export function findPathAStar(
         }
       }
 
-      const speedMult = map.getSpeedMultiplier(nx, ny, speedClass);
-      let moveCost = Math.round(((dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST) / speedMult);
+      // C++ findpath.cpp Passable_Cell (line 1284-1292): flat costs by blockage type only.
+      // Speed multipliers are NOT used for path selection — only for actual movement
+      // speed in drive.cpp. This ensures paths match C++ which picks shortest passable
+      // route regardless of terrain speed.
+      let moveCost = (dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST;
       if (moveResult === MoveResult.TEMP_BLOCKED) moveCost += 50;
       const g = current.g + moveCost;
 
