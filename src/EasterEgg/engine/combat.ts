@@ -112,6 +112,10 @@ export interface CombatContext {
   minimapAlert(cx: number, cy: number): void;
   movementSpeed(entity: Entity): number;
   getFirepowerBias(house: House): number;
+  /** C++ house.cpp:292,302: ArmorBias — difficulty-scaled damage resistance */
+  getArmorBias(house: House): number;
+  /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
+  getROFBias(house: House): number;
   damageStructure(s: MapStructure, damage: number): boolean;
   aiIQ(house: House): number;
   warheadMuzzleColor(warhead: string): string;
@@ -184,11 +188,18 @@ function scatterInfantry(ctx: CombatContext, victim: Entity, attackerPos: WorldP
 
 // ── Mutating Functions ─────────────────────────────────────────────────────────
 
-/** Apply damage to entity, track triggers, scatter idle AI units on hit */
+/** Apply damage to entity, track triggers, scatter idle AI units on hit.
+ *  C++ house.cpp:292,302: ArmorBias — difficulty-scaled damage resistance applied here. */
 export function damageEntity(
   ctx: CombatContext, target: Entity, amount: number,
   warhead: WarheadType, attacker?: Entity,
 ): boolean {
+  // C++ parity: apply house-level armor bias from difficulty (house.cpp:292,302)
+  // ArmorBias > 1 = tougher (less damage), < 1 = weaker (more damage)
+  const houseArmorBias = ctx.getArmorBias(target.house);
+  if (houseArmorBias !== 1.0 && amount > 0) {
+    amount = Math.max(1, Math.round(amount / houseArmorBias));
+  }
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
   const killed = target.takeDamage(amount, warhead, attacker, whProps);
   if (target.triggerName) ctx.attackedTriggerNames.add(target.triggerName);
@@ -1168,11 +1179,13 @@ export function updateStructureCombat(ctx: CombatContext): void {
         s.desiredTurretDir = directionTo(structPos, bestTarget.pos);
       }
       // H1: Buildings with Ammo>1 fire rapidly (1-tick rearm) then recharge (C++ techno.cpp:2861)
+      // C++ house.cpp:293,303: ROFBias scales rearm delay
+      const structRofBias = ctx.getROFBias(s.house);
       if (s.ammo > 0) {
         s.ammo--;
-        s.attackCooldown = s.ammo > 0 ? 1 : s.weapon.rof; // rapid-fire until last shot
+        s.attackCooldown = s.ammo > 0 ? 1 : Math.max(1, Math.round(s.weapon.rof * structRofBias)); // rapid-fire until last shot
       } else {
-        s.attackCooldown = s.weapon.rof; // unlimited ammo (-1) uses normal ROF
+        s.attackCooldown = Math.max(1, Math.round(s.weapon.rof * structRofBias)); // unlimited ammo (-1) uses normal ROF
       }
       if (TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
       // CF1: Apply C++ Modify_Damage — structure direct hit at distance 0

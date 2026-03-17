@@ -128,6 +128,48 @@ export function revealAroundCell(map: GameMap, cx: number, cy: number, radius: n
 }
 
 /**
+ * Reveal all cells connected to (cx, cy) via passable terrain (BFS flood fill).
+ * C++ parity: TACTION_REVEAL_ZONE reveals every cell sharing the same
+ * Zones[MZONE_CRUSHER] as the waypoint cell (taction.cpp lines 445-456).
+ * Since MZONE_CRUSHER represents crusher-class passability, a BFS through
+ * passable terrain from the waypoint is functionally equivalent.
+ */
+export function revealZoneFloodFill(map: GameMap, cx: number, cy: number): void {
+  // If the starting cell itself is not passable, nothing to reveal
+  if (!map.isPassable(cx, cy)) return;
+
+  const visited = new Uint8Array(MAP_CELLS * MAP_CELLS);
+  const queue: number[] = [];
+  const startIdx = cy * MAP_CELLS + cx;
+  visited[startIdx] = 1;
+  queue.push(startIdx);
+
+  // 4-directional flood fill (N, S, E, W) — matches C++ zone connectivity
+  const dx = [0, 0, 1, -1];
+  const dy = [-1, 1, 0, 0];
+
+  let head = 0;
+  while (head < queue.length) {
+    const idx = queue[head++];
+    const cellX = idx % MAP_CELLS;
+    const cellY = (idx - cellX) / MAP_CELLS;
+    map.setVisibility(cellX, cellY, 2);
+
+    for (let d = 0; d < 4; d++) {
+      const nx = cellX + dx[d];
+      const ny = cellY + dy[d];
+      if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) continue;
+      const nIdx = ny * MAP_CELLS + nx;
+      if (visited[nIdx]) continue;
+      visited[nIdx] = 1;
+      if (map.isPassable(nx, ny)) {
+        queue.push(nIdx);
+      }
+    }
+  }
+}
+
+/**
  * Update gap generator jamming — runs every GAP_UPDATE_INTERVAL ticks.
  * When powered, gap generators jam visibility around themselves.
  * When unpowered (or destroyed), jamming is removed.

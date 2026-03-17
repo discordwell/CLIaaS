@@ -373,7 +373,7 @@ export function updateMedic(ctx: SpecialUnitsContext, entity: Entity): void {
     let nearestEnemyDist = Infinity;
     let nearestEnemyPos: WorldPos | null = null;
     for (const other of ctx.entities) {
-      if (!other.alive || ctx.entitiesAllied(entity, other)) continue;
+      if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist < entity.stats.sight && dist < nearestEnemyDist) {
         nearestEnemyDist = dist;

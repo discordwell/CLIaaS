@@ -71,6 +71,8 @@ export interface MissionAIContext {
 
   // Warhead helpers
   getFirepowerBias(house: House): number;
+  /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
+  getROFBias(house: House): number;
   getWarheadMult(warhead: WarheadType, armor: ArmorType): number;
   getWarheadMeta(warhead: WarheadType): WarheadMeta;
   getWarheadProps(warhead: WarheadType | string | undefined): WarheadProps | undefined;
@@ -300,8 +302,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       } else {
         // CF12: IsSecondShot cadence for dual-weapon units (C++ techno.cpp:2857-2870)
         // First shot: 3-tick rearm (quick follow-up). Second shot: full ROF (reload delay).
+        // C++ house.cpp:293,303: ROFBias scales rearm delay (techno.cpp Rearm_Delay)
         const isDualWeapon = entity.weapon && entity.weapon2;
-        let rearmTime = activeWeapon.rof;
+        const rofBias = ctx.getROFBias(entity.house);
+        let rearmTime = Math.max(1, Math.round(activeWeapon.rof * rofBias));
         if (isDualWeapon) {
           if (!entity.isSecondShot) {
             rearmTime = 3; // first shot: quick 3-tick rearm
@@ -555,7 +559,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
     for (const other of ctx.entities) {
-      if (!other.alive || ctx.entitiesAllied(entity, other)) continue;
+      if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
       if (!canTargetNaval(entity, other)) continue;
       // AA gate: ground units on hunt can't target airborne aircraft without AA weapons
       if (other.isAirUnit && other.flightAltitude > 0) {
@@ -717,7 +721,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   // Gap #4: Auto-disguise spies near enemies
   if (entity.type === UnitType.I_SPY && entity.alive && !entity.disguisedAs && entity.isPlayerUnit) {
     for (const other of ctx.entities) {
-      if (!other.alive || ctx.entitiesAllied(entity, other)) continue;
+      if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
       if (worldDist(entity.pos, other.pos) <= 4) { // worldDist returns cells
         ctx.spyDisguise(entity, other);
         break;
@@ -825,7 +829,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   if (distFromOrigin > leashRange) {
     // Check for enemies while returning
     for (const other of ctx.entities) {
-      if (!other.alive || ctx.entitiesAllied(entity, other)) continue;
+      if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist > entity.stats.sight) continue;
       const oc2 = other.cell;
@@ -862,7 +866,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   let bestTarget: Entity | null = null;
   let bestScore = -Infinity;
   for (const other of ctx.entities) {
-    if (!other.alive || ctx.entitiesAllied(entity, other)) continue;
+    if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = worldDist(scanPos, other.pos);
     if (dist > scanRange) continue;
@@ -951,7 +955,7 @@ export function updateAmbush(ctx: MissionAIContext, entity: Entity): void {
   entity.lastGuardScan = ctx.tick;
   const ec = entity.cell;
   for (const other of ctx.entities) {
-    if (!other.alive || ctx.entitiesAllied(entity, other)) continue;
+    if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
     if (worldDist(entity.pos, other.pos) > entity.stats.sight) continue;
     const oc = other.cell;
     if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
@@ -1109,7 +1113,8 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       const structHouseBias = ctx.getFirepowerBias(entity.house);
       const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * structHouseBias));
       const destroyed = ctx.damageStructure(s, damage);
-      entity.attackCooldown = entity.weapon.rof;
+      // C++ house.cpp:293,303: ROFBias scales rearm delay
+      entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;
@@ -1162,7 +1167,8 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
     entity.animState = AnimState.ATTACK;
 
     if (entity.attackCooldown <= 0 && entity.weapon) {
-      entity.attackCooldown = entity.weapon.rof;
+      // C++ house.cpp:293,303: ROFBias scales rearm delay
+      entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;

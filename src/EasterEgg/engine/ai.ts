@@ -1886,7 +1886,121 @@ export function updateAIProduction(ctx: AIContext): void {
   }
 }
 
-/** AI autocreate teams -- periodically assemble and deploy teams from autocreate-flagged TeamTypes */
+/**
+ * C++ Suggested_New_Team (teamtype.cpp:419-497) — collect eligible autocreate
+ * team types for a house, then randomly pick one.
+ *
+ * Eligibility: IsAutocreate flag set (bit2 of flags), matches house,
+ * and active instance count (Number) < MaxAllowed.
+ * Caps candidate list at 20 entries (C++ choices[20]).
+ */
+export function suggestedNewTeam(
+  ctx: AIContext,
+  house: House,
+  alerted: boolean,
+): number | null {
+  const choices: number[] = [];
+  const MAX_CHOICES = 20; // C++ choices[20]
+
+  for (let teamIdx = 0; teamIdx < ctx.teamTypes.length; teamIdx++) {
+    if (choices.length >= MAX_CHOICES) break;
+
+    const ttype = ctx.teamTypes[teamIdx];
+    if (houseIdToHouse(ttype.house) !== house) continue;
+    if (ctx.destroyedTeams.has(teamIdx)) continue;
+
+    // C++ teamtype.cpp:434 — when alerted, only autocreate teams; when not alerted, only non-autocreate
+    const isAutocreate = !!(ttype.flags & 4);
+    let maxnum = ttype.maxAllowed;
+    if ((alerted && !isAutocreate) || (!alerted && isAutocreate)) {
+      maxnum = 0;
+    }
+
+    // C++ teamtype.cpp:440 — ttype->Number < maxnum
+    const activeCount = ctx.autocreateTeamCounts.get(teamIdx) ?? 0;
+    if (activeCount < maxnum) {
+      choices.push(teamIdx);
+    }
+  }
+
+  if (choices.length === 0) return null;
+  // C++ teamtype.cpp:492 — Random_Pick(0, choicecount-1)
+  return choices[Math.floor(Math.random() * choices.length)];
+}
+
+/** Spawn a single team instance into the game world.
+ *  C++ Create_One_Of() always increments Number even if placement fails. */
+function spawnTeam(ctx: AIContext, teamIdx: number, house: House): void {
+  const team = ctx.teamTypes[teamIdx];
+
+  // Increment active instance count first (C++ TeamTypeClass::Number)
+  // This mirrors C++ where the team object is created regardless of unit placement.
+  ctx.autocreateTeamCounts.set(teamIdx, (ctx.autocreateTeamCounts.get(teamIdx) ?? 0) + 1);
+
+  const edge = ctx.houseEdges.get(house)?.toLowerCase();
+  let spawnPos: { cx: number; cy: number } | null = null;
+
+  if (edge) {
+    const bx = ctx.map.boundsX, by = ctx.map.boundsY;
+    const bw = ctx.map.boundsW, bh = ctx.map.boundsH;
+    const randOffset = Math.floor(Math.random() * Math.max(bw, bh));
+    switch (edge) {
+      case 'north': spawnPos = { cx: bx + (randOffset % bw), cy: by }; break;
+      case 'south': spawnPos = { cx: bx + (randOffset % bw), cy: by + bh - 1 }; break;
+      case 'east':  spawnPos = { cx: bx + bw - 1, cy: by + (randOffset % bh) }; break;
+      case 'west':  spawnPos = { cx: bx, cy: by + (randOffset % bh) }; break;
+    }
+  }
+
+  if (!spawnPos) {
+    const wp = ctx.waypoints.get(team.origin);
+    if (wp) spawnPos = wp;
+    else return;
+  }
+
+  const world = { x: spawnPos.cx * CELL_SIZE + CELL_SIZE / 2, y: spawnPos.cy * CELL_SIZE + CELL_SIZE / 2 };
+  const teamMissionScript = team.missions.length > 0 ? team.missions.map(m => ({
+    mission: m.mission,
+    data: m.data,
+  })) : null;
+
+  for (const member of team.members) {
+    if (!UNIT_STATS[member.type]) continue;
+    const unitType = member.type as UnitType;
+    for (let i = 0; i < member.count; i++) {
+      const offsetX = (Math.random() - 0.5) * 48;
+      const offsetY = (Math.random() - 0.5) * 48;
+      const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
+      entity.facing = Math.floor(Math.random() * 8);
+      entity.bodyFacing32 = entity.facing * 4;
+
+      if (teamMissionScript) {
+        entity.teamMissions = teamMissionScript;
+        entity.teamMissionIndex = 0;
+      } else {
+        entity.mission = Mission.HUNT;
+      }
+
+      if (team.flags & 2) {
+        entity.mission = Mission.HUNT;
+      }
+
+      applyScenarioOverrides([entity], ctx.scenarioUnitStats, ctx.scenarioWeaponStats);
+      ctx.entities.push(entity);
+      ctx.entityById.set(entity.id, entity);
+    }
+  }
+
+}
+
+/**
+ * AI autocreate teams — periodically assemble and deploy teams from autocreate-flagged TeamTypes.
+ *
+ * C++ house.cpp:988-1006: when IsAlerted && AlertTime==0, creates
+ * Random_Pick(2, (TechLevel-1)/3+1) teams per cycle using Suggested_New_Team.
+ * Each call to Suggested_New_Team collects eligible teams (matching house,
+ * autocreate flag, Number < MaxAllowed) and picks one at random.
+ */
 export function updateAIAutocreateTeams(ctx: AIContext): void {
   if (!ctx.autocreateEnabled) return;
   if (ctx.tick % 120 !== 0) return;
@@ -1898,67 +2012,16 @@ export function updateAIAutocreateTeams(ctx: AIContext): void {
     const credits = ctx.houseCredits.get(house) ?? 0;
     if (credits < 500) continue;
 
-    for (let teamIdx = 0; teamIdx < ctx.teamTypes.length; teamIdx++) {
-      const team = ctx.teamTypes[teamIdx];
-      if (!(team.flags & 4)) continue;
-      if (houseIdToHouse(team.house) !== house) continue;
-      if (ctx.destroyedTeams.has(teamIdx)) continue;
+    // C++ house.cpp:993 — maxteams = Random_Pick(2, (TechLevel-1)/3+1)
+    const techLevel = state.techLevel;
+    const maxTeamsUpper = Math.floor((techLevel - 1) / 3) + 1;
+    const maxTeams = Math.floor(Math.random() * (Math.max(maxTeamsUpper, 2) - 2 + 1)) + 2;
 
-      const edge = ctx.houseEdges.get(house)?.toLowerCase();
-      let spawnPos: { cx: number; cy: number } | null = null;
-
-      if (edge) {
-        const bx = ctx.map.boundsX, by = ctx.map.boundsY;
-        const bw = ctx.map.boundsW, bh = ctx.map.boundsH;
-        const randOffset = Math.floor(Math.random() * Math.max(bw, bh));
-        switch (edge) {
-          case 'north': spawnPos = { cx: bx + (randOffset % bw), cy: by }; break;
-          case 'south': spawnPos = { cx: bx + (randOffset % bw), cy: by + bh - 1 }; break;
-          case 'east':  spawnPos = { cx: bx + bw - 1, cy: by + (randOffset % bh) }; break;
-          case 'west':  spawnPos = { cx: bx, cy: by + (randOffset % bh) }; break;
-        }
+    for (let t = 0; t < maxTeams; t++) {
+      const teamIdx = suggestedNewTeam(ctx, house, true);
+      if (teamIdx !== null) {
+        spawnTeam(ctx, teamIdx, house);
       }
-
-      if (!spawnPos) {
-        const wp = ctx.waypoints.get(team.origin);
-        if (wp) spawnPos = wp;
-        else continue;
-      }
-
-      const world = { x: spawnPos.cx * CELL_SIZE + CELL_SIZE / 2, y: spawnPos.cy * CELL_SIZE + CELL_SIZE / 2 };
-      const teamMissionScript = team.missions.length > 0 ? team.missions.map(m => ({
-        mission: m.mission,
-        data: m.data,
-      })) : null;
-
-      for (const member of team.members) {
-        if (!UNIT_STATS[member.type]) continue;
-        const unitType = member.type as UnitType;
-        for (let i = 0; i < member.count; i++) {
-          const offsetX = (Math.random() - 0.5) * 48;
-          const offsetY = (Math.random() - 0.5) * 48;
-          const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
-          entity.facing = Math.floor(Math.random() * 8);
-          entity.bodyFacing32 = entity.facing * 4;
-
-          if (teamMissionScript) {
-            entity.teamMissions = teamMissionScript;
-            entity.teamMissionIndex = 0;
-          } else {
-            entity.mission = Mission.HUNT;
-          }
-
-          if (team.flags & 2) {
-            entity.mission = Mission.HUNT;
-          }
-
-          applyScenarioOverrides([entity], ctx.scenarioUnitStats, ctx.scenarioWeaponStats);
-          ctx.entities.push(entity);
-          ctx.entityById.set(entity.id, entity);
-        }
-      }
-
-      break; // One team per house per cycle
     }
   }
 }

@@ -7,7 +7,7 @@ import {
   type WorldPos, type WeaponStats,
   CELL_SIZE, Mission, AnimState, House, UnitType,
   worldDist, directionTo, worldToCell,
-  CIVILIAN_UNIT_TYPES, COUNTRY_BONUSES,
+  CIVILIAN_UNIT_TYPES,
 } from './types';
 import { Entity, CloakState } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -30,6 +30,8 @@ export interface AircraftContext {
   idleMission(entity: Entity): Mission;
   fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void;
   fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void;
+  /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
+  getROFBias(house: House): number;
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────
@@ -246,8 +248,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
           entity.aircraftState = 'rearming';
           // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
-          const rofBias = COUNTRY_BONUSES[entity.house]?.rofMult ?? 1.0;
-          entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * rofBias));
+          // C++ house.cpp:293,303: ROFBias includes difficulty scaling
+          entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * ctx.getROFBias(entity.house)));
         } else {
           entity.aircraftState = 'landed';
         }
@@ -266,8 +268,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           entity.aircraftState = 'landed';
         } else {
           // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
-          const nextRofBias = COUNTRY_BONUSES[entity.house]?.rofMult ?? 1.0;
-          entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * nextRofBias));
+          // C++ house.cpp:293,303: ROFBias includes difficulty scaling
+          entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * ctx.getROFBias(entity.house)));
         }
       }
       return true;
@@ -345,7 +347,8 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
         } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
           ctx.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, entity.weapon);
         }
-        entity.attackCooldown = entity.weapon.rof;
+        // C++ house.cpp:293,303: ROFBias scales rearm delay
+        entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
         if (entity.ammo > 0) entity.ammo--;
       }
 
@@ -424,7 +427,8 @@ export function updateHelicopterAttack(ctx: AircraftContext, entity: Entity): bo
     } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
       ctx.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, entity.weapon);
     }
-    entity.attackCooldown = entity.weapon.rof;
+    // C++ house.cpp:293,303: ROFBias scales rearm delay
+    entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
     if (entity.ammo > 0) entity.ammo--;
   }
 
