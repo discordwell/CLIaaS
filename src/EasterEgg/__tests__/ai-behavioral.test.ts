@@ -405,7 +405,7 @@ describe('updateAISellDamaged', () => {
     expect(s1.alive).toBe(false); // sold because there's another
   });
 
-  it('grants refund to houseCredits (health-scaled)', () => {
+  it('grants full refund to houseCredits (C++ techno.cpp:5743-5761)', () => {
     const ctx = makeMockAIContext({ tick: 75 });
     const maxHp = 800;
     const hp = Math.floor(maxHp * 0.20); // 20% HP, below 25% CONDITION_RED
@@ -414,9 +414,9 @@ describe('updateAISellDamaged', () => {
     ctx.houseCredits.set(House.USSR, 100);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
-    // BARR cost = 300 (from PRODUCTION_ITEMS)
+    // C++ parity: AI gets full refund (no 50% penalty, no health scaling)
     const barrItem = PRODUCTION_ITEMS.find(p => p.type === 'BARR' && p.isStructure);
-    const expectedRefund = Math.floor((barrItem?.cost ?? 300) * 0.5 * (hp / maxHp));
+    const expectedRefund = barrItem?.cost ?? 300;
 
     updateAISellDamaged(ctx);
     expect(ctx.houseCredits.get(House.USSR)).toBe(100 + expectedRefund);
@@ -650,7 +650,10 @@ describe('getAIBuildOrder', () => {
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
 
     const queue = getAIBuildOrder(ctx, House.USSR, state);
-    expect(queue[0]).toBe('POWR');
+    // C++ urgency system: POWR is URGENCY_LOW when no refinery (economy first).
+    // PROC at URGENCY_HIGH beats it. POWR still appears in the queue.
+    expect(queue).toContain('POWR');
+    expect(queue[0]).toBe('PROC'); // refinery is highest urgency when none exists
   });
 
   it('includes TENT when no infantry production exists', () => {
@@ -681,43 +684,55 @@ describe('getAIBuildOrder', () => {
     expect(queue).toContain('WEAP');
   });
 
-  it('includes DOME when credits > 1000 and none exists', () => {
+  it('includes DOME when enemy has aircraft and credits > 1000', () => {
     const ctx = makeMockAIContext();
     ctx.houseCredits.set(House.USSR, 2000);
+    // C++ urgency system: DOME is only built reactively for AA (house.cpp:5638-5646)
+    // Need enemy aircraft to trigger DOME build
+    const enemyHelo = new Entity(UnitType.V_HELI, House.Spain, 200, 200);
+    ctx.entities.push(enemyHelo);
+    ctx.entityById.set(enemyHelo.id, enemyHelo);
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
 
     const queue = getAIBuildOrder(ctx, House.USSR, state);
     expect(queue).toContain('DOME');
   });
 
-  it('does not include DOME when credits <= 1000', () => {
+  it('does not include DOME when no enemy aircraft exist', () => {
     const ctx = makeMockAIContext();
-    ctx.houseCredits.set(House.USSR, 500);
+    ctx.houseCredits.set(House.USSR, 2000);
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
 
+    // C++ urgency system: DOME only built reactively for AA
     const queue = getAIBuildOrder(ctx, House.USSR, state);
     expect(queue).not.toContain('DOME');
   });
 
-  it('picks TSLA defense for soviet faction, GUN for allied', () => {
+  it('picks FTUR defense for soviet faction, PBOX for first allied defense', () => {
+    // C++ urgency system: Soviet base defense = FTUR (flame turret),
+    // TSLA requires powerFractionOk. Allied alternates PBOX/GUN by count.
+
     // Soviet house (USSR)
     const ctxSoviet = makeMockAIContext();
     ctxSoviet.houseCredits.set(House.USSR, 5000);
     const sState = addAIHouse(ctxSoviet, House.USSR, { iq: 3 });
     const sovQueue = getAIBuildOrder(ctxSoviet, House.USSR, sState);
-    expect(sovQueue).toContain('TSLA');
+    expect(sovQueue).toContain('FTUR');
 
-    // Allied house (Spain)
+    // Allied house (England) — first defense (count=0, 0%2===0) picks PBOX
     const ctxAllied = makeMockAIContext();
     ctxAllied.houseCredits.set(House.England, 5000);
     const aState = addAIHouse(ctxAllied, House.England, { iq: 3 });
     const alliedQueue = getAIBuildOrder(ctxAllied, House.England, aState);
-    expect(alliedQueue).toContain('GUN');
+    expect(alliedQueue).toContain('PBOX');
   });
 
-  it('includes tech center (STEK for soviet) when DOME exists', () => {
+  it('includes tech center (STEK for soviet) when power is adequate', () => {
     const ctx = makeMockAIContext();
+    // C++ urgency system: STEK requires powerFractionOk (produced >= consumed).
+    // DOME consumes 40, so we need at least one POWR (produces 100).
     ctx.structures.push(makeStructure('DOME', House.USSR, 50, 50));
+    ctx.structures.push(makeStructure('POWR', House.USSR, 48, 50));
     ctx.houseCredits.set(House.USSR, 5000);
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
 
