@@ -262,8 +262,8 @@ describe('PROC economic functions (rules.ini Cost=2000)', () => {
     expect(sellRefund(PROC_COST)).toBe(1000);
   });
 
-  it('repair cost per step: ceil(2000 * 0.20 / (900 / 7)) = ceil(400 / 128.57) = 4', () => {
-    expect(repairCostPerStep(PROC_COST, PROC_MAX_HP)).toBe(4);
+  it('repair cost per step: ceil(2000 * 0.25 / (900 / 5)) = ceil(500 / 180) = 3', () => {
+    expect(repairCostPerStep(PROC_COST, PROC_MAX_HP)).toBe(3);
   });
 });
 

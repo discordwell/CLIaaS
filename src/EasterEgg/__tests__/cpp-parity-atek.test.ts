@@ -293,8 +293,8 @@ describe('ATEK economic functions (rules.ini Cost=1500)', () => {
     expect(sellRefund(ATEK_COST)).toBe(750);
   });
 
-  it('repair cost per step: ceil(1500 * 0.20 / (400 / 7)) = ceil(300 / 57.14) = 6', () => {
-    expect(repairCostPerStep(ATEK_COST, ATEK_MAX_HP)).toBe(6);
+  it('repair cost per step: ceil(1500 * 0.25 / (400 / 5)) = ceil(375 / 80) = 5', () => {
+    expect(repairCostPerStep(ATEK_COST, ATEK_MAX_HP)).toBe(5);
   });
 });
 

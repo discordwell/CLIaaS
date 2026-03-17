@@ -328,8 +328,8 @@ describe('FIX economic functions (rules.ini Cost=1200)', () => {
     expect(sellRefund(FIX_COST)).toBe(600);
   });
 
-  it('repair cost per step: ceil(1200 * 0.20 / (800 / 7)) = ceil(240 / 114.28) = 3', () => {
-    expect(repairCostPerStep(FIX_COST, FIX_MAX_HP)).toBe(3);
+  it('repair cost per step: ceil(1200 * 0.25 / (800 / 5)) = ceil(300 / 160) = 2', () => {
+    expect(repairCostPerStep(FIX_COST, FIX_MAX_HP)).toBe(2);
   });
 });
 

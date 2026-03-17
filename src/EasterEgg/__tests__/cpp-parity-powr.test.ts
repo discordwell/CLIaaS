@@ -259,8 +259,8 @@ describe('POWR economic functions (rules.ini Cost=300)', () => {
     expect(sellRefund(POWR_COST)).toBe(150);
   });
 
-  it('repair cost per step: ceil(300 * 0.20 / (400 / 7)) = ceil(60 / 57.14) = 2', () => {
-    expect(repairCostPerStep(POWR_COST, POWR_MAX_HP)).toBe(2);
+  it('repair cost per step: ceil(300 * 0.25 / (400 / 5)) = ceil(75 / 80) = 1', () => {
+    expect(repairCostPerStep(POWR_COST, POWR_MAX_HP)).toBe(1);
   });
 });
 
