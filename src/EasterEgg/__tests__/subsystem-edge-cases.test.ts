@@ -128,6 +128,8 @@ function makeCombatContext(overrides?: Partial<CombatContext>): CombatContext {
     minimapAlert: () => {},
     movementSpeed: () => 0.5,
     getFirepowerBias: () => 1.0,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
     damageStructure: () => false,
     aiIQ: () => 3,
     screenShake: 0,

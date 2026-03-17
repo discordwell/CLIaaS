@@ -75,6 +75,7 @@ function makeAircraftCtx(
     idleMission: () => Mission.GUARD,
     fireWeaponAt: () => {},
     fireWeaponAtStructure: () => {},
+    getROFBias: () => 1.0,
   };
 }
 

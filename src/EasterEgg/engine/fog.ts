@@ -30,6 +30,9 @@ export interface FogContext {
   tick: number;
   playerHouse: House;
   fogDisabled: boolean;
+  /** C++ house.h:268 IsGPSActive — GPS satellite has been launched, full map vision active.
+   *  Set by superweapon system when GPS fires, cleared when ATEK destroyed (house.cpp:1420-1425). */
+  gpsActive: boolean;
   baseDiscovered: boolean;
   powerProduced: number;
   powerConsumed: number;
@@ -50,6 +53,14 @@ export interface FogContext {
  */
 export function updateFogOfWar(ctx: FogContext): void {
   if (ctx.fogDisabled) {
+    ctx.map.revealAll();
+    return;
+  }
+
+  // C++ house.cpp:1265 + display.cpp:4159 — when GPS satellite is active,
+  // the entire map stays revealed (IsGPSActive prevents Shroud_Cell from working).
+  // Normal fog-of-war is bypassed while GPS is active.
+  if (ctx.gpsActive) {
     ctx.map.revealAll();
     return;
   }

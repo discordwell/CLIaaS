@@ -62,6 +62,8 @@ function makeCombatCtx(overrides?: Partial<CombatContext>): CombatContext {
     minimapAlert: () => {},
     movementSpeed: () => 1,
     getFirepowerBias: () => 1,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
     damageStructure: () => false,
     aiIQ: () => 3,
     warheadMuzzleColor: () => '#fff',

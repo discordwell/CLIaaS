@@ -141,6 +141,8 @@ function makeCombatContext(overrides: Partial<CombatContext> = {}): CombatContex
     minimapAlert: vi.fn(),
     movementSpeed: () => 1,
     getFirepowerBias: (house) => COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
     damageStructure: vi.fn(() => false),
     aiIQ: () => 3,
     clearStructureFootprint: vi.fn(),

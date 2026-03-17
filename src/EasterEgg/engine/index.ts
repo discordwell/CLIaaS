@@ -3590,6 +3590,8 @@ export class Game {
       case Game.TMISSION_SET_GLOBAL: {
         // Set a global variable (C++ team.cpp:2919 TMission_Set_Global)
         this.globals.add(tm.data);
+        // C++ parity (#38): immediately spring triggers dependent on this global
+        this.springGlobalTriggers(tm.data);
         entity.teamMissionIndex++;
         break;
       }

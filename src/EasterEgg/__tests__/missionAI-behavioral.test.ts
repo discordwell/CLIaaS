@@ -108,6 +108,8 @@ function makeMockContext(overrides: Partial<MissionAIContext> = {}): MissionAICo
 
     // Warhead helpers
     getFirepowerBias: () => 1.0,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
     getWarheadMult: (wh: WarheadType, ar: ArmorType) => {
       const idx = { none: 0, wood: 1, light: 2, heavy: 3, concrete: 4 }[ar] ?? 0;
       return WARHEAD_VS_ARMOR[wh]?.[idx] ?? 1.0;

@@ -56,6 +56,7 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     idleMission: () => Mission.GUARD,
     fireWeaponAt: vi.fn(),
     fireWeaponAtStructure: vi.fn(),
+    getROFBias: () => 1.0,
     ...overrides,
   };
 }
@@ -90,6 +91,8 @@ function makeCombatCtx(
     minimapAlert: () => {},
     movementSpeed: () => 2,
     getFirepowerBias: (house: House) => COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
     damageStructure: () => false,
     aiIQ: () => 3,
     warheadMuzzleColor: () => '#fff',

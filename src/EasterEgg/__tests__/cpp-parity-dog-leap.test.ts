@@ -62,6 +62,8 @@ function makeCombatContext(entities: Entity[], mapW = 20, mapH = 20): CombatCont
     movementSpeed: () => 1,
     getFirepowerBias: () => 1.0,
     getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
+    getArmorBias: () => 1.0,
     damageStructure: () => false,
     aiIQ: () => 1,
     warheadMuzzleColor: () => '#fff',

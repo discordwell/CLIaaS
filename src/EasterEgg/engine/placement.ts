@@ -9,7 +9,7 @@ import {
   type House, UnitType, Mission,
 } from './types';
 import { getEffectiveCost } from './production';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, getBibCells } from './scenario';
 import { Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type Effect } from './renderer';
@@ -57,6 +57,10 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
       if (!ctx.map.isPassable(cx + dx, cy + dy)) return false;
     }
   }
+  // C++ bdata.cpp:3448-3477 Occupy_List(placement=true): bib cells must also be passable
+  for (const bc of getBibCells(item.type, cx, cy)) {
+    if (!ctx.map.isPassable(bc.cx, bc.cy)) return false;
+  }
   // Walls can be placed anywhere passable (C++ parity — no adjacency requirement for walls)
   // Non-wall structures must be adjacent to an existing player structure (footprint-based AABB)
   if (!isWall) {
@@ -95,6 +99,10 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     for (let dx = 0; dx < fw; dx++) {
       ctx.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
     }
+  }
+  // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
+  for (const bc of getBibCells(item.type, cx, cy)) {
+    ctx.map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
   }
   // Store wall type for auto-connection sprite rendering
   if (isWall) {
@@ -170,6 +178,10 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     for (let dx = 0; dx < 3; dx++) {
       ctx.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
     }
+  }
+  // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below FACT)
+  for (const bc of getBibCells('FACT', cx, cy)) {
+    ctx.map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
   }
   ctx.playSound('eva_acknowledged');
   ctx.effects.push({

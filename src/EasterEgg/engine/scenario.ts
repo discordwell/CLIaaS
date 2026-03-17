@@ -44,8 +44,8 @@ const TEVENT_LEAVES_MAP = 23;
 const TEVENT_ENTERS_ZONE = 24;
 const TEVENT_CROSS_HORIZONTAL = 25;       // TR5: fixed index (was 21, C++ = 25)
 const TEVENT_CROSS_VERTICAL = 26;         // TR5: fixed index (was 22, C++ = 26)
-const TEVENT_GLOBAL_SET = 27;
-const TEVENT_GLOBAL_CLEAR = 28;
+export const TEVENT_GLOBAL_SET = 27;
+export const TEVENT_GLOBAL_CLEAR = 28;
 const TEVENT_FAKES_DESTROYED = 29;        // TR3: all fake structures destroyed
 const TEVENT_LOW_POWER = 30;              // TR5: fixed index (was 15, C++ = 30)
 const TEVENT_ALL_BRIDGES_DESTROYED = 31;
@@ -66,7 +66,7 @@ const TACTION_PLAY_MOVIE = 10;            // TR4: play a movie/cutscene (C++ TAC
 const TACTION_TEXT_TRIGGER = 11;
 const TACTION_DESTROY_TRIGGER = 12;
 const TACTION_AUTOCREATE = 13;
-// 14 = WINLOSE (unused)
+const TACTION_WINLOSE = 14;              // C++ taction.h: "Win if captured, lose if destroyed."
 const TACTION_ALLOWWIN = 15;
 const TACTION_REVEAL_MAP = 16;            // C++ TACTION_REVEAL_ALL
 const TACTION_REVEAL_SOME = 17;
@@ -82,7 +82,7 @@ const TACTION_SUB_TIMER = 26;
 const TACTION_SET_TIMER = 27;
 const TACTION_SET_GLOBAL = 28;
 const TACTION_CLEAR_GLOBAL = 29;
-// 30 = BASE_BUILDING (unused)
+const TACTION_BASE_BUILDING = 30;        // C++ taction.h: "Automated base building." — sets IsBaseBuilding on/off
 const TACTION_CREEP_SHADOW = 31;
 const TACTION_DESTROY_OBJECT = 32;
 const TACTION_1_SPECIAL = 33;
@@ -1184,6 +1184,35 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   ...mapStructureSize(CIVILIAN_STRUCTURE_4X2, [4, 2]),
 };
 
+// C++ bdata.cpp:3597-3629 Bib_And_Offset — buildings with IsBibbed=true in rules.ini.
+// Bibs are decorative ground tiles placed beneath certain buildings that make additional
+// cells impassable. The bib extends 1 row below the building footprint, with the same
+// width as the building. C++ only generates bibs for buildings with Width() >= 2
+// (Width 2 → SMUDGE_BIB3, Width 3 → SMUDGE_BIB2, Width 4 → SMUDGE_BIB1).
+export const BIBBED_BUILDINGS: ReadonlySet<string> = new Set([
+  'FACT', 'WEAP', 'PROC', 'POWR', 'APWR', 'BARR', 'TENT',
+  'FIX', 'HPAD', 'AFLD', 'DOME',
+  'ATEK', 'STEK', 'IRON', 'PDOX',
+  'SYRD', 'SPEN', 'BIO', 'HOSP', 'MISS', 'FCOM',
+]);
+
+/** C++ bdata.cpp:3597-3629 — Compute bib cells for a building.
+ *  Returns array of {cx,cy} cells that form the bib (1 row below building footprint),
+ *  or empty array if building has no bib.
+ *  Bib width = building width, positioned at cy + height (one row below). */
+export function getBibCells(type: string, cx: number, cy: number): CellPos[] {
+  if (!BIBBED_BUILDINGS.has(type)) return [];
+  const [fw, fh] = STRUCTURE_SIZE[type] ?? [1, 1];
+  // C++ Bib_And_Offset: only widths 2,3,4 get bibs (switch default → SMUDGE_NONE)
+  if (fw < 2 || fw > 4) return [];
+  const bibRow = cy + fh; // one row below the building footprint
+  const cells: CellPos[] = [];
+  for (let dx = 0; dx < fw; dx++) {
+    cells.push({ cx: cx + dx, cy: bibRow });
+  }
+  return cells;
+}
+
 // Structure max HP overrides (default is 256)
 export const STRUCTURE_MAX_HP: Record<string, number> = {
   POWR: 400, APWR: 700, PROC: 900, TENT: 800, BARR: 800,
@@ -1397,6 +1426,10 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
         map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
       }
     }
+    // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
+    for (const bc of getBibCells(s.type, pos.cx, pos.cy)) {
+      map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+    }
     // Store wall type for auto-connection sprite rendering
     if (s.type === 'SBAG' || s.type === 'FENC' || s.type === 'BARB' || s.type === 'BRIK') {
       map.setWallType(pos.cx, pos.cy, s.type);
@@ -1438,6 +1471,10 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       for (let dx = 0; dx < fw; dx++) {
         map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
       }
+    }
+    // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
+    for (const bc of getBibCells(bs.type, pos.cx, pos.cy)) {
+      map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
     }
     // Store wall type for auto-connection sprite rendering
     if (bs.type === 'SBAG' || bs.type === 'FENC' || bs.type === 'BARB' || bs.type === 'BRIK') {
@@ -2104,6 +2141,9 @@ export interface TriggerActionResult {
   timerSubtract?: number;         // subtract time from mission timer (SUB_TIMER)
   oneSpecial?: boolean;           // charge one superweapon (1_SPECIAL)
   fullSpecial?: boolean;          // charge all superweapons (FULL_SPECIAL)
+  globalChanged?: number;         // C++ parity (#38): global index that was set/cleared (triggers immediate spring)
+  baseBuilding?: { house: number; enabled: boolean }; // C++ parity (#39): set IsBaseBuilding on/off for a house
+  winLose?: boolean;              // C++ parity (#39): mark attached object — win if captured, lose if destroyed
 }
 
 /** Execute a trigger action — returns result with entities and side effects */
@@ -2221,10 +2261,12 @@ export function executeTriggerAction(
 
     case TACTION_SET_GLOBAL:
       globals.add(action.data);
+      result.globalChanged = action.data; // C++ parity (#38): immediate spring
       break;
 
     case TACTION_CLEAR_GLOBAL:
       globals.delete(action.data);
+      result.globalChanged = action.data; // C++ parity (#38): immediate spring
       break;
 
     case TACTION_START_TIMER:
@@ -2270,6 +2312,14 @@ export function executeTriggerAction(
 
     case TACTION_ALLOWWIN:
       result.allowWin = true;
+      break;
+
+    case TACTION_WINLOSE:
+      // C++ TD trigger.cpp: "Win if captured, lose if destroyed."
+      // Marks the attached object so the game loop checks capture → win, destroy → lose.
+      // In RA, defined in taction.h but falls through to default (noop) in taction.cpp.
+      // However, the enum and description exist — we implement it per the TD behavior.
+      result.winLose = true;
       break;
 
     case TACTION_DESTROY_TEAM:
@@ -2366,6 +2416,13 @@ export function executeTriggerAction(
     case TACTION_PREFERRED_TARGET:
       // Designate preferred target type for AI house (action.data = quarry type)
       result.preferredTarget = action.data;
+      break;
+
+    case TACTION_BASE_BUILDING:
+      // C++ taction.cpp: hptr->IsBaseBuilding = Data.Bool
+      // Enables or disables AI base building for the trigger's house.
+      // Data.Bool is stored as action.data (0=false, nonzero=true). NEED_BOOL parameter.
+      result.baseBuilding = { house: triggerHouse ?? 0, enabled: !!action.data };
       break;
 
     case TACTION_1_SPECIAL:

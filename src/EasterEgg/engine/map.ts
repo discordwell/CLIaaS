@@ -396,13 +396,20 @@ export class GameMap {
     }
   }
 
-  /** Creep shadow: downgrade all visible/fog cells back to shroud (darkness).
-   *  Used by SCA04EA tunnel mission — map reshrouds periodically until power is restored. */
-  creepShadow(): void {
+  /** Shroud the entire map — C++ Map.Shroud_The_Map() parity.
+   *  Resets all cells to shroud (0). Used when GPS is lost (ATEK destroyed).
+   *  The normal fog-of-war update will re-reveal around player units next tick. */
+  shroudAll(): void {
     for (let i = 0; i < this.visibility.length; i++) {
       if (this.visibility[i] > 0) this.visibility[i] = 0;
     }
     this.visibleCells.length = 0;
+  }
+
+  /** Creep shadow: downgrade all visible/fog cells back to shroud (darkness).
+   *  Used by SCA04EA tunnel mission — map reshrouds periodically until power is restored. */
+  creepShadow(): void {
+    this.shroudAll();
   }
 
   /** Update fog of war: downgrade visible to fog, then reveal around units */

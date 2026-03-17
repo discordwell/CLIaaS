@@ -72,6 +72,8 @@ function makeCombatContext(entities: Entity[]): CombatContext {
     minimapAlert: () => {},
     movementSpeed: () => 1,
     getFirepowerBias: () => 1,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
     damageStructure: () => false,
     aiIQ: () => 3,
     warheadMuzzleColor: () => '255,200,60',

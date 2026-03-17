@@ -74,6 +74,7 @@ function makeAircraftContext(overrides: Partial<AircraftContext> = {}): Aircraft
     idleMission: () => Mission.GUARD,
     fireWeaponAt: vi.fn(),
     fireWeaponAtStructure: vi.fn(),
+    getROFBias: () => 1.0,
     ...overrides,
   };
 }

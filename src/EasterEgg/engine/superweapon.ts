@@ -36,6 +36,7 @@ export interface SuperweaponContext {
   lossCount: number;
   map: {
     revealAll(): void;
+    shroudAll(): void;
     isPassable(cx: number, cy: number): boolean;
     setVisibility(cx: number, cy: number, v: number): void;
     inBounds(cx: number, cy: number): boolean;
@@ -44,6 +45,9 @@ export interface SuperweaponContext {
   };
   sonarSpiedTarget: Map<House, House>;
   gapGeneratorCells: Map<number, { cx: number; cy: number; radius: number }>;
+
+  /** C++ house.h:268 IsGPSActive — mutable, synced back to Game class after update */
+  gpsActive: boolean;
 
   // Nuke tracking state
   nukePendingTarget: WorldPos | null;
@@ -124,11 +128,14 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
       }
 
       // Auto-fire GPS Satellite (one-shot)
+      // C++ bullet.cpp:413,1067 — sets IsGPSActive=true, IsVisionary=true, Map_Cell for all cells
       if (def.type === SuperweaponType.GPS_SATELLITE && state.ready && !state.fired) {
         ctx.map.revealAll();
         state.fired = true;
         state.ready = false;
+        // C++ house.h:268 — IsGPSActive persists until ATEK is destroyed
         if (ctx.isAllied(s.house, ctx.playerHouse)) {
+          ctx.gpsActive = true;
           ctx.pushEva('GPS satellite launched');
           // GPS sweep visual
           ctx.effects.push({
@@ -202,6 +209,20 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
       ctx.playSound('cannon');
       if (ctx.isAllied(state.house as House, ctx.playerHouse)) {
         ctx.pushEva('Sonar pulse activated');
+      }
+    }
+  }
+
+  // C++ house.cpp:1420-1425 — re-shroud map when ATEK destroyed after GPS launched.
+  // If GPS was fired but the Advanced Tech Center is gone, clear IsGPSActive and
+  // shroud the map so the player loses full-map vision. Normal fog-of-war will
+  // re-reveal around player units on the next tick.
+  for (const [key, state] of ctx.superweapons) {
+    if (state.type === SuperweaponType.GPS_SATELLITE && state.fired && !activeBuildings.has(key)) {
+      if (ctx.isAllied(state.house, ctx.playerHouse)) {
+        ctx.gpsActive = false;
+        ctx.map.shroudAll();
+        ctx.pushEva('GPS satellite lost');
       }
     }
   }

@@ -93,6 +93,8 @@ function makeCombatCtx(
     minimapAlert: () => {},
     movementSpeed: () => 1,
     getFirepowerBias: () => 1.0,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
     damageStructure: () => false,
     aiIQ: () => 3,
     warheadMuzzleColor: () => '#fff',
