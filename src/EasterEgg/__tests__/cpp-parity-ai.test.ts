@@ -2055,10 +2055,9 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
     });
     updateAISellDamaged(ctx);
     const credits = ctx.houseCredits.get(House.USSR) ?? 0;
-    // refund = floor(cost * 0.5 * hpRatio)
+    // C++ techno.cpp:5743-5761: AI gets 100% refund (no Rule.RefundPercent penalty)
     const weapCost = TEST_PRODUCTION_ITEMS.find(p => p.type === 'WEAP')!.cost;
-    const expectedRefund = Math.floor(weapCost * 0.5 * (hp / maxHp));
-    expect(credits).toBe(expectedRefund);
+    expect(credits).toBe(weapCost);
   });
 
   it('never sells FACT', () => {
