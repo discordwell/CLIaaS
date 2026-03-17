@@ -32,7 +32,7 @@ export interface ProductionContext {
   playerTechLevel: number;
   baseDiscovered: boolean;
   scenarioProductionItems: ProductionItem[];
-  productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number }>;
+  productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number; powerMult: number }>;
   pendingPlacement: ProductionItem | null;
   wallPlacementPrepaid: boolean;
   map: GameMap;
@@ -54,6 +54,17 @@ export interface ProductionContext {
 }
 
 // ── Pure functions ───────────────────────────────────────────────────────────
+
+/**
+ * Compute the power fraction multiplier, clamped to [1/16, 1].
+ * C++ factory.cpp:434: rate = time / Bound(Power_Fraction(), fixed(1,16), fixed(1))
+ * At 100%+ power: 1.0 (normal speed). At 50% power: 0.5. At 0% power: 1/16.
+ */
+export function computePowerMult(ctx: ProductionContext): number {
+  if (ctx.powerConsumed <= ctx.powerProduced) return 1.0;
+  if (ctx.powerProduced <= 0) return 1 / 16;
+  return Math.max(1 / 16, ctx.powerProduced / ctx.powerConsumed);
+}
 
 /** Get effective cost for an item, applying country bonus multiplier */
 export function getEffectiveCost(item: ProductionItem, playerHouse: House): number {
@@ -117,7 +128,10 @@ export function startProduction(ctx: ProductionContext, item: ProductionItem): v
     ctx.playEva('eva_insufficient_funds');
     return;
   }
-  ctx.productionQueue.set(category, { item, progress: 0, queueCount: 1, costPaid: 0 });
+  // C++ parity (factory.cpp:434): snapshot power fraction at production start time.
+  // Rate is LOCKED — changing power mid-production has no effect until suspend+restart.
+  const powerMult = computePowerMult(ctx);
+  ctx.productionQueue.set(category, { item, progress: 0, queueCount: 1, costPaid: 0, powerMult });
   ctx.playSound('eva_building');
 }
 
@@ -138,20 +152,10 @@ export function cancelProduction(ctx: ProductionContext, category: string): void
 }
 
 /** Advance production queues each tick.
- *  PR3: C++ incremental cost — deducts costPerTick each tick; pauses if insufficient funds. */
+ *  PR3: C++ incremental cost — deducts costPerTick each tick; pauses if insufficient funds.
+ *  C++ parity (factory.cpp:434): power fraction is snapshotted at Start() time and locked
+ *  for the duration of production. Changing power mid-production has no effect. */
 export function tickProduction(ctx: ProductionContext): void {
-  // Continuous power penalty (C++ parity): multiplier = powerFraction, clamped to [1/16, 1.0]
-  // C++ factory.cpp:434: rate = time / Bound(Power_Fraction(), fixed(1,16), fixed(1))
-  // At 100%+ power: normal speed. At 50% power: 2x slower. At 0% power: 16x slower.
-  let powerMult = 1.0;
-  if (ctx.powerConsumed > ctx.powerProduced) {
-    if (ctx.powerProduced <= 0) {
-      powerMult = 1 / 16; // C++ Bound(0, fixed(1,16), fixed(1)) = 1/16
-    } else {
-      const powerFraction = ctx.powerProduced / ctx.powerConsumed;
-      powerMult = Math.max(1 / 16, powerFraction);
-    }
-  }
   for (const [category, entry] of ctx.productionQueue) {
     // Check prerequisite still exists
     if (!ctx.hasBuilding(entry.item.prerequisite)) {
@@ -178,7 +182,8 @@ export function tickProduction(ctx: ProductionContext): void {
     // Multiple factories let you build multiple items simultaneously (separate
     // queues), but do NOT speed up a single item's production. Progress
     // advances by 1 per tick regardless of how many factories the player owns.
-    entry.progress += powerMult;
+    // C++ parity: use the LOCKED power fraction from Start() time, not current power
+    entry.progress += entry.powerMult;
     if (entry.progress >= entry.item.buildTime) {
       // Build complete
       if (entry.item.isStructure) {
@@ -196,6 +201,7 @@ export function tickProduction(ctx: ProductionContext): void {
           entry.queueCount--;
           entry.progress = 0;
           entry.costPaid = 0; // reset for next queued item
+          entry.powerMult = computePowerMult(ctx); // C++ parity: re-snapshot power on restart
         } else {
           ctx.productionQueue.delete(category);
         }

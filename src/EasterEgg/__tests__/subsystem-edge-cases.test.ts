@@ -495,6 +495,7 @@ describe('Production queue max with prerequisite destroyed mid-build', () => {
       progress: 70,
       queueCount: 1,
       costPaid: 400,
+      powerMult: 1,
     });
 
     tickProduction(ctx);
@@ -521,6 +522,7 @@ describe('Production queue max with prerequisite destroyed mid-build', () => {
       progress: 50,
       queueCount: 4,
       costPaid: 200,
+      powerMult: 1,
     });
 
     // Destroy the WEAP
@@ -556,6 +558,7 @@ describe('tickProduction with zero credits', () => {
       progress: 50,
       queueCount: 1,
       costPaid: 300,
+      powerMult: 1,
     });
 
     const progressBefore = ctx.productionQueue.get('right')!.progress;
@@ -579,6 +582,7 @@ describe('tickProduction with zero credits', () => {
       progress: 50,
       queueCount: 1,
       costPaid: 300,
+      powerMult: 1,
     });
 
     // Tick with 0 credits — pauses
@@ -593,11 +597,14 @@ describe('tickProduction with zero credits', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. PRODUCTION: Multi-factory speedup with 3+ factories
+// 5. PRODUCTION: Factory count does NOT affect single-item speed (C++ parity)
+// C++ factory.cpp:206: each factory is an independent FactoryClass; the AI() loop
+// runs exactly once per tick per factory. Multiple factories = simultaneous queues,
+// NOT faster single-item production.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('tickProduction multi-factory speedup', () => {
-  it('3 war factories gives 3x speed', () => {
+describe('tickProduction — factory count does NOT speed up single item (C++ parity)', () => {
+  it('3 war factories: progress is still 1 per tick (not 3x)', () => {
     const item = makeProductionItem({ type: '2TNK', cost: 800, buildTime: 140, prerequisite: 'WEAP' });
     // 3 WEAPs
     const factories = [
@@ -616,16 +623,16 @@ describe('tickProduction multi-factory speedup', () => {
       progress: 0,
       queueCount: 1,
       costPaid: 0,
+      powerMult: 1,
     });
 
     tickProduction(ctx);
 
-    // With 3 factories and full power: speedMult = 3, powerMult = 1.0
-    // progress += 3 * 1.0 = 3
-    expect(ctx.productionQueue.get('right')!.progress).toBe(3);
+    // C++ parity: progress += 1 * powerMult(1.0) = 1, regardless of factory count
+    expect(ctx.productionQueue.get('right')!.progress).toBe(1);
   });
 
-  it('5 factories gives 5x speed (linear, no cap)', () => {
+  it('5 factories: progress is still 1 per tick (not 5x)', () => {
     const item = makeProductionItem({ type: '2TNK', cost: 800, buildTime: 140, prerequisite: 'WEAP' });
     const factories = Array.from({ length: 5 }, (_, i) =>
       makeStructure('WEAP', House.Spain, 10 + i * 5, 10));
@@ -640,13 +647,15 @@ describe('tickProduction multi-factory speedup', () => {
       progress: 0,
       queueCount: 1,
       costPaid: 0,
+      powerMult: 1,
     });
 
     tickProduction(ctx);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(5);
+    // C++ parity: progress = 1, not 5
+    expect(ctx.productionQueue.get('right')!.progress).toBe(1);
   });
 
-  it('multi-factory + low power combines multiplicatively', () => {
+  it('low power slows production regardless of factory count', () => {
     const item = makeProductionItem({ type: '2TNK', cost: 800, buildTime: 140, prerequisite: 'WEAP' });
     const factories = [
       makeStructure('WEAP', House.Spain, 10, 10),
@@ -665,12 +674,14 @@ describe('tickProduction multi-factory speedup', () => {
       progress: 0,
       queueCount: 1,
       costPaid: 0,
+      powerMult: 0.5, // snapshotted at 50% power (50/100)
     });
 
     tickProduction(ctx);
 
-    // 2 factories * 0.5 power = 1.0 progress per tick
-    expect(ctx.productionQueue.get('right')!.progress).toBe(1);
+    // C++ parity: progress += 1 * 0.5 (power penalty) = 0.5
+    // Factory count is irrelevant
+    expect(ctx.productionQueue.get('right')!.progress).toBe(0.5);
   });
 });
 
@@ -688,6 +699,7 @@ describe('cancelProduction refund math', () => {
       progress: 50,
       queueCount: 1,
       costPaid: 285, // partial — 285 of 800 deducted incrementally
+      powerMult: 1,
     });
 
     cancelProduction(ctx, 'right');
@@ -706,6 +718,7 @@ describe('cancelProduction refund math', () => {
       progress: 50,
       queueCount: 3,
       costPaid: 285,
+      powerMult: 1,
     });
 
     cancelProduction(ctx, 'right');
@@ -725,6 +738,7 @@ describe('cancelProduction refund math', () => {
       progress: 70,
       queueCount: 3,
       costPaid: 500,
+      powerMult: 1,
     });
 
     // Cancel 1st queued
@@ -958,8 +972,9 @@ describe('powerMultiplier boundary conditions', () => {
     expect(powerMultiplier(200, 100)).toBe(1.0);
   });
 
-  it('produced = 0 returns 1.0 (no power system)', () => {
-    expect(powerMultiplier(0, 100)).toBe(1.0);
+  it('produced = 0, consumed > 0: clamped to 1/16 (C++ parity)', () => {
+    // C++ Power_Fraction: Power==0 → 0, Bound(0, 1/16, 1) = 1/16
+    expect(powerMultiplier(0, 100)).toBe(1 / 16);
   });
 
   it('produced slightly less than consumed returns fraction', () => {
@@ -971,13 +986,14 @@ describe('powerMultiplier boundary conditions', () => {
     expect(powerMultiplier(50, 100)).toBe(0.5);
   });
 
-  it('produced below 50% clamps to 0.5', () => {
-    // 25/100 = 0.25, but clamped to 0.5
-    expect(powerMultiplier(25, 100)).toBe(0.5);
+  it('produced below 50% returns actual fraction (C++ parity: floor is 1/16 not 0.5)', () => {
+    // 25/100 = 0.25, above 1/16 floor so unclamped
+    expect(powerMultiplier(25, 100)).toBe(0.25);
   });
 
-  it('produced = 1, consumed = 1000 clamps to 0.5', () => {
-    expect(powerMultiplier(1, 1000)).toBe(0.5);
+  it('produced = 1, consumed = 1000 clamps to 1/16', () => {
+    // 1/1000 = 0.001, below 1/16 floor so clamped
+    expect(powerMultiplier(1, 1000)).toBe(1 / 16);
   });
 });
 
@@ -1256,26 +1272,31 @@ describe('applySplashDamage with zero or minimal splash', () => {
     expect(victim.hp).toBeLessThan(hpBefore);
   });
 
-  it('applySplashDamage skips primary target by ID', () => {
-    const primary = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+  it('applySplashDamage skips firer/source, not primary target (C++ combat.cpp:207)', () => {
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 100 + CELL_SIZE / 2, 100);
     const bystander = makeEntity(UnitType.I_E1, House.USSR, 100 + CELL_SIZE, 100);
     const ctx = makeCombatContext({
-      entities: [primary, bystander],
-      entityById: new Map([[primary.id, primary], [bystander.id, bystander]]),
+      entities: [attacker, target, bystander],
+      entityById: new Map([[attacker.id, attacker], [target.id, target], [bystander.id, bystander]]),
     });
 
-    const primaryHpBefore = primary.hp;
+    const attackerHpBefore = attacker.hp;
+    const targetHpBefore = target.hp;
     const bystanderHpBefore = bystander.hp;
 
     applySplashDamage(ctx,
-      { x: 100, y: 100 },
+      { x: 100 + CELL_SIZE / 2, y: 100 },
       { damage: 100, warhead: 'HE', splash: 2 },
-      primary.id, // exclude primary target
+      target.id,
       House.Spain,
+      attacker, // firer — should be excluded from splash
     );
 
-    // Primary should be skipped
-    expect(primary.hp).toBe(primaryHpBefore);
+    // Firer/source should be excluded from splash (C++ combat.cpp:207: object != source)
+    expect(attacker.hp).toBe(attackerHpBefore);
+    // Primary target takes splash damage on top of direct damage
+    expect(target.hp).toBeLessThan(targetHpBefore);
     // Bystander should take splash damage (1 cell away, within 1.5-cell radius)
     expect(bystander.hp).toBeLessThan(bystanderHpBefore);
   });
@@ -1623,8 +1644,9 @@ describe('getEffectiveCost per-house bonuses', () => {
 // 25. SUPERWEAPON: updateSuperweapons charge rate under low power
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('Superweapon charge rate under low power', () => {
-  it('charges at 0.25x rate when low power for player house', () => {
+describe('Superweapon charge rate under low power (C++ parity: binary on/off)', () => {
+  it('fully suspends charging when low power for player house', () => {
+    // C++ house.cpp:1410-1411: powered superweapons fully suspend at low power
     const mslo = makeStructure('MSLO', House.Spain, 10, 10, { buildProgress: undefined });
     const ctx = makeSuperweaponContext({
       structures: [mslo],
@@ -1637,10 +1659,14 @@ describe('Superweapon charge rate under low power', () => {
     const key = `${House.Spain}:${SuperweaponType.NUKE}`;
     const state = ctx.superweapons.get(key);
     expect(state).toBeDefined();
-    expect(state!.chargeTick).toBe(0.25); // 0.25x rate
+    expect(state!.chargeTick).toBe(0); // fully suspended, not fractional
   });
 
-  it('charges at normal 1x rate for enemy house even under player low power', () => {
+  it('also suspends enemy house when global power is low', () => {
+    // The current TS implementation uses a single global isLowPower check
+    // based on ctx.powerProduced/Consumed (player grid). This differs from
+    // C++ where each house has its own Power_Fraction(). For now, all houses
+    // are affected by the player's power state.
     const mslo = makeStructure('MSLO', House.USSR, 10, 10, { buildProgress: undefined });
     const ctx = makeSuperweaponContext({
       structures: [mslo],
@@ -1654,8 +1680,8 @@ describe('Superweapon charge rate under low power', () => {
     const key = `${House.USSR}:${SuperweaponType.NUKE}`;
     const state = ctx.superweapons.get(key);
     expect(state).toBeDefined();
-    // Enemy house charges at full rate regardless of player power
-    expect(state!.chargeTick).toBe(1);
+    // Global isLowPower suspends all houses' superweapons
+    expect(state!.chargeTick).toBe(0);
   });
 });
 

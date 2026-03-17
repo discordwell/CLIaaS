@@ -120,11 +120,11 @@ describe('power grid multiplier', () => {
     expect(s.power.multiplier).toBe(0.5);
   });
 
-  it('clamps to 0.5 minimum', () => {
+  it('clamps to 1/16 minimum (C++ parity: Bound(frac, 1/16, 1))', () => {
     const game = makeGame({ powerProduced: 10, powerConsumed: 100 });
     const s = serializeState(castGame(game));
-    // powerMultiplier(10, 100) = max(0.5, 0.1) = 0.5
-    expect(s.power.multiplier).toBe(0.5);
+    // powerMultiplier(10, 100) = max(1/16, 0.1) = 0.1 (above 1/16 floor)
+    expect(s.power.multiplier).toBe(0.1);
   });
 
   it('returns 1.0 when both zero', () => {
@@ -146,6 +146,7 @@ describe('production queue enhanced fields', () => {
       progress: 50,
       queueCount: 1,
       costPaid: 400,
+      powerMult: 1,
     });
 
     const s = serializeState(castGame(game));
@@ -162,6 +163,7 @@ describe('production queue enhanced fields', () => {
       progress: 0,
       queueCount: 1,
       costPaid: 0,
+      powerMult: 1,
     });
 
     const s = serializeState(castGame(game));

@@ -323,7 +323,7 @@ export class Game {
   /** Strategic AI state per non-player house (skip ant missions) */
   private aiStates = new Map<House, AIHouseState>();
   /** Production queue: active build + queued repeats per category (max 5 total) */
-  productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number }> = new Map();
+  productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number; powerMult: number }> = new Map();
   /** Structure placement: waiting to be placed on map */
   pendingPlacement: ProductionItem | null = null;
   wallPlacementPrepaid = false; // tracks whether first wall cost was prepaid by production
@@ -443,6 +443,15 @@ export class Game {
   private builtInfantryTypes = new Set<string>();
   /** Aircraft types player has built (for TEVENT_BUILD_AIRCRAFT) */
   private builtAircraftTypes = new Set<string>();
+
+  // C++ parity (#21): per-entity discovery tracking (TEVENT_DISCOVERED)
+  /** Entity IDs that have been discovered by the player (revealed while enemy-owned) */
+  private discoveredEntityIds = new Set<number>();
+  /** Structure indices that have been discovered by the player */
+  private discoveredStructureIds = new Set<number>();
+  // C++ parity (#21): per-house discovery tracking (TEVENT_HOUSE_DISCOVERED)
+  /** RA house indices whose IsDiscovered flag has been set (any unit of house first seen) */
+  private houseDiscovered = new Map<number, boolean>();
 
   // Turbo mode (for E2E test runner)
   turboMultiplier = 2;
@@ -1655,6 +1664,10 @@ export class Game {
     // Check cell triggers — detect player units entering trigger cells
     this.checkCellTriggers();
 
+    // C++ parity (#21): detect object/house discovery and zone/line crossings
+    this.checkDiscoveryTriggers();
+    this.checkZoneAndCrossTriggers();
+
     // Process triggers (every 15 ticks = once per second for performance)
     if (this.tick % 15 === 0) {
       this.processTriggers();
@@ -1855,50 +1868,71 @@ export class Game {
               this.gapGeneratorCells.delete(si);
             }
           }
-          // Refund: flat 50% of building cost (C++ parity — no health scaling)
           const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
           // Recalculate silo capacity BEFORE adding refund (structure is now dead)
           this.recalculateSiloCapacity();
-          if (prodItem) {
-            this.addCredits(Math.floor(prodItem.cost * 0.5), true);
-          }
+          const healthRatioAtSell = (s.sellHpAtStart ?? s.maxHp) / s.maxHp;
           s.sellHpAtStart = undefined;
           const wx = s.cx * CELL_SIZE + CELL_SIZE;
           const wy = s.cy * CELL_SIZE + CELL_SIZE;
           this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: EXPLOSION_FRAMES['veh-hit1'] ?? 17, size: 12,
             sprite: 'veh-hit1', spriteStart: 0 });
+
+          // C++ building.cpp:3509-3549: ConYard sell → MCV reversion
+          // Conditions: FACT, deployed from MCV (ArchiveTarget), human-owned, HP > 0
+          // When MCV spawns: no infantry survivors, no sell refund (C++ only refunds if MCV can't spawn)
+          let mcvSpawned = false;
+          if (s.type === 'FACT' && s.deployedFromMCV &&
+              this.isAllied(s.house, this.playerHouse) && healthRatioAtSell > 0) {
+            const mcv = new Entity(UnitType.V_MCV, s.house, wx, wy);
+            mcv.hp = Math.max(1, Math.floor(mcv.maxHp * healthRatioAtSell));
+            mcv.mission = Mission.GUARD;
+            this.entities.push(mcv);
+            this.entityById.set(mcv.id, mcv);
+            mcvSpawned = true;
+          }
+
+          // Refund: flat 50% of building cost (C++ parity — no health scaling)
+          // C++ building.cpp:3509-3549: no refund when ConYard reverts to MCV
+          if (!mcvSpawned && prodItem) {
+            this.addCredits(Math.floor(prodItem.cost * 0.5), true);
+          }
+
           // SL4: Spawn infantry survivors (C++ building.cpp How_Many_Survivors + Crew_Type)
-          // Count: (buildingCost * SurvivorFraction) / E1_cost, clamped 1-5
-          const E1_COST = 100;
-          const SURVIVOR_FRACTION = 0.5; // rules.cpp:177 SurvivorFraction(fixed(1,2))
-          const buildCost = prodItem?.cost ?? 300;
-          const survivorCount = Math.min(5, Math.max(1,
-            Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
-          for (let si = 0; si < survivorCount; si++) {
-            // C++ Crew_Type: per-building type with random variance
-            let crewType: UnitType;
-            switch (s.type) {
-              case 'SILO': // STRUCT_STORAGE: 50% C1 or C7 (civilians)
-                crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
-                break;
-              case 'FACT': // STRUCT_CONST: 25% engineer if human-owned
-                crewType = Math.random() < 0.25 ? UnitType.I_E6 : UnitType.I_E1;
-                break;
-              case 'KENN': // STRUCT_KENNEL: 50% dog, 50% nothing
-                if (Math.random() < 0.5) continue; // no survivor this iteration
-                crewType = UnitType.I_DOG;
-                break;
-              case 'TENT': case 'BARR': // Barracks: always E1
-                crewType = UnitType.I_E1;
-                break;
-              default: // TechnoClass::Crew_Type: E1, with 15% civilian chance if no weapon
-                crewType = UnitType.I_E1;
-                break;
+          // C++ parity: no survivors when ConYard reverts to MCV
+          if (!mcvSpawned) {
+            // Count: (buildingCost * SurvivorFraction) / E1_cost, clamped 1-5
+            const E1_COST = 100;
+            const SURVIVOR_FRACTION = 0.5; // rules.cpp:177 SurvivorFraction(fixed(1,2))
+            const buildCost = prodItem?.cost ?? 300;
+            const survivorCount = Math.min(5, Math.max(1,
+              Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
+            for (let si = 0; si < survivorCount; si++) {
+              // C++ Crew_Type: per-building type with random variance
+              let crewType: UnitType;
+              switch (s.type) {
+                case 'SILO': // STRUCT_STORAGE: 50% C1 or C7 (civilians)
+                  crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+                  break;
+                case 'FACT': // STRUCT_CONST: 25% engineer if human-owned
+                  crewType = Math.random() < 0.25 ? UnitType.I_E6 : UnitType.I_E1;
+                  break;
+                case 'KENN': // STRUCT_KENNEL: 50% dog, 50% nothing
+                  if (Math.random() < 0.5) continue; // no survivor this iteration
+                  crewType = UnitType.I_DOG;
+                  break;
+                case 'TENT': case 'BARR': // Barracks: always E1
+                  crewType = UnitType.I_E1;
+                  break;
+                default: // TechnoClass::Crew_Type: E1, with 15% civilian chance if no weapon
+                  crewType = UnitType.I_E1;
+                  break;
+              }
+              const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
+              inf.mission = Mission.GUARD;
+              this.entities.push(inf);
+              this.entityById.set(inf.id, inf);
             }
-            const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
-            inf.mission = Mission.GUARD;
-            this.entities.push(inf);
-            this.entityById.set(inf.id, inf);
           }
         }
       }
@@ -4807,6 +4841,167 @@ export class Game {
     }
   }
 
+  /**
+   * C++ parity (#21): detect object discovery for TEVENT_DISCOVERED and set House.IsDiscovered
+   * for TEVENT_HOUSE_DISCOVERED.
+   *
+   * C++ techno.cpp:776-792 — Revealed() sets IsDiscoveredByPlayer, then if not owned by player,
+   * fires Trigger->Spring(TEVENT_DISCOVERED, this) and sets House->IsDiscovered = true.
+   * C++ techno.cpp:3899 — Record_The_Kill() also fires TEVENT_DISCOVERED.
+   *
+   * We check each enemy entity/structure: if the player can see its cell (visibility == 2)
+   * and it hasn't been discovered yet, mark it discovered and set the trigger flags.
+   */
+  private checkDiscoveryTriggers(): void {
+    // Check entities
+    for (const entity of this.entities) {
+      if (!entity.alive) continue;
+      if (this.isPlayerControlled(entity)) continue; // only enemy/neutral
+      if (this.discoveredEntityIds.has(entity.id)) continue; // already discovered
+
+      // Check if player can see this entity's cell
+      const vis = this.map.getVisibility(entity.cell.cx, entity.cell.cy);
+      if (vis < 2) continue; // not visible
+
+      this.discoveredEntityIds.add(entity.id);
+
+      // Set house discovery (C++ House->IsDiscovered = true in techno.cpp:792)
+      const hi = Game.HOUSE_TO_INDEX[entity.house];
+      if (hi !== undefined) {
+        this.houseDiscovered.set(hi, true);
+      }
+
+      // Fire trigger discovery if entity has a trigger attached
+      if (entity.triggerName) {
+        for (const trigger of this.triggers) {
+          if (trigger.name === entity.triggerName) {
+            trigger.objectDiscovered = true;
+          }
+        }
+      }
+    }
+
+    // Check structures
+    for (let si = 0; si < this.structures.length; si++) {
+      const s = this.structures[si];
+      if (!s.alive) continue;
+      if (this.isAllied(s.house, this.playerHouse)) continue; // only enemy/neutral
+      if (this.discoveredStructureIds.has(si)) continue;
+
+      // Check if player can see this structure's cell
+      const vis = this.map.getVisibility(s.cx, s.cy);
+      if (vis < 2) continue;
+
+      this.discoveredStructureIds.add(si);
+
+      const hi = Game.HOUSE_TO_INDEX[s.house];
+      if (hi !== undefined) {
+        this.houseDiscovered.set(hi, true);
+      }
+
+      if (s.triggerName) {
+        for (const trigger of this.triggers) {
+          if (trigger.name === s.triggerName) {
+            trigger.objectDiscovered = true;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * C++ parity (#21): detect zone entry, horizontal crossing, and vertical crossing
+   * for TEVENT_ENTERS_ZONE, TEVENT_CROSS_HORIZONTAL, TEVENT_CROSS_VERTICAL.
+   *
+   * C++ foot.cpp:1406-1455:
+   * - CROSS_HORIZONTAL: scans all cells in the same Y row for triggers with CROSS_HORIZONTAL event;
+   *   calls Spring(TEVENT_CROSS_HORIZONTAL, this) if object->Owner() == Data.House.
+   * - CROSS_VERTICAL: same but for X column.
+   * - ENTERS_ZONE: iterates MapTriggers; if trigger has ENTERS_ZONE event and the entity is in the
+   *   same movement zone as the trigger's cell, calls Spring(TEVENT_ENTERS_ZONE, this).
+   *
+   * C++ tevent.cpp:290-293: ownership check — object->Owner() must equal Data.House for all four
+   * events (PLAYER_ENTERED, CROSS_H, CROSS_V, ENTERS_ZONE). Note: == not !=, so the trigger's
+   * Data.House specifies WHICH house's units should trigger it.
+   */
+  private checkZoneAndCrossTriggers(): void {
+    for (const entity of this.entities) {
+      if (!entity.alive) continue;
+      // C++ foot.cpp:1409 — only uncloaked units trigger these
+      const entityHouseIdx = Game.HOUSE_TO_INDEX[entity.house];
+      if (entityHouseIdx === undefined) continue;
+
+      const ex = entity.cell.cx;
+      const ey = entity.cell.cy;
+
+      for (const trigger of this.triggers) {
+        // Skip already-fired non-persistent triggers
+        if (trigger.fired && trigger.persistence <= 1) continue;
+
+        const hasEntersZone = trigger.event1.type === 24 || // TEVENT_ENTERS_ZONE
+          (trigger.eventControl !== 0 && trigger.event2.type === 24);
+        const hasCrossH = trigger.event1.type === 25 || // TEVENT_CROSS_HORIZONTAL
+          (trigger.eventControl !== 0 && trigger.event2.type === 25);
+        const hasCrossV = trigger.event1.type === 26 || // TEVENT_CROSS_VERTICAL
+          (trigger.eventControl !== 0 && trigger.event2.type === 26);
+
+        if (!hasEntersZone && !hasCrossH && !hasCrossV) continue;
+
+        // C++ tevent.cpp:290-293: ownership check — object->Owner() must == Data.House
+        // Data.House is in event1.data or event2.data depending on which event uses it
+        const checkOwnership = (eventData: number): boolean => {
+          return entityHouseIdx === eventData;
+        };
+
+        // CROSS_HORIZONTAL: entity is in same row (Y) as any cell trigger with CROSS_H
+        if (hasCrossH && !trigger.crossedHorizontal) {
+          const evtData = trigger.event1.type === 25 ? trigger.event1.data : trigger.event2.data;
+          if (checkOwnership(evtData)) {
+            // Check if any cell in the entity's row has this trigger
+            for (const [cellIdx, trigName] of this.map.cellTriggers) {
+              if (trigName !== trigger.name) continue;
+              const trigY = Math.floor(cellIdx / MAP_CELLS);
+              if (ey === trigY) {
+                trigger.crossedHorizontal = true;
+                break;
+              }
+            }
+          }
+        }
+
+        // CROSS_VERTICAL: entity is in same column (X) as any cell trigger with CROSS_V
+        if (hasCrossV && !trigger.crossedVertical) {
+          const evtData = trigger.event1.type === 26 ? trigger.event1.data : trigger.event2.data;
+          if (checkOwnership(evtData)) {
+            for (const [cellIdx, trigName] of this.map.cellTriggers) {
+              if (trigName !== trigger.name) continue;
+              const trigX = cellIdx % MAP_CELLS;
+              if (ex === trigX) {
+                trigger.crossedVertical = true;
+                break;
+              }
+            }
+          }
+        }
+
+        // ENTERS_ZONE: entity is in same zone as trigger's cell
+        // C++ uses Map[trigger->Cell].Zones[MZone] == Map[Coord].Zones[MZone]
+        // Simplified: same connected passable region. We approximate with cell proximity
+        // since we don't have full zone maps — check if entity is on any cell assigned to this trigger.
+        if (hasEntersZone && !trigger.enteredZone) {
+          const evtData = trigger.event1.type === 24 ? trigger.event1.data : trigger.event2.data;
+          if (checkOwnership(evtData)) {
+            const entityCellIdx = ey * MAP_CELLS + ex;
+            const trigName = this.map.cellTriggers.get(entityCellIdx);
+            if (trigName === trigger.name) {
+              trigger.enteredZone = true;
+            }
+          }
+        }
+      }
+    }
+  }
+
   /** Map our House enum to RA HousesType index (for trigger event checks) */
   private static readonly HOUSE_TO_INDEX: Record<string, number> = {
     [House.Spain]: 0, [House.Greece]: 1, [House.USSR]: 2,
@@ -4829,6 +5024,12 @@ export class Game {
       triggerStartTick: trigger.timerTick,
       triggerName: trigger.name,
       playerEntered: trigger.playerEntered,
+      // C++ parity (#21): differentiated trigger event state
+      objectDiscovered: trigger.objectDiscovered,
+      houseDiscovered: this.houseDiscovered,
+      enteredZone: trigger.enteredZone,
+      crossedHorizontal: trigger.crossedHorizontal,
+      crossedVertical: trigger.crossedVertical,
       enemyUnitsAlive: shared.enemyUnitsAlive,
       enemyKillCount: this.killCount,
       playerFactories: shared.playerFactories,

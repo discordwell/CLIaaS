@@ -198,6 +198,7 @@ describe('serializeState', () => {
       progress: 50,
       queueCount: 2,
       costPaid: 400,
+      powerMult: 1,
     });
 
     const s = serializeState(game as unknown as Parameters<typeof serializeState>[0]);
