@@ -683,28 +683,36 @@ export class OracleStrategy {
         reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} defenders)`);
         reasons.push(...micro.reasons);
 
-        // Surplus: attack enemies within leash range of base (30 cells),
-        // but don't chase into enemy territory. In survival mode, tighter leash (20 cells).
+        // In survival mode, ALL units defend — no surplus chasing.
+        // In non-survival, surplus attacks nearby enemies within leash range.
         const isTimedSurvival = state.missionTimerActive && state.missionTimer > 0;
-        const leashSq = isTimedSurvival ? 400 : 900; // 20 or 30 cells
-        const nearbyEnemies = state.enemies.filter(
-          (e) => this.distanceSq(e, baseCenter) <= leashSq,
-        );
-        if (surplus.length > 0 && nearbyEnemies.length > 0) {
-          const atkMicro = this.microManage(surplus, nearbyEnemies, baseCenter);
-          commands.push(...atkMicro.commands);
-          reasons.push(`attack nearby ${surplus.length}${isTimedSurvival ? ' (survival)' : ''}`);
-        } else if (surplus.length > 0) {
-          // No nearby enemies — surplus patrols near base
-          const stray = surplus.filter((u) => this.distanceSq(u, baseCenter) > 225);
-          if (stray.length > 0) {
-            commands.push({
-              cmd: 'move',
-              ids: stray.map((u) => u.id),
-              cx: baseCenter.cx,
-              cy: baseCenter.cy,
-            });
-            reasons.push(`patrol ${stray.length} to base`);
+        if (isTimedSurvival) {
+          // Survival: surplus also helps defend — everyone fights base threats
+          if (surplus.length > 0) {
+            const surplusMicro = this.microManage(surplus, baseThreats, baseCenter);
+            commands.push(...surplusMicro.commands);
+            reasons.push(`all defend (survival, ${surplus.length} surplus)`);
+          }
+        } else {
+          const leashSq = 900; // 30 cells
+          const nearbyEnemies = state.enemies.filter(
+            (e) => this.distanceSq(e, baseCenter) <= leashSq,
+          );
+          if (surplus.length > 0 && nearbyEnemies.length > 0) {
+            const atkMicro = this.microManage(surplus, nearbyEnemies, baseCenter);
+            commands.push(...atkMicro.commands);
+            reasons.push(`attack nearby ${surplus.length}`);
+          } else if (surplus.length > 0) {
+            const stray = surplus.filter((u) => this.distanceSq(u, baseCenter) > 225);
+            if (stray.length > 0) {
+              commands.push({
+                cmd: 'move',
+                ids: stray.map((u) => u.id),
+                cx: baseCenter.cx,
+                cy: baseCenter.cy,
+              });
+              reasons.push(`patrol ${stray.length} to base`);
+            }
           }
         }
       } else {
