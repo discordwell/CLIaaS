@@ -162,6 +162,7 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     attackCooldown: 0,
     ammo: -1,
     maxAmmo: -1,
+    deployedFromMCV: true, // C++ ArchiveTarget parity: tracks MCV origin for sell reversion
   };
   ctx.structures.push(newStruct);
   // Mark 3x3 footprint
