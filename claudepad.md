@@ -1,11 +1,12 @@
 # Session Summaries
 
-## 2026-03-17T01:30Z — Session 154: Building Mission Strategy Improvements
+## 2026-03-17T02:00Z — Session 154: Building Mission Strategy Improvements
 - **M8 survival defense**: Surplus units now help defend instead of chasing enemies. Win rate improved from ~10% baseline to ~25-30%.
 - **M4 analysis**: Generic strategy can't handle extreme starting conditions (1 JEEP + 1 E1 vs 7 heavy tanks). MCV deploys ~tick 900, first tank at ~tick 4800. Needs dedicated strategy.
-- **Key finding**: M8 original 3/5 was likely lucky (actual baseline ~10-20%). Pure defense in survival mode is the most impactful improvement.
-- **Power management**: Investigated APWR spam and POWR(99) build order — constant power building is actually beneficial (adds structure HP buffer). Removing it causes regression.
-- **Explored but reverted**: Credit conservation (too restrictive), retreat limits (worsened attrition), pre-ConYard defense (prevented beneficial initial attack).
+- **Step size sensitivity**: Reducing step(15/30) to step(10) or step(5) causes severe command stuttering — units get re-commanded every 0.33-0.67s and never execute. Must keep step(15/30). Fix: only re-command IDLE units, not all units every tick.
+- **Infantry scatter**: Sounds good in theory but overrides attack commands, causing units to stop fighting. Needs dedup with subsequent commands — implement later.
+- **Key learning from user**: Economy first, build up overwhelming force before attacking. Build towards ore deposits. Light + medium tanks suffice for Allied land maps. Game clock runs ~45 min by tick 3900 — need faster decisions without command stutter.
+- **POWR(99) in build order**: Constant power building is actually beneficial (adds structure HP buffer). Removing it causes regression.
 
 ## 2026-03-17T00:15Z — Session 153: SCG01EA Victory — Transport Auto-Load + Evacuation Fix
 - **Bug fixes**: Tanya sprite (E7→e5), barrel chain explosions (structure blast loop), transport auto-loads nearby civilians on TMISSION_MOVE arrival, `return` after evacuate to prevent GUARD override.
