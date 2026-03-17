@@ -223,21 +223,21 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
   }
 
   // ── Infantry directional scatter (C++ infantry.cpp:1852-1929) ──
+  // C++ TakeDamage (infantry.cpp:439) calls Scatter(source_coord) with forced=false.
 
-  // C++ infantry.cpp:1860 — IsDriving: already moving → forced becomes false
-  // TakeDamage calls Scatter(threat, true), so forced starts as true
-  let forced = true;
-  if (entity.moveTarget !== null) forced = false;
+  // C++ infantry.cpp:1860 — IsDriving: already moving → forced stays false
+  const isDriving = entity.moveTarget !== null;
 
   // C++ infantry.cpp:1866 — mission must allow scatter (MissionControl[Mission].IsScatter)
   const mc = MISSION_CONTROL[entity.mission];
-  if (mc && !mc.isScatter && !forced) return;
+  if (mc && !mc.isScatter) return;
 
-  // C++ infantry.cpp:1872 — non-FraidyCat with valid combat target doesn't scatter (unless forced)
-  if (!entity.stats.isFraidyCat && entity.target !== null && !forced) return;
+  // C++ infantry.cpp:1872 — non-FraidyCat with valid combat target doesn't scatter
+  if (!entity.stats.isFraidyCat && entity.target !== null) return;
 
-  // C++ infantry.cpp:1885 — must be forced OR IsFraidyCat to actually scatter
-  if (!forced && !entity.stats.isFraidyCat) return;
+  // C++ infantry.cpp:1885 — IsDriving non-FraidyCat infantry doesn't scatter
+  // (IsDriving → forced=false; without forced, only FraidyCat scatters per C++)
+  if (isDriving && !entity.stats.isFraidyCat) return;
 
   // Calculate scatter direction (C++ infantry.cpp:1888-1900)
   let awayDir: number;
