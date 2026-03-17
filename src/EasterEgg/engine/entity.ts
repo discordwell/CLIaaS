@@ -229,6 +229,12 @@ export class Entity {
   // Team behavior flags
   isSuicide = false; // IsSuicide team flag: don't retreat, fight to death
 
+  // C++ parity: back-pointer to owning Team object (C++ FootClass::Team in team.h)
+  // Set by Team.add(), cleared by Team.remove() and Team.dissolve()
+  // Typed loosely to avoid circular dependency (team.ts imports entity.ts)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  teamRef: any = null;
+
   // Superweapon effect timers
   ironCurtainTick = 0;  // ticks remaining for Iron Curtain invulnerability
   chronoShiftTick = 0;  // visual effect timer after being chronoshifted
