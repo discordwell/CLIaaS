@@ -540,6 +540,8 @@ export interface WeaponStats {
   isDropping?: boolean;     // vertical drop trajectory (parabombs)
   isParachuted?: boolean;   // parachute visual during descent
   isGigundo?: boolean;      // large explosion sprite on impact (V2RL, nukes)
+  isDegenerate?: boolean;   // C++ bullet.cpp:478-480 — projectile loses 1 strength/tick during flight (min 5)
+  isHigh?: boolean;         // C++ type.h:1365 — flies over walls (missiles, rockets); non-high explode on wall contact (bullet.cpp:903-913)
 }
 
 // C6: Warhead splash falloff properties — warhead.cpp:72
@@ -648,46 +650,46 @@ export const UNIT_STATS: Record<string, UnitStats> = {
 // projSpeed: per-weapon projectile visual speed in cells/second (C++ BulletClass::AI Speed field)
 export const WEAPON_STATS: Record<string, WeaponStats> = {
   // Infantry weapons
-  M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 40, isInvisible: true },
+  M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 40, isInvisible: true, isDegenerate: true },
   Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 5 }, // C++ Speed=5 (Lobbed)
-  Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 15 },
-  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15, isAntiAir: true },
+  Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 15, isHigh: true },
+  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15, isAntiAir: true, isHigh: true },
   Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20 },
-  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40, isInvisible: true },
+  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40, isInvisible: true, isDegenerate: true },
   Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 40 },
-  Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true },
+  Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true, isDegenerate: true },
   // Vehicle weapons
-  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 40, isInvisible: true },
-  '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
-  '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
-  '105mm':          { name: '105mm',             damage: 40,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30 },
-  '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30, burst: 2 },
-  MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 15 },
+  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 40, isInvisible: true, isDegenerate: true },
+  '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30, isDegenerate: true },
+  '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30, isDegenerate: true },
+  '105mm':          { name: '105mm',             damage: 40,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30, isDegenerate: true },
+  '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 30, burst: 2, isDegenerate: true },
+  MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 15, isHigh: true },
   '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true },
   TeslaCannon:      { name: 'TeslaCannon',       damage: 100, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
   PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 40 }, // Shock Trooper
   GoodWrench:       { name: 'GoodWrench',        damage: -100, rof: 80, range: 1.83, warhead: 'Mechanical', projSpeed: 40 },        // Mechanic (heals vehicles)
-  APTusk:           { name: 'APTusk',             damage: 75,  rof: 80, range: 5.0,  warhead: 'AP', projSpeed: 40, burst: 2 },       // Chrono Tank missile
+  APTusk:           { name: 'APTusk',             damage: 75,  rof: 80, range: 5.0,  warhead: 'AP', projSpeed: 40, burst: 2, isHigh: true },       // Chrono Tank missile
   TTankZap:         { name: 'TTankZap',           damage: 100, rof: 120, range: 7.0,  warhead: 'Super', splash: 1.0, projSpeed: 40 }, // Tesla Tank
   // Naval weapons (C++ RULES.INI — vessel.cpp)
-  Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 40, burst: 2 },                                 // DD primary naval gun
+  Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 40, burst: 2, isDegenerate: true },                                 // DD primary naval gun
   TorpTube:         { name: 'TorpTube',         damage: 90,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 1.0, isSubSurface: true }, // SS torpedo, underwater travel
   DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 12, isAntiSub: true },                         // DD secondary, hits submerged subs
-  Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // CA cruise missile
-  SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // MSUB missiles
-  SubSCUD:          { name: 'SubSCUD',          damage: 400, rof: 120, range: 14.0, warhead: 'HE', projSpeed: 20, projectileSpeed: 2.0, projectileROT: 5, burst: 2 }, // Aftermath missile sub missile
+  Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // CA cruise missile
+  SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // MSUB missiles
+  SubSCUD:          { name: 'SubSCUD',          damage: 400, rof: 120, range: 14.0, warhead: 'HE', projSpeed: 20, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // Aftermath missile sub missile
   Democharge:       { name: 'Democharge',       damage: 500, rof: 80, range: 1.75, warhead: 'Nuke', projSpeed: 40 }, // Demo truck self-destruct charge
   // Aircraft weapons (C++ RULES.INI — aircraft.cpp)
-  Maverick:         { name: 'Maverick',          damage: 50,  rof: 3,  range: 6.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Air-to-ground missile (MIG)
-  Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5 },  // Helicopter missile (HELI)
-  ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 40 },  // Rapid-fire hitscan (HIND/YAK)
+  Maverick:         { name: 'Maverick',          damage: 50,  rof: 3,  range: 6.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, isHigh: true },  // Air-to-ground missile (MIG)
+  Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, isHigh: true },  // Helicopter missile (HELI)
+  ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 40, isDegenerate: true },  // Rapid-fire hitscan (HIND/YAK)
   // New parity weapons
   '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 30, isArcing: true, inaccuracy: 1.0 },  // Cruiser main gun
-  '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 40 },  // Gunboat weapon
-  Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true },  // Tanya's dual pistols
-  Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 40 },  // Stavros/civilian
-  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5, isGigundo: true, isFueled: true },  // V2 Rocket (C++ FROG: speed=25, High=yes, Proximity=yes, Gigundo=yes, Fueled=yes)
+  '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 40, isDegenerate: true },  // Gunboat weapon
+  Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true, isDegenerate: true },  // Tanya's dual pistols
+  Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 40, isDegenerate: true },  // Stavros/civilian
+  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5, isGigundo: true, isFueled: true, isHigh: true },  // V2 Rocket (C++ FROG: speed=25, High=yes, Proximity=yes, Gigundo=yes, Fueled=yes)
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super', projSpeed: 40 }, // C++: Warhead=Super (combat.cpp confirms)
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },

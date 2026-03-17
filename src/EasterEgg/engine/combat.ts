@@ -36,6 +36,7 @@ export interface InflightProjectile {
   targetId: number;
   weapon: WeaponStats;
   damage: number;
+  strength: number;      // C++ bullet.cpp:478-480 — current damage, decremented each tick if isDegenerate (min 5)
   speed: number;         // cells per tick
   travelFrames: number;  // total frames to travel
   currentFrame: number;
@@ -47,6 +48,9 @@ export interface InflightProjectile {
   isArcing: boolean;     // true if weapon has ballistic arc trajectory
   arcHeight: number;     // current vertical position (leptons); starts at 1 for arcing
   arcRiser: number;      // vertical velocity; decremented by RULE_GRAVITY each tick
+  // C++ bullet.cpp:903-913 — wall collision fields
+  startX: number;        // origin X position (attacker pos at launch)
+  startY: number;        // origin Y position (attacker pos at launch)
 }
 
 /** Minimal AI state slice needed by damageStructure */
@@ -376,6 +380,7 @@ export function launchProjectile(
     targetId: target?.id ?? -1,
     weapon,
     damage,
+    strength: damage,  // C++ bullet.cpp:478 — initialized to weapon damage, decremented if IsDegenerate
     speed,
     travelFrames,
     currentFrame: 0,
@@ -386,6 +391,8 @@ export function launchProjectile(
     isArcing,
     arcHeight,
     arcRiser,
+    startX: attacker.pos.x,
+    startY: attacker.pos.y,
   });
 }
 
@@ -395,6 +402,11 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
 
   for (const proj of ctx.inflightProjectiles) {
     proj.currentFrame++;
+
+    // C++ bullet.cpp:478-480 — IsDegenerate: projectile loses 1 strength per tick during flight (min 5)
+    if (proj.weapon.isDegenerate && proj.strength > 5) {
+      proj.strength--;
+    }
 
     // C++ object.cpp:237-254 — ballistic arc gravity simulation
     // Each tick: Height += Riser; Riser -= Rule.Gravity
@@ -423,6 +435,25 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
     }
 
+    // C++ bullet.cpp:903-913 — wall collision check (Is_Forced_To_Explode)
+    // Non-high bullets that enter a cell containing a wall (high overlay) explode on contact.
+    // Dropping projectiles skip this check (C++ type.h:1383: "Dropping projectiles do not
+    // calculate collision with terrain (such as walls)").
+    if (!proj.weapon.isHigh && !proj.weapon.isDropping) {
+      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
+      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+      const cc = worldToCell(curX, curY);
+      if (ctx.map.getWallType(cc.cx, cc.cy) !== '') {
+        // Force-explode at wall cell center (C++ coord = Cell_Coord(Coord_Cell(coord)))
+        proj.impactX = cc.cx * CELL_SIZE + CELL_SIZE / 2;
+        proj.impactY = cc.cy * CELL_SIZE + CELL_SIZE / 2;
+        proj.travelFrames = proj.currentFrame; // land now
+        arrived.push(proj);
+        continue;
+      }
+    }
+
     // Landing check: arcing projectiles land when height <= 0 (C++ object.cpp:241);
     // non-arcing projectiles land when travel frames are exhausted.
     const hasLanded = proj.isArcing
@@ -444,8 +475,11 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     const target = ctx.entityById.get(proj.targetId);
     const attacker = ctx.entityById.get(proj.attackerId);
 
+    // C++ bullet.cpp:478-480 — use degraded strength (proj.strength) instead of original damage
+    const impactDamage = proj.strength;
+
     if (proj.directHit && target && target.alive) {
-      const killed = damageEntity(ctx, target, proj.damage, proj.weapon.warhead, attacker);
+      const killed = damageEntity(ctx, target, impactDamage, proj.weapon.warhead, attacker);
 
       if (!killed && attacker) {
         triggerRetaliation(ctx, target, attacker);
@@ -464,11 +498,12 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       }
     }
 
-    // Splash damage at impact point
+    // Splash damage at impact point — use degraded strength (C++ Bullet_Explodes passes Strength to Explosion_Damage)
     if (proj.weapon.splash && proj.weapon.splash > 0) {
       const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
       applySplashDamage(
-        ctx, { x: proj.impactX, y: proj.impactY }, proj.weapon,
+        ctx, { x: proj.impactX, y: proj.impactY },
+        { damage: impactDamage, warhead: proj.weapon.warhead, splash: proj.weapon.splash },
         proj.directHit && target ? target.id : -1,
         attackerHouse, attacker ?? undefined,
       );
