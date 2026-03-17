@@ -32,7 +32,7 @@ import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
 import {
   usesTrackMovement, lookupTrackControl, getEffectiveTrack, getTrackArray,
-  smoothTurn, LP, PIXEL_LEPTON_W, F_D, RAW_TRACKS,
+  smoothTurn, LP, PIXEL_LEPTON_W, F_D, RAW_TRACKS, TRACK_CONTROL,
   type TrackControlEntry,
 } from './tracks';
 import {
@@ -1435,20 +1435,25 @@ export class Game {
     this.updateFogOfWar();
 
     // Update occupancy grid and assign infantry sub-cell positions
+    // C++ cell.h: each cell has 5 sub-positions (CENTER + 4 corners) for infantry,
+    // plus Vehicle/Building/Monolith flags that block entire cell.
     this.map.occupancy.fill(0);
-    this.cellInfCount.clear();
+    this.map.clearSubCellOccupancy();
     for (const entity of this.entities) {
       if (entity.alive) {
         // Air units don't block ground occupancy when airborne
         if (!entity.isAirUnit || entity.flightAltitude === 0) {
-          this.map.setOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
-        }
-        // Assign sub-cell positions for infantry so they spread within the cell
-        if (entity.stats.isInfantry) {
-          const ci = entity.cell.cy * 128 + entity.cell.cx;
-          const cnt = this.cellInfCount.get(ci) ?? 0;
-          entity.subCell = cnt % 5;
-          this.cellInfCount.set(ci, cnt + 1);
+          if (entity.stats.isInfantry) {
+            // Infantry: occupy a sub-cell (up to 5 per cell)
+            const subCell = this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id);
+            if (subCell >= 0) {
+              entity.subCell = subCell;
+            }
+            // else: all sub-cells full — entity keeps its previous subCell
+          } else {
+            // Vehicles/buildings: block entire cell (all sub-cells)
+            this.map.setVehicleOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
+          }
         }
       }
     }
@@ -3939,7 +3944,7 @@ export class Game {
         entity.target = bestTarget;
         entity.mission = Mission.ATTACK;
         entity.animState = AnimState.ATTACK;
-        entity.trackNumber = -1; // MV1: reset track on mission interrupt
+        entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on mission interrupt
         entity.trackCellSpan = 1;
         return;
       }
@@ -3995,8 +4000,10 @@ export class Game {
         return;
       }
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
+      // C++ infantry sub-cell system: infantry can share cells if sub-cells are available
       const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
-      if (occ > 0 && occ !== entity.id && entity.moveTarget) {
+      const infantryCanEnter = entity.stats.isInfantry && this.map.hasAvailableSubCell(nextCell.cx, nextCell.cy);
+      if (occ > 0 && occ !== entity.id && !infantryCanEnter && entity.moveTarget) {
         // PF2: "Tell blocking unit to move" (C++ drive.cpp — nudge idle friendly units aside)
         const blocker = this.entityById.get(occ);
         if (blocker?.alive && this.entitiesAllied(entity, blocker) &&
@@ -4109,6 +4116,7 @@ export class Game {
             entity.trackFlags = ctrl.flag & ~F_D; // strip F_D (only F_T|F_X|F_Y for geometry)
             entity.trackIndex = 0;
             entity.trackCellSpan = useLongTrack ? 2 : 1;
+            entity.trackControlIndex = nextFacing8 * 8 + followingFacing8; // C++ TrackNumber (TC index)
             entity.speedAccum = 0; // C++: fresh budget per While_Moving() call
             // Long tracks target the SECOND cell ahead; short tracks target the next cell
             const trackTarget = useLongTrack
@@ -4480,13 +4488,41 @@ export class Game {
    *  of movement budget. Position = targetCellCenter + Smooth_Turn(offset, flags).
    *  Returns true when track is complete (reached target cell center). */
   private followTrackStep(entity: Entity, speedPixels: number, targetX: number, targetY: number): boolean {
-    const track = getTrackArray(entity.trackNumber);
+    let track = getTrackArray(entity.trackNumber);
     if (!track) {
       entity.trackNumber = -1;
       entity.trackCellSpan = 1;
       return true;
     }
-    const flags = entity.trackFlags;
+    let flags = entity.trackFlags;
+
+    // C++ drive.cpp:688-696: Determine if there's a turn coming up for track jumping.
+    // nextface = Path[0] equivalent: direction from current target cell to next path cell.
+    // adj = true when nextface differs from the current track's ending facing.
+    let nextFace8 = -1; // -1 = FACING_NONE (no next direction)
+    let adj = false;
+    const tcIdx = entity.trackControlIndex;
+    if (tcIdx >= 0 && tcIdx < TRACK_CONTROL.length) {
+      // Compute next path direction for track jumping (C++ drive.cpp:688 nextface = Path[0])
+      // For 2-cell tracks, the "next" direction is from the 2nd cell onward;
+      // for 1-cell tracks, from the 1st cell onward.
+      const nextCellOffset = entity.trackCellSpan; // 1 or 2
+      const currentTargetCell = entity.path[entity.pathIndex + nextCellOffset - 1];
+      const followingCell = entity.path[entity.pathIndex + nextCellOffset];
+      if (currentTargetCell && followingCell) {
+        nextFace8 = directionTo(
+          { x: currentTargetCell.cx * CELL_SIZE + CELL_SIZE / 2,
+            y: currentTargetCell.cy * CELL_SIZE + CELL_SIZE / 2 },
+          { x: followingCell.cx * CELL_SIZE + CELL_SIZE / 2,
+            y: followingCell.cy * CELL_SIZE + CELL_SIZE / 2 },
+        );
+        // C++ drive.cpp:695: adj = (nextface != FACING_NONE && Dir_Facing(track->Facing) != nextface)
+        const currentEndFacing8 = Math.floor(TRACK_CONTROL[tcIdx].facing / 32);
+        if (nextFace8 !== currentEndFacing8) {
+          adj = true;
+        }
+      }
+    }
 
     // C++ drive.cpp:664: maxspeed * SpeedBias * House->GroundspeedBias
     const biasedSpeed = speedPixels * entity.speedBias * entity.groundspeedBias;
@@ -4494,10 +4530,13 @@ export class Game {
     // Convert pixel speed to lepton budget + accumulator (C++ SpeedAccum pattern)
     let actual = entity.speedAccum + (biasedSpeed / LP);
 
+    // Track number for RawTracks lookup (C++ uses tracknum = track->Track or track->StartTrack)
+    let rawTrackNum = entity.trackNumber;
+
     while (actual > PIXEL_LEPTON_W) {
       actual -= PIXEL_LEPTON_W;
 
-      if (entity.trackIndex >= track.length) {
+      if (entity.trackIndex >= track!.length) {
         entity.pos.x = targetX;
         entity.pos.y = targetY;
         entity.trackNumber = -1;
@@ -4506,7 +4545,7 @@ export class Game {
         return true;
       }
 
-      const step = track[entity.trackIndex];
+      const step = track![entity.trackIndex];
 
       // End marker: offset (0,0) and trackIndex > 0 (C++ drive.cpp:712)
       if (step.x === 0 && step.y === 0 && entity.trackIndex > 0) {
@@ -4529,6 +4568,61 @@ export class Game {
       const dir32 = Math.floor(result.facing / 8);
       entity.bodyFacing32 = dir32;
       entity.facing = Math.floor(dir32 / 4) as Dir;
+
+      // === Track Jumping (C++ drive.cpp:734-788) ===
+      // When the vehicle reaches the Jump index in its current track AND has a
+      // following move with a turn, jump to the next track's Entry point for
+      // smooth "swooping" curves at speed.
+      if (nextFace8 >= 0 && adj && entity.trackIndex > 0 &&
+          rawTrackNum >= 1 && rawTrackNum <= RAW_TRACKS.length) {
+        const rawMeta = RAW_TRACKS[rawTrackNum - 1];
+        if (rawMeta.jump >= 0 && rawMeta.jump === entity.trackIndex) {
+          // C++ drive.cpp:738: tnum = Dir_Facing(track->Facing) * FACING_COUNT + nextface
+          const currentEndFacing8 = tcIdx >= 0 ? Math.floor(TRACK_CONTROL[tcIdx].facing / 32) : -1;
+          if (currentEndFacing8 >= 0) {
+            const newTCIndex = currentEndFacing8 * 8 + nextFace8;
+            if (newTCIndex >= 0 && newTCIndex < TRACK_CONTROL.length) {
+              const newTC = TRACK_CONTROL[newTCIndex];
+              // C++ drive.cpp:740: if (newtrack->Track && RawTracks[newtrack->Track-1].Entry)
+              if (newTC.track > 0 && newTC.track <= RAW_TRACKS.length &&
+                  RAW_TRACKS[newTC.track - 1].entry > 0) {
+                const newRawTrackNum = newTC.track;
+                const newTrack = getTrackArray(newRawTrackNum);
+                if (newTrack) {
+                  // Perform the jump: switch to new track at its Entry point
+                  // C++ drive.cpp:748-754
+                  entity.trackNumber = newRawTrackNum;
+                  entity.trackControlIndex = newTCIndex;
+                  entity.trackFlags = newTC.flag & ~F_D; // strip F_D for geometry
+                  entity.trackIndex = RAW_TRACKS[newRawTrackNum - 1].entry - 1; // -1 anticipates increment
+
+                  // Update locals for the rest of the while loop
+                  track = newTrack;
+                  flags = entity.trackFlags;
+                  rawTrackNum = newRawTrackNum;
+                  adj = false; // C++ drive.cpp:755: adj = false (prevent re-jumping)
+
+                  // Advance path: consume one cell (C++ memmove shifts Path left by 1)
+                  // The jump transitions from the current track's target area to the
+                  // next cell, so advance pathIndex by 1.
+                  entity.pathIndex++;
+
+                  // Update trackCellSpan: new long tracks cover 2 cells
+                  entity.trackCellSpan = (newTC.flag & F_D) ? 2 : 1;
+
+                  // Recompute target for the new track's destination cell
+                  const newTargetCellIdx = entity.pathIndex + entity.trackCellSpan - 1;
+                  const newTargetCell = entity.path[newTargetCellIdx];
+                  if (newTargetCell) {
+                    targetX = newTargetCell.cx * CELL_SIZE + CELL_SIZE / 2;
+                    targetY = newTargetCell.cy * CELL_SIZE + CELL_SIZE / 2;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
 
       entity.trackIndex++;
     }
@@ -4859,10 +4953,12 @@ export class Game {
           this.onStateChange?.('lost');
         }
         if (result.allowWin) this.allowWin = true;
-        if (result.allHunt) {
-          // Set all enemy units to HUNT mission
+        if (result.allHunt !== undefined) {
+          // C++ parity: HouseClass::As_Pointer(Data.House)->Do_All_To_Hunt()
+          // Targets a SPECIFIC house from action data, not all enemies
+          const huntHouse = houseIdToHouse(result.allHunt);
           for (const e of this.entities) {
-            if (e.alive && !this.isPlayerControlled(e)) {
+            if (e.alive && e.house === huntHouse) {
               e.mission = Mission.HUNT;
             }
           }
@@ -4907,8 +5003,9 @@ export class Game {
           this.missionTimer += result.timerExtend * TIME_UNIT_TICKS;
           this.missionTimerExpired = false;
         }
-        // Autocreate: enable AI auto-spawning (queen spawning + base rebuild)
-        if (result.autocreate) this.autocreateEnabled = true;
+        // Autocreate: C++ parity — HouseClass::As_Pointer(Data.House)->IsAlerted = true
+        // Uses action's Data.House, not the trigger's owner house
+        if (result.autocreate !== undefined) this.autocreateEnabled = true;
         // Destroy team: mark team as destroyed, preventing future spawns
         if (result.destroyTeam !== undefined) this.destroyedTeams.add(result.destroyTeam);
         // Start/stop mission timer
@@ -4918,9 +5015,10 @@ export class Game {
         if (result.timerSubtract !== undefined) {
           this.missionTimer = Math.max(0, this.missionTimer - result.timerSubtract * TIME_UNIT_TICKS);
         }
-        // Fire sale: sell all buildings of trigger house and set units to HUNT
-        if (result.fireSale && trigger.house !== undefined) {
-          const saleHouse = houseIdToHouse(trigger.house);
+        // Fire sale: C++ parity — HouseClass::As_Pointer(Data.House)->State = STATE_ENDGAME
+        // Uses action's Data.House, not the trigger's owner house
+        if (result.fireSale !== undefined) {
+          const saleHouse = houseIdToHouse(result.fireSale);
           for (const s of this.structures) {
             if (s.alive && s.house === saleHouse && s.sellProgress === undefined) {
               s.sellProgress = 0;

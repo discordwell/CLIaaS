@@ -2,11 +2,16 @@
  * C++ Behavioral Parity: TACTION_BEGIN_PRODUCTION (action=3)
  *
  * Tests verify TACTION_BEGIN_PRODUCTION behavior matches C++ RA source code.
- * C++ behavior: When action=3 fires, it sets result.beginProduction = triggerHouse
- * for the house that owns the trigger, signalling that house's AI to begin
- * unit/structure production. If triggerHouse is undefined or < 0, no effect.
+ * C++ behavior (taction.cpp):
+ *   case TACTION_BEGIN_PRODUCTION:
+ *     if (Data.House != HOUSE_NONE) {
+ *       HouseClass * specified_house = HouseClass::As_Pointer(Data.House);
+ *       specified_house->Begin_Production();
+ *     }
  *
- * Source: TACTION.H (enum value 3), TRIGGER.CPP executeTriggerAction switch case.
+ * The action uses Data.House (action.data in TS), NOT the trigger's owner house.
+ *
+ * Source: TACTION.H (enum value 3), TACTION.CPP operator() switch case.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -48,98 +53,99 @@ describe('TACTION_BEGIN_PRODUCTION constant value (TACTION.H)', () => {
   });
 });
 
-describe('TACTION_BEGIN_PRODUCTION sets result.beginProduction to triggerHouse', () => {
-  it('sets beginProduction to house index 0 (Spain/GoodGuy)', () => {
+describe('TACTION_BEGIN_PRODUCTION sets result.beginProduction to action.data (Data.House)', () => {
+  it('sets beginProduction to action.data=0 (Spain/GoodGuy)', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 0 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
-      0, // triggerHouse = 0
+      5, // triggerHouse — should be IGNORED
     );
     expect(result.beginProduction).toBe(0);
   });
 
-  it('sets beginProduction to house index 1 (Greece)', () => {
+  it('sets beginProduction to action.data=1 (Greece)', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 1 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
-      1,
+      0, // triggerHouse — should be IGNORED
     );
     expect(result.beginProduction).toBe(1);
   });
 
-  it('sets beginProduction to house index 5 (USSR)', () => {
+  it('sets beginProduction to action.data=5 (Germany)', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 5 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
-      5,
+      0,
     );
     expect(result.beginProduction).toBe(5);
   });
 
-  it('sets beginProduction to house index 10 (high house index)', () => {
+  it('sets beginProduction to action.data=10 (high house index)', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 10 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
-      10,
+      0,
     );
     expect(result.beginProduction).toBe(10);
   });
 });
 
-describe('TACTION_BEGIN_PRODUCTION does nothing when triggerHouse is missing or negative', () => {
-  it('result.beginProduction is undefined when triggerHouse is undefined', () => {
+describe('TACTION_BEGIN_PRODUCTION uses action.data, not triggerHouse', () => {
+  it('beginProduction reflects action.data even when triggerHouse differs', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 2 }), // USSR
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
-      undefined, // triggerHouse omitted
+      1, // triggerHouse = Greece — must be IGNORED
     );
-    expect(result.beginProduction).toBeUndefined();
+    expect(result.beginProduction).toBe(2);
+    expect(result.beginProduction).not.toBe(1);
   });
 
-  it('result.beginProduction is undefined when triggerHouse is -1', () => {
+  it('works when triggerHouse is undefined', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 3 }),
+      emptyTeamTypes,
+      emptyWaypoints,
+      emptyGlobals,
+      emptyTriggers,
+      undefined,
+    );
+    expect(result.beginProduction).toBe(3);
+  });
+
+  it('works when triggerHouse is -1', () => {
+    const result = executeTriggerAction(
+      beginProductionAction({ data: 4 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
       -1,
     );
-    expect(result.beginProduction).toBeUndefined();
-  });
-
-  it('result.beginProduction is undefined when triggerHouse is -99', () => {
-    const result = executeTriggerAction(
-      beginProductionAction(),
-      emptyTeamTypes,
-      emptyWaypoints,
-      emptyGlobals,
-      emptyTriggers,
-      -99,
-    );
-    expect(result.beginProduction).toBeUndefined();
+    expect(result.beginProduction).toBe(4);
   });
 });
 
 describe('TACTION_BEGIN_PRODUCTION does not produce side effects', () => {
   it('spawned array is empty — no units created', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 3 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
@@ -152,7 +158,7 @@ describe('TACTION_BEGIN_PRODUCTION does not produce side effects', () => {
   it('globals set is not mutated', () => {
     const globals = new Set<number>([1, 2]);
     executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 3 }),
       emptyTeamTypes,
       emptyWaypoints,
       globals,
@@ -166,7 +172,7 @@ describe('TACTION_BEGIN_PRODUCTION does not produce side effects', () => {
 
   it('does not set win, lose, or allowWin', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 3 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
@@ -180,7 +186,7 @@ describe('TACTION_BEGIN_PRODUCTION does not produce side effects', () => {
 
   it('does not set allHunt or autocreate', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 3 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
@@ -210,7 +216,7 @@ describe('TACTION_BEGIN_PRODUCTION does not produce side effects', () => {
       triggeringEntityIds: [],
     }];
     executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 3 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
@@ -222,54 +228,41 @@ describe('TACTION_BEGIN_PRODUCTION does not produce side effects', () => {
   });
 });
 
-describe('TACTION_BEGIN_PRODUCTION action.data and action.team are ignored', () => {
-  it('action.data does not affect beginProduction value', () => {
+describe('TACTION_BEGIN_PRODUCTION action.team and action.trigger are ignored', () => {
+  it('action.team does not affect beginProduction value', () => {
     const result = executeTriggerAction(
-      beginProductionAction({ data: 42 }),
+      beginProductionAction({ data: 2, team: 5 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
       7,
     );
-    // beginProduction reflects triggerHouse, not action.data
-    expect(result.beginProduction).toBe(7);
-  });
-
-  it('action.team does not affect beginProduction value', () => {
-    const result = executeTriggerAction(
-      beginProductionAction({ team: 5 }),
-      emptyTeamTypes,
-      emptyWaypoints,
-      emptyGlobals,
-      emptyTriggers,
-      2,
-    );
     expect(result.beginProduction).toBe(2);
   });
 
   it('action.trigger does not affect beginProduction value', () => {
     const result = executeTriggerAction(
-      beginProductionAction({ trigger: 3 }),
+      beginProductionAction({ data: 4, trigger: 3 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
-      4,
+      1,
     );
     expect(result.beginProduction).toBe(4);
   });
 });
 
-describe('TACTION_BEGIN_PRODUCTION boundary: triggerHouse === 0 is valid', () => {
-  it('triggerHouse=0 sets beginProduction (0 >= 0 is true)', () => {
+describe('TACTION_BEGIN_PRODUCTION boundary: action.data === 0 is valid', () => {
+  it('action.data=0 sets beginProduction (0 is a valid house index)', () => {
     const result = executeTriggerAction(
-      beginProductionAction(),
+      beginProductionAction({ data: 0 }),
       emptyTeamTypes,
       emptyWaypoints,
       emptyGlobals,
       emptyTriggers,
-      0,
+      5,
     );
     // Critical boundary: house index 0 is a valid house
     expect(result.beginProduction).toBe(0);

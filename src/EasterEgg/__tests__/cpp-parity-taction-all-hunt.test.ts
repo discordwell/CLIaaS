@@ -1,12 +1,12 @@
 /**
  * C++ Behavioral Parity: TACTION_ALL_HUNT (action=6) — force all units to hunt
  *
- * Tests verify TACTION_ALL_HUNT behavior matches C++ RA source code (TRIGGER.CPP).
+ * Tests verify TACTION_ALL_HUNT behavior matches C++ RA source code (TACTION.CPP).
  * C++ behavior: calls HouseClass::As_Pointer(Data.House)->Do_All_To_Hunt().
- * TypeScript behavior: sets result.allHunt = true. No other side effects —
- * spawned is empty, win/lose are undefined, and all other result fields are unset.
+ * TypeScript behavior: sets result.allHunt = action.data (Data.House).
+ * The result carries the target house index, not a boolean.
  *
- * Source: TACTION.H (enum value 6), TRIGGER.CPP Handle_Action switch case.
+ * Source: TACTION.H (enum value 6), TACTION.CPP operator() switch case.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -49,10 +49,11 @@ describe('TACTION_ALL_HUNT constant value (TACTION.H)', () => {
   });
 });
 
-describe('TACTION_ALL_HUNT sets result.allHunt = true (trigger.cpp)', () => {
-  it('result.allHunt is true', () => {
+describe('TACTION_ALL_HUNT sets result.allHunt = action.data (taction.cpp)', () => {
+  it('result.allHunt equals action.data (Data.House)', () => {
     const result = executeAllHunt();
-    expect(result.allHunt).toBe(true);
+    // Default data=0, so allHunt should be 0 (HOUSE_SPAIN)
+    expect(result.allHunt).toBe(0);
   });
 
   it('result.win is undefined', () => {
@@ -72,33 +73,33 @@ describe('TACTION_ALL_HUNT sets result.allHunt = true (trigger.cpp)', () => {
   });
 });
 
-describe('TACTION_ALL_HUNT ignores action parameters (trigger.cpp)', () => {
-  it('result.allHunt is true regardless of team index', () => {
-    expect(executeAllHunt(allHuntAction({ team: 0 })).allHunt).toBe(true);
-    expect(executeAllHunt(allHuntAction({ team: 5 })).allHunt).toBe(true);
-    expect(executeAllHunt(allHuntAction({ team: -1 })).allHunt).toBe(true);
-    expect(executeAllHunt(allHuntAction({ team: 99 })).allHunt).toBe(true);
+describe('TACTION_ALL_HUNT uses action.data as house target (taction.cpp)', () => {
+  it('result.allHunt reflects action.data regardless of team index', () => {
+    expect(executeAllHunt(allHuntAction({ team: 0 })).allHunt).toBe(0);
+    expect(executeAllHunt(allHuntAction({ team: 5 })).allHunt).toBe(0);
+    expect(executeAllHunt(allHuntAction({ team: -1 })).allHunt).toBe(0);
+    expect(executeAllHunt(allHuntAction({ team: 99 })).allHunt).toBe(0);
   });
 
-  it('result.allHunt is true regardless of trigger index', () => {
-    expect(executeAllHunt(allHuntAction({ trigger: 0 })).allHunt).toBe(true);
-    expect(executeAllHunt(allHuntAction({ trigger: 3 })).allHunt).toBe(true);
-    expect(executeAllHunt(allHuntAction({ trigger: -1 })).allHunt).toBe(true);
+  it('result.allHunt reflects action.data regardless of trigger index', () => {
+    expect(executeAllHunt(allHuntAction({ trigger: 0 })).allHunt).toBe(0);
+    expect(executeAllHunt(allHuntAction({ trigger: 3 })).allHunt).toBe(0);
+    expect(executeAllHunt(allHuntAction({ trigger: -1 })).allHunt).toBe(0);
   });
 
-  it('result.allHunt is true regardless of data field', () => {
-    expect(executeAllHunt(allHuntAction({ data: 0 })).allHunt).toBe(true);
-    expect(executeAllHunt(allHuntAction({ data: 42 })).allHunt).toBe(true);
-    expect(executeAllHunt(allHuntAction({ data: 255 })).allHunt).toBe(true);
+  it('result.allHunt equals action.data for various house values', () => {
+    expect(executeAllHunt(allHuntAction({ data: 0 })).allHunt).toBe(0);
+    expect(executeAllHunt(allHuntAction({ data: 2 })).allHunt).toBe(2);
+    expect(executeAllHunt(allHuntAction({ data: 5 })).allHunt).toBe(5);
   });
 });
 
-describe('TACTION_ALL_HUNT produces no other side effects (trigger.cpp)', () => {
+describe('TACTION_ALL_HUNT produces no other side effects (taction.cpp)', () => {
   it('no other TriggerActionResult flags are set', () => {
     const result = executeAllHunt();
 
     // Verify only allHunt is set; everything else is undefined or default
-    expect(result.allHunt).toBe(true);
+    expect(result.allHunt).toBe(0);
     expect(result.win).toBeUndefined();
     expect(result.lose).toBeUndefined();
     expect(result.allowWin).toBeUndefined();
@@ -144,7 +145,7 @@ describe('TACTION_ALL_HUNT produces no other side effects (trigger.cpp)', () => 
       [],
     );
 
-    expect(result.allHunt).toBe(true);
+    expect(result.allHunt).toBe(0);
     expect(result.spawned).toEqual([]);
   });
 

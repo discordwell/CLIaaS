@@ -417,9 +417,10 @@ Height=50
 
 describe('BEGIN_PRODUCTION trigger action (Gap #4)', () => {
   it('executeTriggerAction returns beginProduction for TACTION_BEGIN_PRODUCTION', () => {
-    const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 0 };
+    // C++ parity: uses action.data (Data.House), not triggerHouse
+    const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 2 /* USSR house index */ };
     const result = executeTriggerAction(
-      action, [], new Map(), new Set(), [], 2 /* USSR house index */
+      action, [], new Map(), new Set(), [], 0 /* triggerHouse — ignored */
     );
     expect(result.beginProduction).toBe(2);
   });

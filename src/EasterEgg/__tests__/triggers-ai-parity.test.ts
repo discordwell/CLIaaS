@@ -188,7 +188,7 @@ describe('TR4: New trigger action constants', () => {
   it('TACTION_FIRE_SALE (9) sets fireSale result', () => {
     const action: TriggerAction = { action: 9, team: -1, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
-    expect(result.fireSale).toBe(true);
+    expect(result.fireSale).toBe(0); // action.data=0 (Data.House)
   });
 
   it('TACTION_PLAY_MOVIE (10) sets playMovie result', () => {

@@ -352,17 +352,17 @@ describe('executeTriggerAction — complete action coverage', () => {
     expect(result.lose).toBe(true);
   });
 
-  // TACTION_BEGIN_PRODUCTION (3)
-  it('TACTION_BEGIN_PRODUCTION (3) sets beginProduction to triggerHouse', () => {
-    const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 0 };
-    const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers, 2);
+  // TACTION_BEGIN_PRODUCTION (3) — C++ parity: uses action.data (Data.House), not triggerHouse
+  it('TACTION_BEGIN_PRODUCTION (3) sets beginProduction to action.data (Data.House)', () => {
+    const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 2 }; // Data.House=USSR
+    const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers, 0);
     expect(result.beginProduction).toBe(2);
   });
 
-  it('TACTION_BEGIN_PRODUCTION (3) without triggerHouse does not set beginProduction', () => {
-    const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 0 };
+  it('TACTION_BEGIN_PRODUCTION (3) without triggerHouse still sets beginProduction from action.data', () => {
+    const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 3 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
-    expect(result.beginProduction).toBeUndefined();
+    expect(result.beginProduction).toBe(3);
   });
 
   // TACTION_CREATE_TEAM (4) — needs team and waypoint
@@ -409,11 +409,11 @@ describe('executeTriggerAction — complete action coverage', () => {
     expect(result.destroyTeam).toBe(7);
   });
 
-  // TACTION_ALL_HUNT (6)
-  it('TACTION_ALL_HUNT (6) sets allHunt flag', () => {
+  // TACTION_ALL_HUNT (6) — C++ parity: uses action.data (Data.House)
+  it('TACTION_ALL_HUNT (6) sets allHunt to action.data (Data.House)', () => {
     const action: TriggerAction = { action: 6, team: -1, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
-    expect(result.allHunt).toBe(true);
+    expect(result.allHunt).toBe(0);
   });
 
   // TACTION_REINFORCEMENTS (7) — same code path as CREATE_TEAM
@@ -440,11 +440,11 @@ describe('executeTriggerAction — complete action coverage', () => {
     expect(result.dropZone).toBe(5);
   });
 
-  // TACTION_FIRE_SALE (9)
-  it('TACTION_FIRE_SALE (9) sets fireSale flag', () => {
+  // TACTION_FIRE_SALE (9) — C++ parity: uses action.data (Data.House)
+  it('TACTION_FIRE_SALE (9) sets fireSale to action.data (Data.House)', () => {
     const action: TriggerAction = { action: 9, team: -1, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
-    expect(result.fireSale).toBe(true);
+    expect(result.fireSale).toBe(0);
   });
 
   // TACTION_PLAY_MOVIE (10)
@@ -481,11 +481,11 @@ describe('executeTriggerAction — complete action coverage', () => {
     expect(result.spawned).toEqual([]);
   });
 
-  // TACTION_AUTOCREATE (13)
-  it('TACTION_AUTOCREATE (13) sets autocreate flag', () => {
+  // TACTION_AUTOCREATE (13) — C++ parity: uses action.data (Data.House)
+  it('TACTION_AUTOCREATE (13) sets autocreate to action.data (Data.House)', () => {
     const action: TriggerAction = { action: 13, team: -1, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
-    expect(result.autocreate).toBe(true);
+    expect(result.autocreate).toBe(0);
   });
 
   // TACTION_ALLOWWIN (15)
@@ -1351,10 +1351,11 @@ describe('Edge cases', () => {
     expect(checkTriggerEvent(event, createState({ enemyKillCount: 0 }))).toBe(true);
   });
 
-  it('BEGIN_PRODUCTION with negative triggerHouse does not set beginProduction', () => {
+  it('BEGIN_PRODUCTION uses action.data regardless of triggerHouse (C++ parity)', () => {
     const action: TriggerAction = { action: 3, team: -1, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers, -1);
-    expect(result.beginProduction).toBeUndefined();
+    // C++ parity: uses Data.House (action.data=0), not triggerHouse
+    expect(result.beginProduction).toBe(0);
   });
 });
 

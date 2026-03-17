@@ -1,12 +1,18 @@
 /**
  * C++ Behavioral Parity: TACTION_FIRE_SALE (action=9) — sell all buildings
  *
- * Tests verify TACTION_FIRE_SALE behavior matches C++ RA source code (TRIGGER.CPP).
- * C++ behavior: forces the house to sell all buildings and go on a rampage.
- * TypeScript behavior: sets result.fireSale = true. No other side effects —
- * spawned is empty, win/lose are undefined, and all other result fields are unset.
+ * Tests verify TACTION_FIRE_SALE behavior matches C++ RA source code (TACTION.CPP).
+ * C++ behavior:
+ *   case TACTION_FIRE_SALE:
+ *     if (Data.House != HOUSE_NONE) {
+ *       HouseClass * specified_house = HouseClass::As_Pointer(Data.House);
+ *       specified_house->State = STATE_ENDGAME;
+ *     }
  *
- * Source: TACTION.H (enum value 9), TRIGGER.CPP Handle_Action switch case.
+ * The action uses Data.House (action.data in TS), NOT the trigger's owner house.
+ * result.fireSale carries the target house index.
+ *
+ * Source: TACTION.H (enum value 9), TACTION.CPP operator() switch case.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -49,10 +55,11 @@ describe('TACTION_FIRE_SALE constant value (TACTION.H)', () => {
   });
 });
 
-describe('TACTION_FIRE_SALE sets result.fireSale = true (trigger.cpp)', () => {
-  it('result.fireSale is true', () => {
+describe('TACTION_FIRE_SALE sets result.fireSale = action.data (taction.cpp)', () => {
+  it('result.fireSale equals action.data (Data.House)', () => {
     const result = executeFireSale();
-    expect(result.fireSale).toBe(true);
+    // Default data=0, so fireSale = 0 (HOUSE_SPAIN)
+    expect(result.fireSale).toBe(0);
   });
 
   it('result.win is undefined', () => {
@@ -72,33 +79,33 @@ describe('TACTION_FIRE_SALE sets result.fireSale = true (trigger.cpp)', () => {
   });
 });
 
-describe('TACTION_FIRE_SALE ignores action parameters (trigger.cpp)', () => {
-  it('result.fireSale is true regardless of team index', () => {
-    expect(executeFireSale(fireSaleAction({ team: 0 })).fireSale).toBe(true);
-    expect(executeFireSale(fireSaleAction({ team: 5 })).fireSale).toBe(true);
-    expect(executeFireSale(fireSaleAction({ team: -1 })).fireSale).toBe(true);
-    expect(executeFireSale(fireSaleAction({ team: 99 })).fireSale).toBe(true);
+describe('TACTION_FIRE_SALE uses action.data as house target (taction.cpp)', () => {
+  it('result.fireSale reflects action.data regardless of team index', () => {
+    expect(executeFireSale(fireSaleAction({ team: 0 })).fireSale).toBe(0);
+    expect(executeFireSale(fireSaleAction({ team: 5 })).fireSale).toBe(0);
+    expect(executeFireSale(fireSaleAction({ team: -1 })).fireSale).toBe(0);
+    expect(executeFireSale(fireSaleAction({ team: 99 })).fireSale).toBe(0);
   });
 
-  it('result.fireSale is true regardless of trigger index', () => {
-    expect(executeFireSale(fireSaleAction({ trigger: 0 })).fireSale).toBe(true);
-    expect(executeFireSale(fireSaleAction({ trigger: 3 })).fireSale).toBe(true);
-    expect(executeFireSale(fireSaleAction({ trigger: -1 })).fireSale).toBe(true);
+  it('result.fireSale reflects action.data regardless of trigger index', () => {
+    expect(executeFireSale(fireSaleAction({ trigger: 0 })).fireSale).toBe(0);
+    expect(executeFireSale(fireSaleAction({ trigger: 3 })).fireSale).toBe(0);
+    expect(executeFireSale(fireSaleAction({ trigger: -1 })).fireSale).toBe(0);
   });
 
-  it('result.fireSale is true regardless of data field', () => {
-    expect(executeFireSale(fireSaleAction({ data: 0 })).fireSale).toBe(true);
-    expect(executeFireSale(fireSaleAction({ data: 42 })).fireSale).toBe(true);
-    expect(executeFireSale(fireSaleAction({ data: 255 })).fireSale).toBe(true);
+  it('result.fireSale equals action.data for various house values', () => {
+    expect(executeFireSale(fireSaleAction({ data: 0 })).fireSale).toBe(0);
+    expect(executeFireSale(fireSaleAction({ data: 2 })).fireSale).toBe(2);
+    expect(executeFireSale(fireSaleAction({ data: 5 })).fireSale).toBe(5);
   });
 });
 
-describe('TACTION_FIRE_SALE produces no other side effects (trigger.cpp)', () => {
+describe('TACTION_FIRE_SALE produces no other side effects (taction.cpp)', () => {
   it('no other TriggerActionResult flags are set', () => {
     const result = executeFireSale();
 
     // Verify only fireSale is set; everything else is undefined or default
-    expect(result.fireSale).toBe(true);
+    expect(result.fireSale).toBe(0);
     expect(result.win).toBeUndefined();
     expect(result.lose).toBeUndefined();
     expect(result.allowWin).toBeUndefined();
@@ -144,7 +151,7 @@ describe('TACTION_FIRE_SALE produces no other side effects (trigger.cpp)', () =>
       [],
     );
 
-    expect(result.fireSale).toBe(true);
+    expect(result.fireSale).toBe(0);
     expect(result.spawned).toEqual([]);
   });
 

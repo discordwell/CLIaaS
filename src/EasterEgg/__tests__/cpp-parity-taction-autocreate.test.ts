@@ -4,8 +4,8 @@
  * In the original C++ Red Alert source (TACTION.CPP), TACTION_AUTOCREATE sets
  * the IsAlerted flag on the specified house, which enables autocreation of
  * teams from the AI base. The action requires NEED_HOUSE as its parameter
- * type. In our TypeScript implementation, executeTriggerAction sets
- * `result.autocreate = true`.
+ * type (Data.House). In our TypeScript implementation, executeTriggerAction
+ * sets `result.autocreate = action.data` (the house index).
  *
  * These tests verify that our TypeScript implementation matches that behavior.
  */
@@ -51,11 +51,11 @@ function execAutocreate(
 
 describe('TACTION_AUTOCREATE (action=13) — C++ parity', () => {
   // ------------------------------------------------------------------
-  // Core: result.autocreate is set to true
+  // Core: result.autocreate is set to action.data (Data.House)
   // ------------------------------------------------------------------
-  it('sets result.autocreate to true', () => {
+  it('sets result.autocreate to action.data (default data=0)', () => {
     const result = execAutocreate();
-    expect(result.autocreate).toBe(true);
+    expect(result.autocreate).toBe(0);
   });
 
   // ------------------------------------------------------------------
@@ -224,19 +224,19 @@ describe('TACTION_AUTOCREATE (action=13) — C++ parity', () => {
   // ------------------------------------------------------------------
   it('still sets autocreate when team parameter is present', () => {
     const result = execAutocreate({ team: 5 });
-    expect(result.autocreate).toBe(true);
+    expect(result.autocreate).toBe(0);
     expect(result.spawned).toEqual([]);
   });
 
   it('still sets autocreate when trigger parameter is present', () => {
     const result = execAutocreate({ trigger: 3 });
-    expect(result.autocreate).toBe(true);
+    expect(result.autocreate).toBe(0);
     expect(result.spawned).toEqual([]);
   });
 
-  it('still sets autocreate when data parameter is present', () => {
-    const result = execAutocreate({ data: 42 });
-    expect(result.autocreate).toBe(true);
+  it('sets autocreate to action.data (Data.House) value', () => {
+    const result = execAutocreate({ data: 2 }); // HOUSE_USSR
+    expect(result.autocreate).toBe(2);
     expect(result.spawned).toEqual([]);
   });
 

@@ -124,10 +124,10 @@ describe('Later missions DO have BEGIN_PRODUCTION triggers', () => {
 });
 
 describe('executeTriggerAction emits beginProduction for action type 3', () => {
-  it('BEGIN_PRODUCTION action returns house index in beginProduction field', () => {
-    const action: TriggerAction = { action: TACTION_BEGIN_PRODUCTION, team: -1, trigger: -1, data: 0 };
+  it('BEGIN_PRODUCTION action returns action.data (Data.House) in beginProduction field', () => {
+    const action: TriggerAction = { action: TACTION_BEGIN_PRODUCTION, team: -1, trigger: -1, data: 2 /* USSR house index */ };
     const result = executeTriggerAction(
-      action, [], new Map(), new Set(), [], 2 /* USSR house index */
+      action, [], new Map(), new Set(), [], 0 /* triggerHouse — should be IGNORED */
     );
     expect(result.beginProduction).toBe(2);
   });
