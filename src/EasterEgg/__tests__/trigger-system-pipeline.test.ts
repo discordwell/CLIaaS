@@ -654,11 +654,11 @@ describe('executeTriggerAction — complete action coverage', () => {
     expect(result.preferredTarget).toBe(4);
   });
 
-  // TACTION_LAUNCH_NUKES (36)
-  it('TACTION_LAUNCH_NUKES (36) sets nuke flag', () => {
+  // TACTION_LAUNCH_NUKES (36) — C++ iterates Buildings[] for STRUCT_MSLO
+  it('TACTION_LAUNCH_NUKES (36) sets launchNukes flag', () => {
     const action: TriggerAction = { action: 36, team: -1, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
-    expect(result.nuke).toBe(true);
+    expect(result.launchNukes).toBe(true);
   });
 
   // Unknown action — returns empty result
@@ -1494,7 +1494,7 @@ describe('Source code structure verification', () => {
       [33, 'oneSpecial'],
       [34, 'fullSpecial'],
       [35, 'preferredTarget'],
-      [36, 'nuke'],
+      [36, 'launchNukes'],
     ];
 
     for (const [actionType, expectedField] of actionResultMap) {

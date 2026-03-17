@@ -656,7 +656,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 15, isHigh: true },
   RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15, isAntiAir: true, isHigh: true },
   Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20, isFlameEquipped: true },  // C++ bbdata.cpp: Animates=yes — flame trail
-  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40, isInvisible: true, isDegenerate: true },
+  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projectileSpeed: 0.5, projSpeed: 40, isInvisible: true, isDegenerate: true }, // C++ bullet.cpp:96-175 — dog rides bullet (projectileSpeed enables limbo/unlimbo travel)
   Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 40 },
   Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true, isDegenerate: true },
   // Vehicle weapons

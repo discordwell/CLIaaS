@@ -179,12 +179,12 @@ describe('Extended Trigger Actions', () => {
     expect(result.revealZone).toBe(42);
   });
 
-  it('TACTION_LAUNCH_NUKES (36): sets nuke flag in result', () => {
-    // C++ TACTION_LAUNCH_NUKES = 36 (was TACTION_NUKE=10 at wrong index)
+  it('TACTION_LAUNCH_NUKES (36): sets launchNukes flag in result', () => {
+    // C++ TACTION_LAUNCH_NUKES = 36 — iterates Buildings[] for STRUCT_MSLO, assigns MISSION_MISSILE
     const action: TriggerAction = { action: 36, team: -1, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
 
-    expect(result.nuke).toBe(true);
+    expect(result.launchNukes).toBe(true);
   });
 });
 

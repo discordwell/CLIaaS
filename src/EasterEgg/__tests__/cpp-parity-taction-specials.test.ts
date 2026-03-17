@@ -11,7 +11,7 @@
  *   33 -> result.oneSpecial = true
  *   34 -> result.fullSpecial = true
  *   35 -> result.preferredTarget = action.data
- *   36 -> result.nuke = true
+ *   36 -> result.launchNukes = true
  */
 
 import { describe, it, expect } from 'vitest';
@@ -55,7 +55,7 @@ function expectNoOtherSideEffects(
     'win', 'lose', 'allowWin', 'allHunt', 'revealAll', 'revealWaypoint',
     'dropZone', 'creepShadow', 'textMessage', 'setTimer', 'timerExtend',
     'autocreate', 'destroyTriggeringUnit', 'playSound', 'playSpeech',
-    'airstrike', 'nuke', 'centerView', 'fireSale', 'playMovie',
+    'airstrike', 'launchNukes', 'centerView', 'fireSale', 'playMovie',
     'revealZone', 'playMusic', 'preferredTarget', 'beginProduction',
     'destroyTeam', 'startTimer', 'stopTimer', 'timerSubtract',
     'oneSpecial', 'fullSpecial',
@@ -407,10 +407,10 @@ describe('TACTION_LAUNCH_NUKES constant value (TACTION.H)', () => {
   });
 });
 
-describe('TACTION_LAUNCH_NUKES sets result.nuke = true (trigger.cpp)', () => {
-  it('result.nuke is true', () => {
+describe('TACTION_LAUNCH_NUKES sets result.launchNukes = true (trigger.cpp)', () => {
+  it('result.launchNukes is true', () => {
     const result = exec(TACTION_LAUNCH_NUKES);
-    expect(result.nuke).toBe(true);
+    expect(result.launchNukes).toBe(true);
   });
 
   it('spawned array is empty', () => {
@@ -429,31 +429,31 @@ describe('TACTION_LAUNCH_NUKES sets result.nuke = true (trigger.cpp)', () => {
 });
 
 describe('TACTION_LAUNCH_NUKES ignores action parameters (trigger.cpp)', () => {
-  it('result.nuke is true regardless of team index', () => {
-    expect(exec(TACTION_LAUNCH_NUKES, { team: 0 }).nuke).toBe(true);
-    expect(exec(TACTION_LAUNCH_NUKES, { team: 5 }).nuke).toBe(true);
-    expect(exec(TACTION_LAUNCH_NUKES, { team: -1 }).nuke).toBe(true);
-    expect(exec(TACTION_LAUNCH_NUKES, { team: 99 }).nuke).toBe(true);
+  it('result.launchNukes is true regardless of team index', () => {
+    expect(exec(TACTION_LAUNCH_NUKES, { team: 0 }).launchNukes).toBe(true);
+    expect(exec(TACTION_LAUNCH_NUKES, { team: 5 }).launchNukes).toBe(true);
+    expect(exec(TACTION_LAUNCH_NUKES, { team: -1 }).launchNukes).toBe(true);
+    expect(exec(TACTION_LAUNCH_NUKES, { team: 99 }).launchNukes).toBe(true);
   });
 
-  it('result.nuke is true regardless of trigger index', () => {
-    expect(exec(TACTION_LAUNCH_NUKES, { trigger: 0 }).nuke).toBe(true);
-    expect(exec(TACTION_LAUNCH_NUKES, { trigger: 3 }).nuke).toBe(true);
-    expect(exec(TACTION_LAUNCH_NUKES, { trigger: -1 }).nuke).toBe(true);
+  it('result.launchNukes is true regardless of trigger index', () => {
+    expect(exec(TACTION_LAUNCH_NUKES, { trigger: 0 }).launchNukes).toBe(true);
+    expect(exec(TACTION_LAUNCH_NUKES, { trigger: 3 }).launchNukes).toBe(true);
+    expect(exec(TACTION_LAUNCH_NUKES, { trigger: -1 }).launchNukes).toBe(true);
   });
 
-  it('result.nuke is true regardless of data field', () => {
-    expect(exec(TACTION_LAUNCH_NUKES, { data: 0 }).nuke).toBe(true);
-    expect(exec(TACTION_LAUNCH_NUKES, { data: 42 }).nuke).toBe(true);
-    expect(exec(TACTION_LAUNCH_NUKES, { data: 255 }).nuke).toBe(true);
+  it('result.launchNukes is true regardless of data field', () => {
+    expect(exec(TACTION_LAUNCH_NUKES, { data: 0 }).launchNukes).toBe(true);
+    expect(exec(TACTION_LAUNCH_NUKES, { data: 42 }).launchNukes).toBe(true);
+    expect(exec(TACTION_LAUNCH_NUKES, { data: 255 }).launchNukes).toBe(true);
   });
 });
 
 describe('TACTION_LAUNCH_NUKES produces no other side effects (trigger.cpp)', () => {
   it('no other TriggerActionResult flags are set', () => {
     const result = exec(TACTION_LAUNCH_NUKES);
-    expect(result.nuke).toBe(true);
-    expectNoOtherSideEffects(result, 'nuke');
+    expect(result.launchNukes).toBe(true);
+    expectNoOtherSideEffects(result, 'launchNukes');
   });
 
   it('spawned is empty even with teamTypes and waypoints available', () => {
@@ -470,7 +470,7 @@ describe('TACTION_LAUNCH_NUKES produces no other side effects (trigger.cpp)', ()
       [],
     );
 
-    expect(result.nuke).toBe(true);
+    expect(result.launchNukes).toBe(true);
     expect(result.spawned).toEqual([]);
   });
 

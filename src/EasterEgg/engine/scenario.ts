@@ -148,6 +148,7 @@ export interface TeamType {
   name: string;
   house: number;        // house ID
   flags: number;        // bitfield: bit1=IsSuicide, bit2=IsAutocreate, etc.
+  maxAllowed: number;   // C++ MaxAllowed — max active instances of this team type
   origin: number;       // starting waypoint
   trigger: number;      // trigger index to assign to spawned members (-1 = none)
   members: TeamMember[];
@@ -769,7 +770,8 @@ export function parseScenarioINI(text: string): ScenarioData {
         missions.push({ mission: parseInt(mId), data: parseInt(mData) || 0 });
       }
 
-      teamTypes.push({ name, house, flags, origin, trigger, members, missions });
+      const maxAllowed = parseInt(parts[4]) || 0;
+      teamTypes.push({ name, house, flags, maxAllowed, origin, trigger, members, missions });
     }
   }
 
@@ -2087,7 +2089,7 @@ export interface TriggerActionResult {
   playSound?: number;    // play a sound effect (PLAY_SOUND)
   playSpeech?: number;   // play EVA speech (PLAY_SPEECH)
   airstrike?: boolean;   // call in an airstrike (legacy)
-  nuke?: boolean;        // launch a nuclear missile (LAUNCH_NUKES)
+  launchNukes?: boolean; // C++ parity: iterate all MSLO buildings, assign MISSION_MISSILE (TACTION_LAUNCH_NUKES)
   centerView?: number;   // center camera on waypoint (legacy)
   // TR4: new action results
   fireSale?: number;              // C++ parity: house index from action Data.House (FIRE_SALE)
@@ -2377,8 +2379,8 @@ export function executeTriggerAction(
       break;
 
     case TACTION_LAUNCH_NUKES:
-      // Launch nuclear missiles from all silos
-      result.nuke = true;
+      // C++ taction.cpp: iterates Buildings[], finds STRUCT_MSLO, assigns MISSION_MISSILE to each
+      result.launchNukes = true;
       break;
   }
 

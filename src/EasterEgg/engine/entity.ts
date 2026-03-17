@@ -261,6 +261,11 @@ export class Entity {
   cloakTimer = 0;         // frames remaining in cloaking/uncloaking transition
   sonarPulseTimer = 0;    // frames remaining before recloak allowed (after detection)
 
+  // Dog-rides-bullet limbo state (C++ bullet.cpp:96-175, infantry.cpp:3649-3654)
+  // When a dog fires its DogJaw weapon, it enters limbo (hidden, untargetable, removed from map).
+  // The dog rides the bullet to the target and unlimbos at impact coordinates.
+  inLimbo = false;
+
   // LST door state
   doorOpen = false;
   doorTimer = 0;          // countdown to auto-close

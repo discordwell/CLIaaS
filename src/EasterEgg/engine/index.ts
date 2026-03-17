@@ -79,6 +79,7 @@ import {
   updateFogOfWar as _updateFogOfWar,
   updateSubDetection as _updateSubDetection,
   revealAroundCell as _revealAroundCell,
+  revealZoneFloodFill as _revealZoneFloodFill,
   updateGapGenerators as _updateGapGenerators,
   GAP_RADIUS, GAP_UPDATE_INTERVAL, DEFENSE_TYPES as FOG_DEFENSE_TYPES,
 } from './fog';
@@ -471,6 +472,8 @@ export class Game {
 
   // AI autocreate flag — gated by trigger action
   private autocreateEnabled = false;
+  /** C++ TeamTypeClass::Number — active instance count per team type index */
+  private autocreateTeamCounts = new Map<number, number>();
   // AI base rebuild system
   private baseBlueprint: Array<{ type: string; cell: number; house: House }> = [];
   private baseRebuildQueue: Array<{ type: string; cell: number; house: House }> = [];
@@ -554,6 +557,7 @@ export class Game {
       movementSpeed: (e) => this.movementSpeed(e),
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       getArmorBias: (h) => this.getArmorBias(h),
+      getROFBias: (h) => this.getROFBias(h),
       damageStructure: (s, d) => this.damageStructure(s, d),
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
       warheadMuzzleColor: (w) => this.warheadMuzzleColor(w as WarheadType),
@@ -834,6 +838,7 @@ export class Game {
       idleMission: (e) => this.idleMission(e),
       fireWeaponAt: (a, t, w) => this.fireWeaponAt(a, t, w),
       fireWeaponAtStructure: (a, s, w) => this.fireWeaponAtStructure(a, s, w),
+      getROFBias: (h) => this.getROFBias(h),
     };
   }
 
@@ -908,6 +913,7 @@ export class Game {
       autocreateEnabled: this.autocreateEnabled,
       teamTypes: this.teamTypes,
       destroyedTeams: this.destroyedTeams,
+      autocreateTeamCounts: this.autocreateTeamCounts,
       waypoints: this.waypoints,
       houseEdges: this.houseEdges,
       effects: this.effects as AIContext['effects'],
@@ -1092,6 +1098,7 @@ export class Game {
     this.isThieved = false;
     this.missionTimerRunning = true;
     this.destroyedTeams.clear();
+    this.autocreateTeamCounts.clear();
     this.builtUnitTypes.clear();
     this.builtInfantryTypes.clear();
     this.builtAircraftTypes.clear();
@@ -5375,10 +5382,12 @@ export class Game {
             if (e.alive && e.house === saleHouse) e.mission = Mission.HUNT;
           }
         }
-        // Reveal zone: reveal around waypoint with 15-cell radius
+        // Reveal zone: BFS flood fill from waypoint through passable terrain
+        // C++ parity: TACTION_REVEAL_ZONE reveals all cells sharing the same
+        // Zones[MZONE_CRUSHER] as the waypoint (taction.cpp lines 445-456)
         if (result.revealZone !== undefined) {
           const wp = this.waypoints.get(result.revealZone);
-          if (wp) this.revealAroundCell(wp.cx, wp.cy, 15);
+          if (wp) _revealZoneFloodFill(this.map, wp.cx, wp.cy);
         }
         // Charge one superweapon of trigger house
         if (result.oneSpecial && trigger.house !== undefined) {
@@ -5430,14 +5439,24 @@ export class Game {
             this.audio.play('explode_lg');
           }
         }
-        // Nuke: massive explosion at map center
-        if (result.nuke) {
-          const cx = (this.map.boundsX + this.map.boundsW / 2) * CELL_SIZE;
-          const cy = (this.map.boundsY + this.map.boundsH / 2) * CELL_SIZE;
-          this.effects.push({ type: 'explosion', x: cx, y: cy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'] ?? 22, size: 48, sprite: 'art-exp1', spriteStart: 0 });
-          for (const e of this.entities) {
-            if (!e.alive) continue;
-            if (worldDist(e.pos, { x: cx, y: cy }) <= 8) this.damageEntity(e, 500, 'HE'); // worldDist returns cells
+        // C++ taction.cpp TACTION_LAUNCH_NUKES: iterate all buildings, find MSLOs,
+        // assign MISSION_MISSILE to each (launches dud missiles from all silos)
+        if (result.launchNukes) {
+          for (const s of this.structures) {
+            if (!s.alive || s.type !== 'MSLO') continue;
+            // Visual missile launch from silo (dud — no damage on impact)
+            const sx = s.cx * CELL_SIZE + CELL_SIZE;
+            const sy = s.cy * CELL_SIZE + CELL_SIZE;
+            // Rocket flies straight up (target = far above source)
+            this.effects.push({
+              type: 'projectile',
+              x: sx, y: sy,
+              startX: sx, startY: sy,
+              endX: sx, endY: sy - CELL_SIZE * 20,
+              frame: 0, maxFrames: 45, size: 4,
+              projStyle: 'rocket',
+            });
+            this.audio.play('nuke_launch');
           }
         }
         // Center camera on waypoint
