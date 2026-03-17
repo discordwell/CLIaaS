@@ -40,8 +40,9 @@ import {
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
   checkTriggerEvent, executeTriggerAction, houseIdToHouse, consumeSemiPersistentAttachment,
-  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
+  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells,
   saveCarryover, TIME_UNIT_TICKS,
+  TEVENT_GLOBAL_SET, TEVENT_GLOBAL_CLEAR,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
 export { CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, checkMissionExists, loadMissionBriefings, getMissionBriefing } from './scenario';
@@ -3134,7 +3135,7 @@ export class Game {
     return null;
   }
 
-  /** Clear a structure's footprint cells back to passable */
+  /** Clear a structure's footprint cells back to passable (including bib row) */
   private clearStructureFootprint(s: MapStructure): void {
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
     for (let dy = 0; dy < fh; dy++) {
@@ -3142,6 +3143,10 @@ export class Game {
         this.map.setTerrain(s.cx + dx, s.cy + dy, Terrain.CLEAR);
         this.map.clearWallType(s.cx + dx, s.cy + dy);
       }
+    }
+    // C++ building.cpp:734-740: Clear bib cells when building is removed/destroyed
+    for (const bc of getBibCells(s.type, s.cx, s.cy)) {
+      this.map.setTerrain(bc.cx, bc.cy, Terrain.CLEAR);
     }
   }
 
@@ -5136,6 +5141,417 @@ export class Game {
     }
   }
 
+  /**
+   * Apply side effects from a trigger action result. Extracted from processTriggers
+   * to share with springGlobalTriggers (C++ parity #38).
+   */
+  private applyTriggerActionResult(result: TriggerActionResult, trigger: ScenarioTrigger): void {
+    if (result.win && this.state === 'playing') {
+      if (this.toCarryOver) saveCarryover(this.entities);
+      this.state = 'won';
+      this.audio.music.stop();
+      this.audio.play('victory_fanfare');
+      this.audio.play('eva_mission_accomplished');
+      this.onStateChange?.('won');
+    }
+    if (result.lose && this.state === 'playing') {
+      this.state = 'lost';
+      this.audio.music.stop();
+      this.audio.play('defeat_sting');
+      this.onStateChange?.('lost');
+    }
+    if (result.allowWin) this.allowWin = true;
+    if (result.allHunt !== undefined) {
+      const huntHouse = houseIdToHouse(result.allHunt);
+      for (const e of this.entities) {
+        if (e.alive && e.house === huntHouse) {
+          e.mission = Mission.HUNT;
+        }
+      }
+    }
+    if (result.revealAll) {
+      this.map.revealAll();
+    }
+    if (result.revealWaypoint !== undefined) {
+      const wp = this.waypoints.get(result.revealWaypoint);
+      if (wp) {
+        this.revealAroundCell(wp.cx, wp.cy, 10);
+      }
+    }
+    if (result.dropZone !== undefined) {
+      const wp = this.waypoints.get(result.dropZone);
+      if (wp) {
+        this.revealAroundCell(wp.cx, wp.cy, 8);
+        const world = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+        this.effects.push({
+          type: 'marker', x: world.x, y: world.y,
+          frame: 0, maxFrames: 90, size: 6,
+        });
+        this.minimapAlert(wp.cx, wp.cy);
+        this.audio.play('eva_reinforcements');
+      }
+    }
+    if (result.creepShadow) {
+      this.map.creepShadow();
+    }
+    if (result.textMessage !== undefined) {
+      this.showEvaMessage(result.textMessage);
+    }
+    if (result.setTimer !== undefined) {
+      this.missionTimer = result.setTimer * TIME_UNIT_TICKS;
+      this.missionTimerExpired = false;
+      this.missionTimerRunning = true;
+    }
+    if (result.timerExtend !== undefined) {
+      this.missionTimer += result.timerExtend * TIME_UNIT_TICKS;
+      this.missionTimerExpired = false;
+    }
+    if (result.autocreate !== undefined) this.autocreateEnabled = true;
+    if (result.destroyTeam !== undefined) this.destroyedTeams.add(result.destroyTeam);
+    if (result.startTimer) this.missionTimerRunning = true;
+    if (result.stopTimer) this.missionTimerRunning = false;
+    if (result.timerSubtract !== undefined) {
+      this.missionTimer = Math.max(0, this.missionTimer - result.timerSubtract * TIME_UNIT_TICKS);
+    }
+    if (result.fireSale !== undefined) {
+      const saleHouse = houseIdToHouse(result.fireSale);
+      for (const s of this.structures) {
+        if (s.alive && s.house === saleHouse && s.sellProgress === undefined) {
+          s.sellProgress = 0;
+        }
+      }
+      for (const e of this.entities) {
+        if (e.alive && e.house === saleHouse) e.mission = Mission.HUNT;
+      }
+    }
+    if (result.revealZone !== undefined) {
+      const wp = this.waypoints.get(result.revealZone);
+      if (wp) _revealZoneFloodFill(this.map, wp.cx, wp.cy);
+    }
+    if (result.oneSpecial && trigger.house !== undefined) {
+      const swHouse = houseIdToHouse(trigger.house);
+      for (const [, state] of this.superweapons) {
+        if (state.house === swHouse && !state.ready) {
+          state.ready = true;
+          break;
+        }
+      }
+    }
+    if (result.fullSpecial && trigger.house !== undefined) {
+      const swHouse = houseIdToHouse(trigger.house);
+      for (const [, state] of this.superweapons) {
+        if (state.house === swHouse) state.ready = true;
+      }
+    }
+    if (result.preferredTarget !== undefined && trigger.house !== undefined) {
+      const ptHouse = houseIdToHouse(trigger.house);
+      const aiState = this.aiStates.get(ptHouse);
+      if (aiState) aiState.preferredTarget = result.preferredTarget ?? null;
+    }
+    if (result.beginProduction !== undefined) {
+      const bpHouse = houseIdToHouse(result.beginProduction);
+      if (!this.aiStates.has(bpHouse) && !this.isAllied(bpHouse, this.playerHouse)) {
+        const newState = this.createAIHouseState(bpHouse);
+        newState.productionEnabled = true;
+        this.aiStates.set(bpHouse, newState);
+      } else {
+        const existingState = this.aiStates.get(bpHouse);
+        if (existingState) existingState.productionEnabled = true;
+      }
+    }
+    // C++ parity (#39): TACTION_BASE_BUILDING — set IsBaseBuilding on/off for AI house
+    if (result.baseBuilding !== undefined) {
+      const bbHouse = houseIdToHouse(result.baseBuilding.house);
+      const aiState = this.aiStates.get(bbHouse);
+      if (aiState) {
+        aiState.isBaseBuilding = result.baseBuilding.enabled;
+        if (result.baseBuilding.enabled) {
+          aiState.isStarted = true;
+          aiState.productionEnabled = true;
+        }
+      } else if (result.baseBuilding.enabled && !this.isAllied(bbHouse, this.playerHouse)) {
+        const newState = this.createAIHouseState(bbHouse);
+        newState.isBaseBuilding = true;
+        newState.isStarted = true;
+        newState.productionEnabled = true;
+        this.aiStates.set(bbHouse, newState);
+      }
+    }
+    // C++ parity (#39): TACTION_WINLOSE — "Win if captured, lose if destroyed."
+    // C++ TD trigger.cpp: checks which event caused the spring:
+    //   EVENT_DESTROYED → player loses; EVENT_PLAYER_ENTERED (capture) → player wins.
+    if (result.winLose && this.state === 'playing') {
+      const TEVENT_DESTROYED_ID = 7;
+      const TEVENT_PLAYER_ENTERED_ID = 1;
+      const hasDestroyed = trigger.event1.type === TEVENT_DESTROYED_ID || trigger.event2.type === TEVENT_DESTROYED_ID;
+      const hasCaptured = trigger.event1.type === TEVENT_PLAYER_ENTERED_ID || trigger.event2.type === TEVENT_PLAYER_ENTERED_ID;
+      if (hasDestroyed) {
+        this.state = 'lost';
+        this.audio.music.stop();
+        this.audio.play('defeat_sting');
+        this.onStateChange?.('lost');
+      } else if (hasCaptured) {
+        if (this.toCarryOver) saveCarryover(this.entities);
+        this.state = 'won';
+        this.audio.music.stop();
+        this.audio.play('victory_fanfare');
+        this.audio.play('eva_mission_accomplished');
+        this.onStateChange?.('won');
+      }
+    }
+    if (result.airstrike) {
+      const wp = this.waypoints.get(0);
+      if (wp) {
+        const wx = wp.cx * CELL_SIZE + CELL_SIZE / 2;
+        const wy = wp.cy * CELL_SIZE + CELL_SIZE / 2;
+        this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'] ?? 22, size: 24, sprite: 'art-exp1', spriteStart: 0 });
+        for (const e of this.entities) {
+          if (!e.alive) continue;
+          if (worldDist(e.pos, { x: wx, y: wy }) <= 4) this.damageEntity(e, 200, 'HE');
+        }
+        this.audio.play('explode_lg');
+      }
+    }
+    if (result.launchNukes) {
+      for (const s of this.structures) {
+        if (!s.alive || s.type !== 'MSLO') continue;
+        const sx = s.cx * CELL_SIZE + CELL_SIZE;
+        const sy = s.cy * CELL_SIZE + CELL_SIZE;
+        this.effects.push({
+          type: 'projectile',
+          x: sx, y: sy,
+          startX: sx, startY: sy,
+          endX: sx, endY: sy - CELL_SIZE * 20,
+          frame: 0, maxFrames: 45, size: 4,
+          projStyle: 'rocket',
+        });
+        this.audio.play('nuke_launch');
+      }
+    }
+    if (result.centerView !== undefined) {
+      const wp = this.waypoints.get(result.centerView);
+      if (wp) {
+        this.camera.centerOn(wp.cx * CELL_SIZE + CELL_SIZE / 2, wp.cy * CELL_SIZE + CELL_SIZE / 2);
+      }
+    }
+    if (result.playMovie !== undefined) {
+      this.showEvaMessage(-1, `[Movie: ${result.playMovie}]`);
+    }
+    if (result.playMusic !== undefined) {
+      this.audio.music.next();
+    }
+    if (result.playSpeech !== undefined) {
+      this.handleTriggerSpeech(result.playSpeech);
+    }
+    if (result.playSound !== undefined) {
+      this.handleTriggerSound(result.playSound);
+    }
+    if (result.spawned.length > 0) {
+      applyScenarioOverrides(result.spawned, this.scenarioUnitStats, this.scenarioWeaponStats);
+    }
+    const ants = result.spawned.filter(e => e.isAnt);
+    if (ants.length > 1) {
+      const wid = this.nextWaveId++;
+      const rallyDelay = this.tick + GAME_TICKS_PER_SEC * 2;
+      for (const ant of ants) {
+        ant.waveId = wid;
+        ant.waveRallyTick = rallyDelay;
+      }
+    }
+    for (const entity of result.spawned) {
+      this.entities.push(entity);
+      this.entityById.set(entity.id, entity);
+      if (entity.isPlayerUnit) {
+        this.effects.push({
+          type: 'marker', x: entity.pos.x, y: entity.pos.y,
+          frame: 0, maxFrames: 15, size: 14, markerColor: 'rgba(100,200,255,1)',
+        });
+      }
+    }
+    if (result.destroyTriggeringUnit) {
+      let destroyed = false;
+      if (trigger.triggeringEntityIds.length > 0) {
+        for (const eid of trigger.triggeringEntityIds) {
+          const te = this.entityById.get(eid);
+          if (te && te.alive) {
+            te.takeDamage(9999);
+            this.effects.push({
+              type: 'explosion', x: te.pos.x, y: te.pos.y,
+              frame: 0, maxFrames: 18, size: 12,
+              sprite: 'fball1', spriteStart: 0,
+            });
+            destroyed = true;
+          }
+        }
+        trigger.triggeringEntityIds = [];
+      }
+      if (!destroyed) {
+        for (const e of this.entities) {
+          if (e.alive && e.triggerName === trigger.name) {
+            e.takeDamage(9999);
+            this.effects.push({
+              type: 'explosion', x: e.pos.x, y: e.pos.y,
+              frame: 0, maxFrames: 18, size: 12,
+              sprite: 'fball1', spriteStart: 0,
+            });
+          }
+        }
+        for (const s of this.structures) {
+          if (s.alive && s.triggerName === trigger.name) {
+            this.damageStructure(s, s.maxHp + 1);
+          }
+        }
+      }
+    }
+    // C++ parity (#39): TACTION_BASE_BUILDING — set IsBaseBuilding on/off for AI house
+    if (result.baseBuilding !== undefined) {
+      const bbHouse = houseIdToHouse(result.baseBuilding.house);
+      const aiState = this.aiStates.get(bbHouse);
+      if (aiState) {
+        aiState.isBaseBuilding = result.baseBuilding.enabled;
+        // C++ house.cpp:936-940: when IsBaseBuilding goes true, also set IsStarted + IsAlerted
+        if (result.baseBuilding.enabled) {
+          aiState.isStarted = true;
+          aiState.productionEnabled = true;
+        }
+      } else if (result.baseBuilding.enabled && !this.isAllied(bbHouse, this.playerHouse)) {
+        const newState = this.createAIHouseState(bbHouse);
+        newState.isBaseBuilding = true;
+        newState.isStarted = true;
+        newState.productionEnabled = true;
+        this.aiStates.set(bbHouse, newState);
+      }
+    }
+    // C++ parity (#38): if this action changed a global, immediately spring dependent triggers
+    if (result.globalChanged !== undefined) {
+      this.springGlobalTriggers(result.globalChanged);
+    }
+  }
+
+  /**
+   * C++ parity (#38): When a global variable changes, immediately scan all triggers
+   * that depend on TEVENT_GLOBAL_SET/TEVENT_GLOBAL_CLEAR for that global and spring them.
+   *
+   * C++ ref: scenario.cpp:263-290 Set_Global_To() sets IsGlobalChanged flag and resets
+   * paired event timers. logic.cpp:218-221 then springs TEVENT_GLOBAL_SET/CLEAR triggers
+   * on the very next logic tick (not deferred to the 15-tick processTriggers cycle).
+   */
+  private springGlobalTriggers(globalIndex: number): void {
+    // C++ Set_Global_To: reset paired event timer for triggers that depend on this global.
+    // When Event1 is global-dependent, reset Event2's timer, and vice versa.
+    for (const trigger of this.triggers) {
+      if ((trigger.event1.type === TEVENT_GLOBAL_SET || trigger.event1.type === TEVENT_GLOBAL_CLEAR)
+          && trigger.event1.data === globalIndex) {
+        // Reset paired event timer (Event2) — C++ scenario.cpp:280
+        trigger.timerTick = this.tick;
+      }
+      if ((trigger.event2.type === TEVENT_GLOBAL_SET || trigger.event2.type === TEVENT_GLOBAL_CLEAR)
+          && trigger.event2.data === globalIndex) {
+        // Reset paired event timer (Event1) — C++ scenario.cpp:283
+        trigger.timerTick = this.tick;
+      }
+    }
+
+    // C++ logic.cpp:218-221: immediately spring triggers that depend on global state.
+    // Build minimal shared state for trigger evaluation.
+    const structureTypes = new Set<string>();
+    const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
+    const houseAlive = new Map<number, boolean>();
+    const houseUnitsAlive = new Map<number, boolean>();
+    const houseBuildingsAlive = new Map<number, boolean>();
+    const housesWithBuildings = new Set<number>();
+    let playerFactories = 0;
+    let fakesExist = false;
+    const FAKE_TYPES = new Set(['FACF', 'DOMF', 'WEAF']);
+    for (const s of this.structures) {
+      if (s.alive) {
+        structureTypes.add(s.type);
+        if (this.isAllied(s.house, this.playerHouse) &&
+            (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'BARR' || s.type === 'TENT' || s.type === 'AFLD' || s.type === 'HPAD' || s.type === 'SYRD' || s.type === 'SPEN')) {
+          playerFactories++;
+        }
+        const hi = Game.HOUSE_TO_INDEX[s.house];
+        if (hi !== undefined) {
+          houseAlive.set(hi, true);
+          if (!WALL_TYPES.has(s.type)) {
+            houseBuildingsAlive.set(hi, true);
+            housesWithBuildings.add(hi);
+          }
+        }
+        if (FAKE_TYPES.has(s.type)) fakesExist = true;
+      } else if (s.triggerName) {
+        destroyedTriggerNames.add(s.triggerName);
+      }
+    }
+    for (const e of this.entities) {
+      if (e.alive) {
+        const hi = Game.HOUSE_TO_INDEX[e.house];
+        if (hi !== undefined) {
+          houseAlive.set(hi, true);
+          houseUnitsAlive.set(hi, true);
+        }
+      } else if (e.triggerName) {
+        destroyedTriggerNames.add(e.triggerName);
+      }
+    }
+    const buildingsDestroyedByHouse = new Map<number, boolean>();
+    for (const s of this.structures) {
+      const hi = Game.HOUSE_TO_INDEX[s.house];
+      if (hi !== undefined && !WALL_TYPES.has(s.type) && !housesWithBuildings.has(hi)) {
+        buildingsDestroyedByHouse.set(hi, true);
+      }
+    }
+    const shared = {
+      structureTypes, destroyedTriggerNames, enemyUnitsAlive: 0, playerFactories,
+      houseAlive, houseUnitsAlive, houseBuildingsAlive,
+      builtStructureTypes: this.builtStructureTypes,
+      buildingsDestroyedByHouse, fakesExist,
+    };
+
+    for (const trigger of this.triggers) {
+      if (trigger.fired && trigger.persistence <= 1) continue;
+
+      // Only spring triggers that have a global event matching this globalIndex
+      const e1IsGlobal = (trigger.event1.type === TEVENT_GLOBAL_SET || trigger.event1.type === TEVENT_GLOBAL_CLEAR)
+                         && trigger.event1.data === globalIndex;
+      const e2IsGlobal = (trigger.event2.type === TEVENT_GLOBAL_SET || trigger.event2.type === TEVENT_GLOBAL_CLEAR)
+                         && trigger.event2.data === globalIndex;
+      if (!e1IsGlobal && !e2IsGlobal) continue;
+
+      const state = this.buildTriggerState(trigger, shared);
+      const result = this.checkTriggerEvents(trigger, state);
+      if (!result.shouldFire) continue;
+
+      if (this.debugTriggers) {
+        console.log(`[TRIGGER] ${trigger.name} sprung immediately by global ${globalIndex} change`);
+      }
+      trigger.fired = true;
+      if (trigger.persistence === 2) {
+        trigger.timerTick = this.tick;
+      }
+
+      // Execute actions (same logic as processTriggers)
+      const executeAction = (action: typeof trigger.action1) => {
+        if ((action.action === 4 || action.action === 7) && this.destroyedTeams.has(action.team)) return;
+        const actionResult = executeTriggerAction(
+          action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
+          this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH }
+        );
+        this.applyTriggerActionResult(actionResult, trigger);
+      };
+
+      if (trigger.eventControl === 3) {
+        if (result.e1) executeAction(trigger.action1);
+        if (result.e2) executeAction(trigger.action2);
+      } else {
+        executeAction(trigger.action1);
+        if (trigger.actionControl === 1) {
+          executeAction(trigger.action2);
+        }
+      }
+    }
+  }
+
   /** Process trigger system — check conditions and fire actions */
   private processTriggers(): void {
     // Tick mission timer (processTriggers runs every 15 ticks, so decrement by 15)
@@ -5283,268 +5699,14 @@ export class Game {
         trigger.timerTick = this.tick;
       }
 
-      // Execute actions
+      // Execute actions — delegates to applyTriggerActionResult (C++ parity #38 refactor)
       const executeAction = (action: typeof trigger.action1) => {
-        // Skip team spawning if team was destroyed by DESTROY_TEAM
         if ((action.action === 4 || action.action === 7) && this.destroyedTeams.has(action.team)) return;
         const result = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
           this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH }
         );
-        // Handle side effects
-        if (result.win && this.state === 'playing') {
-          if (this.toCarryOver) saveCarryover(this.entities);
-          this.state = 'won';
-          this.audio.music.stop();
-          this.audio.play('victory_fanfare');
-          this.audio.play('eva_mission_accomplished');
-          this.onStateChange?.('won');
-        }
-        if (result.lose && this.state === 'playing') {
-          this.state = 'lost';
-          this.audio.music.stop();
-          this.audio.play('defeat_sting');
-          this.onStateChange?.('lost');
-        }
-        if (result.allowWin) this.allowWin = true;
-        if (result.allHunt !== undefined) {
-          // C++ parity: HouseClass::As_Pointer(Data.House)->Do_All_To_Hunt()
-          // Targets a SPECIFIC house from action data, not all enemies
-          const huntHouse = houseIdToHouse(result.allHunt);
-          for (const e of this.entities) {
-            if (e.alive && e.house === huntHouse) {
-              e.mission = Mission.HUNT;
-            }
-          }
-        }
-        if (result.revealAll) {
-          this.map.revealAll();
-        }
-        // Reveal area around a specific waypoint (~10 cell radius)
-        if (result.revealWaypoint !== undefined) {
-          const wp = this.waypoints.get(result.revealWaypoint);
-          if (wp) {
-            this.revealAroundCell(wp.cx, wp.cy, 10);
-          }
-        }
-        // Drop zone flare: reveal + visual marker + EVA announcement
-        if (result.dropZone !== undefined) {
-          const wp = this.waypoints.get(result.dropZone);
-          if (wp) {
-            this.revealAroundCell(wp.cx, wp.cy, 8);
-            const world = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
-            this.effects.push({
-              type: 'marker', x: world.x, y: world.y,
-              frame: 0, maxFrames: 90, size: 6,
-            });
-            this.minimapAlert(wp.cx, wp.cy);
-            this.audio.play('eva_reinforcements');
-          }
-        }
-        // Creep shadow: reshroud entire map (SCA04EA tunnel darkness)
-        if (result.creepShadow) {
-          this.map.creepShadow();
-        }
-        if (result.textMessage !== undefined) {
-          this.showEvaMessage(result.textMessage);
-        }
-        if (result.setTimer !== undefined) {
-          this.missionTimer = result.setTimer * TIME_UNIT_TICKS;
-          this.missionTimerExpired = false;
-          this.missionTimerRunning = true; // SET_TIMER implicitly starts the timer
-        }
-        if (result.timerExtend !== undefined) {
-          this.missionTimer += result.timerExtend * TIME_UNIT_TICKS;
-          this.missionTimerExpired = false;
-        }
-        // Autocreate: C++ parity — HouseClass::As_Pointer(Data.House)->IsAlerted = true
-        // Uses action's Data.House, not the trigger's owner house
-        if (result.autocreate !== undefined) this.autocreateEnabled = true;
-        // Destroy team: mark team as destroyed, preventing future spawns
-        if (result.destroyTeam !== undefined) this.destroyedTeams.add(result.destroyTeam);
-        // Start/stop mission timer
-        if (result.startTimer) this.missionTimerRunning = true;
-        if (result.stopTimer) this.missionTimerRunning = false;
-        // Subtract time from mission timer
-        if (result.timerSubtract !== undefined) {
-          this.missionTimer = Math.max(0, this.missionTimer - result.timerSubtract * TIME_UNIT_TICKS);
-        }
-        // Fire sale: C++ parity — HouseClass::As_Pointer(Data.House)->State = STATE_ENDGAME
-        // Uses action's Data.House, not the trigger's owner house
-        if (result.fireSale !== undefined) {
-          const saleHouse = houseIdToHouse(result.fireSale);
-          for (const s of this.structures) {
-            if (s.alive && s.house === saleHouse && s.sellProgress === undefined) {
-              s.sellProgress = 0;
-            }
-          }
-          for (const e of this.entities) {
-            if (e.alive && e.house === saleHouse) e.mission = Mission.HUNT;
-          }
-        }
-        // Reveal zone: BFS flood fill from waypoint through passable terrain
-        // C++ parity: TACTION_REVEAL_ZONE reveals all cells sharing the same
-        // Zones[MZONE_CRUSHER] as the waypoint (taction.cpp lines 445-456)
-        if (result.revealZone !== undefined) {
-          const wp = this.waypoints.get(result.revealZone);
-          if (wp) _revealZoneFloodFill(this.map, wp.cx, wp.cy);
-        }
-        // Charge one superweapon of trigger house
-        if (result.oneSpecial && trigger.house !== undefined) {
-          const swHouse = houseIdToHouse(trigger.house);
-          for (const [, state] of this.superweapons) {
-            if (state.house === swHouse && !state.ready) {
-              state.ready = true;
-              break;
-            }
-          }
-        }
-        // Charge all superweapons of trigger house
-        if (result.fullSpecial && trigger.house !== undefined) {
-          const swHouse = houseIdToHouse(trigger.house);
-          for (const [, state] of this.superweapons) {
-            if (state.house === swHouse) state.ready = true;
-          }
-        }
-        // Set AI preferred target
-        if (result.preferredTarget !== undefined && trigger.house !== undefined) {
-          const ptHouse = houseIdToHouse(trigger.house);
-          const aiState = this.aiStates.get(ptHouse);
-          if (aiState) aiState.preferredTarget = result.preferredTarget ?? null;
-        }
-        // Begin production: activate AI for the specified house
-        // C++ parity: this trigger gates unit/structure production for AI houses
-        if (result.beginProduction !== undefined) {
-          const bpHouse = houseIdToHouse(result.beginProduction);
-          if (!this.aiStates.has(bpHouse) && !this.isAllied(bpHouse, this.playerHouse)) {
-            const newState = this.createAIHouseState(bpHouse);
-            newState.productionEnabled = true;
-            this.aiStates.set(bpHouse, newState);
-          } else {
-            const existingState = this.aiStates.get(bpHouse);
-            if (existingState) existingState.productionEnabled = true;
-          }
-        }
-        // Airstrike: explosion + damage at trigger waypoint
-        if (result.airstrike) {
-          const wp = this.waypoints.get(0);
-          if (wp) {
-            const wx = wp.cx * CELL_SIZE + CELL_SIZE / 2;
-            const wy = wp.cy * CELL_SIZE + CELL_SIZE / 2;
-            this.effects.push({ type: 'explosion', x: wx, y: wy, frame: 0, maxFrames: EXPLOSION_FRAMES['art-exp1'] ?? 22, size: 24, sprite: 'art-exp1', spriteStart: 0 });
-            for (const e of this.entities) {
-              if (!e.alive) continue;
-              if (worldDist(e.pos, { x: wx, y: wy }) <= 4) this.damageEntity(e, 200, 'HE'); // worldDist returns cells
-            }
-            this.audio.play('explode_lg');
-          }
-        }
-        // C++ taction.cpp TACTION_LAUNCH_NUKES: iterate all buildings, find MSLOs,
-        // assign MISSION_MISSILE to each (launches dud missiles from all silos)
-        if (result.launchNukes) {
-          for (const s of this.structures) {
-            if (!s.alive || s.type !== 'MSLO') continue;
-            // Visual missile launch from silo (dud — no damage on impact)
-            const sx = s.cx * CELL_SIZE + CELL_SIZE;
-            const sy = s.cy * CELL_SIZE + CELL_SIZE;
-            // Rocket flies straight up (target = far above source)
-            this.effects.push({
-              type: 'projectile',
-              x: sx, y: sy,
-              startX: sx, startY: sy,
-              endX: sx, endY: sy - CELL_SIZE * 20,
-              frame: 0, maxFrames: 45, size: 4,
-              projStyle: 'rocket',
-            });
-            this.audio.play('nuke_launch');
-          }
-        }
-        // Center camera on waypoint
-        if (result.centerView !== undefined) {
-          const wp = this.waypoints.get(result.centerView);
-          if (wp) {
-            this.camera.centerOn(wp.cx * CELL_SIZE + CELL_SIZE / 2, wp.cy * CELL_SIZE + CELL_SIZE / 2);
-          }
-        }
-        // Movie trigger — show as title card EVA message (FMVs not available)
-        if (result.playMovie !== undefined) {
-          this.showEvaMessage(-1, `[Movie: ${result.playMovie}]`);
-        }
-        // Play music track from trigger (PLAY_MUSIC action)
-        if (result.playMusic !== undefined) {
-          this.audio.music.next(); // advance to next track (theme ID is informational)
-        }
-        // Sound/speech from triggers
-        if (result.playSpeech !== undefined) {
-          this.handleTriggerSpeech(result.playSpeech);
-        }
-        if (result.playSound !== undefined) {
-          this.handleTriggerSound(result.playSound);
-        }
-        // Apply per-scenario stat overrides to spawned entities
-        if (result.spawned.length > 0) {
-          applyScenarioOverrides(result.spawned, this.scenarioUnitStats, this.scenarioWeaponStats);
-        }
-        // Tag ant spawns with wave coordination
-        const ants = result.spawned.filter(e => e.isAnt);
-        if (ants.length > 1) {
-          const wid = this.nextWaveId++;
-          const rallyDelay = this.tick + GAME_TICKS_PER_SEC * 2; // 2-second rally
-          for (const ant of ants) {
-            ant.waveId = wid;
-            ant.waveRallyTick = rallyDelay;
-          }
-        }
-        for (const entity of result.spawned) {
-          this.entities.push(entity);
-          this.entityById.set(entity.id, entity);
-          // Spawn flash effect for player reinforcements
-          if (entity.isPlayerUnit) {
-            this.effects.push({
-              type: 'marker', x: entity.pos.x, y: entity.pos.y,
-              frame: 0, maxFrames: 15, size: 14, markerColor: 'rgba(100,200,255,1)',
-            });
-          }
-        }
-        // Destroy the attached object (entity/structure with matching triggerName,
-        // OR the triggering entity for cell triggers — C++ TACTION_DESTROY_OBJECT)
-        if (result.destroyTriggeringUnit) {
-          let destroyed = false;
-          // First: kill ALL triggering entities (cell triggers accumulate IDs)
-          if (trigger.triggeringEntityIds.length > 0) {
-            for (const eid of trigger.triggeringEntityIds) {
-              const te = this.entityById.get(eid);
-              if (te && te.alive) {
-                te.takeDamage(9999);
-                this.effects.push({
-                  type: 'explosion', x: te.pos.x, y: te.pos.y,
-                  frame: 0, maxFrames: 18, size: 12,
-                  sprite: 'fball1', spriteStart: 0,
-                });
-                destroyed = true;
-              }
-            }
-            trigger.triggeringEntityIds = [];
-          }
-          // Fallback: destroy entities/structures with matching triggerName
-          if (!destroyed) {
-            for (const e of this.entities) {
-              if (e.alive && e.triggerName === trigger.name) {
-                e.takeDamage(9999);
-                this.effects.push({
-                  type: 'explosion', x: e.pos.x, y: e.pos.y,
-                  frame: 0, maxFrames: 18, size: 12,
-                  sprite: 'fball1', spriteStart: 0,
-                });
-              }
-            }
-            for (const s of this.structures) {
-              if (s.alive && s.triggerName === trigger.name) {
-                this.damageStructure(s, s.maxHp + 1);
-              }
-            }
-          }
-        }
+        this.applyTriggerActionResult(result, trigger);
       };
 
       // C++ trigger.cpp:307-323 — MULTI_LINKED routes actions per-event;

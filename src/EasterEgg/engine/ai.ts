@@ -15,7 +15,7 @@ import {
 import { Entity } from './entity';
 import {
   type MapStructure, type TeamType,
-  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
+  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells,
   applyScenarioOverrides,
 } from './scenario';
 import { type GameMap, Terrain } from './map';
@@ -60,6 +60,8 @@ export interface AIHouseState {
   lastAttackerEnemy: House | null;
   /** C++ IsStarted — whether this house has placed its first building */
   isStarted: boolean;
+  /** C++ IsBaseBuilding — controls AI base construction (taction.cpp TACTION_BASE_BUILDING) */
+  isBaseBuilding: boolean;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -325,6 +327,7 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     unitsKilledBy: new Map(),
     lastAttackerEnemy: null,
     isStarted: true,
+    isBaseBuilding: false,
   };
 }
 
@@ -728,6 +731,10 @@ export function spawnAIStructure(ctx: AIContext, type: string, house: House, cx:
     for (let dx = 0; dx < fw; dx++) {
       ctx.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
     }
+  }
+  // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
+  for (const bc of getBibCells(type, cx, cy)) {
+    ctx.map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
   }
 }
 

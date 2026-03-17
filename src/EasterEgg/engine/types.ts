@@ -24,6 +24,8 @@ export const TEMPLATE_ROAD_MAX = 228;
 export const MAX_DAMAGE = 1000;          // rules.cpp:227 — max damage per hit
 export const REPAIR_STEP = 5;            // rules.cpp:228 RepairStep=5 — HP per repair pulse (buildings)
 export const REPAIR_PERCENT = 0.25;      // rules.cpp:229 RepairPercent=fixed(1,4)=0.25 — cost ratio per step
+export const UREPAIR_STEP = 5;           // rules.cpp:230 URepairStep=5 — HP per repair pulse (units at Service Depot)
+export const UREPAIR_PERCENT = 0.25;     // rules.cpp:231 URepairPercent=fixed(1,4)=0.25 — cost ratio per step (units)
 export const CONDITION_RED = 0.25;       // rules.cpp:235 — red health threshold
 export const CONDITION_YELLOW = 0.5;     // rules.cpp:234 — yellow health threshold
 export const PRONE_DAMAGE_BIAS = 0.5;    // rules.cpp:202 — prone infantry damage multiplier

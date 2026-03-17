@@ -5,7 +5,8 @@
 
 import {
   type WorldPos, type ProductionItem,
-  REPAIR_STEP, REPAIR_PERCENT, POWER_DRAIN, CELL_SIZE,
+  REPAIR_STEP, REPAIR_PERCENT, UREPAIR_STEP, UREPAIR_PERCENT,
+  POWER_DRAIN, CELL_SIZE,
   type House, Mission,
   worldDist,
 } from './types';
@@ -44,9 +45,17 @@ export interface RepairSellContext {
 
 /** Calculate repair cost per step for a structure type.
  *  Formula: ceil(buildCost * REPAIR_PERCENT / (maxHp / REPAIR_STEP))
- *  C++ rules.cpp:228-229 RepairStep, RepairPercent */
+ *  C++ techno.cpp:6144, rules.cpp:228-229 RepairStep, RepairPercent */
 export function repairCostPerStep(buildCost: number, maxHp: number): number {
   return Math.ceil((buildCost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP));
+}
+
+/** Calculate repair cost per step for a unit (foot) at Service Depot.
+ *  Formula: ceil(buildCost * UREPAIR_PERCENT / (maxHp / UREPAIR_STEP))
+ *  C++ techno.cpp:6141-6142: (Raw_Cost()/(MaxStrength/Rule.URepairStep)) * Rule.URepairPercent
+ *  rules.cpp:230-231 URepairStep=5, URepairPercent=fixed(1,4)=0.25 */
+export function unitRepairCostPerStep(buildCost: number, maxHp: number): number {
+  return Math.ceil((buildCost * UREPAIR_PERCENT) / (maxHp / UREPAIR_STEP));
 }
 
 /** Calculate sell refund for a structure — no health scaling.
@@ -178,7 +187,7 @@ export function tickRepairs(ctx: RepairSellContext): void {
 }
 
 /** Tick service depot repair — one docked vehicle at a time, costs credits.
- *  Called every 14 ticks. C++ parity: REPAIR_STEP HP per tick. */
+ *  Called every 14 ticks. C++ parity: UREPAIR_STEP HP per tick (techno.cpp:987-1016). */
 export function tickServiceDepot(ctx: RepairSellContext): void {
   for (const s of ctx.structures) {
     if (!s.alive || s.type !== 'FIX') continue;
@@ -202,10 +211,10 @@ export function tickServiceDepot(ctx: RepairSellContext): void {
     if (docked) {
       if (docked.hp < docked.maxHp) {
         const unitCost = ctx.scenarioProductionItems.find(p => p.type === docked!.type)?.cost ?? 400;
-        const cost = repairCostPerStep(unitCost, docked.maxHp);
+        const cost = unitRepairCostPerStep(unitCost, docked.maxHp);
         if (ctx.credits >= cost) {
           ctx.credits -= cost;
-          docked.hp = Math.min(docked.maxHp, docked.hp + REPAIR_STEP);
+          docked.hp = Math.min(docked.maxHp, docked.hp + UREPAIR_STEP);
           ctx.effects.push({
             type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
             frame: 0, maxFrames: 4, size: 3, sprite: 'piff', spriteStart: 0,
