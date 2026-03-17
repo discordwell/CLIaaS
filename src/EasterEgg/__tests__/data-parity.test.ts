@@ -1525,8 +1525,8 @@ describe('Scalar constants parity', () => {
   it('MAP_CELLS = 128', () => expect(MAP_CELLS).toBe(128));
   it('GAME_TICKS_PER_SEC = 20 (C++ default GameSpeed=3: 60/3)', () => expect(GAME_TICKS_PER_SEC).toBe(20));
   it('MAX_DAMAGE = 1000', () => expect(MAX_DAMAGE).toBe(1000));
-  it('REPAIR_STEP = 7', () => expect(REPAIR_STEP).toBe(7));
-  it('REPAIR_PERCENT = 0.20', () => expect(REPAIR_PERCENT).toBe(0.20));
+  it('REPAIR_STEP = 5', () => expect(REPAIR_STEP).toBe(5));
+  it('REPAIR_PERCENT = 0.25', () => expect(REPAIR_PERCENT).toBe(0.25));
   it('CONDITION_RED = 0.25', () => expect(CONDITION_RED).toBe(0.25));
   it('CONDITION_YELLOW = 0.5', () => expect(CONDITION_YELLOW).toBe(0.5));
   it('PRONE_DAMAGE_BIAS = 0.5', () => expect(PRONE_DAMAGE_BIAS).toBe(0.5));
