@@ -330,8 +330,9 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       const isMoving = entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
       const baseInaccuracy = activeWeapon.inaccuracy ?? 0;
       let effectiveInaccuracy = isMoving ? Math.max(baseInaccuracy, 1.0) : baseInaccuracy;
-      // SC1: AP warheads force scatter vs infantry even with 0 weapon inaccuracy (C++ bullet.cpp:709-710)
-      if (activeWeapon.warhead === 'AP' && entity.target.stats.isInfantry && effectiveInaccuracy <= 0) {
+      // SC1: AP/IsFueled warheads force scatter vs infantry (C++ bullet.cpp:709-710)
+      // C++: (Is_Target_Infantry(TarCom)) && (Warhead == WARHEAD_AP || Class->IsFueled)
+      if ((activeWeapon.warhead === 'AP' || activeWeapon.isFueled) && entity.target.stats.isInfantry && effectiveInaccuracy <= 0) {
         effectiveInaccuracy = 0.5;
       }
       // WH5: IsInaccurate flag — forced scatter on every shot (C++ bullet.h)
@@ -748,7 +749,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   let bestTarget: Entity | null = null;
   let bestScore = -Infinity;
   for (const other of ctx.entities) {
-    if (!other.alive) continue;
+    if (!other.alive || other.inLimbo) continue;
     if (ctx.entitiesAllied(entity, other)) continue;
     // M8: Dogs ONLY target infantry (C++ techno.cpp:2017-2026 — THREAT_INFANTRY)
     if (isDog && !other.stats.isInfantry) continue;

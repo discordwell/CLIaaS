@@ -655,7 +655,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 5 }, // C++ Speed=5 (Lobbed)
   Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 15, isHigh: true },
   RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 15, isAntiAir: true, isHigh: true },
-  Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20 },
+  Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 20, isFlameEquipped: true },  // C++ bbdata.cpp: Animates=yes — flame trail
   DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projSpeed: 40, isInvisible: true, isDegenerate: true },
   Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 40 },
   Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 40, isInvisible: true, isDegenerate: true },
@@ -694,7 +694,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super', projSpeed: 40 }, // C++: Warhead=Super (combat.cpp confirms)
   TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 40 },
-  FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8, projSpeed: 15 },
+  FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8, projSpeed: 15, isFlameEquipped: true },  // C++ bbdata.cpp: Animates=yes — flame trail
   Napalm:           { name: 'Napalm',            damage: 100, rof: 20, range: 4.5,  warhead: 'Fire', projSpeed: 12 },
   Camera:           { name: 'Camera',            damage: 0,   rof: 10, range: 2.75, warhead: 'Super', projSpeed: 40 },  // Spy plane reveal (C++ RULES.INI [Camera])
   ParaBomb:         { name: 'ParaBomb',          damage: 300, rof: 4,  range: 4.5,  warhead: 'HE', projSpeed: 5, isDropping: true, isParachuted: true },  // C++ RULES.INI [ParaBomb]: Badger bomber payload

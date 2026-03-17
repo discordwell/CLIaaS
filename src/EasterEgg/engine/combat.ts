@@ -10,7 +10,7 @@ import {
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META,
   armorIndex, worldDist, worldToCell, modifyDamage,
   directionTo, calcProjectileTravelFrames,
-  House, Mission, AnimState, EXPLOSION_FRAMES,
+  House, Mission, AnimState, UnitType, EXPLOSION_FRAMES,
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
 } from './types';
 import { type Entity } from './entity';
@@ -52,6 +52,17 @@ export interface InflightProjectile {
   // C++ bullet.cpp:903-913 — wall collision fields
   startX: number;        // origin X position (attacker pos at launch)
   startY: number;        // origin Y position (attacker pos at launch)
+  // C++ bullet.cpp:96-175 — dog-rides-bullet: dog entity ID riding this projectile (enters limbo on fire, unlimbos on impact)
+  dogRiderId: number;    // entity ID of dog riding this bullet (-1 = none)
+  // C++ fuse.cpp — IsFueled: fuel timer counts down; when 0, force-explode mid-air (bullet.cpp:710, fuse.h:62)
+  fuelTimer: number;     // ticks remaining before fuel-forced explosion (0xFF max, 0 = explode now)
+  isFueled: boolean;     // true if weapon has IsFueled flag (SCUD/V2)
+  // C++ bullet.cpp:790-802 — IsDropping: vertical drop from FLIGHT_LEVEL (parabombs)
+  isDropping: boolean;   // true if weapon has IsDropping flag
+  dropHeight: number;    // current altitude in pixels; starts at FLIGHT_LEVEL(24), falls by RULE_GRAVITY each tick
+  // C++ bullet.cpp:377-386 — IsFlameEquipped: flame/smoke trail every other tick
+  isFlameEquipped: boolean;
+  flameToggle: boolean;  // alternates each tick; trail spawns when true (C++ IsToAnimate)
 }
 
 /** Minimal AI state slice needed by damageStructure */
@@ -426,6 +437,41 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
   }
 }
 
+/** Crushable wall types — C++ odata.cpp IsCrushable flag.
+ *  SBAG (sandbag), FENC (fence), BARB (barbwire), WOOD (wood wall) are crushable.
+ *  BRIK (brick/concrete) is NOT crushable. CYCL (cyclone fence) is crushable in C++ but
+ *  not present as a wall type in the TS engine. */
+export const CRUSHABLE_WALLS = new Set(['SBAG', 'FENC', 'BARB', 'WOOD']);
+
+/** Wall crush — crusher vehicles destroy crushable walls on cell entry.
+ *  C++ unit.cpp:1855-1871: Per_Cell_Process checks IsCrusher && overlay IsCrushable.
+ *  Crushable walls (SBAG, FENC, BARB, WOOD) are destroyed instantly.
+ *  Non-crushable walls (BRIK) are left intact. Calls Reduce_Wall(-1) in C++. */
+export function checkWallCrush(ctx: CombatContext, vehicle: Entity): void {
+  if (!vehicle.stats.crusher) return;
+  const vc = vehicle.cell;
+  const wallType = ctx.map.getWallType(vc.cx, vc.cy);
+  if (wallType === '' || !CRUSHABLE_WALLS.has(wallType)) return;
+
+  // Destroy the wall overlay on the map
+  ctx.map.clearWallType(vc.cx, vc.cy);
+  ctx.map.addDecal(vc.cx, vc.cy, 4, 0.3);
+
+  // Destroy the corresponding wall structure (mark dead, clear footprint)
+  for (const s of ctx.structures) {
+    if (s.alive && s.cx === vc.cx && s.cy === vc.cy && s.type === wallType) {
+      s.alive = false;
+      s.rubble = true;
+      ctx.clearStructureFootprint(s);
+      break;
+    }
+  }
+
+  // C++ unit.cpp:1864-1868: sandbag gets VOC_SANDBAG, others get VOC_WALLKILL2
+  const crushSound = wallType === 'SBAG' ? 'wallkill_sand' : 'wallkill2';
+  ctx.playSoundAt(crushSound, vc.cx * CELL_SIZE + CELL_SIZE / 2, vc.cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
 /** Launch a projectile with travel time — damage is deferred until arrival */
 export function launchProjectile(
   ctx: CombatContext, attacker: Entity, target: Entity | null, weapon: WeaponStats,
@@ -448,6 +494,15 @@ export function launchProjectile(
     arcRiser = Math.max(10, Math.floor(travelFrames / 2) * RULE_GRAVITY);
   }
 
+  // C++ infantry.cpp:3649-3654 — dog-rides-bullet: dog enters limbo when firing
+  // The dog is removed from the map, becomes invisible and untargetable,
+  // and rides the bullet to the target. On impact, the dog unlimbos at the impact point.
+  let dogRiderId = -1;
+  if (attacker.type === UnitType.I_DOG && attacker.alive) {
+    attacker.inLimbo = true;
+    dogRiderId = attacker.id;
+  }
+
   ctx.inflightProjectiles.push({
     attackerId: attacker.id,
     targetId: target?.id ?? -1,
@@ -466,6 +521,17 @@ export function launchProjectile(
     arcRiser,
     startX: attacker.pos.x,
     startY: attacker.pos.y,
+    dogRiderId,
+    // C++ fuse.cpp — IsFueled: fuel timer = range = (distance/speed) + 4, capped at 0xFF
+    // When timer reaches 0 after arming delay, bullet force-explodes (runs out of fuel)
+    fuelTimer: Math.min(0xFF, travelFrames + 4),
+    isFueled: !!weapon.isFueled,
+    // C++ bullet.cpp:790-802 — IsDropping: start at FLIGHT_LEVEL, fall with gravity
+    isDropping: !!weapon.isDropping,
+    dropHeight: weapon.isDropping ? 24 : 0,  // C++ FLIGHT_LEVEL = 24 pixels
+    // C++ bullet.cpp:377-386 — IsFlameEquipped: flame trail toggle
+    isFlameEquipped: !!weapon.isFlameEquipped,
+    flameToggle: false,  // C++ IsToAnimate starts false
   });
 }
 
@@ -479,6 +545,37 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // C++ bullet.cpp:478-480 — IsDegenerate: projectile loses 1 strength per tick during flight (min 5)
     if (proj.weapon.isDegenerate && proj.strength > 5) {
       proj.strength--;
+    }
+
+    // C++ fuse.cpp:127 — fuel timer always decrements each tick (FuseClass::Fuse_Checkup)
+    if (proj.fuelTimer > 0) {
+      proj.fuelTimer--;
+    }
+
+    // C++ bullet.cpp:790-802 — IsDropping: vertical drop from FLIGHT_LEVEL with gravity
+    // dropHeight decreases by RULE_GRAVITY each tick; when it reaches 0, bullet lands
+    if (proj.isDropping && proj.dropHeight > 0) {
+      proj.dropHeight -= RULE_GRAVITY;
+    }
+
+    // C++ bullet.cpp:377-386 — IsFlameEquipped: spawn flame/smoke trail every other tick
+    if (proj.isFlameEquipped) {
+      if (proj.flameToggle) {
+        // Spawn visual flame trail at projectile's current interpolated position
+        const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+        const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
+        const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+        ctx.effects.push({
+          type: 'explosion',
+          x: curX,
+          y: curY,
+          frame: 0,
+          maxFrames: 14,  // ANIM_FBALL_FADE frame count
+          size: 8,
+          sprite: 'napalm1',  // closest match to FBALL_FADE in our sprite set
+        });
+      }
+      proj.flameToggle = !proj.flameToggle;  // C++ IsToAnimate = !IsToAnimate
     }
 
     // C++ object.cpp:237-254 — ballistic arc gravity simulation
@@ -561,6 +658,20 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       }
     }
 
+    // C++ bullet.cpp:359-361 — IsDropping: force-explode when dropHeight reaches 0
+    // (Class->IsDropping && !IsFalling): once height descends to 0, bullet lands
+    if (proj.isDropping && proj.dropHeight <= 0 && proj.currentFrame > 0) {
+      arrived.push(proj);
+      continue;
+    }
+
+    // C++ fuse.cpp:139 — IsFueled: force-explode when fuel timer reaches 0 (ran out of fuel mid-air)
+    // Fuse_Checkup returns true when Timer == 0 after arming delay expires
+    if (proj.isFueled && proj.fuelTimer <= 0) {
+      arrived.push(proj);
+      continue;
+    }
+
     // Landing check: arcing projectiles land when height <= 0 (C++ object.cpp:241);
     // non-arcing projectiles land when travel frames are exhausted.
     const hasLanded = proj.isArcing
@@ -573,6 +684,10 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
 
   // Remove arrived projectiles
   ctx.inflightProjectiles = ctx.inflightProjectiles.filter(p => {
+    // Dropping projectiles are removed when height reaches 0
+    if (p.isDropping) return p.dropHeight > 0 || p.currentFrame === 0;
+    // Fueled projectiles are removed when fuel runs out
+    if (p.isFueled && p.fuelTimer <= 0) return false;
     if (p.isArcing) return p.arcHeight > 0 || p.currentFrame <= 1;
     return p.currentFrame < p.travelFrames;
   });
@@ -626,6 +741,41 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       ctx.screenShake = Math.max(ctx.screenShake, 12);
       ctx.playSoundAt('building_explode', proj.impactX, proj.impactY);
     }
+
+    // C++ bullet.cpp:112-175 — dog-rides-bullet unlimbo: when bullet arrives, dog exits limbo at impact point
+    if (proj.dogRiderId >= 0) {
+      const dog = ctx.entityById.get(proj.dogRiderId);
+      if (dog && dog.alive) {
+        // C++ bullet.cpp:134-161 — Try impact point first, then 8 adjacent cells.
+        // If all 9 positions fail (impassable), delete the dog.
+        let unlimboed = false;
+        const impactCell = worldToCell(proj.impactX, proj.impactY);
+        // C++ bullet.cpp:145 — for (int i = -1; i < 8; i++)  (-1 = impact cell, 0-7 = adjacent)
+        const offsets: [number, number][] = [
+          [0, 0], [-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0],
+        ];
+        for (const [dx, dy] of offsets) {
+          const cx = impactCell.cx + dx;
+          const cy = impactCell.cy + dy;
+          if (ctx.map.inBounds(cx, cy) && ctx.map.isPassable(cx, cy)) {
+            dog.inLimbo = false;
+            dog.pos.x = cx * CELL_SIZE + CELL_SIZE / 2;
+            dog.pos.y = cy * CELL_SIZE + CELL_SIZE / 2;
+            // C++ bullet.cpp:152 — Do_Action(DO_DOG_MAUL, true): dog performs maul animation after landing
+            dog.animState = AnimState.ATTACK;
+            dog.animFrame = 0;
+            unlimboed = true;
+            break;
+          }
+        }
+        // C++ bullet.cpp:165-167 — if (!unlimbo) delete dog;
+        if (!unlimboed) {
+          dog.alive = false;
+          dog.inLimbo = false;
+          dog.mission = Mission.DIE;
+        }
+      }
+    }
   }
 }
 
@@ -646,7 +796,7 @@ export function applySplashDamage(
   const sourceId = attacker?.id ?? -1;
 
   for (const other of ctx.entities) {
-    if (!other.alive || other.id === sourceId) continue;
+    if (!other.alive || other.inLimbo || other.id === sourceId) continue;
     // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
     const isFriendly = ctx.isAllied(other.house, attackerHouse);
     const distCells = worldDist(center, other.pos);
@@ -876,7 +1026,7 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
         const targetCy = s.cy + off.dy;
         // Damage entities in cardinal cell — flat 200 Fire damage, no falloff
         for (const e of ctx.entities) {
-          if (!e.alive) continue;
+          if (!e.alive || e.inLimbo) continue;
           const ec = e.cell;
           if (ec.cx === targetCx && ec.cy === targetCy) {
             damageEntity(ctx, e, 200, 'Fire');
@@ -896,7 +1046,7 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
       // Non-barrel: generic 2-cell radial HE blast with distance falloff
       const blastRadius = 2;
       for (const e of ctx.entities) {
-        if (!e.alive) continue;
+        if (!e.alive || e.inLimbo) continue;
         const dist = worldDist({ x: wx, y: wy }, e.pos);
         if (dist > blastRadius) continue;
         const falloff = 1 - (dist / blastRadius) * 0.6;
@@ -972,7 +1122,7 @@ export function updateStructureCombat(ctx: CombatContext): void {
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
     for (const e of ctx.entities) {
-      if (!e.alive) continue;
+      if (!e.alive || e.inLimbo) continue;
       if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
       // AA gate: non-AA structures can't target airborne aircraft
       if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon!.isAntiAir) continue;
@@ -999,7 +1149,7 @@ export function updateStructureCombat(ctx: CombatContext): void {
       let bestAirTarget: Entity | null = null;
       let bestAirDist = Infinity;
       for (const e of ctx.entities) {
-        if (!e.alive || !e.isAirUnit || e.flightAltitude <= 0) continue;
+        if (!e.alive || e.inLimbo || !e.isAirUnit || e.flightAltitude <= 0) continue;
         if (ctx.isAllied(s.house, e.house)) continue;
         const dist = worldDist(structPos, e.pos);
         if (dist < range && dist < bestAirDist) {

@@ -66,6 +66,7 @@ import {
   handleUnitDeath as _handleUnitDeath,
   triggerRetaliation as _triggerRetaliation,
   checkVehicleCrush as _checkVehicleCrush,
+  checkWallCrush as _checkWallCrush,
   launchProjectile as _launchProjectile,
   updateInflightProjectiles as _updateInflightProjectiles,
   applySplashDamage as _applySplashDamage,
@@ -1467,7 +1468,7 @@ export class Game {
     this.map.occupancy.fill(0);
     this.map.clearSubCellOccupancy();
     for (const entity of this.entities) {
-      if (entity.alive) {
+      if (entity.alive && !entity.inLimbo) {
         // Air units don't block ground occupancy when airborne
         if (!entity.isAirUnit || entity.flightAltitude === 0) {
           if (entity.stats.isInfantry) {
@@ -1492,6 +1493,9 @@ export class Game {
       entity.turretRotTickedThisFrame = false;
       // Clear recoil from previous tick (C++ techno.cpp:2339 — recoil lasts 1 tick)
       if (entity.isInRecoilState) entity.isInRecoilState = false;
+
+      // C++ bullet.cpp:96-175 — dog in limbo rides bullet; skip all processing
+      if (entity.inLimbo) continue;
 
       // Submarine cloaking state machine (SS, MSUB)
       if (entity.alive && entity.stats.isCloakable) {
@@ -3301,6 +3305,13 @@ export class Game {
       entity.tickTurretRotation();
     }
 
+    // Wall crush: crusher vehicles destroy crushable walls on cell entry
+    // C++ unit.cpp:1855-1871 — Per_Cell_Process: IsCrusher && overlay IsCrushable → Reduce_Wall(-1)
+    if (entity.alive && entity.stats.crusher &&
+        entity.stats.speed > 0 && entity.animState === AnimState.WALK) {
+      this.checkWallCrush(entity);
+    }
+
     // Vehicle crush: heavy tracked vehicles (crusher=true) kill crushable units on cell entry
     // C++ DriveClass::Ok_To_Move — only vehicles with Crusher flag crush infantry/ants
     if (entity.alive && entity.stats.crusher &&
@@ -3879,7 +3890,11 @@ export class Game {
     this._runCombat(ctx => _checkVehicleCrush(ctx, vehicle));
   }
 
-
+  /** Wall crush — delegates to combat.ts
+   *  C++ unit.cpp:1855-1871: crusher vehicles destroy crushable walls on cell entry */
+  private checkWallCrush(vehicle: Entity): void {
+    this._runCombat(ctx => _checkWallCrush(ctx, vehicle));
+  }
 
   /** Ant AI — hunt nearest visible player unit (fog-aware, LOS-aware) */
   private updateAntAI(entity: Entity): void {
@@ -3998,7 +4013,7 @@ export class Game {
       let bestTarget: Entity | null = null;
       let bestScore = -Infinity;
       for (const other of this.entities) {
-        if (!other.alive || this.entitiesAllied(entity, other)) continue;
+        if (!other.alive || other.inLimbo || this.entitiesAllied(entity, other)) continue;
         const dist = worldDist(entity.pos, other.pos);
         if (dist > scanRange) continue;
         if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
@@ -4703,6 +4718,28 @@ export class Game {
       const dir32 = Math.floor(result.facing / 8);
       entity.bodyFacing32 = dir32;
       entity.facing = Math.floor(dir32 / 4) as Dir;
+
+      // === Per-Cell Process (C++ drive.cpp:721-728) ===
+      // When trackIndex matches RawTracks[tracknum-1].Cell, trigger mid-movement
+      // cell processing: vehicle crush and wall crush at the intermediate cell.
+      // C++ calls Per_Cell_Process(PCP_DURING) which runs Overrun_Square and
+      // crushable overlay destruction (UnitClass::Per_Cell_Process lines 1857-1876).
+      if (entity.trackIndex > 0 &&
+          rawTrackNum >= 1 && rawTrackNum <= RAW_TRACKS.length &&
+          RAW_TRACKS[rawTrackNum - 1].cell >= 0 &&
+          RAW_TRACKS[rawTrackNum - 1].cell === entity.trackIndex) {
+        // Vehicle crush: heavy tracked vehicles crush infantry at mid-cell
+        if (entity.stats.crusher) {
+          this.checkVehicleCrush(entity);
+        }
+        // Fog reveal around the mid-cell position (C++ Look() equivalent)
+        const midCx = Math.floor(entity.pos.x / CELL_SIZE);
+        const midCy = Math.floor(entity.pos.y / CELL_SIZE);
+        if (entity.isPlayerUnit) {
+          this.revealAroundCell(midCx, midCy, entity.stats.sight);
+        }
+        if (!entity.alive) return false; // C++ drive.cpp:724-726: if (!IsActive) return false
+      }
 
       // === Track Jumping (C++ drive.cpp:734-788) ===
       // When the vehicle reaches the Jump index in its current track AND has a

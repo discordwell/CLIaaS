@@ -1779,6 +1779,9 @@ export class Renderer {
     });
 
     for (const entity of sorted) {
+      // C++ bullet.cpp:96-175 — dog in limbo rides bullet, not rendered on map
+      if (entity.inLimbo) continue;
+
       const ecx = Math.floor(entity.pos.x / CELL_SIZE);
       const ecy = Math.floor(entity.pos.y / CELL_SIZE);
 
