@@ -23,7 +23,7 @@ import { canTargetNaval } from './aircraft';
 /** CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2) */
 export const SPLASH_RADIUS = 1.5;
 
-const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
+const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 
 /** Turreted structure types — turret rotates to face target (GUN/SAM) */
 const TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
