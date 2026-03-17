@@ -108,8 +108,8 @@ describe('SHOK stats verification (idata.cpp / rules.ini)', () => {
     expect(stats.isInfantry).toBe(true);
   });
 
-  it('crushable is true (infantry.cpp — all infantry are crushable)', () => {
-    expect(stats.crushable).toBe(true);
+  it('crushable is false (C++ aftrmt.ini Crushable=no — Shock Troopers resist crushing)', () => {
+    expect(stats.crushable).toBe(false);
   });
 
   it('primary weapon is PortaTesla', () => {
@@ -232,16 +232,17 @@ describe('SHOK splash radius (combat.cpp)', () => {
   });
 });
 
-// ── Crushable (drive.cpp:Ok_To_Move) ─────────────────────────────────────────
-// C++ drive.cpp — all infantry are crushable by crusher vehicles
+// ── Crushable (drive.cpp:Ok_To_Move + aftrmt.ini Crushable=no) ──────────────
+// C++ aftrmt.ini — SHOK has Crushable=no override (powered armor resists crushing)
 
 describe('SHOK crushable (drive.cpp:Ok_To_Move)', () => {
-  it('SHOK is killed when a crusher vehicle (2TNK) enters its cell', () => {
+  it('SHOK is NOT killed when a crusher vehicle (2TNK) enters its cell (aftrmt.ini Crushable=no)', () => {
     const shok = entityAtCell(UnitType.I_SHOK, House.USSR, 10, 10);
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
     const ctx = makeCombatCtx([shok, tank]);
     checkVehicleCrush(ctx, tank);
-    expect(shok.alive).toBe(false);
+    expect(shok.alive).toBe(true);
+    expect(shok.hp).toBe(shok.maxHp);
   });
 
   it('SHOK is NOT crushed by non-crusher vehicle (JEEP)', () => {

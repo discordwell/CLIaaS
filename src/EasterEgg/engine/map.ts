@@ -256,16 +256,27 @@ export class GameMap {
     return this.visibility[cy * MAP_CELLS + cx];
   }
 
-  /** Set visibility at cell */
+  /** Set visibility at cell.
+   *  C++ parity: any cell set to visible (2) must be tracked for fog-of-war
+   *  downgrade, regardless of how it became visible. */
   setVisibility(cx: number, cy: number, v: number): void {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
-      this.visibility[cy * MAP_CELLS + cx] = v;
+      const idx = cy * MAP_CELLS + cx;
+      this.visibility[idx] = v;
+      if (v === 2) {
+        this.visibleCells.push(idx);
+      }
     }
   }
 
   /** Reveal the entire map (all cells set to visible) */
   revealAll(): void {
     this.visibility.fill(2);
+    // Track all cells for fog-of-war downgrade (C++ parity)
+    this.visibleCells.length = 0;
+    for (let i = 0; i < MAP_CELLS * MAP_CELLS; i++) {
+      this.visibleCells.push(i);
+    }
   }
 
   /** Creep shadow: downgrade all visible/fog cells back to shroud (darkness).

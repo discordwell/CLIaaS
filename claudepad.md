@@ -1,5 +1,10 @@
 # Session Summaries
 
+## 2026-03-17T06:15Z — Session 158: Map Terrain Parity Tests + 15 Bug Fixes
+- **New test file**: `cpp-parity-map.test.ts` — 259 tests covering the full GameMap class (map.ts, 599 lines): MoveResult enum, Terrain enum (9 types), passability rules (land/naval × 9 terrains), occupancy grid, wall tracking (4 types), tree tracking, bounds, speed multipliers (FOOT/WHEEL/WINGED/FLOAT × all terrains), Bresenham line of sight, fog of war (shroud/fog/visible + updateFogOfWar), ore/gem overlays (depletion/growth/spread), bridge system, gap generator (overlapping jams), decals (FIFO cap), shore detection, adjacent water cell finding, initDefault, cell triggers, smudges, grid layout verification.
+- **Fixed 15 pre-existing test failures across 8 files**: SHOK crushable=false (aftrmt.ini Crushable=no), MRJ icon HIRES upgrade (32x24→64x48), MISSION_UNLOAD constant (15→12), MCV deploying state detection, build order skip-unbuildable (break→continue), BARR before 2nd PROC in build order, harvester replacement gate, unit-proximity micro engagement, deployMCV house fix (entity.house for C++ parity), console.warn for unknown house edges.
+- **All 21,935 tests pass across 291 files.** Zero failures.
+
 ## 2026-03-17T06:00Z — Session 157: Oracle Tactical Overhaul — Idle-Aware Commands + Economy + Scatter
 - **Idle-aware command system**: Units busy executing orders are no longer re-commanded every tick. `shouldRecommand()` checks idle status, target alive, and 90-tick stale timeout. Prevents command stuttering at high decision frequency.
 - **Step size reduced to 5 ticks** (from 15/30): 6x faster reactions, safe because idle filter prevents stuttering.

@@ -1047,6 +1047,7 @@ export function calculateHouseEdgeSpawnCell(
     case 'west':
       return { cx: x, cy: alignedY };
     default:
+      console.warn(`Unknown house edge: '${edge}' — expected north/south/east/west`);
       return null;
   }
 }

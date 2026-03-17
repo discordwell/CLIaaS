@@ -999,10 +999,10 @@ describe('MCV Deployment — deployMCV', () => {
     expect(h).toBe(3);
   });
 
-  it('deployed FACT uses playerHouse', () => {
+  it('deployed FACT uses entity house (C++ parity: MCV owner → ConYard owner)', () => {
     const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
     const chunk = placementSource.slice(idx, idx + 700);
-    expect(chunk).toContain('ctx.playerHouse');
+    expect(chunk).toContain('entity.house');
   });
 
   it('deployment returns false if any surrounding cell is impassable', () => {
