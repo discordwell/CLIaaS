@@ -1485,29 +1485,27 @@ export class OracleStrategy {
       }
     }
 
-    // --- ARTY fire support ---
+    // --- ARTY fire support — prioritize V2RL (only real threat) ---
     if (arty) {
+      const v2 = state.enemies.find((e) => e.t === 'V2RL');
       const nearbyEnemies = state.enemies.filter(
         (e) => this.distanceSq(e, arty) <= 400,
       );
-      if (nearbyEnemies.length > 0) {
-        // ARTY attacks nearest enemy
+      if (v2) {
+        // V2RL is the #1 priority — it can kill Tanya
+        commands.push({ cmd: 'attack', ids: [arty.id], target: v2.id });
+        reasons.push('ARTY → V2RL');
+      } else if (nearbyEnemies.length > 0) {
         const target = this.nearestEnemy(arty, nearbyEnemies);
+        commands.push({ cmd: 'attack', ids: [arty.id], target: target.id });
+        reasons.push(`ARTY → ${target.t}`);
+      } else {
+        // Follow Tanya for support
         commands.push({
-          cmd: 'attack',
-          ids: [arty.id],
-          target: target.id,
+          cmd: 'move', ids: [arty.id],
+          cx: tanya.cx, cy: tanya.cy,
         });
-        reasons.push(`ARTY fires on ${target.t}`);
-      } else if (this.distanceSq(arty, SCG03EA_ARTY_POS) > 36) {
-        // Move ARTY to fire position
-        commands.push({
-          cmd: 'move',
-          ids: [arty.id],
-          cx: SCG03EA_ARTY_POS.cx,
-          cy: SCG03EA_ARTY_POS.cy,
-        });
-        reasons.push('ARTY to fire pos');
+        reasons.push('ARTY follows');
       }
     }
 
@@ -1542,8 +1540,8 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // Retreat if Tanya is badly hurt — wait for medics
-    if (tanyaHpFrac < 0.35) {
+    // Retreat if Tanya is hurt — she's the lose condition, be conservative
+    if (tanyaHpFrac < 0.5) {
       commands.push({
         cmd: 'move',
         ids: [tanya.id],
@@ -1554,22 +1552,56 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // Bridges are overlays — Tanya destroys them with C4 (deploy on the cell)
-    const atBridge = this.distanceSq(tanya, currentBridge) <= 4;
-    if (atBridge) {
-      // On the bridge — deploy C4
-      commands.push({ cmd: 'deploy', ids: [tanya.id] });
+    // Tanya one-shots infantry — pick off nearby enemies before advancing.
+    // Bridges are destroyed by blowing up nearby barrels (BARL/BRL3).
+    const bridgeBarrels = state.structures.filter(
+      (s) => (s.t === 'BARL' || s.t === 'BRL3') && this.distanceSq(s, currentBridge) <= 100,
+    );
+    const atBridge = this.distanceSq(tanya, currentBridge) <= 64; // 8 cells
+    if (atBridge && bridgeBarrels.length > 0) {
+      // Near bridge — blow up a barrel to destroy the bridge
+      const barrel = bridgeBarrels[0];
+      commands.push({ cmd: 'attack', ids: [tanya.id], target: barrel.id });
+      reasons.push(`Tanya → barrel at (${barrel.cx},${barrel.cy})`);
+    } else if (atBridge && bridgeBarrels.length === 0) {
+      // Bridge barrels destroyed — bridge should be gone, advance
       this.scg03eaBridgeIndex++;
-      reasons.push(`Tanya C4 bridge ${this.scg03eaBridgeIndex}!`);
+      reasons.push(`bridge ${this.scg03eaBridgeIndex} destroyed!`);
     } else {
-      // Attack-move toward bridge — clears enemies en route
-      commands.push({
-        cmd: 'attack_move',
-        ids: [tanya.id],
-        cx: currentBridge.cx,
-        cy: currentBridge.cy,
-      });
-      reasons.push(`Tanya → bridge ${this.scg03eaBridgeIndex + 1} (${currentBridge.cx},${currentBridge.cy})`);
+      // Check for infantry near Tanya — she one-shots them
+      const nearbyInf = state.enemies.filter(
+        (e) => isInfantryByType(e.t) && this.distanceSq(e, tanya) <= 144, // 12 cells
+      );
+      // Check for vehicles near Tanya — she can't fight those, retreat
+      const nearbyVehicles = state.enemies.filter(
+        (e) => !isInfantryByType(e.t) && e.t !== 'LST' && this.distanceSq(e, tanya) <= 100,
+      );
+
+      if (nearbyVehicles.length > 0 && nearbyInf.length === 0) {
+        // Vehicle nearby, no infantry to screen — retreat from vehicle
+        const awayX = tanya.cx + (tanya.cx - nearbyVehicles[0].cx);
+        const awayY = tanya.cy + (tanya.cy - nearbyVehicles[0].cy);
+        commands.push({
+          cmd: 'move', ids: [tanya.id],
+          cx: Math.max(0, Math.min(127, awayX)),
+          cy: Math.max(0, Math.min(127, awayY)),
+        });
+        reasons.push(`Tanya dodges ${nearbyVehicles[0].t}`);
+      } else if (nearbyInf.length > 0) {
+        // Infantry nearby — pick off the nearest one (one-shot kill)
+        const target = this.nearestEnemy(tanya, nearbyInf);
+        commands.push({
+          cmd: 'attack', ids: [tanya.id], target: target.id,
+        });
+        reasons.push(`Tanya kills ${target.t} (${nearbyInf.length} nearby)`);
+      } else {
+        // Path is clear — advance toward bridge
+        commands.push({
+          cmd: 'move', ids: [tanya.id],
+          cx: currentBridge.cx, cy: currentBridge.cy,
+        });
+        reasons.push(`Tanya → bridge ${this.scg03eaBridgeIndex + 1}`);
+      }
     }
 
     return { commands, reason: reasons.join('; ') };
