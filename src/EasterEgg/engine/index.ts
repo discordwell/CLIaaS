@@ -5304,12 +5304,17 @@ export class Game {
   }
 
   /** Recalculate silo capacity when storage changes.
-   *  C++ parity: excess credits above new capacity are kept as cash (not lost).
-   *  Credits only get capped by silo capacity on NEW harvester deposits, not on storage loss. */
+   *  C++ parity (house.cpp Adjust_Capacity): when capacity decreases and credits exceed
+   *  the new capacity, excess credits are LOST (spilled). Both sell (Limbo) and destruction
+   *  pass inanger=true in C++, meaning excess tiberium is not refunded.
+   *  This creates economic risk — losing storage buildings costs you credits. */
   recalculateSiloCapacity(): void {
     this.siloCapacity = this.calculateSiloCapacity();
-    // SI2 parity: excess credits above new capacity are refunded to cash, not lost.
-    // Credits remain as-is — they just can't grow beyond the new cap from harvesting.
+    // C++ parity: cap credits to new capacity — excess is lost (spilled)
+    // Matches C++ building.cpp:2986 Adjust_Capacity(-Class->Capacity, true)
+    if (this.siloCapacity > 0 && this.credits > this.siloCapacity) {
+      this.credits = this.siloCapacity;
+    }
   }
 
   /** Add credits, capped to silo capacity. Returns amount actually added.
