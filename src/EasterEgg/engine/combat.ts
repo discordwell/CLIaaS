@@ -527,6 +527,40 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       }
     }
 
+    // C++ bullet.cpp:920-941 — torpedo water boundary check (Is_Forced_To_Explode)
+    // Subsurface projectiles (torpedoes) check land type each frame and explode if they leave water.
+    if (proj.weapon.isSubSurface) {
+      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
+      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+      const cc = worldToCell(curX, curY);
+      if (ctx.map.getTerrain(cc.cx, cc.cy) !== Terrain.WATER) {
+        // Force-explode at cell center when torpedo leaves water (C++ coord = Cell_Coord(Coord_Cell(coord)))
+        proj.impactX = cc.cx * CELL_SIZE + CELL_SIZE / 2;
+        proj.impactY = cc.cy * CELL_SIZE + CELL_SIZE / 2;
+        proj.travelFrames = proj.currentFrame; // land now
+        arrived.push(proj);
+        continue;
+      }
+    }
+
+    // C++ bullet.cpp:946-948 — AA proximity detonation (Is_Forced_To_Explode)
+    // Anti-air projectiles detonate when within half a cell (~0x0080 leptons) of an airborne target.
+    if (proj.weapon.isAntiAir && target && target.alive && target.isAirUnit && target.flightAltitude > 0) {
+      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
+      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+      const distToTarget = Math.sqrt((curX - target.pos.x) ** 2 + (curY - target.pos.y) ** 2);
+      // C++ Distance(TarCom) < 0x0080: 128 leptons = half a cell (CELL_LEPTON_W=256)
+      if (distToTarget < CELL_SIZE / 2) {
+        proj.impactX = target.pos.x;
+        proj.impactY = target.pos.y;
+        proj.travelFrames = proj.currentFrame; // detonate now
+        arrived.push(proj);
+        continue;
+      }
+    }
+
     // Landing check: arcing projectiles land when height <= 0 (C++ object.cpp:241);
     // non-arcing projectiles land when travel frames are exhausted.
     const hasLanded = proj.isArcing
