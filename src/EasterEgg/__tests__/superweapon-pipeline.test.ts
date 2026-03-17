@@ -1169,7 +1169,7 @@ describe('Superweapon cooldown and charging system', () => {
     expect(state.ready).toBe(true);
   });
 
-  it('low power reduces charge rate to 0.25 for player', () => {
+  it('low power fully suspends charging for player (C++ house.cpp:1410-1411)', () => {
     const ctx = makeMockSuperweaponContext({
       powerProduced: 50,
       powerConsumed: 100, // low power
@@ -1180,7 +1180,7 @@ describe('Superweapon cooldown and charging system', () => {
     const state = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { chargeTick: 0 });
     ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
     updateSuperweapons(ctx);
-    expect(state.chargeTick).toBe(0.25); // reduced charge rate
+    expect(state.chargeTick).toBe(0); // fully suspended — no charging at low power
   });
 
   it('charge simulation: normal power reaches ready in exactly rechargeTicks', () => {
@@ -1196,16 +1196,17 @@ describe('Superweapon cooldown and charging system', () => {
     expect(chargeTick).toBe(6300);
   });
 
-  it('charge simulation: low power takes 4x longer', () => {
+  it('charge simulation: low power means zero progress (C++ house.cpp:1410-1411)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.CHRONOSPHERE];
     let chargeTick = 0;
-    const chargeRate = 0.25;
-    let ticks = 0;
-    while (chargeTick < def.rechargeTicks) {
-      chargeTick = Math.min(chargeTick + chargeRate, def.rechargeTicks);
-      ticks++;
+    const suspended = true; // low power → fully suspended
+    const ticksSimulated = 100;
+    for (let i = 0; i < ticksSimulated; i++) {
+      if (!suspended) {
+        chargeTick = Math.min(chargeTick + 1, def.rechargeTicks);
+      }
     }
-    expect(ticks).toBe(def.rechargeTicks * 4); // 6300 * 4 = 25200
+    expect(chargeTick).toBe(0); // no progress while suspended
   });
 
   it('GPS does not recharge after firing (fired flag gate)', () => {
