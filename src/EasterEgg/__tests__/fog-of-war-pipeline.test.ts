@@ -66,6 +66,7 @@ function makeMockFogContext(overrides: Partial<FogContext> = {}): FogContext {
     tick: 0,
     playerHouse: House.Greece,
     fogDisabled: false,
+    gpsActive: false,
     baseDiscovered: true,
     powerProduced: 200,
     powerConsumed: 100,

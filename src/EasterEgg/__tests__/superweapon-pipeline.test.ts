@@ -110,6 +110,7 @@ function makeMockSuperweaponContext(
     lossCount: 0,
     map: {
       revealAll() { revealedAll = true; },
+      shroudAll() {},
       isPassable(_cx: number, _cy: number) { return true; },
       setVisibility(cx: number, cy: number, v: number) { visibilityCells.push({ cx, cy, v }); },
       inBounds(_cx: number, _cy: number) { return true; },
@@ -118,6 +119,7 @@ function makeMockSuperweaponContext(
     },
     sonarSpiedTarget: new Map(),
     gapGeneratorCells: new Map(),
+    gpsActive: false,
     nukePendingTarget: null,
     nukePendingTick: 0,
     nukePendingSource: null,

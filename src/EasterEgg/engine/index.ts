@@ -485,6 +485,9 @@ export class Game {
   /** When true, fog of war is disabled (all cells visible) */
   fogDisabled = false;
   fogReEnableTick = 0; // ticks until fog re-enables after spy infiltration
+  /** C++ house.h:268 IsGPSActive — GPS satellite launched, full map revealed.
+   *  Cleared when ATEK is destroyed (house.cpp:1420-1425). */
+  gpsActive = false;
 
   // Pause menu state
   pauseMenuOpen = false;
@@ -610,6 +613,7 @@ export class Game {
       tick: this.tick,
       playerHouse: this.playerHouse,
       fogDisabled: this.fogDisabled,
+      gpsActive: this.gpsActive,
       baseDiscovered: this.baseDiscovered,
       powerProduced: this.powerProduced,
       powerConsumed: this.powerConsumed,
@@ -702,6 +706,7 @@ export class Game {
       map: this.map,
       gapGeneratorCells: this.gapGeneratorCells,
       sonarSpiedTarget: this.sonarSpiedTarget,
+      gpsActive: this.gpsActive,
       nukePendingTarget: this.nukePendingTarget,
       nukePendingTick: this.nukePendingTick,
       nukePendingSource: this.nukePendingSource,
@@ -729,6 +734,7 @@ export class Game {
     const result = fn(ctx);
     this.killCount = ctx.killCount;
     this.lossCount = ctx.lossCount;
+    this.gpsActive = ctx.gpsActive;
     this.nukePendingTarget = ctx.nukePendingTarget;
     this.nukePendingTick = ctx.nukePendingTick;
     this.nukePendingSource = ctx.nukePendingSource;
@@ -5230,6 +5236,7 @@ export class Game {
       const wp = this.waypoints.get(result.revealZone);
       if (wp) _revealZoneFloodFill(this.map, wp.cx, wp.cy);
     }
+    // Charge one superweapon of trigger house
     if (result.oneSpecial && trigger.house !== undefined) {
       const swHouse = houseIdToHouse(trigger.house);
       for (const [, state] of this.superweapons) {
@@ -5239,6 +5246,7 @@ export class Game {
         }
       }
     }
+    // Charge all superweapons of trigger house
     if (result.fullSpecial && trigger.house !== undefined) {
       const swHouse = houseIdToHouse(trigger.house);
       for (const [, state] of this.superweapons) {

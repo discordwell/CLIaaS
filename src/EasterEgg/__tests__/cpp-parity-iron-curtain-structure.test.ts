@@ -89,6 +89,7 @@ function makeSuperweaponCtx(
     lossCount: 0,
     map: {
       revealAll() {},
+      shroudAll() {},
       isPassable() { return true; },
       setVisibility() {},
       inBounds() { return true; },
@@ -97,6 +98,7 @@ function makeSuperweaponCtx(
     },
     sonarSpiedTarget: new Map(),
     gapGeneratorCells: new Map(),
+    gpsActive: false,
     nukePendingTarget: null,
     nukePendingTick: 0,
     nukePendingSource: null,
