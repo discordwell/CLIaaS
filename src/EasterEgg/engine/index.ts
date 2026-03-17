@@ -239,6 +239,24 @@ const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
 /** In-flight projectile for deferred damage — defined in combat.ts */
 type InflightProjectile = InflightProjectileType;
 
+// ============================================================================
+// C++ PathThreshhold escalation constants (foot.h:239, foot.cpp:396-411, rules.cpp:271)
+// ============================================================================
+/** C++ foot.h:239 — maximum path retry attempts before giving up */
+const PATH_RETRY = 10;
+/** C++ defines.h:828-837 — MoveType enum: passability threshold levels */
+const MOVE_CLOAK = 1;         // default starting threshold (easiest)
+const MOVE_TEMP  = 4;         // maximum threshold (hardest — blocked by friendly)
+/** C++ rules.cpp:271 PathDelay(".016") * TICKS_PER_MINUTE(900) ≈ 14 ticks */
+const PATH_DELAY_TICKS = 14;
+
+/** Reset path threshold state when a new move order is given (C++ foot.cpp:1723-1735 Assign_Destination) */
+function resetPathThreshold(entity: Entity): void {
+  entity.pathThreshold = MOVE_CLOAK;
+  entity.tryCount = PATH_RETRY;
+  entity.pathDelay = 0;
+}
+
 export class Game {
   // Core systems
   assets: AssetManager;
@@ -2299,6 +2317,7 @@ export class Game {
         unit.moveQueue = [];
         unit.path = findPath(this.map, unit.cell, worldToCell(goalX, goalY), true, unit.isNavalUnit, unit.stats.speedClass);
         unit.pathIndex = 0;
+        resetPathThreshold(unit); // C++ foot.cpp:1734
       }
       keys.delete('x');
     }
@@ -2581,6 +2600,7 @@ export class Game {
             u.teamMissionIndex = 0;
             u.path = findPath(this.map, u.cell, worldToCell(pos.x, pos.y), true, u.isNavalUnit, u.stats.speedClass);
             u.pathIndex = 0;
+            resetPathThreshold(u); // C++ foot.cpp:1734
           }
           if (units.length > 0) {
             this.playAckVoice(false);
@@ -2762,6 +2782,7 @@ export class Game {
               unit.stats.speedClass
             );
             unit.pathIndex = 0;
+            resetPathThreshold(unit); // C++ foot.cpp:1734 — new move order resets PathThreshhold
           }
         }
       }
@@ -3917,6 +3938,9 @@ export class Game {
 
   /** Move toward move target along path */
   private updateMove(entity: Entity): void {
+    // C++ PathDelay countdown (foot.cpp:463 — CDTimerClass decrements each frame)
+    if (entity.pathDelay > 0) entity.pathDelay--;
+
     if (!entity.moveTarget && entity.path.length === 0) {
       entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
@@ -3978,28 +4002,49 @@ export class Game {
       const terrainOk = entity.isNavalUnit
         ? this.map.isWaterPassable(nextCell.cx, nextCell.cy)
         : this.map.isTerrainPassable(nextCell.cx, nextCell.cy);
-      if (!terrainOk && entity.moveTarget && this.tick - entity.lastPathRecalc > 15) {
+      if (!terrainOk && entity.moveTarget) {
+        // C++ PathThreshhold escalation (foot.cpp:396-411, drive.cpp:989-996)
+        // Respect PathDelay timer before retrying (C++ foot.cpp:463)
+        if (entity.pathDelay > 0) {
+          return;
+        }
         entity.lastPathRecalc = this.tick;
         const newPath = findPath(
           this.map, entity.cell,
           worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
           entity.isNavalUnit, entity.stats.speedClass
         );
+        // C++ foot.cpp:463 — set PathDelay after every path calculation
+        entity.pathDelay = PATH_DELAY_TICKS;
         if (newPath.length === 0) {
-          // Destination unreachable — stop movement
-          entity.moveTarget = null;
-          entity.path = [];
-          entity.pathIndex = 0;
-          entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
-          entity.trackCellSpan = 1;
-          entity.mission = this.idleMission(entity);
-          entity.animState = AnimState.IDLE;
+          // C++ foot.cpp:409-410 — escalate threshold on failure
+          entity.pathThreshold++;
+          if (entity.pathThreshold > MOVE_TEMP) {
+            // C++ drive.cpp:989-996 — decrement TryTryAgain; at 0, give up
+            if (entity.tryCount > 0) {
+              entity.tryCount--;
+              entity.pathThreshold = MOVE_CLOAK; // reset threshold for next retry cycle
+            } else {
+              // All retries exhausted — stop movement (C++ drive.cpp:992)
+              entity.moveTarget = null;
+              entity.path = [];
+              entity.pathIndex = 0;
+              entity.trackNumber = -1; entity.trackControlIndex = -1;
+              entity.trackCellSpan = 1;
+              entity.mission = this.idleMission(entity);
+              entity.animState = AnimState.IDLE;
+              resetPathThreshold(entity);
+            }
+          }
           return;
         }
         entity.path = newPath;
         entity.pathIndex = 0;
         entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
         entity.trackCellSpan = 1;
+        // Successful path — reset threshold but keep tryCount (C++ drive.cpp:1050)
+        entity.pathThreshold = MOVE_CLOAK;
+        entity.tryCount = PATH_RETRY;
         return;
       }
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
@@ -4024,22 +4069,44 @@ export class Game {
             }
           }
         }
-        if (this.tick - entity.lastPathRecalc > 15) {
-          entity.lastPathRecalc = this.tick;
-          const newPath = findPath(
-            this.map, entity.cell,
-            worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-            entity.isNavalUnit, entity.stats.speedClass
-          );
-          if (newPath.length === 0) {
-            // Can't find alternate route — wait a moment
-            return;
-          }
-          entity.path = newPath;
-          entity.pathIndex = 0;
-          entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
-          entity.trackCellSpan = 1;
+        // C++ PathThreshhold escalation (foot.cpp:396-411, drive.cpp:989-996)
+        if (entity.pathDelay > 0) {
+          return;
         }
+        entity.lastPathRecalc = this.tick;
+        const newPath = findPath(
+          this.map, entity.cell,
+          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+          entity.isNavalUnit, entity.stats.speedClass
+        );
+        entity.pathDelay = PATH_DELAY_TICKS;
+        if (newPath.length === 0) {
+          // C++ foot.cpp:409-410 — escalate threshold on failure
+          entity.pathThreshold++;
+          if (entity.pathThreshold > MOVE_TEMP) {
+            if (entity.tryCount > 0) {
+              entity.tryCount--;
+              entity.pathThreshold = MOVE_CLOAK;
+            } else {
+              // All retries exhausted — give up (C++ drive.cpp:992)
+              entity.moveTarget = null;
+              entity.path = [];
+              entity.pathIndex = 0;
+              entity.trackNumber = -1; entity.trackControlIndex = -1;
+              entity.trackCellSpan = 1;
+              entity.mission = this.idleMission(entity);
+              entity.animState = AnimState.IDLE;
+              resetPathThreshold(entity);
+            }
+          }
+          return;
+        }
+        entity.path = newPath;
+        entity.pathIndex = 0;
+        entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
+        entity.trackCellSpan = 1;
+        entity.pathThreshold = MOVE_CLOAK;
+        entity.tryCount = PATH_RETRY;
       }
       const target: WorldPos = {
         x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
@@ -4193,19 +4260,42 @@ export class Game {
           const infCanEnter = entity.stats.isInfantry && this.map.hasAvailableSubCell(nextCellPos.cx, nextCellPos.cy);
           const occBlocked = !entity.isNavalUnit && occId > 0 && occId !== entity.id && !infCanEnter;
           if (!passable || occBlocked) {
-            // Re-pathfind instead of sliding through impassable terrain.
-            if (this.tick - entity.lastPathRecalc > 15) {
-              entity.lastPathRecalc = this.tick;
-              const newPath = findPath(
-                this.map, currentCell,
-                worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-                entity.isNavalUnit, entity.stats.speedClass
-              );
-              if (newPath.length > 0) {
-                entity.path = newPath;
-                entity.pathIndex = 0;
-              } else if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
-                finishMove();
+            // C++ PathThreshhold escalation (foot.cpp:396-411, drive.cpp:989-996)
+            if (entity.pathDelay > 0) {
+              entity.pathDelay--;
+              return;
+            }
+            entity.lastPathRecalc = this.tick;
+            const newPath = findPath(
+              this.map, currentCell,
+              worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+              entity.isNavalUnit, entity.stats.speedClass
+            );
+            entity.pathDelay = PATH_DELAY_TICKS;
+            if (newPath.length > 0) {
+              entity.path = newPath;
+              entity.pathIndex = 0;
+              entity.pathThreshold = MOVE_CLOAK;
+              entity.tryCount = PATH_RETRY;
+            } else {
+              // C++ foot.cpp:409-410 — escalate threshold on failure
+              entity.pathThreshold++;
+              if (entity.pathThreshold > MOVE_TEMP) {
+                if (entity.tryCount > 0) {
+                  entity.tryCount--;
+                  entity.pathThreshold = MOVE_CLOAK;
+                } else if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
+                  finishMove();
+                  resetPathThreshold(entity);
+                } else {
+                  // All retries exhausted — give up (C++ drive.cpp:992)
+                  entity.moveTarget = null;
+                  entity.path = [];
+                  entity.pathIndex = 0;
+                  entity.mission = this.idleMission(entity);
+                  entity.animState = AnimState.IDLE;
+                  resetPathThreshold(entity);
+                }
               }
             }
             return;
