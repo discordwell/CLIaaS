@@ -180,8 +180,8 @@ describe('RP4: Service depot repair rate (~14 tick interval)', () => {
     expect(firingTicks).toEqual([0, 14, 28, 42, 56, 70, 84, 98]);
   });
 
-  it('repair amount is REPAIR_STEP (7) per tick (C++ rules.ini RepairStep=7)', () => {
-    expect(REPAIR_STEP).toBe(7);
+  it('repair amount is REPAIR_STEP (5) per tick (C++ rules.ini RepairStep=5)', () => {
+    expect(REPAIR_STEP).toBe(5);
   });
 
   it('~14 tick interval matches building self-repair rate', () => {
@@ -203,14 +203,14 @@ describe('RP4: Service depot repair rate (~14 tick interval)', () => {
   });
 
   it('time to repair 100 HP at 14-tick interval', () => {
-    // 100 HP / 7 HP per step ≈ 14.29 steps
-    // 14.29 steps * 14 ticks/step ≈ 200 ticks
-    // 200 ticks / 15 FPS ≈ 13.33 seconds
+    // 100 HP / 5 HP per step = 20 steps
+    // 20 steps * 14 ticks/step = 280 ticks
+    // 280 ticks / 15 FPS ≈ 18.67 seconds
     const hp = 100;
     const steps = hp / REPAIR_STEP;
     const totalTicks = steps * 14;
     const seconds = totalTicks / 15;
-    expect(seconds).toBeCloseTo(13.33, 1);
+    expect(seconds).toBeCloseTo(18.67, 1);
   });
 });
 
@@ -247,10 +247,10 @@ describe('RP5: Repair cancel on insufficient funds', () => {
     const credits = 500;
     const repairCost = 3;
     expect(credits >= repairCost).toBe(true);
-    // HP increases by REPAIR_STEP
+    // HP increases by REPAIR_STEP (5)
     const hp = 100;
     const newHp = Math.min(400, hp + REPAIR_STEP);
-    expect(newHp).toBe(107);
+    expect(newHp).toBe(105);
   });
 });
 

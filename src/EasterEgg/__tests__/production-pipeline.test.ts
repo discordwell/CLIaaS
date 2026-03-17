@@ -1269,7 +1269,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     expect(entry!.progress).toBeCloseTo(0.75);
   });
 
-  it('tickProduction applies power penalty clamped at 0.5 (never slower than 2x)', () => {
+  it('tickProduction applies power penalty clamped at 1/16 (C++ fixed(1,16) floor)', () => {
     const e1 = findItem('E1');
     const ctx = makeMockProductionContext({
       powerProduced: 25,
@@ -1279,7 +1279,8 @@ describe('Behavioral verification — production.ts exported functions', () => {
     tickProduction(ctx);
     const entry = ctx.productionQueue.get('right');
     expect(entry).toBeDefined();
-    expect(entry!.progress).toBeCloseTo(0.5);
+    // powerFraction = 25/100 = 0.25, clamped to max(1/16, 0.25) = 0.25
+    expect(entry!.progress).toBeCloseTo(0.25);
   });
 
   it('tickProduction deducts costPerTick incrementally (PR3)', () => {
@@ -1294,7 +1295,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     expect(entry.costPaid).toBeCloseTo(expectedPerTick, 5);
   });
 
-  it('tickProduction uses countPlayerBuildings for multi-factory speedup', () => {
+  it('tickProduction does not apply multi-factory speedup (C++ parity: each factory is independent)', () => {
     const e1 = findItem('E1'); // prerequisite=TENT
     const ctx = makeMockProductionContext({
       structures: [
@@ -1308,8 +1309,9 @@ describe('Behavioral verification — production.ts exported functions', () => {
     startProduction(ctx, e1);
     tickProduction(ctx);
     const entry = ctx.productionQueue.get('right')!;
-    // 2 barracks * 1.0 power mult = 2x speed
-    expect(entry.progress).toBe(2);
+    // C++ parity: multiple factories do NOT speed up a single item.
+    // Each factory is an independent FactoryClass; progress advances by 1 per tick.
+    expect(entry.progress).toBe(1);
   });
 
   it('tickProduction cancels production when prerequisite building is destroyed', () => {
