@@ -459,6 +459,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             inf.selected = false;
             // Clear cell occupancy (mirrors engine auto-load at index.ts:2528)
             game.map.setOccupancy(inf.cell.cx, inf.cell.cy, 0);
+            if (inf.stats.isInfantry) game.map.vacateSubCell(inf.cell.cx, inf.cell.cy, inf.id);
             // Remove from world (will be re-added on unload)
             game.entities = game.entities.filter((e: Entity) => e.id !== inf.id);
             game.entityById.delete(inf.id);

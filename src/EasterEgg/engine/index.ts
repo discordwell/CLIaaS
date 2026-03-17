@@ -269,7 +269,7 @@ export class Game {
   private lastEvaTime = new Map<string, number>();
   /** Counter for wave group coordination */
   private nextWaveId = 1;
-  private cellInfCount = new Map<number, number>(); // reused each tick for sub-cell assignment
+  // cellInfCount removed: sub-cell assignment now handled by GameMap.subCellOccupancy
   /** Index for cycling through idle units with period key */
   private lastIdleCycleIdx = 0;
   /** Double-tap detection for control group camera centering */
@@ -2637,6 +2637,7 @@ export class Game {
             this.entities = this.entities.filter(e => e.id !== unit.id);
             this.entityById.delete(unit.id);
             this.map.setOccupancy(unit.cell.cx, unit.cell.cy, 0);
+            if (unit.stats.isInfantry) this.map.vacateSubCell(unit.cell.cx, unit.cell.cy, unit.id);
             loaded++;
           } else {
             // Move toward transport (they'll be loaded by proximity check)
@@ -3269,6 +3270,7 @@ export class Game {
             // Mark for removal from world (will be re-added on unload)
             entity.mission = Mission.SLEEP;
             this.map.setOccupancy(entity.cell.cx, entity.cell.cy, 0);
+            if (entity.stats.isInfantry) this.map.vacateSubCell(entity.cell.cx, entity.cell.cy, entity.id);
             // Defer removal to avoid mutating array during iteration
             this._pendingTransportLoads.push(entity.id);
             // C++ parity: transport auto-evacuates when a civilian/VIP is loaded
@@ -3370,6 +3372,7 @@ export class Game {
               other.alive = false;
               other.mission = Mission.SLEEP;
               this.map.setOccupancy(other.cell.cx, other.cell.cy, 0);
+              if (other.stats.isInfantry) this.map.vacateSubCell(other.cell.cx, other.cell.cy, other.id);
               this._pendingTransportLoads.push(other.id);
               // Auto-evacuate when civilian boards (same as player-initiated loading)
               if (entity.stats.isAircraft) {
@@ -3987,7 +3990,7 @@ export class Game {
           entity.moveTarget = null;
           entity.path = [];
           entity.pathIndex = 0;
-          entity.trackNumber = -1; // MV1: reset track on repath
+          entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
           entity.trackCellSpan = 1;
           entity.mission = this.idleMission(entity);
           entity.animState = AnimState.IDLE;
@@ -3995,7 +3998,7 @@ export class Game {
         }
         entity.path = newPath;
         entity.pathIndex = 0;
-        entity.trackNumber = -1; // MV1: reset track on repath
+        entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
         entity.trackCellSpan = 1;
         return;
       }
@@ -4034,7 +4037,7 @@ export class Game {
           }
           entity.path = newPath;
           entity.pathIndex = 0;
-          entity.trackNumber = -1; // MV1: reset track on repath
+          entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
           entity.trackCellSpan = 1;
         }
       }
@@ -4186,7 +4189,9 @@ export class Game {
             : this.map.isPassable(nextCellPos.cx, nextCellPos.cy);
           // Also check occupancy on the new cell
           const occId = this.map.getOccupancy(nextCellPos.cx, nextCellPos.cy);
-          const occBlocked = !entity.isNavalUnit && occId > 0 && occId !== entity.id;
+          // C++ infantry sub-cell: infantry can enter cells with available sub-cells
+          const infCanEnter = entity.stats.isInfantry && this.map.hasAvailableSubCell(nextCellPos.cx, nextCellPos.cy);
+          const occBlocked = !entity.isNavalUnit && occId > 0 && occId !== entity.id && !infCanEnter;
           if (!passable || occBlocked) {
             // Re-pathfind instead of sliding through impassable terrain.
             if (this.tick - entity.lastPathRecalc > 15) {
@@ -4490,7 +4495,7 @@ export class Game {
   private followTrackStep(entity: Entity, speedPixels: number, targetX: number, targetY: number): boolean {
     let track = getTrackArray(entity.trackNumber);
     if (!track) {
-      entity.trackNumber = -1;
+      entity.trackNumber = -1; entity.trackControlIndex = -1;
       entity.trackCellSpan = 1;
       return true;
     }
@@ -4539,7 +4544,7 @@ export class Game {
       if (entity.trackIndex >= track!.length) {
         entity.pos.x = targetX;
         entity.pos.y = targetY;
-        entity.trackNumber = -1;
+        entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
         return true;
@@ -4551,7 +4556,7 @@ export class Game {
       if (step.x === 0 && step.y === 0 && entity.trackIndex > 0) {
         entity.pos.x = targetX;
         entity.pos.y = targetY;
-        entity.trackNumber = -1;
+        entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
         return true;

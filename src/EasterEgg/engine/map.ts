@@ -37,8 +37,18 @@ export class GameMap {
   boundsW: number;
   boundsH: number;
 
-  /** Occupancy: entity ID at each cell (0 = empty) */
+  /** Occupancy: entity ID at each cell (0 = empty).
+   *  For cells with multiple infantry, stores the first infantry's ID (legacy compat).
+   *  Use subCellOccupancy for full infantry sub-cell tracking. */
   occupancy: Int32Array;
+
+  /** Sub-cell occupancy: maps cell index → array of 5 entity IDs (0=empty) per sub-cell.
+   *  Sub-cells: 0=CENTER, 1=NW, 2=NE, 3=SW, 4=SE (C++ cell.h Flag.Occupy) */
+  subCellOccupancy = new Map<number, [number, number, number, number, number]>();
+
+  /** Vehicle/building flag per cell: if true, cell is fully blocked (all sub-cells occupied).
+   *  C++ cell.h Flag.Occupy.Vehicle | Flag.Occupy.Monolith | Flag.Occupy.Building */
+  vehicleOccupancy = new Set<number>();
 
   /** Fog of war: 0=shroud, 1=fog (explored), 2=visible */
   visibility: Uint8Array;
@@ -248,6 +258,113 @@ export class GameMap {
   getOccupancy(cx: number, cy: number): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return -1;
     return this.occupancy[cy * MAP_CELLS + cx];
+  }
+
+  /** Clear all sub-cell occupancy data (called at start of each tick rebuild) */
+  clearSubCellOccupancy(): void {
+    this.subCellOccupancy.clear();
+    this.vehicleOccupancy.clear();
+  }
+
+  /** Mark a vehicle/building as occupying a cell (blocks all sub-cells).
+   *  C++ cell.h: Flag.Occupy.Vehicle = true */
+  setVehicleOccupancy(cx: number, cy: number, entityId: number): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      const idx = cy * MAP_CELLS + cx;
+      this.vehicleOccupancy.add(idx);
+      this.occupancy[idx] = entityId;
+    }
+  }
+
+  /** Occupy a sub-cell for an infantry unit. Returns the assigned sub-cell index (0-4),
+   *  or -1 if all sub-cells are full or a vehicle is present.
+   *  C++ cell.cpp Closest_Free_Spot: prefers CENTER (0), then corners in order. */
+  occupySubCell(cx: number, cy: number, entityId: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return -1;
+    const idx = cy * MAP_CELLS + cx;
+    // Vehicle/building blocks all sub-cells
+    if (this.vehicleOccupancy.has(idx)) return -1;
+    let slots = this.subCellOccupancy.get(idx);
+    if (!slots) {
+      slots = [0, 0, 0, 0, 0];
+      this.subCellOccupancy.set(idx, slots);
+    }
+    // C++ Closest_Free_Spot preference order: CENTER (0) first, then NW(1), NE(2), SW(3), SE(4)
+    const order = [0, 1, 2, 3, 4];
+    for (const s of order) {
+      if (slots[s] === 0) {
+        slots[s] = entityId;
+        // Set legacy occupancy to first infantry's ID for backward compat
+        if (this.occupancy[idx] === 0) {
+          this.occupancy[idx] = entityId;
+        }
+        return s;
+      }
+    }
+    return -1; // all 5 sub-cells occupied
+  }
+
+  /** Vacate a sub-cell when an infantry unit leaves a cell.
+   *  Called when infantry dies, is loaded into transport, etc. */
+  vacateSubCell(cx: number, cy: number, entityId: number): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    const slots = this.subCellOccupancy.get(idx);
+    if (slots) {
+      for (let i = 0; i < 5; i++) {
+        if (slots[i] === entityId) {
+          slots[i] = 0;
+          break;
+        }
+      }
+    }
+  }
+
+  /** Get the number of occupied sub-cells in a cell */
+  getSubCellCount(cx: number, cy: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 5;
+    const idx = cy * MAP_CELLS + cx;
+    if (this.vehicleOccupancy.has(idx)) return 5;
+    const slots = this.subCellOccupancy.get(idx);
+    if (!slots) return 0;
+    let count = 0;
+    for (let i = 0; i < 5; i++) {
+      if (slots[i] !== 0) count++;
+    }
+    return count;
+  }
+
+  /** Check if a cell has any available sub-cells for infantry */
+  hasAvailableSubCell(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    const idx = cy * MAP_CELLS + cx;
+    if (this.vehicleOccupancy.has(idx)) return false;
+    const slots = this.subCellOccupancy.get(idx);
+    if (!slots) return true; // no occupants = all 5 free
+    for (let i = 0; i < 5; i++) {
+      if (slots[i] === 0) return true;
+    }
+    return false;
+  }
+
+  /** Check if a cell has a vehicle occupying it (blocks all sub-cells) */
+  hasVehicleOccupancy(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    return this.vehicleOccupancy.has(cy * MAP_CELLS + cx);
+  }
+
+  /** Check if cell is only occupied by infantry (no vehicles/buildings).
+   *  Used by infantry movement to determine if cell can accept more infantry. */
+  isOnlyInfantryOccupied(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    const idx = cy * MAP_CELLS + cx;
+    if (this.vehicleOccupancy.has(idx)) return false;
+    const slots = this.subCellOccupancy.get(idx);
+    if (!slots) return false;
+    for (let i = 0; i < 5; i++) {
+      if (slots[i] !== 0) return true;
+    }
+    return false;
   }
 
   /** Get visibility at cell: 0=shroud, 1=fog, 2=visible */
@@ -574,14 +691,26 @@ export class GameMap {
   }
 
   /** PF3: C++ Can_Enter_Cell — returns nuanced MoveResult for pathfinding.
-   *  @param isMoving Optional callback: given occupant entity ID, returns true if that entity is currently moving */
-  canEnterCell(cx: number, cy: number, naval = false, isMoving?: (entityId: number) => boolean): MoveResult {
+   *  @param isMoving Optional callback: given occupant entity ID, returns true if that entity is currently moving
+   *  @param isInfantry If true, cell is passable if sub-cells are available (C++ infantry sub-cell system) */
+  canEnterCell(cx: number, cy: number, naval = false, isMoving?: (entityId: number) => boolean, isInfantry = false): MoveResult {
     if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
         cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
       return MoveResult.IMPASSABLE;
     }
     const passable = naval ? this.getTerrain(cx, cy) === Terrain.WATER : PASSABLE.has(this.getTerrain(cx, cy));
     if (!passable) return MoveResult.IMPASSABLE;
+
+    // Infantry sub-cell check: infantry can enter if sub-cells are available
+    if (isInfantry) {
+      const idx = cy * MAP_CELLS + cx;
+      // Vehicle/building blocks all sub-cells
+      if (this.vehicleOccupancy.has(idx)) return MoveResult.OCCUPIED;
+      // Check if any sub-cell is free
+      if (this.hasAvailableSubCell(cx, cy)) return MoveResult.OK;
+      return MoveResult.OCCUPIED; // all 5 sub-cells full
+    }
+
     const occupant = this.getOccupancy(cx, cy);
     if (occupant > 0) {
       if (isMoving && isMoving(occupant)) return MoveResult.TEMP_BLOCKED;

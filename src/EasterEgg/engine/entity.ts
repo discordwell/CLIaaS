@@ -108,6 +108,13 @@ export class Entity {
   lastAIScan = 0;      // tick when ant AI last scanned
   lastPathRecalc = 0;  // tick when path was last recalculated (for blocked paths)
 
+  // C++ PathThreshhold escalation system (foot.cpp:396-411, foot.h:232-240)
+  // When pathfinding fails, threshold escalates: CLOAK(1) → MOVING_BLOCK(2) → DESTROYABLE(3) → TEMP(4)
+  // allowing movement through increasingly difficult obstacles.
+  pathThreshold = 1;   // starts at MOVE_CLOAK (C++ foot.cpp:125 — constructor init)
+  pathDelay = 0;       // ticks until next path recalc allowed (C++ foot.cpp:463 — Rule.PathDelay * TICKS_PER_MINUTE)
+  tryCount = 10;       // retries remaining before giving up (C++ foot.h:239 — PATH_RETRY=10)
+
   // Rotation accumulators (C++ ROT system: accumulate rot per tick, advance facing when >= threshold)
   rotAccumulator = 0;
   turretRotAccumulator = 0;
@@ -176,6 +183,7 @@ export class Entity {
   trackIndex = 0;      // current step within the track
   trackFlags = 0;      // TrackControl flags (F_T|F_X|F_Y) for Smooth_Turn transformation
   trackCellSpan = 1;   // cells covered by current track: 1=short, 2=long 2-cell track
+  trackControlIndex = -1; // C++ TrackNumber: index into TrackControl[] table (0-66), for track jumping
   speedAccum = 0;      // C++ SpeedAccum: sub-pixel movement remainder (leptons)
 
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
