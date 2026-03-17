@@ -4669,15 +4669,22 @@ export class Game {
     };
   }
 
-  /** Evaluate whether a trigger's events are met based on eventControl mode */
-  private checkTriggerEvents(trigger: ScenarioTrigger, state: TriggerGameState): boolean {
+  /**
+   * Evaluate whether a trigger's events are met based on eventControl mode.
+   * Returns per-event results so MULTI_LINKED (eventControl=3) can route
+   * Action1/Action2 independently.
+   *
+   * C++ ref: trigger.cpp:249-264 (Spring event switch)
+   */
+  private checkTriggerEvents(trigger: ScenarioTrigger, state: TriggerGameState): { shouldFire: boolean; e1: boolean; e2: boolean } {
     const e1 = checkTriggerEvent(trigger.event1, state);
     const e2 = checkTriggerEvent(trigger.event2, state);
     switch (trigger.eventControl) {
-      case 0: return e1;            // only event1
-      case 1: return e1 && e2;      // AND
-      case 2: return e1 || e2;      // OR
-      default: return e1;
+      case 0: return { shouldFire: e1, e1, e2 };                   // MULTI_ONLY
+      case 1: return { shouldFire: e1 && e2, e1, e2 };             // MULTI_AND
+      case 2: return { shouldFire: e1 || e2, e1, e2 };             // MULTI_OR
+      case 3: return { shouldFire: e1 || e2, e1, e2 };             // MULTI_LINKED (same gate as OR, action routing differs)
+      default: return { shouldFire: e1, e1, e2 };
     }
   }
 
@@ -4778,14 +4785,20 @@ export class Game {
       // Force-fired triggers bypass event conditions
       let shouldFire = false;
       let forcedFire = false;
+      let linkedE1 = false;  // per-event results for MULTI_LINKED action routing
+      let linkedE2 = false;
       if (trigger.forceFirePending) {
         shouldFire = true;
         forcedFire = true;
+        linkedE1 = true;     // C++ trigger.cpp:308 — forced fires Action1 (e1 || forced)
         trigger.forceFirePending = false;
       } else {
         // Check event conditions
         const state = this.buildTriggerState(trigger, shared);
-        shouldFire = this.checkTriggerEvents(trigger, state);
+        const result = this.checkTriggerEvents(trigger, state);
+        shouldFire = result.shouldFire;
+        linkedE1 = result.e1;
+        linkedE2 = result.e2;
       }
 
       if (!shouldFire) continue;
@@ -5070,9 +5083,17 @@ export class Game {
         }
       };
 
-      executeAction(trigger.action1);
-      if (trigger.actionControl === 1) {
-        executeAction(trigger.action2);
+      // C++ trigger.cpp:307-323 — MULTI_LINKED routes actions per-event;
+      // all other modes use actionControl to decide which actions fire.
+      if (trigger.eventControl === 3) {
+        // MULTI_LINKED: Action1 fires if e1 true OR forced, Action2 fires if e2 true AND NOT forced
+        if (linkedE1 || forcedFire) executeAction(trigger.action1);
+        if (linkedE2 && !forcedFire) executeAction(trigger.action2);
+      } else {
+        executeAction(trigger.action1);
+        if (trigger.actionControl === 1) {
+          executeAction(trigger.action2);
+        }
       }
 
       // C++ Spring() parity: if multiple entities with this triggerName died
@@ -5080,15 +5101,21 @@ export class Game {
       let extraFires = 8; // guard against infinite loops
       while (trigger.persistence === 2 && trigger.pendingDestroyedCount > 0 && extraFires-- > 0) {
         const reState = this.buildTriggerState(trigger, shared);
-        if (!this.checkTriggerEvents(trigger, reState)) break;
+        const reResult = this.checkTriggerEvents(trigger, reState);
+        if (!reResult.shouldFire) break;
         if (this.debugTriggers) {
           console.log(`[TRIGGER] ${trigger.name} re-fired (pending=${trigger.pendingDestroyedCount})`);
         }
         trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
         trigger.timerTick = this.tick;
-        executeAction(trigger.action1);
-        if (trigger.actionControl === 1) {
-          executeAction(trigger.action2);
+        if (trigger.eventControl === 3) {
+          if (reResult.e1) executeAction(trigger.action1);
+          if (reResult.e2) executeAction(trigger.action2);
+        } else {
+          executeAction(trigger.action1);
+          if (trigger.actionControl === 1) {
+            executeAction(trigger.action2);
+          }
         }
       }
     }

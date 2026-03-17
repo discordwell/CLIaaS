@@ -171,7 +171,7 @@ export interface ScenarioTrigger {
   name: string;
   persistence: number;   // 0=volatile, 1=semi, 2=persistent
   house: number;         // RA house index that owns this trigger
-  eventControl: number;  // 0=only, 1=and, 2=or
+  eventControl: number;  // 0=only, 1=and, 2=or, 3=linked
   actionControl: number; // 0=only, 1=and
   event1: TriggerEvent;
   event2: TriggerEvent;
@@ -2046,7 +2046,7 @@ export interface TriggerActionResult {
   win?: boolean;
   lose?: boolean;
   allowWin?: boolean;
-  allHunt?: boolean;
+  allHunt?: number;             // C++ parity: house index from action Data.House (not boolean)
   revealAll?: boolean;
   revealWaypoint?: number;  // reveal area around a specific waypoint (REVEAL_SOME)
   dropZone?: number;        // drop zone flare at waypoint (DZ)
@@ -2054,7 +2054,7 @@ export interface TriggerActionResult {
   textMessage?: number;  // text trigger ID to display
   setTimer?: number;     // mission timer value to set (in 1/10th minute units)
   timerExtend?: number;  // extend mission timer by this many 1/10th minute units
-  autocreate?: boolean;  // enable autocreation of teams (AI base production)
+  autocreate?: number;   // C++ parity: house index from action Data.House (AUTOCREATE)
   destroyTriggeringUnit?: boolean; // kill the unit that triggered this
   playSound?: number;    // play a sound effect (PLAY_SOUND)
   playSpeech?: number;   // play EVA speech (PLAY_SPEECH)
@@ -2062,7 +2062,7 @@ export interface TriggerActionResult {
   nuke?: boolean;        // launch a nuclear missile (LAUNCH_NUKES)
   centerView?: number;   // center camera on waypoint (legacy)
   // TR4: new action results
-  fireSale?: boolean;             // sell all buildings (FIRE_SALE)
+  fireSale?: number;              // C++ parity: house index from action Data.House (FIRE_SALE)
   playMovie?: number;             // play a movie/cutscene (PLAY_MOVIE)
   revealZone?: number;            // reveal all of specified zone (REVEAL_ZONE)
   playMusic?: number;             // play music track (PLAY_MUSIC)
@@ -2248,7 +2248,9 @@ export function executeTriggerAction(
       break;
 
     case TACTION_ALL_HUNT:
-      result.allHunt = true;
+      // C++ parity: HouseClass::As_Pointer(Data.House)->Do_All_To_Hunt()
+      // Targets a SPECIFIC house from action data, not all enemies
+      result.allHunt = action.data;
       break;
 
     case TACTION_TEXT_TRIGGER:
@@ -2283,15 +2285,15 @@ export function executeTriggerAction(
       break;
 
     case TACTION_BEGIN_PRODUCTION:
-      // AI production start — tells the trigger's house to begin building
-      if (triggerHouse !== undefined && triggerHouse >= 0) {
-        result.beginProduction = triggerHouse;
-      }
+      // C++ parity: HouseClass::As_Pointer(Data.House)->Begin_Production()
+      // Uses action's Data.House, NOT the trigger's owner house
+      result.beginProduction = action.data;
       break;
 
     case TACTION_AUTOCREATE:
-      // Enable autocreation of teams from AI base (queen spawning in ant missions)
-      result.autocreate = true;
+      // C++ parity: HouseClass::As_Pointer(Data.House)->IsAlerted = true
+      // Uses action's Data.House, NOT the trigger's owner house
+      result.autocreate = action.data;
       break;
 
     case TACTION_TIMER_EXTEND:
@@ -2311,8 +2313,9 @@ export function executeTriggerAction(
 
     // TR4: New trigger actions (stub implementations)
     case TACTION_FIRE_SALE:
-      // Sell all buildings and go on rampage
-      result.fireSale = true;
+      // C++ parity: HouseClass::As_Pointer(Data.House)->State = STATE_ENDGAME
+      // Uses action's Data.House, NOT the trigger's owner house
+      result.fireSale = action.data;
       break;
 
     case TACTION_PLAY_MOVIE:
