@@ -6,7 +6,7 @@
 import {
   type WorldPos, type WeaponStats, type ArmorType, type WarheadType,
   type WarheadMeta, type WarheadProps,
-  CELL_SIZE, MAP_CELLS, CONDITION_YELLOW,
+  CELL_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META,
   armorIndex, worldDist, worldToCell, modifyDamage,
   directionTo, calcProjectileTravelFrames,
@@ -43,6 +43,10 @@ export interface InflightProjectile {
   impactX: number;       // final impact position (may be scattered)
   impactY: number;
   attackerIsPlayer: boolean;
+  // Ballistic arc fields (C++ bullet.cpp:783-789, object.cpp:237-254)
+  isArcing: boolean;     // true if weapon has ballistic arc trajectory
+  arcHeight: number;     // current vertical position (leptons); starts at 1 for arcing
+  arcRiser: number;      // vertical velocity; decremented by RULE_GRAVITY each tick
 }
 
 /** Minimal AI state slice needed by damageStructure */
@@ -354,6 +358,19 @@ export function launchProjectile(
   const speed = weapon.projectileSpeed!;
   const travelFrames = Math.max(1, Math.round(dist / speed));
 
+  // C++ bullet.cpp:783-789 — ballistic arc initialization for isArcing weapons
+  // Riser = ((Distance/2) / (speed+1)) * Rule.Gravity, min 10
+  // This gives enough upward velocity to keep the projectile airborne for ~travelFrames ticks.
+  const isArcing = !!weapon.isArcing;
+  let arcHeight = 0;
+  let arcRiser = 0;
+  if (isArcing) {
+    arcHeight = 1; // C++ bullet.cpp:786 — Height = 1
+    // C++ formula: Riser = ((Distance(tcoord)/2) / (speed+1)) * Rule.Gravity
+    // In our units, travelFrames ≈ Distance/speed, so Riser ≈ (travelFrames/2) * Gravity
+    arcRiser = Math.max(10, Math.floor(travelFrames / 2) * RULE_GRAVITY);
+  }
+
   ctx.inflightProjectiles.push({
     attackerId: attacker.id,
     targetId: target?.id ?? -1,
@@ -366,6 +383,9 @@ export function launchProjectile(
     impactX,
     impactY,
     attackerIsPlayer: ctx.isPlayerControlled(attacker),
+    isArcing,
+    arcHeight,
+    arcRiser,
   });
 }
 
@@ -375,6 +395,16 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
 
   for (const proj of ctx.inflightProjectiles) {
     proj.currentFrame++;
+
+    // C++ object.cpp:237-254 — ballistic arc gravity simulation
+    // Each tick: Height += Riser; Riser -= Rule.Gravity
+    // When Height <= 0, the bullet has landed → explode (bullet.cpp:359: forced = IsArcing && !IsFalling)
+    if (proj.isArcing) {
+      proj.arcHeight += proj.arcRiser;
+      proj.arcRiser -= RULE_GRAVITY;
+      // C++ object.cpp:254 — clamp riser to prevent runaway negative velocity
+      proj.arcRiser = Math.max(proj.arcRiser, -100);
+    }
 
     // C9/C10: Homing projectile tracking (C++ bullet.cpp:368,517)
     // projectileROT = homing turn rate. C10: homing updates every other frame.
@@ -393,13 +423,21 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
     }
 
-    if (proj.currentFrame >= proj.travelFrames) {
+    // Landing check: arcing projectiles land when height <= 0 (C++ object.cpp:241);
+    // non-arcing projectiles land when travel frames are exhausted.
+    const hasLanded = proj.isArcing
+      ? (proj.arcHeight <= 0 && proj.currentFrame > 1)  // skip frame 1 since Height starts at 1
+      : (proj.currentFrame >= proj.travelFrames);
+    if (hasLanded) {
       arrived.push(proj);
     }
   }
 
   // Remove arrived projectiles
-  ctx.inflightProjectiles = ctx.inflightProjectiles.filter(p => p.currentFrame < p.travelFrames);
+  ctx.inflightProjectiles = ctx.inflightProjectiles.filter(p => {
+    if (p.isArcing) return p.arcHeight > 0 || p.currentFrame <= 1;
+    return p.currentFrame < p.travelFrames;
+  });
 
   // Apply damage for arrived projectiles
   for (const proj of arrived) {

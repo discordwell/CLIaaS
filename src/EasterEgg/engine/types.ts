@@ -27,6 +27,7 @@ export const REPAIR_PERCENT = 0.20;      // rules.ini RepairPercent=20% — cost
 export const CONDITION_RED = 0.25;       // rules.cpp:235 — red health threshold
 export const CONDITION_YELLOW = 0.5;     // rules.cpp:234 — yellow health threshold
 export const PRONE_DAMAGE_BIAS = 0.5;    // rules.cpp:202 — prone infantry damage multiplier
+export const RULE_GRAVITY = 3;            // rules.cpp — Rule.Gravity default (object.cpp:252: Riser -= Rule.Gravity)
 
 // Power drain per structure type — C++ rules.ini Power= values (negative = consumes)
 // Values sourced from each building's INI entry; 0 means no drain.
