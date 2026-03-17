@@ -936,12 +936,12 @@ describe('powerMultiplier — from repairSell.ts', () => {
     expect(powerMultiplier(75, 100)).toBe(0.75);
   });
 
-  it('clamps minimum to 0.5', () => {
-    expect(powerMultiplier(25, 100)).toBe(0.5);
+  it('clamps minimum to 0.0625 (1/16 per C++ factory.cpp:434)', () => {
+    expect(powerMultiplier(5, 100)).toBe(0.0625);
   });
 
-  it('returns 0.5 for extreme low power (10%)', () => {
-    expect(powerMultiplier(10, 100)).toBe(0.5);
+  it('returns 0.1 for extreme low power (10%)', () => {
+    expect(powerMultiplier(10, 100)).toBe(0.1);
   });
 
   it('returns 1.0 when produced is 0 and consumed is 0', () => {
