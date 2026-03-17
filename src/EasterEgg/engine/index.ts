@@ -85,6 +85,7 @@ import {
 import {
   type RepairSellContext,
   repairCostPerStep as _repairCostPerStep,
+  sellRefund,
   toggleRepair as _toggleRepair,
   isStructureRepairing as _isStructureRepairing,
   sellStructureByIndex as _sellStructureByIndex,
@@ -1582,7 +1583,7 @@ export class Game {
 
     // Check for units leaving the map edge (civilian evacuation)
     for (const entity of this.entities) {
-      if (!entity.alive) continue;
+      if (!entity.alive || entity.inLimbo) continue;
       const c = entity.cell;
       if (c.cx <= this.map.boundsX || c.cx >= this.map.boundsX + this.map.boundsW - 1 ||
           c.cy <= this.map.boundsY || c.cy >= this.map.boundsY + this.map.boundsH - 1) {
@@ -1902,10 +1903,11 @@ export class Game {
             mcvSpawned = true;
           }
 
-          // Refund: flat 50% of building cost (C++ parity — no health scaling)
+          // Refund: C++ techno.cpp:5743-5761 — AI gets 100%, human gets 50%
           // C++ building.cpp:3509-3549: no refund when ConYard reverts to MCV
           if (!mcvSpawned && prodItem) {
-            this.addCredits(Math.floor(prodItem.cost * 0.5), true);
+            const isHuman = this.isAllied(s.house, this.playerHouse);
+            this.addCredits(sellRefund(prodItem.cost, isHuman), true);
           }
 
           // SL4: Spawn infantry survivors (C++ building.cpp How_Many_Survivors + Crew_Type)
@@ -2457,7 +2459,7 @@ export class Game {
             this.clearStructureFootprint(s);
             const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
             if (prodItem) {
-              this.addCredits(Math.floor(prodItem.cost * 0.5), true);
+              this.addCredits(sellRefund(prodItem.cost, true), true); // sell mode = human
             }
             this.audio.play('sell');
           } else {
