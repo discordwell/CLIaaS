@@ -180,6 +180,10 @@ export interface ScenarioTrigger {
   fired: boolean;         // has this trigger fired?
   timerTick: number;      // game tick when timer started (for TIME events)
   playerEntered: boolean; // has a player unit entered a cell with this trigger?
+  objectDiscovered: boolean; // C++ parity: attached object was discovered by enemy (TEVENT_DISCOVERED)
+  enteredZone: boolean; // C++ parity: a matching-house unit entered the trigger's zone (TEVENT_ENTERS_ZONE)
+  crossedHorizontal: boolean; // C++ parity: a matching-house unit crossed the trigger cell's Y row (TEVENT_CROSS_HORIZONTAL)
+  crossedVertical: boolean; // C++ parity: a matching-house unit crossed the trigger cell's X column (TEVENT_CROSS_VERTICAL)
   forceFirePending: boolean; // set by FORCE_TRIGGER — fires on next check regardless of events
   pendingDestroyedCount: number; // C++ Spring() parity: count of unprocessed deaths (fires once per death)
   triggeringEntityIds: number[]; // C++ parity: entity IDs that triggered this (for DESTROY_OBJECT with cell triggers)
@@ -792,6 +796,10 @@ export function parseScenarioINI(text: string): ScenarioData {
         fired: false,
         timerTick: 0,
         playerEntered: false,
+        objectDiscovered: false,
+        enteredZone: false,
+        crossedHorizontal: false,
+        crossedVertical: false,
         forceFirePending: false,
         pendingDestroyedCount: 0,
         triggeringEntityIds: [],
@@ -1099,9 +1107,11 @@ export interface MapStructure {
   buildProgress?: number;    // 0-1 construction animation progress (undefined = built)
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
   sellHpAtStart?: number;    // HP when sell was initiated (for health-scaled refund)
+  deployedFromMCV?: boolean; // C++ ArchiveTarget parity: ConYard was created by MCV deploy
   turretDir?: number;        // 0-7 facing for turreted structures (GUN/SAM)
   desiredTurretDir?: number; // target turret facing (rotates toward this)
   firingFlash?: number;      // ticks remaining for muzzle flash frame
+  ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
 }
 
 /** Weapon stats for defensive structures */
@@ -1865,6 +1875,12 @@ export interface TriggerGameState {
   triggerStartTick: number;
   triggerName: string;
   playerEntered: boolean;
+  // C++ parity (#21): differentiated trigger event state
+  objectDiscovered: boolean;  // per-trigger: attached object was discovered by enemy (TEVENT_DISCOVERED)
+  houseDiscovered: Map<number, boolean>; // per-house: any unit of this house has been seen by player (TEVENT_HOUSE_DISCOVERED)
+  enteredZone: boolean;       // per-trigger: matching-house unit entered trigger's zone (TEVENT_ENTERS_ZONE)
+  crossedHorizontal: boolean; // per-trigger: matching-house unit crossed trigger cell's Y row (TEVENT_CROSS_HORIZONTAL)
+  crossedVertical: boolean;   // per-trigger: matching-house unit crossed trigger cell's X column (TEVENT_CROSS_VERTICAL)
   // Aggregate counts for event checks
   enemyUnitsAlive: number;    // non-player living units
   enemyKillCount: number;     // total enemy units killed
@@ -1953,9 +1969,15 @@ export function checkTriggerEvent(
     case TEVENT_ALL_BRIDGES_DESTROYED:
       return state.bridgesAlive === 0;
     case TEVENT_DISCOVERED:
+      // C++ parity (#21): fires when an object with this trigger attached is first seen by the opposing side.
+      // In C++, Spring(TEVENT_DISCOVERED, this) is called from TechnoClass::Revealed() and Record_The_Kill().
+      // C++ tevent.cpp:270-283 — requires event == TEVENT_DISCOVERED to pass the gate check.
+      return state.objectDiscovered;
     case TEVENT_ENTERS_ZONE:
-      // Area discovered / zone entered — use playerEntered flag (set via cell triggers)
-      return state.playerEntered;
+      // C++ parity (#21): fires when a unit whose owner matches Data.House enters the same movement zone
+      // as the trigger's attached cell. C++ tevent.cpp:290-293 checks object->Owner() == Data.House.
+      // C++ foot.cpp:1447-1455 checks zone membership via Map[trigger->Cell].Zones[MZone].
+      return state.enteredZone;
     case TEVENT_ATTACKED:
       // Attached object was attacked (damaged) — per-entity tracking via triggerName
       return state.attackedTriggerNames.has(state.triggerName);
@@ -1978,8 +2000,10 @@ export function checkTriggerEvent(
       // Units have left the map edge (civilian evacuation)
       return state.unitsLeftMap > 0;
     case TEVENT_HOUSE_DISCOVERED:
-      // Same as DISCOVERED — player has entered an area
-      return state.playerEntered;
+      // C++ parity (#21): fires when the specified house's IsDiscovered flag is set.
+      // C++ tevent.cpp:435-436 — hptr = HouseClass::As_Pointer(Data.House), checks hptr->IsDiscovered.
+      // IsDiscovered is set in techno.cpp:792 when any unit of that house is first seen by player.
+      return state.houseDiscovered.get(event.data) ?? false;
     case TEVENT_LOW_POWER:
       // Player is low on power
       return state.isLowPower;
@@ -1987,11 +2011,15 @@ export function checkTriggerEvent(
       // C++ House.IsThieved — set when a Thief infiltrates PROC/SILO
       return state.isThieved;
     case TEVENT_CROSS_HORIZONTAL:
-      // Player crossed a horizontal line — use playerEntered flag
-      return state.playerEntered;
+      // C++ parity (#21): fires when a unit whose owner matches Data.House crosses the Y row of the
+      // trigger's cell. C++ foot.cpp:1419-1428 scans all cells in the row; tevent.cpp:290-293
+      // checks object->Owner() == Data.House.
+      return state.crossedHorizontal;
     case TEVENT_CROSS_VERTICAL:
-      // Player crossed a vertical line — use playerEntered flag
-      return state.playerEntered;
+      // C++ parity (#21): fires when a unit whose owner matches Data.House crosses the X column of
+      // the trigger's cell. C++ foot.cpp:1434-1442 scans all cells in the column; tevent.cpp:290-293
+      // checks object->Owner() == Data.House.
+      return state.crossedVertical;
     case TEVENT_UNITS_DESTROYED:
       // All units of a house destroyed (event.data = RA house index)
       // C++ index 9: "all house's units destroyed" — checks units only, not structures

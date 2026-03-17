@@ -333,57 +333,111 @@ export function activateSuperweapon(
   switch (type) {
     case SuperweaponType.CHRONOSPHERE: {
       // Teleport first selected player unit to target (C++: CTNK excluded — has own teleport)
+      // C++ house.cpp:2779-2780: infantry CAN be selected for chronoshift
       const selected = ctx.entities.filter(e =>
-        e.alive && e.selected && e.house === house && !e.stats.isInfantry
+        e.alive && e.selected && e.house === house
         && e.type !== UnitType.V_CTNK
       );
       const unit = selected[0];
       if (unit) {
-        const origin = { x: unit.pos.x, y: unit.pos.y };
-        unit.pos.x = target.x;
-        unit.pos.y = target.y;
-        unit.prevPos.x = target.x;
-        unit.prevPos.y = target.y;
-        unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
-        // Blue flash effects at origin and destination
-        ctx.effects.push({
-          type: 'explosion', x: origin.x, y: origin.y,
-          frame: 0, maxFrames: 20, size: 24,
-          sprite: 'litning', spriteStart: 0,
-        });
-        ctx.effects.push({
-          type: 'explosion', x: target.x, y: target.y,
-          frame: 0, maxFrames: 20, size: 24,
-          sprite: 'litning', spriteStart: 0,
-        });
-        ctx.playSound('chrono');
-        if (ctx.isAllied(house, ctx.playerHouse)) {
-          ctx.pushEva('Chronosphere activated');
+        // C++ house.cpp:2817-2826: "Destroy any infantryman that gets teleported"
+        // Organic matter cannot survive chronoshift — infantry are killed with full-strength fire damage
+        if (unit.stats.isInfantry) {
+          const origin = { x: unit.pos.x, y: unit.pos.y };
+          // C++ moves infantry to destination cell then kills with Take_Damage(Strength, WARHEAD_FIRE)
+          unit.pos.x = target.x;
+          unit.pos.y = target.y;
+          unit.prevPos.x = target.x;
+          unit.prevPos.y = target.y;
+          const damage = unit.hp;
+          ctx.damageEntity(unit, damage, 'Fire');
+          // Blue flash at origin
+          ctx.effects.push({
+            type: 'explosion', x: origin.x, y: origin.y,
+            frame: 0, maxFrames: 20, size: 24,
+            sprite: 'litning', spriteStart: 0,
+          });
+          ctx.playSound('chrono');
+          if (ctx.isAllied(house, ctx.playerHouse)) {
+            ctx.pushEva('Chronosphere activated');
+          }
+        } else {
+          const origin = { x: unit.pos.x, y: unit.pos.y };
+          unit.pos.x = target.x;
+          unit.pos.y = target.y;
+          unit.prevPos.x = target.x;
+          unit.prevPos.y = target.y;
+          unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
+          // Blue flash effects at origin and destination
+          ctx.effects.push({
+            type: 'explosion', x: origin.x, y: origin.y,
+            frame: 0, maxFrames: 20, size: 24,
+            sprite: 'litning', spriteStart: 0,
+          });
+          ctx.effects.push({
+            type: 'explosion', x: target.x, y: target.y,
+            frame: 0, maxFrames: 20, size: 24,
+            sprite: 'litning', spriteStart: 0,
+          });
+          ctx.playSound('chrono');
+          if (ctx.isAllied(house, ctx.playerHouse)) {
+            ctx.pushEva('Chronosphere activated');
+          }
         }
       }
       break;
     }
     case SuperweaponType.IRON_CURTAIN: {
-      // Find unit or structure nearest to target
-      let bestEntity: Entity | null = null;
-      let bestDist = Infinity;
-      for (const e of ctx.entities) {
-        if (!e.alive || !ctx.isAllied(e.house, house)) continue;
-        const d = worldDist(e.pos, target);
-        if (d < bestDist && d < 3) {
-          bestDist = d;
-          bestEntity = e;
+      // C++ house.cpp:2740-2771 — Iron Curtain targets any techno at the cell:
+      // RTTI_UNIT, RTTI_BUILDING, RTTI_VESSEL, RTTI_AIRCRAFT all receive
+      // IronCurtainCountDown = Rule.IronCurtainDuration * TICKS_PER_MINUTE.
+      // We check both entities (units) and structures (buildings).
+
+      // Check structures first — C++ Cell_Techno returns building if present
+      let appliedToStructure = false;
+      const tc = worldToCell(target.x, target.y);
+      for (const s of ctx.structures) {
+        if (!s.alive || !ctx.isAllied(s.house, house)) continue;
+        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+        if (tc.cx >= s.cx && tc.cx < s.cx + sw && tc.cy >= s.cy && tc.cy < s.cy + sh) {
+          s.ironCurtainTicks = IRON_CURTAIN_DURATION;
+          const sx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
+          const sy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
+          ctx.effects.push({
+            type: 'explosion', x: sx, y: sy,
+            frame: 0, maxFrames: 15, size: 20,
+          });
+          ctx.playSound('iron_curtain');
+          if (ctx.isAllied(house, ctx.playerHouse)) {
+            ctx.pushEva('Iron Curtain activated');
+          }
+          appliedToStructure = true;
+          break;
         }
       }
-      if (bestEntity) {
-        bestEntity.ironCurtainTick = IRON_CURTAIN_DURATION;
-        ctx.effects.push({
-          type: 'explosion', x: bestEntity.pos.x, y: bestEntity.pos.y,
-          frame: 0, maxFrames: 15, size: 20,
-        });
-        ctx.playSound('iron_curtain');
-        if (ctx.isAllied(house, ctx.playerHouse)) {
-          ctx.pushEva('Iron Curtain activated');
+
+      // Fall back to entity search if no structure found at target cell
+      if (!appliedToStructure) {
+        let bestEntity: Entity | null = null;
+        let bestDist = Infinity;
+        for (const e of ctx.entities) {
+          if (!e.alive || !ctx.isAllied(e.house, house)) continue;
+          const d = worldDist(e.pos, target);
+          if (d < bestDist && d < 3) {
+            bestDist = d;
+            bestEntity = e;
+          }
+        }
+        if (bestEntity) {
+          bestEntity.ironCurtainTick = IRON_CURTAIN_DURATION;
+          ctx.effects.push({
+            type: 'explosion', x: bestEntity.pos.x, y: bestEntity.pos.y,
+            frame: 0, maxFrames: 15, size: 20,
+          });
+          ctx.playSound('iron_curtain');
+          if (ctx.isAllied(house, ctx.playerHouse)) {
+            ctx.pushEva('Iron Curtain activated');
+          }
         }
       }
       break;

@@ -749,6 +749,8 @@ export function applySplashDamage(
  *  bridge destruction, and structure explosion blast damage to nearby units. */
 export function structureDamage(ctx: CombatContext, s: MapStructure, damage: number): boolean {
   if (!s.alive) return false;
+  // C++ house.cpp:2751 — Iron Curtain makes structures invulnerable (no damage taken)
+  if (s.ironCurtainTicks && s.ironCurtainTicks > 0) return false;
   s.hp = Math.max(0, s.hp - damage);
   // Track attacked trigger names for TEVENT_ATTACKED
   if (s.triggerName) ctx.attackedTriggerNames.add(s.triggerName);

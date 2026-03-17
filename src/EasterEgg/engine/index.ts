@@ -1761,6 +1761,12 @@ export class Game {
       if (e.chronoShiftTick > 0) e.chronoShiftTick--;
     }
 
+    // Tick Iron Curtain timers on structures (C++ house.cpp:2751 parity)
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      if (s.ironCurtainTicks && s.ironCurtainTicks > 0) s.ironCurtainTicks--;
+    }
+
     // Fog re-enable timer (spy DOME infiltration)
     if (this.fogDisabled && this.fogReEnableTick > 0) {
       this.fogReEnableTick--;
