@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-17T01:30Z — Session 154: Building Mission Strategy Improvements
+- **M8 survival defense**: Surplus units now help defend instead of chasing enemies. Win rate improved from ~10% baseline to ~25-30%.
+- **M4 analysis**: Generic strategy can't handle extreme starting conditions (1 JEEP + 1 E1 vs 7 heavy tanks). MCV deploys ~tick 900, first tank at ~tick 4800. Needs dedicated strategy.
+- **Key finding**: M8 original 3/5 was likely lucky (actual baseline ~10-20%). Pure defense in survival mode is the most impactful improvement.
+- **Power management**: Investigated APWR spam and POWR(99) build order — constant power building is actually beneficial (adds structure HP buffer). Removing it causes regression.
+- **Explored but reverted**: Credit conservation (too restrictive), retreat limits (worsened attrition), pre-ConYard defense (prevented beneficial initial attack).
+
 ## 2026-03-17T00:15Z — Session 153: SCG01EA Victory — Transport Auto-Load + Evacuation Fix
 - **Bug fixes**: Tanya sprite (E7→e5), barrel chain explosions (structure blast loop), transport auto-loads nearby civilians on TMISSION_MOVE arrival, `return` after evacuate to prevent GUARD override.
 - **Root cause of Einstein evac failure**: Chinook arrives at waypoint but no TMISSION_LOAD in its script. C++ auto-loads civilians when transport arrives near them. TS engine was missing this. Added civilian auto-load in TMISSION_MOVE arrival + `orderTransportEvacuate` for aircraft.
