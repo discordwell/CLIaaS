@@ -807,14 +807,57 @@ describe('monotonic damage decrease across full distance range', () => {
 // Section 16: Additional edge cases from code review
 // ============================================================
 describe('additional edge cases', () => {
-  it('negative baseDamage returns 0 (C++ combat.cpp:86-96 healing handler)', () => {
-    // C++ handles negative damage (healing) separately. At close range with ARMOR_NONE,
-    // C++ returns the negative value. At any distance or with armor, C++ returns 0.
-    // TS engine handles healing separately, so modifyDamage always returns 0 for negative input.
-    expect(modifyDamage(-100, 'Super', 'none', 0)).toBe(0);
-    expect(modifyDamage(-50, 'HE', 'none', 6)).toBe(0);
-    expect(modifyDamage(-50, 'HE', 'none', 12)).toBe(0);
-    expect(modifyDamage(-1, 'SA', 'heavy', 0)).toBe(0);
+  // C++ combat.cpp:86-96 (FIXIT_CSII) — negative damage is healing.
+  // Non-Mechanical warhead: heals unarmored (armor=none) at close range.
+  // Mechanical warhead: heals armored (armor!=none) at close range.
+  // Close range = distance < 0x008 leptons = 0.75 pixels.
+
+  it('Organic heal: returns negative at point-blank vs unarmored', () => {
+    // Medic's Heal weapon: -50 damage, Organic warhead
+    // warhead != Mechanical, armor == none, dist(0) < 0.75 → return -50
+    expect(modifyDamage(-50, 'Organic', 'none', 0)).toBe(-50);
+  });
+
+  it('Mechanical heal: returns negative at point-blank vs armored', () => {
+    // Mechanic's GoodWrench: -100 damage, Mechanical warhead
+    // warhead == Mechanical, armor != none, dist(0) < 0.75 → return -100
+    expect(modifyDamage(-100, 'Mechanical', 'heavy', 0)).toBe(-100);
+    expect(modifyDamage(-100, 'Mechanical', 'light', 0)).toBe(-100);
+    expect(modifyDamage(-100, 'Mechanical', 'wood', 0)).toBe(-100);
+    expect(modifyDamage(-100, 'Mechanical', 'concrete', 0)).toBe(-100);
+  });
+
+  it('Organic heal: returns 0 vs armored (wrong armor type)', () => {
+    // warhead != Mechanical, but armor != none → no healing
+    expect(modifyDamage(-50, 'Organic', 'heavy', 0)).toBe(0);
+    expect(modifyDamage(-50, 'Organic', 'light', 0)).toBe(0);
+    expect(modifyDamage(-50, 'Organic', 'wood', 0)).toBe(0);
+  });
+
+  it('Mechanical heal: returns 0 vs unarmored (wrong armor type)', () => {
+    // warhead == Mechanical, but armor == none → no healing
+    expect(modifyDamage(-100, 'Mechanical', 'none', 0)).toBe(0);
+  });
+
+  it('healing returns 0 when too far (dist >= 0.75px)', () => {
+    // C++ threshold: distance < 0x008 leptons = 0.75 pixels
+    expect(modifyDamage(-50, 'Organic', 'none', 1)).toBe(0);
+    expect(modifyDamage(-50, 'Organic', 'none', 6)).toBe(0);
+    expect(modifyDamage(-100, 'Mechanical', 'heavy', 1)).toBe(0);
+    expect(modifyDamage(-100, 'Mechanical', 'heavy', 12)).toBe(0);
+  });
+
+  it('any non-Mechanical warhead can heal unarmored at close range', () => {
+    // C++ checks warhead != WARHEAD_MECHANICAL, not warhead == WARHEAD_ORGANIC
+    expect(modifyDamage(-100, 'Super', 'none', 0)).toBe(-100);
+    expect(modifyDamage(-50, 'HE', 'none', 0)).toBe(-50);
+    expect(modifyDamage(-50, 'SA', 'none', 0)).toBe(-50);
+    expect(modifyDamage(-1, 'Fire', 'none', 0)).toBe(-1);
+  });
+
+  it('non-Mechanical warhead returns 0 vs armored even at close range', () => {
+    expect(modifyDamage(-50, 'SA', 'heavy', 0)).toBe(0);
+    expect(modifyDamage(-100, 'HE', 'concrete', 0)).toBe(0);
   });
 
   it('fractional distPixels: floor handles non-integer pixel distances', () => {

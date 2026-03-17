@@ -1051,10 +1051,17 @@ export function modifyDamage(
   // C++ combat.cpp:74 — zero damage short-circuit
   if (baseDamage === 0) return 0;
 
-  // C++ combat.cpp:86-96 — negative damage is healing; C++ returns it at close range
-  // for correct armor, else returns 0. TS engine handles healing separately, so
-  // negative baseDamage always returns 0 here.
-  if (baseDamage < 0) return 0;
+  // C++ combat.cpp:86-96 (FIXIT_CSII) — negative damage is healing.
+  // Non-Mechanical warhead heals unarmored (infantry); Mechanical heals armored (vehicles).
+  // Only applies at very close range: C++ distance < 0x008 leptons = 0.75 pixels.
+  if (baseDamage < 0) {
+    const HEAL_PROXIMITY_PX = 8 * CELL_SIZE / LEPTON_SIZE; // 0x008 leptons → 0.75px
+    if (distPixels < HEAL_PROXIMITY_PX) {
+      if (warhead !== 'Mechanical' && armor === 'none') return baseDamage;
+      if (warhead === 'Mechanical' && armor !== 'none') return baseDamage;
+    }
+    return 0;
+  }
 
   // Step 1: Warhead vs armor multiplier (combat.cpp:98-101)
   const mult = warheadMultOverride ?? getWarheadMultiplier(warhead, armor);
