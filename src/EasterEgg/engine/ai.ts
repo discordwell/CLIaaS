@@ -52,6 +52,14 @@ export interface AIHouseState {
   maxUnit: number;
   maxInfantry: number;
   maxBuilding: number;
+  /** C++ BuildingsKilled[HOUSE_COUNT] — per-victim kill tracking (house.cpp:498) */
+  buildingsKilledBy: Map<House, number>;
+  /** C++ UnitsKilled[HOUSE_COUNT] — per-victim kill tracking (house.cpp:496) */
+  unitsKilledBy: Map<House, number>;
+  /** C++ LAEnemy — house of last attacker (house.h:527) */
+  lastAttackerEnemy: House | null;
+  /** C++ IsStarted — whether this house has placed its first building */
+  isStarted: boolean;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -298,6 +306,10 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     maxUnit: ctx.houseMaxUnits.get(house) ?? -1,
     maxInfantry: ctx.houseMaxInfantry.get(house) ?? -1,
     maxBuilding: ctx.houseMaxBuildings.get(house) ?? -1,
+    buildingsKilledBy: new Map(),
+    unitsKilledBy: new Map(),
+    lastAttackerEnemy: null,
+    isStarted: true,
   };
 }
 
@@ -886,6 +898,258 @@ export function aiCheckEndgame(ctx: AIContext, house: House): boolean {
   return hasBuildings && !hasProductionBuilding;
 }
 
+// ── C++ MAP_CELL_W equivalent — cells per map row (house.cpp:4660) ────────────
+const MAP_CELL_W = MAP_CELLS; // 128
+
+/**
+ * Record a building kill by `killerHouse` against a building owned by `victimHouse`.
+ * C++ parity: techno.cpp:3934 — `source->House->BuildingsKilled[Owner()]++`
+ * This is indexed by *victim* house on the *killer*'s state.
+ */
+export function aiRecordBuildingKill(ctx: AIContext, killerHouse: House, victimHouse: House): void {
+  const state = ctx.aiStates.get(killerHouse);
+  if (!state) return;
+  const prev = state.buildingsKilledBy.get(victimHouse) ?? 0;
+  state.buildingsKilledBy.set(victimHouse, prev + 1);
+}
+
+/**
+ * Record a unit kill by `killerHouse` against a unit owned by `victimHouse`.
+ * C++ parity: techno.cpp:3972 — `source->House->UnitsKilled[Owner()]++`
+ */
+export function aiRecordUnitKill(ctx: AIContext, killerHouse: House, victimHouse: House): void {
+  const state = ctx.aiStates.get(killerHouse);
+  if (!state) return;
+  const prev = state.unitsKilledBy.get(victimHouse) ?? 0;
+  state.unitsKilledBy.set(victimHouse, prev + 1);
+}
+
+/**
+ * Record that `attackerHouse` attacked a building/unit of `myHouse`.
+ * C++ parity: building.cpp:1208 — `House->LAEnemy = source->Owner()`
+ */
+export function aiRecordLastAttacker(ctx: AIContext, myHouse: House, attackerHouse: House): void {
+  const state = ctx.aiStates.get(myHouse);
+  if (!state) return;
+  state.lastAttackerEnemy = attackerHouse;
+}
+
+/**
+ * Compute multi-factor enemy score for a candidate enemy house.
+ * C++ parity: house.cpp:4660-4686 Expert_AI enemy selection.
+ *
+ * @param myCenter Base center of scoring house (cell coords)
+ * @param enemyCenter Base center of candidate enemy (cell coords)
+ * @param enemyBuildingsKilledUs How many of *our* buildings the enemy killed
+ * @param enemyUnitsKilledUs How many of *our* units the enemy killed
+ * @param enemyCurUnits Enemy's current unit count
+ * @param myCurUnits Our current unit count
+ * @param enemyCurBuildings Enemy's current building count
+ * @param myCurBuildings Our current building count
+ * @param enemyCurInfantry Enemy's current infantry count
+ * @param myCurInfantry Our current infantry count
+ * @param isLastAttacker Whether this enemy is our LAEnemy
+ */
+export function computeEnemyScore(
+  myCenter: { cx: number; cy: number },
+  enemyCenter: { cx: number; cy: number },
+  enemyBuildingsKilledUs: number,
+  enemyUnitsKilledUs: number,
+  enemyCurUnits: number,
+  myCurUnits: number,
+  enemyCurBuildings: number,
+  myCurBuildings: number,
+  enemyCurInfantry: number,
+  myCurInfantry: number,
+  isLastAttacker: boolean,
+): number {
+  // C++ house.cpp:4660 — distance component
+  // Distance is cell-based Manhattan-ish; C++ uses Distance() which is lepton-based
+  // but for scoring purposes we use Euclidean cell distance
+  const dx = myCenter.cx - enemyCenter.cx;
+  const dy = myCenter.cy - enemyCenter.cy;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  // C++ line 4660-4661: value = ((MAP_CELL_W*2) - Distance(Center, h->Center)) * 2
+  let value = (MAP_CELL_W * 2 - dist) * 2;
+
+  // C++ line 4668-4669: kill history
+  // Note: in C++ `h->BuildingsKilled[Class->House]` means "how many of MY buildings
+  // did house h kill". The array is indexed by victim house on the killer's struct.
+  value += enemyBuildingsKilledUs * 5;
+  value += enemyUnitsKilledUs;
+
+  // C++ line 4676-4678: relative force size
+  value += enemyCurUnits - myCurUnits;
+  value += enemyCurBuildings - myCurBuildings;
+  value += Math.floor((enemyCurInfantry - myCurInfantry) / 4);
+
+  // C++ line 4684-4686: last attacker bonus
+  if (isLastAttacker) {
+    value += 100;
+  }
+
+  return value;
+}
+
+/**
+ * Count units, infantry, and buildings for a house.
+ * Returns { units, infantry, buildings } counts matching C++ CurUnits/CurInfantry/CurBuildings.
+ */
+export function aiCountForce(ctx: AIContext, house: House): { units: number; infantry: number; buildings: number } {
+  let units = 0, infantry = 0, buildings = 0;
+  for (const e of ctx.entities) {
+    if (!e.alive || e.house !== house) continue;
+    if (e.stats.isInfantry) infantry++;
+    else if (!e.stats.isAircraft && !e.stats.isVessel && !e.isAnt) units++;
+  }
+  for (const s of ctx.structures) {
+    if (s.alive && s.house === house) buildings++;
+  }
+  return { units, infantry, buildings };
+}
+
+/**
+ * Update designated enemy for all AI houses using C++ multi-factor scoring.
+ * C++ parity: house.cpp:4619-4741 Expert_AI enemy selection.
+ *
+ * Runs every ~60 ticks. For each AI house, evaluates all enemy houses and
+ * picks the one with highest composite score as designated enemy.
+ *
+ * Preconditions (from C++):
+ * - House must have at least one alive building (ActiveBScan)
+ * - House must have a base center (Center)
+ * - Attack state must be 0 (not actively attacking) — we relax this
+ *
+ * If any enemy house has not started (no buildings), skip enemy selection
+ * entirely — ensures accurate distance-based scoring (C++ house.cpp:4639-4642).
+ */
+export function updateDesignatedEnemy(ctx: AIContext): void {
+  if (ctx.tick % 60 !== 0) return;
+
+  for (const [house, state] of ctx.aiStates) {
+    // Need a base to compute distances from
+    const myCenter = aiGetBaseCenter(ctx, house);
+    if (!myCenter) {
+      state.designatedEnemy = null;
+      continue;
+    }
+
+    // Must have at least one alive building (C++ ActiveBScan)
+    let hasBuildings = false;
+    for (const s of ctx.structures) {
+      if (s.alive && s.house === house) { hasBuildings = true; break; }
+    }
+    if (!hasBuildings) {
+      state.designatedEnemy = null;
+      continue;
+    }
+
+    // C++ line 4606-4611: clear enemy if defeated/allied/no base
+    if (state.designatedEnemy != null) {
+      const enemyCenter = aiGetBaseCenter(ctx, state.designatedEnemy);
+      const isDefeated = enemyCenter == null;
+      const isAllied = ctx.isAllied(house, state.designatedEnemy);
+      if (isDefeated || isAllied) {
+        state.designatedEnemy = null;
+      }
+    }
+
+    // Compute our force counts
+    const myForce = aiCountForce(ctx, house);
+
+    let bestScore = 0; // C++ close = 0
+    let bestEnemy: House | null = null;
+
+    for (const [enemyHouse, enemyState] of ctx.aiStates) {
+      if (enemyHouse === house) continue;
+      if (ctx.isAllied(house, enemyHouse)) continue;
+
+      const enemyCenter = aiGetBaseCenter(ctx, enemyHouse);
+      if (!enemyCenter) continue;
+
+      // C++ line 4639-4642: if any enemy hasn't started, abort selection
+      if (!enemyState.isStarted) {
+        bestEnemy = null;
+        break;
+      }
+
+      const enemyForce = aiCountForce(ctx, enemyHouse);
+
+      // C++ BuildingsKilled/UnitsKilled: how many of MY stuff did the enemy kill
+      // This is tracked on the enemy's state, indexed by victim house
+      const enemyBuildingsKilledUs = enemyState.buildingsKilledBy.get(house) ?? 0;
+      const enemyUnitsKilledUs = enemyState.unitsKilledBy.get(house) ?? 0;
+
+      const score = computeEnemyScore(
+        myCenter,
+        enemyCenter,
+        enemyBuildingsKilledUs,
+        enemyUnitsKilledUs,
+        enemyForce.units,
+        myForce.units,
+        enemyForce.buildings,
+        myForce.buildings,
+        enemyForce.infantry,
+        myForce.infantry,
+        state.lastAttackerEnemy === enemyHouse,
+      );
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestEnemy = enemyHouse;
+      }
+    }
+
+    // Also evaluate non-AI enemy houses (e.g., player)
+    // Player doesn't have an aiState, so we check structures/entities directly
+    const allHouses = new Set<House>();
+    for (const s of ctx.structures) {
+      if (s.alive && s.house !== house && !ctx.isAllied(house, s.house)) {
+        allHouses.add(s.house);
+      }
+    }
+    for (const e of ctx.entities) {
+      if (e.alive && e.house !== house && !ctx.isAllied(house, e.house)) {
+        allHouses.add(e.house);
+      }
+    }
+
+    for (const enemyHouse of allHouses) {
+      // Skip if already evaluated as an AI state
+      if (ctx.aiStates.has(enemyHouse)) continue;
+
+      const enemyCenter = aiGetBaseCenter(ctx, enemyHouse);
+      if (!enemyCenter) continue;
+
+      const enemyForce = aiCountForce(ctx, enemyHouse);
+
+      // For player houses, get kill stats from their perspective — but we don't
+      // track player kills in AIHouseState. Use 0 for player kill counts.
+      const score = computeEnemyScore(
+        myCenter,
+        enemyCenter,
+        0, // player kill tracking not in AI state
+        0,
+        enemyForce.units,
+        myForce.units,
+        enemyForce.buildings,
+        myForce.buildings,
+        enemyForce.infantry,
+        myForce.infantry,
+        state.lastAttackerEnemy === enemyHouse,
+      );
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestEnemy = enemyHouse;
+      }
+    }
+
+    state.designatedEnemy = bestEnemy;
+  }
+}
+
 /** AI strategic planner -- phase transitions every 150 ticks (~10s) */
 export function updateAIStrategicPlanner(ctx: AIContext): void {
   if (ctx.tick % 150 !== 0) return;
@@ -1169,7 +1433,26 @@ export function aiPickAttackTarget(ctx: AIContext, house: House): WorldPos | nul
     }
   }
 
+  const designated = ptState?.designatedEnemy ?? null;
   const priorities = ['FACT', 'WEAP', 'PROC'];
+
+  // C++ parity: prefer priority structures belonging to designated enemy first
+  if (designated != null) {
+    for (const type of priorities) {
+      for (const s of ctx.structures) {
+        if (!s.alive || s.house !== designated) continue;
+        if (s.type === type) {
+          const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+          return {
+            x: (s.cx + w / 2) * CELL_SIZE,
+            y: (s.cy + h / 2) * CELL_SIZE,
+          };
+        }
+      }
+    }
+  }
+
+  // Fallback: any enemy's priority structures
   for (const type of priorities) {
     for (const s of ctx.structures) {
       if (!s.alive || ctx.isAllied(s.house, house)) continue;
@@ -1188,6 +1471,22 @@ export function aiPickAttackTarget(ctx: AIContext, house: House): WorldPos | nul
 
   let bestDist = Infinity;
   let bestPos: WorldPos | null = null;
+
+  // C++ parity: prefer designated enemy structures, then nearest of any enemy
+  if (designated != null) {
+    for (const s of ctx.structures) {
+      if (!s.alive || s.house !== designated) continue;
+      const dx = s.cx - center.cx;
+      const dy = s.cy - center.cy;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+        bestPos = { x: (s.cx + w / 2) * CELL_SIZE, y: (s.cy + h / 2) * CELL_SIZE };
+      }
+    }
+    if (bestPos) return bestPos;
+  }
 
   for (const s of ctx.structures) {
     if (!s.alive || ctx.isAllied(s.house, house)) continue;

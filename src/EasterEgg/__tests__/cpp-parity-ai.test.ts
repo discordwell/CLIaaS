@@ -1019,7 +1019,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
 // ── 6. Build order priority (getAIBuildOrder) ──────────────────────────────────
 
 describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
-  it('queues POWR first when power deficit', () => {
+  it('queues POWR when power deficit (C++ urgency-ranked)', () => {
     const state = makeAIState({ house: House.USSR });
     const structures = [
       makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 }),
@@ -1028,7 +1028,9 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
     ];
     const ctx = makeAIContext({ structures, houseCredits: new Map([[House.USSR, 5000]]) });
     const queue = getAIBuildOrder(ctx, House.USSR, state);
-    expect(queue[0]).toBe('POWR');
+    // POWR is in the queue (LOW urgency since no refinery — C++ house.cpp:5486)
+    // PROC has HIGH urgency (first refinery — C++ house.cpp:5507) so it comes first
+    expect(queue).toContain('POWR');
   });
 
   it('queues TENT when no barracks exist', () => {
@@ -1042,12 +1044,18 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
     expect(queue).toContain('TENT');
   });
 
-  it('queues PROC when fewer than 2 refineries', () => {
-    const state = makeAIState({ house: House.USSR });
+  it('queues PROC when refinery ratio not met (C++ house.cpp:5502)', () => {
+    const state = makeAIState({ house: House.USSR, harvesterCount: 1 });
+    // With 7 buildings, refineryRatio*7 = 0.16*7 = 1.12, roundUp = 2.
+    // 1 PROC < 2 → needs another refinery.
     const structures = [
       makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 }),
       makeStructure({ type: 'POWR', house: House.USSR, cx: 14, cy: 10 }),
-      makeStructure({ type: 'PROC', house: House.USSR, cx: 18, cy: 10 }), // only 1
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 16, cy: 10 }),
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 18, cy: 10 }),
+      makeStructure({ type: 'TENT', house: House.USSR, cx: 22, cy: 10 }),
+      makeStructure({ type: 'WEAP', house: House.USSR, cx: 26, cy: 10 }),
+      makeStructure({ type: 'PROC', house: House.USSR, cx: 30, cy: 10 }), // only 1
     ];
     const ctx = makeAIContext({ structures, houseCredits: new Map([[House.USSR, 5000]]) });
     const queue = getAIBuildOrder(ctx, House.USSR, state);
@@ -1066,8 +1074,8 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
     expect(queue).toContain('WEAP');
   });
 
-  it('queues DOME when credits > 1000 and no dome', () => {
-    const state = makeAIState({ house: House.USSR });
+  it('queues DOME reactively for AA when enemy has aircraft (C++ house.cpp:5638)', () => {
+    const state = makeAIState({ house: House.USSR, harvesterCount: 1 });
     const structures = [
       makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 }),
       makeStructure({ type: 'POWR', house: House.USSR, cx: 14, cy: 10 }),
@@ -1077,7 +1085,9 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
       makeStructure({ type: 'PROC', house: House.USSR, cx: 26, cy: 10 }),
       makeStructure({ type: 'PROC', house: House.USSR, cx: 30, cy: 10 }),
     ];
-    const ctx = makeAIContext({ structures, houseCredits: new Map([[House.USSR, 5000]]) });
+    // C++ AI_Building only builds DOME reactively when enemy has aircraft and no radar
+    const entities = [new Entity(UnitType.V_MIG, House.Spain, 100, 100)];
+    const ctx = makeAIContext({ structures, entities, houseCredits: new Map([[House.USSR, 5000]]) });
     const queue = getAIBuildOrder(ctx, House.USSR, state);
     expect(queue).toContain('DOME');
   });
@@ -1115,20 +1125,23 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
     expect(queue).not.toContain('GUN');
   });
 
-  it('allied AI queues GUN for defense, not TSLA', () => {
-    const state = makeAIState({ house: House.Spain });
+  it('allied AI queues PBOX or GUN for defense, not TSLA (C++ house.cpp:5590-5606)', () => {
+    const state = makeAIState({ house: House.Spain, harvesterCount: 1 });
     const structures = [
       makeStructure({ type: 'FACT', house: House.Spain, cx: 10, cy: 10 }),
       makeStructure({ type: 'POWR', house: House.Spain, cx: 14, cy: 10 }),
       makeStructure({ type: 'POWR', house: House.Spain, cx: 16, cy: 10 }),
-      makeStructure({ type: 'TENT', house: House.Spain, cx: 18, cy: 10 }),
+      makeStructure({ type: 'BARR', house: House.Spain, cx: 18, cy: 10 }),
       makeStructure({ type: 'WEAP', house: House.Spain, cx: 22, cy: 10 }),
       makeStructure({ type: 'PROC', house: House.Spain, cx: 26, cy: 10 }),
       makeStructure({ type: 'PROC', house: House.Spain, cx: 30, cy: 10 }),
     ];
     const ctx = makeAIContext({ structures, houseCredits: new Map([[House.Spain, 5000]]) });
     const queue = getAIBuildOrder(ctx, House.Spain, state);
-    expect(queue).toContain('GUN');
+    // C++ alternates between PBOX and GUN (Percent_Chance(50))
+    // TS uses current % 2 deterministic alternation
+    const hasAlliedDefense = queue.includes('GUN') || queue.includes('PBOX');
+    expect(hasAlliedDefense).toBe(true);
     expect(queue).not.toContain('TSLA');
   });
 
@@ -1167,22 +1180,26 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
     expect(queue).toContain('AFLD');
   });
 
-  it('queues extra PROC when harvester count > refinery count', () => {
-    const state = makeAIState({ house: House.USSR, harvesterCount: 3, refineryCount: 1 });
+  it('queues PROC when refinery ratio demands more (C++ house.cpp:5502)', () => {
+    // C++ uses ratio-based refinery logic, not harvester-vs-refinery count.
+    // With 10 buildings and only 1 refinery, ratio = 0.16*10 = 1.6, roundUp = 2.
+    // 1 < 2 → needs another refinery.
+    const state = makeAIState({ house: House.USSR, harvesterCount: 1 });
     const structures = [
       makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 }),
       makeStructure({ type: 'POWR', house: House.USSR, cx: 14, cy: 10 }),
       makeStructure({ type: 'POWR', house: House.USSR, cx: 16, cy: 10 }),
-      makeStructure({ type: 'TENT', house: House.USSR, cx: 18, cy: 10 }),
-      makeStructure({ type: 'WEAP', house: House.USSR, cx: 22, cy: 10 }),
-      makeStructure({ type: 'PROC', house: House.USSR, cx: 26, cy: 10 }),
-      makeStructure({ type: 'PROC', house: House.USSR, cx: 30, cy: 10 }),
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 18, cy: 10 }),
+      makeStructure({ type: 'POWR', house: House.USSR, cx: 20, cy: 10 }),
+      makeStructure({ type: 'TENT', house: House.USSR, cx: 22, cy: 10 }),
+      makeStructure({ type: 'WEAP', house: House.USSR, cx: 26, cy: 10 }),
+      makeStructure({ type: 'DOME', house: House.USSR, cx: 30, cy: 10 }),
+      makeStructure({ type: 'FTUR', house: House.USSR, cx: 34, cy: 10 }),
+      makeStructure({ type: 'PROC', house: House.USSR, cx: 38, cy: 10 }), // only 1
     ];
     const ctx = makeAIContext({ structures, houseCredits: new Map([[House.USSR, 5000]]) });
     const queue = getAIBuildOrder(ctx, House.USSR, state);
-    // Should have PROC in queue from the harv > ref check (item 10)
-    const procCount = queue.filter(q => q === 'PROC').length;
-    expect(procCount).toBeGreaterThanOrEqual(1);
+    expect(queue).toContain('PROC');
   });
 });
 
