@@ -1051,11 +1051,20 @@ export function modifyDamage(
   // C++ combat.cpp:74 — zero damage short-circuit
   if (baseDamage === 0) return 0;
 
+  // C++ combat.cpp:86-96 — negative damage is healing; C++ returns it at close range
+  // for correct armor, else returns 0. TS engine handles healing separately, so
+  // negative baseDamage always returns 0 here.
+  if (baseDamage < 0) return 0;
+
   // Step 1: Warhead vs armor multiplier (combat.cpp:98-101)
   const mult = warheadMultOverride ?? getWarheadMultiplier(warhead, armor);
   if (mult <= 0) return 0;
 
   let damage = baseDamage * mult * houseBias;
+
+  // C++ combat.cpp:106 — distance block gated on if(damage); zero/negative skipped entirely.
+  // Covers: C++ fixed-point truncation to 0, and TS-only negative houseBias.
+  if (damage <= 0) return 0;
 
   // Step 2: Distance-based falloff (combat.cpp:106-125)
   // C++ converts pixel distance to a factor using SpreadFactor and PIXEL_LEPTON_W.

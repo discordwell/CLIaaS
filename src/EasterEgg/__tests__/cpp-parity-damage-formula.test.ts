@@ -807,20 +807,14 @@ describe('monotonic damage decrease across full distance range', () => {
 // Section 16: Additional edge cases from code review
 // ============================================================
 describe('additional edge cases', () => {
-  it('negative baseDamage at close range: MinDamage boosts to 1', () => {
-    // -100 * 1.0 = -100, distFactor=0 < 4, max(-100, 1) = 1
-    expect(modifyDamage(-100, 'Super', 'none', 0)).toBe(1);
-  });
-
-  it('negative baseDamage at far range: clamped to 0', () => {
-    // -50 * 0.9 = -45, distFactor=4 (NOT < 4), no MinDamage
-    // -45/4 = -11.25, max(0, round(-11.25)) = 0
+  it('negative baseDamage returns 0 (C++ combat.cpp:86-96 healing handler)', () => {
+    // C++ handles negative damage (healing) separately. At close range with ARMOR_NONE,
+    // C++ returns the negative value. At any distance or with armor, C++ returns 0.
+    // TS engine handles healing separately, so modifyDamage always returns 0 for negative input.
+    expect(modifyDamage(-100, 'Super', 'none', 0)).toBe(0);
+    expect(modifyDamage(-50, 'HE', 'none', 6)).toBe(0);
     expect(modifyDamage(-50, 'HE', 'none', 12)).toBe(0);
-  });
-
-  it('negative baseDamage at mid range: MinDamage still applies when distFactor < 4', () => {
-    // -50 * 0.9 = -45, distFactor=2 < 4, max(-45/2, 1) = max(-22.5, 1) = 1
-    expect(modifyDamage(-50, 'HE', 'none', 6)).toBe(1);
+    expect(modifyDamage(-1, 'SA', 'heavy', 0)).toBe(0);
   });
 
   it('fractional distPixels: floor handles non-integer pixel distances', () => {
@@ -834,20 +828,16 @@ describe('additional edge cases', () => {
     expect(modifyDamage(100, 'SA', 'none', 4.5)).toBe(33);
   });
 
-  it('negative houseBias at close range: MinDamage boosts to 1', () => {
-    // 100 * 1.0 * -1.0 = -100, distFactor=0 < 4, max(-100, 1) = 1
-    expect(modifyDamage(100, 'Super', 'none', 0, -1.0)).toBe(1);
-  });
-
-  it('negative houseBias at far range: clamped to 0', () => {
-    // 100 * 1.0 * -1.0 = -100, distFactor=16 (NOT < 4), -100/16=-6.25
-    // max(0, round(-6.25)) = 0
+  it('negative houseBias: damage after mult is negative → returns 0', () => {
+    // 100 * 1.0 * -1.0 = -100 → damage <= 0 check triggers (C++ line 106 guard)
+    expect(modifyDamage(100, 'Super', 'none', 0, -1.0)).toBe(0);
     expect(modifyDamage(100, 'Super', 'none', 8, -1.0)).toBe(0);
   });
 
-  it('zero houseBias: damage = 0 but baseDamage > 0 → MinDamage=1 at close range', () => {
-    // 100 * 1.0 * 0.0 = 0, distFactor=0 < 4, max(0, 1) = 1
-    expect(modifyDamage(100, 'Super', 'none', 0, 0.0)).toBe(1);
+  it('zero houseBias: damage after mult is 0 → returns 0 (C++ line 106 guard)', () => {
+    // 100 * 1.0 * 0.0 = 0 → damage <= 0 check triggers, matching C++ behavior
+    // (In C++, houseBias is applied before calling Modify_Damage, so damage=0 hits line 74)
+    expect(modifyDamage(100, 'Super', 'none', 0, 0.0)).toBe(0);
   });
 
   it('very large distPixels with spread=0: clamped to distFactor=16', () => {
