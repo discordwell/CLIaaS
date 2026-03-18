@@ -21,7 +21,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   EXPLOSION_FRAMES,
-  WEAPONS,
+  WEAPON_STATS,
 } from '../engine/types';
 import type { WeaponStats, WarheadType } from '../engine/types';
 
@@ -404,9 +404,7 @@ describe('IsFlameEquipped flame trail toggle (bullet.cpp:377-386)', () => {
     // C++ bbdata.cpp: IsFlameEquipped = Animates=yes in RULES.INI
     // Only flame-type projectiles have Animates=yes
     // Import WEAPONS from types.ts for verification
-    const { WEAPONS } = require('../engine/types');
-
-    const flameWeapons = Object.entries(WEAPONS as Record<string, WeaponStats>)
+    const flameWeapons = Object.entries(WEAPON_STATS as Record<string, WeaponStats>)
       .filter(([, w]) => (w as any).isFlameEquipped)
       .map(([name]) => name);
 
@@ -414,16 +412,14 @@ describe('IsFlameEquipped flame trail toggle (bullet.cpp:377-386)', () => {
   });
 
   it('Flamer weapon has Fire warhead and splash=1.0 (bbdata.cpp)', () => {
-    const { WEAPONS } = require('../engine/types');
-    const flamer = WEAPONS.Flamer;
+    const flamer = WEAPON_STATS.Flamer;
     expect(flamer.warhead).toBe('Fire');
     expect(flamer.splash).toBe(1.0);
     expect((flamer as any).isFlameEquipped).toBe(true);
   });
 
   it('FireballLauncher weapon has Fire warhead and splash=1.5 (bbdata.cpp)', () => {
-    const { WEAPONS } = require('../engine/types');
-    const fbl = WEAPONS.FireballLauncher;
+    const fbl = WEAPON_STATS.FireballLauncher;
     expect(fbl.warhead).toBe('Fire');
     expect(fbl.splash).toBe(1.5);
     expect((fbl as any).isFlameEquipped).toBe(true);
