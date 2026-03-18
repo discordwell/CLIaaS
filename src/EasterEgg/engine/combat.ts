@@ -160,6 +160,63 @@ export function getWarheadProps(
   return scenarioWarheadProps[warhead] ?? WARHEAD_PROPS[warhead as WarheadType];
 }
 
+// ── C++ Combat_Anim — damage-scaled explosion sprite selection ──────────────
+// C++ combat.cpp:295-366 selects explosion animations from arrays based on:
+//   1. Warhead's ExplosionSet (integer 0-6)
+//   2. Damage amount (scales which animation in the set's array)
+//   3. LandType (water/air/ground for different sprites)
+//
+// Damage-scaled index formula: floor((arrayLen - 1) * min(damage, maxDamage) / maxDamage)
+
+/** C++ Combat_Anim animation arrays, indexed by damage-scaled fraction */
+const FIRE_LIST  = ['napalm1', 'napalm2', 'napalm3'];               // ExplosionSet=3, max 150
+const AP_LIST    = ['veh-hit3', 'veh-hit2', 'frag1', 'fball1'];     // ExplosionSet=4, max 90
+const HE_LIST    = ['veh-hit1', 'veh-hit2', 'art-exp1', 'fball1'];  // ExplosionSet=5, max 130
+const WATER_LIST = ['water-exp3', 'water-exp2', 'water-exp1'];      // Water override for sets 3-5
+
+/**
+ * C++ Combat_Anim() — select explosion sprite based on damage, explosion set, and land type.
+ * @param damage   Raw damage amount (before armor/spread modifiers)
+ * @param explosionSet  Integer 0-6 from WarheadProps.explosionSet
+ * @param land     'ground' | 'water' | 'air' (LAND_NONE for aircraft targets)
+ * @returns Sprite name or null if no explosion (set 0 or damage 0)
+ */
+export function combatAnim(damage: number, explosionSet: number, land: 'ground' | 'water' | 'air'): string | null {
+  if (damage === 0) return null;
+
+  switch (explosionSet) {
+    case 6: return 'atomsfx';  // ANIM_ATOM_BLAST — always
+
+    case 2:  // SA piffs: piff for ≤15, piffpiff for >15
+      return damage > 15 ? 'piffpiff' : 'piff';
+
+    case 4: {  // AP frags
+      if (land === 'air') return 'flak';
+      const maxDmg = 90;
+      const list = land === 'water' ? WATER_LIST : AP_LIST;
+      return list[Math.floor((list.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
+    }
+
+    case 5: {  // HE pops
+      if (land === 'air') return 'flak';
+      const maxDmg = 130;
+      const list = land === 'water' ? WATER_LIST : HE_LIST;
+      return list[Math.floor((list.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
+    }
+
+    case 3: {  // Fire
+      if (land === 'air') return 'flak';
+      const maxDmg = 150;
+      const list = land === 'water' ? WATER_LIST : FIRE_LIST;
+      return list[Math.floor((list.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
+    }
+
+    case 1: return 'piff';  // HollowPoint — always piff
+
+    default: return null;  // Set 0 (Super/Organic/Mechanical) — no explosion
+  }
+}
+
 /** Damage-based speed reduction (C++ drive.cpp:1157-1161).
  *  Single tier: <=50% HP = 75% speed (ConditionYellow). */
 export function damageSpeedFactor(entity: Entity): number {
@@ -745,8 +802,15 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       }
     }
 
-    // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-    const projImpactSprite = getWarheadProps(proj.weapon.warhead, ctx.scenarioWarheadProps)?.explosionSet ?? 'veh-hit1';
+    // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
+    const projExpSet = getWarheadProps(proj.weapon.warhead, ctx.scenarioWarheadProps)?.explosionSet ?? 0;
+    // Determine land type: air targets at altitude use flak, water terrain uses water sprites
+    const projImpactCell = worldToCell(proj.impactX, proj.impactY);
+    const projTarget = ctx.entityById.get(proj.targetId);
+    const projLand: 'ground' | 'water' | 'air' =
+      (projTarget && projTarget.isAirUnit && projTarget.flightAltitude > 0) ? 'air' :
+      (ctx.map.getTerrain(projImpactCell.cx, projImpactCell.cy) === Terrain.WATER) ? 'water' : 'ground';
+    const projImpactSprite = combatAnim(proj.strength, projExpSet, projLand) ?? 'veh-hit1';
     // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
     const isScud = proj.weapon.name === 'SCUD';
     ctx.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
@@ -1240,9 +1304,13 @@ export function updateStructureCombat(ctx: CombatContext): void {
           projStyle: 'bullet',
         } as Effect);
         // AA weapons hitting aircraft use flak burst sprite (C++ FLAK.SHP)
+        // Non-AA: use C++ Combat_Anim damage-scaled selection
+        const structExpSet = getWarheadProps(wh, ctx.scenarioWarheadProps)?.explosionSet ?? 0;
+        const structLand: 'ground' | 'water' | 'air' =
+          (bestTarget.isAirUnit && bestTarget.flightAltitude > 0) ? 'air' : 'ground';
         const aaImpactSprite = (s.weapon.isAntiAir && bestTarget.isAirUnit && bestTarget.flightAltitude > 0)
           ? 'flak'
-          : (getWarheadProps(wh, ctx.scenarioWarheadProps)?.explosionSet ?? 'veh-hit1');
+          : (combatAnim(s.weapon.damage, structExpSet, structLand) ?? 'veh-hit1');
         ctx.effects.push({
           type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
           frame: 0, maxFrames: 10, size: 6,

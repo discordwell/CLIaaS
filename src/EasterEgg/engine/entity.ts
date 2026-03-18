@@ -100,7 +100,7 @@ export class Entity {
 
   // Death / visual
   deathTick = 0;       // ticks since death (for corpse fade + cleanup)
-  deathVariant = 0;    // 0=die1, 1=die2 (selected randomly on death)
+  deathVariant = 0;    // C++ InfantryDeath: 0=instant, 1=twirl, 2=explode, 3=flying, 4=burn, 5=electro
   damageFlash = 0;     // ticks remaining for damage flash effect
 
   // AI rate-limiting
@@ -442,7 +442,8 @@ export class Entity {
           return d.frame + sdir * d.jump + (this.animFrame % d.count);
         }
         case AnimState.DIE: {
-          const d = (this.deathVariant === 1 && anim.die2) ? anim.die2 : anim.die1;
+          // C++ InfantryDeath 0=die1 (instant), 1-5=die2 (twirl/explode/flying/burn/electro)
+          const d = (this.deathVariant > 0 && anim.die2) ? anim.die2 : anim.die1;
           return d.frame + Math.min(this.animFrame, d.count - 1);
         }
         default: {
@@ -530,12 +531,11 @@ export class Entity {
       this.animTick = 0;
       this.deathTick = 0;
       // R7: Use warhead's infantryDeath property from C++ warhead.cpp InfantryDeath
-      // 0=normal (die1), 1=fire death (die2), 2=explode (die2)
+      // Pass through the full C++ InfDeath value (0-5) for 6 distinct death animations:
+      //   0=instant (die1), 1=twirl (die2), 2=explode (die2), 3=flying (die2), 4=burn (die2), 5=electro (die2)
       const whProps = warheadPropsOverride ?? (warhead ? WARHEAD_PROPS[warhead as WarheadType] : undefined);
-      if (whProps && whProps.infantryDeath > 0) {
-        this.deathVariant = 1; // die2 for fire death (1) and explode (2)
-      } else if (whProps && whProps.infantryDeath === 0) {
-        this.deathVariant = 0; // die1 for normal death
+      if (whProps !== undefined) {
+        this.deathVariant = whProps.infantryDeath; // full 0-5 range from C++
       } else {
         this.deathVariant = Math.random() < 0.4 ? 1 : 0; // fallback: random
       }

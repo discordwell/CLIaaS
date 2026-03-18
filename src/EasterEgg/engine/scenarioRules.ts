@@ -144,7 +144,7 @@ export function buildScenarioRuleOverrides(
     if (section.has('Ore')) meta.destroysOre = section.get('Ore')!.toLowerCase() === 'yes';
     scenarioWarheadMeta[warheadName] = meta;
 
-    const props: WarheadProps = { ...(scenarioWarheadProps[warheadName] ?? { infantryDeath: 0, explosionSet: 'piff' }) };
+    const props: WarheadProps = { ...(scenarioWarheadProps[warheadName] ?? { infantryDeath: 0, explosionSet: 0 }) };
     if (section.has('InfDeath')) props.infantryDeath = Number.parseInt(section.get('InfDeath')!, 10);
     scenarioWarheadProps[warheadName] = props;
   }

@@ -249,8 +249,8 @@ describe('crushed unit death state', () => {
     expect(infantry.animState).toBe(AnimState.DIE);
     expect(infantry.animFrame).toBe(0);
     expect(infantry.deathTick).toBe(0);
-    // Super warhead has infantryDeath=2 (explode), which maps to deathVariant=1 (die2)
-    expect(infantry.deathVariant).toBe(1);
+    // Super warhead has infantryDeath=5 (electro) => deathVariant=5 (C++ InfDeath=5)
+    expect(infantry.deathVariant).toBe(5);
   });
 
   it('crushed ant has correct death state flags', () => {

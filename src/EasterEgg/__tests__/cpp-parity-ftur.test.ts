@@ -212,7 +212,7 @@ describe('Fire warhead infantry death animation (warhead.cpp)', () => {
   });
 
   it('uses napalm1 explosion set', () => {
-    expect(WARHEAD_PROPS['Fire'].explosionSet).toBe('napalm1');
+    expect(WARHEAD_PROPS['Fire'].explosionSet).toBe(3);
   });
 });
 

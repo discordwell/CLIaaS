@@ -837,40 +837,40 @@ describe('WARHEAD_PROPS parity', () => {
     expect(Object.keys(WARHEAD_PROPS)).toHaveLength(9);
   });
 
-  it('SA — infantryDeath=1, explosionSet=piff', () => {
-    expect(WARHEAD_PROPS.SA).toEqual({ infantryDeath: 1, explosionSet: 'piff' });
+  it('SA — infantryDeath=1, explosionSet=2', () => {
+    expect(WARHEAD_PROPS.SA).toEqual({ infantryDeath: 1, explosionSet: 2 });
   });
 
-  it('HE — infantryDeath=2, explosionSet=veh-hit1', () => {
-    expect(WARHEAD_PROPS.HE).toEqual({ infantryDeath: 2, explosionSet: 'veh-hit1' });
+  it('HE — infantryDeath=2, explosionSet=5', () => {
+    expect(WARHEAD_PROPS.HE).toEqual({ infantryDeath: 2, explosionSet: 5 });
   });
 
-  it('AP — infantryDeath=3, explosionSet=piff', () => {
-    expect(WARHEAD_PROPS.AP).toEqual({ infantryDeath: 3, explosionSet: 'piff' });
+  it('AP — infantryDeath=3, explosionSet=4', () => {
+    expect(WARHEAD_PROPS.AP).toEqual({ infantryDeath: 3, explosionSet: 4 });
   });
 
-  it('Fire — infantryDeath=4, explosionSet=napalm1', () => {
-    expect(WARHEAD_PROPS.Fire).toEqual({ infantryDeath: 4, explosionSet: 'napalm1' });
+  it('Fire — infantryDeath=4, explosionSet=3', () => {
+    expect(WARHEAD_PROPS.Fire).toEqual({ infantryDeath: 4, explosionSet: 3 });
   });
 
-  it('HollowPoint — infantryDeath=1, explosionSet=piff', () => {
-    expect(WARHEAD_PROPS.HollowPoint).toEqual({ infantryDeath: 1, explosionSet: 'piff' });
+  it('HollowPoint — infantryDeath=1, explosionSet=1', () => {
+    expect(WARHEAD_PROPS.HollowPoint).toEqual({ infantryDeath: 1, explosionSet: 1 });
   });
 
-  it('Super — infantryDeath=5, explosionSet=atomsfx', () => {
-    expect(WARHEAD_PROPS.Super).toEqual({ infantryDeath: 5, explosionSet: 'atomsfx' });
+  it('Super — infantryDeath=5, explosionSet=0', () => {
+    expect(WARHEAD_PROPS.Super).toEqual({ infantryDeath: 5, explosionSet: 0 });
   });
 
-  it('Organic — infantryDeath=0, explosionSet=piff', () => {
-    expect(WARHEAD_PROPS.Organic).toEqual({ infantryDeath: 0, explosionSet: 'piff' });
+  it('Organic — infantryDeath=0, explosionSet=0', () => {
+    expect(WARHEAD_PROPS.Organic).toEqual({ infantryDeath: 0, explosionSet: 0 });
   });
 
-  it('Nuke — infantryDeath=4, explosionSet=atomsfx', () => {
-    expect(WARHEAD_PROPS.Nuke).toEqual({ infantryDeath: 4, explosionSet: 'atomsfx' });
+  it('Nuke — infantryDeath=4, explosionSet=6', () => {
+    expect(WARHEAD_PROPS.Nuke).toEqual({ infantryDeath: 4, explosionSet: 6 });
   });
 
-  it('Mechanical — infantryDeath=0, explosionSet=piff', () => {
-    expect(WARHEAD_PROPS.Mechanical).toEqual({ infantryDeath: 0, explosionSet: 'piff' });
+  it('Mechanical — infantryDeath=0, explosionSet=0', () => {
+    expect(WARHEAD_PROPS.Mechanical).toEqual({ infantryDeath: 0, explosionSet: 0 });
   });
 });
 

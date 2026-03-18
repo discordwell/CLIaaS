@@ -191,11 +191,11 @@ describe('Fire warhead infantryDeath=4 (burn animation)', () => {
     expect(WARHEAD_PROPS.Fire.infantryDeath).toBe(4);
   });
 
-  it('WARHEAD_PROPS.Fire uses napalm1 explosion sprite', () => {
-    expect(WARHEAD_PROPS.Fire.explosionSet).toBe('napalm1');
+  it('WARHEAD_PROPS.Fire uses explosionSet=3 (C++ Fire array)', () => {
+    expect(WARHEAD_PROPS.Fire.explosionSet).toBe(3);
   });
 
-  it('infantry killed by Fire warhead gets deathVariant=1 (die2 burn animation)', () => {
+  it('infantry killed by Fire warhead gets deathVariant=4 (burn death, C++ InfDeath=4)', () => {
     const victim = new Entity(UnitType.I_E1, House.Greece, 100, 100);
     expect(victim.alive).toBe(true);
 
@@ -203,8 +203,8 @@ describe('Fire warhead infantryDeath=4 (burn animation)', () => {
     const killed = victim.takeDamage(999, 'Fire');
     expect(killed).toBe(true);
     expect(victim.alive).toBe(false);
-    // infantryDeath=4 > 0 => deathVariant=1 (die2)
-    expect(victim.deathVariant).toBe(1);
+    // infantryDeath=4 => deathVariant=4 (burn)
+    expect(victim.deathVariant).toBe(4);
   });
 
   it('E4 killing another infantry with Flamer produces burn death', () => {
@@ -215,12 +215,12 @@ describe('Fire warhead infantryDeath=4 (burn animation)', () => {
     const killed = victim.takeDamage(attacker.weapon!.damage, attacker.weapon!.warhead);
     // E1 has 50 HP, Flamer does 70 damage — should kill
     expect(killed).toBe(true);
-    expect(victim.deathVariant).toBe(1); // burn death (die2)
+    expect(victim.deathVariant).toBe(4); // burn death (C++ InfDeath=4)
   });
 
-  it('infantry killed by non-fire warhead (SA) gets deathVariant from SA props', () => {
+  it('infantry killed by non-fire warhead (SA) gets deathVariant=1 (twirl, C++ InfDeath=1)', () => {
     const victim = new Entity(UnitType.I_E1, House.Greece, 100, 100);
-    // SA infantryDeath=1 > 0 => deathVariant=1 (die2: twirl)
+    // SA infantryDeath=1 => deathVariant=1 (twirl)
     victim.takeDamage(999, 'SA');
     expect(victim.deathVariant).toBe(1);
   });
@@ -457,7 +457,7 @@ describe('E4 standard infantry behaviors', () => {
       const killed = e4.takeDamage(999, 'Fire');
       expect(killed).toBe(true);
       expect(e4.alive).toBe(false);
-      expect(e4.deathVariant).toBe(1); // die2 (burn)
+      expect(e4.deathVariant).toBe(4); // C++ InfDeath=4 (burn)
     });
   });
 
@@ -514,7 +514,7 @@ describe('E4 combined combat scenarios', () => {
     // Full Flamer hit (point-blank, no falloff): 70 damage
     const killed = e1.takeDamage(70, 'Fire');
     expect(killed).toBe(true);
-    expect(e1.deathVariant).toBe(1); // fire death
+    expect(e1.deathVariant).toBe(4); // C++ InfDeath=4 (burn)
   });
 
   it('E4 Flamer does NOT one-shot E4 (70 dmg > 40 HP — kills)', () => {

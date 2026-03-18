@@ -1709,7 +1709,8 @@ export class Renderer {
         if (c.isInfantry) {
           // Infantry: use last frame of death animation
           const anim = INFANTRY_ANIMS[c.type] ?? INFANTRY_ANIMS.E1;
-          const d = (c.deathVariant === 1 && anim.die2) ? anim.die2 : anim.die1;
+          // C++ InfantryDeath 0=die1 (instant), 1-5=die2 (twirl/explode/flying/burn/electro)
+          const d = (c.deathVariant > 0 && anim.die2) ? anim.die2 : anim.die1;
           frame = d.frame + d.count - 1;
         } else if (c.isAnt) {
           // Ants: use dedicated ANTDIE.SHP sprite if available, else fall back to in-sprite death

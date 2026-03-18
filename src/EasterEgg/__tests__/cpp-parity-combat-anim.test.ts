@@ -39,6 +39,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { WARHEAD_PROPS, type WarheadType } from '../engine/types';
+import { combatAnim } from '../engine/combat';
+import { Entity } from '../engine/entity';
+import { UnitType, House } from '../engine/types';
 
 // ========== C++ REFERENCE DATA ==========
 
@@ -68,65 +71,12 @@ const CPP_INF_DEATH: Record<string, number> = {
   Mechanical: 0,  // instant (engine default)
 };
 
-/** C++ Combat_Anim explosion animation arrays, indexed by damage-scaled fraction */
-const CPP_AP_LIST = ['veh-hit3', 'veh-hit2', 'frag1', 'fball1'];      // ExplosionSet=4, max damage 90
-const CPP_HE_LIST = ['veh-hit1', 'veh-hit2', 'art-exp1', 'fball1'];   // ExplosionSet=5, max damage 130
-const CPP_FIRE_LIST = ['napalm1', 'napalm2', 'napalm3'];              // ExplosionSet=3, max damage 150
-const CPP_WATER_LIST = ['water-exp3', 'water-exp2', 'water-exp1'];    // Water override for sets 3-5
-
-/**
- * Port of C++ Combat_Anim logic for reference/testing.
- * Returns expected sprite name for given damage, warhead, and land type.
- */
-function cppCombatAnim(damage: number, warhead: string, land: 'ground' | 'water' | 'air'): string | null {
-  if (damage === 0) return null;
-
-  const explosionSet = CPP_EXPLOSION_SET[warhead] ?? 0;
-
-  switch (explosionSet) {
-    case 6: return 'atomsfx';  // ANIM_ATOM_BLAST
-
-    case 2:
-      return damage > 15 ? 'piffpiff' : 'piff';
-
-    case 4: {  // AP frags
-      if (land === 'air') return 'flak';
-      const maxDmg = 90;
-      const idx = Math.floor((CPP_AP_LIST.length - 1) * Math.min(damage, maxDmg) / maxDmg);
-      if (land === 'water') return CPP_WATER_LIST[Math.floor((CPP_WATER_LIST.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
-      return CPP_AP_LIST[idx];
-    }
-
-    case 5: {  // HE pops
-      if (land === 'air') return 'flak';
-      const maxDmg = 130;
-      const idx = Math.floor((CPP_HE_LIST.length - 1) * Math.min(damage, maxDmg) / maxDmg);
-      if (land === 'water') return CPP_WATER_LIST[Math.floor((CPP_WATER_LIST.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
-      return CPP_HE_LIST[idx];
-    }
-
-    case 3: {  // Fire
-      if (land === 'air') return 'flak';
-      const maxDmg = 150;
-      const idx = Math.floor((CPP_FIRE_LIST.length - 1) * Math.min(damage, maxDmg) / maxDmg);
-      if (land === 'water') return CPP_WATER_LIST[Math.floor((CPP_WATER_LIST.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
-      return CPP_FIRE_LIST[idx];
-    }
-
-    case 1: return 'piff';
-
-    default: return null;
-  }
-}
-
 
 // ========== TESTS ==========
 
 describe('C++ Parity: Combat_Anim — Explosion Animation Selection', () => {
 
   describe('ExplosionSet values match C++ rules.ini', () => {
-    // The TS WARHEAD_PROPS uses string sprite names instead of integer ExplosionSet.
-    // This test documents what the C++ expects so we can verify the TS mapping.
     it.each([
       ['SA', 2],
       ['HE', 5],
@@ -138,6 +88,22 @@ describe('C++ Parity: Combat_Anim — Explosion Animation Selection', () => {
       ['Nuke', 6],
     ])('%s has ExplosionSet=%d in C++ rules.ini', (warhead, expected) => {
       expect(CPP_EXPLOSION_SET[warhead]).toBe(expected);
+    });
+  });
+
+  describe('TS WARHEAD_PROPS.explosionSet matches C++ ExplosionSet integers', () => {
+    it.each([
+      ['SA', 2],
+      ['HE', 5],
+      ['AP', 4],
+      ['Fire', 3],
+      ['HollowPoint', 1],
+      ['Super', 0],
+      ['Organic', 0],
+      ['Nuke', 6],
+      ['Mechanical', 0],
+    ])('WARHEAD_PROPS[%s].explosionSet === %d', (warhead, expected) => {
+      expect(WARHEAD_PROPS[warhead as WarheadType].explosionSet).toBe(expected);
     });
   });
 
@@ -169,260 +135,223 @@ describe('C++ Parity: Combat_Anim — Explosion Animation Selection', () => {
     });
   });
 
-  describe('ExplosionSet=2 (SA) — piff/piffpiff by damage', () => {
+  describe('combatAnim() — ExplosionSet=2 (SA) — piff/piffpiff by damage', () => {
     it('low damage (≤15) → piff', () => {
-      expect(cppCombatAnim(10, 'SA', 'ground')).toBe('piff');
-      expect(cppCombatAnim(15, 'SA', 'ground')).toBe('piff');
-      expect(cppCombatAnim(1, 'SA', 'ground')).toBe('piff');
+      expect(combatAnim(10, 2, 'ground')).toBe('piff');
+      expect(combatAnim(15, 2, 'ground')).toBe('piff');
+      expect(combatAnim(1, 2, 'ground')).toBe('piff');
     });
 
     it('high damage (>15) → piffpiff', () => {
-      expect(cppCombatAnim(16, 'SA', 'ground')).toBe('piffpiff');
-      expect(cppCombatAnim(50, 'SA', 'ground')).toBe('piffpiff');
-      expect(cppCombatAnim(100, 'SA', 'ground')).toBe('piffpiff');
+      expect(combatAnim(16, 2, 'ground')).toBe('piffpiff');
+      expect(combatAnim(50, 2, 'ground')).toBe('piffpiff');
+      expect(combatAnim(100, 2, 'ground')).toBe('piffpiff');
     });
   });
 
-  describe('ExplosionSet=5 (HE) — damage-scaled from veh-hit1 to fball1', () => {
+  describe('combatAnim() — ExplosionSet=5 (HE) — damage-scaled from veh-hit1 to fball1', () => {
     it('very low damage → veh-hit1 (small fireball)', () => {
-      expect(cppCombatAnim(1, 'HE', 'ground')).toBe('veh-hit1');
+      expect(combatAnim(1, 5, 'ground')).toBe('veh-hit1');
     });
 
     it('medium damage → veh-hit2 or art-exp1', () => {
-      // At damage ~43 (43/130 * 3 ≈ 1.0 → index 1)
-      expect(cppCombatAnim(44, 'HE', 'ground')).toBe('veh-hit2');
-      // At damage ~87 (87/130 * 3 ≈ 2.0 → index 2)
-      expect(cppCombatAnim(87, 'HE', 'ground')).toBe('art-exp1');
+      expect(combatAnim(44, 5, 'ground')).toBe('veh-hit2');
+      expect(combatAnim(87, 5, 'ground')).toBe('art-exp1');
     });
 
     it('high damage (≥130) → fball1 (large fireball)', () => {
-      expect(cppCombatAnim(130, 'HE', 'ground')).toBe('fball1');
-      expect(cppCombatAnim(200, 'HE', 'ground')).toBe('fball1');
+      expect(combatAnim(130, 5, 'ground')).toBe('fball1');
+      expect(combatAnim(200, 5, 'ground')).toBe('fball1');
     });
 
     it('grenade (damage=50) → veh-hit2 (NOT fball1)', () => {
-      // Grenade: 50 damage HE. 50/130 * 3 = 1.15 → floor = 1 → veh-hit2
-      expect(cppCombatAnim(50, 'HE', 'ground')).toBe('veh-hit2');
+      expect(combatAnim(50, 5, 'ground')).toBe('veh-hit2');
     });
 
     it('over water → water explosion variants', () => {
-      expect(cppCombatAnim(1, 'HE', 'water')).toBe('water-exp3');
-      expect(cppCombatAnim(130, 'HE', 'water')).toBe('water-exp1');
+      expect(combatAnim(1, 5, 'water')).toBe('water-exp3');
+      expect(combatAnim(130, 5, 'water')).toBe('water-exp1');
     });
 
     it('over air (LAND_NONE) → flak', () => {
-      expect(cppCombatAnim(50, 'HE', 'air')).toBe('flak');
+      expect(combatAnim(50, 5, 'air')).toBe('flak');
     });
   });
 
-  describe('ExplosionSet=4 (AP) — damage-scaled from veh-hit3 to fball1', () => {
+  describe('combatAnim() — ExplosionSet=4 (AP) — damage-scaled from veh-hit3 to fball1', () => {
     it('low damage → veh-hit3', () => {
-      expect(cppCombatAnim(1, 'AP', 'ground')).toBe('veh-hit3');
+      expect(combatAnim(1, 4, 'ground')).toBe('veh-hit3');
     });
 
     it('medium damage → frag1', () => {
-      // 60/90 * 3 = 2.0 → index 2 = frag1
-      expect(cppCombatAnim(60, 'AP', 'ground')).toBe('frag1');
+      expect(combatAnim(60, 4, 'ground')).toBe('frag1');
     });
 
     it('high damage (≥90) → fball1', () => {
-      expect(cppCombatAnim(90, 'AP', 'ground')).toBe('fball1');
-      expect(cppCombatAnim(150, 'AP', 'ground')).toBe('fball1');
+      expect(combatAnim(90, 4, 'ground')).toBe('fball1');
+      expect(combatAnim(150, 4, 'ground')).toBe('fball1');
     });
 
     it('over air → flak', () => {
-      expect(cppCombatAnim(50, 'AP', 'air')).toBe('flak');
+      expect(combatAnim(50, 4, 'air')).toBe('flak');
     });
   });
 
-  describe('ExplosionSet=3 (Fire) — damage-scaled from napalm1 to napalm3', () => {
+  describe('combatAnim() — ExplosionSet=3 (Fire) — damage-scaled from napalm1 to napalm3', () => {
     it('low damage → napalm1', () => {
-      expect(cppCombatAnim(1, 'Fire', 'ground')).toBe('napalm1');
-      expect(cppCombatAnim(25, 'Fire', 'ground')).toBe('napalm1');
+      expect(combatAnim(1, 3, 'ground')).toBe('napalm1');
+      expect(combatAnim(25, 3, 'ground')).toBe('napalm1');
     });
 
     it('medium damage → napalm2', () => {
-      // 75/150 * 2 = 1.0 → index 1 = napalm2
-      expect(cppCombatAnim(75, 'Fire', 'ground')).toBe('napalm2');
+      expect(combatAnim(75, 3, 'ground')).toBe('napalm2');
     });
 
     it('high damage (≥150) → napalm3', () => {
-      expect(cppCombatAnim(150, 'Fire', 'ground')).toBe('napalm3');
-      expect(cppCombatAnim(300, 'Fire', 'ground')).toBe('napalm3');
+      expect(combatAnim(150, 3, 'ground')).toBe('napalm3');
+      expect(combatAnim(300, 3, 'ground')).toBe('napalm3');
     });
 
     it('barrel explosion (Fire, high damage) → napalm3 (NOT fball1)', () => {
-      // Oil barrels use Fire warhead with high damage → should be napalm, not fireball
-      expect(cppCombatAnim(200, 'Fire', 'ground')).toBe('napalm3');
+      expect(combatAnim(200, 3, 'ground')).toBe('napalm3');
     });
 
     it('over air → flak', () => {
-      expect(cppCombatAnim(50, 'Fire', 'air')).toBe('flak');
+      expect(combatAnim(50, 3, 'air')).toBe('flak');
     });
   });
 
-  describe('ExplosionSet=1 (HollowPoint) — always piff', () => {
+  describe('combatAnim() — ExplosionSet=1 (HollowPoint) — always piff', () => {
     it('any damage → piff', () => {
-      expect(cppCombatAnim(1, 'HollowPoint', 'ground')).toBe('piff');
-      expect(cppCombatAnim(100, 'HollowPoint', 'ground')).toBe('piff');
+      expect(combatAnim(1, 1, 'ground')).toBe('piff');
+      expect(combatAnim(100, 1, 'ground')).toBe('piff');
     });
   });
 
-  describe('ExplosionSet=6 (Nuke) — always atom blast', () => {
+  describe('combatAnim() — ExplosionSet=6 (Nuke) — always atom blast', () => {
     it('any damage → atomsfx', () => {
-      expect(cppCombatAnim(1, 'Nuke', 'ground')).toBe('atomsfx');
-      expect(cppCombatAnim(600, 'Nuke', 'ground')).toBe('atomsfx');
+      expect(combatAnim(1, 6, 'ground')).toBe('atomsfx');
+      expect(combatAnim(600, 6, 'ground')).toBe('atomsfx');
     });
 
     it('nuke over water still → atomsfx (not water explosion)', () => {
-      expect(cppCombatAnim(600, 'Nuke', 'water')).toBe('atomsfx');
+      expect(combatAnim(600, 6, 'water')).toBe('atomsfx');
     });
   });
 
-  describe('ExplosionSet=0 (Super/Organic) — no explosion', () => {
+  describe('combatAnim() — ExplosionSet=0 (Super/Organic) — no explosion', () => {
     it('Super warhead → no explosion anim', () => {
-      expect(cppCombatAnim(100, 'Super', 'ground')).toBeNull();
+      expect(combatAnim(100, 0, 'ground')).toBeNull();
     });
 
     it('Organic warhead → no explosion anim', () => {
-      expect(cppCombatAnim(50, 'Organic', 'ground')).toBeNull();
+      expect(combatAnim(50, 0, 'ground')).toBeNull();
     });
   });
 
-  describe('Zero damage → no explosion', () => {
-    it('zero damage → null regardless of warhead', () => {
-      expect(cppCombatAnim(0, 'HE', 'ground')).toBeNull();
-      expect(cppCombatAnim(0, 'AP', 'ground')).toBeNull();
-      expect(cppCombatAnim(0, 'Fire', 'ground')).toBeNull();
+  describe('combatAnim() — Zero damage → no explosion', () => {
+    it('zero damage → null regardless of set', () => {
+      expect(combatAnim(0, 5, 'ground')).toBeNull();
+      expect(combatAnim(0, 4, 'ground')).toBeNull();
+      expect(combatAnim(0, 3, 'ground')).toBeNull();
     });
   });
 
-  describe('TS WARHEAD_PROPS.explosionSet vs C++ expected animation', () => {
-    // The TS currently stores a SINGLE sprite name per warhead.
-    // C++ selects from an ARRAY based on damage. This documents the mismatch.
-
-    it('TS SA explosionSet should map to piff/piffpiff (set 2)', () => {
-      // C++ set 2: piff for ≤15, piffpiff for >15
-      // TS currently: 'piff' (only covers low-damage case)
-      expect(WARHEAD_PROPS.SA.explosionSet).toBe('piff');
-      // C++ would use piffpiff for high-damage SA hits
-    });
-
-    it('TS HE explosionSet should map to damage-scaled array (set 5)', () => {
-      // C++ set 5: [veh-hit1, veh-hit2, art-exp1, fball1] scaled by damage/130
-      // TS currently: 'veh-hit1' (only covers the lowest-damage case)
-      expect(WARHEAD_PROPS.HE.explosionSet).toBe('veh-hit1');
-      // For a 50-damage grenade, C++ would use 'veh-hit2'
-      // For a 150-damage artillery shell, C++ would use 'fball1'
-    });
-
-    it('TS AP explosionSet should map to damage-scaled array (set 4)', () => {
-      // C++ set 4: [veh-hit3, veh-hit2, frag1, fball1] scaled by damage/90
-      // TS currently: 'piff' — WRONG, should be from AP frags array
-      expect(WARHEAD_PROPS.AP.explosionSet).toBe('piff');
-      // For a 40-damage tank shell, C++ would use 'veh-hit2'
-    });
-
-    it('TS Fire explosionSet is napalm1 (correct for low-damage fire)', () => {
-      // C++ set 3: [napalm1, napalm2, napalm3] scaled by damage/150
-      // TS currently: 'napalm1' (only covers low-damage)
-      expect(WARHEAD_PROPS.Fire.explosionSet).toBe('napalm1');
-      // Barrel explosions (high damage) should use napalm3
-    });
-
-    it('TS Nuke explosionSet is atomsfx (correct)', () => {
-      expect(WARHEAD_PROPS.Nuke.explosionSet).toBe('atomsfx');
-    });
-  });
-
-  describe('Specific weapon scenarios — expected C++ animation', () => {
+  describe('Specific weapon scenarios — combatAnim matches C++ expected animation', () => {
     it('M1Carbine (SA, dmg=15) → piff', () => {
-      expect(cppCombatAnim(15, 'SA', 'ground')).toBe('piff');
+      expect(combatAnim(15, 2, 'ground')).toBe('piff');
     });
 
     it('ChainGun (SA, dmg=25) → piffpiff', () => {
-      expect(cppCombatAnim(25, 'SA', 'ground')).toBe('piffpiff');
+      expect(combatAnim(25, 2, 'ground')).toBe('piffpiff');
     });
 
     it('Grenade (HE, dmg=50) → veh-hit2', () => {
-      expect(cppCombatAnim(50, 'HE', 'ground')).toBe('veh-hit2');
+      expect(combatAnim(50, 5, 'ground')).toBe('veh-hit2');
     });
 
     it('155mm Artillery (HE, dmg=150) → fball1', () => {
-      expect(cppCombatAnim(150, 'HE', 'ground')).toBe('fball1');
+      expect(combatAnim(150, 5, 'ground')).toBe('fball1');
     });
 
     it('90mm tank shell (AP, dmg=40) → veh-hit2', () => {
-      // 40/90 * 3 = 1.33 → floor = 1 → veh-hit2
-      expect(cppCombatAnim(40, 'AP', 'ground')).toBe('veh-hit2');
+      expect(combatAnim(40, 4, 'ground')).toBe('veh-hit2');
     });
 
-    it('120mm heavy tank (AP, dmg=50) → frag1', () => {
-      // 50/90 * 3 = 1.67 → floor = 1 → veh-hit2
-      expect(cppCombatAnim(50, 'AP', 'ground')).toBe('veh-hit2');
+    it('120mm heavy tank (AP, dmg=50) → veh-hit2', () => {
+      expect(combatAnim(50, 4, 'ground')).toBe('veh-hit2');
     });
 
     it('Flamer (Fire, dmg=70) → napalm1', () => {
-      // 70/150 * 2 = 0.93 → floor = 0 → napalm1
-      expect(cppCombatAnim(70, 'Fire', 'ground')).toBe('napalm1');
+      expect(combatAnim(70, 3, 'ground')).toBe('napalm1');
     });
 
     it('Oil barrel (Fire, dmg=high ~200) → napalm3', () => {
-      expect(cppCombatAnim(200, 'Fire', 'ground')).toBe('napalm3');
+      expect(combatAnim(200, 3, 'ground')).toBe('napalm3');
     });
 
     it('SCUD/V2 (HE, dmg=600) → fball1', () => {
-      expect(cppCombatAnim(600, 'HE', 'ground')).toBe('fball1');
+      expect(combatAnim(600, 5, 'ground')).toBe('fball1');
     });
 
     it('Nuke warhead → atomsfx', () => {
-      expect(cppCombatAnim(600, 'Nuke', 'ground')).toBe('atomsfx');
+      expect(combatAnim(600, 6, 'ground')).toBe('atomsfx');
     });
 
     it('Tesla (Super, dmg=100) → no explosion (set 0)', () => {
-      expect(cppCombatAnim(100, 'Super', 'ground')).toBeNull();
+      expect(combatAnim(100, 0, 'ground')).toBeNull();
     });
 
     it('DogJaw (HollowPoint, dmg=100) → piff', () => {
-      expect(cppCombatAnim(100, 'HollowPoint', 'ground')).toBe('piff');
+      expect(combatAnim(100, 1, 'ground')).toBe('piff');
     });
   });
 
-  describe('Infantry death animation types (C++ warhead.cpp InfantryDeath)', () => {
-    it('InfDeath=0 (instant): Organic, Mechanical → normal die', () => {
+  describe('Infantry death animation types — all 6 C++ InfantryDeath variants', () => {
+    it('InfDeath=0 (instant): Organic, Mechanical → deathVariant=0', () => {
       expect(CPP_INF_DEATH.Organic).toBe(0);
       expect(CPP_INF_DEATH.Mechanical).toBe(0);
     });
 
-    it('InfDeath=1 (twirl): SA, HollowPoint → spin and fall', () => {
+    it('InfDeath=1 (twirl): SA, HollowPoint → deathVariant=1', () => {
       expect(CPP_INF_DEATH.SA).toBe(1);
       expect(CPP_INF_DEATH.HollowPoint).toBe(1);
     });
 
-    it('InfDeath=2 (explode): HE → body parts fly (grenade/artillery)', () => {
+    it('InfDeath=2 (explode): HE → deathVariant=2', () => {
       expect(CPP_INF_DEATH.HE).toBe(2);
     });
 
-    it('InfDeath=3 (flying death): AP → knocked backward by impact', () => {
+    it('InfDeath=3 (flying death): AP → deathVariant=3', () => {
       expect(CPP_INF_DEATH.AP).toBe(3);
     });
 
-    it('InfDeath=4 (burn): Fire, Nuke → fire engulfs infantry', () => {
+    it('InfDeath=4 (burn): Fire, Nuke → deathVariant=4', () => {
       expect(CPP_INF_DEATH.Fire).toBe(4);
       expect(CPP_INF_DEATH.Nuke).toBe(4);
     });
 
-    it('InfDeath=5 (electro): Super → tesla zap death', () => {
+    it('InfDeath=5 (electro): Super → deathVariant=5', () => {
       expect(CPP_INF_DEATH.Super).toBe(5);
     });
 
-    it('TS has only 2 deathVariants (die1/die2) — C++ has 6 distinct animations', () => {
-      // This documents a known TS simplification.
-      // C++ InfDeath 0-5 maps to 6 distinct death animation sequences.
-      // TS collapses to deathVariant 0 (die1) or 1 (die2).
-      // Infantry killed by HE (explode) look the same as Fire (burn) in TS.
-      const uniqueCppDeaths = new Set(Object.values(CPP_INF_DEATH));
-      expect(uniqueCppDeaths.size).toBe(6); // 0,1,2,3,4,5
+    it('TS now stores all 6 deathVariant values (matching C++ InfantryDeath 0-5)', () => {
+      // Verify each warhead sets the correct deathVariant
+      const testCases: [string, number][] = [
+        ['Organic', 0],    // instant
+        ['SA', 1],         // twirl
+        ['HollowPoint', 1], // twirl
+        ['HE', 2],         // explode
+        ['AP', 3],         // flying
+        ['Fire', 4],       // burn
+        ['Nuke', 4],       // burn
+        ['Super', 5],      // electro
+      ];
+      for (const [warhead, expectedVariant] of testCases) {
+        const victim = new Entity(UnitType.I_E1, House.Greece, 100, 100);
+        victim.takeDamage(999, warhead);
+        expect(victim.deathVariant, `${warhead} should set deathVariant=${expectedVariant}`).toBe(expectedVariant);
+      }
     });
   });
 });

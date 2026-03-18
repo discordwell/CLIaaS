@@ -19,6 +19,7 @@ import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
 import { findPath } from './pathfinding';
 import { canTargetNaval } from './aircraft';
+import { combatAnim } from './combat';
 
 // ── Context interface ───────────────────────────────────────────────────────
 
@@ -501,18 +502,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           } as Effect);
         }
 
-        // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-        // Water terrain uses water splash sprites (C++ bullet.cpp:1032)
+        // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
         const impactCell = worldToCell(impactX, impactY);
-        const isWaterImpact = ctx.map.getTerrain(impactCell.cx, impactCell.cy) === Terrain.WATER
-          && !entity.target.isNavalUnit; // vessel targets still use normal explosions
-        let impactSprite: string;
-        if (isWaterImpact) {
-          const waterSprites = ['h2o_exp1', 'h2o_exp2', 'h2o_exp3'];
-          impactSprite = waterSprites[Math.floor(Math.random() * 3)];
-        } else {
-          impactSprite = ctx.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 'veh-hit1';
-        }
+        const impactExpSet = ctx.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 0;
+        const impactLand: 'ground' | 'water' | 'air' =
+          (entity.target.isAirUnit && entity.target.flightAltitude > 0) ? 'air' :
+          (ctx.map.getTerrain(impactCell.cx, impactCell.cy) === Terrain.WATER && !entity.target.isNavalUnit) ? 'water' : 'ground';
+        const impactSprite = combatAnim(activeWeapon.damage, impactExpSet, impactLand) ?? 'veh-hit1';
         ctx.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0,
           maxFrames: EXPLOSION_FRAMES[impactSprite] ?? 17, size: 8,
           sprite: impactSprite, spriteStart: 0 } as Effect);
@@ -1125,8 +1121,9 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
         frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
         muzzleColor: ctx.warheadMuzzleColor(entity.weapon.warhead),
       } as Effect);
-      // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-      const structImpactSprite = ctx.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
+      // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
+      const structAttackExpSet = ctx.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 0;
+      const structImpactSprite = combatAnim(entity.weapon.damage, structAttackExpSet, 'ground') ?? 'veh-hit1';
       ctx.effects.push({
         type: 'explosion', x: structPos.x, y: structPos.y,
         frame: 0, maxFrames: EXPLOSION_FRAMES[structImpactSprite] ?? 17, size: 8,
@@ -1209,8 +1206,12 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
         type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
         startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
       } as Effect);
-      // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
-      const ffImpactSprite = ctx.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 'veh-hit1';
+      // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
+      const ffExpSet = ctx.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 0;
+      const ffCell = worldToCell(impactX, impactY);
+      const ffLand: 'ground' | 'water' | 'air' =
+        (ctx.map.getTerrain(ffCell.cx, ffCell.cy) === Terrain.WATER) ? 'water' : 'ground';
+      const ffImpactSprite = combatAnim(entity.weapon.damage, ffExpSet, ffLand) ?? 'veh-hit1';
       ctx.effects.push({
         type: 'explosion', x: impactX, y: impactY,
         frame: 0, maxFrames: EXPLOSION_FRAMES[ffImpactSprite] ?? 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,

@@ -477,13 +477,13 @@ describe('SHOK infantry animation (infantry.cpp:479)', () => {
     expect(shok.animState).toBe(AnimState.IDLE);
   });
 
-  it('SHOK death via Super warhead sets deathVariant=1 (electro death, infantryDeath=5)', () => {
+  it('SHOK death via Super warhead sets deathVariant=5 (electro death, C++ InfDeath=5)', () => {
     const shok = entityAtCell(UnitType.I_SHOK, House.USSR, 10, 10);
-    // Super warhead has infantryDeath=5 (electro), which is > 0, so die2
+    // Super warhead has infantryDeath=5 (electro) => deathVariant=5
     const killed = shok.takeDamage(999, 'Super');
     expect(killed).toBe(true);
     expect(shok.alive).toBe(false);
-    expect(shok.deathVariant).toBe(1); // die2 for electro death
+    expect(shok.deathVariant).toBe(5); // C++ InfDeath=5 (electro)
   });
 });
 

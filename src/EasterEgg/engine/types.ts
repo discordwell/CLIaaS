@@ -492,22 +492,22 @@ export function getWarheadMultiplier(warhead: WarheadType, armor: ArmorType): nu
 }
 
 // Warhead properties from C++ warhead.cpp — infantryDeath selects death animation,
-// explosionSet picks the visual explosion sprite
+// explosionSet is the C++ rules.ini Explosion=N integer (0-6) selecting the animation array
 export interface WarheadProps {
   infantryDeath: number;   // rules.ini InfDeath: 0=instant, 1=twirl, 2=explode, 3=flying, 4=burn, 5=electro
-  explosionSet: string;    // sprite name for explosion effect
+  explosionSet: number;    // C++ rules.ini Explosion=N: 0=none, 1=piff, 2=SA piffs, 3=fire, 4=AP frags, 5=HE pops, 6=nuke
 }
 
 export const WARHEAD_PROPS: Record<WarheadType, WarheadProps> = {
-  SA:          { infantryDeath: 1, explosionSet: 'piff' },       // InfDeath=1 (twirl), Explosion=2 (piffs)
-  HE:          { infantryDeath: 2, explosionSet: 'veh-hit1' },   // InfDeath=2 (explode), Explosion=5 (pops)
-  AP:          { infantryDeath: 3, explosionSet: 'piff' },       // InfDeath=3 (flying), Explosion=4 (frags)
-  Fire:        { infantryDeath: 4, explosionSet: 'napalm1' },    // InfDeath=4 (burn), Explosion=3 (fire)
-  HollowPoint: { infantryDeath: 1, explosionSet: 'piff' },       // InfDeath=1 (twirl), Explosion=1 (piff)
-  Super:       { infantryDeath: 5, explosionSet: 'atomsfx' },    // InfDeath=5 (electro), no Explosion
-  Organic:     { infantryDeath: 0, explosionSet: 'piff' },       // InfDeath=0 (instant), no Explosion
-  Nuke:        { infantryDeath: 4, explosionSet: 'atomsfx' },    // InfDeath=4 (burn), Explosion=6 (nuke)
-  Mechanical:  { infantryDeath: 0, explosionSet: 'piff' },       // engine-only (not in rules.ini)
+  SA:          { infantryDeath: 1, explosionSet: 2 },  // InfDeath=1 (twirl), Explosion=2 (piff/piffpiff by damage)
+  HE:          { infantryDeath: 2, explosionSet: 5 },  // InfDeath=2 (explode), Explosion=5 (veh-hit1..fball1)
+  AP:          { infantryDeath: 3, explosionSet: 4 },  // InfDeath=3 (flying), Explosion=4 (veh-hit3..fball1)
+  Fire:        { infantryDeath: 4, explosionSet: 3 },  // InfDeath=4 (burn), Explosion=3 (napalm1..napalm3)
+  HollowPoint: { infantryDeath: 1, explosionSet: 1 },  // InfDeath=1 (twirl), Explosion=1 (always piff)
+  Super:       { infantryDeath: 5, explosionSet: 0 },  // InfDeath=5 (electro), Explosion=0 (no explosion)
+  Organic:     { infantryDeath: 0, explosionSet: 0 },  // InfDeath=0 (instant), Explosion=0 (no explosion)
+  Nuke:        { infantryDeath: 4, explosionSet: 6 },  // InfDeath=4 (burn), Explosion=6 (always atomsfx)
+  Mechanical:  { infantryDeath: 0, explosionSet: 0 },  // engine-only, Explosion=0 (no explosion)
 };
 
 /** Frame counts for explosion sprite sheets (must match manifest.json) */

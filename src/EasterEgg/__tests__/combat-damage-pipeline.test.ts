@@ -1450,7 +1450,7 @@ describe('WARHEAD_PROPS — infantry death variants', () => {
     for (const wh of warheads) {
       expect(WARHEAD_PROPS[wh], `${wh} should have WARHEAD_PROPS`).toBeDefined();
       expect(typeof WARHEAD_PROPS[wh].infantryDeath).toBe('number');
-      expect(typeof WARHEAD_PROPS[wh].explosionSet).toBe('string');
+      expect(typeof WARHEAD_PROPS[wh].explosionSet).toBe('number');
     }
   });
 });
