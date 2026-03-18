@@ -1500,18 +1500,12 @@ export class OracleStrategy {
    * Only engage enemies that cross the interception line heading south.
    */
   private decideScg08ea(state: RAGameState): OracleDecision {
-    // Delegate to generic base-building for economy/production
+    // Use generic base-building for economy/production, but handle combat ourselves.
+    // We call decideBaseBuilding which includes production + its own combat phase.
+    // The base combat is fine (it only defends), but we add interception on top.
     const basePlan = this.decideBaseBuilding(state);
     const commands = basePlan.commands;
     const reasons = [basePlan.reason];
-
-    // Override ALL combat commands — remove any attack/attack_move from base plan
-    // Keep only move, produce, place, deploy commands
-    const safeCmds = commands.filter((c) =>
-      c.cmd !== 'attack' && c.cmd !== 'attack_move',
-    );
-    commands.length = 0;
-    commands.push(...safeCmds);
 
     const playerUnits = this.playerOwnedUnits(state);
     const fighters = playerUnits.filter(
@@ -2119,64 +2113,80 @@ export class OracleStrategy {
 
     const fromPoint = this.centroid(commandable);
 
-    // 6. Smart focus fire — distribute 2-3 units per target for fast kills
-    // without overkilling. AI advantage: assign each unit individually.
-    const assignUnit = (unit: RAEntity, target: RAEntity) => {
-      commands.push({ cmd: 'attack', ids: [unit.id], target: target.id });
-      this.lastUnitTargets.set(unit.id, {
-        targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick,
-      });
+    // 6. KILL CHAIN — concentrated fire, no overkill.
+    // Assign enough units to kill each target, then move to next.
+    // Wounded enemies need fewer shots → assign fewer units.
+    // AI advantage: calculate exact assignments for 20+ units simultaneously.
+
+    // Sort all enemies by kill priority: lowest HP first (finish them fast),
+    // then nearest. Separate by type for weapon matching.
+    const allTargets = enemies.slice().sort((a, b) => {
+      // Absolute HP first — almost-dead enemies die in 1 shot
+      if (a.hp < 50 && b.hp >= 50) return -1;
+      if (b.hp < 50 && a.hp >= 50) return 1;
+      // Then HP fraction
+      const aFrac = a.hp / a.mhp;
+      const bFrac = b.hp / b.mhp;
+      if (Math.abs(aFrac - bFrac) > 0.3) return aFrac - bFrac;
+      // Then distance
+      return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
+    });
+
+    // Estimate units needed to kill each target:
+    // - Infantry: 1 unit (Tanya/JEEP one-shots, or 1-2 shots from others)
+    // - Damaged vehicle (<30% HP): 1-2 units
+    // - Hurt vehicle (30-60%): 2-3 units
+    // - Healthy vehicle: 3-4 units
+    const unitsToKill = (e: RAEntity): number => {
+      if (isInfantryByType(e.t)) return 1;
+      const frac = e.hp / e.mhp;
+      if (frac < 0.3) return 1;
+      if (frac < 0.6) return 2;
+      return 3;
     };
 
-    // Sort targets by priority (damaged first, then nearest)
-    const sortedVehicles = vehicleTargets.length > 0
-      ? vehicleTargets.slice().sort((a, b) => {
-          const aHp = a.hp / a.mhp; const bHp = b.hp / b.mhp;
-          if (aHp < 0.5 && bHp >= 0.5) return -1;
-          if (bHp < 0.5 && aHp >= 0.5) return 1;
-          return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
-        })
-      : [];
-    const sortedInfantry = infantryTargets.length > 0
-      ? infantryTargets.slice().sort((a, b) =>
-          this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint))
-      : [];
+    // Pool all commandable units, assign in priority order
+    const pool = [...antiArmor, ...general, ...antiInfantry]; // armor-killers first
+    let poolIdx = 0;
+    let targetsAssigned = 0;
 
-    // Assign anti-armor units across vehicle targets (2-3 per target)
-    if (antiArmor.length > 0) {
-      const targets = sortedVehicles.length > 0 ? sortedVehicles : sortedInfantry;
-      const unitsPerTarget = Math.max(2, Math.ceil(antiArmor.length / Math.max(targets.length, 1)));
-      let ti = 0;
-      for (const unit of antiArmor) {
-        const target = targets[ti % targets.length];
-        assignUnit(unit, target);
-        if ((antiArmor.indexOf(unit) + 1) % unitsPerTarget === 0) ti++;
-      }
-      reasons.push(`micro:aa ${antiArmor.length}→${Math.min(targets.length, Math.ceil(antiArmor.length / unitsPerTarget))} targets`);
-    }
+    for (const target of allTargets) {
+      if (poolIdx >= pool.length) break;
+      const needed = unitsToKill(target);
+      const assigned: RAEntity[] = [];
 
-    // Assign anti-infantry across infantry targets (1-2 per target, Tanya one-shots)
-    if (antiInfantry.length > 0) {
-      const targets = sortedInfantry.length > 0 ? sortedInfantry : sortedVehicles;
-      const unitsPerTarget = Math.max(1, Math.ceil(antiInfantry.length / Math.max(targets.length, 1)));
-      let ti = 0;
-      for (const unit of antiInfantry) {
-        const target = targets[ti % targets.length];
-        assignUnit(unit, target);
-        if ((antiInfantry.indexOf(unit) + 1) % unitsPerTarget === 0) ti++;
-      }
-      reasons.push(`micro:ai ${antiInfantry.length}→${Math.min(targets.length, Math.ceil(antiInfantry.length / unitsPerTarget))} targets`);
-    }
-
-    // General/unassigned → distribute across priority targets
-    if (general.length > 0) {
-      const targets = sortedVehicles.length > 0 ? sortedVehicles : sortedInfantry;
-      if (targets.length > 0) {
-        for (let i = 0; i < general.length; i++) {
-          assignUnit(general[i], targets[i % targets.length]);
+      // Prefer matching weapon type
+      for (let i = poolIdx; i < pool.length && assigned.length < needed; i++) {
+        const u = pool[i];
+        const isMatch = isInfantryByType(target.t)
+          ? (UNIT_ROLES[u.t] === 'anti_infantry')
+          : (UNIT_ROLES[u.t] === 'anti_armor');
+        if (isMatch || assigned.length < needed) {
+          assigned.push(u);
         }
-        reasons.push(`micro:gen ${general.length}→${Math.min(targets.length, general.length)} targets`);
       }
+
+      // Assign all to this target
+      if (assigned.length > 0) {
+        commands.push({
+          cmd: 'attack',
+          ids: assigned.map((u) => u.id),
+          target: target.id,
+        });
+        for (const u of assigned) {
+          this.lastUnitTargets.set(u.id, {
+            targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick,
+          });
+          // Remove from pool
+          const idx = pool.indexOf(u);
+          if (idx >= 0) pool.splice(idx, 1);
+        }
+        targetsAssigned++;
+      }
+    }
+
+    if (targetsAssigned > 0) {
+      reasons.push(`micro:kill-chain ${commandable.length}→${targetsAssigned} targets`);
     }
 
     return { commands, reasons };
