@@ -221,14 +221,14 @@ describe('pickupCrate', () => {
     expect(ctx.evaMessages.some(m => m.text === 'FIREPOWER UPGRADE')).toBe(true);
   });
 
-  it('SPEED crate sets speedBias to 1.5', () => {
+  it('SPEED crate sets speedBias to 1.7 (C++ RULES.INI Speed=10,SPEED,1.7)', () => {
     const ctx = makeCrateCtx();
     const crate = makeCrate('speed');
     const unit = new Entity(UnitType.V_JEEP, House.Greece, 500, 500);
     expect(unit.speedBias).toBe(1.0); // default
 
     pickupCrate(ctx, crate, unit);
-    expect(unit.speedBias).toBe(1.5);
+    expect(unit.speedBias).toBe(1.7);
     expect(ctx.evaMessages.some(m => m.text === 'SPEED UPGRADE')).toBe(true);
   });
 
@@ -377,13 +377,14 @@ describe('pickupCrate', () => {
     expect(ctx.evaMessages.some(m => m.text === 'TIME QUAKE')).toBe(true);
   });
 
-  it('all pickups play crate_pickup sound and add piffpiff effect', () => {
+  it('all pickups play crate_pickup sound and add type-specific effect (C++ CRATE_ANIM_MAP)', () => {
     const ctx = makeCrateCtx();
     const crate = makeCrate('money', 500, 500);
     const unit = new Entity(UnitType.V_JEEP, House.Greece, 500, 500);
 
     pickupCrate(ctx, crate, unit);
     expect(ctx.playSoundAt).toHaveBeenCalledWith('crate_pickup', 500, 500);
-    expect(ctx.effects.some(e => e.sprite === 'piffpiff')).toBe(true);
+    // C++ uses per-crate animation sprites (e.g., money→'dollar'), not generic 'piffpiff'
+    expect(ctx.effects.some(e => e.sprite === 'dollar')).toBe(true);
   });
 });
