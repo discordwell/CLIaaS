@@ -588,10 +588,11 @@ describe('C++ Take_Damage fire spawning (building.cpp:1391-1434)', () => {
 
   function getFireDistribution(width: number, height: number) {
     const maxRoll = 5 + width + height;
+    // Count how many outcomes fall in each case range, clamped to maxRoll
     const noFire = 1; // case 0
-    const small = 5;  // cases 1-5
-    const med = 3;    // cases 6-8
-    const big = 1;    // case 9
+    const small = Math.min(5, maxRoll); // cases 1-5, clamped
+    const med = Math.max(0, Math.min(8, maxRoll) - 5); // cases 6-8, clamped
+    const big = maxRoll >= 9 ? 1 : 0; // case 9
 
     // Rolls above 9 produce no fire (default case)
     const extraNoFire = Math.max(0, maxRoll - 9);
@@ -600,7 +601,7 @@ describe('C++ Take_Damage fire spawning (building.cpp:1391-1434)', () => {
       totalOutcomes: maxRoll + 1,
       smallChance: small / (maxRoll + 1),
       medChance: med / (maxRoll + 1),
-      bigChance: maxRoll >= 9 ? big / (maxRoll + 1) : 0,
+      bigChance: big / (maxRoll + 1),
       noFireChance: (noFire + extraNoFire) / (maxRoll + 1),
     };
   }
