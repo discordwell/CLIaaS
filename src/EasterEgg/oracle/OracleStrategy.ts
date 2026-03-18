@@ -1995,6 +1995,7 @@ export class OracleStrategy {
     }
 
     // 3. Idle-aware filter — only re-command units that need new orders
+    // AI advantage: instant retargeting when enemies die — no wasted shots.
     const commandable = healthy.filter(
       (u) => !scatteredIds.has(u.id) && this.shouldRecommand(u, enemies),
     );
@@ -2003,7 +2004,7 @@ export class OracleStrategy {
       return { commands, reasons };
     }
 
-    // 4. Classify commandable units by role
+    // 5. Classify commandable units by role
     const antiInfantry: RAEntity[] = [];
     const antiArmor: RAEntity[] = [];
     const general: RAEntity[] = [];
@@ -2021,55 +2022,63 @@ export class OracleStrategy {
 
     const fromPoint = this.centroid(commandable);
 
-    // 6. Weapon-type matching + focus fire
-    // Anti-infantry → priority infantry target (fallback to vehicles)
-    if (antiInfantry.length > 0) {
-      const targets = infantryTargets.length > 0 ? infantryTargets : vehicleTargets;
-      if (targets.length > 0) {
-        const target = this.pickPriorityTarget(targets, fromPoint);
-        commands.push({
-          cmd: 'attack',
-          ids: antiInfantry.map((u) => u.id),
-          target: target.id,
-        });
-        reasons.push(`micro:ai ${antiInfantry.length}→${target.t}#${target.id}`);
-        for (const u of antiInfantry) {
-          this.lastUnitTargets.set(u.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick });
-        }
-      }
-    }
+    // 6. Smart focus fire — distribute 2-3 units per target for fast kills
+    // without overkilling. AI advantage: assign each unit individually.
+    const assignUnit = (unit: RAEntity, target: RAEntity) => {
+      commands.push({ cmd: 'attack', ids: [unit.id], target: target.id });
+      this.lastUnitTargets.set(unit.id, {
+        targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick,
+      });
+    };
 
-    // Anti-armor → priority vehicle target (fallback to infantry)
+    // Sort targets by priority (damaged first, then nearest)
+    const sortedVehicles = vehicleTargets.length > 0
+      ? vehicleTargets.slice().sort((a, b) => {
+          const aHp = a.hp / a.mhp; const bHp = b.hp / b.mhp;
+          if (aHp < 0.5 && bHp >= 0.5) return -1;
+          if (bHp < 0.5 && aHp >= 0.5) return 1;
+          return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
+        })
+      : [];
+    const sortedInfantry = infantryTargets.length > 0
+      ? infantryTargets.slice().sort((a, b) =>
+          this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint))
+      : [];
+
+    // Assign anti-armor units across vehicle targets (2-3 per target)
     if (antiArmor.length > 0) {
-      const targets = vehicleTargets.length > 0 ? vehicleTargets : infantryTargets;
-      if (targets.length > 0) {
-        const target = this.pickPriorityTarget(targets, fromPoint);
-        commands.push({
-          cmd: 'attack',
-          ids: antiArmor.map((u) => u.id),
-          target: target.id,
-        });
-        reasons.push(`micro:aa ${antiArmor.length}→${target.t}#${target.id}`);
-        for (const u of antiArmor) {
-          this.lastUnitTargets.set(u.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick });
-        }
+      const targets = sortedVehicles.length > 0 ? sortedVehicles : sortedInfantry;
+      const unitsPerTarget = Math.max(2, Math.ceil(antiArmor.length / Math.max(targets.length, 1)));
+      let ti = 0;
+      for (const unit of antiArmor) {
+        const target = targets[ti % targets.length];
+        assignUnit(unit, target);
+        if ((antiArmor.indexOf(unit) + 1) % unitsPerTarget === 0) ti++;
       }
+      reasons.push(`micro:aa ${antiArmor.length}→${Math.min(targets.length, Math.ceil(antiArmor.length / unitsPerTarget))} targets`);
     }
 
-    // General/unassigned → biggest remaining threat (prefer vehicles)
+    // Assign anti-infantry across infantry targets (1-2 per target, Tanya one-shots)
+    if (antiInfantry.length > 0) {
+      const targets = sortedInfantry.length > 0 ? sortedInfantry : sortedVehicles;
+      const unitsPerTarget = Math.max(1, Math.ceil(antiInfantry.length / Math.max(targets.length, 1)));
+      let ti = 0;
+      for (const unit of antiInfantry) {
+        const target = targets[ti % targets.length];
+        assignUnit(unit, target);
+        if ((antiInfantry.indexOf(unit) + 1) % unitsPerTarget === 0) ti++;
+      }
+      reasons.push(`micro:ai ${antiInfantry.length}→${Math.min(targets.length, Math.ceil(antiInfantry.length / unitsPerTarget))} targets`);
+    }
+
+    // General/unassigned → distribute across priority targets
     if (general.length > 0) {
-      const targets = vehicleTargets.length > 0 ? vehicleTargets : infantryTargets;
+      const targets = sortedVehicles.length > 0 ? sortedVehicles : sortedInfantry;
       if (targets.length > 0) {
-        const target = this.pickPriorityTarget(targets, fromPoint);
-        commands.push({
-          cmd: 'attack',
-          ids: general.map((u) => u.id),
-          target: target.id,
-        });
-        reasons.push(`micro:gen ${general.length}→${target.t}#${target.id}`);
-        for (const u of general) {
-          this.lastUnitTargets.set(u.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick });
+        for (let i = 0; i < general.length; i++) {
+          assignUnit(general[i], targets[i % targets.length]);
         }
+        reasons.push(`micro:gen ${general.length}→${Math.min(targets.length, general.length)} targets`);
       }
     }
 
