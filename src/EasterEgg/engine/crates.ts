@@ -43,6 +43,32 @@ export const CRATE_NAME_MAP: Record<string, CrateType> = {
   timequake: 'timequake', vortex: 'vortex',
 };
 
+/**
+ * Crate type → animation sprite mapping (C++ CrateAnims[], populated from RULES.INI [Powerups]).
+ * Each entry's second field in RULES.INI specifies the animation sprite name.
+ * null/undefined means ANIM_NONE (no crate-specific animation).
+ *
+ * C++ refs: const.cpp:402-421 (defaults), rules.cpp:801 (RULES.INI override),
+ *           cell.cpp:2319-2321 (animation trigger on pickup)
+ * RULES.INI: public/ra/assets/rules.ini:2819-2836
+ */
+export const CRATE_ANIM_MAP: Partial<Record<CrateType, string>> = {
+  money:            'dollar',    // RULES.INI Money=50,DOLLAR,2000
+  armor:            'armor',     // RULES.INI Armor=10,ARMOR,2.0
+  speed:            'speed',     // RULES.INI Speed=10,SPEED,1.7
+  firepower:        'fpower',    // RULES.INI Firepower=10,FPOWER,2.0
+  cloak:            'stealth2',  // RULES.INI Cloak=0,STEALTH2
+  darkness:         'empulse',   // RULES.INI Darkness=1,EMPULSE
+  reveal:           'earth',     // RULES.INI Reveal=1,EARTH
+  heal_base:        'invun',     // RULES.INI HealBase=1,INVUN
+  sonar:            'sonarbox',  // RULES.INI Sonar=3,SONARBOX
+  icbm:             'missile2',  // RULES.INI ICBM=1,MISSILE2
+  timequake:        'tquake',    // RULES.INI TimeQuake=3,TQUAKE
+  invulnerability:  'invulbox',  // RULES.INI Invulnerability=3,INVULBOX,1.0
+  parabomb:         'parabox',   // RULES.INI ParaBomb=3,PARABOX
+  // unit, explosion, napalm, squad, heal, vortex → ANIM_NONE (no crate animation)
+};
+
 /** CR9: Weighted crate share distribution (C++ CrateShares from rules.ini) */
 export const CRATE_SHARES: Array<{ type: CrateType; shares: number }> = [
   { type: 'money', shares: 50 },
@@ -137,9 +163,12 @@ export function spawnCrate(ctx: CrateContext): void {
 /** Apply crate bonus to the unit that picked it up */
 export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void {
   ctx.playSoundAt('crate_pickup', crate.x, crate.y);
+  // C++ cell.cpp:2319-2321: CrateAnims[powerup] — type-specific animation at pickup location
+  // Falls back to generic piffpiff if no crate-specific animation defined (ANIM_NONE)
+  const crateSprite = CRATE_ANIM_MAP[crate.type];
   ctx.effects.push({
     type: 'explosion', x: crate.x, y: crate.y,
-    frame: 0, maxFrames: 10, size: 8, sprite: 'piffpiff', spriteStart: 0,
+    frame: 0, maxFrames: 10, size: 8, sprite: crateSprite ?? 'piffpiff', spriteStart: 0,
   });
   switch (crate.type) {
     case 'money':
@@ -178,8 +207,9 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       ctx.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: ctx.tick });
       break;
     case 'speed':
-      // CR7: 1.5× speed boost — C++ rules.cpp SpeedBias=1.5 (verified)
-      unit.speedBias = 1.5;
+      // CR7: 1.7× speed boost — C++ RULES.INI Speed=10,SPEED,1.7
+      // cell.cpp:2572: val = SpeedBias * fixed(CrateData[powerup], 256) = 1.0 * 1.7
+      unit.speedBias = 1.7;
       ctx.evaMessages.push({ text: 'SPEED UPGRADE', tick: ctx.tick });
       break;
     case 'reveal':
