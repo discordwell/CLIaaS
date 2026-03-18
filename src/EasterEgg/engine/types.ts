@@ -514,9 +514,13 @@ export const WARHEAD_PROPS: Record<WarheadType, WarheadProps> = {
 export const EXPLOSION_FRAMES: Record<string, number> = {
   piff: 4, piffpiff: 8, fball1: 18,
   'veh-hit1': 17, 'veh-hit2': 22, 'veh-hit3': 14,
+  frag1: 15,  // C++ FRAG1.SHP — medium fragment explosion (adata.cpp:594, Stages=-1)
   napalm1: 14, napalm2: 14, napalm3: 14,
   atomsfx: 27, 'art-exp1': 22,
+  flak: 8,    // C++ FLAK.SHP — anti-air burst (adata.cpp:1873, Stages=-1)
   'h2o_exp1': 14, 'h2o_exp2': 14, 'h2o_exp3': 14,
+  // Aliases: combatAnim() returns water-exp* names (matching C++ WATER_LIST naming)
+  'water-exp1': 14, 'water-exp2': 14, 'water-exp3': 14,
 };
 
 export interface WeaponStats {
