@@ -221,6 +221,8 @@ export class OracleStrategy {
       result = this.decideScg02ea(state);
     } else if (this.scenario === 'SCG03EA') {
       result = this.decideScg03ea(state);
+    } else if (this.scenario === 'SCG08EA') {
+      result = this.decideScg08ea(state);
     } else {
       result = this.decideGeneric(state);
     }
@@ -228,12 +230,11 @@ export class OracleStrategy {
     return result;
   }
 
-  // SCG08EA critical structures — lose if either is destroyed
-  // Human-requested design element: ATEK at (58,95), PDOX at (58,102)
-  private static readonly SCG08EA_CRITICAL: Point[] = [
-    { cx: 58, cy: 95 },   // ATEK (Allied Tech Center)
-    { cx: 58, cy: 102 },  // PDOX (Chronosphere)
-  ];
+  // SCG08EA: Never attack first — the HUNT trigger makes all enemies rush
+  // the ATEK/PDOX if provoked. Defend only.
+  private static readonly SCG08EA_INTERCEPT: Point = { cx: 58, cy: 80 };
+  // Missions that should NEVER initiate attacks (defense/survival only)
+  private static readonly DEFENSE_ONLY_MISSIONS = new Set(['SCG08EA']);
 
   checkResult(state: RAGameState): OracleResult {
     if (state.winPending) {
@@ -629,33 +630,49 @@ export class OracleStrategy {
     // --- Phase 3.5: MINELAYER DEFENSE ---
     this.dispatchMinelayers(playerUnits, conYard, commands, reasons);
 
-    // --- Phase 3.75: CRITICAL STRUCTURE GUARD (mission-specific) ---
-    // SCG08EA: always keep 3+ units near ATEK and PDOX — lose if destroyed
+    // --- Phase 3.75: M8 INTERCEPTION (mission-specific) ---
+    // SCG08EA: Enemy base is ~(65,60), ATEK at (58,95), PDOX at (58,102).
+    // Enemies sneak south to destroy critical buildings. We need an
+    // interception line at y≈80 between enemy base and critical structures.
+    // Station 40% of combat force on the intercept line, engage anything
+    // heading south. The rest defends the main base normally.
     if (this.scenario === 'SCG08EA') {
-      const critGuards = playerUnits.filter(
-        (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) && u.hp / u.mhp >= 0.5,
+      const interceptLine: Point = { cx: 58, cy: 80 }; // between enemy base and ATEK
+      const interceptRadius = 400; // 20 cells
+      const allCombat = playerUnits.filter(
+        (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) && u.hp > 0,
       );
-      for (const critPoint of OracleStrategy.SCG08EA_CRITICAL) {
-        const nearCrit = critGuards.filter((u) => this.distanceSq(u, critPoint) <= 100);
-        const critThreats = state.enemies.filter((e) => this.distanceSq(e, critPoint) <= 225);
-        if (critThreats.length > 0 && nearCrit.length > 0) {
-          const micro = this.microManage(nearCrit, critThreats, critPoint);
-          commands.push(...micro.commands);
-          reasons.push(`guard critical (${critThreats.length} threats)`);
-        } else if (nearCrit.length < 3 && critGuards.length > 6) {
-          // Station more guards near critical structure
-          const farUnits = critGuards
-            .filter((u) => this.distanceSq(u, critPoint) > 100)
-            .slice(0, 3 - nearCrit.length);
-          if (farUnits.length > 0) {
-            commands.push({
-              cmd: 'move',
-              ids: farUnits.map((u) => u.id),
-              cx: critPoint.cx,
-              cy: critPoint.cy,
-            });
-            reasons.push(`station ${farUnits.length} near critical`);
-          }
+      // Enemies heading toward critical structures (south of y=70)
+      const southernThreats = state.enemies.filter(
+        (e) => e.cy > 70 || this.distanceSq(e, interceptLine) <= interceptRadius,
+      );
+      // Station interceptors
+      const interceptorCount = Math.max(4, Math.floor(allCombat.length * 0.4));
+      const nearIntercept = allCombat.filter(
+        (u) => this.distanceSq(u, interceptLine) <= interceptRadius,
+      );
+
+      if (southernThreats.length > 0 && nearIntercept.length > 0) {
+        // Engage threats heading south
+        const micro = this.microManage(nearIntercept, southernThreats, interceptLine);
+        commands.push(...micro.commands);
+        reasons.push(`intercept ${southernThreats.length} south (${nearIntercept.length} defenders)`);
+        reasons.push(...micro.reasons);
+      }
+
+      // Send more units to intercept line if under-manned (only idle ones)
+      if (nearIntercept.length < interceptorCount) {
+        const reinforcements = allCombat
+          .filter((u) => this.distanceSq(u, interceptLine) > interceptRadius && this.isIdle(u))
+          .slice(0, interceptorCount - nearIntercept.length);
+        if (reinforcements.length > 0) {
+          commands.push({
+            cmd: 'move',
+            ids: reinforcements.map((u) => u.id),
+            cx: interceptLine.cx,
+            cy: interceptLine.cy,
+          });
+          reasons.push(`reinforce intercept (${reinforcements.length})`);
         }
       }
     }
@@ -783,7 +800,8 @@ export class OracleStrategy {
         const enemyStr = state.enemies.reduce(
           (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
         );
-        const shouldAttack = !isTimedSurvival && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
+        const defenseOnly = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
+        const shouldAttack = !isTimedSurvival && !defenseOnly && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
 
         if (shouldAttack && state.enemies.length > 0) {
           const defenderCount = Math.max(3, Math.floor(fighters.length / 2));
@@ -920,7 +938,8 @@ export class OracleStrategy {
         (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
       );
 
-      if (friendlyStr > enemyStr * 1.5) {
+      const defenseOnly = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
+      if (!defenseOnly && friendlyStr > enemyStr * 1.5) {
         // Strong enough — attack with micro-management
         const rallyPoint = alliedStructures.length > 0
           ? this.findBase(alliedStructures) as Point
@@ -1474,6 +1493,84 @@ export class OracleStrategy {
    * SCG03EA "Dead End": Destroy two bridges with Tanya while keeping her alive.
    * ARTY provides fire support, medics heal Tanya.
    */
+  /**
+   * SCG08EA "Chronoshift": Pure defense — survive 45 minutes.
+   * NEVER attack first (triggers HUNT response → enemies rush ATEK/PDOX).
+   * Station interceptors between enemy base and critical buildings.
+   * Only engage enemies that cross the interception line heading south.
+   */
+  private decideScg08ea(state: RAGameState): OracleDecision {
+    // Delegate to generic base-building for economy/production
+    const basePlan = this.decideBaseBuilding(state);
+    const commands = basePlan.commands;
+    const reasons = [basePlan.reason];
+
+    // Override ALL combat commands — remove any attack/attack_move from base plan
+    // Keep only move, produce, place, deploy commands
+    const safeCmds = commands.filter((c) =>
+      c.cmd !== 'attack' && c.cmd !== 'attack_move',
+    );
+    commands.length = 0;
+    commands.push(...safeCmds);
+
+    const playerUnits = this.playerOwnedUnits(state);
+    const fighters = playerUnits.filter(
+      (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) && u.hp > 0,
+    );
+
+    // Interception zone: y > 75 (between enemy base at y≈60 and ATEK at y=95)
+    const interceptLine = OracleStrategy.SCG08EA_INTERCEPT;
+    const southernThreats = state.enemies.filter((e) => e.cy > 75);
+    const criticalThreats = state.enemies.filter(
+      (e) => e.cy > 88, // very close to ATEK/PDOX
+    );
+
+    // Priority 1: engage anything near critical structures
+    if (criticalThreats.length > 0) {
+      const nearCrit = fighters.filter((u) => u.cy > 70);
+      if (nearCrit.length > 0) {
+        const micro = this.microManage(nearCrit, criticalThreats, interceptLine);
+        commands.push(...micro.commands);
+        reasons.push(`CRITICAL ${criticalThreats.length} near ATEK/PDOX`);
+      }
+    }
+
+    // Priority 2: intercept enemies crossing the line
+    if (southernThreats.length > 0) {
+      const interceptors = fighters.filter(
+        (u) => this.distanceSq(u, interceptLine) <= 625, // within 25 cells
+      );
+      if (interceptors.length > 0) {
+        const idle = interceptors.filter((u) => this.isIdle(u));
+        if (idle.length > 0) {
+          const micro = this.microManage(idle, southernThreats, interceptLine);
+          commands.push(...micro.commands);
+        }
+        reasons.push(`intercept ${southernThreats.length} threats (${interceptors.length} on line)`);
+      }
+    }
+
+    // Priority 3: move units to intercept position (only idle, no stutter)
+    const onLine = fighters.filter((u) => u.cy > 70 && u.cy < 90);
+    const needed = Math.max(6, Math.floor(fighters.length * 0.5));
+    if (onLine.length < needed) {
+      const reinforce = fighters
+        .filter((u) => (u.cy <= 70 || u.cy >= 90) && this.isIdle(u))
+        .slice(0, needed - onLine.length);
+      if (reinforce.length > 0) {
+        commands.push({
+          cmd: 'move',
+          ids: reinforce.map((u) => u.id),
+          cx: interceptLine.cx,
+          cy: interceptLine.cy,
+        });
+        reasons.push(`reinforce line (${reinforce.length}→${onLine.length + reinforce.length}/${needed})`);
+      }
+    }
+
+    return { commands, reason: reasons.join('; ') };
+  }
+
   private decideScg03ea(state: RAGameState): OracleDecision {
     const commands: Array<Record<string, unknown>> = [];
     const reasons: string[] = [];
