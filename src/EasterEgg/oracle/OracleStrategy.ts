@@ -673,33 +673,42 @@ export class OracleStrategy {
       (e) => alliedStructures.some((s) => this.distanceSq(e, s) <= 400),
     );
 
-    // Retreat injured to base
-    const injured = combatUnits.filter(
-      (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
+    // Injured units: don't retreat mid-combat — they still fight.
+    // Only pull back critically wounded idle units (< 15% HP).
+    // Everyone else stays in the fight.
+    const critical = combatUnits.filter(
+      (u) => u.hp / u.mhp < 0.15 && u.hp > 0 && this.isIdle(u),
     );
     const healthy = combatUnits.filter(
       (u) => u.hp / u.mhp >= RETREAT_HP_FRACTION,
     );
-    if (injured.length > 0) {
+    const walking_wounded = combatUnits.filter(
+      (u) => u.hp / u.mhp >= 0.15 && u.hp / u.mhp < RETREAT_HP_FRACTION,
+    );
+    // Critical units retreat
+    if (critical.length > 0) {
       commands.push({
         cmd: 'move',
-        ids: injured.map((u) => u.id),
+        ids: critical.map((u) => u.id),
         cx: baseCenter.cx,
         cy: baseCenter.cy,
       });
-      reasons.push(`retreat ${injured.length} injured`);
+      reasons.push(`retreat ${critical.length} critical`);
     }
 
-    if (healthy.length > 0) {
+    // Fighting force = healthy + walking wounded (everyone except critical)
+    const fighters = [...healthy, ...walking_wounded];
+
+    if (fighters.length > 0) {
       // DEFEND FIRST: if base is threatened, send units to deal with threats
       if (baseThreats.length > 0) {
         // How many defenders do we need? Match the threat + buffer
         const threatStr = baseThreats.reduce(
           (s, e) => s + (e.t.includes('TNK') ? 3 : 1), 0,
         );
-        const defendersNeeded = Math.min(healthy.length, Math.ceil(threatStr * 1.5));
-        const defenders = healthy.slice(0, defendersNeeded);
-        const surplus = healthy.slice(defendersNeeded);
+        const defendersNeeded = Math.min(fighters.length, Math.ceil(threatStr * 1.5));
+        const defenders = fighters.slice(0, defendersNeeded);
+        const surplus = fighters.slice(defendersNeeded);
 
         // Defenders engage base threats — only command idle/guard units to avoid
         // stuttering from re-commanding units already mid-attack
@@ -747,10 +756,10 @@ export class OracleStrategy {
         // No base threats — check for unit-proximity engagement first
         // Units should engage enemies near them regardless of full attack threshold
         const unitThreats = state.enemies.filter(
-          (e) => healthy.some((u) => this.distanceSq(u, e) <= 225), // 15 cells
+          (e) => fighters.some((u) => this.distanceSq(u, e) <= 225), // 15 cells
         );
-        if (unitThreats.length > 0 && healthy.length >= 3) {
-          const idleHealthy = healthy.filter((u) => this.isIdle(u));
+        if (unitThreats.length > 0 && fighters.length >= 3) {
+          const idleHealthy = fighters.filter((u) => this.isIdle(u));
           if (idleHealthy.length > 0) {
             const micro = this.microManage(idleHealthy, unitThreats, baseCenter);
             commands.push(...micro.commands);
@@ -761,8 +770,8 @@ export class OracleStrategy {
         // No base threats, no unit threats — decide: attack or turtle?
         // If there's a mission timer counting down, this is a survival mission — turtle.
         const isTimedSurvival = state.missionTimerActive && state.missionTimer > 0;
-        const tankCount = healthy.filter((u) => u.t.includes('TNK')).length;
-        const friendlyStr = healthy.reduce(
+        const tankCount = fighters.filter((u) => u.t.includes('TNK')).length;
+        const friendlyStr = fighters.reduce(
           (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
         );
         const enemyStr = state.enemies.reduce(
@@ -771,9 +780,9 @@ export class OracleStrategy {
         const shouldAttack = !isTimedSurvival && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
 
         if (shouldAttack && state.enemies.length > 0) {
-          const defenderCount = Math.max(3, Math.floor(healthy.length / 2));
-          const defenders = healthy.slice(0, defenderCount);
-          const attackers = healthy.slice(defenderCount);
+          const defenderCount = Math.max(3, Math.floor(fighters.length / 2));
+          const defenders = fighters.slice(0, defenderCount);
+          const attackers = fighters.slice(defenderCount);
           const leashSq2 = 900; // 30 cells from base
 
           // Defenders patrol near base (only re-command idle ones)
@@ -1948,15 +1957,21 @@ export class OracleStrategy {
       }
     }
 
-    if (retreating.length > 0) {
+    // Only retreat critically wounded (<15% HP) idle units.
+    // Walking wounded (15-30%) stay and fight.
+    const critical = retreating.filter((u) => u.hp / u.mhp < 0.15 && this.isIdle(u));
+    if (critical.length > 0) {
       commands.push({
         cmd: 'move',
-        ids: retreating.map((u) => u.id),
+        ids: critical.map((u) => u.id),
         cx: rallyPoint.cx,
         cy: rallyPoint.cy,
       });
-      reasons.push(`micro:retreat ${retreating.length}`);
+      reasons.push(`micro:retreat ${critical.length} critical`);
     }
+    // Walking wounded rejoin the fight
+    const wounded = retreating.filter((u) => u.hp / u.mhp >= 0.15);
+    healthy.push(...wounded);
 
     if (healthy.length === 0) {
       return { commands, reasons };
