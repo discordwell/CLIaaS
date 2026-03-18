@@ -46,10 +46,11 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },            // STRUCT_POWER — always first
   { names: ['PROC'],         type_ids: [12] },            // STRUCT_REFINERY — WEAP prerequisite
   { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
-  { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks — before 2nd refinery
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income ASAP
+  { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks — after economy is running
   { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },         // Base defense
-  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power — no cap (after core infra)
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery — sustain heavy production
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power — no cap
 ];
 
 // Tank preference order (best to worst — covers both Allied and Soviet)
@@ -554,16 +555,17 @@ export class OracleStrategy {
       (this.baseBuildIndex < BUILD_ORDER.length && !hasWarFactory);
     const minCreditsForInfantry = savingForBuilding ? 1500 : 300;
 
-    // Produce units from War Factory — priority: harvester replacement > tanks
+    // Produce units from War Factory — priority: harvesters > tanks
+    // Aim for at least 2 harvesters, or 1 per refinery, whichever is more
     const tankCount = playerUnits.filter((u) => u.t.includes('TNK')).length;
     const harvCount = playerUnits.filter((u) => u.t === 'HARV').length;
     const refCount = alliedStructures.filter((s) => s.t === 'PROC').length;
-    // Only replace harvesters when we have other units (PROC auto-spawns a free HARV)
-    const needHarvester = harvCount < refCount && playerUnits.length > 0 && buildable?.units.includes('HARV');
+    const targetHarvesters = Math.max(2, refCount);
+    const needHarvester = harvCount < targetHarvesters && buildable?.units.includes('HARV');
 
     if (hasWarFactory && !unitProduction && buildable) {
-      if (needHarvester && state.credits > 600) {
-        // Replace lost harvester — economy dies without it
+      if (needHarvester && (harvCount === 0 || state.credits > 1200)) {
+        // Build harvesters — emergency if 0, proactive otherwise
         const harvTypeId = this.unitNameToTypeId('HARV');
         if (harvTypeId >= 0) {
           commands.push({
@@ -571,9 +573,9 @@ export class OracleStrategy {
             rtti: RTTI_UNITTYPE,
             type_id: harvTypeId,
           });
-          reasons.push('produce HARV (replacement)');
+          reasons.push(`produce HARV (${harvCount}/${targetHarvesters})`);
         }
-      } else {
+      } else if (!needHarvester || state.credits > 600) {
         // Tank production — first few tanks are critical, lower credit threshold
         const tankCreditThreshold = tankCount < 3 ? 400 : 700;
         if (state.credits > tankCreditThreshold) {
@@ -673,27 +675,29 @@ export class OracleStrategy {
       (e) => alliedStructures.some((s) => this.distanceSq(e, s) <= 400),
     );
 
-    // Injured units: don't retreat mid-combat — they still fight.
-    // Only pull back critically wounded idle units (< 15% HP).
-    // Everyone else stays in the fight.
-    const critical = combatUnits.filter(
-      (u) => u.hp / u.mhp < 0.15 && u.hp > 0 && this.isIdle(u),
-    );
+    // Retreat only matters if units can heal (medics present).
+    // Without healing, injured units should fight to the death.
+    const hasMedics = playerUnits.some((u) => u.t === 'MEDI');
     const healthy = combatUnits.filter(
       (u) => u.hp / u.mhp >= RETREAT_HP_FRACTION,
     );
     const walking_wounded = combatUnits.filter(
-      (u) => u.hp / u.mhp >= 0.15 && u.hp / u.mhp < RETREAT_HP_FRACTION,
+      (u) => u.hp > 0 && u.hp / u.mhp < RETREAT_HP_FRACTION,
     );
-    // Critical units retreat
-    if (critical.length > 0) {
-      commands.push({
-        cmd: 'move',
-        ids: critical.map((u) => u.id),
-        cx: baseCenter.cx,
-        cy: baseCenter.cy,
-      });
-      reasons.push(`retreat ${critical.length} critical`);
+    // Only retreat if medics can heal them — otherwise fight to the death
+    if (hasMedics) {
+      const critical = walking_wounded.filter(
+        (u) => u.hp / u.mhp < 0.15 && this.isIdle(u),
+      );
+      if (critical.length > 0) {
+        commands.push({
+          cmd: 'move',
+          ids: critical.map((u) => u.id),
+          cx: baseCenter.cx,
+          cy: baseCenter.cy,
+        });
+        reasons.push(`retreat ${critical.length} to medic`);
+      }
     }
 
     // Fighting force = healthy + walking wounded (everyone except critical)
@@ -710,11 +714,13 @@ export class OracleStrategy {
         const defenders = fighters.slice(0, defendersNeeded);
         const surplus = fighters.slice(defendersNeeded);
 
-        // Defenders engage base threats — only command idle/guard units to avoid
-        // stuttering from re-commanding units already mid-attack
-        const idleDefenders = defenders.filter((u) => this.isIdle(u) || u.m === MISSION_GUARD);
-        if (idleDefenders.length > 0) {
-          const micro = this.microManage(idleDefenders, baseThreats, baseCenter);
+        // Defenders engage base threats — command idle units + periodically
+        // retarget engaged units (every ~30 ticks) to handle target switches
+        const idleDefenders = defenders.filter((u) => this.isIdle(u));
+        const retargetDue = (state.tick % 30) < 5; // retarget window every 30 ticks
+        const toCommand = retargetDue ? defenders : idleDefenders;
+        if (toCommand.length > 0) {
+          const micro = this.microManage(toCommand, baseThreats, baseCenter);
           commands.push(...micro.commands);
           reasons.push(...micro.reasons);
         }
@@ -1946,32 +1952,9 @@ export class OracleStrategy {
       return { commands, reasons };
     }
 
-    // 1. Pullback — units below RETREAT_HP_FRACTION get move to rally
-    const retreating: RAEntity[] = [];
-    const healthy: RAEntity[] = [];
-    for (const u of combatUnits) {
-      if (u.hp > 0 && u.hp / u.mhp < RETREAT_HP_FRACTION) {
-        retreating.push(u);
-      } else {
-        healthy.push(u);
-      }
-    }
-
-    // Only retreat critically wounded (<15% HP) idle units.
-    // Walking wounded (15-30%) stay and fight.
-    const critical = retreating.filter((u) => u.hp / u.mhp < 0.15 && this.isIdle(u));
-    if (critical.length > 0) {
-      commands.push({
-        cmd: 'move',
-        ids: critical.map((u) => u.id),
-        cx: rallyPoint.cx,
-        cy: rallyPoint.cy,
-      });
-      reasons.push(`micro:retreat ${critical.length} critical`);
-    }
-    // Walking wounded rejoin the fight
-    const wounded = retreating.filter((u) => u.hp / u.mhp >= 0.15);
-    healthy.push(...wounded);
+    // No retreat in micro — all units fight to the death.
+    // Retreat is handled at the strategy level only when medics exist.
+    const healthy = combatUnits.filter((u) => u.hp > 0);
 
     if (healthy.length === 0) {
       return { commands, reasons };
