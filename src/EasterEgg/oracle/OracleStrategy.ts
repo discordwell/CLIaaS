@@ -184,6 +184,8 @@ export class OracleStrategy {
   private lastTick = 0;
   private currentTick = 0;
   private lastUnitTargets = new Map<number, { targetId: number; cx: number; cy: number; tick: number }>();
+  // Track last move destination per unit — avoid re-sending move to same place
+  private lastUnitMoves = new Map<number, { cx: number; cy: number; tick: number }>();
   private lastKnownEnemyCentroid: Point | null = null;
 
   constructor(scenario = '') {
@@ -704,7 +706,7 @@ export class OracleStrategy {
     // Only retreat if medics can heal them — otherwise fight to the death
     if (hasMedics) {
       const critical = walking_wounded.filter(
-        (u) => u.hp / u.mhp < 0.15 && this.isIdle(u),
+        (u) => u.hp / u.mhp < 0.15 && this.shouldMove(u, baseCenter.cx, baseCenter.cy),
       );
       if (critical.length > 0) {
         commands.push({
@@ -713,6 +715,7 @@ export class OracleStrategy {
           cx: baseCenter.cx,
           cy: baseCenter.cy,
         });
+        for (const u of critical) this.recordMove(u.id, baseCenter.cx, baseCenter.cy);
         reasons.push(`retreat ${critical.length} to medic`);
       }
     }
@@ -763,7 +766,10 @@ export class OracleStrategy {
             commands.push(...atkMicro.commands);
             reasons.push(`attack nearby ${surplus.length}`);
           } else if (surplus.length > 0) {
-            const stray = surplus.filter((u) => this.isIdle(u) && this.distanceSq(u, baseCenter) > 225);
+            const stray = surplus.filter(
+              (u) => this.distanceSq(u, baseCenter) > 225 &&
+                this.shouldMove(u, baseCenter.cx, baseCenter.cy),
+            );
             if (stray.length > 0) {
               commands.push({
                 cmd: 'move',
@@ -771,6 +777,7 @@ export class OracleStrategy {
                 cx: baseCenter.cx,
                 cy: baseCenter.cy,
               });
+              for (const u of stray) this.recordMove(u.id, baseCenter.cx, baseCenter.cy);
               reasons.push(`patrol ${stray.length} to base`);
             }
           }
@@ -1549,7 +1556,8 @@ export class OracleStrategy {
     const needed = Math.max(6, Math.floor(fighters.length * 0.5));
     if (onLine.length < needed) {
       const reinforce = fighters
-        .filter((u) => (u.cy <= 70 || u.cy >= 90) && this.isIdle(u))
+        .filter((u) => (u.cy <= 70 || u.cy >= 90) &&
+          this.shouldMove(u, interceptLine.cx, interceptLine.cy))
         .slice(0, needed - onLine.length);
       if (reinforce.length > 0) {
         commands.push({
@@ -1558,6 +1566,7 @@ export class OracleStrategy {
           cx: interceptLine.cx,
           cy: interceptLine.cy,
         });
+        for (const u of reinforce) this.recordMove(u.id, interceptLine.cx, interceptLine.cy);
         reasons.push(`reinforce line (${reinforce.length}→${onLine.length + reinforce.length}/${needed})`);
       }
     }
@@ -1812,6 +1821,28 @@ export class OracleStrategy {
     // Stale timeout (>90 ticks since last command)
     if (this.currentTick - last.tick > 90) return true;
     return false;
+  }
+
+  /**
+   * Check if a unit needs a new move command. Returns false if the unit
+   * was recently sent to the same destination (within 60 ticks and 5 cells).
+   */
+  private shouldMove(unit: RAEntity, cx: number, cy: number): boolean {
+    if (this.isIdle(unit)) return true;
+    const last = this.lastUnitMoves.get(unit.id);
+    if (!last) return true;
+    // Same destination? (within 5 cells)
+    const dx = cx - last.cx;
+    const dy = cy - last.cy;
+    if (dx * dx + dy * dy <= 25 && this.currentTick - last.tick < 60) {
+      return false; // already heading there
+    }
+    return true;
+  }
+
+  /** Record that we sent a move command to a unit. */
+  private recordMove(unitId: number, cx: number, cy: number): void {
+    this.lastUnitMoves.set(unitId, { cx, cy, tick: this.currentTick });
   }
 
   private isScg01eaRescueTriggered(state: RAGameState): boolean {
