@@ -617,10 +617,12 @@ describe('Parabomb (PARA_BOX) animation — C++ adata.cpp:544-567, house.cpp:272
 
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
     // Each bomb has frame = -delay where delay = (i + 3) * 5
-    // First bomb (i=-3): delay=0, frame=0
+    // First bomb (i=-3): delay=0, frame=-0 (JS: -(0) produces negative zero)
+    // Intermediate bombs have increasing negative delays
     // Last bomb (i=+3): delay=30, frame=-30
-    expect(explosions[0].frame).toBe(0);  // first bomb, no delay
-    expect(explosions[6].frame).toBe(-30); // last bomb, 30-tick delay
+    expect(explosions[0].frame + 0).toBe(0);  // first bomb, no delay (normalize -0 → 0)
+    expect(explosions[1].frame).toBe(-5);      // second bomb, 5 tick delay
+    expect(explosions[6].frame).toBe(-30);     // last bomb, 30-tick delay
   });
 
   it('parabomb triggers screen shake', () => {
