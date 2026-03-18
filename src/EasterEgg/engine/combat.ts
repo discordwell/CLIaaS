@@ -711,7 +711,21 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // C++ bullet.cpp:478-480 — use degraded strength (proj.strength) instead of original damage
     const impactDamage = proj.strength;
 
-    if (proj.directHit && target && target.alive) {
+    // C++ bullet.cpp:991 — Bullet_Explodes calls Explosion_Damage as the SOLE damage path.
+    // There is NO separate direct-hit damage call in C++. All damage flows through Explosion_Damage,
+    // which iterates all objects in the cell and adjacent cells, applying distance-based damage.
+    // The direct-hit target is at distance ~0, so it gets full damage from the splash calculation.
+    if (proj.weapon.splash && proj.weapon.splash > 0) {
+      // Splash weapons: ALL damage through applySplashDamage (matches C++ Explosion_Damage)
+      const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
+      applySplashDamage(
+        ctx, { x: proj.impactX, y: proj.impactY },
+        { damage: impactDamage, warhead: proj.weapon.warhead, splash: proj.weapon.splash },
+        -1,  // No entity excluded from splash (firer is already excluded inside applySplashDamage)
+        attackerHouse, attacker ?? undefined,
+      );
+    } else if (proj.directHit && target && target.alive) {
+      // Non-splash weapons (machine guns, etc.): direct hit only, no area effect
       const killed = damageEntity(ctx, target, impactDamage, proj.weapon.warhead, attacker);
 
       if (!killed && attacker) {
@@ -729,17 +743,6 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
           trackLoss: true,
         });
       }
-    }
-
-    // Splash damage at impact point — use degraded strength (C++ Bullet_Explodes passes Strength to Explosion_Damage)
-    if (proj.weapon.splash && proj.weapon.splash > 0) {
-      const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
-      applySplashDamage(
-        ctx, { x: proj.impactX, y: proj.impactY },
-        { damage: impactDamage, warhead: proj.weapon.warhead, splash: proj.weapon.splash },
-        proj.directHit && target ? target.id : -1,
-        attackerHouse, attacker ?? undefined,
-      );
     }
 
     // R8: Impact explosion sprite from warhead's explosionSet (C++ warhead.cpp)
@@ -803,7 +806,9 @@ export function applySplashDamage(
   const attackerIsPlayerControlled = ctx.isAllied(attackerHouse, ctx.playerHouse);
 
   // C++ combat.cpp:207 — splash excludes the FIRER (source), not the direct-hit target.
-  // The direct-hit target takes splash damage on top of its direct damage.
+  // C++ bullet.cpp:991 — Explosion_Damage is the SOLE damage path; there is no separate
+  // direct-hit call. The direct-hit target receives damage through this splash calculation
+  // at distance ~0, getting full warhead damage.
   const sourceId = attacker?.id ?? -1;
 
   for (const other of ctx.entities) {
@@ -1188,12 +1193,26 @@ export function updateStructureCombat(ctx: CombatContext): void {
         s.attackCooldown = Math.max(1, Math.round(s.weapon.rof * structRofBias)); // unlimited ammo (-1) uses normal ROF
       }
       if (TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
-      // CF1: Apply C++ Modify_Damage — structure direct hit at distance 0
+      // C++ bullet.cpp:991 — Explosion_Damage is the SOLE damage path for splash weapons.
       const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
       const houseBias = ctx.getFirepowerBias(s.house);
-      const whMult = getWarheadMult(wh, bestTarget.stats.armor, ctx.warheadOverrides);
-      const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
-      const killed = damageEntity(ctx, bestTarget, damage, wh);
+      let killed: boolean;
+
+      if (s.weapon.splash && s.weapon.splash > 0) {
+        // Splash weapons: ALL damage through applySplashDamage (matches C++ Explosion_Damage)
+        const hpBefore = bestTarget.hp;
+        applySplashDamage(
+          ctx, bestTarget.pos,
+          { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
+          -1, s.house,
+        );
+        killed = !bestTarget.alive || bestTarget.hp <= 0;
+      } else {
+        // Non-splash weapons: direct hit only
+        const whMult = getWarheadMult(wh, bestTarget.stats.armor, ctx.warheadOverrides);
+        const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
+        killed = damageEntity(ctx, bestTarget, damage, wh);
+      }
 
       // Fire effects — color by warhead type (C++ parity)
       ctx.effects.push({
@@ -1232,16 +1251,9 @@ export function updateStructureCombat(ctx: CombatContext): void {
         ctx.playSoundAt('machinegun', sx, sy);
       }
 
-      // Splash damage
-      if (s.weapon.splash && s.weapon.splash > 0) {
-        applySplashDamage(
-          ctx, bestTarget.pos,
-          { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
-          bestTarget.id, s.house,
-        );
-      }
-
-      if (killed) {
+      // For non-splash weapons, handle death here. Splash weapons already handle
+      // death inside applySplashDamage (C++ Explosion_Damage handles everything).
+      if (killed && !(s.weapon.splash && s.weapon.splash > 0)) {
         handleUnitDeath(ctx, bestTarget, {
           screenShake: 4, explosionSize: 16, debris: false,
           decal: { infantry: 4, vehicle: 8, opacity: 0.5 },

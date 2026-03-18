@@ -229,9 +229,8 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     expect(hpBefore).toBeGreaterThan(100); // precondition: must survive the hit
     const ctx = makeCombatCtx([tsla], [tank]);
     updateStructureCombat(ctx);
-    // Super vs heavy = 1.0 mult, direct 100 + splash at dist=0 = 100, total = 200
-    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
-    expect(hpBefore - tank.hp).toBe(200);
+    // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs heavy = 1.0, base 100
+    expect(hpBefore - tank.hp).toBe(100);
   });
 
   it('applies full 100 damage to heavy armor (Super = 1.0x vs all)', () => {
@@ -241,9 +240,8 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([tsla], [tank]);
     updateStructureCombat(ctx);
-    // Super vs heavy = 1.0 mult, direct 100 + splash at dist=0 = 100, total = 200
-    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
-    expect(hpBefore - tank.hp).toBe(200);
+    // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs heavy = 1.0, base 100
+    expect(hpBefore - tank.hp).toBe(100);
   });
 
   it('applies full 100 damage to light armor (Super = 1.0x vs all)', () => {
@@ -252,9 +250,8 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const hpBefore = apc.hp;
     const ctx = makeCombatCtx([tsla], [apc]);
     updateStructureCombat(ctx);
-    // Super vs light = 1.0 mult, direct 100 + splash at dist=0 = 100, total = 200
-    // C++ combat.cpp:207 — splash excludes FIRER, not direct-hit target
-    expect(hpBefore - apc.hp).toBe(200);
+    // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs light = 1.0, base 100
+    expect(hpBefore - apc.hp).toBe(100);
   });
 
   it('does NOT fire at enemy outside range 8.5', () => {
