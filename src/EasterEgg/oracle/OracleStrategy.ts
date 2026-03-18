@@ -1521,16 +1521,37 @@ export class OracleStrategy {
 
     // Interception zone: y > 75 (between enemy base at y≈60 and ATEK at y=95)
     const interceptLine = OracleStrategy.SCG08EA_INTERCEPT;
+    const atekPos: Point = { cx: 58, cy: 95 };
     const southernThreats = state.enemies.filter((e) => e.cy > 75);
     const criticalThreats = state.enemies.filter(
-      (e) => e.cy > 88, // very close to ATEK/PDOX
+      (e) => e.cy > 85, // heading toward ATEK/PDOX
     );
 
-    // Priority 1: engage anything near critical structures
+    // Priority 0: PERMANENT GARRISON at ATEK — always keep 4 units there
+    const garrisonNeeded = 4;
+    const nearATEK = fighters.filter((u) => this.distanceSq(u, atekPos) <= 225);
+    if (nearATEK.length < garrisonNeeded) {
+      const toSend = fighters
+        .filter((u) => this.distanceSq(u, atekPos) > 225 &&
+          this.shouldMove(u, atekPos.cx, atekPos.cy))
+        .slice(0, garrisonNeeded - nearATEK.length);
+      if (toSend.length > 0) {
+        commands.push({
+          cmd: 'move',
+          ids: toSend.map((u) => u.id),
+          cx: atekPos.cx,
+          cy: atekPos.cy,
+        });
+        for (const u of toSend) this.recordMove(u.id, atekPos.cx, atekPos.cy);
+        reasons.push(`garrison ATEK (${nearATEK.length}+${toSend.length}/${garrisonNeeded})`);
+      }
+    }
+
+    // Priority 1: engage anything heading toward critical structures
     if (criticalThreats.length > 0) {
-      const nearCrit = fighters.filter((u) => u.cy > 70);
-      if (nearCrit.length > 0) {
-        const micro = this.microManage(nearCrit, criticalThreats, interceptLine);
+      const responders = fighters.filter((u) => u.cy > 70);
+      if (responders.length > 0) {
+        const micro = this.microManage(responders, criticalThreats, atekPos);
         commands.push(...micro.commands);
         reasons.push(`CRITICAL ${criticalThreats.length} near ATEK/PDOX`);
       }
@@ -1834,12 +1855,11 @@ export class OracleStrategy {
     if (this.isIdle(unit)) return true;
     const last = this.lastUnitMoves.get(unit.id);
     if (!last) return true;
-    // Same destination? (within 5 cells)
+    // Same destination (within 5 cells) and recent — don't re-send
     const dx = cx - last.cx;
     const dy = cy - last.cy;
-    const moveCooldown = unit.t.includes('TNK') ? 30 : 15;
-    if (dx * dx + dy * dy <= 25 && this.currentTick - last.tick < moveCooldown) {
-      return false; // already heading there
+    if (dx * dx + dy * dy <= 25 && this.currentTick - last.tick < 15) {
+      return false;
     }
     return true;
   }
@@ -2180,48 +2200,80 @@ export class OracleStrategy {
       return 3;
     };
 
-    // Pool all commandable units, assign in priority order
-    const pool = [...antiArmor, ...general, ...antiInfantry]; // armor-killers first
-    let poolIdx = 0;
+    // Two-pass kill chain: first assign weapon-matched units to their
+    // preferred targets, then fill remaining slots with general units.
+    // Sorted targets: infantry sorted by distance, vehicles by HP then distance.
+    const sortedInf = infantryTargets.slice().sort(
+      (a, b) => this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint),
+    );
+    const sortedVeh = vehicleTargets.slice().sort((a, b) => {
+      if (a.hp < 50 && b.hp >= 50) return -1;
+      if (b.hp < 50 && a.hp >= 50) return 1;
+      const af = a.hp / a.mhp; const bf = b.hp / b.mhp;
+      if (Math.abs(af - bf) > 0.3) return af - bf;
+      return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
+    });
+
+    const assignedIds = new Set<number>();
     let targetsAssigned = 0;
 
-    for (const target of allTargets) {
-      if (poolIdx >= pool.length) break;
-      const needed = unitsToKill(target);
-      const assigned: RAEntity[] = [];
-
-      // Prefer matching weapon type
-      for (let i = poolIdx; i < pool.length && assigned.length < needed; i++) {
-        const u = pool[i];
-        const isMatch = isInfantryByType(target.t)
-          ? (UNIT_ROLES[u.t] === 'anti_infantry')
-          : (UNIT_ROLES[u.t] === 'anti_armor');
-        if (isMatch || assigned.length < needed) {
-          assigned.push(u);
+    const assignGroup = (units: RAEntity[], targets: RAEntity[]) => {
+      let ui = 0;
+      for (const target of targets) {
+        if (ui >= units.length) break;
+        const needed = unitsToKill(target);
+        const batch: number[] = [];
+        while (batch.length < needed && ui < units.length) {
+          batch.push(units[ui].id);
+          assignedIds.add(units[ui].id);
+          ui++;
+        }
+        if (batch.length > 0) {
+          commands.push({ cmd: 'attack', ids: batch, target: target.id });
+          for (const id of batch) {
+            this.lastUnitTargets.set(id, {
+              targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick,
+            });
+          }
+          targetsAssigned++;
         }
       }
+    };
 
-      // Assign all to this target
-      if (assigned.length > 0) {
-        commands.push({
-          cmd: 'attack',
-          ids: assigned.map((u) => u.id),
-          target: target.id,
+    // Pass 1: anti-armor → vehicles, anti-infantry → infantry
+    assignGroup(antiArmor, sortedVeh.length > 0 ? sortedVeh : sortedInf);
+    assignGroup(antiInfantry, sortedInf.length > 0 ? sortedInf : sortedVeh);
+
+    // Pass 2: general units fill remaining targets (prefer vehicles)
+    const remainingVeh = sortedVeh.filter(
+      (e) => !commands.some((c) => c.target === e.id),
+    );
+    const remainingInf = sortedInf.filter(
+      (e) => !commands.some((c) => c.target === e.id),
+    );
+    const remainingTargets = [...remainingVeh, ...remainingInf];
+    const unassignedGeneral = general.filter((u) => !assignedIds.has(u.id));
+    if (unassignedGeneral.length > 0 && remainingTargets.length > 0) {
+      assignGroup(unassignedGeneral, remainingTargets);
+    }
+    // Any leftover general units → pile onto the first vehicle target
+    const leftover = general.filter((u) => !assignedIds.has(u.id));
+    if (leftover.length > 0 && sortedVeh.length > 0) {
+      commands.push({
+        cmd: 'attack',
+        ids: leftover.map((u) => u.id),
+        target: sortedVeh[0].id,
+      });
+      for (const u of leftover) {
+        this.lastUnitTargets.set(u.id, {
+          targetId: sortedVeh[0].id, cx: sortedVeh[0].cx, cy: sortedVeh[0].cy,
+          tick: this.currentTick,
         });
-        for (const u of assigned) {
-          this.lastUnitTargets.set(u.id, {
-            targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick,
-          });
-          // Remove from pool
-          const idx = pool.indexOf(u);
-          if (idx >= 0) pool.splice(idx, 1);
-        }
-        targetsAssigned++;
       }
     }
 
     if (targetsAssigned > 0) {
-      reasons.push(`micro:kill-chain ${commandable.length}→${targetsAssigned} targets`);
+      reasons.push(`micro:chain ${commandable.length}→${targetsAssigned}t`);
     }
 
     return { commands, reasons };
