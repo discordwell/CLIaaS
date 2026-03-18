@@ -1818,8 +1818,11 @@ export class OracleStrategy {
     if (!last) return true;
     // Target dead?
     if (!enemies.some(e => e.id === last.targetId)) return true;
-    // Stale timeout (>90 ticks since last command)
-    if (this.currentTick - last.tick > 90) return true;
+    // Cooldown: tanks/vehicles need ~2 seconds (30 ticks) to complete a
+    // fire cycle. Infantry/Tanya fire fast — 10 tick cooldown.
+    const cooldown = unit.t.includes('TNK') || unit.t === 'ARTY' || unit.t === 'V2RL'
+      ? 30 : 10;
+    if (this.currentTick - last.tick > cooldown) return true;
     return false;
   }
 
@@ -1834,7 +1837,8 @@ export class OracleStrategy {
     // Same destination? (within 5 cells)
     const dx = cx - last.cx;
     const dy = cy - last.cy;
-    if (dx * dx + dy * dy <= 25 && this.currentTick - last.tick < 60) {
+    const moveCooldown = unit.t.includes('TNK') ? 30 : 15;
+    if (dx * dx + dy * dy <= 25 && this.currentTick - last.tick < moveCooldown) {
       return false; // already heading there
     }
     return true;
