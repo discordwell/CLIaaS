@@ -701,11 +701,15 @@ export class OracleStrategy {
         const defenders = healthy.slice(0, defendersNeeded);
         const surplus = healthy.slice(defendersNeeded);
 
-        // Defenders engage base threats with micro
-        const micro = this.microManage(defenders, baseThreats, baseCenter);
-        commands.push(...micro.commands);
-        reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} defenders)`);
-        reasons.push(...micro.reasons);
+        // Defenders engage base threats — only command idle/guard units to avoid
+        // stuttering from re-commanding units already mid-attack
+        const idleDefenders = defenders.filter((u) => this.isIdle(u) || u.m === MISSION_GUARD);
+        if (idleDefenders.length > 0) {
+          const micro = this.microManage(idleDefenders, baseThreats, baseCenter);
+          commands.push(...micro.commands);
+          reasons.push(...micro.reasons);
+        }
+        reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} def, ${idleDefenders.length} idle)`);
 
         // In survival mode, ALL units defend — no surplus chasing.
         // In non-survival, surplus attacks nearby enemies within leash range.
@@ -746,10 +750,13 @@ export class OracleStrategy {
           (e) => healthy.some((u) => this.distanceSq(u, e) <= 225), // 15 cells
         );
         if (unitThreats.length > 0 && healthy.length >= 3) {
-          const micro = this.microManage(healthy, unitThreats, baseCenter);
-          commands.push(...micro.commands);
-          reasons.push(`defend units (${unitThreats.length} threats near units)`);
-          reasons.push(...micro.reasons);
+          const idleHealthy = healthy.filter((u) => this.isIdle(u));
+          if (idleHealthy.length > 0) {
+            const micro = this.microManage(idleHealthy, unitThreats, baseCenter);
+            commands.push(...micro.commands);
+            reasons.push(...micro.reasons);
+          }
+          reasons.push(`defend units (${unitThreats.length} threats, ${idleHealthy.length} idle)`);
         } else {
         // No base threats, no unit threats — decide: attack or turtle?
         // If there's a mission timer counting down, this is a survival mission — turtle.
@@ -764,7 +771,6 @@ export class OracleStrategy {
         const shouldAttack = !isTimedSurvival && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
 
         if (shouldAttack && state.enemies.length > 0) {
-          // Keep half near base, send half to attack within leash range
           const defenderCount = Math.max(3, Math.floor(healthy.length / 2));
           const defenders = healthy.slice(0, defenderCount);
           const attackers = healthy.slice(defenderCount);
