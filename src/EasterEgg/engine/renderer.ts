@@ -1564,10 +1564,16 @@ export class Renderer {
       }
 
       // Health bar on damaged structures (visible only)
+      // C++ techno.cpp:1121-1153 + bdata.cpp:3399-3405:
+      //   Dimensions: width = Width() * ICON_PIXEL_W - Width() * ICON_PIXEL_W / 5
+      //   = Width() * 24 * 4/5  (building footprint width scaled to 80%)
+      //   Bar is centered on building center.
       if (vis === 2 && s.hp < s.maxHp) {
-        const barX = screenX + CELL_SIZE;
+        const [fw] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+        const cppBarW = Math.floor(fw * CELL_SIZE * 4 / 5);
+        const barX = screenX + (fw * CELL_SIZE) / 2;
         const barY = screenY - 2;
-        this.renderHealthBar(barX, barY, CELL_SIZE * 1.5, s.hp / s.maxHp, false);
+        this.renderHealthBar(barX, barY, cppBarW, s.hp / s.maxHp, false);
       }
 
       // Damage effects: light smoke (<75%), fire+smoke (<50%), intense fire (<25%)
