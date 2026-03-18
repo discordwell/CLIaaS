@@ -553,14 +553,16 @@ describe('C++ Parity: Crate Pickup Animation Effects', () => {
       expect(CPP_CRATE_TYPE_ORDER).toHaveLength(18);
     });
 
-    it('TS CrateType union covers all crate types that appear in CRATE_SHARES', () => {
-      // CRATE_SHARES must include entries for the crate types used in multiplay random selection
+    it('TS CrateType union covers all C++ crate types that appear in CRATE_SHARES', () => {
+      // CRATE_SHARES must include entries for all 18 C++ CrateType enum values
+      // (defines.h:759-781). "heal" is a TS-only addition, NOT a C++ type.
       const shareTypes = CRATE_SHARES.map(s => s.type);
-      // These are the types from C++ that go into the weighted pool
+      // All 18 C++ crate types from defines.h:759-778
       const expectedInPool: CrateType[] = [
-        'money', 'unit', 'speed', 'firepower', 'armor',
-        'reveal', 'cloak', 'heal', 'explosion',
-        'sonar', 'icbm', 'timequake', 'vortex',
+        'money', 'unit', 'parabomb', 'heal_base', 'cloak',
+        'explosion', 'napalm', 'squad', 'darkness', 'reveal',
+        'sonar', 'armor', 'speed', 'firepower', 'icbm',
+        'timequake', 'invulnerability', 'vortex',
       ];
       for (const t of expectedInPool) {
         expect(shareTypes, `CRATE_SHARES should include "${t}"`).toContain(t);

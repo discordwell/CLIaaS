@@ -69,22 +69,33 @@ export const CRATE_ANIM_MAP: Partial<Record<CrateType, string>> = {
   // unit, explosion, napalm, squad, heal, vortex → ANIM_NONE (no crate animation)
 };
 
-/** CR9: Weighted crate share distribution (C++ CrateShares from rules.ini) */
+/**
+ * CR9: Weighted crate share distribution — must match C++ RULES.INI [Powerups] section.
+ * C++ refs: const.cpp:381-400 (defaults), rules.cpp:778-816 (RULES.INI override),
+ *           rules.ini:2819-2836 (actual values), defines.h:759-781 (CrateType enum order)
+ *
+ * Order matches C++ CrateType enum: CRATE_MONEY(0) through CRATE_VORTEX(17).
+ * ChronalVortex is NOT in RULES.INI → uses const.cpp default of 5.
+ */
 export const CRATE_SHARES: Array<{ type: CrateType; shares: number }> = [
-  { type: 'money', shares: 50 },
-  { type: 'unit', shares: 20 },
-  { type: 'speed', shares: 10 },
-  { type: 'firepower', shares: 10 },
-  { type: 'armor', shares: 10 },
-  { type: 'reveal', shares: 5 },
-  { type: 'cloak', shares: 3 },
-  { type: 'heal', shares: 15 },
-  { type: 'explosion', shares: 5 },
-  { type: 'parabomb', shares: 3 },
-  { type: 'sonar', shares: 2 },
-  { type: 'icbm', shares: 1 },
-  { type: 'timequake', shares: 1 },
-  { type: 'vortex', shares: 1 },
+  { type: 'money', shares: 50 },           // Money=50,DOLLAR,2000
+  { type: 'unit', shares: 20 },            // Unit=20,NONE
+  { type: 'parabomb', shares: 3 },         // ParaBomb=3,PARABOX
+  { type: 'heal_base', shares: 1 },        // HealBase=1,INVUN
+  { type: 'cloak', shares: 0 },            // Cloak=0,STEALTH2 (disabled in RULES.INI)
+  { type: 'explosion', shares: 5 },        // Explosion=5,NONE,500
+  { type: 'napalm', shares: 5 },           // Napalm=5,NONE,600
+  { type: 'squad', shares: 20 },           // Squad=20,NONE
+  { type: 'darkness', shares: 1 },         // Darkness=1,EMPULSE
+  { type: 'reveal', shares: 1 },           // Reveal=1,EARTH
+  { type: 'sonar', shares: 3 },            // Sonar=3,SONARBOX
+  { type: 'armor', shares: 10 },           // Armor=10,ARMOR,2.0
+  { type: 'speed', shares: 10 },           // Speed=10,SPEED,1.7
+  { type: 'firepower', shares: 10 },       // Firepower=10,FPOWER,2.0
+  { type: 'icbm', shares: 1 },             // ICBM=1,MISSILE2
+  { type: 'timequake', shares: 3 },        // TimeQuake=3,TQUAKE
+  { type: 'invulnerability', shares: 3 },   // Invulnerability=3,INVULBOX,1.0
+  { type: 'vortex', shares: 5 },           // ChronalVortex — const.cpp default=5
 ];
 
 // ── Context interface ───────────────────────────────────────────────────────
