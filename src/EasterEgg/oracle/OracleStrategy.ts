@@ -734,10 +734,12 @@ export class OracleStrategy {
         const defenders = fighters.slice(0, defendersNeeded);
         const surplus = fighters.slice(defendersNeeded);
 
-        // Defenders engage base threats — command idle units + periodically
-        // retarget engaged units (every ~30 ticks) to handle target switches
+        // Defenders engage base threats. Force retarget if critical structures
+        // are threatened (ATEK/PDOX in M8) — override cooldown in emergencies.
         const idleDefenders = defenders.filter((u) => this.isIdle(u));
-        const retargetDue = (state.tick % 30) < 5; // retarget window every 30 ticks
+        const hasCriticalThreats = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) &&
+          baseThreats.some((e) => e.t.includes('TNK') || e.t === 'V2RL');
+        const retargetDue = hasCriticalThreats || (state.tick % 30) < 5;
         const toCommand = retargetDue ? defenders : idleDefenders;
         if (toCommand.length > 0) {
           const micro = this.microManage(toCommand, baseThreats, baseCenter);
@@ -1526,9 +1528,7 @@ export class OracleStrategy {
     // Rally directly to ATEK — the army covers the critical buildings from tick 0
     const rallyPoint: Point = { cx: 58, cy: 95 };
 
-    // Early game: persistently push army south until they arrive.
-    // Don't use shouldMove — units that stop to fight need re-rallying.
-    // After tick 2000, stop rallying and let generic defense take over.
+    // Push army south toward ATEK. Persistent re-rally for 2000 ticks.
     const needsRally = state.tick < 2000
       ? landCombat.filter((u) => u.cy < 70 && this.isIdle(u))
       : [];
