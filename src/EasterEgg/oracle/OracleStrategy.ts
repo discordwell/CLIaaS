@@ -46,11 +46,11 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },            // STRUCT_POWER — always first
   { names: ['PROC'],         type_ids: [12] },            // STRUCT_REFINERY — WEAP prerequisite
   { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income ASAP
-  { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks — after economy is running
-  { names: ['PBOX', 'FTUR'], type_ids: [4, 10] },         // Base defense
-  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery — sustain heavy production
-  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power — no cap
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory — double tank output
+  { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
 ];
 
 // Tank preference order (best to worst — covers both Allied and Soviet)
@@ -1511,41 +1511,42 @@ export class OracleStrategy {
   /**
    * SCG08EA "Chronoshift": Survive 45 minutes defending ATEK + PDOX.
    *
-   * Key insight: army starts at y≈50, ATEK/PDOX at y≈95-102.
-   * Early deaths happen because enemies reach ATEK before the army.
-   * Solution: immediately move the whole army south to y≈85 (between
-   * enemy base and critical buildings), then let generic defense handle
-   * the rest. ONE concentrated force, no splitting.
+   * Strategy: keep army near ATEK (y≈95). Only fight enemies that
+   * attack our stuff. Don't chase. Let them come to us.
+   * Build 2 war factories + 3 refineries for sustained replacement.
    */
   private decideScg08ea(state: RAGameState): OracleDecision {
-    // One-time: reposition army south toward critical buildings
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+
     const playerUnits = this.playerOwnedUnits(state);
     const NAVAL = new Set(['DD', 'LST', 'SS', 'CA', 'PT']);
     const landCombat = playerUnits.filter(
       (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
         !NAVAL.has(u.t) && u.hp > 0,
     );
-    // Rally directly to ATEK — the army covers the critical buildings from tick 0
-    const rallyPoint: Point = { cx: 58, cy: 95 };
+    const atekPos: Point = { cx: 58, cy: 95 };
 
-    // Push army south toward ATEK. Persistent re-rally for 2000 ticks.
-    const needsRally = state.tick < 2000
-      ? landCombat.filter((u) => u.cy < 70 && this.isIdle(u))
-      : [];
-    const commands: Array<Record<string, unknown>> = [];
-    const reasons: string[] = [];
-    if (needsRally.length > 0) {
+    // Army default position: near ATEK. If idle and far away, move there.
+    // This is the "home base" — we only leave to fight nearby threats.
+    const farIdle = landCombat.filter(
+      (u) => this.distanceSq(u, atekPos) > 400 && // > 20 cells from ATEK
+        this.shouldMove(u, atekPos.cx, atekPos.cy),
+    );
+    if (farIdle.length > 0) {
       commands.push({
         cmd: 'attack_move',
-        ids: needsRally.map((u) => u.id),
-        cx: rallyPoint.cx,
-        cy: rallyPoint.cy,
+        ids: farIdle.map((u) => u.id),
+        cx: atekPos.cx,
+        cy: atekPos.cy,
       });
-      for (const u of needsRally) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
-      reasons.push(`rally south ${needsRally.length} units`);
+      for (const u of farIdle) this.recordMove(u.id, atekPos.cx, atekPos.cy);
+      reasons.push(`rally ${farIdle.length} to ATEK`);
     }
 
-    // Generic base-building handles economy + defense
+    // Generic base-building handles economy + production + defense.
+    // The base defense detects threats near ALL allied structures
+    // (including ATEK/PDOX) and sends the army to engage.
     const basePlan = this.decideBaseBuilding(state);
     commands.push(...basePlan.commands);
     reasons.push(basePlan.reason);
