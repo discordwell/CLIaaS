@@ -1528,6 +1528,7 @@ export class OracleStrategy {
     );
 
     // Priority 0: PERMANENT GARRISON at ATEK — always keep 4 units there
+    // Use attack_move so units fight enemies en route (not death-march)
     const garrisonNeeded = 4;
     const nearATEK = fighters.filter((u) => this.distanceSq(u, atekPos) <= 225);
     if (nearATEK.length < garrisonNeeded) {
@@ -1537,7 +1538,7 @@ export class OracleStrategy {
         .slice(0, garrisonNeeded - nearATEK.length);
       if (toSend.length > 0) {
         commands.push({
-          cmd: 'move',
+          cmd: 'attack_move',
           ids: toSend.map((u) => u.id),
           cx: atekPos.cx,
           cy: atekPos.cy,
@@ -1582,7 +1583,7 @@ export class OracleStrategy {
         .slice(0, needed - onLine.length);
       if (reinforce.length > 0) {
         commands.push({
-          cmd: 'move',
+          cmd: 'attack_move',
           ids: reinforce.map((u) => u.id),
           cx: interceptLine.cx,
           cy: interceptLine.cy,
