@@ -1506,117 +1506,19 @@ export class OracleStrategy {
    * Station interceptors between enemy base and critical buildings.
    * Only engage enemies that cross the interception line heading south.
    */
+  /**
+   * SCG08EA: Simple defense — let decideBaseBuilding handle everything.
+   * The generic combat phase already defends all allied structures
+   * (including ATEK/PDOX) and the timer-survival + defense-only flags
+   * prevent attacking. The key insight: keep the army as ONE force
+   * responding to threats, not split across positions.
+   */
   private decideScg08ea(state: RAGameState): OracleDecision {
-    const commands: Array<Record<string, unknown>> = [];
-    const reasons: string[] = [];
-
-    const playerUnits = this.playerOwnedUnits(state);
-    // Exclude naval units (DD, LST, SS) — they can't walk to land positions
-    const NAVAL_TYPES = new Set(['DD', 'LST', 'SS', 'CA', 'PT']);
-    const fighters = playerUnits.filter(
-      (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
-        !NAVAL_TYPES.has(u.t) && u.hp > 0,
-    );
-
-    const interceptLine = OracleStrategy.SCG08EA_INTERCEPT;
-    const atekPos: Point = { cx: 58, cy: 95 };
-    const southernThreats = state.enemies.filter((e) => e.cy > 75);
-    const criticalThreats = state.enemies.filter(
-      (e) => e.cy > 85,
-    );
-
-    // === GARRISON FIRST — before base building claims units ===
-    // Send 4 units to ATEK immediately. This runs before decideBaseBuilding
-    // so shouldMove isn't blocked by generic combat commands.
-    const garrisonNeeded = 4;
-    const nearATEK = fighters.filter((u) => this.distanceSq(u, atekPos) <= 225);
-    const garrisonSent = new Set<number>();
-    // Lock the closest 4 units to ATEK as permanent garrison.
-    // These units are EXCLUDED from intercept/defense pools below.
-    const garrisonPool = fighters
-      .slice()
-      .sort((a, b) => this.distanceSq(a, atekPos) - this.distanceSq(b, atekPos))
-      .slice(0, garrisonNeeded);
-    for (const u of garrisonPool) garrisonSent.add(u.id);
-
-    // If garrison units are far, send them. If near, engage local threats.
-    const garrisonFar = garrisonPool.filter(
-      (u) => this.distanceSq(u, atekPos) > 225 &&
-        this.shouldMove(u, atekPos.cx, atekPos.cy),
-    );
-    if (garrisonFar.length > 0) {
-      commands.push({
-        cmd: 'attack_move',
-        ids: garrisonFar.map((u) => u.id),
-        cx: atekPos.cx, cy: atekPos.cy,
-      });
-      for (const u of garrisonFar) this.recordMove(u.id, atekPos.cx, atekPos.cy);
-      reasons.push(`garrison→ATEK (${garrisonFar.length} en route)`);
-    }
-    // Garrison units near ATEK engage critical threats
-    const garrisonNear = garrisonPool.filter(
-      (u) => this.distanceSq(u, atekPos) <= 225,
-    );
-    if (garrisonNear.length > 0 && criticalThreats.length > 0) {
-      const micro = this.microManage(garrisonNear, criticalThreats, atekPos);
-      commands.push(...micro.commands);
-      reasons.push(`garrison defends (${garrisonNear.length} vs ${criticalThreats.length})`);
-    }
-
-    // === Now run base building for economy/production ===
-    const basePlan = this.decideBaseBuilding(state);
-    commands.push(...basePlan.commands);
-    reasons.push(basePlan.reason);
-
-    // Non-garrison fighters available for intercept duty
-    const available = fighters.filter((u) => !garrisonSent.has(u.id));
-
-    // Priority 1: engage anything heading toward critical structures
-    if (criticalThreats.length > 0) {
-      const responders = available.filter((u) => u.cy > 70);
-      if (responders.length > 0) {
-        const micro = this.microManage(responders, criticalThreats, atekPos);
-        commands.push(...micro.commands);
-        reasons.push(`CRITICAL ${criticalThreats.length} near ATEK/PDOX`);
-      }
-    }
-
-    // Priority 2: intercept enemies crossing the line
-    if (southernThreats.length > 0) {
-      const interceptors = available.filter(
-        (u) => this.distanceSq(u, interceptLine) <= 625,
-      );
-      if (interceptors.length > 0) {
-        const idle = interceptors.filter((u) => this.isIdle(u));
-        if (idle.length > 0) {
-          const micro = this.microManage(idle, southernThreats, interceptLine);
-          commands.push(...micro.commands);
-        }
-        reasons.push(`intercept ${southernThreats.length} threats (${interceptors.length} on line)`);
-      }
-    }
-
-    // Priority 3: move available units to intercept position
-    const onLine = available.filter((u) => u.cy > 70 && u.cy < 90);
-    const needed = Math.max(6, Math.floor(available.length * 0.5));
-    if (onLine.length < needed) {
-      const reinforce = available
-        .filter((u) => (u.cy <= 70 || u.cy >= 90) &&
-          this.shouldMove(u, interceptLine.cx, interceptLine.cy))
-        .slice(0, needed - onLine.length);
-      if (reinforce.length > 0) {
-        commands.push({
-          cmd: 'attack_move',
-          ids: reinforce.map((u) => u.id),
-          cx: interceptLine.cx,
-          cy: interceptLine.cy,
-        });
-        for (const u of reinforce) this.recordMove(u.id, interceptLine.cx, interceptLine.cy);
-        reasons.push(`reinforce line (${reinforce.length}→${onLine.length + reinforce.length}/${needed})`);
-      }
-    }
-
-    return { commands, reason: reasons.join('; ') };
+    // Just use the generic base-building strategy.
+    // The defense-only flag prevents attack initiation.
+    // The timer-survival flag prevents offensive pushes.
+    // The base defense covers ALL allied structures including ATEK/PDOX.
+    return this.decideBaseBuilding(state);
   }
 
   private decideScg03ea(state: RAGameState): OracleDecision {
