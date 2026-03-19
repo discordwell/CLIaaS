@@ -2094,112 +2094,59 @@ export class OracleStrategy {
 
     const fromPoint = this.centroid(commandable);
 
-    // 6. KILL CHAIN — concentrated fire, no overkill.
-    // Assign enough units to kill each target, then move to next.
-    // Wounded enemies need fewer shots → assign fewer units.
-    // AI advantage: calculate exact assignments for 20+ units simultaneously.
-
-    // Sort all enemies by kill priority: lowest HP first (finish them fast),
-    // then nearest. Separate by type for weapon matching.
-    const allTargets = enemies.slice().sort((a, b) => {
-      // Absolute HP first — almost-dead enemies die in 1 shot
-      if (a.hp < 50 && b.hp >= 50) return -1;
-      if (b.hp < 50 && a.hp >= 50) return 1;
-      // Then HP fraction
-      const aFrac = a.hp / a.mhp;
-      const bFrac = b.hp / b.mhp;
-      if (Math.abs(aFrac - bFrac) > 0.3) return aFrac - bFrac;
-      // Then distance
-      return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
-    });
-
-    // Estimate units needed to kill each target:
-    // - Infantry: 1 unit (Tanya/JEEP one-shots, or 1-2 shots from others)
-    // - Damaged vehicle (<30% HP): 1-2 units
-    // - Hurt vehicle (30-60%): 2-3 units
-    // - Healthy vehicle: 3-4 units
-    const unitsToKill = (e: RAEntity): number => {
-      if (isInfantryByType(e.t)) return 1;
-      const frac = e.hp / e.mhp;
-      if (frac < 0.3) return 1;
-      if (frac < 0.6) return 2;
-      return 3;
+    // 6. CONCENTRATED FOCUS FIRE — two targets max.
+    // ALL anti-armor → one vehicle. ALL anti-infantry → one infantry.
+    // General units pile onto the vehicle target (bigger threat).
+    // Kill one enemy fast, then move to the next. Dead enemies = 0 DPS.
+    const pickTarget = (targets: RAEntity[]): RAEntity | undefined => {
+      if (targets.length === 0) return undefined;
+      // Priority: lowest HP first (finish kills), then nearest
+      return targets.slice().sort((a, b) => {
+        if (a.hp < 50 && b.hp >= 50) return -1;
+        if (b.hp < 50 && a.hp >= 50) return 1;
+        const af = a.hp / a.mhp; const bf = b.hp / b.mhp;
+        if (Math.abs(af - bf) > 0.3) return af - bf;
+        return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
+      })[0];
     };
 
-    // Two-pass kill chain: first assign weapon-matched units to their
-    // preferred targets, then fill remaining slots with general units.
-    // Sorted targets: infantry sorted by distance, vehicles by HP then distance.
-    const sortedInf = infantryTargets.slice().sort(
-      (a, b) => this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint),
-    );
-    const sortedVeh = vehicleTargets.slice().sort((a, b) => {
-      if (a.hp < 50 && b.hp >= 50) return -1;
-      if (b.hp < 50 && a.hp >= 50) return 1;
-      const af = a.hp / a.mhp; const bf = b.hp / b.mhp;
-      if (Math.abs(af - bf) > 0.3) return af - bf;
-      return this.distanceSq(a, fromPoint) - this.distanceSq(b, fromPoint);
-    });
+    const vehTarget = pickTarget(vehicleTargets);
+    const infTarget = pickTarget(infantryTargets);
 
-    const assignedIds = new Set<number>();
-    let targetsAssigned = 0;
-
-    const assignGroup = (units: RAEntity[], targets: RAEntity[]) => {
-      let ui = 0;
-      for (const target of targets) {
-        if (ui >= units.length) break;
-        const needed = unitsToKill(target);
-        const batch: number[] = [];
-        while (batch.length < needed && ui < units.length) {
-          batch.push(units[ui].id);
-          assignedIds.add(units[ui].id);
-          ui++;
-        }
-        if (batch.length > 0) {
-          commands.push({ cmd: 'attack', ids: batch, target: target.id });
-          for (const id of batch) {
-            this.lastUnitTargets.set(id, {
-              targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick,
-            });
-          }
-          targetsAssigned++;
-        }
-      }
-    };
-
-    // Pass 1: anti-armor → vehicles, anti-infantry → infantry
-    assignGroup(antiArmor, sortedVeh.length > 0 ? sortedVeh : sortedInf);
-    assignGroup(antiInfantry, sortedInf.length > 0 ? sortedInf : sortedVeh);
-
-    // Pass 2: general units fill remaining targets (prefer vehicles)
-    const remainingVeh = sortedVeh.filter(
-      (e) => !commands.some((c) => c.target === e.id),
-    );
-    const remainingInf = sortedInf.filter(
-      (e) => !commands.some((c) => c.target === e.id),
-    );
-    const remainingTargets = [...remainingVeh, ...remainingInf];
-    const unassignedGeneral = general.filter((u) => !assignedIds.has(u.id));
-    if (unassignedGeneral.length > 0 && remainingTargets.length > 0) {
-      assignGroup(unassignedGeneral, remainingTargets);
-    }
-    // Any leftover general units → pile onto the first vehicle target
-    const leftover = general.filter((u) => !assignedIds.has(u.id));
-    if (leftover.length > 0 && sortedVeh.length > 0) {
-      commands.push({
-        cmd: 'attack',
-        ids: leftover.map((u) => u.id),
-        target: sortedVeh[0].id,
-      });
-      for (const u of leftover) {
+    const recordAttack = (units: RAEntity[], target: RAEntity) => {
+      commands.push({ cmd: 'attack', ids: units.map((u) => u.id), target: target.id });
+      for (const u of units) {
         this.lastUnitTargets.set(u.id, {
-          targetId: sortedVeh[0].id, cx: sortedVeh[0].cx, cy: sortedVeh[0].cy,
-          tick: this.currentTick,
+          targetId: target.id, cx: target.cx, cy: target.cy, tick: this.currentTick,
         });
       }
+    };
+
+    // Anti-armor → one vehicle (or infantry fallback)
+    if (antiArmor.length > 0) {
+      const target = vehTarget ?? infTarget;
+      if (target) {
+        recordAttack(antiArmor, target);
+        reasons.push(`micro:aa ${antiArmor.length}→${target.t}`);
+      }
     }
 
-    if (targetsAssigned > 0) {
-      reasons.push(`micro:chain ${commandable.length}→${targetsAssigned}t`);
+    // Anti-infantry → one infantry (or vehicle fallback)
+    if (antiInfantry.length > 0) {
+      const target = infTarget ?? vehTarget;
+      if (target) {
+        recordAttack(antiInfantry, target);
+        reasons.push(`micro:ai ${antiInfantry.length}→${target.t}`);
+      }
+    }
+
+    // General → pile onto vehicle target (biggest threat)
+    if (general.length > 0) {
+      const target = vehTarget ?? infTarget;
+      if (target) {
+        recordAttack(general, target);
+        reasons.push(`micro:gen ${general.length}→${target.t}`);
+      }
     }
 
     return { commands, reasons };
