@@ -1507,18 +1507,50 @@ export class OracleStrategy {
    * Only engage enemies that cross the interception line heading south.
    */
   /**
-   * SCG08EA: Simple defense — let decideBaseBuilding handle everything.
-   * The generic combat phase already defends all allied structures
-   * (including ATEK/PDOX) and the timer-survival + defense-only flags
-   * prevent attacking. The key insight: keep the army as ONE force
-   * responding to threats, not split across positions.
+   * SCG08EA "Chronoshift": Survive 45 minutes defending ATEK + PDOX.
+   *
+   * Key insight: army starts at y≈50, ATEK/PDOX at y≈95-102.
+   * Early deaths happen because enemies reach ATEK before the army.
+   * Solution: immediately move the whole army south to y≈85 (between
+   * enemy base and critical buildings), then let generic defense handle
+   * the rest. ONE concentrated force, no splitting.
    */
   private decideScg08ea(state: RAGameState): OracleDecision {
-    // Just use the generic base-building strategy.
-    // The defense-only flag prevents attack initiation.
-    // The timer-survival flag prevents offensive pushes.
-    // The base defense covers ALL allied structures including ATEK/PDOX.
-    return this.decideBaseBuilding(state);
+    // One-time: reposition army south toward critical buildings
+    const playerUnits = this.playerOwnedUnits(state);
+    const NAVAL = new Set(['DD', 'LST', 'SS', 'CA', 'PT']);
+    const landCombat = playerUnits.filter(
+      (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
+        !NAVAL.has(u.t) && u.hp > 0,
+    );
+    // Rally directly to ATEK — the army covers the critical buildings from tick 0
+    const rallyPoint: Point = { cx: 58, cy: 95 };
+
+    // Early game: persistently push army south until they arrive.
+    // Don't use shouldMove — units that stop to fight need re-rallying.
+    // After tick 2000, stop rallying and let generic defense take over.
+    const needsRally = state.tick < 2000
+      ? landCombat.filter((u) => u.cy < 70 && this.isIdle(u))
+      : [];
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+    if (needsRally.length > 0) {
+      commands.push({
+        cmd: 'attack_move',
+        ids: needsRally.map((u) => u.id),
+        cx: rallyPoint.cx,
+        cy: rallyPoint.cy,
+      });
+      for (const u of needsRally) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
+      reasons.push(`rally south ${needsRally.length} units`);
+    }
+
+    // Generic base-building handles economy + defense
+    const basePlan = this.decideBaseBuilding(state);
+    commands.push(...basePlan.commands);
+    reasons.push(basePlan.reason);
+
+    return { commands, reason: reasons.join('; ') };
   }
 
   private decideScg03ea(state: RAGameState): OracleDecision {
@@ -2110,7 +2142,11 @@ export class OracleStrategy {
       })[0];
     };
 
-    const vehTarget = pickTarget(vehicleTargets);
+    // V2RLs are #1 threat — long range, can snipe critical buildings.
+    // Always kill V2RLs first before any other vehicle.
+    const v2Targets = vehicleTargets.filter((e) => e.t === 'V2RL');
+    const nonV2Vehicles = vehicleTargets.filter((e) => e.t !== 'V2RL');
+    const vehTarget = pickTarget(v2Targets) ?? pickTarget(nonV2Vehicles);
     const infTarget = pickTarget(infantryTargets);
 
     const recordAttack = (units: RAEntity[], target: RAEntity) => {
