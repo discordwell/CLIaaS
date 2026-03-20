@@ -60,6 +60,17 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
 ];
 
+// SCG11EA "Aftermath": Naval-focused build order — skip war factory, double refinery, rush shipyard.
+// Starting army (5 tanks, 2 artillery) is sufficient for island defense.
+const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
+  { names: ['POWR'],         type_ids: [17] },              // Power for base
+  { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund the navy
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard — destroyers ASAP
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Extra power
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
+];
+
 // Tank preference order (best to worst — covers both Allied and Soviet)
 // 3TNK=Heavy(Soviet), 2TNK=Medium(Allied), 4TNK=Mammoth(Soviet), 1TNK=Light(both)
 const TANK_PREFERENCE = ['3TNK', '2TNK', '4TNK', '1TNK'];
@@ -396,7 +407,7 @@ export class OracleStrategy {
   // the ATEK/PDOX if provoked. Defend only.
   private static readonly SCG08EA_INTERCEPT: Point = { cx: 58, cy: 80 };
   // Missions that should NEVER initiate attacks (defense/survival only)
-  private static readonly DEFENSE_ONLY_MISSIONS = new Set(['SCG08EA']);
+  private static readonly DEFENSE_ONLY_MISSIONS = new Set(['SCG08EA', 'SCG11EA']);
 
   // Per-mission coastal cells for shipyard placement (fallback).
   // Dynamic detection via MapPack parsing (mapParser.ts) is preferred
@@ -1950,24 +1961,27 @@ export class OracleStrategy {
       // South-first route: spy must trigger tny3 cell at (24,107) to set
       // global 18 → Tanya spawns. Then north via y=48 corridor to WEAP.
       const spyWaypoints: Point[] = [
-        // Phase A: North to y=48 corridor, east to x=22, south through river gap
+        // Phase A: East along y=48 to x=40, then south past ALL dog zones
         { cx: 16, cy: 48 },   // north to safe corridor
-        { cx: 22, cy: 48 },   // east to x=22 (through ROUGH terrain)
-        { cx: 22, cy: 64 },   // south (pre-river)
-        { cx: 22, cy: 68 },   // through river gap (x=22 is CLEAR at y=68)
-        { cx: 22, cy: 73 },   // south past river
-        { cx: 22, cy: 80 },
-        { cx: 22, cy: 88 },
-        { cx: 22, cy: 95 },
-        { cx: 22, cy: 100 },
+        { cx: 21, cy: 48 },
+        { cx: 24, cy: 48 },
+        { cx: 28, cy: 48 },
+        { cx: 34, cy: 48 },
+        { cx: 40, cy: 48 },   // east past all dog patrols
+        { cx: 38, cy: 48 },   // slightly west (BARR at 40,53 blocks direct south)
+        { cx: 38, cy: 55 },   // south past BARR
+        { cx: 40, cy: 65 },
+        { cx: 35, cy: 68 },   // through river gap (x=18-41 clear at y=68)
+        { cx: 30, cy: 75 },   // SW toward tny3
+        { cx: 25, cy: 85 },
+        { cx: 24, cy: 95 },
         { cx: 24, cy: 105 },
         { cx: 24, cy: 107 },  // tny3 cell trigger! → global 18 → Tanya
-        // Phase B: North through same gap then y=48 corridor to WEAP
-        { cx: 22, cy: 95 },
-        { cx: 22, cy: 85 },
-        { cx: 22, cy: 75 },
-        { cx: 22, cy: 68 },   // back through river gap
-        { cx: 22, cy: 58 },
+        // Phase B: Back north same route then east to WEAP
+        { cx: 24, cy: 95 },
+        { cx: 30, cy: 80 },
+        { cx: 35, cy: 68 },   // through river gap
+        { cx: 40, cy: 55 },
         { cx: 16, cy: 48 },   // north corridor entry
         { cx: 21, cy: 48 },
         { cx: 24, cy: 48 },
@@ -1981,7 +1995,7 @@ export class OracleStrategy {
       // Use distance check — spy is within 4 cells of current target.
       if (!this.scg05eaSpyWpIdx) this.scg05eaSpyWpIdx = 0;
       const wpTarget = spyWaypoints[this.scg05eaSpyWpIdx];
-      if (wpTarget && this.distanceSq(spy, wpTarget) <= 16) {
+      if (wpTarget && this.distanceSq(spy, wpTarget) <= 4) { // within 2 cells
         this.scg05eaSpyWpIdx++;
       }
       let wpIdx = this.scg05eaSpyWpIdx;
@@ -1990,7 +2004,8 @@ export class OracleStrategy {
       // No waiting — just sprint. Dogs patrol through every possible path.
       // The spy's 25 HP may not survive, but waiting means the timer runs out.
 
-      if (targetWeap && (wpIdx >= spyWaypoints.length || this.distanceSq(spy, targetWeap) <= 36)) {
+      if (targetWeap && wpIdx >= spyWaypoints.length) {
+        // Only infiltrate AFTER all waypoints completed (south route + north return)
         // Always re-send attack command when within 6 cells of WEAP.
         // The harness has immediate infiltration for spies within 4 cells,
         // bypassing the game loop's entity update order issue.

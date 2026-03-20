@@ -22,10 +22,10 @@ export const TEMPLATE_ROAD_MAX = 228;
 
 // === C++ Rule.ini defaults (rules.cpp) ===
 export const MAX_DAMAGE = 1000;          // rules.cpp:227 — max damage per hit
-export const REPAIR_STEP = 5;            // rules.cpp:228 RepairStep=5 — HP per repair pulse (buildings)
-export const REPAIR_PERCENT = 0.25;      // rules.cpp:229 RepairPercent=fixed(1,4)=0.25 — cost ratio per step
-export const UREPAIR_STEP = 5;           // rules.cpp:230 URepairStep=5 — HP per repair pulse (units at Service Depot)
-export const UREPAIR_PERCENT = 0.25;     // rules.cpp:231 URepairPercent=fixed(1,4)=0.25 — cost ratio per step (units)
+export const REPAIR_STEP = 7;            // rules.ini RepairStep=7 — HP per repair pulse (buildings) (C++ default=5, overridden by rules.ini)
+export const REPAIR_PERCENT = 0.20;      // rules.ini RepairPercent=20% — cost ratio per step (C++ default=fixed(1,4)=0.25, overridden by rules.ini)
+export const UREPAIR_STEP = 10;          // rules.ini URepairStep=10 — HP per repair pulse (units at Service Depot) (C++ default=5, overridden by rules.ini)
+export const UREPAIR_PERCENT = 0.20;     // rules.ini URepairPercent=20% — cost ratio per step (units) (C++ default=fixed(1,4)=0.25, overridden by rules.ini)
 export const CONDITION_RED = 0.25;       // rules.cpp:235 — red health threshold
 export const CONDITION_YELLOW = 0.5;     // rules.cpp:234 — yellow health threshold
 export const PRONE_DAMAGE_BIAS = 0.5;    // rules.cpp:202 — prone infantry damage multiplier
@@ -773,7 +773,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
 };
 
 // Superweapon gameplay constants
-export const IRON_CURTAIN_DURATION = 450;       // C++ rules.cpp:266: fixed(1,2) * TICKS_PER_MINUTE = 0.5 * 900 = 30 seconds
+export const IRON_CURTAIN_DURATION = 675;       // rules.ini IronCurtain=.75 → 0.75 * 60 * 15 = 675 ticks (C++ default=fixed(1,2)=0.5, overridden by rules.ini)
 export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 7; // C++ house.cpp:2753-2755: IronCurtainDuration * TICKS_PER_SECOND = 0.5 * 15
 export const NUKE_DAMAGE = 1000;
 export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
@@ -852,8 +852,8 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   // Structures — rules.ini Prerequisite=, Cost=, Owner=, TechLevel= values
   { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 1 },
   { type: 'APWR', name: 'Adv. Power Plant', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 8 },
-  { type: 'BARR', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 1 },
-  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1 },
+  { type: 'BARR', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1 },  // rules.ini Owner=soviet
+  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 1 },  // rules.ini Owner=allies
   { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 1 },
   { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 3 },
   { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 1 },
@@ -862,15 +862,15 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'DOME', faction: 'both', isStructure: true, techLevel: 9 },
   { type: 'AFLD', name: 'Airfield', cost: 600, buildTime: 200, prerequisite: 'DOME', faction: 'soviet', isStructure: true, techLevel: 5 },
   // Defenses
-  { type: 'PBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'BARR', faction: 'allied', isStructure: true, techLevel: 2 },
-  { type: 'HBOX', name: 'Camo Pillbox', cost: 600, buildTime: 80, prerequisite: 'BARR', faction: 'allied', isStructure: true, techLevel: 3 },
-  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'BARR', faction: 'allied', isStructure: true, techLevel: 4 },
+  { type: 'PBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 2 },  // rules.ini Prerequisite=tent
+  { type: 'HBOX', name: 'Camo Pillbox', cost: 600, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 3 },  // rules.ini Prerequisite=tent
+  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 4 },  // rules.ini Prerequisite=tent
   { type: 'AGUN', name: 'AA Gun', cost: 600, buildTime: 100, prerequisite: 'DOME', faction: 'allied', isStructure: true, techLevel: 5 },
   { type: 'GAP', name: 'Gap Generator', cost: 500, buildTime: 120, prerequisite: 'ATEK', faction: 'allied', isStructure: true, techLevel: 10 },
-  { type: 'FTUR', name: 'Flame Tower', cost: 600, buildTime: 100, prerequisite: 'TENT', faction: 'soviet', isStructure: true, techLevel: 2 },
+  { type: 'FTUR', name: 'Flame Tower', cost: 600, buildTime: 100, prerequisite: 'BARR', faction: 'soviet', isStructure: true, techLevel: 2 },  // rules.ini Prerequisite=barr
   { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true, techLevel: 7 },
   { type: 'SAM', name: 'SAM Site', cost: 750, buildTime: 120, prerequisite: 'DOME', faction: 'soviet', isStructure: true, techLevel: 9 },
-  { type: 'KENN', name: 'Kennel', cost: 200, buildTime: 60, prerequisite: 'TENT', faction: 'soviet', isStructure: true, techLevel: 3 },
+  { type: 'KENN', name: 'Kennel', cost: 200, buildTime: 60, prerequisite: 'BARR', faction: 'soviet', isStructure: true, techLevel: 3 },  // rules.ini Prerequisite=barr
   // Naval
   { type: 'SYRD', name: 'Ship Yard', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 3 },
   { type: 'SPEN', name: 'Sub Pen', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 3 },
