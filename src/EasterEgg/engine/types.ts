@@ -91,15 +91,6 @@ export enum House {
   GoodGuy = 'GoodGuy', // Meta-house: player side
   BadGuy = 'BadGuy',   // Meta-house: enemy side
   Neutral = 'Neutral',
-  Special = 'Special',
-  Multi1 = 'Multi1',
-  Multi2 = 'Multi2',
-  Multi3 = 'Multi3',
-  Multi4 = 'Multi4',
-  Multi5 = 'Multi5',
-  Multi6 = 'Multi6',
-  Multi7 = 'Multi7',
-  Multi8 = 'Multi8',
 }
 
 // Alliance groups (ant missions only — campaign uses dynamic alliances from scenario INI)
@@ -113,9 +104,7 @@ export const HOUSE_FACTION: Record<string, Faction> = {
   Spain: 'allied', Greece: 'allied', England: 'allied', France: 'allied',
   Germany: 'allied', Turkey: 'allied', GoodGuy: 'allied',
   USSR: 'soviet', Ukraine: 'soviet', BadGuy: 'soviet',
-  Neutral: 'both', Special: 'both',
-  Multi1: 'both', Multi2: 'both', Multi3: 'both', Multi4: 'both',
-  Multi5: 'both', Multi6: 'both', Multi7: 'both', Multi8: 'both',
+  Neutral: 'both',
 };
 
 export interface CountryBonus {
@@ -139,15 +128,6 @@ export const COUNTRY_BONUSES: Record<string, CountryBonus> = {
   GoodGuy: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
   BadGuy:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
   Neutral: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Special: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi1: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi2: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi3: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi4: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi5: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi6: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi7: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Multi8: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
 };
 
 // House firepower bias — derived from COUNTRY_BONUSES (C++ House->FirepowerBias)
@@ -793,8 +773,8 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
 };
 
 // Superweapon gameplay constants
-export const IRON_CURTAIN_DURATION = 675;       // C++ rules.cpp:483 reads IronCurtain=.75 from rules.ini → 0.75 * 900 = 675 ticks (45 seconds)
-export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 11; // C++ house.cpp:2754: IronCurtainDuration * TICKS_PER_SECOND = fixed(3,4) * 15 = 11
+export const IRON_CURTAIN_DURATION = 450;       // C++ rules.cpp:266: fixed(1,2) * TICKS_PER_MINUTE = 0.5 * 900 = 30 seconds
+export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 7; // C++ house.cpp:2753-2755: IronCurtainDuration * TICKS_PER_SECOND = 0.5 * 15
 export const NUKE_DAMAGE = 1000;
 export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
 export const NUKE_FLIGHT_TICKS = 45;            // missile travel time
@@ -1235,9 +1215,10 @@ export function buildAlliancesFromINI(
       set.add(ally);
     }
   }
-  // C++ parity (house.cpp:7158): Make_Ally(HOUSE_NEUTRAL) for each house.
-  // ONE-WAY: everyone considers Neutral an ally. Neutral's own alliances
-  // come from INI. No GoodGuy auto-alliance (uses INI like any house).
+  // C++ parity (house.cpp:7158): every house calls Make_Ally(HOUSE_NEUTRAL).
+  // This is ONE-WAY: everyone considers Neutral an ally, but Neutral's own
+  // alliances come from its INI Allies= entry (e.g., Allies=Special).
+  // C++ has NO auto-alliance for GoodGuy — it uses INI Allies= like any other house.
   for (const h of Object.values(House)) {
     table.get(h)?.add(House.Neutral);
   }

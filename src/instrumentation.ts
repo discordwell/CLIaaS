@@ -5,7 +5,12 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    try { await import('../sentry.server.config'); } catch { /* cross-platform deploy */ }
+    try {
+      await import('../sentry.server.config');
+    } catch {
+      // Sentry instrumentation may fail in cross-platform deploys
+      // (macOS build → Linux runtime). Safe to skip when SENTRY_DSN is unset.
+    }
 
     // Start BullMQ workers (no-op if Redis unavailable)
     const { startAllWorkers, stopAllWorkers } = await import('./lib/queue/workers/index');
@@ -21,6 +26,10 @@ export async function register() {
   }
 
   if (process.env.NEXT_RUNTIME === 'edge') {
-    try { await import('../sentry.edge.config'); } catch { /* cross-platform deploy */ }
+    try {
+      await import('../sentry.edge.config');
+    } catch {
+      // Same cross-platform issue as above
+    }
   }
 }

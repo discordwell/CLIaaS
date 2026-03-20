@@ -1950,32 +1950,24 @@ export class OracleStrategy {
       // South-first route: spy must trigger tny3 cell at (24,107) to set
       // global 18 → Tanya spawns. Then north via y=48 corridor to WEAP.
       const spyWaypoints: Point[] = [
-        // Phase A: South — 3-cell increments to prevent pathfinder detours
-        { cx: 20, cy: 55 },
-        { cx: 20, cy: 58 },
-        { cx: 20, cy: 61 },
-        { cx: 20, cy: 64 },
-        { cx: 20, cy: 67 },
-        { cx: 20, cy: 70 },
-        { cx: 20, cy: 73 },
-        { cx: 20, cy: 76 },
-        { cx: 20, cy: 79 },
-        { cx: 20, cy: 82 },
-        { cx: 20, cy: 85 },
-        { cx: 20, cy: 88 },
-        { cx: 20, cy: 91 },
-        { cx: 20, cy: 94 },
-        { cx: 20, cy: 97 },
-        { cx: 20, cy: 100 },
-        { cx: 20, cy: 103 },
-        { cx: 20, cy: 105 },  // cut east toward tny3
+        // Phase A: North to y=48 corridor, east to x=22, south through river gap
+        { cx: 16, cy: 48 },   // north to safe corridor
+        { cx: 22, cy: 48 },   // east to x=22 (through ROUGH terrain)
+        { cx: 22, cy: 64 },   // south (pre-river)
+        { cx: 22, cy: 68 },   // through river gap (x=22 is CLEAR at y=68)
+        { cx: 22, cy: 73 },   // south past river
+        { cx: 22, cy: 80 },
+        { cx: 22, cy: 88 },
+        { cx: 22, cy: 95 },
+        { cx: 22, cy: 100 },
+        { cx: 24, cy: 105 },
         { cx: 24, cy: 107 },  // tny3 cell trigger! → global 18 → Tanya
-        // Phase B: North along west edge then y=48 corridor to WEAP
-        { cx: 20, cy: 97 },
-        { cx: 20, cy: 88 },
-        { cx: 20, cy: 78 },
-        { cx: 20, cy: 68 },
-        { cx: 20, cy: 58 },
+        // Phase B: North through same gap then y=48 corridor to WEAP
+        { cx: 22, cy: 95 },
+        { cx: 22, cy: 85 },
+        { cx: 22, cy: 75 },
+        { cx: 22, cy: 68 },   // back through river gap
+        { cx: 22, cy: 58 },
         { cx: 16, cy: 48 },   // north corridor entry
         { cx: 21, cy: 48 },
         { cx: 24, cy: 48 },

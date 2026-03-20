@@ -79,19 +79,25 @@ else
 fi
 CMDS
 
-echo "[2/6] Syncing source..."
+echo "[2/6] Building locally (Turbopack needs >12GB RAM)..."
+cd "$PROJECT_ROOT"
+pnpm install --frozen-lockfile
+pnpm build
+
+echo "[3/6] Syncing source + build output to VPS..."
 rsync -az --delete -e "$RSYNC_SSH" \
   --exclude '.git' \
-  --exclude '.next' \
   --exclude 'node_modules' \
   --exclude '.env' \
   --exclude '.env.local' \
   --exclude 'test-results' \
   --exclude '.claude' \
   --exclude 'build-wasm' \
+  --exclude '.next/cache' \
+  --exclude '*.nft.json' \
   "$PROJECT_ROOT/" "$VPS_SSH:$REMOTE_APP_DIR/"
 
-echo "[3/6] Installing dependencies + building on remote (webpack)..."
+echo "[3.1/6] Installing dependencies on remote..."
 "${SSH_CMD[@]}" bash -s -- "$REMOTE_APP_DIR" "$REMOTE_SHARED_DIR" <<'CMDS'
 set -euo pipefail
 APP_DIR="$1"
@@ -100,14 +106,10 @@ cd "$APP_DIR"
 
 if command -v pnpm >/dev/null 2>&1; then
   CI=true pnpm install --frozen-lockfile
-  # Use --webpack: Turbopack needs >20GB RAM for 478 routes (Next.js 16 bug)
-  npx next build --webpack
 elif command -v corepack >/dev/null 2>&1; then
   CI=true corepack pnpm install --frozen-lockfile
-  npx next build --webpack
 elif command -v npm >/dev/null 2>&1; then
   npm install
-  npx next build --webpack
 else
   echo "ERROR: no supported package manager found (pnpm/corepack/npm)."
   exit 1

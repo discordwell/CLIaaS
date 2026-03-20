@@ -7,19 +7,11 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { House, Mission, CELL_SIZE, GAME_TICKS_PER_SEC, worldToCell, worldDist, type ProductionItem, SUPERWEAPON_DEFS, getStripSide } from './types';
+import { House, Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, SUPERWEAPON_DEFS, getStripSide } from './types';
 import { findPath } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
 import { powerMultiplier } from './repairSell';
-
-// C++ RA runs at 15 Hz (TICKS_PER_SECOND=15, timer.h), TS engine at GAME_TICKS_PER_SEC (20 Hz).
-// When dual-runtime parity tests send N ticks, both runtimes must process the same real game
-// time. Scale incoming tick counts by TS_HZ/CPP_HZ so N C++ ticks maps to the equivalent
-// TS ticks. This is the ONLY correct conversion point — production build times, movement
-// speeds, and all other timing constants are already expressed in native TS ticks.
-const CPP_TICKS_PER_SEC = 15;
-const TICK_SCALE = GAME_TICKS_PER_SEC / CPP_TICKS_PER_SEC; // 20/15 ≈ 1.333
 
 // === Serialized state types ===
 
@@ -430,13 +422,14 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             // In C++ RA, spy infiltration happens during movement phase before
             // enemy scans. The TS engine processes all entities in one pass,
             // so dogs can kill the spy before it infiltrates.
+            console.log(`[HARNESS] attack_struct: unit=${e.type}(${e.id}) struct=${s.type} ally=${s.ally} dist check...`);
             if (e.type === 'SPY' && e.isPlayerUnit && !s.ally) {
               const sx = s.cx * CELL_SIZE + CELL_SIZE;
               const sy = s.cy * CELL_SIZE + CELL_SIZE;
               const dx = e.pos.x - sx;
               const dy = e.pos.y - sy;
               const dist = Math.sqrt(dx * dx + dy * dy) / CELL_SIZE;
-              if (dist <= 6) { // building center is 1-2 cells from edge
+              if (dist <= 4) {
                 // Direct infiltration — bypass game loop
                 (game as any).spyInfiltrate(e, s);
                 results.push({ cmd: 'attack_struct', ok: true });
@@ -446,7 +439,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;
-            e.moveTarget = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+            e.moveTarget = structCenter;
             e.path = findPath(game.map, e.cell, { cx: s.cx, cy: s.cy }, true, e.isNavalUnit, e.stats.speedClass);
             e.pathIndex = 0;
           }
@@ -485,12 +478,21 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             break;
           }
           clearTeamScripts(inf);
-          // C++ parity: MISSION_ENTER is always asynchronous — infantry walks to
-          // the transport and the game loop auto-loads on proximity (index.ts:2528).
-          // Previous code had an instant-load shortcut when dist < 2.0, but C++
-          // agent_harness.cpp always assigns MISSION_ENTER and lets the game loop
-          // handle it. Match that behavior so parity tests get identical timing.
-          {
+          // If close enough, load directly (generous threshold for agent use)
+          const loadDist = worldDist(inf.pos, transport.pos);
+          if (loadDist < 2.0) {
+            transport.passengers.push(inf);
+            inf.transportRef = transport;
+            inf.mission = Mission.SLEEP;
+            inf.selected = false;
+            // Clear cell occupancy (mirrors engine auto-load at index.ts:2528)
+            game.map.setOccupancy(inf.cell.cx, inf.cell.cy, 0);
+            if (inf.stats.isInfantry) game.map.vacateSubCell(inf.cell.cx, inf.cell.cy, inf.id);
+            // Remove from world (will be re-added on unload)
+            game.entities = game.entities.filter((e: Entity) => e.id !== inf.id);
+            game.entityById.delete(inf.id);
+            results.push({ cmd: 'enter', ok: true });
+          } else {
             // Move infantry toward transport — find shore cell if transport is naval
             // C++ behavior: infantry walks to nearest shore, transport sails to pick up.
             // Without this, infantry pathfinds to a water cell and drowns.
@@ -653,10 +655,7 @@ export function installHarness(game: Game): void {
   w.__agentCommand = (commands: AgentCommand[]) => processCommands(game, commands);
 
   w.__agentStep = (n = 15, commands?: AgentCommand[]) => {
-    // C++ parity: scale incoming tick count from C++ 15 Hz to TS 20 Hz so both
-    // runtimes process the same real game time in dual-runtime parity tests.
-    const scaled = Math.ceil(n * TICK_SCALE);
-    const clamped = Math.max(0, Math.min(scaled, 1200)); // cap at 1 minute of game time (1200 @ 20Hz)
+    const clamped = Math.max(0, Math.min(n, 900)); // cap at 1 minute of game time
     const results = commands && Array.isArray(commands) ? processCommands(game, commands) : [];
     game.step(clamped);
     return { results, state: serializeState(game) } satisfies StepResult;
