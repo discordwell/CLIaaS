@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
+  // Keep native Node modules out of Turbopack bundling (they use binary addons / C++ bindings)
+  serverExternalPackages: ['ioredis', 'bullmq'],
   typescript: {
     // CLI connector types checked separately via tsc --noEmit
     ignoreBuildErrors: true,
