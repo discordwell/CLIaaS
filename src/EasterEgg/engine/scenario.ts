@@ -2182,14 +2182,45 @@ export function executeTriggerAction(
       })) : null;
       let transport: Entity | null = null;
       const infantry: Entity[] = [];
+      // C++ parity (reinf.cpp:441): ground reinforcements spawn at the map edge
+      // and walk in. The team's origin waypoint determines which edge to use.
+      // Only aircraft spawn at the edge cell AND fly — ground units get MISSION_GUARD
+      // and the team mission script moves them to the waypoint.
+      const groundEdgeCell = (!team.members.every(m => {
+        const ut = toUnitType(m.type);
+        return ut && UNIT_STATS[ut]?.isAircraft;
+      }) && houseEdges && mapBounds)
+        ? calculateHouseEdgeSpawnCell(teamHouse, houseEdges, mapBounds, wp)
+        : null;
+
       for (const member of team.members) {
         for (let i = 0; i < member.count; i++) {
           const unitType = toUnitType(member.type);
           if (!unitType) continue;
-          // Spread units slightly around waypoint
-          const offsetX = (Math.random() - 0.5) * 48;
-          const offsetY = (Math.random() - 0.5) * 48;
-          const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
+
+          // C++ reinf.cpp:471 — spawn at the map-edge entry cell, not the waypoint.
+          // Ground units appear at the edge; their team TMISSION_MOVE walks them in.
+          // Aircraft spawn at the edge but fly to the origin (handled below).
+          let spawnX = world.x;
+          let spawnY = world.y;
+          const stats = UNIT_STATS[unitType] ?? UNIT_STATS.E1;
+
+          if (stats.isAircraft && houseEdges && mapBounds) {
+            // Aircraft: spawn at edge, fly in to origin waypoint
+            const edgeCell = calculateHouseEdgeSpawnCell(teamHouse, houseEdges, mapBounds, wp);
+            if (edgeCell) {
+              const edgeWorld = cellToWorld(edgeCell.cx, edgeCell.cy);
+              spawnX = edgeWorld.x;
+              spawnY = edgeWorld.y;
+            }
+          } else if (groundEdgeCell) {
+            // Ground units: spawn at edge cell (C++ reinf.cpp:471 Unlimbo at Calculated_Cell)
+            const edgeWorld = cellToWorld(groundEdgeCell.cx, groundEdgeCell.cy);
+            spawnX = edgeWorld.x;
+            spawnY = edgeWorld.y;
+          }
+
+          const entity = new Entity(unitType, house, spawnX, spawnY);
           entity.facing = Math.floor(Math.random() * 8);
           entity.bodyFacing32 = entity.facing * 4;
           // Assign team mission script to each member
@@ -2212,27 +2243,20 @@ export function executeTriggerAction(
           }
           // VIP spawn protection — civilians/VIPs spawned in hostile zones get brief invulnerability
           // so they can start moving before being killed (C++ building-exit protection equivalent).
-          // The TS engine runs at 20 Hz, so use 120 ticks to preserve the intended ~6 second window.
           if (CIVILIAN_UNIT_TYPES.has(member.type)) {
             entity.invulnTick = 120;
           }
-          // Aircraft reinforcements: spawn at house edge, fly in to origin waypoint
-          // C++ ScenarioClass::Create_Army spawns ALL aircraft at the map edge, including
-          // loaded transports (e.g. SCG01EA tanya team — Chinook flies in with Tanya).
-          if (entity.stats.isAircraft && houseEdges && mapBounds) {
-            const edgeCell = calculateHouseEdgeSpawnCell(teamHouse, houseEdges, mapBounds, wp);
-            if (edgeCell) {
-              const edgeWorld = cellToWorld(edgeCell.cx, edgeCell.cy);
-              entity.pos = { x: edgeWorld.x, y: edgeWorld.y };
-              entity.prevPos = { x: edgeWorld.x, y: edgeWorld.y };
-            }
-            // Start airborne in flying state (not landed on the ground)
+          // Aircraft-specific: start airborne, fly toward origin waypoint
+          if (stats.isAircraft) {
             entity.aircraftState = 'flying';
             entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
             entity.animState = AnimState.WALK;
-            // Set initial MOVE toward the origin waypoint so the first TMISSION_MOVE works naturally
             entity.mission = Mission.MOVE;
             entity.moveTarget = { x: world.x, y: world.y };
+          } else {
+            // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.
+            // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.
+            entity.mission = Mission.GUARD;
           }
           // Track transports and infantry for auto-loading
           if (entity.isTransport && !transport) {
