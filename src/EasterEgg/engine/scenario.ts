@@ -2196,7 +2196,7 @@ export interface TriggerActionResult {
   revealZone?: number;            // reveal all of specified zone (REVEAL_ZONE)
   playMusic?: number;             // play music track (PLAY_MUSIC)
   preferredTarget?: number;       // set preferred target type for AI (PREFERRED_TARGET)
-  beginProduction?: number;       // house index that should start AI production (BEGIN_PRODUCTION)
+  beginProduction?: number;       // house index — sets IsStarted only, NOT productionEnabled (BEGIN_PRODUCTION)
   destroyTeam?: number;           // team index to mark as destroyed (DESTROY_TEAM)
   startTimer?: boolean;           // start the mission timer (START_TIMER)
   stopTimer?: boolean;            // stop the mission timer (STOP_TIMER)
@@ -2442,8 +2442,9 @@ export function executeTriggerAction(
 
     case TACTION_ALL_HUNT:
       // C++ parity: HouseClass::As_Pointer(Data.House)->Do_All_To_Hunt()
-      // Targets a SPECIFIC house from action data, not all enemies
-      result.allHunt = action.data;
+      // Targets a SPECIFIC house from action data, not all enemies.
+      // Data.House is the low byte of Data.Value (union int → int8_t).
+      result.allHunt = action.data & 0xFF;
       break;
 
     case TACTION_TEXT_TRIGGER:
@@ -2478,15 +2479,20 @@ export function executeTriggerAction(
       break;
 
     case TACTION_BEGIN_PRODUCTION:
-      // C++ parity: HouseClass::As_Pointer(Data.House)->Begin_Production()
-      // Uses action's Data.House, NOT the trigger's owner house
-      result.beginProduction = action.data;
+      // C++ house.h:716: Begin_Production(void) { IsStarted = true; }
+      // Only sets IsStarted — does NOT enable general production (IsBaseBuilding).
+      // Uses action's Data.House, NOT the trigger's owner house.
+      // C++ taction.h:109-119: Data is union { int Value; int8_t House; }.
+      // INI stores Data.Value (int); Data.House reads the low byte as int8_t.
+      // e.g., -254 → 0xFFFFFF02 → low byte 2 → HOUSE_USSR.
+      result.beginProduction = action.data & 0xFF;
       break;
 
     case TACTION_AUTOCREATE:
       // C++ parity: HouseClass::As_Pointer(Data.House)->IsAlerted = true
-      // Uses action's Data.House, NOT the trigger's owner house
-      result.autocreate = action.data;
+      // Uses action's Data.House, NOT the trigger's owner house.
+      // Data.House is the low byte of Data.Value (union int → int8_t).
+      result.autocreate = action.data & 0xFF;
       break;
 
     case TACTION_TIMER_EXTEND:
@@ -2507,8 +2513,9 @@ export function executeTriggerAction(
     // TR4: New trigger actions (stub implementations)
     case TACTION_FIRE_SALE:
       // C++ parity: HouseClass::As_Pointer(Data.House)->State = STATE_ENDGAME
-      // Uses action's Data.House, NOT the trigger's owner house
-      result.fireSale = action.data;
+      // Uses action's Data.House, NOT the trigger's owner house.
+      // Data.House is the low byte of Data.Value (union int → int8_t).
+      result.fireSale = action.data & 0xFF;
       break;
 
     case TACTION_PLAY_MOVIE:

@@ -268,3 +268,107 @@ describe('TACTION_BEGIN_PRODUCTION boundary: action.data === 0 is valid', () => 
     expect(result.beginProduction).toBe(0);
   });
 });
+
+describe('TACTION_BEGIN_PRODUCTION negative Data.Value decoding (C++ union int to int8_t)', () => {
+  /**
+   * C++ taction.h:109-119 — Data is a union of int Value and int8_t House.
+   * INI stores Data.Value (int). When accessed as Data.House, the low byte
+   * is read as int8_t. RA trigger INIs encode house IDs as negative ints
+   * where the low byte is the house ID:
+   *   -254 -> 0xFFFFFF02 -> low byte 0x02 -> HOUSE_USSR (2)
+   *   -247 -> 0xFFFFFF09 -> low byte 0x09 -> HOUSE_BAD  (9)
+   */
+  it('data=-254 decodes to house 2 (USSR) via low-byte extraction', () => {
+    const result = executeTriggerAction(
+      beginProductionAction({ data: -254 }),
+      emptyTeamTypes,
+      emptyWaypoints,
+      emptyGlobals,
+      emptyTriggers,
+      0,
+    );
+    // -254 & 0xFF = 2 (HOUSE_USSR)
+    expect(result.beginProduction).toBe(2);
+  });
+
+  it('data=-247 decodes to house 9 (BadGuy) via low-byte extraction', () => {
+    const result = executeTriggerAction(
+      beginProductionAction({ data: -247 }),
+      emptyTeamTypes,
+      emptyWaypoints,
+      emptyGlobals,
+      emptyTriggers,
+      0,
+    );
+    // -247 & 0xFF = 9 (HOUSE_BAD)
+    expect(result.beginProduction).toBe(9);
+  });
+
+  it('data=-256 decodes to house 0 (Spain) via low-byte extraction', () => {
+    const result = executeTriggerAction(
+      beginProductionAction({ data: -256 }),
+      emptyTeamTypes,
+      emptyWaypoints,
+      emptyGlobals,
+      emptyTriggers,
+      0,
+    );
+    // -256 & 0xFF = 0 (HOUSE_SPAIN)
+    expect(result.beginProduction).toBe(0);
+  });
+
+  it('data=-255 decodes to house 1 (Greece) via low-byte extraction', () => {
+    const result = executeTriggerAction(
+      beginProductionAction({ data: -255 }),
+      emptyTeamTypes,
+      emptyWaypoints,
+      emptyGlobals,
+      emptyTriggers,
+      0,
+    );
+    // -255 & 0xFF = 1 (HOUSE_GREECE)
+    expect(result.beginProduction).toBe(1);
+  });
+
+  it('SCG05EA prod trigger: data=-254 targets USSR, data=-247 targets BadGuy', () => {
+    // SCG05EA trigger "prod": action1 data=-254, action2 data=-247
+    const ussrResult = executeTriggerAction(
+      beginProductionAction({ data: -254 }),
+      emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers, 0,
+    );
+    const badResult = executeTriggerAction(
+      beginProductionAction({ data: -247 }),
+      emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers, 0,
+    );
+    expect(ussrResult.beginProduction).toBe(2);  // USSR
+    expect(badResult.beginProduction).toBe(9);   // BadGuy
+  });
+});
+
+describe('TACTION_BEGIN_PRODUCTION only sets IsStarted, not productionEnabled', () => {
+  /**
+   * C++ house.h:716: void Begin_Production(void) { IsStarted = true; }
+   *
+   * In C++, Begin_Production() only sets IsStarted. It does NOT set
+   * IsBaseBuilding, and in single-player GAME_NORMAL mode, AI_Unit()
+   * only builds units to fill teams (house.cpp:5808-5885), not arbitrary
+   * tech-tree units. The IsBaseBuilding path (house.cpp:5887-5909) is
+   * what enables full arbitrary production.
+   *
+   * The TS engine must NOT set productionEnabled from BEGIN_PRODUCTION,
+   * or the AI will build TTNK, SHOK, QTNK, etc. that never appear in C++.
+   */
+  it('result only contains beginProduction, not baseBuilding or autocreate', () => {
+    const result = executeTriggerAction(
+      beginProductionAction({ data: 2 }),
+      emptyTeamTypes,
+      emptyWaypoints,
+      emptyGlobals,
+      emptyTriggers,
+      0,
+    );
+    expect(result.beginProduction).toBe(2);
+    expect(result.baseBuilding).toBeUndefined();
+    expect(result.autocreate).toBeUndefined();
+  });
+});

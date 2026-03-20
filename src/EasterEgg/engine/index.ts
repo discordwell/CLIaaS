@@ -5408,14 +5408,21 @@ export class Game {
       if (aiState) aiState.preferredTarget = result.preferredTarget ?? null;
     }
     if (result.beginProduction !== undefined) {
+      // C++ house.h:716: Begin_Production(void) { IsStarted = true; }
+      // This ONLY sets IsStarted — it does NOT enable general AI production.
+      // In C++, IsStarted is used for enemy selection (house.cpp:4639) and
+      // indicates the house has begun operations. General unit production
+      // (AI_Unit/AI_Infantry) in single-player only builds units to fill teams,
+      // NOT arbitrary tech-tree units. The IsBaseBuilding flag (set by
+      // TACTION_BASE_BUILDING) is what enables full arbitrary production.
       const bpHouse = houseIdToHouse(result.beginProduction);
       if (!this.aiStates.has(bpHouse) && !this.isAllied(bpHouse, this.playerHouse)) {
         const newState = this.createAIHouseState(bpHouse);
-        newState.productionEnabled = true;
+        newState.isStarted = true;
         this.aiStates.set(bpHouse, newState);
       } else {
         const existingState = this.aiStates.get(bpHouse);
-        if (existingState) existingState.productionEnabled = true;
+        if (existingState) existingState.isStarted = true;
       }
     }
     // C++ parity (#39): TACTION_BASE_BUILDING — set IsBaseBuilding on/off for AI house

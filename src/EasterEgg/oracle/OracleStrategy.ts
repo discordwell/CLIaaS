@@ -103,6 +103,7 @@ const SCG11EA_AA_DEFENSE_TRIGGER = 2;
 const SCG11EA_GROUND_DEFENSE_TRIGGER = 2;
 const SCG11EA_DEFENSE_CREDIT_RESERVE = 1200;
 const SCG11EA_ECON_REBUILD_FLOOR = 500;
+const SCG11EA_PROC_REBUILD_RESERVE = 2000;
 const SCG11EA_RIVER_SWEEP_POINTS: Point[] = [
   { cx: 67, cy: 91 },
   { cx: 71, cy: 72 },
@@ -1036,27 +1037,48 @@ export class OracleStrategy {
         }
 
         let offsets = [...PLACEMENT_OFFSETS];
+        let scg11eaProcCandidates: Point[] = [];
         if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC') {
-          const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
-          if (procCount === 0) {
-            offsets.sort((a, b) => {
-              const aDist = (placeRef.cx + a.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
-                (placeRef.cy + a.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
-              const bDist = (placeRef.cx + b.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
-                (placeRef.cy + b.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
-              return aDist - bDist;
-            });
-          } else {
-            offsets.sort((a, b) => {
-              const aSouth = placeRef.cy + a.cy;
-              const bSouth = placeRef.cy + b.cy;
-              if (aSouth !== bSouth) return bSouth - aSouth;
-              const aWest = placeRef.cx + a.cx;
-              const bWest = placeRef.cx + b.cx;
-              if (aWest !== bWest) return aWest - bWest;
-              return Math.abs(a.cx) + Math.abs(a.cy) - (Math.abs(b.cx) + Math.abs(b.cy));
-            });
+          offsets.sort((a, b) => {
+            const aDist = (placeRef.cx + a.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
+              (placeRef.cy + a.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
+            const bDist = (placeRef.cx + b.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
+              (placeRef.cy + b.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
+            return aDist - bDist;
+          });
+
+          const procAnchor = playerUnits.some((u) => u.t === 'HARV')
+            ? this.centroid(playerUnits.filter((u) => u.t === 'HARV'))
+            : SCG11EA_ORE_ANCHOR;
+          const candidateAnchors = alliedStructures
+            .filter((s) =>
+              s.t === 'FACT' ||
+              s.t === 'PROC' ||
+              s.t === 'POWR' ||
+              s.t === 'APWR' ||
+              s.t === 'WEAP')
+            .sort((a, b) =>
+              this.distanceSq(a, procAnchor) - this.distanceSq(b, procAnchor))
+            .slice(0, 4);
+          if (candidateAnchors.length === 0) {
+            candidateAnchors.push(conYard);
           }
+          for (const anchor of candidateAnchors) {
+            for (let dy = -12; dy <= 6; dy++) {
+              for (let dx = -10; dx <= 10; dx++) {
+                scg11eaProcCandidates.push({ cx: anchor.cx + dx, cy: anchor.cy + dy });
+              }
+            }
+          }
+          scg11eaProcCandidates = scg11eaProcCandidates
+            .filter((pos) => pos.cx >= 0 && pos.cx < 128 && pos.cy >= 0 && pos.cy < 128)
+            .sort((a, b) => {
+              const aOre = this.distanceSq(a, procAnchor);
+              const bOre = this.distanceSq(b, procAnchor);
+              if (aOre !== bOre) return aOre - bOre;
+              if (a.cy !== b.cy) return a.cy - b.cy;
+              return Math.abs(a.cx - procAnchor.cx) - Math.abs(b.cx - procAnchor.cx);
+            });
         } else if (this.scenario !== 'SCG11EA' && coastalCells2 && coastalCells2.length > 0) {
           // Sort offsets toward water from the reference building
           const wt = coastalCells2[0];
@@ -1077,15 +1099,31 @@ export class OracleStrategy {
         let placeCx: number, placeCy: number;
         // Find first offset that passes terrain/fog/occupancy validation
         let foundValid = false;
-        for (let i = 0; i < offsets.length; i++) {
-          const idx = (this.placementAttempts + i) % offsets.length;
-          const cx = placeRef.cx + offsets[idx].cx;
-          const cy = placeRef.cy + offsets[idx].cy;
-          if (this.canPlaceBuilding(cx, cy, state, false)) {
-            placeCx = cx;
-            placeCy = cy;
-            foundValid = true;
-            break;
+        if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC' && scg11eaProcCandidates.length > 0) {
+          const seenCandidates = new Set<string>();
+          for (const pos of scg11eaProcCandidates) {
+            const key = `${pos.cx},${pos.cy}`;
+            if (seenCandidates.has(key)) continue;
+            seenCandidates.add(key);
+            if (this.canPlaceBuilding(pos.cx, pos.cy, state, false)) {
+              placeCx = pos.cx;
+              placeCy = pos.cy;
+              foundValid = true;
+              break;
+            }
+          }
+        }
+        if (!foundValid) {
+          for (let i = 0; i < offsets.length; i++) {
+            const idx = (this.placementAttempts + i) % offsets.length;
+            const cx = placeRef.cx + offsets[idx].cx;
+            const cy = placeRef.cy + offsets[idx].cy;
+            if (this.canPlaceBuilding(cx, cy, state, false)) {
+              placeCx = cx;
+              placeCy = cy;
+              foundValid = true;
+              break;
+            }
           }
         }
         if (!foundValid) {
@@ -1156,21 +1194,46 @@ export class OracleStrategy {
         const shipCount = playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length;
         const survivingTanks = playerUnits.filter((u) => u.t.includes('TNK')).length;
         const scg11eaSubHuntLive = scg11eaEnemySubCount > 0;
+        const scg11eaEconomyCollapsed = procCount === 0;
+        const scg11eaEconomyFragile = procCount < 2;
         const scg11eaStaticDefenseUnlocked =
           shipCount >= SCG11EA_FLEET_ONLINE_SHIPS &&
           scg11eaEnemySubCount <= SCG11EA_ASSAULT_MAX_SUBS &&
           procCount >= 3;
         if (
-          procCount === 0 &&
-          (!scg11eaSubHuntLive || shipCount === 0 || state.credits < SCG11EA_ECON_REBUILD_FLOOR) &&
+          scg11eaEconomyCollapsed &&
           buildable.structures.includes('PROC')
         ) {
-          commands.push({
-            cmd: 'produce',
-            rtti: RTTI_BUILDINGTYPE,
-            type_id: 12,
-          });
-          reasons.push('rebuild PROC');
+          if (
+            !scg11eaSubHuntLive ||
+            shipCount === 0 ||
+            state.credits >= SCG11EA_PROC_REBUILD_RESERVE ||
+            state.credits < SCG11EA_ECON_REBUILD_FLOOR
+          ) {
+            commands.push({
+              cmd: 'produce',
+              rtti: RTTI_BUILDINGTYPE,
+              type_id: 12,
+            });
+            reasons.push('rebuild PROC');
+          } else {
+            reasons.push(`save for PROC rebuild (${state.credits}/${SCG11EA_PROC_REBUILD_RESERVE})`);
+          }
+        } else if (
+          scg11eaSubHuntLive &&
+          scg11eaEconomyFragile &&
+          buildable.structures.includes('PROC')
+        ) {
+          if (state.credits >= SCG11EA_PROC_REBUILD_RESERVE) {
+            commands.push({
+              cmd: 'produce',
+              rtti: RTTI_BUILDINGTYPE,
+              type_id: 12,
+            });
+            reasons.push(`restore naval economy (${procCount + 1}/2 PROC)`);
+          } else {
+            reasons.push(`save for PROC rebuild (${state.credits}/${SCG11EA_PROC_REBUILD_RESERVE})`);
+          }
         } else if (
           scg11eaSubHuntLive &&
           weapCount === 0 &&
@@ -1400,6 +1463,11 @@ export class OracleStrategy {
       this.scenario === 'SCG11EA' &&
       scg11eaEnemySubCount > 0 &&
       (hasShipyard || vesselProduction != null || navalCount > 0);
+    const scg11eaNavalEconomyFragile =
+      this.scenario === 'SCG11EA' &&
+      scg11eaSubHuntPhase &&
+      refCount < 2 &&
+      buildable?.structures.includes('PROC') === true;
     const scg11eaFleetOnline =
       this.scenario === 'SCG11EA' &&
       navalCount >= SCG11EA_FLEET_ONLINE_SHIPS;
@@ -1421,7 +1489,8 @@ export class OracleStrategy {
           : SCG11EA_SUB_HUNT_TANK_FLOOR)
         : 0;
     const skipTankProduction = this.scenario === 'SCG11EA'
-      ? (scg11eaSubHuntPhase ? !scg11eaArmorEmergency : tankCount >= scg11eaTankTarget)
+      ? ((tankCount >= scg11eaTankTarget && !scg11eaArmorEmergency) ||
+        (scg11eaNavalEconomyFragile && !scg11eaArmorEmergency))
       : false;
     if (hasWarFactory && !unitProduction && buildable && !skipTankProduction) {
       if (needHarvester && (harvCount === 0 || state.credits > 1200)) {
@@ -1438,7 +1507,9 @@ export class OracleStrategy {
       } else if (!needHarvester || state.credits > 600) {
         // Tank production — SCG11EA spends harder on armor until the fleet is ready.
         const tankCreditThreshold = this.scenario === 'SCG11EA'
-          ? (scg11eaSubHuntPhase
+          ? (scg11eaNavalEconomyFragile && !scg11eaArmorEmergency
+            ? SCG11EA_PROC_REBUILD_RESERVE
+            : scg11eaSubHuntPhase
             ? SCG11EA_DEFENSE_CREDIT_RESERVE
             : tankCount < scg11eaTankTarget ? 500 : 900)
           : (tankCount < 3 ? 400 : 700);
@@ -1496,7 +1567,9 @@ export class OracleStrategy {
     );
     // SCG11EA: always produce ships (we know subs are there), lower credit threshold
     const shipCreditThreshold = this.scenario === 'SCG11EA'
-      ? (scg11eaSubHuntPhase ? 250 : 400)
+      ? (scg11eaNavalEconomyFragile
+        ? SCG11EA_PROC_REBUILD_RESERVE
+        : scg11eaSubHuntPhase ? 250 : 400)
       : 800;
     const shouldProduceShips = this.scenario === 'SCG11EA' || enemyNaval;
     if (
@@ -1504,6 +1577,7 @@ export class OracleStrategy {
       !vesselProduction &&
       buildable &&
       shouldProduceShips &&
+      !scg11eaNavalEconomyFragile &&
       state.credits > shipCreditThreshold &&
       (!buildingProduction || suppressScg11eaLeftoverBuild)
     ) {
