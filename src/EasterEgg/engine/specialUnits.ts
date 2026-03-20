@@ -70,7 +70,12 @@ export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
   const scx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
   const scy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
   const dist = worldDist(entity.pos, { x: scx, y: scy });
-  if (dist > 1.5) {
+  // C4 plant range: for small buildings (1x1) use 1.5 from center.
+  // For larger buildings, Tanya can't enter the footprint — extend range
+  // by half the building diagonal so she can plant from an adjacent cell.
+  const halfDiag = Math.sqrt(sw * sw + sh * sh) / 2;
+  const plantRange = Math.max(1.5, halfDiag + 0.5);
+  if (dist > plantRange) {
     entity.animState = AnimState.WALK;
     entity.moveToward({ x: scx, y: scy }, ctx.movementSpeed(entity));
     return;

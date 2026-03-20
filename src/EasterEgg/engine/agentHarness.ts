@@ -430,15 +430,24 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;
-            e.moveTarget = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-            // Pathfind to adjacent cell of structure (structure cell itself is WALL)
+            // Pathfind to cell adjacent to structure CENTER (C4 checks dist to center).
+            // Structure footprint: (s.cx, s.cy) to (s.cx+sw-1, s.cy+sh-1).
+            // We want cells AROUND the footprint, closest to the center.
+            const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+            const centerX = s.cx + Math.floor(sw / 2);
+            const centerY = s.cy + Math.floor(sh / 2);
+            e.moveTarget = { x: centerX * CELL_SIZE + CELL_SIZE / 2, y: centerY * CELL_SIZE + CELL_SIZE / 2 };
             let bestPath: ReturnType<typeof findPath> = [];
-            for (const [ddx, ddy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]) {
-              const ax = s.cx + ddx, ay = s.cy + ddy;
-              const p = findPath(game.map, e.cell, { cx: ax, cy: ay }, true, e.isNavalUnit, e.stats.speedClass);
-              if (p.length > 0 && (bestPath.length === 0 || p.length < bestPath.length)) {
-                bestPath = p;
-                e.moveTarget = { x: ax * CELL_SIZE + CELL_SIZE / 2, y: ay * CELL_SIZE + CELL_SIZE / 2 };
+            // Try all cells around the footprint perimeter
+            for (let dy = -1; dy <= sh; dy++) {
+              for (let dx = -1; dx <= sw; dx++) {
+                if (dx >= 0 && dx < sw && dy >= 0 && dy < sh) continue; // inside footprint
+                const ax = s.cx + dx, ay = s.cy + dy;
+                const p = findPath(game.map, e.cell, { cx: ax, cy: ay }, true, e.isNavalUnit, e.stats.speedClass);
+                if (p.length > 0 && (bestPath.length === 0 || p.length < bestPath.length)) {
+                  bestPath = p;
+                  e.moveTarget = { x: ax * CELL_SIZE + CELL_SIZE / 2, y: ay * CELL_SIZE + CELL_SIZE / 2 };
+                }
               }
             }
             e.path = bestPath;

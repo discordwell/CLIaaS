@@ -875,6 +875,13 @@ export class OracleStrategy {
           !NAVAL_COMBAT_TYPES.has(e.t) &&
           alliedStructures.some((s) => this.distanceSq(e, s) <= 400)).length
         : 0;
+    const scg11eaGroundThreatCount =
+      this.scenario === 'SCG11EA'
+        ? state.enemies.filter((e) =>
+          !NAVAL_COMBAT_TYPES.has(e.t) &&
+          !AIRCRAFT_TYPES.has(e.t) &&
+          alliedStructures.some((s) => this.distanceSq(e, s) <= 400)).length
+        : 0;
     const scg11eaEnemyAirCount =
       this.scenario === 'SCG11EA'
         ? state.enemies.filter((e) =>
@@ -1160,7 +1167,7 @@ export class OracleStrategy {
           scg11eaSubHuntLive &&
           weapCount === 0 &&
           survivingTanks < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
-          scg11eaBaseThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
+          scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
           buildable.structures.includes('WEAP')
         ) {
           commands.push({
@@ -1168,7 +1175,7 @@ export class OracleStrategy {
             rtti: RTTI_BUILDINGTYPE,
             type_id: 2,
           });
-          reasons.push(`emergency rebuild WEAP (${survivingTanks} tanks, threats=${scg11eaBaseThreatCount})`);
+          reasons.push(`emergency rebuild WEAP (${survivingTanks} tanks, threats=${scg11eaGroundThreatCount})`);
         } else if (powerDeficit > 0 && buildable.structures.includes('APWR')) {
           commands.push({
             cmd: 'produce',
@@ -1208,7 +1215,7 @@ export class OracleStrategy {
           });
           reasons.push(`produce AGUN (${aaCount + 1}/${SCG11EA_AA_DEFENSE_TARGET}, air=${scg11eaEnemyAirCount})`);
         } else if (
-          scg11eaBaseThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
+          scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
           gunCount < SCG11EA_GROUND_DEFENSE_TARGET &&
           state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE &&
           (buildable.structures.includes('FTUR') || buildable.structures.includes('GUN'))
@@ -1219,7 +1226,7 @@ export class OracleStrategy {
             rtti: RTTI_BUILDINGTYPE,
             type_id: defenseType === 'FTUR' ? 10 : 8,
           });
-          reasons.push(`produce ${defenseType} (${gunCount + 1}/${SCG11EA_GROUND_DEFENSE_TARGET}, threats=${scg11eaBaseThreatCount})`);
+          reasons.push(`produce ${defenseType} (${gunCount + 1}/${SCG11EA_GROUND_DEFENSE_TARGET}, threats=${scg11eaGroundThreatCount})`);
         } else if (
           !scg11eaSubHuntLive &&
           weapCount === 0 &&
@@ -1389,8 +1396,7 @@ export class OracleStrategy {
       this.scenario === 'SCG11EA' &&
       scg11eaSubHuntPhase &&
       tankCount < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
-      (scg11eaBaseThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
-        scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER);
+      scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER;
     const scg11eaTankTarget =
       this.scenario === 'SCG11EA'
         ? (scg11eaSubHuntPhase
@@ -2636,12 +2642,14 @@ export class OracleStrategy {
         const target = targetable[0] ?? null;
         if (target) {
           const tId = target.id;
+          const tDist = this.distanceSq(tanya, target);
+          // Send attack once — don't re-send while adjacent (resets C4 timer!)
           if (!lastTarget || lastTarget.targetId !== tId) {
             commands.push({ cmd: 'attack', ids: [tanya.id], target: tId });
             this.lastUnitTargets.set(tanya.id, { targetId: tId, cx: target.cx, cy: target.cy, tick: state.tick });
           }
           const label = BARREL_TYPES.has(target.t) ? 'BARREL' : target.t;
-          reasons.push(`Tanya → C4 ${label}(${target.cx},${target.cy}) d=${Math.sqrt(this.distanceSq(tanya, target)).toFixed(0)}`);
+          reasons.push(`Tanya → C4 ${label}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)}`);
         }
       }
 
@@ -2902,43 +2910,49 @@ export class OracleStrategy {
       if (patrolShips.length > 0) reasons.push(`sweep river (${patrolShips.length} ships)`);
     }
 
-    // GROUND ASSAULT — send ALL tanks to destroy the island Soviet base.
-    // No home guard, no fleet prerequisite. The walkthrough says: build tanks,
-    // smash their base, THEN go naval. Tanks prioritize tanks/buildings over infantry.
-    if (landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
-      // Structure target is the default — head for the Soviet base
-      const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-      // Only divert for enemy vehicles VERY close (100 = 10 cells) and ON the assault path
-      const nearbyEnemyUnits = state.enemies.filter(
-        (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
-          !isInfantryByType(e.t) &&
-          landArmor.some((u) => this.distanceSq(u, e) <= 100),
-      );
-      let assaultTarget: Point | null = structTarget;
-      if (nearbyEnemyUnits.length > 0) {
-        // Priority: tanks > V2RL > other vehicles
-        nearbyEnemyUnits.sort((a, b) => {
-          const aP = a.t.includes('TNK') ? 0 : a.t === 'V2RL' ? 1 : 2;
-          const bP = b.t.includes('TNK') ? 0 : b.t === 'V2RL' ? 1 : 2;
-          return aP !== bP ? aP - bP : this.distanceSq(a, landArmor[0]) - this.distanceSq(b, landArmor[0]);
-        });
-        assaultTarget = { cx: nearbyEnemyUnits[0].cx, cy: nearbyEnemyUnits[0].cy };
-      }
-      // If no nearby units, assaultTarget is already structTarget
+    // Only peel armor west once the fleet has done the dangerous part of the job.
+    // Earlier pushes bled the island hold line and starved DD production exactly
+    // when the river was closest to opening.
+    const fleetStableForAssault =
+      playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS &&
+      enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS;
+    const canSpareArmor = landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
+    const homeGuard = Math.max(3, Math.min(5, baseGroundThreats.length + 2));
+    const assaultReserve = landArmor
+      .slice()
+      .sort((a, b) => {
+        const aTank = a.t.includes('TNK') ? 0 : 1;
+        const bTank = b.t.includes('TNK') ? 0 : 1;
+        if (aTank !== bTank) return aTank - bTank;
+        return this.distanceSq(a, SCG11EA_PRIMARY_ASSAULT_POINT) - this.distanceSq(b, SCG11EA_PRIMARY_ASSAULT_POINT);
+      })
+      .slice(homeGuard);
+    const assaultGroup = enemySubs.length > 0
+      ? assaultReserve.slice(0, SCG11EA_EARLY_ASSAULT_CAP)
+      : assaultReserve;
+    if (fleetStableForAssault && canSpareArmor && baseGroundThreats.length <= 2 && assaultGroup.length >= 4) {
+      const assaultTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
       if (assaultTarget) {
-        const retargetDue = (state.tick % 30) < 5;
-        const movers = retargetDue ? landArmor : landArmor.filter(
-          (u) => this.isIdle(u) || this.distanceSq(u, assaultTarget!) > 225,
+        const retargetDue = (state.tick % 40) < 5;
+        const mobileAssault = (retargetDue ? assaultGroup : assaultGroup.filter(
+          (u) =>
+            this.isIdle(u) ||
+            this.shouldMove(u, assaultTarget.cx, assaultTarget.cy) ||
+            this.distanceSq(u, assaultTarget) > 225,
+        )).filter(
+          (u) => this.distanceSq(u, assaultTarget) > 9 || this.isIdle(u),
         );
-        if (movers.length > 0) {
+        if (mobileAssault.length > 0) {
           commands.push({
             cmd: 'attack_move',
-            ids: movers.map((u) => u.id),
+            ids: mobileAssault.map((u) => u.id),
             cx: assaultTarget.cx,
             cy: assaultTarget.cy,
           });
-          for (const u of movers) this.recordMove(u.id, assaultTarget.cx, assaultTarget.cy);
-          reasons.push(`assault (${movers.length} armor → ${assaultTarget.cx},${assaultTarget.cy})`);
+          for (const unit of mobileAssault) {
+            this.recordMove(unit.id, assaultTarget.cx, assaultTarget.cy);
+          }
+          reasons.push(`assault (${mobileAssault.length} armor → ${assaultTarget.cx},${assaultTarget.cy})`);
         }
       }
     }
