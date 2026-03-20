@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -19,8 +23,12 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@cli/*": ["./cli/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@cli/*": [
+        "./cli/*"
+      ]
     }
   },
   "include": [
@@ -29,7 +37,16 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    ".next/dev/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "src/EasterEgg", "scripts", "cli/db", "exports/routes", "vitest.config.ts", "drizzle"]
+  "exclude": [
+    "node_modules",
+    "src/EasterEgg",
+    "scripts",
+    "cli/db",
+    "exports/routes",
+    "vitest.config.ts",
+    "drizzle"
+  ]
 }

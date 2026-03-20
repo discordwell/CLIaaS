@@ -279,6 +279,8 @@ export class OracleStrategy {
   private baseBuildIndex = 0;
   private placementAttempts = 0;
   private lastPlacementTick = 0;
+  private syrdPlacementStart = -1;
+  private syrdPlacementStart = -1;  // placementAttempts value when SYRD grid scan began
   private scg03eaBridgeIndex = 0;  // 0 = first bridge, 1 = second, 2 = done
   private mineWaypointIndex = 0;
   private mineDeployPending = false;  // true when minelayer has arrived and should deploy
@@ -620,28 +622,23 @@ export class OracleStrategy {
     if (buildingProduction?.done) {
       const isShipyard = buildingProduction.t === 'SYRD' || buildingProduction.t === 'SPEN';
 
-      // Shipyards must be placed on coastal cells (land adjacent to water)
-      // Priority: 1) C++ coastal detection, 2) MapPack-parsed coastal cells, 3) hardcoded per-mission
-      const coastalCells = state.coastalCells?.length
-        ? state.coastalCells
-        : this.resolveCoastalCells(conYard);
-      if (isShipyard && coastalCells && coastalCells.length > 0) {
-        // For each coastal cell, try a 5x5 spiral around it.
-        // The parser gives us approximate shoreline — the exact valid
-        // placement cell might be 1-2 cells off in any direction.
-        const spiralOffsets = [
-          [0,0], [1,0], [-1,0], [0,1], [0,-1],
-          [1,1], [-1,1], [1,-1], [-1,-1],
-          [2,0], [-2,0], [0,2], [0,-2],
-          [2,1], [-2,1], [2,-1], [-2,-1],
-          [1,2], [-1,2], [1,-2], [-1,-2],
-        ];
-        const baseIdx = Math.floor(this.placementAttempts / spiralOffsets.length);
-        const spiralIdx = this.placementAttempts % spiralOffsets.length;
-        const base = coastalCells[baseIdx % coastalCells.length];
-        const [sdx, sdy] = spiralOffsets[spiralIdx];
-        const placeCx = base.cx + sdx;
-        const placeCy = base.cy + sdy;
+      if (isShipyard) {
+        // Brute-force grid scan: try every cell within Adjacent=8 of
+        // the northernmost player building. The game engine's Legal_Placement
+        // validates each cell via Is_Clear_To_Build(SPEED_FLOAT) — we don't
+        // need MapPack coastal detection at all.
+        if (this.syrdPlacementStart < 0) {
+          this.syrdPlacementStart = this.placementAttempts;
+        }
+        const northmost = alliedStructures.reduce((best, s) =>
+          s.cy < best.cy ? s : best, alliedStructures[0]);
+        const gridSize = 17; // -8 to +8
+        const totalCells = gridSize * gridSize;
+        const localIdx = (this.placementAttempts - this.syrdPlacementStart) % totalCells;
+        const gx = (localIdx % gridSize) - 8;
+        const gy = Math.floor(localIdx / gridSize) - 8;
+        const placeCx = northmost.cx + gx;
+        const placeCy = northmost.cy + gy;
 
         commands.push({
           cmd: 'place',
@@ -653,7 +650,7 @@ export class OracleStrategy {
           this.placementAttempts++;
           this.lastPlacementTick = state.tick;
         }
-        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy}) [shore ${base.cx},${base.cy}+${sdx},${sdy}]`);
+        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy}) [grid ${localIdx}/${totalCells} from ${northmost.cx},${northmost.cy}]`);
       } else {
         // Sort placement offsets by priority:
         // 1. If shipyard is upcoming in build order, bias toward nearest water
