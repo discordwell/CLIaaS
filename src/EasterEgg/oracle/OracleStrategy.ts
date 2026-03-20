@@ -1984,8 +1984,10 @@ export class OracleStrategy {
         { cx: 40, cy: 48 },
         { cx: 48, cy: 48 },   // east past base + dogs
         { cx: 56, cy: 48 },   // well east of all buildings
-        { cx: 56, cy: 55 },   // south in clear east zone
-        { cx: 56, cy: 65 },
+        { cx: 60, cy: 48 },   // further east to avoid all dogs
+        { cx: 60, cy: 55 },   // south (no dogs at x=60)
+        { cx: 60, cy: 63 },   // continue south
+        { cx: 55, cy: 65 },   // SW toward river gap
         { cx: 40, cy: 68 },   // west through river gap
         { cx: 30, cy: 75 },
         { cx: 25, cy: 85 },

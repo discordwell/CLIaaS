@@ -268,3 +268,177 @@ describe('OracleStrategy mission logic', () => {
     expect(strategy.checkResult(state({ losePending: true }))).toBe('defeat');
   });
 });
+
+describe('SCG11EA naval strategy', () => {
+  // SCG11EA base state: island base with 48 structures, starting army, 14800 credits
+  function scg11eaState(overrides: Partial<RAGameState> = {}): RAGameState {
+    return state({
+      tick: 500,
+      credits: 14800,
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+      ],
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: 'ARTY', house: 'Greece', cx: 30, cy: 82, hp: 75, mhp: 75 }),
+        unit({ id: 7, t: 'ARTY', house: 'Greece', cx: 32, cy: 82, hp: 75, mhp: 75 }),
+      ],
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 40, hp: 300, mhp: 300 }),
+        unit({ id: 51, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 60, hp: 300, mhp: 300 }),
+        unit({ id: 52, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 80, hp: 300, mhp: 300 }),
+      ],
+      ...overrides,
+    });
+  }
+
+  it('builds PROC before WEAP in the SCG11EA build order', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      buildable: {
+        structures: ['POWR', 'PROC', 'WEAP', 'SYRD'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1', 'E3'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+
+    // Should produce PROC (refinery), not WEAP — build order prioritizes economy
+    const produceCommands = decision.commands.filter(
+      (c) => c.cmd === 'produce' && c.rtti === 6, // RTTI_BUILDINGTYPE
+    );
+    // First building should be PROC (type_id 12) since we already have POWR
+    expect(produceCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 12 }),
+      ]),
+    );
+    // Should NOT produce WEAP (type_id 2)
+    expect(produceCommands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type_id: 2 }),
+      ]),
+    );
+  });
+
+  it('does not produce tanks on SCG11EA', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 103, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 80 }),
+        structure({ id: 104, t: 'WEAP', ally: true, house: 'Greece', cx: 32, cy: 76 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'SYRD'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1', 'E3'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+
+    // Should NOT produce any tank units (RTTI_UNITTYPE = 29)
+    const unitProduceCommands = decision.commands.filter(
+      (c) => c.cmd === 'produce' && c.rtti === 29,
+    );
+    expect(unitProduceCommands).toHaveLength(0);
+  });
+
+  it('produces destroyers when shipyard exists on SCG11EA', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 103, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 80 }),
+        structure({ id: 104, t: 'SYRD', ally: true, house: 'Greece', cx: 22, cy: 85 }),
+      ],
+      credits: 2000,
+      buildable: {
+        structures: ['POWR'],
+        units: ['2TNK', 'HARV'],
+        infantry: ['E1'],
+        vessels: ['DD', 'PT'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+
+    // Should produce DD (destroyer) — RTTI_VESSELTYPE = 33
+    const vesselCommands = decision.commands.filter(
+      (c) => c.cmd === 'produce' && c.rtti === 33,
+    );
+    expect(vesselCommands.length).toBeGreaterThan(0);
+  });
+
+  it('sends destroyers to attack enemy submarines', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 10, t: 'DD', house: 'Greece', cx: 25, cy: 85, hp: 200, mhp: 200, m: 5 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 104, t: 'SYRD', ally: true, house: 'Greece', cx: 22, cy: 85 }),
+      ],
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 60, hp: 300, mhp: 300 }),
+      ],
+    });
+
+    const decision = strategy.decide(s);
+
+    // Destroyer should attack the sub
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'attack', ids: [10], target: 50 }),
+      ]),
+    );
+  });
+
+  it('does not initiate land attacks on SCG11EA (defense-only)', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      credits: 5000,
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 38, cy: 80, hp: 300, mhp: 300 }),
+      ],
+      enemies: [
+        // Far-away enemy — should NOT trigger attack
+        unit({ id: 50, t: '3TNK', ally: false, house: 'USSR', cx: 90, cy: 30, hp: 400, mhp: 400 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+      ],
+    });
+
+    const decision = strategy.decide(s);
+
+    // Should NOT have attack commands targeting the far-away tank
+    const attackFarEnemy = decision.commands.filter(
+      (c) => (c.cmd === 'attack' || c.cmd === 'attack_move') && c.target === 50,
+    );
+    expect(attackFarEnemy).toHaveLength(0);
+  });
+});

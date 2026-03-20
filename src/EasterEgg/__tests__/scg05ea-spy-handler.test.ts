@@ -151,14 +151,29 @@ describe('SCG05EA — spy infiltration phase', () => {
   });
 });
 
+/**
+ * Helper: properly set up spy infiltration state by simulating the two-step
+ * detection: spy seen (sets spyStopped) → spy disappears (sets spyInfiltrated).
+ */
+function setupSpyInfiltrated(strategy: OracleStrategy): void {
+  // Step 1: Spy is seen → sets scg05eaSpyStopped
+  strategy.decide(makeState({
+    tick: 100,
+    units: [makeEntity(1, 'SPY', 'Greece', 16, 50)],
+    structures: [TARGET_WEAP],
+  }));
+  // Step 2: Spy disappears (consumed by infiltration) at tick > 200 → sets scg05eaSpyInfiltrated
+  strategy.decide(makeState({
+    tick: 300,
+    units: [], // spy gone
+    structures: [TARGET_WEAP],
+  }));
+}
+
 describe('SCG05EA — Tanya SAM destruction phase', () => {
   it('Tanya attacks nearest SAM directly (she spawns at 25,107 near SAMs)', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    // Simulate spy already infiltrated
-    strategy.decide(makeState({
-      tick: 100,
-      globals: [1],
-    }));
+    setupSpyInfiltrated(strategy);
 
     // Tanya spawns near SAMs via reinforcement at (25, 107), team-moves to (23, 105)
     const state = makeState({
@@ -185,7 +200,7 @@ describe('SCG05EA — Tanya SAM destruction phase', () => {
 
   it('advances to next SAM when current one is destroyed', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    strategy.decide(makeState({ tick: 100, globals: [1] }));
+    setupSpyInfiltrated(strategy);
 
     // First SAM destroyed, only 3 remain
     const state = makeState({
@@ -209,7 +224,7 @@ describe('SCG05EA — Tanya SAM destruction phase', () => {
 
   it('Tanya evades dogs near SAM area', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    strategy.decide(makeState({ tick: 100, globals: [1] }));
+    setupSpyInfiltrated(strategy);
 
     const state = makeState({
       tick: 2000,
@@ -230,10 +245,10 @@ describe('SCG05EA — Tanya SAM destruction phase', () => {
 describe('SCG05EA — chinook evacuation phase', () => {
   it('Tanya boards chinook after all SAMs destroyed', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    // Set up spy infiltrated
-    strategy.decide(makeState({ tick: 100, globals: [1] }));
+    setupSpyInfiltrated(strategy);
 
-    // Advance SAM index by presenting states with no SAM structures
+    // Advance SAM index by presenting states with Tanya and no SAM structures
+    // Each call with Tanya + no SAMs will try to advance samIndex
     for (let i = 0; i < 5; i++) {
       strategy.decide(makeState({
         tick: 2000 + i * 100,
