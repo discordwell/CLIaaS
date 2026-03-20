@@ -20,6 +20,19 @@ import { type Effect } from './renderer';
 import { Terrain } from './map';
 
 // ---------------------------------------------------------------------------
+// C++ parity constants — house.cpp / rules.cpp / defines.h
+// ---------------------------------------------------------------------------
+
+/** C++ rules.cpp:124 ChronoDuration=3 (minutes), defines.h:3032 TICKS_PER_MINUTE=900 → 2700 ticks */
+export const CHRONO_DURATION_TICKS = 2700;
+
+/** C++ rules.cpp:204 VortexChance=0.2 → 20% chance per chronoshift */
+const CHRONO_VORTEX_CHANCE = 0.2;
+
+/** C++ rules.cpp:204 QuakeChance=0.2 → 20% chance per chronoshift */
+const CHRONO_QUAKE_CHANCE = 0.2;
+
+// ---------------------------------------------------------------------------
 // Context interface — everything the superweapon functions need from Game
 // ---------------------------------------------------------------------------
 
@@ -75,6 +88,12 @@ export interface SuperweaponContext {
   // Renderer
   screenShake: number;
   screenFlash: number;
+
+  // C++ house.cpp:2876-2888 — chronal vortex spawning after chronoshift
+  activeVortices?: Array<{ x: number; y: number; angle: number; ticksLeft: number; id: number }>;
+
+  // C++ house.cpp:2871-2873 — time quake flag set by chronoshift (20% chance)
+  timeQuake?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,11 +373,15 @@ export function activateSuperweapon(
 
   switch (type) {
     case SuperweaponType.CHRONOSPHERE: {
-      // Teleport first selected player unit to target (C++: CTNK excluded — has own teleport)
-      // C++ house.cpp:2779-2780: infantry CAN be selected for chronoshift
+      // C++ house.cpp:2779-2803: eligibility filter
+      // - RTTI_UNIT, RTTI_INFANTRY, RTTI_VESSEL (except VESSEL_TRANSPORT/VESSEL_CARRIER)
+      // - NOT RTTI_AIRCRAFT (house.cpp:2813)
+      // - NOT UNIT_CHRONOTANK (has own teleport)
       const selected = ctx.entities.filter(e =>
         e.alive && e.selected && e.house === house
         && e.type !== UnitType.V_CTNK
+        && !e.stats.isAircraft       // C++ house.cpp:2779-2785,2813: aircraft excluded
+        && e.type !== UnitType.V_LST  // C++ house.cpp:2784: VESSEL_TRANSPORT excluded
       );
       const unit = selected[0];
       if (unit) {
@@ -383,13 +406,18 @@ export function activateSuperweapon(
           if (ctx.isAllied(house, ctx.playerHouse)) {
             ctx.pushEva('Chronosphere activated');
           }
-        } else {
+        } else if (unit.type === UnitType.V_DTRK) {
+          // C++ house.cpp:2828-2830: Demo Truck self-destruct after chronoshift
+          // tech->Assign_Target(tech->As_Target()) causes self-targeting → explosion
           const origin = { x: unit.pos.x, y: unit.pos.y };
           unit.pos.x = target.x;
           unit.pos.y = target.y;
           unit.prevPos.x = target.x;
           unit.prevPos.y = target.y;
           unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
+          // C++ Assign_Target(self) → triggers ATTACK mission on self
+          unit.target = unit;
+          unit.mission = Mission.ATTACK;
           // Blue flash effects at origin and destination
           ctx.effects.push({
             type: 'explosion', x: origin.x, y: origin.y,
@@ -405,6 +433,56 @@ export function activateSuperweapon(
           if (ctx.isAllied(house, ctx.playerHouse)) {
             ctx.pushEva('Chronosphere activated');
           }
+        } else {
+          // C++ house.cpp:2835-2852: Warp vehicle to destination with Moebius return
+          const origin = { x: unit.pos.x, y: unit.pos.y };
+          unit.pos.x = target.x;
+          unit.pos.y = target.y;
+          unit.prevPos.x = target.x;
+          unit.prevPos.y = target.y;
+          unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
+          // C++ drive.cpp:2836-2844: save origin cell, set Moebius return timer
+          // MoebiusCell = origin, IsMoebius = true, MoebiusCountDown = ChronoDuration * TICKS_PER_MINUTE
+          unit.moebiusCell = { x: origin.x, y: origin.y };
+          unit.moebiusCountDown = CHRONO_DURATION_TICKS; // 2700 ticks (3 minutes at 15 TPS)
+          // Blue flash effects at origin and destination
+          ctx.effects.push({
+            type: 'explosion', x: origin.x, y: origin.y,
+            frame: 0, maxFrames: 20, size: 24,
+            sprite: 'litning', spriteStart: 0,
+          });
+          ctx.effects.push({
+            type: 'explosion', x: target.x, y: target.y,
+            frame: 0, maxFrames: 20, size: 24,
+            sprite: 'litning', spriteStart: 0,
+          });
+          ctx.playSound('chrono');
+          if (ctx.isAllied(house, ctx.playerHouse)) {
+            ctx.pushEva('Chronosphere activated');
+          }
+        }
+
+        // C++ house.cpp:2871-2873: 20% chance for time quake
+        // if (!TimeQuake) { TimeQuake = Percent_Chance(Rule.QuakeChance * 100); }
+        if (!ctx.timeQuake) {
+          ctx.timeQuake = Math.random() < CHRONO_QUAKE_CHANCE;
+        }
+
+        // C++ house.cpp:2876-2888: 20% chance for chronal vortex at random map location
+        if (Math.random() < CHRONO_VORTEX_CHANCE) {
+          const vx = Math.floor(Math.random() * 60) * CELL_SIZE + CELL_SIZE / 2;
+          const vy = Math.floor(Math.random() * 60) * CELL_SIZE + CELL_SIZE / 2;
+          if (ctx.activeVortices) {
+            ctx.activeVortices.push({
+              x: vx, y: vy, angle: Math.random() * Math.PI * 2,
+              ticksLeft: 450, id: ctx.tick,
+            });
+          }
+          ctx.effects.push({
+            type: 'explosion', x: vx, y: vy,
+            frame: 0, maxFrames: 45, size: 20,
+            sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen',
+          });
         }
       }
       break;

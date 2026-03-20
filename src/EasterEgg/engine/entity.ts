@@ -246,6 +246,11 @@ export class Entity {
   ironCurtainTick = 0;  // ticks remaining for Iron Curtain invulnerability
   chronoShiftTick = 0;  // visual effect timer after being chronoshifted
 
+  // Moebius return fields (C++ drive.h:62-74 — IsMoebius, MoebiusCountDown, MoebiusCell)
+  // After chronoshift, unit saves origin cell and returns after ChronoDuration expires.
+  moebiusCell: WorldPos | null = null;  // origin position before chronoshift
+  moebiusCountDown = 0;                 // ticks remaining before return-to-origin
+
   // IA1: Infantry fidget randomization (C++ infantry.cpp:1748-1821)
   fidgetDelay = Math.floor(Math.random() * 20) + 12; // random 12-31 frames
   fidgetVariant = Math.random(); // selects idle1 vs idle2 animation

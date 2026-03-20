@@ -379,6 +379,9 @@ export class Game {
   /** CR8: Active vortex entities from Vortex crate */
   activeVortices: Array<{ x: number; y: number; angle: number; ticksLeft: number; id: number }> = [];
 
+  /** C++ house.cpp:2871-2873 — TimeQuake flag set by chronoshift (20% chance) */
+  timeQuake = false;
+
   // SP1: Spy infiltration house flags (C++ infantry.cpp:645-676)
   spiedHouses = new Set<House>();
   radarSpiedHouses = new Set<House>();
@@ -390,6 +393,15 @@ export class Game {
   // Stats tracking
   killCount = 0;
   lossCount = 0;
+  // C++ score tracking (score.cpp:546-597)
+  pointTotal = 0;           // Net score: +cost for kills, -cost for losses (C++ house.h:546)
+  harvestedCredits = 0;     // Total credits harvested (C++ HarvestedCredits)
+  initialCredits = 0;       // Starting credits (C++ Control.InitialCredits)
+  stolenCredits = 0;        // Credits from captured buildings (C++ StolenBuildingsCredits)
+  alliedUnitsLost = 0;      // C++ score.cpp:553 — GKilled
+  alliedBuildingsLost = 0;  // C++ score.cpp:555 — GBKilled
+  sovietUnitsLost = 0;      // C++ score.cpp:551 — NKilled
+  sovietBuildingsLost = 0;  // C++ score.cpp:552 — NBKilled
   effects: Effect[] = [];
   /** Persistent corpses left by dead units (capped to prevent memory growth) */
   corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; isAnt: boolean; alpha: number; deathVariant: number }> = [];
@@ -537,6 +549,11 @@ export class Game {
       scenarioId: this.scenarioId,
       killCount: this.killCount,
       lossCount: this.lossCount,
+      pointTotal: this.pointTotal,
+      alliedUnitsLost: this.alliedUnitsLost,
+      sovietUnitsLost: this.sovietUnitsLost,
+      alliedBuildingsLost: this.alliedBuildingsLost,
+      sovietBuildingsLost: this.sovietBuildingsLost,
       warheadOverrides: this.warheadOverrides,
       scenarioWarheadMeta: this.scenarioWarheadMeta,
       scenarioWarheadProps: this.scenarioWarheadProps,
@@ -597,6 +614,11 @@ export class Game {
     // Sync mutable state back
     this.killCount = ctx.killCount;
     this.lossCount = ctx.lossCount;
+    this.pointTotal = ctx.pointTotal;
+    this.alliedUnitsLost = ctx.alliedUnitsLost;
+    this.sovietUnitsLost = ctx.sovietUnitsLost;
+    this.alliedBuildingsLost = ctx.alliedBuildingsLost;
+    this.sovietBuildingsLost = ctx.sovietBuildingsLost;
     this.inflightProjectiles = ctx.inflightProjectiles;
     // damageStructure mutable state sync
     this.lastBaseAttackEva = ctx.lastBaseAttackEva;
@@ -726,6 +748,8 @@ export class Game {
       cameraViewWidth: this.camera.viewWidth,
       screenShake: this.renderer.screenShake,
       screenFlash: this.renderer.screenFlash,
+      activeVortices: this.activeVortices,
+      timeQuake: this.timeQuake,
     };
   }
 
@@ -741,6 +765,7 @@ export class Game {
     this.nukePendingSource = ctx.nukePendingSource;
     this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
     this.renderer.screenFlash = Math.max(this.renderer.screenFlash, ctx.screenFlash);
+    if (ctx.timeQuake !== undefined) this.timeQuake = ctx.timeQuake;
     return result;
   }
 
@@ -794,7 +819,7 @@ export class Game {
       isAllied: (a, b) => this.isAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
       playSound: (n) => this.audio.play(n as SoundName),
-      addCredits: (amount) => this.addCredits(amount),
+      addCredits: (amount) => { this.addCredits(amount); this.harvestedCredits += amount; },
     };
   }
 
@@ -1033,6 +1058,7 @@ export class Game {
     this.teamTypes = scenario.teamTypes;
     this.triggers = scenario.triggers;
     this.credits = scenario.credits;
+    this.initialCredits = scenario.credits; // C++ Control.InitialCredits — capture before gameplay
     this.playerHouse = scenario.playerHouse;
     this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
     this.playerTechLevel = scenario.playerTechLevel ?? 10;

@@ -29,6 +29,7 @@ const MUSIC_TRACKS = [
   '13_dense',
   '14_vector',
   '15_smash',
+  '16_score',  // C++ THEME_SCORE — score screen music (theme.cpp:84)
 ];
 
 /** Calm tracks: ambient/exploration music (indices into MUSIC_TRACKS) */
@@ -36,6 +37,9 @@ const CALM_TRACKS = new Set([1, 3, 4, 7, 10, 13]); // radio, roll_out, mud, run,
 
 /** Action tracks: combat music (indices into MUSIC_TRACKS) */
 const ACTION_TRACKS = new Set([0, 2, 5, 6, 8, 9, 11, 12, 14]); // hell_march, crush, twin_cannon, face_the_enemy, terminate, big_foot, militant_force, dense, smash
+
+/** Special tracks: excluded from gameplay shuffle (score, map select, etc.) */
+const SPECIAL_TRACKS = new Set([15]); // 16_score
 
 /**
  * Music player — streams MP3 soundtrack files via HTML5 Audio.
@@ -95,9 +99,9 @@ export class MusicPlayer {
   /** Whether music is actively playing */
   get isPlaying(): boolean { return this.playing; }
 
-  /** Shuffle playlist using Fisher-Yates */
+  /** Shuffle playlist using Fisher-Yates — excludes special tracks (score, map) */
   private shuffle(): void {
-    this.playlist = MUSIC_TRACKS.map((_, i) => i);
+    this.playlist = MUSIC_TRACKS.map((_, i) => i).filter(i => !SPECIAL_TRACKS.has(i));
     for (let i = this.playlist.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [this.playlist[i], this.playlist[j]] = [this.playlist[j], this.playlist[i]];
@@ -183,6 +187,16 @@ export class MusicPlayer {
     if (!this.available) return;
     this.playing = true;
     this.advance();
+  }
+
+  /** Play a specific track by name (for score screen, map screen, etc.)
+   *  C++ Theme.Queue_Song(THEME_SCORE) — score.cpp:412 */
+  playSpecific(trackName: string): void {
+    const idx = MUSIC_TRACKS.findIndex(t => t.includes(trackName));
+    if (idx >= 0 && this.available) {
+      this.playing = true;
+      this.playTrack(idx);
+    }
   }
 
   /** Pause music */
@@ -296,7 +310,8 @@ export type SoundName =
   | 'eva_reinforcements' | 'eva_mission_warning' | 'tesla_charge'
   | 'sniper' | 'building_placed' | 'mammoth_cannon'
   | 'eva_building_captured' | 'eva_insufficient_funds' | 'eva_silos_needed'
-  | 'chrono' | 'iron_curtain' | 'nuke_launch' | 'nuke_explode';
+  | 'chrono' | 'iron_curtain' | 'nuke_launch' | 'nuke_explode'
+  | 'score_beep' | 'score_swoosh';
 
 /** Base path for extracted audio WAV files */
 const AUDIO_BASE_URL = '/ra/audio';

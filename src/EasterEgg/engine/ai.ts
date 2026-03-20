@@ -52,6 +52,10 @@ export interface AIHouseState {
   maxUnit: number;
   maxInfantry: number;
   maxBuilding: number;
+  /** C++ Control.MaxVessel — per-house vessel cap (house.h:89) */
+  maxVessel: number;
+  /** C++ Control.MaxAircraft — per-house aircraft cap (house.h:91) */
+  maxAircraft: number;
   /** C++ BuildingsKilled[HOUSE_COUNT] — per-victim kill tracking (house.cpp:498) */
   buildingsKilledBy: Map<House, number>;
   /** C++ UnitsKilled[HOUSE_COUNT] — per-victim kill tracking (house.cpp:496) */
@@ -120,6 +124,21 @@ export const DIFFICULTY_MODS: Record<Difficulty, { spawnInterval: number; maxAnt
   hard:   { spawnInterval: 20, maxAnts: 28, fireAntChance: 0.50, waveSize: 1.3 },
 };
 
+/**
+ * C++ Rule defaults (rules.cpp:240-254) and HouseStaticClass constructor (house.cpp:755-759).
+ * Default per-house caps = Rule.XxxMax / 6 (integer division).
+ */
+const RULE_UNIT_MAX = 500;
+const RULE_BUILDING_MAX = 500;
+const RULE_INFANTRY_MAX = 500;
+const RULE_VESSEL_MAX = 100;
+// const RULE_AIRCRAFT_MAX = 100;  // Not used — C++ MaxAircraft uses UnitMax, not AircraftMax!
+const CPP_DEFAULT_MAX_UNIT     = Math.floor(RULE_UNIT_MAX / 6);      // 83
+const CPP_DEFAULT_MAX_BUILDING = Math.floor(RULE_BUILDING_MAX / 6);  // 83
+const CPP_DEFAULT_MAX_INFANTRY = Math.floor(RULE_INFANTRY_MAX / 6);  // 83
+const CPP_DEFAULT_MAX_VESSEL   = Math.floor(RULE_VESSEL_MAX / 6);    // 16
+const CPP_DEFAULT_MAX_AIRCRAFT = Math.floor(RULE_UNIT_MAX / 6);      // 83 (C++ quirk: uses UnitMax!)
+
 /** C++ RepairStep=5, RepairPercent=0.20 (from rules.cpp:228-229) */
 const REPAIR_STEP = 5;
 const REPAIR_PERCENT = 0.20;
@@ -149,6 +168,10 @@ export interface AIContext {
   houseMaxUnits: Map<House, number>;
   houseMaxInfantry: Map<House, number>;
   houseMaxBuildings: Map<House, number>;
+  /** C++ Control.MaxVessel from scenario INI (house.cpp:7144) */
+  houseMaxVessels?: Map<House, number>;
+  /** C++ Control.MaxAircraft — not loaded from INI in vanilla RA, uses compiled default */
+  houseMaxAircraft?: Map<House, number>;
 
   // Base rebuild state
   baseBlueprint: Array<{ type: string; cell: number; house: House }>;
@@ -329,9 +352,16 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     preferredTarget: null,
     iq: ctx.houseIQs.get(house) ?? 3,
     techLevel: ctx.houseTechLevels.get(house) ?? 10,
-    maxUnit: ctx.houseMaxUnits.get(house) ?? -1,
-    maxInfantry: ctx.houseMaxInfantry.get(house) ?? -1,
-    maxBuilding: ctx.houseMaxBuildings.get(house) ?? -1,
+    maxUnit: ctx.houseMaxUnits.get(house) ?? CPP_DEFAULT_MAX_UNIT,
+    maxInfantry: ctx.houseMaxInfantry.get(house) ?? CPP_DEFAULT_MAX_INFANTRY,
+    maxBuilding: ctx.houseMaxBuildings.get(house) ?? CPP_DEFAULT_MAX_BUILDING,
+    maxVessel: (() => {
+      // C++ house.cpp:7144-7145: MaxVessel from INI, fallback to MaxUnit if 0
+      const v = ctx.houseMaxVessels?.get(house) ?? CPP_DEFAULT_MAX_VESSEL;
+      if (v === 0) return ctx.houseMaxUnits.get(house) ?? CPP_DEFAULT_MAX_UNIT;
+      return v;
+    })(),
+    maxAircraft: ctx.houseMaxAircraft?.get(house) ?? CPP_DEFAULT_MAX_AIRCRAFT,
     buildingsKilledBy: new Map(),
     unitsKilledBy: new Map(),
     lastAttackerEnemy: null,
@@ -1203,6 +1233,55 @@ export function updateAIStrategicPlanner(ctx: AIContext): void {
 
     if (state.underAttack && ctx.tick - state.lastBaseAttackTick > 150) {
       state.underAttack = false;
+    }
+
+    // ── C++ dynamic cap increase (house.cpp:4648-4740) ──────────────────
+    // Sum enemy CurUnits/CurBuildings/CurInfantry/CurVessels/CurAircraft,
+    // divide by enemy count, then raise caps to enemyAvg + 10 if lower.
+    {
+      let enemyUnits = 0, enemyBuildings = 0, enemyInfantry = 0;
+      let enemyVessels = 0, enemyAircraft = 0, enemyCount = 0;
+
+      for (const [otherHouse] of ctx.aiStates) {
+        if (otherHouse === house) continue;
+        if (ctx.isAllied(house, otherHouse)) continue;
+        enemyCount++;
+      }
+      // Also count player house as enemy if not allied
+      if (!ctx.isAllied(house, ctx.playerHouse)) {
+        enemyCount++;
+      }
+
+      if (enemyCount > 0) {
+        // Count entities belonging to non-allied houses
+        for (const e of ctx.entities) {
+          if (!e.alive) continue;
+          if (e.house === house) continue;
+          if (ctx.isAllied(house, e.house)) continue;
+          if (e.stats.isInfantry) { enemyInfantry++; }
+          else if (e.stats.isAircraft) { enemyAircraft++; }
+          else if (e.stats.isVessel) { enemyVessels++; }
+          else if (!e.isAnt) { enemyUnits++; }
+        }
+        for (const s of ctx.structures) {
+          if (!s.alive) continue;
+          if (s.house === house) continue;
+          if (ctx.isAllied(house, s.house)) continue;
+          enemyBuildings++;
+        }
+
+        const avgUnits = Math.floor(enemyUnits / enemyCount);
+        const avgBuildings = Math.floor(enemyBuildings / enemyCount);
+        const avgInfantry = Math.floor(enemyInfantry / enemyCount);
+        const avgVessels = Math.floor(enemyVessels / enemyCount);
+        const avgAircraft = Math.floor(enemyAircraft / enemyCount);
+
+        if (state.maxUnit < avgUnits + 10) state.maxUnit = avgUnits + 10;
+        if (state.maxBuilding < avgBuildings + 10) state.maxBuilding = avgBuildings + 10;
+        if (state.maxInfantry < avgInfantry + 10) state.maxInfantry = avgInfantry + 10;
+        if (state.maxVessel < avgVessels + 10) state.maxVessel = avgVessels + 10;
+        if (state.maxAircraft < avgAircraft + 10) state.maxAircraft = avgAircraft + 10;
+      }
     }
 
     // ── C++ Expert_AI state machine (house.cpp:4749-4769) ──────────────

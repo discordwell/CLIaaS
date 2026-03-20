@@ -1,10 +1,9 @@
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
-import { SharedTsOracleStrategy } from '../oracle/SharedOracleBridge.js';
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
 
-describe('SCG05EA final approach dog analysis', () => {
+describe('SCG05EA spy infiltration test', () => {
   let adapter: TsAgentAdapter;
 
   beforeAll(async () => {
@@ -16,64 +15,67 @@ describe('SCG05EA final approach dog analysis', () => {
     await adapter.disconnect();
   }, 20_000);
 
-  it('tracks dogs near WEAP during spy approach', async () => {
-    const oracle = new SharedTsOracleStrategy('SCG05EA');
-    let state = await adapter.loadScenario('SCG05EA');
+  it('sends spy to (47,49) then attack_struct on WEAP', async () => {
+    await adapter.loadScenario('SCG05EA');
 
-    // Run oracle until spy reaches x>=40
-    for (let i = 0; i < 300; i++) {
-      const decision = oracle.decide(state);
-      const step = await adapter.step(15, decision.commands);
-      state = step.state;
-      const spy = state.units.find(u => u.t === 'SPY');
+    // Get spy
+    let state = (await adapter.step(1)).state;
+    for (let i = 0; i < 40; i++) {
+      state = (await adapter.step(15)).state;
+      if (state.units.find(u => u.t === 'SPY')) break;
+    }
+    const spy = state.units.find(u => u.t === 'SPY')!;
 
-      if (spy && spy.cx >= 40) {
-        console.log(`\nSpy at (${spy.cx},${spy.cy}) tick=${state.tick} — tracking dogs`);
+    // Move spy directly to (47,49) via cell-by-cell
+    const wps = [
+      { cx: 18, cy: 48 }, { cx: 21, cy: 48 }, { cx: 24, cy: 48 },
+      { cx: 27, cy: 48 }, { cx: 30, cy: 48 }, { cx: 35, cy: 48 },
+      { cx: 40, cy: 48 }, { cx: 45, cy: 48 }, { cx: 47, cy: 49 },
+    ];
+    for (const wp of wps) {
+      await adapter.step(1, [{ cmd: 'move', unitIds: [spy.id], cx: wp.cx, cy: wp.cy }]);
+      for (let j = 0; j < 50; j++) {
+        state = (await adapter.step(15)).state;
+        const s = state.units.find(u => u.t === 'SPY');
+        if (!s) { console.log('SPY DIED en route'); return; }
+        if (Math.abs(s.cx - wp.cx) <= 1 && Math.abs(s.cy - wp.cy) <= 1) break;
+      }
+    }
 
-        // Log ALL dogs and their positions for the next 200 ticks
-        for (let j = 0; j < 400; j++) {
-          const d2 = oracle.decide(state);
-          const s2 = await adapter.step(5, d2.commands);
-          state = s2.state;
-          const sp = state.units.find(u => u.t === 'SPY');
-          const dogs = state.enemies.filter(e => e.t === 'DOG');
-          const nearDogs = dogs.filter(d =>
-            sp && Math.sqrt((d.cx - sp.cx) ** 2 + (d.cy - sp.cy) ** 2) <= 6
-          );
+    const spyNow = state.units.find(u => u.t === 'SPY')!;
+    console.log(`Spy at (${spyNow.cx},${spyNow.cy})`);
 
-          if (!sp) {
-            console.log(`  t=${state.tick}: SPY GONE! state=${state.state} globals=[${state.globals.join(',')}]`);
-            const tanya = state.units.find(u => u.t === 'E7');
-            console.log(`    Tanya: ${tanya ? `(${tanya.cx},${tanya.cy})` : 'not yet'}`);
-            console.log(`    Dogs nearby WEAP: ${dogs.filter(d =>
-              Math.sqrt((d.cx - 44) ** 2 + (d.cy - 50) ** 2) <= 8
-            ).map(d => `(${d.cx},${d.cy})`).join(', ')}`);
-            // Wait for Tanya
-            for (let k = 0; k < 30; k++) {
-              const dk = oracle.decide(state);
-              state = (await adapter.step(30, dk.commands)).state;
-              const t = state.units.find(u => u.t === 'E7');
-              if (t) {
-                console.log(`    TANYA SPAWNED at (${t.cx},${t.cy}) tick=${state.tick}!`);
-                break;
-              }
-            }
+    // Find WEAP
+    const weap = state.structures.find(s => s.t === 'WEAP' && !s.ally);
+    console.log(`WEAP at (${weap!.cx},${weap!.cy}) idx=${weap!.idx}`);
+
+    // Send attack_struct DIRECTLY (not through oracle bridge)
+    const result = await adapter.step(1, [
+      { cmd: 'attack_struct', unitIds: [spyNow.id], structIdx: weap!.idx },
+    ]);
+    console.log(`attack_struct result: ${result.results.map(r => `${r.cmd}:${r.ok}:${r.error ?? 'ok'}`).join(', ')}`);
+
+    // Wait for infiltration
+    for (let i = 0; i < 30; i++) {
+      state = (await adapter.step(15)).state;
+      const s = state.units.find(u => u.t === 'SPY');
+      if (!s) {
+        console.log(`\nSPY CONSUMED at tick ${state.tick}! globals=[${state.globals.join(',')}]`);
+        const tanya = state.units.find(u => u.t === 'E7');
+        console.log(`Tanya: ${tanya ? `(${tanya.cx},${tanya.cy})` : 'not yet'}`);
+        // Wait more for Tanya
+        for (let k = 0; k < 100; k++) {
+          state = (await adapter.step(30)).state;
+          const t = state.units.find(u => u.t === 'E7');
+          if (t) {
+            console.log(`TANYA SPAWNED at (${t.cx},${t.cy}) tick=${state.tick}!`);
             break;
-          }
-
-          if (j % 3 === 0 || nearDogs.length > 0) {
-            console.log(
-              `  t=${state.tick}: spy(${sp.cx},${sp.cy}) hp=${sp.hp} ` +
-              `dogs_6=[${nearDogs.map(d => `(${d.cx},${d.cy})`).join(',')}]`
-            );
           }
         }
         break;
       }
-
-      if (state.state === 'lost') {
-        console.log(`LOST at tick ${state.tick} before reaching x=40`);
-        break;
+      if (i % 5 === 0) {
+        console.log(`  [${i}] spy (${s.cx},${s.cy}) m="${s.m}" hp=${s.hp}`);
       }
     }
 

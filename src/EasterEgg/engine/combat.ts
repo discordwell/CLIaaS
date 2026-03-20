@@ -519,13 +519,21 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
       const crushSound = other.isAnt ? 'die_ant' : 'die_infantry';
       ctx.playSoundAt(crushSound, other.pos.x, other.pos.y);
       ctx.map.addDecal(oc.cx, oc.cy, 3, 0.3);
-      if (ctx.isPlayerControlled(vehicle)) ctx.killCount++;
-      else {
+      const crushCost = other.stats.cost ?? other.stats.strength ?? 0;
+      if (ctx.isPlayerControlled(vehicle)) {
+        ctx.killCount++;
+        ctx.pointTotal += crushCost;
+      } else {
         ctx.lossCount++;
+        ctx.pointTotal -= crushCost;
         ctx.playEva('eva_unit_lost');
         const alertCell = other.cell;
         ctx.minimapAlert(alertCell.cx, alertCell.cy);
       }
+      // Per-side casualty (C++ score.cpp:548-560)
+      const crushFaction = HOUSE_FACTION[other.house] ?? 'allied';
+      if (crushFaction === 'soviet') ctx.sovietUnitsLost++;
+      else if (crushFaction !== 'both') ctx.alliedUnitsLost++;
     }
   }
 }
