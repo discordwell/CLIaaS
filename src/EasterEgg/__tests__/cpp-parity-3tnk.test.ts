@@ -408,7 +408,7 @@ describe('3TNK slower but heavier than allied tanks', () => {
     expect(UNIT_STATS['3TNK'].armor).toBe('heavy');
   });
 
-  it('3TNK has dual 105mm (40dmg x2 slots) vs single-weapon 1TNK/2TNK', () => {
+  it('3TNK has dual 105mm (30dmg x2 slots) vs single-weapon 1TNK/2TNK', () => {
     // 3TNK: both primary and secondary
     expect(UNIT_STATS['3TNK'].secondaryWeapon).toBe('105mm');
 
