@@ -524,10 +524,10 @@ describe('Data parity: prerequisite assignments match rules.ini', () => {
     expect(t4!.techPrereq).toBe('STEK');
   });
 
-  it('APC has techPrereq BARR (Allied barracks)', () => {
+  it('APC has techPrereq TENT (Allied barracks, rules.ini Prerequisite=weap,tent)', () => {
     const apc = PRODUCTION_ITEMS.find(p => p.type === 'APC');
     expect(apc).toBeDefined();
-    expect(apc!.techPrereq).toBe('BARR');
+    expect(apc!.techPrereq).toBe('TENT');
   });
 
   it('CA techPrereq is ATEK, not DOME', () => {

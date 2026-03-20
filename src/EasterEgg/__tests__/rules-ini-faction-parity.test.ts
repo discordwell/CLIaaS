@@ -42,44 +42,44 @@ describe('rules.ini import pipeline', () => {
   });
 
   describe('critical faction assignments (regression guard)', () => {
-    it('BARR is Allied', () => {
+    it('BARR is Soviet (rules.ini Owner=soviet)', () => {
       const barr = ITEMS.find(i => i.type === 'BARR' && i.isStructure);
-      expect(barr?.faction).toBe('allied');
+      expect(barr?.faction).toBe('soviet');
     });
 
-    it('TENT is Soviet', () => {
+    it('TENT is Allied (rules.ini Owner=allies)', () => {
       const tent = ITEMS.find(i => i.type === 'TENT' && i.isStructure);
-      expect(tent?.faction).toBe('soviet');
+      expect(tent?.faction).toBe('allied');
     });
 
-    it('PBOX prerequisite is BARR (Allied barracks)', () => {
+    it('PBOX prerequisite is TENT (Allied barracks)', () => {
       const pbox = ITEMS.find(i => i.type === 'PBOX');
-      expect(pbox?.prerequisite).toBe('BARR');
+      expect(pbox?.prerequisite).toBe('TENT');
     });
 
-    it('HBOX prerequisite is BARR (Allied barracks)', () => {
+    it('HBOX prerequisite is TENT (Allied barracks)', () => {
       const hbox = ITEMS.find(i => i.type === 'HBOX');
-      expect(hbox?.prerequisite).toBe('BARR');
+      expect(hbox?.prerequisite).toBe('TENT');
     });
 
-    it('GUN prerequisite is BARR (Allied barracks)', () => {
+    it('GUN prerequisite is TENT (Allied barracks)', () => {
       const gun = ITEMS.find(i => i.type === 'GUN');
-      expect(gun?.prerequisite).toBe('BARR');
+      expect(gun?.prerequisite).toBe('TENT');
     });
 
-    it('FTUR prerequisite is TENT (Soviet barracks)', () => {
+    it('FTUR prerequisite is BARR (Soviet barracks)', () => {
       const ftur = ITEMS.find(i => i.type === 'FTUR');
-      expect(ftur?.prerequisite).toBe('TENT');
+      expect(ftur?.prerequisite).toBe('BARR');
     });
 
-    it('KENN prerequisite is TENT (Soviet barracks)', () => {
+    it('KENN prerequisite is BARR (Soviet barracks)', () => {
       const kenn = ITEMS.find(i => i.type === 'KENN');
-      expect(kenn?.prerequisite).toBe('TENT');
+      expect(kenn?.prerequisite).toBe('BARR');
     });
 
-    it('APC techPrereq is BARR (Allied barracks)', () => {
+    it('APC techPrereq is TENT (Allied barracks)', () => {
       const apc = ITEMS.find(i => i.type === 'APC');
-      expect(apc?.techPrereq).toBe('BARR');
+      expect(apc?.techPrereq).toBe('TENT');
     });
   });
 

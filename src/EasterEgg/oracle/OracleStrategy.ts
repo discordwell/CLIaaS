@@ -323,6 +323,12 @@ export class OracleStrategy {
     this.iniText = text;
   }
 
+  /** Return the mission-specific build order (or the default). */
+  private getBuildOrder(): BuildOrderEntry[] {
+    if (this.scenario === 'SCG11EA') return SCG11EA_BUILD_ORDER;
+    return BUILD_ORDER;
+  }
+
   /**
    * Resolve coastal cells for shipyard placement.
    * Tries MapPack parsing first (if INI text available), then falls back to hardcoded.
@@ -396,6 +402,8 @@ export class OracleStrategy {
       result = this.decideScg08ea(state);
     } else if (this.scenario === 'SCG09EA') {
       result = this.decideTransportEscape(state);
+    } else if (this.scenario === 'SCG11EA') {
+      result = this.decideScg11ea(state);
     } else {
       result = this.decideGeneric(state);
     }
@@ -822,8 +830,9 @@ export class OracleStrategy {
         // Always scan from the start — buildings can be destroyed and
         // need rebuilding. Skip ones that currently exist on the map.
         let ordered = false;
-        for (let i = 0; i < BUILD_ORDER.length; i++) {
-          const entry = BUILD_ORDER[i];
+        const buildOrder = this.getBuildOrder();
+        for (let i = 0; i < buildOrder.length; i++) {
+          const entry = buildOrder[i];
           // Check if we already have enough of this building type
           const maxCount = entry.maxCount ?? 1;
           const existingCount = entry.names.reduce(
@@ -853,7 +862,7 @@ export class OracleStrategy {
           }
         }
         // If build order complete and we have credits, build extra power or defenses
-        if (!ordered && this.baseBuildIndex >= BUILD_ORDER.length) {
+        if (!ordered && this.baseBuildIndex >= buildOrder.length) {
           if (state.power.consumed >= state.power.produced && buildable.structures.includes('POWR')) {
             commands.push({
               cmd: 'produce',
@@ -882,7 +891,7 @@ export class OracleStrategy {
 
     // Check if we're still saving for a building (don't drain credits)
     const savingForBuilding = buildingProduction != null ||
-      (this.baseBuildIndex < BUILD_ORDER.length && !hasWarFactory);
+      (this.baseBuildIndex < this.getBuildOrder().length && !hasWarFactory);
     const minCreditsForInfantry = savingForBuilding ? 1500 : 300;
 
     // Produce units from War Factory — priority: harvesters > tanks
@@ -893,7 +902,9 @@ export class OracleStrategy {
     const targetHarvesters = Math.max(2, refCount);
     const needHarvester = harvCount < targetHarvesters && buildable?.units.includes('HARV');
 
-    if (hasWarFactory && !unitProduction && buildable) {
+    // SCG11EA: skip all tank production — starting army suffices, save credits for navy
+    const skipTankProduction = this.scenario === 'SCG11EA';
+    if (hasWarFactory && !unitProduction && buildable && !skipTankProduction) {
       if (needHarvester && (harvCount === 0 || state.credits > 1200)) {
         // Build harvesters — emergency if 0, proactive otherwise
         const harvTypeId = this.unitNameToTypeId('HARV');
@@ -966,7 +977,10 @@ export class OracleStrategy {
     const enemyNaval = state.enemies.some(
       (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'LST',
     );
-    if (hasShipyard && !vesselProduction && buildable && enemyNaval && state.credits > 800) {
+    // SCG11EA: always produce ships (we know subs are there), lower credit threshold
+    const shipCreditThreshold = this.scenario === 'SCG11EA' ? 400 : 800;
+    const shouldProduceShips = this.scenario === 'SCG11EA' || enemyNaval;
+    if (hasShipyard && !vesselProduction && buildable && shouldProduceShips && state.credits > shipCreditThreshold) {
       const ship = SHIP_PREFERENCE.find((s) => buildable.vessels?.includes(s));
       if (ship) {
         const shipTypeId = this.vesselNameToTypeId(ship);
@@ -1967,21 +1981,22 @@ export class OracleStrategy {
         { cx: 24, cy: 48 },
         { cx: 28, cy: 48 },
         { cx: 34, cy: 48 },
-        { cx: 40, cy: 48 },   // east past all dog patrols
-        { cx: 38, cy: 48 },   // slightly west (BARR at 40,53 blocks direct south)
-        { cx: 38, cy: 55 },   // south past BARR
-        { cx: 40, cy: 65 },
-        { cx: 35, cy: 68 },   // through river gap (x=18-41 clear at y=68)
-        { cx: 30, cy: 75 },   // SW toward tny3
+        { cx: 40, cy: 48 },
+        { cx: 48, cy: 48 },   // east past base + dogs
+        { cx: 56, cy: 48 },   // well east of all buildings
+        { cx: 56, cy: 55 },   // south in clear east zone
+        { cx: 56, cy: 65 },
+        { cx: 40, cy: 68 },   // west through river gap
+        { cx: 30, cy: 75 },
         { cx: 25, cy: 85 },
         { cx: 24, cy: 95 },
         { cx: 24, cy: 105 },
-        { cx: 24, cy: 107 },  // tny3 cell trigger! → global 18 → Tanya
-        // Phase B: Back north same route then east to WEAP
+        { cx: 24, cy: 107 },  // tny3 trigger! → global 18 → Tanya
+        // Phase B: North through gap then WEAP
         { cx: 24, cy: 95 },
         { cx: 30, cy: 80 },
-        { cx: 35, cy: 68 },   // through river gap
-        { cx: 40, cy: 55 },
+        { cx: 40, cy: 68 },   // river gap
+        { cx: 48, cy: 55 },
         { cx: 16, cy: 48 },   // north corridor entry
         { cx: 21, cy: 48 },
         { cx: 24, cy: 48 },
@@ -2156,6 +2171,62 @@ export class OracleStrategy {
     const basePlan = this.decideBaseBuilding(state);
     commands.push(...basePlan.commands);
     reasons.push(basePlan.reason);
+
+    return { commands, reason: reasons.join('; ') };
+  }
+
+  /**
+   * SCG11EA "Aftermath": Naval victory — economy → shipyard → destroyers → hunt subs.
+   *
+   * Starting conditions: 48 structures (island base), 11 units (5 tanks, 2 arty, 2 MCV, 2 inf),
+   * 14,800 credits. Enemies include 14 submarines east (x=67-72, y=31-97).
+   * Strategy: don't waste credits on tanks — deploy MCV, double refineries, rush shipyard,
+   * mass destroyers to hunt the subs. Defense-only land posture (DEFENSE_ONLY_MISSIONS).
+   */
+  private decideScg11ea(state: RAGameState): OracleDecision {
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+
+    // Delegate economy, building, and defense to base-building (uses SCG11EA_BUILD_ORDER,
+    // skips tank production, lowers ship credit threshold — all handled via scenario checks).
+    const basePlan = this.decideBaseBuilding(state);
+    commands.push(...basePlan.commands);
+    reasons.push(basePlan.reason);
+
+    // Send completed destroyers to hunt submarines east of the island.
+    // Enemy subs are at x=67-72, y=31-97. Spread destroyers along the sub line.
+    const NAVAL_TYPES = new Set(['DD', 'CA', 'PT']);
+    const playerUnits = this.playerOwnedUnits(state);
+    const playerShips = playerUnits.filter((u) => NAVAL_TYPES.has(u.t));
+    const enemySubs = state.enemies.filter((e) => e.t === 'SS' || e.t === 'MSUB');
+
+    if (playerShips.length > 0 && enemySubs.length > 0) {
+      // Send idle ships toward the nearest sub
+      const idleShips = playerShips.filter((u) => this.isIdle(u));
+      if (idleShips.length > 0) {
+        // Find nearest sub to each idle ship, attack it
+        for (const ship of idleShips) {
+          const nearest = this.nearestEnemy(ship, enemySubs);
+          commands.push({ cmd: 'attack', ids: [ship.id], target: nearest.id });
+        }
+        reasons.push(`hunt subs (${idleShips.length} DD → ${enemySubs.length} SS)`);
+      }
+    } else if (playerShips.length > 0 && enemySubs.length === 0) {
+      // No subs visible — patrol the eastern water to find them
+      const patrolTarget: Point = { cx: 70, cy: 64 }; // center of sub line
+      const idleShips = playerShips.filter(
+        (u) => this.isIdle(u) && this.distanceSq(u, patrolTarget) > 225,
+      );
+      if (idleShips.length > 0) {
+        commands.push({
+          cmd: 'attack_move',
+          ids: idleShips.map((u) => u.id),
+          cx: patrolTarget.cx,
+          cy: patrolTarget.cy,
+        });
+        reasons.push(`patrol east (${idleShips.length} ships)`);
+      }
+    }
 
     return { commands, reason: reasons.join('; ') };
   }

@@ -269,8 +269,8 @@ describe('STRUCTURE_IMAGES mapping', () => {
     }
   });
 
-  it('has 27 entries', () => {
-    expect(Object.keys(STRUCTURE_IMAGES).length).toBe(27);
+  it('has 28 entries', () => {
+    expect(Object.keys(STRUCTURE_IMAGES).length).toBe(28);
   });
 });
 
