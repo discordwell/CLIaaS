@@ -76,8 +76,8 @@ describe('SCG05EA — spy infiltration phase', () => {
 
     const decision = strategy.decide(state);
     console.log('Spy route:', decision.reason);
-    // Spy uses waypoint route — moves toward first waypoint
-    expect(decision.reason).toMatch(/spy wp\d|spy →/);
+    // Spy uses sprint-based corridor timing (replaced waypoint system in c054041)
+    expect(decision.reason).toMatch(/spy SPRINT|spy ->/);
   });
 
   it('spy advances along safe route waypoints', () => {
@@ -100,8 +100,8 @@ describe('SCG05EA — spy infiltration phase', () => {
     });
     const decision = strategy.decide(state2);
     console.log('Spy advance:', decision.reason);
-    // Should be heading to a waypoint — format is "spy wp{N} → (x,y)"
-    expect(decision.reason).toMatch(/spy wp\d/);
+    // Sprint-based corridor timing — sprints when patrol gap is open
+    expect(decision.reason).toMatch(/spy SPRINT|spy ->/);
   });
 
   it('spy continues waypoint route even with nearby dogs (no evasion — sprint strategy)', () => {

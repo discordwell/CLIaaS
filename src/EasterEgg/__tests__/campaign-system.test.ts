@@ -152,25 +152,27 @@ describe('Dynamic player houses', () => {
 // Alliance Building from INI
 // ============================================================
 describe('buildAlliancesFromINI', () => {
-  it('builds symmetric alliances', () => {
+  it('alliances are one-way per C++ Make_Ally (house.cpp:2101-2107)', () => {
     const alliesMap = new Map<House, House[]>();
     alliesMap.set(House.Spain, [House.Greece, House.England]);
     alliesMap.set(House.Greece, [House.Spain]);
 
     const table = buildAlliancesFromINI(alliesMap, House.Spain);
-    // Spain allied with Greece
+    // Spain allied with Greece (Spain listed Greece)
     expect(table.get(House.Spain)!.has(House.Greece)).toBe(true);
-    // Greece allied with Spain
+    // Greece allied with Spain (Greece listed Spain)
     expect(table.get(House.Greece)!.has(House.Spain)).toBe(true);
-    // England allied with Spain (symmetric)
-    expect(table.get(House.England)!.has(House.Spain)).toBe(true);
+    // England does NOT auto-ally Spain — C++ Make_Ally is one-way, not symmetric
+    expect(table.get(House.England)!.has(House.Spain)).toBe(false);
   });
 
-  it('GoodGuy is always allied with player', () => {
+  it('GoodGuy has no auto-alliance with player (C++ house.cpp:7131-7164)', () => {
+    // C++ Read_INI processes GoodGuy identically to any other house —
+    // alliances come purely from the [GoodGuy] Allies= INI entry
     const alliesMap = new Map<House, House[]>();
     const table = buildAlliancesFromINI(alliesMap, House.USSR);
-    expect(table.get(House.GoodGuy)!.has(House.USSR)).toBe(true);
-    expect(table.get(House.USSR)!.has(House.GoodGuy)).toBe(true);
+    expect(table.get(House.GoodGuy)!.has(House.USSR)).toBe(false);
+    expect(table.get(House.USSR)!.has(House.GoodGuy)).toBe(false);
   });
 
   it('everyone is allied with themselves', () => {
