@@ -328,8 +328,9 @@ describe('SCG11EA naval strategy', () => {
     );
   });
 
-  it('does not produce tanks on SCG11EA', () => {
+  it('caps tank production at 5 on SCG11EA', () => {
     const strategy = new OracleStrategy('SCG11EA');
+    // With 5 tanks already, should NOT produce more
     const s = scg11eaState({
       structures: [
         structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
@@ -348,7 +349,7 @@ describe('SCG11EA naval strategy', () => {
 
     const decision = strategy.decide(s);
 
-    // Should NOT produce any tank units (RTTI_UNITTYPE = 29)
+    // 5 tanks in scg11eaState default — at cap, should NOT produce
     const unitProduceCommands = decision.commands.filter(
       (c) => c.cmd === 'produce' && c.rtti === 29,
     );

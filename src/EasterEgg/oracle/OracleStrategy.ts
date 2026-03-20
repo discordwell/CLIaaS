@@ -68,20 +68,20 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
 ];
 
-// SCG11EA "Aftermath": Naval-focused build order — skip war factory, rush shipyard.
-// MCV moves east to (35,82) before deploying — cuts chain distance to coast in half.
-// Ore at (26-31, 59-61), real water at x=63. Chain east ~28 cells from ConYard.
-// Ore at (26-31, 59-61) — refineries placed toward ore via coastal bias.
+// SCG11EA "Aftermath": East chain to real water at x=63.
+// WEAP early for replacement tanks + it's a 3x2 building = great chain link.
+// Ore at (26-31, 59-61). ConYard deploys at ~(20-25, 90-100).
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
-  { names: ['PROC'],         type_ids: [12] },              // First refinery — toward ore
+  { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
+  { names: ['WEAP'],         type_ids: [2] },               // War factory — tanks + big chain link
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery
-  { names: ['POWR'],         type_ids: [17], maxCount: 4 },  // Chain east (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 6 },  // Chain east (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain east (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 10 }, // Chain east — reach x=61
+  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain east (3 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain east (3 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 11 }, // Chain east (3 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 14 }, // Chain east — reach x=60
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in real water (x=63+)
-  { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
 
@@ -792,18 +792,23 @@ export class OracleStrategy {
             // Near ConYard — fill gaps around deploy point
             { cx: 32, cy: 88 }, { cx: 32, cy: 86 }, { cx: 32, cy: 90 },
             { cx: 28, cy: 88 }, { cx: 28, cy: 86 },
-            // Eastward in 3-4 cell steps (tight for reliable build radius)
-            { cx: 35, cy: 88 }, { cx: 35, cy: 86 }, { cx: 35, cy: 90 },
-            { cx: 38, cy: 88 }, { cx: 38, cy: 86 }, { cx: 38, cy: 90 },
-            { cx: 41, cy: 88 }, { cx: 41, cy: 86 }, { cx: 41, cy: 90 },
-            { cx: 44, cy: 88 }, { cx: 44, cy: 86 }, { cx: 44, cy: 90 },
-            { cx: 47, cy: 88 }, { cx: 47, cy: 86 }, { cx: 47, cy: 90 },
-            { cx: 50, cy: 88 }, { cx: 50, cy: 86 }, { cx: 50, cy: 90 },
-            { cx: 53, cy: 88 }, { cx: 53, cy: 86 }, { cx: 53, cy: 90 },
-            { cx: 56, cy: 90 }, { cx: 56, cy: 88 }, { cx: 56, cy: 86 },
-            // Final stretch: y=90 first (y=86/88 blocked by shore templates at x=59+)
-            { cx: 59, cy: 90 }, { cx: 59, cy: 88 }, { cx: 59, cy: 86 },
-            { cx: 60, cy: 90 }, { cx: 60, cy: 88 },
+            // Eastward in 2-cell steps. POWR sight=3 only reveals 3 cells
+            // from building edge. 2-cell building + 3 sight = 5 cell reveal.
+            // Next building at +2 needs cells x to x+1 mapped — both within 5.
+            { cx: 34, cy: 88 }, { cx: 34, cy: 90 }, { cx: 34, cy: 86 },
+            { cx: 36, cy: 88 }, { cx: 36, cy: 90 }, { cx: 36, cy: 86 },
+            { cx: 38, cy: 88 }, { cx: 38, cy: 90 }, { cx: 38, cy: 86 },
+            { cx: 40, cy: 88 }, { cx: 40, cy: 90 }, { cx: 40, cy: 86 },
+            { cx: 42, cy: 88 }, { cx: 42, cy: 90 }, { cx: 42, cy: 86 },
+            { cx: 44, cy: 88 }, { cx: 44, cy: 90 }, { cx: 44, cy: 86 },
+            { cx: 46, cy: 88 }, { cx: 46, cy: 90 }, { cx: 46, cy: 86 },
+            { cx: 48, cy: 88 }, { cx: 48, cy: 90 },
+            { cx: 50, cy: 88 }, { cx: 50, cy: 90 },
+            { cx: 52, cy: 88 }, { cx: 52, cy: 90 },
+            { cx: 54, cy: 90 }, { cx: 54, cy: 88 },
+            { cx: 56, cy: 90 }, { cx: 56, cy: 88 },
+            { cx: 58, cy: 90 }, { cx: 58, cy: 88 },
+            { cx: 60, cy: 90 },
           ];
           const idx = this.placementAttempts % chainPositions.length;
           const pos = chainPositions[idx];
@@ -956,10 +961,7 @@ export class OracleStrategy {
     );
 
     // Check if we're still saving for a building (don't drain credits).
-    // SCG11EA skips WEAP — use SYRD as the "core production ready" marker instead.
-    const coreProductionReady = this.scenario === 'SCG11EA'
-      ? alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN')
-      : hasWarFactory;
+    const coreProductionReady = hasWarFactory;
     const savingForBuilding = buildingProduction != null ||
       (this.baseBuildIndex < this.getBuildOrder().length && !coreProductionReady);
     const minCreditsForInfantry = savingForBuilding ? 1500 : 300;
@@ -972,8 +974,8 @@ export class OracleStrategy {
     const targetHarvesters = Math.max(2, refCount);
     const needHarvester = harvCount < targetHarvesters && buildable?.units.includes('HARV');
 
-    // SCG11EA: skip all tank production — starting army suffices, save credits for navy
-    const skipTankProduction = this.scenario === 'SCG11EA';
+    // SCG11EA: build replacement tanks up to 5 — defend chain while building east
+    const skipTankProduction = this.scenario === 'SCG11EA' && tankCount >= 5;
     if (hasWarFactory && !unitProduction && buildable && !skipTankProduction) {
       if (needHarvester && (harvCount === 0 || state.credits > 1200)) {
         // Build harvesters — emergency if 0, proactive otherwise
@@ -2128,11 +2130,11 @@ export class OracleStrategy {
           this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
         : null;
 
-      // Tanya spawns at (25,107) but team script may park her on impassable cells.
-      // If she's south of y=108 (building zone), try moving her north step by step.
+      // Tanya spawns at (25,107) but team script parks her in impassable building zone.
+      // Warp to (22,105) — confirmed passable from earlier traces (Tanya walked through).
       if (tanya.cy > 108) {
-        commands.push({ cmd: 'move', ids: [tanya.id], cx: tanya.cx, cy: tanya.cy - 1 });
-        reasons.push(`Tanya unstick: (${tanya.cx},${tanya.cy}) → north`);
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
+        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (22,105)`);
         return { commands, reason: reasons.join('; ') };
       }
 
@@ -2149,10 +2151,12 @@ export class OracleStrategy {
         this.lastUnitTargets.delete(tanya.id); // clear target on flee
         reasons.push(`Tanya FLEE dog(${nearestDog!.cx},${nearestDog!.cy}) d=${Math.sqrt(dogDist).toFixed(1)}`);
       } else if (infantryInRange.length > 0) {
-        // PRIORITY 2: Shoot nearest infantry in range — always re-target (quick kills)
+        // PRIORITY 2: Shoot nearest infantry — only send if target changes
         const target = infantryInRange[0];
-        commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
-        this.lastUnitTargets.set(tanya.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: state.tick });
+        if (!lastTarget || lastTarget.targetId !== target.id) {
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
+          this.lastUnitTargets.set(tanya.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: state.tick });
+        }
         reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(this.distanceSq(tanya, target)).toFixed(1)} [${infantryInRange.length} in range]`);
       } else if (nearestSam) {
         // PRIORITY 3: Attack nearest SAM — send only once to avoid stutter-stepping
