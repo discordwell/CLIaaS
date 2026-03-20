@@ -70,26 +70,24 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
 ];
 
-// SCG11EA "Aftermath / Naval Supremacy": survive the island first, then open the river.
+// SCG11EA "Aftermath / Naval Supremacy": bootstrap the island, then hand off to navy fast.
 // Strategy:
-//   1. Build a real land economy and enough tank production to hold the beachhead.
-//   2. Add the shipyard only after the land line can sustain the transition.
-//   3. Mass destroyers and clear the river screen before spending on static tech.
-// Ground-first: destroy the Soviet base with tanks, THEN build navy.
-// SYRD goes last — only after economy is strong and base is under control.
+//   1. Get a stable local base: POWR + PROC + WEAP + second PROC + second POWR.
+//   2. Stop there and rush the east-coast shipyard once the shore is revealed.
+//   3. Keep enough tanks alive to hold the island while destroyers clear the river.
+//   4. Only spend on static tech or heavy macro after the fleet is established.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
-  { names: ['POWR'],         type_ids: [17] },              // Power
-  { names: ['PROC'],         type_ids: [12] },              // Economy
-  { names: ['WEAP'],         type_ids: [2] },               // Tanks ASAP
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // More economy
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Double tank output
-  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Sustain the assault
-  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Power for base
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Navy AFTER ground assault
+  { names: ['POWR'],         type_ids: [17] },              // First power
+  { names: ['PROC'],         type_ids: [12] },              // First refinery
+  { names: ['WEAP'],         type_ids: [2] },               // Tank line online
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery
+  { names: ['POWR'],         type_ids: [17], maxCount: 2 }, // Power for SYRD + DDs
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Rush navy once the coast is mapped
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
-const SCG11EA_PRE_NAVAL_TANK_TARGET = 20;  // Keep pumping tanks until base is destroyed
+const SCG11EA_PRE_NAVAL_TANK_TARGET = 12;  // Hold the island, but don't starve the shipyard
+const SCG11EA_SHIPYARD_TANK_FLOOR = 8;     // Finish SYRD once we have a credible beachhead
 const SCG11EA_SUB_HUNT_TANK_FLOOR = 6;     // Keep a real island hold while DDs clear the river
 const SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR = 4; // Panic rebuild only when the beachhead is collapsing
 const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Refill for the westward push once the river is effectively open
@@ -101,8 +99,8 @@ const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fl
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
 const SCG11EA_ASSAULT_MIN_ARMOR = 12;      // Need 12+ tanks to break through Mammoths + Teslas
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
-const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 1;
-const SCG11EA_STATIC_DEFENSE_MAX_SUBS = 12;
+const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 2;
+const SCG11EA_STATIC_DEFENSE_MAX_SUBS = 4;
 const SCG11EA_AA_DEFENSE_TARGET = 2;
 const SCG11EA_GROUND_DEFENSE_TARGET = 2;
 const SCG11EA_AA_DEFENSE_TRIGGER = 2;
@@ -343,6 +341,7 @@ export class OracleStrategy {
   private sawScg02eaConvoy = false;
   private scg11eaCoastRevealed = false;
   private scg11eaNavalUnlocked = false;
+  private scg11eaMcvMoved = false;
   private scg02eaAssaultIndex = 0;
   private baseBuildIndex = 0;
   private placementAttempts = 0;
@@ -629,9 +628,10 @@ export class OracleStrategy {
 
   private scg11eaDesiredShipCount(enemySubCount: number): number {
     if (enemySubCount <= 0) return 0;
-    if (enemySubCount >= 10) return 1;
-    if (enemySubCount >= 5) return 2;
-    return 3;
+    if (enemySubCount >= 7) return 4;
+    if (enemySubCount >= 3) return 3;
+    if (enemySubCount >= 1) return 2;
+    return 0;
   }
 
   decide(state: RAGameState): OracleDecision {
@@ -928,6 +928,7 @@ export class OracleStrategy {
         (
           existingShipyard &&
           buildingProduction != null &&
+          !buildingProduction.done &&
           buildingProduction.t !== 'SYRD' &&
           buildingProduction.t !== 'SPEN' &&
           (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR' || buildingProduction.t === 'PROC')
@@ -1286,6 +1287,7 @@ export class OracleStrategy {
         const scg11eaEconomyCollapsed = procCount === 0;
         const scg11eaEconomyFragile = procCount < 2;
         const scg11eaStaticDefenseUnlocked =
+          !scg11eaFleetShort &&
           shipCount >= SCG11EA_STATIC_DEFENSE_MIN_SHIPS &&
           scg11eaEnemySubCount <= SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
           procCount >= 2;
@@ -1589,9 +1591,20 @@ export class OracleStrategy {
           ? SCG11EA_POST_NAVAL_TANK_TARGET
           : SCG11EA_SUB_HUNT_TANK_FLOOR)
         : 0;
+    const scg11eaFleetPriority =
+      this.scenario === 'SCG11EA' &&
+      scg11eaSubHuntPhase &&
+      scg11eaFleetShort &&
+      tankCount >= SCG11EA_SUB_HUNT_TANK_FLOOR;
+    const scg11eaShipyardPriority =
+      this.scenario === 'SCG11EA' &&
+      scg11eaShipyardInProgress &&
+      tankCount >= SCG11EA_SHIPYARD_TANK_FLOOR;
     const skipTankProduction = this.scenario === 'SCG11EA'
       ? ((tankCount >= scg11eaTankTarget && !scg11eaArmorEmergency) ||
-        (scg11eaNavalEconomyFragile && !scg11eaArmorEmergency))
+        (scg11eaNavalEconomyFragile && !scg11eaArmorEmergency) ||
+        (scg11eaShipyardPriority && !scg11eaArmorEmergency) ||
+        (scg11eaFleetPriority && !scg11eaArmorEmergency))
       : false;
     if (hasWarFactory && !unitProduction && buildable && !skipTankProduction) {
       if (needHarvester && (harvCount === 0 || state.credits > 1200)) {
@@ -2706,7 +2719,7 @@ export class OracleStrategy {
       const corridorDogs = dogs.filter((d) =>
         d.cx >= 20 && d.cx <= 30 && d.cy >= 48 && d.cy <= 53,
       );
-      const gapOpen = corridorDogs.length === 0; // no dogs in corridor
+      const gapOpen = corridorDogs.length <= 1; // sprint with at most 1 dog in corridor
 
       // Always send move commands — engine-level dedup in agentHarness
       // skips path reset when destination hasn't changed, so repeated
@@ -2716,35 +2729,16 @@ export class OracleStrategy {
         reasons.push(reason);
       };
 
-      // Dog dodge — ALWAYS takes priority, even mid-infiltration.
-      // Dog detection is ≤3 cells. Dodge at 4 cells (distSq ≤ 16).
-      if (nearestDog && dogDistSq <= 16) {
-        const dy = spy.cy - nearestDog.cy;
-        // Dodge east + perpendicular to dog, stay in y=[49,51]
-        const dodgeX = spy.cx + 2;
-        let dodgeY = spy.cy + (dy >= 0 ? 1 : -1);
-        dodgeY = Math.max(49, Math.min(51, dodgeY));
-        sendMove(dodgeX, dodgeY, `spy DODGE dog(${nearestDog.cx},${nearestDog.cy}) d=${Math.sqrt(dogDistSq).toFixed(1)}`);
-      } else if (targetWeap && this.distanceSq(spy, targetWeap) <= 4) {
-        // Adjacent to WEAP — attack to infiltrate
+      // No dodge — just sprint. Dodging makes the spy oscillate and die.
+      // The harness 20-cell shortcut handles infiltration once x≥23.
+      if (targetWeap && spy.cx >= 23) {
+        // Past patrol zone — attack WEAP. TS harness has 20-cell shortcut
+        // that calls spyInfiltrate directly. C++ will pathfind naturally.
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
         reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
-      } else if (spy.cx >= 23) {
-        // Past patrol zone — short-hop east at y=50 to prevent pathfinder going south.
-        // Hops of ~5 cells keep the pathfinder from taking long detours.
-        const nextX = Math.min(spy.cx + 5, 43);
-        sendMove(nextX, 50, `spy EAST (${spy.cx},${spy.cy}) → (${nextX},50)`);
-      } else if (gapOpen) {
-        // Gap is open — sprint east with short hops at y=50 to prevent pathfinder detours
-        const nextX = Math.min(spy.cx + 3, 43);
-        sendMove(nextX, spy.cy, `spy SPRINT east (${spy.cx},${spy.cy}) gap=OPEN`);
-      } else if (spy.cx < 20) {
-        // Move to staging x=19, wait for gap
-        sendMove(19, 50, `spy → staging (${spy.cx},${spy.cy}) corridor=${corridorDogs.length}dogs`);
       } else {
-        // At x=20+, corridor blocked. Keep sprinting — don't stop.
-        // Stopping means the gap will close before we cross. Sprint and hope.
-        sendMove(43, 50, `spy SPRINT east (${spy.cx},${spy.cy}) corridor=${corridorDogs.length}dogs YOLO`);
+        // Always sprint east — no waiting, no dodging. Just go.
+        sendMove(43, 50, `spy SPRINT east (${spy.cx},${spy.cy})`);
       }
 
       return { commands, reason: reasons.join('; ') };
@@ -3079,6 +3073,30 @@ export class OracleStrategy {
     const enemyStructures = state.structures.filter((s) => !s.ally);
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
+      const huntPackSize =
+        this.scenario === 'SCG11EA'
+          ? enemySubs.length >= 7
+            ? 3
+            : enemySubs.length >= 3
+            ? 2
+            : 1
+          : 1;
+      if (this.scenario === 'SCG11EA' && playerShips.length < huntPackSize) {
+        let rallying = 0;
+        for (const ship of playerShips) {
+          if (!this.shouldMove(ship, SCG11EA_FLEET_RALLY_POINT.cx, SCG11EA_FLEET_RALLY_POINT.cy) && !this.isIdle(ship)) continue;
+          if (this.distanceSq(ship, SCG11EA_FLEET_RALLY_POINT) <= 36 && !this.isIdle(ship)) continue;
+          commands.push({
+            cmd: 'move',
+            ids: [ship.id],
+            cx: SCG11EA_FLEET_RALLY_POINT.cx,
+            cy: SCG11EA_FLEET_RALLY_POINT.cy,
+          });
+          this.recordMove(ship.id, SCG11EA_FLEET_RALLY_POINT.cx, SCG11EA_FLEET_RALLY_POINT.cy);
+          rallying++;
+        }
+        if (rallying > 0) reasons.push(`rally fleet (${playerShips.length}/${huntPackSize})`);
+      } else {
       // The harness exposes all enemy submarines, including boats outside current
       // vision. Direct ATTACK orders can stall forever on hidden targets, so drive
       // destroyers with HUNT missions toward the latest known submarine cells.
@@ -3111,6 +3129,7 @@ export class OracleStrategy {
         issued++;
       }
       if (issued > 0) reasons.push(`hunt subs (${issued}/${playerShips.length} ships → ${enemySubs.length} SS)`);
+      }
     } else if (playerShips.length > 0 && enemySubs.length === 0) {
       // No subs visible — spread along the full river corridor so hidden boats
       // at the north/south extremes get found quickly.
