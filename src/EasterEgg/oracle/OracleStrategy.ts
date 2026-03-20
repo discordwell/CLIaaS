@@ -1943,7 +1943,7 @@ export class OracleStrategy {
         { cx: 21, cy: 48 },
         { cx: 24, cy: 48 },   // through ROUGH terrain
         { cx: 28, cy: 48 },
-        { cx: 44, cy: 48 },   // straight through tree (now passable) to above WEAP
+        { cx: 46, cy: 48 },   // slightly east of WEAP (44,50) to avoid dog near entrance
       ];
 
       // Find current waypoint — advance by x-coordinate progression (not distance).
