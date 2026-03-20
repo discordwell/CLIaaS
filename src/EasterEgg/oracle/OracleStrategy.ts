@@ -351,8 +351,14 @@ export class OracleStrategy {
   // enemy shipyard positions and map layout in the INI files.
   private static readonly COASTAL_CELLS: Record<string, Point[]> = {
     'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
-    'SCG11EA': [{ cx: 20, cy: 90 }, { cx: 22, cy: 88 }, { cx: 18, cy: 92 }],
-    'SCG11EB': [{ cx: 20, cy: 90 }, { cx: 22, cy: 88 }, { cx: 18, cy: 92 }],
+    'SCG11EA': [
+      { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
+      { cx: 26, cy: 85 }, { cx: 18, cy: 86 }, { cx: 28, cy: 84 },
+      { cx: 22, cy: 83 }, { cx: 24, cy: 82 }, { cx: 20, cy: 84 },
+    ],
+    'SCG11EB': [
+      { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
+    ],
   };
 
   checkResult(state: RAGameState): OracleResult {
@@ -587,9 +593,19 @@ export class OracleStrategy {
             return bDist - aDist; // furthest from enemy first
           });
         }
-        const offset = offsets[this.placementAttempts % offsets.length];
-        const placeCx = conYard.cx + offset.cx;
-        const placeCy = conYard.cy + offset.cy;
+        let placeCx: number, placeCy: number;
+        if (this.placementAttempts < offsets.length) {
+          // First pass: try predefined offsets
+          const offset = offsets[this.placementAttempts % offsets.length];
+          placeCx = conYard.cx + offset.cx;
+          placeCy = conYard.cy + offset.cy;
+        } else {
+          // Exhausted offsets — try random positions in wider radius
+          const angle = (this.placementAttempts * 137.5) * Math.PI / 180; // golden angle
+          const dist = 8 + (this.placementAttempts % 10);
+          placeCx = Math.round(conYard.cx + Math.cos(angle) * dist);
+          placeCy = Math.round(conYard.cy + Math.sin(angle) * dist);
+        }
         commands.push({
           cmd: 'place',
           rtti: RTTI_BUILDINGTYPE,
