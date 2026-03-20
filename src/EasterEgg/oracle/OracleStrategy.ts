@@ -89,6 +89,7 @@ const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
 const SCG11EA_PRE_NAVAL_TANK_TARGET = 12;  // Hold the island, but don't starve the shipyard
 const SCG11EA_SHIPYARD_TANK_FLOOR = 8;     // Finish SYRD once we have a credible beachhead
 const SCG11EA_SUB_HUNT_TANK_FLOOR = 6;     // Keep a real island hold while DDs clear the river
+const SCG11EA_LATE_SUB_HUNT_TANK_FLOOR = 4; // Once the base is stable, spend the rest on DD rebuilds
 const SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR = 4; // Panic rebuild only when the beachhead is collapsing
 const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Refill for the westward push once the river is effectively open
 const SCG11EA_POST_NAVAL_SUB_THRESHOLD = 1;
@@ -100,7 +101,7 @@ const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinn
 const SCG11EA_ASSAULT_MIN_ARMOR = 12;      // Need 12+ tanks to break through Mammoths + Teslas
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
 const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 2;
-const SCG11EA_STATIC_DEFENSE_MAX_SUBS = 4;
+const SCG11EA_STATIC_DEFENSE_MAX_SUBS = 1;
 const SCG11EA_AA_DEFENSE_TARGET = 2;
 const SCG11EA_GROUND_DEFENSE_TARGET = 2;
 const SCG11EA_AA_DEFENSE_TRIGGER = 2;
@@ -628,8 +629,8 @@ export class OracleStrategy {
 
   private scg11eaDesiredShipCount(enemySubCount: number): number {
     if (enemySubCount <= 0) return 0;
-    if (enemySubCount >= 7) return 4;
-    if (enemySubCount >= 3) return 3;
+    if (enemySubCount >= 4) return 4;
+    if (enemySubCount >= 2) return 3;
     if (enemySubCount >= 1) return 2;
     return 0;
   }
@@ -952,6 +953,12 @@ export class OracleStrategy {
       this.scenario === 'SCG11EA'
         ? state.enemies.filter((e) =>
           e.t === 'YAK' || e.t === 'MIG' || e.t === 'HIND' || e.t === 'HELI').length
+        : 0;
+    const scg11eaLocalAirThreatCount =
+      this.scenario === 'SCG11EA'
+        ? state.enemies.filter((e) =>
+          AIRCRAFT_TYPES.has(e.t) &&
+          alliedStructures.some((s) => this.distanceSq(e, s) <= 400)).length
         : 0;
     const scg11eaEnemySubCount =
       this.scenario === 'SCG11EA'
@@ -1328,7 +1335,8 @@ export class OracleStrategy {
         } else if (
           scg11eaSubHuntLive &&
           weapCount === 0 &&
-          survivingTanks < SCG11EA_POST_NAVAL_TANK_TARGET &&
+          shipCount === 0 &&
+          survivingTanks < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
           scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
           buildable.structures.includes('WEAP')
         ) {
@@ -1337,7 +1345,7 @@ export class OracleStrategy {
             rtti: RTTI_BUILDINGTYPE,
             type_id: 2,
           });
-          reasons.push(`emergency rebuild WEAP (${survivingTanks} tanks, threats=${scg11eaGroundThreatCount})`);
+          reasons.push(`emergency rebuild WEAP (${survivingTanks} tanks, ships=${shipCount}, threats=${scg11eaGroundThreatCount})`);
         } else if (powerDeficit > 0 && buildable.structures.includes('APWR')) {
           commands.push({
             cmd: 'produce',
@@ -1589,13 +1597,17 @@ export class OracleStrategy {
           ? SCG11EA_PRE_NAVAL_TANK_TARGET
           : scg11eaRiverOpen
           ? SCG11EA_POST_NAVAL_TANK_TARGET
-          : SCG11EA_SUB_HUNT_TANK_FLOOR)
+          : (scg11eaEnemySubCount >= 7 ||
+            scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
+            scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER)
+          ? SCG11EA_SUB_HUNT_TANK_FLOOR
+          : SCG11EA_LATE_SUB_HUNT_TANK_FLOOR)
         : 0;
     const scg11eaFleetPriority =
       this.scenario === 'SCG11EA' &&
       scg11eaSubHuntPhase &&
       scg11eaFleetShort &&
-      tankCount >= SCG11EA_SUB_HUNT_TANK_FLOOR;
+      tankCount >= scg11eaTankTarget;
     const scg11eaShipyardPriority =
       this.scenario === 'SCG11EA' &&
       scg11eaShipyardInProgress &&
@@ -1687,8 +1699,8 @@ export class OracleStrategy {
     const scg11eaBasePressure =
       this.scenario === 'SCG11EA' &&
       (scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
-        scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER ||
-        tankCount < SCG11EA_ASSAULT_MIN_ARMOR);
+        scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER ||
+        tankCount < (scg11eaSubHuntPhase ? scg11eaTankTarget : SCG11EA_ASSAULT_MIN_ARMOR));
     // SCG11EA: always produce ships (we know subs are there), lower credit threshold
     const shipCreditThreshold = this.scenario === 'SCG11EA'
       ? (scg11eaNavalEconomyFragile
@@ -2861,8 +2873,12 @@ export class OracleStrategy {
         if (target) {
           const tId = target.id;
           const tDist = this.distanceSq(tanya, target);
-          // Send attack once — don't re-send while adjacent (resets C4 timer!)
-          if (!lastTarget || lastTarget.targetId !== tId) {
+          if (BARREL_TYPES.has(target.t) && tDist <= TANYA_RANGE_SQ) {
+            // Barrel in gun range — SHOOT it (one-shot kill, chain explosion)
+            commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: tId });
+            this.lastUnitTargets.delete(tanya.id);
+          } else if (!lastTarget || lastTarget.targetId !== tId) {
+            // C4 everything else (or walk toward barrels out of range)
             commands.push({ cmd: 'attack', ids: [tanya.id], target: tId });
             this.lastUnitTargets.set(tanya.id, { targetId: tId, cx: target.cx, cy: target.cy, tick: state.tick });
           }
@@ -3077,7 +3093,9 @@ export class OracleStrategy {
         this.scenario === 'SCG11EA'
           ? enemySubs.length >= 7
             ? 3
-            : enemySubs.length >= 3
+            : enemySubs.length >= 4
+            ? 3
+            : enemySubs.length >= 2
             ? 2
             : 1
           : 1;
@@ -3187,12 +3205,23 @@ export class OracleStrategy {
       reasons.push('island base DESTROYED');
     }
 
-    // GROUND ASSAULT — only after the fleet has materially opened the river.
-    // Even a strong island army should not peel off while the submarine screen is intact.
-    const scg11eaAssaultOpen =
-      shipyardOnline &&
-      enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS;
-    if (!islandBaseDestroyed && scg11eaAssaultOpen && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
+    // GROUND ASSAULT — mass 12 tanks, attack in waves, retreat if below 6.
+    // No fleet gate. Stockpile then overwhelm — don't trickle reinforcements.
+    const armyCentroid = this.centroid(landArmor);
+    const armyIsNorth = armyCentroid.cy <= 75;
+    const shouldRetreat = armyIsNorth && landArmor.length < 6;
+    if (shouldRetreat) {
+      const basePos = alliedStructures.length > 0
+        ? this.centroid(alliedStructures as unknown as RAEntity[])
+        : { cx: 25, cy: 90 };
+      const retreaters = landArmor.filter((u) => this.shouldMove(u, basePos.cx, basePos.cy));
+      if (retreaters.length > 0) {
+        commands.push({ cmd: 'move', ids: retreaters.map((u) => u.id), cx: basePos.cx, cy: basePos.cy });
+        for (const u of retreaters) this.recordMove(u.id, basePos.cx, basePos.cy);
+        reasons.push(`retreat (${retreaters.length} < 6, restocking)`);
+      }
+    }
+    if (!islandBaseDestroyed && !shouldRetreat && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
       const armyCentroid = this.centroid(landArmor);
       const stagingPoint: Point = { cx: 45, cy: 65 };
       const atStaging = armyCentroid.cy <= 70;
