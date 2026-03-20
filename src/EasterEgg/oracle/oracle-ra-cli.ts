@@ -303,6 +303,14 @@ async function runOracle(
   console.log('\n=== Oracle Loop (observe → decide → act) ===\n');
 
   const strategy = new OracleStrategy(scenario);
+  // Load scenario INI for dynamic coastal cell detection (MapPack parsing)
+  const scenarioId = scenario.replace(/\.[^.]+$/, '').toUpperCase();
+  const iniPath = path.join(process.cwd(), 'public', 'ra', 'assets', `${scenarioId}.ini`);
+  try {
+    if (fs.existsSync(iniPath)) {
+      strategy.setINIText(fs.readFileSync(iniPath, 'utf-8'));
+    }
+  } catch { /* non-fatal: falls back to hardcoded coastal cells */ }
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${scenario.replace(/[^\w.-]+/g, '_')}`;
   const artifactsDir = path.join(process.cwd(), 'artifacts', runId);
   fs.mkdirSync(artifactsDir, { recursive: true });

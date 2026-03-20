@@ -7,6 +7,7 @@
  */
 
 import type { RAGameState, RAEntity, RAStructure, RABuildable } from './WasmAdapter';
+import { getCoastalCellsFromText } from './mapParser';
 
 export interface OracleDecision {
   commands: Array<Record<string, unknown>>;
@@ -294,9 +295,58 @@ export class OracleStrategy {
   // Track last move destination per unit — avoid re-sending move to same place
   private lastUnitMoves = new Map<number, { cx: number; cy: number; tick: number }>();
   private lastKnownEnemyCentroid: Point | null = null;
+  // Cached coastal cells from INI MapPack parsing (computed once per mission)
+  private mapParserCoastalCells: Point[] | null = null;
+  // Optional INI text for dynamic coastal detection (set externally)
+  private iniText: string | null = null;
 
   constructor(scenario = '') {
     this.scenario = scenario.replace(/\.[^.]+$/, '').toUpperCase();
+  }
+
+  /**
+   * Provide the scenario INI text for dynamic coastal cell detection.
+   * When set, the strategy will parse the MapPack to find coastal cells
+   * instead of relying solely on hardcoded per-mission positions.
+   */
+  setINIText(text: string): void {
+    this.iniText = text;
+  }
+
+  /**
+   * Resolve coastal cells for shipyard placement.
+   * Tries MapPack parsing first (if INI text available), then falls back to hardcoded.
+   * Results are cached after first computation.
+   */
+  private resolveCoastalCells(conYard: { cx: number; cy: number }): Point[] | undefined {
+    // Return cached result if available
+    if (this.mapParserCoastalCells !== null) {
+      return this.mapParserCoastalCells.length > 0 ? this.mapParserCoastalCells : undefined;
+    }
+
+    // Try dynamic MapPack parsing
+    if (this.iniText) {
+      try {
+        const cells = getCoastalCellsFromText(this.iniText, conYard.cx, conYard.cy);
+        if (cells.length > 0) {
+          this.mapParserCoastalCells = cells;
+          return cells;
+        }
+      } catch {
+        // MapPack parse failed — fall through to hardcoded
+      }
+    }
+
+    // Fall back to hardcoded per-mission coastal cells
+    const hardcoded = OracleStrategy.COASTAL_CELLS[this.scenario];
+    if (hardcoded) {
+      this.mapParserCoastalCells = hardcoded;
+      return hardcoded;
+    }
+
+    // No coastal cells available for this scenario
+    this.mapParserCoastalCells = [];
+    return undefined;
   }
 
   decide(state: RAGameState): OracleDecision {
@@ -349,10 +399,10 @@ export class OracleStrategy {
   // Missions that should NEVER initiate attacks (defense/survival only)
   private static readonly DEFENSE_ONLY_MISSIONS = new Set(['SCG08EA']);
 
-  // Per-mission coastal cells for shipyard placement.
-  // Hardcoded because reading WASM map memory requires recompiling C++
-  // which breaks Asyncify instrumentation. These are derived from
-  // enemy shipyard positions and map layout in the INI files.
+  // Per-mission coastal cells for shipyard placement (fallback).
+  // Dynamic detection via MapPack parsing (mapParser.ts) is preferred
+  // when INI text is available. These hardcoded values serve as a
+  // reliable fallback when the parser is not initialized.
   private static readonly COASTAL_CELLS: Record<string, Point[]> = {
     'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
     'SCG11EA': [
@@ -569,10 +619,10 @@ export class OracleStrategy {
       const isShipyard = buildingProduction.t === 'SYRD' || buildingProduction.t === 'SPEN';
 
       // Shipyards must be placed on coastal cells (land adjacent to water)
-      // Use C++ coastal detection if available, fall back to hardcoded per-mission
+      // Priority: 1) C++ coastal detection, 2) MapPack-parsed coastal cells, 3) hardcoded per-mission
       const coastalCells = state.coastalCells?.length
         ? state.coastalCells
-        : OracleStrategy.COASTAL_CELLS[this.scenario];
+        : this.resolveCoastalCells(conYard);
       if (isShipyard && coastalCells && coastalCells.length > 0) {
         const coastal = coastalCells[this.placementAttempts % coastalCells.length];
         commands.push({

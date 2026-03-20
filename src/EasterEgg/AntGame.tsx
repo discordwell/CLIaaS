@@ -729,6 +729,11 @@ export default function AntGame({ onExit }: AntGameProps) {
           installHarness(game);
           game.disableFog();
           const oracle = new SharedTsOracleStrategy(scenarioId);
+          // Load INI text for dynamic coastal cell detection (MapPack parsing)
+          fetch(`/ra/assets/${scenarioId}.ini`)
+            .then(r => r.ok ? r.text() : '')
+            .then(text => { if (text) oracle.setINIText(text); })
+            .catch(() => { /* non-fatal: falls back to hardcoded coastal cells */ });
           let totalTicks = 0;
           let iteration = 0;
           const maxTicks = Number(params.get('maxTicks')) || 30000;

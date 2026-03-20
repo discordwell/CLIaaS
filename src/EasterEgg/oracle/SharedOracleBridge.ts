@@ -303,6 +303,14 @@ export class SharedTsOracleStrategy {
     this.oracle = new OracleStrategy(scenario);
   }
 
+  /**
+   * Provide INI text for dynamic coastal cell detection via MapPack parsing.
+   * Call this after construction if the INI data is available (e.g. from fetch).
+   */
+  setINIText(text: string): void {
+    this.oracle.setINIText(text);
+  }
+
   checkResult(state: AgentState): OracleResult {
     const bridge = normalizeTsState(state);
     const oracleResult = this.oracle.checkResult(bridge.normalizedState);
