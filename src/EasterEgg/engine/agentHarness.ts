@@ -563,6 +563,40 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           } else if (e.type === 'QTNK') {
             game.deployMADTank(e);
             results.push({ cmd: 'deploy', ok: true });
+          } else if (e.isTransport && e.passengers.length > 0) {
+            // Unload transport passengers onto nearby passable terrain
+            const ec = e.cell;
+            // For naval transports, find shore cells; for others, use nearby passable cells
+            const unloadCells: Array<{ x: number; y: number }> = [];
+            for (let dy = -3; dy <= 3; dy++) {
+              for (let dx = -3; dx <= 3; dx++) {
+                const cx = ec.cx + dx;
+                const cy = ec.cy + dy;
+                if (game.map.isPassable(cx, cy) && (!e.isNavalUnit || game.map.isShoreCell(cx, cy))) {
+                  unloadCells.push({ x: cx * CELL_SIZE + CELL_SIZE / 2, y: cy * CELL_SIZE + CELL_SIZE / 2 });
+                }
+              }
+            }
+            if (unloadCells.length === 0) {
+              results.push({ cmd: 'deploy', ok: false, error: 'no passable cells nearby for unload' });
+              break;
+            }
+            let cellIdx = 0;
+            for (const p of e.passengers) {
+              const dest = unloadCells[cellIdx % unloadCells.length];
+              p.alive = true;
+              p.hp = p.hp > 0 ? p.hp : 1;
+              p.transportRef = null;
+              p.pos = { x: dest.x + (Math.random() - 0.5) * CELL_SIZE * 0.5, y: dest.y + (Math.random() - 0.5) * CELL_SIZE * 0.5 };
+              p.cell = worldToCell(p.pos.x, p.pos.y);
+              p.mission = Mission.GUARD;
+              p.deathTick = 0;
+              game.entities.push(p);
+              game.entityById.set(p.id, p);
+              cellIdx++;
+            }
+            e.passengers = [];
+            results.push({ cmd: 'deploy', ok: true });
           } else {
             results.push({ cmd: 'deploy', ok: false, error: `unit type ${e.type} cannot deploy` });
           }

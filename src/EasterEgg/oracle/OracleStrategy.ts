@@ -215,11 +215,12 @@ const SCG03EA_ARTY_POS: Point = { cx: 54, cy: 55 };    // cell 7094 = central fi
 // Final phase: destroy all USSR+BadGuy forces.
 const SCG05EA_WEAP_TARGET: Point = { cx: 43, cy: 50 };
 const SCG05EA_DOG_SAFE_DISTANCE_SQ = 25; // 5 cells squared (>3 cell detection + buffer)
-// LST landing point: east of peninsula, south of WEAP, away from dogs
-const SCG05EA_LST_LANDING: Point = { cx: 36, cy: 56 };
-// Spy walk route from landing to WEAP approach (avoid dogs at 49-50,52)
+// LST landing point: water cell near the base. (24,50) is confirmed water
+// (spy drowned there). The LST sails here, then unload finds shore cells.
+const SCG05EA_LST_LANDING: Point = { cx: 24, cy: 50 };
+// After unloading, spy walks from shore to WEAP (avoid dogs at 49-50,52)
 const SCG05EA_SPY_ROUTE: Point[] = [
-  { cx: 38, cy: 52 },   // inland from landing
+  { cx: 35, cy: 49 },   // inland toward base
   { cx: 42, cy: 48 },   // north of WEAP, clear of dogs at (49,52)
 ];
 // SAM sites Tanya must destroy — ordered by proximity to her spawn at (25,107).

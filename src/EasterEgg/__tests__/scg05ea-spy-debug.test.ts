@@ -1,14 +1,9 @@
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
-import type { AgentState, AgentUnit } from '../engine/agentHarness.js';
-
-/**
- * SCG05EA spy diagnostic — figure out why the spy gets stuck at (14,54).
- */
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
 
-describe('SCG05EA spy debug', () => {
+describe('SCG05EA spy flow', () => {
   let adapter: TsAgentAdapter;
 
   beforeAll(async () => {
@@ -20,131 +15,49 @@ describe('SCG05EA spy debug', () => {
     await adapter.disconnect();
   }, 20_000);
 
-  it('dumps spy state over time to find stuck cause', async () => {
-    const state0 = await adapter.loadScenario('SCG05EA');
-    console.log(`[t=0] units=${state0.units.length} state=${state0.state}`);
+  it('board → probe LST mobility → unload', async () => {
+    await adapter.loadScenario('SCG05EA');
 
-    // Step until spy appears
-    let state = state0;
+    // Wait for spy
+    let state = (await adapter.step(1)).state;
     for (let i = 0; i < 40; i++) {
-      const result = await adapter.step(15);
-      state = result.state;
-      const spy = state.units.find((u) => u.t === 'SPY');
-      const lst = state.units.find((u) => u.t === 'LST');
-      if (spy) {
-        console.log(`[t=${state.tick}] SPY found: pos=(${spy.cx},${spy.cy}) mission="${spy.m}" hp=${spy.hp} ally=${spy.ally} house="${spy.h}"`);
-        if (lst) console.log(`  LST at (${lst.cx},${lst.cy}) mission="${lst.m}" cargo=${lst.cargo}`);
-        // Dump ALL spy fields
-        console.log(`  SPY full:`, JSON.stringify(spy));
-        break;
-      }
-      if (i % 10 === 0) {
-        console.log(`[t=${state.tick}] no spy yet, units=${state.units.length} (${state.units.map(u=>u.t).join(',')})`);
-      }
+      state = (await adapter.step(15)).state;
+      if (state.units.find(u => u.t === 'SPY')) break;
+    }
+    const spy = state.units.find(u => u.t === 'SPY')!;
+    const lst = state.units.find(u => u.t === 'LST')!;
+    console.log(`SPY (${spy.cx},${spy.cy}), LST (${lst.cx},${lst.cy}) cargo=${lst.cargo}`);
+
+    // Board
+    await adapter.step(1, [{ cmd: 'enter', unitId: spy.id, transportId: lst.id }]);
+    state = (await adapter.step(15)).state;
+    const lstB = state.units.find(u => u.t === 'LST')!;
+    console.log(`After board: LST (${lstB.cx},${lstB.cy}) cargo=${lstB.cargo}`);
+
+    // Probe LST mobility — try various destinations
+    const probes = [
+      { cx: 20, cy: 49 }, { cx: 25, cy: 50 }, { cx: 30, cy: 50 },
+      { cx: 15, cy: 45 }, { cx: 15, cy: 55 }, { cx: 20, cy: 55 },
+      { cx: 30, cy: 55 }, { cx: 35, cy: 55 }, { cx: 40, cy: 55 },
+    ];
+    for (const p of probes) {
+      const r = await adapter.step(120, [
+        { cmd: 'move', unitIds: [lstB.id], cx: p.cx, cy: p.cy },
+      ]);
+      const l = r.state.units.find(u => u.t === 'LST');
+      console.log(`  LST → (${p.cx},${p.cy}): pos=(${l?.cx},${l?.cy}) m="${l?.m}"`);
     }
 
-    // Now track spy movement for 100 steps
-    for (let i = 0; i < 100; i++) {
-      const result = await adapter.step(15);
-      state = result.state;
-      const spy = state.units.find((u) => u.t === 'SPY');
-      if (!spy) {
-        console.log(`[t=${state.tick}] SPY GONE (infiltrated or dead?)`);
-        console.log(`  globals=${state.globals.join(',')}`);
-        break;
-      }
-      if (i % 5 === 0) {
-        const dogs = state.units.filter((u) => !u.ally && u.t === 'DOG');
-        const nearDogs = dogs.filter(d => {
-          const dx = d.cx - spy.cx;
-          const dy = d.cy - spy.cy;
-          return dx*dx + dy*dy <= 100;
-        });
-        console.log(`[t=${state.tick}] SPY (${spy.cx},${spy.cy}) m="${spy.m}" target=(${spy.mtx},${spy.mty}) tid=${spy.tid} dogs_near=${nearDogs.length} dogs_total=${dogs.length}`);
-      }
-    }
-
-    // Probe passable terrain — try moving in all directions with enough time
-    const spy = state.units.find((u) => u.t === 'SPY');
-    if (spy) {
-      console.log(`\n--- Terrain probe from (${spy.cx},${spy.cy}) ---`);
-
-      // Test east route (the likely correct path)
-      // Send spy to WEAP in one shot and track tick by tick
-      const eastTargets = [
-        { cx: 43, cy: 48, label: 'WEAP approach' },
-      ];
-
-      // Send move command once, then track spy position each tick
-      // Test multiple routes: south→east, direct east at y=52
-      const routes = [
-        { label: 'south to y=55', cx: 18, cy: 55 },
-        { label: 'direct to WEAP', cx: 43, cy: 50 },
-      ];
-      // Test: board spy onto LST (with the shore-finding fix)
-      const lst = state.units.find((u) => u.t === 'LST');
-      const legs = lst ? [
-        { cx: -1, cy: -1, label: `board LST (id=${lst.id})`, boardLst: true, lstId: lst.id },
-      ] : [
-        { cx: 20, cy: 50, label: 'no LST fallback' },
-      ];
-
-      for (const leg of legs as Array<{ cx: number; cy: number; label: string; boardLst?: boolean; lstId?: number }>) {
-        console.log(`--- Leg: ${leg.label} ---`);
-        if (leg.boardLst && leg.lstId != null) {
-          await adapter.step(1, [
-            { cmd: 'enter', unitId: spy.id, transportId: leg.lstId },
-          ]);
-        } else {
-          await adapter.step(1, [
-            { cmd: 'move', unitIds: [spy.id], cx: leg.cx, cy: leg.cy },
-          ]);
-        }
-        let arrived = false;
-        for (let j = 0; j < 40; j++) {
-          const r = await adapter.step(15);
-          const s2 = r.state.units.find((u) => u.t === 'SPY');
-          if (!s2) {
-            console.log(`  SPY GONE at step ${j}! state=${r.state.state} globals=${r.state.globals.join(',')}`);
-            break;
-          }
-          if (j % 5 === 0) {
-            const enemies = r.state.units.filter((u) => !u.ally);
-            const near = enemies.filter(e => {
-              const dx = e.cx - s2.cx; const dy = e.cy - s2.cy;
-              return dx*dx + dy*dy <= 49;
-            });
-            console.log(`  [${j}] (${s2.cx},${s2.cy}) m="${s2.m}" near=[${near.map(e=>`${e.t}(${e.cx},${e.cy})`).join(',')}]`);
-          }
-          if (s2.m === 'GUARD' || s2.m === 'AREA_GUARD') {
-            console.log(`  Arrived at (${s2.cx},${s2.cy})`);
-            arrived = true;
-            break;
-          }
-        }
-        if (!arrived) {
-          const s3 = (await adapter.step(1)).state.units.find((u) => u.t === 'SPY');
-          if (!s3) { console.log('  SPY GONE during wait'); break; }
-          console.log(`  Timeout at (${s3.cx},${s3.cy})`);
-        }
-      }
-
-      for (let i = 0; i < 5; i++) {
-        const result = await adapter.step(15);
-        const s = result.state.units.find((u) => u.t === 'SPY');
-        if (!s) {
-          // Check if any enemy structure was infiltrated (spy consumed)
-          const globals = result.state.globals;
-          console.log(`  [+${(i+1)*15}] SPY GONE! globals=${globals.join(',')} state=${result.state.state}`);
-          // Check which structures still exist near the spy's last known position
-          const nearStructs = result.state.structures.filter(st => !st.ally);
-          console.log(`  Enemy structs near death: ${nearStructs.filter(st => st.cx < 30 && st.cy < 55).map(st => `${st.t}(${st.cx},${st.cy})`).join(', ')}`);
-          break;
-        }
-        if (i % 3 === 0) {
-          console.log(`  [+${(i+1)*15}] spy (${s.cx},${s.cy}) m="${s.m}" tid=${s.tid} mtx=${s.mtx} mty=${s.mty}`);
-        }
-      }
+    // Try unloading where LST is
+    const lstNow = state.units.find(u => u.t === 'LST');
+    if (lstNow && (lstNow.cargo ?? 0) > 0) {
+      console.log(`\nUnloading at (${lstNow.cx},${lstNow.cy})...`);
+      const ur = await adapter.step(1, [{ cmd: 'deploy', unitId: lstNow.id }]);
+      console.log(`  deploy result: ${ur.results.map(r => `${r.cmd}:${r.ok}:${r.error ?? 'ok'}`).join(', ')}`);
+      state = (await adapter.step(15)).state;
+      const spyOut = state.units.find(u => u.t === 'SPY');
+      const lstAfter = state.units.find(u => u.t === 'LST');
+      console.log(`  SPY: ${spyOut ? `(${spyOut.cx},${spyOut.cy})` : 'none'} LST cargo=${lstAfter?.cargo}`);
     }
 
     expect(true).toBe(true);
