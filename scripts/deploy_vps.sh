@@ -168,11 +168,17 @@ APP_PORT="$1"
 SERVICE_NAME="$2"
 SUDO_CMD="$3"
 
-if ! curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/dev/null; then
-  echo "ERROR: healthcheck failed"
-  $SUDO_CMD journalctl -u "$SERVICE_NAME" --no-pager -n 80 || true
-  exit 1
-fi
+# Wait up to 15 seconds for the server to become healthy
+for i in $(seq 1 15); do
+  if curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/dev/null 2>&1; then
+    echo "Healthcheck passed (attempt $i)"
+    exit 0
+  fi
+  sleep 1
+done
+echo "ERROR: healthcheck failed after 15 attempts"
+$SUDO_CMD journalctl -u "$SERVICE_NAME" --no-pager -n 80 || true
+exit 1
 CMDS
 
 echo "[6/6] Configuring edge reverse proxy..."
