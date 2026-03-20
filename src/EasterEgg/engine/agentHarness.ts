@@ -230,8 +230,10 @@ export function serializeState(game: Game): AgentState {
   for (let i = 0; i < game.structures.length; i++) {
     const s = game.structures[i];
     if (!s.alive) continue;
+    // C++ parity: Neutral structures are NOT allied to the player.
+    // They're neutral — barrels, civilian buildings, etc.
     const isAlly = isAlliedHouse(s.house);
-    const reportAsAlly = isAlly || s.house === House.Neutral;
+    const reportAsAlly = isAlly;
     structures.push(serializeStructure(s, i, reportAsAlly, game.isStructureRepairing(i)));
   }
 
