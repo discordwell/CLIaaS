@@ -5204,6 +5204,11 @@ export class Game {
    * Apply side effects from a trigger action result. Extracted from processTriggers
    * to share with springGlobalTriggers (C++ parity #38).
    */
+  /** Start score screen music after a brief delay (C++ Theme.Queue_Song(THEME_SCORE), score.cpp:412) */
+  private startScoreMusic(): void {
+    setTimeout(() => this.audio.music.playSpecific('score'), 1200);
+  }
+
   private applyTriggerActionResult(result: TriggerActionResult, trigger: ScenarioTrigger): void {
     if (result.win && this.state === 'playing') {
       if (this.toCarryOver) saveCarryover(this.entities);
@@ -5211,12 +5216,14 @@ export class Game {
       this.audio.music.stop();
       this.audio.play('victory_fanfare');
       this.audio.play('eva_mission_accomplished');
+      this.startScoreMusic();
       this.onStateChange?.('won');
     }
     if (result.lose && this.state === 'playing') {
       this.state = 'lost';
       this.audio.music.stop();
       this.audio.play('defeat_sting');
+      this.startScoreMusic();
       this.onStateChange?.('lost');
     }
     if (result.allowWin) this.allowWin = true;
