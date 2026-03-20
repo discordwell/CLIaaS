@@ -1802,9 +1802,13 @@ function classifyOutdoorTerrain(
           map.setTerrain(cx, cy, Terrain.WATER);
         }
         // SNOW: stays CLEAR (default) — frozen river is passable
-      } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 97 && tmpl <= 110) ||
-                 (tmpl >= 131 && tmpl <= 172)) {
+      } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 131 && tmpl <= 172)) {
+        // Actual cliffs and large rock formations — impassable
         map.setTerrain(cx, cy, Terrain.ROCK);
+      } else if (tmpl >= 97 && tmpl <= 110) {
+        // Small rock debris — C++ treats as ROUGH (passable, slower movement).
+        // Previously incorrectly classified as impassable ROCK.
+        map.setTerrain(cx, cy, Terrain.ROUGH);
       } else if (tmpl === 400 || (tmpl >= 401 && tmpl <= 404) ||
                  (tmpl >= 500 && tmpl <= 508)) {
         map.setTerrain(cx, cy, Terrain.ROCK);

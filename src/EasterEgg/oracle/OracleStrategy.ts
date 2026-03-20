@@ -1907,17 +1907,16 @@ export class OracleStrategy {
       // Safe route: go SOUTH past ALL dogs to y=62 (open terrain, zero
       // patrol coverage), east for 30 cells, then north back to WEAP.
       // Longer path but completely avoids the rock formation AND dog patrols.
-      // Route: east to get inland first (coast is full of impassable shore),
-      // then south past ALL dog zones to y=65, east across clear terrain,
-      // then north to the WEAP. Yes it's a long detour but it's the only
-      // path that avoids rocks at y=48-49 AND patrol dogs at y=50-58.
+      // With rock debris (97-110) now ROUGH (passable), north corridor works.
+      // Route: north to y=48, east to x=24 (through passable rock debris),
+      // brief dip to y=50 to bypass cliffs at x=25-28, back north, east to WEAP.
       const spyWaypoints: Point[] = [
-        { cx: 20, cy: 50 },   // east from start to get off narrow coast
-        { cx: 22, cy: 55 },   // SE through passable terrain
-        { cx: 25, cy: 62 },   // south past dog zones
-        { cx: 35, cy: 65 },   // east in open terrain (no dogs)
-        { cx: 50, cy: 65 },   // east past enemy base x-range
-        { cx: 50, cy: 52 },   // north toward WEAP
+        { cx: 18, cy: 48 },   // north from peninsula
+        { cx: 24, cy: 48 },   // east past debris (template 104 now ROUGH)
+        { cx: 24, cy: 50 },   // south to pass cliffs at x=25-28
+        { cx: 30, cy: 50 },   // east past cliffs (y=50 is all clear)
+        { cx: 30, cy: 48 },   // back north after cliffs
+        { cx: 40, cy: 48 },   // east to WEAP area
       ];
 
       // Find current waypoint
