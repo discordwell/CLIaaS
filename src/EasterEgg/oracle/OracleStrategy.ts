@@ -53,7 +53,8 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
   { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory — double tank output
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },        // Shipyard — naval production (skipped if not buildable)
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Bridge power toward coast
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },        // Shipyard — naval production
   { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
