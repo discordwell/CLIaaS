@@ -46,10 +46,13 @@ describe('Alliance table — C++ parity', () => {
     expect(table.get(House.USSR)!.has(House.USSR)).toBe(true);
   });
 
-  it('GoodGuy is always mutually allied with the player', () => {
+  it('GoodGuy is NOT auto-allied — uses INI like any house (C++ has no hardcoded GoodGuy alliance)', () => {
     const table = buildAlliancesFromINI(new Map(), House.Greece);
-    expect(table.get(House.GoodGuy)!.has(House.Greece)).toBe(true);
-    expect(table.get(House.Greece)!.has(House.GoodGuy)).toBe(true);
+    // With no Allies= declared, GoodGuy only allies itself + Neutral
+    expect(table.get(House.GoodGuy)!.has(House.Greece)).toBe(false);
+    expect(table.get(House.Greece)!.has(House.GoodGuy)).toBe(false);
+    // But GoodGuy does consider Neutral an ally (Make_Ally(HOUSE_NEUTRAL))
+    expect(table.get(House.GoodGuy)!.has(House.Neutral)).toBe(true);
   });
 
   it('every house considers Neutral an ally (one-way, house.cpp:7158)', () => {

@@ -974,13 +974,17 @@ function toHouse(name: string): House {
     case 'turkey': return House.Turkey;
     case 'goodguy': return House.GoodGuy;
     case 'badguy': return House.BadGuy;
-    case 'special': return House.Neutral;
+    case 'special': return House.Special;
     case 'neutral': return House.Neutral;
-    // C++ parity: Multi1-Multi8 are distinct houses with no default alliances.
-    // In single-player, they're scenario-specific holders (not Neutral, not allied).
-    // Mapping unknown houses to Neutral would make them allied to everyone
-    // (via Make_Ally(HOUSE_NEUTRAL)), so fall back to BadGuy instead.
-    default: return House.BadGuy;
+    case 'multi1': return House.Multi1;
+    case 'multi2': return House.Multi2;
+    case 'multi3': return House.Multi3;
+    case 'multi4': return House.Multi4;
+    case 'multi5': return House.Multi5;
+    case 'multi6': return House.Multi6;
+    case 'multi7': return House.Multi7;
+    case 'multi8': return House.Multi8;
+    default: return House.Neutral;
   }
 }
 
@@ -1006,7 +1010,15 @@ export function houseIdToHouse(id: number): House {
     case 8: return House.GoodGuy;
     case 9: return House.BadGuy;
     case 10: return House.Neutral;
-    case 11: return House.Neutral; // Special
+    case 11: return House.Special; // HOUSE_JP / Special
+    case 12: return House.Multi1;
+    case 13: return House.Multi2;
+    case 14: return House.Multi3;
+    case 15: return House.Multi4;
+    case 16: return House.Multi5;
+    case 17: return House.Multi6;
+    case 18: return House.Multi7;
+    case 19: return House.Multi8;
     default: return House.Neutral;
   }
 }
