@@ -1925,12 +1925,7 @@ export class OracleStrategy {
       reasons.push('spy STOP (intercept team script)');
       return { commands, reason: reasons.join('; ') };
     }
-    // Hold spy for 200 ticks to shift patrol timing
-    if (spy && this.scg05eaSpyStopped && this.scg05eaSpyStartTick > 0 &&
-        state.tick - this.scg05eaSpyStartTick < 200) {
-      reasons.push(`spy holding (${200 - (state.tick - this.scg05eaSpyStartTick)} ticks)`);
-      return { commands, reason: reasons.join('; ') };
-    }
+
 
     // ─── PHASE 1: Spy infiltration (waypoint-guided north corridor) ─────
     // Spy disembarks at ~(15,50). Shore fix makes y=48 passable BEACH.
@@ -1944,24 +1939,22 @@ export class OracleStrategy {
 
       // North corridor with incremental waypoints (pathfinder needs small steps).
       const spyWaypoints: Point[] = [
-        { cx: 16, cy: 48 },   // north from peninsula
-        { cx: 18, cy: 48 },
-        { cx: 20, cy: 48 },
-        { cx: 22, cy: 48 },   // through ROUGH rock debris
-        { cx: 24, cy: 48 },   // through ROUGH cliff formations
-        { cx: 26, cy: 48 },
+        { cx: 18, cy: 48 },   // north from peninsula
+        { cx: 21, cy: 48 },
+        { cx: 24, cy: 48 },   // through ROUGH terrain
         { cx: 28, cy: 48 },
-        { cx: 30, cy: 48 },   // past the cliff zone
-        { cx: 33, cy: 48 },
-        { cx: 36, cy: 48 },
-        { cx: 39, cy: 48 },
-        { cx: 44, cy: 48 },   // directly above WEAP at (44,50)
+        { cx: 31, cy: 48 },   // pathfinder routes around tree at (29,48)
+        { cx: 34, cy: 48 },
+        { cx: 38, cy: 48 },
+        { cx: 42, cy: 48 },
+        { cx: 44, cy: 48 },   // directly above WEAP
       ];
 
-      // Find current waypoint
+      // Find current waypoint — advance by x-coordinate progression (not distance).
+      // The spy may drift to y=49 but still be past a waypoint's x.
       let wpIdx = 0;
       for (let i = 0; i < spyWaypoints.length; i++) {
-        if (this.distanceSq(spy, spyWaypoints[i]) <= 4) {
+        if (spy.cx >= spyWaypoints[i].cx && Math.abs(spy.cy - spyWaypoints[i].cy) <= 2) {
           wpIdx = i + 1;
         }
       }
