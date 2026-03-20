@@ -633,9 +633,9 @@ export class OracleStrategy {
 
   private scg11eaDesiredShipCount(enemySubCount: number): number {
     if (enemySubCount <= 0) return 0;
-    if (enemySubCount >= 4) return 4;
-    if (enemySubCount >= 2) return 3;
-    if (enemySubCount >= 1) return 2;
+    if (enemySubCount >= 6) return 5;
+    if (enemySubCount >= 3) return 4;
+    if (enemySubCount >= 1) return 3;
     return 0;
   }
 
@@ -1307,7 +1307,6 @@ export class OracleStrategy {
           scg11eaSubHuntLive &&
           !scg11eaEconomyCollapsed &&
           scg11eaEconomyFragile &&
-          scg11eaFleetShort &&
           shipCount > 0 &&
           scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS;
         const scg11eaStaticDefenseUnlocked =
@@ -1629,12 +1628,19 @@ export class OracleStrategy {
       scg11eaSubHuntPhase &&
       scg11eaFleetShort &&
       tankCount >= scg11eaTankTarget;
+    const scg11eaVesselPriority =
+      this.scenario === 'SCG11EA' &&
+      scg11eaSubHuntPhase &&
+      scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
+      navalCount > 0 &&
+      tankCount >= SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR;
     const scg11eaShipyardPriority =
       this.scenario === 'SCG11EA' &&
       scg11eaShipyardInProgress &&
       tankCount >= SCG11EA_SHIPYARD_TANK_FLOOR;
     const skipTankProduction = this.scenario === 'SCG11EA'
       ? ((tankCount >= scg11eaTankTarget && !scg11eaArmorEmergency) ||
+        (scg11eaVesselPriority && !scg11eaArmorEmergency) ||
         (scg11eaNavalEconomyFragile && !scg11eaArmorEmergency) ||
         (scg11eaShipyardPriority && !scg11eaArmorEmergency) ||
         (scg11eaFleetPriority && !scg11eaArmorEmergency))
@@ -2907,11 +2913,19 @@ export class OracleStrategy {
           if (target) {
             const tId = target.id;
             const tDist = this.distanceSq(tanya, target);
-            if (!lastTarget || lastTarget.targetId !== tId) {
+            if (tDist <= 49) {
+              // Within 7 cells — shoot it directly with Colt45/C4
+              commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: tId });
+              this.lastUnitTargets.delete(tanya.id);
+              reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(1)}`);
+            } else if (!lastTarget || lastTarget.targetId !== tId) {
+              // Far away — walk toward it (C4 when adjacent)
               commands.push({ cmd: 'attack', ids: [tanya.id], target: tId });
               this.lastUnitTargets.set(tanya.id, { targetId: tId, cx: target.cx, cy: target.cy, tick: state.tick });
+              reasons.push(`Tanya → C4 ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)}`);
+            } else {
+              reasons.push(`Tanya → ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)} en route`);
             }
-            reasons.push(`Tanya → C4 ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)}`);
           }
         }
       }
