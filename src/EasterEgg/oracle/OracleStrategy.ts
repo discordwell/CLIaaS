@@ -31,6 +31,10 @@ const NON_COMBAT_TYPES = new Set(['C7', 'C8', 'EINSTEIN', 'TRAN']);
 const RTTI_BUILDINGTYPE = 6;
 const RTTI_UNITTYPE = 29;
 const RTTI_INFANTRYTYPE = 14;
+const RTTI_VESSELTYPE = 33;
+
+// Ship preference order (best to worst)
+const SHIP_PREFERENCE = ['CA', 'DD', 'PT', 'SS'];
 
 // Non-combat unit types excluded from attack orders
 const BASE_NON_COMBAT_TYPES = new Set(['MCV', 'HARV', 'MNLY', 'TRUK']);
@@ -48,6 +52,7 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['WEAP'],         type_ids: [2] },             // STRUCT_WEAP — tanks ASAP
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — double income
   { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory — double tank output
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },        // Shipyard — naval production (skipped if not buildable)
   { names: ['BARR', 'TENT'], type_ids: [21, 22] },        // Barracks
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
@@ -74,6 +79,10 @@ const UNIT_ROLES: Record<string, UnitRole> = {
   'E1': 'anti_infantry', 'E4': 'anti_infantry', 'DOG': 'anti_infantry', 'JEEP': 'anti_infantry',
   'E3': 'anti_armor', 'ARTY': 'anti_armor', 'V2RL': 'anti_armor',
   '1TNK': 'anti_armor', '2TNK': 'anti_armor', '3TNK': 'anti_armor', '4TNK': 'anti_armor',
+  // Naval units
+  'DD': 'anti_armor', 'CA': 'anti_armor', 'PT': 'anti_armor', 'SS': 'anti_armor',
+  'LST': 'non_combat',
+  // Non-combat
   'MCV': 'non_combat', 'HARV': 'non_combat', 'MNLY': 'non_combat', 'TRUK': 'non_combat', 'MEDI': 'non_combat',
 };
 
@@ -627,6 +636,35 @@ export class OracleStrategy {
         rtti: RTTI_INFANTRYTYPE,
       });
       reasons.push(`exit ${infantryProduction.t}`);
+    }
+
+    // Produce ships from Shipyard/Sub Pen (if available and enemies have naval units)
+    const hasShipyard = alliedStructures.some(
+      (s) => s.t === 'SYRD' || s.t === 'SPEN',
+    );
+    const vesselProduction = state.production.find(
+      (p) => p.rtti === RTTI_VESSELTYPE,
+    );
+    const enemyNaval = state.enemies.some(
+      (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'LST',
+    );
+    if (hasShipyard && !vesselProduction && buildable && enemyNaval && state.credits > 800) {
+      const ship = SHIP_PREFERENCE.find((s) => buildable.vessels?.includes(s));
+      if (ship) {
+        const shipTypeId = this.vesselNameToTypeId(ship);
+        if (shipTypeId >= 0) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_VESSELTYPE,
+            type_id: shipTypeId,
+          });
+          reasons.push(`produce ${ship}`);
+        }
+      }
+    }
+    if (vesselProduction?.done) {
+      commands.push({ cmd: 'place', rtti: RTTI_VESSELTYPE });
+      reasons.push(`launch ${vesselProduction.t}`);
     }
 
     // --- Phase 3.5: MINELAYER DEFENSE ---
@@ -1998,6 +2036,18 @@ export class OracleStrategy {
    * Map unit type name to UnitType enum index (for produce command).
    * Based on defines.h UnitType enum order.
    */
+  private vesselNameToTypeId(name: string): number {
+    const VESSEL_MAP: Record<string, number> = {
+      'SS':   0,  // VESSEL_SS (Submarine)
+      'DD':   1,  // VESSEL_DD (Destroyer)
+      'CA':   2,  // VESSEL_CA (Cruiser)
+      'LST':  3,  // VESSEL_TRANSPORT
+      'PT':   4,  // VESSEL_PT (Gunboat)
+      'MSUB': 5,  // VESSEL_MISSILESUB
+    };
+    return VESSEL_MAP[name] ?? -1;
+  }
+
   private unitNameToTypeId(name: string): number {
     const UNIT_MAP: Record<string, number> = {
       '4TNK': 0,  // UNIT_HTANK (Mammoth)
