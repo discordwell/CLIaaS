@@ -956,12 +956,14 @@ export class Renderer {
           }
         }
 
-        // Clear template cells: draw tileset grass for CLEAR, TREE, and WALL terrain
+        // Clear template cells: draw tileset grass for CLEAR and TREE terrain.
+        // WALL cells (building footprints) use renderGrassCell instead of tileset tiles
+        // so they blend seamlessly with the surrounding procedural grass.
         // C++ cell.cpp:981-987: CLEAR1 uses Clear_Icon() = (cx&3)|((cy&3)<<2) for 16 variations
-        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE || terrain === Terrain.WALL)) {
+        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE)) {
           const clearIcon = (cx & 3) | ((cy & 3) << 2);
           if (this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y)) {
-            if (terrain === Terrain.CLEAR || terrain === Terrain.WALL) continue;
+            if (terrain === Terrain.CLEAR) continue;
             atlasDrawn = true; // TREE cells need overlay on top
           }
         }
@@ -1164,9 +1166,19 @@ export class Renderer {
             }
             break;
           }
-          case Terrain.WALL:
-            // Fall through to CLEAR — render building footprints as normal ground.
+          case Terrain.WALL: {
+            // Render building footprints with procedural grass to match surrounding terrain.
             // Structure sprites draw on top in the structure pass.
+            if (map.getWallType(cx, cy)) break; // wall-type structures render in structure pass
+            if (this.theatre === 'INTERIOR') {
+              const bright = 40 + (h % 6);
+              ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
+              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+            } else {
+              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+            }
+            break;
+          }
         }
       }
     }
