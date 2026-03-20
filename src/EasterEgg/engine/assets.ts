@@ -124,34 +124,34 @@ export class AssetManager {
     this._totalCount = names.length;
     this._loadedCount = 0;
 
-    // Load sprites in batches to avoid overwhelming the dev server.
-    // C++ loads from local MIX files with no network — TS needs to be robust
-    // against slow/overloaded HTTP servers.
-    const BATCH_SIZE = 40;
+    // Load sprites in sequential batches to avoid overwhelming the dev server.
+    // C++ loads from local MIX files — TS needs to handle slow HTTP servers.
+    const BATCH_SIZE = 30;
     const MAX_RETRIES = 2;
-    const spritePromises: Promise<void>[] = [];
-    for (let i = 0; i < names.length; i += BATCH_SIZE) {
-      const batch = names.slice(i, i + BATCH_SIZE);
-      spritePromises.push(
-        Promise.all(batch.map(async (name) => {
-          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            try {
-              const image = await loadImage(`${BASE_URL}/${name}.png${cacheBust}`);
-              this.sheets.set(name, { image, meta: this.manifest![name] });
-              this._loadedCount++;
-              this._onProgress?.(this._loadedCount, this._totalCount);
-              return;
-            } catch {
-              if (attempt === MAX_RETRIES) {
-                // Skip this sprite after all retries — will render as missing stub
-                this._loadedCount++;
-                this._onProgress?.(this._loadedCount, this._totalCount);
-              }
-            }
+    const loadSprite = async (name: string) => {
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const image = await loadImage(`${BASE_URL}/${name}.png${cacheBust}`);
+          this.sheets.set(name, { image, meta: this.manifest![name] });
+          this._loadedCount++;
+          this._onProgress?.(this._loadedCount, this._totalCount);
+          return;
+        } catch {
+          if (attempt === MAX_RETRIES) {
+            this._loadedCount++;
+            this._onProgress?.(this._loadedCount, this._totalCount);
           }
-        })).then(() => {})
-      );
-    }
+        }
+      }
+    };
+    // Sequential batches: wait for each batch before starting the next
+    const spriteLoadAll = async () => {
+      for (let i = 0; i < names.length; i += BATCH_SIZE) {
+        const batch = names.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(loadSprite));
+      }
+    };
+    const spritePromises = [spriteLoadAll()];
 
     // Load palette, tileset, remap colors, and ALL sprites in parallel
     await Promise.all([
