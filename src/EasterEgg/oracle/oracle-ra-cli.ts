@@ -335,7 +335,16 @@ async function runOracle(
 
     // 4. Act
     if (decision.commands.length > 0) {
-      await adapter.command(decision.commands);
+      const cmdResults = await adapter.command(decision.commands);
+      // Debug: log place command results with full command details
+      for (let ci = 0; ci < decision.commands.length; ci++) {
+        const c = decision.commands[ci];
+        const r = cmdResults[ci];
+        if (c.cmd === 'place') {
+          const prodInfo = state.production.find((p: any) => p.done);
+          console.log(`[Debug] place cx=${c.cx},cy=${c.cy} rtti=${c.rtti} → ok=${r?.ok} | prod=${prodInfo?.t}:${prodInfo?.prog}%rtti=${prodInfo?.rtti}done=${prodInfo?.done}`);
+        }
+      }
     }
     // 5-tick steps: idle-aware commands prevent stuttering at high frequency
     const stepTicks = 5;

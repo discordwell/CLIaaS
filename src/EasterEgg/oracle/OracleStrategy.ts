@@ -216,14 +216,8 @@ const SCG03EA_ARTY_POS: Point = { cx: 54, cy: 55 };    // cell 7094 = central fi
 // Final phase: destroy all USSR+BadGuy forces.
 const SCG05EA_WEAP_TARGET: Point = { cx: 43, cy: 50 };
 const SCG05EA_DOG_SAFE_DISTANCE_SQ = 25; // 5 cells squared (>3 cell detection + buffer)
-// LST landing point: water cell near the base. (24,50) is confirmed water
-// (spy drowned there). The LST sails here, then unload finds shore cells.
-const SCG05EA_LST_LANDING: Point = { cx: 24, cy: 50 };
-// After unloading, spy walks from shore to WEAP (avoid dogs at 49-50,52)
-const SCG05EA_SPY_ROUTE: Point[] = [
-  { cx: 35, cy: 49 },   // inland toward base
-  { cx: 42, cy: 48 },   // north of WEAP, clear of dogs at (49,52)
-];
+// Spy route uses y=48 (northmost passable row, within map bounds Y=48).
+// Patrol dogs sweep y=50-58 but y=48 is mostly clear.
 // SAM sites Tanya must destroy — ordered by proximity to her spawn at (25,107).
 // Tanya spawns via reinforcement at WP6=(25,107), team-moves to WP35=(23,105).
 // Nearest SAMs first to minimize travel through dog patrol zones.
@@ -288,9 +282,6 @@ export class OracleStrategy {
   private mcvSpawnTick = 0;           // tick when MCV first appeared
   private mcvDeployAttempts = 0;      // how many times we've tried deploying
   private scg05eaSpyInfiltrated = false;  // true after spy enters WEAP
-  private scg05eaSpyBoarded = false;     // true when spy is aboard LST
-  private scg05eaSpyLanded = false;      // true after LST delivers spy near base
-  private scg05eaSpyRouteIndex = 0;      // current waypoint in spy safe route
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -623,22 +614,40 @@ export class OracleStrategy {
       const isShipyard = buildingProduction.t === 'SYRD' || buildingProduction.t === 'SPEN';
 
       if (isShipyard) {
-        // Brute-force grid scan: try every cell within Adjacent=8 of
-        // the northernmost player building. The game engine's Legal_Placement
-        // validates each cell via Is_Clear_To_Build(SPEED_FLOAT) — we don't
-        // need MapPack coastal detection at all.
+        // Place_Object doesn't check adjacency — only IsMapped + Legal_Placement.
+        // SYRD needs all 3x3 foundation cells to be water (SPEED_FLOAT) and mapped.
+        // Strategy: scan a wide band of water cells near hardcoded coastal positions,
+        // starting 2 cells into the water from each coastal point and extending further.
         if (this.syrdPlacementStart < 0) {
           this.syrdPlacementStart = this.placementAttempts;
         }
-        const northmost = alliedStructures.reduce((best, s) =>
-          s.cy < best.cy ? s : best, alliedStructures[0]);
-        const gridSize = 17; // -8 to +8
-        const totalCells = gridSize * gridSize;
-        const localIdx = (this.placementAttempts - this.syrdPlacementStart) % totalCells;
-        const gx = (localIdx % gridSize) - 8;
-        const gy = Math.floor(localIdx / gridSize) - 8;
-        const placeCx = northmost.cx + gx;
-        const placeCy = northmost.cy + gy;
+        const coastRef = OracleStrategy.COASTAL_CELLS[this.scenario]
+          ?? [{ cx: conYard.cx, cy: conYard.cy + 5 }];
+        // Build a list of candidate water cells: for each coastal point,
+        // try cells 2-8 rows further into the water (higher cy = south)
+        // and ±4 columns laterally. Also try northward (lower cy) in case
+        // water is to the north on some maps.
+        const candidates: Array<{ cx: number; cy: number }> = [];
+        for (const ref of coastRef) {
+          for (let dy = -3; dy <= 10; dy++) {
+            for (let dx = -4; dx <= 4; dx++) {
+              candidates.push({ cx: ref.cx + dx, cy: ref.cy + dy });
+            }
+          }
+        }
+        // Deduplicate
+        const seen = new Set<string>();
+        const uniqueCandidates = candidates.filter((c) => {
+          const key = `${c.cx},${c.cy}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        const localIdx = (this.placementAttempts - this.syrdPlacementStart) % uniqueCandidates.length;
+        const cell = uniqueCandidates[localIdx];
+        const placeCx = cell.cx;
+        const placeCy = cell.cy;
 
         commands.push({
           cmd: 'place',
@@ -650,7 +659,7 @@ export class OracleStrategy {
           this.placementAttempts++;
           this.lastPlacementTick = state.tick;
         }
-        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy}) [grid ${localIdx}/${totalCells} from ${northmost.cx},${northmost.cy}]`);
+        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy}) [water scan ${localIdx}/${uniqueCandidates.length}]`);
       } else {
         // Sort placement offsets by priority:
         // 1. If shipyard is upcoming in build order, bias toward nearest water
@@ -1809,104 +1818,39 @@ export class OracleStrategy {
       }
     }
 
-    // ─── PHASE 1: Spy infiltration ───────────────────────────────────────
-    // The spy lands on a coastal peninsula and CANNOT walk to the base.
-    // Strategy: re-board the spy onto the LST, sail to a landing near the
-    // base, disembark, then walk to the WEAP avoiding dogs.
+    // ─── PHASE 1: Spy infiltration (waypoint-guided north corridor) ─────
+    // Spy disembarks at ~(15,50). Shore fix makes y=48 passable BEACH.
+    // Route: north to y=48 (avoids patrol dogs at y=50-55), east along
+    // y=48 to x≈40 (clear corridor), then south to infiltrate WEAP at (43,50).
     if (spy && !this.scg05eaSpyInfiltrated) {
-      const lst = playerUnits.find((u) => u.t === 'LST');
       const targetWeap = state.structures.find(
         (s) => s.t === 'WEAP' && !s.ally &&
-          this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 16,
+          this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 25,
       );
 
-      // Sub-phase 1a: Board spy onto LST
-      if (!this.scg05eaSpyBoarded && !this.scg05eaSpyLanded) {
-        if (lst) {
-          const spyInLst = (lst.cargo ?? 0) > 0;
-          if (spyInLst) {
-            this.scg05eaSpyBoarded = true;
-            reasons.push('spy aboard LST');
-          } else if (this.isIdle(spy)) {
-            commands.push({ cmd: 'enter', ids: [spy.id], target: lst.id });
-            reasons.push('spy → board LST');
-          } else {
-            reasons.push('spy boarding LST...');
-          }
-        } else {
-          // No LST available — try walking (fallback for if LST already left)
-          this.scg05eaSpyLanded = true;
-          reasons.push('no LST, spy walks');
-        }
-        if (commands.length > 0 || !this.scg05eaSpyBoarded) {
-          return { commands, reason: reasons.join('; ') };
-        }
-      }
-
-      // Sub-phase 1b: Sail LST to landing point near base
-      if (this.scg05eaSpyBoarded && !this.scg05eaSpyLanded && lst) {
-        const atLanding = this.distanceSq(lst, SCG05EA_LST_LANDING) <= 9;
-        if (atLanding) {
-          // Unload spy
-          commands.push({ cmd: 'deploy', ids: [lst.id] });
-          this.scg05eaSpyLanded = true;
-          reasons.push('LST unloading spy at landing');
-        } else {
-          commands.push({
-            cmd: 'move', ids: [lst.id],
-            cx: SCG05EA_LST_LANDING.cx, cy: SCG05EA_LST_LANDING.cy,
-          });
-          reasons.push(`LST → landing (${SCG05EA_LST_LANDING.cx},${SCG05EA_LST_LANDING.cy})`);
-        }
-        return { commands, reason: reasons.join('; ') };
-      }
-
-      // Sub-phase 1c: Spy walks from landing to WEAP (avoid dogs)
-      if (this.scg05eaSpyLanded) {
-        const nearestDog = dogs.length > 0
-          ? dogs.reduce((a, b) =>
-            this.distanceSq(spy, a) < this.distanceSq(spy, b) ? a : b)
-          : null;
-        const dogDist = nearestDog ? this.distanceSq(spy, nearestDog) : Infinity;
-
-        if (dogDist <= SCG05EA_DOG_SAFE_DISTANCE_SQ) {
-          const dx = spy.cx - nearestDog!.cx;
-          const dy = spy.cy - nearestDog!.cy;
-          const len = Math.sqrt(dx * dx + dy * dy) || 1;
-          commands.push({
-            cmd: 'move', ids: [spy.id],
-            cx: Math.round(spy.cx + (dx / len) * 6),
-            cy: Math.round(spy.cy + (dy / len) * 6),
-          });
-          reasons.push(`spy evade dog at (${nearestDog!.cx},${nearestDog!.cy})`);
-        } else if (this.isIdle(spy)) {
-          const closeToWeap = targetWeap && this.distanceSq(spy, targetWeap) <= 36;
-          const dogNearWeap = dogs.some(
-            (d) => targetWeap && this.distanceSq(d, targetWeap) <= 49,
-          );
-
-          if (closeToWeap && targetWeap && !dogNearWeap) {
-            commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-            reasons.push('spy → infiltrate WEAP');
-          } else if (this.scg05eaSpyRouteIndex < SCG05EA_SPY_ROUTE.length) {
-            const wp = SCG05EA_SPY_ROUTE[this.scg05eaSpyRouteIndex];
-            if (this.distanceSq(spy, wp) <= 9) {
-              this.scg05eaSpyRouteIndex++;
-            }
-            const next = SCG05EA_SPY_ROUTE[
-              Math.min(this.scg05eaSpyRouteIndex, SCG05EA_SPY_ROUTE.length - 1)
-            ];
-            commands.push({ cmd: 'move', ids: [spy.id], cx: next.cx, cy: next.cy });
-            reasons.push(`spy → wp${this.scg05eaSpyRouteIndex} (${next.cx},${next.cy})`);
-          } else if (targetWeap) {
-            commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-            reasons.push('spy → infiltrate WEAP (route done)');
-          } else {
-            reasons.push('spy waiting (no WEAP found)');
-          }
-        } else {
-          reasons.push('spy en route');
-        }
+      // Always re-command the spy — don't wait for idle.
+      // The spy can get stuck in ATTACK mission with no valid path, so we
+      // must override with move commands to guide it through waypoints.
+      if (targetWeap && this.distanceSq(spy, targetWeap) <= 36) {
+        // Close enough — infiltrate
+        commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+        reasons.push(`spy infiltrate WEAP (${spy.cx},${spy.cy})`);
+      } else if (spy.cy > 48) {
+        // Go north to escape the patrol zone (y=48 is northmost passable row)
+        commands.push({ cmd: 'move', ids: [spy.id], cx: Math.min(spy.cx + 2, 40), cy: 48 });
+        reasons.push(`spy north → (${Math.min(spy.cx + 2, 40)},48)`);
+      } else if (spy.cx < 40) {
+        // At y=48, go east (patrol-free corridor)
+        const nextX = Math.min(spy.cx + 10, 40);
+        commands.push({ cmd: 'move', ids: [spy.id], cx: nextX, cy: 48 });
+        reasons.push(`spy east → (${nextX},48)`);
+      } else if (targetWeap) {
+        // At x≥40, y=48 — go to WEAP
+        commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+        reasons.push(`spy → WEAP (${spy.cx},${spy.cy})`);
+      } else {
+        commands.push({ cmd: 'move', ids: [spy.id], cx: SCG05EA_WEAP_TARGET.cx, cy: SCG05EA_WEAP_TARGET.cy });
+        reasons.push('spy → WEAP area');
       }
 
       return { commands, reason: reasons.join('; ') };

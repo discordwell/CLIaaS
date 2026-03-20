@@ -1753,19 +1753,13 @@ function classifyOutdoorTerrain(
       } else if (tmpl >= 1 && tmpl <= 2) {
         map.setTerrain(cx, cy, Terrain.WATER);
       } else if (tmpl >= 3 && tmpl <= 56) {
-        // Shore/beach transitions — mixed water+land tiles.
-        // C++ uses per-template icon masks. Our simplified heuristic:
-        // icons 0-1 are the deep water portion, always impassable.
-        // icons 2-3 are the shallow/beach zone — C++ treats as passable BEACH.
-        // icons 4+ are firmly on land (clear).
-        // The old threshold (icon < 4) incorrectly blocked walkable shore cells,
-        // trapping infantry on peninsulas (C++/TS parity fix for SCG05EA etc.)
-        const icon = templateIcon[idx];
-        if (icon < 2) {
-          map.setTerrain(cx, cy, Terrain.WATER);
-        } else if (icon < 4) {
-          map.setTerrain(cx, cy, Terrain.BEACH);
-        }
+        // Shore/beach transitions — C++ treats ALL shore template cells as
+        // passable ground (BEACH). The template renders both water and land
+        // visually, but the cell passability is determined by the template
+        // type, not the icon. Shore templates (3-56) are always walkable.
+        // Previous bug: icon < 4 was treated as WATER, which trapped infantry
+        // on peninsulas where shore cells blocked all exits.
+        map.setTerrain(cx, cy, Terrain.BEACH);
       } else if (tmpl >= 59 && tmpl <= 96) {
         // Water cliff edges — always water
         map.setTerrain(cx, cy, Terrain.WATER);

@@ -1900,6 +1900,55 @@ export function updateAIProduction(ctx: AIContext): void {
         }
       }
     }
+
+    // C++ parity (house.cpp:6239-6277): AI_Aircraft — build aircraft when pads are available.
+    // Logic: "Build aircraft if we have more pads than current aircraft of that pad type."
+    // Helicopters (HPAD): prefer HELI (Longbow) for allies, HIND for soviets
+    // Fixed-wing (AFLD): prefer MIG for soviets, YAK as fallback
+    const updatedCredits = ctx.houseCredits.get(house) ?? 0;
+    if (updatedCredits >= 800) {
+      const houseFaction = HOUSE_FACTION[house] ?? 'both';
+      const isSoviet = houseFaction === 'soviet';
+
+      // Count pads and aircraft
+      const hpadCount = ctx.structures.filter(s => s.alive && s.house === house && s.type === 'HPAD').length;
+      const afldCount = ctx.structures.filter(s => s.alive && s.house === house && s.type === 'AFLD').length;
+      const heliCount = ctx.entities.filter(e => e.alive && e.house === house &&
+        (e.type === UnitType.V_HELI || e.type === UnitType.V_HIND)).length;
+      const fixedWingCount = ctx.entities.filter(e => e.alive && e.house === house &&
+        (e.type === UnitType.V_MIG || e.type === UnitType.V_YAK)).length;
+
+      // Helicopter production: HPAD count > current helicopter count
+      if (hpadCount > heliCount) {
+        // C++ house.cpp:6254-6257: soviets build HIND, allies build HELI (Longbow)
+        const heliType = isSoviet ? UnitType.V_HIND : UnitType.V_HELI;
+        const heliItem = ctx.scenarioProductionItems.find(p => p.type === heliType);
+        if (heliItem && updatedCredits >= heliItem.cost) {
+          const unit = spawnAIUnit(ctx, house, heliType, 'HPAD', Mission.AREA_GUARD);
+          if (unit) {
+            unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
+            unit.aircraftState = 'landed';
+            ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - heliItem.cost);
+          }
+        }
+      }
+
+      // Fixed-wing production: AFLD count > current fixed-wing count
+      if (afldCount > fixedWingCount) {
+        // C++ house.cpp:6263-6270: soviets prefer MIG, fallback to YAK
+        const jetType = isSoviet ? UnitType.V_MIG : UnitType.V_YAK;
+        const jetItem = ctx.scenarioProductionItems.find(p => p.type === jetType);
+        const jetCredits = ctx.houseCredits.get(house) ?? 0;
+        if (jetItem && jetCredits >= jetItem.cost) {
+          const unit = spawnAIUnit(ctx, house, jetType, 'AFLD', Mission.AREA_GUARD);
+          if (unit) {
+            unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
+            unit.aircraftState = 'landed';
+            ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - jetItem.cost);
+          }
+        }
+      }
+    }
   }
 }
 

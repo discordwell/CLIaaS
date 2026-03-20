@@ -1100,15 +1100,19 @@ export function modifyDamage(
   if (damage <= 0) return 0;
 
   // Step 2: Distance-based falloff (combat.cpp:106-125)
-  // C++ converts pixel distance to a factor using SpreadFactor and PIXEL_LEPTON_W.
-  // In pixel space: distFactor = distPixels * 2 / SpreadFactor (for SpreadFactor > 0)
-  //                 distFactor = distPixels * 4               (for SpreadFactor == 0)
+  // C++ converts lepton distance using PIXEL_LEPTON_W (=256/24=10 via integer division).
+  //   SpreadFactor==0: distance /= PIXEL_LEPTON_W/4  → dist_leptons / 2  → distPixels * 5
+  //   SpreadFactor >0: distance /= SpreadFactor*(PIXEL_LEPTON_W/2) → distPixels * 2 / SpreadFactor
   // C++ uses integer division — Math.floor matches the truncation behavior.
   const spreadFactor = spreadFactorOverride ?? WARHEAD_META[warhead]?.spreadFactor ?? 1;
   let distFactor: number;
   if (spreadFactor === 0) {
-    distFactor = distPixels * 4;
+    // C++ combat.cpp:108 — distance /= PIXEL_LEPTON_W/4 = 10/4 = 2 (integer)
+    // In pixel space: (distPixels * PIXEL_LEPTON_W) / 2 = distPixels * 5
+    distFactor = distPixels * 5;
   } else {
+    // C++ combat.cpp:110 — distance /= SpreadFactor * (PIXEL_LEPTON_W/2) = SpreadFactor * 5
+    // In pixel space: (distPixels * PIXEL_LEPTON_W) / (SpreadFactor * 5) = distPixels * 2 / SpreadFactor
     distFactor = (distPixels * 2) / spreadFactor;
   }
   distFactor = Math.floor(distFactor);                    // C++ integer truncation (combat.cpp:108-110)

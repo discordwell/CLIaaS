@@ -10,8 +10,15 @@ import {
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
-  armorIndex,
+  armorIndex, PRODUCTION_ITEMS,
 } from './types';
+
+// === C++ Points lookup (techno.cpp:6290: Risk = Reward = Points) ===
+// Used by threatScore() to compute C++ Value() = Risk + Reward = 2 * Points
+const UNIT_POINTS: Record<string, number> = {};
+for (const item of PRODUCTION_ITEMS) {
+  UNIT_POINTS[item.type] = item.cost;
+}
 
 // === Submarine Cloak State Machine ===
 export enum CloakState {
@@ -753,11 +760,21 @@ export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
 
 /** AI2: Calculate threat score for guard targeting (C++ techno.cpp:1449-1763 Evaluate_Object).
  *  Higher score = higher priority target. Pure function for testability.
+ *
+ *  C++ algorithm (Evaluate_Object):
+ *    1. value = object->Value() + object->Crew.Kills         (line 1651-1652)
+ *       where Value() = Risk() + Reward = 2 * Points         (techno.cpp:4519, 6290)
+ *    2. Designated enemy: value += 500; value *= 3;           (line 1659-1662)
+ *    3. Area_Modify: value = areamod * value;                 (line 1732-1735)
+ *    4. Distance: value = (value * 32000) / ((dist/256)+1);   (line 1752)
+ *    5. value = max(value, 1);                                (line 1756)
+ *    Integer arithmetic throughout.
+ *
  *  @param scanner The unit doing the scanning
  *  @param target The potential target being evaluated
  *  @param dist Distance between scanner and target (in cells)
- *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit
- *  @param closingSpeed Rate of distance change (positive = target approaching). A9: zone-aware threat.
+ *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit (unused, C++ handles elsewhere)
+ *  @param closingSpeed Rate of distance change (unused, C++ has no equivalent)
  *  @param designatedEnemy AI4: enemy house that gets massive bonus (or null)
  *  @param nearFriendlyStructureCount AI5: count of friendly structures within splash radius of target */
 export function threatScore(
@@ -767,16 +784,17 @@ export function threatScore(
   nearFriendlyStructureCount?: number,
 ): number {
   // AI6: Spy target exclusion — spies are not normal targets (except for dogs)
+  // C++ techno.cpp:1557-1563
   if (target.type === UnitType.I_SPY && scanner.type !== UnitType.I_DOG) {
     return 0;
   }
 
-  // AI2: Base score = cost-proportional scoring (C++ techno.cpp:1449-1763)
-  // Use unit cost when available (C++ Risk_Value = cost), fallback to HP+damage approximation
-  let value = target.stats.cost ?? (target.stats.strength + (target.weapon?.damage ?? 0) * 5);
-
-  // Kill count bonus: experienced enemies are more dangerous
-  value += target.kills * 50;
+  // C++ techno.cpp:1651-1652: value = object->Value() + object->Crew.Kills
+  // Value() = Risk() + Reward = 2 * Points (techno.cpp:4519, 6290: Risk = Reward = Points)
+  // Points comes from RULES.INI "Points=" which equals cost for most units.
+  // Lookup: UNIT_STATS.cost > PRODUCTION_ITEMS cost > strength fallback
+  const points = target.stats.cost ?? UNIT_POINTS[target.type] ?? target.stats.strength;
+  let value = Math.trunc(points * 2) + target.kills;  // Value() + Crew.Kills
 
   // A11: Warhead effectiveness — prefer targets we can actually damage
   // (C++ per-weapon-class threat multipliers from techno.cpp)
@@ -786,52 +804,36 @@ export function threatScore(
     if (verses) {
       const mult = verses[armorIndex(target.stats.armor)];
       if (mult > 1.0) {
-        value = Math.round(value * 1.5);   // scanner's weapon is effective vs this armor
+        value = Math.trunc(value * 1.5);   // scanner's weapon is effective vs this armor
       } else if (mult < 0.5) {
-        value = Math.round(value * 0.5);   // scanner's weapon is poor vs this armor
+        value = Math.trunc(value * 0.5);   // scanner's weapon is poor vs this armor
       }
     }
   }
 
-  const weaponDanger = Math.min((target.weapon?.damage ?? 0) * 2, 200);
-  value += weaponDanger;
-
-  // AI4: Designated enemy house bonus — +500 then multiply by 3 (C++ techno.cpp)
+  // AI4: Designated enemy house bonus — +500 then multiply by 3
+  // C++ techno.cpp:1659-1662
   if (designatedEnemy != null && target.house === designatedEnemy) {
     value = (value + 500) * 3;
   }
 
-  // AI2: Hyperbolic distance falloff (C++ techno.cpp)
-  // Convert distance from cells to leptons: dist * 256
-  const distLeptons = dist * 256;
-  let score = (value * 32000) / (distLeptons + 1);
-
-  // Original RA strongly prefers armed combatants over VIP/civilian evac targets.
-  // Without this penalty, SCG01EA prison guards focus Einstein instead of the escort.
-  if ((target.isCivilian || CIVILIAN_UNIT_TYPES.has(target.type)) && !isTargetAttackingAlly) {
-    score *= 0.15;
-  }
-
-  // Wounded bonus: finish off weakened targets (HP < 50% → 1.5x)
-  if (target.hp < target.maxHp * 0.5) score *= 1.5;
-
-  // Retaliation bonus: enemy currently attacking allies → 2x priority
-  if (isTargetAttackingAlly) {
-    score *= 2;
-  }
-
-  // A9: Zone-aware threat — enemies closing distance get +25% priority
-  if (closingSpeed !== undefined && closingSpeed > 0) {
-    score *= 1.25;
-  }
-
   // AI5: Area_Modify — reduce threat when target is near friendly structures
-  // C++ techno.cpp: odds /= 2 per nearby building (exponential halving)
+  // C++ techno.cpp:1732-1735: applied to value BEFORE distance (integer multiply)
+  // C++ techno.cpp:1342-1401: odds /= 2 per nearby building (exponential halving)
   // Only applies when scanner has splash weapon (proxy for C++ IsSupressed flag)
   if (nearFriendlyStructureCount !== undefined && nearFriendlyStructureCount > 0 &&
       scanner.weapon?.splash && scanner.weapon.splash > 0) {
-    score *= Math.pow(0.5, nearFriendlyStructureCount);
+    value = Math.trunc(value * Math.pow(0.5, nearFriendlyStructureCount));
   }
+
+  // AI2: Hyperbolic distance falloff (C++ techno.cpp:1752)
+  // C++ integer division: dist/ICON_LEPTON_W truncates to cell count
+  // dist is in cells already, so distCells = floor(dist)
+  const distCells = Math.floor(dist);
+  let score = Math.trunc((value * 32000) / (distCells + 1));
+
+  // C++ techno.cpp:1756: value = max(value, 1)
+  score = Math.max(score, 1);
 
   return score;
 }
