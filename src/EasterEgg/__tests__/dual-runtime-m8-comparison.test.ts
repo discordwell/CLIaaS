@@ -742,12 +742,37 @@ async function runComparison(scenario: string, maxTicks: number): Promise<void> 
 // ── Test suite — run each mission sequentially ──────────────────────────────
 
 const MISSIONS: Array<{ scenario: string; maxTicks: number }> = [
+  // Base campaign (Oracle has custom strategies for 01,02,03,05,08,09)
   { scenario: 'SCG01EA', maxTicks: 2000 },
   { scenario: 'SCG02EA', maxTicks: 2000 },
   { scenario: 'SCG03EA', maxTicks: 2000 },
+  { scenario: 'SCG03EB', maxTicks: 2000 },
+  { scenario: 'SCG04EA', maxTicks: 2700 },
   { scenario: 'SCG05EA', maxTicks: 2700 },
+  { scenario: 'SCG05EB', maxTicks: 2700 },
+  { scenario: 'SCG06EA', maxTicks: 2700 },
+  { scenario: 'SCG06EB', maxTicks: 2700 },
+  { scenario: 'SCG07EA', maxTicks: 2700 },
   { scenario: 'SCG08EA', maxTicks: 2700 },
+  { scenario: 'SCG08EB', maxTicks: 2700 },
   { scenario: 'SCG09EA', maxTicks: 2700 },
+  { scenario: 'SCG09EB', maxTicks: 2700 },
+  { scenario: 'SCG10EA', maxTicks: 2700 },
+  { scenario: 'SCG10EB', maxTicks: 2700 },
+  { scenario: 'SCG11EA', maxTicks: 2700 },
+  { scenario: 'SCG11EB', maxTicks: 2700 },
+  { scenario: 'SCG12EA', maxTicks: 2700 },
+  { scenario: 'SCG13EA', maxTicks: 2700 },
+  { scenario: 'SCG14EA', maxTicks: 2700 },
+  // Counterstrike expansion
+  { scenario: 'SCG20EA', maxTicks: 2700 },
+  { scenario: 'SCG21EA', maxTicks: 2700 },
+  { scenario: 'SCG22EA', maxTicks: 2700 },
+  { scenario: 'SCG23EA', maxTicks: 2700 },
+  { scenario: 'SCG24EA', maxTicks: 2700 },
+  { scenario: 'SCG26EA', maxTicks: 2700 },
+  { scenario: 'SCG27EA', maxTicks: 2700 },
+  { scenario: 'SCG28EA', maxTicks: 2700 },
 ];
 
 describe('Dual-Runtime Comparison', () => {
