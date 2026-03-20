@@ -70,28 +70,34 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
 ];
 
-// SCG11EA "Aftermath": survive with armor first, then transition to naval.
-// The harness places buildings with direct Unlimbo() terrain legality, so the
-// east power chain is unnecessary here. Build a durable land economy first,
-// add a second war factory for tank replacement, then place the shipyard
-// directly onto the mapped east-ocean water once a scout has revealed x=63+.
+// SCG11EA "Aftermath / Naval Supremacy": Ground-first, then naval.
+// Strategy from walkthrough:
+//   1. Deploy MCV1, save MCV2 for river crossing
+//   2. Build up ground forces (tanks), multiple harvesters
+//   3. Build enough armor and economy to hold the island
+//   4. Build shipyard, produce destroyers, clear subs from river
+//   5. Add the third refinery after naval is online
+//   6. Destroyers + armor clear river defenses (Teslas, SAMs)
+//   7. England fleet passes through → victory
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
-  { names: ['WEAP'],         type_ids: [2] },               // War factory — stabilize with tanks
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — hold island, fund navy
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory — replace armor losses
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard on east-ocean water (x=63+)
-  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery after fleet online
+  { names: ['WEAP'],         type_ids: [2] },               // War factory — tanks ASAP
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund tank army
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory — faster tank production
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard once the hold line is stable
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery — sustain DD + armor
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power as needed
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
-const SCG11EA_PRE_NAVAL_TANK_TARGET = 12;
-const SCG11EA_POST_NAVAL_TANK_TARGET = 9;
+const SCG11EA_PRE_NAVAL_TANK_TARGET = 15;  // Big army for island defense before naval tech
+const SCG11EA_SUB_HUNT_TANK_FLOOR = 5;     // Once DDs are working, keep only a minimum island garrison
+const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Rebuild a real army after the river is open
 const SCG11EA_FLEET_ONLINE_SHIPS = 3;
 const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
-const SCG11EA_ASSAULT_MIN_SHIPS = 1;
-const SCG11EA_ASSAULT_MIN_ARMOR = 8;
+const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
+const SCG11EA_ASSAULT_MAX_SUBS = 0;        // Keep every tank home until the submarine screen is gone
+const SCG11EA_ASSAULT_MIN_ARMOR = 8;       // Keep a larger home guard while the fleet works
 const SCG11EA_RIVER_SWEEP_POINTS: Point[] = [
   { cx: 67, cy: 91 },
   { cx: 71, cy: 72 },
@@ -552,6 +558,8 @@ export class OracleStrategy {
           const aRank = rank.get(a.t) ?? 999;
           const bRank = rank.get(b.t) ?? 999;
           if (aRank !== bRank) return aRank - bRank;
+          if (a.cx !== b.cx) return a.cx - b.cx;
+          if (a.cy !== b.cy) return b.cy - a.cy;
           return this.distanceSq(a, SCG11EA_PRIMARY_ASSAULT_POINT) - this.distanceSq(b, SCG11EA_PRIMARY_ASSAULT_POINT);
         });
       if (candidates.length === 0) return null;
@@ -627,7 +635,7 @@ export class OracleStrategy {
   // the ATEK/PDOX if provoked. Defend only.
   private static readonly SCG08EA_INTERCEPT: Point = { cx: 58, cy: 80 };
   // Missions that should NEVER initiate attacks (defense/survival only)
-  private static readonly DEFENSE_ONLY_MISSIONS = new Set(['SCG08EA', 'SCG11EA']);
+  private static readonly DEFENSE_ONLY_MISSIONS = new Set(['SCG08EA']);
 
   // Per-mission coastal cells for shipyard placement (fallback).
   // Dynamic detection via MapPack parsing (mapParser.ts) is preferred
@@ -865,6 +873,10 @@ export class OracleStrategy {
         ? state.enemies.filter((e) =>
           e.t === 'YAK' || e.t === 'MIG' || e.t === 'HIND' || e.t === 'HELI').length
         : 0;
+    const scg11eaEnemySubCount =
+      this.scenario === 'SCG11EA'
+        ? state.enemies.filter((e) => e.t === 'SS' || e.t === 'MSUB').length
+        : 0;
 
     if (!buildingProduction || (buildingProduction.t !== 'SYRD' && buildingProduction.t !== 'SPEN')) {
       this.syrdPlacementStart = -1;
@@ -979,13 +991,18 @@ export class OracleStrategy {
         const coastalCells2 = this.resolveCoastalCells(conYard);
         let placeRef = { cx: conYard.cx, cy: conYard.cy };
         if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC') {
-          let bestDist = Infinity;
-          for (const s of alliedStructures) {
-            const d = (s.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 + (s.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
-            if (d < bestDist) {
-              bestDist = d;
-              placeRef = { cx: s.cx, cy: s.cy };
+          const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+          if (procCount === 0) {
+            let bestDist = Infinity;
+            for (const s of alliedStructures) {
+              const d = (s.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 + (s.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
+              if (d < bestDist) {
+                bestDist = d;
+                placeRef = { cx: s.cx, cy: s.cy };
+              }
             }
+          } else {
+            placeRef = { cx: conYard.cx, cy: conYard.cy };
           }
         } else if (this.scenario !== 'SCG11EA' && coastalCells2 && coastalCells2.length > 0) {
           // Find the allied structure closest to water
@@ -1002,13 +1019,26 @@ export class OracleStrategy {
 
         let offsets = [...PLACEMENT_OFFSETS];
         if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC') {
-          offsets.sort((a, b) => {
-            const aDist = (placeRef.cx + a.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
-              (placeRef.cy + a.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
-            const bDist = (placeRef.cx + b.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
-              (placeRef.cy + b.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
-            return aDist - bDist;
-          });
+          const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+          if (procCount === 0) {
+            offsets.sort((a, b) => {
+              const aDist = (placeRef.cx + a.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
+                (placeRef.cy + a.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
+              const bDist = (placeRef.cx + b.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
+                (placeRef.cy + b.cy - SCG11EA_ORE_ANCHOR.cy) ** 2;
+              return aDist - bDist;
+            });
+          } else {
+            offsets.sort((a, b) => {
+              const aSouth = placeRef.cy + a.cy;
+              const bSouth = placeRef.cy + b.cy;
+              if (aSouth !== bSouth) return bSouth - aSouth;
+              const aWest = placeRef.cx + a.cx;
+              const bWest = placeRef.cx + b.cx;
+              if (aWest !== bWest) return aWest - bWest;
+              return Math.abs(a.cx) + Math.abs(a.cy) - (Math.abs(b.cx) + Math.abs(b.cy));
+            });
+          }
         } else if (this.scenario !== 'SCG11EA' && coastalCells2 && coastalCells2.length > 0) {
           // Sort offsets toward water from the reference building
           const wt = coastalCells2[0];
@@ -1110,6 +1140,7 @@ export class OracleStrategy {
           procCount < 2 &&
           buildable.structures.includes('PROC') &&
           state.credits >= 2000 &&
+          scg11eaEnemySubCount === 0 &&
           survivingTanks < SCG11EA_PRE_NAVAL_TANK_TARGET
         ) {
           commands.push({
@@ -1122,6 +1153,7 @@ export class OracleStrategy {
           weapCount < 2 &&
           buildable.structures.includes('WEAP') &&
           state.credits >= 2000 &&
+          scg11eaEnemySubCount === 0 &&
           survivingTanks < SCG11EA_PRE_NAVAL_TANK_TARGET
         ) {
           commands.push({
@@ -1290,12 +1322,18 @@ export class OracleStrategy {
     const needHarvester = harvCount < targetHarvesters && buildable?.units.includes('HARV');
 
     // SCG11EA: hold a bigger tank floor before switching to destroyers.
+    const scg11eaSubHuntPhase =
+      this.scenario === 'SCG11EA' &&
+      hasShipyard &&
+      scg11eaEnemySubCount > 0;
     const scg11eaFleetOnline =
       this.scenario === 'SCG11EA' &&
       navalCount >= SCG11EA_FLEET_ONLINE_SHIPS;
     const scg11eaTankTarget =
       this.scenario === 'SCG11EA'
-        ? (scg11eaFleetOnline
+        ? (scg11eaSubHuntPhase
+          ? SCG11EA_SUB_HUNT_TANK_FLOOR
+          : scg11eaFleetOnline
           ? SCG11EA_POST_NAVAL_TANK_TARGET
           : SCG11EA_PRE_NAVAL_TANK_TARGET)
         : 0;
@@ -1317,7 +1355,9 @@ export class OracleStrategy {
       } else if (!needHarvester || state.credits > 600) {
         // Tank production — SCG11EA spends harder on armor until the fleet is ready.
         const tankCreditThreshold = this.scenario === 'SCG11EA'
-          ? (tankCount < scg11eaTankTarget ? 500 : 900)
+          ? (scg11eaSubHuntPhase
+            ? (vesselProduction ? 1100 : 800)
+            : (tankCount < scg11eaTankTarget ? 500 : 900))
           : (tankCount < 3 ? 400 : 700);
         if (state.credits > tankCreditThreshold) {
           const tank = TANK_PREFERENCE.find((t) => buildable.units.includes(t));
@@ -1372,7 +1412,9 @@ export class OracleStrategy {
       (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'LST',
     );
     // SCG11EA: always produce ships (we know subs are there), lower credit threshold
-    const shipCreditThreshold = this.scenario === 'SCG11EA' ? 400 : 800;
+    const shipCreditThreshold = this.scenario === 'SCG11EA'
+      ? (scg11eaSubHuntPhase ? 250 : 400)
+      : 800;
     const shouldProduceShips = this.scenario === 'SCG11EA' || enemyNaval;
     if (
       hasShipyard &&
@@ -2642,12 +2684,12 @@ export class OracleStrategy {
   }
 
   /**
-   * SCG11EA "Aftermath": Naval victory — economy → shipyard → destroyers → hunt subs.
+   * SCG11EA "Naval Supremacy": Ground assault → naval control → fleet escort.
    *
-   * Starting conditions: 48 structures (island base), 11 units (5 tanks, 2 arty, 2 MCV, 2 inf),
-   * 14,800 credits. Enemies include 14 submarines east (x=67-72, y=31-97).
-   * Strategy: stabilize with enough tanks to hold the island, then transition into
-   * destroyers to hunt the submarines. Defense-only land posture.
+   * Phase 1: Deploy MCV1, save MCV2. Build tanks, assault island Soviet base.
+   * Phase 2: Build shipyard, produce destroyers, clear subs from river.
+   * Phase 3: Transport MCV2 across river, destroy mainland Soviet base.
+   * Phase 4: Destroyers clear river defenses, England fleet passes → victory.
    */
   private decideScg11ea(state: RAGameState): OracleDecision {
     const commands: Array<Record<string, unknown>> = [];
@@ -2656,8 +2698,22 @@ export class OracleStrategy {
     const playerUnits = this.playerOwnedUnits(state);
     const alliedStructures = state.structures.filter((s) => s.ally);
 
-    // Let MCVs deploy naturally via decideBaseBuilding.
-    // The harness can place the shipyard directly once the east shoreline is mapped.
+    // Save MCV2 — deploy only MCV1, hold the other for river crossing.
+    // decideBaseBuilding will deploy the first MCV it finds. We prevent
+    // deploying the second by moving it away when there's already a ConYard.
+    const mcvs = playerUnits.filter((u) => u.t === 'MCV');
+    const conYard = alliedStructures.find((s) => s.t === 'FACT');
+    if (conYard && mcvs.length > 0 && !this.scg11eaMcvMoved) {
+      // ConYard exists — keep the spare MCV safe near base
+      const spareMcv = mcvs[0];
+      const safeSpot: Point = { cx: conYard.cx, cy: conYard.cy + 3 };
+      if (this.distanceSq(spareMcv, safeSpot) > 9) {
+        commands.push({ cmd: 'move', ids: [spareMcv.id], cx: safeSpot.cx, cy: safeSpot.cy });
+        this.recordMove(spareMcv.id, safeSpot.cx, safeSpot.cy);
+        reasons.push('MCV2 safe near base');
+      }
+      this.scg11eaMcvMoved = true;
+    }
     const coastScoutTarget = SCG11EA_SHIPYARD_SCOUT_TARGET;
     const coastMappedNow = playerUnits.some(
       (u) =>
@@ -2745,6 +2801,8 @@ export class OracleStrategy {
       (u) => (u.t.includes('TNK') || u.t === 'ARTY') && u.hp > 0,
     );
     const shipyardOnline = this.scg11eaNavalPhaseStarted(alliedStructures);
+    const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+    const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
     const baseThreats = state.enemies.filter(
       (e) => alliedStructures.some((s) => this.distanceSq(e, s) <= 400),
     );
@@ -2805,12 +2863,14 @@ export class OracleStrategy {
       if (patrolShips.length > 0) reasons.push(`sweep river (${patrolShips.length} ships)`);
     }
 
-    // Once the fleet is online and the home island is stable, send surplus armor
-    // north-east to kill Soviet production and shore defenses. Pure turtling lets
-    // the enemy air/ground snowball overwhelm the base before the naval mission ends.
-    const hasFleet = playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS || shipyardOnline;
+    // Only peel armor west once the fleet has fully cleared the submarine screen.
+    // Earlier pushes during the sub hunt bled the island hold line and starved DD
+    // production exactly when the river was closest to opening.
+    const fleetStableForAssault =
+      playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS &&
+      enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS;
     const canSpareArmor = landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
-    const homeGuard = Math.max(2, Math.min(4, baseGroundThreats.length + 1));
+    const homeGuard = Math.max(3, Math.min(5, baseGroundThreats.length + 2));
     const assaultGroup = landArmor
       .slice()
       .sort((a, b) => {
@@ -2820,7 +2880,7 @@ export class OracleStrategy {
         return this.distanceSq(a, SCG11EA_PRIMARY_ASSAULT_POINT) - this.distanceSq(b, SCG11EA_PRIMARY_ASSAULT_POINT);
       })
       .slice(homeGuard);
-    if (hasFleet && canSpareArmor && baseGroundThreats.length <= 2 && assaultGroup.length >= 3) {
+    if (fleetStableForAssault && canSpareArmor && baseGroundThreats.length <= 2 && assaultGroup.length >= 4) {
       const assaultTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
       if (assaultTarget) {
         const retargetDue = (state.tick % 40) < 5;
