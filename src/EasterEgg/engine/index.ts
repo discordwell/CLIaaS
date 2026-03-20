@@ -5897,16 +5897,11 @@ export class Game {
     if (this.state !== 'playing') return;
     if (this.tick < GAME_TICKS_PER_SEC * 3) return;
 
-    const playerAlive = this.entities.some(e => e.alive && e.isPlayerUnit);
-
-    // Loss: all player units dead
-    if (!playerAlive) {
-      this.state = 'lost';
-      this.audio.music.stop();
-      this.audio.play('defeat_sting');
-      this.onStateChange?.('lost');
-      return;
-    }
+    // C++ parity: loss conditions come from triggers (TACTION_LOSE), not from
+    // hardcoded "all units dead" checks. C++ has no equivalent auto-lose —
+    // Flag_To_Lose (house.cpp:4102) is only called from the trigger system.
+    // The TS hardcoded check caused SCG27EA to lose at tick 60 before
+    // trigger-delivered reinforcements could arrive.
 
     // Win conditions are primarily trigger-driven (TACTION_WIN).
     // Only use the "all ants dead" shortcut if no trigger will fire TACTION_WIN.
