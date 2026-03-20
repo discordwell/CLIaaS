@@ -6362,23 +6362,21 @@ export class Game {
       const [pfw, pfh] = STRUCTURE_SIZE[this.pendingPlacement.type] ?? [2, 2];
       let valid = true;
       const cells: boolean[] = [];
+      // C++ cell.cpp: Is_Clear_To_Build uses buildable terrain, not passable
       for (let dy = 0; dy < pfh; dy++) {
         for (let dx = 0; dx < pfw; dx++) {
-          const passable = this.map.isPassable(cx + dx, cy + dy);
-          cells.push(passable);
-          if (!passable) valid = false;
+          const buildable = this.map.isBuildable(cx + dx, cy + dy);
+          cells.push(buildable);
+          if (!buildable) valid = false;
         }
       }
-      // Check adjacency — footprint-based AABB (expand existing structure by 1 cell, check overlap)
+      // C++ display.cpp:749-775: two-ring proximity scan (2-cell expansion)
       let adj = false;
       for (const s of this.structures) {
         if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
         const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-        // Existing structure expanded by 1 cell in each direction
-        const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
-        // New building footprint
+        const exL = s.cx - 2, exT = s.cy - 2, exR = s.cx + sw + 2, exB = s.cy + sh + 2;
         const nL = cx, nT = cy, nR = cx + pfw, nB = cy + pfh;
-        // AABB overlap test
         if (nL < exR && nR > exL && nT < exB && nB > exT) { adj = true; break; }
       }
       this.renderer.placementValid = valid && adj;
