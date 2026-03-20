@@ -3,7 +3,7 @@ import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
 
-describe('SCG05EA spy infiltration test', () => {
+describe('SCG05EA south path probe', () => {
   let adapter: TsAgentAdapter;
 
   beforeAll(async () => {
@@ -15,10 +15,9 @@ describe('SCG05EA spy infiltration test', () => {
     await adapter.disconnect();
   }, 20_000);
 
-  it('sends spy to (47,49) then attack_struct on WEAP', async () => {
+  it('probes cell-by-cell south from (14,64)', async () => {
     await adapter.loadScenario('SCG05EA');
 
-    // Get spy
     let state = (await adapter.step(1)).state;
     for (let i = 0; i < 40; i++) {
       state = (await adapter.step(15)).state;
@@ -26,16 +25,14 @@ describe('SCG05EA spy infiltration test', () => {
     }
     const spy = state.units.find(u => u.t === 'SPY')!;
 
-    // Move spy directly to (47,49) via cell-by-cell
-    const wps = [
-      { cx: 18, cy: 48 }, { cx: 21, cy: 48 }, { cx: 24, cy: 48 },
-      { cx: 27, cy: 48 }, { cx: 30, cy: 48 }, { cx: 35, cy: 48 },
-      { cx: 40, cy: 48 }, { cx: 45, cy: 48 }, { cx: 47, cy: 49 },
+    // Move to (14,64) first
+    const setup = [
+      { cx: 16, cy: 48 }, { cx: 14, cy: 55 }, { cx: 14, cy: 60 }, { cx: 14, cy: 64 },
     ];
-    for (const wp of wps) {
+    for (const wp of setup) {
       await adapter.step(1, [{ cmd: 'move', unitIds: [spy.id], cx: wp.cx, cy: wp.cy }]);
       for (let j = 0; j < 50; j++) {
-        state = (await adapter.step(15)).state;
+        state = (await adapter.step(20)).state;
         const s = state.units.find(u => u.t === 'SPY');
         if (!s) { console.log('SPY DIED en route'); return; }
         if (Math.abs(s.cx - wp.cx) <= 1 && Math.abs(s.cy - wp.cy) <= 1) break;
@@ -43,59 +40,38 @@ describe('SCG05EA spy infiltration test', () => {
     }
 
     const spyNow = state.units.find(u => u.t === 'SPY')!;
-    console.log(`Spy at (${spyNow.cx},${spyNow.cy})`);
+    console.log(`Start: (${spyNow.cx},${spyNow.cy})`);
 
-    // Find WEAP
-    const weap = state.structures.find(s => s.t === 'WEAP' && !s.ally);
-    console.log(`WEAP at (${weap!.cx},${weap!.cy}) idx=${weap!.idx}`);
-    // Show all enemy WEAPs
-    const allWeaps = state.structures.filter(s => s.t === 'WEAP' && !s.ally);
-    console.log(`All enemy WEAPs: ${allWeaps.map(w => `idx=${w.idx}(${w.cx},${w.cy},h=${w.h})`).join(', ')}`);
-
-    // Send attack_struct DIRECTLY
-    const result = await adapter.step(1, [
-      { cmd: 'attack_struct', unitIds: [spyNow.id], structIdx: weap!.idx },
-    ]);
-    console.log(`attack_struct result: ${result.results.map(r => `${r.cmd}:${r.ok}:${r.error ?? 'ok'}`).join(', ')}`);
-    // Read browser console for debug logs
-    const logs = adapter.getLogs();
-    for (const log of logs) {
-      if (log.includes('HARNESS') || log.includes('SPY_INFILTRATE')) {
-        console.log(`  BROWSER: ${log}`);
-      }
-    }
-
-    // Wait for infiltration
-    for (let i = 0; i < 30; i++) {
-      state = (await adapter.step(15)).state;
-      const s = state.units.find(u => u.t === 'SPY');
-      if (!s) {
-        console.log(`\nSPY CONSUMED at tick ${state.tick}! globals=[${state.globals.join(',')}]`);
-        const tanya = state.units.find(u => u.t === 'E7');
-        console.log(`Tanya: ${tanya ? `(${tanya.cx},${tanya.cy})` : 'not yet'}`);
-        // Wait more for Tanya
-        for (let k = 0; k < 300; k++) {
-          state = (await adapter.step(30)).state;
-          if (k % 50 === 0) {
-            console.log(`  waiting... t=${state.tick} state=${state.state} globals=[${state.globals.join(',')}] units=${state.units.length}`);
-            // Read browser console for trigger debug
-            const browserLogs = adapter.getLogs();
-            const trigLogs = browserLogs.filter(l => l.includes('TRIGGER') || l.includes('SPY_INFILTRATE'));
-            if (trigLogs.length > 0) {
-              for (const l of trigLogs.slice(-5)) console.log(`    ${l}`);
-            }
-          }
-          const t = state.units.find(u => u.t === 'E7');
-          if (t) {
-            console.log(`TANYA SPAWNED at (${t.cx},${t.cy}) tick=${state.tick}!`);
+    // Probe southward 1 cell at a time
+    for (let y = spyNow.cy + 1; y <= 110; y++) {
+      const r = await adapter.step(200, [
+        { cmd: 'move', unitIds: [spyNow.id], cx: spyNow.cx, cy: y },
+      ]);
+      const s = r.state.units.find(u => u.t === 'SPY');
+      if (!s) { console.log(`  → (${spyNow.cx},${y}): SPY DIED`); break; }
+      const moved = s.cy === y && Math.abs(s.cx - spyNow.cx) <= 1;
+      console.log(`  → (${spyNow.cx},${y}): ${moved ? `OK at (${s.cx},${s.cy})` : `STUCK at (${s.cx},${s.cy})`}`);
+      if (!moved) {
+        // Try alternate x positions
+        for (const altX of [13, 15, 16, 17, 18, 20, 22, 25, 30]) {
+          const ar = await adapter.step(200, [
+            { cmd: 'move', unitIds: [s.id], cx: altX, cy: y },
+          ]);
+          const as = ar.state.units.find(u => u.t === 'SPY');
+          if (as && as.cy === y) {
+            console.log(`    ALT (${altX},${y}): OK at (${as.cx},${as.cy})`);
+            spyNow.cx = as.cx;
+            spyNow.cy = as.cy;
             break;
+          } else if (as) {
+            console.log(`    ALT (${altX},${y}): STUCK at (${as.cx},${as.cy})`);
           }
         }
-        break;
+        if (spyNow.cy !== y) break;
+        continue;
       }
-      if (i % 5 === 0) {
-        console.log(`  [${i}] spy (${s.cx},${s.cy}) m="${s.m}" hp=${s.hp}`);
-      }
+      spyNow.cx = s.cx;
+      spyNow.cy = s.cy;
     }
 
     expect(true).toBe(true);
