@@ -65,6 +65,22 @@ describe('translateOracleDecisionToTs — production commands', () => {
     expect(commands).toEqual([{ cmd: 'repair', structIdx: 3 }]);
   });
 
+  it('warns when sell target structure not found', () => {
+    const decision = { commands: [{ cmd: 'sell', target: 999 }], reason: 'test' };
+    const { commands, warnings } = translateOracleDecisionToTs(decision, EMPTY_BRIDGE);
+    expect(commands).toHaveLength(0);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('sell');
+  });
+
+  it('warns when repair target structure not found', () => {
+    const decision = { commands: [{ cmd: 'repair', target: 999 }], reason: 'test' };
+    const { commands, warnings } = translateOracleDecisionToTs(decision, EMPTY_BRIDGE);
+    expect(commands).toHaveLength(0);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('repair');
+  });
+
   it('warns on unknown produce rtti', () => {
     const decision = { commands: [{ cmd: 'produce', rtti: 99, type_id: 0 }], reason: 'test' };
     const { commands, warnings } = translateOracleDecisionToTs(decision, EMPTY_BRIDGE);
