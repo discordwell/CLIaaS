@@ -216,6 +216,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'AGUN.SHP', 'agun'],    // Anti-Aircraft Gun
   ['CONQUER.MIX', 'GAP.SHP', 'gap'],      // Gap Generator
   ['CONQUER.MIX', 'PBOX.SHP', 'pbox'],    // Camo Pillbox
+  ['CONQUER.MIX', 'FTUR.SHP', 'ftur'],    // Flame Tower
   // Buildings — tech/special
   ['CONQUER.MIX', 'HPAD.SHP', 'hpad'],    // Helipad
   ['CONQUER.MIX', 'AFLD.SHP', 'afld'],    // Airfield

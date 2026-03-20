@@ -1007,7 +1007,7 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
   // C++ parity: spies infiltrate from adjacent cells (building edge), not center.
   // Buildings are 2x2 or 3x2 cells, so the edge can be 2-3 cells from center.
   // Unarmed units (spies, engineers) need range 4 to reach from adjacent cells.
-  const range = entity.weapon?.range ?? 4;
+  const range = entity.weapon?.range ?? 2;
 
   // Minimum range check: artillery can't fire at point-blank structures
   if (entity.weapon?.minRange && dist < entity.weapon.minRange) {

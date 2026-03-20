@@ -1148,7 +1148,7 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
 export const STRUCTURE_IMAGES: Record<string, string> = {
   FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
   WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
-  GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
+  GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun', FTUR: 'ftur',
   GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
   ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', MSLO: 'mslo', KENN: 'kenn',
   FENC: 'fenc', BRIK: 'brik', SBAG: 'sbag', BARB: 'barb', WOOD: 'wood',

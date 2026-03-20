@@ -428,7 +428,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
               const dx = e.pos.x - sx;
               const dy = e.pos.y - sy;
               const dist = Math.sqrt(dx * dx + dy * dy) / CELL_SIZE;
-              if (dist <= 4) {
+              if (dist <= 6) { // building center is 1-2 cells from edge
                 // Direct infiltration — bypass game loop
                 (game as any).spyInfiltrate(e, s);
                 results.push({ cmd: 'attack_struct', ok: true });

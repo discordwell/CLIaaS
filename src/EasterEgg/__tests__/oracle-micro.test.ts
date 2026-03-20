@@ -96,11 +96,13 @@ describe('micro — pullback', () => {
     const state = makeState({
       structures: [makeStructure(100, 'FACT', 'Greece', 50, 48)],
       units: [
-        // Badly damaged unit — should retreat
-        makeEntity(1, '3TNK', 'Greece', 55, 55, 20, 100),
+        // Critically damaged unit (<15% HP) — should retreat when medic is present
+        makeEntity(1, '3TNK', 'Greece', 55, 55, 10, 100),
         // Healthy units
         makeEntity(2, '3TNK', 'Greece', 50, 50),
         makeEntity(3, '3TNK', 'Greece', 51, 50),
+        // Medic present — enables retreat logic for critically damaged units
+        makeEntity(4, 'MEDI', 'Greece', 50, 48),
       ],
       enemies: [
         { ...makeEntity(60, '2TNK', 'USSR', 58, 58), ally: false },

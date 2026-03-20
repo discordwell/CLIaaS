@@ -111,7 +111,7 @@ export const AI_DIFFICULTY_MODS: Record<Difficulty, {
 export const STRUCTURE_IMAGES: Record<string, string> = {
   FACT: 'fact', POWR: 'powr', APWR: 'apwr', BARR: 'barr', TENT: 'tent',
   WEAP: 'weap', PROC: 'proc', SILO: 'silo', DOME: 'dome', FIX: 'fix',
-  GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun',
+  GUN: 'gun', SAM: 'sam', HBOX: 'hbox', TSLA: 'tsla', AGUN: 'agun', FTUR: 'ftur',
   GAP: 'gap', PBOX: 'pbox', HPAD: 'hpad', AFLD: 'afld',
   ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', KENN: 'kenn',
   QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',

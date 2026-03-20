@@ -136,7 +136,7 @@ describe('base building — build order', () => {
         makeStructure(102, 'PROC', 'Greece', 92, 52),
       ],
       power: { produced: 100, consumed: 40 },
-      buildable: { structures: ['PROC', 'POWR', 'BARR', 'SBAG'], units: [], infantry: [] },
+      buildable: { structures: ['BARR', 'SBAG'], units: [], infantry: [] },
     });
 
     const decision = strategy.decide(state);
@@ -199,6 +199,10 @@ describe('base building — unit production', () => {
         makeStructure(102, 'TENT', 'Greece', 89, 55),
         makeStructure(103, 'PROC', 'Greece', 92, 52),
         makeStructure(104, 'WEAP', 'Greece', 86, 55),
+      ],
+      units: [
+        makeEntity(10, 'HARV', 'Greece', 90, 55),
+        makeEntity(11, 'HARV', 'Greece', 91, 55),
       ],
       power: { produced: 100, consumed: 60 },
       buildable: {

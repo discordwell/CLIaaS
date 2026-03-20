@@ -1099,6 +1099,7 @@ export class OracleStrategy {
       (u) => u.hp > 0 && u.hp / u.mhp < RETREAT_HP_FRACTION,
     );
     // Only retreat if medics can heal them — otherwise fight to the death
+    const retreatedIds = new Set<number>();
     if (hasMedics) {
       const critical = walking_wounded.filter(
         (u) => u.hp / u.mhp < 0.15 && this.shouldMove(u, baseCenter.cx, baseCenter.cy),
@@ -1110,13 +1111,18 @@ export class OracleStrategy {
           cx: baseCenter.cx,
           cy: baseCenter.cy,
         });
-        for (const u of critical) this.recordMove(u.id, baseCenter.cx, baseCenter.cy);
+        for (const u of critical) {
+          this.recordMove(u.id, baseCenter.cx, baseCenter.cy);
+          retreatedIds.add(u.id);
+        }
         reasons.push(`retreat ${critical.length} to medic`);
       }
     }
 
-    // Fighting force = healthy + walking wounded (everyone except critical)
-    const fighters = [...healthy, ...walking_wounded];
+    // Fighting force = healthy + walking wounded, excluding retreated critical units
+    const fighters = [...healthy, ...walking_wounded].filter(
+      (u) => !retreatedIds.has(u.id),
+    );
 
     if (fighters.length > 0) {
       // DEFEND FIRST: if base is threatened, send units to deal with threats
@@ -1127,19 +1133,20 @@ export class OracleStrategy {
         const defenders = fighters.slice(0, defendersNeeded);
         const surplus = fighters.slice(defendersNeeded);
 
-        // Defenders engage base threats. Force retarget if critical structures
-        // are threatened (ATEK/PDOX in M8) — override cooldown in emergencies.
-        const idleDefenders = defenders.filter((u) => this.isIdle(u));
+        // Defenders engage base threats. shouldRecommand handles idle units,
+        // dead targets, and stale-command timeouts. Force ALL defenders on
+        // critical threats (ATEK/PDOX in M8) or periodic retarget ticks.
+        const recommandable = defenders.filter((u) => this.shouldRecommand(u, baseThreats));
         const hasCriticalThreats = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) &&
           baseThreats.some((e) => e.t.includes('TNK') || e.t === 'V2RL');
         const retargetDue = hasCriticalThreats || (state.tick % 30) < 5;
-        const toCommand = retargetDue ? defenders : idleDefenders;
+        const toCommand = retargetDue ? defenders : recommandable;
         if (toCommand.length > 0) {
           const micro = this.microManage(toCommand, baseThreats, baseCenter);
           commands.push(...micro.commands);
           reasons.push(...micro.reasons);
         }
-        reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} def, ${idleDefenders.length} idle)`);
+        reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} def, ${recommandable.length} ready)`);
 
         // In survival mode, ALL units defend — no surplus chasing.
         // In non-survival, surplus attacks nearby enemies within leash range.
@@ -1960,14 +1967,11 @@ export class OracleStrategy {
       // The spy's 25 HP may not survive, but waiting means the timer runs out.
 
       if (targetWeap && (wpIdx >= spyWaypoints.length || this.distanceSq(spy, targetWeap) <= 36)) {
-        // Send infiltrate ONCE, then let spy run uninterrupted.
-        // Re-commanding resets the pathfinder, causing the spy to restart.
-        if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
-          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-          reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
-        } else {
-          reasons.push(`spy → WEAP (${spy.cx},${spy.cy})`);
-        }
+        // Always re-send attack command when within 6 cells of WEAP.
+        // The harness has immediate infiltration for spies within 4 cells,
+        // bypassing the game loop's entity update order issue.
+        commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+        reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy}) d=${Math.sqrt(this.distanceSq(spy, targetWeap)).toFixed(1)}`);
       } else if (wpIdx < spyWaypoints.length) {
         const wp = spyWaypoints[wpIdx];
         commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
