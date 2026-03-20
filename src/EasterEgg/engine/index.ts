@@ -1874,10 +1874,10 @@ export class Game {
 
     // Tick structure construction and sell animations
     for (const s of this.structures) {
-      // Construction: 0→1 over ~2 seconds = 30 ticks
+      // Construction: 0→1 over 38 ticks (C++ parity: (MAKE_FRAME_COUNT-1) * floor(BuildupTime * TICKS_PER_MINUTE / MAKE_FRAME_COUNT))
       if (s.buildProgress !== undefined && s.buildProgress < 1) {
         const wasBuilding = s.buildProgress < 1;
-        s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
+        s.buildProgress = Math.min(1, s.buildProgress + 1 / 38);
         // Track completed construction for TEVENT_BUILD
         if (wasBuilding && s.buildProgress >= 1) {
           this.builtStructureTypes.add(s.type);

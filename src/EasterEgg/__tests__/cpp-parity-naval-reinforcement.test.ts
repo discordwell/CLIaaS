@@ -44,6 +44,7 @@ import {
 } from '../engine/scenario';
 import {
   House,
+  Mission,
   UNIT_STATS,
   TERRAIN_SPEED,
   SpeedClass,
@@ -465,6 +466,8 @@ describe('Naval reinforcement — C++ parity', () => {
   // C++ reinf.cpp:219-234 — transport vs passenger classification
   // ============================================================
   describe('mixed naval/ground team classification', () => {
+    const MAP_BOUNDS = { x: 0, y: 0, w: 64, h: 64 };
+
     it('LST is transport, ground units are passengers in C++', () => {
       // C++ reinf.cpp:219: `if (tclass->Max_Passengers() > 0)` → transport list
       // C++ reinf.cpp:227: else → passenger list
@@ -619,7 +622,7 @@ describe('Naval reinforcement — C++ parity', () => {
       // C++ reinf.cpp:480 — non-aircraft get MISSION_GUARD
       // TS scenario.ts:2271 — ground units get Mission.GUARD
       // Vessels should also get GUARD (they're not aircraft)
-      expect(dd.mission).toBe(1); // Mission.GUARD = 1
+      expect(dd.mission).toBe(Mission.GUARD);
     });
   });
 

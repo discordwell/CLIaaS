@@ -32,7 +32,9 @@ export enum Terrain {
   TREE = 9,   // TS extension — C++ has no TREE LandType; trees are TerrainClass objects on CLEAR cells
 }
 
-const PASSABLE = new Set([Terrain.CLEAR, Terrain.ROAD, Terrain.ORE, Terrain.ROUGH, Terrain.BEACH]);
+// C++ parity: trees (TerrainClass) are placed on CLEAR ground — infantry can
+// walk through them. Vehicles are blocked by occupancy checks, not terrain type.
+const PASSABLE = new Set([Terrain.CLEAR, Terrain.ROAD, Terrain.ORE, Terrain.ROUGH, Terrain.BEACH, Terrain.TREE]);
 
 /** C++ rules.cpp:864 Ground[land].Build — only CLEAR and ROAD terrain allow building placement.
  *  ORE, ROUGH, BEACH are passable for movement but NOT buildable.

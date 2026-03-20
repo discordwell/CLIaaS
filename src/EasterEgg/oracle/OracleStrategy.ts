@@ -1943,11 +1943,7 @@ export class OracleStrategy {
         { cx: 21, cy: 48 },
         { cx: 24, cy: 48 },   // through ROUGH terrain
         { cx: 28, cy: 48 },
-        { cx: 31, cy: 48 },   // pathfinder routes around tree at (29,48)
-        { cx: 34, cy: 48 },
-        { cx: 38, cy: 48 },
-        { cx: 42, cy: 48 },
-        { cx: 44, cy: 48 },   // directly above WEAP
+        { cx: 44, cy: 48 },   // straight through tree (now passable) to above WEAP
       ];
 
       // Find current waypoint — advance by x-coordinate progression (not distance).

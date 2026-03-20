@@ -1144,7 +1144,7 @@ describe('checkTriggerEvent with TEVENT_ANY across persistence modes', () => {
    * C++ tevent.cpp: TEVENT_ANY always returns true.
    * Used to test that persistence logic (not event logic) controls re-firing.
    */
-  const TEVENT_ANY = 1;
+  const TEVENT_ANY = 8; // C++ tevent.h / TS scenario.ts:28
 
   it('TEVENT_ANY returns true regardless of state', () => {
     const state = createState();

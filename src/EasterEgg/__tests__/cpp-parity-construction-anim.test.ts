@@ -126,13 +126,13 @@ function simulateCppStageProgression(anim: AnimControlType): Array<{ tick: numbe
 // ─── TS Construction Behavior ────────────────────────────────────────────────────
 // TS engine/index.ts:1878-1880:
 //   if (s.buildProgress !== undefined && s.buildProgress < 1) {
-//     s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
+//     s.buildProgress = Math.min(1, s.buildProgress + 1 / 38);
 //   }
 //
 // TS renderer.ts:1467-1468 (construction frame from make sheet):
 //   useFrame = Math.min(Math.floor(s.buildProgress! * maxFrame), maxFrame);
 
-const TS_CONSTRUCTION_TICKS = 30; // hardcoded 1/30 increment rate
+const TS_CONSTRUCTION_TICKS = 38; // C++ parity: (20-1) * floor(0.05*900/20) = 19*2 = 38
 
 /**
  * Simulate TS construction frame progression.
@@ -215,19 +215,18 @@ describe('C++ parity: Construction buildup animation', () => {
       expect(cppConstructionDurationTicks(20)).toBe(38);
     });
 
-    it('TS construction = 30 ticks (hardcoded)', () => {
-      // TS engine/index.ts:1880: s.buildProgress += 1 / 30
-      // Reaches 1.0 after 30 ticks
-      expect(TS_CONSTRUCTION_TICKS).toBe(30);
+    it('TS construction = 38 ticks (C++ parity)', () => {
+      // TS engine/index.ts:1880: s.buildProgress += 1 / 38
+      // Reaches 1.0 after 38 ticks — matches C++ (Count-1)*Rate = 19*2 = 38
+      expect(TS_CONSTRUCTION_TICKS).toBe(38);
     });
 
-    it('PARITY GAP: C++ construction = 38 ticks, TS = 30 ticks', () => {
+    it('PARITY: C++ construction = 38 ticks, TS = 38 ticks', () => {
       // C++ derives timing from make-sheet frame count via BuildupTime * TICKS_PER_MINUTE formula.
-      // TS hardcodes 30 ticks regardless of building type.
-      // For 20-frame make sheets: C++ = 38, TS = 30 — an 8-tick (21%) divergence.
+      // TS uses 1/38 increment to match C++ (Count-1)*Rate = 19*2 = 38.
       const cppTicks = cppConstructionDurationTicks(20);
       const tsTicks = TS_CONSTRUCTION_TICKS;
-      expect(tsTicks).toBe(cppTicks); // PARITY GAP — TS=30, C++=38
+      expect(tsTicks).toBe(cppTicks);
     });
 
     it('C++ total with state machine overhead: INITIAL(1) + animation(38) = 39 ticks minimum', () => {
@@ -325,16 +324,13 @@ describe('C++ parity: Construction buildup animation', () => {
       expect(tsProgression[tsProgression.length - 1].frame).toBe(maxFrame);
     });
 
-    it('PARITY GAP: C++ and TS show different frames at the same game tick', () => {
+    it('PARITY: C++ and TS show same frame at the same game tick', () => {
       // C++ at tick 10: stage = 10 / 2 = 5 → frame 5
-      // TS at tick 10: buildProgress = 10/30 = 0.333, frame = floor(0.333 * 19) = floor(6.33) = 6
+      // TS at tick 10: buildProgress = 10/38 = 0.2632, frame = floor(0.2632 * 19) = floor(5.0) = 5
       const cppFrameAtTick10 = 5; // stage 5 (every 2 ticks)
-      const tsFrameAtTick10 = Math.floor((10 / 30) * 19); // 6
+      const tsFrameAtTick10 = Math.floor((10 / 38) * 19); // 5
 
-      // PARITY GAP: frame pacing differs because:
-      // 1. C++ has Rate=2 (discrete stages), TS has continuous 1/30 progress
-      // 2. C++ total duration is 38 ticks, TS is 30 ticks
-      expect(tsFrameAtTick10).toBe(cppFrameAtTick10); // PARITY GAP — TS=6, C++=5
+      expect(tsFrameAtTick10).toBe(cppFrameAtTick10);
     });
 
     it('C++ frame-to-tick mapping is linear (stage * Rate)', () => {
@@ -349,12 +345,12 @@ describe('C++ parity: Construction buildup animation', () => {
     it('TS frame-to-tick mapping is continuous (buildProgress * maxFrame)', () => {
       const maxFrame = 19;
       // Frame N is first displayed when floor(buildProgress * maxFrame) == N
-      // buildProgress = tick / 30
-      // N = floor(tick * maxFrame / 30)
-      // tick = ceil(N * 30 / maxFrame)
+      // buildProgress = tick / 38
+      // N = floor(tick * maxFrame / 38)
+      // tick = ceil(N * 38 / maxFrame)
       for (let frame = 0; frame <= maxFrame; frame++) {
-        const firstTick = frame === 0 ? 0 : Math.ceil((frame * 30) / maxFrame);
-        const actualFrame = Math.min(Math.floor((firstTick / 30) * maxFrame), maxFrame);
+        const firstTick = frame === 0 ? 0 : Math.ceil((frame * 38) / maxFrame);
+        const actualFrame = Math.min(Math.floor((firstTick / 38) * maxFrame), maxFrame);
         expect(actualFrame).toBe(frame);
       }
     });
@@ -515,7 +511,7 @@ describe('C++ parity: Construction buildup animation', () => {
 
     it('TS has no state machine — single continuous progress ramp', () => {
       // TS engine/index.ts:1878-1892:
-      //   s.buildProgress = Math.min(1, s.buildProgress + 1 / 30);
+      //   s.buildProgress = Math.min(1, s.buildProgress + 1 / 38);
       //   if (buildProgress >= 1) { builtStructureTypes.add(s.type); ... }
       //
       // No INITIAL/DURING phases, no Begin_Mode call, no sound trigger on start,
@@ -628,16 +624,13 @@ describe('C++ parity: Construction buildup animation', () => {
       const maxFrame = 19;
       const tsProgression = simulateTsFrameProgression(maxFrame);
       const distinctFrames = new Set(tsProgression.map(p => p.frame));
-      // TS may show fewer distinct frames if 30 ticks < 20 frames (some frames skipped)
-      // or same count if distribution is good
-      // With 30 ticks and 20 possible frames, some frames may be held for only 1 tick
-      // while others may be held for 2
+      // With 38 ticks and 20 frames, each frame is shown for exactly 2 ticks (matching C++)
       expect(distinctFrames.size).toBeLessThanOrEqual(maxFrame + 1);
     });
 
-    it('PARITY GAP: TS may skip or double-up frames due to 30 vs 38 tick duration', () => {
+    it('PARITY: TS frame durations are uniform (2 ticks each, matching C++)', () => {
       // C++ with 20 frames over 38 ticks: each frame shown for exactly 2 ticks
-      // TS with 20 possible frames over 30 ticks: some frames shown for 1 tick, some for 2
+      // TS with 20 frames over 38 ticks: each frame shown for exactly 2 ticks
       const maxFrame = 19;
       const tsProgression = simulateTsFrameProgression(maxFrame);
       const cppProgression = simulateCppStageProgression(cppConstructionAnim(20));
@@ -649,14 +642,13 @@ describe('C++ parity: Construction buildup animation', () => {
       }
       expect(cppDurations.every(d => d === 2)).toBe(true);
 
-      // TS frame durations: not all the same
+      // TS frame durations: all exactly 2 ticks (now matches C++ with 38-tick duration)
       const tsDurations: number[] = [];
       for (let i = 1; i < tsProgression.length; i++) {
         tsDurations.push(tsProgression[i].tick - tsProgression[i - 1].tick);
       }
       const allSame = tsDurations.every(d => d === tsDurations[0]);
-      // PARITY GAP: TS frame durations are not uniform
-      expect(allSame).toBe(true); // PARITY GAP — likely false for non-uniform distribution
+      expect(allSame).toBe(true);
     });
   });
 

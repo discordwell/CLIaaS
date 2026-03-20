@@ -239,9 +239,13 @@ export function revealZoneFloodFill(map: GameMap, cx: number, cy: number): void 
 export function updateGapGenerators(ctx: FogContext): void {
   if (ctx.tick % GAP_UPDATE_INTERVAL !== 0) return;
 
-  const pf = ctx.powerProduced > 0
-    ? ctx.powerProduced / Math.max(ctx.powerConsumed, 1)
-    : 0;
+  // C++ house.cpp:4164: if (Power >= Drain || Drain == 0) return(1);
+  // C++ house.cpp:4166-4168: if (Power) return fixed(Power, Drain); else return 0;
+  const pf = ctx.powerConsumed === 0 || ctx.powerProduced >= ctx.powerConsumed
+    ? 1
+    : ctx.powerProduced > 0
+      ? ctx.powerProduced / ctx.powerConsumed
+      : 0;
 
   const activeGaps = new Set<number>();
 
