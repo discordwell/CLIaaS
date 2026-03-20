@@ -1960,20 +1960,13 @@ export class OracleStrategy {
       // The spy's 25 HP may not survive, but waiting means the timer runs out.
 
       if (targetWeap && (wpIdx >= spyWaypoints.length || this.distanceSq(spy, targetWeap) <= 36)) {
-        // Approach WEAP from west side (43,49) — away from static dogs at (49,52).
-        // First move to approach cell, then infiltrate at close range.
-        const approachPoint: Point = { cx: 43, cy: 49 };
-        const atApproach = this.distanceSq(spy, approachPoint) <= 4;
-        if (atApproach) {
-          // Close to WEAP — send infiltrate
+        // Send infiltrate ONCE, then let spy run uninterrupted.
+        // Re-commanding resets the pathfinder, causing the spy to restart.
+        if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
           commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
           reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
-        } else if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
-          // Move to approach point
-          commands.push({ cmd: 'move', ids: [spy.id], cx: approachPoint.cx, cy: approachPoint.cy });
-          reasons.push(`spy → approach (${approachPoint.cx},${approachPoint.cy})`);
         } else {
-          reasons.push(`spy approaching WEAP (${spy.cx},${spy.cy})`);
+          reasons.push(`spy → WEAP (${spy.cx},${spy.cy})`);
         }
       } else if (wpIdx < spyWaypoints.length) {
         const wp = spyWaypoints[wpIdx];

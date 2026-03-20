@@ -208,9 +208,13 @@ export function serializeState(game: Game): AgentState {
   const isAlliedFn = (game as unknown as {
     isAllied?: (house: House, playerHouse: House) => boolean;
   }).isAllied;
+  // C++ parity: Is_Ally checks from the PLAYER's perspective.
+  // PlayerPtr->Is_Ally(otherHouse) checks if the player considers otherHouse an ally.
+  // isAllied(a, b) checks if a's alliance set contains b.
+  // So we check isAllied(playerHouse, otherHouse).
   const isAlliedHouse = (house: House) => (
     typeof isAlliedFn === 'function'
-      ? isAlliedFn.call(game, house, game.playerHouse)
+      ? isAlliedFn.call(game, game.playerHouse, house)
       : house === game.playerHouse
   );
   const alliedHouses = Object.values(House).filter((house) => {
