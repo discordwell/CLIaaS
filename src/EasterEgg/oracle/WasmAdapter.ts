@@ -194,11 +194,20 @@ export class WasmAdapter {
   /** Get current game state via agent_get_state() */
   async observe(): Promise<RAGameState> {
     this.ensurePage();
-    return await this.page!.evaluate(() => {
-      const Module = (window as any).Module;
-      const json = Module.ccall('agent_get_state', 'string', [], []);
-      return JSON.parse(json);
+    const raw = await this.page!.evaluate(() => {
+      try {
+        const pageApi = (window as any).__agentState;
+        if (typeof pageApi === 'function') {
+          return pageApi();
+        }
+        const Module = (window as any).Module;
+        const json = Module.ccall('agent_get_state', 'string', [], []);
+        return JSON.parse(json);
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
     });
+    return this.normalizeState(raw);
   }
 
   /** Step N ticks with optional commands via agent_step() */
@@ -229,11 +238,20 @@ export class WasmAdapter {
   async command(commands: Array<Record<string, unknown>>): Promise<Array<{ cmd: string; ok: boolean }>> {
     this.ensurePage();
     const cmdJson = JSON.stringify(commands);
-    return await this.page!.evaluate((json) => {
-      const Module = (window as any).Module;
-      const result = Module.ccall('agent_command', 'string', ['string'], [json]);
-      return JSON.parse(result);
+    const raw = await this.page!.evaluate((json) => {
+      try {
+        const pageApi = (window as any).__agentCommand;
+        if (typeof pageApi === 'function') {
+          return pageApi(JSON.parse(json));
+        }
+        const Module = (window as any).Module;
+        const result = Module.ccall('agent_command', 'string', ['string'], [json]);
+        return JSON.parse(result);
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
     }, cmdJson);
+    return Array.isArray(raw) ? raw : [];
   }
 
   // ─── Mouse Click Injection ──────────────────────────────────────────
@@ -369,20 +387,68 @@ export class WasmAdapter {
     if (!this.page) throw new Error('Not connected — call connect() first');
   }
 
+  private normalizeState(raw: Partial<RAGameState> | null | undefined): RAGameState {
+    const state = raw ?? {};
+    return {
+      tick: typeof state.tick === 'number' ? state.tick : 0,
+      credits: typeof state.credits === 'number' ? state.credits : 0,
+      playerHouse: state.playerHouse,
+      alliedHouses: Array.isArray(state.alliedHouses) ? state.alliedHouses : [],
+      globals: Array.isArray(state.globals) ? state.globals : [],
+      missionTimer: state.missionTimer,
+      missionTimerActive: Boolean(state.missionTimerActive),
+      civEvacuated: Boolean(state.civEvacuated),
+      winPending: Boolean(state.winPending),
+      losePending: Boolean(state.losePending),
+      bridgeCount: state.bridgeCount,
+      power: {
+        produced: typeof state.power?.produced === 'number' ? state.power.produced : 0,
+        consumed: typeof state.power?.consumed === 'number' ? state.power.consumed : 0,
+      },
+      units: Array.isArray(state.units) ? state.units : [],
+      enemies: Array.isArray(state.enemies) ? state.enemies : [],
+      structures: Array.isArray(state.structures) ? state.structures : [],
+      production: Array.isArray(state.production) ? state.production : [],
+      buildable: state.buildable,
+      coastalCells: Array.isArray(state.coastalCells) ? state.coastalCells : [],
+      error: state.error,
+    };
+  }
+
   private async rawStep(n: number, commands?: string): Promise<AgentStepResult> {
     this.ensurePage();
-    // agent_step is Asyncify-instrumented (emscripten_sleep in call graph), so
-    // ccall returns a Promise even when no actual sleep occurs. Must use async.
-    return await this.page!.evaluate(async ({ ticks, cmds }) => {
-      const Module = (window as any).Module;
-      const json = await Module.ccall(
-        'agent_step', 'string',
-        ['number', 'string'],
-        [ticks, cmds || ''],
-        { async: true },
-      );
-      return JSON.parse(json);
+    const raw = await this.page!.evaluate(async ({ ticks, cmds }) => {
+      try {
+        const pageApi = (window as any).__agentStep;
+        if (typeof pageApi === 'function') {
+          const parsedCommands = cmds ? JSON.parse(cmds) : [];
+          return await pageApi(ticks, parsedCommands);
+        }
+
+        // agent_step is Asyncify-instrumented (emscripten_sleep in call graph), so
+        // ccall returns a Promise even when no actual sleep occurs. Must use async.
+        const Module = (window as any).Module;
+        const json = await Module.ccall(
+          'agent_step', 'string',
+          ['number', 'string'],
+          [ticks, cmds || ''],
+          { async: true },
+        );
+        return JSON.parse(json);
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
     }, { ticks: n, cmds: commands ?? '' });
+    if (!raw || typeof raw !== 'object' || !('state' in raw)) {
+      return {
+        results: [],
+        state: this.normalizeState(raw as Partial<RAGameState>),
+      };
+    }
+    return {
+      results: Array.isArray(raw.results) ? raw.results : [],
+      state: this.normalizeState(raw.state as Partial<RAGameState>),
+    };
   }
 
   /**
@@ -402,6 +468,7 @@ export class WasmAdapter {
     // Phase 1: Wait for __autoplayReady (set by C++ when entering game loop)
     // Falls back to document.title checkpoints set by EM_ASM in init.cpp
     console.log('[WasmAdapter] Phase 1: Waiting for game loop entry (__autoplayReady)...');
+    let enteredGameLoop = false;
     try {
       await this.page!.waitForFunction(() => {
         const w = window as any;
@@ -412,6 +479,7 @@ export class WasmAdapter {
         if (t.includes('ENTERING_GAME_LOOP') || t.includes('SELECT_GAME_DONE')) return true;
         return false;
       }, { timeout: 120_000, polling: 1000 });
+      enteredGameLoop = true;
     } catch {
       // If __autoplayReady never fires, the game might be stuck
       // Try to get diagnostics from the page title
@@ -425,23 +493,30 @@ export class WasmAdapter {
     // can't reliably interleave with the 1ms emscripten_sleep gaps.
     // waitForFunction runs its callback in-page, avoiding the CDP timing issue.
     console.log('[WasmAdapter] Phase 2: Waiting for agent_get_state via waitForFunction...');
-    await this.page!.waitForFunction(() => {
-      try {
-        const Asyncify = (window as any).Asyncify;
-        if (Asyncify && Asyncify.state !== 0) return false;
-        const Module = (window as any).Module;
-        if (!Module || typeof Module.ccall !== 'function') return false;
-        const json = Module.ccall('agent_get_state', 'string', [], []);
-        const state = JSON.parse(json);
-        const hasScenarioState =
-          Array.isArray(state.units) && state.units.length > 0 ||
-          Array.isArray(state.structures) && state.structures.length > 0;
-        (window as any).__agentStatus = `tick=${state.tick} loaded=${hasScenarioState ? 'yes' : 'no'} error=${state.error || 'none'}`;
-        return hasScenarioState && !state.error;
-      } catch {
-        return false;
-      }
-    }, { timeout: 60_000, polling: 1000 });
+    try {
+      await this.page!.waitForFunction(() => {
+        try {
+          const Asyncify = (window as any).Asyncify;
+          if (Asyncify && Asyncify.state !== 0) return false;
+          const Module = (window as any).Module;
+          if (!Module || typeof Module.ccall !== 'function') return false;
+          const json = Module.ccall('agent_get_state', 'string', [], []);
+          const state = JSON.parse(json);
+          const hasScenarioState =
+            Array.isArray(state.units) && state.units.length > 0 ||
+            Array.isArray(state.structures) && state.structures.length > 0;
+          (window as any).__agentStatus = `tick=${state.tick} loaded=${hasScenarioState ? 'yes' : 'no'} error=${state.error || 'none'}`;
+          return hasScenarioState && !state.error;
+        } catch {
+          return false;
+        }
+      }, { timeout: 60_000, polling: 1000 });
+    } catch (error) {
+      if (!enteredGameLoop) throw error;
+      const title = await this.page!.title();
+      console.log(`[WasmAdapter] Phase 2 timed out after game loop entry. Page title: "${title}"`);
+      console.log('[WasmAdapter] Proceeding anyway — scenario state can finish loading during oracle stepping.');
+    }
 
     console.log('[WasmAdapter] Game is running — adapter ready');
   }

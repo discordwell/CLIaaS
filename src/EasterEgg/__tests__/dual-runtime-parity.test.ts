@@ -4,11 +4,14 @@ import type { AgentState, AgentUnit } from '../engine/agentHarness.js';
 import type { RAGameState, RAEntity } from '../oracle/WasmAdapter.js';
 import {
   ensureParityServer,
+  isDevServerAvailable,
   stopParityServer,
   stepBoth,
   withDualScenario,
   type ParityServerHandle,
 } from './dual-runtime-test-utils.js';
+
+const serverUp = isDevServerAvailable();
 
 let serverHandle: ParityServerHandle | undefined;
 
@@ -43,15 +46,14 @@ function isPlacementReadyForPowr(state: AgentState | RAGameState): boolean {
   return state.production?.some((item) => item.t === 'POWR' && item.done === true) ?? false;
 }
 
-beforeAll(async () => {
-  serverHandle = await ensureParityServer();
-}, 180_000);
+describe.skipIf(!serverUp)('Dual Runtime Parity', () => {
+  beforeAll(async () => {
+    serverHandle = await ensureParityServer();
+  }, 180_000);
 
-afterAll(async () => {
-  await stopParityServer(serverHandle);
-}, 20_000);
-
-describe('Dual Runtime Parity', () => {
+  afterAll(async () => {
+    await stopParityServer(serverHandle);
+  }, 20_000);
   it('keeps the SCA01EA jeep move/stop sequence in lock-step', async () => {
     await withDualScenario('SCA01EA', async (handle) => {
       const tsJeep = singleTsUnit(handle.tsState, 'JEEP');

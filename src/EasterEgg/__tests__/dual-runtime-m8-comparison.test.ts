@@ -20,11 +20,14 @@ import { SharedTsOracleStrategy, type TsOracleDecision } from '../oracle/SharedO
 import type { RAGameState, RAEntity, RAProduction, AgentStepResult } from '../oracle/WasmAdapter.js';
 import {
   ensureParityServer,
+  isDevServerAvailable,
   stopParityServer,
   withDualScenario,
   type DualRuntimeHandle,
   type ParityServerHandle,
 } from './dual-runtime-test-utils.js';
+
+const serverUp = isDevServerAvailable();
 
 // ── Output paths ─────────────────────────────────────────────────────────────
 
@@ -607,14 +610,6 @@ function generateReport(
 
 let serverHandle: ParityServerHandle | undefined;
 
-beforeAll(async () => {
-  serverHandle = await ensureParityServer();
-}, 180_000);
-
-afterAll(async () => {
-  await stopParityServer(serverHandle);
-}, 20_000);
-
 // ── Parameterized comparison runner ──────────────────────────────────────────
 
 async function runComparison(scenario: string, maxTicks: number): Promise<void> {
@@ -775,7 +770,15 @@ const MISSIONS: Array<{ scenario: string; maxTicks: number }> = [
   { scenario: 'SCG28EA', maxTicks: 2700 },
 ];
 
-describe('Dual-Runtime Comparison', () => {
+describe.skipIf(!serverUp)('Dual-Runtime Comparison', () => {
+  beforeAll(async () => {
+    serverHandle = await ensureParityServer();
+  }, 180_000);
+
+  afterAll(async () => {
+    await stopParityServer(serverHandle);
+  }, 20_000);
+
   for (const { scenario, maxTicks } of MISSIONS) {
     it(`${scenario} — compare TS vs WASM`, async () => {
       await runComparison(scenario, maxTicks);

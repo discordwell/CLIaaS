@@ -1,9 +1,12 @@
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
+import { isDevServerAvailable, RA_PARITY_BASE_URL } from './dual-runtime-test-utils.js';
 
-const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
+const BASE_URL = RA_PARITY_BASE_URL;
 
-describe('SCG05EA spy infiltration test', () => {
+const serverUp = isDevServerAvailable();
+
+describe.skipIf(!serverUp)('SCG05EA spy infiltration test', () => {
   let adapter: TsAgentAdapter;
 
   beforeAll(async () => {

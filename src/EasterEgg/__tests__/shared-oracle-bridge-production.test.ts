@@ -28,7 +28,7 @@ describe('translateOracleDecisionToTs — production commands', () => {
   });
 
   it('translates produce RTTI_VESSELTYPE to build command', () => {
-    const decision = { commands: [{ cmd: 'produce', rtti: 33, type_id: 1 }], reason: 'test' };
+    const decision = { commands: [{ cmd: 'produce', rtti: 31, type_id: 1 }], reason: 'test' };
     const { commands } = translateOracleDecisionToTs(decision, EMPTY_BRIDGE);
     expect(commands).toEqual([{ cmd: 'build', type: 'DD' }]);
   });

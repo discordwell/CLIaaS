@@ -39,6 +39,9 @@ extern TARGET As_Target(CELL cell);
 static char s_state_buf[STATE_BUF_SIZE];
 static char s_cmd_buf[CMD_BUF_SIZE];
 static char s_step_buf[STEP_BUF_SIZE];
+static VesselType s_agent_pending_vessel = VESSEL_NONE;
+static long s_agent_pending_vessel_start = -1;
+static long s_agent_pending_vessel_finish = -1;
 
 /* --- Buffer write helpers (global cursor) --- */
 static int   s_pos;
@@ -89,6 +92,181 @@ static TechnoClass* agent_lookup(int id)
 		case RTTI_BUILDING: return (idx < Buildings.Count()) ? (TechnoClass*)Buildings.Ptr(idx) : NULL;
 		default: return NULL;
 	}
+}
+
+static bool agent_place_structure(CELL cell)
+{
+	if (!PlayerPtr) return false;
+
+	FactoryClass* factory = PlayerPtr->Fetch_Factory(RTTI_BUILDINGTYPE);
+	if (!factory || !factory->Has_Completed()) return false;
+
+	TechnoClass* tech = factory->Get_Object();
+	if (!tech || tech->What_Am_I() != RTTI_BUILDING) return false;
+
+#ifdef __EMSCRIPTEN__
+	EM_ASM({
+		if (window.__wlog) window.__wlog("agent_place_structure: try cell=" + $0);
+	}, cell);
+#endif
+
+	if (!tech->Unlimbo(Cell_Coord(cell))) {
+#ifdef __EMSCRIPTEN__
+		EM_ASM({
+			if (window.__wlog) window.__wlog("agent_place_structure: Unlimbo failed");
+		});
+#endif
+		return false;
+	}
+
+	factory->Completed();
+	PlayerPtr->Abandon_Production(RTTI_BUILDINGTYPE);
+	Map.Set_Cursor_Shape(0);
+	Map.PendingObjectPtr = 0;
+	Map.PendingObject = 0;
+	Map.PendingHouse = HOUSE_NONE;
+
+#ifdef __EMSCRIPTEN__
+	EM_ASM({
+		if (window.__wlog) window.__wlog("agent_place_structure: success");
+	});
+#endif
+
+	return true;
+}
+
+static const char* agent_factory_item_name(FactoryClass* factory, RTTIType rtti)
+{
+	if (!factory) return NULL;
+
+	/*
+	** Vessel production becomes unstable if we dereference the pending limbo
+	** object just to print its class name. The oracle only needs to know that
+	** a vessel factory is busy, so fall back to a safe generic label there.
+	*/
+	if (rtti == RTTI_VESSELTYPE) {
+		if (s_agent_pending_vessel != VESSEL_NONE) {
+			return VesselTypeClass::As_Reference(s_agent_pending_vessel).Name();
+		}
+		if (PlayerPtr && PlayerPtr->BuildVessel != VESSEL_NONE) {
+			return VesselTypeClass::As_Reference(PlayerPtr->BuildVessel).Name();
+		}
+		if (PlayerPtr && PlayerPtr->JustBuiltVessel != VESSEL_NONE) {
+			return VesselTypeClass::As_Reference(PlayerPtr->JustBuiltVessel).Name();
+		}
+		return "VESSEL";
+	}
+
+	TechnoClass* obj = factory->Get_Object();
+	if (!obj) return NULL;
+	return obj->Class_Of().Name();
+}
+
+static const char* agent_pending_vessel_name(VesselType type)
+{
+	switch (type) {
+		case VESSEL_SS: return "SS";
+		case VESSEL_DD: return "DD";
+		case VESSEL_CA: return "CA";
+		case VESSEL_TRANSPORT: return "LST";
+		case VESSEL_PT: return "PT";
+		case VESSEL_MISSILESUB: return "MSUB";
+		default: return "VESSEL";
+	}
+}
+
+static int agent_pending_vessel_build_time(VesselType type)
+{
+	switch (type) {
+		case VESSEL_SS: return 700;
+		case VESSEL_DD: return 900;
+		case VESSEL_CA: return 1200;
+		case VESSEL_TRANSPORT: return 700;
+		case VESSEL_PT: return 500;
+		case VESSEL_MISSILESUB: return 1100;
+		default: return 900;
+	}
+}
+
+static void agent_clear_pending_vessel(void)
+{
+	s_agent_pending_vessel = VESSEL_NONE;
+	s_agent_pending_vessel_start = -1;
+	s_agent_pending_vessel_finish = -1;
+}
+
+static bool agent_pending_vessel_done(void)
+{
+	return s_agent_pending_vessel != VESSEL_NONE &&
+		s_agent_pending_vessel_finish >= 0 &&
+		Frame >= s_agent_pending_vessel_finish;
+}
+
+static BuildingClass* agent_find_player_naval_yard(void)
+{
+	if (!PlayerPtr) return NULL;
+
+	BuildingClass* fallback = NULL;
+	for (int i = 0; i < Buildings.Count(); i++) {
+		BuildingClass* b = Buildings.Ptr(i);
+		if (!b || b->IsInLimbo || b->Strength <= 0) continue;
+		if (!PlayerPtr->Is_Ally(b)) continue;
+
+		if (b->Class->Type == STRUCT_SHIP_YARD || b->Class->Type == STRUCT_SUB_PEN) {
+			if (b->Owner() == PlayerPtr->Class->House) return b;
+			if (!fallback) fallback = b;
+		}
+	}
+
+	return fallback;
+}
+
+static bool agent_try_place_pending_vessel(CELL cell)
+{
+	if (!PlayerPtr || cell == -1 || s_agent_pending_vessel == VESSEL_NONE) return false;
+
+	VesselClass* vessel = new VesselClass(s_agent_pending_vessel, PlayerPtr->Class->House);
+	if (!vessel) return false;
+
+	if (vessel->Unlimbo(Cell_Coord(cell), Random_Pick(DIR_N, DIR_MAX))) {
+		PlayerPtr->IsBuiltSomething = true;
+		agent_clear_pending_vessel();
+		return true;
+	}
+
+	delete vessel;
+	return false;
+}
+
+static bool agent_launch_pending_vessel(CELL preferred_cell)
+{
+	if (!PlayerPtr || s_agent_pending_vessel == VESSEL_NONE) return false;
+	if (!agent_pending_vessel_done()) return false;
+
+	BuildingClass* yard = agent_find_player_naval_yard();
+	if (!yard) return false;
+
+	if (preferred_cell != -1 && agent_try_place_pending_vessel(preferred_cell)) return true;
+
+	CELL yard_cell = Coord_Cell(yard->Center_Coord());
+	int base_x = Cell_X(yard_cell);
+	int base_y = Cell_Y(yard_cell);
+
+	for (int radius = 1; radius <= 10; radius++) {
+		for (int dy = -radius; dy <= radius; dy++) {
+			for (int dx = -radius; dx <= radius; dx++) {
+				if (dx != -radius && dx != radius && dy != -radius && dy != radius) continue;
+				int cx = base_x + dx;
+				int cy = base_y + dy;
+				if (cx < 1 || cx >= MAP_CELL_W - 1 || cy < 1 || cy >= MAP_CELL_H - 1) continue;
+				CELL cell = XY_Cell(cx, cy);
+				if (Map[cell].Land_Type() != LAND_WATER) continue;
+				if (agent_try_place_pending_vessel(cell)) return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 /* --- Serialize one object as JSON into the active buffer --- */
@@ -346,8 +524,13 @@ char* agent_get_state(void)
 	buf_init(s_state_buf, STATE_BUF_SIZE);
 
 	if (!PlayerPtr) {
+		agent_clear_pending_vessel();
 		buf_cat("{\"error\":\"no player\"}");
 		return s_state_buf;
+	}
+
+	if (s_agent_pending_vessel != VESSEL_NONE && s_agent_pending_vessel_start > Frame) {
+		agent_clear_pending_vessel();
 	}
 
 	HousesType player_house = PlayerPtr->Class->House;
@@ -492,14 +675,33 @@ char* agent_get_state(void)
 		RTTI_VESSELTYPE, RTTI_BUILDINGTYPE
 	};
 	for (int f = 0; f < 5; f++) {
+		if (prod_types[f] == RTTI_VESSELTYPE && s_agent_pending_vessel != VESSEL_NONE) {
+			int progress = 0;
+			long duration = s_agent_pending_vessel_finish - s_agent_pending_vessel_start;
+			if (duration > 0) {
+				long elapsed = Frame - s_agent_pending_vessel_start;
+				if (elapsed < 0) elapsed = 0;
+				if (elapsed > duration) elapsed = duration;
+				progress = (int)((elapsed * FactoryClass::STEP_COUNT) / duration);
+			}
+			if (progress > FactoryClass::STEP_COUNT) progress = FactoryClass::STEP_COUNT;
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("{\"t\":\"%s\",\"prog\":%d,\"rtti\":%d,\"done\":%s}",
+				agent_pending_vessel_name(s_agent_pending_vessel),
+				progress,
+				(int)RTTI_VESSELTYPE,
+				agent_pending_vessel_done() ? "true" : "false");
+			continue;
+		}
 		FactoryClass* factory = PlayerPtr->Fetch_Factory(prod_types[f]);
 		if (!factory) continue;
-		TechnoClass* obj = factory->Get_Object();
-		if (!obj) continue;
+		const char* prod_name = agent_factory_item_name(factory, prod_types[f]);
+		if (!prod_name) continue;
 		if (!first) buf_cat(",");
 		first = false;
 		buf_cat("{\"t\":\"%s\",\"prog\":%d,\"rtti\":%d,\"done\":%s}",
-			obj->Class_Of().Name(),
+			prod_name,
 			factory->Completion(),
 			(int)prod_types[f],
 			factory->Has_Completed() ? "true" : "false");
@@ -549,15 +751,46 @@ char* agent_get_state(void)
 	}
 	buf_cat("],\"vessels\":[");
 	first = true;
-	for (int v = VESSEL_FIRST; v < VESSEL_COUNT; v++) {
-		VesselTypeClass const & vtype = VesselTypeClass::As_Reference((VesselType)v);
-		if (PlayerPtr->Can_Build(&vtype, PlayerPtr->ActLike)) {
+	bool has_shipyard = false;
+	bool has_subpen = false;
+	for (int i = 0; i < Buildings.Count(); i++) {
+		BuildingClass* b = Buildings.Ptr(i);
+		if (!b || b->IsInLimbo || b->Strength <= 0) continue;
+		if (!PlayerPtr->Is_Ally(b)) continue;
+		if (b->Class->Type == STRUCT_SHIP_YARD) has_shipyard = true;
+		if (b->Class->Type == STRUCT_SUB_PEN) has_subpen = true;
+	}
+
+	/*
+	** Querying Can_Build() across all vessel types destabilizes the WASM runtime
+	** once naval production is active. Emit a conservative vessel catalog based
+	** on the owned naval production structure instead.
+	*/
+	if (has_shipyard) {
+		static const char* allied_vessels[] = { "DD", "LST", "PT" };
+		for (int i = 0; i < 3; i++) {
 			if (!first) buf_cat(",");
 			first = false;
-			buf_cat("\"%s\"", vtype.Name());
+			buf_cat("\"%s\"", allied_vessels[i]);
+		}
+	} else if (has_subpen) {
+		static const char* soviet_vessels[] = { "SS", "LST", "MSUB" };
+		for (int i = 0; i < 3; i++) {
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("\"%s\"", soviet_vessels[i]);
+		}
+	} else {
+		for (int v = VESSEL_FIRST; v < VESSEL_COUNT; v++) {
+			VesselTypeClass const & vtype = VesselTypeClass::As_Reference((VesselType)v);
+			if (PlayerPtr->Can_Build(&vtype, PlayerPtr->ActLike)) {
+				if (!first) buf_cat(",");
+				first = false;
+				buf_cat("\"%s\"", vtype.Name());
+			}
 		}
 	}
-	buf_cat("]}},");
+	buf_cat("]},");
 
 	/* --- Coastal cells (land cells adjacent to water, near player base) --- */
 	buf_cat("\"coastalCells\":[");
@@ -623,6 +856,33 @@ char* agent_get_state(void)
 }
 
 /* ======================================================================
+ * EXPORT 1b: dedicated vessel commands to avoid JSON/command bridge trap
+ * ====================================================================== */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int agent_vessel_produce(int type_id)
+{
+	if (s_agent_pending_vessel != VESSEL_NONE) return 0;
+	s_agent_pending_vessel = (VesselType)type_id;
+	s_agent_pending_vessel_start = Frame;
+	s_agent_pending_vessel_finish = Frame + agent_pending_vessel_build_time(s_agent_pending_vessel);
+	return 1;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int agent_vessel_place(int cx, int cy)
+{
+	CELL cell = -1;
+	if (cx >= 0 && cy >= 0) {
+		cell = XY_Cell(cx, cy);
+	}
+	return agent_launch_pending_vessel(cell) ? 1 : 0;
+}
+
+/* ======================================================================
  * EXPORT 2: agent_command — process JSON command array
  * ====================================================================== */
 #ifdef __EMSCRIPTEN__
@@ -644,7 +904,23 @@ char* agent_command(char* json)
 
 		/* --- produce/place run once per command, not per-id --- */
 		if (strcmp(cmd.cmd, "produce") == 0 && cmd.has_rtti && cmd.has_type_id && PlayerPtr) {
-			ProdFailType result = PlayerPtr->Begin_Production((RTTIType)cmd.rtti, cmd.type_id);
+			ProdFailType result;
+			if ((RTTIType)cmd.rtti == RTTI_VESSELTYPE) {
+				/*
+				** Keep naval production entirely inside harness state. The original
+				** ship build path traps in the headless WASM runtime.
+				*/
+				if (s_agent_pending_vessel == VESSEL_NONE) {
+					s_agent_pending_vessel = (VesselType)cmd.type_id;
+					s_agent_pending_vessel_start = Frame;
+					s_agent_pending_vessel_finish = Frame + agent_pending_vessel_build_time(s_agent_pending_vessel);
+					result = PROD_OK;
+				} else {
+					result = PROD_CANT;
+				}
+			} else {
+				result = PlayerPtr->Begin_Production((RTTIType)cmd.rtti, cmd.type_id);
+			}
 			any_ok = (result == PROD_OK);
 		}
 		else if (strcmp(cmd.cmd, "place") == 0 && cmd.has_rtti && PlayerPtr) {
@@ -652,7 +928,13 @@ char* agent_command(char* json)
 			if (cmd.has_cx && cmd.has_cy) {
 				cell = XY_Cell(cmd.cx, cmd.cy);
 			}
-			any_ok = PlayerPtr->Place_Object((RTTIType)cmd.rtti, cell);
+			if ((RTTIType)cmd.rtti == RTTI_BUILDINGTYPE && cell != -1) {
+				any_ok = agent_place_structure(cell);
+			} else if ((RTTIType)cmd.rtti == RTTI_VESSELTYPE) {
+				any_ok = agent_launch_pending_vessel(cell);
+			} else {
+				any_ok = PlayerPtr->Place_Object((RTTIType)cmd.rtti, cell);
+			}
 		}
 		else {
 			/* --- per-id commands --- */

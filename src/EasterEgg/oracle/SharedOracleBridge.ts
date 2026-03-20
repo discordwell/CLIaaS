@@ -29,7 +29,7 @@ const VESSEL_TYPES = new Set(['SS','DD','CA','LST','PT','MSUB']);
 const RTTI_BUILDINGTYPE = 6;
 const RTTI_UNITTYPE = 29;
 const RTTI_INFANTRYTYPE = 14;
-const RTTI_VESSELTYPE = 33;
+const RTTI_VESSELTYPE = 31;
 
 // Reverse mappings: type_id -> type name (from C++ defines.h StructType enum)
 const BUILDING_ID_TO_NAME: Record<number, string> = {

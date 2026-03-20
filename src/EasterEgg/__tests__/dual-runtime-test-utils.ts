@@ -16,6 +16,24 @@ import type {
 export const RA_PARITY_BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+/**
+ * Synchronously check whether the dev server is reachable.
+ * Uses a quick `curl --max-time 2` probe so it can be used at module scope
+ * for `describe.skipIf(!devServerAvailable)` guards.
+ */
+export function isDevServerAvailable(): boolean {
+  const port = Number.parseInt(new URL(RA_PARITY_BASE_URL).port || '80', 10);
+  try {
+    execFileSync('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '2', `http://127.0.0.1:${port}/`], {
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface ParityServerHandle {
   startedByTest: boolean;
   process?: ChildProcessWithoutNullStreams;

@@ -2,19 +2,22 @@ import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
 import { SharedTsOracleStrategy } from '../oracle/SharedOracleBridge.js';
 import type { AgentState } from '../engine/agentHarness.js';
+import { isDevServerAvailable, RA_PARITY_BASE_URL } from './dual-runtime-test-utils.js';
 
 /**
  * SCG05EA live playthrough — runs the oracle against the real TS engine.
  * Requires dev server at localhost:3001.
  */
 
-const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
+const BASE_URL = RA_PARITY_BASE_URL;
 const STEP_TICKS_NORMAL = 15;
 const STEP_TICKS_MICRO = 5; // Smaller steps when Tanya is alive for responsive micro
 const MAX_ITERATIONS = 4000;
 const LOG_EVERY = 10;
 
-describe('SCG05EA live playthrough', () => {
+const serverUp = isDevServerAvailable();
+
+describe.skipIf(!serverUp)('SCG05EA live playthrough', () => {
   let adapter: TsAgentAdapter;
   let oracle: SharedTsOracleStrategy;
 
