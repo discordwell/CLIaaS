@@ -345,6 +345,16 @@ export class OracleStrategy {
   // Missions that should NEVER initiate attacks (defense/survival only)
   private static readonly DEFENSE_ONLY_MISSIONS = new Set(['SCG08EA']);
 
+  // Per-mission coastal cells for shipyard placement.
+  // Hardcoded because reading WASM map memory requires recompiling C++
+  // which breaks Asyncify instrumentation. These are derived from
+  // enemy shipyard positions and map layout in the INI files.
+  private static readonly COASTAL_CELLS: Record<string, Point[]> = {
+    'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
+    'SCG11EA': [{ cx: 20, cy: 90 }, { cx: 22, cy: 88 }, { cx: 18, cy: 92 }],
+    'SCG11EB': [{ cx: 20, cy: 90 }, { cx: 22, cy: 88 }, { cx: 18, cy: 92 }],
+  };
+
   checkResult(state: RAGameState): OracleResult {
     if (state.winPending) {
       return 'victory';
@@ -549,8 +559,12 @@ export class OracleStrategy {
       const isShipyard = buildingProduction.t === 'SYRD' || buildingProduction.t === 'SPEN';
 
       // Shipyards must be placed on coastal cells (land adjacent to water)
-      if (isShipyard && state.coastalCells && state.coastalCells.length > 0) {
-        const coastal = state.coastalCells[this.placementAttempts % state.coastalCells.length];
+      // Use C++ coastal detection if available, fall back to hardcoded per-mission
+      const coastalCells = state.coastalCells?.length
+        ? state.coastalCells
+        : OracleStrategy.COASTAL_CELLS[this.scenario];
+      if (isShipyard && coastalCells && coastalCells.length > 0) {
+        const coastal = coastalCells[this.placementAttempts % coastalCells.length];
         commands.push({
           cmd: 'place',
           rtti: RTTI_BUILDINGTYPE,
@@ -1715,7 +1729,7 @@ export class OracleStrategy {
         );
 
         if (closeToWeap && targetWeap && !dogNearWeap) {
-          commands.push({ cmd: 'attack_struct', ids: [spy.id], structId: targetWeap.id });
+          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
           reasons.push('spy → infiltrate WEAP');
         } else if (this.scg05eaSpyRouteIndex < SCG05EA_SPY_ROUTE.length) {
           const wp = SCG05EA_SPY_ROUTE[this.scg05eaSpyRouteIndex];
@@ -1728,7 +1742,7 @@ export class OracleStrategy {
           commands.push({ cmd: 'move', ids: [spy.id], cx: next.cx, cy: next.cy });
           reasons.push(`spy → wp${this.scg05eaSpyRouteIndex} (${next.cx},${next.cy})`);
         } else if (targetWeap) {
-          commands.push({ cmd: 'attack_struct', ids: [spy.id], structId: targetWeap.id });
+          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
           reasons.push('spy → infiltrate WEAP (route done)');
         } else {
           reasons.push('spy waiting (no WEAP found)');
@@ -1767,7 +1781,7 @@ export class OracleStrategy {
           this.scg05eaSamIndex++;
           reasons.push(`SAM ${this.scg05eaSamIndex} destroyed, advancing`);
         } else {
-          commands.push({ cmd: 'attack_struct', ids: [tanya.id], structId: samTarget.id });
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: samTarget.id });
           reasons.push(`Tanya → SAM ${this.scg05eaSamIndex + 1}/${SCG05EA_SAM_TARGETS.length}`);
         }
       } else {
@@ -1793,7 +1807,7 @@ export class OracleStrategy {
     // ─── PHASE 3: Chinook evacuation ────────────────────────────────────
     if (tanya && chinook && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length) {
       if (this.isIdle(tanya)) {
-        commands.push({ cmd: 'enter', unitId: tanya.id, transportId: chinook.id });
+        commands.push({ cmd: 'enter', ids: [tanya.id], target: chinook.id });
         reasons.push('Tanya → board chinook');
       } else {
         reasons.push('Tanya moving to chinook');

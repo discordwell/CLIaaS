@@ -139,9 +139,9 @@ describe('SCG05EA — spy infiltration phase', () => {
     const decision = strategy.decide(state);
     console.log('Spy infiltrate:', decision.reason);
     expect(decision.reason).toContain('infiltrate WEAP');
-    const attackCmds = decision.commands.filter((c) => c.cmd === 'attack_struct');
+    const attackCmds = decision.commands.filter((c) => c.cmd === 'attack' && typeof c.target === 'number');
     expect(attackCmds.length).toBe(1);
-    expect(attackCmds[0].structId).toBe(8);
+    expect(attackCmds[0].target).toBe(8);
   });
 });
 
@@ -172,9 +172,9 @@ describe('SCG05EA — Tanya SAM destruction phase', () => {
     console.log('Tanya SAM attack:', decision.reason);
     // Should directly attack nearest SAM — no route needed
     expect(decision.reason).toMatch(/SAM 1\/4/);
-    const attackCmds = decision.commands.filter((c) => c.cmd === 'attack_struct');
+    const attackCmds = decision.commands.filter((c) => c.cmd === 'attack' && typeof c.target === 'number');
     expect(attackCmds.length).toBe(1);
-    expect(attackCmds[0].structId).toBe(53); // nearest SAM at (28, 107)
+    expect(attackCmds[0].target).toBe(53); // nearest SAM at (28, 107)
   });
 
   it('advances to next SAM when current one is destroyed', () => {
