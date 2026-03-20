@@ -1336,8 +1336,13 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     } else if (type.includes('rock') || type.includes('cliff')) {
       map.setTerrain(pos.cx, pos.cy, Terrain.ROCK);
     } else if (/^tc?\d/.test(type)) {
-      // T01-T17 = single trees, TC01-TC05 = tree clumps
-      map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
+      // T01-T17 = single trees, TC01-TC05 = tree clumps.
+      // C++ parity: single trees (T01-T18) don't block infantry movement.
+      // They're TerrainClass objects on CLEAR ground — infantry walks through.
+      // Only tree clumps (TC) set TREE terrain for multi-cell blocking.
+      if (type.startsWith('tc')) {
+        map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
+      }
       map.setTreeType(pos.cx, pos.cy, type);
       // Tree clumps occupy multiple cells (from C++ tdata.cpp occupancy data)
       if (type.startsWith('tc')) {
