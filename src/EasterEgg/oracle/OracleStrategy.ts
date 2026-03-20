@@ -206,6 +206,33 @@ const SCG03EA_BRIDGE_V07: Point = { cx: 53, cy: 57 };  // cell 7349 = central br
 const SCG03EA_FALLBACK: Point = { cx: 62, cy: 49 };    // cell 6334 = starting area
 const SCG03EA_ARTY_POS: Point = { cx: 54, cy: 55 };    // cell 7094 = central fire support
 
+// ── SCG05EA "Paradox Equation" — spy infiltration → Tanya rescue → SAM destroy ──
+// Spy arrives by LST at west coast, must infiltrate BadGuy WEAP at (43,50).
+// Dogs detect spies within 3 cells — route north through y≈46 corridor.
+// After infiltration: Tanya freed, destroys 4 SAM sites, chinook evacuates her.
+// Final phase: destroy all USSR+BadGuy forces.
+const SCG05EA_WEAP_TARGET: Point = { cx: 43, cy: 50 };
+const SCG05EA_DOG_SAFE_DISTANCE_SQ = 25; // 5 cells squared (>3 cell detection + buffer)
+// Safe spy waypoints: north corridor avoids dogs at (23-24, 54-55) and (49-50, 52)
+const SCG05EA_SPY_ROUTE: Point[] = [
+  { cx: 16, cy: 46 },   // north of landing, clear of dogs
+  { cx: 30, cy: 46 },   // east along safe corridor
+  { cx: 42, cy: 46 },   // approach WEAP from north
+];
+// SAM sites Tanya must destroy (west pair first, then east)
+const SCG05EA_SAM_TARGETS: Point[] = [
+  { cx: 17, cy: 94 },
+  { cx: 16, cy: 107 },
+  { cx: 28, cy: 94 },
+  { cx: 28, cy: 107 },
+];
+// Tanya safe route: hug west edge to avoid dog patrols in mid-map
+const SCG05EA_TANYA_ROUTE: Point[] = [
+  { cx: 14, cy: 55 },   // west edge, below base
+  { cx: 14, cy: 75 },   // continue south along edge
+  { cx: 14, cy: 90 },   // approach first SAM area (dodge dog3 patrol at 14,92)
+];
+
 // ── SCG09EA "Infiltration" — sneak infantry north, escape via transport ──────
 // Map: X=21 Y=35 W=84 H=70 (so map extends roughly (21,35) to (105,105))
 // Player starts at ~(37,94)/(44,96) with 2 E1 infantry.
@@ -257,6 +284,11 @@ export class OracleStrategy {
   private minesLaid = 0;              // total mines laid so far
   private mcvSpawnTick = 0;           // tick when MCV first appeared
   private mcvDeployAttempts = 0;      // how many times we've tried deploying
+  private scg05eaSpyInfiltrated = false;  // true after spy enters WEAP
+  private scg05eaSpyRouteIndex = 0;      // current waypoint in spy safe route
+  private scg05eaSamIndex = 0;           // current SAM target for Tanya
+  private scg05eaTanyaRouteIndex = 0;    // current waypoint in Tanya safe route
+  private scg05eaTanyaAtSams = false;    // true once Tanya reaches SAM area
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
   private currentTick = 0;
@@ -300,6 +332,8 @@ export class OracleStrategy {
       result = this.decideScg02ea(state);
     } else if (this.scenario === 'SCG03EA') {
       result = this.decideScg03ea(state);
+    } else if (this.scenario === 'SCG05EA') {
+      result = this.decideScg05ea(state);
     } else if (this.scenario === 'SCG08EA') {
       result = this.decideScg08ea(state);
     } else if (this.scenario === 'SCG09EA') {
@@ -1628,6 +1662,172 @@ export class OracleStrategy {
    * Station interceptors between enemy base and critical buildings.
    * Only engage enemies that cross the interception line heading south.
    */
+  // ── SCG05EA "Paradox Equation" ──────────────────────────────────────────────
+  // Phase 1: Sneak spy to BadGuy WEAP (avoid dogs)
+  // Phase 2: Tanya freed → destroy 4 SAM sites
+  // Phase 3: Chinook arrives → evacuate Tanya
+  // Phase 4: Build base, destroy all enemies
+  private decideScg05ea(state: RAGameState): OracleDecision {
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+    const playerUnits = this.playerOwnedUnits(state);
+
+    const spy = playerUnits.find((u) => u.t === 'SPY');
+    const tanya = playerUnits.find((u) => u.t === 'E7');
+    const chinook = playerUnits.find((u) => u.t === 'TRAN');
+    const dogs = state.enemies.filter((e) => e.t === 'DOG');
+
+    // Track spy infiltration — once spy disappears after being seen, it infiltrated
+    if (!this.scg05eaSpyInfiltrated && !spy && state.tick > 200) {
+      if (tanya || state.globals.length > 0) {
+        this.scg05eaSpyInfiltrated = true;
+      }
+    }
+
+    // ─── PHASE 1: Spy infiltration ───────────────────────────────────────
+    if (spy && !this.scg05eaSpyInfiltrated) {
+      const targetWeap = state.structures.find(
+        (s) => s.t === 'WEAP' && !s.ally &&
+          this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 16,
+      );
+
+      if (!this.isIdle(spy)) {
+        // Spy is moving — check for dog threats and redirect if needed
+        const nearestDog = dogs.length > 0
+          ? dogs.reduce((a, b) =>
+            this.distanceSq(spy, a) < this.distanceSq(spy, b) ? a : b)
+          : null;
+        const dogDist = nearestDog ? this.distanceSq(spy, nearestDog) : Infinity;
+
+        if (dogDist <= SCG05EA_DOG_SAFE_DISTANCE_SQ) {
+          // Dog too close — emergency redirect
+          const dx = spy.cx - nearestDog!.cx;
+          const dy = spy.cy - nearestDog!.cy;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          commands.push({
+            cmd: 'move', ids: [spy.id],
+            cx: Math.round(spy.cx + (dx / len) * 6),
+            cy: Math.round(spy.cy + (dy / len) * 6),
+          });
+          reasons.push(`spy evade dog at (${nearestDog!.cx},${nearestDog!.cy})`);
+        } else {
+          reasons.push('spy en route');
+        }
+      } else {
+        // Spy is idle — advance along safe route or infiltrate
+        const closeToWeap = targetWeap && this.distanceSq(spy, targetWeap) <= 36;
+        const dogNearWeap = dogs.some(
+          (d) => targetWeap && this.distanceSq(d, targetWeap) <= 49,
+        );
+
+        if (closeToWeap && targetWeap && !dogNearWeap) {
+          commands.push({ cmd: 'attack_struct', ids: [spy.id], structId: targetWeap.id });
+          reasons.push('spy → infiltrate WEAP');
+        } else if (this.scg05eaSpyRouteIndex < SCG05EA_SPY_ROUTE.length) {
+          const wp = SCG05EA_SPY_ROUTE[this.scg05eaSpyRouteIndex];
+          if (this.distanceSq(spy, wp) <= 9) {
+            this.scg05eaSpyRouteIndex++;
+          }
+          const next = SCG05EA_SPY_ROUTE[
+            Math.min(this.scg05eaSpyRouteIndex, SCG05EA_SPY_ROUTE.length - 1)
+          ];
+          commands.push({ cmd: 'move', ids: [spy.id], cx: next.cx, cy: next.cy });
+          reasons.push(`spy → wp${this.scg05eaSpyRouteIndex} (${next.cx},${next.cy})`);
+        } else if (targetWeap) {
+          commands.push({ cmd: 'attack_struct', ids: [spy.id], structId: targetWeap.id });
+          reasons.push('spy → infiltrate WEAP (route done)');
+        } else {
+          reasons.push('spy waiting (no WEAP found)');
+        }
+      }
+
+      return { commands, reason: reasons.join('; ') };
+    }
+
+    // ─── PHASE 2: Tanya destroys SAM sites ──────────────────────────────
+    if (tanya && this.scg05eaSpyInfiltrated && this.scg05eaSamIndex < SCG05EA_SAM_TARGETS.length) {
+      const nearestDog = dogs.length > 0
+        ? dogs.reduce((a, b) =>
+          this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
+        : null;
+      const dogDist = nearestDog ? this.distanceSq(tanya, nearestDog) : Infinity;
+
+      if (dogDist <= SCG05EA_DOG_SAFE_DISTANCE_SQ) {
+        const dx = tanya.cx - nearestDog!.cx;
+        const dy = tanya.cy - nearestDog!.cy;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        commands.push({
+          cmd: 'move', ids: [tanya.id],
+          cx: Math.round(tanya.cx + (dx / len) * 6),
+          cy: Math.round(tanya.cy + (dy / len) * 6),
+        });
+        reasons.push(`Tanya evade dog at (${nearestDog!.cx},${nearestDog!.cy})`);
+      } else if (this.isIdle(tanya)) {
+        const samTarget = state.structures.find(
+          (s) => s.t === 'SAM' && !s.ally &&
+            this.distanceSq(s, SCG05EA_SAM_TARGETS[this.scg05eaSamIndex]) <= 16,
+        );
+
+        if (!samTarget) {
+          this.scg05eaSamIndex++;
+          reasons.push(`SAM ${this.scg05eaSamIndex} destroyed, advancing`);
+        } else if (!this.scg05eaTanyaAtSams && this.scg05eaTanyaRouteIndex < SCG05EA_TANYA_ROUTE.length) {
+          const wp = SCG05EA_TANYA_ROUTE[this.scg05eaTanyaRouteIndex];
+          if (this.distanceSq(tanya, wp) <= 16) {
+            this.scg05eaTanyaRouteIndex++;
+          }
+          if (this.scg05eaTanyaRouteIndex >= SCG05EA_TANYA_ROUTE.length) {
+            this.scg05eaTanyaAtSams = true;
+          } else {
+            const next = SCG05EA_TANYA_ROUTE[this.scg05eaTanyaRouteIndex];
+            commands.push({ cmd: 'move', ids: [tanya.id], cx: next.cx, cy: next.cy });
+            reasons.push(`Tanya → route wp${this.scg05eaTanyaRouteIndex}`);
+          }
+        }
+
+        if (this.scg05eaTanyaAtSams && samTarget) {
+          commands.push({ cmd: 'attack_struct', ids: [tanya.id], structId: samTarget.id });
+          reasons.push(`Tanya → SAM ${this.scg05eaSamIndex + 1}/${SCG05EA_SAM_TARGETS.length}`);
+        }
+      } else {
+        reasons.push('Tanya en route');
+      }
+
+      // Other combat units defend while Tanya works
+      const combat = playerUnits.filter(
+        (u) => u.id !== tanya.id && this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
+      );
+      const nearbyEnemies = state.enemies.filter(
+        (e) => e.t !== 'DOG' && combat.some((u) => this.distanceSq(u, e) <= 225),
+      );
+      if (nearbyEnemies.length > 0 && combat.length > 0) {
+        const micro = this.microManage(combat, nearbyEnemies, this.centroid(combat));
+        commands.push(...micro.commands);
+        reasons.push(...micro.reasons);
+      }
+
+      return { commands, reason: reasons.join('; ') };
+    }
+
+    // ─── PHASE 3: Chinook evacuation ────────────────────────────────────
+    if (tanya && chinook && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length) {
+      if (this.isIdle(tanya)) {
+        commands.push({ cmd: 'enter', unitId: tanya.id, transportId: chinook.id });
+        reasons.push('Tanya → board chinook');
+      } else {
+        reasons.push('Tanya moving to chinook');
+      }
+      return { commands, reason: reasons.join('; ') };
+    }
+
+    // ─── PHASE 4: Destroy all enemies (generic base building) ───────────
+    if (this.scg05eaSpyInfiltrated) {
+      return this.decideGeneric(state);
+    }
+
+    return { commands, reason: 'waiting for spy arrival' };
+  }
+
   /**
    * SCG08EA "Chronoshift": Survive 45 minutes defending ATEK + PDOX.
    *
