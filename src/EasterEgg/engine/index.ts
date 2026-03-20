@@ -6376,9 +6376,12 @@ export class Game {
 
     // Render end screen overlay when game is over
     if (this.state === 'won' || this.state === 'lost') {
-      const structsBuilt = this.structures.filter(s => this.isAllied(s.house, this.playerHouse)).length;
-      const structsLost = this.structures.filter(s => !s.alive && this.isAllied(s.house, this.playerHouse)).length;
-      // Build survivors roster for victory screen
+      const survivingUnits = this.entities.filter(e =>
+        e.alive && this.isAllied(e.house, this.playerHouse)).length;
+      const isSovietPlayer = this.playerFaction === 'soviet';
+      const enemyCasualties = isSovietPlayer
+        ? (this.alliedUnitsLost + this.alliedBuildingsLost)
+        : (this.sovietUnitsLost + this.sovietBuildingsLost);
       const survivors = this.state === 'won'
         ? this.entities.filter(e => e.alive && e.isPlayerUnit).map(e => ({
             type: e.type, name: e.stats.name, hp: e.hp, maxHp: e.maxHp, kills: e.kills,
@@ -6386,12 +6389,19 @@ export class Game {
         : [];
       this.renderer.renderEndScreen(
         this.state === 'won',
-        this.killCount,
-        this.lossCount,
         this.tick,
-        structsBuilt,
-        structsLost,
+        this.pointTotal,
+        survivingUnits,
+        enemyCasualties,
         this.credits,
+        this.stolenCredits,
+        this.harvestedCredits,
+        this.initialCredits,
+        this.alliedUnitsLost,
+        this.sovietUnitsLost,
+        this.alliedBuildingsLost,
+        this.sovietBuildingsLost,
+        this.playerFaction === 'soviet' ? 'soviet' : 'allied',
         survivors,
       );
     }

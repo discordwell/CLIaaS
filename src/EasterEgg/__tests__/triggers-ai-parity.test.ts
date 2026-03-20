@@ -498,8 +498,8 @@ describe('AI6: Spy target exclusion', () => {
 
 // === Existing behavior preservation ===
 
-describe('Preserved behaviors: retaliation + wounded bonuses', () => {
-  it('wounded target scores higher than full-health same type', () => {
+describe('C++ parity: no TS-only wounded/retaliation/closing-speed bonuses', () => {
+  it('wounded target scores same as full-health (C++ has no wounded bonus)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const healthy = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     const wounded = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
@@ -508,12 +508,11 @@ describe('Preserved behaviors: retaliation + wounded bonuses', () => {
     const healthyScore = threatScore(scanner, healthy, 2, false);
     const woundedScore = threatScore(scanner, wounded, 2, false);
 
-    expect(woundedScore).toBeGreaterThan(healthyScore);
-    // Wounded bonus is 1.5x
-    expect(woundedScore / healthyScore).toBeCloseTo(1.5, 1);
+    // C++ parity: threatScore uses Value()+Crew.Kills, not current HP
+    expect(woundedScore).toBe(healthyScore);
   });
 
-  it('target attacking allies gets 2x retaliation bonus', () => {
+  it('isTargetAttackingAlly flag has no effect (C++ has no retaliation bonus)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const passive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     const aggressive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
@@ -521,18 +520,18 @@ describe('Preserved behaviors: retaliation + wounded bonuses', () => {
     const passiveScore = threatScore(scanner, passive, 2, false);
     const aggressiveScore = threatScore(scanner, aggressive, 2, true);
 
-    expect(aggressiveScore).toBeGreaterThan(passiveScore);
-    expect(aggressiveScore / passiveScore).toBeCloseTo(2.0, 1);
+    // C++ parity: no retaliation multiplier in Evaluate_Object
+    expect(aggressiveScore).toBe(passiveScore);
   });
 
-  it('closing speed bonus gives +25%', () => {
+  it('closing speed has no effect (C++ has no closing speed bonus)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const target = makeEntity(UnitType.ANT1, House.USSR, 200, 100);
 
     const stationaryScore = threatScore(scanner, target, 3, false, 0);
     const closingScore = threatScore(scanner, target, 3, false, 2);
 
-    expect(closingScore).toBeGreaterThan(stationaryScore);
-    expect(closingScore / stationaryScore).toBeCloseTo(1.25, 1);
+    // C++ parity: no closing speed factor in Evaluate_Object
+    expect(closingScore).toBe(stationaryScore);
   });
 });

@@ -424,15 +424,15 @@ describe('Civilian threat scoring penalty (techno.cpp:1449-1763)', () => {
     expect(chanScore).toBeLessThan(combatantScore);
   });
 
-  it('civilian attacking allies does NOT get the penalty (isTargetAttackingAlly=true)', () => {
+  it('civilian attacking allies flag has no effect (C++ has no retaliation bonus)', () => {
     const scanner = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const c1 = entityAtCell(UnitType.I_C1, House.Spain, 11, 10);
 
     const penalizedScore = threatScore(scanner, c1, 1, false);
     const unpenalizedScore = threatScore(scanner, c1, 1, true);
 
-    // When attacking allies, the penalty is skipped and retaliation bonus applies
-    expect(unpenalizedScore).toBeGreaterThan(penalizedScore);
+    // C++ parity: isTargetAttackingAlly is not used in Evaluate_Object
+    expect(unpenalizedScore).toBe(penalizedScore);
   });
 });
 

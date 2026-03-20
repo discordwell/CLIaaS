@@ -4040,71 +4040,119 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
-  // ─── End Screen ─────────────────────────────────────────
+  // ─── End Screen (C++ score.cpp:365-884 parity) ─────────
+
+  /** C++ fixed-point 100*fixed(n,d) — score.cpp uses fixed.h/fixed.cpp
+   *  fixed(n,d).Raw = (n*256)/d; 100*fixed = ((Raw*100)+128)/256 */
+  private static fixedMul100(n: number, d: number): number {
+    if (d === 0) return 0;
+    const raw = Math.trunc((n * 256) / d);
+    return Math.trunc(((raw * 100) + 128) / 256);
+  }
 
   renderEndScreen(
     won: boolean,
-    killCount: number,
-    lossCount: number,
     tick: number,
-    structsBuilt = 0,
-    structsLost = 0,
-    creditsRemaining = 0,
+    pointTotal: number,
+    survivingUnits: number,
+    enemyCasualties: number,
+    creditsRemaining: number,
+    stolenCredits: number,
+    harvestedCredits: number,
+    initialCredits: number,
+    alliedUnitsLost: number,
+    sovietUnitsLost: number,
+    alliedBuildingsLost: number,
+    sovietBuildingsLost: number,
+    playerSide: 'allied' | 'soviet',
     survivors: Array<{ type: string; name: string; hp: number; maxHp: number; kills: number }> = [],
   ): void {
     const ctx = this.ctx;
     const w = this.width;
     const h = this.height;
 
-    // Initialize score animation timer on first render
     if (this.scoreAnimStartTime === 0) {
       this.scoreAnimStartTime = Date.now();
       this.scoreAnimActive = true;
     }
-    const scoreAnimTick = (Date.now() - this.scoreAnimStartTime) / 1000;
-    const animProgress = Math.min(1, scoreAnimTick / 1.5); // 1.5s to count up
-    const animateValue = (val: number) => Math.floor(val * animProgress);
+    const elapsed = (Date.now() - this.scoreAnimStartTime) / 1000;
 
-    // Semi-transparent overlay
-    ctx.fillStyle = won ? 'rgba(0,40,0,0.75)' : 'rgba(60,0,0,0.75)';
+    // === C++ Score Calculation (score.cpp:546-597) ===
+    let uspoints = pointTotal;
+    switch (this.difficulty) {
+      case 'easy':   uspoints += 500;  break;
+      case 'normal': uspoints += 1500; break;
+      case 'hard':   uspoints += 3500; break;
+    }
+
+    let leadershipRaw = survivingUnits;
+    if (!leadershipRaw) leadershipRaw = 1;
+    const leadership = Math.min(150,
+      Renderer.fixedMul100(leadershipRaw, enemyCasualties + leadershipRaw));
+
+    const economy = Math.min(150,
+      Renderer.fixedMul100(creditsRemaining + 1 + stolenCredits,
+        harvestedCredits + initialCredits + 1));
+
+    let total = Math.trunc((uspoints * leadership) / 100) + Math.trunc((uspoints * economy) / 100);
+    if (total < -9999) total = -9999;
+    total = Math.min(total, 99999);
+
+    // === Time display (score.cpp:439, 1357-1370) ===
+    const TIMER_MINUTE = 900;
+    let displayMinutes = Math.trunc(tick / TIMER_MINUTE) + 1;
+    if (Math.trunc(displayMinutes / 60) > 9) displayMinutes = 9 * 60 + 59;
+    const timeHrs = Math.trunc(displayMinutes / 60);
+    const timeMins = displayMinutes % 60;
+    const timeStr = `${timeHrs}:${timeMins.toString().padStart(2, '0')}`;
+
+    // === Animation phases ===
+    const phase1Progress = Math.min(1, elapsed / 3.0);
+    const phase2Progress = elapsed > 3.0 ? Math.min(1, (elapsed - 3.0) / 2.0) : 0;
+    const phase3 = elapsed > 5.0;
+
+    // === Background ===
+    const isAllied = playerSide === 'allied';
+    ctx.fillStyle = isAllied
+      ? (won ? 'rgba(0,20,50,0.82)' : 'rgba(40,10,10,0.82)')
+      : (won ? 'rgba(50,10,10,0.82)' : 'rgba(40,10,10,0.82)');
     ctx.fillRect(0, 0, w, h);
 
-    // Score panel border
-    const panelW = 280;
+    // === Panel ===
+    const panelW = 300;
     const survivorRows = won && survivors.length > 0 ? Math.ceil(new Set(survivors.map(s => s.type)).size / 3) + 2 : 0;
-    const panelH = 260 + survivorRows * 12;
+    const panelH = 340 + survivorRows * 12;
     const px = (w - panelW) / 2;
-    const py = (h - panelH) / 2 - 20;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    const py = (h - panelH) / 2 - 10;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(px, py, panelW, panelH);
-    ctx.strokeStyle = won ? '#4a4' : '#a44';
+    ctx.strokeStyle = isAllied ? '#4466aa' : '#aa4444';
     ctx.lineWidth = 2;
     ctx.strokeRect(px, py, panelW, panelH);
 
-    // Title
+    // === Title ===
     ctx.textAlign = 'center';
-    ctx.font = 'bold 18px monospace';
-    ctx.fillStyle = won ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
-    ctx.fillText(won ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED', w / 2, py + 24);
+    ctx.font = 'bold 16px monospace';
+    ctx.fillStyle = won ? '#44cc44' : '#cc4444';
+    ctx.fillText(won ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED', w / 2, py + 22);
 
-    // Divider
-    ctx.strokeStyle = '#555';
+    ctx.strokeStyle = '#444';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(px + 10, py + 34);
-    ctx.lineTo(px + panelW - 10, py + 34);
+    ctx.moveTo(px + 10, py + 30);
+    ctx.lineTo(px + panelW - 10, py + 30);
     ctx.stroke();
 
-    // Stats — RA-style table layout with animated counters
-    ctx.font = '11px monospace';
+    // === Phase 1: Ratings ===
     const leftX = px + 16;
     const rightX = px + panelW - 16;
-    let row = py + 54;
-    const rowH = 20;
+    let row = py + 48;
+    const rowH = 18;
 
     const drawRow = (label: string, value: string, color = '#ccc') => {
       ctx.textAlign = 'left';
-      ctx.fillStyle = '#999';
+      ctx.font = '11px monospace';
+      ctx.fillStyle = '#8a8';
       ctx.fillText(label, leftX, row);
       ctx.textAlign = 'right';
       ctx.fillStyle = color;
@@ -4112,76 +4160,103 @@ export class Renderer {
       row += rowH;
     };
 
-    const minutes = Math.floor(tick / (15 * 60));
-    const seconds = Math.floor((tick / 15) % 60);
-    const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    drawRow('Time', timeStr);
-    drawRow('Enemies Killed', String(animateValue(killCount)), '#f84');
-    drawRow('Units Lost', String(animateValue(lossCount)), lossCount > 0 ? '#f44' : '#8f8');
-    drawRow('Structures Built', String(animateValue(structsBuilt)), '#8cf');
-    drawRow('Structures Lost', String(animateValue(structsLost)), structsLost > 0 ? '#f44' : '#8f8');
-    drawRow('Credits Remaining', `$${animateValue(creditsRemaining)}`, '#FFD700');
+    drawRow('TIME', timeStr, '#88cc88');
 
-    // Score calculation (RA-style: kills * 50 - losses * 30 + time bonus)
-    const timeBonus = Math.max(0, 1000 - Math.floor(tick / 15));
-    const score = killCount * 50 - lossCount * 30 - structsLost * 100 + timeBonus;
-    row += 4;
+    const animLead = Math.floor(leadership * phase1Progress);
+    drawRow('LEADERSHIP', `${animLead}%`, '#88cc88');
+
+    const econDelay = Math.max(0, (phase1Progress - 0.23) / 0.77);
+    const animEcon = Math.floor(economy * econDelay);
+    drawRow('ECONOMY', `${animEcon}%`, '#88cc88');
+
+    if (phase1Progress > 0.5) {
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#668';
+      ctx.fillText(`x ${uspoints}`, rightX, row);
+      row += 14;
+    } else {
+      row += 14;
+    }
+
+    ctx.strokeStyle = phase1Progress >= 0.85 ? '#88cc88' : '#333';
     ctx.beginPath();
-    ctx.moveTo(px + 10, row - 14);
-    ctx.lineTo(px + panelW - 10, row - 14);
+    ctx.moveTo(px + panelW / 2, row - 8);
+    ctx.lineTo(rightX, row - 8);
     ctx.stroke();
-    ctx.font = 'bold 13px monospace';
-    drawRow('SCORE', String(Math.max(0, animateValue(score))), '#FFD700');
 
-    // Letter grade based on score
-    const finalScore = Math.max(0, score);
-    const grade = finalScore >= 2000 ? 'S' : finalScore >= 1500 ? 'A' : finalScore >= 1000 ? 'B' : finalScore >= 500 ? 'C' : finalScore >= 200 ? 'D' : 'F';
-    const gradeColor = grade === 'S' ? '#FFD700' : grade === 'A' ? '#C0C0C0' : grade === 'B' ? '#CD7F32' : '#888';
-    if (animProgress >= 1) {
-      ctx.font = 'bold 24px monospace';
+    if (phase1Progress >= 0.9) {
+      const totalProgress = Math.min(1, (phase1Progress - 0.9) / 0.1);
+      const animTotal = Math.floor(total * totalProgress);
+      ctx.font = 'bold 13px monospace';
+      drawRow('TOTAL', String(animTotal), '#FFD700');
+    } else {
+      row += rowH;
+    }
+
+    row += 6;
+
+    // === Phase 2: Casualty Bar Graphs ===
+    if (phase2Progress > 0) {
+      ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillStyle = gradeColor;
-      ctx.fillText(grade, w / 2, row + 4);
-      row += 28;
+      ctx.fillStyle = '#88cc88';
+      ctx.fillText('CASUALTIES', w / 2, row);
+      row += 14;
+
+      const barW = panelW - 80;
+      const barH = 10;
+      const barX = px + 40;
+
+      const drawBarPair = (alliedVal: number, sovietVal: number, label1: string, label2: string) => {
+        const maxVal = Math.max(alliedVal, sovietVal, 1);
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#6688cc';
+        ctx.fillText(label1, barX - 4, row + 8);
+        ctx.fillStyle = '#223';
+        ctx.fillRect(barX, row, barW, barH);
+        ctx.fillStyle = '#4466aa';
+        ctx.fillRect(barX, row, barW * (alliedVal / maxVal) * phase2Progress, barH);
+        if (alliedVal > 0) {
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#aac';
+          ctx.fillText(String(Math.floor(alliedVal * phase2Progress)), barX + barW + 4, row + 8);
+        }
+        row += barH + 3;
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#cc6666';
+        ctx.fillText(label2, barX - 4, row + 8);
+        ctx.fillStyle = '#322';
+        ctx.fillRect(barX, row, barW, barH);
+        ctx.fillStyle = '#aa4444';
+        ctx.fillRect(barX, row, barW * (sovietVal / maxVal) * phase2Progress, barH);
+        if (sovietVal > 0) {
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#caa';
+          ctx.fillText(String(Math.floor(sovietVal * phase2Progress)), barX + barW + 4, row + 8);
+        }
+        row += barH + 8;
+      };
+
+      drawBarPair(alliedUnitsLost, sovietUnitsLost, 'ALLIES', 'SOVIET');
+
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#88cc88';
+      ctx.fillText('BUILDINGS DESTROYED', w / 2, row);
+      row += 14;
+      drawBarPair(alliedBuildingsLost, sovietBuildingsLost, 'ALLIES', 'SOVIET');
     }
 
-    // Bar graph: kills vs losses
-    if (animProgress > 0.5) {
-      const barProgress = Math.min(1, (animProgress - 0.5) * 2);
-      const barW = 100;
-      const barH = 8;
-      const barX = (w - barW) / 2;
-      const maxVal = Math.max(killCount, lossCount, 1);
-      // Kills bar (green)
-      ctx.fillStyle = '#111';
-      ctx.fillRect(barX, row, barW, barH);
-      ctx.fillStyle = '#4a4';
-      ctx.fillRect(barX, row, barW * (killCount / maxVal) * barProgress, barH);
-      ctx.font = '7px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#8f8';
-      ctx.fillText('K', barX - 10, row + 7);
-      row += barH + 3;
-      // Losses bar (red)
-      ctx.fillStyle = '#111';
-      ctx.fillRect(barX, row, barW, barH);
-      ctx.fillStyle = '#a44';
-      ctx.fillRect(barX, row, barW * (lossCount / maxVal) * barProgress, barH);
-      ctx.fillStyle = '#f88';
-      ctx.fillText('L', barX - 10, row + 7);
-      row += barH + 6;
-      ctx.textAlign = 'left';
-    }
-
-    // Survivors roster (victory only)
-    if (won && survivors.length > 0) {
-      row += 6;
+    // === Phase 3: Survivors ===
+    if (phase3 && won && survivors.length > 0) {
+      row += 2;
       ctx.font = 'bold 9px monospace';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#8cf';
       ctx.fillText('SURVIVING FORCES', w / 2, row);
       row += 12;
-      // Group by type
       const typeCounts = new Map<string, { count: number; name: string; totalKills: number }>();
       for (const s of survivors) {
         const entry = typeCounts.get(s.type) ?? { count: 0, name: s.name, totalKills: 0 };
@@ -4192,7 +4267,7 @@ export class Renderer {
       ctx.font = '9px monospace';
       let col = 0;
       for (const [, info] of typeCounts) {
-        const tx = px + 16 + col * 90;
+        const tx = px + 16 + col * 95;
         if (tx + 80 > px + panelW) break;
         ctx.textAlign = 'left';
         ctx.fillStyle = '#aaa';
@@ -4204,12 +4279,16 @@ export class Renderer {
       if (col > 0) row += 11;
     }
 
-    // Prompt
-    ctx.font = '12px monospace';
-    ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
-    const promptY = Math.max(row + 20, h / 2 + 70);
-    ctx.textAlign = 'center';
-    ctx.fillText('Press any key to continue', w / 2, promptY);
+    // === Prompt ===
+    if (phase3 || elapsed > 4.0) {
+      const blink = Math.floor(elapsed * 2) % 2 === 0;
+      ctx.font = '11px monospace';
+      ctx.fillStyle = blink ? '#cc8' : '#664';
+      const promptY = Math.max(row + 16, py + panelH - 18);
+      ctx.textAlign = 'center';
+      ctx.fillText('Click to continue', w / 2, promptY);
+    }
+
     ctx.textAlign = 'left';
   }
 
