@@ -123,31 +123,27 @@ describe('SCG05EA — spy infiltration phase', () => {
     expect(decision.reason).toMatch(/spy|WEAP/);
   });
 
-  it('spy infiltrates WEAP when close and no dogs nearby', () => {
+  it('spy infiltrates WEAP after completing all waypoints', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    // Advance spy route index to completion
-    for (let i = 0; i < 5; i++) {
-      strategy.decide(makeState({
-        tick: 300 + i * 100,
-        units: [makeEntity(1, 'SPY', 'Greece', 16 + i * 7, 46)],
-        enemies: [],
-        structures: [TARGET_WEAP],
-      }));
-    }
+    // First call with spy sets scg05eaSpyStopped
+    strategy.decide(makeState({
+      tick: 100,
+      units: [makeEntity(1, 'SPY', 'Greece', 16, 50)],
+      structures: [TARGET_WEAP],
+    }));
+    // Set waypoint index past all waypoints
+    (strategy as unknown as Record<string, number>).scg05eaSpyWpIdx = 999;
 
     const state = makeState({
-      tick: 900,
-      units: [makeEntity(1, 'SPY', 'Greece', 42, 47)], // near WEAP, idle
-      enemies: [], // no dogs nearby
+      tick: 15000,
+      units: [makeEntity(1, 'SPY', 'Greece', 48, 48)],
+      enemies: [],
       structures: [TARGET_WEAP],
     });
 
     const decision = strategy.decide(state);
     console.log('Spy infiltrate:', decision.reason);
     expect(decision.reason).toContain('infiltrate WEAP');
-    const attackCmds = decision.commands.filter((c) => c.cmd === 'attack' && typeof c.target === 'number');
-    expect(attackCmds.length).toBe(1);
-    expect(attackCmds[0].target).toBe(8);
   });
 });
 

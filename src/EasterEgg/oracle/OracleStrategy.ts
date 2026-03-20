@@ -9,6 +9,14 @@
 import type { RAGameState, RAEntity, RAStructure, RABuildable } from './WasmAdapter';
 import { getCoastalCellsFromText } from './mapParser';
 
+/**
+ * TS engine runs at 20 Hz. Oracle tick constants should use sec() to
+ * convert from game seconds to TS ticks so timing is correct regardless
+ * of engine tick rate.
+ */
+const TS_HZ = 20;
+function sec(seconds: number): number { return Math.round(seconds * TS_HZ); }
+
 export interface OracleDecision {
   commands: Array<Record<string, unknown>>;
   reason: string;
@@ -424,9 +432,10 @@ export class OracleStrategy {
   private static readonly COASTAL_CELLS: Record<string, Point[]> = {
     'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
     'SCG11EA': [
-      { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
-      { cx: 26, cy: 85 }, { cx: 18, cy: 86 }, { cx: 28, cy: 84 },
-      { cx: 22, cy: 83 }, { cx: 24, cy: 82 }, { cx: 20, cy: 84 },
+      // Island perimeter — base at (25,96), island spans ~(22-28, 94-99)
+      { cx: 25, cy: 94 }, { cx: 25, cy: 99 }, { cx: 22, cy: 96 },
+      { cx: 28, cy: 96 }, { cx: 23, cy: 94 }, { cx: 27, cy: 94 },
+      { cx: 23, cy: 99 }, { cx: 27, cy: 99 }, { cx: 25, cy: 100 },
     ],
     'SCG11EB': [
       { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
@@ -448,13 +457,13 @@ export class OracleStrategy {
     if (
       state.units.length === 0 &&
       state.structures.filter((s) => s.ally).length === 0 &&
-      state.tick > 100 &&
+      state.tick > sec(7) &&
       this.peakUnits > 0
     ) {
       return 'defeat';
     }
 
-    if ((this.scenario === 'SCG01EA' || this.scenario === 'SCG03EA') && this.sawTanya && state.tick > 240) {
+    if ((this.scenario === 'SCG01EA' || this.scenario === 'SCG03EA') && this.sawTanya && state.tick > sec(16)) {
       const tanyaAlive = state.units.some((u) => u.t === 'E7');
       if (!tanyaAlive) {
         return 'defeat';
@@ -472,8 +481,8 @@ export class OracleStrategy {
 
     if (
       state.enemies.length === 0 &&
-      state.tick > 200 &&
-      this.ticksSinceLastEnemy > 3000 &&
+      state.tick > sec(13) &&
+      this.ticksSinceLastEnemy > sec(200) &&
       this.lastEnemyCount > 0 &&
       this.exploreIndex >= EXPLORE_WAYPOINTS.length
     ) {
@@ -517,7 +526,7 @@ export class OracleStrategy {
 
     // Early game before MCV arrives — stay defensive, don't scatter
     // But only if we DON'T have an existing base (if we do, decideGenericCombat handles it)
-    if (state.tick < 1500 && playerUnits.length > 0 && !hasConYard && alliedStructures.length === 0) {
+    if (state.tick < sec(100) && playerUnits.length > 0 && !hasConYard && alliedStructures.length === 0) {
       const commands: Array<Record<string, unknown>> = [];
       const reasons: string[] = [];
       const combat = playerUnits.filter(
@@ -568,8 +577,8 @@ export class OracleStrategy {
       } else if (this.isIdle(mcv)) {
         commands.push({ cmd: 'deploy', ids: [mcv.id] });
         this.mcvDeployAttempts++;
-        reasons.push(mcvAge > 300 ? `deploy MCV (idle, ${mcvAge} ticks)` : 'deploy MCV');
-      } else if (mcvAge > 2000 && this.mcvDeployAttempts === 0) {
+        reasons.push(mcvAge > sec(20) ? `deploy MCV (idle, ${mcvAge} ticks)` : 'deploy MCV');
+      } else if (mcvAge > sec(133) && this.mcvDeployAttempts === 0) {
         // MCV never became idle — force deploy anyway (might be in non-idle guard state)
         commands.push({ cmd: 'deploy', ids: [mcv.id] });
         this.mcvDeployAttempts++;
@@ -724,7 +733,7 @@ export class OracleStrategy {
             cx: cell.cx,
             cy: cell.cy,
           });
-          if (state.tick - this.lastPlacementTick > 30) {
+          if (state.tick - this.lastPlacementTick > sec(2)) {
             this.placementAttempts++;
             this.lastPlacementTick = state.tick;
           }
@@ -793,7 +802,7 @@ export class OracleStrategy {
           cy: placeCy,
         });
         // Cycle through placement offsets on repeated attempts
-        if (state.tick - this.lastPlacementTick > 60) {
+        if (state.tick - this.lastPlacementTick > sec(4)) {
           this.placementAttempts++;
           this.lastPlacementTick = state.tick;
         }
@@ -1301,7 +1310,7 @@ export class OracleStrategy {
             reasons.push(`rally ${stray.length} to base`);
           }
           reasons.push(`building up (${tankCount} tanks, ${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)})`);
-          if (!isTimedSurvival && this.ticksSinceLastEnemy > 150) {
+          if (!isTimedSurvival && this.ticksSinceLastEnemy > sec(10)) {
             const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
             if (scout) {
               const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
@@ -1312,7 +1321,7 @@ export class OracleStrategy {
           }
         } else {
           // No enemies — scout
-          if (this.ticksSinceLastEnemy > 90) {
+          if (this.ticksSinceLastEnemy > sec(6)) {
             const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
             if (scout) {
               const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
@@ -1378,7 +1387,7 @@ export class OracleStrategy {
       } else {
         // Outgunned — send one scout, keep rest defensive
         const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[healthy.length - 1];
-        if (scout && (this.ticksSinceLastEnemy > 120 || this.isIdle(scout))) {
+        if (scout && (this.ticksSinceLastEnemy > sec(8) || this.isIdle(scout))) {
           const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
           commands.push({
             cmd: 'attack_move',
@@ -1393,7 +1402,7 @@ export class OracleStrategy {
     }
 
     if (state.enemies.length === 0 && healthy.length > 0) {
-      if (this.ticksSinceLastEnemy > 90 || healthy.some((u) => this.isIdle(u))) {
+      if (this.ticksSinceLastEnemy > sec(6) || healthy.some((u) => this.isIdle(u))) {
         // Send one scout, not the whole army
         const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
         if (scout) {
@@ -1946,7 +1955,7 @@ export class OracleStrategy {
     // 1. Spy was previously seen (spyStopped flag set)
     // 2. Spy is now gone from units
     // 3. Game is NOT in lost state
-    if (!this.scg05eaSpyInfiltrated && !spy && this.scg05eaSpyStopped && state.tick > 200) {
+    if (!this.scg05eaSpyInfiltrated && !spy && this.scg05eaSpyStopped && state.tick > sec(13)) {
       this.scg05eaSpyInfiltrated = true;
     }
 
