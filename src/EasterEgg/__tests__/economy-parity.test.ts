@@ -366,9 +366,9 @@ describe('Economy Parity (C++ Red Alert)', () => {
       expect(mult).toBeLessThanOrEqual(1.0);
     });
 
-    it('clear terrain speed is exactly 1.0', () => {
+    it('clear terrain speed is 0.60 for WHEEL (C++ RULES.INI)', () => {
       const mult = map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL);
-      expect(mult).toBe(1.0);
+      expect(mult).toBe(0.60);
     });
 
     it('WINGED always returns 1.0', () => {
@@ -394,44 +394,44 @@ describe('Economy Parity (C++ Red Alert)', () => {
   // === MV5: Terrain speed values for Ore, Beach, Rough, River ===
 
   describe('MV5: Terrain speed values', () => {
-    it('Ore terrain gives 0.8 speed multiplier for WHEEL', () => {
+    it('Ore terrain gives 0.50 speed multiplier for WHEEL (C++ RULES.INI)', () => {
       map.setTerrain(50, 50, Terrain.ORE);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.8);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.50);
     });
 
-    it('Ore terrain gives 0.8 speed multiplier for FOOT', () => {
+    it('Ore terrain gives 0.90 speed multiplier for FOOT (C++ RULES.INI)', () => {
       map.setTerrain(50, 50, Terrain.ORE);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.8);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.90);
     });
 
-    it('Beach terrain gives 0.6 speed multiplier for WHEEL', () => {
+    it('Beach terrain gives 0.40 speed multiplier for WHEEL (C++ RULES.INI)', () => {
       map.setTerrain(50, 50, Terrain.BEACH);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.6);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.40);
     });
 
-    it('Beach terrain gives 0.6 speed multiplier for FOOT', () => {
+    it('Beach terrain gives 0.80 speed multiplier for FOOT (C++ RULES.INI)', () => {
       map.setTerrain(50, 50, Terrain.BEACH);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.6);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.80);
     });
 
-    it('Rough terrain gives 0.6 speed multiplier for WHEEL', () => {
+    it('Rough terrain gives 0.40 speed multiplier for WHEEL (C++ RULES.INI)', () => {
       map.setTerrain(50, 50, Terrain.ROUGH);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.6);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.40);
     });
 
-    it('Rough terrain gives 0.6 speed multiplier for FOOT', () => {
+    it('Rough terrain gives 0.80 speed multiplier for FOOT (C++ RULES.INI)', () => {
       map.setTerrain(50, 50, Terrain.ROUGH);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.6);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.80);
     });
 
-    it('River terrain gives 0.4 speed multiplier for WHEEL', () => {
+    it('River terrain gives 0.0 speed multiplier for WHEEL (C++ RULES.INI impassable)', () => {
       map.setTerrain(50, 50, Terrain.RIVER);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.4);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.0);
     });
 
-    it('River terrain gives 0.4 speed multiplier for FOOT', () => {
+    it('River terrain gives 0.0 speed multiplier for FOOT (C++ RULES.INI impassable)', () => {
       map.setTerrain(50, 50, Terrain.RIVER);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.4);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.FOOT)).toBe(0.0);
     });
 
     it('new terrain types exist in Terrain enum', () => {

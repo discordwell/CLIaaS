@@ -843,32 +843,32 @@ describe('Rotation mechanics', () => {
 // ============================================================================
 
 describe('Terrain speed multipliers', () => {
-  it('CLEAR terrain gives full speed (1.0)', () => {
+  it('CLEAR terrain — C++ RULES.INI: Foot=0.90, Wheel=0.60', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.CLEAR);
 
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(1.0);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(1.0);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.90);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.60);
   });
 
-  it('ORE terrain reduces speed to 0.8', () => {
+  it('ORE terrain — C++ RULES.INI: Foot=0.90, Wheel=0.50', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.ORE);
 
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.8);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.8);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.90);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.50);
   });
 
-  it('FLOAT speed class: water=1.0, non-water=0.3', () => {
+  it('FLOAT speed class: water=1.0, non-water=0.0 (C++ RULES.INI)', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.WATER);
     map.setTerrain(6, 5, Terrain.CLEAR);
 
     expect(map.getSpeedMultiplier(5, 5, SpeedClass.FLOAT)).toBe(1.0);
-    expect(map.getSpeedMultiplier(6, 5, SpeedClass.FLOAT)).toBe(0.3);
+    expect(map.getSpeedMultiplier(6, 5, SpeedClass.FLOAT)).toBe(0.0);
   });
 
   it('WINGED speed class always returns 1.0 regardless of terrain', () => {

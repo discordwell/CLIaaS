@@ -3,29 +3,56 @@
  * The map is 128×128 cells but only a portion (typically 50×50) is playable.
  */
 
-import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX } from './types';
+import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, TERRAIN_SPEED } from './types';
 
-/** C++ Can_Enter_Cell() result enum — nuanced passability for pathfinding */
+/** C++ MoveType enum (defines.h:828-837) — Can_Enter_Cell() return values for pathfinding.
+ *  cpp-parity: values match C++ MOVE_OK..MOVE_NO exactly. */
 export enum MoveResult {
-  OK = 0,           // fully passable
-  IMPASSABLE = -1,  // terrain blocks permanently
-  OCCUPIED = 1,     // stationary unit blocking
-  TEMP_BLOCKED = 2, // unit passing through, will clear soon
+  OK = 0,           // MOVE_OK — no blockage
+  CLOAK = 1,        // MOVE_CLOAK — a cloaked blocking enemy object
+  OCCUPIED = 2,     // MOVE_MOVING_BLOCK — blocked, but only temporarily (stationary unit)
+  DESTROYABLE = 3,  // MOVE_DESTROYABLE — enemy unit or building is blocking
+  TEMP_BLOCKED = 4, // MOVE_TEMP — blocked by friendly unit
+  IMPASSABLE = 5,   // MOVE_NO — strictly prohibited terrain
 }
 
+/** C++ LandType enum (defines.h:2841-2855) — terrain classification per cell.
+ *  cpp-parity: ordinals 0-8 match C++ LAND_CLEAR..LAND_RIVER exactly.
+ *  TREE=9 is a TS extension (C++ uses TerrainClass objects on LAND_CLEAR cells). */
 export enum Terrain {
   CLEAR = 0,
-  WATER = 1,
-  ROCK = 2,
-  TREE = 3,
+  ROAD = 1,   // C++ LAND_ROAD — paved road surface
+  WATER = 2,
+  ROCK = 3,
   WALL = 4,
-  ORE = 5,
+  ORE = 5,    // C++ LAND_TIBERIUM
   BEACH = 6,
   ROUGH = 7,
   RIVER = 8,
+  TREE = 9,   // TS extension — C++ has no TREE LandType; trees are TerrainClass objects on CLEAR cells
 }
 
-const PASSABLE = new Set([Terrain.CLEAR, Terrain.ORE, Terrain.ROUGH, Terrain.BEACH]);
+const PASSABLE = new Set([Terrain.CLEAR, Terrain.ROAD, Terrain.ORE, Terrain.ROUGH, Terrain.BEACH]);
+
+/** C++ rules.cpp:864 Ground[land].Build — only CLEAR and ROAD terrain allow building placement.
+ *  ORE, ROUGH, BEACH are passable for movement but NOT buildable.
+ *  cpp-parity: rules.cpp:844-864 _lands[] defaults. */
+const BUILDABLE = new Set([Terrain.CLEAR, Terrain.ROAD]);
+
+/** Map Terrain enum values to TERRAIN_SPEED table keys.
+ *  C++ parity: TREE maps to 'Rock' (trees are impassable terrain objects in C++). */
+const TERRAIN_NAME_MAP: Record<number, string> = {
+  [Terrain.CLEAR]: 'Clear',
+  [Terrain.ROAD]: 'Road',
+  [Terrain.WATER]: 'Water',
+  [Terrain.ROCK]: 'Rock',
+  [Terrain.WALL]: 'Wall',
+  [Terrain.ORE]: 'Ore',
+  [Terrain.BEACH]: 'Beach',
+  [Terrain.ROUGH]: 'Rough',
+  [Terrain.RIVER]: 'River',
+  [Terrain.TREE]: 'Rock', // C++ parity — trees are TerrainClass on CLEAR, but impassable like Rock
+};
 
 export class GameMap {
   /** 128×128 grid of terrain types */
@@ -183,6 +210,18 @@ export class GameMap {
     return PASSABLE.has(this.getTerrain(cx, cy));
   }
 
+  /** C++ cell.cpp:498-503 Is_Clear_To_Build — check if a cell allows building placement.
+   *  Only CLEAR terrain is buildable (C++ Ground[land].Build).
+   *  ORE, ROUGH, BEACH are passable for movement but NOT buildable.
+   *  cpp-parity: rules.cpp:864, cell.cpp:453-513 */
+  isBuildable(cx: number, cy: number): boolean {
+    if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
+        cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
+      return false;
+    }
+    return BUILDABLE.has(this.getTerrain(cx, cy));
+  }
+
   /** Check if a cell is water-passable (for naval units) */
   isWaterPassable(cx: number, cy: number): boolean {
     if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
@@ -204,41 +243,31 @@ export class GameMap {
     return false;
   }
 
-  /** M1/MV5: Get terrain speed multiplier by SpeedClass (C++ drive.cpp Ground[terrain].Cost[speed_class]).
+  /** C++ drive.cpp Ground[terrain].Cost[speed_class] — terrain speed multiplier.
+   *  cpp-parity: uses TERRAIN_SPEED lookup table from types.ts which matches RULES.INI values.
    *  Defaults to WHEEL if no speedClass provided (backward compat with pathfinding).
-   *  MV5: All multipliers capped at 1.0 — roads/clear terrain cannot exceed base speed. */
+   *  WINGED always 1.0 (rules.cpp:862 hardcoded). TREE treated as Rock (C++ parity). */
   getSpeedMultiplier(cx: number, cy: number, speedClass: SpeedClass = SpeedClass.WHEEL): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 1.0;
-    // WINGED (aircraft) ignores terrain entirely
+    // C++ rules.cpp:862 — WINGED always fixed(1), aircraft ignore terrain
     if (speedClass === SpeedClass.WINGED) return 1.0;
     const terrain = this.cells[cy * MAP_CELLS + cx];
-    // FLOAT (ships) can only traverse water
-    if (speedClass === SpeedClass.FLOAT) return terrain === Terrain.WATER ? 1.0 : 0.3;
+
+    // Map Terrain enum to TERRAIN_SPEED table key
+    // C++ parity: TREE cells use Rock speed (impassable, 0.0 for all ground)
+    const terrainKey = TERRAIN_NAME_MAP[terrain];
+    const entry = TERRAIN_SPEED[terrainKey];
+    if (!entry) return 1.0; // unknown terrain defaults to full speed
+
+    // Check if cell has a road template overlay (overrides terrain speed)
     const tmpl = this.templateType[cy * MAP_CELLS + cx];
     const isRoad = tmpl >= TEMPLATE_ROAD_MIN && tmpl <= TEMPLATE_ROAD_MAX;
-
-    let mult: number;
-    if (speedClass === SpeedClass.FOOT) {
-      // Infantry: roads = base speed (capped at 1.0), trees slow significantly
-      if (terrain === Terrain.RIVER) mult = 0.4;
-      else if (terrain === Terrain.BEACH) mult = 0.6;
-      else if (terrain === Terrain.ROUGH) mult = 0.6;
-      else if (terrain === Terrain.ORE) mult = 0.8;
-      else if (terrain === Terrain.TREE) mult = 0.6;
-      else if (isRoad) mult = 1.0;
-      else mult = 1.0;
-    } else {
-      // WHEEL (all vehicles per udata.cpp:865) and TRACK
-      if (terrain === Terrain.RIVER) mult = 0.4;
-      else if (terrain === Terrain.BEACH) mult = 0.6;
-      else if (terrain === Terrain.ROUGH) mult = 0.6;
-      else if (terrain === Terrain.ORE) mult = 0.8;
-      else if (terrain === Terrain.TREE) mult = 0.85;
-      else if (isRoad) mult = 1.0;
-      else mult = 1.0;
+    if (isRoad && terrain === Terrain.CLEAR) {
+      const roadEntry = TERRAIN_SPEED['Road'];
+      if (roadEntry) return Math.min(roadEntry[speedClass], 1.0);
     }
-    // MV5: Cap all multipliers at 1.0 — no terrain makes units faster than base speed
-    return Math.min(mult, 1.0);
+
+    return Math.min(entry[speedClass], 1.0);
   }
 
   /** Check if cell is within playable bounds */

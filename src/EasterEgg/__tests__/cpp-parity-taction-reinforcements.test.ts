@@ -115,11 +115,11 @@ describe('TACTION_REINFORCEMENTS basic spawn', () => {
     const expectedX = 60 * 24;
     const expectedY = 60 * 24;
     const entity = result.spawned[0];
-    // Entity pos should be within ±24 pixels of the waypoint center (random spread)
-    expect(entity.pos.x).toBeGreaterThan(expectedX - 30);
-    expect(entity.pos.x).toBeLessThan(expectedX + 30);
-    expect(entity.pos.y).toBeGreaterThan(expectedY - 30);
-    expect(entity.pos.y).toBeLessThan(expectedY + 30);
+    // Entity pos should be within ±2 cells of the waypoint center (random spread + sub-cell offset)
+    expect(entity.pos.x).toBeGreaterThan(expectedX - 48);
+    expect(entity.pos.x).toBeLessThan(expectedX + 48);
+    expect(entity.pos.y).toBeGreaterThan(expectedY - 48);
+    expect(entity.pos.y).toBeLessThan(expectedY + 48);
   });
 
   it('spawns multiple member types in a single team', () => {

@@ -554,7 +554,9 @@ function makeFogContext(overrides: Partial<FogContext> = {}): FogContext {
 }
 
 describe('updateSubDetection — behavioral edge cases', () => {
-  it('does not detect subs out of detector sight range', () => {
+  it('C++ parity: global sonar detects distant subs when player has anti-sub (house.cpp:2622-2632)', () => {
+    // C++ sonar pulse iterates ALL vessels with no distance check — global sweep.
+    // When the player has an anti-sub unit, distant subs ARE detected.
     const detector = makeEntity(UnitType.V_DD, House.Spain, 100, 100);
     const sub = makeEntity(UnitType.V_SS, House.USSR, 100 + CELL_SIZE * 50, 100);
     sub.cloakState = CloakState.CLOAKED;
@@ -562,13 +564,14 @@ describe('updateSubDetection — behavioral edge cases', () => {
     const ctx = makeFogContext({ entities: [detector, sub] });
     updateSubDetection(ctx);
 
-    expect(sub.cloakState).toBe(CloakState.CLOAKED);
+    expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
   });
 
-  it('detects cloaked sub within detector sight range', () => {
+  it('C++ parity: scanner detects cloaked sub in adjacent cell (foot.cpp:1373-1386)', () => {
     const detector = makeEntity(UnitType.V_DD, House.Spain, 100, 100);
-    // Place sub within sight range (destroyer sight is typically 5-8 cells)
-    const sub = makeEntity(UnitType.V_SS, House.USSR, 100 + CELL_SIZE * 2, 100);
+    // C++ foot.cpp:1373-1386: scanner detection uses 8 adjacent cells (1-cell range).
+    // Place sub in adjacent cell (1 cell away).
+    const sub = makeEntity(UnitType.V_SS, House.USSR, 100 + CELL_SIZE, 100);
     sub.cloakState = CloakState.CLOAKED;
 
     const ctx = makeFogContext({ entities: [detector, sub] });
@@ -627,10 +630,12 @@ describe('updateSubDetection — behavioral edge cases', () => {
     expect(sub.cloakState).toBe(CloakState.CLOAKED);
   });
 
-  it('multiple detectors can independently detect subs', () => {
+  it('multiple detectors: sub adjacent to one detector is detected', () => {
+    // C++ foot.cpp:1373-1386: scanner adjacency — 1-cell range
+    // Sub is adjacent to d2 (1 cell away), not adjacent to d1
     const d1 = makeEntity(UnitType.V_DD, House.Spain, 100, 100);
     const d2 = makeEntity(UnitType.V_DD, House.Spain, 200, 100);
-    const sub = makeEntity(UnitType.V_SS, House.USSR, 150, 100);
+    const sub = makeEntity(UnitType.V_SS, House.USSR, 200 + CELL_SIZE, 100);
     sub.cloakState = CloakState.CLOAKED;
 
     const ctx = makeFogContext({ entities: [d1, d2, sub] });

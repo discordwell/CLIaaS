@@ -139,8 +139,11 @@ describe('placeStructure', () => {
   });
 
   it('keeps pendingPlacement for wall placement (allows chain-placing)', () => {
+    // C++ parity: walls require adjacency to a friendly structure (display.cpp:706-778)
+    const existing = makeStructure('FACT', House.Greece, 3, 3);
     const item = wallItem('BRIK', 25);
     const ctx = makePlacementCtx({
+      structures: [existing],
       pendingPlacement: item,
       credits: 500,
     });
@@ -152,8 +155,11 @@ describe('placeStructure', () => {
   });
 
   it('deducts credits for wall types when wallPlacementPrepaid is false', () => {
+    // C++ parity: walls require adjacency to a friendly structure (display.cpp:706-778)
+    const existing = makeStructure('FACT', House.Greece, 3, 3);
     const item = wallItem('SBAG', 25);
     const ctx = makePlacementCtx({
+      structures: [existing],
       pendingPlacement: item,
       wallPlacementPrepaid: false,
       credits: 500,
@@ -165,8 +171,11 @@ describe('placeStructure', () => {
   });
 
   it('does not deduct credits for walls when wallPlacementPrepaid is true', () => {
+    // C++ parity: walls require adjacency to a friendly structure (display.cpp:706-778)
+    const existing = makeStructure('FACT', House.Greece, 3, 3);
     const item = wallItem('FENC', 25);
     const ctx = makePlacementCtx({
+      structures: [existing],
       pendingPlacement: item,
       wallPlacementPrepaid: true,
       credits: 500,
@@ -182,8 +191,11 @@ describe('placeStructure', () => {
 
   it('wall types SBAG, FENC, BARB, BRIK all behave as walls', () => {
     for (const wallType of ['SBAG', 'FENC', 'BARB', 'BRIK']) {
+      // C++ parity: walls require adjacency to a friendly structure (display.cpp:706-778)
+      const existing = makeStructure('FACT', House.Greece, 3, 3);
       const item = wallItem(wallType, 25);
       const ctx = makePlacementCtx({
+        structures: [existing],
         pendingPlacement: item,
         credits: 500,
       });

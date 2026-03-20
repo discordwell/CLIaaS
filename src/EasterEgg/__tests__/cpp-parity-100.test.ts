@@ -39,11 +39,13 @@ describe('ParaBomb weapon stats match C++ RULES.INI', () => {
 // === Phase 6: MoveResult enum and canEnterCell ===
 
 describe('Phase 6: MoveResult passability nuance', () => {
-  it('MoveResult enum has correct values', () => {
+  it('MoveResult enum has correct values (C++ defines.h:828-837 MoveType)', () => {
     expect(MoveResult.OK).toBe(0);
-    expect(MoveResult.IMPASSABLE).toBe(-1);
-    expect(MoveResult.OCCUPIED).toBe(1);
-    expect(MoveResult.TEMP_BLOCKED).toBe(2);
+    expect(MoveResult.CLOAK).toBe(1);
+    expect(MoveResult.OCCUPIED).toBe(2);
+    expect(MoveResult.DESTROYABLE).toBe(3);
+    expect(MoveResult.TEMP_BLOCKED).toBe(4);
+    expect(MoveResult.IMPASSABLE).toBe(5);
   });
 
   it('canEnterCell returns IMPASSABLE for out-of-bounds', () => {

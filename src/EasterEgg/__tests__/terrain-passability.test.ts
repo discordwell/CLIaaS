@@ -199,11 +199,11 @@ describe('River template terrain classification', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.RIVER);
-    // Speed multiplier exists for RIVER (used if unit is somehow on it)
+    // C++ RULES.INI: River is impassable (0.0) for all ground units
     const footMult = map.getSpeedMultiplier(5, 5, SpeedClass.FOOT);
-    expect(footMult).toBe(0.4);
+    expect(footMult).toBe(0.0);
     const wheelMult = map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL);
-    expect(wheelMult).toBe(0.4);
+    expect(wheelMult).toBe(0.0);
     // But terrain is impassable — units should never pathfind onto it
     expect(map.isPassable(5, 5)).toBe(false);
   });
@@ -212,20 +212,20 @@ describe('River template terrain classification', () => {
 // === Speed multipliers for newly passable terrain ===
 
 describe('Speed multipliers for ROUGH and BEACH', () => {
-  it('ROUGH terrain slows ground units (0.6 multiplier)', () => {
+  it('ROUGH terrain — C++ RULES.INI: Foot=0.80, Wheel=0.40', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.ROUGH);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.6);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.6);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.80);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.40);
   });
 
-  it('BEACH terrain slows ground units (0.6 multiplier)', () => {
+  it('BEACH terrain — C++ RULES.INI: Foot=0.80, Wheel=0.40', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.BEACH);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.6);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.6);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.80);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.40);
   });
 
   it('WINGED speed class ignores terrain entirely', () => {

@@ -1181,7 +1181,9 @@ describe('updateFogOfWar with entities at map boundaries', () => {
     expect(() => updateFogOfWar(ctx)).not.toThrow();
   });
 
-  it('damaged entity at CONDITION_RED gets sight reduced to 1', () => {
+  it('C++ parity: damaged entity at CONDITION_RED keeps full sight (techno.cpp:5908)', () => {
+    // C++ techno.cpp:5908: sight_range = Techno_Type_Class()->SightRange
+    // No health-based reduction — sight is always the type's SightRange.
     const unit = makeEntity(UnitType.V_2TNK, House.Spain, 50 * CELL_SIZE, 50 * CELL_SIZE);
     // Set HP to below CONDITION_RED (25%)
     unit.hp = Math.floor(unit.maxHp * CONDITION_RED) - 1;
@@ -1202,7 +1204,7 @@ describe('updateFogOfWar with entities at map boundaries', () => {
     updateFogOfWar(ctx);
 
     expect(capturedUnits.length).toBe(1);
-    expect(capturedUnits[0].sight).toBe(1); // reduced sight at red health
+    expect(capturedUnits[0].sight).toBe(unit.stats.sight); // C++ uses full SightRange regardless of health
   });
 });
 

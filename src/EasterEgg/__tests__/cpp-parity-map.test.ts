@@ -44,23 +44,29 @@ describe('MoveResult enum values match C++ findpath.cpp', () => {
     expect(MoveResult.OK).toBe(0);
   });
 
-  it('IMPASSABLE = -1 (terrain blocks permanently)', () => {
-    expect(MoveResult.IMPASSABLE).toBe(-1);
+  it('CLOAK = 1 (cloaked blocking enemy)', () => {
+    expect(MoveResult.CLOAK).toBe(1);
   });
 
-  it('OCCUPIED = 1 (stationary unit blocking)', () => {
-    expect(MoveResult.OCCUPIED).toBe(1);
+  it('OCCUPIED = 2 (blocked, temporarily)', () => {
+    expect(MoveResult.OCCUPIED).toBe(2);
   });
 
-  it('TEMP_BLOCKED = 2 (unit passing through, will clear soon)', () => {
-    expect(MoveResult.TEMP_BLOCKED).toBe(2);
+  it('DESTROYABLE = 3 (enemy unit or building blocking)', () => {
+    expect(MoveResult.DESTROYABLE).toBe(3);
   });
 
-  it('has exactly 4 members', () => {
-    // Numeric enums in TS have forward+reverse mappings; count only numeric keys
+  it('TEMP_BLOCKED = 4 (friendly unit blocking)', () => {
+    expect(MoveResult.TEMP_BLOCKED).toBe(4);
+  });
+
+  it('IMPASSABLE = 5 (terrain blocks permanently)', () => {
+    expect(MoveResult.IMPASSABLE).toBe(5);
+  });
+
+  it('has exactly 6 members (C++ MOVE_COUNT = 6)', () => {
     const numericKeys = Object.keys(MoveResult).filter(k => !isNaN(Number(k)));
-    // OK(0), OCCUPIED(1), TEMP_BLOCKED(2) plus IMPASSABLE(-1) = 4 numeric keys
-    expect(numericKeys.length).toBe(4);
+    expect(numericKeys.length).toBe(6);
   });
 });
 
@@ -71,18 +77,19 @@ describe('MoveResult enum values match C++ findpath.cpp', () => {
 describe('Terrain enum values match C++ cell.cpp', () => {
 
   it('CLEAR = 0', () => expect(Terrain.CLEAR).toBe(0));
-  it('WATER = 1', () => expect(Terrain.WATER).toBe(1));
-  it('ROCK = 2', () => expect(Terrain.ROCK).toBe(2));
-  it('TREE = 3', () => expect(Terrain.TREE).toBe(3));
+  it('ROAD = 1', () => expect(Terrain.ROAD).toBe(1));
+  it('WATER = 2', () => expect(Terrain.WATER).toBe(2));
+  it('ROCK = 3', () => expect(Terrain.ROCK).toBe(3));
   it('WALL = 4', () => expect(Terrain.WALL).toBe(4));
   it('ORE = 5', () => expect(Terrain.ORE).toBe(5));
   it('BEACH = 6', () => expect(Terrain.BEACH).toBe(6));
   it('ROUGH = 7', () => expect(Terrain.ROUGH).toBe(7));
   it('RIVER = 8', () => expect(Terrain.RIVER).toBe(8));
+  it('TREE = 9 (TS extension)', () => expect(Terrain.TREE).toBe(9));
 
-  it('has exactly 9 terrain types', () => {
+  it('has 10 terrain types (9 C++ + TREE TS extension)', () => {
     const numericKeys = Object.keys(Terrain).filter(k => !isNaN(Number(k)));
-    expect(numericKeys.length).toBe(9);
+    expect(numericKeys.length).toBe(10);
   });
 });
 
@@ -643,34 +650,34 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
 
   // -- WHEEL (default, all vehicles) --
 
-  it('WHEEL: CLEAR = 1.0', () => {
+  it('WHEEL: CLEAR = 0.60 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(1.0);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
   });
 
-  it('WHEEL: RIVER = 0.4', () => {
+  it('WHEEL: RIVER = 0.0 (C++ RULES.INI impassable)', () => {
     map.setTerrain(15, 15, Terrain.RIVER);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.4);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.0);
   });
 
-  it('WHEEL: BEACH = 0.6', () => {
+  it('WHEEL: BEACH = 0.40 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.BEACH);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.6);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.40);
   });
 
-  it('WHEEL: ROUGH = 0.6', () => {
+  it('WHEEL: ROUGH = 0.40 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.ROUGH);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.6);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.40);
   });
 
-  it('WHEEL: ORE = 0.8', () => {
+  it('WHEEL: ORE = 0.50 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.ORE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.8);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.50);
   });
 
-  it('WHEEL: TREE = 0.85', () => {
+  it('WHEEL: TREE = 0.0 (TREE maps to Rock, impassable)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.85);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.0);
   });
 
   it('WHEEL: road template = 1.0', () => {
@@ -681,34 +688,34 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
 
   // -- FOOT (infantry) --
 
-  it('FOOT: CLEAR = 1.0', () => {
+  it('FOOT: CLEAR = 0.90 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(1.0);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.90);
   });
 
-  it('FOOT: RIVER = 0.4', () => {
+  it('FOOT: RIVER = 0.0 (C++ RULES.INI impassable)', () => {
     map.setTerrain(15, 15, Terrain.RIVER);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.4);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.0);
   });
 
-  it('FOOT: BEACH = 0.6', () => {
+  it('FOOT: BEACH = 0.80 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.BEACH);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.6);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.80);
   });
 
-  it('FOOT: ROUGH = 0.6', () => {
+  it('FOOT: ROUGH = 0.80 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.ROUGH);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.6);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.80);
   });
 
-  it('FOOT: ORE = 0.8', () => {
+  it('FOOT: ORE = 0.90 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.ORE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.8);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.90);
   });
 
-  it('FOOT: TREE = 0.6 (slower than vehicles in trees)', () => {
+  it('FOOT: TREE = 0.0 (TREE maps to Rock, impassable)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.6);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.0);
   });
 
   it('FOOT: road template = 1.0', () => {
@@ -737,9 +744,9 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.FLOAT)).toBe(1.0);
   });
 
-  it('FLOAT: non-water terrain = 0.3', () => {
+  it('FLOAT: non-water terrain = 0.0 (C++ RULES.INI impassable)', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FLOAT)).toBe(0.3);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FLOAT)).toBe(0.0);
   });
 
   // -- MV5: Cap at 1.0 --
@@ -761,8 +768,8 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
   // -- Default speedClass --
 
   it('defaults to WHEEL if no speedClass provided', () => {
-    map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.getSpeedMultiplier(15, 15)).toBe(0.85); // WHEEL tree speed
+    map.setTerrain(15, 15, Terrain.ORE);
+    expect(map.getSpeedMultiplier(15, 15)).toBe(0.50); // WHEEL ore speed (C++ RULES.INI)
   });
 
   // -- Road template range --
@@ -775,25 +782,24 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
   it('template just below road range is NOT a road', () => {
     map.setTerrain(15, 15, Terrain.ROUGH);
     map.templateType[15 * MAP_CELLS + 15] = TEMPLATE_ROAD_MIN - 1;
-    // Without road, ROUGH = 0.6
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.6);
+    // Without road, ROUGH WHEEL = 0.40 (C++ RULES.INI)
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.40);
   });
 
   it('template just above road range is NOT a road', () => {
     map.setTerrain(15, 15, Terrain.ROUGH);
     map.templateType[15 * MAP_CELLS + 15] = TEMPLATE_ROAD_MAX + 1;
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.6);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.40);
   });
 
   // -- FOOT vs WHEEL difference on TREE --
 
-  it('FOOT is slower than WHEEL on TREE terrain (0.6 vs 0.85)', () => {
+  it('TREE terrain is impassable (maps to Rock speeds, all 0.0)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
     const footSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.FOOT);
     const wheelSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL);
-    expect(footSpeed).toBe(0.6);
-    expect(wheelSpeed).toBe(0.85);
-    expect(footSpeed).toBeLessThan(wheelSpeed);
+    expect(footSpeed).toBe(0.0);
+    expect(wheelSpeed).toBe(0.0);
   });
 });
 

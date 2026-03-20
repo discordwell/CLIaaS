@@ -985,14 +985,14 @@ describe('MCV Deployment — deployMCV', () => {
 
   it('deployMCV kills the MCV entity', () => {
     const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
-    const chunk = placementSource.slice(idx, idx + 500);
+    const chunk = placementSource.slice(idx, idx + 800);
     expect(chunk).toContain('entity.alive = false');
     expect(chunk).toContain('Mission.DIE');
   });
 
   it('deployMCV places FACT at (cx-1, cy-1)', () => {
     const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
-    const chunk = placementSource.slice(idx, idx + 1000);
+    const chunk = placementSource.slice(idx, idx + 1200);
     expect(chunk).toContain('ec.cx - 1');
     expect(chunk).toContain('ec.cy - 1');
     expect(chunk).toContain("type: 'FACT'");
@@ -1011,15 +1011,16 @@ describe('MCV Deployment — deployMCV', () => {
 
   it('deployed FACT uses entity house (C++ parity: MCV owner → ConYard owner)', () => {
     const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
-    const chunk = placementSource.slice(idx, idx + 700);
+    const chunk = placementSource.slice(idx, idx + 1200);
     expect(chunk).toContain('entity.house');
   });
 
-  it('deployment returns false if any surrounding cell is impassable', () => {
+  it('deployment returns false if any surrounding cell is not buildable', () => {
     const idx = placementSource.indexOf('deployMCV(ctx: PlacementContext, entity: Entity)');
-    const chunk = placementSource.slice(idx, idx + 400);
+    const chunk = placementSource.slice(idx, idx + 500);
     expect(chunk).toContain('return false');
-    expect(chunk).toContain('isPassable');
+    // C++ parity: uses isBuildable (cell.cpp:498-503 Is_Clear_To_Build) not isPassable
+    expect(chunk).toContain('isBuildable');
   });
 });
 
@@ -1545,8 +1546,9 @@ describe('Wall Placement and Sell', () => {
     expect(idx).toBeGreaterThan(-1);
   });
 
-  it('wall placement does not require adjacency (unlike normal structures)', () => {
-    const idx = placementSource.indexOf('Walls can be placed anywhere passable');
+  it('wall placement requires adjacency like all buildings (C++ parity: display.cpp:706-778)', () => {
+    // C++ parity: walls go through Passes_Proximity_Check same as buildings
+    const idx = placementSource.indexOf('ALL placements (including walls)');
     expect(idx).toBeGreaterThan(-1);
   });
 

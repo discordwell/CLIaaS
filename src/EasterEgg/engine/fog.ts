@@ -4,7 +4,7 @@
  */
 
 import {
-  CELL_SIZE, MAP_CELLS, CONDITION_RED,
+  CELL_SIZE, MAP_CELLS,
   House, worldDist,
 } from './types';
 import { type Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
@@ -49,7 +49,8 @@ export interface FogContext {
 
 /**
  * Recalculate fog-of-war visibility for all player units and structures.
- * Units at CONDITION_RED health have their sight reduced to 1.
+ * C++ techno.cpp:5903-5913: Look() uses SightRange directly with NO health check.
+ * C++ map.cpp:296: if (!sightrange || sightrange > 10) return — caps at 10.
  */
 export function updateFogOfWar(ctx: FogContext): void {
   if (ctx.fogDisabled) {
@@ -69,7 +70,11 @@ export function updateFogOfWar(ctx: FogContext): void {
 
   for (const e of ctx.entities) {
     if (e.alive && e.isPlayerUnit) {
-      const sight = (e.hp / e.maxHp) < CONDITION_RED ? 1 : e.stats.sight;
+      // C++ techno.cpp:5908: sight_range = Techno_Type_Class()->SightRange
+      // No health-based reduction — sight is always the type's SightRange.
+      const sight = e.stats.sight;
+      // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
+      if (!sight || sight > 10) continue;
       units.push({ x: e.pos.x, y: e.pos.y, sight });
     }
   }
@@ -80,8 +85,10 @@ export function updateFogOfWar(ctx: FogContext): void {
   if (ctx.baseDiscovered) {
     for (const s of ctx.structures) {
       if (s.alive && ctx.isAllied(s.house, ctx.playerHouse)) {
-        const baseSight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
-        const sight = (s.hp / s.maxHp) < CONDITION_RED ? 1 : baseSight;
+        // C++ building.cpp uses Class->SightRange directly — no health reduction.
+        const sight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
+        // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
+        if (!sight || sight > 10) continue;
         const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
         const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
         units.push({ x: wx, y: wy, sight });
@@ -94,27 +101,71 @@ export function updateFogOfWar(ctx: FogContext): void {
 }
 
 /**
- * Detect submerged/cloaked units within sonar range of anti-sub units.
- * Detected subs are forced into the UNCLOAKING state.
+ * Detect submerged/cloaked units using two C++ mechanisms:
+ *
+ * 1. Global sonar sweep (C++ house.cpp:2622-2632 — SPC_SONAR_PULSE):
+ *    When the player has any anti-sub unit alive, ALL enemy cloakable entities
+ *    are detected regardless of distance. The C++ sonar pulse iterates all
+ *    vessels with no range check.
+ *
+ * 2. Scanner adjacency (C++ foot.cpp:1373-1386):
+ *    A cloaked unit checks the 8 adjacent cells for enemy IsScanner units.
+ *    Detection range is exactly 1 cell (adjacency), NOT the scanner's sight range.
  */
 export function updateSubDetection(ctx: FogContext): void {
+  // Collect all anti-sub detectors for scanner adjacency and global sonar checks.
+  const playerAntiSubs: Entity[] = [];
   for (const dd of ctx.entities) {
-    if (!dd.alive || !dd.stats.isAntiSub) continue;
-    const sight = dd.stats.sight;
+    if (dd.alive && dd.stats.isAntiSub) {
+      playerAntiSubs.push(dd);
+    }
+  }
 
-    for (const sub of ctx.entities) {
-      if (!sub.alive || !sub.stats.isCloakable) continue;
+  // Iterate each cloaked/cloaking entity and apply both detection mechanisms.
+  for (const sub of ctx.entities) {
+    if (!sub.alive || !sub.stats.isCloakable) continue;
+    if (sub.cloakState !== CloakState.CLOAKED && sub.cloakState !== CloakState.CLOAKING) continue;
+
+    let detected = false;
+    let nearScanner = false;
+
+    const subCx = Math.floor(sub.pos.x / CELL_SIZE);
+    const subCy = Math.floor(sub.pos.y / CELL_SIZE);
+
+    for (const dd of playerAntiSubs) {
       if (ctx.entitiesAllied(dd, sub)) continue;
-      if (sub.cloakState !== CloakState.CLOAKED && sub.cloakState !== CloakState.CLOAKING) continue;
 
-      const dist = worldDist(dd.pos, sub.pos);
-      if (dist <= sight) {
-        sub.sonarPulseTimer = SONAR_PULSE_DURATION;
-        if (sub.cloakState === CloakState.CLOAKED || sub.cloakState === CloakState.CLOAKING) {
-          sub.cloakState = CloakState.UNCLOAKING;
-          sub.cloakTimer = CLOAK_TRANSITION_FRAMES;
-        }
+      const ddCx = Math.floor(dd.pos.x / CELL_SIZE);
+      const ddCy = Math.floor(dd.pos.y / CELL_SIZE);
+      const cellDx = Math.abs(subCx - ddCx);
+      const cellDy = Math.abs(subCy - ddCy);
+
+      // C++ foot.cpp:1373-1386: scanner adjacency — check 8 adjacent cells (1-cell range)
+      if (cellDx <= 1 && cellDy <= 1 && (cellDx + cellDy > 0)) {
+        detected = true;
+        break;
       }
+
+      // Track if this sub is within any scanner's sight range.
+      // When a scanner IS nearby, adjacency is the only detection path —
+      // the global sonar sweep defers to scanner adjacency.
+      const dist = worldDist(dd.pos, sub.pos);
+      if (dist <= dd.stats.sight) {
+        nearScanner = true;
+      }
+    }
+
+    // C++ house.cpp:2622-2632: global sonar sweep — when the player has anti-sub
+    // units, enemy subs NOT in any scanner's detection zone are detected globally.
+    // Subs within a scanner's sight range use adjacency-only detection (foot.cpp).
+    if (!detected && !nearScanner && playerAntiSubs.some(dd => !ctx.entitiesAllied(dd, sub))) {
+      detected = true;
+    }
+
+    if (detected) {
+      sub.sonarPulseTimer = SONAR_PULSE_DURATION;
+      sub.cloakState = CloakState.UNCLOAKING;
+      sub.cloakTimer = CLOAK_TRANSITION_FRAMES;
     }
   }
 }

@@ -16,7 +16,9 @@ import { type Effect } from './renderer';
 
 // ── Local constants ──────────────────────────────────────────────────────────
 
-const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
+// C++ building.cpp:1062-1098: all wall types that convert to overlays
+// cpp-parity: WOOD (building.cpp:1082) and CYCL (building.cpp:1086) were missing
+const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 
 // ── Context interface ────────────────────────────────────────────────────────
 
@@ -51,24 +53,28 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
   // Walls after the first need to check credits (first wall paid at production start)
   if (isWall && ctx.credits < item.cost) return false;
   const [fw, fh] = STRUCTURE_SIZE[item.type] ?? [2, 2];
-  // Validate: cells must be passable and within bounds
+  // C++ cell.cpp:498-503: cells must be buildable (Ground[land].Build=true) and within bounds
+  // cpp-parity: ORE, ROUGH, BEACH are passable for movement but NOT buildable
   for (let dy = 0; dy < fh; dy++) {
     for (let dx = 0; dx < fw; dx++) {
-      if (!ctx.map.isPassable(cx + dx, cy + dy)) return false;
+      if (!ctx.map.isBuildable(cx + dx, cy + dy)) return false;
     }
   }
-  // C++ bdata.cpp:3448-3477 Occupy_List(placement=true): bib cells must also be passable
+  // C++ bdata.cpp:3448-3477 Occupy_List(placement=true): bib cells must also be buildable
   for (const bc of getBibCells(item.type, cx, cy)) {
-    if (!ctx.map.isPassable(bc.cx, bc.cy)) return false;
+    if (!ctx.map.isBuildable(bc.cx, bc.cy)) return false;
   }
-  // Walls can be placed anywhere passable (C++ parity — no adjacency requirement for walls)
-  // Non-wall structures must be adjacent to an existing player structure (footprint-based AABB)
-  if (!isWall) {
+  // C++ display.cpp:706-778 Passes_Proximity_Check: ALL placements (including walls)
+  // must be near a friendly structure. C++ uses a two-ring scan (8-dir + 4-dir cardinal)
+  // reaching buildings up to 2 cells away. We approximate with 2-cell AABB expansion.
+  // cpp-parity: display.cpp:749-775 second-level scan, display.cpp:734-741 walls
+  {
     let adjacent = false;
     for (const s of ctx.structures) {
       if (!s.alive || !ctx.isAllied(s.house, ctx.playerHouse)) continue;
       const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      const exL = s.cx - 1, exT = s.cy - 1, exR = s.cx + sw + 1, exB = s.cy + sh + 1;
+      // C++ two-ring scan reaches 2 cells in cardinal directions from existing building edge
+      const exL = s.cx - 2, exT = s.cy - 2, exR = s.cx + sw + 2, exB = s.cy + sh + 2;
       const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
       if (nL < exR && nR > exL && nT < exB && nB > exT) { adjacent = true; break; }
     }
@@ -145,10 +151,11 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
 export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
   if (entity.type !== UnitType.V_MCV || !entity.alive) return false;
   const ec = entity.cell;
-  // Need a 3x3 clear area
+  // C++ unit.cpp:1491: Legal_Placement checks all foundation cells via Is_Clear_To_Build
+  // Need a 3x3 buildable area (cpp-parity: cell.cpp:498-503)
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
-      if (!ctx.map.isPassable(ec.cx + dx, ec.cy + dy)) return false;
+      if (!ctx.map.isBuildable(ec.cx + dx, ec.cy + dy)) return false;
     }
   }
   // Remove the MCV entity
@@ -158,12 +165,16 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
   const cx = ec.cx - 1;
   const cy = ec.cy - 1;
   const factMaxHp = STRUCTURE_MAX_HP['FACT'] ?? 256;
+  // C++ unit.cpp:1555: building->Strength = Health_Ratio() * building->Class->MaxStrength
+  // A damaged MCV creates a damaged Construction Yard (cpp-parity)
+  const healthRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
+  const factHp = Math.floor(healthRatio * factMaxHp);
   const newStruct: MapStructure = {
     type: 'FACT',
     image: 'fact',
     house: entity.house,
     cx, cy,
-    hp: factMaxHp,
+    hp: factHp,
     maxHp: factMaxHp,
     alive: true,
     rubble: false,

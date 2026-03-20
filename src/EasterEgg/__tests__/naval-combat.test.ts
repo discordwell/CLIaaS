@@ -207,9 +207,9 @@ describe('Vessel movement on water', () => {
     expect(map.getSpeedMultiplier(5, 5, SpeedClass.FLOAT)).toBe(1.0);
   });
 
-  it('FLOAT units get low speed multiplier on land', () => {
+  it('FLOAT units get 0.0 speed multiplier on land (C++ RULES.INI impassable)', () => {
     const map = makeMixedMap();
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FLOAT)).toBe(0.3); // land cell
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.FLOAT)).toBe(0.0); // land cell
     expect(map.getSpeedMultiplier(5, 15, SpeedClass.FLOAT)).toBe(1.0); // water cell
   });
 
