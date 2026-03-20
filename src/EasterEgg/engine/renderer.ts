@@ -1493,18 +1493,10 @@ export class Renderer {
         // Building foundation bib: concrete pad under buildings (C++ bib.cpp)
         // Fills transparent areas of building sprites that expect a foundation underneath.
         // BIB1=4x2 cells, BIB2=3x2 cells, BIB3=2x2 cells — bottom 2 rows of building footprint.
-        const bibSize = BIB_SIZES[s.type];
-        if (bibSize && !isConstructing && !isSelling) {
-          const bibAlpha = vis === 1 ? 0.6 : 1;
-          ctx.globalAlpha = bibAlpha;
-          ctx.fillStyle = '#8C8464'; // concrete/sand color matching TEMPERAT palette
-          // Bib covers the bottom 2 cell rows of the building footprint
-          const bibW = bibSize[0] * CELL_SIZE;
-          const bibH = 2 * CELL_SIZE;
-          const bibY = screenY + (bibSize[1] - 2) * CELL_SIZE;
-          ctx.fillRect(screenX, bibY, bibW, bibH);
-          ctx.globalAlpha = 1;
-        }
+        // C++ draws building bibs using BIB1/BIB2/BIB3 sprites (concrete pads).
+        // Without bib sprite extraction, skip the flat color fill — let the
+        // CLEAR1 tileset tile show through instead (matches C++ ground appearance).
+        // The bib terrain cells are still marked WALL for pathfinding.
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
         const hasMakeSheet = useSheet !== s.image; // true when dedicated buildup sprite exists
         // Construction: make sheet plays frames naturally; fallback uses clip+scanline reveal

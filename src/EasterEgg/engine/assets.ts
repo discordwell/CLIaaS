@@ -126,7 +126,7 @@ export class AssetManager {
 
     // Load sprites in sequential batches to avoid overwhelming the dev server.
     // C++ loads from local MIX files — TS needs to handle slow HTTP servers.
-    const BATCH_SIZE = 30;
+    const BATCH_SIZE = 80;
     const MAX_RETRIES = 2;
     const loadSprite = async (name: string) => {
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
