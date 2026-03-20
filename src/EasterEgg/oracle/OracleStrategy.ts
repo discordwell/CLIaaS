@@ -70,14 +70,17 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 
 // SCG11EA "Aftermath": Naval-focused build order — skip war factory, double refinery, rush shipyard.
 // Starting army (3 medium + 2 light tanks, 2 artillery) is sufficient for defense.
-// Coast is 20 cells north at y=76 — need POWR chain to extend build radius.
+// Water is 17 cells north (y=79) of base (y=96). Need heavy POWR chain to extend
+// build radius northward — buildings scatter, so we need 8+ to statistically bridge the gap.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund the navy
-  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Chain north toward coast (step 1)
-  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain north toward coast (step 2)
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard on north coast
+  { names: ['POWR'],         type_ids: [17], maxCount: 4 },  // Chain north (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 6 },  // Chain north (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain north (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 10 }, // Chain north (2 more) — should reach water
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in water
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
@@ -778,6 +781,34 @@ export class OracleStrategy {
           }
         }
 
+        // SCG11EA: use explicit northward chain positions for POWR instead of spiral offsets.
+        // Need to bridge 17 cells from base (y=96) to water (y=79).
+        if (this.scenario === 'SCG11EA' && buildingProduction.t === 'POWR') {
+          // Dense chain: 2-cell spacing to handle tight build radius (~3 cells)
+          const chainPositions = [
+            { cx: 25, cy: 94 }, { cx: 24, cy: 94 }, { cx: 26, cy: 94 },
+            { cx: 25, cy: 92 }, { cx: 24, cy: 92 }, { cx: 26, cy: 92 },
+            { cx: 25, cy: 90 }, { cx: 24, cy: 90 }, { cx: 26, cy: 90 },
+            { cx: 25, cy: 88 }, { cx: 24, cy: 88 }, { cx: 26, cy: 88 },
+            { cx: 25, cy: 86 }, { cx: 24, cy: 86 }, { cx: 26, cy: 86 },
+            { cx: 25, cy: 84 }, { cx: 24, cy: 84 }, { cx: 26, cy: 84 },
+            { cx: 25, cy: 82 }, { cx: 24, cy: 82 }, { cx: 26, cy: 82 },
+            { cx: 25, cy: 80 }, { cx: 24, cy: 80 }, { cx: 26, cy: 80 },
+          ];
+          const idx = this.placementAttempts % chainPositions.length;
+          const pos = chainPositions[idx];
+          commands.push({
+            cmd: 'place',
+            rtti: RTTI_BUILDINGTYPE,
+            cx: pos.cx,
+            cy: pos.cy,
+          });
+          if (state.tick - this.lastPlacementTick > 30) {
+            this.placementAttempts++;
+            this.lastPlacementTick = state.tick;
+          }
+          reasons.push(`place ${buildingProduction.t} at (${pos.cx},${pos.cy}) [chain ${idx}/${chainPositions.length}]`);
+        } else {
         let offsets = [...PLACEMENT_OFFSETS];
         if (coastalCells2 && coastalCells2.length > 0) {
           // Sort offsets toward water from the reference building
@@ -822,6 +853,7 @@ export class OracleStrategy {
           this.lastPlacementTick = state.tick;
         }
         reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
+        } // close SCG11EA POWR else
       }
     } else if (!buildingProduction && buildable) {
       // Nothing building — find next item in build order
@@ -2048,17 +2080,41 @@ export class OracleStrategy {
       if (targetWeap && wpIdx >= spyWaypoints.length) {
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
         reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
-      } else if (dogDistSq <= 16 && nearestDog) {
-        // Dog within 4 cells — emergency dodge east
-        // Don't change y (stay at y=48) — just sprint east faster
-        const dodgeCx = Math.min(spy.cx + 6, 70);
-        commands.push({ cmd: 'move', ids: [spy.id], cx: dodgeCx, cy: 48 }); // always stay at y=48
-        reasons.push(`spy SPRINT dog(${nearestDog.cx},${nearestDog.cy}) → (${dodgeCx},${spy.cy})`);
-        if (wpTarget && spy.cx >= wpTarget.cx - 2) this.scg05eaSpyWpIdx++;
       } else if (wpIdx < spyWaypoints.length) {
         const wp = spyWaypoints[wpIdx];
-        commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
-        reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy})`);
+
+        // Look-ahead dog avoidance:
+        // Check if any dog is within 8 cells of the PATH between spy and waypoint.
+        // If a dog is heading toward the path (closing distance), WAIT.
+        // If the path is clear, ADVANCE.
+        const pathMidX = (spy.cx + wp.cx) / 2;
+        const pathMidY = (spy.cy + wp.cy) / 2;
+        const pathMid: Point = { cx: Math.round(pathMidX), cy: Math.round(pathMidY) };
+
+        // Find dogs near the path (within 6 cells of midpoint or endpoints)
+        const dangerDogs = dogs.filter((d) => {
+          const dToMid = this.distanceSq(d, pathMid);
+          const dToSpy = this.distanceSq(d, spy);
+          const dToWp = this.distanceSq(d, wp);
+          return Math.min(dToMid, dToSpy, dToWp) <= 36; // within 6 cells
+        });
+
+        if (dangerDogs.length > 0 && nearestDog && dogDistSq <= 25) {
+          // Dog within 5 cells — emergency: stop and wait for it to pass
+          // Don't move — any direction might run INTO the dog
+          if (!this.isIdle(spy)) {
+            commands.push({ cmd: 'stop', ids: [spy.id] });
+          }
+          reasons.push(`spy WAIT dog(${nearestDog.cx},${nearestDog.cy}) d=${Math.sqrt(dogDistSq).toFixed(1)}`);
+        } else if (dangerDogs.length > 0) {
+          // Dogs near path but not immediately threatening — wait
+          const closest = dangerDogs[0];
+          reasons.push(`spy HOLD path dog(${closest.cx},${closest.cy}) near wp${wpIdx}`);
+        } else {
+          // Path clear — advance!
+          commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
+          reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy}) CLEAR`);
+        }
       } else {
         commands.push({ cmd: 'move', ids: [spy.id], cx: SCG05EA_WEAP_TARGET.cx, cy: SCG05EA_WEAP_TARGET.cy });
         reasons.push('spy → WEAP area');

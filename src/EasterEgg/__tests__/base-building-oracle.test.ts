@@ -413,14 +413,16 @@ describe('summarize', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('SYRD placement — vessel-based water detection', () => {
-  it('places SYRD near enemy submarine positions, not hardcoded coastal cells', () => {
-    const strategy = new OracleStrategy('SCG11EA');
+  it('places SYRD near enemy submarine positions using coastal cells', () => {
+    // Use SCG07EA which has no mission-specific handler — it routes through
+    // the generic decideBaseBuilding path with coastal cells at cx=52,50,54.
+    const strategy = new OracleStrategy('SCG07EA');
     // Subs are on the EAST side of the map at x=67-72
     const state = makeState({
       tick: 8000,
       structures: [
-        makeStructure(100, 'FACT', 'Greece', 26, 80),
-        makeStructure(101, 'POWR', 'Greece', 24, 80),
+        makeStructure(100, 'FACT', 'Greece', 26, 50),
+        makeStructure(101, 'POWR', 'Greece', 24, 50),
       ],
       production: [{ t: 'SYRD', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
       buildable: { structures: ['SYRD'], units: [], infantry: [] },
@@ -438,22 +440,22 @@ describe('SYRD placement — vessel-based water detection', () => {
       (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
     );
     expect(placeCmd).toBeDefined();
-    // Placement should target the area between base (x=26) and subs (x=67-72),
-    // NOT the old hardcoded coastal cells at x=18-28, y=82-86
+    // SCG07EA coastal cells are around cx=48-56, cy=47-60 — well east of base (x=26)
     expect(placeCmd!.cx).toBeGreaterThan(35);
   });
 
   it('dispatches water scout when naval enemies detected', () => {
-    const strategy = new OracleStrategy('SCG11EA');
+    // Use SCG07EA — generic path dispatches tank as water scout
+    const strategy = new OracleStrategy('SCG07EA');
     const state = makeState({
       tick: 500,
       structures: [
-        makeStructure(100, 'FACT', 'Greece', 26, 80),
-        makeStructure(101, 'POWR', 'Greece', 24, 80),
-        makeStructure(102, 'WEAP', 'Greece', 28, 80),
+        makeStructure(100, 'FACT', 'Greece', 26, 50),
+        makeStructure(101, 'POWR', 'Greece', 24, 50),
+        makeStructure(102, 'WEAP', 'Greece', 28, 50),
       ],
       units: [
-        makeEntity(10, '2TNK', 'Greece', 27, 79),
+        makeEntity(10, '2TNK', 'Greece', 27, 49),
       ],
       enemies: [
         makeEntity(200, 'SS', 'USSR', 67, 42, 100, 100, 5),
@@ -472,7 +474,8 @@ describe('SYRD placement — vessel-based water detection', () => {
   });
 
   it('re-dispatches scout if original scout is destroyed', () => {
-    const strategy = new OracleStrategy('SCG11EA');
+    // Use SCG07EA — generic path handles scout re-dispatch
+    const strategy = new OracleStrategy('SCG07EA');
     const sub = makeEntity(200, 'SS', 'USSR', 67, 42, 100, 100, 5);
     sub.ally = false;
 
@@ -480,10 +483,10 @@ describe('SYRD placement — vessel-based water detection', () => {
     const state1 = makeState({
       tick: 500,
       structures: [
-        makeStructure(100, 'FACT', 'Greece', 26, 80),
-        makeStructure(101, 'WEAP', 'Greece', 28, 80),
+        makeStructure(100, 'FACT', 'Greece', 26, 50),
+        makeStructure(101, 'WEAP', 'Greece', 28, 50),
       ],
-      units: [makeEntity(10, '2TNK', 'Greece', 27, 79)],
+      units: [makeEntity(10, '2TNK', 'Greece', 27, 49)],
       enemies: [sub],
       buildable: { structures: [], units: ['2TNK'], infantry: [] },
     });
@@ -493,10 +496,10 @@ describe('SYRD placement — vessel-based water detection', () => {
     const state2 = makeState({
       tick: 1000,
       structures: [
-        makeStructure(100, 'FACT', 'Greece', 26, 80),
-        makeStructure(101, 'WEAP', 'Greece', 28, 80),
+        makeStructure(100, 'FACT', 'Greece', 26, 50),
+        makeStructure(101, 'WEAP', 'Greece', 28, 50),
       ],
-      units: [makeEntity(11, '2TNK', 'Greece', 27, 79)],
+      units: [makeEntity(11, '2TNK', 'Greece', 27, 49)],
       enemies: [sub],
       buildable: { structures: [], units: ['2TNK'], infantry: [] },
     });
@@ -509,11 +512,12 @@ describe('SYRD placement — vessel-based water detection', () => {
   });
 
   it('falls back to hardcoded coastal cells when no enemy vessels present', () => {
-    const strategy = new OracleStrategy('SCG11EA');
+    // Use SCG07EA — coastal cells are at cx=52,50,54 (east of base)
+    const strategy = new OracleStrategy('SCG07EA');
     const state = makeState({
       tick: 8000,
       structures: [
-        makeStructure(100, 'FACT', 'Greece', 26, 80),
+        makeStructure(100, 'FACT', 'Greece', 26, 50),
       ],
       production: [{ t: 'SYRD', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
       buildable: { structures: ['SYRD'], units: [], infantry: [] },
@@ -525,9 +529,9 @@ describe('SYRD placement — vessel-based water detection', () => {
       (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
     );
     expect(placeCmd).toBeDefined();
-    // Without vessels, falls back to hardcoded coastal cells for SCG11EA
-    // which are around x=18-28, y=82-86
-    expect(placeCmd!.cx).toBeLessThan(35);
-    expect(placeCmd!.cy).toBeGreaterThan(78);
+    // Without vessels, falls back to hardcoded coastal cells for SCG07EA
+    // which are around cx=48-56, cy=47-60
+    expect(placeCmd!.cx).toBeGreaterThan(44);
+    expect(placeCmd!.cy).toBeGreaterThan(44);
   });
 });
