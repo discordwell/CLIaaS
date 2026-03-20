@@ -5808,7 +5808,8 @@ export class Game {
           this.audio.play('eva_new_options');
           this.showEvaMessage(10); // "Construction options available."
           this.revealAroundCell(s.cx, s.cy, 10);
-          this.spawnBaseReinforcements();
+          // C++ parity: no garrison spawn on base discovery — C++ has no
+          // equivalent mechanic. Reinforcements come from scenario triggers only.
           return;
         }
       }

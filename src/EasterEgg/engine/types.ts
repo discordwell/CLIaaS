@@ -1201,12 +1201,14 @@ export function buildAlliancesFromINI(
     table.set(h, new Set([h]));
   }
   // Apply explicit alliances from INI
+  // C++ parity (house.cpp:7156-7163): alliances are ONE-WAY.
+  // [Germany] Allies=Greece means Germany considers Greece an ally,
+  // but Greece does NOT automatically consider Germany an ally.
+  // C++ Make_Ally sets only the caller's bitfield: Allies |= (1L << h)
   for (const [house, allies] of alliesMap) {
     const set = table.get(house)!;
     for (const ally of allies) {
       set.add(ally);
-      // Alliances are bidirectional
-      table.get(ally)?.add(house);
     }
   }
   // GoodGuy is always allied with the player
