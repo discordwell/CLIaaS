@@ -14,8 +14,9 @@ import {
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
   HOUSE_FACTION,
 } from './types';
-import { type Entity } from './entity';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED } from './scenario';
+import { Entity } from './entity';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS } from './scenario';
+import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
 import { canTargetNaval } from './aircraft';
@@ -266,6 +267,33 @@ function scatterInfantry(ctx: CombatContext, victim: Entity, attackerPos: WorldP
   if (ctx.map.isPassable(sc.cx, sc.cy)) {
     victim.pos.x = scatterX;
     victim.pos.y = scatterY;
+  }
+}
+
+/** C++ map.cpp:1837-1861 — Kill all entities on destroyed bridge cells.
+ *  When a bridge is fully destroyed, all occupants on those cells die instantly
+ *  with full-strength HE damage: obj->Take_Damage(obj->Strength, 0, WARHEAD_HE, NULL, true) */
+export function killBridgeOccupants(ctx: CombatContext, cx: number, cy: number, radius: number): void {
+  for (const e of ctx.entities) {
+    if (!e.alive || e.inLimbo) continue;
+    const ec = e.cell;
+    // Check if entity is within the bridge destruction radius
+    const dx = ec.cx - cx;
+    const dy = ec.cy - cy;
+    if (Math.abs(dx) > radius || Math.abs(dy) > radius) continue;
+    // Only kill if the entity's cell is now water (was part of the destroyed bridge)
+    if (ctx.map.getTerrain(ec.cx, ec.cy) !== Terrain.WATER) continue;
+    // C++ map.cpp:1843 — obj->Take_Damage(obj->Strength, 0, WARHEAD_HE) — instant kill
+    const killed = damageEntity(ctx, e, e.hp + 10, 'HE');
+    if (killed) {
+      handleUnitDeath(ctx, e, {
+        screenShake: 4, explosionSize: 12, debris: true,
+        decal: null,
+        explodeLgSound: false,
+        attackerIsPlayer: false,
+        trackLoss: ctx.isPlayerControlled(e),
+      });
+    }
   }
 }
 
@@ -1002,6 +1030,29 @@ export function applySplashDamage(
     structureDamage(ctx, s, splashDmg);
   }
 
+  // C++ combat.cpp:261-268 — bridge destruction from splash damage.
+  // Only AP and HE warheads can damage bridges. Damage chance:
+  // Random_Pick(1, BridgeStrength=1000) < damage. For damage=200, ~20% chance.
+  if ((weapon.warhead === 'AP' || weapon.warhead === 'HE') && ctx.map.templateType) {
+    const impactCell = worldToCell(center.x, center.y);
+    const bridgeIdx = impactCell.cy * MAP_CELLS + impactCell.cx;
+    const tmpl = ctx.map.templateType[bridgeIdx];
+    // C++ bridge template IDs: 131,133 (intact), 235,236 (extended), 378,379 (half-destroyed)
+    if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) {
+      // C++ combat.cpp:267 — Random_Pick(1, Rule.BridgeStrength) < strength
+      // BridgeStrength default = 1000 (rules.cpp:267)
+      const bridgeStrength = 1000;
+      if (Math.floor(Math.random() * bridgeStrength) + 1 < weapon.damage) {
+        const destroyed = ctx.map.destroyBridge(impactCell.cx, impactCell.cy, 3);
+        if (destroyed > 0) {
+          killBridgeOccupants(ctx, impactCell.cx, impactCell.cy, 3);
+          ctx.bridgeCellCount = ctx.map.countBridgeCells();
+          ctx.showEvaMessage(7); // "Bridge destroyed."
+        }
+      }
+    }
+  }
+
   // Terrain destruction: large explosions (splash >= 1.5) can destroy trees, walls, and ore in the blast radius
   const whMeta = getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta);
   if (splashRange >= 1.5 && weapon.damage >= 30) {
@@ -1207,13 +1258,87 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
     if (s.type === 'BARL' || s.type === 'BRL3') {
       const destroyed = ctx.map.destroyBridge(s.cx, s.cy, 3);
       if (destroyed > 0) {
+        killBridgeOccupants(ctx, s.cx, s.cy, 3);
         ctx.bridgeCellCount = ctx.map.countBridgeCells();
         ctx.showEvaMessage(7); // "Bridge destroyed."
       }
     }
+    // C++ building.cpp:1663-1716 — Drop_Debris: spawn infantry survivors on destruction
+    // Walls and barrels don't spawn survivors (no crew). Kennels are IsSurvivorless on destruction.
+    if (!WALL_TYPES.has(s.type) && s.type !== 'BARL' && s.type !== 'BRL3' && s.type !== 'KENN') {
+      spawnDestructionSurvivors(ctx, s, wx, wy);
+    }
     return true;
   }
   return false;
+}
+
+// ── Destruction Survivors ────────────────────────────────────────────────────
+
+/** C++ building costs for survivor count calculation */
+const FACT_COST = 2000;
+const HARVESTER_COST = 1400;
+const HIND_COST = 1200;
+const SURVIVOR_FRACTION = 0.4;
+const E1_COST = 100;
+
+/**
+ * C++ building.cpp:1663-1716 — Drop_Debris: spawn infantry survivors when a building is destroyed.
+ * Uses same survivor count formula as sell (How_Many_Survivors), but spawning is probabilistic
+ * per occupy cell (1/3 chance normally, simplified here to guaranteed spawning like sell path).
+ *
+ * C++ Crew_Type per building (building.cpp:4667-4701):
+ *   SILO → 50% C1, 50% C7 | FACT → 25% E6 (1 max), else E1
+ *   KENN → excluded (IsSurvivorless) | TENT/BARR → E1
+ *   default → E1, with 15% civilian (C1/C7) if building has no weapon
+ */
+function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: number, wy: number): void {
+  // Calculate survivor count: C++ How_Many_Survivors (building.cpp:5591-5600)
+  const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
+  let buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300);
+  if (s.type === 'PROC') buildCost -= HARVESTER_COST;
+  if (s.type === 'HPAD') buildCost -= (HIND_COST + HIND_COST) / 2;
+  const survivorCount = Math.min(5, Math.max(1,
+    Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
+
+  // C++ building.cpp:3456-3463 — one engineer limit (applies to both sell and destruction)
+  let engineerSpawned = false;
+  const isUnarmed = !STRUCTURE_WEAPONS[s.type];
+
+  for (let si = 0; si < survivorCount; si++) {
+    let crewType: UnitType;
+    switch (s.type) {
+      case 'SILO':
+        crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+        break;
+      case 'FACT':
+        if (!engineerSpawned && Math.random() < 0.25) {
+          crewType = UnitType.I_E6;
+          engineerSpawned = true;
+        } else {
+          crewType = UnitType.I_E1;
+        }
+        break;
+      case 'TENT': case 'BARR':
+        crewType = UnitType.I_E1;
+        break;
+      default:
+        // C++ techno.cpp:4454-4465 — 15% civilian chance if building has no weapon
+        if (isUnarmed && Math.random() < 0.15) {
+          crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+        } else {
+          crewType = UnitType.I_E1;
+        }
+        break;
+    }
+    const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
+    // C++ building.cpp:1701 — destruction survivors get random HP (5 to MaxStrength)
+    inf.hp = Math.max(5, Math.floor(Math.random() * inf.maxHp) + 5);
+    inf.hp = Math.min(inf.hp, inf.maxHp);
+    inf.mission = Mission.GUARD;
+    ctx.entities.push(inf);
+    ctx.entityById.set(inf.id, inf);
+  }
 }
 
 /** Structure auto-fire — pillboxes, guard towers, tesla coils, SAM/AGUN fire at nearby enemies.

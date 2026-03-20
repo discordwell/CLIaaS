@@ -1046,13 +1046,13 @@ describe('Tiberium_Adjust — cell.cpp:2019-2082 initial density by adjacency', 
 
 describe('Ore growth timing — map.ts ORE_GROWTH_INTERVAL', () => {
   /**
-   * TS map.ts:551: ORE_GROWTH_INTERVAL = 256
-   * C++ growth is driven by OverlayClass::AI() which runs per-cell in the map logic loop.
+   * TS map.ts:551: ORE_GROWTH_INTERVAL = 1821
+   * C++ growth is driven by map.cpp:1017 scanning cells each tick.
    *
-   * TS runs growOre() once every 256 ticks (~17 seconds at 15 FPS).
+   * Both C++ and TS fire growth every ~1821 ticks (~121 seconds at 15 FPS).
    */
-  it('ORE_GROWTH_INTERVAL = 256 ticks', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(256);
+  it('ORE_GROWTH_INTERVAL = 1821 ticks', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
   });
 
   it('growOre does not run on tick 0', () => {

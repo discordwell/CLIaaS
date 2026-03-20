@@ -382,15 +382,13 @@ describe('UNCLOAKING -> UNCLOAKED transition (techno.cpp:2462-2471)', () => {
   // This prevents immediate recloaking. TS does not implement CloakDelay.
   // PARITY GAP: TS has no CloakDelay after uncloaking — sub recloak is immediate when
   // conditions are met. C++ has Rule.CloakDelay * TICKS_PER_MINUTE cooldown.
-  it('C++ sets CloakDelay after UNCLOAKING completes; TS does not', () => {
+  it('C++ sets CloakDelay after UNCLOAKING completes; TS now matches', () => {
     // C++ techno.cpp:2468: CloakDelay = Rule.CloakDelay * TICKS_PER_MINUTE;
-    // TS: no CloakDelay field or timer — sub may recloak immediately after uncloaking.
-    // This is observable: in C++, a sub that uncloaks has a mandatory delay before recloaking.
-    // In TS, the sub can begin cloaking the very next tick after reaching UNCLOAKED.
+    // TS now implements cloakDelay field, set after UNCLOAKING->UNCLOAKED transition.
     const ss = entityAtCell(UnitType.V_SS, House.USSR, 10, 10);
     ss.cloakState = CloakState.UNCLOAKED;
-    // TS has no CloakDelay property
-    expect((ss as Record<string, unknown>)['cloakDelay']).toBeUndefined(); // PARITY GAP
+    // TS now has cloakDelay property (defaults to 0 on fresh entity)
+    expect(ss.cloakDelay).toBe(0);
   });
 });
 
@@ -1121,14 +1119,10 @@ describe('Sonar reveal duration constants', () => {
     expect(SONAR_PULSE_DURATION).toBe(225);
   });
 
-  // SONAR_REVEAL_TICKS (450) is double the C++ value.
-  // C++: PulseCountDown = 15 * TICKS_PER_SECOND = 225 ticks = 15 seconds
-  // TS: SONAR_REVEAL_TICKS = 450 = 30 seconds
-  // PARITY GAP: TS superweapon sonar lasts 30s, C++ sonar pulse lasts 15s.
-  it('SONAR_REVEAL_TICKS (superweapon) is 450 vs C++ 225 — double duration', () => {
-    expect(SONAR_REVEAL_TICKS).toBe(450);
-    // C++ equivalent would be 225
-    // PARITY GAP: superweapon sonar lasts twice as long as C++
+  // SONAR_REVEAL_TICKS now matches C++ PulseCountDown (225 ticks = 15 seconds).
+  // C++ house.cpp:2629: PulseCountDown = 15 * TICKS_PER_SECOND = 225
+  it('SONAR_REVEAL_TICKS (superweapon) matches C++ 225 (15s at 15 TPS)', () => {
+    expect(SONAR_REVEAL_TICKS).toBe(225);
   });
 });
 

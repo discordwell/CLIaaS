@@ -248,6 +248,11 @@ export function translateOracleDecisionToTs(
       continue;
     }
 
+    if (kind === 'warp_unit' && ids.length === 1) {
+      commands.push({ cmd: 'warp_unit', unitId: ids[0], cx: command.cx ?? 0, cy: command.cy ?? 0 } as never);
+      continue;
+    }
+
     if (kind === 'enter' && typeof command.target === 'number' && ids.length === 1) {
       commands.push({ cmd: 'enter', unitId: ids[0], transportId: command.target });
       continue;

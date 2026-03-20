@@ -360,7 +360,7 @@ export class Team {
         const mission = this.missionList[this.currentMission];
 
         // C++ team.cpp:710 — timeout from mission data
-        this.timeOut = mission.data * 9; // ~TICKS_PER_MINUTE/10 simplified
+        this.timeOut = mission.data * 90; // C++ team.cpp:710: TICKS_PER_MINUTE/10 = 900/10 = 90
         this.target = null;
 
         // Set mission target based on mission type

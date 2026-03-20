@@ -2095,15 +2095,49 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // ─── PHASE 2: Tanya destroys SAM sites ──────────────────────────────
-    if (tanya && this.scg05eaSpyInfiltrated && this.scg05eaSamIndex < SCG05EA_SAM_TARGETS.length) {
+    // ─── PHASE 2: Tanya destroys SAM sites with intensive micro ────────
+    // Priority: 1) evade dogs (instant kill), 2) shoot nearby infantry,
+    // 3) advance to nearest SAM, 4) C4 the SAM.
+    // Tanya has Colt45 range=5.75, 50 dmg, ROF=5. One-shots most infantry.
+    if (tanya && this.scg05eaSpyInfiltrated) {
+      const TANYA_RANGE_SQ = 33; // 5.75^2 ≈ 33 — weapon range
+      const DOG_DANGER_SQ = 36;  // 6 cells — flee from dogs
+      // Track last target to avoid resending the same command (stutter-stepping)
+      const lastTarget = this.lastUnitTargets.get(tanya.id);
+
+      // Find nearest dog
       const nearestDog = dogs.length > 0
         ? dogs.reduce((a, b) =>
           this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
         : null;
       const dogDist = nearestDog ? this.distanceSq(tanya, nearestDog) : Infinity;
 
-      if (dogDist <= SCG05EA_DOG_SAFE_DISTANCE_SQ) {
+      // Find infantry in weapon range (prioritize closest)
+      const infantryInRange = state.enemies.filter((e) => {
+        if (e.t === 'DOG') return false; // dogs handled separately
+        if (!e.hp || e.hp <= 0) return false;
+        return this.distanceSq(tanya, e) <= TANYA_RANGE_SQ;
+      }).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
+
+      // Find remaining SAMs
+      const remainingSams = state.structures.filter(
+        (s) => s.t === 'SAM' && !s.ally,
+      );
+      const nearestSam = remainingSams.length > 0
+        ? remainingSams.reduce((a, b) =>
+          this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
+        : null;
+
+      // Tanya spawns at (25,107) but team script may park her on impassable cells.
+      // If she's south of y=108 (building zone), try moving her north step by step.
+      if (tanya.cy > 108) {
+        commands.push({ cmd: 'move', ids: [tanya.id], cx: tanya.cx, cy: tanya.cy - 1 });
+        reasons.push(`Tanya unstick: (${tanya.cx},${tanya.cy}) → north`);
+        return { commands, reason: reasons.join('; ') };
+      }
+
+      if (dogDist <= DOG_DANGER_SQ) {
+        // PRIORITY 1: Dog within 6 cells — RUN AWAY (dogs kill Tanya instantly)
         const dx = tanya.cx - nearestDog!.cx;
         const dy = tanya.cy - nearestDog!.cy;
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -2112,36 +2146,29 @@ export class OracleStrategy {
           cx: Math.round(tanya.cx + (dx / len) * 6),
           cy: Math.round(tanya.cy + (dy / len) * 6),
         });
-        reasons.push(`Tanya evade dog at (${nearestDog!.cx},${nearestDog!.cy})`);
-      } else if (this.isIdle(tanya)) {
-        // Tanya spawns at (25,107) near the SAMs — no route needed, just attack
-        const samTarget = state.structures.find(
-          (s) => s.t === 'SAM' && !s.ally &&
-            this.distanceSq(s, SCG05EA_SAM_TARGETS[this.scg05eaSamIndex]) <= 16,
-        );
-
-        if (!samTarget) {
-          this.scg05eaSamIndex++;
-          reasons.push(`SAM ${this.scg05eaSamIndex} destroyed, advancing`);
-        } else {
-          commands.push({ cmd: 'attack', ids: [tanya.id], target: samTarget.id });
-          reasons.push(`Tanya → SAM ${this.scg05eaSamIndex + 1}/${SCG05EA_SAM_TARGETS.length}`);
+        this.lastUnitTargets.delete(tanya.id); // clear target on flee
+        reasons.push(`Tanya FLEE dog(${nearestDog!.cx},${nearestDog!.cy}) d=${Math.sqrt(dogDist).toFixed(1)}`);
+      } else if (infantryInRange.length > 0) {
+        // PRIORITY 2: Shoot nearest infantry in range — always re-target (quick kills)
+        const target = infantryInRange[0];
+        commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
+        this.lastUnitTargets.set(tanya.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: state.tick });
+        reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(this.distanceSq(tanya, target)).toFixed(1)} [${infantryInRange.length} in range]`);
+      } else if (nearestSam) {
+        // PRIORITY 3: Attack nearest SAM — send only once to avoid stutter-stepping
+        const samId = nearestSam.id;
+        if (!lastTarget || lastTarget.targetId !== samId) {
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: samId });
+          this.lastUnitTargets.set(tanya.id, { targetId: samId, cx: nearestSam.cx, cy: nearestSam.cy, tick: state.tick });
         }
+        const samDist = Math.sqrt(this.distanceSq(tanya, nearestSam)).toFixed(0);
+        reasons.push(`Tanya → SAM(${nearestSam.cx},${nearestSam.cy}) d=${samDist} [${remainingSams.length} left]`);
+      } else if (remainingSams.length === 0) {
+        // All SAMs destroyed — advance to chinook phase
+        this.scg05eaSamIndex = SCG05EA_SAM_TARGETS.length;
+        reasons.push('all SAMs destroyed');
       } else {
-        reasons.push('Tanya en route');
-      }
-
-      // Other combat units defend while Tanya works
-      const combat = playerUnits.filter(
-        (u) => u.id !== tanya.id && this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
-      );
-      const nearbyEnemies = state.enemies.filter(
-        (e) => e.t !== 'DOG' && combat.some((u) => this.distanceSq(u, e) <= 225),
-      );
-      if (nearbyEnemies.length > 0 && combat.length > 0) {
-        const micro = this.microManage(combat, nearbyEnemies, this.centroid(combat));
-        commands.push(...micro.commands);
-        reasons.push(...micro.reasons);
+        reasons.push('Tanya idle');
       }
 
       return { commands, reason: reasons.join('; ') };
@@ -2158,20 +2185,7 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // ─── PHASE 3.5: Send LST south to trigger Tanya spawn ─────────────
-    // tny3 cell trigger at (24,107)/(24,108) needs a Greece unit to enter.
-    // Send the LST (player/Greece unit) south to trigger it. The LST is
-    // naval so it can only reach water cells — target (24,107) directly
-    // and hope it's adjacent water, or the TS engine trigger check
-    // fires when the LST enters a nearby cell.
-    if (this.scg05eaSpyInfiltrated && !tanya) {
-      const lst = playerUnits.find((u) => u.t === 'LST');
-      if (lst) {
-        commands.push({ cmd: 'move', ids: [lst.id], cx: 24, cy: 107 });
-        reasons.push(`LST → (24,107) trigger tny3 for Tanya`);
-        return { commands, reason: reasons.join('; ') };
-      }
-    }
+    // (LST-south phase removed — tny3 triggered via set_global after spy infiltration)
 
     // ─── PHASE 4: Destroy all enemies (generic base building) ───────────
     if (this.scg05eaSpyInfiltrated) {

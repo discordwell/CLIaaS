@@ -144,7 +144,7 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
   // Section 2: Timeout scaling factor (team.cpp:710)
   // C++ uses: TimeOut = mission->Data.Value * (TICKS_PER_MINUTE / 10)
   // TICKS_PER_MINUTE = 900 (defines.h:3032), so scaling = 90
-  // TS uses: this.timeOut = mission.data * 9
+  // TS uses: this.timeOut = mission.data * 90 (C++ parity)
   // ==========================================================================
   describe('GUARD timeout scaling factor (team.cpp:710, defines.h:3031-3032)', () => {
     /**
@@ -157,19 +157,12 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
      *
      * So: TimeOut = Data.Value * 90
      *
-     * TS team.ts:359:
-     *   this.timeOut = mission.data * 9;  // ~TICKS_PER_MINUTE/10 simplified
-     *
-     * The TS scaling factor is 9 (not 90). This is a 10x divergence from C++.
-     * If this is intentional (game runs at different tick rate), it's a design
-     * choice. If not, it's a PARITY GAP.
+     * TS team.ts now uses: this.timeOut = mission.data * 90 (C++ parity)
      */
-    it('C++ TICKS_PER_MINUTE = 900, scaling = 90; TS uses 9', () => {
-      // C++ expected: data=1 → timeout=90 ticks
-      // TS actual: data=1 → timeout=9 ticks
+    it('C++ TICKS_PER_MINUTE = 900, scaling = 90; TS matches', () => {
       const CPP_TICKS_PER_MINUTE = 900;
       const CPP_SCALING = CPP_TICKS_PER_MINUTE / 10; // 90
-      const TS_SCALING = 9;
+      const TS_SCALING = 90; // now matches C++
 
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
@@ -189,18 +182,17 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai();
 
       // Tick 2: advance block runs (isMoving, !isReforming, isNextMission)
-      //   → currentMission=0 (GUARD), timeOut = data * 9 = 9
-      //   Execute block runs GUARD: coordinateRegroup, timeOut-- → 8
+      //   → currentMission=0 (GUARD), timeOut = data * 90 = 90
+      //   Execute block runs GUARD: coordinateRegroup, timeOut-- → 89
       team.ai();
 
-      // C++ would set TimeOut = 1 * 90 = 90, after first GUARD tick: 89
-      // TS sets timeOut = 1 * 9 = 9, after first GUARD tick: 8
-      // PARITY GAP: TS timeout scaling is 10x smaller than C++
-      expect(team.timeOut).toBe(1 * TS_SCALING - 1); // 9 - 1 = 8 after first tick
-      expect(1 * TS_SCALING).not.toBe(1 * CPP_SCALING); // PARITY GAP: 9 !== 90
+      // C++ sets TimeOut = 1 * 90 = 90, after first GUARD tick: 89
+      // TS now matches: timeOut = 1 * 90 = 90, after first tick: 89
+      expect(team.timeOut).toBe(1 * TS_SCALING - 1); // 90 - 1 = 89 after first tick
+      expect(TS_SCALING).toBe(CPP_SCALING); // C++ parity: both use 90
     });
 
-    it('guard data=5 timeout should be 450 ticks in C++ (45 in TS)', () => {
+    it('guard data=5 timeout is 450 ticks (C++ parity)', () => {
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
         missions: [
@@ -215,11 +207,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(); // tick 1: activate + regroup (reforming)
       team.ai(); // tick 2: advance to GUARD + execute GUARD (decrements once)
 
-      // Initial: 5 * 9 = 45, after first GUARD tick: 45 - 1 = 44
-      // C++ would be: 5 * 90 = 450, after first tick: 449
-      // PARITY GAP: 10x difference in timeout scaling
-      expect(team.timeOut).toBe(5 * 9 - 1); // 45 - 1 = 44
-      expect(5 * 9).not.toBe(5 * 90); // PARITY GAP: 45 !== 450
+      // Initial: 5 * 90 = 450, after first GUARD tick: 450 - 1 = 449
+      // Matches C++ parity: 5 * 90 = 450
+      expect(team.timeOut).toBe(5 * 90 - 1); // 450 - 1 = 449
     });
   });
 

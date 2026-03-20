@@ -115,21 +115,21 @@ describe('Growth eligibility — Can_Tiberium_Grow (cell.cpp:2869-2884)', () => 
   it('gold ore at max density 0x0E (OverlayData=11) cannot grow further', () => {
     setOverlay(map, 50, 50, 0x0E);
     vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x0E);
   });
 
   it('gold ore at density 0x0D (OverlayData=10) CAN grow to 0x0E', () => {
     setOverlay(map, 50, 50, 0x0D);
     vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x0E);
   });
 
   it('gold ore at min density 0x03 (OverlayData=0) CAN grow to 0x04', () => {
     setOverlay(map, 50, 50, 0x03);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x04);
   });
 
@@ -142,28 +142,28 @@ describe('Growth eligibility — Can_Tiberium_Grow (cell.cpp:2869-2884)', () => 
   it('gem at 0x0F does NOT grow — C++ excludes non-GOLD overlays', () => {
     setOverlay(map, 50, 50, 0x0F);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x0F);
   });
 
   it('gem at 0x10 does NOT grow', () => {
     setOverlay(map, 50, 50, 0x10);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x10);
   });
 
   it('gem at 0x11 does NOT grow', () => {
     setOverlay(map, 50, 50, 0x11);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x11);
   });
 
   it('gem at max 0x12 does NOT grow', () => {
     setOverlay(map, 50, 50, 0x12);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x12);
   });
 
@@ -186,7 +186,7 @@ describe('Growth eligibility — Can_Tiberium_Grow (cell.cpp:2869-2884)', () => 
       testMap.initDefault();
       setOverlay(testMap, 50, 50, ovl);
       vi.spyOn(Math, 'random').mockReturnValue(0);
-      testMap.growOre(256);
+      testMap.growOre(1821);
       expect(getOverlay(testMap, 50, 50), `overlay 0x${ovl.toString(16)} should grow to 0x${(ovl + 1).toString(16)}`).toBe(ovl + 1);
       vi.restoreAllMocks();
     }
@@ -214,7 +214,7 @@ describe('Growth eligibility — Can_Tiberium_Grow (cell.cpp:2869-2884)', () => 
     // (because the check is < 0.5, not <= 0.5)
     setOverlay(map, 50, 50, 0x05);
     vi.spyOn(Math, 'random').mockReturnValue(0.5); // exactly at boundary
-    map.growOre(256);
+    map.growOre(1821);
     // TS: 0.5 < 0.5 is FALSE, so no growth
     expect(getOverlay(map, 50, 50)).toBe(0x05);
     // C++ would grow this cell if it was reservoir-sampled — PARITY GAP
@@ -259,7 +259,7 @@ describe('Spread eligibility — Can_Tiberium_Spread (cell.cpp:2904-2918)', () =
       .mockReturnValueOnce(0.6)  // density: skip (> 0.5)
       .mockReturnValueOnce(0.1)  // spread: trigger (< 0.25)
       .mockReturnValueOnce(0.0); // direction: north
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03); // spread to north
   });
 
@@ -267,7 +267,7 @@ describe('Spread eligibility — Can_Tiberium_Spread (cell.cpp:2904-2918)', () =
     setOverlay(map, 50, 50, 0x09);
     const mockRandom = vi.spyOn(Math, 'random');
     mockRandom.mockReturnValue(0); // always trigger everything
-    map.growOre(256);
+    map.growOre(1821);
     // Check all 8 adjacent cells — none should have ore
     const dirs = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
     for (const [dx, dy] of dirs) {
@@ -304,7 +304,7 @@ describe('Spread eligibility — Can_Tiberium_Spread (cell.cpp:2904-2918)', () =
     // because the spread check uses the pre-growth value (0x09)
     setOverlay(map, 50, 50, 0x09);
     vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
-    map.growOre(256);
+    map.growOre(1821);
     // Cell should have grown to 0x0A
     expect(getOverlay(map, 50, 50)).toBe(0x0A);
     // But no spread should have occurred (0x09 <= 0x09)
@@ -325,7 +325,7 @@ describe('Spread eligibility — Can_Tiberium_Spread (cell.cpp:2904-2918)', () =
       testMap.initDefault();
       setOverlay(testMap, 50, 50, gemOvl);
       vi.spyOn(Math, 'random').mockReturnValue(0);
-      testMap.growOre(256);
+      testMap.growOre(1821);
       // No adjacent cell should have any ore/gem
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -380,7 +380,7 @@ describe('Spread mechanism — Spread_Tiberium (cell.cpp:2963-2979)', () => {
       if (callIdx < calls.length) return calls[callIdx++];
       return 0.9; // all subsequent calls: no action
     });
-    map.growOre(256);
+    map.growOre(1821);
     // SW cell (49, 51) should have new ore — N,NE,E,SE,S are blocked, SW is first valid
     expect(getOverlay(map, 49, 51)).toBe(0x03);
   });
@@ -406,7 +406,7 @@ describe('Spread mechanism — Spread_Tiberium (cell.cpp:2963-2979)', () => {
       .mockReturnValueOnce(0.6)  // density: skip
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0); // direction: north
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03); // minimum density
   });
 
@@ -424,7 +424,7 @@ describe('Spread mechanism — Spread_Tiberium (cell.cpp:2963-2979)', () => {
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0)  // direction: start at 0 (N)
       .mockReturnValue(0.9);     // rest: no more actions
-    map.growOre(256);
+    map.growOre(1821);
     // Count how many neighbors got ore
     let oreCount = 0;
     for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]) {
@@ -463,7 +463,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0)  // direction: north (blocked)
       .mockReturnValue(0.9);
-    map.growOre(256);
+    map.growOre(1821);
     // North cell should retain its original overlay, not be overwritten
     expect(getOverlay(map, 50, 49)).toBe(0x05);
   });
@@ -495,7 +495,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)  // density: skip
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0); // direction: north (road)
-    map.growOre(256);
+    map.growOre(1821);
     // C++ would allow spread to ROAD (Build=true in rules.cpp:864)
     // TS rejects it because it checks for Terrain.CLEAR only
     // PARITY GAP: expect 0x03 for C++ parity, but TS gives 0xFF
@@ -515,7 +515,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
@@ -526,7 +526,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
@@ -537,7 +537,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
@@ -548,7 +548,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
@@ -565,7 +565,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
@@ -579,7 +579,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
@@ -596,7 +596,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
@@ -614,7 +614,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
       .mockReturnValueOnce(0.6)
       .mockReturnValueOnce(0.1)
       .mockReturnValueOnce(0.0); // direction: north (out of bounds)
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, edgeX, edgeY - 1)).toBe(0xFF);
   });
 });
@@ -646,21 +646,19 @@ describe('Growth timing — map.cpp:1017-1072', () => {
    * Full scan takes 16384 / 9 = 1821 ticks to complete (~121 seconds = ~2 minutes).
    * Growth/spread actions fire ONCE per full scan completion (map.cpp:1072-1098).
    *
-   * TS uses a fixed 256-tick interval (GameMap.ORE_GROWTH_INTERVAL = 256).
+   * TS uses a fixed 1821-tick interval (GameMap.ORE_GROWTH_INTERVAL = 1821).
    *
-   * PARITY GAP: C++ fires growth every ~1821 ticks. TS fires every 256 ticks.
-   * C++ rate: once per ~121 seconds. TS rate: once per ~17 seconds.
-   * TS grows ore roughly 7x faster than C++.
+   * PARITY MATCH: Both C++ and TS fire growth every ~1821 ticks (~121 seconds).
    */
-  it('TS ORE_GROWTH_INTERVAL is 256 ticks', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(256);
+  it('TS ORE_GROWTH_INTERVAL is 1821 ticks (C++ parity)', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
     // C++ equivalent interval: MAP_CELL_TOTAL / subcount = ~1821 ticks
-    // PARITY GAP: 256 vs ~1821 ticks
+    // PARITY MATCH: both fire every ~1821 ticks
   });
 
   /**
    * C++ timing check: tick 0 should NOT trigger growth.
-   * TS map.ts:561 — "if (tick % 256 !== 0 || tick === 0) return;"
+   * TS map.ts:561 — "if (tick % 1821 !== 0 || tick === 0) return;"
    */
   it('tick 0 does NOT trigger growth', () => {
     setOverlay(map, 50, 50, 0x05);
@@ -669,28 +667,28 @@ describe('Growth timing — map.cpp:1017-1072', () => {
     expect(getOverlay(map, 50, 50)).toBe(0x05);
   });
 
-  it('non-256-aligned ticks do NOT trigger growth', () => {
+  it('non-1821-aligned ticks do NOT trigger growth', () => {
     setOverlay(map, 50, 50, 0x05);
     vi.spyOn(Math, 'random').mockReturnValue(0);
     map.growOre(100);
     expect(getOverlay(map, 50, 50)).toBe(0x05);
-    map.growOre(255);
+    map.growOre(1820);
     expect(getOverlay(map, 50, 50)).toBe(0x05);
-    map.growOre(257);
+    map.growOre(1822);
     expect(getOverlay(map, 50, 50)).toBe(0x05);
   });
 
-  it('tick 256 triggers growth', () => {
+  it('tick 1821 triggers growth', () => {
     setOverlay(map, 50, 50, 0x05);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x06);
   });
 
-  it('tick 512 triggers growth (multiple of 256)', () => {
+  it('tick 3642 triggers growth (multiple of 1821)', () => {
     setOverlay(map, 50, 50, 0x05);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(512);
+    map.growOre(3642);
     expect(getOverlay(map, 50, 50)).toBe(0x06);
   });
 });
@@ -764,7 +762,7 @@ describe('Probability model divergence — C++ reservoir vs TS random', () => {
     expect(count).toBe(100);
 
     vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
-    map.growOre(256);
+    map.growOre(1821);
 
     // ALL 100 cells should have grown to 0x06
     let grownCount = 0;
@@ -811,7 +809,7 @@ describe('Fully depleted areas — seed cell requirement', () => {
       }
     }
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     for (let y = 48; y <= 52; y++) {
       for (let x = 48; x <= 52; x++) {
         expect(getOverlay(map, x, y)).toBe(0xFF);
@@ -829,14 +827,14 @@ describe('Fully depleted areas — seed cell requirement', () => {
       .mockReturnValueOnce(0.6)  // density: skip
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0); // direction: north
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
 
   it('single LOW-density seed cell canNOT spread', () => {
     setOverlay(map, 50, 50, 0x05); // density 2 (< 7 threshold)
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     // Cell grows to 0x06 but no spread (density 2 < 7)
     expect(getOverlay(map, 50, 50)).toBe(0x06);
     for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
@@ -878,8 +876,8 @@ describe('Growth rate constants — rules.cpp:205-206', () => {
 
     expect(CPP_SUBCOUNT).toBe(9); // 16384 / 1800 = 9 cells/tick
     expect(CPP_FULL_SCAN_TICKS).toBe(1821); // 16384 / 9 rounded up
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(256); // TS interval
-    // PARITY GAP: 1821 vs 256 ticks
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821); // TS interval matches C++
+    // PARITY MATCH: both fire every ~1821 ticks
   });
 });
 
@@ -973,7 +971,7 @@ describe('IsTGrowth / IsTSpread flags — rules.cpp:195-196', () => {
     map.initDefault();
     setOverlay(map, 50, 50, 0x05);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x06); // always grows
     vi.restoreAllMocks();
   });
@@ -1025,7 +1023,7 @@ describe('Direction iteration — cell.cpp:2968-2969', () => {
       .mockReturnValueOnce(0.6)  // density: skip
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0); // offset: 0 (start at N)
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03); // N is (50, 49)
   });
 
@@ -1042,7 +1040,7 @@ describe('Direction iteration — cell.cpp:2968-2969', () => {
       if (callIdx < calls.length) return calls[callIdx++];
       return 0.9; // no further actions
     });
-    map.growOre(256);
+    map.growOre(1821);
     // S is (50, 51) — should be the first valid cell found with offset=4
     expect(getOverlay(map, 50, 51)).toBe(0x03);
   });
@@ -1063,7 +1061,7 @@ describe('Direction iteration — cell.cpp:2968-2969', () => {
       .mockReturnValueOnce(0.6)  // density: skip (for 50,50)
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0); // offset: 0 (start at N)
-    map.growOre(256);
+    map.growOre(1821);
     // Only W is valid, so ore should spread there regardless of start direction
     expect(getOverlay(map, 49, 50)).toBe(0x03);
   });
@@ -1119,7 +1117,7 @@ describe('Multiple ore cells — processing order', () => {
       .mockReturnValueOnce(0.1)  // spread: trigger
       .mockReturnValueOnce(0.0)  // direction: north → (45, 49)
       .mockReturnValue(0.9);     // all other cells: no action
-    map.growOre(256);
+    map.growOre(1821);
     // (45, 49) should have ore at minimum density (0x03), NOT grown
     expect(getOverlay(map, 45, 49)).toBe(0x03);
   });
@@ -1155,7 +1153,7 @@ describe('Multiple ore cells — processing order', () => {
       return 0.9; // everything else: skip
     });
 
-    map.growOre(256);
+    map.growOre(1821);
 
     // The new ore at (45, 46) was created as 0x03, then later in the same scan
     // cycle it was grown to 0x04. C++ would leave it at 0x03 until next cycle.
@@ -1197,7 +1195,7 @@ describe('OverlayData max check — cell.cpp:2879', () => {
     map.initDefault();
     setOverlay(map, 50, 50, 0x0D);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x0E);
     vi.restoreAllMocks();
   });
@@ -1208,7 +1206,7 @@ describe('OverlayData max check — cell.cpp:2879', () => {
     map.initDefault();
     setOverlay(map, 50, 50, 0x0E);
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    map.growOre(256);
+    map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x0E);
     vi.restoreAllMocks();
   });
@@ -1321,7 +1319,7 @@ describe('Spread → germination integration', () => {
         if (callIdx < calls.length) return calls[callIdx++];
         return 0.9; // no further actions on newly spread cells
       });
-      testMap.growOre(256);
+      testMap.growOre(1821);
 
       const { dx, dy, name } = dirs[dirIdx];
       expect(

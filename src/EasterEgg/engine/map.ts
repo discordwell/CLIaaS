@@ -546,9 +546,9 @@ export class GameMap {
   // Gems:     0x0F (GEM01, min) through 0x12 (GEM04, max) — 4 density levels
   // No overlay: 0xFF
 
-  /** Ore regrowth interval in ticks — C++ OverlayClass::AI() runs growth roughly
-   *  every 256 game ticks (~17 seconds at 15 FPS). */
-  static readonly ORE_GROWTH_INTERVAL = 256;
+  /** Ore regrowth interval in ticks — C++ map.cpp:1017 scans MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE)
+   *  = 16384 / (2 * 900) = 9 cells/tick. Full scan: ceil(16384/9) = 1821 ticks (~121s at 15 FPS). */
+  static readonly ORE_GROWTH_INTERVAL = 1821;
 
   /** Probability of an existing ore cell increasing one density level per growth cycle.
    *  C++ behavior: roughly 1 in 2 chance per cell per cycle. */
@@ -619,8 +619,9 @@ export class GameMap {
     }
   }
 
-  /** Find nearest ore/gem cell to a given position (returns null if none) */
-  findNearestOre(cx: number, cy: number, maxRange = 20): CellPos | null {
+  /** Find nearest ore/gem cell to a given position (returns null if none).
+   *  C++ parity: short scan=6, long scan=32 (unit.cpp:2230-2234). */
+  findNearestOre(cx: number, cy: number, maxRange = 6): CellPos | null {
     let bestDist = Infinity;
     let best: CellPos | null = null;
     const r = maxRange;

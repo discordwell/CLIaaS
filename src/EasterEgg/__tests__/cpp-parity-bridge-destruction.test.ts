@@ -392,30 +392,25 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
   });
 });
 
-// ── PARITY GAP: Splash damage does NOT destroy bridges in TS ───────────────
+// ── Splash damage bridge destruction (combat.cpp:261-268) ──────────────────
 // C++ combat.cpp:261-268 — Explosion_Damage checks for bridge templates at the
 // impact cell and calls Destroy_Bridge_At if warhead is AP or HE and
 // Random_Pick(1, BridgeStrength) < strength. This means ANY sufficiently
 // powerful AP/HE explosion on a bridge cell can destroy the bridge.
-//
-// TS applySplashDamage (combat.ts:914-1060) does NOT check for bridge templates
-// and does NOT call destroyBridge. Bridge destruction in TS is ONLY triggered
-// by barrel explosions in structureDamage (combat.ts:1206-1213).
 
-describe('PARITY GAP: Splash damage bridge destruction (combat.cpp:261-268)', () => {
+describe('Splash damage bridge destruction (combat.cpp:261-268)', () => {
 
-  it('C++ behavior: AP/HE splash on bridge cell should have chance to destroy bridge', () => {
-    // PARITY GAP — In C++, any AP or HE warhead explosion on a bridge cell has a
-    // probabilistic chance to destroy the bridge: Random_Pick(1, 1000) < strength.
-    // For strength=200 this is a ~20% chance per hit.
-    // In TS, applySplashDamage does not check bridge templates at all.
+  it('AP/HE splash on bridge cell destroys bridge probabilistically', () => {
+    // C++ combat.cpp:267 — Random_Pick(1, BridgeStrength=1000) < damage.
+    // For damage=200 this is a ~20% chance per hit.
+    // With 50 hits, probability of at least one success ≈ 1-(0.8^50) ≈ 99.998%.
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
     const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
 
-    // Fire 50 HE explosions at the bridge cell — in C++, at least some would destroy it
+    // Fire 50 HE explosions at the bridge cell — probabilistic, but almost certain to succeed
     for (let i = 0; i < 50; i++) {
       applySplashDamage(
         ctx,
@@ -426,29 +421,27 @@ describe('PARITY GAP: Splash damage bridge destruction (combat.cpp:261-268)', ()
       );
     }
 
-    // PARITY GAP: TS bridge should still be intact because applySplashDamage
-    // does not implement bridge destruction. In C++, this would likely be destroyed.
-    const bridgeIdx = 20 * MAP_CELLS + 20;
-    expect(ctx.map.templateType[bridgeIdx]).toBe(TEMPLATE_BRIDGE1); // PARITY GAP
+    // Bridge should be destroyed after 50 hits with ~20% chance each
+    expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.WATER);
   });
 
-  it('C++ behavior: only AP and HE warheads can damage bridges, not SA/Fire/Super', () => {
-    // PARITY GAP — C++ combat.cpp:267 explicitly checks: warhead == WARHEAD_AP || warhead == WARHEAD_HE
-    // SA, Fire, and Super warheads cannot damage bridges in C++.
-    // In TS, no warhead damages bridges via splash — all are equally non-functional.
+  it('only AP and HE warheads can damage bridges, not SA/Fire/Super', () => {
+    // C++ combat.cpp:267 explicitly checks: warhead == WARHEAD_AP || warhead == WARHEAD_HE
+    // SA, Fire, and Super warheads cannot damage bridges.
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
 
     const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
 
-    // These warheads should NOT damage bridges in C++ either
+    // These warheads should NOT damage bridges
     for (const wh of ['SA', 'Fire', 'Super'] as const) {
-      applySplashDamage(ctx, impactPos, { damage: 500, warhead: wh, splash: 1.5 }, -1, House.Spain);
+      for (let i = 0; i < 20; i++) {
+        applySplashDamage(ctx, impactPos, { damage: 500, warhead: wh, splash: 1.5 }, -1, House.Spain);
+      }
     }
 
     const bridgeIdx = 20 * MAP_CELLS + 20;
-    // Bridge is intact — this matches C++ behavior for SA/Fire/Super,
-    // but for the wrong reason in TS (TS doesn't implement splash-bridge at all).
+    // Bridge remains intact — SA/Fire/Super cannot damage bridges
     expect(ctx.map.templateType[bridgeIdx]).toBe(TEMPLATE_BRIDGE1);
   });
 });
@@ -496,36 +489,51 @@ describe('PARITY GAP: Two-phase bridge destruction (map.cpp:1797-1864)', () => {
   });
 });
 
-// ── PARITY GAP: Occupant killing on bridge destruction ─────────────────────
+// ── Bridge destruction kills occupants (map.cpp:1837-1861) ─────────────────
 // C++ map.cpp:1837-1861 — when a bridge is fully destroyed, ALL occupants
 // (units on the bridge cells) are killed instantly with full-strength WARHEAD_HE
-// damage. TS does not implement this behavior.
+// damage. TS killBridgeOccupants implements this behavior.
 
-describe('PARITY GAP: Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
+describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
 
-  it('C++ kills all units standing on destroyed bridge cells', () => {
-    // PARITY GAP — In C++, units on the bridge when it's destroyed are killed:
-    //   obj->Take_Damage(obj->Strength, 0, WARHEAD_HE, NULL, true)
-    // This is instant death (full HP damage). TS destroyBridge does not check
-    // for or damage any entities on the bridge cells.
+  it('barrel explosion on bridge kills all units standing on destroyed bridge cells', () => {
+    // C++ map.cpp:1843 — obj->Take_Damage(obj->Strength, 0, WARHEAD_HE, NULL, true)
+    // Units on the bridge when it's destroyed are killed instantly.
     const infantryOnBridge = new Entity(
       UnitType.I_E1, House.USSR,
-      20 * CELL_SIZE + CELL_SIZE / 2,
+      21 * CELL_SIZE + CELL_SIZE / 2,
       20 * CELL_SIZE + CELL_SIZE / 2,
     );
-    const ctx = makeCombatCtx([infantryOnBridge]);
-    setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1H, 6);
+    const barrel = makeBarrel(20, 20, 'BARL');
+    const ctx = makeCombatCtx([infantryOnBridge], [barrel]);
+    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
-    const hpBefore = infantryOnBridge.hp;
+    // Destroy barrel — triggers bridge destruction and occupant killing
+    structureDamage(ctx, barrel, 100);
 
-    // Destroy bridge directly (simulating what would happen in C++ Phase 2)
-    ctx.map.destroyBridge(20, 20, 3);
+    // Infantry on the bridge cell should be dead
+    expect(infantryOnBridge.alive).toBe(false);
+  });
+
+  it('units NOT on bridge cells are unaffected by bridge destruction', () => {
+    const infantryOffBridge = new Entity(
+      UnitType.I_E1, House.USSR,
+      25 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const barrel = makeBarrel(20, 20, 'BARL');
+    const ctx = makeCombatCtx([infantryOffBridge], [barrel]);
+    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
-    // PARITY GAP: Infantry should be dead (C++ kills them), but TS doesn't damage them
-    expect(infantryOnBridge.hp).toBe(hpBefore); // PARITY GAP — C++ would kill this unit
-    expect(infantryOnBridge.alive).toBe(true);   // PARITY GAP — C++ would set alive=false
+    const hpBefore = infantryOffBridge.hp;
+
+    structureDamage(ctx, barrel, 100);
+
+    // Infantry far from bridge should be alive (may take blast damage but not bridge-kill)
+    // The bridge occupant killer only kills units on cells that became water
+    expect(infantryOffBridge.alive).toBe(true);
   });
 });
 

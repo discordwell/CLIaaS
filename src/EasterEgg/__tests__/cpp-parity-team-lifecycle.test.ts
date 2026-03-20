@@ -493,7 +493,7 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
         missions: [
-          { mission: TMISSION_GUARD, data: 1 }, // 1 tenth-minute = ~9 ticks timeout
+          { mission: TMISSION_GUARD, data: 1 }, // 1 * 90 = 90 ticks timeout (C++ TICKS_PER_MINUTE/10)
           { mission: TMISSION_MOVE, data: 0 },
         ],
         forcedActive: true,
@@ -502,8 +502,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const e1 = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
       team.add(e1);
 
-      // Run enough ticks for: activate (1) + regroup (1) + start guard (1) + timeout (~9) + advance
-      for (let i = 0; i < 20; i++) {
+      // Run enough ticks for: activate (1) + regroup (1) + start guard (1) + timeout (90) + advance
+      for (let i = 0; i < 100; i++) {
         team.ai();
       }
 

@@ -292,8 +292,8 @@ describe('STRUCT_SUB_PEN (SPEN) spy effect — sonar pulse (infantry.cpp:664-669
     expect(def.needsTarget).toBe(false);
   });
 
-  it('SONAR_REVEAL_TICKS is 450 (30 seconds at 15 tps)', () => {
-    expect(SONAR_REVEAL_TICKS).toBe(450);
+  it('SONAR_REVEAL_TICKS is 225 (15 seconds at 15 tps, C++ parity)', () => {
+    expect(SONAR_REVEAL_TICKS).toBe(225);
   });
 
   it('spy is consumed after SPEN infiltration', () => {

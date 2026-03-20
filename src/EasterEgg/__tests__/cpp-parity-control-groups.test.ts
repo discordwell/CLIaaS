@@ -84,11 +84,22 @@ class ControlGroupManager {
   }
 
   /**
-   * Assign control group (Ctrl+N) — mirrors TS engine index.ts ~2243-2249
+   * Assign control group (Ctrl+N) — mirrors TS engine index.ts ~2257-2278
+   * C++ foot.h:200-204 — Group is scalar: assigning to group N removes from all others.
    * Stores the current selection as the group.
    */
   assignGroup(g: number): void {
     if (this.selectedIds.size > 0) {
+      // C++ parity: remove assigned units from all other groups (single-group membership)
+      for (const id of this.selectedIds) {
+        for (const [otherG, otherIds] of this.controlGroups) {
+          if (otherG !== g) otherIds.delete(id);
+        }
+      }
+      // Clean up now-empty groups
+      for (const [otherG, otherIds] of this.controlGroups) {
+        if (otherIds.size === 0) this.controlGroups.delete(otherG);
+      }
       this.controlGroups.set(g, new Set(this.selectedIds));
     }
   }
@@ -209,32 +220,33 @@ describe('C++ Parity: Control Groups', () => {
       expect(mgr.controlGroups.has(1)).toBe(false);
     });
 
-    it('C++ groups are 0-9 via keys 1-0; TS supports groups 1-9', () => {
+    it('FIXED: C++ groups are 0-9 via keys 1-0; TS now supports groups 0-9', () => {
       // C++ conquer.cpp:979-1018: Keys 1-0 map to Handle_Team(0) through Handle_Team(9)
-      // TS index.ts:2244: for (let g = 1; g <= 9; g++) — only groups 1-9
-      // PARITY GAP: TS is missing group 0 (key 0 / KN_0 → Handle_Team(9) in C++)
+      // FIXED: TS index.ts now uses for (let g = 0; g <= 9; g++) — groups 0-9
       const mgr = new ControlGroupManager();
       const t1 = entityAtCell(UnitType.LIGHT_TANK, House.Spain, 5, 5);
       mgr.addEntity(t1);
       mgr.select(t1);
 
-      // Groups 1-9 work
-      for (let g = 1; g <= 9; g++) {
-        mgr.assignGroup(g);
-        expect(mgr.controlGroups.get(g)?.has(t1.id)).toBe(true);
-      }
+      // Groups 0-9 all work (note: single-group membership means only last assignment persists)
+      mgr.assignGroup(0);
+      expect(mgr.controlGroups.get(0)?.has(t1.id)).toBe(true);
+
+      // Verify group 0 specifically works
+      mgr.unselectAll();
+      mgr.select(t1);
+      mgr.assignGroup(0);
+      const group0 = mgr.controlGroups.get(0);
+      expect(group0).toBeDefined();
+      expect(group0!.has(t1.id)).toBe(true);
     });
 
-    it('C++ enforces single-group membership; TS allows multi-group', () => {
+    it('FIXED: C++ enforces single-group membership; TS now enforces it too', () => {
       // C++ conquer.cpp:4131: if (obj->Group == team) obj->Group = 0xFF;
       // C++ conquer.cpp:4133: obj->Group = team;
-      // In C++, assigning unit to group N clears it from group N (the SAME group),
-      // and since Group is a single unsigned char, the unit can only be in one group.
+      // In C++, Group is a single unsigned char — unit can only be in one group.
       //
-      // TS: controlGroups.set(g, new Set(selectedIds)) — stores IDs in sets,
-      // a unit's ID can appear in multiple group sets simultaneously.
-      //
-      // PARITY GAP: TS does not enforce single-group membership
+      // FIXED: TS now removes units from all other groups when assigning to a new group.
       const mgr = new ControlGroupManager();
       const t1 = entityAtCell(UnitType.LIGHT_TANK, House.Spain, 5, 5);
       mgr.addEntity(t1);
@@ -243,17 +255,13 @@ describe('C++ Parity: Control Groups', () => {
       mgr.assignGroup(1);
       mgr.assignGroup(2);
 
-      // In C++, t1 would only be in group 2 (last assigned).
-      // In TS, t1 is in BOTH groups 1 and 2.
+      // FIXED: t1 should only be in group 2 (last assigned), removed from group 1
       const inGroup1 = mgr.controlGroups.get(1)?.has(t1.id) ?? false;
       const inGroup2 = mgr.controlGroups.get(2)?.has(t1.id) ?? false;
 
-      // TS behavior: unit in both groups
       expect(inGroup2).toBe(true);
-
-      // PARITY GAP: C++ would have inGroup1 === false, TS has inGroup1 === true
-      // In C++, Group is a scalar — assigning to group 2 overwrites group 1
-      expect(inGroup1).toBe(true); // TS behavior (C++ would be false)
+      // FIXED: C++ parity — assigning to group 2 removes from group 1
+      expect(inGroup1).toBe(false);
     });
   });
 

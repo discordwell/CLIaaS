@@ -1321,14 +1321,14 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
     expect(map.findNearestOre(15, 15, 30)).toEqual({ cx: 15, cy: 40 });
   });
 
-  it('findNearestOre default maxRange is 20', () => {
-    // Place ore at distance 19 — should be found
-    map.overlay[34 * MAP_CELLS + 15] = 0x08; // (15,34) → dy=19
-    expect(map.findNearestOre(15, 15)).toEqual({ cx: 15, cy: 34 });
+  it('findNearestOre default maxRange is 6 (C++ short scan)', () => {
+    // Place ore at distance 5 — should be found
+    map.overlay[20 * MAP_CELLS + 15] = 0x08; // (15,20) → dy=5
+    expect(map.findNearestOre(15, 15)).toEqual({ cx: 15, cy: 20 });
 
-    // Place ore at distance 21 — should NOT be found with default
+    // Place ore at distance 7 — should NOT be found with default
     const m2 = new GameMap();
-    m2.overlay[36 * MAP_CELLS + 15] = 0x08; // (15,36) → dy=21
+    m2.overlay[22 * MAP_CELLS + 15] = 0x08; // (15,22) → dy=7
     expect(m2.findNearestOre(15, 15)).toBeNull();
   });
 });
@@ -1339,8 +1339,8 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
 describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
 
-  it('ORE_GROWTH_INTERVAL = 256 ticks', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(256);
+  it('ORE_GROWTH_INTERVAL = 1821 ticks (C++ map.cpp:1017 full scan)', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
   });
 
   it('growOre does nothing at tick 0', () => {
@@ -1355,16 +1355,16 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
     map.overlay[idx] = 0x08;
     map.growOre(100);
     expect(map.overlay[idx]).toBe(0x08);
-    map.growOre(255);
+    map.growOre(1820);
     expect(map.overlay[idx]).toBe(0x08);
   });
 
-  it('growOre fires at tick 256 (first interval)', () => {
+  it('growOre fires at tick 1821 (first interval)', () => {
     // With deterministic random, we can't predict exact outcome, but we can
     // check that it runs without error and the overlay is in a valid range
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x05; // mid-range gold
-    map.growOre(256);
+    map.growOre(1821);
     // Overlay should still be in gold range (possibly incremented)
     expect(map.overlay[idx]).toBeGreaterThanOrEqual(0x05);
     expect(map.overlay[idx]).toBeLessThanOrEqual(0x06);
@@ -1374,7 +1374,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x0F; // gem minimum
     // Run many growth cycles
-    for (let tick = 256; tick <= 256 * 100; tick += 256) {
+    for (let tick = 1821; tick <= 1821 * 100; tick += 1821) {
       map.growOre(tick);
     }
     // Gem overlay should be completely unchanged
@@ -1384,7 +1384,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
   it('gold ore at max density (0x0E) cannot grow further', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x0E; // max gold
-    for (let tick = 256; tick <= 256 * 50; tick += 256) {
+    for (let tick = 1821; tick <= 1821 * 50; tick += 1821) {
       map.growOre(tick);
     }
     expect(map.overlay[idx]).toBe(0x0E); // stays at max
@@ -1400,7 +1400,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
     map.overlay[idx] = 0x09; // exactly at threshold — spread should NOT fire
     // All neighbors are CLEAR (default) — spread-eligible terrain
     // Run a single cycle so density growth can't push us multiple levels
-    map.growOre(256);
+    map.growOre(1821);
     let neighborOreCount = 0;
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -1426,7 +1426,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
     map.setTerrain(cx - 1, cy - 1, Terrain.ORE);
     map.setTerrain(cx + 1, cy - 1, Terrain.BEACH);
     map.setTerrain(cx - 1, cy + 1, Terrain.RIVER);
-    for (let tick = 256; tick <= 256 * 200; tick += 256) {
+    for (let tick = 1821; tick <= 1821 * 200; tick += 1821) {
       map.growOre(tick);
     }
     // None of the neighbors should have ore (only CLEAR allows spread)
@@ -1450,7 +1450,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
         map.setWallType(cx + dx, cy + dy, 'SBAG');
       }
     }
-    for (let tick = 256; tick <= 256 * 200; tick += 256) {
+    for (let tick = 1821; tick <= 1821 * 200; tick += 1821) {
       map.growOre(tick);
     }
     for (let dy = -1; dy <= 1; dy++) {
@@ -1468,7 +1468,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
     map.overlay[idx] = 0x0E;
     // Place existing overlay on a neighbor
     map.overlay[cy * MAP_CELLS + cx + 1] = 0x03; // existing gold
-    for (let tick = 256; tick <= 256 * 200; tick += 256) {
+    for (let tick = 1821; tick <= 1821 * 200; tick += 1821) {
       map.growOre(tick);
     }
     // The neighbor with existing ore should have grown but not been overwritten to 0x03
@@ -1847,7 +1847,7 @@ describe('Ore growth constants (C++ overlay.cpp parity)', () => {
     expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
   });
 
-  it('ORE_GROWTH_INTERVAL = 256 ticks (~17 seconds at 15 FPS)', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(256);
+  it('ORE_GROWTH_INTERVAL = 1821 ticks (~121 seconds at 15 FPS)', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
   });
 });

@@ -104,26 +104,36 @@ describe('Queue append (shift+click) — C++ foot.cpp:2275-2307', () => {
   });
 
   /**
-   * PARITY GAP: C++ NavQueue is fixed-size [10] — overflow is silently dropped.
-   * TS uses unbounded array — no overflow protection.
+   * FIXED: C++ NavQueue is fixed-size [10] — overflow is silently dropped.
+   * TS now caps via Entity.queueWaypoint() at NAV_QUEUE_MAX (10).
    *
    * C++ foot.cpp:2294: if (count < ARRAY_SIZE(NavQueue)) { NavQueue[count] = target; }
    * When count >= 10, the target is silently ignored.
    */
-  it('C++ caps queue at 10 entries — TS has no cap', () => {
+  it('queue caps at 10 entries — matches C++ NavQueue[10]', () => {
     const unit = makeUnit();
     unit.mission = Mission.MOVE;
     unit.moveTarget = wp(50, 50);
 
-    // Push 12 waypoints (C++ would cap at 10, TS allows all 12)
+    // Attempt to queue 12 waypoints via queueWaypoint (C++ caps at 10)
     for (let i = 0; i < 12; i++) {
-      unit.moveQueue.push(wp(i * 100, i * 100));
+      unit.queueWaypoint(wp(i * 100, i * 100));
     }
 
     // C++ behavior: ARRAY_SIZE(NavQueue) = 10, so only 10 entries
-    // TS behavior: unbounded array, all 12 are stored
-    // PARITY GAP: TS does not enforce the 10-entry limit
-    expect(unit.moveQueue.length).toBe(12); // TS: 12 (C++ would be 10)
+    // TS behavior: queueWaypoint enforces the 10-entry limit — FIXED
+    expect(unit.moveQueue.length).toBe(10);
+  });
+
+  it('queueWaypoint returns false when queue is full', () => {
+    const unit = makeUnit();
+    // Fill queue to capacity
+    for (let i = 0; i < 10; i++) {
+      expect(unit.queueWaypoint(wp(i * 100, i * 100))).toBe(true);
+    }
+    // 11th should be rejected
+    expect(unit.queueWaypoint(wp(1100, 1100))).toBe(false);
+    expect(unit.moveQueue.length).toBe(10);
   });
 });
 
@@ -351,7 +361,7 @@ describe('Shift+click gate condition — C++ techno.cpp:3264 vs TS index.ts:2888
 describe('NavQueue loop mode — C++ foot.cpp:2288-2289,2242-2248', () => {
 
   /**
-   * PARITY GAP: C++ has IsNavQueueLoop — when the unit's own target is queued,
+   * FIXED: C++ has IsNavQueueLoop — when the unit's own target is queued,
    * it sets IsNavQueueLoop=true. Handle_Navigation_List then re-appends each
    * consumed waypoint to the end of the queue, creating an indefinite patrol loop.
    *
@@ -370,16 +380,48 @@ describe('NavQueue loop mode — C++ foot.cpp:2288-2289,2242-2248', () => {
    *     }
    *   }
    *
-   * TS has NO concept of IsNavQueueLoop. There is no way to create a
-   * looping patrol path. Once the queue is consumed, movement stops.
+   * TS now has navQueueLoop and navQueueOriginal for patrol loop support.
    */
-  it('TS Entity has no navQueueLoop property', () => {
+  it('Entity has navQueueLoop property (C++ foot.h:146 IsNavQueueLoop)', () => {
     const unit = makeUnit();
     // C++ foot.h:146: unsigned IsNavQueueLoop:1
-    // TS: no such field exists
-    expect('navQueueLoop' in unit).toBe(false);
-    expect('isNavQueueLoop' in unit).toBe(false);
-    // PARITY GAP: TS lacks patrol loop capability
+    // TS: navQueueLoop boolean — FIXED
+    expect('navQueueLoop' in unit).toBe(true);
+    expect(unit.navQueueLoop).toBe(false); // defaults to false (C++ foot.cpp:114)
+  });
+
+  it('navQueueLoop=true re-appends consumed waypoints', () => {
+    const unit = makeUnit();
+    unit.navQueueLoop = true;
+    unit.navQueueOriginal = [wp(100, 100), wp(200, 200), wp(300, 300)];
+    unit.moveQueue = [wp(100, 100), wp(200, 200), wp(300, 300)];
+
+    // Consume front entry (C++ Handle_Navigation_List)
+    const consumed = unit.moveQueue.shift()!;
+    expect(consumed).toEqual(wp(100, 100));
+
+    // C++ foot.cpp:2242-2248: re-append consumed entry when looping
+    unit.queueWaypoint({ x: consumed.x, y: consumed.y });
+    expect(unit.moveQueue.length).toBe(3); // 2 remaining + 1 re-appended
+    expect(unit.moveQueue[2]).toEqual(wp(100, 100)); // re-appended at end
+  });
+
+  it('navQueueOriginal re-populates empty queue when loop is true', () => {
+    const unit = makeUnit();
+    unit.navQueueLoop = true;
+    unit.navQueueOriginal = [wp(100, 100), wp(200, 200)];
+    unit.moveQueue = []; // exhausted
+
+    // C++ Handle_Navigation_List: when queue empty and loop=true, re-populate
+    if (unit.moveQueue.length === 0 && unit.navQueueLoop && unit.navQueueOriginal.length > 0) {
+      for (const w of unit.navQueueOriginal) {
+        unit.queueWaypoint({ x: w.x, y: w.y });
+      }
+    }
+
+    expect(unit.moveQueue.length).toBe(2);
+    expect(unit.moveQueue[0]).toEqual(wp(100, 100));
+    expect(unit.moveQueue[1]).toEqual(wp(200, 200));
   });
 });
 
@@ -524,8 +566,8 @@ describe('Queue when idle triggers movement — C++ foot.cpp:2303-2305', () => {
 describe('NavQueue capacity — C++ foot.h:189', () => {
 
   /**
-   * PARITY GAP: C++ uses a fixed-size array of 10 targets.
-   * TS uses a dynamic JavaScript array with no upper bound.
+   * FIXED: C++ uses a fixed-size array of 10 targets.
+   * TS now enforces the same limit via Entity.queueWaypoint() and NAV_QUEUE_MAX.
    *
    * C++ foot.h:189: TARGET NavQueue[10]
    * C++ foot.cpp:2279-2280:
@@ -536,24 +578,20 @@ describe('NavQueue capacity — C++ foot.h:189', () => {
    *   if (count < ARRAY_SIZE(NavQueue)) {
    *     NavQueue[count] = target;
    *   }
-   *
-   * In practice, 10 waypoints is generous — players rarely queue more than 5-6.
-   * The TS unbounded array is functionally compatible but not size-limited.
    */
-  it('C++ max queue size is 10', () => {
-    const CPP_NAV_QUEUE_SIZE = 10;
+  it('C++ max queue size is 10 — TS NAV_QUEUE_MAX matches', () => {
     // C++ foot.h:189: TARGET NavQueue[10]
-    expect(CPP_NAV_QUEUE_SIZE).toBe(10);
+    expect(Entity.NAV_QUEUE_MAX).toBe(10);
   });
 
-  it('TS moveQueue has no enforced maximum', () => {
+  it('queueWaypoint enforces 10-entry maximum — matches C++', () => {
     const unit = makeUnit();
-    // Fill with 15 waypoints
+    // Attempt 15 waypoints via queueWaypoint
     for (let i = 0; i < 15; i++) {
-      unit.moveQueue.push(wp(i * 50, i * 50));
+      unit.queueWaypoint(wp(i * 50, i * 50));
     }
-    expect(unit.moveQueue.length).toBe(15);
-    // PARITY GAP: C++ would cap at 10, silently dropping entries 11-15
+    // FIXED: TS now caps at 10, matching C++ NavQueue[10]
+    expect(unit.moveQueue.length).toBe(10);
   });
 });
 

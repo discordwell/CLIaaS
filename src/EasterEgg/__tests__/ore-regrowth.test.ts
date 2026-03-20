@@ -11,7 +11,7 @@ import { MAP_CELLS } from '../engine/types';
  *   0xFF      = No overlay
  *
  * C++ behavior:
- *   - Growth fires every ~256 ticks (~17s at 15 FPS)
+ *   - Growth fires every ~1821 ticks (~121s at 15 FPS)
  *   - ~50% chance per cell to increase density by 1
  *   - ~25% chance per cell to spread to one random adjacent empty CLEAR cell
  *   - Fully depleted areas (all 0xFF) never regrow — requires a seed cell
@@ -48,28 +48,28 @@ describe('Ore Regrowth (C++ parity)', () => {
       vi.restoreAllMocks();
     });
 
-    it('does not trigger at non-256-aligned ticks', () => {
+    it('does not trigger at non-1821-aligned ticks', () => {
       setOverlay(50, 50, 0x05);
       vi.spyOn(Math, 'random').mockReturnValue(0);
       map.growOre(100);
       expect(getOverlay(50, 50)).toBe(0x05);
-      map.growOre(255);
+      map.growOre(1820);
       expect(getOverlay(50, 50)).toBe(0x05);
       vi.restoreAllMocks();
     });
 
-    it('triggers at tick 256', () => {
+    it('triggers at tick 1821', () => {
       setOverlay(50, 50, 0x05);
       vi.spyOn(Math, 'random').mockReturnValue(0); // always grow
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x06); // increased by 1
       vi.restoreAllMocks();
     });
 
-    it('triggers at tick 512 (multiple of 256)', () => {
+    it('triggers at tick 3642 (multiple of 1821)', () => {
       setOverlay(50, 50, 0x05);
       vi.spyOn(Math, 'random').mockReturnValue(0);
-      map.growOre(512);
+      map.growOre(3642);
       expect(getOverlay(50, 50)).toBe(0x06);
       vi.restoreAllMocks();
     });
@@ -80,7 +80,7 @@ describe('Ore Regrowth (C++ parity)', () => {
       setOverlay(50, 50, 0x05);
       // Math.random < 0.5 triggers density growth
       vi.spyOn(Math, 'random').mockReturnValue(0.1);
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x06);
       vi.restoreAllMocks();
     });
@@ -88,7 +88,7 @@ describe('Ore Regrowth (C++ parity)', () => {
     it('gold ore at min density 0x03 increases to 0x04', () => {
       setOverlay(50, 50, 0x03);
       vi.spyOn(Math, 'random').mockReturnValue(0.1);
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x04);
       vi.restoreAllMocks();
     });
@@ -96,7 +96,7 @@ describe('Ore Regrowth (C++ parity)', () => {
     it('gold ore at max density 0x0E does NOT increase further', () => {
       setOverlay(50, 50, 0x0E);
       vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
-      map.growOre(256);
+      map.growOre(1821);
       // Density stays at max — should NOT wrap or go above 0x0E
       expect(getOverlay(50, 50)).toBe(0x0E);
       vi.restoreAllMocks();
@@ -105,7 +105,7 @@ describe('Ore Regrowth (C++ parity)', () => {
     it('gem at density 0x0F does NOT increase (EC6: gems never grow)', () => {
       setOverlay(50, 50, 0x0F);
       vi.spyOn(Math, 'random').mockReturnValue(0.1);
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x0F); // EC6: gems skipped entirely
       vi.restoreAllMocks();
     });
@@ -113,7 +113,7 @@ describe('Ore Regrowth (C++ parity)', () => {
     it('gem at density 0x11 does NOT increase (EC6: gems never grow)', () => {
       setOverlay(50, 50, 0x11);
       vi.spyOn(Math, 'random').mockReturnValue(0.1);
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x11); // EC6: gems skipped entirely
       vi.restoreAllMocks();
     });
@@ -121,7 +121,7 @@ describe('Ore Regrowth (C++ parity)', () => {
     it('gem at max density 0x12 does NOT increase further', () => {
       setOverlay(50, 50, 0x12);
       vi.spyOn(Math, 'random').mockReturnValue(0);
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x12);
       vi.restoreAllMocks();
     });
@@ -131,7 +131,7 @@ describe('Ore Regrowth (C++ parity)', () => {
       // 0.8 > 0.5 (ORE_DENSITY_CHANCE), so no density growth
       // Also > 0.25 (ORE_SPREAD_CHANCE), so no spread either
       vi.spyOn(Math, 'random').mockReturnValue(0.8);
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x05); // no change
       vi.restoreAllMocks();
     });
@@ -148,7 +148,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip (0.6 >= 0.5)
         .mockReturnValueOnce(0.1)  // spread: trigger (0.1 < 0.25)
         .mockReturnValueOnce(0.0); // direction: north [0,-1] → cell (50, 49)
-      map.growOre(256);
+      map.growOre(1821);
       // Cell (50, 49) should now have minimum gold ore
       expect(getOverlay(50, 49)).toBe(0x03);
       // Original cell should NOT have changed density (we skipped it)
@@ -160,7 +160,7 @@ describe('Ore Regrowth (C++ parity)', () => {
       setOverlay(50, 50, 0x10); // gem cell
       const mockRandom = vi.spyOn(Math, 'random');
       mockRandom.mockReturnValue(0); // always trigger everything
-      map.growOre(256);
+      map.growOre(1821);
       // EC6: gems are completely skipped by growOre — no spread occurs
       expect(getOverlay(50, 51)).toBe(0xFF);
       expect(getOverlay(50, 49)).toBe(0xFF);
@@ -181,7 +181,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValue(0.9);
       // Need to handle (50,49) too since it also has ore:
       // It would be processed before (50,50) due to row order
-      map.growOre(256);
+      map.growOre(1821);
       // Cell (50, 49) should retain its original overlay, not be overwritten to 0x03
       expect(getOverlay(50, 49)).not.toBe(0x03);
       vi.restoreAllMocks();
@@ -197,7 +197,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger
         .mockReturnValueOnce(0.0); // direction: north → (50, 49) which is WATER
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0xFF); // still no overlay
       vi.restoreAllMocks();
     });
@@ -210,7 +210,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger
         .mockReturnValueOnce(0.25); // direction: index 1 → [1,0] → east → (51, 50)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(51, 50)).toBe(0xFF);
       vi.restoreAllMocks();
     });
@@ -223,7 +223,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger
         .mockReturnValueOnce(0.5); // direction: index 2 → [0,1] → south → (50, 51)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 51)).toBe(0xFF);
       vi.restoreAllMocks();
     });
@@ -236,7 +236,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger
         .mockReturnValueOnce(0.75); // direction: index 3 → [-1,0] → west → (49, 50)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(49, 50)).toBe(0xFF);
       vi.restoreAllMocks();
     });
@@ -250,7 +250,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger
         .mockReturnValueOnce(0.0); // direction: north → (50, 49)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0xFF); // blocked by wall structure
       vi.restoreAllMocks();
     });
@@ -265,7 +265,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         }
       }
       vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger everything
-      map.growOre(256);
+      map.growOre(1821);
       // All cells should remain 0xFF — no seed cell means no regrowth
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -283,7 +283,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger
         .mockReturnValueOnce(0.0); // direction: north
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // spread to neighbor
       vi.restoreAllMocks();
     });
@@ -300,7 +300,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         .mockReturnValueOnce(0.6)  // density: skip
         .mockReturnValueOnce(0.1)  // spread: trigger
         .mockReturnValueOnce(0.0); // direction: north → (edgeX, edgeY - 1) — out of bounds!
-      map.growOre(256);
+      map.growOre(1821);
       // The cell above the bounds edge should NOT get ore
       expect(getOverlay(edgeX, edgeY - 1)).toBe(0xFF);
       vi.restoreAllMocks();
@@ -324,7 +324,7 @@ describe('Ore Regrowth (C++ parity)', () => {
         // High value = skip for all other cells
         return 0.9;
       });
-      map.growOre(256);
+      map.growOre(1821);
       // Cells just outside bounds should NOT have ore
       if (maxX + 1 < MAP_CELLS) {
         expect(getOverlay(maxX + 1, maxY)).toBe(0xFF);
@@ -337,8 +337,8 @@ describe('Ore Regrowth (C++ parity)', () => {
   });
 
   describe('Static configuration', () => {
-    it('ORE_GROWTH_INTERVAL is 256 ticks', () => {
-      expect(GameMap.ORE_GROWTH_INTERVAL).toBe(256);
+    it('ORE_GROWTH_INTERVAL is 1821 ticks (C++ map.cpp:1017 full scan interval)', () => {
+      expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
     });
 
     it('ORE_DENSITY_CHANCE is 0.5', () => {

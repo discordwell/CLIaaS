@@ -265,9 +265,11 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     entity.animState = AnimState.ATTACK;
 
     // S5: NoMovingFire setup time (C++ unit.cpp:1760-1764 — Arm = Rearm_Delay(true)/4 when stopping)
-    // When a NoMovingFire unit transitions from moving to stationary, add ROF/4 warmup delay
+    // C++ Rearm_Delay(true) = weapon->ROF * House->ROFBias (techno.cpp:2867)
+    // So setup = (ROF * ROFBias) / 4
     if (entity.stats.noMovingFire && entity.wasMoving && entity.weapon) {
-      const setupTime = Math.floor(entity.weapon.rof / 4);
+      const rofBias = ctx.getROFBias(entity.house);
+      const setupTime = Math.floor(entity.weapon.rof * rofBias / 4);
       if (entity.attackCooldown < setupTime) {
         entity.attackCooldown = setupTime;
       }
@@ -549,8 +551,9 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
   if (!entity.target?.alive) {
     entity.target = null;
-    // C++ foot.cpp:654-703 — Hunt actively scans for new targets with extended range
-    const huntRange = entity.stats.sight * 2; // hunt has wider scan than guard
+    // C++ foot.cpp:654-703 — Hunt actively scans for new targets
+    // C++ THREAT_NORMAL scans the entire map (no range limit).
+    const huntRange = Infinity; // C++ parity: THREAT_NORMAL has unlimited range
     const ec = entity.cell;
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
@@ -822,9 +825,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   // Use origin position for distance checks so guards defend their post, not where they wandered
   const scanPos = origin;
   const scanCell = worldToCell(scanPos.x, scanPos.y);
-  // AG1: C++ foot.cpp:996-1001 — leash = Threat_Range(1)/2 = weapon.range/2 from origin
+  // AG1: C++ foot.cpp:996-1001 — leash = Threat_Range(1)/2
+  // C++ Threat_Range(1) = min(2*weaponRange, 0x0A00=10cells), so leash = min(weaponRange, 5)
   const weaponRange = entity.weapon?.range ?? entity.stats.sight;
-  const leashRange = weaponRange / 2;
+  const leashRange = Math.min(weaponRange / 2, 5);
   const scanRange = Math.max(leashRange, entity.stats.sight);
 
   // If too far from origin (> leash range), return home — but still attack enemies en route

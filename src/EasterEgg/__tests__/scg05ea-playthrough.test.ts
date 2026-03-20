@@ -9,9 +9,10 @@ import type { AgentState } from '../engine/agentHarness.js';
  */
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
-const STEP_TICKS = 15;
-const MAX_ITERATIONS = 2000;
-const LOG_EVERY = 5;
+const STEP_TICKS_NORMAL = 15;
+const STEP_TICKS_MICRO = 5; // Smaller steps when Tanya is alive for responsive micro
+const MAX_ITERATIONS = 4000;
+const LOG_EVERY = 10;
 
 describe('SCG05EA live playthrough', () => {
   let adapter: TsAgentAdapter;
@@ -65,7 +66,10 @@ describe('SCG05EA live playthrough', () => {
       if (hasAttack) {
         console.log(`  CMD: ${JSON.stringify(decision.commands)}`);
       }
-      const stepResult = await adapter.step(STEP_TICKS, decision.commands);
+      // Use smaller steps when Tanya is alive for responsive micro
+      const hasTanya = lastState.units.some((u: { t: string }) => u.t === 'E7');
+      const stepTicks = hasTanya ? STEP_TICKS_MICRO : STEP_TICKS_NORMAL;
+      const stepResult = await adapter.step(stepTicks, decision.commands);
       // After infiltrate command, dump browser console and enable trigger debug
       if (hasAttack) {
         const logs = adapter.getLogs();

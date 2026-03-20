@@ -203,7 +203,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gold ore density increases on growth cycle', () => {
       setOverlay(50, 50, 0x05); // gold density 2
       vi.spyOn(Math, 'random').mockReturnValue(0.1); // always trigger density growth
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x06); // increased by 1
       vi.restoreAllMocks();
     });
@@ -211,7 +211,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gem overlay does NOT increase density on growth cycle', () => {
       setOverlay(50, 50, 0x0F); // GEM01 min density
       vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger everything
-      map.growOre(256);
+      map.growOre(1821);
       // Gem should remain unchanged — growOre skips gems entirely
       expect(getOverlay(50, 50)).toBe(0x0F);
       vi.restoreAllMocks();
@@ -220,7 +220,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gem at max density does NOT increase', () => {
       setOverlay(50, 50, 0x12); // GEM04 max density
       vi.spyOn(Math, 'random').mockReturnValue(0);
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x12);
       vi.restoreAllMocks();
     });
@@ -228,7 +228,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gem overlay does NOT spread to adjacent empty cells', () => {
       setOverlay(50, 50, 0x12); // gem at max density
       vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
-      map.growOre(256);
+      map.growOre(1821);
       // All adjacent cells should remain empty — gems don't spread
       expect(getOverlay(50, 49)).toBe(0xFF);
       expect(getOverlay(51, 50)).toBe(0xFF);
@@ -244,7 +244,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
         .mockReturnValueOnce(0.6)  // density: skip (0.6 >= 0.5)
         .mockReturnValueOnce(0.1)  // spread: trigger (0.1 < 0.25)
         .mockReturnValueOnce(0.0); // direction: index 0 → N [0,-1] → (50, 49)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // gold spread
       vi.restoreAllMocks();
     });
@@ -257,7 +257,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
       // 0x03 = density 0, 0x09 = density 6. Spread requires > 6, so overlay must be > 0x09
       setOverlay(50, 50, 0x07); // density 4 — below threshold
       vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
-      map.growOre(256);
+      map.growOre(1821);
       // Density may have increased (0x07 -> 0x08), but no spreading
       for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]) {
         expect(getOverlay(50 + dx, 50 + dy)).toBe(0xFF);
@@ -268,7 +268,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gold at density 0x09 (density 6, exactly at threshold) does NOT spread', () => {
       setOverlay(50, 50, 0x09);
       vi.spyOn(Math, 'random').mockReturnValue(0);
-      map.growOre(256);
+      map.growOre(1821);
       // Overlay may have increased to 0x0A, but spread check uses original value
       // Actually, the density check may bump it before spread check runs.
       // Let's just check the adjacent cells are empty:
@@ -289,7 +289,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
         .mockReturnValueOnce(0.6)   // density: skip
         .mockReturnValueOnce(0.1)   // spread: trigger
         .mockReturnValueOnce(0.0);  // direction: index 0 → N → (50, 49)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // spread occurred
       vi.restoreAllMocks();
     });
@@ -301,7 +301,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
         .mockReturnValueOnce(0.6)   // density: skip
         .mockReturnValueOnce(0.1)   // spread: trigger
         .mockReturnValueOnce(0.125); // direction: index 1 → NE [1,-1] → (51, 49)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(51, 49)).toBe(0x03); // spread to NE diagonal
       vi.restoreAllMocks();
     });
@@ -314,7 +314,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
         .mockReturnValueOnce(0.1)   // spread: trigger for (50,50)
         .mockReturnValueOnce(0.375) // direction: index 3 → SE [1,1] → (51, 51)
         .mockReturnValue(0.9);      // skip all subsequent density/spread for new cell
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(51, 51)).toBe(0x03); // spread to SE diagonal
       vi.restoreAllMocks();
     });
@@ -327,7 +327,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
         .mockReturnValueOnce(0.1)   // spread: trigger for (50,50)
         .mockReturnValueOnce(0.625) // direction: index 5 → SW [-1,1] → (49, 51)
         .mockReturnValue(0.9);      // skip all subsequent density/spread for new cell
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(49, 51)).toBe(0x03); // spread to SW diagonal
       vi.restoreAllMocks();
     });
@@ -339,7 +339,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
         .mockReturnValueOnce(0.6)   // density: skip
         .mockReturnValueOnce(0.1)   // spread: trigger
         .mockReturnValueOnce(0.875); // direction: index 7 → NW [-1,-1] → (49, 49)
-      map.growOre(256);
+      map.growOre(1821);
       expect(getOverlay(49, 49)).toBe(0x03); // spread to NW diagonal
       vi.restoreAllMocks();
     });

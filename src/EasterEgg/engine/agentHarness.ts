@@ -540,6 +540,23 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           break;
         }
 
+        case 'warp_unit': {
+          // Debug/harness command: teleport a unit to a specific cell
+          const we = game.entityById.get(c.unitId);
+          if (!we?.alive) {
+            results.push({ cmd: 'warp_unit', ok: false, error: 'unit not alive' });
+            break;
+          }
+          we.pos = { x: c.cx * CELL_SIZE + CELL_SIZE / 2, y: c.cy * CELL_SIZE + CELL_SIZE / 2 };
+          we.path = [];
+          we.pathIndex = 0;
+          we.mission = Mission.GUARD;
+          we.target = null;
+          we.moveTarget = null;
+          results.push({ cmd: 'warp_unit', ok: true });
+          break;
+        }
+
         case 'set_global': {
           // Debug/harness command: directly set a global (simulates cell trigger activation)
           const globals = (game as unknown as { globals: Set<number> }).globals;

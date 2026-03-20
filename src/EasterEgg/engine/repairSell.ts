@@ -226,7 +226,9 @@ export function tickServiceDepot(ctx: RepairSellContext): void {
       const needsRearm = e.maxAmmo > 0 && e.ammo < e.maxAmmo;
       if (!needsRepair && !needsRearm) continue;
       const dist = worldDist({ x: sx, y: sy }, e.pos);
-      if (dist < 1.5 && dist < bestDist) {
+      // C++ building.cpp: docking distance is 0x10 leptons (~0.0625 cells).
+      // Use 0.7 cells to match tightened auto-load proximity while remaining practical.
+      if (dist < 0.7 && dist < bestDist) {
         docked = e;
         bestDist = dist;
       }

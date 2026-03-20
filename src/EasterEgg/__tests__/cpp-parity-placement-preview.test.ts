@@ -165,6 +165,14 @@ function tsPreview(
     }
   }
 
+  // FIXED: bdata.cpp:3448-3477 — include bib cells in preview
+  const bibCells = getBibCells(buildingType, cx, cy);
+  for (const bc of bibCells) {
+    const bibBuildable = map.isBuildable(bc.cx, bc.cy);
+    cells.push(bibBuildable);
+    if (!bibBuildable) valid = false;
+  }
+
   // index.ts:6373-6382: AABB adjacency with 2-cell expansion (FIXED: was 1-cell)
   let adj = false;
   for (const s of structures) {
@@ -173,6 +181,11 @@ function tsPreview(
     const exL = s.cx - 2, exT = s.cy - 2, exR = s.cx + sw + 2, exB = s.cy + sh + 2;
     const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
     if (nL < exR && nR > exL && nT < exB && nB > exT) { adj = true; break; }
+  }
+
+  // FIXED: cell.cpp:1126 — proximity gates per-cell color (when proximity fails, ALL cells red)
+  if (!adj) {
+    for (let i = 0; i < cells.length; i++) cells[i] = false;
   }
 
   return {
@@ -306,7 +319,8 @@ describe('Section 1: Per-cell buildability — Is_Clear_To_Build (cell.cpp:453-5
     const cpp = cppPreview(map, 'POWR', 13, 10, structs);
     const ts = tsPreview(map, 'POWR', 13, 10, structs);
     expect(cpp.cells).toEqual([true, true, true, true]);
-    expect(ts.cells).toEqual([true, true, true, true]);
+    // TS includes bib cells: 4 footprint (ROAD=green) + 2 bib (CLEAR=green)
+    expect(ts.cells).toEqual([true, true, true, true, true, true]);
   });
 
   it('WALL cell shows red in both C++ and TS', () => {
@@ -358,30 +372,26 @@ describe('Section 2: Proximity gates per-cell coloring (cell.cpp:1126)', () => {
     expect(result.cells).toEqual([false, false, false, false]);
   });
 
-  // REMAINING GAP: TS per-cell color is independent of proximity check.
-  // In C++, proximity=false forces ALL cells red. In TS, per-cell color
-  // reflects buildability only; the proximity gate is applied at the
-  // overall placementValid level (border/text), not per-cell color.
-  it('REMAINING GAP: TS per-cell color does not gate on proximity — C++ does', () => {
+  // FIXED: TS per-cell color now gates on proximity check, matching C++.
+  // In C++, proximity=false forces ALL cells red. TS now does the same.
+  it('FIXED: TS per-cell color gates on proximity — matches C++ cell.cpp:1126', () => {
     // C++ cell.cpp:1126: proximity=false → all red
-    // TS renderer.ts:3994: uses placementCells[idx] which is isBuildable(),
-    //   independent of adj. CLEAR cells still show green in TS.
+    // TS: FIXED — when adj=false, all cells set to false
     const map = makeMap();
     const tsResult = tsPreview(map, 'POWR', 50, 50, []);
     const cppResult = cppPreview(map, 'POWR', 50, 50, []);
 
-    // TS: all cells show green (buildable) even without proximity
-    expect(tsResult.cells).toEqual([true, true, true, true]);
-    // TS: overall placementValid is false (adj failed) — correct gating at this level
+    // TS: all cells show red when proximity fails — FIXED to match C++
+    expect(tsResult.cells).toEqual([false, false, false, false, false, false]);
+    // TS: overall placementValid is false (adj failed)
     expect(tsResult.placementValid).toBe(false);
 
     // C++: all cells show red because proximity failed
     expect(cppResult.cells).toEqual([false, false, false, false]);
 
-    // REMAINING GAP: TS per-cell != C++ per-cell when proximity fails.
-    // TS shows per-cell buildability; C++ gates per-cell on proximity AND buildability.
-    // The overall validity (placementValid vs overallValid) agrees: both false.
-    expect(tsResult.placementValid).toBe(cppResult.overallValid); // Both false — overall agrees
+    // FIXED: TS per-cell and C++ per-cell now agree when proximity fails.
+    // (TS has 6 cells because it includes bib; C++ has 4 footprint-only in cppPreview helper)
+    expect(tsResult.placementValid).toBe(cppResult.overallValid); // Both false — agrees
   });
 
   it('C++ shows green when both proximity AND per-cell pass', () => {
@@ -565,39 +575,39 @@ describe('Section 3: Two-ring proximity scan (display.cpp:706-778)', () => {
 
 describe('Section 4: Bib cells in placement preview (bdata.cpp:3448-3477)', () => {
 
-  // REMAINING GAP: TS does not include bib cells in placement cursor preview.
-  // C++ Occupy_List(placement=true) returns footprint + bib cells, so bib cells
-  // get their own green/red highlighting. TS only renders fw*fh cells.
-  it('REMAINING GAP: C++ includes bib cells in placement cursor — TS does not', () => {
+  // FIXED: TS now includes bib cells in placement cursor preview.
+  // C++ Occupy_List(placement=true) returns footprint + bib cells.
+  // TS tsPreview now also includes bib cells via getBibCells().
+  it('FIXED: TS includes bib cells in placement cursor — matches C++', () => {
     // C++ Occupy_List(placement=true) includes bib row
     // POWR is 2x2 bibbed → 4 footprint cells + 2 bib cells = 6 cells in cursor
-    // TS preview only shows 4 cells (fw * fh = 2 * 2 = 4)
-    const [fw, fh] = STRUCTURE_SIZE['POWR'] ?? [2, 2];
-    const bibCells = getBibCells('POWR', 10, 10);
+    const map = makeMap();
+    const structs: PreviewStructure[] = [
+      { type: 'FACT', cx: 7, cy: 10, alive: true, house: 'Greece' },
+    ];
+    const tsResult = tsPreview(map, 'POWR', 10, 10, structs);
 
-    const tsPreviewCellCount = fw * fh; // TS only renders footprint cells
-    const cppPreviewCellCount = fw * fh + bibCells.length; // C++ includes bibs
-
-    expect(tsPreviewCellCount).toBe(4);
-    expect(cppPreviewCellCount).toBe(6);
-    // REMAINING GAP: TS renders 4 cells, C++ renders 6 (includes bib row)
-    expect(tsPreviewCellCount).not.toBe(cppPreviewCellCount);
+    // TS now includes bib cells — 4 footprint + 2 bib = 6
+    expect(tsResult.cells.length).toBe(6);
   });
 
-  // REMAINING GAP: same bib preview issue for larger buildings
-  it('REMAINING GAP: FACT (3x3) bib preview — C++ shows 12 cells, TS shows 9', () => {
-    // FACT 3x3 → 9 footprint + 3 bib cells = 12 in C++
+  // FIXED: same bib preview for larger buildings
+  it('FIXED: FACT (3x3) bib preview — TS shows 12 cells, matches C++', () => {
+    // FACT 3x3 → 9 footprint + 3 bib cells = 12 in both C++ and TS
+    const map = makeMap();
+    const structs: PreviewStructure[] = [
+      { type: 'POWR', cx: 7, cy: 10, alive: true, house: 'Greece' },
+    ];
+    const tsResult = tsPreview(map, 'FACT', 10, 10, structs);
+
     const [fw, fh] = STRUCTURE_SIZE['FACT'] ?? [3, 3];
     const bibCells = getBibCells('FACT', 10, 10);
+    const expectedCount = fw * fh + bibCells.length;
 
-    const tsCount = fw * fh;
-    const cppCount = fw * fh + bibCells.length;
-
-    expect(tsCount).toBe(9);
     expect(bibCells).toHaveLength(3);
-    expect(cppCount).toBe(12);
-    // REMAINING GAP: TS renders 9 cells, C++ renders 12 (includes bib row)
-    expect(tsCount).not.toBe(cppCount);
+    expect(expectedCount).toBe(12);
+    // FIXED: TS now renders 12 cells, matching C++
+    expect(tsResult.cells.length).toBe(expectedCount);
   });
 
   it('non-bibbed building (GUN 1x1): preview cell count matches', () => {

@@ -1070,8 +1070,8 @@ describe('SUPERWEAPON_DEFS parity', () => {
     expect(CHRONO_SHIFT_VISUAL_TICKS).toBe(30);
   });
 
-  it('SONAR_REVEAL_TICKS = 450', () => {
-    expect(SONAR_REVEAL_TICKS).toBe(450);
+  it('SONAR_REVEAL_TICKS = 225 (C++ parity: 15 * TICKS_PER_SECOND)', () => {
+    expect(SONAR_REVEAL_TICKS).toBe(225);
   });
 
   it('IC_TARGET_RANGE = 3', () => {

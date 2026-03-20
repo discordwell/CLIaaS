@@ -26,7 +26,7 @@ import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
-import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
+import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, CLOAK_DELAY_TICKS } from './entity';
 import { GameMap, Terrain } from './map';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
@@ -278,7 +278,7 @@ export class Game {
   structures: MapStructure[] = [];
   selectedIds = new Set<number>();
   selectedStructureIdx = -1; // index into structures[] for selected building (-1 = none)
-  controlGroups: Map<number, Set<number>> = new Map(); // 1-9 → entity IDs
+  controlGroups: Map<number, Set<number>> = new Map(); // 0-9 → entity IDs (C++ parity: keys 1-0)
   attackMoveMode = false;
   sellMode = false;
   repairMode = false;
@@ -1997,6 +1997,10 @@ export class Game {
             if (s.type === 'HPAD') buildCost -= (HIND_COST + HIND_COST) / 2; // bdata.cpp:3676-3677 (C++ bug: HIND twice)
             const survivorCount = Math.min(5, Math.max(1,
               Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
+            // C++ building.cpp:3456-3463 — one engineer limit per ConYard sell
+            let engineerSpawned = false;
+            // C++ techno.cpp:4454-4465 — check if building has no weapon (for 15% civilian chance)
+            const isUnarmed = !STRUCTURE_WEAPONS[s.type];
             for (let si = 0; si < survivorCount; si++) {
               // C++ Crew_Type: per-building type with random variance
               let crewType: UnitType;
@@ -2004,8 +2008,14 @@ export class Game {
                 case 'SILO': // STRUCT_STORAGE: 50% C1 or C7 (civilians)
                   crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
                   break;
-                case 'FACT': // STRUCT_CONST: 25% engineer if human-owned
-                  crewType = Math.random() < 0.25 ? UnitType.I_E6 : UnitType.I_E1;
+                case 'FACT': // STRUCT_CONST: 25% engineer if human-owned, max 1 engineer
+                  // C++ building.cpp:3456-3463 — re-roll if engineer already spawned
+                  if (!engineerSpawned && Math.random() < 0.25) {
+                    crewType = UnitType.I_E6;
+                    engineerSpawned = true;
+                  } else {
+                    crewType = UnitType.I_E1;
+                  }
                   break;
                 case 'KENN': // STRUCT_KENNEL: 50% dog, 50% nothing
                   if (Math.random() < 0.5) continue; // no survivor this iteration
@@ -2015,7 +2025,12 @@ export class Game {
                   crewType = UnitType.I_E1;
                   break;
                 default: // TechnoClass::Crew_Type: E1, with 15% civilian chance if no weapon
-                  crewType = UnitType.I_E1;
+                  // C++ techno.cpp:4454-4465 — unarmed buildings have 15% chance for C1/C7
+                  if (isUnarmed && Math.random() < 0.15) {
+                    crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+                  } else {
+                    crewType = UnitType.I_E1;
+                  }
                   break;
               }
               const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
@@ -2239,18 +2254,29 @@ export class Game {
       keys.delete('z');
     }
 
-    // Ctrl+1-9: assign control group
+    // Ctrl+0-9: assign control group (C++ conquer.cpp:979-1018: keys 1-0 → groups 0-9)
     if (ctrlHeld) {
-      for (let g = 1; g <= 9; g++) {
+      for (let g = 0; g <= 9; g++) {
         if (keys.has(String(g)) && this.selectedIds.size > 0) {
+          // C++ foot.h:200-204 — Group is scalar (unsigned char): a unit can only be in one group.
+          // Remove assigned units from all other groups before adding to new group.
+          for (const id of this.selectedIds) {
+            for (const [otherG, otherIds] of this.controlGroups) {
+              if (otherG !== g) otherIds.delete(id);
+            }
+          }
+          // Clean up now-empty groups
+          for (const [otherG, otherIds] of this.controlGroups) {
+            if (otherIds.size === 0) this.controlGroups.delete(otherG);
+          }
           this.controlGroups.set(g, new Set(this.selectedIds));
           keys.delete(String(g)); // consume
         }
       }
     } else {
-      // 1-9 without ctrl: recall control group; double-tap to center camera
+      // 0-9 without ctrl: recall control group; double-tap to center camera
       const now = Date.now();
-      for (let g = 1; g <= 9; g++) {
+      for (let g = 0; g <= 9; g++) {
         if (keys.has(String(g))) {
           const group = this.controlGroups.get(g);
           if (group && group.size > 0) {
@@ -2887,7 +2913,8 @@ export class Game {
 
           if (shiftHeld && unit.mission === Mission.MOVE) {
             // Shift+click: queue waypoint (don't change current path)
-            unit.moveQueue.push(pos);
+            // C++ foot.cpp:2294: cap at NAV_QUEUE_MAX (10) — silently drops overflow
+            unit.queueWaypoint(pos);
           } else {
             unit.mission = Mission.MOVE;
             unit.moveTarget = pos;
@@ -4134,8 +4161,18 @@ export class Game {
       }
       if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
         entity.moveTarget = null;
+        // C++ foot.cpp:2242-2248: navQueueLoop re-populates queue when exhausted
+        if (entity.moveQueue.length === 0 && entity.navQueueLoop && entity.navQueueOriginal.length > 0) {
+          for (const wp of entity.navQueueOriginal) {
+            entity.queueWaypoint({ x: wp.x, y: wp.y });
+          }
+        }
         if (entity.moveQueue.length > 0) {
           const next = entity.moveQueue.shift()!;
+          // C++ foot.cpp:2242-2248: re-append consumed waypoint when looping
+          if (entity.navQueueLoop) {
+            entity.queueWaypoint({ x: next.x, y: next.y });
+          }
           entity.moveTarget = next;
         } else {
           entity.mission = this.idleMission(entity);
@@ -4374,8 +4411,18 @@ export class Game {
       const closeEnough = 2.5; // worldDist returns cells
       const finishMove = () => {
         entity.moveTarget = null;
+        // C++ foot.cpp:2242-2248: navQueueLoop re-populates queue when exhausted
+        if (entity.moveQueue.length === 0 && entity.navQueueLoop && entity.navQueueOriginal.length > 0) {
+          for (const wp of entity.navQueueOriginal) {
+            entity.queueWaypoint({ x: wp.x, y: wp.y });
+          }
+        }
         if (entity.moveQueue.length > 0) {
           const next = entity.moveQueue.shift()!;
+          // C++ foot.cpp:2242-2248: re-append consumed waypoint when looping
+          if (entity.navQueueLoop) {
+            entity.queueWaypoint({ x: next.x, y: next.y });
+          }
           entity.moveTarget = next;
           entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
@@ -4479,6 +4526,8 @@ export class Game {
    *  Auto-cloaks when idle + no enemies within 3 cells + sonarPulseTimer === 0.
    *  Auto-uncloaks when firing or taking damage (handled in entity.takeDamage). */
   private updateSubCloak(entity: Entity): void {
+    // C++ techno.cpp:2599: CloakDelay counts down each tick; blocks cloaking while > 0
+    if (entity.cloakDelay > 0) entity.cloakDelay--;
     switch (entity.cloakState) {
       case CloakState.CLOAKING:
         entity.cloakTimer--;
@@ -4492,11 +4541,15 @@ export class Game {
         if (entity.cloakTimer <= 0) {
           entity.cloakState = CloakState.UNCLOAKED;
           entity.cloakTimer = 0;
+          // C++ techno.cpp:2468: CloakDelay = Rule.CloakDelay * TICKS_PER_MINUTE
+          entity.cloakDelay = CLOAK_DELAY_TICKS;
         }
         break;
       case CloakState.UNCLOAKED:
         // Auto-cloak when idle and sonar pulse expired (C++ TECHNO.CPP Cloak_AI)
         if (entity.sonarPulseTimer > 0) break;
+        // C++ techno.cpp:2599: CloakDelay != 0 -> don't cloak (cooldown active)
+        if (entity.cloakDelay > 0) break;
         if (entity.mission === Mission.ATTACK) break; // don't cloak while attacking
         // CL4: Don't cloak while weapon is on cooldown (C++ — firing prevents cloak)
         if (entity.weapon && entity.attackCooldown > 0) break;
@@ -6370,6 +6423,13 @@ export class Game {
           if (!buildable) valid = false;
         }
       }
+      // C++ bdata.cpp:3448-3477: Occupy_List(placement=true) includes bib cells in preview
+      const bibCells = getBibCells(this.pendingPlacement.type, cx, cy);
+      for (const bc of bibCells) {
+        const bibBuildable = this.map.isBuildable(bc.cx, bc.cy);
+        cells.push(bibBuildable);
+        if (!bibBuildable) valid = false;
+      }
       // C++ display.cpp:749-775: two-ring proximity scan (2-cell expansion)
       let adj = false;
       for (const s of this.structures) {
@@ -6378,6 +6438,10 @@ export class Game {
         const exL = s.cx - 2, exT = s.cy - 2, exR = s.cx + sw + 2, exB = s.cy + sh + 2;
         const nL = cx, nT = cy, nR = cx + pfw, nB = cy + pfh;
         if (nL < exR && nR > exL && nT < exB && nB > exT) { adj = true; break; }
+      }
+      // C++ cell.cpp:1126: proximity gates per-cell color — when proximity fails, ALL cells red
+      if (!adj) {
+        for (let i = 0; i < cells.length; i++) cells[i] = false;
       }
       this.renderer.placementValid = valid && adj;
       this.renderer.placementCells = cells;

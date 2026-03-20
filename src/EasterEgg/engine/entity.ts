@@ -33,6 +33,12 @@ export const CLOAK_TRANSITION_FRAMES = 38;
 
 /** Frames before recloak allowed after sonar detection (15 seconds at 15 FPS, C++ SONAR_TIME) */
 export const SONAR_PULSE_DURATION = 225;
+
+/** C++ techno.cpp:2468: CloakDelay = Rule.CloakDelay * TICKS_PER_MINUTE
+ *  Rule.CloakDelay is read from RULES.INI "SubmergeDelay" (default 0, standard RA1 = .016 fixed).
+ *  .016 * 900 (TICKS_PER_MINUTE at 15Hz) ≈ 14 ticks. Prevents immediate recloak after uncloaking. */
+export const CLOAK_DELAY_TICKS = 14;
+
 // Structure reference is typed loosely to avoid circular dependency with scenario.ts
 export interface StructureRef {
   alive: boolean;
@@ -96,7 +102,10 @@ export class Entity {
   targetStructure: StructureRef | null = null; // for attacking buildings
   forceFirePos: WorldPos | null = null; // force-fire ground position (Ctrl+right-click)
   moveTarget: WorldPos | null = null;
-  moveQueue: WorldPos[] = []; // shift+click waypoint queue
+  moveQueue: WorldPos[] = []; // shift+click waypoint queue (C++ NavQueue[10] — capped at 10)
+  static readonly NAV_QUEUE_MAX = 10; // C++ foot.h:189: TARGET NavQueue[10]
+  navQueueLoop = false;               // C++ foot.h:146: IsNavQueueLoop — patrol loop mode
+  navQueueOriginal: WorldPos[] = [];  // saved waypoints for loop re-population
   path: CellPos[] = [];
   pathIndex = 0;
 
@@ -272,6 +281,7 @@ export class Entity {
   cloakState: CloakState = CloakState.UNCLOAKED;
   cloakTimer = 0;         // frames remaining in cloaking/uncloaking transition
   sonarPulseTimer = 0;    // frames remaining before recloak allowed (after detection)
+  cloakDelay = 0;         // C++ techno.cpp:2468: CloakDelay cooldown after uncloaking completes
 
   // Dog-rides-bullet limbo state (C++ bullet.cpp:96-175, infantry.cpp:3649-3654)
   // When a dog fires its DogJaw weapon, it enters limbo (hidden, untargetable, removed from map).
@@ -332,6 +342,14 @@ export class Entity {
 
   get cell(): CellPos {
     return worldToCell(this.pos.x, this.pos.y);
+  }
+
+  /** C++ foot.cpp:2275-2307 Queue_Navigation_List — append waypoint, cap at 10.
+   *  Returns true if appended, false if queue is full (C++ silently drops). */
+  queueWaypoint(pos: WorldPos): boolean {
+    if (this.moveQueue.length >= Entity.NAV_QUEUE_MAX) return false;
+    this.moveQueue.push(pos);
+    return true;
   }
 
   /** Dynamic check: true if this entity's house is in the player-controlled set.

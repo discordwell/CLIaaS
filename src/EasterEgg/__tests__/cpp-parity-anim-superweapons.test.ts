@@ -697,10 +697,9 @@ describe('Sonar Pulse (SONAR_BOX) animation — C++ adata.cpp:1651-1674, house.c
 
     updateSuperweapons(ctx);
 
-    // C++ house.cpp:2629 — PulseCountDown = 15 * TICKS_PER_SECOND
-    // TS uses SONAR_REVEAL_TICKS = 450
+    // C++ house.cpp:2629 — PulseCountDown = 15 * TICKS_PER_SECOND = 225
     expect(sub.sonarPulseTimer).toBe(SONAR_REVEAL_TICKS);
-    expect(sub.sonarPulseTimer).toBe(450);
+    expect(sub.sonarPulseTimer).toBe(225);
   });
 
   it('sonar pulse plays sonar ping sound (C++ VOC_SONAR)', () => {

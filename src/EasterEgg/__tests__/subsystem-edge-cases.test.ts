@@ -100,6 +100,10 @@ function makeMockMap() {
     inBounds: (_cx: number, _cy: number) => true,
     overlay: new Uint8Array(128 * 128).fill(0xFF),
     boundsX: 0, boundsY: 0, boundsW: 128, boundsH: 128,
+    templateType: new Uint16Array(128 * 128).fill(0),
+    destroyBridge: () => 0,
+    countBridgeCells: () => 0,
+    hasLineOfSight: () => true,
   };
 }
 

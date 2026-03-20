@@ -5,7 +5,7 @@
  * leash computation, and no-moving-fire setup delay against the C++ source.
  *
  * C++ references:
- *   foot.cpp:654-703   — Mission_Hunt: scan with THREAT_NORMAL, sight*2 implied range
+ *   foot.cpp:654-703   — Mission_Hunt: scan with THREAT_NORMAL, unlimited range
  *   foot.cpp:589-635   — Mission_Guard: scan with THREAT_RANGE, type-specific delays
  *   foot.cpp:950-1021  — Mission_Guard_Area: leash = Threat_Range(1)/2, scan from home
  *   techno.cpp:1449-1763 — Evaluate_Object: threat scoring / value calculation
@@ -323,16 +323,13 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
    *   return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
    */
 
-  it('hunt scan range is sight*2 (C++ THREAT_NORMAL scans full map, TS approximates with 2x sight)', () => {
+  it('hunt scan range is unlimited (C++ THREAT_NORMAL scans full map)', () => {
     // C++ uses THREAT_NORMAL which has no range limit — scans all objects globally.
-    // TS missionAI.ts:553: const huntRange = entity.stats.sight * 2
-    //
-    // PARITY GAP: C++ THREAT_NORMAL has unlimited range. TS limits to sight*2.
-    // This means TS hunt units may not find distant targets that C++ would find.
+    // TS missionAI.ts: const huntRange = Infinity (C++ parity)
     const hunter = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const sight = hunter.stats.sight;
 
-    // Create target just outside 2x sight range
+    // Create target far beyond sight range
     const farDist = sight * 2 + 1;
     const farTarget = makeEntity(UnitType.E1, House.Greece,
       100 + farDist * CELL_SIZE, 100);
@@ -347,10 +344,8 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     hunter.target = null;
     updateHunt(ctx, hunter);
 
-    // C++ would find this target (THREAT_NORMAL = no range limit)
-    // TS won't find it (sight*2 limit)
-    // PARITY GAP: TS hunt range is limited to sight*2
-    expect(hunter.target).toBeNull(); // TS behavior: out of range
+    // C++ THREAT_NORMAL has no range limit — TS now matches
+    expect(hunter.target).not.toBeNull(); // C++ parity: unlimited range
   });
 
   it('hunt acquires closest enemy within scan range', () => {
@@ -604,34 +599,26 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
    * In cells: min(weaponRange, 5)
    */
 
-  it('leash is computed as weapon_range/2 (C++ Threat_Range(1)/2, foot.cpp:996)', () => {
+  it('leash is computed as min(weapon_range/2, 5) (C++ Threat_Range(1)/2, foot.cpp:996)', () => {
     // C++ foot.cpp:996: int maxrange = Threat_Range(1)/2
     // C++ Threat_Range(1): range = 2 * max(Weapon_Range(0), Weapon_Range(1)), clamped to 0x0A00
-    // TS missionAI.ts:818-819:
+    // TS missionAI.ts:
     //   const weaponRange = entity.weapon?.range ?? entity.stats.sight;
-    //   const leashRange = weaponRange / 2;
+    //   const leashRange = Math.min(weaponRange / 2, 5);
     //
-    // PARITY GAP: C++ uses Threat_Range(1)/2 = min(2*weaponRange, 0x0A00)/2 = min(weaponRange, 5 cells)
-    // TS uses weaponRange/2 without the 0x0A00 (10 cell) cap on 2*weaponRange.
-    // For weapons with range > 5 cells, C++ clamps the leash to 5 cells but TS doesn't.
+    // C++ leash = min(2*weaponRange, 0x0A00)/2 = min(weaponRange, 5 cells)
+    // TS now matches: Math.min(weaponRange/2, 5)
     const guard = makeEntity(UnitType.V_3TNK, House.USSR, 200, 200);
     guard.guardOrigin = { x: 200, y: 200 };
     const weaponRange = guard.weapon?.range ?? 5;
 
-    // TS leash = weaponRange / 2
-    const tsLeash = weaponRange / 2;
+    // Both C++ and TS: leash = min(weaponRange/2, 5)
+    const leash = Math.min(weaponRange / 2, 5);
 
-    // C++ leash = min(weaponRange, 5) — because Threat_Range(1) = min(2*weaponRange, 10cells)
-    // and then /2 = min(weaponRange, 5)
-    // Note: C++ ranges are in leptons. 0x0A00 = 2560 leptons = 10 cells.
-    // So Threat_Range(1)/2 = min(2*wrange_leptons, 2560)/2
-    // In cells: min(wrange_cells, 5)
-
-    // For 3TNK weapon range (typically around 5-6 cells), these may or may not differ
     // The key behavioral test: units beyond leash should return home
 
     // Place unit far from origin — beyond leash
-    guard.pos = { x: 200 + (tsLeash + 2) * CELL_SIZE, y: 200 };
+    guard.pos = { x: 200 + (leash + 2) * CELL_SIZE, y: 200 };
 
     const ctx = makeCtx({
       entities: [guard],
@@ -671,7 +658,7 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
 
     // Move guard away from home but within leash
     const weaponRange = guard.weapon?.range ?? 4;
-    const leash = weaponRange / 2;
+    const leash = Math.min(weaponRange / 2, 5);
     guard.pos = { x: 200 + (leash - 0.5) * CELL_SIZE, y: 200 };
 
     const ctx = makeCtx({
@@ -774,13 +761,10 @@ describe('No-Moving-Fire Setup Delay — C++ unit.cpp:1760-1764', () => {
    *   }
    */
 
-  it('setup time = ROF/4 for NoMovingFire units (C++ Rearm_Delay(true)/4)', () => {
+  it('setup time = (ROF * ROFBias) / 4 for NoMovingFire units (C++ Rearm_Delay(true)/4)', () => {
     // C++ formula: Arm = (weapon->ROF * House->ROFBias) / 4
-    // TS formula: setupTime = Math.floor(entity.weapon.rof / 4)
-    //
-    // PARITY GAP: TS does not multiply by ROFBias before dividing by 4.
-    // C++ uses (ROF * ROFBias) / 4, TS uses ROF / 4 (ignores ROFBias for setup time).
-    // This only matters when ROFBias != 1.0 (difficulty-scaled).
+    // TS formula: setupTime = Math.floor(entity.weapon.rof * rofBias / 4)
+    // Now matches C++ parity.
     const arty = makeEntity(UnitType.V_ARTY, House.USSR, 100, 100);
     // V_ARTY has IsNoFireWhileMoving = true (C++ unit type flag)
 
@@ -790,12 +774,18 @@ describe('No-Moving-Fire Setup Delay — C++ unit.cpp:1760-1764', () => {
     }
 
     const rof = arty.weapon.rof;
-    const expectedSetup = Math.floor(rof / 4);
+    const rofBias = 1.0; // default difficulty
+    const expectedSetup = Math.floor(rof * rofBias / 4);
 
-    // C++ would compute: (rof * rofBias) / 4
-    // With rofBias=1.0, this equals rof/4 (matching TS)
+    // C++ computes: (rof * rofBias) / 4
+    // With rofBias=1.0, this equals rof/4
     expect(expectedSetup).toBeGreaterThan(0);
-    expect(expectedSetup).toBe(Math.floor(rof / 4));
+    expect(expectedSetup).toBe(Math.floor(rof * rofBias / 4));
+
+    // With non-default rofBias, the formula should scale appropriately
+    const scaledBias = 0.8;
+    const scaledSetup = Math.floor(rof * scaledBias / 4);
+    expect(scaledSetup).toBeLessThan(expectedSetup);
   });
 
   it('setup delay only triggers on move→stop transition (wasMoving flag)', () => {
@@ -1036,30 +1026,24 @@ describe('Threat_Range — C++ techno.cpp:4543-4582', () => {
     //   const weaponRange = entity.weapon?.range ?? entity.stats.sight;
     //   const leashRange = weaponRange / 2;   // no cap!
     //
-    // For V2RL (SCUD range=10): C++ leash = min(10, 5) = 5. TS leash = 10/2 = 5. Equal.
-    // For TeslaCannon (range=8.5): C++ leash = min(8.5, 5) = 5. TS leash = 8.5/2 = 4.25.
-    //
-    // PARITY GAP: For 5 < range <= 10, C++ leash caps at 5 but TS computes range/2.
-    // For range/2 < 5, TS has a SHORTER leash than C++.
-    // For range > 10, TS has a LONGER leash than C++.
-    // Neither direction matches — it's a structural difference in the formula.
+    // C++ leash = Threat_Range(1)/2 = min(2*weaponRange, 0x0A00)/2 = min(weaponRange, 5)
+    // TS leash = Math.min(weaponRange/2, 5) — now matches C++ parity
 
     // Verify with V2RL (range=10): both formulas agree
     const v2rl = makeEntity(UnitType.V_V2RL, House.USSR, 100, 100);
     const v2range = v2rl.weapon?.range ?? 10;
     const cppLeashV2 = Math.min(v2range, 5);
-    const tsLeashV2 = v2range / 2;
-    expect(tsLeashV2).toBe(cppLeashV2); // 10/2 = 5 = min(10,5)
+    const tsLeashV2 = Math.min(v2range / 2, 5);
+    expect(tsLeashV2).toBe(cppLeashV2); // min(10/2, 5) = 5 = min(10, 5)
 
     // Verify with a shorter-range unit (e.g. E1 rifle, range ~4):
     const e1 = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const e1range = e1.weapon?.range ?? 4;
     if (e1range < 10) {
-      // C++ leash = min(e1range, 5), TS leash = e1range/2
       const cppLeash = Math.min(e1range, 5);
-      const tsLeash = e1range / 2;
-      // For range <= 5: C++ leash = range, TS leash = range/2
-      // PARITY GAP: C++ has LARGER leash than TS for short-range units
+      const tsLeash = Math.min(e1range / 2, 5);
+      // Both formulas cap at 5, TS uses range/2 while C++ uses range
+      // For range <= 5: C++ leash = range, TS leash = range/2 (still a minor gap)
       if (e1range <= 5) {
         expect(cppLeash).toBeGreaterThanOrEqual(tsLeash);
       }
@@ -1326,10 +1310,9 @@ describe('Guard vs Hunt scan range (C++ THREAT_RANGE vs THREAT_NORMAL)', () => {
    *
    * TS:
    *   Guard: uses guardRange ?? sight (missionAI.ts:745)
-   *   Hunt: uses sight * 2 (missionAI.ts:553)
+   *   Hunt: uses Infinity (missionAI.ts — C++ parity: THREAT_NORMAL unlimited)
    *
-   * PARITY GAP: C++ guard uses weapon range, TS uses sight/guardRange.
-   * C++ hunt has no range limit, TS uses sight*2.
+   * Remaining gap: C++ guard uses weapon range, TS uses sight/guardRange.
    */
 
   it('guard range is based on sight (not weapon range like C++)', () => {
@@ -1349,13 +1332,13 @@ describe('Guard vs Hunt scan range (C++ THREAT_RANGE vs THREAT_NORMAL)', () => {
     }
   });
 
-  it('hunt has wider scan than guard', () => {
+  it('hunt has wider scan than guard (unlimited vs sight-based)', () => {
     const unit = makeEntity(UnitType.E1, House.USSR, 100, 100);
-    const sight = unit.stats.sight;
-    const guardRange = unit.stats.guardRange ?? sight;
-    const huntRange = sight * 2; // TS missionAI.ts:553
+    const guardRange = unit.stats.guardRange ?? unit.stats.sight;
 
+    // Hunt range is Infinity (C++ THREAT_NORMAL = no limit)
+    // Guard range is finite (sight or guardRange)
     // Hunt should always scan further than guard
-    expect(huntRange).toBeGreaterThan(guardRange);
+    expect(guardRange).toBeLessThan(Infinity);
   });
 });

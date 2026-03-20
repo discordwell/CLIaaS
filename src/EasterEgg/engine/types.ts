@@ -780,7 +780,7 @@ export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
 export const NUKE_FLIGHT_TICKS = 45;            // missile travel time
 export const NUKE_MIN_FALLOFF = 0.1;            // minimum damage fraction at edge
 export const CHRONO_SHIFT_VISUAL_TICKS = 30;    // blue flash duration
-export const SONAR_REVEAL_TICKS = 450;          // sonar pulse reveal duration (30s)
+export const SONAR_REVEAL_TICKS = 225;          // C++ house.cpp:2629: 15 * TICKS_PER_SECOND = 225 (15s)
 export const IC_TARGET_RANGE = 3;               // Iron Curtain click-to-unit search radius in cells
 
 // === Superweapon state interface ===

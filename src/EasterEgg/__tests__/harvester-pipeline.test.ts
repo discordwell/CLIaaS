@@ -1186,9 +1186,9 @@ describe('Harvester Pipeline', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('Ore regrowth constants', () => {
-    it('ORE_GROWTH_INTERVAL is 256 ticks (~17s at 15 FPS)', () => {
-      expect(GameMap.ORE_GROWTH_INTERVAL).toBe(256);
-      expect(GameMap.ORE_GROWTH_INTERVAL / 15).toBeCloseTo(17.07, 1);
+    it('ORE_GROWTH_INTERVAL is 1821 ticks (~121s at 15 FPS)', () => {
+      expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
+      expect(GameMap.ORE_GROWTH_INTERVAL / 15).toBeCloseTo(121.4, 0);
     });
 
     it('ORE_DENSITY_CHANCE is 50%', () => {

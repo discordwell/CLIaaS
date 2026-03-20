@@ -111,7 +111,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
       if (!isIdleMission(entity.mission)) break;
       // Find nearest ore cell — AI harvesters spread to avoid clustering
       const ec = entity.cell;
-      const oreCell = findHarvesterOre(ctx, entity, ec.cx, ec.cy, 30);
+      const oreCell = findHarvesterOre(ctx, entity, ec.cx, ec.cy, 32);
       if (oreCell) {
         entity.harvesterState = 'seeking';
         entity.mission = Mission.MOVE;
@@ -166,7 +166,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
           entity.harvesterState = 'returning';
         } else if (bailCredits === 0) {
           // No more ore at this cell — look for adjacent ore
-          const newOre = ctx.map.findNearestOre(ec.cx, ec.cy, 20);
+          const newOre = ctx.map.findNearestOre(ec.cx, ec.cy, 6);
           if (newOre && entity.oreLoad < Entity.BAIL_COUNT) {
             entity.harvesterState = 'seeking';
             entity.mission = Mission.MOVE;

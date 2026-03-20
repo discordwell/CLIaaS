@@ -1039,9 +1039,9 @@ describe('Spy Plane — map reveal mechanics', () => {
 // ═══════════════════════════════════════════════════════════
 describe('Sonar Pulse — submarine detection mechanics', () => {
 
-  it('SONAR_REVEAL_TICKS = 450 (30 seconds at 15 FPS)', () => {
-    expect(SONAR_REVEAL_TICKS).toBe(450);
-    expect(SONAR_REVEAL_TICKS / 15).toBe(30);
+  it('SONAR_REVEAL_TICKS = 225 (15 seconds at 15 FPS, C++ parity)', () => {
+    expect(SONAR_REVEAL_TICKS).toBe(225);
+    expect(SONAR_REVEAL_TICKS / 15).toBe(15);
   });
 
   it('SONAR_PULSE_DURATION = 225 (entity-level recloak delay)', () => {

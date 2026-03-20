@@ -10,7 +10,7 @@ import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
-import { type MapStructure, STRUCTURE_SIZE } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, getBibCells } from './scenario';
 import { SHADOW_TABLE, cellShadowIndex } from './shadow';
 
 /** Interpolate between two values on a 0-31 ring (shortest path).
@@ -3987,7 +3987,7 @@ export class Renderer {
     );
     const [fw, fh] = STRUCTURE_SIZE[this.placementItem.type] ?? [2, 2];
 
-    // Per-cell passability coloring
+    // Per-cell passability coloring (footprint cells)
     for (let dy = 0; dy < fh; dy++) {
       for (let dx = 0; dx < fw; dx++) {
         const idx = dy * fw + dx;
@@ -4001,6 +4001,22 @@ export class Renderer {
         ctx.lineWidth = 0.5;
         ctx.strokeRect(screen.x + dx * CELL_SIZE, screen.y + dy * CELL_SIZE, CELL_SIZE, CELL_SIZE);
       }
+    }
+    // C++ bdata.cpp:3448-3477: bib cells in placement preview
+    const bibCellPositions = getBibCells(this.placementItem.type, this.placementCx, this.placementCy);
+    for (let bi = 0; bi < bibCellPositions.length; bi++) {
+      const bc = bibCellPositions[bi];
+      const bibIdx = fw * fh + bi;
+      const bibPassable = (this.placementCells && bibIdx < this.placementCells.length)
+        ? this.placementCells[bibIdx] : this.placementValid;
+      const bScreen = camera.worldToScreen(bc.cx * CELL_SIZE, bc.cy * CELL_SIZE);
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = bibPassable ? 'rgba(80,255,80,0.4)' : 'rgba(255,80,80,0.4)';
+      ctx.fillRect(bScreen.x, bScreen.y, CELL_SIZE, CELL_SIZE);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = bibPassable ? 'rgba(80,255,80,0.2)' : 'rgba(255,80,80,0.2)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(bScreen.x, bScreen.y, CELL_SIZE, CELL_SIZE);
     }
 
     ctx.globalAlpha = 1;

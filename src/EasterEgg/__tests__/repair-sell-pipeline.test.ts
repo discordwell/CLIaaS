@@ -719,7 +719,7 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
 
   it('KENN sell spawns 50% dog (Crew_Type)', () => {
     const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
-    const chunk = indexSource.slice(sellSection, sellSection + 2500);
+    const chunk = indexSource.slice(sellSection, sellSection + 3000);
     expect(chunk).toContain("'KENN'");
     expect(chunk).toContain('I_DOG');
   });
@@ -772,7 +772,7 @@ describe('Power grid after selling power plant', () => {
 describe('Service Depot — vehicle repair', () => {
   /** Create a depot + vehicle context for tickServiceDepot tests.
    *  FIX structure center is at (cx*CELL_SIZE + CELL_SIZE, cy*CELL_SIZE + CELL_SIZE).
-   *  Vehicle must be within 1.5 cells of that center. */
+   *  Vehicle must be within 0.7 cells of that center (C++ 0x10 leptons parity). */
   function makeDepotContext(vehicleHp: number, vehicleMaxHp: number, credits = 5000) {
     const depot = makeStructure('FIX', House.Spain, 10, 10);
     // Depot center: (10*24+24, 10*24+24) = (264, 264)
@@ -804,12 +804,12 @@ describe('Service Depot — vehicle repair', () => {
     expect(infantry.hp).toBe(10);
   });
 
-  it('depot finds closest damaged/depleted vehicle within 1.5 cells', () => {
+  it('depot finds closest damaged/depleted vehicle within 0.7 cells', () => {
     const depot = makeStructure('FIX', House.Spain, 10, 10);
-    // Vehicle right at depot center (distance = 0 < 1.5)
+    // Vehicle right at depot center (distance = 0 < 0.7)
     const close = new Entity(UnitType.V_JEEP, House.Spain, 264, 264);
     close.hp = 50; close.maxHp = 110;
-    // Vehicle far away (distance >> 1.5 cells)
+    // Vehicle far away (distance >> 0.7 cells)
     const far = new Entity(UnitType.V_JEEP, House.Spain, 500, 500);
     far.hp = 50; far.maxHp = 110;
     const ctx = makeMockRepairSellContext();

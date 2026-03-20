@@ -575,8 +575,8 @@ describe('Sonar pulse', () => {
     expect(SONAR_PULSE_DURATION).toBe(225);
   });
 
-  it('SONAR_REVEAL_TICKS is 450 ticks (30 seconds)', () => {
-    expect(SONAR_REVEAL_TICKS).toBe(450);
+  it('SONAR_REVEAL_TICKS is 225 ticks (15 seconds, C++ parity)', () => {
+    expect(SONAR_REVEAL_TICKS).toBe(225);
   });
 
   it('updateSubDetection sets sonarPulseTimer = SONAR_PULSE_DURATION on detected subs', () => {
@@ -594,10 +594,10 @@ describe('Sonar pulse', () => {
     expect(sub.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
   });
 
-  it('SONAR_REVEAL_TICKS constant is 450 (superweapon duration)', () => {
-    // Superweapon sonar pulse uses this longer duration
-    expect(SONAR_REVEAL_TICKS).toBe(450);
-    expect(SONAR_REVEAL_TICKS).toBe(SONAR_PULSE_DURATION * 2);
+  it('SONAR_REVEAL_TICKS constant matches SONAR_PULSE_DURATION (C++ parity)', () => {
+    // Both now equal 225 — matches C++ house.cpp:2629 PulseCountDown = 15 * TICKS_PER_SECOND
+    expect(SONAR_REVEAL_TICKS).toBe(225);
+    expect(SONAR_REVEAL_TICKS).toBe(SONAR_PULSE_DURATION);
   });
 });
 

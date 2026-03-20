@@ -390,9 +390,9 @@ describe('C++ parity: distance threshold (building.cpp:3860)', () => {
     expect(tank.hp).toBe(100 + UREPAIR_STEP);
   });
 
-  it('unit 1 cell away from depot center is still repaired in TS', () => {
-    // PARITY GAP: C++ distance check is 0x10 leptons (~0.0625 cells).
-    // TS uses 1.5 cells — a unit 1 cell away would be repaired in TS but NOT in C++.
+  it('unit 1 cell away from depot center is NOT repaired (C++ parity)', () => {
+    // C++ distance check is 0x10 leptons (~0.0625 cells).
+    // TS now uses 0.7 cells — a unit 1 cell away is NOT repaired, matching C++.
     const depot = makeServiceDepot(5, 5);
     const sx = depot.cx * CELL_SIZE + CELL_SIZE;
     const sy = depot.cy * CELL_SIZE + CELL_SIZE + CELL_SIZE; // 1 cell below
@@ -406,9 +406,8 @@ describe('C++ parity: distance threshold (building.cpp:3860)', () => {
     });
 
     tickServiceDepot(ctx);
-    // TS repairs at this distance (dist = 1.0 < 1.5)
-    // C++ would NOT repair (dist = 256 leptons >> 0x10 = 16 leptons)
-    expect(tank.hp).toBe(100 + UREPAIR_STEP); // PARITY GAP: C++ would keep hp=100
+    // dist = 1.0 > 0.7 threshold — NOT repaired (matches C++ behavior)
+    expect(tank.hp).toBe(100);
   });
 
   it('unit 2 cells away from depot center is NOT repaired', () => {
