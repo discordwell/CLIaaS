@@ -243,7 +243,6 @@ export class Renderer {
   private tilesetImage: HTMLImageElement | null = null;
   private tilesetMeta: TilesetMeta | null = null;
   private tilesetReady = false;
-  private _loggedMissing?: Set<string>;
   private tilesetTheatre = ''; // which theatre the cached tileset is for
   placementValid = false;
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
@@ -1395,11 +1394,6 @@ export class Renderer {
       const isConstructing = s.buildProgress !== undefined && s.buildProgress < 1;
       const isSelling = s.sellProgress !== undefined;
       const sheet = assets.getSheet(s.image);
-      if (!sheet && !this._loggedMissing?.has(s.image)) {
-        if (!this._loggedMissing) this._loggedMissing = new Set();
-        this._loggedMissing.add(s.image);
-        console.warn(`[RENDER] Missing sprite sheet: "${s.image}" for structure ${s.type}`);
-      }
       if (sheet) {
         // Determine frame: damaged buildings use second half of frames
         const totalFrames = sheet.meta.frameCount;
@@ -1537,11 +1531,6 @@ export class Renderer {
           centerX: true,
           centerY: true,
         });
-        // DEBUG: red border on APWR to trace rendering
-        if (s.type === 'APWR') {
-          ctx.strokeStyle = 'red'; ctx.lineWidth = 2;
-          ctx.strokeRect(screenX, screenY, dfw, dfh);
-        }
         if (isConstructing && !hasMakeSheet) {
           // Green construction scanline at the build edge (fallback only — make sheets show naturally)
           const revealY = screenY + dfh / 2 - Math.floor(dfh * s.buildProgress!);
