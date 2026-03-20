@@ -158,8 +158,8 @@ export function spawnCrate(ctx: CrateContext): void {
   const maxLifetime = crateTimeMin * 2; // 20 minutes
   const lifetimeMinutes = minLifetime + Math.random() * (maxLifetime - minLifetime);
   const lifetimeTicks = Math.floor(lifetimeMinutes * 60 * GAME_TICKS_PER_SEC);
-  // Try up to 20 random cells to find a valid spawn
-  for (let attempt = 0; attempt < 20; attempt++) {
+  // C++ map.cpp:1177 — try up to 1000 random cells to find a valid spawn
+  for (let attempt = 0; attempt < 1000; attempt++) {
     const cx = ctx.map.boundsX + Math.floor(Math.random() * ctx.map.boundsW);
     const cy = ctx.map.boundsY + Math.floor(Math.random() * ctx.map.boundsH);
     if (!ctx.map.isPassable(cx, cy)) continue;

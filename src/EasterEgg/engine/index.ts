@@ -1069,8 +1069,8 @@ export class Game {
     this.nukePendingTick = 0;
     this.nukePendingSource = null;
     this.globals.clear();
-    // First crate spawns after 60 seconds
-    this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
+    // C++ scenario.cpp:2436-2441 — crates placed at tick 0 during scenario init
+    this.nextCrateTick = 0;
     this.crates = [];
     this.inflightProjectiles = [];
     // Build alliance table: use scenario INI data if available, otherwise default (ant missions)
@@ -1876,13 +1876,17 @@ export class Game {
         }
       }
       // Sell: play make-sheet frames in reverse at construction rate (C++ parity).
-      // Duration scales with per-building frame count from BUILDING_FRAME_TABLE.
+      // C++ bdata.cpp:3129: timedelay = floor(BuildupTime * TICKS_PER_MINUTE / makeFrameCount)
+      // C++ duration = (makeFrameCount - 1) * timedelay ticks.
+      // All standard RA buildings use 20-frame make sheets:
+      //   timedelay = floor(0.05 * 900 / 20) = 2, duration = 19 * 2 = 38 ticks.
       // Guard: skip if structure was destroyed mid-sell (e.g. by enemy attack)
       if (s.sellProgress !== undefined && s.alive) {
-        const bft = BUILDING_FRAME_TABLE[s.image];
-        const sellFrameCount = bft ? Math.max(bft.damageFrame, 1) : 15;
-        // Match construction rate: 1 tick per frame (same visual pace as build-up)
-        s.sellProgress = Math.min(1, s.sellProgress + 1 / (sellFrameCount * 2));
+        // C++ parity: sell duration from make sheet frame count, not damageFrame.
+        // BuildupTime(0.05) * TICKS_PER_MINUTE(900) = 45; makeFrameCount = 20 for all buildings.
+        const MAKE_FRAME_COUNT = 20;
+        const SELL_DURATION = (MAKE_FRAME_COUNT - 1) * Math.floor((0.05 * 900) / MAKE_FRAME_COUNT); // 19 * 2 = 38
+        s.sellProgress = Math.min(1, s.sellProgress + 1 / SELL_DURATION);
         if (s.sellProgress >= 1) {
           s.alive = false;
           s.sellProgress = undefined;

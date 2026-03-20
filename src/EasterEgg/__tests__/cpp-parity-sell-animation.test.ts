@@ -61,12 +61,16 @@ function cppSellDurationTicks(makeSheetFrameCount: number): number {
 
 /**
  * Calculate TS sell duration for a building.
- * TS index.ts:1885: sellProgress += 1 / (sellFrameCount * 2)
- * Complete when sellProgress >= 1, so total = sellFrameCount * 2 ticks
+ * TS index.ts:1885 (fixed): sellProgress += 1 / SELL_DURATION
+ *   where SELL_DURATION = (MAKE_FRAME_COUNT - 1) * floor(0.05 * 900 / MAKE_FRAME_COUNT)
+ *   = (20 - 1) * floor(45 / 20) = 19 * 2 = 38 ticks for all buildings.
+ * Complete when sellProgress >= 1, so total = 38 ticks (constant).
  */
-function tsSellDurationTicks(damageFrame: number): number {
-  const sellFrameCount = Math.max(damageFrame, 1);
-  return sellFrameCount * 2;
+function tsSellDurationTicks(_damageFrame: number): number {
+  // After C++ parity fix: TS uses make sheet frame count (constant 20),
+  // not damageFrame. Duration = (20-1) * floor(45/20) = 38 for all buildings.
+  const MAKE_FRAME_COUNT = 20;
+  return (MAKE_FRAME_COUNT - 1) * Math.floor((0.05 * 900) / MAKE_FRAME_COUNT);
 }
 
 // ─── C++ How_Many_Survivors Formula ─────────────────────────────────────────────
@@ -446,31 +450,27 @@ describe('C++ parity: Structure sell animation frame timing', () => {
   });
 
   // ─── 10. BUILDING_FRAME_TABLE vs Make Sheet Frame Source ───────────────────
-  describe('TS uses damageFrame instead of make sheet frame count', () => {
-    // In C++, the sell animation frame count comes from Get_Build_Frame_Count(BuildupData)
-    // which reads the actual *MAKE.SHP frame count.
-    //
-    // In TS, the sell duration uses BUILDING_FRAME_TABLE[s.image].damageFrame,
-    // which is the normal building's damage frame threshold — NOT the make sheet.
-    //
-    // This means different buildings will sell at very different speeds in TS vs C++.
+  describe('TS now uses make sheet frame count (C++ parity fix)', () => {
+    // FIXED: TS sell duration now uses the C++ make sheet frame count (constant 20),
+    // not BUILDING_FRAME_TABLE damageFrame. All buildings sell in 38 ticks,
+    // matching C++ Mission_Deconstruction DURING phase.
 
-    const FRAME_DIVERGENCES = [
-      { type: 'POWR', damageFrame: 4, makeFrames: 20, note: 'sells very fast in TS (8 ticks) vs C++ (38 ticks)' },
-      { type: 'FACT', damageFrame: 26, makeFrames: 20, note: 'sells slower in TS (52 ticks) vs C++ (38 ticks)' },
-      { type: 'GAP',  damageFrame: 32, makeFrames: 20, note: 'sells much slower in TS (64 ticks) vs C++ (38 ticks)' },
-      { type: 'PDOX', damageFrame: 29, makeFrames: 20, note: 'sells much slower in TS (58 ticks) vs C++ (38 ticks)' },
-      { type: 'DOME', damageFrame: 8, makeFrames: 20, note: 'sells faster in TS (16 ticks) vs C++ (38 ticks)' },
-      { type: 'SILO', damageFrame: 5, makeFrames: 20, note: 'sells very fast in TS (10 ticks) vs C++ (38 ticks)' },
+    const FRAME_CASES = [
+      { type: 'POWR', damageFrame: 4, makeFrames: 20 },
+      { type: 'FACT', damageFrame: 26, makeFrames: 20 },
+      { type: 'GAP',  damageFrame: 32, makeFrames: 20 },
+      { type: 'PDOX', damageFrame: 29, makeFrames: 20 },
+      { type: 'DOME', damageFrame: 8, makeFrames: 20 },
+      { type: 'SILO', damageFrame: 5, makeFrames: 20 },
     ];
 
-    for (const { type, damageFrame, makeFrames, note } of FRAME_DIVERGENCES) {
-      it(`${type}: damageFrame=${damageFrame} != makeFrames=${makeFrames} — ${note}`, () => {
+    for (const { type, damageFrame, makeFrames } of FRAME_CASES) {
+      it(`${type}: TS sell duration matches C++ (38 ticks, make sheet count=${makeFrames})`, () => {
         const tsTicks = tsSellDurationTicks(damageFrame);
         const cppTicks = cppSellDurationTicks(makeFrames);
 
-        // PARITY GAP: TS and C++ use different frame sources for sell duration
-        expect(tsTicks).not.toBe(cppTicks);
+        // PARITY FIX: TS now uses make sheet frame count, matching C++
+        expect(tsTicks).toBe(cppTicks);
       });
     }
   });
@@ -491,16 +491,17 @@ describe('C++ parity: Structure sell animation frame timing', () => {
       // Plus 1 more tick for DURING to detect IsReadyToCommence
       // Total = 2 + (count-1)*rate + 1 = 3 + (count-1)*rate
       //
-      // TS: sellProgress 0→1 at rate 1/(sellFrameCount*2) per tick = sellFrameCount*2 ticks total
-      // No state machine overhead.
+      // TS (fixed): sellProgress 0→1 at rate 1/38 per tick = 38 ticks for all buildings.
+      // No state machine overhead (TS lacks the 3-tick overhead C++ has).
       const makeFrames = 20;
       const cppTotal = 3 + cppSellDurationTicks(makeFrames); // 3 + 38 = 41 ticks
-      const tsTotalPowr = tsSellDurationTicks(4);             // 8 ticks for POWR
-      const tsTotalFact = tsSellDurationTicks(26);            // 52 ticks for FACT
+      const tsTotal = tsSellDurationTicks(0);                  // 38 ticks for all buildings
 
       expect(cppTotal).toBe(41);
-      expect(tsTotalPowr).toBe(8);   // much faster
-      expect(tsTotalFact).toBe(52);  // slightly slower
+      // PARITY NOTE: TS animation duration (38) matches C++ DURING phase (38),
+      // but C++ has 3 extra ticks of state machine overhead. This is a minor
+      // structural difference (TS has no INITIAL/HOLDING phases).
+      expect(tsTotal).toBe(38);
     });
   });
 

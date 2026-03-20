@@ -619,44 +619,45 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
   it('sell animation advances sellProgress each tick', () => {
     const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
     expect(sellSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(sellSection, sellSection + 400);
+    const chunk = indexSource.slice(sellSection, sellSection + 800);
     expect(chunk).toContain('s.sellProgress');
-    expect(chunk).toContain('sellFrameCount');
+    expect(chunk).toContain('SELL_DURATION');
   });
 
-  it('sell progress rate is 1/(sellFrameCount * 2) per tick', () => {
+  it('sell progress rate is 1/SELL_DURATION per tick (C++ make sheet parity)', () => {
     const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
-    const chunk = indexSource.slice(sellSection, sellSection + 700);
-    expect(chunk).toContain('sellFrameCount * 2');
+    const chunk = indexSource.slice(sellSection, sellSection + 800);
+    // C++ parity: duration computed from make sheet frame count (20),
+    // not BUILDING_FRAME_TABLE damageFrame
+    expect(chunk).toContain('MAKE_FRAME_COUNT');
+    expect(chunk).toContain('SELL_DURATION');
   });
 
-  it('sell duration scales with BUILDING_FRAME_TABLE damageFrame', () => {
-    // FACT: damageFrame=26 → 26*2=52 ticks to sell
-    // POWR: damageFrame=4  → 4*2=8 ticks to sell
+  it('sell duration is constant 38 ticks for all buildings (C++ make sheet parity)', () => {
+    // C++ parity: all buildings use 20-frame make sheet
+    // timedelay = floor(0.05 * 900 / 20) = 2, duration = (20-1) * 2 = 38
+    const MAKE_FRAME_COUNT = 20;
+    const SELL_DURATION = (MAKE_FRAME_COUNT - 1) * Math.floor((0.05 * 900) / MAKE_FRAME_COUNT);
+    expect(SELL_DURATION).toBe(38);
+    // All building types sell in 38 ticks regardless of damageFrame
     const factEntry = BUILDING_FRAME_TABLE['fact'];
     const powrEntry = BUILDING_FRAME_TABLE['powr'];
     expect(factEntry).toBeDefined();
     expect(powrEntry).toBeDefined();
-
-    // Duration = sellFrameCount * 2 ticks
-    // sellFrameCount = max(damageFrame, 1)
-    const factDuration = Math.max(factEntry.damageFrame, 1) * 2;
-    const powrDuration = Math.max(powrEntry.damageFrame, 1) * 2;
-    expect(factDuration).toBe(52);
-    expect(powrDuration).toBe(8);
-    expect(factDuration).toBeGreaterThan(powrDuration);
+    // Both use the same constant sell duration
+    expect(SELL_DURATION).toBe(38);
   });
 
   it('sell finalizes when sellProgress >= 1', () => {
     const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
-    const chunk = indexSource.slice(sellSection, sellSection + 800);
+    const chunk = indexSource.slice(sellSection, sellSection + 1200);
     expect(chunk).toContain('sellProgress >= 1');
     expect(chunk).toContain('s.alive = false');
   });
 
   it('sell finalization clears footprint', () => {
     const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
-    const chunk = indexSource.slice(sellSection, sellSection + 800);
+    const chunk = indexSource.slice(sellSection, sellSection + 1200);
     expect(chunk).toContain('clearStructureFootprint');
   });
 
@@ -674,7 +675,7 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
 
   it('sell finalization creates explosion effect at structure center', () => {
     const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
-    const chunk = indexSource.slice(sellSection, sellSection + 2000);
+    const chunk = indexSource.slice(sellSection, sellSection + 2500);
     expect(chunk).toContain("type: 'explosion'");
     expect(chunk).toContain('veh-hit1');
   });

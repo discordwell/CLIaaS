@@ -1798,9 +1798,13 @@ function classifyOutdoorTerrain(
           map.setTerrain(cx, cy, Terrain.WATER);
         }
         // SNOW: stays CLEAR (default) — frozen river is passable
-      } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 131 && tmpl <= 172)) {
-        // Actual cliffs and large rock formations — impassable
+      } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 131 && tmpl <= 148)) {
+        // Cliff edges and vertical cliff faces — truly impassable
         map.setTerrain(cx, cy, Terrain.ROCK);
+      } else if (tmpl >= 149 && tmpl <= 172) {
+        // Rough hills and rock formations — C++ treats most of these as
+        // passable ROUGH terrain, not impassable cliffs.
+        map.setTerrain(cx, cy, Terrain.ROUGH);
       } else if (tmpl >= 97 && tmpl <= 110) {
         // Small rock debris — C++ treats as ROUGH (passable, slower movement).
         // Previously incorrectly classified as impassable ROCK.
