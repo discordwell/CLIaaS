@@ -1174,9 +1174,11 @@ export class Renderer {
               ctx.lineWidth = 1;
               ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
             } else {
-              // Building footprint cells — draw grass so terrain shows through
-              // transparent areas of structure sprites (not gray concrete slabs)
-              if (!useTileset || !this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
+              // C++ parity (cell.cpp:981-987): building footprint cells draw TEMPLATE_CLEAR1
+              // from the current theatre's tileset. Icon = (cx & 3) | ((cy & 3) << 2) gives
+              // 16 variations matching the surrounding ground (grass in TEMPERATE, snow in SNOW).
+              const clearIcon = (cx & 3) | ((cy & 3) << 2);
+              if (!useTileset || !this.drawTileFromAtlas(ctx, 0, clearIcon, screen.x, screen.y)) {
                 this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
               }
             }
