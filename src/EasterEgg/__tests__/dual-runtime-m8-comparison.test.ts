@@ -29,8 +29,6 @@ import {
 // ── Output paths ─────────────────────────────────────────────────────────────
 
 const OUTPUT_DIR = path.resolve(__dirname, '..', '..', '..', 'docs', 'm8-comparison');
-const SCREENSHOT_DIR = path.join(OUTPUT_DIR, 'screenshots');
-const STATE_DIR = path.join(OUTPUT_DIR, 'states');
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
@@ -617,168 +615,145 @@ afterAll(async () => {
   await stopParityServer(serverHandle);
 }, 20_000);
 
-describe('M8 Dual-Runtime Comparison', () => {
-  it('runs SCG08EA on both TS and WASM and generates divergence report', async () => {
-    // Ensure output directories exist
-    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-    fs.mkdirSync(STATE_DIR, { recursive: true });
+// ── Parameterized comparison runner ──────────────────────────────────────────
 
-    const SCENARIO = 'SCG08EA';
-    const MAX_TICKS = 2700;
-    const STEP_SIZE = 10;
-    const SNAPSHOT_INTERVAL = 100;
+async function runComparison(scenario: string, maxTicks: number): Promise<void> {
+  const scenarioOutputDir = path.join(OUTPUT_DIR, scenario);
+  const scenarioScreenshotDir = path.join(scenarioOutputDir, 'screenshots');
+  const scenarioStateDir = path.join(scenarioOutputDir, 'states');
 
-    const snapshots: Snapshot[] = [];
-    const deaths: UnitDeath[] = [];
-    const combatEvents: CombatEvent[] = [];
-    const movementSamples: MovementSample[] = [];
-    const productionEvents: ProductionEvent[] = [];
+  fs.mkdirSync(scenarioScreenshotDir, { recursive: true });
+  fs.mkdirSync(scenarioStateDir, { recursive: true });
 
-    let finalTick = 0;
-    let tsOutcome = 'playing';
-    let wasmOutcome = 'playing';
-    let crashError: string | undefined;
+  const STEP_SIZE = 10;
+  const SNAPSHOT_INTERVAL = 100;
 
-    await withDualScenario(SCENARIO, async (handle: DualRuntimeHandle) => {
-      const tsOracle = new SharedTsOracleStrategy(SCENARIO);
-      const wasmOracle = new OracleStrategy(SCENARIO);
+  const snapshots: Snapshot[] = [];
+  const deaths: UnitDeath[] = [];
+  const combatEvents: CombatEvent[] = [];
+  const movementSamples: MovementSample[] = [];
+  const productionEvents: ProductionEvent[] = [];
 
-      let currentTick = 0;
-      let prevTsState = handle.tsState;
-      let prevWasmState = handle.wasmState;
+  let finalTick = 0;
+  let tsOutcome = 'playing';
+  let wasmOutcome = 'playing';
+  let crashError: string | undefined;
 
-      // Take initial snapshot at tick 0
-      const [tsScreenshot0, wasmScreenshot0] = await captureGameScreenshots(handle.ts, handle.wasm);
-      const diffPath0 = path.join(SCREENSHOT_DIR, `diff-0.png`);
-      const pixelDiff0 = await computePixelDiff(tsScreenshot0, wasmScreenshot0, diffPath0);
+  await withDualScenario(scenario, async (handle: DualRuntimeHandle) => {
+    const tsOracle = new SharedTsOracleStrategy(scenario);
+    const wasmOracle = new OracleStrategy(scenario);
 
-      fs.writeFileSync(path.join(SCREENSHOT_DIR, 'ts-0.png'), tsScreenshot0);
-      fs.writeFileSync(path.join(SCREENSHOT_DIR, 'wasm-0.png'), wasmScreenshot0);
-      fs.writeFileSync(path.join(STATE_DIR, 'ts-0.json'), JSON.stringify(handle.tsState, null, 2));
-      fs.writeFileSync(path.join(STATE_DIR, 'wasm-0.json'), JSON.stringify(handle.wasmState, null, 2));
+    let currentTick = 0;
+    let prevTsState = handle.tsState;
+    let prevWasmState = handle.wasmState;
 
-      snapshots.push({
-        tick: 0,
-        tsState: handle.tsState,
-        wasmState: handle.wasmState,
-        tsScreenshot: tsScreenshot0,
-        wasmScreenshot: wasmScreenshot0,
-        pixelDiff: pixelDiff0,
-      });
+    // Take initial snapshot at tick 0
+    const [tsScreenshot0, wasmScreenshot0] = await captureGameScreenshots(handle.ts, handle.wasm);
+    const diffPath0 = path.join(scenarioScreenshotDir, `diff-0.png`);
+    const pixelDiff0 = await computePixelDiff(tsScreenshot0, wasmScreenshot0, diffPath0);
 
-      try {
-        while (currentTick < MAX_TICKS) {
-          // Oracle decides for each runtime independently
-          const tsDecision = tsOracle.decide(prevTsState);
-          const wasmDecision = wasmOracle.decide(prevWasmState);
+    fs.writeFileSync(path.join(scenarioScreenshotDir, 'ts-0.png'), tsScreenshot0);
+    fs.writeFileSync(path.join(scenarioScreenshotDir, 'wasm-0.png'), wasmScreenshot0);
+    fs.writeFileSync(path.join(scenarioStateDir, 'ts-0.json'), JSON.stringify(handle.tsState, null, 2));
+    fs.writeFileSync(path.join(scenarioStateDir, 'wasm-0.json'), JSON.stringify(handle.wasmState, null, 2));
 
-          // Step both runtimes in parallel
-          const [tsResult, wasmResult] = await Promise.all([
-            handle.ts.step(STEP_SIZE, tsDecision.commands),
-            handle.wasm.step(
-              STEP_SIZE,
-              wasmDecision.commands.length > 0 ? JSON.stringify(wasmDecision.commands) : undefined,
-            ),
-          ]);
-
-          currentTick += STEP_SIZE;
-          finalTick = currentTick;
-
-          const currTsState = tsResult.state;
-          const currWasmState = wasmResult.state;
-
-          // Track events
-          deaths.push(...trackDeaths(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
-          combatEvents.push(...trackCombat(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
-          movementSamples.push(...trackMovement(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
-          productionEvents.push(...trackProduction(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
-
-          // Snapshot every SNAPSHOT_INTERVAL ticks
-          if (currentTick % SNAPSHOT_INTERVAL === 0) {
-            const [tsScreenshot, wasmScreenshot] = await captureGameScreenshots(handle.ts, handle.wasm);
-
-            const diffPath = path.join(SCREENSHOT_DIR, `diff-${currentTick}.png`);
-            const pixelDiff = await computePixelDiff(tsScreenshot, wasmScreenshot, diffPath);
-
-            fs.writeFileSync(path.join(SCREENSHOT_DIR, `ts-${currentTick}.png`), tsScreenshot);
-            fs.writeFileSync(path.join(SCREENSHOT_DIR, `wasm-${currentTick}.png`), wasmScreenshot);
-            fs.writeFileSync(
-              path.join(STATE_DIR, `ts-${currentTick}.json`),
-              JSON.stringify(currTsState, null, 2),
-            );
-            fs.writeFileSync(
-              path.join(STATE_DIR, `wasm-${currentTick}.json`),
-              JSON.stringify(currWasmState, null, 2),
-            );
-
-            snapshots.push({
-              tick: currentTick,
-              tsState: currTsState,
-              wasmState: currWasmState,
-              tsScreenshot,
-              wasmScreenshot,
-              pixelDiff,
-            });
-          }
-
-          // Check mission completion
-          tsOutcome = tsOracle.checkResult(currTsState);
-          wasmOutcome = wasmOracle.checkResult(currWasmState);
-
-          if (tsOutcome !== 'playing' || wasmOutcome !== 'playing') {
-            // Take a final snapshot on completion
-            if (currentTick % SNAPSHOT_INTERVAL !== 0) {
-              const [tsScreenshot, wasmScreenshot] = await captureGameScreenshots(handle.ts, handle.wasm);
-
-              const diffPath = path.join(SCREENSHOT_DIR, `diff-${currentTick}.png`);
-              const pixelDiff = await computePixelDiff(tsScreenshot, wasmScreenshot, diffPath);
-
-              fs.writeFileSync(path.join(SCREENSHOT_DIR, `ts-${currentTick}.png`), tsScreenshot);
-              fs.writeFileSync(path.join(SCREENSHOT_DIR, `wasm-${currentTick}.png`), wasmScreenshot);
-              fs.writeFileSync(
-                path.join(STATE_DIR, `ts-${currentTick}.json`),
-                JSON.stringify(currTsState, null, 2),
-              );
-              fs.writeFileSync(
-                path.join(STATE_DIR, `wasm-${currentTick}.json`),
-                JSON.stringify(currWasmState, null, 2),
-              );
-
-              snapshots.push({
-                tick: currentTick,
-                tsState: currTsState,
-                wasmState: currWasmState,
-                tsScreenshot,
-                wasmScreenshot,
-                pixelDiff,
-              });
-            }
-            break;
-          }
-
-          prevTsState = currTsState;
-          prevWasmState = currWasmState;
-        }
-      } catch (error) {
-        crashError = error instanceof Error ? error.message : String(error);
-      }
-
-      // Generate report (always -- even on crash we produce a partial report)
-      const report = generateReport(
-        snapshots,
-        deaths,
-        combatEvents,
-        movementSamples,
-        productionEvents,
-        finalTick,
-        tsOutcome,
-        wasmOutcome,
-        crashError,
-      );
-
-      fs.writeFileSync(path.join(OUTPUT_DIR, 'REPORT.md'), report);
+    snapshots.push({
+      tick: 0,
+      tsState: handle.tsState,
+      wasmState: handle.wasmState,
+      tsScreenshot: tsScreenshot0,
+      wasmScreenshot: wasmScreenshot0,
+      pixelDiff: pixelDiff0,
     });
 
-    // Test always passes -- this is a comparison tool
-  }, 1_200_000);
+    try {
+      while (currentTick < maxTicks) {
+        const tsDecision = tsOracle.decide(prevTsState);
+        const wasmDecision = wasmOracle.decide(prevWasmState);
+
+        const [tsResult, wasmResult] = await Promise.all([
+          handle.ts.step(STEP_SIZE, tsDecision.commands),
+          handle.wasm.step(
+            STEP_SIZE,
+            wasmDecision.commands.length > 0 ? JSON.stringify(wasmDecision.commands) : undefined,
+          ),
+        ]);
+
+        currentTick += STEP_SIZE;
+        finalTick = currentTick;
+
+        const currTsState = tsResult.state;
+        const currWasmState = wasmResult.state;
+
+        deaths.push(...trackDeaths(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
+        combatEvents.push(...trackCombat(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
+        movementSamples.push(...trackMovement(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
+        productionEvents.push(...trackProduction(currentTick, prevTsState, currTsState, prevWasmState, currWasmState));
+
+        if (currentTick % SNAPSHOT_INTERVAL === 0) {
+          const [tsScreenshot, wasmScreenshot] = await captureGameScreenshots(handle.ts, handle.wasm);
+          const diffPath = path.join(scenarioScreenshotDir, `diff-${currentTick}.png`);
+          const pixelDiff = await computePixelDiff(tsScreenshot, wasmScreenshot, diffPath);
+
+          fs.writeFileSync(path.join(scenarioScreenshotDir, `ts-${currentTick}.png`), tsScreenshot);
+          fs.writeFileSync(path.join(scenarioScreenshotDir, `wasm-${currentTick}.png`), wasmScreenshot);
+          fs.writeFileSync(path.join(scenarioStateDir, `ts-${currentTick}.json`), JSON.stringify(currTsState, null, 2));
+          fs.writeFileSync(path.join(scenarioStateDir, `wasm-${currentTick}.json`), JSON.stringify(currWasmState, null, 2));
+
+          snapshots.push({ tick: currentTick, tsState: currTsState, wasmState: currWasmState, tsScreenshot, wasmScreenshot, pixelDiff });
+        }
+
+        tsOutcome = tsOracle.checkResult(currTsState);
+        wasmOutcome = wasmOracle.checkResult(currWasmState);
+
+        if (tsOutcome !== 'playing' || wasmOutcome !== 'playing') {
+          if (currentTick % SNAPSHOT_INTERVAL !== 0) {
+            const [tsScreenshot, wasmScreenshot] = await captureGameScreenshots(handle.ts, handle.wasm);
+            const diffPath = path.join(scenarioScreenshotDir, `diff-${currentTick}.png`);
+            const pixelDiff = await computePixelDiff(tsScreenshot, wasmScreenshot, diffPath);
+
+            fs.writeFileSync(path.join(scenarioScreenshotDir, `ts-${currentTick}.png`), tsScreenshot);
+            fs.writeFileSync(path.join(scenarioScreenshotDir, `wasm-${currentTick}.png`), wasmScreenshot);
+            fs.writeFileSync(path.join(scenarioStateDir, `ts-${currentTick}.json`), JSON.stringify(currTsState, null, 2));
+            fs.writeFileSync(path.join(scenarioStateDir, `wasm-${currentTick}.json`), JSON.stringify(currWasmState, null, 2));
+
+            snapshots.push({ tick: currentTick, tsState: currTsState, wasmState: currWasmState, tsScreenshot, wasmScreenshot, pixelDiff });
+          }
+          break;
+        }
+
+        prevTsState = currTsState;
+        prevWasmState = currWasmState;
+      }
+    } catch (error) {
+      crashError = error instanceof Error ? error.message : String(error);
+      console.error(`[${scenario} CRASH] at tick ${currentTick}: ${crashError}`);
+    }
+
+    const report = generateReport(
+      snapshots, deaths, combatEvents, movementSamples, productionEvents,
+      finalTick, tsOutcome, wasmOutcome, crashError,
+    );
+    fs.writeFileSync(path.join(scenarioOutputDir, 'REPORT.md'), report);
+    console.log(`[${scenario}] Report written. Final tick: ${finalTick}, TS: ${tsOutcome}, WASM: ${wasmOutcome}`);
+  });
+}
+
+// ── Test suite — run each mission sequentially ──────────────────────────────
+
+const MISSIONS: Array<{ scenario: string; maxTicks: number }> = [
+  { scenario: 'SCG01EA', maxTicks: 2000 },
+  { scenario: 'SCG02EA', maxTicks: 2000 },
+  { scenario: 'SCG03EA', maxTicks: 2000 },
+  { scenario: 'SCG05EA', maxTicks: 2700 },
+  { scenario: 'SCG08EA', maxTicks: 2700 },
+  { scenario: 'SCG09EA', maxTicks: 2700 },
+];
+
+describe('Dual-Runtime Comparison', () => {
+  for (const { scenario, maxTicks } of MISSIONS) {
+    it(`${scenario} — compare TS vs WASM`, async () => {
+      await runComparison(scenario, maxTicks);
+    }, 1_200_000);
+  }
 });
