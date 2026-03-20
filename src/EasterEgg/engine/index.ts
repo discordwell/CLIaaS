@@ -6708,7 +6708,11 @@ export class Game {
     }
     if (structure.triggerName) this.spiedBuildingTriggers.add(structure.triggerName);
 
-    // Spy is consumed on infiltration
+    // Spy is consumed on infiltration.
+    // C++ parity: clear trigger name before death so TEVENT_DESTROYED doesn't
+    // fire for the spy. Without this, the spy's death triggers a loss condition
+    // (los3) before the infiltration trigger chain (SPYS→frc5→Tanya) completes.
+    spy.triggerName = undefined;
     spy.alive = false;
     spy.mission = Mission.DIE;
     spy.disguisedAs = null;

@@ -76,7 +76,15 @@ describe('SCG05EA spy infiltration test', () => {
         // Wait more for Tanya
         for (let k = 0; k < 300; k++) {
           state = (await adapter.step(30)).state;
-          if (k % 50 === 0) console.log(`  waiting... t=${state.tick} state=${state.state} globals=[${state.globals.join(',')}] units=${state.units.length}`);
+          if (k % 50 === 0) {
+            console.log(`  waiting... t=${state.tick} state=${state.state} globals=[${state.globals.join(',')}] units=${state.units.length}`);
+            // Read browser console for trigger debug
+            const browserLogs = adapter.getLogs();
+            const trigLogs = browserLogs.filter(l => l.includes('TRIGGER') || l.includes('SPY_INFILTRATE'));
+            if (trigLogs.length > 0) {
+              for (const l of trigLogs.slice(-5)) console.log(`    ${l}`);
+            }
+          }
           const t = state.units.find(u => u.t === 'E7');
           if (t) {
             console.log(`TANYA SPAWNED at (${t.cx},${t.cy}) tick=${state.tick}!`);
