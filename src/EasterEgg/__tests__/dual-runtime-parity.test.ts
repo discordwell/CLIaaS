@@ -1,3 +1,8 @@
+/**
+ * E2E test — requires `pnpm dev` running on port 3001.
+ * Runs C++ WASM alongside the TS engine in Playwright browsers.
+ * Use `pnpm test:e2e` to run. Skips gracefully via skipIf(!serverUp) in `pnpm test`.
+ */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { AgentState, AgentUnit } from '../engine/agentHarness.js';

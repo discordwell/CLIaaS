@@ -1,34 +1,32 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
-import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
+import { NodeAgentAdapter } from './node-agent-adapter.js';
 import { SharedTsOracleStrategy } from '../oracle/SharedOracleBridge.js';
 import type { AgentState } from '../engine/agentHarness.js';
-import { isDevServerAvailable, RA_PARITY_BASE_URL } from './dual-runtime-test-utils.js';
 
 /**
  * SCG05EA live playthrough — runs the oracle against the real TS engine.
- * Requires dev server at localhost:3001.
+ * Runs directly in Node.js via NodeAgentAdapter (no browser/dev server needed).
  */
 
-const BASE_URL = RA_PARITY_BASE_URL;
 const STEP_TICKS_NORMAL = 15;
 const STEP_TICKS_MICRO = 5; // Smaller steps when Tanya is alive for responsive micro
 const MAX_ITERATIONS = 4000;
 const LOG_EVERY = 10;
 
-const serverUp = isDevServerAvailable();
-
-describe.skipIf(!serverUp)('SCG05EA live playthrough', () => {
-  let adapter: TsAgentAdapter;
+describe('SCG05EA live playthrough', () => {
+  let adapter: NodeAgentAdapter;
   let oracle: SharedTsOracleStrategy;
 
   beforeAll(async () => {
-    adapter = new TsAgentAdapter({ url: BASE_URL, headless: true });
-    await adapter.connect();
-  }, 120_000);
+    adapter = new NodeAgentAdapter();
+  }, 30_000);
 
-  afterAll(async () => {
-    await adapter.disconnect();
-  }, 20_000);
+  afterAll(() => {
+    adapter.disconnect();
+  });
 
   it('plays SCG05EA to completion or reveals failure point', async () => {
     oracle = new SharedTsOracleStrategy('SCG05EA');
@@ -72,28 +70,8 @@ describe.skipIf(!serverUp)('SCG05EA live playthrough', () => {
       // Use smaller steps when Tanya is alive for responsive micro
       const hasTanya = lastState.units.some((u: { t: string }) => u.t === 'E7');
       const stepTicks = hasTanya ? STEP_TICKS_MICRO : STEP_TICKS_NORMAL;
-      const stepResult = await adapter.step(stepTicks, decision.commands);
-      // After infiltrate command, dump browser console and enable trigger debug
+      const stepResult = adapter.step(stepTicks, decision.commands);
       if (hasAttack) {
-        const logs = adapter.getLogs();
-        const harnessLogs = logs.filter(l => l.includes('HARNESS') || l.includes('SPY') || l.includes('infiltrat'));
-        if (harnessLogs.length > 0) {
-          for (const l of harnessLogs) console.log(`  BROWSER: ${l}`);
-          // Dump trigger 42 and nearby triggers to verify indexing
-          const allTrigs = (stepResult.state as unknown as { triggers?: Array<{ name: string; fired: boolean }> }).triggers ?? [];
-          console.log(`  Total triggers: ${allTrigs.length}`);
-          if (allTrigs.length > 42) {
-            console.log(`  Trigger[42]: ${JSON.stringify(allTrigs[42])}`);
-            console.log(`  Trigger[41]: ${JSON.stringify(allTrigs[41])}`);
-            console.log(`  Trigger[43]: ${JSON.stringify(allTrigs[43])}`);
-          }
-          // Also find spy2 by name
-          const spy2ByName = allTrigs.findIndex(t => t.name === 'spy2');
-          console.log(`  spy2 index by name: ${spy2ByName}`);
-          // Check SPYS action1 trigger field
-          const spysTrig = allTrigs.find(t => t.name === 'SPYS') as { a1: number; a1d: number } | undefined;
-          console.log(`  SPYS.a1=${spysTrig?.a1} (force-fires trigger idx: from INI field)`);
-        }
         if (stepResult.state.globals.length > 1) {
           console.log(`  GLOBALS CHANGED: [${stepResult.state.globals.join(',')}]`);
         }

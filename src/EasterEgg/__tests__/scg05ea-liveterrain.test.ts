@@ -1,44 +1,46 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
-import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
-import { isDevServerAvailable, RA_PARITY_BASE_URL } from './dual-runtime-test-utils.js';
+import { NodeAgentAdapter } from './node-agent-adapter.js';
 
-const BASE_URL = RA_PARITY_BASE_URL;
+/**
+ * SCG05EA spy death analysis — tracks spy tick-by-tick through death zone.
+ * Runs directly in Node.js via NodeAgentAdapter (no browser/dev server needed).
+ */
 
-const serverUp = isDevServerAvailable();
-
-describe.skipIf(!serverUp)('SCG05EA spy death analysis', () => {
-  let adapter: TsAgentAdapter;
+describe('SCG05EA spy death analysis', () => {
+  let adapter: NodeAgentAdapter;
 
   beforeAll(async () => {
-    adapter = new TsAgentAdapter({ url: BASE_URL, headless: true });
-    await adapter.connect();
-  }, 120_000);
+    adapter = new NodeAgentAdapter();
+  }, 30_000);
 
-  afterAll(async () => {
-    await adapter.disconnect();
-  }, 20_000);
+  afterAll(() => {
+    adapter.disconnect();
+  });
 
   it('tracks spy tick-by-tick through death zone', async () => {
     await adapter.loadScenario('SCG05EA');
 
     // Wait for spy
-    let state = (await adapter.step(1)).state;
+    let state = adapter.step(1).state;
     for (let i = 0; i < 40; i++) {
-      state = (await adapter.step(15)).state;
+      state = adapter.step(15).state;
       if (state.units.find(u => u.t === 'SPY')) break;
     }
     const spy = state.units.find(u => u.t === 'SPY')!;
     console.log(`SPY starts at (${spy.cx},${spy.cy})`);
 
     // Send spy east toward (40,50)
-    await adapter.step(1, [
+    adapter.step(1, [
       { cmd: 'move', unitIds: [spy.id], cx: 40, cy: 50 },
     ]);
 
     // Track EVERY tick
     let lastCx = spy.cx, lastCy = spy.cy;
     for (let i = 0; i < 200; i++) {
-      const r = await adapter.step(5); // 5 ticks at a time for speed
+      const r = adapter.step(5); // 5 ticks at a time for speed
       state = r.state;
       const s = state.units.find(u => u.t === 'SPY');
 

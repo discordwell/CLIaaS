@@ -1,6 +1,10 @@
 /**
  * M8 Dual-Runtime Comparison Test
  *
+ * E2E test — requires `pnpm dev` running on port 3001.
+ * Runs C++ WASM alongside the TS engine in Playwright browsers.
+ * Use `pnpm test:e2e` to run. Skips gracefully via skipIf(!serverUp) in `pnpm test`.
+ *
  * Orchestrates both the TS and C++ WASM game engines running SCG08EA (Allied
  * Mission 8), each driven by an independent Oracle AI.  Captures paired
  * screenshots and state snapshots every 100 ticks for up to 2700 ticks, tracks
