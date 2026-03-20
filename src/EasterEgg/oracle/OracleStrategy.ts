@@ -587,15 +587,15 @@ export class OracleStrategy {
       return candidates[0] ?? null;
     };
 
-    // Priority: static defense → production → power → everything else.
-    // Tanks will focus-fire enemy units (mammoths) before reaching structures.
+    // Priority: production first (stop enemy reinforcements), then defense, then power.
+    // WEAP → FACT → BARR/TENT → AFLD/HPAD → SPEN → defense → power.
     // Island Soviet base first (x=35-60), then eastern/mainland bases.
     return pickPriorityTarget(
       { minCx: 35, maxCx: 60, minCy: 35, maxCy: 58 },
-      ['TSLA', 'FTUR', 'SAM', 'AFLD', 'HPAD', 'WEAP', 'BARR', 'KENN', 'STEK', 'PROC', 'FACT', 'DOME', 'APWR', 'POWR'],
+      ['WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD', 'STEK', 'TSLA', 'FTUR', 'SAM', 'PROC', 'DOME', 'APWR', 'POWR'],
     ) ?? pickPriorityTarget(
       { minCx: 60, maxCx: 105, minCy: 35, maxCy: 60 },
-      ['TSLA', 'FTUR', 'SAM', 'SPEN', 'FCOM', 'AFLD', 'WEAP', 'FACT', 'PROC', 'APWR', 'POWR'],
+      ['WEAP', 'FACT', 'SPEN', 'AFLD', 'HPAD', 'TSLA', 'FTUR', 'SAM', 'FCOM', 'PROC', 'APWR', 'POWR'],
     );
   }
 
@@ -880,13 +880,36 @@ export class OracleStrategy {
     const existingShipyard = alliedStructures.some(
       (s) => s.t === 'SYRD' || s.t === 'SPEN',
     );
+    const scg11eaStuckUtilityBuild =
+      this.scenario === 'SCG11EA' &&
+      buildingProduction != null &&
+      buildingProduction.prog === 0 &&
+      (buildingProduction.t === 'POWR' ||
+        buildingProduction.t === 'APWR' ||
+        buildingProduction.t === 'PROC') &&
+      state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE &&
+      (
+        (
+          (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR') &&
+          state.power.produced >= state.power.consumed + 120
+        ) ||
+        (
+          buildingProduction.t === 'PROC' &&
+          alliedStructures.filter((s) => s.t === 'PROC').length >= 3
+        )
+      );
     const suppressScg11eaLeftoverBuild =
       this.scenario === 'SCG11EA' &&
-      existingShipyard &&
-      buildingProduction != null &&
-      buildingProduction.t !== 'SYRD' &&
-      buildingProduction.t !== 'SPEN' &&
-      (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR' || buildingProduction.t === 'PROC');
+      (
+        (
+          existingShipyard &&
+          buildingProduction != null &&
+          buildingProduction.t !== 'SYRD' &&
+          buildingProduction.t !== 'SPEN' &&
+          (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR' || buildingProduction.t === 'PROC')
+        ) ||
+        scg11eaStuckUtilityBuild
+      );
     const scg11eaBaseThreatCount =
       this.scenario === 'SCG11EA'
         ? state.enemies.filter((e) =>
@@ -3048,38 +3071,21 @@ export class OracleStrategy {
       if (patrolShips.length > 0) reasons.push(`sweep river (${patrolShips.length} ships)`);
     }
 
-    // GROUND ASSAULT — all tanks attack_move to enemy base. Ground-first strategy.
-    // GROUND ASSAULT — two phases: march north, then attack_move into base.
-    // 'move' to staging point (y=65) bypasses dogs/infantry.
-    // 'attack_move' from staging into the base engages everything.
-    const scg11eaLandAssaultOpen =
-      shipyardOnline &&
-      enemySubs.length <= SCG11EA_POST_NAVAL_SUB_THRESHOLD;
-    if (scg11eaLandAssaultOpen && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
+    // GROUND ASSAULT — two phases. No fleet gate.
+    // Phase 1: 'move' to staging y=65 (bypass dogs).
+    // Phase 2: at staging, priority:
+    //   1) Enemy units ACTIVELY ENGAGING (within 6 cells) → focus-fire
+    //   2) Production buildings (WEAP→FACT→BARR→AFLD→SPEN) → attack_move
+    //   3) Other buildings
+    // If enemies are nearby but not engaging, IGNORE them and hit buildings.
+    if (landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
       const armyCentroid = this.centroid(landArmor);
       const stagingPoint: Point = { cx: 45, cy: 65 };
       const atStaging = armyCentroid.cy <= 70;
-      const nearbyVehicles = state.enemies.filter(
-        (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-          landArmor.some((u) => this.distanceSq(u, e) <= 100),
-      );
       const retargetDue = (state.tick % 25) < 5;
-      if (nearbyVehicles.length > 0) {
-        // Focus-fire blocking tanks
-        nearbyVehicles.sort((a, b) => {
-          const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
-          return p(a.t) - p(b.t);
-        });
-        const movers = retargetDue ? landArmor : landArmor.filter(
-          (u) => this.isIdle(u) || this.distanceSq(u, nearbyVehicles[0]) > 100,
-        );
-        if (movers.length > 0) {
-          commands.push({ cmd: 'attack', ids: movers.map((u) => u.id), target: nearbyVehicles[0].id });
-          for (const u of movers) this.recordMove(u.id, nearbyVehicles[0].cx, nearbyVehicles[0].cy);
-          reasons.push(`assault focus ${nearbyVehicles[0].t} (${movers.length})`);
-        }
-      } else if (!atStaging) {
-        // Phase 1: march to staging — 'move' bypasses dogs
+
+      if (!atStaging) {
+        // Phase 1: march north — 'move' bypasses dogs/infantry
         const movers = retargetDue ? landArmor : landArmor.filter(
           (u) => this.isIdle(u) || this.distanceSq(u, stagingPoint) > 225,
         );
@@ -3089,16 +3095,38 @@ export class OracleStrategy {
           reasons.push(`assault march (${movers.length} → y=${stagingPoint.cy})`);
         }
       } else {
-        // Phase 2: at staging — attack_move into the base
-        const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-        if (structTarget) {
+        // Phase 2: at staging — kill the base
+        // Only focus-fire enemy units ACTIVELY ENGAGING (within 6 cells of our tanks)
+        const engaging = state.enemies.filter(
+          (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
+            landArmor.some((u) => this.distanceSq(u, e) <= 36), // 6 cells
+        );
+        if (engaging.length > 0) {
+          // Focus-fire the engaging threat
+          engaging.sort((a, b) => {
+            const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
+            return p(a.t) - p(b.t);
+          });
           const movers = retargetDue ? landArmor : landArmor.filter(
-            (u) => this.isIdle(u) || this.distanceSq(u, structTarget) > 100,
+            (u) => this.isIdle(u) || this.distanceSq(u, engaging[0]) > 36,
           );
           if (movers.length > 0) {
-            commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
-            for (const u of movers) this.recordMove(u.id, structTarget.cx, structTarget.cy);
-            reasons.push(`assault push ${structTarget.t} (${movers.length} → ${structTarget.cx},${structTarget.cy})`);
+            commands.push({ cmd: 'attack', ids: movers.map((u) => u.id), target: engaging[0].id });
+            for (const u of movers) this.recordMove(u.id, engaging[0].cx, engaging[0].cy);
+            reasons.push(`assault kill ${engaging[0].t} (${movers.length})`);
+          }
+        } else {
+          // No engaging enemies — hit production buildings
+          const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
+          if (structTarget) {
+            const movers = retargetDue ? landArmor : landArmor.filter(
+              (u) => this.isIdle(u) || this.distanceSq(u, structTarget) > 100,
+            );
+            if (movers.length > 0) {
+              commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+              for (const u of movers) this.recordMove(u.id, structTarget.cx, structTarget.cy);
+              reasons.push(`assault raze ${structTarget.t} (${movers.length} → ${structTarget.cx},${structTarget.cy})`);
+            }
           }
         }
       }

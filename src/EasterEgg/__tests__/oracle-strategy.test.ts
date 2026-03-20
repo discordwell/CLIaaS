@@ -860,6 +860,68 @@ describe('SCG11EA naval strategy', () => {
     expect(decision.reason).toContain('rebuild SYRD for sub hunt');
   });
 
+  it('defers SCG11EA shipyard rebuild while one destroyer is still afloat and cash is tight', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+
+    strategy.decide(scg11eaState({
+      units: [
+        unit({ id: 1, t: '2TNK', house: 'Greece', cx: 60, cy: 89, hp: 300, mhp: 300 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 110, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 101, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 84 }),
+        structure({ id: 103, t: 'SYRD', ally: true, house: 'Greece', cx: 63, cy: 85 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'PROC', 'SYRD'],
+        units: [],
+        infantry: [],
+        vessels: ['DD'],
+      },
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+      ],
+    }));
+
+    const s = scg11eaState({
+      credits: 550,
+      units: [
+        unit({ id: 1, t: '2TNK', house: 'Greece', cx: 60, cy: 89, hp: 300, mhp: 300 }),
+        unit({ id: 10, t: 'DD', house: 'Greece', cx: 65, cy: 86, hp: 200, mhp: 200, m: 5 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 110, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 101, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 84 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'PROC', 'SYRD'],
+        units: [],
+        infantry: [],
+        vessels: ['DD'],
+      },
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+        unit({ id: 51, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 44, hp: 200, mhp: 200 }),
+        unit({ id: 52, t: 'SS', ally: false, house: 'USSR', cx: 72, cy: 48, hp: 200, mhp: 200 }),
+        unit({ id: 53, t: 'SS', ally: false, house: 'USSR', cx: 74, cy: 52, hp: 200, mhp: 200 }),
+        unit({ id: 54, t: 'SS', ally: false, house: 'USSR', cx: 76, cy: 56, hp: 200, mhp: 200 }),
+        unit({ id: 55, t: 'SS', ally: false, house: 'USSR', cx: 78, cy: 60, hp: 200, mhp: 200 }),
+      ],
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 27 }),
+      ]),
+    );
+    expect(decision.reason).not.toContain('rebuild SYRD for sub hunt');
+  });
+
   it('starts the shipyard on SCG11EA once the coast, refinery line, and power line are ready', () => {
     const strategy = new OracleStrategy('SCG11EA');
     const s = scg11eaState({
@@ -1250,18 +1312,18 @@ describe('SCG11EA naval strategy', () => {
     const s = scg11eaState({
       credits: 5000,
       units: [
-        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
-        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
-        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
-        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 38, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 8, t: 'ARTY', house: 'Greece', cx: 30, cy: 82, hp: 150, mhp: 150 }),
-        unit({ id: 9, t: '2TNK', house: 'Greece', cx: 40, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 10, t: '2TNK', house: 'Greece', cx: 42, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 11, t: '1TNK', house: 'Greece', cx: 31, cy: 84, hp: 200, mhp: 200 }),
-        unit({ id: 12, t: '1TNK', house: 'Greece', cx: 33, cy: 84, hp: 200, mhp: 200 }),
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 43, cy: 66, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 45, cy: 66, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 47, cy: 66, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 43, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 45, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 47, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 49, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 8, t: 'ARTY', house: 'Greece', cx: 42, cy: 69, hp: 150, mhp: 150 }),
+        unit({ id: 9, t: '2TNK', house: 'Greece', cx: 51, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 10, t: '2TNK', house: 'Greece', cx: 53, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 11, t: '1TNK', house: 'Greece', cx: 44, cy: 70, hp: 200, mhp: 200 }),
+        unit({ id: 12, t: '1TNK', house: 'Greece', cx: 46, cy: 70, hp: 200, mhp: 200 }),
         unit({ id: 20, t: 'DD', house: 'Greece', cx: 64, cy: 86, hp: 200, mhp: 200, m: 5 }),
         unit({ id: 21, t: 'DD', house: 'Greece', cx: 66, cy: 86, hp: 200, mhp: 200, m: 5 }),
         unit({ id: 22, t: 'DD', house: 'Greece', cx: 68, cy: 86, hp: 200, mhp: 200, m: 5 }),
@@ -1281,7 +1343,7 @@ describe('SCG11EA naval strategy', () => {
     const decision = strategy.decide(s);
     expect(decision.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ cmd: 'attack', target: 200 }),
+        expect.objectContaining({ cmd: 'attack_move', cx: 49, cy: 40 }),
       ]),
     );
   });
@@ -1291,18 +1353,18 @@ describe('SCG11EA naval strategy', () => {
     const s = scg11eaState({
       credits: 5000,
       units: [
-        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
-        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
-        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
-        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 38, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 8, t: '2TNK', house: 'Greece', cx: 40, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 9, t: 'ARTY', house: 'Greece', cx: 30, cy: 82, hp: 150, mhp: 150 }),
-        unit({ id: 11, t: '2TNK', house: 'Greece', cx: 42, cy: 80, hp: 300, mhp: 300 }),
-        unit({ id: 12, t: '1TNK', house: 'Greece', cx: 31, cy: 84, hp: 200, mhp: 200 }),
-        unit({ id: 13, t: '1TNK', house: 'Greece', cx: 33, cy: 84, hp: 200, mhp: 200 }),
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 43, cy: 66, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 45, cy: 66, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 47, cy: 66, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 43, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 45, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 47, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 49, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 8, t: '2TNK', house: 'Greece', cx: 51, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 9, t: 'ARTY', house: 'Greece', cx: 42, cy: 69, hp: 150, mhp: 150 }),
+        unit({ id: 11, t: '2TNK', house: 'Greece', cx: 53, cy: 68, hp: 300, mhp: 300 }),
+        unit({ id: 12, t: '1TNK', house: 'Greece', cx: 44, cy: 70, hp: 200, mhp: 200 }),
+        unit({ id: 13, t: '1TNK', house: 'Greece', cx: 46, cy: 70, hp: 200, mhp: 200 }),
         unit({ id: 20, t: 'DD', house: 'Greece', cx: 64, cy: 86, hp: 200, mhp: 200, m: 5 }),
         unit({ id: 21, t: 'DD', house: 'Greece', cx: 66, cy: 86, hp: 200, mhp: 200, m: 5 }),
         unit({ id: 22, t: 'DD', house: 'Greece', cx: 68, cy: 86, hp: 200, mhp: 200, m: 5 }),
@@ -1324,12 +1386,13 @@ describe('SCG11EA naval strategy', () => {
     const decision = strategy.decide(s);
     expect(decision.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ cmd: 'attack', target: 200, ids: expect.any(Array) }),
+        expect.objectContaining({ cmd: 'attack_move', cx: 49, cy: 40, ids: expect.any(Array) }),
       ]),
     );
     const assaultCommand = decision.commands.find((c) =>
-      c.cmd === 'attack' &&
-      c.target === 200 &&
+      c.cmd === 'attack_move' &&
+      c.cx === 49 &&
+      c.cy === 40 &&
       Array.isArray(c.ids),
     );
     expect(assaultCommand).toBeDefined();
