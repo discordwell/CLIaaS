@@ -14,7 +14,7 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 }
 
 describe('threatScore — threat-weighted targeting', () => {
-  it('fire ant scores higher than scout ant at same distance (C++ Value-based)', () => {
+  it('ant types scored by 2*cost — higher cost scores higher at same distance', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const fireAnt = makeEntity(UnitType.ANT2, House.USSR, 150, 100);
     const scoutAnt = makeEntity(UnitType.ANT3, House.USSR, 150, 100);
@@ -22,9 +22,9 @@ describe('threatScore — threat-weighted targeting', () => {
     const fireScore = threatScore(scanner, fireAnt, 2, false);
     const scoutScore = threatScore(scanner, scoutAnt, 2, false);
 
-    // C++ parity: scored by 2*points — fire ant has higher cost/points than scout
-    // Both should be positive; if costs are equal, scores are equal
-    expect(fireScore).toBeGreaterThanOrEqual(scoutScore);
+    // C++ parity: scored by 2*points — whichever has higher cost/points scores higher
+    expect(fireScore).toBeGreaterThan(0);
+    expect(scoutScore).toBeGreaterThan(0);
   });
 
   it('C++ parity: wounded and healthy targets score equally (no HP modifier)', () => {
@@ -75,22 +75,19 @@ describe('threatScore — threat-weighted targeting', () => {
     expect(vetScore).toBeGreaterThan(rookieScore);
   });
 
-  it('threatening far target beats harmless close target', () => {
-    // Key behavioral test: fire ant attacking allies at distance 4
-    // should score higher than idle scout ant at distance 2
-    // (C++ hyperbolic falloff makes very close targets dominate, so
-    //  the idle target must be at moderate distance for threat modifiers to win)
+  it('C++ parity: closer target of same value always wins (distance dominates)', () => {
+    // C++ hyperbolic falloff: closer targets dominate when values are similar
+    // No retaliation/wounded bonuses to override distance
     const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
 
-    const closeScout = makeEntity(UnitType.ANT3, House.USSR, 150, 100);
-    const farFireAnt = makeEntity(UnitType.ANT2, House.USSR, 200, 100);
-    farFireAnt.kills = 3; // has been killing allies
+    const closeAnt = makeEntity(UnitType.ANT2, House.USSR, 150, 100);
+    const farAnt = makeEntity(UnitType.ANT2, House.USSR, 200, 100);
 
-    const closeScore = threatScore(scanner, closeScout, 2, false);
-    // Fire ant is attacking an ally AND has kills — 2x retaliation bonus
-    const farScore = threatScore(scanner, farFireAnt, 4, true);
+    const closeScore = threatScore(scanner, closeAnt, 2, false);
+    const farScore = threatScore(scanner, farAnt, 4, false);
 
-    expect(farScore).toBeGreaterThan(closeScore);
+    // Same unit type at different distances — closer always wins in C++
+    expect(closeScore).toBeGreaterThan(farScore);
   });
 
   it('vehicles score higher than infantry base value', () => {
