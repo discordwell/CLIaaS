@@ -1446,41 +1446,12 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   );
 
   // Add base structures from [Base] section (pre-placed buildings)
-  for (const bs of data.baseStructures) {
-    const baseHouse = toHouse(bs.house);
-    const pos = cellIndexToPos(bs.cell);
-    const image = STRUCTURE_IMAGES[bs.type] ?? bs.type.toLowerCase();
-    const maxHp = STRUCTURE_MAX_HP[bs.type] ?? 256;
-    structures.push({
-      type: bs.type,
-      image,
-      house: baseHouse,
-      cx: pos.cx,
-      cy: pos.cy,
-      hp: maxHp,
-      maxHp,
-      alive: true,
-      rubble: false,
-      weapon: STRUCTURE_WEAPONS[bs.type],
-      attackCooldown: 0,
-      ammo: -1,
-      maxAmmo: -1,
-    });
-    const [fw, fh] = STRUCTURE_SIZE[bs.type] ?? [1, 1];
-    for (let dy = 0; dy < fh; dy++) {
-      for (let dx = 0; dx < fw; dx++) {
-        map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
-      }
-    }
-    // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
-    for (const bc of getBibCells(bs.type, pos.cx, pos.cy)) {
-      map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
-    }
-    // Store wall type for auto-connection sprite rendering
-    if (bs.type === 'SBAG' || bs.type === 'FENC' || bs.type === 'BARB' || bs.type === 'BRIK') {
-      map.setWallType(pos.cx, pos.cy, bs.type);
-    }
-  }
+  // C++ parity (base.h:116-118): [Base] section defines the AI rebuild blueprint,
+  // NOT additional visible structures. The actual buildings are already in [STRUCTURES].
+  // "Portions of this list can be pre-built by simply saving those buildings in the INI
+  // along with non-base buildings, so Is_Built will return true for them."
+  // We store baseBlueprint (line 1597) for the AI rebuild system but do NOT create
+  // duplicate visible structures here.
 
   // Store smudge marks on the map for rendering
   map.smudges = data.smudges.map(s => ({

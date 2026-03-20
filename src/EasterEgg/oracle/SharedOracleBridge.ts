@@ -56,6 +56,20 @@ const VESSEL_ID_TO_NAME: Record<number, string> = {
   0: 'SS', 1: 'DD', 2: 'CA', 3: 'LST', 4: 'PT', 5: 'MSUB',
 };
 
+// Reverse lookup: type name → RTTI category (for production state normalization)
+const BUILDING_NAMES = new Set(Object.values(BUILDING_ID_TO_NAME));
+const UNIT_NAMES = new Set(Object.values(UNIT_ID_TO_NAME));
+const INFANTRY_NAMES = new Set(Object.values(INFANTRY_ID_TO_NAME));
+const VESSEL_NAMES = new Set(Object.values(VESSEL_ID_TO_NAME));
+
+function nameToRtti(name: string): number | undefined {
+  if (BUILDING_NAMES.has(name)) return RTTI_BUILDINGTYPE;
+  if (UNIT_NAMES.has(name)) return RTTI_UNITTYPE;
+  if (INFANTRY_NAMES.has(name)) return RTTI_INFANTRYTYPE;
+  if (VESSEL_NAMES.has(name)) return RTTI_VESSELTYPE;
+  return undefined;
+}
+
 function rttiToName(rtti: number, typeId: number): string | undefined {
   switch (rtti) {
     case RTTI_BUILDINGTYPE: return BUILDING_ID_TO_NAME[typeId];
@@ -183,6 +197,8 @@ export function normalizeTsState(state: AgentState): TsStateBridge {
       production: state.production.map((item) => ({
         t: item.t,
         prog: Math.round(item.prog * 100),
+        rtti: nameToRtti(item.t),
+        done: item.prog >= 1,
       })),
       buildable: toBuildable(state),
     },

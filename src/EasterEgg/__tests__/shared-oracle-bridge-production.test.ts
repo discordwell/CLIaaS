@@ -139,3 +139,72 @@ describe('normalizeTsState — buildable field', () => {
     expect(buildable!.infantry).toEqual([]);
   });
 });
+
+describe('normalizeTsState — production rtti and done fields', () => {
+  // C++ parity: Oracle checks state.production.find(p => p.rtti === RTTI_BUILDINGTYPE)
+  // to detect current building production. Without rtti, Oracle can't tell what's
+  // in the queue and keeps issuing new produce commands every tick.
+
+  const STATE_WITH_PRODUCTION = {
+    tick: 500,
+    credits: 3000,
+    playerHouse: 'Greece',
+    alliedHouses: ['Greece'],
+    globals: [],
+    missionTimer: 0,
+    civiliansEvacuated: 0,
+    state: 'playing',
+    power: { produced: 200, consumed: 100, multiplier: 1 },
+    units: [],
+    enemies: [],
+    structures: [],
+    production: [
+      { t: 'POWR', name: 'Power Plant', prog: 0.5, q: 1, cost: 300, paid: 150 },
+      { t: '2TNK', name: 'Medium Tank', prog: 0.8, q: 1, cost: 800, paid: 640 },
+      { t: 'E3', name: 'Rocket Soldier', prog: 1.0, q: 1, cost: 300, paid: 300 },
+    ],
+    available: [],
+    availableItems: [],
+    superweapons: [],
+    mapBounds: { x: 0, y: 0, w: 128, h: 128 },
+    kills: 0,
+    losses: 0,
+  } as AgentState;
+
+  it('includes rtti for building production (RTTI_BUILDINGTYPE = 6)', () => {
+    const bridge = normalizeTsState(STATE_WITH_PRODUCTION);
+    const powr = bridge.normalizedState.production.find(p => p.t === 'POWR');
+    expect(powr).toBeDefined();
+    expect(powr!.rtti).toBe(6); // RTTI_BUILDINGTYPE
+  });
+
+  it('includes rtti for unit production (RTTI_UNITTYPE = 29)', () => {
+    const bridge = normalizeTsState(STATE_WITH_PRODUCTION);
+    const tank = bridge.normalizedState.production.find(p => p.t === '2TNK');
+    expect(tank).toBeDefined();
+    expect(tank!.rtti).toBe(29); // RTTI_UNITTYPE
+  });
+
+  it('includes rtti for infantry production (RTTI_INFANTRYTYPE = 14)', () => {
+    const bridge = normalizeTsState(STATE_WITH_PRODUCTION);
+    const e3 = bridge.normalizedState.production.find(p => p.t === 'E3');
+    expect(e3).toBeDefined();
+    expect(e3!.rtti).toBe(14); // RTTI_INFANTRYTYPE
+  });
+
+  it('marks completed items with done=true (prog >= 1.0)', () => {
+    const bridge = normalizeTsState(STATE_WITH_PRODUCTION);
+    const e3 = bridge.normalizedState.production.find(p => p.t === 'E3');
+    expect(e3!.done).toBe(true);
+    const powr = bridge.normalizedState.production.find(p => p.t === 'POWR');
+    expect(powr!.done).toBe(false);
+  });
+
+  it('converts prog from 0-1 to 0-100 scale', () => {
+    const bridge = normalizeTsState(STATE_WITH_PRODUCTION);
+    const powr = bridge.normalizedState.production.find(p => p.t === 'POWR');
+    expect(powr!.prog).toBe(50); // 0.5 * 100
+    const tank = bridge.normalizedState.production.find(p => p.t === '2TNK');
+    expect(tank!.prog).toBe(80); // 0.8 * 100
+  });
+});
