@@ -39,18 +39,21 @@ beforeEach(() => resetEntityIds());
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function makeSAM(cx: number, cy: number, house: House = House.USSR, hp?: number): MapStructure {
+function makeSAM(cx: number, cy: number, house: House = House.USSR, hp?: number, facing: number = 2): MapStructure {
   const maxHp = STRUCTURE_MAX_HP['SAM'] ?? 400;
   return {
     type: 'SAM', image: 'sam', house,
     cx, cy, hp: hp ?? maxHp, maxHp, alive: true, rubble: false,
     weapon: { ...STRUCTURE_WEAPONS['SAM'] },
     attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    turretDir: facing,          // pre-aligned to target direction (default East)
+    desiredTurretDir: facing,
+    firingFlash: 0,
   };
 }
 
-function makeSAMWithAmmo(cx: number, cy: number, ammo: number, house: House = House.USSR): MapStructure {
-  const s = makeSAM(cx, cy, house);
+function makeSAMWithAmmo(cx: number, cy: number, ammo: number, house: House = House.USSR, facing: number = 2): MapStructure {
+  const s = makeSAM(cx, cy, house, undefined, facing);
   s.ammo = ammo;
   s.maxAmmo = ammo;
   return s;
@@ -340,12 +343,14 @@ describe('SAM power dependency (building.cpp PW1/PW3)', () => {
 // to face the target before firing. turretDir/desiredTurretDir track facing.
 
 describe('SAM turret rotation (building.cpp turreted structures)', () => {
-  it('initializes turretDir to 4 (South) when first updated', () => {
+  it('initializes turretDir to default (0=North for SAM) when undefined', () => {
     const sam = makeSAM(10, 10);
+    sam.turretDir = undefined;
+    sam.desiredTurretDir = undefined;
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    // turretDir starts undefined, gets set to default 4 (South) on first tick
+    // turretDir starts undefined, gets set to default 0 (North for SAM) on first tick
     expect(sam.turretDir).toBeUndefined();
 
     updateStructureCombat(ctx);

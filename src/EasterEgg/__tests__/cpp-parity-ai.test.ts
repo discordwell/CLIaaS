@@ -940,8 +940,8 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     expect(unit.mission).toBe(Mission.MOVE);
   });
 
-  it('IQ < 3 skips repair', () => {
-    const state = makeAIState({ house: House.USSR, iq: 2 });
+  it('IQ < 1 skips repair', () => {
+    const state = makeAIState({ house: House.USSR, iq: 0 });
     const damaged = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 100 });
     const ctx = makeAIContext({
       tick: 15,
@@ -953,8 +953,8 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     expect(damaged.hp).toBe(100); // unchanged
   });
 
-  it('IQ >= 3 repairs damaged structures', () => {
-    const state = makeAIState({ house: House.USSR, iq: 3 });
+  it('IQ >= 1 repairs damaged structures', () => {
+    const state = makeAIState({ house: House.USSR, iq: 1 });
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const damaged = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
@@ -968,8 +968,8 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     expect(damaged.hp).toBeGreaterThan(hpBefore);
   });
 
-  it('IQ < 3 skips sell-damaged', () => {
-    const state = makeAIState({ house: House.USSR, iq: 2 });
+  it('IQ < 1 skips sell-damaged', () => {
+    const state = makeAIState({ house: House.USSR, iq: 0 });
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const dying = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1 }); // well below CONDITION_RED
     const ctx = makeAIContext({
@@ -982,8 +982,8 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     expect(dying.alive).toBe(true); // not sold
   });
 
-  it('IQ >= 3 sells near-death structures', () => {
-    const state = makeAIState({ house: House.USSR, iq: 3 });
+  it('IQ >= 1 sells near-death structures', () => {
+    const state = makeAIState({ house: House.USSR, iq: 1 });
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const dying = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1 });
     const ctx = makeAIContext({
@@ -1034,7 +1034,7 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
     expect(queue).toContain('POWR');
   });
 
-  it('queues TENT when no barracks exist', () => {
+  it('queues BARR when no barracks exist (Soviet builds BARR, not TENT)', () => {
     const state = makeAIState({ house: House.USSR });
     const structures = [
       makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 }),
@@ -1042,7 +1042,8 @@ describe('getAIBuildOrder — priority queue (HOUSE.CPP build logic)', () => {
     ];
     const ctx = makeAIContext({ structures, houseCredits: new Map([[House.USSR, 5000]]) });
     const queue = getAIBuildOrder(ctx, House.USSR, state);
-    expect(queue).toContain('TENT');
+    // C++ house.cpp:5520-5521: Soviet faction builds BARR, Allied builds TENT
+    expect(queue).toContain('BARR');
   });
 
   it('queues PROC when refinery ratio not met (C++ house.cpp:5502)', () => {

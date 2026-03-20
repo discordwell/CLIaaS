@@ -973,8 +973,8 @@ describe('Section 8: Building footprint sizes (bdata.cpp)', () => {
     ['POWR', 2, 2],   // Power Plant
     ['APWR', 2, 2],   // Advanced Power Plant
     ['PROC', 3, 2],   // Ore Refinery
-    ['BARR', 2, 2],   // Barracks (Allied)
-    ['TENT', 2, 2],   // Barracks (Soviet)
+    ['BARR', 2, 2],   // Barracks (Soviet)
+    ['TENT', 2, 2],   // Barracks (Allied)
     ['FIX', 3, 2],    // Service Depot
     ['SILO', 1, 1],   // Ore Silo
     ['DOME', 2, 2],   // Radar Dome

@@ -411,8 +411,8 @@ describe('Engineer friendly repair — Renovate() (infantry.cpp:606-611)', () =>
 
     updateAttackStructure(ctx, eng, s);
 
-    // TS current behavior: falls through to damage path, deals 66 damage
-    expect(s.hp).toBe(134); // 200 - 66 = 134 — PARITY GAP: C++ would leave at 200
+    // C++ parity: Renovate() on full-health building is a harmless no-op. HP stays at 200.
+    expect(s.hp).toBe(200); // C++ Renovate() no-op — engineer consumed, building unharmed
     // Engineer is still consumed either way
     expect(eng.alive).toBe(false);
   });
@@ -442,10 +442,9 @@ describe('Engineer capture HP behavior — C++ vs TS divergence', () => {
 
     updateAttackStructure(ctx, eng, s);
 
-    // TS behavior: hp restored to maxHp
-    expect(s.hp).toBe(200);
-    // C++ behavior would be: expect(s.hp).toBe(50);
-    // PARITY GAP: TS heals building on capture; C++ leaves it damaged.
+    // C++ parity: Captured() changes ownership but does NOT restore HP
+    expect(s.hp).toBe(50);
+    // C++ building.cpp:2936: building remains at pre-capture HP
   });
 });
 
@@ -751,21 +750,17 @@ describe('Demo truck warhead type', () => {
 // engineer can capture. The only check is Is_Ally(tech).
 //
 // TS missionAI.ts:1015: if (entity.type === UnitType.I_E6 && entity.isPlayerUnit)
-// PARITY GAP: TS only handles player engineers in updateAttackStructure.
-// AI engineers fall through to the generic attack logic.
+// C++ parity: any house's engineer can capture, not just player's.
+// C++ infantry.cpp:598-637 — no isPlayerUnit check in C++.
 // ============================================================
-describe('Engineer capture player-only restriction (PARITY GAP)', () => {
-  it('only player-controlled engineers trigger capture logic in TS', () => {
+describe('Engineer capture — any house (C++ infantry.cpp:598-637)', () => {
+  it('AI-controlled engineers also trigger capture logic (C++ parity)', () => {
     /**
      * C++ infantry.cpp:598-637: Any engineer entering an enemy building
      * performs capture/damage regardless of which house controls it.
      *
-     * TS missionAI.ts:1015:
-     *   if (entity.type === UnitType.I_E6 && entity.isPlayerUnit) {
-     *
-     * PARITY GAP: AI engineers (e.g., Soviet engineer attacking player building)
-     * do not use the capture logic in TS. They fall through to normal attack,
-     * which fires the engineer's weapon (null weapon = no-op).
+     * TS missionAI.ts:1025-1026: entity.type === UnitType.I_E6 (no isPlayerUnit check)
+     * Now matches C++ behavior — any house's engineer captures.
      */
     const s = makeStructure({ hp: 50, maxHp: 200, house: House.Greece });
     const aiEng = makeEntity(UnitType.I_E6, House.USSR, s.cx * CELL_SIZE + CELL_SIZE, s.cy * CELL_SIZE + CELL_SIZE);
@@ -773,9 +768,8 @@ describe('Engineer capture player-only restriction (PARITY GAP)', () => {
 
     updateAttackStructure(ctx, aiEng, s);
 
-    // In C++: enemy engineer would capture this building (hp <= ConditionRed)
-    // In TS: AI engineer is NOT handled by the capture logic, building stays player-owned
-    expect(s.house).toBe(House.Greece); // No capture — PARITY GAP
+    // C++ parity: AI engineer captures at red health, building changes to engineer's house
+    expect(s.house).toBe(House.USSR); // AI capture now works — C++ parity
   });
 });
 

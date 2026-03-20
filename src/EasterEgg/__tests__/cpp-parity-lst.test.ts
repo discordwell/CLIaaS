@@ -439,21 +439,22 @@ describe('LST movement — stop-rotate-move (drive.cpp)', () => {
     // One moveToward tick — vessel should stop to rotate first
     const arrived = lst.moveToward(targetPos, lst.stats.speed);
 
-    // LST rot=10 >= 8, so it snaps facing instantly like infantry rot
-    // After snap, it should move forward
-    // rot >= 8 means instant facing snap in tickRotation
-    expect(arrived).toBe(false); // 3 cells away, won't arrive in one tick
+    // LST rot=10 uses accumulator rotation (only infantry snaps instantly).
+    // The LST must rotate before moving (stop-rotate-move).
+    expect(arrived).toBe(false); // still rotating or 3 cells away
   });
 
-  it('LST rot=10 means instant facing snap (rot >= 8 threshold)', () => {
+  it('LST rot=10 uses accumulator rotation (not instant snap — only infantry snap)', () => {
     expect(UNIT_STATS.LST.rot).toBe(10);
-    // rot >= 8 means the unit snaps facing instantly
+    // LST is not infantry, so it uses the accumulator even with rot=10.
+    // C++ Rotation_Adjust: ROT=10 takes 7 ticks for 90 degrees.
     const lst = entityAtCell(UnitType.V_LST, House.Spain, 10, 10);
     lst.facing = Dir.N;
     lst.desiredFacing = Dir.S; // opposite direction
     const aligned = lst.tickRotation();
-    expect(aligned).toBe(true);
-    expect(lst.facing).toBe(Dir.S);
+    // First tick: acc += 10, 10 >= 8 → step once, but 180 degrees needs many steps.
+    expect(aligned).toBe(false);
+    expect(lst.facing).not.toBe(Dir.S);
   });
 });
 

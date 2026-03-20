@@ -353,14 +353,16 @@ describe('ANT3 rotation — rot=9 snap (drive.cpp)', () => {
     expect(UNIT_STATS.ANT3.rot).toBe(9);
   });
 
-  it('ANT3 facing snaps instantly since rot >= 8', () => {
+  it('ANT3 rot=9 uses accumulator rotation (not instant snap — only infantry snap)', () => {
     const ant3 = entityAtCell(UnitType.ANT3, House.USSR, 10, 10);
     ant3.facing = Dir.N;
     ant3.desiredFacing = Dir.S; // opposite direction
     ant3.bodyFacing32 = Dir.N * 4;
     const aligned = ant3.tickRotation();
-    expect(aligned).toBe(true);
-    expect(ant3.facing).toBe(Dir.S);
+    // ANT3 is not infantry, so it uses the accumulator even with rot=9.
+    // First tick: acc += 9, 9 >= 8 → step once, but not fully aligned yet.
+    expect(aligned).toBe(false);
+    expect(ant3.facing).not.toBe(Dir.S);
   });
 
   it('ANT2 rot is 6 (< 8) — does NOT snap instantly (contrast with ANT3)', () => {
@@ -384,7 +386,7 @@ describe('ANT3 movement — non-infantry vehicle rules (drive.cpp)', () => {
     expect(UNIT_STATS.ANT3.isInfantry).toBe(false);
   });
 
-  it('ANT3 moves toward target (rot=9 snaps instantly, so no stall)', () => {
+  it('ANT3 moves toward target after rotation completes (rot=9 uses accumulator)', () => {
     const ant3 = entityAtCell(UnitType.ANT3, House.USSR, 10, 10);
     ant3.facing = Dir.N;
     ant3.desiredFacing = Dir.N;
@@ -393,9 +395,16 @@ describe('ANT3 movement — non-infantry vehicle rules (drive.cpp)', () => {
     const startX = ant3.pos.x;
     const targetPos = { x: startX + CELL_SIZE * 3, y: ant3.pos.y }; // due East
 
+    // C++ parity: all vehicles use Rotation_Adjust accumulator. ROT=9 is fast but not instant.
+    // First tick starts rotation but doesn't complete 90-degree turn.
     const arrived = ant3.moveToward(targetPos, ant3.stats.speed);
+    expect(ant3.pos.x).toBe(startX); // stopped to rotate
 
-    // Despite facing N and target E, rot=9 means instant snap → movement happens
+    // Complete rotation and move over multiple ticks
+    for (let i = 0; i < 10; i++) {
+      ant3.rotTickedThisFrame = false;
+      ant3.moveToward(targetPos, ant3.stats.speed);
+    }
     const distMoved = Math.sqrt((ant3.pos.x - startX) ** 2 + (ant3.pos.y - ant3.pos.y) ** 2);
     expect(distMoved).toBeGreaterThan(0);
   });

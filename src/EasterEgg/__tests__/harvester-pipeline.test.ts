@@ -149,9 +149,9 @@ function simulateHarvesterTick(
         if (bailCredits > 0) {
           harv.oreLoad += 1;
           harv.oreCreditValue += bailCredits;
-          if (bailCredits >= 110) {
+          if (bailCredits >= 50) {
             harv.oreLoad += 2;
-            harv.oreCreditValue += 220;
+            harv.oreCreditValue += 100;
           }
         }
         if (harv.oreLoad >= Entity.BAIL_COUNT) {
@@ -436,10 +436,10 @@ describe('Harvester Pipeline', () => {
       // Tick 10: first bail depleted
       simulateHarvesterTick(harv, map, [], House.Spain, true, 10);
       expect(harv.oreLoad).toBe(1);
-      expect(harv.oreCreditValue).toBe(35);
+      expect(harv.oreCreditValue).toBe(25);
     });
 
-    it('harvesting gold accumulates 35 credits per bail', () => {
+    it('harvesting gold accumulates 25 credits per bail', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
       setOverlay(map, 50, 50, 0x0E); // max gold (12 bails from this cell)
@@ -449,10 +449,10 @@ describe('Harvester Pipeline', () => {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
       expect(harv.oreLoad).toBe(3);
-      expect(harv.oreCreditValue).toBe(3 * 35); // 105 credits
+      expect(harv.oreCreditValue).toBe(3 * 25); // 75 credits
     });
 
-    it('harvesting gems adds 3 bails (1 + 2 bonus) and 330 credits per harvest action', () => {
+    it('harvesting gems adds 3 bails (1 + 2 bonus) and 150 credits per harvest action', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
       setOverlay(map, 50, 50, 0x12); // max gem density (4 depletes)
@@ -462,7 +462,7 @@ describe('Harvester Pipeline', () => {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
       expect(harv.oreLoad).toBe(3); // 1 base + 2 bonus
-      expect(harv.oreCreditValue).toBe(110 + 220); // 330 credits
+      expect(harv.oreCreditValue).toBe(50 + 100); // 150 credits
     });
 
     it('gem bonus: harvester fills when accumulated bails reach BAIL_COUNT', () => {
@@ -471,10 +471,10 @@ describe('Harvester Pipeline', () => {
       // Place a large gem field so cell never depletes within the test
       // Max gem density is 0x12 (4 steps). We need 10 gem harvests (30 bails).
       // Place multiple gem cells around harvester and manually simulate gem harvesting.
-      // Each gem harvest: +3 bails, +330 credits. 10th harvest → 30 bails >= 28 → returning.
+      // Each gem harvest: +3 bails, +150 credits. 10th harvest → 30 bails >= 28 → returning.
       for (let i = 0; i < 10; i++) {
         harv.oreLoad += 3;
-        harv.oreCreditValue += 330;
+        harv.oreCreditValue += 150;
         if (harv.oreLoad >= Entity.BAIL_COUNT) break;
       }
       expect(harv.oreLoad).toBeGreaterThanOrEqual(Entity.BAIL_COUNT);
@@ -486,14 +486,14 @@ describe('Harvester Pipeline', () => {
       // Each gold harvest adds exactly 1 bail (no bonus). 28 harvests = 28 bails.
       // Max gold cell density is 12 bails (0x0E → 0x03 = 12 steps).
       // So harvester needs to harvest ~2.3 max-density cells to fill.
-      // Verify the math: 28 gold bails at 35 credits each = 980 total.
+      // Verify the math: 28 gold bails at 25 credits each = 700 total.
       const harv = makeHarvester(House.Spain, 50, 50);
       for (let i = 0; i < 28; i++) {
         harv.oreLoad += 1;
-        harv.oreCreditValue += 35;
+        harv.oreCreditValue += 25;
       }
       expect(harv.oreLoad).toBe(Entity.BAIL_COUNT);
-      expect(harv.oreCreditValue).toBe(980);
+      expect(harv.oreCreditValue).toBe(700);
       // At exactly BAIL_COUNT, the state machine would trigger returning
       expect(harv.oreLoad >= Entity.BAIL_COUNT).toBe(true);
     });
@@ -593,7 +593,7 @@ describe('Harvester Pipeline', () => {
       const harv = makeHarvester(House.Spain, 58, 55);
       harv.harvesterState = 'returning';
       harv.oreLoad = 10;
-      harv.oreCreditValue = 350;
+      harv.oreCreditValue = 250;
       harv.mission = Mission.GUARD;
 
       simulateHarvesterTick(harv, map, [refinery], House.Spain, true, 0);
@@ -621,14 +621,14 @@ describe('Harvester Pipeline', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'returning';
       harv.oreLoad = 10;
-      harv.oreCreditValue = 350;
+      harv.oreCreditValue = 250;
       harv.mission = Mission.GUARD;
 
       simulateHarvesterTick(harv, map, [], House.Spain, true, 0);
       expect(harv.harvesterState).toBe('idle');
       // Ore is retained
       expect(harv.oreLoad).toBe(10);
-      expect(harv.oreCreditValue).toBe(350);
+      expect(harv.oreCreditValue).toBe(250);
     });
 
     it('returning harvester ignores destroyed refineries', () => {
@@ -698,7 +698,7 @@ describe('Harvester Pipeline', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'unloading';
       harv.oreLoad = 10;
-      harv.oreCreditValue = 350;
+      harv.oreCreditValue = 250;
 
       // Ticks 1-13: still unloading
       for (let i = 1; i <= 13; i++) {
@@ -711,20 +711,20 @@ describe('Harvester Pipeline', () => {
       expect(harv.oreLoad).toBe(0);
       expect(harv.oreCreditValue).toBe(0);
       expect(harv.harvestTick).toBe(0);
-      expect(result.creditsDeposited).toBe(350);
+      expect(result.creditsDeposited).toBe(250);
     });
 
     it('player harvester deposits credits via addCredits (creditsDeposited > 0)', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'unloading';
       harv.oreLoad = 28;
-      harv.oreCreditValue = 980; // full gold load
+      harv.oreCreditValue = 700; // full gold load
 
       // Fast-forward to tick 14
       for (let i = 1; i <= 14; i++) {
         const result = simulateHarvesterTick(harv, makeMap(), [], House.Spain, true, i);
         if (i === 14) {
-          expect(result.creditsDeposited).toBe(980);
+          expect(result.creditsDeposited).toBe(700);
           expect(result.aiCreditsDeposited).toBe(0);
         }
       }
@@ -734,12 +734,12 @@ describe('Harvester Pipeline', () => {
       const harv = makeHarvester(House.USSR, 50, 50);
       harv.harvesterState = 'unloading';
       harv.oreLoad = 28;
-      harv.oreCreditValue = 980;
+      harv.oreCreditValue = 700;
 
       for (let i = 1; i <= 14; i++) {
         const result = simulateHarvesterTick(harv, makeMap(), [], House.USSR, false, i);
         if (i === 14) {
-          expect(result.aiCreditsDeposited).toBe(980);
+          expect(result.aiCreditsDeposited).toBe(700);
           expect(result.creditsDeposited).toBe(0);
         }
       }
@@ -760,41 +760,41 @@ describe('Harvester Pipeline', () => {
       expect(harv.harvesterState).toBe('idle');
     });
 
-    it('full gold load value: 28 bails x 35 credits = 980', () => {
-      expect(Entity.BAIL_COUNT * 35).toBe(980);
+    it('full gold load value: 28 bails x 25 credits = 700', () => {
+      expect(Entity.BAIL_COUNT * 25).toBe(700);
     });
 
-    it('full gem load value: ~10 gem harvests x 330 credits = 3300', () => {
-      // Each gem harvest: 3 bails, 330 credits. 10 harvests = 30 bails, 3300 credits.
+    it('full gem load value: ~10 gem harvests x 150 credits = 1500', () => {
+      // Each gem harvest: 3 bails, 150 credits. 10 harvests = 30 bails, 1500 credits.
       // But BAIL_COUNT is 28, so the 10th harvest overshoots.
-      // Actual: 9 harvests = 27 bails (2970 credits), 10th adds 3 more = 30 (3300).
+      // Actual: 9 harvests = 27 bails (1350 credits), 10th adds 3 more = 30 (1500).
       // The harvester stops at >= 28, so it deposits the accumulated value.
       const harv = makeHarvester(House.Spain, 50, 50);
       // Simulate gem harvesting
       for (let i = 0; i < 10; i++) {
         harv.oreLoad += 3;
-        harv.oreCreditValue += 330;
+        harv.oreCreditValue += 150;
         if (harv.oreLoad >= Entity.BAIL_COUNT) break;
       }
-      // After 10 gem harvests: 30 bails, 3300 credits
+      // After 10 gem harvests: 30 bails, 1500 credits
       expect(harv.oreLoad).toBe(30);
-      expect(harv.oreCreditValue).toBe(3300);
+      expect(harv.oreCreditValue).toBe(1500);
     });
 
     it('mixed gold+gem load deposits correct total', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
-      // 5 gold harvests: 5 bails, 175 credits
+      // 5 gold harvests: 5 bails, 125 credits
       for (let i = 0; i < 5; i++) {
         harv.oreLoad += 1;
-        harv.oreCreditValue += 35;
+        harv.oreCreditValue += 25;
       }
-      // 3 gem harvests: 9 bails, 990 credits
+      // 3 gem harvests: 9 bails, 450 credits
       for (let i = 0; i < 3; i++) {
         harv.oreLoad += 3;
-        harv.oreCreditValue += 330;
+        harv.oreCreditValue += 150;
       }
       expect(harv.oreLoad).toBe(14); // 5 + 9
-      expect(harv.oreCreditValue).toBe(175 + 990); // 1165
+      expect(harv.oreCreditValue).toBe(125 + 450); // 575
     });
   });
 
@@ -900,7 +900,7 @@ describe('Harvester Pipeline', () => {
         deposited += result.creditsDeposited;
       }
       expect(harv.harvesterState).toBe('idle');
-      expect(deposited).toBe(35); // 1 bail of gold
+      expect(deposited).toBe(25); // 1 bail of gold
       expect(harv.oreLoad).toBe(0);
       expect(harv.oreCreditValue).toBe(0);
     });
@@ -1225,7 +1225,7 @@ describe('Harvester Pipeline', () => {
       // The check is oreLoad >= BAIL_COUNT, so 30 >= 28 → returning.
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.oreLoad = 27;
-      harv.oreCreditValue = 27 * 35;
+      harv.oreCreditValue = 27 * 25;
       harv.harvesterState = 'harvesting';
       const map = makeMap();
       setOverlay(map, 50, 50, 0x10); // gem
@@ -1294,7 +1294,7 @@ describe('Harvester Pipeline', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
       harv.oreLoad = 15;
-      harv.oreCreditValue = 15 * 35;
+      harv.oreCreditValue = 15 * 25;
 
       const killed = harv.takeDamage(9999);
       expect(killed).toBe(true);

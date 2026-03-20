@@ -5,7 +5,7 @@
  * 2. Harvester AI gate fires for both GUARD and AREA_GUARD missions
  * 3. Seeking/returning states accept AREA_GUARD as move-completion signal
  * 4. Seeking timeout fires when path is exhausted during MOVE
- * 5. depleteOre returns correct credit values (35 gold, 110 gem)
+ * 5. depleteOre returns correct credit values (25 gold, 50 gem per rules.ini)
  * 6. ORE_CAPACITY is 28 bails (C++ UnitTypeClass::Max_Pips)
  */
 
@@ -85,14 +85,14 @@ describe('Ore depletion credits', () => {
     map.overlay[cy * MAP_CELLS + cx] = val;
   }
 
-  it('gold ore yields 35 credits per bail', () => {
+  it('gold ore yields 25 credits per bail (rules.ini GoldValue=25)', () => {
     setOverlay(50, 50, 0x07);
-    expect(map.depleteOre(50, 50)).toBe(35);
+    expect(map.depleteOre(50, 50)).toBe(25);
   });
 
-  it('gem yields 110 credits per bail', () => {
+  it('gem yields 50 credits per bail (rules.ini GemValue=50)', () => {
     setOverlay(50, 50, 0x10);
-    expect(map.depleteOre(50, 50)).toBe(110);
+    expect(map.depleteOre(50, 50)).toBe(50);
   });
 
   it('fully depleted gold ore cell returns 0xFF overlay', () => {
@@ -105,9 +105,9 @@ describe('Ore depletion credits', () => {
     expect(map.depleteOre(50, 50)).toBe(0);
   });
 
-  it('28 bails at 35 credits = 980 credits per full gold load', () => {
-    // Full harvester trip value
-    expect(Entity.ORE_CAPACITY * 35).toBe(980);
+  it('28 bails at 25 credits = 700 credits per full gold load', () => {
+    // Full harvester trip value (rules.ini GoldValue=25)
+    expect(Entity.ORE_CAPACITY * 25).toBe(700);
   });
 });
 

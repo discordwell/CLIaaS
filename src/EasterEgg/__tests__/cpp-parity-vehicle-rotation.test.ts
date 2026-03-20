@@ -334,7 +334,7 @@ describe('3. TS tickRotation parity with C++ Rotation_Adjust', () => {
     expect(tsTicks).toBe(32);
   });
 
-  it('PARITY GAP: JEEP ROT=10 — C++ takes 7 ticks, TS snaps instantly', () => {
+  it('JEEP ROT=10 — C++ takes 7 ticks, TS matches', () => {
     // C++ with ROT=10: 0→64 takes 7 ticks (10,20,30,40,50,60,64-snap at diff=4<10)
     const cppTicks = (() => {
       let c = 0;
@@ -356,11 +356,10 @@ describe('3. TS tickRotation parity with C++ Rotation_Adjust', () => {
       tsTicks++;
     }
 
-    // PARITY GAP: TS treats ROT >= 8 as instant snap (entity.ts:659).
-    // C++ still takes 7 ticks with ROT=10 (gradual 256-step system).
-    // This means TS Jeeps/Rangers turn instantly while C++ takes 7 ticks for 90 degrees.
-    expect(tsTicks).toBe(1); // PARITY GAP — TS snaps in 1 tick, C++ takes 7
-    expect(tsTicks).toBeLessThan(cppTicks); // PARITY GAP
+    // Fixed: TS now uses the accumulator for all vehicles (including ROT=10 Jeeps),
+    // matching C++ Rotation_Adjust behavior. Only infantry snap instantly.
+    expect(tsTicks).toBe(cppTicks);
+    expect(tsTicks).toBe(7);
   });
 });
 
@@ -411,18 +410,17 @@ describe('4. Shortest-path rotation direction (facing.cpp:168-172)', () => {
     expect(facing).toBe(251);
   });
 
-  it('TS 180-degree (N→S): goes clockwise (diff=16 in 32-step, <=16 → CW)', () => {
-    // TS: desiredFacing32=16, current=0. diff32=(16-0+32)%32=16, <=16 → CW.
-    // So TS goes CW for exactly 180 degrees, while C++ goes CCW.
-    // This is a rotation direction divergence at exactly 180 degrees.
+  it('TS 180-degree (N→S): goes counterclockwise matching C++ (signed char)128 = -128', () => {
+    // C++: (signed char)(128-0) = -128 → counterclockwise.
+    // TS: diff32=(16-0+32)%32=16, ==16 → CCW (matching C++).
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.desiredFacing = Dir.S;
     tank.rotTickedThisFrame = false;
     tank.tickRotation();
     tank.rotTickedThisFrame = false;
     tank.tickRotation();
-    // TS goes CW from 0 → 1
-    expect(tank.bodyFacing32).toBe(1); // CW direction (PARITY GAP: C++ goes CCW)
+    // TS goes CCW from 0 → 31 (matching C++ counterclockwise direction)
+    expect(tank.bodyFacing32).toBe(31); // CCW direction — matches C++
   });
 });
 

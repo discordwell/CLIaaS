@@ -561,7 +561,7 @@ describe('Overlay ore/gem — C++ defines.h:1487-1494 vs TS encoding', () => {
     const TS_GOLD_LEVEL_COUNT = 0x0E - 0x03 + 1; // 12 levels
     // TS uses 3x finer density resolution (12 levels vs 4 types)
     expect(TS_GOLD_LEVEL_COUNT).toBe(CPP_GOLD_TYPE_COUNT * 3);
-    // But both yield 35 credits per bail — behavioral parity maintained
+    // But both yield 25 credits per bail (rules.ini) — behavioral parity maintained
   });
 
   // C++ has 4 gem types; TS has 4 gem levels — count matches
@@ -585,11 +585,11 @@ describe('Overlay ore/gem — C++ defines.h:1487-1494 vs TS encoding', () => {
   });
 
   // Depletion returns credits
-  it('TS gold = 35 credits/bail; TS gem = 110 credits/bail', () => {
+  it('TS gold = 25 credits/bail (rules.ini GoldValue=25); TS gem = 50 credits/bail (rules.ini GemValue=50)', () => {
     map.overlay[15 * MAP_CELLS + 15] = 0x08;
-    expect(map.depleteOre(15, 15)).toBe(35);
+    expect(map.depleteOre(15, 15)).toBe(25);
     map.overlay[15 * MAP_CELLS + 15] = 0x10;
-    expect(map.depleteOre(15, 15)).toBe(110);
+    expect(map.depleteOre(15, 15)).toBe(50);
   });
 });
 

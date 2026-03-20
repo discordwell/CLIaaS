@@ -316,8 +316,8 @@ describe('Harvester state machine for AI', () => {
   it('oreCreditValue tracks total credits for lump-sum unload', () => {
     const harv = makeEntity(UnitType.V_HARV, House.USSR);
     expect(harv.oreCreditValue).toBe(0);
-    harv.oreCreditValue = 980; // 28 bails x 35 credits
-    expect(harv.oreCreditValue).toBe(980);
+    harv.oreCreditValue = 700; // 28 bails x 25 credits (rules.ini)
+    expect(harv.oreCreditValue).toBe(700);
   });
 
   it('harvestTick is used for timing in each state', () => {

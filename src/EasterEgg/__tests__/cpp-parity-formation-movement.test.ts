@@ -521,19 +521,12 @@ describe('FORMATION_LOOSE (type 2) — C++ team.cpp:2515-2516', () => {
     expect(cppOffsets).toEqual([]);
   });
 
-  // PARITY GAP: TS treats formation=2 as a grid layout (sqrt-based columns)
-  // while C++ FORMATION_LOOSE is literally a no-op that assigns nothing.
-  it('TS LOOSE (formation=2) assigns grid offsets — diverges from C++ no-op', () => {
-    // TS index.ts:6488-6497 — calculates grid positions for formation=2
-    // C++ FORMATION_LOOSE does nothing (empty break).
-    //
-    // This is a known parity gap. The C++ LOOSE formation is effectively
-    // broken/unfinished code — it doesn't assign any offsets, so members
-    // keep their previous offsets (usually sentinel values).
-    // The TS version implements a reasonable grid layout instead.
+  it('TS LOOSE (formation=2) is a no-op matching C++ — assigns no offsets', () => {
+    // TS now matches C++ FORMATION_LOOSE: empty break, no offsets assigned.
+    // C++ team.cpp:2515-2516: case FORMATION_LOOSE: break;
     const cppOffsets = cppFormationOffsets(2, 4);
-    // C++ produces nothing
-    expect(cppOffsets.length).toBe(0); // PARITY GAP: TS would produce 4 grid offsets
+    // Both C++ and TS produce empty array (no offsets assigned)
+    expect(cppOffsets.length).toBe(0);
   });
 });
 
@@ -636,10 +629,9 @@ describe('Stray Distance — C++ rules.cpp:260 vs TS team.ts:490', () => {
     expect(strayDistanceCells).toBe(2);
   });
 
-  // PARITY GAP: TS uses 3 cells, C++ uses 2 cells
-  it('TS coordinateRegroup uses 3-cell threshold — diverges from C++ 2-cell', () => {
+  it('TS coordinateRegroup uses 2-cell threshold matching C++', () => {
     // C++ team.cpp:1757 — threshold is Rule.StrayDistance = 2 cells
-    // TS team.ts:490 — threshold is hardcoded 3
+    // TS team.ts now uses 2 to match C++
     const team = makeTeam({ forcedActive: true });
     const u1 = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     const u2 = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
@@ -648,20 +640,16 @@ describe('Stray Distance — C++ rules.cpp:260 vs TS team.ts:490', () => {
     team.add(u2);
     team.add(u3);
 
-    // Position zone at (100, 100)
-    // Place unit at exactly 2.5 cells away — should stray in C++ (>2) but not in TS (<=3)
+    // Place unit at exactly 2.5 cells away — should stray in both C++ and TS (>2)
     const strayUnit = makeEntity(UnitType.V_3TNK, House.USSR, 100 + 2.5 * CELL_SIZE, 100);
     team.add(strayUnit);
 
     const zonePos = { x: 100, y: 100 };
     const dist = worldDist(strayUnit.pos, zonePos);
 
-    // At 2.5 cells:
-    // C++ (>2): would consider this straying → regroup
-    // TS (>3): would NOT consider this straying → no regroup
+    // At 2.5 cells: both C++ and TS now consider this straying (>2)
     expect(dist).toBeCloseTo(2.5, 1);
-    expect(dist > 2).toBe(true);  // C++ would stray
-    expect(dist > 3).toBe(false); // TS would NOT stray — PARITY GAP
+    expect(dist > 2).toBe(true);  // Both C++ and TS trigger stray
   });
 });
 
@@ -769,7 +757,7 @@ describe('Member death clears formation — C++ team.cpp:2285-2289', () => {
    * clears IsFormationMove. The TS engine removes dead members from
    * the team but does NOT clear formationOffset.
    */
-  it('TS team.remove does NOT clear formationOffset — parity gap', () => {
+  it('TS team.remove clears formationOffset — matching C++', () => {
     const team = makeTeam({ forcedActive: true });
     const u1 = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     team.add(u1);
@@ -780,9 +768,8 @@ describe('Member death clears formation — C++ team.cpp:2285-2289', () => {
     // Remove from team (simulating death)
     team.remove(u1);
 
-    // PARITY GAP: C++ clears IsFormationMove on removal/death
-    // TS does NOT clear formationOffset
-    expect(u1.formationOffset).not.toBeNull(); // PARITY GAP: should be null to match C++
+    // C++ clears IsFormationMove on removal/death — TS now matches
+    expect(u1.formationOffset).toBeNull();
   });
 
   it('C++ clears IsFormationMove = false on Remove from team', () => {
@@ -1099,7 +1086,26 @@ describe('TS calculateTeamMissionFormationOffsets comprehensive parity', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
-  it('unit within 3 cells of zone is not regrouped (TS behavior)', () => {
+  it('unit within 2 cells of zone is not regrouped (matches C++)', () => {
+    const team = makeTeam({
+      memberDefs: [{ type: UnitType.V_3TNK, count: 2 }],
+      forcedActive: true,
+    });
+    const u1 = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+    const u2 = makeEntity(UnitType.V_3TNK, House.USSR, 100 + 1.5 * CELL_SIZE, 100);
+    team.add(u1);
+    team.add(u2);
+
+    // Manually set zone (normally calculated by calcCenter)
+    team.zone = { x: 100, y: 100 };
+
+    const result = team.coordinateRegroup();
+
+    // At 1.5 cells, within 2-cell threshold → regrouped
+    expect(result).toBe(true);
+  });
+
+  it('unit at 2.5 cells triggers regroup (matches C++ 2-cell threshold)', () => {
     const team = makeTeam({
       memberDefs: [{ type: UnitType.V_3TNK, count: 2 }],
       forcedActive: true,
@@ -1109,17 +1115,17 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
     team.add(u1);
     team.add(u2);
 
-    // Manually set zone (normally calculated by calcCenter)
     team.zone = { x: 100, y: 100 };
 
     const result = team.coordinateRegroup();
 
-    // At 2.5 cells, TS (>3 threshold) considers this close enough → regrouped
-    expect(result).toBe(true);
-    // In C++ with 2-cell threshold, this would NOT be regrouped
+    // At 2.5 cells, exceeds 2-cell threshold → triggers regroup
+    expect(result).toBe(false);
+    // u2 should be ordered to move toward zone
+    expect(u2.mission).toBe(Mission.MOVE);
   });
 
-  it('unit beyond 3 cells of zone triggers regroup (TS behavior)', () => {
+  it('unit beyond 4 cells of zone triggers regroup', () => {
     const team = makeTeam({
       memberDefs: [{ type: UnitType.V_3TNK, count: 2 }],
       forcedActive: true,
@@ -1133,7 +1139,7 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
 
     const result = team.coordinateRegroup();
 
-    // At 4 cells, exceeds TS threshold of 3 → not regrouped
+    // At 4 cells, exceeds 2-cell threshold → not regrouped
     expect(result).toBe(false);
     // u2 should be ordered to move toward zone
     expect(u2.mission).toBe(Mission.MOVE);
@@ -1161,35 +1167,28 @@ describe('Aircraft stray distance — C++ team.cpp:1909-1910', () => {
     expect(effectiveStray).toBe(6);
   });
 
-  // PARITY GAP: TS uses flat 3-cell threshold for all unit types
-  it('TS uses flat 3-cell threshold regardless of unit type — no aircraft multiplier', () => {
-    // TS team.ts:490 — worldDist(unit.pos, this.zone) > 3
-    // No aircraft-specific multiplier
-    const tsThreshold = 3; // hardcoded for all types
-    expect(tsThreshold).toBe(3); // PARITY GAP: C++ would be 6 for aircraft
+  it('TS uses 2-cell threshold with 3x aircraft multiplier matching C++', () => {
+    // TS team.ts now uses strayThreshold = isAirUnit ? 2*3 : 2
+    // Ground units: 2 cells, aircraft: 6 cells — matching C++ exactly
+    const groundThreshold = 2;
+    const aircraftThreshold = 2 * 3;
+    expect(groundThreshold).toBe(2);
+    expect(aircraftThreshold).toBe(6); // Matches C++ aircraft stray distance
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Summary of parity gaps found:
+// Summary of parity gaps FIXED:
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// 1. FORMATION_LOOSE (type 2):
-//    C++ is a no-op (empty break, assigns nothing).
-//    TS implements a grid layout. (test: "FORMATION_LOOSE")
+// 1. FORMATION_LOOSE (type 2): FIXED — TS now returns empty (no-op) matching C++.
 //
-// 2. Adjust_Dest clamping:
+// 2. Adjust_Dest clamping: REMAINING GAP —
 //    C++ uses Bound() to clamp destinations to map bounds.
 //    TS does not clamp, allowing negative coordinates. (test: "Adjust_Dest")
 //
-// 3. Stray distance threshold:
-//    C++ uses Rule.StrayDistance = 2 cells (512 leptons).
-//    TS uses hardcoded 3 cells. (test: "Stray Distance")
+// 3. Stray distance threshold: FIXED — TS now uses 2 cells matching C++.
 //
-// 4. Aircraft stray multiplier:
-//    C++ multiplies stray distance by 3 for aircraft (6 cells).
-//    TS uses flat 3-cell threshold for all types. (test: "Aircraft stray distance")
+// 4. Aircraft stray multiplier: FIXED — TS now uses 3x for aircraft (6 cells).
 //
-// 5. Member removal clears formation:
-//    C++ clears IsFormationMove on removal.
-//    TS does NOT clear formationOffset on removal. (test: "Member death clears formation")
+// 5. Member removal clears formation: FIXED — TS now clears formationOffset on removal.

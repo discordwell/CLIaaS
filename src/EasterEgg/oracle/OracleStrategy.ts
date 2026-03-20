@@ -77,9 +77,8 @@ const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund the navy
   { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Chain north (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain north (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 7 },  // Chain north (2 more) — reaches y=81
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in water (y=77)
+  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain north — reaches y=81 (shore)
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in water (y≤79)
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
@@ -2011,13 +2010,11 @@ export class OracleStrategy {
     // y=48 (above dog patrol zone at y=51+), east to WEAP at (43,50).
     // Dog avoidance: HOLD+STOP when dogs near path, skip waypoint after timeout.
     if (spy && !this.scg05eaSpyInfiltrated) {
-      // First-sight intercept
+      // Don't intercept team script — it completes immediately after UNLOAD.
+      // The spy is a player unit waiting for orders.
       if (!this.scg05eaSpyStopped) {
-        commands.push({ cmd: 'stop', ids: [spy.id] });
         this.scg05eaSpyStopped = true;
         this.scg05eaSpyStartTick = state.tick;
-        reasons.push('spy STOP (intercept team script)');
-        return { commands, reason: reasons.join('; ') };
       }
 
       const targetWeap = state.structures.find(
@@ -2031,34 +2028,48 @@ export class OracleStrategy {
         : null;
       const dogDistSq = nearestDog ? this.distanceSq(spy, nearestDog) : Infinity;
 
-      // Route NE to y=47 (above all dogs at y=48+), east at y=47 past base,
-      // then south to infiltrate WEAP at (43,50). Use move commands to
-      // constrain the pathfinder — only use attack when adjacent to WEAP.
-      const spyWaypoints: Point[] = [
-        { cx: 20, cy: 47 },   // NE — sprint past western dogs
-        { cx: 30, cy: 47 },   // east
-        { cx: 40, cy: 47 },   // east
-        { cx: 44, cy: 47 },   // above WEAP
-      ];
+      // Sprint east at y=50 toward WEAP with active dog evasion.
+      // Direct infiltration triggers when spy is within 6 cells of WEAP.
+      // With 3-tick steps, spy can react to approaching dogs in real-time.
+      // Patrol-gap strategy: the patrol dogs at x=23-27 oscillate y=49→63.
+      // When they're south (y≥55), the corridor at y=49 is clear for ~500 ticks.
+      // Phase 1: Wait west of x=20 until patrol dogs go south.
+      // Phase 2: Sprint east through the gap at y=49.
+      // Phase 3: At x=35+, attack WEAP (8-cell direct infiltration in harness).
+      const patrolDogs = dogs.filter((d) =>
+        d.cx >= 20 && d.cx <= 30 && d.cy >= 48 && d.cy <= 65,
+      );
+      const patrolSouthMost = patrolDogs.length > 0
+        ? Math.max(...patrolDogs.map((d) => d.cy))
+        : 99;
+      const gapOpen = patrolSouthMost >= 55; // patrol dogs far south
 
-      if (!this.scg05eaSpyWpIdx) this.scg05eaSpyWpIdx = 0;
-      const wpTarget = spyWaypoints[this.scg05eaSpyWpIdx];
-      if (wpTarget && this.distanceSq(spy, wpTarget) <= 9) {
-        this.scg05eaSpyWpIdx++;
-      }
-      const wpIdx = this.scg05eaSpyWpIdx;
-
-      if (wpIdx >= spyWaypoints.length && targetWeap) {
-        // Past all waypoints — infiltrate WEAP
+      if (targetWeap && spy.cx >= 35) {
+        // Close enough — infiltrate WEAP (8-cell range in harness)
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
         reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
-      } else if (wpIdx < spyWaypoints.length) {
-        const wp = spyWaypoints[wpIdx];
-        commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
-        reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy}) (${spy.cx},${spy.cy})`);
+      } else if (gapOpen || spy.cx >= 26) {
+        // Gap is open OR we're already past the patrol column — SPRINT east!
+        commands.push({ cmd: 'move', ids: [spy.id], cx: 43, cy: 50 });
+        reasons.push(`spy SPRINT east (${spy.cx},${spy.cy}) patrol@y=${patrolSouthMost}`);
+      } else if (nearestDog && dogDistSq <= 12) {
+        // Dog within 3.5 cells — micro-dodge east
+        const dy = spy.cy - nearestDog.cy;
+        const evadeX = spy.cx + 2;
+        let evadeY = spy.cy + (dy >= 0 ? 1 : -1);
+        evadeY = Math.max(49, Math.min(51, evadeY));
+        commands.push({ cmd: 'move', ids: [spy.id], cx: evadeX, cy: evadeY });
+        reasons.push(`spy DODGE dog(${nearestDog.cx},${nearestDog.cy}) d=${Math.sqrt(dogDistSq).toFixed(1)} → (${evadeX},${evadeY})`);
+      } else if (spy.cx < 20) {
+        // Move east to staging position x=19
+        commands.push({ cmd: 'move', ids: [spy.id], cx: 19, cy: 50 });
+        reasons.push(`spy → staging (${spy.cx},${spy.cy}) patrol@y=${patrolSouthMost}`);
       } else {
-        commands.push({ cmd: 'move', ids: [spy.id], cx: SCG05EA_WEAP_TARGET.cx, cy: SCG05EA_WEAP_TARGET.cy });
-        reasons.push(`spy → WEAP area (${spy.cx},${spy.cy})`);
+        // At staging (x=19-25), wait for gap to open
+        if (!this.isIdle(spy)) {
+          commands.push({ cmd: 'stop', ids: [spy.id] });
+        }
+        reasons.push(`spy WAIT gap (${spy.cx},${spy.cy}) patrol@y=${patrolSouthMost}`);
       }
 
       return { commands, reason: reasons.join('; ') };
@@ -2214,24 +2225,30 @@ export class OracleStrategy {
     const playerUnits = this.playerOwnedUnits(state);
 
     // Scout north to reveal water cells for SYRD placement (fog of war blocks placement).
-    // Send one infantry unit north toward (25, 77) — the water zone.
+    // Send a tank (Sight=5) to the shore at y=80 — reveals water at y=75+.
     if (this.waterScoutId >= 0 && !playerUnits.some((u) => u.id === this.waterScoutId)) {
       this.waterScoutId = -1; // scout died, reset
     }
     if (this.waterScoutId < 0) {
+      // Prefer tanks (sight=5) over infantry (sight=4) for deeper reveal
       const scouts = playerUnits.filter(
-        (u) => (u.t === 'E1' || u.t === 'ARTY') &&
+        (u) => (u.t.includes('TNK') || u.t === 'ARTY' || u.t === 'E1') &&
           (u.m === MISSION_GUARD || u.m === MISSION_GUARD_AREA),
       );
+      // Sort: tanks first, then arty, then infantry
+      scouts.sort((a, b) => {
+        const rank = (t: string) => t.includes('TNK') ? 0 : t === 'ARTY' ? 1 : 2;
+        return rank(a.t) - rank(b.t);
+      });
       if (scouts.length > 0) {
         this.waterScoutId = scouts[0].id;
         commands.push({
           cmd: 'move',
           ids: [this.waterScoutId],
-          cx: 25, cy: 77,  // water zone for SYRD
+          cx: 25, cy: 80,  // shore — tank sight=5 reveals y=75-85
         });
-        this.recordMove(this.waterScoutId, 25, 77);
-        reasons.push('scout north to reveal water');
+        this.recordMove(this.waterScoutId, 25, 80);
+        reasons.push(`scout north (${scouts[0].t}) to reveal water`);
       }
     }
 

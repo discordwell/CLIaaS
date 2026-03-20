@@ -15,9 +15,9 @@
  *   bdata.cpp:3369-3374     Init() theater path — timedelay = (5 * TICKS_PER_SECOND) / count
  *   bdata.cpp:3672-3683     Raw_Cost() — subtracts free unit costs (harvester, hind)
  *   techno.cpp:5743-5761    Refund_Amount() — AI=100%, human=Rule.RefundPercent(50%)
- *   rules.cpp:177           SurvivorFraction = fixed(1,2) = 0.5
- *   rules.cpp:180           BuildupTime = ".05" = 0.05
- *   rules.cpp:265           RefundPercent = fixed(1,2) = 0.5
+ *   rules.ini:177           SurvivorFraction = fixed(2,5) = 0.4
+ *   rules.ini:180           BuildupTime = ".06" = 0.06
+ *   rules.ini:265           RefundPercent = fixed(1,2) = 0.5
  *   defines.h:3031-3032     TICKS_PER_SECOND=15, TICKS_PER_MINUTE=900
  *   stage.h:66-79           StageClass — Timer countdown drives Stage increments
  */
@@ -29,9 +29,9 @@ import { BUILDING_FRAME_TABLE } from '../engine/renderer';
 // ─── C++ Constants ──────────────────────────────────────────────────────────────
 const TICKS_PER_SECOND = 15;
 const TICKS_PER_MINUTE = TICKS_PER_SECOND * 60; // 900
-const BUILDUP_TIME = 0.05; // rules.cpp:180 — fixed(".05")
-const SURVIVOR_FRACTION = 0.5; // rules.cpp:177 — fixed(1,2)
-const REFUND_PERCENT = 0.5; // rules.cpp:265 — fixed(1,2)
+const BUILDUP_TIME = 0.06; // rules.ini:180 — fixed(".06")
+const SURVIVOR_FRACTION = 0.4; // rules.ini:177 — fixed(2,5)
+const REFUND_PERCENT = 0.5; // rules.ini:265 — fixed(1,2)
 const E1_RAW_COST = 100; // infantry cost for survivor divisor
 
 // ─── C++ Sell Duration Formula ──────────────────────────────────────────────────
@@ -62,15 +62,15 @@ function cppSellDurationTicks(makeSheetFrameCount: number): number {
 /**
  * Calculate TS sell duration for a building.
  * TS index.ts:1885 (fixed): sellProgress += 1 / SELL_DURATION
- *   where SELL_DURATION = (MAKE_FRAME_COUNT - 1) * floor(0.05 * 900 / MAKE_FRAME_COUNT)
- *   = (20 - 1) * floor(45 / 20) = 19 * 2 = 38 ticks for all buildings.
+ *   where SELL_DURATION = (MAKE_FRAME_COUNT - 1) * floor(0.06 * 900 / MAKE_FRAME_COUNT)
+ *   = (20 - 1) * floor(54 / 20) = 19 * 2 = 38 ticks for all buildings.
  * Complete when sellProgress >= 1, so total = 38 ticks (constant).
  */
 function tsSellDurationTicks(_damageFrame: number): number {
   // After C++ parity fix: TS uses make sheet frame count (constant 20),
-  // not damageFrame. Duration = (20-1) * floor(45/20) = 38 for all buildings.
+  // not damageFrame. Duration = (20-1) * floor(54/20) = 38 for all buildings.
   const MAKE_FRAME_COUNT = 20;
-  return (MAKE_FRAME_COUNT - 1) * Math.floor((0.05 * 900) / MAKE_FRAME_COUNT);
+  return (MAKE_FRAME_COUNT - 1) * Math.floor((0.06 * 900) / MAKE_FRAME_COUNT);
 }
 
 // ─── C++ How_Many_Survivors Formula ─────────────────────────────────────────────
@@ -140,7 +140,7 @@ describe('C++ parity: Structure sell animation frame timing', () => {
 
   // ─── 1. Sell Duration ───────────────────────────────────────────────────────
   // C++ bdata.cpp:3129: timedelay = floor(BuildupTime * TICKS_PER_MINUTE / makeFrameCount)
-  //                                = floor(0.05 * 900 / 20) = floor(45/20) = 2
+  //                                = floor(0.06 * 900 / 20) = floor(54/20) = 2
   // C++ total DURING ticks = (makeFrameCount - 1) * timedelay = 19 * 2 = 38
   //
   // TS index.ts:1885: sellProgress += 1 / (sellFrameCount * 2)
@@ -154,7 +154,7 @@ describe('C++ parity: Structure sell animation frame timing', () => {
 
     it('C++ sell uses make sheet frames; TS uses BUILDING_FRAME_TABLE.damageFrame', () => {
       // For a standard 20-frame make sheet:
-      // C++ timedelay = floor(45 / 20) = 2
+      // C++ timedelay = floor(54 / 20) = 2
       // C++ DURING duration = 19 * 2 = 38 ticks
       const cppDuration = cppSellDurationTicks(20);
       expect(cppDuration).toBe(38);
@@ -190,29 +190,29 @@ describe('C++ parity: Structure sell animation frame timing', () => {
 
   // ─── 2. C++ Buildup Time Constant ──────────────────────────────────────────
   describe('C++ buildup time formula verification', () => {
-    it('BuildupTime * TICKS_PER_MINUTE = 45 ticks total budget', () => {
-      // rules.cpp:180: BuildupTime = ".05" = 0.05
+    it('BuildupTime * TICKS_PER_MINUTE = 54 ticks total budget', () => {
+      // rules.ini:180: BuildupTime = ".06" = 0.06
       // defines.h:3032: TICKS_PER_MINUTE = 900
-      expect(BUILDUP_TIME * TICKS_PER_MINUTE).toBe(45);
+      expect(BUILDUP_TIME * TICKS_PER_MINUTE).toBeCloseTo(54);
     });
 
-    it('timedelay = floor(45 / frameCount) for various frame counts', () => {
+    it('timedelay = floor(54 / frameCount) for various frame counts', () => {
       // bdata.cpp:3129: timedelay = (Rule.BuildupTime * TICKS_PER_MINUTE) / count
       // Integer division in C++
-      expect(Math.floor(45 / 20)).toBe(2);  // 20-frame make sheet → 2 ticks/frame
-      expect(Math.floor(45 / 10)).toBe(4);  // 10-frame make sheet → 4 ticks/frame
-      expect(Math.floor(45 / 30)).toBe(1);  // 30-frame make sheet → 1 tick/frame
-      expect(Math.floor(45 / 45)).toBe(1);  // 45-frame make sheet → 1 tick/frame
-      expect(Math.floor(45 / 1)).toBe(45);  // 1-frame make sheet → 45 ticks/frame
+      expect(Math.floor(54 / 20)).toBe(2);  // 20-frame make sheet → 2 ticks/frame
+      expect(Math.floor(54 / 10)).toBe(5);  // 10-frame make sheet → 5 ticks/frame
+      expect(Math.floor(54 / 30)).toBe(1);  // 30-frame make sheet → 1 tick/frame
+      expect(Math.floor(54 / 45)).toBe(1);  // 45-frame make sheet → 1 tick/frame
+      expect(Math.floor(54 / 1)).toBe(54);  // 1-frame make sheet → 54 ticks/frame
     });
 
     it('total sell duration varies slightly due to integer division', () => {
-      // Total = (count - 1) * floor(45 / count)
-      // This is NOT constant 45 due to truncation
+      // Total = (count - 1) * floor(54 / count)
+      // This is NOT constant 54 due to truncation
       expect(cppSellDurationTicks(20)).toBe(38);  // 19 * 2 = 38
-      expect(cppSellDurationTicks(10)).toBe(36);  // 9 * 4 = 36
+      expect(cppSellDurationTicks(10)).toBe(45);  // 9 * 5 = 45
       expect(cppSellDurationTicks(30)).toBe(29);  // 29 * 1 = 29
-      expect(cppSellDurationTicks(1)).toBe(0);    // 0 * 45 = 0 (single frame = instant)
+      expect(cppSellDurationTicks(1)).toBe(0);    // 0 * 54 = 0 (single frame = instant)
     });
   });
 
@@ -266,38 +266,38 @@ describe('C++ parity: Structure sell animation frame timing', () => {
     //   clamped to [1, 5]
 
     const SURVIVOR_CASES: Array<{ type: string; rawCost: number; expected: number }> = [
-      // floor(300 * 0.5 / 100) = floor(1.5) = 1 → clamp(1, 1, 5) = 1
+      // floor(300 * 0.4 / 100) = floor(1.2) = 1 → clamp(1, 1, 5) = 1
       { type: 'POWR', rawCost: 300, expected: 1 },
       { type: 'BARR', rawCost: 300, expected: 1 },
       { type: 'TENT', rawCost: 300, expected: 1 },
-      // floor(500 * 0.5 / 100) = floor(2.5) = 2
+      // floor(500 * 0.4 / 100) = floor(2.0) = 2
       { type: 'APWR', rawCost: 500, expected: 2 },
       { type: 'KENN', rawCost: 500, expected: 2 },
-      // floor(150 * 0.5 / 100) = floor(0.75) = 0 → clamp(0, 1, 5) = 1
+      // floor(150 * 0.4 / 100) = floor(0.6) = 0 → clamp(0, 1, 5) = 1
       { type: 'SILO', rawCost: 150, expected: 1 },
-      // floor(2000 * 0.5 / 100) = floor(10) = 10 → clamp(10, 1, 5) = 5
+      // floor(2000 * 0.4 / 100) = floor(8.0) = 8 → clamp(8, 1, 5) = 5
       { type: 'FACT', rawCost: 2000, expected: 5 },
       { type: 'WEAP', rawCost: 2000, expected: 5 },
-      // floor(600 * 0.5 / 100) = floor(3) = 3
-      { type: 'PROC', rawCost: 600, expected: 3 },  // 2000 - 1400 = 600
-      { type: 'AFLD', rawCost: 600, expected: 3 },
-      // floor(1000 * 0.5 / 100) = floor(5) = 5
-      { type: 'DOME', rawCost: 1000, expected: 5 },
-      // floor(800 * 0.5 / 100) = floor(4) = 4
-      { type: 'GAP', rawCost: 800, expected: 4 },
-      // floor(1200 * 0.5 / 100) = floor(6) = 6 → clamp(6, 1, 5) = 5
-      { type: 'FIX', rawCost: 1200, expected: 5 },
-      // floor(300 * 0.5 / 100) = floor(1.5) = 1
+      // floor(600 * 0.4 / 100) = floor(2.4) = 2
+      { type: 'PROC', rawCost: 600, expected: 2 },  // 2000 - 1400 = 600
+      { type: 'AFLD', rawCost: 600, expected: 2 },
+      // floor(1000 * 0.4 / 100) = floor(4.0) = 4
+      { type: 'DOME', rawCost: 1000, expected: 4 },
+      // floor(800 * 0.4 / 100) = floor(3.2) = 3
+      { type: 'GAP', rawCost: 800, expected: 3 },
+      // floor(1200 * 0.4 / 100) = floor(4.8) = 4
+      { type: 'FIX', rawCost: 1200, expected: 4 },
+      // floor(300 * 0.4 / 100) = floor(1.2) = 1
       // HPAD rawCost = 1500 - 1200 = 300 (C++ subtracts HIND cost)
       { type: 'HPAD', rawCost: 300, expected: 1 },
-      // floor(1500 * 0.5 / 100) = floor(7.5) = 7 → clamp(7, 1, 5) = 5
+      // floor(1500 * 0.4 / 100) = floor(6.0) = 6 → clamp(6, 1, 5) = 5
       { type: 'ATEK', rawCost: 1500, expected: 5 },
       { type: 'STEK', rawCost: 1500, expected: 5 },
       { type: 'TSLA', rawCost: 1500, expected: 5 },
-      // floor(2800 * 0.5 / 100) = floor(14) = 14 → clamp(14, 1, 5) = 5
+      // floor(2800 * 0.4 / 100) = floor(11.2) = 11 → clamp(11, 1, 5) = 5
       { type: 'PDOX', rawCost: 2800, expected: 5 },
       { type: 'IRON', rawCost: 2800, expected: 5 },
-      // floor(2500 * 0.5 / 100) = floor(12.5) = 12 → clamp(12, 1, 5) = 5
+      // floor(2500 * 0.4 / 100) = floor(10.0) = 10 → clamp(10, 1, 5) = 5
       { type: 'MSLO', rawCost: 2500, expected: 5 },
     ];
 
@@ -309,11 +309,11 @@ describe('C++ parity: Structure sell animation frame timing', () => {
 
     it('captured buildings halve survivor count (divisor *= 2)', () => {
       // C++ building.cpp:5597: if (IsCaptured) divisor *= 2;
-      // FACT captured: floor(2000 * 0.5 / 200) = 5 → still 5
-      expect(cppSurvivorCount(2000, true)).toBe(5);
-      // APWR captured: floor(500 * 0.5 / 200) = floor(1.25) = 1
+      // FACT captured: floor(2000 * 0.4 / 200) = floor(4.0) = 4
+      expect(cppSurvivorCount(2000, true)).toBe(4);
+      // APWR captured: floor(500 * 0.4 / 200) = floor(1.0) = 1
       expect(cppSurvivorCount(500, true)).toBe(1);
-      // DOME captured: floor(1000 * 0.5 / 200) = floor(2.5) = 2
+      // DOME captured: floor(1000 * 0.4 / 200) = floor(2.0) = 2
       expect(cppSurvivorCount(1000, true)).toBe(2);
     });
 
@@ -582,7 +582,7 @@ describe('C++ parity: Structure sell animation frame timing', () => {
       const tsProcSurvivors = Math.min(5, Math.max(1,
         Math.floor(((2000 - 1400) * SURVIVOR_FRACTION) / E1_RAW_COST)));
       const cppProcSurvivors = cppSurvivorCount(600);
-      expect(tsProcSurvivors).toBe(cppProcSurvivors); // Both = 3
+      expect(tsProcSurvivors).toBe(cppProcSurvivors); // Both = 2
     });
   });
 });

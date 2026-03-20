@@ -56,14 +56,14 @@ describe('ANT_ANIM layout (112 frames)', () => {
 });
 
 describe('sell survivor parity constants', () => {
-  it('survivor formula: floor(cost * 0.5 / 100), clamped 1-5', () => {
-    const formula = (cost: number) => Math.min(5, Math.max(1, Math.floor((cost * 0.5) / 100)));
-    expect(formula(300)).toBe(1);   // barracks, kennel
-    expect(formula(500)).toBe(2);   // war factory
-    expect(formula(600)).toBe(3);
-    expect(formula(1000)).toBe(5);  // capped at 5
-    expect(formula(2000)).toBe(5);  // stays capped
-    expect(formula(100)).toBe(1);   // minimum 1
+  it('survivor formula: floor(cost * 0.4 / 100), clamped 1-5', () => {
+    const formula = (cost: number) => Math.min(5, Math.max(1, Math.floor((cost * 0.4) / 100)));
+    expect(formula(300)).toBe(1);   // barracks, kennel (floor(1.2)=1)
+    expect(formula(500)).toBe(2);   // war factory (floor(2.0)=2)
+    expect(formula(600)).toBe(2);   // (floor(2.4)=2)
+    expect(formula(1000)).toBe(4);  // (floor(4.0)=4)
+    expect(formula(2000)).toBe(5);  // capped at 5 (floor(8.0)=8, clamped)
+    expect(formula(100)).toBe(1);   // minimum 1 (floor(0.4)=0, clamped)
   });
 
   it('crew type units exist in UNIT_STATS', () => {

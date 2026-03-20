@@ -1,7 +1,7 @@
 /**
  * Tests for AI Base Intelligence (Phase 4) — Repair, Sell, Rebuild Priority.
  * Covers: IQ-gated rebuild, priority ordering, credit cost for rebuild,
- * AI auto-repair (IQ >= 3), AI auto-sell near-death buildings (IQ >= 3).
+ * AI auto-repair (IQ >= 1), AI auto-sell near-death buildings (IQ >= 1).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -94,25 +94,25 @@ describe('IQ gating for AI behaviors', () => {
   it('IQ 0 = no AI at all (no rebuild, no repair, no sell)', () => {
     const iq = 0;
     expect(iq >= 2).toBe(false); // rebuild gate
-    expect(iq >= 3).toBe(false); // repair/sell gate
+    expect(iq >= 1).toBe(false); // repair/sell gate
   });
 
-  it('IQ 1 = build only (no rebuild)', () => {
+  it('IQ 1 = repair/sell allowed, no rebuild', () => {
     const iq = 1;
     expect(iq >= 2).toBe(false); // rebuild gate
-    expect(iq >= 3).toBe(false); // repair/sell gate
+    expect(iq >= 1).toBe(true);  // repair/sell gate passes
   });
 
-  it('IQ 2 = rebuild allowed, no repair/sell', () => {
+  it('IQ 2 = rebuild + repair + sell', () => {
     const iq = 2;
     expect(iq >= 2).toBe(true);  // rebuild gate passes
-    expect(iq >= 3).toBe(false); // repair/sell gate fails
+    expect(iq >= 1).toBe(true);  // repair/sell gate passes
   });
 
   it('IQ 3 = full intelligence (rebuild + repair + sell)', () => {
     const iq = 3;
     expect(iq >= 2).toBe(true);  // rebuild gate passes
-    expect(iq >= 3).toBe(true);  // repair/sell gate passes
+    expect(iq >= 1).toBe(true);  // repair/sell gate passes
   });
 });
 

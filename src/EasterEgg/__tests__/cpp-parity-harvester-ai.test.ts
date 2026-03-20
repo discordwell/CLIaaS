@@ -11,7 +11,7 @@
  *   cell.cpp  — Reduce_Tiberium(), Grow_Tiberium(), Spread_Tiberium(),
  *               Can_Tiberium_Grow(), Can_Tiberium_Spread(), Can_Tiberium_Germinate(),
  *               Tiberium_Adjust()
- *   rules.cpp — BailCount(28), GoldValue(35), GemValue(110),
+ *   rules.ini — BailCount(28), GoldValue(25), GemValue(50),
  *               TiberiumShortScan(0x0600), TiberiumLongScan(0x2000), OreDumpRate(2)
  *   building.cpp — BuildingClass::Mission_Harvest() refinery unload state machine
  */
@@ -77,7 +77,7 @@ function getOverlay(map: GameMap, cx: number, cy: number): number {
 // 1. Rules Constants Parity (rules.cpp defaults)
 // =============================================================================
 
-describe('Rules constants — rules.cpp constructor defaults', () => {
+describe('Rules constants — rules.ini override values', () => {
   /**
    * C++ rules.cpp:237 — BailCount(28)
    * The maximum number of ore bails a harvester can carry per trip.
@@ -87,25 +87,25 @@ describe('Rules constants — rules.cpp constructor defaults', () => {
   });
 
   /**
-   * C++ rules.cpp:238 — GoldValue(35)
-   * Credits per bail of gold ore harvested.
+   * rules.ini — GoldValue=25
+   * Credits per bail of gold ore harvested (rules.ini overrides rules.cpp default of 35).
    */
-  it('GoldValue = 35 credits per bail (rules.cpp:238)', () => {
+  it('GoldValue = 25 credits per bail (rules.ini)', () => {
     const map = makeMap();
     placeGold(map, 50, 50, 5);
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(35);
+    expect(credits).toBe(25);
   });
 
   /**
-   * C++ rules.cpp:239 — GemValue(110)
-   * Credits per bail of gems harvested.
+   * rules.ini — GemValue=50
+   * Credits per bail of gems harvested (rules.ini overrides rules.cpp default of 110).
    */
-  it('GemValue = 110 credits per bail (rules.cpp:239)', () => {
+  it('GemValue = 50 credits per bail (rules.ini)', () => {
     const map = makeMap();
     placeGem(map, 50, 50, 2);
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(110);
+    expect(credits).toBe(50);
   });
 });
 
@@ -181,21 +181,21 @@ describe('Credit_Load formula — unit.cpp:4790-4793', () => {
    * C++ unit.cpp:4792:
    *   return((Gold * Rule.GoldValue) + (Gems * Rule.GemValue));
    *
-   * The credit value is: (gold_bails * 35) + (gem_bails * 110)
+   * The credit value is: (gold_bails * 25) + (gem_bails * 50)
    */
-  it('full load of gold = 28 * 35 = 980 credits', () => {
-    const expected = 28 * 35;
-    expect(expected).toBe(980);
+  it('full load of gold = 28 * 25 = 700 credits', () => {
+    const expected = 28 * 25;
+    expect(expected).toBe(700);
   });
 
-  it('full load of gems = 28 * 110 = 3080 credits', () => {
-    const expected = 28 * 110;
-    expect(expected).toBe(3080);
+  it('full load of gems = 28 * 50 = 1400 credits', () => {
+    const expected = 28 * 50;
+    expect(expected).toBe(1400);
   });
 
-  it('mixed load: 14 gold + 14 gems = 14*35 + 14*110 = 2030 credits', () => {
-    const expected = 14 * 35 + 14 * 110;
-    expect(expected).toBe(2030);
+  it('mixed load: 14 gold + 14 gems = 14*25 + 14*50 = 1050 credits', () => {
+    const expected = 14 * 25 + 14 * 50;
+    expect(expected).toBe(1050);
   });
 });
 
@@ -224,12 +224,9 @@ describe('Gem bonus bails — unit.cpp:2306-2308', () => {
     expect(cppBailsPerGemAction).toBe(4);
   });
 
-  it('TS adds only 2 bonus bails per gem harvest (total 3 per action) — PARITY GAP', () => {
-    // TS harvester.ts:159-162:
-    //   entity.oreLoad += 1;  (base bail)
-    //   entity.oreLoad += 2;  (bonus bails — should be 3 per C++)
-    //
-    // TS gives 3 total bails per gem action; C++ gives 4.
+  it('gem harvest adds 4 bails total (1 base + 3 bonus) matching C++', () => {
+    // C++ unit.cpp:2306-2308: 1 base bail + 3 bonus bails = 4 total per gem action
+    // Engine now matches C++ behavior.
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
@@ -240,10 +237,9 @@ describe('Gem bonus bails — unit.cpp:2306-2308', () => {
     placeGem(ctx.map, 50, 50, 3); // density 3, highest gem
 
     updateHarvester(ctx, harv);
-    // TS: oreLoad should be 3 (1 base + 2 bonus), but C++ would give 4 (1 base + 3 bonus)
-    // PARITY GAP: TS gives 3, C++ gives 4
-    expect(harv.oreLoad).toBe(3); // TS behavior
-    // expect(harv.oreLoad).toBe(4); // C++ behavior — uncomment to verify gap
+    // C++ unit.cpp:2306-2308: 1 base bail + 3 bonus bails = 4 total per gem action
+    // Engine now matches C++ behavior
+    expect(harv.oreLoad).toBe(4);
   });
 
   it('gem bonus bails are capped by BailCount (C++ lines 2306-2308 check capacity)', () => {
@@ -254,7 +250,7 @@ describe('Gem bonus bails — unit.cpp:2306-2308', () => {
     harv.harvesterState = 'harvesting';
     harv.harvestTick = 9;
     harv.oreLoad = 27; // near capacity
-    harv.oreCreditValue = 27 * 110;
+    harv.oreCreditValue = 27 * 50;
     ctx.entities.push(harv);
     placeGem(ctx.map, 50, 50, 3);
 
@@ -940,7 +936,7 @@ describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
     harv.oreLoad = 10;
-    harv.oreCreditValue = 350; // 10 * 35
+    harv.oreCreditValue = 250; // 10 * 25
     ctx.entities.push(harv);
 
     // Simulate 13 ticks — should NOT have unloaded yet
@@ -954,7 +950,7 @@ describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
     expect(harv.harvesterState).toBe('idle');
-    expect(ctx.addCredits).toHaveBeenCalledWith(350);
+    expect(ctx.addCredits).toHaveBeenCalledWith(250);
   });
 
   /**
@@ -1160,7 +1156,7 @@ describe('seeking → harvesting transition — harvester.ts:124-146', () => {
 // =============================================================================
 
 describe('harvesting bail extraction — harvester.ts:148-182', () => {
-  it('extracts 1 bail of gold per harvest tick (35 credits)', () => {
+  it('extracts 1 bail of gold per harvest tick (25 credits)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
@@ -1172,10 +1168,10 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
 
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(1);
-    expect(harv.oreCreditValue).toBe(35);
+    expect(harv.oreCreditValue).toBe(25);
   });
 
-  it('extracts 3 bails for gems (1 base + 2 bonus) per harvest tick', () => {
+  it('extracts 4 bails for gems (1 base + 3 bonus) per harvest tick', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
@@ -1186,9 +1182,9 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     placeGem(ctx.map, 50, 50, 3);
 
     updateHarvester(ctx, harv);
-    // TS: 1 base bail + 2 bonus = 3 bails, credit = 110 + 220 = 330
-    expect(harv.oreLoad).toBe(3);
-    expect(harv.oreCreditValue).toBe(330);
+    // C++ unit.cpp:2306-2308: 1 base bail (50 cr) + 3 bonus bails (150 cr) = 4 bails, 200 credits
+    expect(harv.oreLoad).toBe(4);
+    expect(harv.oreCreditValue).toBe(200);
   });
 
   it('transitions to returning when oreLoad >= BAIL_COUNT', () => {
@@ -1197,7 +1193,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     harv.harvesterState = 'harvesting';
     harv.harvestTick = 9;
     harv.oreLoad = 27; // one more bail will fill it
-    harv.oreCreditValue = 27 * 35;
+    harv.oreCreditValue = 27 * 25;
     ctx.entities.push(harv);
     placeGold(ctx.map, 50, 50, 5);
 
@@ -1212,14 +1208,14 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     harv.harvesterState = 'harvesting';
     harv.harvestTick = 9;
     harv.oreLoad = 5;
-    harv.oreCreditValue = 5 * 35;
+    harv.oreCreditValue = 5 * 25;
     ctx.entities.push(harv);
     // Place minimal ore that will deplete on next harvest
     placeGold(ctx.map, 50, 50, 0); // density 0, will become 0xFF after deplete
     // Place more ore nearby so there's somewhere to go
     placeGold(ctx.map, 52, 50, 5);
 
-    // First harvest tick: depletes the last density level (returns 35 credits),
+    // First harvest tick: depletes the last density level (returns 25 credits),
     // oreLoad goes from 5 to 6. bailCredits > 0 so no re-seek yet.
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(6);
@@ -1239,12 +1235,12 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     harv.harvesterState = 'harvesting';
     harv.harvestTick = 9;
     harv.oreLoad = 5;
-    harv.oreCreditValue = 5 * 35;
+    harv.oreCreditValue = 5 * 25;
     ctx.entities.push(harv);
     // Place minimal ore that depletes, with no nearby replacement
     placeGold(ctx.map, 50, 50, 0);
 
-    // First harvest tick: depletes the last density level (35 credits collected).
+    // First harvest tick: depletes the last density level (25 credits collected).
     // oreLoad 5→6. Cell is now empty but bailCredits was > 0 this tick.
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(6);

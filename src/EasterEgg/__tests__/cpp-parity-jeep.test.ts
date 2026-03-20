@@ -507,12 +507,19 @@ describe('JEEP stop-rotate-move (C++ drive.cpp parity)', () => {
     const target = { x: 200, y: 100 };
     const startX = jeep.pos.x;
 
-    // With ROT=10 (>= 8), JEEP snaps rotation instantly
-    // So moveToward should move immediately for JEEP
+    // C++ parity: all vehicles use Rotation_Adjust accumulator, including JEEP (ROT=10).
+    // JEEP takes 7 ticks for 90-degree turn — does NOT snap instantly on first tick.
     const arrived = jeep.moveToward(target, jeep.stats.speed);
 
-    // ROT=10 >= 8 means rotation snaps instantly for JEEP
-    // so it will actually move (unlike slow-rotating vehicles)
+    // First tick: ROT=10 accumulates one 32-step but facing doesn't reach E yet
+    // Vehicle stops to rotate — doesn't move until facing aligns
+    expect(jeep.pos.x).toBe(startX); // no movement on first tick (still rotating)
+
+    // Run remaining ticks to complete rotation and move
+    for (let i = 0; i < 10; i++) {
+      jeep.rotTickedThisFrame = false;
+      jeep.moveToward(target, jeep.stats.speed);
+    }
     expect(jeep.facing).toBe(Dir.E);
     expect(jeep.pos.x).toBeGreaterThan(startX);
   });
@@ -536,15 +543,23 @@ describe('JEEP stop-rotate-move (C++ drive.cpp parity)', () => {
     expect(arty.pos.x).toBe(startX);
   });
 
-  it('JEEP ROT=10 means instant rotation (ROT >= 8 snaps)', () => {
+  it('JEEP ROT=10 uses accumulator — takes 7 ticks for 90 degrees (C++ parity)', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
     jeep.facing = Dir.N;
-    jeep.desiredFacing = Dir.S;
+    jeep.desiredFacing = Dir.E;
     jeep.bodyFacing32 = Dir.N * 4;
 
-    const rotated = jeep.tickRotation();
-    expect(rotated).toBe(true);
-    expect(jeep.facing).toBe(Dir.S);
+    // C++ parity: vehicles always use Rotation_Adjust accumulator.
+    // ROT=10, 90 degrees = 8 visual steps. With while loop (multiple steps per tick
+    // when accumulator rolls over), JEEP reaches Dir.E in 7 ticks.
+    let ticks = 0;
+    while (jeep.facing !== Dir.E && ticks < 20) {
+      jeep.rotTickedThisFrame = false;
+      jeep.tickRotation();
+      ticks++;
+    }
+    expect(jeep.facing).toBe(Dir.E);
+    expect(ticks).toBe(7);
   });
 });
 

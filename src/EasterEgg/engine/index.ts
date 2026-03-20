@@ -253,8 +253,8 @@ const PATH_RETRY = 10;
 /** C++ defines.h:828-837 — MoveType enum: passability threshold levels */
 const MOVE_CLOAK = 1;         // default starting threshold (easiest)
 const MOVE_TEMP  = 4;         // maximum threshold (hardest — blocked by friendly)
-/** C++ rules.cpp:271 PathDelay(".016") * TICKS_PER_MINUTE(900) ≈ 14 ticks */
-const PATH_DELAY_TICKS = 14;
+/** rules.ini PathDelay=.01 * TICKS_PER_MINUTE(900) = 9 ticks (rules.cpp default was .016→14) */
+const PATH_DELAY_TICKS = 9;
 
 /** Reset path threshold state when a new move order is given (C++ foot.cpp:1723-1735 Assign_Destination) */
 function resetPathThreshold(entity: Entity): void {
@@ -429,7 +429,7 @@ export class Game {
   private inflightProjectiles: InflightProjectile[] = [];
   private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
-  private allowWin = false; // set by ALLOWWIN action — required before win condition fires
+  private allowWin = 0; // C++ house.h:335 Blockage counter — each ALLOWWIN trigger increments; win requires <= 0
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
   private missionTimerExpired = false;
   private builtStructureTypes = new Set<string>(); // types player has constructed (for TEVENT_BUILD)
@@ -1114,7 +1114,16 @@ export class Game {
     setPlayerHouses(playerHouseSet);
     // Sync to renderer
     this.renderer.playerHouses = playerHouseSet;
-    this.allowWin = false;
+    // C++ scenario.cpp:618-625 — count ALLOWWIN triggers and init Blockage counter.
+    // Each trigger with ALLOWWIN in action1 or (non-MULTI_ONLY=0) action2 increments Blockage.
+    // actionControl: 0 = MULTI_ONLY, 1 = AND. C++ checks ActionControl != MULTI_ONLY (i.e. === 1).
+    this.allowWin = 0;
+    for (const t of this.triggers) {
+      if (t.action1.action === 15 ||
+          (t.actionControl === 1 && t.action2.action === 15)) {
+        this.allowWin++;
+      }
+    }
     this.missionTimer = 0;
     this.missionTimerExpired = false;
     this.builtStructureTypes.clear();
@@ -1920,13 +1929,13 @@ export class Game {
       // C++ bdata.cpp:3129: timedelay = floor(BuildupTime * TICKS_PER_MINUTE / makeFrameCount)
       // C++ duration = (makeFrameCount - 1) * timedelay ticks.
       // All standard RA buildings use 20-frame make sheets:
-      //   timedelay = floor(0.05 * 900 / 20) = 2, duration = 19 * 2 = 38 ticks.
+      //   timedelay = floor(0.06 * 900 / 20) = 2, duration = 19 * 2 = 38 ticks.
       // Guard: skip if structure was destroyed mid-sell (e.g. by enemy attack)
       if (s.sellProgress !== undefined && s.alive) {
         // C++ parity: sell duration from make sheet frame count, not damageFrame.
-        // BuildupTime(0.05) * TICKS_PER_MINUTE(900) = 45; makeFrameCount = 20 for all buildings.
+        // rules.ini BuildupTime=.06 * TICKS_PER_MINUTE(900) = 54; makeFrameCount = 20 for all buildings.
         const MAKE_FRAME_COUNT = 20;
-        const SELL_DURATION = (MAKE_FRAME_COUNT - 1) * Math.floor((0.05 * 900) / MAKE_FRAME_COUNT); // 19 * 2 = 38
+        const SELL_DURATION = (MAKE_FRAME_COUNT - 1) * Math.floor((0.06 * 900) / MAKE_FRAME_COUNT); // 19 * 2 = 38
         s.sellProgress = Math.min(1, s.sellProgress + 1 / SELL_DURATION);
         if (s.sellProgress >= 1) {
           s.alive = false;
@@ -1977,7 +1986,7 @@ export class Game {
           if (!mcvSpawned) {
             // Count: (buildingRawCost * SurvivorFraction) / E1_cost, clamped 1-5
             const E1_COST = 100;
-            const SURVIVOR_FRACTION = 0.5; // rules.cpp:177 SurvivorFraction(fixed(1,2))
+            const SURVIVOR_FRACTION = 0.4; // rules.ini SurvivorRate=.4 (rules.cpp default was 0.5)
             // C++ bdata.cpp:3672-3683 Raw_Cost(): subtract free unit cost for buildings that come with one
             const FACT_COST = 2000;        // Construction Yard — not in PRODUCTION_ITEMS (pre-placed)
             const HARVESTER_COST = 1400;   // UnitTypeClass::As_Reference(UNIT_HARVESTER).Cost
@@ -2803,7 +2812,9 @@ export class Game {
           const unit = this.entityById.get(id);
           if (!unit?.alive || !unit.isTransport || unit.passengers.length === 0) continue;
           // Unload passengers around the click point (on passable terrain)
-          for (const p of unit.passengers) {
+          // C++ cargo.cpp:87-123: LIFO order — last loaded is unloaded first
+          for (let pi = unit.passengers.length - 1; pi >= 0; pi--) {
+            const p = unit.passengers[pi];
             // Find a passable position near the click point
             let px = world.x, py = world.y;
             for (let attempt = 0; attempt < 8; attempt++) {
@@ -3695,7 +3706,9 @@ export class Game {
           }
 
           let shoreIdx = 0;
-          for (const passenger of entity.passengers) {
+          // C++ cargo.cpp:87-123: LIFO order — last loaded is unloaded first
+          for (let pi = entity.passengers.length - 1; pi >= 0; pi--) {
+            const passenger = entity.passengers[pi];
             passenger.alive = true;
             passenger.hp = passenger.maxHp;
             passenger.transportRef = null;
@@ -5033,6 +5046,21 @@ export class Game {
         }
       }
     }
+
+    // C++ techno.cpp:826-834 Hidden() — un-discover AI objects returning to shroud.
+    // Only non-human (AI) houses can have objects re-hidden; human-owned objects
+    // stay discovered permanently.
+    for (const entity of this.entities) {
+      if (!entity.alive) continue;
+      if (this.isPlayerControlled(entity)) continue; // only enemy/neutral AI
+      if (!this.discoveredEntityIds.has(entity.id)) continue; // not discovered
+
+      const vis = this.map.getVisibility(entity.cell.cx, entity.cell.cy);
+      if (vis < 2) {
+        // Entity returned to shroud — clear discovery flag (C++ IsDiscoveredByPlayer = false)
+        this.discoveredEntityIds.delete(entity.id);
+      }
+    }
   }
 
   /**
@@ -5230,7 +5258,8 @@ export class Game {
       this.startScoreMusic();
       this.onStateChange?.('lost');
     }
-    if (result.allowWin) this.allowWin = true;
+    // C++ trigger.cpp:175-178 — decrement Blockage counter when ALLOWWIN trigger fires
+    if (result.allowWin && this.allowWin > 0) this.allowWin--;
     if (result.allHunt !== undefined) {
       const huntHouse = houseIdToHouse(result.allHunt);
       for (const e of this.entities) {
@@ -5609,7 +5638,8 @@ export class Game {
         if ((action.action === 4 || action.action === 7) && this.destroyedTeams.has(action.team)) return;
         const actionResult = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
-          this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH }
+          this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
+          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1,
         );
         this.applyTriggerActionResult(actionResult, trigger);
       };
@@ -5778,7 +5808,8 @@ export class Game {
         if ((action.action === 4 || action.action === 7) && this.destroyedTeams.has(action.team)) return;
         const result = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
-          this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH }
+          this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
+          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1,
         );
         this.applyTriggerActionResult(result, trigger);
       };
@@ -5975,11 +6006,12 @@ export class Game {
       !this.isAllied(s.house, this.playerHouse)
     );
 
-    // If scenario uses ALLOWWIN, gate fallback win on the flag being set
+    // C++ house.cpp:945 — win only fires when Blockage <= 0
+    // If scenario uses ALLOWWIN, gate fallback win on the counter reaching 0
     const hasAllowWinTrigger = this.triggers.some(t =>
       t.action1.action === 15 || (t.actionControl === 1 && t.action2.action === 15)
     );
-    if (hasAllowWinTrigger && !this.allowWin) return;
+    if (hasAllowWinTrigger && this.allowWin > 0) return;
 
     if (!antsAlive && !pendingAntTriggers && !antStructuresAlive) {
       if (this.toCarryOver) saveCarryover(this.entities);
@@ -6483,17 +6515,10 @@ export class Game {
     };
 
     switch (formation) {
-      case 2: {
-        const cols = Math.ceil(Math.sqrt(count));
-        for (let i = 0; i < count; i++) {
-          const col = i % cols;
-          const row = Math.floor(i / cols);
-          const offsetX = (col - (cols - 1) / 2) * CELL_SIZE;
-          const offsetY = (row - Math.floor((count - 1) / cols) / 2) * CELL_SIZE;
-          offsets.push({ x: offsetX, y: offsetY });
-        }
+      case 2:
+        // C++ FORMATION_LOOSE (foot.cpp) — empty break, no offsets assigned.
+        // Returns empty array (no-op), matching C++ team.cpp:2515-2516.
         break;
-      }
       case 3:
         ydir = -Math.floor(count / 2);
         while (offsets.length < count) {

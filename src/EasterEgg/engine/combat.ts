@@ -27,8 +27,27 @@ export const SPLASH_RADIUS = 1.5;
 
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 
-/** Turreted structure types — turret rotates to face target (GUN/SAM) */
-const TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
+/** Turreted structure types — turret rotates to face target (GUN/SAM/AGUN)
+ *  C++ bdata.cpp:571 (GUN), bdata.cpp:601 (AGUN), bdata.cpp:901 (SAM) — IsTurretEquipped=true */
+const TURRETED_STRUCTURES = new Set(['GUN', 'SAM', 'AGUN']);
+
+/**
+ * C++ bdata.cpp per-building default turret facings (8-dir, derived from DirType / 32):
+ *   GUN:  DirType(208) → 208/32 = 6 (West)     — bdata.cpp:594
+ *   SAM:  DIR_N (0)    → 0/32   = 0 (North)     — bdata.cpp:924
+ *   AGUN: DIR_NE (32)  → 32/32  = 1 (NorthEast) — bdata.cpp:624
+ */
+const TURRET_DEFAULT_FACING: Record<string, number> = {
+  GUN: 6,   // West  (DirType 208)
+  SAM: 0,   // North (DIR_N)
+  AGUN: 1,  // NE    (DIR_NE)
+};
+
+/** C++ rules.ini ROT=5 for all turreted buildings (GUN, SAM, AGUN).
+ *  Used in Rotation_AI (building.cpp:5347-5363) via FacingClass::Rotation_Adjust(ROT).
+ *  C++ 256-step DirType / 32-step visual = 8 accumulator units per visual step.
+ *  ROT=5 means 90-degree rotation (8 steps) takes ceil(8 * 8/5) = 13 ticks, matching C++. */
+const STRUCTURE_TURRET_ROT = 5;
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
@@ -1202,7 +1221,7 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
 export function updateStructureCombat(ctx: CombatContext): void {
   const isLowPower = ctx.powerConsumed > ctx.powerProduced && ctx.powerProduced > 0;
   for (const s of ctx.structures) {
-    if (!s.alive || !s.weapon || s.sellProgress !== undefined) continue;
+    if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) continue;
     // C++ parity PW1/PW3: powered defenses (TSLA, GUN, SAM, AGUN) cannot fire during any power deficit.
     // Unpowered defenses (PBOX, HBOX, FTUR) always fire regardless of power.
     if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
@@ -1214,7 +1233,7 @@ export function updateStructureCombat(ctx: CombatContext): void {
 
     // Turret rotation tick (every frame, independent of cooldown)
     if (TURRETED_STRUCTURES.has(s.type)) {
-      if (s.turretDir === undefined) s.turretDir = 4; // default: South
+      if (s.turretDir === undefined) s.turretDir = TURRET_DEFAULT_FACING[s.type] ?? 4; // C++ bdata.cpp per-building default
       if (s.desiredTurretDir === undefined) s.desiredTurretDir = s.turretDir;
       if (s.turretDir !== s.desiredTurretDir) {
         const diff = (s.desiredTurretDir - s.turretDir + 8) % 8;
@@ -1283,6 +1302,10 @@ export function updateStructureCombat(ctx: CombatContext): void {
       // Update turret direction for turreted structures
       if (TURRETED_STRUCTURES.has(s.type)) {
         s.desiredTurretDir = directionTo(structPos, bestTarget.pos);
+        // C++ Mission_Attack returns FIRE_FACING when turret is not aligned with target,
+        // delaying fire until turret finishes rotating (building.cpp:2312-2318).
+        // Both turretDir and desiredTurretDir are in 8-dir (0-7); compare directly.
+        if (s.turretDir !== undefined && s.turretDir !== s.desiredTurretDir) continue; // turret not aligned — wait
       }
       // H1: Buildings with Ammo>1 fire rapidly (1-tick rearm) then recharge (C++ techno.cpp:2861)
       // C++ house.cpp:293,303: ROFBias scales rearm delay

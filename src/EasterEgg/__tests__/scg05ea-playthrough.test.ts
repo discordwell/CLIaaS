@@ -9,9 +9,9 @@ import type { AgentState } from '../engine/agentHarness.js';
  */
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
-const STEP_TICKS = 15;
-const MAX_ITERATIONS = 2000; // ~30000 ticks (full mission timer ~27000)
-const LOG_EVERY = 20;
+const STEP_TICKS = 3;  // Fine-grained for spy dog evasion
+const MAX_ITERATIONS = 10000; // More iterations to compensate for smaller steps
+const LOG_EVERY = 10;
 
 describe('SCG05EA live playthrough', () => {
   let adapter: TsAgentAdapter;
@@ -41,14 +41,18 @@ describe('SCG05EA live playthrough', () => {
       if (i % LOG_EVERY === 0 || note.includes('infiltrate') || note.includes('SAM') || note.includes('chinook')) {
         const spy = lastState.units.find((u) => u.t === 'SPY');
         const tanya = lastState.units.find((u) => u.t === 'E7');
-        const dogs = lastState.units.filter((u) => !u.ally && u.t === 'DOG');
+        const dogs = lastState.enemies.filter((u: { t: string }) => u.t === 'DOG');
         console.log(
           `[${i}] tick=${lastState.tick} ` +
           `units=${lastState.units.length} enemies=${lastState.structures.filter(s => !s.ally).length}s ` +
           `spy=${spy ? `(${spy.cx},${spy.cy})` : 'none'} ` +
           `tanya=${tanya ? `(${tanya.cx},${tanya.cy})` : 'none'} ` +
-          `dogs=${dogs.length} ` +
-          `| ${note}`,
+          `dogs=${dogs.length}` +
+          (spy ? ` near=[${dogs.filter((d: { cx: number; cy: number }) => {
+            const dx = d.cx - spy.cx, dy = d.cy - spy.cy;
+            return dx*dx + dy*dy <= 36;
+          }).map((d: { cx: number; cy: number }) => `(${d.cx},${d.cy})`).join(',')}]` : '') +
+          ` | ${note}`,
         );
         if (decision.warnings.length > 0) {
           console.log(`  WARNINGS: ${decision.warnings.join(', ')}`);

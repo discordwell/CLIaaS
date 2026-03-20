@@ -753,8 +753,8 @@ describe('RA1 Parity Fixes', () => {
 
 describe('RA1 Parity — Harvester Lump-Sum Unloading (EC5)', () => {
   it('EC5: harvester credits entire load as lump sum', () => {
-    const oreCreditValue = 980;
-    expect(oreCreditValue).toBe(980);
+    const oreCreditValue = 700;
+    expect(oreCreditValue).toBe(700);
   });
 
   it('EC3: bail count is 28', () => {
@@ -785,12 +785,12 @@ describe('RA1 Parity — Service Depot Dock-based Repair', () => {
 });
 
 describe('RA1 Parity — Ore Values (EC1/EC2/EC3)', () => {
-  it('gold ore value is 35 credits per bail', () => {
-    expect(35).toBe(35);
+  it('gold ore value is 25 credits per bail (rules.ini)', () => {
+    expect(25).toBe(25);
   });
 
-  it('gem value is 110 credits per bail', () => {
-    expect(110).toBe(110);
+  it('gem value is 50 credits per bail (rules.ini)', () => {
+    expect(50).toBe(50);
   });
 
   it('harvester capacity is 28 bails', () => {

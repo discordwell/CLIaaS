@@ -17,8 +17,8 @@
  *   stage.h:72-78            Graphic_Logic() — if (About_To_Change()) { Stage++; Timer = Rate; return true; }
  *   type.h:734-738           AnimControlType { Start, Count, Rate }
  *   defines.h:3031-3032      TICKS_PER_SECOND=15, TICKS_PER_MINUTE=900
- *   rules.cpp:180            BuildupTime = ".05" = 0.05
- *   rules.cpp:463            BuildupTime read from INI [General] section
+ *   rules.ini:80             BuildupTime = ".06" = 0.06
+ *   rules.ini [General]      BuildupTime read from INI [General] section
  */
 
 import { describe, it, expect } from 'vitest';
@@ -26,7 +26,7 @@ import { describe, it, expect } from 'vitest';
 // ─── C++ Constants ──────────────────────────────────────────────────────────────
 const TICKS_PER_SECOND = 15;
 const TICKS_PER_MINUTE = TICKS_PER_SECOND * 60; // 900
-const BUILDUP_TIME = 0.05; // rules.cpp:180 — fixed(".05")
+const BUILDUP_TIME = 0.06; // rules.ini:80 — BuildupTime=.06
 
 // ─── C++ AnimControlType for BSTATE_CONSTRUCTION ────────────────────────────────
 // bdata.cpp:3125-3131 One_Time():
@@ -176,23 +176,23 @@ describe('C++ parity: Construction buildup animation', () => {
     // C++ bdata.cpp:3125-3131 — One_Time() path
     it('One_Time path: 20-frame make sheet → Rate=2, Start=0, Count=20', () => {
       const anim = cppConstructionAnim(20);
-      // timedelay = floor(0.05 * 900 / 20) = floor(45 / 20) = floor(2.25) = 2
+      // timedelay = floor(0.06 * 900 / 20) = floor(54 / 20) = floor(2.7) = 2
       expect(anim.Start).toBe(0);
       expect(anim.Count).toBe(20);
       expect(anim.Rate).toBe(2);
     });
 
     it('One_Time path: various frame counts', () => {
-      // 10 frames: floor(45 / 10) = 4
-      expect(cppConstructionAnim(10).Rate).toBe(4);
-      // 15 frames: floor(45 / 15) = 3
+      // 10 frames: floor(54 / 10) = 5
+      expect(cppConstructionAnim(10).Rate).toBe(5);
+      // 15 frames: floor(54 / 15) = 3
       expect(cppConstructionAnim(15).Rate).toBe(3);
-      // 30 frames: floor(45 / 30) = 1
+      // 30 frames: floor(54 / 30) = 1
       expect(cppConstructionAnim(30).Rate).toBe(1);
-      // 45 frames: floor(45 / 45) = 1
+      // 45 frames: floor(54 / 45) = 1
       expect(cppConstructionAnim(45).Rate).toBe(1);
-      // 1 frame: floor(45 / 1) = 45
-      expect(cppConstructionAnim(1).Rate).toBe(45);
+      // 1 frame: floor(54 / 1) = 54
+      expect(cppConstructionAnim(1).Rate).toBe(54);
     });
 
     // C++ bdata.cpp:3369-3374 — Init() theater path
@@ -271,13 +271,13 @@ describe('C++ parity: Construction buildup animation', () => {
       expect(progression.length).toBe(20);
     });
 
-    it('C++ stage progression with 10-frame make sheet: Rate=4', () => {
+    it('C++ stage progression with 10-frame make sheet: Rate=5', () => {
       const anim = cppConstructionAnim(10);
       const progression = simulateCppStageProgression(anim);
 
       expect(progression[0]).toEqual({ tick: 0, stage: 0 });
-      expect(progression[1]).toEqual({ tick: 4, stage: 1 });
-      expect(progression[progression.length - 1]).toEqual({ tick: 36, stage: 9 });
+      expect(progression[1]).toEqual({ tick: 5, stage: 1 });
+      expect(progression[progression.length - 1]).toEqual({ tick: 45, stage: 9 });
       expect(progression.length).toBe(10);
     });
 
@@ -758,38 +758,38 @@ describe('C++ parity: Construction buildup animation', () => {
   // ─── 14. BuildupTime Budget vs Actual Duration ────────────────────────
   describe('BuildupTime budget vs actual construction duration', () => {
 
-    it('total buildup budget = BuildupTime * TICKS_PER_MINUTE = 45 ticks', () => {
-      // rules.cpp:180: BuildupTime = ".05"
+    it('total buildup budget = BuildupTime * TICKS_PER_MINUTE = 54 ticks', () => {
+      // rules.ini:80: BuildupTime = ".06"
       // defines.h:3032: TICKS_PER_MINUTE = 900
       const budget = BUILDUP_TIME * TICKS_PER_MINUTE;
-      expect(budget).toBe(45);
+      expect(budget).toBeCloseTo(54, 5);
     });
 
     it('actual duration is shorter than budget due to integer division truncation', () => {
-      // For 20 frames: timedelay = floor(45/20) = 2, total = 19 * 2 = 38 (not 45)
-      // 7 ticks "lost" to truncation
+      // For 20 frames: timedelay = floor(54/20) = 2, total = 19 * 2 = 38 (not 54)
+      // 16 ticks "lost" to truncation
       const actual = cppConstructionDurationTicks(20);
-      const budget = 45;
+      const budget = 54;
       expect(actual).toBe(38);
       expect(actual).toBeLessThan(budget);
-      expect(budget - actual).toBe(7); // truncation loss
+      expect(budget - actual).toBe(16); // truncation loss
     });
 
     it('truncation loss varies by frame count', () => {
       // frame count → timedelay → actual → loss
-      // 20: floor(45/20)=2, 19*2=38, loss=7
-      // 10: floor(45/10)=4, 9*4=36, loss=9
-      // 15: floor(45/15)=3, 14*3=42, loss=3
-      // 30: floor(45/30)=1, 29*1=29, loss=16
-      // 45: floor(45/45)=1, 44*1=44, loss=1
-      // 9:  floor(45/9)=5,  8*5=40, loss=5
-      // 1:  floor(45/1)=45, 0*45=0, loss=45 (single frame = instant)
+      // 20: floor(54/20)=2, 19*2=38, loss=16
+      // 10: floor(54/10)=5, 9*5=45, loss=9
+      // 15: floor(54/15)=3, 14*3=42, loss=12
+      // 30: floor(54/30)=1, 29*1=29, loss=25
+      // 45: floor(54/45)=1, 44*1=44, loss=10
+      // 9:  floor(54/9)=6,  8*6=48, loss=6
+      // 1:  floor(54/1)=54, 0*54=0, loss=54 (single frame = instant)
       expect(cppConstructionDurationTicks(20)).toBe(38);
-      expect(cppConstructionDurationTicks(10)).toBe(36);
+      expect(cppConstructionDurationTicks(10)).toBe(45);
       expect(cppConstructionDurationTicks(15)).toBe(42);
       expect(cppConstructionDurationTicks(30)).toBe(29);
       expect(cppConstructionDurationTicks(45)).toBe(44);
-      expect(cppConstructionDurationTicks(9)).toBe(40);
+      expect(cppConstructionDurationTicks(9)).toBe(48);
       expect(cppConstructionDurationTicks(1)).toBe(0);
     });
   });
@@ -847,13 +847,13 @@ describe('C++ parity: Construction buildup animation', () => {
   // ─── 17. Theater vs Standard Buildup Timing ──────────────────────────
   describe('theater-specific buildup timing divergence', () => {
 
-    it('theater buildings use 5*TICKS_PER_SECOND budget (75) vs standard 45', () => {
+    it('theater buildings use 5*TICKS_PER_SECOND budget (75) vs standard 54', () => {
       // bdata.cpp:3372: timedelay = (5 * TICKS_PER_SECOND) / count = 75 / count
-      // vs standard bdata.cpp:3129: timedelay = (BuildupTime * TICKS_PER_MINUTE) / count = 45 / count
+      // vs standard bdata.cpp:3129: timedelay = (BuildupTime * TICKS_PER_MINUTE) / count = 54 / count
       const theaterBudget = 5 * TICKS_PER_SECOND;
       const standardBudget = BUILDUP_TIME * TICKS_PER_MINUTE;
       expect(theaterBudget).toBe(75);
-      expect(standardBudget).toBe(45);
+      expect(standardBudget).toBeCloseTo(54, 5);
       expect(theaterBudget).toBeGreaterThan(standardBudget);
     });
 

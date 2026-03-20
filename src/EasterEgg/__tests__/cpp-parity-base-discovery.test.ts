@@ -308,20 +308,18 @@ describe('Sight_From range cap — C++ map.cpp:296', () => {
    * Valid range is 1-10.
    */
 
-  it('PARITY GAP: revealAroundCell with radius 0 reveals center cell (C++ does nothing)', () => {
+  it('revealAroundCell with radius 0 does nothing (C++ map.cpp:296 early return)', () => {
     // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
     // With sightrange=0, Sight_From returns immediately — no cells revealed.
-    //
-    // TS fog.ts:178: r2 = 0*0 = 0; loop runs for dx=0,dy=0: 0 <= 0 → reveals center.
-    // The TS implementation does NOT guard against radius=0.
+    // TS fog.ts now matches: radius === 0 → early return.
     const map = new GameMap();
     map.setBounds(0, 0, 64, 64);
     const visBefore = map.getVisibility(30, 30);
     expect(visBefore).toBe(0); // starts shrouded
     revealAroundCell(map, 30, 30, 0);
     const visAfter = map.getVisibility(30, 30);
-    // PARITY GAP: C++ would leave it at 0, TS reveals it to 2
-    expect(visAfter).toBe(2); // TS behavior — center cell revealed even with radius 0
+    // C++ parity: radius 0 reveals nothing
+    expect(visAfter).toBe(0);
   });
 
   it('revealAroundCell with normal radius reveals cells', () => {

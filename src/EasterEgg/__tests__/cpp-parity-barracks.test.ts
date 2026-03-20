@@ -123,9 +123,9 @@ const BARRACKS_TYPES: Array<{ type: 'BARR' | 'TENT'; faction: string; house: Hou
 // -- Stats (rules.ini / building.cpp) -----------------------------------------
 //
 // C++ rules.ini: BARR -> Strength=800, Cost=300, Power=20 (consumes 20W),
-// Prerequisite=POWR, Owner=allies, TechLevel=1
-// C++ rules.ini: TENT -> Strength=800, Cost=300, Power=20 (consumes 20W),
 // Prerequisite=POWR, Owner=soviet, TechLevel=1
+// C++ rules.ini: TENT -> Strength=800, Cost=300, Power=20 (consumes 20W),
+// Prerequisite=POWR, Owner=allies, TechLevel=1
 
 for (const { type, faction, house } of BARRACKS_TYPES) {
   describe(`${type} stats (rules.ini parity) [${faction}]`, () => {
@@ -174,8 +174,8 @@ for (const { type, faction, house } of BARRACKS_TYPES) {
 
 // -- Faction Ownership (rules.ini Owner=) -------------------------------------
 //
-// BARR: Owner=allies — only allied houses can build it
-// TENT: Owner=soviet — only soviet houses can build it
+// BARR: Owner=soviet — only soviet houses can build it
+// TENT: Owner=allies — only allied houses can build it
 
 describe('Faction ownership parity (rules.ini Owner=)', () => {
 

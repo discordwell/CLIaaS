@@ -748,7 +748,8 @@ describe('updateAttackStructure', () => {
 
     // Engineer captures the building
     expect(struct.house).toBe(House.Spain);
-    expect(struct.hp).toBe(400); // restored to max
+    // C++ parity: Captured() changes ownership but does NOT restore HP (building.cpp:2936)
+    expect(struct.hp).toBe(50); // stays at pre-capture HP
     expect(engineer.alive).toBe(false); // consumed
     expect(ctx.playEva).toHaveBeenCalledWith('eva_building_captured');
   });

@@ -529,19 +529,22 @@ describe('ANT1 movement — rot=8 instant facing snap (drive.cpp)', () => {
     expect(UNIT_STATS.ANT1.rot).toBe(8);
   });
 
-  it('ANT1 snaps facing instantly with rot >= 8', () => {
+  it('ANT1 rot=8 uses accumulator rotation (not instant snap — only infantry snap)', () => {
     const ant = entityAtCell(UnitType.ANT1, House.USSR, 10, 10);
     ant.facing = Dir.N;
     ant.desiredFacing = Dir.S;
     const aligned = ant.tickRotation();
-    expect(aligned).toBe(true);
-    expect(ant.facing).toBe(Dir.S);
+    // ANT1 is not infantry, so it uses the accumulator even with rot=8.
+    // First tick: acc += 8, 8 >= 8 → step once, but 180 degrees is many steps.
+    expect(aligned).toBe(false);
+    expect(ant.facing).not.toBe(Dir.S);
   });
 
   it('ANT1 isInfantry=false, so moveToward uses vehicle path (stop-rotate-move)', () => {
     const ant = entityAtCell(UnitType.ANT1, House.USSR, 10, 10);
     // Vehicle path: if not facingAligned, don't move
-    // But since rot=8, facing snaps instantly, so movement proceeds on first tick
+    // C++ parity: all vehicles use Rotation_Adjust accumulator, including ANT1 (ROT=8).
+    // ROT=8 does one step per tick (acc=8, step, acc=0). 90 degrees = 8 ticks.
     ant.facing = Dir.N;
     ant.desiredFacing = Dir.N;
     ant.bodyFacing32 = Dir.N * 4;
@@ -549,8 +552,16 @@ describe('ANT1 movement — rot=8 instant facing snap (drive.cpp)', () => {
     const startX = ant.pos.x;
     const targetPos = { x: startX + CELL_SIZE * 3, y: ant.pos.y };
 
+    // First tick: rotation starts but doesn't complete for 90-degree turn
     const arrived = ant.moveToward(targetPos, ant.stats.speed);
-    // Because rot=8 snaps facing instantly, ant DOES move on the first tick
+    // Vehicle doesn't move until rotation completes
+    expect(ant.pos.x).toBe(startX); // stopped to rotate
+
+    // Complete rotation over multiple ticks, then move
+    for (let i = 0; i < 10; i++) {
+      ant.rotTickedThisFrame = false;
+      ant.moveToward(targetPos, ant.stats.speed);
+    }
     const distMoved = Math.abs(ant.pos.x - startX);
     expect(distMoved).toBeGreaterThan(0);
   });

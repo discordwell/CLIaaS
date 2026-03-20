@@ -61,17 +61,13 @@ describe('tickRotation — 32-step accumulator system', () => {
     expect(bf32History).toContain(4);
   });
 
-  it('full 32-step rotation takes ~51 ticks for rot=5', () => {
-    // Full rotation: 32 visual steps. rot=5, threshold=8.
-    // Average ticks per visual step: 8/5 = 1.6, so 32 × 1.6 = ~51 ticks
+  it('N→S rotation takes ~21 ticks for rot=5 (CCW path, 13 visual steps to facing match)', () => {
+    // C++ parity: N→S (diff32=16) goes counterclockwise (signed char -128 → CCW).
+    // CCW path: bf32 goes 0→31→30→...→19. At bf32=19, facing=floor(19/4)=4=Dir.S.
+    // That's 13 visual steps. With ROT=5, step 13 occurs at tick 21.
     const tank = new Entity(UnitType.V_4TNK, House.Spain, 100, 100);
     tank.facing = Dir.N;
     tank.bodyFacing32 = 0;
-    tank.desiredFacing = Dir.NW; // 7 = counter-clockwise by 1 step, but we want full rotation
-    // Instead, manually run 32 visual steps worth of ticks
-    // Trace: start at bf32=0, go clockwise. Let's go N→NE→E→...→NW→N
-    // Actually let's just count visual steps for a full circle
-    tank.desiredFacing = Dir.N; // same facing = no rotation. Let's test N → S (4 8-dir steps, 16 visual steps)
     tank.desiredFacing = Dir.S;
     let ticks = 0;
     while (tank.facing !== Dir.S && ticks < 100) {
@@ -79,9 +75,9 @@ describe('tickRotation — 32-step accumulator system', () => {
       tank.tickRotation();
       ticks++;
     }
-    // N→S is 4 8-dir steps = 16 visual steps. 16 × 8/5 = 25.6 → ~26 ticks
-    expect(ticks).toBeGreaterThanOrEqual(24);
-    expect(ticks).toBeLessThanOrEqual(28);
+    // 13 visual steps at ROT=5 = 21 ticks
+    expect(ticks).toBeGreaterThanOrEqual(19);
+    expect(ticks).toBeLessThanOrEqual(23);
   });
 
   it('Artillery (rot=2) rotates very slowly — ~16 ticks per 8-dir step', () => {

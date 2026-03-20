@@ -259,7 +259,7 @@ describe('updateHarvester — state transitions', () => {
       cellCx * CELL_SIZE + CELL_SIZE / 2, cellCy * CELL_SIZE + CELL_SIZE / 2);
     harv.harvesterState = 'harvesting';
     harv.oreLoad = Entity.BAIL_COUNT - 1; // one bail short of full
-    harv.oreCreditValue = 35 * (Entity.BAIL_COUNT - 1);
+    harv.oreCreditValue = 25 * (Entity.BAIL_COUNT - 1);
     harv.harvestTick = 9; // next tick triggers harvest
     harv.mission = Mission.GUARD;
 
@@ -309,7 +309,7 @@ describe('updateHarvester — state transitions', () => {
       dockCx * CELL_SIZE + CELL_SIZE / 2, dockCy * CELL_SIZE + CELL_SIZE / 2);
     harv.harvesterState = 'returning';
     harv.oreLoad = 10;
-    harv.oreCreditValue = 350;
+    harv.oreCreditValue = 250;
     harv.mission = Mission.GUARD; // idle = arrived
 
     const ctx = makeHarvesterContext({
@@ -346,7 +346,7 @@ describe('updateHarvester — state transitions', () => {
     harv.harvesterState = 'unloading';
     harv.harvestTick = 13; // next tick = 14 (dump completes)
     harv.oreLoad = 10;
-    harv.oreCreditValue = 350;
+    harv.oreCreditValue = 250;
 
     const ctx = makeHarvesterContext({
       addCredits,
@@ -356,7 +356,7 @@ describe('updateHarvester — state transitions', () => {
 
     updateHarvester(ctx, harv);
 
-    expect(addCredits).toHaveBeenCalledWith(350);
+    expect(addCredits).toHaveBeenCalledWith(250);
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
     expect(harv.harvesterState).toBe('idle');
@@ -371,7 +371,7 @@ describe('updateHarvester — state transitions', () => {
     harv.harvesterState = 'unloading';
     harv.harvestTick = 13;
     harv.oreLoad = 5;
-    harv.oreCreditValue = 175;
+    harv.oreCreditValue = 125;
 
     const ctx = makeHarvesterContext({
       addCredits,
@@ -383,7 +383,7 @@ describe('updateHarvester — state transitions', () => {
     updateHarvester(ctx, harv);
 
     expect(addCredits).not.toHaveBeenCalled();
-    expect(houseCredits.get(House.USSR)).toBe(275); // 100 + 175
+    expect(houseCredits.get(House.USSR)).toBe(225); // 100 + 125
     expect(harv.oreLoad).toBe(0);
     expect(harv.harvesterState).toBe('idle');
   });
@@ -394,7 +394,7 @@ describe('updateHarvester — state transitions', () => {
     harv.harvesterState = 'unloading';
     harv.harvestTick = 4; // next tick = 5 (sound trigger)
     harv.oreLoad = 10;
-    harv.oreCreditValue = 350;
+    harv.oreCreditValue = 250;
 
     const ctx = makeHarvesterContext({
       playSound,

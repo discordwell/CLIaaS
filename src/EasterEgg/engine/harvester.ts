@@ -155,10 +155,10 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
           // EC3: bail-based capacity — track bail count, not credit amount
           entity.oreLoad += 1;
           entity.oreCreditValue += bailCredits;
-          // EC4: gem bonus bails — C++ unit.cpp:2306-2308, 2 extra bails per gem harvest
-          if (bailCredits >= 110) {
-            entity.oreLoad += 2;
-            entity.oreCreditValue += 220; // 2 bonus bails × 110 credits
+          // EC4: gem bonus bails — C++ unit.cpp:2306-2308, 3 extra bails per gem harvest (total 4)
+          if (bailCredits >= 50) {
+            entity.oreLoad += 3;
+            entity.oreCreditValue += 150; // 3 bonus bails x 50 credits (rules.ini GemValue)
           }
         }
         // Check if full or current cell depleted

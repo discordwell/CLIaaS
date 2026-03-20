@@ -175,6 +175,9 @@ export function updateSubDetection(ctx: FogContext): void {
  * Pure function — only needs the map instance.
  */
 export function revealAroundCell(map: GameMap, cx: number, cy: number, radius: number): void {
+  // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
+  // Radius 0 reveals nothing — early return.
+  if (radius === 0) return;
   const r2 = radius * radius;
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {

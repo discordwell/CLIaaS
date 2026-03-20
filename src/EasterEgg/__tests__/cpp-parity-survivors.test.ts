@@ -8,7 +8,7 @@
  *   building.cpp:3440-3484  — HOLDING state (sell survivors)
  *   building.cpp:1298       — IsSurvivorless for kennels/forced destruction
  *   techno.cpp:4437-4467    — TechnoClass::Crew_Type() fallback
- *   rules.cpp:177           — SurvivorFraction(fixed(1,2)) = 0.5
+ *   rules.ini SurvivorRate=.4  — SurvivorFraction = 0.4
  *
  * C++ How_Many_Survivors algorithm:
  *   1. if (IsSurvivorless || !Class->IsCrew) return 0
@@ -34,8 +34,8 @@ import { PRODUCTION_ITEMS } from '../engine/types';
 // Helpers — C++ formula reimplemented for expected-value calculation
 // ============================================================
 
-/** C++ rules.cpp:177 — SurvivorFraction(fixed(1,2)) = 0.5 */
-const SURVIVOR_FRACTION = 0.5;
+/** rules.ini SurvivorRate=.4 — SurvivorFraction = 0.4 */
+const SURVIVOR_FRACTION = 0.4;
 
 /** C++ INFANTRY_E1.Raw_Cost() = 100 (minigunner base cost) */
 const E1_COST = 100;
@@ -60,7 +60,7 @@ function cppHowManySurvivors(
   if (divisor === 0) return 0;
   if (isCaptured) divisor *= 2;
   // C++ integer arithmetic: (int * fixed) / int
-  // fixed(1,2) = 0.5, so (cost * 0.5) is done as fixed-point multiply then integer divide
+  // rules.ini SurvivorRate=.4, so (cost * 0.4) is done as fixed-point multiply then integer divide
   const count = Math.floor((buildingRawCost * SURVIVOR_FRACTION) / divisor);
   return Math.max(1, Math.min(5, count));
 }
@@ -106,8 +106,8 @@ const CPP_BUILDING_COSTS: Record<string, number> = {
   FACT: 2000,  // Construction Yard (cpp-parity-fact.test.ts:40)
   POWR: 300,   // Power Plant
   APWR: 500,   // Advanced Power Plant
-  BARR: 300,   // Allied Barracks
-  TENT: 300,   // Soviet Barracks
+  BARR: 300,   // Soviet Barracks
+  TENT: 300,   // Allied Barracks
   PROC: 2000,  // Refinery (note: Raw_Cost subtracts harvester cost ~1400, net ~600)
   WEAP: 2000,  // War Factory
   SILO: 150,   // Ore Silo
@@ -135,22 +135,22 @@ const CPP_HELIPAD_RAW_COST = 300;   // 1500 - 1200 (hind, when !IsSeparate)
 // ============================================================
 describe('How_Many_Survivors formula (building.cpp:5591-5600)', () => {
 
-  // C++ formula: Bound(floor(Raw_Cost * 0.5 / 100), 1, 5)
+  // C++ formula: Bound(floor(Raw_Cost * 0.4 / 100), 1, 5)
   const cases: [string, number, number][] = [
     // [building, rawCost, expectedSurvivors]
-    ['SILO (150)',     150,   1],  // floor(150*0.5/100) = floor(0.75) = 0 → clamped to 1
-    ['KENN (200)',     200,   1],  // floor(200*0.5/100) = floor(1.0) = 1
-    ['POWR (300)',     300,   1],  // floor(300*0.5/100) = floor(1.5) = 1
-    ['BARR (300)',     300,   1],  // floor(300*0.5/100) = floor(1.5) = 1
-    ['TENT (300)',     300,   1],  // floor(300*0.5/100) = floor(1.5) = 1
-    ['APWR (500)',     500,   2],  // floor(500*0.5/100) = floor(2.5) = 2
-    ['AFLD (600)',     600,   3],  // floor(600*0.5/100) = floor(3.0) = 3
-    ['DOME (1000)',    1000,  5],  // floor(1000*0.5/100) = floor(5.0) = 5
-    ['FIX (1200)',     1200,  5],  // floor(1200*0.5/100) = floor(6.0) = 6 → clamped to 5
-    ['TSLA (1500)',    1500,  5],  // floor(1500*0.5/100) = floor(7.5) = 7 → clamped to 5
-    ['FACT (2000)',    2000,  5],  // floor(2000*0.5/100) = floor(10) = 10 → clamped to 5
-    ['WEAP (2000)',    2000,  5],  // floor(2000*0.5/100) = 10 → clamped to 5
-    ['PDOX (2800)',    2800,  5],  // floor(2800*0.5/100) = 14 → clamped to 5
+    ['SILO (150)',     150,   1],  // floor(150*0.4/100) = floor(0.6) = 0 → clamped to 1
+    ['KENN (200)',     200,   1],  // floor(200*0.4/100) = floor(0.8) = 0 → clamped to 1
+    ['POWR (300)',     300,   1],  // floor(300*0.4/100) = floor(1.2) = 1
+    ['BARR (300)',     300,   1],  // floor(300*0.4/100) = floor(1.2) = 1
+    ['TENT (300)',     300,   1],  // floor(300*0.4/100) = floor(1.2) = 1
+    ['APWR (500)',     500,   2],  // floor(500*0.4/100) = floor(2.0) = 2
+    ['AFLD (600)',     600,   2],  // floor(600*0.4/100) = floor(2.4) = 2
+    ['DOME (1000)',    1000,  4],  // floor(1000*0.4/100) = floor(4.0) = 4
+    ['FIX (1200)',     1200,  4],  // floor(1200*0.4/100) = floor(4.8) = 4
+    ['TSLA (1500)',    1500,  5],  // floor(1500*0.4/100) = floor(6.0) = 6 → clamped to 5
+    ['FACT (2000)',    2000,  5],  // floor(2000*0.4/100) = floor(8.0) = 8 → clamped to 5
+    ['WEAP (2000)',    2000,  5],  // floor(2000*0.4/100) = 8 → clamped to 5
+    ['PDOX (2800)',    2800,  5],  // floor(2800*0.4/100) = 11 → clamped to 5
   ];
 
   for (const [label, rawCost, expected] of cases) {
@@ -161,9 +161,9 @@ describe('How_Many_Survivors formula (building.cpp:5591-5600)', () => {
 
   it('minimum is always 1 (even for cheapest buildings)', () => {
     // C++ Bound(count, 1, 5) — even if formula yields 0, result is 1
-    expect(cppHowManySurvivors(50)).toBe(1);   // floor(50*0.5/100) = 0 → 1
-    expect(cppHowManySurvivors(100)).toBe(1);  // floor(100*0.5/100) = 0 → 1
-    expect(cppHowManySurvivors(199)).toBe(1);  // floor(199*0.5/100) = 0 → 1
+    expect(cppHowManySurvivors(50)).toBe(1);   // floor(50*0.4/100) = 0 → 1
+    expect(cppHowManySurvivors(100)).toBe(1);  // floor(100*0.4/100) = 0 → 1
+    expect(cppHowManySurvivors(199)).toBe(1);  // floor(199*0.4/100) = 0 → 1
   });
 
   it('maximum is always 5 (even for most expensive buildings)', () => {
@@ -173,11 +173,11 @@ describe('How_Many_Survivors formula (building.cpp:5591-5600)', () => {
 
   it('captured buildings have half survivors (divisor doubled)', () => {
     // C++ building.cpp:5597 — if (IsCaptured) divisor *= 2
-    // FACT (2000): normal = floor(2000*0.5/100) = 10→5, captured = floor(2000*0.5/200) = 5
-    expect(cppHowManySurvivors(2000, true)).toBe(5);  // floor(10/2) = 5
-    // DOME (1000): normal = floor(1000*0.5/100) = 5, captured = floor(1000*0.5/200) = 2
+    // FACT (2000): normal = floor(2000*0.4/100) = 8→5, captured = floor(2000*0.4/200) = 4
+    expect(cppHowManySurvivors(2000, true)).toBe(4);
+    // DOME (1000): normal = floor(1000*0.4/100) = 4, captured = floor(1000*0.4/200) = 2
     expect(cppHowManySurvivors(1000, true)).toBe(2);
-    // BARR (300): normal = floor(300*0.5/100) = 1, captured = floor(300*0.5/200) = 0→1
+    // BARR (300): normal = floor(300*0.4/100) = 1, captured = floor(300*0.4/200) = 0→1
     expect(cppHowManySurvivors(300, true)).toBe(1);
   });
 
@@ -197,8 +197,8 @@ describe('How_Many_Survivors formula (building.cpp:5591-5600)', () => {
 describe('TS survivor count formula (index.ts:1937-1938)', () => {
 
   it('TS formula matches C++ for normal (non-captured) buildings', () => {
-    // TS: Math.min(5, Math.max(1, Math.floor(cost * 0.5 / 100)))
-    // C++ (non-captured): Bound(floor(cost * 0.5 / 100), 1, 5)
+    // TS: Math.min(5, Math.max(1, Math.floor(cost * 0.4 / 100)))
+    // C++ (non-captured): Bound(floor(cost * 0.4 / 100), 1, 5)
     // These should be equivalent for the same cost inputs.
     const testCosts = [150, 200, 300, 500, 600, 1000, 1200, 1500, 2000, 2800];
     for (const cost of testCosts) {
@@ -261,24 +261,24 @@ describe('PARITY GAP: Refinery Raw_Cost (harvester subtraction)', () => {
     expect(getTsBuildCost('PROC')).toBe(2000);
   });
 
-  it('C++ PROC Raw_Cost = 600 (2000 - harvester 1400) → 3 survivors', () => {
+  it('C++ PROC Raw_Cost = 600 (2000 - harvester 1400) → 2 survivors', () => {
     // C++ bdata.cpp:3679-3681: if (Type == STRUCT_REFINERY) cost -= UNIT_HARVESTER.Cost
-    expect(cppHowManySurvivors(CPP_REFINERY_RAW_COST)).toBe(3);
+    expect(cppHowManySurvivors(CPP_REFINERY_RAW_COST)).toBe(2);
   });
 
-  it('TS PROC uses Raw_Cost 600 (2000 - 1400 harvester) → 3 survivors', () => {
+  it('TS PROC uses Raw_Cost 600 (2000 - 1400 harvester) → 2 survivors', () => {
     // FIXED: TS now subtracts harvester cost like C++ Raw_Cost
     const tsRawCost = getTsRawCost('PROC');
     expect(tsRawCost).toBe(600);
-    expect(tsHowManySurvivors(tsRawCost)).toBe(3);
+    expect(tsHowManySurvivors(tsRawCost)).toBe(2);
   });
 
-  it('Refinery survivor count should match C++ (3 survivors)', () => {
+  it('Refinery survivor count should match C++ (2 survivors)', () => {
     // FIXED: TS uses Raw_Cost=600 (2000 - 1400), matching C++
     const tsRawCost = getTsRawCost('PROC');
     const tsSurvivors = tsHowManySurvivors(tsRawCost);
     const cppSurvivors = cppHowManySurvivors(CPP_REFINERY_RAW_COST);
-    expect(tsSurvivors).toBe(cppSurvivors); // Both 3
+    expect(tsSurvivors).toBe(cppSurvivors); // Both 2
   });
 });
 
@@ -296,10 +296,10 @@ describe('correct survivor counts for buildings in PRODUCTION_ITEMS', () => {
     ['BARR', 300,  1],
     ['TENT', 300,  1],
     ['SILO', 150,  1],
-    ['DOME', 1000, 5],
+    ['DOME', 1000, 4],
     ['WEAP', 2000, 5],
-    ['FIX',  1200, 5],
-    ['AFLD', 600,  3],
+    ['FIX',  1200, 4],
+    ['AFLD', 600,  2],
     ['KENN', 200,  1],
     ['TSLA', 1500, 5],
     ['ATEK', 1500, 5],
@@ -504,21 +504,21 @@ describe('PARITY GAP: captured building survivor halving', () => {
 
   it('C++ captured buildings have halved survivor counts', () => {
     // C++ building.cpp:5597: if (IsCaptured) divisor *= 2
-    // DOME (1000): normal = 5, captured = floor(1000*0.5/200) = 2
-    expect(cppHowManySurvivors(1000, false)).toBe(5);
+    // DOME (1000): normal = floor(1000*0.4/100) = 4, captured = floor(1000*0.4/200) = 2
+    expect(cppHowManySurvivors(1000, false)).toBe(4);
     expect(cppHowManySurvivors(1000, true)).toBe(2);
   });
 
-  it('C++ War Factory: normal=5, captured=5 (clamped)', () => {
-    // WEAP (2000): normal = floor(2000*0.5/100) = 10 → 5
-    // captured = floor(2000*0.5/200) = 5 → 5
+  it('C++ War Factory: normal=5, captured=4', () => {
+    // WEAP (2000): normal = floor(2000*0.4/100) = 8 → 5
+    // captured = floor(2000*0.4/200) = 4
     expect(cppHowManySurvivors(2000, false)).toBe(5);
-    expect(cppHowManySurvivors(2000, true)).toBe(5);
+    expect(cppHowManySurvivors(2000, true)).toBe(4);
   });
 
   it('C++ Power Plant: normal=1, captured=1 (clamped to minimum)', () => {
-    // POWR (300): normal = floor(300*0.5/100) = 1
-    // captured = floor(300*0.5/200) = 0 → clamped to 1
+    // POWR (300): normal = floor(300*0.4/100) = 1
+    // captured = floor(300*0.4/200) = 0 → clamped to 1
     expect(cppHowManySurvivors(300, false)).toBe(1);
     expect(cppHowManySurvivors(300, true)).toBe(1);
   });
@@ -548,7 +548,7 @@ describe('PARITY GAP: Helipad Raw_Cost (helicopter subtraction)', () => {
     //   }
     // Note: C++ has a bug — it uses AIRCRAFT_HIND twice instead of HIND + TRANSPORT
     // So: cost = 1500 - (1200+1200)/2 = 1500 - 1200 = 300
-    expect(cppHowManySurvivors(CPP_HELIPAD_RAW_COST)).toBe(1); // floor(300*0.5/100)=1
+    expect(cppHowManySurvivors(CPP_HELIPAD_RAW_COST)).toBe(1); // floor(300*0.4/100)=1
   });
 
   it('TS HPAD uses Raw_Cost 300 (1500 - 1200 hind) → 1 survivor', () => {
@@ -572,39 +572,39 @@ describe('PARITY GAP: Helipad Raw_Cost (helicopter subtraction)', () => {
 // ============================================================
 describe('boundary conditions (building.cpp:5598-5599)', () => {
 
-  it('exact threshold for 2 survivors: cost=400 (floor(400*0.5/100)=2)', () => {
-    expect(cppHowManySurvivors(400)).toBe(2);
-    expect(tsHowManySurvivors(400)).toBe(2);
+  it('exact threshold for 2 survivors: cost=500 (floor(500*0.4/100)=2)', () => {
+    expect(cppHowManySurvivors(500)).toBe(2);
+    expect(tsHowManySurvivors(500)).toBe(2);
   });
 
-  it('just below 2-survivor threshold: cost=399 (floor(399*0.5/100)=1)', () => {
-    expect(cppHowManySurvivors(399)).toBe(1);
-    expect(tsHowManySurvivors(399)).toBe(1);
+  it('just below 2-survivor threshold: cost=499 (floor(499*0.4/100)=1)', () => {
+    expect(cppHowManySurvivors(499)).toBe(1);
+    expect(tsHowManySurvivors(499)).toBe(1);
   });
 
-  it('exact threshold for 3 survivors: cost=600', () => {
-    expect(cppHowManySurvivors(600)).toBe(3);
-    expect(tsHowManySurvivors(600)).toBe(3);
+  it('exact threshold for 3 survivors: cost=750 (floor(750*0.4/100)=3)', () => {
+    expect(cppHowManySurvivors(750)).toBe(3);
+    expect(tsHowManySurvivors(750)).toBe(3);
   });
 
-  it('exact threshold for 4 survivors: cost=800', () => {
-    expect(cppHowManySurvivors(800)).toBe(4);
-    expect(tsHowManySurvivors(800)).toBe(4);
+  it('exact threshold for 4 survivors: cost=1000 (floor(1000*0.4/100)=4)', () => {
+    expect(cppHowManySurvivors(1000)).toBe(4);
+    expect(tsHowManySurvivors(1000)).toBe(4);
   });
 
-  it('exact threshold for 5 survivors (cap): cost=1000', () => {
-    expect(cppHowManySurvivors(1000)).toBe(5);
-    expect(tsHowManySurvivors(1000)).toBe(5);
+  it('exact threshold for 5 survivors (cap): cost=1250 (floor(1250*0.4/100)=5)', () => {
+    expect(cppHowManySurvivors(1250)).toBe(5);
+    expect(tsHowManySurvivors(1250)).toBe(5);
   });
 
-  it('5-survivor cap boundary: cost=999 (floor(999*0.5/100)=4)', () => {
-    expect(cppHowManySurvivors(999)).toBe(4);
-    expect(tsHowManySurvivors(999)).toBe(4);
+  it('5-survivor cap boundary: cost=1249 (floor(1249*0.4/100)=4)', () => {
+    expect(cppHowManySurvivors(1249)).toBe(4);
+    expect(tsHowManySurvivors(1249)).toBe(4);
   });
 
-  it('captured threshold shift: cost=800 (normal=4, captured=2)', () => {
-    expect(cppHowManySurvivors(800, false)).toBe(4);
-    expect(cppHowManySurvivors(800, true)).toBe(2);  // floor(800*0.5/200)=2
+  it('captured threshold shift: cost=800 (normal=3, captured=1)', () => {
+    expect(cppHowManySurvivors(800, false)).toBe(3);
+    expect(cppHowManySurvivors(800, true)).toBe(1);  // floor(800*0.4/200)=1
   });
 });
 
@@ -732,10 +732,10 @@ describe('complete parity matrix — TS vs C++ survivor counts', () => {
     ['BARR', 300,       300,  1, true],
     ['TENT', 300,       300,  1, true],
     ['SILO', 150,       150,  1, true],
-    ['DOME', 1000,      1000, 5, true],
+    ['DOME', 1000,      1000, 4, true],
     ['WEAP', 2000,      2000, 5, true],
-    ['FIX',  1200,      1200, 5, true],
-    ['AFLD', 600,       600,  3, true],
+    ['FIX',  1200,      1200, 4, true],
+    ['AFLD', 600,       600,  2, true],
     ['KENN', 200,       200,  1, true],
     ['TSLA', 1500,      1500, 5, true],
     ['ATEK', 1500,      1500, 5, true],
@@ -745,7 +745,7 @@ describe('complete parity matrix — TS vs C++ survivor counts', () => {
     ['MSLO', 2500,      2500, 5, true],
     // These now match after Raw_Cost fix:
     ['FACT', undefined, 2000, 5, true],  // FIXED: TS hardcodes FACT_COST=2000
-    ['PROC', 2000,      600,  3, true],  // FIXED: TS subtracts harvester cost (2000-1400=600)
+    ['PROC', 2000,      600,  2, true],  // FIXED: TS subtracts harvester cost (2000-1400=600)
     ['HPAD', 1500,      300,  1, true],  // FIXED: TS subtracts hind cost (1500-1200=300)
   ];
 

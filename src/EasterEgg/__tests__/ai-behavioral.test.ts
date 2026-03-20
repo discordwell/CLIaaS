@@ -250,12 +250,12 @@ describe('updateAIRepair', () => {
     expect(s.hp).toBeGreaterThan(100); // repaired
   });
 
-  it('skips houses with IQ < 3', () => {
+  it('skips houses with IQ < 1 (rules.ini [IQ] RepairSell=1)', () => {
     const ctx = makeMockAIContext({ tick: 15 });
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 100, maxHp: 400 });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 5000);
-    addAIHouse(ctx, House.USSR, { iq: 2 });
+    addAIHouse(ctx, House.USSR, { iq: 0 });
 
     updateAIRepair(ctx);
     expect(s.hp).toBe(100); // no repair, IQ too low
@@ -360,11 +360,11 @@ describe('updateAISellDamaged', () => {
     expect(s.rubble).toBe(true);
   });
 
-  it('skips houses with IQ < 3', () => {
+  it('skips houses with IQ < 1 (rules.ini [IQ] RepairSell=1)', () => {
     const ctx = makeMockAIContext({ tick: 75 });
     const s = makeStructure('BARR', House.USSR, 50, 50, { hp: 10, maxHp: 800 });
     ctx.structures.push(s);
-    addAIHouse(ctx, House.USSR, { iq: 2 });
+    addAIHouse(ctx, House.USSR, { iq: 0 });
 
     updateAISellDamaged(ctx);
     expect(s.alive).toBe(true); // IQ too low
@@ -656,13 +656,14 @@ describe('getAIBuildOrder', () => {
     expect(queue[0]).toBe('PROC'); // refinery is highest urgency when none exists
   });
 
-  it('includes TENT when no infantry production exists', () => {
+  it('includes BARR when no infantry production exists (Soviet builds BARR, not TENT)', () => {
     const ctx = makeMockAIContext();
     ctx.houseCredits.set(House.USSR, 5000);
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
 
     const queue = getAIBuildOrder(ctx, House.USSR, state);
-    expect(queue).toContain('TENT');
+    // C++ house.cpp:5520-5521: Soviet faction builds BARR, Allied builds TENT
+    expect(queue).toContain('BARR');
   });
 
   it('includes PROC when fewer than 2 refineries', () => {

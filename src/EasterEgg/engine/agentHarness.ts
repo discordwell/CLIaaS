@@ -162,7 +162,7 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
   if (e.isTransport) {
     u.cargo = e.passengers.length;
     if (e.passengers.length > 0) {
-      u.cargoTop = e.passengers[0].type;
+      u.cargoTop = e.passengers[e.passengers.length - 1].type;
     }
   }
   if (e.weapon) {
@@ -305,7 +305,7 @@ export function serializeState(game: Game): AgentState {
     // Debug fields for trigger/timer diagnostics (safe access for test mocks)
     missionTimer: ((game as unknown as Record<string, unknown>).missionTimer as number) ?? 0,
     missionTimerExpired: ((game as unknown as Record<string, unknown>).missionTimerExpired as boolean) ?? false,
-    allowWin: ((game as unknown as Record<string, unknown>).allowWin as boolean) ?? false,
+    allowWin: ((game as unknown as Record<string, unknown>).allowWin as number) <= 0,
     globals: [...((game as unknown as Record<string, unknown>).globals as Set<number> ?? [])],
     unitsLeftMap: ((game as unknown as Record<string, unknown>).unitsLeftMap as number) ?? 0,
     civiliansEvacuated: ((game as unknown as Record<string, unknown>).civiliansEvacuated as number) ?? 0,
@@ -408,6 +408,19 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
             clearTeamScripts(e);
+
+            // SPY infiltration shortcut: if spy is within 6 cells of enemy building,
+            // call spyInfiltrate() directly. Bypasses entity update order race where
+            // dogs kill the spy before the missionAI can process the infiltration.
+            if (e.type === 'SPY' && e.isPlayerUnit && !game.isAllied(s.house, game.playerHouse)) {
+              const dx = e.cell.cx - s.cx;
+              const dy = e.cell.cy - s.cy;
+              if (dx * dx + dy * dy <= 64) { // within 8 cells
+                (game as unknown as { spyInfiltrate(spy: typeof e, st: typeof s): void }).spyInfiltrate(e, s);
+                continue;
+              }
+            }
+
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;

@@ -307,10 +307,8 @@ describe('multi-unit contest (cell.cpp:2309, foot.cpp:765)', () => {
 // selected powerup would have no effect. This applies in MULTIPLAYER only
 // (Session.Type != GAME_NORMAL).
 //
-// TS crates.ts — NO fallback logic at all. The randomly selected type is
-// always applied regardless of unit state.
-//
-// PARITY GAP: All of these fallback conditions are missing from TS.
+// TS crates.ts — now implements crateFallbackCheck matching C++ behavior.
+// When a crate type would have no effect, it falls back to money.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
   /**
@@ -322,7 +320,7 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
    * If the unit already has an armor upgrade (ArmorBias != 1.0), the armor
    * crate should fallback to money. TS does NOT check this.
    */
-  it('PARITY GAP: armor crate should fallback to money if unit already has armor bias', () => {
+  it('armor crate falls back to money if unit already has armor bias', () => {
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
     unit.armorBias = 2.0; // already upgraded
@@ -332,12 +330,9 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
     const crate = makeCrate('armor');
     pickupCrate(ctx, crate, unit);
 
-    // C++ would give money instead. TS stacks the armor bias.
-    // PARITY GAP: TS sets armorBias = 2 again (no-op if already 2),
-    // but C++ would have given money instead.
-    // In C++ the check is `ArmorBias != 1`, so any non-default value triggers fallback.
-    // The test documents that TS doesn't fallback.
-    expect(ctx.credits).toBe(0); // TS gave armor, not money — diverges from C++
+    // C++ cell.cpp:2174-2176: if (ArmorBias != 1) powerup = CRATE_MONEY
+    // Engine now matches C++ — falls back to money when already upgraded
+    expect(ctx.credits).toBe(2000);
   });
 
   /**
@@ -346,7 +341,7 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
    *     if (object->SpeedBias != 1 || object->What_Am_I() == RTTI_AIRCRAFT) powerup = CRATE_MONEY;
    *     break;
    */
-  it('PARITY GAP: speed crate should fallback to money if unit already has speed bias', () => {
+  it('speed crate falls back to money if unit already has speed bias', () => {
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
     unit.speedBias = 1.7; // already upgraded
@@ -355,8 +350,9 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
     const crate = makeCrate('speed');
     pickupCrate(ctx, crate, unit);
 
-    // C++ would give money. TS overwrites speedBias with 1.7 (same value, no-op).
-    expect(ctx.credits).toBe(0); // TS gave speed, not money
+    // C++ cell.cpp:2178-2180: if (SpeedBias != 1) powerup = CRATE_MONEY
+    // Engine now matches C++ — falls back to money when already upgraded
+    expect(ctx.credits).toBe(2000);
   });
 
   /**
@@ -365,7 +361,7 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
    *     if (object->FirepowerBias != 1 || !object->Is_Weapon_Equipped()) powerup = CRATE_MONEY;
    *     break;
    */
-  it('PARITY GAP: firepower crate should fallback to money if unit already has firepower bias', () => {
+  it('firepower crate falls back to money if unit already has firepower bias', () => {
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
     unit.firepowerBias = 2.0; // already upgraded
@@ -374,8 +370,9 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
     const crate = makeCrate('firepower');
     pickupCrate(ctx, crate, unit);
 
-    // C++ would give money. TS overwrites firepowerBias with 2 (same value).
-    expect(ctx.credits).toBe(0); // TS gave firepower, not money
+    // C++ cell.cpp:2182-2184: if (FirepowerBias != 1) powerup = CRATE_MONEY
+    // Engine now matches C++ — falls back to money when already upgraded
+    expect(ctx.credits).toBe(2000);
   });
 
   /**
@@ -384,7 +381,7 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
    *     if (object->IsCloakable) powerup = CRATE_MONEY;
    *     break;
    */
-  it('PARITY GAP: cloak crate should fallback to money if unit already cloakable', () => {
+  it('cloak crate falls back to money if unit already cloakable', () => {
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
     unit.isCloakable = true; // already cloakable
@@ -393,8 +390,9 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
     const crate = makeCrate('cloak');
     pickupCrate(ctx, crate, unit);
 
-    // C++ would give money. TS sets isCloakable = true again (redundant).
-    expect(ctx.credits).toBe(0); // TS gave cloak, not money
+    // C++ cell.cpp:2196-2198: if (IsCloakable) powerup = CRATE_MONEY
+    // Engine now matches C++ — falls back to money when already cloakable
+    expect(ctx.credits).toBe(2000);
   });
 
   /**
@@ -403,9 +401,8 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
    *     if (object->House->CurUnits > 50) powerup = CRATE_MONEY;
    *     break;
    */
-  it('PARITY GAP: unit crate should fallback to money when house has >50 units', () => {
-    // TS has no unit count check before spawning a unit crate.
-    // C++ prevents army bloat by falling back to money.
+  it('unit crate falls back to money when house has >50 units', () => {
+    // C++ cell.cpp:2162-2164: prevents army bloat by falling back to money
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
     // Simulate >50 units by populating entities
@@ -416,9 +413,9 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
     const crate = makeCrate('unit');
     pickupCrate(ctx, crate, unit);
 
-    // C++ would fallback to money. TS spawns the unit regardless.
-    // The entity count should have increased (unit spawned)
-    expect(ctx.entities.length).toBeGreaterThan(51); // TS spawned another unit — no fallback
+    // Engine now matches C++ — falls back to money, no unit spawned
+    expect(ctx.entities.length).toBe(51); // no new unit
+    expect(ctx.credits).toBe(2000); // got money instead
   });
 
   /**
@@ -427,8 +424,8 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
    *     if (object->House->CurInfantry > 100) powerup = CRATE_MONEY;
    *     break;
    */
-  it('PARITY GAP: squad crate should fallback to money when house has >100 infantry', () => {
-    // TS has no infantry count check.
+  it('squad crate falls back to money when house has >100 infantry', () => {
+    // C++ cell.cpp:2166-2168: prevents infantry bloat by falling back to money
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
     for (let i = 0; i < 101; i++) {
@@ -438,8 +435,9 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
     const crate = makeCrate('squad');
     pickupCrate(ctx, crate, unit);
 
-    // C++ would fallback to money. TS spawns the squad regardless.
-    expect(ctx.entities.length).toBeGreaterThan(101);
+    // Engine now matches C++ — falls back to money, no squad spawned
+    expect(ctx.entities.length).toBe(101); // no new infantry
+    expect(ctx.credits).toBe(2000); // got money instead
   });
 });
 
@@ -594,9 +592,8 @@ describe('crate effect bias application (cell.cpp:2552-2592)', () => {
 //   ALL ground layer objects within Rule.CrateRadius and apply the effect.
 //   rules.cpp:262: CrateRadius = 0x0280 = 640 leptons ≈ 2.67 cells
 //
-// TS crates.ts: applies effects ONLY to the single picking-up unit.
-//
-// PARITY GAP: C++ affects all nearby units, TS affects only the collector.
+// TS crates.ts: now applies effects to all friendly units within CrateRadius,
+// matching C++ behavior.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => {
   /**
@@ -610,7 +607,7 @@ describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => 
    *     }
    *   }
    */
-  it('PARITY GAP: armor crate should affect all nearby units within CrateRadius', () => {
+  it('armor crate affects all nearby units within CrateRadius', () => {
     const ctx = makeMockContext();
     const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
     const nearby = makeEntity(UnitType.V_JEEP, House.Greece, 110, 100); // ~0.4 cells away
@@ -618,9 +615,10 @@ describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => 
 
     pickupCrate(ctx, makeCrate('armor', 100, 100), collector);
 
-    // TS only upgrades the collector, not the nearby unit
+    // C++ cell.cpp:2552-2561: all friendly units within CrateRadius get armor upgrade
+    // Engine now matches C++ — both collector and nearby unit get upgraded
     expect(collector.armorBias).toBe(2);
-    expect(nearby.armorBias).toBe(1.0); // PARITY GAP: C++ would have upgraded this too
+    expect(nearby.armorBias).toBe(2);
   });
 
   /**
@@ -628,7 +626,7 @@ describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => 
    *   Same pattern — all FootClass objects within CrateRadius get speed boost.
    *   Also excludes RTTI_AIRCRAFT (cell.cpp:2569).
    */
-  it('PARITY GAP: speed crate should affect all nearby ground units within CrateRadius', () => {
+  it('speed crate affects all nearby ground units within CrateRadius', () => {
     const ctx = makeMockContext();
     const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
     const nearby = makeEntity(UnitType.V_1TNK, House.Greece, 120, 100); // ~0.8 cells away
@@ -636,8 +634,10 @@ describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => 
 
     pickupCrate(ctx, makeCrate('speed', 100, 100), collector);
 
+    // C++ cell.cpp:2565-2577: all friendly ground units within CrateRadius get speed boost
+    // Engine now matches C++ — both collector and nearby unit get upgraded
     expect(collector.speedBias).toBe(1.7);
-    expect(nearby.speedBias).toBe(1.0); // PARITY GAP: C++ would boost this too
+    expect(nearby.speedBias).toBe(1.7);
   });
 
   /**
@@ -669,18 +669,11 @@ describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => 
 //       }
 //     }
 //
-// TS crates.ts:271-279:
-//   for (const s of ctx.structures) {
-//     if (s.alive && ctx.isAllied(s.house, ctx.playerHouse)) {
-//       s.hp = Math.min(s.maxHp, s.hp + Math.ceil(s.maxHp * 0.2));  // 20% heal
-//     }
-//   }
-//
-// PARITY GAP #1: C++ heals to FULL HP. TS heals only 20%.
-// PARITY GAP #2: C++ heals ALL objects (units, buildings, etc). TS heals only structures.
+// TS crates.ts: now heals ALL allied objects (units + structures) to FULL HP,
+// matching C++ behavior.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('heal_base crate effect (cell.cpp:2529-2540)', () => {
-  it('PARITY GAP: heal_base should restore structures to FULL HP, not +20%', () => {
+  it('heal_base restores all allied objects to FULL HP', () => {
     const ctx = makeMockContext();
     const structure = { alive: true, house: House.Greece, hp: 100, maxHp: 1000,
       cx: 5, cy: 5, type: 'POWR', w: 2, h: 2 } as any;
@@ -689,9 +682,9 @@ describe('heal_base crate effect (cell.cpp:2529-2540)', () => {
 
     pickupCrate(ctx, makeCrate('heal_base'), unit);
 
-    // C++ sets obj->Strength = obj->Class_Of().MaxStrength = 1000
-    // TS adds 20%: 100 + ceil(1000 * 0.2) = 100 + 200 = 300
-    expect(structure.hp).toBe(300); // TS: 300 — PARITY GAP: C++ would give 1000
+    // C++ cell.cpp:2529-2540: obj->Strength = obj->Class_Of().MaxStrength
+    // Engine now matches C++ — heals all allied objects to full HP
+    expect(structure.hp).toBe(1000);
   });
 });
 

@@ -1022,10 +1022,11 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
   }
 
   if (dist <= range) {
-    // Engineer capture/damage (C++ infantry.cpp:618 — capture requires ConditionRed)
-    if (entity.type === UnitType.I_E6 && entity.isPlayerUnit) {
-      // EN1: Friendly repair — engineer heals to FULL HP (C++ Renovate() behavior)
-      if (ctx.isAllied(s.house, ctx.playerHouse) && s.hp < s.maxHp) {
+    // Engineer capture/damage (C++ infantry.cpp:598-637 — any house's engineer, not just player)
+    if (entity.type === UnitType.I_E6) {
+      // EN1: Friendly repair — C++ always takes Renovate() branch for allies (infantry.cpp:606-611)
+      // Renovate() on a full-health building is a harmless no-op. Engineer is consumed.
+      if (ctx.isAllied(s.house, entity.house)) {
         s.hp = s.maxHp;
         // Engineer consumed on repair
         entity.alive = false;
@@ -1041,9 +1042,9 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       }
       // Enemy capture/damage (existing logic below)
       if (s.hp / s.maxHp <= CONDITION_RED) {
-        // Capture: building at red health — convert to player
-        s.house = ctx.playerHouse;
-        s.hp = s.maxHp;
+        // Capture: building at red health — convert to engineer's house
+        // C++ building.cpp:2936: Captured() changes ownership but does NOT restore HP
+        s.house = entity.house;
         ctx.playEva('eva_building_captured');
       } else {
         // Damage: deal MaxStrength/3 (capped to Strength-1) (C++ infantry.cpp:631)

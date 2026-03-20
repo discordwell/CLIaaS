@@ -6,9 +6,9 @@ import { MAP_CELLS, House, UnitType, SpeedClass } from '../engine/types';
 /**
  * Economy & Ore Parity Tests — C++ Red Alert overlay.cpp / drive.cpp
  *
- * EC1/EC2: Gold ore = 35 credits/bail, Gems = 110 credits/bail
+ * EC1/EC2: Gold ore = 25 credits/bail (rules.ini GoldValue=25), Gems = 50 credits/bail (GemValue=50)
  * EC3: Bail-based capacity (28 bails max per harvester load)
- * EC4: Gem bonus bails (+2 per gem harvest action)
+ * EC4: Gem bonus bails (+3 per gem harvest action, total 4 bails per gem harvest)
  * EC5: Lump-sum unload (credit entire load after dump animation)
  * EC6: growOre only grows gold overlays, not gems
  * EC7: Ore spread requires density > 6, uses 8 directions
@@ -36,23 +36,23 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
   // === EC1/EC2: depleteOre credit values ===
 
-  describe('EC1: Gold ore yields 35 credits per bail', () => {
-    it('depleting gold ore at mid density returns 35', () => {
+  describe('EC1: Gold ore yields 25 credits per bail (rules.ini GoldValue=25)', () => {
+    it('depleting gold ore at mid density returns 25', () => {
       setOverlay(50, 50, 0x07); // gold ore mid density
       const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(35);
+      expect(credits).toBe(25);
     });
 
-    it('depleting gold ore at max density returns 35', () => {
+    it('depleting gold ore at max density returns 25', () => {
       setOverlay(50, 50, 0x0E); // GOLD12 max density
       const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(35);
+      expect(credits).toBe(25);
     });
 
-    it('depleting gold ore at min density returns 35 and fully depletes', () => {
+    it('depleting gold ore at min density returns 25 and fully depletes', () => {
       setOverlay(50, 50, 0x03); // GOLD01 min density
       const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(35);
+      expect(credits).toBe(25);
       expect(getOverlay(50, 50)).toBe(0xFF); // fully depleted
     });
 
@@ -61,23 +61,23 @@ describe('Economy Parity (C++ Red Alert)', () => {
     });
   });
 
-  describe('EC2: Gems yield 110 credits per bail', () => {
-    it('depleting gem at mid density returns 110', () => {
+  describe('EC2: Gems yield 50 credits per bail (rules.ini GemValue=50)', () => {
+    it('depleting gem at mid density returns 50', () => {
       setOverlay(50, 50, 0x10); // GEM02
       const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(110);
+      expect(credits).toBe(50);
     });
 
-    it('depleting gem at max density returns 110', () => {
+    it('depleting gem at max density returns 50', () => {
       setOverlay(50, 50, 0x12); // GEM04 max density
       const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(110);
+      expect(credits).toBe(50);
     });
 
-    it('depleting gem at min density returns 110 and fully depletes', () => {
+    it('depleting gem at min density returns 50 and fully depletes', () => {
       setOverlay(50, 50, 0x0F); // GEM01 min density
       const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(110);
+      expect(credits).toBe(50);
       expect(getOverlay(50, 50)).toBe(0xFF); // fully depleted
     });
   });
@@ -99,22 +99,22 @@ describe('Economy Parity (C++ Red Alert)', () => {
       expect(harv.oreCreditValue).toBe(0);
     });
 
-    it('a full gold load = 28 bails x 35 credits = 980 credits', () => {
-      // Simulate: each gold bail adds 1 to oreLoad and 35 to oreCreditValue
+    it('a full gold load = 28 bails x 25 credits = 700 credits', () => {
+      // Simulate: each gold bail adds 1 to oreLoad and 25 to oreCreditValue
       const harv = new Entity(UnitType.V_HARV, House.Spain, 100, 100);
       for (let i = 0; i < 28; i++) {
         harv.oreLoad += 1;
-        harv.oreCreditValue += 35;
+        harv.oreCreditValue += 25;
       }
       expect(harv.oreLoad).toBe(28);
-      expect(harv.oreCreditValue).toBe(980);
+      expect(harv.oreCreditValue).toBe(700);
     });
   });
 
   // === EC4: Gem bonus bails ===
 
-  describe('EC4: Gem bonus bails (+2 per gem harvest)', () => {
-    it('gem harvest adds 3 bails total (1 base + 2 bonus)', () => {
+  describe('EC4: Gem bonus bails (+3 per gem harvest)', () => {
+    it('gem harvest adds 4 bails total (1 base + 3 bonus)', () => {
       // Simulate: check isGemOverlay, deplete, add bails
       setOverlay(50, 50, 0x10); // gem overlay
       expect(map.isGemOverlay(50, 50)).toBe(true);
@@ -122,20 +122,20 @@ describe('Economy Parity (C++ Red Alert)', () => {
       const harv = new Entity(UnitType.V_HARV, House.Spain, 100, 100);
       const isGem = map.isGemOverlay(50, 50);
       const creditValue = map.depleteOre(50, 50);
-      expect(creditValue).toBe(110);
+      expect(creditValue).toBe(50);
 
-      // Simulate the updateHarvester logic
+      // Simulate the updateHarvester logic (matches engine: 1 base + 3 bonus)
       harv.oreLoad += 1;
       harv.oreCreditValue += creditValue;
       if (isGem) {
-        harv.oreLoad += 2;
-        harv.oreCreditValue += creditValue * 2;
+        harv.oreLoad += 3;
+        harv.oreCreditValue += 150; // 3 bonus bails x 50 credits
       }
 
-      // 1 base bail + 2 bonus = 3 bails
-      expect(harv.oreLoad).toBe(3);
-      // 110 + 220 = 330 credits for one gem harvest action
-      expect(harv.oreCreditValue).toBe(330);
+      // 1 base bail + 3 bonus = 4 bails
+      expect(harv.oreLoad).toBe(4);
+      // 50 + 150 = 200 credits for one gem harvest action
+      expect(harv.oreCreditValue).toBe(200);
     });
 
     it('gold harvest adds only 1 bail (no bonus)', () => {
@@ -149,20 +149,20 @@ describe('Economy Parity (C++ Red Alert)', () => {
       harv.oreLoad += 1;
       harv.oreCreditValue += creditValue;
       if (isGem) {
-        harv.oreLoad += 2;
-        harv.oreCreditValue += creditValue * 2;
+        harv.oreLoad += 3;
+        harv.oreCreditValue += 150;
       }
 
       expect(harv.oreLoad).toBe(1);
-      expect(harv.oreCreditValue).toBe(35);
+      expect(harv.oreCreditValue).toBe(25);
     });
 
     it('gems fill harvester faster due to bonus bails', () => {
-      // 28 bails / 3 bails per gem harvest = ~9.3 gem harvests to fill
+      // 28 bails / 4 bails per gem harvest = 7 gem harvests to fill
       // vs 28 gold harvests to fill
-      const gemHarvests = Math.ceil(Entity.BAIL_COUNT / 3);
+      const gemHarvests = Math.ceil(Entity.BAIL_COUNT / 4);
       const goldHarvests = Entity.BAIL_COUNT;
-      expect(gemHarvests).toBe(10); // 10 gem harvests to fill (ceil(28/3))
+      expect(gemHarvests).toBe(7); // 7 gem harvests to fill (ceil(28/4))
       expect(goldHarvests).toBe(28); // 28 gold harvests to fill
       expect(gemHarvests).toBeLessThan(goldHarvests);
     });
@@ -176,18 +176,18 @@ describe('Economy Parity (C++ Red Alert)', () => {
       // Simulate 5 gold bails + 2 gem harvests
       for (let i = 0; i < 5; i++) {
         harv.oreLoad += 1;
-        harv.oreCreditValue += 35;
+        harv.oreCreditValue += 25;
       }
       for (let i = 0; i < 2; i++) {
-        harv.oreLoad += 3; // 1 base + 2 bonus
-        harv.oreCreditValue += 110 + 110 * 2; // 330 per gem harvest
+        harv.oreLoad += 4; // 1 base + 3 bonus
+        harv.oreCreditValue += 200; // 50 + 150 per gem harvest
       }
-      expect(harv.oreLoad).toBe(11); // 5 + 6
-      expect(harv.oreCreditValue).toBe(5 * 35 + 2 * 330); // 175 + 660 = 835
+      expect(harv.oreLoad).toBe(13); // 5 + 8
+      expect(harv.oreCreditValue).toBe(5 * 25 + 2 * 200); // 125 + 400 = 525
 
       // Simulate lump-sum unload: entire oreCreditValue deposited at once
       const deposited = harv.oreCreditValue;
-      expect(deposited).toBe(835);
+      expect(deposited).toBe(525);
 
       // After deposit, reset
       harv.oreLoad = 0;

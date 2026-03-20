@@ -14,6 +14,13 @@ import { type GameMap } from './map';
 import { type Effect } from './renderer';
 import { type MapStructure } from './scenario';
 
+/**
+ * C++ rules.cpp:262: CrateRadius = 0x0280 = 640 leptons.
+ * 1 cell = 256 leptons (CELL_LEPTON_W), so CrateRadius = 640/256 = 2.5 cells.
+ * Upgrade crates (armor, speed, firepower) affect all friendly units within this radius.
+ */
+export const CRATE_RADIUS = 2.5;
+
 // ── Crate types ─────────────────────────────────────────────────────────────
 
 export type CrateType =
@@ -171,17 +178,56 @@ export function spawnCrate(ctx: CrateContext): void {
   }
 }
 
+/** C++ cell.cpp:2161-2296 — check if the selected crate type would be redundant/invalid.
+ *  Returns 'money' if the crate should fall back, or the original type if it's valid.
+ *  C++ falls back to CRATE_MONEY when the powerup would have no effect. */
+export function crateFallbackCheck(type: CrateType, unit: Entity, ctx: CrateContext): CrateType {
+  switch (type) {
+    case 'armor':
+      // C++ cell.cpp:2174-2176: if (object->ArmorBias != 1) powerup = CRATE_MONEY
+      if (unit.armorBias !== 1.0) return 'money';
+      break;
+    case 'speed':
+      // C++ cell.cpp:2178-2180: if (object->SpeedBias != 1 || object->What_Am_I() == RTTI_AIRCRAFT)
+      if (unit.speedBias !== 1.0 || unit.isAirUnit) return 'money';
+      break;
+    case 'firepower':
+      // C++ cell.cpp:2182-2184: if (object->FirepowerBias != 1 || !object->Is_Weapon_Equipped())
+      if (unit.firepowerBias !== 1.0 || !unit.weapon) return 'money';
+      break;
+    case 'cloak':
+      // C++ cell.cpp:2196-2198: if (object->IsCloakable) powerup = CRATE_MONEY
+      if (unit.isCloakable) return 'money';
+      break;
+    case 'unit': {
+      // C++ cell.cpp:2162-2164: if (object->House->CurUnits > 50) powerup = CRATE_MONEY
+      const houseUnits = ctx.entities.filter(e => e.alive && e.house === unit.house && !e.stats.isInfantry).length;
+      if (houseUnits > 50) return 'money';
+      break;
+    }
+    case 'squad': {
+      // C++ cell.cpp:2166-2168: if (object->House->CurInfantry > 100) powerup = CRATE_MONEY
+      const houseInfantry = ctx.entities.filter(e => e.alive && e.house === unit.house && e.stats.isInfantry).length;
+      if (houseInfantry > 100) return 'money';
+      break;
+    }
+  }
+  return type;
+}
+
 /** Apply crate bonus to the unit that picked it up */
 export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void {
   ctx.playSoundAt('crate_pickup', crate.x, crate.y);
+  // C++ cell.cpp:2161-2296: fallback to money when selected type would be redundant
+  const effectiveType = crateFallbackCheck(crate.type, unit, ctx);
   // C++ cell.cpp:2319-2321: CrateAnims[powerup] — type-specific animation at pickup location
   // Falls back to generic piffpiff if no crate-specific animation defined (ANIM_NONE)
-  const crateSprite = CRATE_ANIM_MAP[crate.type];
+  const crateSprite = CRATE_ANIM_MAP[effectiveType];
   ctx.effects.push({
     type: 'explosion', x: crate.x, y: crate.y,
     frame: 0, maxFrames: 10, size: 8, sprite: crateSprite ?? 'piffpiff', spriteStart: 0,
   });
-  switch (crate.type) {
+  switch (effectiveType) {
     case 'money':
       // CR1: C++ solo play gives 2000 credits from money crate
       ctx.addCredits(2000, true);
@@ -207,22 +253,52 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       ctx.evaMessages.push({ text: 'REINFORCEMENTS', tick: ctx.tick });
       break;
     }
-    case 'armor':
-      // CR2: Set armorBias = 2 (half damage taken) — C++ ArmorBias, NOT double maxHp
+    case 'armor': {
+      // CR2: C++ cell.cpp:2552-2561 — apply armor upgrade to ALL friendly units
+      // within CrateRadius (~2.5 cells), not just the collector.
+      // Always apply to the collector as well (may not be in ctx.entities).
       unit.armorBias = 2;
+      const armorPos = { x: crate.x, y: crate.y };
+      for (const e of ctx.entities) {
+        if (!e.alive || e.id === unit.id) continue;
+        if (!ctx.isAllied(e.house, ctx.playerHouse)) continue;
+        if (worldDist(armorPos, e.pos) >= CRATE_RADIUS) continue;
+        e.armorBias = 2;
+      }
       ctx.evaMessages.push({ text: 'ARMOR UPGRADE', tick: ctx.tick });
       break;
-    case 'firepower':
-      // CR3: Set firepowerBias = 2 (double damage output) — C++ FirepowerBias
+    }
+    case 'firepower': {
+      // CR3: C++ cell.cpp:2580-2592 — apply firepower upgrade to ALL friendly units
+      // within CrateRadius (~2.5 cells), not just the collector.
+      // Always apply to the collector as well (may not be in ctx.entities).
       unit.firepowerBias = 2;
+      const fpPos = { x: crate.x, y: crate.y };
+      for (const e of ctx.entities) {
+        if (!e.alive || e.id === unit.id) continue;
+        if (!ctx.isAllied(e.house, ctx.playerHouse)) continue;
+        if (worldDist(fpPos, e.pos) >= CRATE_RADIUS) continue;
+        e.firepowerBias = 2;
+      }
       ctx.evaMessages.push({ text: 'FIREPOWER UPGRADE', tick: ctx.tick });
       break;
-    case 'speed':
-      // CR7: 1.7× speed boost — C++ RULES.INI Speed=10,SPEED,1.7
-      // cell.cpp:2572: val = SpeedBias * fixed(CrateData[powerup], 256) = 1.0 * 1.7
+    }
+    case 'speed': {
+      // CR7: C++ cell.cpp:2565-2577 — apply speed upgrade to ALL friendly ground units
+      // within CrateRadius (~2.5 cells). Excludes aircraft (cell.cpp:2569).
+      // Always apply to the collector as well (may not be in ctx.entities).
       unit.speedBias = 1.7;
+      const speedPos = { x: crate.x, y: crate.y };
+      for (const e of ctx.entities) {
+        if (!e.alive || e.id === unit.id) continue;
+        if (!ctx.isAllied(e.house, ctx.playerHouse)) continue;
+        if (e.isAirUnit) continue; // C++ cell.cpp:2569: excludes RTTI_AIRCRAFT
+        if (worldDist(speedPos, e.pos) >= CRATE_RADIUS) continue;
+        e.speedBias = 1.7;
+      }
       ctx.evaMessages.push({ text: 'SPEED UPGRADE', tick: ctx.tick });
       break;
+    }
     case 'reveal':
       // CR4: Reveal entire map for the player's house (C++ IsVisionary equivalent)
       ctx.visionaryHouses.add(unit.house);
@@ -269,10 +345,15 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       break;
     }
     case 'heal_base': {
-      // Heal all player structures +20% HP
+      // C++ cell.cpp:2529-2540: heal ALL allied objects (units + buildings) to FULL HP
+      for (const e of ctx.entities) {
+        if (e.alive && ctx.isAllied(e.house, ctx.playerHouse)) {
+          e.hp = e.maxHp;
+        }
+      }
       for (const s of ctx.structures) {
         if (s.alive && ctx.isAllied(s.house, ctx.playerHouse)) {
-          s.hp = Math.min(s.maxHp, s.hp + Math.ceil(s.maxHp * 0.2));
+          s.hp = s.maxHp;
         }
       }
       ctx.evaMessages.push({ text: 'BASE REPAIRED', tick: ctx.tick });

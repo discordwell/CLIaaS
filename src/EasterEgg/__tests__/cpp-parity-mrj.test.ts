@@ -452,7 +452,7 @@ describe('MRJ stop-rotate-move (C++ drive.cpp parity)', () => {
     expect(moved).toBe(true);
   });
 
-  it('contrast: JEEP (ROT=10 >= 8) snaps rotation instantly and moves immediately', () => {
+  it('contrast: JEEP (ROT=10) rotates fast but still uses accumulator (7 ticks for 90 degrees)', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
     jeep.facing = Dir.N;
     jeep.bodyFacing32 = Dir.N * 4;
@@ -460,8 +460,16 @@ describe('MRJ stop-rotate-move (C++ drive.cpp parity)', () => {
     const startX = jeep.pos.x;
     const target = { x: startX + CELL_SIZE * 3, y: jeep.pos.y };
 
+    // C++ parity: all vehicles use Rotation_Adjust accumulator (no instant snap).
+    // First tick starts rotation but JEEP hasn't aligned yet.
     jeep.moveToward(target, jeep.stats.speed);
+    expect(jeep.pos.x).toBe(startX); // still rotating, no movement yet
 
+    // Complete rotation and move
+    for (let i = 0; i < 10; i++) {
+      jeep.rotTickedThisFrame = false;
+      jeep.moveToward(target, jeep.stats.speed);
+    }
     expect(jeep.facing).toBe(Dir.E);
     expect(jeep.pos.x).toBeGreaterThan(startX);
   });

@@ -291,7 +291,7 @@ describe('pickupCrate', () => {
     expect(ctx.evaMessages.some(m => m.text === 'SQUAD REINFORCEMENT')).toBe(true);
   });
 
-  it('HEAL_BASE crate heals all allied structures by 20% of maxHp', () => {
+  it('HEAL_BASE crate heals all allied objects to full HP', () => {
     const s1 = makeStructure('POWR', House.Greece, 10, 10, { hp: 100 });
     const s2 = makeStructure('WEAP', House.Greece, 20, 20, { hp: 500 });
     const enemyS = makeStructure('POWR', House.USSR, 30, 30, { hp: 100 });
@@ -300,10 +300,11 @@ describe('pickupCrate', () => {
     const unit = new Entity(UnitType.V_JEEP, House.Greece, 500, 500);
 
     pickupCrate(ctx, crate, unit);
-    // s1: POWR maxHp=400, was 100, healed +20% of 400 = +80 → 180
-    expect(s1.hp).toBe(180);
-    // s2: WEAP maxHp=1000, was 500, healed +20% of 1000 = +200 → 700
-    expect(s2.hp).toBe(700);
+    // C++ cell.cpp:2529-2540: heals ALL allied objects to FULL HP
+    // s1: POWR maxHp=400, was 100 → 400
+    expect(s1.hp).toBe(400);
+    // s2: WEAP maxHp=1000, was 500 → 1000
+    expect(s2.hp).toBe(1000);
     // Enemy structure should NOT be healed
     expect(enemyS.hp).toBe(100);
     expect(ctx.evaMessages.some(m => m.text === 'BASE REPAIRED')).toBe(true);

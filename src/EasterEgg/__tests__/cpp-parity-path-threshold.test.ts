@@ -5,7 +5,7 @@
  *   foot.h:232-240   — PathThreshhold, PathDelay, TryTryAgain (PATH_RETRY=10)
  *   foot.cpp:125-127 — constructor: PathThreshhold(MOVE_CLOAK), TryTryAgain(PATH_RETRY)
  *   foot.cpp:396-411 — escalation loop: Find_Path at PathThreshhold, increment on failure
- *   foot.cpp:463     — PathDelay = Rule.PathDelay * TICKS_PER_MINUTE (~14 ticks)
+ *   foot.cpp:463     — PathDelay = Rule.PathDelay * TICKS_PER_MINUTE (rules.ini PathDelay=.01, .01*900=9 ticks)
  *   foot.cpp:1723-1735 — Assign_Destination resets PathThreshhold to MOVE_CLOAK
  *   drive.cpp:989-996 — TryTryAgain decrement; at 0, give up (Assign_Destination(TARGET_NONE))
  *   drive.cpp:1050    — successful path: TryTryAgain = PATH_RETRY
@@ -145,10 +145,10 @@ describe('PathThreshhold escalation — C++ foot.cpp parity', () => {
 
   it('pathDelay prevents immediate path recalculation', () => {
     const e = new Entity(UnitType.V_1TNK, House.Greece, 100, 100);
-    e.pathDelay = 14; // C++ Rule.PathDelay * TICKS_PER_MINUTE ≈ 14 ticks
+    e.pathDelay = 9; // C++ Rule.PathDelay * TICKS_PER_MINUTE = .01 * 900 = 9 ticks
 
     // Simulate countdown: each tick decrements by 1
-    for (let tick = 0; tick < 14; tick++) {
+    for (let tick = 0; tick < 9; tick++) {
       expect(e.pathDelay > 0).toBe(true);
       e.pathDelay--;
     }
@@ -159,8 +159,8 @@ describe('PathThreshhold escalation — C++ foot.cpp parity', () => {
     const e = new Entity(UnitType.V_1TNK, House.Greece, 100, 100);
     expect(e.pathDelay).toBe(0);
     // After path calc, set delay
-    e.pathDelay = 14;
-    expect(e.pathDelay).toBe(14);
+    e.pathDelay = 9;
+    expect(e.pathDelay).toBe(9);
   });
 
   // =========================================================================

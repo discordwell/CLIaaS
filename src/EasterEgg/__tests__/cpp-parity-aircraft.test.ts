@@ -114,9 +114,11 @@ function makeCombatCtx(
 }
 
 function makeDefenseStructure(
-  type: string, house: House, cx: number, cy: number,
+  type: string, house: House, cx: number, cy: number, facing: number = 1,
 ): MapStructure {
   const weapon = STRUCTURE_WEAPONS[type];
+  const TURRETED = new Set(['GUN', 'SAM', 'AGUN']);
+  const isTurreted = TURRETED.has(type);
   return {
     type, image: type.toLowerCase(), house,
     cx, cy, hp: 256, maxHp: 256, alive: true, rubble: false,
@@ -124,6 +126,7 @@ function makeDefenseStructure(
     attackCooldown: 0,
     ammo: weapon ? 2 : -1,
     maxAmmo: weapon ? 2 : -1,
+    ...(isTurreted ? { turretDir: facing, desiredTurretDir: facing, firingFlash: 0 } : {}),
   };
 }
 
@@ -536,7 +539,8 @@ describe('Structure AA targeting (building.cpp AA gate)', () => {
 
 describe('AA target preference (building.cpp AA override)', () => {
   it('SAM prefers airborne aircraft over ground units', () => {
-    const sam = makeDefenseStructure('SAM', House.USSR, 10, 10);
+    // MiG at (11,11) from SAM at (10,10) = SE direction (3), pre-align turret
+    const sam = makeDefenseStructure('SAM', House.USSR, 10, 10, 3);
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 11, 10);
     const mig = entityAtCell(UnitType.V_MIG, House.Spain, 11, 11);
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;

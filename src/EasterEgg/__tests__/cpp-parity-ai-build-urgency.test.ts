@@ -6,7 +6,7 @@
  *
  * Source references:
  *   - house.cpp:5434-5773 AI_Building() — urgency-ranked build candidates
- *   - rules.cpp:104-121 — ratio/limit defaults (RefineryRatio, BarracksRatio, etc.)
+ *   - rules.ini:104-121 — ratio/limit defaults (RefineryRatio, BarracksRatio, etc.)
  *   - house.cpp:5482-5496 — power: APWR preferred, MEDIUM urgency if has refinery
  *   - house.cpp:5501-5510 — refinery: HIGH if none, MEDIUM otherwise
  *   - house.cpp:5580-5608 — defense: FTUR/PBOX/GUN at MEDIUM
@@ -114,14 +114,14 @@ describe('UrgencyType enum (C++ house.h)', () => {
 });
 
 // =============================================================================
-// 2. AI_BUILD_RULES defaults (C++ rules.cpp:104-121)
+// 2. AI_BUILD_RULES defaults (C++ rules.ini:104-121)
 // =============================================================================
-describe('AI_BUILD_RULES defaults (C++ rules.cpp:104-121)', () => {
+describe('AI_BUILD_RULES defaults (C++ rules.ini:104-121)', () => {
   it('matches rules.ini ratio defaults', () => {
     expect(AI_BUILD_RULES.refineryRatio).toBeCloseTo(0.16);
     expect(AI_BUILD_RULES.barracksRatio).toBeCloseTo(0.16);
     expect(AI_BUILD_RULES.warRatio).toBeCloseTo(0.10);
-    expect(AI_BUILD_RULES.defenseRatio).toBeCloseTo(0.50);
+    expect(AI_BUILD_RULES.defenseRatio).toBeCloseTo(0.40);
     expect(AI_BUILD_RULES.aaRatio).toBeCloseTo(0.14);
     expect(AI_BUILD_RULES.teslaRatio).toBeCloseTo(0.16);
     expect(AI_BUILD_RULES.helipadRatio).toBeCloseTo(0.12);

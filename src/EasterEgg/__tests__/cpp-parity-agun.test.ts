@@ -31,7 +31,7 @@ beforeEach(() => resetEntityIds());
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function makeAGUN(cx: number, cy: number, house: House = House.Greece, hp?: number): MapStructure {
+function makeAGUN(cx: number, cy: number, house: House = House.Greece, hp?: number, facing: number = 2): MapStructure {
   const weapon = STRUCTURE_WEAPONS['AGUN'];
   const maxHp = hp ?? STRUCTURE_MAX_HP['AGUN'] ?? 400;
   return {
@@ -39,6 +39,9 @@ function makeAGUN(cx: number, cy: number, house: House = House.Greece, hp?: numb
     cx, cy, hp: maxHp, maxHp, alive: true, rubble: false,
     attackCooldown: 0, ammo: -1, maxAmmo: -1,
     weapon,
+    turretDir: facing,          // pre-aligned to target direction (default East)
+    desiredTurretDir: facing,
+    firingFlash: 0,
   };
 }
 

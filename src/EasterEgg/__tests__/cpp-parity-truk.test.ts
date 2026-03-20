@@ -491,15 +491,22 @@ describe('TRUK stop-rotate-move (drive.cpp parity)', () => {
     expect(moved).toBe(true);
   });
 
-  it('contrast: JEEP ROT=10 >= 8 means instant rotation snap', () => {
+  it('contrast: JEEP ROT=10 uses accumulator — fast but not instant (C++ parity)', () => {
     const jeep = entityAtCell(UnitType.V_JEEP, House.Spain, 10, 10);
     jeep.facing = Dir.N;
-    jeep.desiredFacing = Dir.S;
+    jeep.desiredFacing = Dir.E;
     jeep.bodyFacing32 = Dir.N * 4;
 
-    const rotated = jeep.tickRotation();
-    expect(rotated).toBe(true);
-    expect(jeep.facing).toBe(Dir.S);
+    // C++ parity: all vehicles use Rotation_Adjust accumulator.
+    // ROT=10 is fast but not instant. JEEP takes 7 ticks for 90 degrees.
+    let ticks = 0;
+    while (jeep.facing !== Dir.E && ticks < 20) {
+      jeep.rotTickedThisFrame = false;
+      jeep.tickRotation();
+      ticks++;
+    }
+    expect(jeep.facing).toBe(Dir.E);
+    expect(ticks).toBe(7);
   });
 
   it('TRUK gradual rotation: tickRotation does NOT snap for ROT=5', () => {

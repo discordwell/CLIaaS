@@ -1188,12 +1188,12 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
   // -- Overlay ranges --
 
   it('gold ore range: 0x03 (GOLD01) through 0x0E (GOLD12)', () => {
-    // Verify depleteOre returns 35 (gold value) for entire gold range
+    // Verify depleteOre returns 25 (rules.ini GoldValue=25) for entire gold range
     for (let ovl = 0x03; ovl <= 0x0E; ovl++) {
       const m = new GameMap();
       m.overlay[15 * MAP_CELLS + 15] = ovl;
       const credits = m.depleteOre(15, 15);
-      expect(credits, `overlay 0x${ovl.toString(16)} should be gold`).toBe(35);
+      expect(credits, `overlay 0x${ovl.toString(16)} should be gold`).toBe(25);
     }
   });
 
@@ -1202,7 +1202,7 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
       const m = new GameMap();
       m.overlay[15 * MAP_CELLS + 15] = ovl;
       const credits = m.depleteOre(15, 15);
-      expect(credits, `overlay 0x${ovl.toString(16)} should be gem`).toBe(110);
+      expect(credits, `overlay 0x${ovl.toString(16)} should be gem`).toBe(50);
     }
   });
 
@@ -1250,16 +1250,16 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
     expect(map.overlay[idx]).toBe(0xFF);
   });
 
-  it('gold bail value = 35 credits (C++ OverlayTypeClass GOLD)', () => {
+  it('gold bail value = 25 credits (rules.ini GoldValue=25)', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x08;
-    expect(map.depleteOre(15, 15)).toBe(35);
+    expect(map.depleteOre(15, 15)).toBe(25);
   });
 
-  it('gem bail value = 110 credits (C++ OverlayTypeClass GEM)', () => {
+  it('gem bail value = 50 credits (rules.ini GemValue=50)', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x10;
-    expect(map.depleteOre(15, 15)).toBe(110);
+    expect(map.depleteOre(15, 15)).toBe(50);
   });
 
   it('depleteOre out-of-bounds returns 0', () => {

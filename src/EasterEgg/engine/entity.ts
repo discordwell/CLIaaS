@@ -655,8 +655,10 @@ export class Entity {
     if (this.rotTickedThisFrame) return this.facing === this.desiredFacing;
     this.rotTickedThisFrame = true;
 
-    // Infantry and fast-rotating units snap instantly (rot >= 8)
-    if (this.stats.rot >= 8) {
+    // Infantry snap instantly — C++ doesn't use Rotation_Adjust for infantry body facing.
+    // Vehicles always use the accumulator regardless of ROT value (e.g. JEEP ROT=10
+    // still takes 7 ticks for 90 degrees in C++).
+    if (this.stats.isInfantry) {
       this.facing = this.desiredFacing;
       this.bodyFacing32 = this.facing * 4;
       this.rotAccumulator = 0;
@@ -665,16 +667,19 @@ export class Entity {
 
     // 32-step vehicle rotation: accumulate ROT per tick, advance bodyFacing32 by ±1 when >= 8
     // MV9: groundspeedBias multiplies rotation rate (C++ GroundSpeed affects ROT accumulation)
+    // C++ Rotation_Adjust uses a while loop — high ROT can advance multiple steps per tick.
     const desiredFacing32 = this.desiredFacing * 4;
     this.rotAccumulator += this.stats.rot * this.groundspeedBias;
-    if (this.rotAccumulator >= 8) {
+    while (this.rotAccumulator >= 8 && this.bodyFacing32 !== desiredFacing32) {
       this.rotAccumulator -= 8;
       // Shortest path in 32-step ring
+      // C++ facing.cpp:168-172: (signed char)(desired-current). When diff==128 (half circle),
+      // signed char gives -128 → counterclockwise. In 32-step: diff==16 → CCW to match C++.
       const diff32 = (desiredFacing32 - this.bodyFacing32 + 32) % 32;
-      if (diff32 <= 16) {
+      if (diff32 > 0 && diff32 < 16) {
         this.bodyFacing32 = (this.bodyFacing32 + 1) % 32;
       } else {
-        this.bodyFacing32 = (this.bodyFacing32 + 31) % 32; // -1 mod 32
+        this.bodyFacing32 = (this.bodyFacing32 + 31) % 32; // -1 mod 32 (counterclockwise)
       }
     }
     // Derive 8-dir facing from bodyFacing32 for game logic compatibility
@@ -696,12 +701,14 @@ export class Entity {
     this.turretRotTickedThisFrame = true;
 
     // 32-step turret rotation at ROT+1 (C++ unit.cpp:542)
+    // C++ Rotation_Adjust uses a while loop — high ROT can advance multiple steps per tick.
     const desiredTurretFacing32 = this.desiredTurretFacing * 4;
     this.turretRotAccumulator += this.stats.rot + 1;
-    if (this.turretRotAccumulator >= 8) {
+    while (this.turretRotAccumulator >= 8 && this.turretFacing32 !== desiredTurretFacing32) {
       this.turretRotAccumulator -= 8;
+      // C++ facing.cpp:168-172: diff==16 (180°) → counterclockwise (signed char -128)
       const diff32 = (desiredTurretFacing32 - this.turretFacing32 + 32) % 32;
-      if (diff32 <= 16) {
+      if (diff32 > 0 && diff32 < 16) {
         this.turretFacing32 = (this.turretFacing32 + 1) % 32;
       } else {
         this.turretFacing32 = (this.turretFacing32 + 31) % 32;

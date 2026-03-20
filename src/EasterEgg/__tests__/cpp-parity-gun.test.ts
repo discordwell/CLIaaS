@@ -35,15 +35,15 @@ beforeEach(() => resetEntityIds());
 
 // -- Helpers ------------------------------------------------------------------
 
-function makeGUN(cx: number, cy: number, house: House = House.Spain): MapStructure {
+function makeGUN(cx: number, cy: number, house: House = House.Spain, facing: number = 2): MapStructure {
   const weapon = { ...STRUCTURE_WEAPONS['GUN'] };
   return {
     type: 'GUN', image: 'gun', house,
     cx, cy, hp: 400, maxHp: 400, alive: true, rubble: false,
     weapon,
     attackCooldown: 0, ammo: -1, maxAmmo: -1,
-    turretDir: 4,           // default: South
-    desiredTurretDir: 4,
+    turretDir: facing,           // pre-aligned to target direction (default East)
+    desiredTurretDir: facing,
     firingFlash: 0,
   };
 }

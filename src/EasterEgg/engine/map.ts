@@ -643,27 +643,27 @@ export class GameMap {
   }
 
   /** Deplete one bail of ore/gem at a cell. Returns credit value per bail (0 if empty).
-   *  C++ parity: gold ore = 35 credits/bail (OverlayTypeClass GOLD), gems = 110 credits/bail. */
+   *  C++ parity: gold ore = 25 credits/bail (rules.ini GoldValue=25), gems = 50 credits/bail (rules.ini GemValue=50). */
   depleteOre(cx: number, cy: number): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
     const idx = cy * MAP_CELLS + cx;
     const ovl = this.overlay[idx];
     if (ovl >= 0x03 && ovl <= 0x0E) {
-      // Gold ore (GOLD01-GOLD12) — 35 credits per bail (C++ overlay.cpp)
+      // Gold ore (GOLD01-GOLD12) — 25 credits per bail (rules.ini GoldValue=25)
       if (ovl > 0x03) {
         this.overlay[idx] = ovl - 1;
       } else {
         this.overlay[idx] = 0xFF; // fully depleted
       }
-      return 35;
+      return 25;
     } else if (ovl >= 0x0F && ovl <= 0x12) {
-      // Gems (GEM01-GEM04) — 110 credits per bail (C++ overlay.cpp)
+      // Gems (GEM01-GEM04) — 50 credits per bail (rules.ini GemValue=50)
       if (ovl > 0x0F) {
         this.overlay[idx] = ovl - 1;
       } else {
         this.overlay[idx] = 0xFF;
       }
-      return 110;
+      return 50;
     }
     return 0;
   }

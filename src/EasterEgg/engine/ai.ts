@@ -402,7 +402,7 @@ export const AI_BUILD_RULES = {
   barracksLimit:  2,
   warRatio:       0.10,
   warLimit:       2,
-  defenseRatio:   0.50,
+  defenseRatio:   0.40,  // rules.ini [AI] DefenseRatio=.4 (rules.cpp default was .5)
   defenseLimit:   40,
   aaRatio:        0.14,
   aaLimit:        10,
@@ -516,8 +516,8 @@ export function getAIBuildOrder(ctx: AIContext, house: House, _state: AIHouseSta
     const current = aiCountStructure(ctx, house, 'BARR') + aiCountStructure(ctx, house, 'TENT');
     if (current < roundUp(rules.barracksRatio * curBuildings) && current < rules.barracksLimit && (money > 300 || hasIncome)) {
       const urgency = current > 0 ? UrgencyType.URGENCY_LOW : UrgencyType.URGENCY_MEDIUM;
-      // Soviet builds TENT, Allied builds BARR
-      const barracksType = faction === 'soviet' ? 'TENT' : 'BARR';
+      // Soviet builds BARR, Allied builds TENT
+      const barracksType = faction === 'soviet' ? 'BARR' : 'TENT';
       choices.push({ urgency, structure: barracksType });
     }
   }
@@ -1785,12 +1785,12 @@ export function updateAIRetreat(ctx: AIContext): void {
   }
 }
 
-/** AI auto-repair -- IQ >= 3 houses repair damaged structures using their own credits */
+/** AI auto-repair -- IQ >= 1 houses repair damaged structures (rules.ini [IQ] RepairSell=1) */
 export function updateAIRepair(ctx: AIContext): void {
   if (ctx.tick % 15 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
-    if (state.iq < 3) continue;
+    if (state.iq < 1) continue;
 
     const credits = ctx.houseCredits.get(house) ?? 0;
     if (credits < 10) continue;
@@ -1814,13 +1814,14 @@ export function updateAIRepair(ctx: AIContext): void {
   }
 }
 
-/** AI auto-sell -- IQ >= 3 houses sell near-death structures for full refund
- *  C++ techno.cpp:5743-5761: AI gets 100% refund (no Rule.RefundPercent penalty) */
+/** AI auto-sell -- IQ >= 1 houses sell near-death structures for full refund
+ *  C++ techno.cpp:5743-5761: AI gets 100% refund (no Rule.RefundPercent penalty)
+ *  rules.ini [IQ] RepairSell=1 (rules.cpp default was 3) */
 export function updateAISellDamaged(ctx: AIContext): void {
   if (ctx.tick % 75 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
-    if (state.iq < 3) continue;
+    if (state.iq < 1) continue;
 
     for (const s of ctx.structures) {
       if (!s.alive || s.house !== house) continue;

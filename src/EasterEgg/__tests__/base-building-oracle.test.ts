@@ -127,7 +127,7 @@ describe('base building — build order', () => {
     expect(decision.reason).toContain('produce PROC');
   });
 
-  it('produces BARR after POWR and PROC exist (Allied barracks preferred)', () => {
+  it('produces BARR after POWR and PROC exist (Soviet barracks preferred)', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const state = makeState({
       structures: [

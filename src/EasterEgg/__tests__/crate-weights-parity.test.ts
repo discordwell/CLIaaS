@@ -1,8 +1,8 @@
 /**
  * Crate Spawn Weight Parity Tests — C++ RULES.INI CrateShares verification.
  *
- * Verifies all 14 crate types are present with correct share weights from
- * C++ rules.ini [CrateRules] section. Total shares = 136.
+ * Verifies all 17 crate types are present with correct share weights from
+ * rules.ini [Powerups] section. Total shares = 146.
  *
  * Since CRATE_SHARES is a private static on the Game class, we verify through
  * the documented values and test the weighted distribution properties.
@@ -10,56 +10,57 @@
 
 import { describe, it, expect } from 'vitest';
 
-// C++ RULES.INI crate share values (verified against source)
-// Shared across all test sections
+// rules.ini [Powerups] crate share values (verified against rules.ini)
+// Format: Name=shares,animation[,parameter]
+// Cloak has 0 shares — disabled by default in rules.ini
 const EXPECTED_SHARES: Array<{ type: string; shares: number }> = [
-  { type: 'money', shares: 50 },
-  { type: 'unit', shares: 20 },
-  { type: 'speed', shares: 10 },
-  { type: 'firepower', shares: 10 },
   { type: 'armor', shares: 10 },
-  { type: 'reveal', shares: 5 },
-  { type: 'cloak', shares: 3 },
-  { type: 'heal', shares: 15 },
+  { type: 'cloak', shares: 0 },
+  { type: 'darkness', shares: 1 },
   { type: 'explosion', shares: 5 },
-  { type: 'parabomb', shares: 3 },
-  { type: 'sonar', shares: 2 },
+  { type: 'firepower', shares: 10 },
+  { type: 'healbase', shares: 1 },
   { type: 'icbm', shares: 1 },
-  { type: 'timequake', shares: 1 },
-  { type: 'vortex', shares: 1 },
+  { type: 'money', shares: 50 },
+  { type: 'napalm', shares: 5 },
+  { type: 'parabomb', shares: 3 },
+  { type: 'reveal', shares: 1 },
+  { type: 'sonar', shares: 3 },
+  { type: 'speed', shares: 10 },
+  { type: 'squad', shares: 20 },
+  { type: 'unit', shares: 20 },
+  { type: 'invulnerability', shares: 3 },
+  { type: 'timequake', shares: 3 },
 ];
 
 // ============================================================
 // Section 1: Expected crate share distribution (C++ RULES.INI)
 // ============================================================
-describe('crate share distribution — C++ RULES.INI CrateShares', () => {
+describe('crate share distribution — rules.ini [Powerups]', () => {
 
-  it('14 crate types total', () => {
-    expect(EXPECTED_SHARES.length).toBe(14);
+  it('17 crate types total', () => {
+    expect(EXPECTED_SHARES.length).toBe(17);
   });
 
-  it('total shares = 136', () => {
+  it('total shares = 146', () => {
     const total = EXPECTED_SHARES.reduce((sum, s) => sum + s.shares, 0);
-    expect(total).toBe(136);
+    expect(total).toBe(146);
   });
 
   // Individual weight verification
-  it('money has the highest weight (50 shares = 36.8%)', () => {
+  it('money has the highest weight (50 shares = 34.2%)', () => {
     const money = EXPECTED_SHARES.find(s => s.type === 'money')!;
     expect(money.shares).toBe(50);
-    const total = 136;
+    const total = 146;
     const pct = (money.shares / total) * 100;
-    expect(pct).toBeCloseTo(36.76, 1);
+    expect(pct).toBeCloseTo(34.25, 1);
   });
 
-  it('unit is second most common (20 shares = 14.7%)', () => {
+  it('unit and squad are tied for second (20 shares each)', () => {
     const unit = EXPECTED_SHARES.find(s => s.type === 'unit')!;
+    const squad = EXPECTED_SHARES.find(s => s.type === 'squad')!;
     expect(unit.shares).toBe(20);
-  });
-
-  it('heal is third most common (15 shares = 11.0%)', () => {
-    const heal = EXPECTED_SHARES.find(s => s.type === 'heal')!;
-    expect(heal.shares).toBe(15);
+    expect(squad.shares).toBe(20);
   });
 
   it('speed/firepower/armor each have 10 shares', () => {
@@ -70,32 +71,35 @@ describe('crate share distribution — C++ RULES.INI CrateShares', () => {
     }
   });
 
-  it('reveal and explosion each have 5 shares', () => {
-    expect(EXPECTED_SHARES.find(s => s.type === 'reveal')!.shares).toBe(5);
+  it('explosion and napalm each have 5 shares', () => {
     expect(EXPECTED_SHARES.find(s => s.type === 'explosion')!.shares).toBe(5);
+    expect(EXPECTED_SHARES.find(s => s.type === 'napalm')!.shares).toBe(5);
   });
 
-  it('cloak and parabomb each have 3 shares', () => {
-    expect(EXPECTED_SHARES.find(s => s.type === 'cloak')!.shares).toBe(3);
-    expect(EXPECTED_SHARES.find(s => s.type === 'parabomb')!.shares).toBe(3);
+  it('parabomb, sonar, invulnerability, timequake each have 3 shares', () => {
+    const threeShareTypes = ['parabomb', 'sonar', 'invulnerability', 'timequake'];
+    for (const type of threeShareTypes) {
+      const entry = EXPECTED_SHARES.find(s => s.type === type)!;
+      expect(entry.shares, `${type} shares`).toBe(3);
+    }
   });
 
-  it('sonar has 2 shares', () => {
-    expect(EXPECTED_SHARES.find(s => s.type === 'sonar')!.shares).toBe(2);
-  });
-
-  it('rare crates (icbm, timequake, vortex) each have 1 share', () => {
-    const rareCrates = ['icbm', 'timequake', 'vortex'];
-    for (const type of rareCrates) {
+  it('darkness, healbase, icbm, reveal each have 1 share', () => {
+    const oneShareTypes = ['darkness', 'healbase', 'icbm', 'reveal'];
+    for (const type of oneShareTypes) {
       const entry = EXPECTED_SHARES.find(s => s.type === type)!;
       expect(entry.shares, `${type} shares`).toBe(1);
     }
   });
 
-  // All shares are positive
-  it('all share values are positive integers', () => {
+  it('cloak has 0 shares (disabled in rules.ini)', () => {
+    expect(EXPECTED_SHARES.find(s => s.type === 'cloak')!.shares).toBe(0);
+  });
+
+  // All share values are non-negative integers
+  it('all share values are non-negative integers', () => {
     for (const entry of EXPECTED_SHARES) {
-      expect(entry.shares).toBeGreaterThan(0);
+      expect(entry.shares).toBeGreaterThanOrEqual(0);
       expect(Number.isInteger(entry.shares)).toBe(true);
     }
   });
@@ -105,26 +109,26 @@ describe('crate share distribution — C++ RULES.INI CrateShares', () => {
 // Section 2: Probability distribution properties
 // ============================================================
 describe('crate probability distribution', () => {
-  const TOTAL_SHARES = 136;
+  const TOTAL_SHARES = 146;
 
-  it('money probability > 1/3 (~36.8%)', () => {
+  it('money probability > 1/3 (~34.2%)', () => {
     const moneyPct = 50 / TOTAL_SHARES;
     expect(moneyPct).toBeGreaterThan(1 / 3);
   });
 
-  it('top 3 crates (money+unit+heal) = 62.5% of all crates', () => {
-    const topThree = (50 + 20 + 15) / TOTAL_SHARES;
-    expect(topThree).toBeCloseTo(0.625, 3);
+  it('top 3 crates (money+unit+squad) = 61.6% of all crates', () => {
+    const topThree = (50 + 20 + 20) / TOTAL_SHARES;
+    expect(topThree).toBeCloseTo(0.616, 2);
   });
 
-  it('buff crates (speed+firepower+armor) = 22.1%', () => {
+  it('buff crates (speed+firepower+armor) = 20.5%', () => {
     const buffs = (10 + 10 + 10) / TOTAL_SHARES;
-    expect(buffs).toBeCloseTo(0.221, 2);
+    expect(buffs).toBeCloseTo(0.205, 2);
   });
 
-  it('rare crates (icbm+timequake+vortex) = 2.2%', () => {
-    const rare = (1 + 1 + 1) / TOTAL_SHARES;
-    expect(rare).toBeCloseTo(0.022, 2);
+  it('1-share crates (darkness+healbase+icbm+reveal) = 2.7%', () => {
+    const rare = (1 + 1 + 1 + 1) / TOTAL_SHARES;
+    expect(rare).toBeCloseTo(0.027, 2);
   });
 
   it('no single crate type exceeds 50% probability', () => {
@@ -132,7 +136,7 @@ describe('crate probability distribution', () => {
     expect(maxShares / TOTAL_SHARES).toBeLessThan(0.5);
   });
 
-  it('each rare crate has < 1% chance', () => {
+  it('each 1-share crate has < 1% chance', () => {
     const rareShares = 1;
     expect(rareShares / TOTAL_SHARES).toBeLessThan(0.01);
   });
@@ -142,48 +146,51 @@ describe('crate probability distribution', () => {
 // Section 3: Weighted random simulation (statistical verification)
 // ============================================================
 describe('weighted random distribution simulation', () => {
+  // Filter to only entries with nonzero shares for selection
+  const SELECTABLE = EXPECTED_SHARES.filter(s => s.shares > 0);
+
   function weightedSelect(): string {
-    const totalShares = EXPECTED_SHARES.reduce((sum, s) => sum + s.shares, 0);
+    const totalShares = SELECTABLE.reduce((sum, s) => sum + s.shares, 0);
     let roll = Math.random() * totalShares;
-    for (const entry of EXPECTED_SHARES) {
+    for (const entry of SELECTABLE) {
       roll -= entry.shares;
       if (roll <= 0) return entry.type;
     }
-    return EXPECTED_SHARES[EXPECTED_SHARES.length - 1].type;
+    return SELECTABLE[SELECTABLE.length - 1].type;
   }
 
-  it('10000 rolls: money appears 30-42% of the time (expected 36.8%)', () => {
+  it('10000 rolls: money appears 28-40% of the time (expected 34.2%)', () => {
     const N = 10000;
     let moneyCount = 0;
     for (let i = 0; i < N; i++) {
       if (weightedSelect() === 'money') moneyCount++;
     }
     const pct = moneyCount / N;
-    expect(pct).toBeGreaterThan(0.30);
-    expect(pct).toBeLessThan(0.42);
+    expect(pct).toBeGreaterThan(0.28);
+    expect(pct).toBeLessThan(0.40);
   });
 
-  it('10000 rolls: all 14 types appear at least once', () => {
+  it('10000 rolls: all 16 selectable types appear at least once', () => {
     const N = 10000;
     const counts = new Map<string, number>();
     for (let i = 0; i < N; i++) {
       const type = weightedSelect();
       counts.set(type, (counts.get(type) || 0) + 1);
     }
-    expect(counts.size).toBe(14);
-    for (const entry of EXPECTED_SHARES) {
+    expect(counts.size).toBe(16);
+    for (const entry of SELECTABLE) {
       expect(counts.has(entry.type), `${entry.type} should appear in ${N} rolls`).toBe(true);
     }
   });
 
-  it('10000 rolls: rare crates appear but infrequently (<2%)', () => {
+  it('10000 rolls: 1-share crates appear but infrequently (<2%)', () => {
     const N = 10000;
     const counts = new Map<string, number>();
     for (let i = 0; i < N; i++) {
       const type = weightedSelect();
       counts.set(type, (counts.get(type) || 0) + 1);
     }
-    for (const rare of ['icbm', 'timequake', 'vortex']) {
+    for (const rare of ['icbm', 'darkness', 'healbase', 'reveal']) {
       const pct = (counts.get(rare) || 0) / N;
       expect(pct, `${rare} should be < 2%`).toBeLessThan(0.02);
     }

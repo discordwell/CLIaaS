@@ -225,6 +225,8 @@ export class Team {
 
     this._members.splice(idx, 1);
     entity.teamRef = null;
+    // C++ team.cpp:2285-2289 — clears IsFormationMove when member is removed/dies
+    entity.formationOffset = null;
     this.isAltered = true;
 
     return true;
@@ -258,9 +260,11 @@ export class Team {
       const alive = this._members.filter(m => m.alive).length;
 
       // Remove dead members — clear their teamRef (C++ Remove sets Team=0, team.cpp:1116)
+      // C++ team.cpp:2285-2289 — also clear IsFormationMove on removal
       for (const m of this._members) {
         if (!m.alive) {
           m.teamRef = null;
+          m.formationOffset = null;
         }
       }
       this._members = this._members.filter(m => m.alive);
@@ -487,7 +491,10 @@ export class Team {
     for (const unit of this._members) {
       if (!unit.alive) continue;
 
-      if (this.zone && worldDist(unit.pos, this.zone) > 3) {
+      // C++ rules.cpp:260: StrayDistance = 0x0200 = 512 leptons = 2 cells
+      // C++ team.cpp:1909-1910: aircraft get 3x stray distance
+      const strayThreshold = unit.isAirUnit ? 2 * 3 : 2;
+      if (this.zone && worldDist(unit.pos, this.zone) > strayThreshold) {
         // Member too far — order to move to zone
         unit.mission = Mission.MOVE;
         unit.moveTarget = { ...this.zone };

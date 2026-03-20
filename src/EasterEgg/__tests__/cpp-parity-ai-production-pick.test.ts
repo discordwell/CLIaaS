@@ -131,7 +131,7 @@ describe('getAIProductionPick — category filtering (C++ factory.cpp prerequisi
   });
 
   it('infantry category also matches items with BARR prerequisite', () => {
-    // BARR is the Allied barracks — infantry category includes both TENT and BARR
+    // BARR is the Soviet barracks — infantry category includes both TENT and BARR
     const ctx = makeMockAIContext({
       scenarioProductionItems: makeMinimalItems(
         { type: 'E1', prerequisite: 'BARR', faction: 'both', techLevel: 1 },
@@ -172,7 +172,7 @@ describe('getAIProductionPick — structure filtering (C++ factory.cpp isStructu
     const ctx = makeMockAIContext({
       scenarioProductionItems: makeMinimalItems(
         { type: 'POWR', prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 1 },
-        { type: 'TENT', prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1 },
+        { type: 'TENT', prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 1 },
       ),
     });
     addAIHouse(ctx, House.USSR, { techLevel: 10 });
@@ -184,7 +184,7 @@ describe('getAIProductionPick — structure filtering (C++ factory.cpp isStructu
     const ctx = makeMockAIContext({
       scenarioProductionItems: makeMinimalItems(
         { type: 'E1', prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-        { type: 'TENT', prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1 },
+        { type: 'TENT', prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 1 },
       ),
     });
     addAIHouse(ctx, House.USSR, { techLevel: 10 });

@@ -28,8 +28,8 @@
  *   - Sell finalization: structure death, footprint clear, infantry survivors
  *   - Power grid recalculation after selling power plant
  *   - Service depot: vehicle repair cost, rearm, insufficient funds eject
- *   - AI repair (IQ >= 3, houseCredits deduction, 80% threshold)
- *   - AI sell (IQ >= 3, CONDITION_RED threshold, ConYard/last-power exemptions)
+ *   - AI repair (IQ >= 1, houseCredits deduction, 80% threshold)
+ *   - AI sell (IQ >= 1, CONDITION_RED threshold, ConYard/last-power exemptions)
  *   - Fire sale: all structures begin selling, units switch to HUNT
  *   - Wall sell: instant removal, 50% refund
  *   - Edge cases: repair + damage race, sell already-selling, zero-credit repair
@@ -638,9 +638,9 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
 
   it('sell duration is constant 38 ticks for all buildings (C++ make sheet parity)', () => {
     // C++ parity: all buildings use 20-frame make sheet
-    // timedelay = floor(0.05 * 900 / 20) = 2, duration = (20-1) * 2 = 38
+    // timedelay = floor(0.06 * 900 / 20) = floor(54/20) = 2, duration = (20-1) * 2 = 38
     const MAKE_FRAME_COUNT = 20;
-    const SELL_DURATION = (MAKE_FRAME_COUNT - 1) * Math.floor((0.05 * 900) / MAKE_FRAME_COUNT);
+    const SELL_DURATION = (MAKE_FRAME_COUNT - 1) * Math.floor((0.06 * 900) / MAKE_FRAME_COUNT);
     expect(SELL_DURATION).toBe(38);
     // All building types sell in 38 ticks regardless of damageFrame
     const factEntry = BUILDING_FRAME_TABLE['fact'];
@@ -689,18 +689,18 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     const chunk = indexSource.slice(sellSection, sellSection + 1500);
     expect(chunk).toContain('SURVIVOR_FRACTION');
     expect(chunk).toContain('survivorCount');
-    // Survivor count: (buildCost * 0.5) / E1_cost, clamped 1-5
+    // Survivor count: (buildCost * 0.4) / E1_cost, clamped 1-5
     expect(chunk).toContain('Math.min(5');
     expect(chunk).toContain('Math.max(1');
   });
 
-  it('survivor count formula: (buildCost * 0.5) / 100, clamped 1-5', () => {
-    // POWR: cost=300 → (300*0.5)/100 = 1.5 → floor → 1
-    // WEAP: cost=2000 → (2000*0.5)/100 = 10 → clamped to 5
-    // SILO: cost=150 → (150*0.5)/100 = 0.75 → clamped to 1
-    const powrSurvivors = Math.min(5, Math.max(1, Math.floor((300 * 0.5) / 100)));
-    const weapSurvivors = Math.min(5, Math.max(1, Math.floor((2000 * 0.5) / 100)));
-    const siloSurvivors = Math.min(5, Math.max(1, Math.floor((150 * 0.5) / 100)));
+  it('survivor count formula: floor(buildCost * 0.4 / 100), clamped 1-5', () => {
+    // POWR: cost=300 → floor(300*0.4/100) = floor(1.2) = 1
+    // WEAP: cost=2000 → floor(2000*0.4/100) = floor(8) = 5 (clamped)
+    // SILO: cost=150 → floor(150*0.4/100) = floor(0.6) = 1 (clamped min)
+    const powrSurvivors = Math.min(5, Math.max(1, Math.floor((300 * 0.4) / 100)));
+    const weapSurvivors = Math.min(5, Math.max(1, Math.floor((2000 * 0.4) / 100)));
+    const siloSurvivors = Math.min(5, Math.max(1, Math.floor((150 * 0.4) / 100)));
     expect(powrSurvivors).toBe(1);
     expect(weapSurvivors).toBe(5);
     expect(siloSurvivors).toBe(1);
@@ -821,7 +821,7 @@ describe('Service Depot — vehicle repair', () => {
     expect(far.hp).toBe(50);
   });
 
-  it('vehicle repair uses UREPAIR_STEP/UREPAIR_PERCENT cost formula (C++ rules.cpp:230-231)', () => {
+  it('vehicle repair uses UREPAIR_STEP/UREPAIR_PERCENT cost formula (rules.ini [Repairing])', () => {
     // JEEP: cost=600, maxHp=110
     // Cost per step = ceil(600 * UREPAIR_PERCENT / (110 / UREPAIR_STEP))
     //               = ceil(600 * 0.20 / (110 / 10)) = ceil(120 / 11) = ceil(10.91) = 11
@@ -1085,14 +1085,14 @@ describe('Wall Sell — instant removal + refund', () => {
 });
 
 // =========================================================================
-// 13. AI Auto-Repair (IQ >= 3)
+// 13. AI Auto-Repair (IQ >= 1)
 // =========================================================================
 describe('AI Auto-Repair — updateAIRepair', () => {
-  it('AI repair requires IQ >= 3', () => {
+  it('AI repair requires IQ >= 1 (rules.ini [IQ] RepairSell=1)', () => {
     const idx = aiSource.indexOf('export function updateAIRepair');
     expect(idx).toBeGreaterThan(-1);
     const chunk = aiSource.slice(idx, idx + 1200);
-    expect(chunk).toContain('state.iq < 3');
+    expect(chunk).toContain('state.iq < 1');
   });
 
   it('AI repair runs every 15 ticks (once per second)', () => {
@@ -1138,11 +1138,11 @@ describe('AI Auto-Repair — updateAIRepair', () => {
 // 14. AI Auto-Sell — updateAISellDamaged
 // =========================================================================
 describe('AI Auto-Sell — updateAISellDamaged', () => {
-  it('AI sell requires IQ >= 3', () => {
+  it('AI sell requires IQ >= 1 (rules.ini [IQ] RepairSell=1)', () => {
     const idx = aiSource.indexOf('export function updateAISellDamaged');
     expect(idx).toBeGreaterThan(-1);
     const chunk = aiSource.slice(idx, idx + 1500);
-    expect(chunk).toContain('state.iq < 3');
+    expect(chunk).toContain('state.iq < 1');
   });
 
   it('AI sell runs every 75 ticks (5 seconds)', () => {
@@ -1576,7 +1576,7 @@ describe('Engineer Repair vs Toggle Repair distinction', () => {
   it('engineer repair heals to FULL HP instantly (not step-based)', () => {
     const idx = missionAISource.indexOf('EN1: Friendly repair');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = missionAISource.slice(idx, idx + 200);
+    const chunk = missionAISource.slice(idx, idx + 300);
     expect(chunk).toContain('s.hp = s.maxHp');
   });
 

@@ -13,10 +13,8 @@ beforeEach(() => resetEntityIds());
 
 describe('MV4: JEEP three-point turn removed', () => {
   it('JEEP does NOT drift backward when rotating (three-point turn code removed)', () => {
-    // JEEP has rot=10 (>= 8), so it snaps facing instantly like infantry.
-    // Use a slow-rotating vehicle (1TNK, rot=5) with V_JEEP type overridden
-    // to simulate the scenario, OR test that JEEP only moves forward (never backward).
-    // Since JEEP snaps rotation, it moves forward immediately — verify no backward drift.
+    // C++ parity: all vehicles (including JEEP ROT=10) use accumulator rotation.
+    // JEEP stops to rotate, then moves forward. No backward drift ever occurs.
     const jeep = new Entity(UnitType.V_JEEP, House.Spain, 100, 100);
     jeep.facing = Dir.N;
     // Target is behind the jeep (south) — old code would have drifted backward by 0.3px
@@ -24,11 +22,13 @@ describe('MV4: JEEP three-point turn removed', () => {
 
     const startY = jeep.pos.y;
 
-    jeep.rotTickedThisFrame = false;
-    jeep.moveToward(target, jeep.stats.speed);
+    // JEEP ROT=10 now uses accumulator — first tick rotates but doesn't move (stop-rotate-move)
+    // Run enough ticks to complete rotation and start moving
+    for (let i = 0; i < 20; i++) {
+      jeep.rotTickedThisFrame = false;
+      jeep.moveToward(target, jeep.stats.speed);
+    }
 
-    // JEEP rot=10 snaps to face south instantly, then moves south (positive Y).
-    // The old three-point turn would have subtracted from position; now it only adds.
     // Key assertion: Y increases (moves toward target), never decreases (no backward drift).
     expect(jeep.pos.y).toBeGreaterThan(startY);
   });
