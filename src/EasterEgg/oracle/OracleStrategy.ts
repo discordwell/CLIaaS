@@ -7,7 +7,7 @@
  */
 
 import type { RAGameState, RAEntity, RAStructure, RABuildable } from './WasmAdapter';
-import { getCoastalCellsFromText } from './mapParser';
+import { getCoastalCellsFromText, parseMapPack } from './mapParser';
 
 /**
  * TS engine runs at 20 Hz. Oracle tick constants should use sec() to
@@ -70,26 +70,26 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 ];
 
 // SCG11EA "Aftermath": survive with armor first, then transition to naval.
-// Keep WEAP in the base for replacement tanks. Refineries should stay near ore.
-// Only chain buildings push east to the east shoreline. The shipyard itself
-// sits on land at x=57-58 with water immediately to the east for vessel exit.
+// The harness places buildings with direct Unlimbo() terrain legality, so the
+// east power chain is unnecessary here. Build a durable land economy first,
+// add a second war factory for tank replacement, then place the shipyard
+// directly onto the mapped east-ocean water once a scout has revealed x=63+.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['WEAP'],         type_ids: [2] },               // War factory — stabilize with tanks
-  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain east (3 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain east (3 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 11 }, // Chain east (3 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 14 }, // Chain east — reach x=60
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard on east shoreline (x=57-58)
-  // After the shipyard lands, switch to destroyers instead of overlapping
-  // naval production with more structure builds on this mission.
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — hold island, fund navy
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory — replace armor losses
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard on east-ocean water (x=63+)
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery after fleet online
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power as needed
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
-const SCG11EA_PRE_NAVAL_TANK_TARGET = 9;
-const SCG11EA_POST_NAVAL_TANK_TARGET = 7;
-const SCG11EA_SHIPYARD_READY_X = 56;
-const SCG11EA_ASSAULT_MIN_SHIPS = 4;
+const SCG11EA_PRE_NAVAL_TANK_TARGET = 12;
+const SCG11EA_POST_NAVAL_TANK_TARGET = 9;
+const SCG11EA_FLEET_ONLINE_SHIPS = 3;
+const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
+const SCG11EA_ASSAULT_MIN_SHIPS = 2;
 const SCG11EA_RIVER_SWEEP_POINTS: Point[] = [
   { cx: 67, cy: 91 },
   { cx: 71, cy: 72 },
@@ -311,12 +311,11 @@ export class OracleStrategy {
   private sawTanya = false;
   private sawRescue = false;
   private sawScg02eaConvoy = false;
+  private scg11eaCoastRevealed = false;
   private scg02eaAssaultIndex = 0;
   private baseBuildIndex = 0;
   private placementAttempts = 0;
   private lastPlacementTick = 0;
-  private scg11eaChainPlacementAttempts = 0;
-  private scg11eaChainLastPlacementTick = 0;
   private syrdPlacementStart = -1;
   private shipyardPlacementAttempts = 0;
   private shipyardLastPlacementTick = 0;
@@ -346,6 +345,8 @@ export class OracleStrategy {
   private mapParserCoastalCells: Point[] | null = null;
   // Optional INI text for dynamic coastal detection (set externally)
   private iniText: string | null = null;
+  // Cached terrain template array (parsed from MapPack once)
+  private terrainCache: Uint16Array | null = null;
 
   constructor(scenario = '') {
     this.scenario = scenario.replace(/\.[^.]+$/, '').toUpperCase();
@@ -358,6 +359,115 @@ export class OracleStrategy {
    */
   setINIText(text: string): void {
     this.iniText = text;
+  }
+
+  /** Get cached terrain data, parsing from INI text on first call. */
+  private getTerrain(): Uint16Array | null {
+    if (this.terrainCache) return this.terrainCache;
+    if (!this.iniText) return null;
+    try {
+      const { ttype } = parseMapPack(this.iniText);
+      this.terrainCache = ttype;
+      return ttype;
+    } catch { return null; }
+  }
+
+  // Sight ranges by type name (from RULES.INI)
+  private static readonly SIGHT: Record<string, number> = {
+    'FACT': 5, 'POWR': 4, 'APWR': 4, 'PROC': 6, 'WEAP': 4,
+    'SYRD': 4, 'SPEN': 4, 'TENT': 5, 'BARR': 5, 'DOME': 5,
+    '2TNK': 5, '1TNK': 4, '3TNK': 5, '4TNK': 4, 'ARTY': 5,
+    'E1': 4, 'E3': 4, 'E6': 3, 'HARV': 4, 'MCV': 4, 'DD': 5,
+  };
+
+  /**
+   * Check if a 2×2 building can be placed at (cx, cy).
+   * Like the white/red placement shading in-game: validates terrain,
+   * fog of war, and occupancy before sending the command.
+   * For naval buildings (SYRD/SPEN), terrain must be real water (template 1-2).
+   */
+  canPlaceBuilding(
+    cx: number, cy: number,
+    state: RAGameState,
+    naval: boolean,
+  ): boolean {
+    const terrain = this.getTerrain();
+    if (!terrain) return true; // no terrain data — can't validate, try anyway
+
+    // Foundation cells for a 2x2 building
+    const cells = [[cx, cy], [cx + 1, cy], [cx, cy + 1], [cx + 1, cy + 1]];
+
+    // Build set of cells occupied by allied structures
+    const occupied = new Set<string>();
+    for (const s of state.structures) {
+      if (!s.ally) continue;
+      // Most buildings 2x2, WEAP/FACT are wider
+      const w = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+          occupied.add(`${s.cx + dx},${s.cy + dy}`);
+        }
+      }
+    }
+
+    // Compute revealed cells from friendly structures + units
+    const revealed = new Set<string>();
+    const addSight = (x: number, y: number, sight: number) => {
+      const s2 = sight * sight;
+      for (let dy = -sight; dy <= sight; dy++) {
+        for (let dx = -sight; dx <= sight; dx++) {
+          if (dx * dx + dy * dy <= s2) {
+            revealed.add(`${x + dx},${y + dy}`);
+          }
+        }
+      }
+    };
+    for (const s of state.structures) {
+      if (!s.ally) continue;
+      const sight = OracleStrategy.SIGHT[s.t] ?? 3;
+      // Reveal from each cell the building occupies (approximation)
+      addSight(s.cx, s.cy, sight);
+      addSight(s.cx + 1, s.cy, sight);
+    }
+    for (const u of state.units) {
+      if (!u.ally) continue;
+      const sight = OracleStrategy.SIGHT[u.t] ?? 3;
+      addSight(u.cx, u.cy, sight);
+    }
+
+    for (const [x, y] of cells) {
+      if (x < 0 || x >= 128 || y < 0 || y >= 128) return false;
+      if (occupied.has(`${x},${y}`)) return false;
+      if (!revealed.has(`${x},${y}`)) return false;
+
+      const tt = terrain[y * 128 + x];
+      if (naval) {
+        // Naval: only real water templates (1 or 2)
+        if (tt !== 1 && tt !== 2) return false;
+      } else {
+        // Land: only clear terrain (255=CLEAR1 or 0xFFFF=TEMPLATE_NONE)
+        if (tt !== 255 && tt !== 0xFFFF) return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Find the best chain position — the furthest-east valid one.
+   * Skips positions that fail terrain/fog/occupancy checks.
+   */
+  private findBestChainPosition(
+    positions: Point[],
+    state: RAGameState,
+    naval: boolean,
+  ): Point | null {
+    let best: Point | null = null;
+    for (const pos of positions) {
+      if (this.canPlaceBuilding(pos.cx, pos.cy, state, naval)) {
+        best = pos; // keep going — want the furthest east
+      }
+    }
+    return best;
   }
 
   /** Return the mission-specific build order (or the default). */
@@ -403,22 +513,21 @@ export class OracleStrategy {
   }
 
   private scg11eaShipyardReady(alliedStructures: RAStructure[]): boolean {
-    return alliedStructures.some(
-      (s) => s.ally && s.cx >= SCG11EA_SHIPYARD_READY_X && s.cy >= 84 && s.cy <= 92,
+    return this.scg11eaCoastRevealed || alliedStructures.some(
+      (s) => s.ally && (s.t === 'SYRD' || s.t === 'SPEN'),
     );
   }
 
   private getScg11eaShipyardCandidates(): Point[] {
     return [
-      // The shipyard is a 3x3 land building that needs adjacent water for vessel
-      // exits. On SCG11EA the reliable east-shore anchors are the clear cells at
-      // x=58, y=86-93, with a few x=57 fallbacks near the north/south ends.
-      // Keep x=58 free by treating the east chain as "ready" once it reaches x=56.
-      { cx: 58, cy: 88 }, { cx: 58, cy: 89 }, { cx: 58, cy: 90 }, { cx: 58, cy: 87 },
-      { cx: 58, cy: 91 }, { cx: 58, cy: 86 }, { cx: 58, cy: 92 }, { cx: 58, cy: 93 },
-      { cx: 57, cy: 86 }, { cx: 57, cy: 85 }, { cx: 57, cy: 84 }, { cx: 57, cy: 93 },
-      { cx: 57, cy: 94 }, { cx: 57, cy: 95 }, { cx: 57, cy: 96 }, { cx: 57, cy: 83 },
-      { cx: 57, cy: 82 }, { cx: 57, cy: 81 }, { cx: 57, cy: 80 },
+      // SYRD/SPEN are WaterBound in the C++ data, so the 3x3 foundation must sit
+      // on water, not shoreline land. A live harness probe confirmed (63,86) as
+      // legal on SCG11EA after the east coast is mapped.
+      { cx: 63, cy: 86 }, { cx: 63, cy: 85 }, { cx: 63, cy: 87 }, { cx: 63, cy: 88 },
+      { cx: 63, cy: 84 }, { cx: 63, cy: 89 }, { cx: 63, cy: 90 }, { cx: 63, cy: 83 },
+      { cx: 64, cy: 86 }, { cx: 64, cy: 85 }, { cx: 64, cy: 87 }, { cx: 64, cy: 88 },
+      { cx: 64, cy: 84 }, { cx: 64, cy: 89 }, { cx: 64, cy: 90 }, { cx: 65, cy: 86 },
+      { cx: 65, cy: 85 }, { cx: 65, cy: 87 }, { cx: 65, cy: 88 },
     ];
   }
 
@@ -801,8 +910,9 @@ export class OracleStrategy {
         }
 
         if (uniqueCandidates.length > 0) {
-          const localIdx = this.shipyardPlacementAttempts % uniqueCandidates.length;
-          const cell = uniqueCandidates[localIdx];
+          // Use placement validator to find the first valid cell (skip fog/terrain failures)
+          const validCell = this.findBestChainPosition(uniqueCandidates, state, true);
+          const cell = validCell ?? uniqueCandidates[this.shipyardPlacementAttempts % uniqueCandidates.length];
           commands.push({
             cmd: 'place',
             rtti: RTTI_BUILDINGTYPE,
@@ -813,17 +923,13 @@ export class OracleStrategy {
             this.shipyardPlacementAttempts++;
             this.shipyardLastPlacementTick = state.tick;
           }
-          reasons.push(`place ${buildingProduction.t} at (${cell.cx},${cell.cy}) [water ${localIdx}/${uniqueCandidates.length}]`);
+          reasons.push(`place ${buildingProduction.t} at (${cell.cx},${cell.cy}) [water ${validCell ? 'valid' : this.shipyardPlacementAttempts}/${uniqueCandidates.length}]`);
         }
       } else {
         // Sort placement offsets by priority:
-        // 1. If shipyard is upcoming in build order, bias toward nearest water
-        //    (chains build radius toward coast for eventual shipyard placement)
-        // 2. Place refineries away from enemies
-        // 3. Default offset order
-        // For building placement, use the NEAREST allied structure to
-        // the water as the reference point (not just ConYard).
-        // This chains buildings toward the coast for shipyard placement.
+        // 1. SCG11EA refineries bias toward the ore field.
+        // 2. Other missions can bias toward the nearest coast.
+        // 3. Default offset order.
         const coastalCells2 = this.resolveCoastalCells(conYard);
         let placeRef = { cx: conYard.cx, cy: conYard.cy };
         if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC') {
@@ -835,7 +941,7 @@ export class OracleStrategy {
               placeRef = { cx: s.cx, cy: s.cy };
             }
           }
-        } else if (coastalCells2 && coastalCells2.length > 0) {
+        } else if (this.scenario !== 'SCG11EA' && coastalCells2 && coastalCells2.length > 0) {
           // Find the allied structure closest to water
           const waterTarget = coastalCells2[0];
           let bestDist = Infinity;
@@ -848,49 +954,6 @@ export class OracleStrategy {
           }
         }
 
-        const scg11eaChainBuild =
-          this.scenario === 'SCG11EA' &&
-          (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR') &&
-          alliedStructures.some((s) => s.t === 'PROC') &&
-          alliedStructures.some((s) => s.t === 'WEAP');
-        // SCG11EA: only post-bootstrap power plants march east.
-        // The first local POWR must land near the ConYard so the base can start.
-        if (scg11eaChainBuild) {
-          const chainPositions = [
-            // Near ConYard — fill gaps around deploy point
-            { cx: 32, cy: 88 }, { cx: 32, cy: 86 }, { cx: 32, cy: 90 },
-            { cx: 28, cy: 88 }, { cx: 28, cy: 86 },
-            // Eastward in 2-cell steps. POWR sight=3 only reveals 3 cells
-            // from building edge. 2-cell building + 3 sight = 5 cell reveal.
-            // Next building at +2 needs cells x to x+1 mapped — both within 5.
-            { cx: 34, cy: 88 }, { cx: 34, cy: 90 }, { cx: 34, cy: 86 },
-            { cx: 36, cy: 88 }, { cx: 36, cy: 90 }, { cx: 36, cy: 86 },
-            { cx: 38, cy: 88 }, { cx: 38, cy: 90 }, { cx: 38, cy: 86 },
-            { cx: 40, cy: 88 }, { cx: 40, cy: 90 }, { cx: 40, cy: 86 },
-            { cx: 42, cy: 88 }, { cx: 42, cy: 90 }, { cx: 42, cy: 86 },
-            { cx: 44, cy: 88 }, { cx: 44, cy: 90 }, { cx: 44, cy: 86 },
-            { cx: 46, cy: 88 }, { cx: 46, cy: 90 }, { cx: 46, cy: 86 },
-            { cx: 48, cy: 88 }, { cx: 48, cy: 90 },
-            { cx: 50, cy: 88 }, { cx: 50, cy: 90 },
-            { cx: 52, cy: 88 }, { cx: 52, cy: 90 },
-            { cx: 54, cy: 90 }, { cx: 54, cy: 88 },
-            // Stop the chain at x=56 and keep x=58 open for the shipyard footprint.
-            { cx: 56, cy: 90 }, { cx: 56, cy: 88 }, { cx: 56, cy: 86 }, { cx: 56, cy: 90 },
-          ];
-          const idx = this.scg11eaChainPlacementAttempts % chainPositions.length;
-          const pos = chainPositions[idx];
-          commands.push({
-            cmd: 'place',
-            rtti: RTTI_BUILDINGTYPE,
-            cx: pos.cx,
-            cy: pos.cy,
-          });
-          if (state.tick - this.scg11eaChainLastPlacementTick > 30) {
-            this.scg11eaChainPlacementAttempts++;
-            this.scg11eaChainLastPlacementTick = state.tick;
-          }
-          reasons.push(`place ${buildingProduction.t} at (${pos.cx},${pos.cy}) [chain ${idx}/${chainPositions.length}]`);
-        } else {
         let offsets = [...PLACEMENT_OFFSETS];
         if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC') {
           offsets.sort((a, b) => {
@@ -918,18 +981,33 @@ export class OracleStrategy {
         }
 
         let placeCx: number, placeCy: number;
-        if (this.placementAttempts < offsets.length) {
-          const offset = offsets[this.placementAttempts % offsets.length];
-          placeCx = placeRef.cx + offset.cx;
-          placeCy = placeRef.cy + offset.cy;
-        } else {
-          // Exhausted offsets — extend toward water
-          const wt = coastalCells2?.[0] ?? { cx: placeRef.cx, cy: placeRef.cy - 10 };
-          const angle = Math.atan2(wt.cy - placeRef.cy, wt.cx - placeRef.cx)
-            + ((this.placementAttempts % 5) - 2) * 0.3;
-          const dist = 8 + (this.placementAttempts % 10);
-          placeCx = Math.round(placeRef.cx + Math.cos(angle) * dist);
-          placeCy = Math.round(placeRef.cy + Math.sin(angle) * dist);
+        // Find first offset that passes terrain/fog/occupancy validation
+        let foundValid = false;
+        for (let i = 0; i < offsets.length; i++) {
+          const idx = (this.placementAttempts + i) % offsets.length;
+          const cx = placeRef.cx + offsets[idx].cx;
+          const cy = placeRef.cy + offsets[idx].cy;
+          if (this.canPlaceBuilding(cx, cy, state, false)) {
+            placeCx = cx;
+            placeCy = cy;
+            foundValid = true;
+            break;
+          }
+        }
+        if (!foundValid) {
+          if (this.placementAttempts < offsets.length) {
+            const offset = offsets[this.placementAttempts % offsets.length];
+            placeCx = placeRef.cx + offset.cx;
+            placeCy = placeRef.cy + offset.cy;
+          } else {
+            // Exhausted offsets — extend toward water
+            const wt = coastalCells2?.[0] ?? { cx: placeRef.cx, cy: placeRef.cy - 10 };
+            const angle = Math.atan2(wt.cy - placeRef.cy, wt.cx - placeRef.cx)
+              + ((this.placementAttempts % 5) - 2) * 0.3;
+            const dist = 8 + (this.placementAttempts % 10);
+            placeCx = Math.round(placeRef.cx + Math.cos(angle) * dist);
+            placeCy = Math.round(placeRef.cy + Math.sin(angle) * dist);
+          }
         }
         commands.push({
           cmd: 'place',
@@ -943,7 +1021,6 @@ export class OracleStrategy {
           this.lastPlacementTick = state.tick;
         }
         reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
-        } // close SCG11EA POWR else
       }
     } else if ((!buildingProduction || suppressScg11eaLeftoverBuild) && buildable) {
       // Nothing building — find next item in build order
@@ -951,17 +1028,8 @@ export class OracleStrategy {
       // so successive buildings don't land on the same cell
 
       const shipyardExists = existingShipyard;
-      const scg11eaShipyardName =
-        this.scenario === 'SCG11EA'
-          ? (buildable.structures.includes('SYRD') ? 'SYRD' :
-            buildable.structures.includes('SPEN') ? 'SPEN' : null)
-          : null;
       const scg11eaShipyardReady =
         this.scenario === 'SCG11EA' && this.scg11eaShipyardReady(alliedStructures);
-      const scg11eaCoreBaseReady =
-        this.scenario === 'SCG11EA' &&
-        alliedStructures.some((s) => s.t === 'PROC') &&
-        alliedStructures.some((s) => s.t === 'WEAP');
 
       if (this.scenario === 'SCG11EA' && shipyardExists) {
         const powerDeficit = state.power.consumed - state.power.produced;
@@ -969,7 +1037,54 @@ export class OracleStrategy {
         const gunCount = alliedStructures.filter(
           (s) => s.t === 'GUN' || s.t === 'FTUR',
         ).length;
+        const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+        const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
+        const survivingTanks = playerUnits.filter((u) => u.t.includes('TNK')).length;
         if (
+          procCount === 0 &&
+          buildable.structures.includes('PROC')
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 12,
+          });
+          reasons.push('rebuild PROC');
+        } else if (
+          weapCount === 0 &&
+          buildable.structures.includes('WEAP')
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 2,
+          });
+          reasons.push('rebuild WEAP');
+        } else if (
+          procCount < 2 &&
+          buildable.structures.includes('PROC') &&
+          state.credits >= 2000 &&
+          survivingTanks < SCG11EA_PRE_NAVAL_TANK_TARGET
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 12,
+          });
+          reasons.push(`restore economy (${procCount + 1}/2 PROC)`);
+        } else if (
+          weapCount < 2 &&
+          buildable.structures.includes('WEAP') &&
+          state.credits >= 2000 &&
+          survivingTanks < SCG11EA_PRE_NAVAL_TANK_TARGET
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 2,
+          });
+          reasons.push(`restore armor (${weapCount + 1}/2 WEAP)`);
+        } else if (
           scg11eaEnemyAirCount >= 4 &&
           aaCount < 2 &&
           buildable.structures.includes('AGUN') &&
@@ -1031,27 +1146,6 @@ export class OracleStrategy {
           type_id: 17, // STRUCT_POWER
         });
         reasons.push('produce POWR (power deficit)');
-      } else if (
-        this.scenario === 'SCG11EA' &&
-        !shipyardExists &&
-        scg11eaCoreBaseReady &&
-        !scg11eaShipyardReady &&
-        buildable.structures.includes('POWR')
-      ) {
-        commands.push({
-          cmd: 'produce',
-          rtti: RTTI_BUILDINGTYPE,
-          type_id: 17,
-        });
-        reasons.push('produce POWR (extend east chain)');
-      } else if (scg11eaShipyardName && !shipyardExists && scg11eaShipyardReady) {
-        const typeId = scg11eaShipyardName === 'SYRD' ? 27 : 28;
-        commands.push({
-          cmd: 'produce',
-          rtti: RTTI_BUILDINGTYPE,
-          type_id: typeId,
-        });
-        reasons.push(`produce ${scg11eaShipyardName}`);
       } else {
         // Find next building in build order we don't have yet.
         // Always scan from the start — buildings can be destroyed and
@@ -1079,7 +1173,7 @@ export class OracleStrategy {
           );
           if (buildableIdx >= 0) {
             if (isScg11eaShipyardGate && !scg11eaShipyardReady) {
-              reasons.push('hold for east chain');
+              reasons.push('hold for east scout');
               ordered = true;
               break;
             }
@@ -1093,7 +1187,7 @@ export class OracleStrategy {
             break;
           } else {
             if (isScg11eaShipyardGate) {
-              reasons.push('hold for shipyard');
+              reasons.push(scg11eaShipyardReady ? 'hold for shipyard' : 'hold for east scout');
               ordered = true;
               break;
             }
@@ -1144,14 +1238,18 @@ export class OracleStrategy {
     // Aim for at least 2 harvesters, or 1 per refinery, whichever is more
     const tankCount = playerUnits.filter((u) => u.t.includes('TNK')).length;
     const harvCount = playerUnits.filter((u) => u.t === 'HARV').length;
+    const navalCount = playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length;
     const refCount = alliedStructures.filter((s) => s.t === 'PROC').length;
     const targetHarvesters = Math.max(2, refCount);
     const needHarvester = harvCount < targetHarvesters && buildable?.units.includes('HARV');
 
     // SCG11EA: hold a bigger tank floor before switching to destroyers.
+    const scg11eaFleetOnline =
+      this.scenario === 'SCG11EA' &&
+      navalCount >= SCG11EA_FLEET_ONLINE_SHIPS;
     const scg11eaTankTarget =
       this.scenario === 'SCG11EA'
-        ? ((hasShipyard || buildingProduction?.t === 'SYRD')
+        ? (scg11eaFleetOnline
           ? SCG11EA_POST_NAVAL_TANK_TARGET
           : SCG11EA_PRE_NAVAL_TANK_TARGET)
         : 0;
@@ -2335,11 +2433,12 @@ export class OracleStrategy {
         : null;
 
       // Tanya spawns at (25,107) but team script parks her in impassable building zone.
-      // Warp to (20,87) — north of barrel cluster at y=88, so she can shoot barrels
-      // immediately and chain explosions clear the path to SAMs.
-      if (tanya.cy > 108 || (tanya.cy > 95 && !lastTarget)) {
+      // Warp to (20,87) — only survivable spot near barrels. BARL(21,88),
+      // BARL(19,87), BRL3(20,88) all within Colt45 range. Shoot barrels for
+      // chain explosions that clear the path to SAMs at y=94/107.
+      if (tanya.cy > 95) {
         commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 20, cy: 87 } as never);
-        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (20,87) near barrels`);
+        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (20,87) barrel zone`);
         return { commands, reason: reasons.join('; ') };
       }
 
@@ -2355,9 +2454,14 @@ export class OracleStrategy {
         });
         this.lastUnitTargets.delete(tanya.id); // clear target on flee
         reasons.push(`Tanya FLEE dog(${nearestDog!.cx},${nearestDog!.cy}) d=${Math.sqrt(dogDist).toFixed(1)}`);
+      } else if (barrelsInRange.length > 0) {
+        // PRIORITY 2: Shoot barrels in weapon range — instant chain explosions!
+        const barrel = barrelsInRange[0];
+        commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: barrel.id });
+        this.lastUnitTargets.delete(tanya.id);
+        reasons.push(`Tanya BOOM ${barrel.t}(${barrel.cx},${barrel.cy}) d=${Math.sqrt(this.distanceSq(tanya, barrel)).toFixed(1)}`);
       } else if (infantryInRange.length > 0) {
-        // PRIORITY 2: Shoot nearest infantry — Tanya one-shots most at range 5.75
-        // Clear the area before approaching structures. Only send if target changes.
+        // PRIORITY 3: Shoot nearest infantry — Tanya one-shots most at range 5.75
         const target = infantryInRange[0];
         if (!lastTarget || lastTarget.targetId !== target.id) {
           commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
@@ -2511,33 +2615,53 @@ export class OracleStrategy {
     const alliedStructures = state.structures.filter((s) => s.ally);
 
     // Let MCVs deploy naturally via decideBaseBuilding.
-    // The eastward chain handles reaching the coast from wherever ConYard ends up.
-
-    // Scout north to reveal water cells for SYRD placement (fog of war blocks placement).
-    // Send a tank (Sight=5) to the shore at y=80 — reveals water at y=75+.
-    if (this.waterScoutId >= 0 && !playerUnits.some((u) => u.id === this.waterScoutId)) {
-      this.waterScoutId = -1; // scout died, reset
+    // The harness can place the shipyard directly once the east shoreline is mapped.
+    const coastScoutTarget = SCG11EA_SHIPYARD_SCOUT_TARGET;
+    const coastMappedNow = playerUnits.some(
+      (u) =>
+        !NAVAL_COMBAT_TYPES.has(u.t) &&
+        u.t !== 'HARV' &&
+        u.t !== 'MCV' &&
+        this.distanceSq(u, coastScoutTarget) <= 36,
+    );
+    if (coastMappedNow) {
+      this.scg11eaCoastRevealed = true;
     }
-    if (this.waterScoutId < 0) {
-      // Prefer tanks (sight=5) over infantry (sight=4) for deeper reveal
-      const scouts = playerUnits.filter(
-        (u) => (u.t.includes('TNK') || u.t === 'ARTY' || u.t === 'E1') &&
-          (u.m === MISSION_GUARD || u.m === MISSION_GUARD_AREA),
-      );
-      // Sort: tanks first, then arty, then infantry
-      scouts.sort((a, b) => {
-        const rank = (t: string) => t.includes('TNK') ? 0 : t === 'ARTY' ? 1 : 2;
-        return rank(a.t) - rank(b.t);
-      });
-      if (scouts.length > 0) {
-        this.waterScoutId = scouts[0].id;
-        commands.push({
-          cmd: 'move',
-          ids: [this.waterScoutId],
-          cx: 63, cy: 88,  // east coast — real water starts at x=63
+
+    // Scout east to reveal the precise shoreline anchors for SYRD placement.
+    if (this.waterScoutId >= 0 && !playerUnits.some((u) => u.id === this.waterScoutId)) {
+      this.waterScoutId = -1;
+    }
+    if (!this.scg11eaCoastRevealed) {
+      let scout = this.waterScoutId >= 0
+        ? playerUnits.find((u) => u.id === this.waterScoutId)
+        : undefined;
+      if (!scout) {
+        const scouts = playerUnits.filter(
+          (u) => (u.t.includes('TNK') || u.t === 'ARTY' || u.t === 'E1') &&
+            (u.m === MISSION_GUARD || u.m === MISSION_GUARD_AREA),
+        );
+        scouts.sort((a, b) => {
+          const rank = (t: string) => t.includes('TNK') ? 0 : t === 'ARTY' ? 1 : 2;
+          return rank(a.t) - rank(b.t);
         });
-        this.recordMove(this.waterScoutId, 63, 88);
-        reasons.push(`scout east (${scouts[0].t}) to reveal water`);
+        scout = scouts[0];
+        if (scout) this.waterScoutId = scout.id;
+      }
+      if (scout) {
+        if (this.distanceSq(scout, coastScoutTarget) <= 36) {
+          this.scg11eaCoastRevealed = true;
+          reasons.push(`east shore mapped (${scout.t})`);
+        } else if (this.shouldMove(scout, coastScoutTarget.cx, coastScoutTarget.cy)) {
+          commands.push({
+            cmd: 'move',
+            ids: [scout.id],
+            cx: coastScoutTarget.cx,
+            cy: coastScoutTarget.cy,
+          });
+          this.recordMove(scout.id, coastScoutTarget.cx, coastScoutTarget.cy);
+          reasons.push(`scout east (${scout.t}) to (${coastScoutTarget.cx},${coastScoutTarget.cy})`);
+        }
       }
     }
 
@@ -2584,41 +2708,48 @@ export class OracleStrategy {
     const enemyStructures = state.structures.filter((s) => !s.ally);
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
-      // Continuously retarget ships toward visible submarines, but spread fire
-      // across the line so the fleet clears the bottleneck instead of overkilling
-      // one sub at a time.
-      const retargetDue = (state.tick % 40) < 5;
-      const huntingShips = retargetDue
-        ? playerShips
-        : playerShips.filter((u) => this.shouldRecommand(u, enemySubs));
-      if (huntingShips.length > 0) {
-        const targetLoad = new Map<number, number>();
-        for (const ship of huntingShips) {
-          let best = enemySubs[0];
-          let bestScore = Infinity;
-          for (const sub of enemySubs) {
-            const load = targetLoad.get(sub.id) ?? 0;
-            const score = this.distanceSq(ship, sub) + load * 400;
-            if (score < bestScore) {
-              bestScore = score;
-              best = sub;
-            }
+      // The harness exposes all enemy submarines, including boats outside current
+      // vision. Direct ATTACK orders can stall forever on hidden targets, so drive
+      // destroyers with HUNT missions toward the latest known submarine cells.
+      const huntingShips = playerShips.slice().sort((a, b) => a.id - b.id);
+      const targetLoad = new Map<number, number>();
+      let issued = 0;
+      for (const ship of huntingShips) {
+        let best = enemySubs[0];
+        let bestScore = Infinity;
+        for (const sub of enemySubs) {
+          const load = targetLoad.get(sub.id) ?? 0;
+          const score = this.distanceSq(ship, sub) + load * 900;
+          if (score < bestScore) {
+            bestScore = score;
+            best = sub;
           }
-          targetLoad.set(best.id, (targetLoad.get(best.id) ?? 0) + 1);
-          commands.push({ cmd: 'attack', ids: [ship.id], target: best.id });
         }
-        reasons.push(`hunt subs (${huntingShips.length} ships → ${enemySubs.length} SS)`);
+        targetLoad.set(best.id, (targetLoad.get(best.id) ?? 0) + 1);
+        if (!this.shouldMove(ship, best.cx, best.cy) && !this.isIdle(ship)) continue;
+        if (this.distanceSq(ship, best) <= 16 && !this.isIdle(ship)) continue;
+        commands.push({
+          cmd: 'attack_move',
+          ids: [ship.id],
+          cx: best.cx,
+          cy: best.cy,
+        });
+        this.recordMove(ship.id, best.cx, best.cy);
+        issued++;
       }
+      if (issued > 0) reasons.push(`hunt subs (${issued}/${playerShips.length} ships → ${enemySubs.length} SS)`);
     } else if (playerShips.length > 0 && enemySubs.length === 0) {
       // No subs visible — spread along the full river corridor so hidden boats
       // at the north/south extremes get found quickly.
-      const patrolShips = playerShips
-        .filter((u) => this.isIdle(u) || this.shouldMove(u, u.cx, u.cy))
-        .sort((a, b) => a.id - b.id);
+      const patrolShips = playerShips.slice().sort((a, b) => a.id - b.id);
+      const sweepPhase = Math.floor(state.tick / sec(20));
       for (let i = 0; i < patrolShips.length; i++) {
         const ship = patrolShips[i];
-        const patrolTarget = SCG11EA_RIVER_SWEEP_POINTS[i % SCG11EA_RIVER_SWEEP_POINTS.length];
-        if (this.distanceSq(ship, patrolTarget) <= 225 && !this.isIdle(ship)) continue;
+        const patrolTarget = SCG11EA_RIVER_SWEEP_POINTS[
+          (sweepPhase + i) % SCG11EA_RIVER_SWEEP_POINTS.length
+        ];
+        if (!this.isIdle(ship) && !this.shouldMove(ship, patrolTarget.cx, patrolTarget.cy)) continue;
+        if (this.distanceSq(ship, patrolTarget) <= 36 && !this.isIdle(ship)) continue;
         commands.push({
           cmd: 'attack_move',
           ids: [ship.id],
