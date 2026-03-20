@@ -17,16 +17,16 @@ describe('Ant sprite manifest entries', () => {
   const ANTS = ['ant1', 'ant2', 'ant3'];
 
   for (const name of ANTS) {
-    it(`${name} has correct manifest entry (48x48, 112 frames)`, () => {
+    it(`${name} has correct manifest entry (24x24, 112 frames)`, () => {
       const entry = manifest[name];
       expect(entry, `${name} missing from manifest`).toBeDefined();
-      expect(entry.frameWidth).toBe(48);
-      expect(entry.frameHeight).toBe(48);
+      expect(entry.frameWidth).toBe(24);
+      expect(entry.frameHeight).toBe(24);
       expect(entry.frameCount).toBe(112);
       expect(entry.columns).toBe(16);
       expect(entry.rows).toBe(7);
-      expect(entry.sheetWidth).toBe(768);
-      expect(entry.sheetHeight).toBe(336);
+      expect(entry.sheetWidth).toBe(384);
+      expect(entry.sheetHeight).toBe(168);
     });
   }
 
