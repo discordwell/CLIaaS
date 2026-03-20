@@ -86,7 +86,7 @@ const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
-const SCG11EA_PRE_NAVAL_TANK_TARGET = 12;  // Hold the island, but don't starve the shipyard
+const SCG11EA_PRE_NAVAL_TANK_TARGET = 20;  // Mass 18+ tanks before assaulting
 const SCG11EA_SHIPYARD_TANK_FLOOR = 8;     // Finish SYRD once we have a credible beachhead
 const SCG11EA_SUB_HUNT_TANK_FLOOR = 6;     // Keep a real island hold while DDs clear the river
 const SCG11EA_LATE_SUB_HUNT_TANK_FLOOR = 4; // Once the base is stable, spend the rest on DD rebuilds
@@ -98,7 +98,7 @@ const SCG11EA_HUNT_MIN_SHIPS = 3;
 const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
-const SCG11EA_ASSAULT_MIN_ARMOR = 12;      // Need 12+ tanks to break through Mammoths + Teslas
+const SCG11EA_ASSAULT_MIN_ARMOR = 10;      // Achievable with 2 WEAP + 3 HARV economy
 const SCG11EA_ASSAULT_RETREAT_FLOOR = 4;   // Stay on the island longer before abandoning the pressure
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
 const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 2;
@@ -110,6 +110,9 @@ const SCG11EA_GROUND_DEFENSE_TRIGGER = 2;
 const SCG11EA_DEFENSE_CREDIT_RESERVE = 800;
 const SCG11EA_ECON_REBUILD_FLOOR = 500;
 const SCG11EA_PROC_REBUILD_RESERVE = 1200;
+const SCG11EA_CRITICAL_FLEET_SHIP_CREDIT = 25;
+const SCG11EA_FLEET_RECOVERY_SHIP_CREDIT = 100;
+const SCG11EA_POWER_REBUILD_EMERGENCY_DEFICIT = 40;
 const SCG11EA_RIVER_SWEEP_POINTS: Point[] = [
   { cx: 67, cy: 91 },
   { cx: 71, cy: 72 },
@@ -1294,6 +1297,12 @@ export class OracleStrategy {
         const scg11eaSubHuntLive = scg11eaEnemySubCount > 0;
         const scg11eaEconomyCollapsed = procCount === 0;
         const scg11eaEconomyFragile = procCount < 2;
+        const scg11eaPowerRebuildDeferred =
+          scg11eaSubHuntLive &&
+          scg11eaFleetShort &&
+          state.power.produced > 0 &&
+          powerDeficit > 0 &&
+          powerDeficit < SCG11EA_POWER_REBUILD_EMERGENCY_DEFICIT;
         const scg11eaStaticDefenseUnlocked =
           !scg11eaFleetShort &&
           shipCount >= SCG11EA_STATIC_DEFENSE_MIN_SHIPS &&
@@ -1347,6 +1356,8 @@ export class OracleStrategy {
             type_id: 2,
           });
           reasons.push(`emergency rebuild WEAP (${survivingTanks} tanks, ships=${shipCount}, threats=${scg11eaGroundThreatCount})`);
+        } else if (powerDeficit > 0 && scg11eaPowerRebuildDeferred) {
+          reasons.push(`defer APWR for fleet (${state.power.produced}/${state.power.consumed}, ${shipCount}/${scg11eaDesiredShips} DD)`);
         } else if (powerDeficit > 0 && buildable.structures.includes('APWR')) {
           commands.push({
             cmd: 'produce',
@@ -1707,7 +1718,11 @@ export class OracleStrategy {
       ? (scg11eaNavalEconomyFragile
         ? SCG11EA_PROC_REBUILD_RESERVE
         : scg11eaSubHuntPhase
-          ? (scg11eaBasePressure ? SCG11EA_DEFENSE_CREDIT_RESERVE : 250)
+          ? scg11eaFleetShort
+            ? (navalCount <= 1
+              ? SCG11EA_CRITICAL_FLEET_SHIP_CREDIT
+              : SCG11EA_FLEET_RECOVERY_SHIP_CREDIT)
+            : (scg11eaBasePressure ? SCG11EA_DEFENSE_CREDIT_RESERVE : 250)
           : 400)
       : 800;
     const shouldProduceShips = this.scenario === 'SCG11EA'
@@ -2856,35 +2871,39 @@ export class OracleStrategy {
         commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
         reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(this.distanceSq(tanya, target)).toFixed(1)} [${infantryOnly.length}]`);
       } else {
-        // PRIORITY 3: C4 nearest enemy building (Tanya plants bomb).
-        // Barrels first (chain explosions are the whole point), then nearest.
-      // Sort: dangerous defenses first (MISS, FTUR, GUN, TSLA), then barrels, then nearest
-        const DEFENSE_TYPES = new Set(['MISS', 'FTUR', 'GUN', 'TSLA', 'PBOX', 'HBOX']);
-        const targetable = state.structures.filter((s) =>
-          !s.ally && s.hp > 0 && this.distanceSq(tanya, s) <= 625, // 25 cells
-        ).sort((a, b) => {
-          // Barrels first (chain explosions clear the area), then defenses, then rest
-          const aB = BARREL_TYPES.has(a.t) ? 0 : DEFENSE_TYPES.has(a.t) ? 1 : 2;
-          const bB = BARREL_TYPES.has(b.t) ? 0 : DEFENSE_TYPES.has(b.t) ? 1 : 2;
-          if (aB !== bB) return aB - bB;
-          return this.distanceSq(tanya, a) - this.distanceSq(tanya, b);
-        });
+        // PRIORITY 3: Shoot any barrel in gun range (instant chain explosion)
+        const shootableBarrel = state.structures.find((s) =>
+          BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 &&
+          this.distanceSq(tanya, s) <= TANYA_RANGE_SQ,
+        );
+        if (shootableBarrel) {
+          commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: shootableBarrel.id });
+          this.lastUnitTargets.delete(tanya.id);
+          reasons.push(`Tanya BOOM ${shootableBarrel.t}(${shootableBarrel.cx},${shootableBarrel.cy}) d=${Math.sqrt(this.distanceSq(tanya, shootableBarrel)).toFixed(1)}`);
+        } else {
+          // PRIORITY 4: C4 nearest structure — SAMs first (that's the objective),
+          // then defenses, then barrels we need to walk to, then anything else.
+          const DEFENSE_TYPES = new Set(['MISS', 'FTUR', 'GUN', 'TSLA', 'PBOX', 'HBOX']);
+          const targetable = state.structures.filter((s) =>
+            !s.ally && s.hp > 0 && this.distanceSq(tanya, s) <= 625,
+          ).sort((a, b) => {
+            // SAMs first (objective), then defenses, then barrels, then rest
+            const aPri = a.t === 'SAM' ? 0 : DEFENSE_TYPES.has(a.t) ? 1 : BARREL_TYPES.has(a.t) ? 2 : 3;
+            const bPri = b.t === 'SAM' ? 0 : DEFENSE_TYPES.has(b.t) ? 1 : BARREL_TYPES.has(b.t) ? 2 : 3;
+            if (aPri !== bPri) return aPri - bPri;
+            return this.distanceSq(tanya, a) - this.distanceSq(tanya, b);
+          });
 
-        const target = targetable[0] ?? null;
-        if (target) {
-          const tId = target.id;
-          const tDist = this.distanceSq(tanya, target);
-          if (BARREL_TYPES.has(target.t) && tDist <= TANYA_RANGE_SQ) {
-            // Barrel in gun range — SHOOT it (one-shot kill, chain explosion)
-            commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: tId });
-            this.lastUnitTargets.delete(tanya.id);
-          } else if (!lastTarget || lastTarget.targetId !== tId) {
-            // C4 everything else (or walk toward barrels out of range)
-            commands.push({ cmd: 'attack', ids: [tanya.id], target: tId });
-            this.lastUnitTargets.set(tanya.id, { targetId: tId, cx: target.cx, cy: target.cy, tick: state.tick });
+          const target = targetable[0] ?? null;
+          if (target) {
+            const tId = target.id;
+            const tDist = this.distanceSq(tanya, target);
+            if (!lastTarget || lastTarget.targetId !== tId) {
+              commands.push({ cmd: 'attack', ids: [tanya.id], target: tId });
+              this.lastUnitTargets.set(tanya.id, { targetId: tId, cx: target.cx, cy: target.cy, tick: state.tick });
+            }
+            reasons.push(`Tanya → C4 ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)}`);
           }
-          const label = BARREL_TYPES.has(target.t) ? 'BARREL' : target.t;
-          reasons.push(`Tanya → C4 ${label}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)}`);
         }
       }
 
