@@ -3,7 +3,7 @@ import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
 
-describe('SCG05EA pathfind debug', () => {
+describe('SCG05EA y=47 test', () => {
   let adapter: TsAgentAdapter;
 
   beforeAll(async () => {
@@ -15,10 +15,10 @@ describe('SCG05EA pathfind debug', () => {
     await adapter.disconnect();
   }, 20_000);
 
-  it('probes passability cell by cell from (20,48) eastward', async () => {
+  it('can spy move to y=47?', async () => {
     await adapter.loadScenario('SCG05EA');
 
-    // Wait for spy
+    // Get spy
     let state = (await adapter.step(1)).state;
     for (let i = 0; i < 40; i++) {
       state = (await adapter.step(15)).state;
@@ -26,57 +26,47 @@ describe('SCG05EA pathfind debug', () => {
     }
     const spy = state.units.find(u => u.t === 'SPY')!;
 
-    // Move spy to (20,48) via north corridor
+    // Move to (18,48) first
     await adapter.step(1, [{ cmd: 'move', unitIds: [spy.id], cx: 18, cy: 48 }]);
     for (let i = 0; i < 30; i++) {
       state = (await adapter.step(15)).state;
       const s = state.units.find(u => u.t === 'SPY');
-      if (!s) { console.log('SPY DIED'); return; }
-      if (s.cx >= 18 && s.cy === 48) break;
+      if (s && s.cx >= 18 && s.cy <= 48) break;
     }
+    let s = state.units.find(u => u.t === 'SPY')!;
+    console.log(`Start: (${s.cx},${s.cy})`);
 
-    await adapter.step(1, [{ cmd: 'move', unitIds: [spy.id], cx: 20, cy: 48 }]);
-    for (let i = 0; i < 30; i++) {
-      state = (await adapter.step(15)).state;
-      const s = state.units.find(u => u.t === 'SPY');
-      if (!s) { console.log('SPY DIED'); return; }
-      if (s.cx >= 20 && s.cy === 48) break;
-    }
+    // Try moving to y=47
+    const r = await adapter.step(120, [{ cmd: 'move', unitIds: [s.id], cx: 18, cy: 47 }]);
+    const s2 = r.state.units.find(u => u.t === 'SPY');
+    console.log(`After move to (18,47): ${s2 ? `(${s2.cx},${s2.cy}) m="${s2.m}"` : 'SPY GONE!'}`);
+    if (!s2) return;
 
-    let spyNow = state.units.find(u => u.t === 'SPY')!;
-    console.log(`Spy at (${spyNow.cx},${spyNow.cy})`);
+    // Try moving to (30,47) — past the tree
+    const r2 = await adapter.step(300, [{ cmd: 'move', unitIds: [s2.id], cx: 30, cy: 47 }]);
+    const s3 = r2.state.units.find(u => u.t === 'SPY');
+    console.log(`After move to (30,47): ${s3 ? `(${s3.cx},${s3.cy}) m="${s3.m}"` : 'SPY GONE!'}`);
+    if (!s3) return;
 
-    // Now try moving 1 cell at a time eastward
-    for (let targetX = spyNow.cx + 1; targetX <= 35; targetX++) {
-      const result = await adapter.step(120, [
-        { cmd: 'move', unitIds: [spyNow.id], cx: targetX, cy: 48 },
-      ]);
-      state = result.state;
-      const s = state.units.find(u => u.t === 'SPY');
-      if (!s) { console.log(`  → (${targetX},48): SPY DIED`); break; }
-      const moved = s.cx === targetX && s.cy === 48;
-      const cmdOk = result.results.map(r => `${r.cmd}:${r.ok}`).join(',');
-      console.log(`  → (${targetX},48): ${moved ? 'OK' : `STUCK at (${s.cx},${s.cy})`} cmd=${cmdOk} m="${s.m}" hp=${s.hp}`);
-      if (!moved) {
-        // Also try y=49 as alternative
-        const alt = await adapter.step(120, [
-          { cmd: 'move', unitIds: [s.id], cx: targetX, cy: 49 },
-        ]);
-        const s2 = alt.state.units.find(u => u.t === 'SPY');
-        if (s2) {
-          console.log(`    alt (${targetX},49): ${s2.cx === targetX ? 'OK' : `STUCK at (${s2.cx},${s2.cy})`}`);
-        }
-        // Try y=50
-        const alt2 = await adapter.step(120, [
-          { cmd: 'move', unitIds: [s.id], cx: targetX, cy: 50 },
-        ]);
-        const s3 = alt2.state.units.find(u => u.t === 'SPY');
-        if (s3) {
-          console.log(`    alt (${targetX},50): ${s3.cx === targetX ? 'OK' : `STUCK at (${s3.cx},${s3.cy})`}`);
-        }
-        break;
-      }
-      spyNow = s;
+    // Try moving to (31,48) — past the tree, back at y=48
+    const r3 = await adapter.step(300, [{ cmd: 'move', unitIds: [s3.id], cx: 31, cy: 48 }]);
+    const s4 = r3.state.units.find(u => u.t === 'SPY');
+    console.log(`After move to (31,48): ${s4 ? `(${s4.cx},${s4.cy}) m="${s4.m}"` : 'SPY GONE!'}`);
+    if (!s4) return;
+
+    // If we got past tree, continue to WEAP
+    const r4 = await adapter.step(600, [{ cmd: 'move', unitIds: [s4.id], cx: 44, cy: 48 }]);
+    const s5 = r4.state.units.find(u => u.t === 'SPY');
+    console.log(`After move to (44,48): ${s5 ? `(${s5.cx},${s5.cy}) m="${s5.m}"` : 'SPY GONE!'}`);
+    if (!s5) return;
+
+    // Infiltrate WEAP
+    const weap = r4.state.structures.find(st => st.t === 'WEAP' && !st.ally);
+    if (weap) {
+      console.log(`\nSending spy to WEAP at (${weap.cx},${weap.cy})`);
+      const r5 = await adapter.step(600, [{ cmd: 'attack_struct', unitIds: [s5.id], structIdx: weap.idx }]);
+      const s6 = r5.state.units.find(u => u.t === 'SPY');
+      console.log(`Result: ${s6 ? `SPY at (${s6.cx},${s6.cy})` : 'SPY INFILTRATED!'} globals=${r5.state.globals.join(',')}`);
     }
 
     expect(true).toBe(true);
