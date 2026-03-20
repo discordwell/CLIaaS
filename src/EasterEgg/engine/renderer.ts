@@ -1163,24 +1163,27 @@ export class Renderer {
             break;
           }
           case Terrain.WALL: {
-            // Skip gray fill for wall-type structures — they render as sprites in structure pass
+            // Skip for wall-type structures — they render as sprites in structure pass
             if (map.getWallType(cx, cy)) break;
+            // C++ parity: buildings don't change the cell's template (cell.cpp:981-987).
+            // The cell retains its original ground tile. Draw using the cell's MapPack
+            // template/icon, falling back to CLEAR1 (template 255 in tileset).
             if (this.theatre === 'INTERIOR') {
-              // Interior: concrete walls
               const bright = 40 + (h % 6);
               ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
               ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
               ctx.strokeStyle = 'rgba(0,0,0,0.3)';
               ctx.lineWidth = 1;
               ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
-            } else {
-              // C++ parity (cell.cpp:981-987): building footprint cells draw TEMPLATE_CLEAR1.
-              // The tileset extraction maps CLEAR1 to template 255 (extract-ra-tiles.ts:52).
-              // Use icon 0 — the single extracted CLEAR1 tile for the current theatre
-              // (grass in TEMPERATE, snow in SNOW).
-              if (!useTileset || !this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
-                this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+            } else if (useTileset) {
+              // Try the cell's original template first, then fall back to CLEAR1
+              if (!this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
+                if (!this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
+                  this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+                }
               }
+            } else {
+              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
             }
             break;
           }
