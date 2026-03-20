@@ -241,8 +241,8 @@ describe('SCG04EA simulation — generic handler analysis', () => {
         makeEntity(1, 'JEEP', 'Greece', 86, 53),
         makeEntity(2, 'E1', 'Greece', 87, 52),
         makeEntity(4, 'HARV', 'Greece', 80, 48),
-        makeEntity(5, '2TNK', 'Greece', 85, 51),
-        makeEntity(6, '2TNK', 'Greece', 86, 51),
+        makeEntity(5, '1TNK', 'Greece', 85, 51),
+        makeEntity(6, '1TNK', 'Greece', 86, 51),
       ],
       enemies: enemyUnits(),
       structures: [
@@ -254,7 +254,7 @@ describe('SCG04EA simulation — generic handler analysis', () => {
       ],
       buildable: {
         structures: ['POWR', 'PROC', 'TENT', 'FIX'],
-        units: ['HARV', '1TNK', '2TNK', 'APC', 'JEEP', 'MNLY'],
+        units: ['HARV', '1TNK', 'APC', 'JEEP', 'MNLY'],
         infantry: ['E1', 'E3', 'MEDI'],
       },
     });
@@ -270,7 +270,7 @@ describe('SCG04EA simulation — generic handler analysis', () => {
   it('phase 7 (tick 5000): 8 tanks + economy — attacks enemy base', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const tanks = Array.from({ length: 8 }, (_, i) =>
-      makeEntity(10 + i, '2TNK', 'Greece', 85 + (i % 4), 51 + Math.floor(i / 4), 256, 256, 5),
+      makeEntity(10 + i, '1TNK', 'Greece', 85 + (i % 4), 51 + Math.floor(i / 4), 256, 256, 5),
     );
     const state = makeState({
       tick: 5000,
@@ -294,7 +294,7 @@ describe('SCG04EA simulation — generic handler analysis', () => {
       ],
       buildable: {
         structures: ['POWR', 'TENT', 'FIX', 'AGUN'],
-        units: ['HARV', '1TNK', '2TNK', 'APC', 'JEEP', 'MNLY'],
+        units: ['HARV', '1TNK', 'APC', 'JEEP', 'MNLY'],
         infantry: ['E1', 'E3', 'MEDI'],
       },
     });
@@ -314,7 +314,7 @@ describe('SCG04EA simulation — generic handler analysis', () => {
   it('phase 7b (tick 8000): enemy autocreate keeps producing — oracle turtles forever', () => {
     const strategy = new OracleStrategy('SCG04EA');
     const tanks = Array.from({ length: 12 }, (_, i) =>
-      makeEntity(10 + i, '2TNK', 'Greece', 85 + (i % 4), 51 + Math.floor(i / 4), 256, 256, 5),
+      makeEntity(10 + i, '1TNK', 'Greece', 85 + (i % 4), 51 + Math.floor(i / 4), 256, 256, 5),
     );
     // Enemy has been autocreating — more units than initial
     const reinforcedEnemies = [
@@ -355,7 +355,7 @@ describe('SCG04EA simulation — generic handler analysis', () => {
       ],
       buildable: {
         structures: ['POWR', 'FIX', 'AGUN'],
-        units: ['HARV', '1TNK', '2TNK', 'APC', 'JEEP', 'MNLY'],
+        units: ['HARV', '1TNK', 'APC', 'JEEP', 'MNLY'],
         infantry: ['E1', 'E3', 'MEDI'],
       },
     });
@@ -402,9 +402,9 @@ describe('SCG04EA simulation — generic handler analysis', () => {
       power: { produced: 200, consumed: 80 },
       units: [
         makeEntity(1, 'JEEP', 'Greece', 86, 53),
-        makeEntity(5, '2TNK', 'Greece', 85, 51),
-        makeEntity(6, '2TNK', 'Greece', 86, 51),
-        makeEntity(7, '2TNK', 'Greece', 87, 51),
+        makeEntity(5, '1TNK', 'Greece', 85, 51),
+        makeEntity(6, '1TNK', 'Greece', 86, 51),
+        makeEntity(7, '1TNK', 'Greece', 87, 51),
         makeEntity(4, 'HARV', 'Greece', 80, 48),
       ],
       enemies: [
@@ -422,7 +422,7 @@ describe('SCG04EA simulation — generic handler analysis', () => {
       ],
       buildable: {
         structures: ['POWR', 'PROC', 'TENT'],
-        units: ['HARV', '1TNK', '2TNK'],
+        units: ['HARV', '1TNK'],
         infantry: ['E1', 'E3'],
       },
     });
