@@ -556,7 +556,7 @@ describe('SYRD placement — vessel-based water detection', () => {
     expect(placeCmd!.cx).toBeLessThan(40);
   });
 
-  it('keeps the SCG11EA bootstrap power local, then starts the east chain from the first slot', () => {
+  it('keeps SCG11EA power placement local instead of forcing an east chain', () => {
     const strategy = new OracleStrategy('SCG11EA');
 
     const bootstrapDecision = strategy.decide(makeState({
@@ -577,7 +577,7 @@ describe('SYRD placement — vessel-based water detection', () => {
     expect(bootstrapPlace!.cy).toBeGreaterThanOrEqual(75);
     expect(bootstrapPlace!.cy).toBeLessThanOrEqual(83);
 
-    const chainDecision = strategy.decide(makeState({
+    const localPowerDecision = strategy.decide(makeState({
       tick: 8000,
       structures: [
         makeStructure(100, 'FACT', 'Greece', 30, 80),
@@ -589,21 +589,23 @@ describe('SYRD placement — vessel-based water detection', () => {
       buildable: { structures: ['POWR', 'SYRD'], units: [], infantry: [] },
     }));
 
-    const chainPlace = chainDecision.commands.find(
+    const localPowerPlace = localPowerDecision.commands.find(
       (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
     );
-    expect(chainPlace).toBeDefined();
-    expect(chainPlace!.cx).toBe(32);
-    expect(chainPlace!.cy).toBe(88);
+    expect(localPowerPlace).toBeDefined();
+    expect(localPowerPlace!.cx).toBeGreaterThanOrEqual(25);
+    expect(localPowerPlace!.cx).toBeLessThanOrEqual(35);
+    expect(localPowerPlace!.cy).toBeGreaterThanOrEqual(75);
+    expect(localPowerPlace!.cy).toBeLessThanOrEqual(83);
   });
 
-  it('pins SCG11EA shipyard placement to the east-shore land anchors', () => {
+  it('pins SCG11EA shipyard placement to the east-ocean water anchors', () => {
     const strategy = new OracleStrategy('SCG11EA');
     const state = makeState({
       tick: 8000,
       structures: [
         makeStructure(100, 'FACT', 'Greece', 30, 80),
-        makeStructure(101, 'POWR', 'Greece', 56, 90),
+        makeStructure(101, 'POWR', 'Greece', 28, 80),
       ],
       production: [{ t: 'SYRD', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
       buildable: { structures: ['SYRD'], units: [], infantry: [] },
@@ -618,9 +620,9 @@ describe('SYRD placement — vessel-based water detection', () => {
       (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
     );
     expect(placeCmd).toBeDefined();
-    expect(placeCmd!.cx).toBeGreaterThanOrEqual(57);
-    expect(placeCmd!.cx).toBeLessThanOrEqual(58);
-    expect(placeCmd!.cy).toBeGreaterThanOrEqual(80);
-    expect(placeCmd!.cy).toBeLessThanOrEqual(96);
+    expect(placeCmd!.cx).toBeGreaterThanOrEqual(63);
+    expect(placeCmd!.cx).toBeLessThanOrEqual(65);
+    expect(placeCmd!.cy).toBeGreaterThanOrEqual(83);
+    expect(placeCmd!.cy).toBeLessThanOrEqual(90);
   });
 });

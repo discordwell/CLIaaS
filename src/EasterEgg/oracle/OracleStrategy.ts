@@ -35,6 +35,7 @@ const MISSION_GUARD_AREA = 10;
 const RETREAT_HP_FRACTION = 0.3;
 
 const NON_COMBAT_TYPES = new Set(['C7', 'C8', 'EINSTEIN', 'TRAN', 'LST']);
+const AIRCRAFT_TYPES = new Set(['YAK', 'MIG', 'HIND', 'HELI', 'TRAN', 'BADR', 'U2']);
 
 // RTTIType enum values from C++ defines.h (used for produce/place commands)
 const RTTI_BUILDINGTYPE = 6;
@@ -89,7 +90,8 @@ const SCG11EA_PRE_NAVAL_TANK_TARGET = 12;
 const SCG11EA_POST_NAVAL_TANK_TARGET = 9;
 const SCG11EA_FLEET_ONLINE_SHIPS = 3;
 const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
-const SCG11EA_ASSAULT_MIN_SHIPS = 2;
+const SCG11EA_ASSAULT_MIN_SHIPS = 1;
+const SCG11EA_ASSAULT_MIN_ARMOR = 8;
 const SCG11EA_RIVER_SWEEP_POINTS: Point[] = [
   { cx: 67, cy: 91 },
   { cx: 71, cy: 72 },
@@ -529,6 +531,50 @@ export class OracleStrategy {
       { cx: 64, cy: 84 }, { cx: 64, cy: 89 }, { cx: 64, cy: 90 }, { cx: 65, cy: 86 },
       { cx: 65, cy: 85 }, { cx: 65, cy: 87 }, { cx: 65, cy: 88 },
     ];
+  }
+
+  private chooseScg11eaAssaultTarget(enemyStructures: RAStructure[]): Point | null {
+    const pickPriorityTarget = (
+      bounds: { minCx: number; maxCx: number; minCy: number; maxCy: number },
+      priority: string[],
+    ): Point | null => {
+      const rank = new Map(priority.map((t, i) => [t, i]));
+      const candidates = enemyStructures
+        .filter(
+          (s) =>
+            s.cx >= bounds.minCx &&
+            s.cx <= bounds.maxCx &&
+            s.cy >= bounds.minCy &&
+            s.cy <= bounds.maxCy &&
+            rank.has(s.t),
+        )
+        .sort((a, b) => {
+          const aRank = rank.get(a.t) ?? 999;
+          const bRank = rank.get(b.t) ?? 999;
+          if (aRank !== bRank) return aRank - bRank;
+          return this.distanceSq(a, SCG11EA_PRIMARY_ASSAULT_POINT) - this.distanceSq(b, SCG11EA_PRIMARY_ASSAULT_POINT);
+        });
+      if (candidates.length === 0) return null;
+      return { cx: candidates[0].cx, cy: candidates[0].cy };
+    };
+
+    return pickPriorityTarget(
+      { minCx: 37, maxCx: 59, minCy: 38, maxCy: 55 },
+      ['AFLD', 'HPAD', 'WEAP', 'PROC', 'FACT', 'DOME', 'STEK', 'BARR', 'KENN', 'APWR', 'POWR'],
+    ) ?? pickPriorityTarget(
+      { minCx: 60, maxCx: 82, minCy: 45, maxCy: 52 },
+      ['SPEN', 'TSLA', 'SAM', 'FACT', 'PROC', 'APWR', 'POWR'],
+    ) ?? pickPriorityTarget(
+      { minCx: 68, maxCx: 82, minCy: 45, maxCy: 50 },
+      ['FCOM', 'TSLA', 'SAM', 'FACT', 'PROC', 'APWR', 'POWR'],
+    ) ?? pickPriorityTarget(
+      { minCx: 90, maxCx: 110, minCy: 45, maxCy: 60 },
+      ['FCOM', 'FACT', 'PROC', 'APWR', 'POWR'],
+    );
+  }
+
+  private scg11eaNavalPhaseStarted(alliedStructures: RAStructure[]): boolean {
+    return alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
   }
 
   decide(state: RAGameState): OracleDecision {
@@ -1463,6 +1509,8 @@ export class OracleStrategy {
       (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
         !(this.scenario === 'SCG11EA' && NAVAL_COMBAT_TYPES.has(u.t)),
     );
+    const scg11eaNavalPhase = this.scenario === 'SCG11EA' && this.scg11eaNavalPhaseStarted(alliedStructures);
+    const defenseOnlyMission = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) && !scg11eaNavalPhase;
 
     // Base center = centroid of all allied structures (not just ConYard)
     const baseCenter = alliedStructures.length > 0
@@ -1524,7 +1572,7 @@ export class OracleStrategy {
         // dead targets, and stale-command timeouts. Force ALL defenders on
         // critical threats (ATEK/PDOX in M8) or periodic retarget ticks.
         const recommandable = defenders.filter((u) => this.shouldRecommand(u, baseThreats));
-        const hasCriticalThreats = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) &&
+        const hasCriticalThreats = defenseOnlyMission &&
           baseThreats.some((e) => e.t.includes('TNK') || e.t === 'V2RL');
         const retargetDue = hasCriticalThreats || (state.tick % 30) < 5;
         const toCommand = retargetDue ? defenders : recommandable;
@@ -1537,7 +1585,7 @@ export class OracleStrategy {
 
         // In survival mode, ALL units defend — no surplus chasing.
         // In non-survival, surplus attacks nearby enemies within leash range.
-        const isTimedSurvival = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) && state.missionTimerActive && state.missionTimer > 0;
+        const isTimedSurvival = defenseOnlyMission && state.missionTimerActive && state.missionTimer > 0;
         if (isTimedSurvival) {
           // Survival: surplus also helps defend — everyone fights base threats
           if (surplus.length > 0) {
@@ -1575,7 +1623,6 @@ export class OracleStrategy {
         // No base threats — check for unit-proximity engagement first
         // Units should engage enemies near them regardless of full attack threshold
         // Skip for defense-only missions — don't chase enemies, let them come to base
-        const defenseOnlyMission = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
         const unitThreats = defenseOnlyMission ? [] : state.enemies.filter(
           (e) => fighters.some((u) => this.distanceSq(u, e) <= 225), // 15 cells
         );
@@ -1590,11 +1637,11 @@ export class OracleStrategy {
         } else {
         // No base threats, no unit threats — decide: attack or turtle?
         // If there's a mission timer counting down, this is a survival mission — turtle.
-        const isTimedSurvival = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) && state.missionTimerActive && state.missionTimer > 0;
+        const isTimedSurvival = defenseOnlyMission && state.missionTimerActive && state.missionTimer > 0;
         const tankCount = fighters.filter((u) => u.t.includes('TNK')).length;
         const friendlyStr = combatStrength(fighters);
         const enemyStr = combatStrength(state.enemies);
-        const defenseOnly = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
+        const defenseOnly = defenseOnlyMission;
         const shouldAttack = !isTimedSurvival && !defenseOnly && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
 
         if (shouldAttack && state.enemies.length > 0) {
@@ -2417,10 +2464,10 @@ export class OracleStrategy {
         this.distanceSq(tanya, s) <= TANYA_RANGE_SQ * 2, // slightly extended range for barrels
       ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
 
-      // Find nearby barrels to approach (within 20 cells — barrels at y=88 are far)
+      // Find nearby barrels to approach (within 8 cells — close enough to reach)
       const nearbyBarrels = state.structures.filter((s) =>
         BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 &&
-        this.distanceSq(tanya, s) <= 400, // 20 cells
+        this.distanceSq(tanya, s) <= 64, // 8 cells
       ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
 
       // Find remaining SAMs
@@ -2433,12 +2480,11 @@ export class OracleStrategy {
         : null;
 
       // Tanya spawns at (25,107) but team script parks her in impassable building zone.
-      // Warp to (20,87) — only survivable spot near barrels. BARL(21,88),
-      // BARL(19,87), BRL3(20,88) all within Colt45 range. Shoot barrels for
-      // chain explosions that clear the path to SAMs at y=94/107.
-      if (tanya.cy > 95) {
-        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 20, cy: 87 } as never);
-        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (20,87) barrel zone`);
+      // Only warp to escape the team script's impassable building zone (y>108).
+      // Otherwise let Tanya fight naturally — she has C4 for buildings.
+      if (tanya.cy > 108) {
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
+        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (22,105) passable`);
         return { commands, reason: reasons.join('; ') };
       }
 
@@ -2487,46 +2533,42 @@ export class OracleStrategy {
           }
           reasons.push(`Tanya → BARREL ${barrel.t}(${barrel.cx},${barrel.cy}) d=${Math.sqrt(bDist).toFixed(0)} [${nearbyBarrels.length}]`);
         }
-      } else if (nearestSam) {
-        // PRIORITY 5: Attack SAM — use shoot_struct if in range, else move toward it
-        // If stuck (same position for 5s), skip to next SAM
-        const posKey = tanya.id + 10000;
-        const lastPos = this.lastUnitTargets.get(posKey);
-        const stuckAtSam = lastPos && lastPos.cx === tanya.cx && lastPos.cy === tanya.cy &&
-          state.tick - lastPos.tick > sec(5);
-        if (!lastPos || lastPos.cx !== tanya.cx || lastPos.cy !== tanya.cy) {
-          this.lastUnitTargets.set(posKey, { targetId: -1, cx: tanya.cx, cy: tanya.cy, tick: state.tick });
-        }
+      } else {
+        // PRIORITY 5: C4 nearest enemy building (clears path toward SAMs)
+        // Or attack nearest SAM if no other buildings in range
+        const nearbyEnemyBuildings = state.structures.filter((s) =>
+          !s.ally && s.hp > 0 && !BARREL_TYPES.has(s.t) && s.t !== 'SAM' &&
+          this.distanceSq(tanya, s) <= 100, // within 10 cells
+        ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
 
-        // If stuck, try a different SAM
-        let samTarget = nearestSam;
-        if (stuckAtSam && remainingSams.length > 1) {
-          samTarget = remainingSams.find((s) => s.id !== nearestSam.id) ?? nearestSam;
-          this.lastUnitTargets.set(posKey, { targetId: -1, cx: tanya.cx, cy: tanya.cy, tick: state.tick + sec(5) });
-          this.lastUnitTargets.delete(tanya.id);
-          reasons.push(`STUCK → try different SAM`);
-        }
+        const structTarget = nearbyEnemyBuildings.length > 0
+          ? nearbyEnemyBuildings[0]
+          : nearestSam;
 
-        // If SAM in weapon range, shoot it directly
-        const samDist = this.distanceSq(tanya, samTarget);
-        if (samDist <= TANYA_RANGE_SQ) {
-          commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: samTarget.id });
-          this.lastUnitTargets.delete(tanya.id);
-          reasons.push(`Tanya SHOOT SAM(${samTarget.cx},${samTarget.cy}) d=${Math.sqrt(samDist).toFixed(1)}`);
+        if (!structTarget) {
+          // Nothing to attack
         } else {
-          const samId = samTarget.id;
-          if (!lastTarget || lastTarget.targetId !== samId) {
-            commands.push({ cmd: 'attack', ids: [tanya.id], target: samId });
-            this.lastUnitTargets.set(tanya.id, { targetId: samId, cx: samTarget.cx, cy: samTarget.cy, tick: state.tick });
+          const sDist = this.distanceSq(tanya, structTarget);
+          if (sDist <= 49) { // 7 cells — slightly extended for structures (Colt45 range + buffer)
+            // In range — shoot it
+            commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: structTarget.id });
+            this.lastUnitTargets.delete(tanya.id);
+            reasons.push(`Tanya SHOOT ${structTarget.t}(${structTarget.cx},${structTarget.cy}) d=${Math.sqrt(sDist).toFixed(1)}`);
+          } else {
+            // C4 it — attack_struct routes adjacent
+            const sId = structTarget.id;
+            if (!lastTarget || lastTarget.targetId !== sId) {
+              commands.push({ cmd: 'attack', ids: [tanya.id], target: sId });
+              this.lastUnitTargets.set(tanya.id, { targetId: sId, cx: structTarget.cx, cy: structTarget.cy, tick: state.tick });
+            }
+            reasons.push(`Tanya → C4 ${structTarget.t}(${structTarget.cx},${structTarget.cy}) d=${Math.sqrt(sDist).toFixed(0)}`);
           }
-          reasons.push(`Tanya → SAM(${samTarget.cx},${samTarget.cy}) d=${Math.sqrt(samDist).toFixed(0)} [${remainingSams.length} left]`);
         }
-      } else if (remainingSams.length === 0) {
-        // All SAMs destroyed — advance to chinook phase
+      }
+
+      if (remainingSams.length === 0) {
         this.scg05eaSamIndex = SCG05EA_SAM_TARGETS.length;
         reasons.push('all SAMs destroyed');
-      } else {
-        reasons.push('Tanya idle');
       }
 
       return { commands, reason: reasons.join('; ') };
@@ -2702,9 +2744,11 @@ export class OracleStrategy {
     const landArmor = playerUnits.filter(
       (u) => (u.t.includes('TNK') || u.t === 'ARTY') && u.hp > 0,
     );
+    const shipyardOnline = this.scg11eaNavalPhaseStarted(alliedStructures);
     const baseThreats = state.enemies.filter(
       (e) => alliedStructures.some((s) => this.distanceSq(e, s) <= 400),
     );
+    const baseGroundThreats = baseThreats.filter((e) => !AIRCRAFT_TYPES.has(e.t) && !NAVAL_COMBAT_TYPES.has(e.t));
     const enemyStructures = state.structures.filter((s) => !s.ally);
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
@@ -2764,9 +2808,9 @@ export class OracleStrategy {
     // Once the fleet is online and the home island is stable, send surplus armor
     // north-east to kill Soviet production and shore defenses. Pure turtling lets
     // the enemy air/ground snowball overwhelm the base before the naval mission ends.
-    const hasFleet = playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS;
-    const canSpareArmor = landArmor.length >= 7;
-    const homeGuard = Math.max(4, Math.min(6, baseThreats.length + 3));
+    const hasFleet = playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS || shipyardOnline;
+    const canSpareArmor = landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
+    const homeGuard = Math.max(2, Math.min(4, baseGroundThreats.length + 1));
     const assaultGroup = landArmor
       .slice()
       .sort((a, b) => {
@@ -2776,29 +2820,17 @@ export class OracleStrategy {
         return this.distanceSq(a, SCG11EA_PRIMARY_ASSAULT_POINT) - this.distanceSq(b, SCG11EA_PRIMARY_ASSAULT_POINT);
       })
       .slice(homeGuard);
-    if (hasFleet && canSpareArmor && baseThreats.length <= 2 && assaultGroup.length >= 3) {
-      const sovietCoreAlive = enemyStructures.some(
-        (s) => ['AFLD', 'HPAD', 'WEAP', 'FACT', 'PROC', 'DOME', 'STEK', 'BARR', 'KENN'].includes(s.t) &&
-          s.cx >= 37 && s.cx <= 62 && s.cy >= 38 && s.cy <= 55,
-      );
-      const bottleneckAlive = enemyStructures.some(
-        (s) => ['TSLA', 'SAM', 'FCOM', 'FACT', 'POWR', 'APWR'].includes(s.t) &&
-          s.cx >= 68 && s.cx <= 82 && s.cy >= 45 && s.cy <= 50,
-      );
-      const eastBaseAlive = enemyStructures.some(
-        (s) => ['FCOM', 'FACT', 'APWR', 'POWR'].includes(s.t) &&
-          s.cx >= 90 && s.cy >= 45,
-      );
-      const assaultTarget = sovietCoreAlive
-        ? SCG11EA_PRIMARY_ASSAULT_POINT
-        : bottleneckAlive
-          ? SCG11EA_BOTTLENECK_ASSAULT_POINT
-          : eastBaseAlive
-            ? SCG11EA_EASTERN_ASSAULT_POINT
-            : null;
+    if (hasFleet && canSpareArmor && baseGroundThreats.length <= 2 && assaultGroup.length >= 3) {
+      const assaultTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
       if (assaultTarget) {
-        const mobileAssault = assaultGroup.filter(
-          (u) => this.isIdle(u) || this.shouldMove(u, assaultTarget.cx, assaultTarget.cy),
+        const retargetDue = (state.tick % 40) < 5;
+        const mobileAssault = (retargetDue ? assaultGroup : assaultGroup.filter(
+          (u) =>
+            this.isIdle(u) ||
+            this.shouldMove(u, assaultTarget.cx, assaultTarget.cy) ||
+            this.distanceSq(u, assaultTarget) > 225,
+        )).filter(
+          (u) => this.distanceSq(u, assaultTarget) > 9 || this.isIdle(u),
         );
         if (mobileAssault.length > 0) {
           commands.push({

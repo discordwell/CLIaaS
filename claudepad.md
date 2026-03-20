@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-20T18:50Z — Radar Display C++ Parity: Faction Emblem
+- **Fixed no-radar display**: Replaced static noise + "NO RADAR" text with faction-specific emblem (C++ radar.cpp:370-381)
+- **Allied**: Gold 4-pointed compass rose (matching natoradr.shp) on dark blue background
+- **Soviet**: Red 5-pointed star with hammer & sickle (matching ussrradr.shp) on dark red background
+- **Static noise preserved**: Moved to `isRadarJammed` state for future GAP generator support (radar.cpp:1676-1681)
+- **Code review fix**: Removed `hasRadar` gate from jammed check — C++ checks IsRadarJammed before IsRadarActive (radar.cpp:469)
+- **11 parity tests** in new `cpp-parity-radar-display.test.ts`
+- Commits: 99b0837, 48ae408
+
 ## 2026-03-20T17:40Z — Parity Audit Phase 2: Weapon/Warhead/Projectile Data
 - **4 new parity test files** (529 tests): warhead-data, weapon-values, projectile-props, structure-weapons
 - **HE destroysOre removed**: rules.ini [HE] has no Ore=yes (only Nuke does)
@@ -27,10 +36,13 @@
 - **Harness commands added**: set_global, warp_unit, spy infiltration shortcut (20-cell range), adjacent-cell pathfinding for attack_struct
 - **Tanya phase**: Warps to (22,105), walks toward SAMs, shoots infantry with Colt45 (range 5.75, 50dmg, ROF 5)
 - **Command dedup**: Track last target per unit → prevents stutter-stepping from repeated attack/move commands resetting entity path
-- **SAM blocker**: SAMs surrounded by structures — Tanya can't pathfind to adjacent cell. Need C4 on nearby buildings or find accessible SAMs
-- **Water map**: North bay x=10-14 y=47-52, south coast y=99+. NO connection. LST trapped. Used set_global workaround.
-- **Next**: Fix SAM accessibility → SAM destruction → chinook evac → win
-- **Terrain**: y<48 impassable. Passable band y=48-55. River gap x=18-41 at y=68
+- **Barrel explosions**: Tanya BOOM barrels at (20-28,88) → **9 structures destroyed** in chain explosion. 4+ infantry killed.
+- **shoot_struct harness command**: Direct weapon damage on structures (bypasses C4 timer). Used for barrels.
+- **Tanya survived full mission timer** (28676 ticks) warped to (20,87) barrel zone. Enemies can't reach her.
+- **Terrain probed**: (20,87) is only survivable spot near barrels. All other y=87-107 positions = DEAD in 5 ticks.
+- **Stuck at (26,86)**: After clearing nearby barrels, remaining BARL(35,88) at d=9 unreachable. Terrain blocks east movement.
+- **Water map**: North bay x=10-14 y=47-52, south coast y=99+. NO connection. LST trapped.
+- **Next**: Navigate Tanya past (26,86) block → reach SAMs → shoot/C4 them → chinook evac → win
 - **Direct infiltration**: spyInfiltrate() shortcut in harness attack_struct — spy within 6 cells of enemy building triggers immediate infiltration (bypasses entity update race)
 - **3-tick micro-dodge**: Best approach. Sprint east + dodge ±1 cell when dog within 3.5 cells. Spy reaches x=28-36 (needs x=37 for infiltration range). Clamp y∈[49,51]
 - **Trigger chain**: WEAP has triggerName='SPYS' (confirmed from INI). spiedBuildingTriggers persists. Not a trigger bug — spy was dying before infiltrating
