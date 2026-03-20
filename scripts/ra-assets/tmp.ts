@@ -57,16 +57,20 @@ export function parseTmp(data: Buffer): TmpFile {
   const tileSize = tileWidth * tileHeight; // 576 for 24x24
   const slotCount = blocksX * blocksY;
 
-  const tiles: (TmpTile | null)[] = new Array(slotCount).fill(null);
+  // C++ parity: templates like CLEAR1 have tileCount > blocksX*blocksY.
+  // These are tile VARIATIONS for the same cell (e.g., 16 random clear ground tiles
+  // in a 1x1 template). Use the larger of slotCount and tileCount for the array size.
+  const effectiveSlots = Math.max(slotCount, tileCount);
+  const tiles: (TmpTile | null)[] = new Array(effectiveSlots).fill(null);
   let tilesRead = 0;
 
   // Image index array offset — at header byte +36 (verified against OpenRA TmpRALoader.cs)
   const indexStart = data.readInt32LE(36);
   const indexEnd = data.readInt32LE(28);
 
-  if (indexStart > 0 && indexStart + slotCount <= data.length) {
+  if (indexStart > 0 && indexStart + effectiveSlots <= data.length) {
     // Use the index array to map slots to tile images
-    for (let slot = 0; slot < slotCount; slot++) {
+    for (let slot = 0; slot < effectiveSlots; slot++) {
       const tileIdx = data[indexStart + slot];
       if (tileIdx === 0xFF) {
         continue; // Empty slot
@@ -81,7 +85,7 @@ export function parseTmp(data: Buffer): TmpFile {
     }
   } else {
     // Fallback: no valid index — read tiles sequentially (1x1 templates)
-    for (let i = 0; i < tileCount && i < slotCount; i++) {
+    for (let i = 0; i < tileCount && i < effectiveSlots; i++) {
       const pixelOffset = imgStart + i * tileSize;
       if (pixelOffset + tileSize <= data.length) {
         const pixels = new Uint8Array(tileSize);

@@ -957,9 +957,10 @@ export class Renderer {
         }
 
         // Clear template cells: draw tileset grass for CLEAR, TREE, and WALL terrain
-        // WALL cells (building footprints) use template 255 (CLEAR1) from the MapPack
+        // C++ cell.cpp:981-987: CLEAR1 uses Clear_Icon() = (cx&3)|((cy&3)<<2) for 16 variations
         if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE || terrain === Terrain.WALL)) {
-          if (this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
+          const clearIcon = (cx & 3) | ((cy & 3) << 2);
+          if (this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y)) {
             if (terrain === Terrain.CLEAR || terrain === Terrain.WALL) continue;
             atlasDrawn = true; // TREE cells need overlay on top
           }
@@ -1382,19 +1383,20 @@ export class Renderer {
         const damaged = s.hp < s.maxHp * 0.5; // less than 50% health
         let frame = 0;
         // GUN turret: 128 frames = [32 normal][32 firing][32 damaged][32 damaged firing]
+        // turretDir is now 32-step (0-31) — use directly with BODY_SHAPE
         if (s.type === 'GUN' && s.turretDir !== undefined) {
-          const facingFrame = BODY_SHAPE[(s.turretDir * 4) % 32];
+          const facingFrame = BODY_SHAPE[s.turretDir % 32];
           const baseFrame = damaged ? 64 : 0;
           const firingOffset = (s.firingFlash && s.firingFlash > 0) ? 32 : 0;
           frame = baseFrame + firingOffset + facingFrame;
         // SAM launcher: 68 frames = [2 closed + 32 rotation][34 damaged]
         } else if (s.type === 'SAM' && s.turretDir !== undefined) {
           const baseFrame = damaged ? 34 : 0;
-          const facingFrame = BODY_SHAPE[(s.turretDir * 4) % 32];
+          const facingFrame = BODY_SHAPE[s.turretDir % 32];
           frame = baseFrame + 2 + facingFrame;
         // AGUN turret: same 128-frame layout as GUN (32 normal, 32 firing, 32 damaged, 32 damaged-firing)
         } else if (s.type === 'AGUN' && s.turretDir !== undefined) {
-          const facingFrame = BODY_SHAPE[(s.turretDir * 4) % 32];
+          const facingFrame = BODY_SHAPE[s.turretDir % 32];
           const baseFrame = damaged ? 64 : 0;
           const firingOffset = (s.firingFlash && s.firingFlash > 0) ? 32 : 0;
           frame = baseFrame + firingOffset + facingFrame;
