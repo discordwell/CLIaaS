@@ -497,13 +497,19 @@ export class GameMap {
     return true;
   }
 
-  /** Count bridge template cells (templates 235-252 are bridge structures) */
+  /** Count intact bridge cells (C++ parity: map.cpp:2045-2073 Intact_Bridge_Count)
+   *  Scans ALL map cells (not just bounds) for bridge templates with icon==6.
+   *  C++ counts only TEMPLATE_BRIDGE1/1H/2/2H/1A/1B with TIcon==6 as the
+   *  "bridge center" tile that represents an intact bridge section. */
   countBridgeCells(): number {
+    // C++ bridge template IDs (defines.h):
+    // TEMPLATE_BRIDGE1=236, TEMPLATE_BRIDGE1H=238, TEMPLATE_BRIDGE2=237,
+    // TEMPLATE_BRIDGE2H=239, TEMPLATE_BRIDGE_1A=241, TEMPLATE_BRIDGE_1B=242
+    const BRIDGE_TEMPLATES = new Set([236, 237, 238, 239, 241, 242]);
     let count = 0;
-    for (let cy = this.boundsY; cy < this.boundsY + this.boundsH; cy++) {
-      for (let cx = this.boundsX; cx < this.boundsX + this.boundsW; cx++) {
-        const tmpl = this.templateType[cy * MAP_CELLS + cx];
-        if (tmpl >= 235 && tmpl <= 252) count++;
+    for (let i = 0; i < MAP_CELLS * MAP_CELLS; i++) {
+      if (BRIDGE_TEMPLATES.has(this.templateType[i]) && this.templateIcon[i] === 6) {
+        count++;
       }
     }
     return count;

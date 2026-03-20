@@ -1753,10 +1753,18 @@ function classifyOutdoorTerrain(
       } else if (tmpl >= 1 && tmpl <= 2) {
         map.setTerrain(cx, cy, Terrain.WATER);
       } else if (tmpl >= 3 && tmpl <= 56) {
-        // Shore/beach transitions — icon 0-3 are typically water portions
+        // Shore/beach transitions — mixed water+land tiles.
+        // C++ uses per-template icon masks. Our simplified heuristic:
+        // icons 0-1 are the deep water portion, always impassable.
+        // icons 2-3 are the shallow/beach zone — C++ treats as passable BEACH.
+        // icons 4+ are firmly on land (clear).
+        // The old threshold (icon < 4) incorrectly blocked walkable shore cells,
+        // trapping infantry on peninsulas (C++/TS parity fix for SCG05EA etc.)
         const icon = templateIcon[idx];
-        if (icon < 4) {
+        if (icon < 2) {
           map.setTerrain(cx, cy, Terrain.WATER);
+        } else if (icon < 4) {
+          map.setTerrain(cx, cy, Terrain.BEACH);
         }
       } else if (tmpl >= 59 && tmpl <= 96) {
         // Water cliff edges — always water
