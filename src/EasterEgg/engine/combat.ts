@@ -12,6 +12,7 @@ import {
   directionTo, calcProjectileTravelFrames,
   House, Mission, AnimState, UnitType, EXPLOSION_FRAMES,
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
+  HOUSE_FACTION,
 } from './types';
 import { type Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED } from './scenario';
@@ -84,6 +85,12 @@ export interface CombatContext {
   scenarioId: string;
   killCount: number;
   lossCount: number;
+  // C++ score tracking (score.cpp:546-597, techno.cpp PointTotal)
+  pointTotal: number;
+  alliedUnitsLost: number;
+  sovietUnitsLost: number;
+  alliedBuildingsLost: number;
+  sovietBuildingsLost: number;
   warheadOverrides: Record<string, [number, number, number, number, number]>;
   scenarioWarheadMeta: Record<string, WarheadMeta>;
   scenarioWarheadProps: Record<string, WarheadProps>;
@@ -444,6 +451,24 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     ctx.playEva('eva_unit_lost');
     const tc = worldToCell(kx, ky);
     ctx.minimapAlert(tc.cx, tc.cy);
+  }
+
+  // C++ score tracking: PointTotal += cost for enemy kills, -= cost for own losses
+  // (techno.cpp: source->House->PointTotal += points; House->PointTotal -= points)
+  const unitCost = victim.stats.cost ?? victim.stats.strength ?? 0;
+  if (opts.attackerIsPlayer) {
+    ctx.pointTotal += unitCost;
+  }
+  if ((opts.trackLoss && ctx.isPlayerControlled(victim)) || opts.friendlyFireLoss) {
+    ctx.pointTotal -= unitCost;
+  }
+
+  // Per-side casualty tracking for score screen bar graphs (C++ score.cpp:548-560)
+  const faction = HOUSE_FACTION[victim.house] ?? 'allied';
+  if (faction === 'soviet') {
+    ctx.sovietUnitsLost++;
+  } else if (faction !== 'both') {
+    ctx.alliedUnitsLost++;
   }
 }
 
@@ -1082,6 +1107,10 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
     ctx.screenShake = Math.max(ctx.screenShake, shakeIntensity);
     ctx.screenFlash = Math.max(ctx.screenFlash, Math.min(8, fw * 2));
     ctx.playSoundAt('building_explode', wx, wy);
+    // Per-side building casualty tracking (C++ score.cpp:548-560)
+    const bFaction = HOUSE_FACTION[s.house] ?? 'allied';
+    if (bFaction === 'soviet') ctx.sovietBuildingsLost++;
+    else if (bFaction !== 'both') ctx.alliedBuildingsLost++;
     if (ctx.isAllied(s.house, ctx.playerHouse)) {
       ctx.structuresLost++;
       ctx.playEva('eva_unit_lost'); // reuse unit_lost for building destruction

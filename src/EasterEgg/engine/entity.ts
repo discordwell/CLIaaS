@@ -520,7 +520,8 @@ export class Entity {
     // C++ infantry.cpp:442-457 — increase fear on damage
     if (this.stats.isInfantry && amount > 0) {
       if (this.fear < Entity.FEAR_SCARED) {
-        this.fear = Entity.FEAR_SCARED;
+        // C++ infantry.cpp:443-444: IsFraidyCat civilians jump to FEAR_PANIC (200)
+        this.fear = this.stats.isFraidyCat ? Entity.FEAR_PANIC : Entity.FEAR_SCARED;
       }
       // Additional fear based on health ratio (C++ infantry.cpp:454-457)
       let moreFear = Entity.FEAR_ANXIOUS;
