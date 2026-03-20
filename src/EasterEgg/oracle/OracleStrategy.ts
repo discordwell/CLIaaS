@@ -631,7 +631,7 @@ export class OracleStrategy {
 
         // Build placement candidates: scan a wide grid between base and water.
         // Use vessel centroid to determine water direction, then scan the
-        // shoreline area (midpoint between base and vessels, ±15 cells).
+        // shoreline area (60% midpoint between base and vessels, ±10 cells).
         const candidates: Array<{ cx: number; cy: number }> = [];
         if (vessels.length > 0) {
           // Find nearest vessel to base
@@ -677,6 +677,21 @@ export class OracleStrategy {
           seen.add(key);
           return true;
         });
+
+        // Last resort: if no vessels and no coastal cells, scan toward map edges
+        if (uniqueCandidates.length === 0) {
+          for (let dy = -15; dy <= 15; dy++) {
+            for (let dx = 0; dx <= 30; dx++) {
+              candidates.push({ cx: baseCx + dx, cy: baseCy + dy });
+              candidates.push({ cx: baseCx - dx, cy: baseCy + dy });
+            }
+          }
+          const seen2 = new Set<string>();
+          for (const c of candidates) {
+            const key = `${c.cx},${c.cy}`;
+            if (!seen2.has(key)) { seen2.add(key); uniqueCandidates.push(c); }
+          }
+        }
 
         if (uniqueCandidates.length > 0) {
           const localIdx = (this.placementAttempts - this.syrdPlacementStart) % uniqueCandidates.length;
@@ -962,6 +977,10 @@ export class OracleStrategy {
     const hasNavalEnemies = state.enemies.some(
       (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'MSUB',
     );
+    // Reset scout if destroyed
+    if (this.waterScoutId >= 0 && !playerUnits.some((u) => u.id === this.waterScoutId)) {
+      this.waterScoutId = -1;
+    }
     if (hasNavalEnemies && this.waterScoutId < 0) {
       // Find enemy vessels to determine water direction
       const waterVessels = state.enemies.filter(
@@ -1904,19 +1923,20 @@ export class OracleStrategy {
           this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 25,
       );
 
-      // Safe route: go SOUTH past ALL dogs to y=62 (open terrain, zero
-      // patrol coverage), east for 30 cells, then north back to WEAP.
-      // Longer path but completely avoids the rock formation AND dog patrols.
-      // With rock debris (97-110) now ROUGH (passable), north corridor works.
-      // Route: north to y=48, east to x=24 (through passable rock debris),
-      // brief dip to y=50 to bypass cliffs at x=25-28, back north, east to WEAP.
+      // North corridor with incremental waypoints (pathfinder needs small steps).
       const spyWaypoints: Point[] = [
-        { cx: 18, cy: 48 },   // north from peninsula
-        { cx: 24, cy: 48 },   // east past debris (template 104 now ROUGH)
-        { cx: 24, cy: 50 },   // south to pass cliffs at x=25-28
-        { cx: 30, cy: 50 },   // east past cliffs (y=50 is all clear)
-        { cx: 30, cy: 48 },   // back north after cliffs
-        { cx: 40, cy: 48 },   // east to WEAP area
+        { cx: 16, cy: 48 },   // north from peninsula
+        { cx: 18, cy: 48 },
+        { cx: 20, cy: 48 },
+        { cx: 22, cy: 48 },   // through ROUGH rock debris
+        { cx: 24, cy: 48 },   // last clear cell before cliffs
+        { cx: 24, cy: 49 },   // south one step
+        { cx: 24, cy: 50 },   // south to y=50 (clear row)
+        { cx: 27, cy: 50 },   // east past cliffs
+        { cx: 30, cy: 50 },   // continue east
+        { cx: 30, cy: 48 },   // back north
+        { cx: 35, cy: 48 },
+        { cx: 40, cy: 48 },   // WEAP approach
       ];
 
       // Find current waypoint

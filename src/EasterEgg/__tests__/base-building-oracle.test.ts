@@ -467,6 +467,43 @@ describe('SYRD placement — vessel-based water detection', () => {
     expect(moveCmd!.cx).toBeGreaterThan(40); // heading east toward water
   });
 
+  it('re-dispatches scout if original scout is destroyed', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const sub = makeEntity(200, 'SS', 'USSR', 67, 42, 100, 100, 5);
+    sub.ally = false;
+
+    // First call: scout dispatched (tank id=10)
+    const state1 = makeState({
+      tick: 500,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 26, 80),
+        makeStructure(101, 'WEAP', 'Greece', 28, 80),
+      ],
+      units: [makeEntity(10, '2TNK', 'Greece', 27, 79)],
+      enemies: [sub],
+      buildable: { structures: [], units: ['2TNK'], infantry: [] },
+    });
+    strategy.decide(state1);
+
+    // Second call: scout tank destroyed (id=10 gone), new tank available (id=11)
+    const state2 = makeState({
+      tick: 1000,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 26, 80),
+        makeStructure(101, 'WEAP', 'Greece', 28, 80),
+      ],
+      units: [makeEntity(11, '2TNK', 'Greece', 27, 79)],
+      enemies: [sub],
+      buildable: { structures: [], units: ['2TNK'], infantry: [] },
+    });
+    const decision2 = strategy.decide(state2);
+    const moveCmd = decision2.commands.find(
+      (c) => c.cmd === 'move' && c.ids?.includes(11),
+    );
+    expect(moveCmd).toBeDefined();
+    expect(moveCmd!.cx).toBeGreaterThan(40);
+  });
+
   it('falls back to hardcoded coastal cells when no enemy vessels present', () => {
     const strategy = new OracleStrategy('SCG11EA');
     const state = makeState({
