@@ -62,6 +62,59 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 // 3TNK=Heavy(Soviet), 2TNK=Medium(Allied), 4TNK=Mammoth(Soviet), 1TNK=Light(both)
 const TANK_PREFERENCE = ['3TNK', '2TNK', '4TNK', '1TNK'];
 
+// ── Cost-weighted unit power ─────────────────────────────────────────────
+// Normalized so that 1.0 ≈ 100 credits worth of combat power.
+// Aircraft are excluded (power 0) — destroy their airfields/helipads instead.
+const UNIT_POWER: Record<string, number> = {
+  // Infantry (from PRODUCTION_ITEMS costs)
+  'E1':   1.0,   // 100 credits
+  'E2':   1.6,   // 160
+  'E3':   3.0,   // 300
+  'E4':   3.0,   // 300
+  'E6':   0,     // Engineer — non-combat
+  'E7':   12.0,  // 1200 (Tanya)
+  'SPY':  0,     // non-combat
+  'THF':  0,     // non-combat
+  'MEDI': 0,     // non-combat
+  'DOG':  2.0,   // 200
+  'SHOK': 9.0,   // 900
+  // Vehicles
+  'JEEP': 6.0,   // 600
+  '1TNK': 7.0,   // 700
+  '2TNK': 8.0,   // 800
+  '3TNK': 9.5,   // 950
+  '4TNK': 17.0,  // 1700
+  'ARTY': 6.0,   // 600
+  'APC':  8.0,   // 800
+  'V2RL': 7.0,   // 700
+  'STNK': 8.0,   // 800 (Phase Transport)
+  'CTNK': 24.0,  // 2400 (Chrono Tank)
+  'TTNK': 15.0,  // 1500 (Tesla Tank)
+  // Non-combat vehicles — 0 power
+  'MCV':  0, 'HARV': 0, 'MNLY': 0, 'TRUK': 0, 'MRJ': 0, 'MGG': 0, 'DTRK': 0,
+  // Naval
+  'DD':   10.0,  // 1000
+  'CA':   20.0,  // 2000
+  'PT':   5.0,   // 500
+  'SS':   9.5,   // 950
+  'MSUB': 16.5,  // 1650
+  'LST':  0,     // transport
+  // Aircraft — 0 power (take out their airstrips/helipads)
+  'YAK': 0, 'MIG': 0, 'HIND': 0, 'HELI': 0, 'TRAN': 0, 'BADR': 0, 'U2': 0,
+};
+const DEFAULT_UNIT_POWER = 1.0; // unknown types get minimum power
+
+function unitPower(t: string): number {
+  return UNIT_POWER[t] ?? DEFAULT_UNIT_POWER;
+}
+
+/** Compute cost-weighted combat strength of a unit list, scaled by HP fraction. */
+function combatStrength(units: RAEntity[]): number {
+  return units.reduce(
+    (s, u) => s + unitPower(u.t) * (u.hp / u.mhp), 0,
+  );
+}
+
 // Faction-aware house classification
 const SOVIET_HOUSES = new Set(['USSR', 'Ukraine', 'BadGuy']);
 function isSovietHouse(house: string | undefined): boolean {
@@ -765,9 +818,7 @@ export class OracleStrategy {
       // DEFEND FIRST: if base is threatened, send units to deal with threats
       if (baseThreats.length > 0) {
         // How many defenders do we need? Match the threat + buffer
-        const threatStr = baseThreats.reduce(
-          (s, e) => s + (e.t.includes('TNK') ? 3 : 1), 0,
-        );
+        const threatStr = combatStrength(baseThreats);
         const defendersNeeded = Math.min(fighters.length, Math.ceil(threatStr * 1.5));
         const defenders = fighters.slice(0, defendersNeeded);
         const surplus = fighters.slice(defendersNeeded);
@@ -841,12 +892,8 @@ export class OracleStrategy {
         // If there's a mission timer counting down, this is a survival mission — turtle.
         const isTimedSurvival = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) && state.missionTimerActive && state.missionTimer > 0;
         const tankCount = fighters.filter((u) => u.t.includes('TNK')).length;
-        const friendlyStr = fighters.reduce(
-          (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
-        );
-        const enemyStr = state.enemies.reduce(
-          (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
-        );
+        const friendlyStr = combatStrength(fighters);
+        const enemyStr = combatStrength(state.enemies);
         const defenseOnly = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
         const shouldAttack = !isTimedSurvival && !defenseOnly && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
 
@@ -978,12 +1025,8 @@ export class OracleStrategy {
 
     if (state.enemies.length > 0 && healthy.length > 0) {
       // Estimate force ratio before committing to an attack
-      const friendlyStr = healthy.reduce(
-        (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
-      );
-      const enemyStr = state.enemies.reduce(
-        (s, e) => s + (e.t.includes('TNK') ? 3 : 1) * (e.hp / e.mhp), 0,
-      );
+      const friendlyStr = combatStrength(healthy);
+      const enemyStr = combatStrength(state.enemies);
 
       const defenseOnly = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
       if (!defenseOnly && friendlyStr > enemyStr * 1.5) {
