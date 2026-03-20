@@ -1567,6 +1567,11 @@ export class OracleStrategy {
     const scg11eaFleetShort =
       this.scenario === 'SCG11EA' &&
       navalCount < scg11eaDesiredShips;
+    const scg11eaShipyardInProgress =
+      this.scenario === 'SCG11EA' &&
+      buildingProduction != null &&
+      (buildingProduction.t === 'SYRD' || buildingProduction.t === 'SPEN') &&
+      !buildingProduction.done;
     const scg11eaArmorEmergency =
       this.scenario === 'SCG11EA' &&
       scg11eaSubHuntPhase &&
@@ -1603,11 +1608,16 @@ export class OracleStrategy {
       } else if (!needHarvester || state.credits > 600) {
         // Tank production — SCG11EA spends harder on armor until the fleet is ready.
         const tankCreditThreshold = this.scenario === 'SCG11EA'
-          ? (scg11eaNavalEconomyFragile && !scg11eaArmorEmergency
-            ? SCG11EA_PROC_REBUILD_RESERVE
-            : scg11eaSubHuntPhase
-            ? SCG11EA_DEFENSE_CREDIT_RESERVE
-            : tankCount < scg11eaTankTarget ? 500 : 900)
+          ? Math.max(
+            scg11eaNavalEconomyFragile && !scg11eaArmorEmergency
+              ? SCG11EA_PROC_REBUILD_RESERVE
+              : scg11eaSubHuntPhase
+              ? SCG11EA_DEFENSE_CREDIT_RESERVE
+              : tankCount < scg11eaTankTarget ? 500 : 900,
+            scg11eaShipyardInProgress && !scg11eaArmorEmergency && tankCount >= SCG11EA_POST_NAVAL_TANK_TARGET
+              ? SCG11EA_PROC_REBUILD_RESERVE
+              : 0,
+          )
           : (tankCount < 3 ? 400 : 700);
         if (state.credits > tankCreditThreshold) {
           const tank = TANK_PREFERENCE.find((t) => buildable.units.includes(t));
@@ -2706,14 +2716,28 @@ export class OracleStrategy {
         reasons.push(reason);
       };
 
-      if (targetWeap && spy.cx >= 23) {
-        // Within 20 cells of WEAP — infiltrate (harness direct spyInfiltrate)
+      // Dog dodge — ALWAYS takes priority, even mid-infiltration.
+      // Dog detection is ≤3 cells. Dodge at 4 cells (distSq ≤ 16).
+      if (nearestDog && dogDistSq <= 16) {
+        const dy = spy.cy - nearestDog.cy;
+        // Dodge east + perpendicular to dog, stay in y=[49,51]
+        const dodgeX = spy.cx + 2;
+        let dodgeY = spy.cy + (dy >= 0 ? 1 : -1);
+        dodgeY = Math.max(49, Math.min(51, dodgeY));
+        sendMove(dodgeX, dodgeY, `spy DODGE dog(${nearestDog.cx},${nearestDog.cy}) d=${Math.sqrt(dogDistSq).toFixed(1)}`);
+      } else if (targetWeap && this.distanceSq(spy, targetWeap) <= 4) {
+        // Adjacent to WEAP — attack to infiltrate
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-
         reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+      } else if (spy.cx >= 23) {
+        // Past patrol zone — short-hop east at y=50 to prevent pathfinder going south.
+        // Hops of ~5 cells keep the pathfinder from taking long detours.
+        const nextX = Math.min(spy.cx + 5, 43);
+        sendMove(nextX, 50, `spy EAST (${spy.cx},${spy.cy}) → (${nextX},50)`);
       } else if (gapOpen) {
-        // Gap is open — SPRINT east, no dodge, no stops (send once)
-        sendMove(43, 50, `spy SPRINT east (${spy.cx},${spy.cy}) gap=OPEN`);
+        // Gap is open — sprint east with short hops at y=50 to prevent pathfinder detours
+        const nextX = Math.min(spy.cx + 3, 43);
+        sendMove(nextX, spy.cy, `spy SPRINT east (${spy.cx},${spy.cy}) gap=OPEN`);
       } else if (spy.cx < 20) {
         // Move to staging x=19, wait for gap
         sendMove(19, 50, `spy → staging (${spy.cx},${spy.cy}) corridor=${corridorDogs.length}dogs`);
@@ -3144,9 +3168,12 @@ export class OracleStrategy {
       reasons.push('island base DESTROYED');
     }
 
-    // GROUND ASSAULT — two phases. No fleet gate.
-    // Only assault if the island base still has production buildings to destroy.
-    if (!islandBaseDestroyed && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
+    // GROUND ASSAULT — only after the fleet has materially opened the river.
+    // Even a strong island army should not peel off while the submarine screen is intact.
+    const scg11eaAssaultOpen =
+      shipyardOnline &&
+      enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS;
+    if (!islandBaseDestroyed && scg11eaAssaultOpen && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
       const armyCentroid = this.centroid(landArmor);
       const stagingPoint: Point = { cx: 45, cy: 65 };
       const atStaging = armyCentroid.cy <= 70;
