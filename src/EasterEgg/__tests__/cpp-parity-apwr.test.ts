@@ -169,9 +169,9 @@ describe('APWR power production (building.cpp:4613 Power_Output)', () => {
     expect(powerOutput('APWR', 1, 700)).toBe(0);
   });
 
-  it('rounds output at non-integer health ratios (349/700 -> 100W)', () => {
-    // 349/700 = 0.49857..., * 200 = 99.714, round = 100
-    expect(powerOutput('APWR', 349, 700)).toBe(100);
+  it('C++ fixed-point at non-integer health ratios (349/700 -> 99W)', () => {
+    // C++ fixed(349,700) = floor(349*256/700) = 127, then (127*200+128)/256 = 99
+    expect(powerOutput('APWR', 349, 700)).toBe(99);
   });
 
   it('handles zero maxHp safely (no division by zero)', () => {
@@ -389,12 +389,12 @@ describe('APWR power output degrades with combat damage', () => {
     expect(powerOutput('APWR', apwr.hp, apwr.maxHp)).toBe(50);
   });
 
-  it('each point of damage reduces output proportionally', () => {
-    // At 699/700 HP: round(200 * 699/700) = round(199.714) = 200
-    expect(powerOutput('APWR', 699, 700)).toBe(200);
-    // At 696/700 HP: round(200 * 696/700) = round(198.857) = 199
-    expect(powerOutput('APWR', 696, 700)).toBe(199);
-    // At 350/700 HP: round(200 * 350/700) = round(100) = 100
+  it('each point of damage reduces output — C++ fixed-point', () => {
+    // C++ fixed(699,700)*200: fixed=floor(699*256/700)=255, (255*200+128)/256=199
+    expect(powerOutput('APWR', 699, 700)).toBe(199);
+    // C++ fixed(696,700)*200: fixed=floor(696*256/700)=254, (254*200+128)/256=198
+    expect(powerOutput('APWR', 696, 700)).toBe(198);
+    // C++ fixed(350,700)*200: fixed=floor(350*256/700)=128, (128*200+128)/256=100
     expect(powerOutput('APWR', 350, 700)).toBe(100);
   });
 

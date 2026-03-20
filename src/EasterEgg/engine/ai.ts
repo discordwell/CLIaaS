@@ -873,8 +873,9 @@ export function aiFireSale(ctx: AIContext, house: House): boolean {
     // In TS, we mark as dead/rubble and give partial refund
     const prodItem = ctx.scenarioProductionItems.find(p => p.type === s.type && p.isStructure);
     if (prodItem) {
-      const hpRatio = s.hp / s.maxHp;
-      const refund = Math.floor(prodItem.cost * 0.5 * hpRatio);
+      // C++ Fire_Sale → Sell_Back(1) → Refund_Amount: AI (IsHuman=false) gets 100%,
+      // no RefundPercent penalty, no health scaling (techno.cpp:5743-5761)
+      const refund = prodItem.cost;
       const current = ctx.houseCredits.get(house) ?? 0;
       ctx.houseCredits.set(house, current + refund);
     }

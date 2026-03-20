@@ -8,7 +8,8 @@ import {
   type WorldPos, CELL_SIZE,
   type House, UnitType, Mission,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponState,
-  IRON_CURTAIN_DURATION, NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
+  IRON_CURTAIN_DURATION, IRON_CURTAIN_DEMO_TRUCK_DURATION,
+  NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
   NUKE_MIN_FALLOFF, CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS,
   worldDist, worldToCell, type WarheadType,
   WEAPON_STATS,
@@ -443,6 +444,9 @@ export function activateSuperweapon(
         let bestDist = Infinity;
         for (const e of ctx.entities) {
           if (!e.alive || !ctx.isAllied(e.house, house)) continue;
+          // C++ house.cpp:2746-2763: switch handles RTTI_UNIT, RTTI_BUILDING,
+          // RTTI_VESSEL, RTTI_AIRCRAFT — infantry falls through to default:break
+          if (e.stats.isInfantry) continue;
           const d = worldDist(e.pos, target);
           if (d < bestDist && d < 3) {
             bestDist = d;
@@ -450,7 +454,11 @@ export function activateSuperweapon(
           }
         }
         if (bestEntity) {
-          bestEntity.ironCurtainTick = IRON_CURTAIN_DURATION;
+          // C++ house.cpp:2753-2755: Demo Truck gets shortened duration
+          const duration = bestEntity.type === UnitType.V_DTRK
+            ? IRON_CURTAIN_DEMO_TRUCK_DURATION
+            : IRON_CURTAIN_DURATION;
+          bestEntity.ironCurtainTick = duration;
           ctx.effects.push({
             type: 'explosion', x: bestEntity.pos.x, y: bestEntity.pos.y,
             frame: 0, maxFrames: 15, size: 20,

@@ -366,9 +366,7 @@ describe('systematic divergence analysis', () => {
     }
     // Document the divergence count — this always passes
     // The exact count depends on the TS implementation
-    expect(divergences).toBeGreaterThan(0); // There ARE divergences
-    // C++ uses 8-bit fractional precision (1/256) while TS uses full double.
-    // For POWR (100W/400HP), ~82 of 401 HP values diverge (~20%).
+    expect(divergences).toBe(0); // Fixed: TS now uses C++ 8.8 fixed-point
   });
 
   it('APWR: counts divergent HP values across full range', () => {
@@ -380,9 +378,7 @@ describe('systematic divergence analysis', () => {
         divergences++;
       }
     }
-    expect(divergences).toBeGreaterThan(0);
-    // For APWR (200W/700HP), ~260 of 701 HP values diverge (~37%).
-    // Higher rated power and non-power-of-2 maxHP amplify truncation effects.
+    expect(divergences).toBe(0); // Fixed: TS now uses C++ 8.8 fixed-point
   });
 
   it('C++ fixed-point systematically loses precision vs float', () => {
@@ -405,7 +401,7 @@ describe('systematic divergence analysis', () => {
     // but the truncation in fixed() construction dominates.
     // Most divergences have C++ < TS (truncation) or C++ > TS (rounding),
     // but both directions exist.
-    expect(cppHigherCount + cppLowerCount).toBeGreaterThan(0);
+    expect(cppHigherCount + cppLowerCount).toBe(0); // Fixed: perfect parity
   });
 });
 

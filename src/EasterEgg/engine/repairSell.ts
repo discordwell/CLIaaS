@@ -64,13 +64,21 @@ export function sellRefund(buildCost: number, isHuman = true): number {
   return isHuman ? Math.floor(buildCost * 0.5) : buildCost;
 }
 
+/** Emulate C++ 8.8 fixed-point power output: fixed(hp, maxHp) * ratedPower.
+ *  C++ building.cpp:4613: return(Class->Power * fixed(LastStrength, Class->MaxStrength));
+ *  C++ fixed.cpp:64: fixed(n,d) truncates to floor(n * 256 / d) (8.8 format). */
+export function fixedPowerOutput(ratedPower: number, hp: number, maxHp: number): number {
+  if (maxHp <= 0 || hp <= 0) return 0;
+  const fixedRaw = Math.floor((hp * 256) / maxHp);           // fixed(hp, maxHp) — truncation
+  return Math.floor((fixedRaw * ratedPower + 128) / 256);     // fixed * int → int (rounded)
+}
+
 /** Calculate power output for a structure at given health.
- *  C++ building.cpp:4613 Power_Output — scales linearly with health ratio.
+ *  C++ building.cpp:4613 Power_Output — uses 8.8 fixed-point arithmetic.
  *  POWR=100W, APWR=200W at full health. */
 export function powerOutput(type: string, hp: number, maxHp: number): number {
-  const healthRatio = maxHp > 0 ? hp / maxHp : 0;
-  if (type === 'POWR') return Math.round(100 * healthRatio);
-  if (type === 'APWR') return Math.round(200 * healthRatio);
+  if (type === 'POWR') return fixedPowerOutput(100, hp, maxHp);
+  if (type === 'APWR') return fixedPowerOutput(200, hp, maxHp);
   return 0;
 }
 
@@ -85,9 +93,8 @@ export function calculatePowerGrid(
   let consumed = 0;
   for (const s of structures) {
     if (!s.alive || s.sellProgress !== undefined || !isAllied(s.house, playerHouse)) continue;
-    const healthRatio = s.hp / s.maxHp;
-    if (s.type === 'POWR') produced += Math.round(100 * healthRatio);
-    else if (s.type === 'APWR') produced += Math.round(200 * healthRatio);
+    if (s.type === 'POWR') produced += fixedPowerOutput(100, s.hp, s.maxHp);
+    else if (s.type === 'APWR') produced += fixedPowerOutput(200, s.hp, s.maxHp);
     const drain = POWER_DRAIN[s.type];
     if (drain) consumed += drain;
   }

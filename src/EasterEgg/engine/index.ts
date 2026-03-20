@@ -95,6 +95,7 @@ import {
   tickServiceDepot as _tickServiceDepot,
   calculateSiloCapacity as _calculateSiloCapacity,
   calculatePowerGrid as _calculatePowerGrid,
+  fixedPowerOutput as _fixedPowerOutput,
 } from './repairSell';
 import {
   type SpecialUnitsContext,
@@ -1839,11 +1840,9 @@ export class Game {
     this.powerConsumed = 0;
     for (const s of this.structures) {
       if (!s.alive || s.sellProgress !== undefined || !this.isAllied(s.house, this.playerHouse)) continue;
-      // Power production — scales with building health (C++ building.cpp:4613 Power_Output)
-      const healthRatio = s.hp / s.maxHp;
-      // C++ building.cpp: FACT produces 0 power (ConYard is not a power source)
-      if (s.type === 'POWR') this.powerProduced += Math.round(100 * healthRatio);
-      else if (s.type === 'APWR') this.powerProduced += Math.round(200 * healthRatio);
+      // Power production — C++ 8.8 fixed-point (building.cpp:4613 Power_Output)
+      if (s.type === 'POWR') this.powerProduced += _fixedPowerOutput(100, s.hp, s.maxHp);
+      else if (s.type === 'APWR') this.powerProduced += _fixedPowerOutput(200, s.hp, s.maxHp);
       // Power consumption — from POWER_DRAIN table (rules.ini Power= values)
       const drain = POWER_DRAIN[s.type];
       if (drain) this.powerConsumed += drain;

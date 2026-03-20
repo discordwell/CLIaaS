@@ -280,22 +280,26 @@ export class Renderer {
     this.ctx.imageSmoothingEnabled = false;
   }
 
-  /** C++ Power_Height() — logarithmic scale for power bar (power.cpp:394-417) */
+  /** C++ Power_Height() → Draw_It rescaling (power.cpp:394-417, 229) */
   static powerBarHeight(value: number): number {
-    const POWER_HEIGHT = Renderer.POWER_HEIGHT;
+    const POWER_HEIGHT = Renderer.POWER_HEIGHT_INTERNAL; // 110 (C++ internal)
     const STEP_LEVEL = Renderer.POWER_STEP_LEVEL;
     const STEP_FACTOR = Renderer.POWER_STEP_FACTOR;
-    let num = Math.floor(value / STEP_LEVEL);
+    const num = Math.trunc(value / STEP_LEVEL);
     let retval = 0;
     let remaining = value;
     for (let lp = 0; lp < num; lp++) {
-      retval = retval + Math.floor(((POWER_HEIGHT - 2) - retval) / STEP_FACTOR);
+      retval = retval + Math.trunc(((POWER_HEIGHT - 2) - retval) / STEP_FACTOR);
       remaining -= STEP_LEVEL;
     }
     if (remaining > 0) {
-      retval = retval + Math.floor((Math.floor(((POWER_HEIGHT - 2) - retval) / STEP_FACTOR) * remaining) / STEP_LEVEL);
+      retval = retval + Math.trunc(
+        (Math.trunc(((POWER_HEIGHT - 2) - retval) / STEP_FACTOR) * remaining) / STEP_LEVEL
+      );
     }
-    return Math.max(0, Math.min(POWER_HEIGHT - 2, retval));
+    retval = Math.max(0, Math.min(POWER_HEIGHT - 2, retval));
+    // C++ Draw_It HIRES rescaling (power.cpp:229): (raw * 153) / 107
+    return Math.floor(retval * 153 / 107);
   }
 
   /** Update power bar bounce animation — call once per game tick (C++ PowerClass::AI) */
@@ -327,8 +331,7 @@ export class Renderer {
     if (this.drainBounce > 0 && this.drainHeight === this.desiredDrainHeight) {
       this.drainBounce--;
     } else if (this.drainHeight !== this.desiredDrainHeight) {
-      const dStep = Math.max(1, Math.ceil(Math.abs(this.desiredDrainHeight - this.drainHeight) / 8));
-      this.drainHeight += this.drainDir * dStep;
+      this.drainHeight += this.drainDir; // C++ increments by exactly 1 per tick (power.cpp:318-319)
       if ((this.drainDir > 0 && this.drainHeight > this.desiredDrainHeight) ||
           (this.drainDir < 0 && this.drainHeight < this.desiredDrainHeight)) {
         this.drainHeight = this.desiredDrainHeight;
@@ -339,8 +342,7 @@ export class Renderer {
     if (this.powerBounce > 0 && this.powerHeight === this.desiredPowerHeight) {
       this.powerBounce--;
     } else if (this.powerHeight !== this.desiredPowerHeight) {
-      const pStep = Math.max(1, Math.ceil(Math.abs(this.desiredPowerHeight - this.powerHeight) / 8));
-      this.powerHeight += this.powerDir * pStep;
+      this.powerHeight += this.powerDir; // C++ increments by exactly 1 per tick (power.cpp:330-331)
       if ((this.powerDir > 0 && this.powerHeight > this.desiredPowerHeight) ||
           (this.powerDir < 0 && this.powerHeight < this.desiredPowerHeight)) {
         this.powerHeight = this.desiredPowerHeight;
@@ -352,7 +354,7 @@ export class Renderer {
 
     // Trigger flash when drain exceeds power
     if (consumed > produced && produced > 0 && this.powerFlashTimer === 0) {
-      this.powerFlashTimer = 30; // flash for 2 seconds
+      this.powerFlashTimer = 15; // C++ TICKS_PER_SECOND = 15 (defines.h:3031)
     }
   }
 
@@ -3391,7 +3393,8 @@ export class Renderer {
 
   // Power bar (C++ power.h)
   static readonly POWER_Y = 176;         // (88×2) absolute Y
-  static readonly POWER_HEIGHT = 153;    // (76×2+1) HIRES bar height
+  static readonly POWER_HEIGHT = 153;    // (76×2+1) HIRES rendered bar height
+  static readonly POWER_HEIGHT_INTERNAL = 110; // C++ POWER_HEIGHT (200-(7+70+13)) for Power_Height()
   static readonly POWER_BAR_W = 10;
   static readonly POWER_BAR_X_OFFSET = 2;
 
