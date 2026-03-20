@@ -1218,5 +1218,12 @@ export function buildAlliancesFromINI(
   // GoodGuy is always allied with the player
   table.get(House.GoodGuy)?.add(playerHouse);
   table.get(playerHouse)?.add(House.GoodGuy);
+  // C++ parity (house.cpp:7156-7158): Neutral is mutually allied with ALL houses.
+  // Default Allies includes Neutral (Get_Owners default = 1 << HOUSE_NEUTRAL),
+  // and every house calls Make_Ally(HOUSE_NEUTRAL).
+  for (const h of Object.values(House)) {
+    table.get(h)?.add(House.Neutral);
+    table.get(House.Neutral)?.add(h);
+  }
   return table;
 }
