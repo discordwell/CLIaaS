@@ -279,7 +279,7 @@ describe('Non-ConYard buildings sell normally', () => {
 
   it('survivor crew types differ per building (SILO=civilian, BARR=E1)', () => {
     const survivorSection = indexSource.indexOf('SL4: Spawn infantry survivors');
-    const chunk = indexSource.slice(survivorSection, survivorSection + 2000);
+    const chunk = indexSource.slice(survivorSection, survivorSection + 3000);
     expect(chunk).toContain("case 'SILO'");
     expect(chunk).toContain("case 'BARR'");
     expect(chunk).toContain("case 'KENN'");

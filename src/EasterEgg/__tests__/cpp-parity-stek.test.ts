@@ -285,8 +285,9 @@ describe('STEK economic functions (rules.ini Cost=1500)', () => {
     expect(sellRefund(STEK_COST)).toBe(750);
   });
 
-  it('repair cost per step: ceil(1500 * 0.20 / (600 / 7)) = ceil(300 / 85.71) = 4', () => {
-    expect(repairCostPerStep(STEK_COST, STEK_MAX_HP)).toBe(4);
+  it('repair cost per step: C++ fixed-point (64*12+128)/256 = 3', () => {
+    // C++ fixed-point: stepsToFull=600/5=120, costPerStep=1500/120=12, (64*12+128)/256=3
+    expect(repairCostPerStep(STEK_COST, STEK_MAX_HP)).toBe(3);
   });
 });
 

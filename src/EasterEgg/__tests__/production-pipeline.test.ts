@@ -345,7 +345,7 @@ describe('Tick-based production lifecycle', () => {
     expect(entry.progress).toBe(10);
   });
 
-  it('heavy tank (buildTime=200) completes after exactly 200 ticks', () => {
+  it('heavy tank completes after exactly buildTime ticks (C++ cost-based)', () => {
     const t3 = findItem('3TNK');
     const structures = [
       makeStructure('FACT', House.Spain),
@@ -357,7 +357,7 @@ describe('Tick-based production lifecycle', () => {
     const entry: ProdEntry = { item: t3, progress: 0, queueCount: 1, costPaid: 0 };
 
     let ticks = 0;
-    for (let tick = 0; tick < 300; tick++) {
+    for (let tick = 0; tick < 2000; tick++) {
       const result = tickProductionEntry(entry, structures, state, 200, 50, House.Spain);
       ticks++;
       if (result === 'completed') break;
@@ -381,11 +381,11 @@ describe('PR3: Incremental cost deduction per tick', () => {
     const state = { credits: 5000 };
     const entry: ProdEntry = { item: e1, progress: 0, queueCount: 1, costPaid: 0 };
 
-    // After 1 tick, credits should decrease by cost/buildTime = 100/45 ~= 2.22
+    // After 1 tick, credits should decrease by cost/buildTime (C++ cost-based buildTime)
     const creditsBefore = state.credits;
     tickProductionEntry(entry, structures, state, 100, 50, House.Spain);
     const deducted = creditsBefore - state.credits;
-    const expectedPerTick = 100 / 45;
+    const expectedPerTick = 100 / e1.buildTime;
     expect(deducted).toBeCloseTo(expectedPerTick, 5);
     // costPaid should match
     expect(entry.costPaid).toBeCloseTo(expectedPerTick, 5);

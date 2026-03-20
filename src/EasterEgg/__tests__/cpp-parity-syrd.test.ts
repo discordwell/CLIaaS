@@ -142,10 +142,10 @@ describe('SYRD stats (rules.ini parity)', () => {
     expect(prodItem!.cost).toBe(650);
   });
 
-  it('has build time 150', () => {
+  it('has build time 624 (C++ cost-based: floor(650 * 0.96))', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'SYRD');
     expect(prodItem).toBeDefined();
-    expect(prodItem!.buildTime).toBe(150);
+    expect(prodItem!.buildTime).toBe(624);
   });
 
   it('prerequisite is POWR', () => {

@@ -213,12 +213,12 @@ describe('createAIHouseState', () => {
     expect(state.maxBuilding).toBe(10);
   });
 
-  it('defaults maxUnit/maxInfantry/maxBuilding to -1 (unlimited)', () => {
+  it('defaults maxUnit/maxInfantry/maxBuilding to 83 (C++ dynamic caps)', () => {
     const ctx = makeMockAIContext();
     const state = createAIHouseState(ctx, House.USSR);
-    expect(state.maxUnit).toBe(-1);
-    expect(state.maxInfantry).toBe(-1);
-    expect(state.maxBuilding).toBe(-1);
+    expect(state.maxUnit).toBe(83);
+    expect(state.maxInfantry).toBe(83);
+    expect(state.maxBuilding).toBe(83);
   });
 });
 

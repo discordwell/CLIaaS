@@ -266,8 +266,9 @@ describe('HPAD economic functions (rules.ini Cost=1500)', () => {
     expect(sellRefund(HPAD_COST)).toBe(750);
   });
 
-  it('repair cost per step: ceil(1500 * 0.20 / (800 / 7)) = ceil(300 / 114.29) = 3', () => {
-    expect(repairCostPerStep(HPAD_COST, HPAD_MAX_HP)).toBe(3);
+  it('repair cost per step: C++ fixed-point (64*9+128)/256 = 2', () => {
+    // C++ fixed-point: stepsToFull=800/5=160, costPerStep=1500/160=9, (64*9+128)/256=2
+    expect(repairCostPerStep(HPAD_COST, HPAD_MAX_HP)).toBe(2);
   });
 });
 
@@ -625,9 +626,9 @@ describe('HPAD as production prerequisite for helicopters', () => {
     expect(item!.prerequisite).toBe('DOME');
   });
 
-  it('HPAD build time is 180 ticks', () => {
+  it('HPAD build time is 1440 ticks (C++ cost-based: floor(1500 * 0.96))', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'HPAD' && p.isStructure);
     expect(item).toBeDefined();
-    expect(item!.buildTime).toBe(180);
+    expect(item!.buildTime).toBe(1440);
   });
 });

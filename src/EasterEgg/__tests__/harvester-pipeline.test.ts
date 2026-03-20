@@ -1444,9 +1444,9 @@ describe('Harvester Pipeline', () => {
       expect(harvItem.techPrereq).toBe('PROC');
     });
 
-    it('HARV build time is 160 ticks', () => {
+    it('HARV build time is 1344 ticks (C++ cost-based: floor(1400 * 0.96))', () => {
       const harvItem = PRODUCTION_ITEMS.find((p: { type: string }) => p.type === 'HARV');
-      expect(harvItem.buildTime).toBe(160);
+      expect(harvItem.buildTime).toBe(1344);
     });
 
     it('HARV is available to both factions', () => {

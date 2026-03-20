@@ -519,8 +519,9 @@ describe('Iron Curtain (INVUL_BOX) animation — C++ adata.cpp:1603-1625, house.
     activateSuperweapon(ctx, SuperweaponType.IRON_CURTAIN, House.Spain, tank.pos);
 
     // C++ house.cpp:2751 — IronCurtainCountDown = Rule.IronCurtainDuration * TICKS_PER_MINUTE
+    // C++ rules.ini IronCurtain=.75 → 0.75 * 900 = 675 ticks (45 seconds)
     expect(tank.ironCurtainTick).toBe(IRON_CURTAIN_DURATION);
-    expect(tank.ironCurtainTick).toBe(450); // C++ parity: 30 seconds at 15 FPS
+    expect(tank.ironCurtainTick).toBe(675);
   });
 
   it('Iron Curtain plays iron_curtain sound (C++ VOC_IRON1)', () => {

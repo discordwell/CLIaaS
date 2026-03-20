@@ -162,8 +162,8 @@ describe('PASSABLE set includes all walkable terrain types', () => {
   const map = new GameMap();
   map.setBounds(0, 0, 20, 20);
 
-  const passable = [Terrain.CLEAR, Terrain.ORE, Terrain.ROUGH, Terrain.BEACH];
-  const impassable = [Terrain.WATER, Terrain.ROCK, Terrain.TREE, Terrain.WALL, Terrain.RIVER];
+  const passable = [Terrain.CLEAR, Terrain.ORE, Terrain.ROUGH, Terrain.BEACH, Terrain.TREE]; // C++ parity: single trees don't block infantry
+  const impassable = [Terrain.WATER, Terrain.ROCK, Terrain.WALL, Terrain.RIVER];
 
   for (const t of passable) {
     it(`${Terrain[t]} is passable`, () => {

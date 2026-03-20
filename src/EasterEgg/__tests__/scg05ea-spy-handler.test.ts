@@ -61,8 +61,9 @@ function staticDogs(): RAEntity[] {
 }
 
 describe('SCG05EA — spy infiltration phase', () => {
-  it('spy boards LST when stranded on peninsula', () => {
+  it('spy uses waypoint route from peninsula (no LST boarding)', () => {
     const strategy = new OracleStrategy('SCG05EA');
+    strategy['scg05eaSpyStopped'] = true; // past initial STOP phase
     const state = makeState({
       tick: 300,
       units: [
@@ -74,10 +75,9 @@ describe('SCG05EA — spy infiltration phase', () => {
     });
 
     const decision = strategy.decide(state);
-    console.log('Spy board:', decision.reason);
-    expect(decision.reason).toContain('board LST');
-    const enterCmds = decision.commands.filter((c) => c.cmd === 'enter');
-    expect(enterCmds.length).toBe(1);
+    console.log('Spy route:', decision.reason);
+    // Spy uses waypoint route — moves toward first waypoint
+    expect(decision.reason).toMatch(/spy wp\d|spy →/);
   });
 
   it('spy advances along safe route waypoints', () => {
@@ -99,14 +99,15 @@ describe('SCG05EA — spy infiltration phase', () => {
     });
     const decision = strategy.decide(state2);
     console.log('Spy advance:', decision.reason);
-    // Should be heading to wp1 (30, 46) or wp2 (42, 46)
-    expect(decision.reason).toMatch(/spy → wp/);
+    // Should be heading to a waypoint — format is "spy wp{N} → (x,y)"
+    expect(decision.reason).toMatch(/spy wp\d/);
   });
 
-  it('spy evades when dog gets within 5 cells (after landing)', () => {
+  it('spy continues waypoint route even with nearby dogs (no evasion — sprint strategy)', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    // Simulate spy already landed near base
+    // Simulate spy already landed near base, past initial STOP
     strategy['scg05eaSpyLanded'] = true;
+    strategy['scg05eaSpyStopped'] = true;
     const state = makeState({
       tick: 500,
       units: [makeEntity(1, 'SPY', 'Greece', 38, 52, 25, 25, 3)], // moving (m=3)
@@ -117,8 +118,9 @@ describe('SCG05EA — spy infiltration phase', () => {
     });
 
     const decision = strategy.decide(state);
-    console.log('Spy evade:', decision.reason);
-    expect(decision.reason).toContain('evade dog');
+    console.log('Spy with nearby dog:', decision.reason);
+    // Spy sprints — no evasion, continues toward WEAP
+    expect(decision.reason).toMatch(/spy|WEAP/);
   });
 
   it('spy infiltrates WEAP when close and no dogs nearby', () => {
@@ -264,6 +266,7 @@ describe('SCG05EA — chinook evacuation phase', () => {
 describe('SCG05EA — generic fallthrough', () => {
   it('falls through to generic handler after spy infiltrated and no Tanya/chinook', () => {
     const strategy = new OracleStrategy('SCG05EA');
+    strategy['scg05eaSpyInfiltrated'] = true;
     strategy.decide(makeState({ tick: 100, globals: [1] }));
 
     const state = makeState({

@@ -979,7 +979,7 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
       expect(mig.moveTarget).toEqual(expectedWorld);
     });
 
-    it('non-aircraft units spawn at origin waypoint, NOT edge (no aircraft state)', () => {
+    it('non-aircraft units spawn at map edge per C++ reinf.cpp:471 (no aircraft state)', () => {
       resetEntityIds();
       const teamTypes: TeamType[] = [{
         name: 'ground',
@@ -1005,11 +1005,10 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
 
       expect(result.spawned).toHaveLength(1);
       const tank = result.spawned[0];
-      // Non-aircraft should be near the origin waypoint, not at map edge
-      const expectedX = 50 * CELL_SIZE + CELL_SIZE / 2;
-      const expectedY = 50 * CELL_SIZE + CELL_SIZE / 2;
-      expect(Math.abs(tank.pos.x - expectedX)).toBeLessThanOrEqual(24);
-      expect(Math.abs(tank.pos.y - expectedY)).toBeLessThanOrEqual(24);
+      // C++ parity: ground units spawn at map edge (reinf.cpp:471 Calculated_Cell)
+      // Waypoint (50,50) in bounds (0,0,100,100) → south edge → cy=99
+      const edgeY = (MAP_BOUNDS.y + MAP_BOUNDS.h - 1) * CELL_SIZE + CELL_SIZE / 2;
+      expect(Math.abs(tank.pos.y - edgeY)).toBeLessThanOrEqual(24);
       // Should NOT have aircraftState='flying'
       expect(tank.aircraftState).not.toBe('flying');
     });

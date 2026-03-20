@@ -50,8 +50,8 @@ function makeGame(overrides: Partial<MockGame> = {}): MockGame {
     },
     _repairing: new Set<number>(),
     getAvailableItems: () => [],
-    isAllied: (house: House, playerHouse: House) =>
-      house === playerHouse || house === House.Greece || house === House.Neutral,
+    isAllied: (a: House, b: House) =>
+      a === b || (a === House.Spain && (b === House.Greece || b === House.Neutral)),
     startProduction: vi.fn(),
     cancelProduction: vi.fn(),
     placeStructure: vi.fn().mockReturnValue(true),

@@ -141,10 +141,10 @@ describe('DOME stats (rules.ini parity)', () => {
     expect(prodItem!.cost).toBe(1000);
   });
 
-  it('build time is 150 ticks', () => {
+  it('build time is 960 ticks (C++ cost-based: floor(1000 * 0.96))', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'DOME');
     expect(prodItem).toBeDefined();
-    expect(prodItem!.buildTime).toBe(150);
+    expect(prodItem!.buildTime).toBe(960);
   });
 
   it('prerequisite is PROC (Refinery)', () => {
@@ -302,8 +302,9 @@ describe('DOME economic functions (rules.ini Cost=1000)', () => {
     expect(sellRefund(DOME_COST)).toBe(500);
   });
 
-  it('repair cost per step: ceil(1000 * 0.20 / (1000 / 7)) = ceil(200 / 142.86) = 2', () => {
-    expect(repairCostPerStep(DOME_COST, DOME_MAX_HP)).toBe(2);
+  it('repair cost per step: C++ fixed-point (64*5+128)/256 = 1', () => {
+    // C++ fixed-point: stepsToFull=1000/5=200, costPerStep=1000/200=5, (64*5+128)/256=1
+    expect(repairCostPerStep(DOME_COST, DOME_MAX_HP)).toBe(1);
   });
 });
 

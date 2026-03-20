@@ -327,12 +327,12 @@ describe('createAIHouseState — difficulty modifier application (HOUSE.CPP)', (
     expect(state.maxBuilding).toBe(10);
   });
 
-  it('defaults caps to -1 (uncapped)', () => {
+  it('defaults caps to 83 (C++ dynamic caps)', () => {
     const ctx = makeAIContext({});
     const state = createAIHouseState(ctx, House.USSR);
-    expect(state.maxUnit).toBe(-1);
-    expect(state.maxInfantry).toBe(-1);
-    expect(state.maxBuilding).toBe(-1);
+    expect(state.maxUnit).toBe(83);
+    expect(state.maxInfantry).toBe(83);
+    expect(state.maxBuilding).toBe(83);
   });
 });
 

@@ -56,8 +56,8 @@ function makeGame(overrides: Record<string, unknown> = {}) {
     },
     _repairing: new Set<number>(),
     getAvailableItems: () => [] as ProductionItem[],
-    isAllied: (house: House, playerHouse: House) =>
-      house === playerHouse || house === House.Greece || house === House.Neutral,
+    isAllied: (a: House, b: House) =>
+      a === b || (a === House.Spain && (b === House.Greece || b === House.Neutral)),
     startProduction: vi.fn(),
     cancelProduction: vi.fn(),
     placeStructure: vi.fn().mockReturnValue(true),
@@ -501,8 +501,8 @@ describe('backward compatibility', () => {
   it('reports player house and allied houses for campaign automation', () => {
     const game = makeGame({
       playerHouse: House.England,
-      isAllied: (house: House, playerHouse: House) =>
-        house === playerHouse || house === House.France || house === House.Germany,
+      isAllied: (a: House, b: House) =>
+        a === b || (a === House.England && (b === House.France || b === House.Germany)),
     });
 
     const s = serializeState(castGame(game));

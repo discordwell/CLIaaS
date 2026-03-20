@@ -742,12 +742,13 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     expect(scoreOne).toBeLessThan(scoreNone);
     expect(scoreTwo).toBeLessThan(scoreOne);
     // C++ Area_Modify: odds /= 2 per building → pow(0.5, count)
-    // 1 building: 0.5x
-    expect(scoreOne).toBeCloseTo(scoreNone * 0.5, 1);
-    // 2 buildings: 0.25x
-    expect(scoreTwo).toBeCloseTo(scoreNone * 0.25, 1);
-    // 3 buildings: 0.125x
-    expect(scoreThree).toBeCloseTo(scoreNone * 0.125, 1);
+    // Math.trunc causes integer rounding; use ratio check with tolerance
+    // 1 building: ~0.5x (within 2% tolerance due to integer truncation)
+    expect(scoreOne / scoreNone).toBeCloseTo(0.5, 1);
+    // 2 buildings: ~0.25x
+    expect(scoreTwo / scoreNone).toBeCloseTo(0.25, 1);
+    // 3 buildings: ~0.125x
+    expect(scoreThree / scoreNone).toBeCloseTo(0.125, 1);
   });
 
   it('splash-weapon scanner: penalty continues exponentially (no floor)', () => {
@@ -759,10 +760,10 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scoreFive = threatScore(scanner, target, 1, false, 0, null, 5);
     const scoreTen = threatScore(scanner, target, 1, false, 0, null, 10);
 
-    // 5 buildings: 1/32 = 0.03125x
-    expect(scoreFive).toBeCloseTo(scoreNone * Math.pow(0.5, 5), 2);
-    // 10 buildings: 1/1024 ≈ 0.001x
-    expect(scoreTen).toBeCloseTo(scoreNone * Math.pow(0.5, 10), 4);
+    // 5 buildings: ~1/32 = 0.03125x (use ratio for integer truncation tolerance)
+    expect(scoreFive / scoreNone).toBeCloseTo(Math.pow(0.5, 5), 1);
+    // 10 buildings: ~1/1024 ≈ 0.001x
+    expect(scoreTen / scoreNone).toBeCloseTo(Math.pow(0.5, 10), 1);
   });
 
   it('non-splash scanner: nearFriendlyStructureCount has no effect', () => {

@@ -427,9 +427,9 @@ describe('Fire Sale — sell all buildings (house.cpp:7322-7335)', () => {
     aiFireSale(ctx, House.USSR);
 
     const credits = ctx.houseCredits.get(House.USSR) ?? 0;
-    // Full HP → refund = cost * 0.5 * 1.0
+    // C++ Fire_Sale → Sell_Back(1): AI (IsHuman=false) gets 100% refund (techno.cpp:5743-5761)
     if (powrItem) {
-      expect(credits).toBe(Math.floor(powrItem.cost * 0.5));
+      expect(credits).toBe(powrItem.cost);
     } else {
       // No prod item found — credits should still be 0
       expect(credits).toBe(0);

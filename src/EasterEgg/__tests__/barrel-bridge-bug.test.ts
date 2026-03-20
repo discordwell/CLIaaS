@@ -107,9 +107,9 @@ describe('Barrel explosion bridge destruction fix', () => {
     const showEvaMessage = vi.fn();
     const map = new GameMap();
     // Plant bridge template cells near the barrel position (10,10)
-    // Bridge templates are IDs 235-252
+    // C++ bridge templates: 131, 133, 235, 236, 378, 379
     const idx = 10 * 128 + 10; // cy=10, cx=10 assuming MAP_CELLS=128
-    (map as any).templateType[idx] = 240; // bridge template
+    (map as any).templateType[idx] = 235; // TEMPLATE_BRIDGE_1A
     // Also set terrain so destroyBridge can find it
     const ctx = makeMockCombatContext({ showEvaMessage, map, bridgeCellCount: 1 });
     const barrel = makeBarrel({ hp: 1 });

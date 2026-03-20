@@ -544,9 +544,9 @@ describe('MNLY production identity (rules.ini)', () => {
     expect(item.cost).toBe(800);
   });
 
-  it('buildTime is 120', () => {
+  it('buildTime is 768 (C++ cost-based: floor(800 * 0.96))', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MNLY')!;
-    expect(item.buildTime).toBe(120);
+    expect(item.buildTime).toBe(768);
   });
 
   it('prerequisite is WEAP (War Factory)', () => {
