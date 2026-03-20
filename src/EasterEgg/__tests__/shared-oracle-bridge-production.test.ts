@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { translateOracleDecisionToTs, type TsStateBridge } from '../oracle/SharedOracleBridge';
+import { translateOracleDecisionToTs, normalizeTsState, type TsStateBridge } from '../oracle/SharedOracleBridge';
+import type { AgentState } from '../engine/agentHarness';
 
 const EMPTY_BRIDGE: TsStateBridge = {
   normalizedState: {} as any,
@@ -86,5 +87,55 @@ describe('translateOracleDecisionToTs — production commands', () => {
     const { commands, warnings } = translateOracleDecisionToTs(decision, EMPTY_BRIDGE);
     expect(commands).toHaveLength(0);
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe('normalizeTsState — buildable field', () => {
+  const MINIMAL_STATE: AgentState = {
+    tick: 100,
+    credits: 5000,
+    playerHouse: 'Greece',
+    alliedHouses: ['Greece'],
+    globals: [],
+    missionTimer: 0,
+    civiliansEvacuated: 0,
+    state: 'playing',
+    power: { produced: 200, consumed: 100, multiplier: 1 },
+    units: [],
+    enemies: [],
+    structures: [],
+    production: [],
+    available: ['POWR', 'WEAP', '2TNK', 'E3', 'DD'],
+    availableItems: [
+      { t: 'POWR', name: 'Power Plant', cost: 300, time: 100, side: 'left', isStruct: true },
+      { t: 'WEAP', name: 'War Factory', cost: 2000, time: 200, side: 'left', isStruct: true },
+      { t: '2TNK', name: 'Medium Tank', cost: 800, time: 150, side: 'right', isStruct: false },
+      { t: 'E3', name: 'Rocket Soldier', cost: 300, time: 80, side: 'right', isStruct: false },
+      { t: 'DD', name: 'Destroyer', cost: 1000, time: 200, side: 'right', isStruct: false },
+    ],
+    superweapons: [],
+    mapBounds: { x: 0, y: 0, w: 128, h: 128 },
+    kills: 0,
+    losses: 0,
+  } as AgentState;
+
+  it('includes buildable with categorized available items', () => {
+    const bridge = normalizeTsState(MINIMAL_STATE);
+    const buildable = bridge.normalizedState.buildable;
+    expect(buildable).toBeDefined();
+    expect(buildable!.structures).toEqual(['POWR', 'WEAP']);
+    expect(buildable!.units).toEqual(['2TNK']);
+    expect(buildable!.infantry).toEqual(['E3']);
+    expect(buildable!.vessels).toEqual(['DD']);
+  });
+
+  it('returns empty arrays when no items available', () => {
+    const emptyState = { ...MINIMAL_STATE, availableItems: [] };
+    const bridge = normalizeTsState(emptyState);
+    const buildable = bridge.normalizedState.buildable;
+    expect(buildable).toBeDefined();
+    expect(buildable!.structures).toEqual([]);
+    expect(buildable!.units).toEqual([]);
+    expect(buildable!.infantry).toEqual([]);
   });
 });

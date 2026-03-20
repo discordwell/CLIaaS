@@ -17,6 +17,15 @@ import type {
 
 const TS_STRUCTURE_ID_OFFSET = 1_000_000_000;
 
+// Infantry type names — must match OracleStrategy.INFANTRY_TYPES
+const INFANTRY_TYPES = new Set([
+  'E1','E2','E3','E4','E6','E7','SPY','THF','MEDI','GNRL','DOG',
+  'C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','EINSTEIN','CHAN','DELPHI',
+]);
+
+// Vessel type names
+const VESSEL_TYPES = new Set(['SS','DD','CA','LST','PT','MSUB']);
+
 const RTTI_BUILDINGTYPE = 6;
 const RTTI_UNITTYPE = 29;
 const RTTI_INFANTRYTYPE = 14;
@@ -110,6 +119,27 @@ function toRaStructure(structure: AgentStructure, id: number): RAStructure {
   };
 }
 
+function toBuildable(state: AgentState): { structures: string[]; units: string[]; infantry: string[]; vessels: string[] } {
+  const structures: string[] = [];
+  const units: string[] = [];
+  const infantry: string[] = [];
+  const vessels: string[] = [];
+
+  for (const item of state.availableItems) {
+    if (item.isStruct) {
+      structures.push(item.t);
+    } else if (INFANTRY_TYPES.has(item.t)) {
+      infantry.push(item.t);
+    } else if (VESSEL_TYPES.has(item.t)) {
+      vessels.push(item.t);
+    } else {
+      units.push(item.t);
+    }
+  }
+
+  return { structures, units, infantry, vessels };
+}
+
 export function normalizeTsState(state: AgentState): TsStateBridge {
   const alliedHouses = new Set(state.alliedHouses);
   const units: RAEntity[] = state.units.map((unit) => toRaEntity(unit, true));
@@ -154,6 +184,7 @@ export function normalizeTsState(state: AgentState): TsStateBridge {
         t: item.t,
         prog: Math.round(item.prog * 100),
       })),
+      buildable: toBuildable(state),
     },
   };
 }
