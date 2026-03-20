@@ -61,21 +61,23 @@ function staticDogs(): RAEntity[] {
 }
 
 describe('SCG05EA — spy infiltration phase', () => {
-  it('spy follows safe route north (y=46) to avoid dogs', () => {
+  it('spy boards LST when stranded on peninsula', () => {
     const strategy = new OracleStrategy('SCG05EA');
     const state = makeState({
       tick: 300,
-      units: [makeEntity(1, 'SPY', 'Greece', 16, 49)], // just disembarked from LST
+      units: [
+        makeEntity(1, 'SPY', 'Greece', 16, 50), // on peninsula
+        makeEntity(2, 'LST', 'Greece', 15, 49), // LST nearby
+      ],
       enemies: staticDogs(),
       structures: [TARGET_WEAP],
     });
 
     const decision = strategy.decide(state);
-    console.log('Spy start:', decision.reason);
-    // Should move to first safe route waypoint (16, 46) — north
-    const moveCmds = decision.commands.filter((c) => c.cmd === 'move');
-    expect(moveCmds.length).toBe(1);
-    expect(moveCmds[0].cy).toBe(46); // north corridor
+    console.log('Spy board:', decision.reason);
+    expect(decision.reason).toContain('board LST');
+    const enterCmds = decision.commands.filter((c) => c.cmd === 'enter');
+    expect(enterCmds.length).toBe(1);
   });
 
   it('spy advances along safe route waypoints', () => {
@@ -101,13 +103,15 @@ describe('SCG05EA — spy infiltration phase', () => {
     expect(decision.reason).toMatch(/spy → wp/);
   });
 
-  it('spy evades when dog gets within 5 cells', () => {
+  it('spy evades when dog gets within 5 cells (after landing)', () => {
     const strategy = new OracleStrategy('SCG05EA');
+    // Simulate spy already landed near base
+    strategy['scg05eaSpyLanded'] = true;
     const state = makeState({
       tick: 500,
-      units: [makeEntity(1, 'SPY', 'Greece', 30, 48, 25, 25, 3)], // moving (m=3)
+      units: [makeEntity(1, 'SPY', 'Greece', 38, 52, 25, 25, 3)], // moving (m=3)
       enemies: [
-        { ...makeEntity(100, 'DOG', 'BadGuy', 32, 49), ally: false }, // 3 cells away
+        { ...makeEntity(100, 'DOG', 'BadGuy', 40, 53), ally: false }, // 3 cells away
       ],
       structures: [TARGET_WEAP],
     });

@@ -207,17 +207,19 @@ const SCG03EA_FALLBACK: Point = { cx: 62, cy: 49 };    // cell 6334 = starting a
 const SCG03EA_ARTY_POS: Point = { cx: 54, cy: 55 };    // cell 7094 = central fire support
 
 // ── SCG05EA "Paradox Equation" — spy infiltration → Tanya rescue → SAM destroy ──
-// Spy arrives by LST at west coast, must infiltrate BadGuy WEAP at (43,50).
-// Dogs detect spies within 3 cells — route north through y≈46 corridor.
+// Spy arrives by LST at west coast on a PENINSULA — can't walk to the base.
+// Must re-board LST, sail east to a landing near the WEAP, then disembark.
+// Dogs detect spies within 3 cells — avoid dogs at (49-50, 52) near the WEAP.
 // After infiltration: Tanya freed, destroys 4 SAM sites, chinook evacuates her.
 // Final phase: destroy all USSR+BadGuy forces.
 const SCG05EA_WEAP_TARGET: Point = { cx: 43, cy: 50 };
 const SCG05EA_DOG_SAFE_DISTANCE_SQ = 25; // 5 cells squared (>3 cell detection + buffer)
-// Safe spy waypoints: north corridor avoids dogs at (23-24, 54-55) and (49-50, 52)
+// LST landing point: east of peninsula, south of WEAP, away from dogs
+const SCG05EA_LST_LANDING: Point = { cx: 36, cy: 56 };
+// Spy walk route from landing to WEAP approach (avoid dogs at 49-50,52)
 const SCG05EA_SPY_ROUTE: Point[] = [
-  { cx: 16, cy: 46 },   // north of landing, clear of dogs
-  { cx: 30, cy: 46 },   // east along safe corridor
-  { cx: 42, cy: 46 },   // approach WEAP from north
+  { cx: 38, cy: 52 },   // inland from landing
+  { cx: 42, cy: 48 },   // north of WEAP, clear of dogs at (49,52)
 ];
 // SAM sites Tanya must destroy — ordered by proximity to her spawn at (25,107).
 // Tanya spawns via reinforcement at WP6=(25,107), team-moves to WP35=(23,105).
@@ -281,6 +283,8 @@ export class OracleStrategy {
   private mcvSpawnTick = 0;           // tick when MCV first appeared
   private mcvDeployAttempts = 0;      // how many times we've tried deploying
   private scg05eaSpyInfiltrated = false;  // true after spy enters WEAP
+  private scg05eaSpyBoarded = false;     // true when spy is aboard LST
+  private scg05eaSpyLanded = false;      // true after LST delivers spy near base
   private scg05eaSpyRouteIndex = 0;      // current waypoint in spy safe route
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg09eaTransportSeen = false;  // true once the escape transport appears
@@ -1709,14 +1713,59 @@ export class OracleStrategy {
     }
 
     // ─── PHASE 1: Spy infiltration ───────────────────────────────────────
+    // The spy lands on a coastal peninsula and CANNOT walk to the base.
+    // Strategy: re-board the spy onto the LST, sail to a landing near the
+    // base, disembark, then walk to the WEAP avoiding dogs.
     if (spy && !this.scg05eaSpyInfiltrated) {
+      const lst = playerUnits.find((u) => u.t === 'LST');
       const targetWeap = state.structures.find(
         (s) => s.t === 'WEAP' && !s.ally &&
           this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 16,
       );
 
-      if (!this.isIdle(spy)) {
-        // Spy is moving — check for dog threats and redirect if needed
+      // Sub-phase 1a: Board spy onto LST
+      if (!this.scg05eaSpyBoarded && !this.scg05eaSpyLanded) {
+        if (lst) {
+          const spyInLst = (lst.cargo ?? 0) > 0;
+          if (spyInLst) {
+            this.scg05eaSpyBoarded = true;
+            reasons.push('spy aboard LST');
+          } else if (this.isIdle(spy)) {
+            commands.push({ cmd: 'enter', ids: [spy.id], target: lst.id });
+            reasons.push('spy → board LST');
+          } else {
+            reasons.push('spy boarding LST...');
+          }
+        } else {
+          // No LST available — try walking (fallback for if LST already left)
+          this.scg05eaSpyLanded = true;
+          reasons.push('no LST, spy walks');
+        }
+        if (commands.length > 0 || !this.scg05eaSpyBoarded) {
+          return { commands, reason: reasons.join('; ') };
+        }
+      }
+
+      // Sub-phase 1b: Sail LST to landing point near base
+      if (this.scg05eaSpyBoarded && !this.scg05eaSpyLanded && lst) {
+        const atLanding = this.distanceSq(lst, SCG05EA_LST_LANDING) <= 9;
+        if (atLanding) {
+          // Unload spy
+          commands.push({ cmd: 'deploy', ids: [lst.id] });
+          this.scg05eaSpyLanded = true;
+          reasons.push('LST unloading spy at landing');
+        } else {
+          commands.push({
+            cmd: 'move', ids: [lst.id],
+            cx: SCG05EA_LST_LANDING.cx, cy: SCG05EA_LST_LANDING.cy,
+          });
+          reasons.push(`LST → landing (${SCG05EA_LST_LANDING.cx},${SCG05EA_LST_LANDING.cy})`);
+        }
+        return { commands, reason: reasons.join('; ') };
+      }
+
+      // Sub-phase 1c: Spy walks from landing to WEAP (avoid dogs)
+      if (this.scg05eaSpyLanded) {
         const nearestDog = dogs.length > 0
           ? dogs.reduce((a, b) =>
             this.distanceSq(spy, a) < this.distanceSq(spy, b) ? a : b)
@@ -1724,7 +1773,6 @@ export class OracleStrategy {
         const dogDist = nearestDog ? this.distanceSq(spy, nearestDog) : Infinity;
 
         if (dogDist <= SCG05EA_DOG_SAFE_DISTANCE_SQ) {
-          // Dog too close — emergency redirect
           const dx = spy.cx - nearestDog!.cx;
           const dy = spy.cy - nearestDog!.cy;
           const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -1734,34 +1782,33 @@ export class OracleStrategy {
             cy: Math.round(spy.cy + (dy / len) * 6),
           });
           reasons.push(`spy evade dog at (${nearestDog!.cx},${nearestDog!.cy})`);
+        } else if (this.isIdle(spy)) {
+          const closeToWeap = targetWeap && this.distanceSq(spy, targetWeap) <= 36;
+          const dogNearWeap = dogs.some(
+            (d) => targetWeap && this.distanceSq(d, targetWeap) <= 49,
+          );
+
+          if (closeToWeap && targetWeap && !dogNearWeap) {
+            commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+            reasons.push('spy → infiltrate WEAP');
+          } else if (this.scg05eaSpyRouteIndex < SCG05EA_SPY_ROUTE.length) {
+            const wp = SCG05EA_SPY_ROUTE[this.scg05eaSpyRouteIndex];
+            if (this.distanceSq(spy, wp) <= 9) {
+              this.scg05eaSpyRouteIndex++;
+            }
+            const next = SCG05EA_SPY_ROUTE[
+              Math.min(this.scg05eaSpyRouteIndex, SCG05EA_SPY_ROUTE.length - 1)
+            ];
+            commands.push({ cmd: 'move', ids: [spy.id], cx: next.cx, cy: next.cy });
+            reasons.push(`spy → wp${this.scg05eaSpyRouteIndex} (${next.cx},${next.cy})`);
+          } else if (targetWeap) {
+            commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+            reasons.push('spy → infiltrate WEAP (route done)');
+          } else {
+            reasons.push('spy waiting (no WEAP found)');
+          }
         } else {
           reasons.push('spy en route');
-        }
-      } else {
-        // Spy is idle — advance along safe route or infiltrate
-        const closeToWeap = targetWeap && this.distanceSq(spy, targetWeap) <= 36;
-        const dogNearWeap = dogs.some(
-          (d) => targetWeap && this.distanceSq(d, targetWeap) <= 49,
-        );
-
-        if (closeToWeap && targetWeap && !dogNearWeap) {
-          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-          reasons.push('spy → infiltrate WEAP');
-        } else if (this.scg05eaSpyRouteIndex < SCG05EA_SPY_ROUTE.length) {
-          const wp = SCG05EA_SPY_ROUTE[this.scg05eaSpyRouteIndex];
-          if (this.distanceSq(spy, wp) <= 9) {
-            this.scg05eaSpyRouteIndex++;
-          }
-          const next = SCG05EA_SPY_ROUTE[
-            Math.min(this.scg05eaSpyRouteIndex, SCG05EA_SPY_ROUTE.length - 1)
-          ];
-          commands.push({ cmd: 'move', ids: [spy.id], cx: next.cx, cy: next.cy });
-          reasons.push(`spy → wp${this.scg05eaSpyRouteIndex} (${next.cx},${next.cy})`);
-        } else if (targetWeap) {
-          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-          reasons.push('spy → infiltrate WEAP (route done)');
-        } else {
-          reasons.push('spy waiting (no WEAP found)');
         }
       }
 
