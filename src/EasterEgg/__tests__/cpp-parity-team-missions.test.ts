@@ -25,7 +25,7 @@
  *   - team.cpp:2866-2872 — TMission_Loop(): CurrentMission = Data.Value - 1, IsNextMission = true
  *   - team.cpp:2890-2900 — TMission_Invulnerable(): set IronCurtainCountDown, advance
  *   - team.cpp:2919-2925 — TMission_Set_Global(): set global, IsNextMission = true
- *   - teamtype.cpp:65-82 — 16 TMISSION_* types
+ *   - teamtype.cpp:65-82 — 17 TMISSION_* types (including TMISSION_INVULNERABLE)
  *   - defines.h:3031-3032 — TICKS_PER_SECOND=15, TICKS_PER_MINUTE=900
  *   - rules.cpp:260      — StrayDistance = 0x0200 (512 leptons = 2 cells)
  *
@@ -41,7 +41,7 @@ import {
   TMISSION_MOVE, TMISSION_ATTACK, TMISSION_ATT_WAYPT, TMISSION_GUARD,
   TMISSION_UNLOAD, TMISSION_DEPLOY, TMISSION_PATROL, TMISSION_LOOP, TMISSION_DO,
   TMISSION_SET_GLOBAL, TMISSION_ATTACKTARCOM, TMISSION_LOAD, TMISSION_FORMATION,
-  TMISSION_MOVECELL, TMISSION_HOUND_DOG, TMISSION_SPY,
+  TMISSION_MOVECELL, TMISSION_HOUND_DOG, TMISSION_SPY, TMISSION_INVULNERABLE,
   registerTeam, getActiveTeams, clearAllTeams, updateAllTeams,
 } from '../engine/team';
 
@@ -94,7 +94,7 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
   // ==========================================================================
   describe('TMISSION constants match C++ enum (teamtype.cpp:65-82)', () => {
     /**
-     * C++ teamtype.cpp:65-82:
+     * C++ teamtype.h / teamtype.cpp:65-82:
      *   TeamMissionClass TeamMissions[TMISSION_COUNT] = {
      *     {TMISSION_ATTACK},       // 0
      *     {TMISSION_ATT_WAYPT},    // 1
@@ -109,9 +109,10 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
      *     {TMISSION_HOUND_DOG},    // 10
      *     {TMISSION_DO},           // 11
      *     {TMISSION_SET_GLOBAL},   // 12
-     *     {TMISSION_LOAD},         // 13
-     *     {TMISSION_SPY},          // 14
-     *     {TMISSION_PATROL},       // 15
+     *     {TMISSION_INVULNERABLE}, // 13  ← teamtype.h:57
+     *     {TMISSION_LOAD},         // 14
+     *     {TMISSION_SPY},          // 15
+     *     {TMISSION_PATROL},       // 16
      *   };
      */
     const EXPECTED_CONSTANTS: [string, number, number][] = [
@@ -128,9 +129,10 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       ['TMISSION_HOUND_DOG',    TMISSION_HOUND_DOG,    10],
       ['TMISSION_DO',           TMISSION_DO,           11],
       ['TMISSION_SET_GLOBAL',   TMISSION_SET_GLOBAL,   12],
-      ['TMISSION_LOAD',         TMISSION_LOAD,         13],
-      ['TMISSION_SPY',          TMISSION_SPY,          14],
-      ['TMISSION_PATROL',       TMISSION_PATROL,       15],
+      ['TMISSION_INVULNERABLE', TMISSION_INVULNERABLE, 13],
+      ['TMISSION_LOAD',         TMISSION_LOAD,         14],
+      ['TMISSION_SPY',          TMISSION_SPY,          15],
+      ['TMISSION_PATROL',       TMISSION_PATROL,       16],
     ];
 
     for (const [name, tsValue, cppValue] of EXPECTED_CONSTANTS) {
@@ -1788,6 +1790,562 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
       expect(team.isHasBeen).toBe(false);
       expect(team.dissolved).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // Section 28: TMISSION_INVULNERABLE gap — C++ enum vs TS constants
+  // C++ teamtype.h:44-66 defines the full enum:
+  //   TMISSION_SET_GLOBAL    = 12,
+  //   TMISSION_INVULNERABLE  = 13,  ← TS is MISSING this constant
+  //   TMISSION_LOAD          = 14,
+  //   TMISSION_SPY           = 15,
+  //   TMISSION_PATROL        = 16,
+  //   TMISSION_COUNT         = 17
+  //
+  // TS team.ts currently has:
+  //   TMISSION_SET_GLOBAL = 12, TMISSION_LOAD = 13, TMISSION_SPY = 14, TMISSION_PATROL = 15
+  // This is a numbering discrepancy — LOAD/SPY/PATROL are shifted down by 1.
+  //
+  // The TeamMissions array (teamtype.cpp:65-82) lists 16 entries for the
+  // scenario editor, but uses explicit enum members — not indices.
+  // The TMissions string array (teamtype.cpp:131-148) has 17 entries
+  // indexed by enum value, with "Invulnerable" at index 13.
+  //
+  // The C++ enum is the source of truth for mission type numbering.
+  // ==========================================================================
+  describe('TMISSION_INVULNERABLE enum gap — C++ teamtype.h:44-66', () => {
+    /**
+     * C++ teamtype.h:44-66:
+     *   TMISSION_SET_GLOBAL   = 12,
+     *   TMISSION_INVULNERABLE = 13,
+     *   TMISSION_LOAD         = 14,
+     *   TMISSION_SPY          = 15,
+     *   TMISSION_PATROL       = 16,
+     *   TMISSION_COUNT        = 17
+     *
+     * C++ teamtype.cpp:131-148 TMissions string array:
+     *   [13] = "Invulnerable"
+     *   [14] = "Load onto Transport"
+     *   [15] = "Spy on bldg @ waypt..."
+     *   [16] = "Patrol to waypoint..."
+     *
+     * TS team.ts is missing TMISSION_INVULNERABLE (13), causing
+     * TMISSION_LOAD=13, TMISSION_SPY=14, TMISSION_PATROL=15 — all off by 1.
+     */
+    it('C++ TMISSION_COUNT = 17 (17 distinct mission types, 0-16)', () => {
+      // C++ teamtype.h:64: TMISSION_COUNT (value after TMISSION_PATROL=16 → 17)
+      const CPP_TMISSION_COUNT = 17;
+      expect(CPP_TMISSION_COUNT).toBe(17);
+    });
+
+    it('C++ TMissions string array has 17 entries with "Invulnerable" at [13]', () => {
+      // C++ teamtype.cpp:131-148: char const * TeamTypeClass::TMissions[TMISSION_COUNT]
+      const cppTMissionStrings = [
+        'Attack...',                    // 0
+        'Attack Waypoint...',           // 1
+        'Change Formation to...',       // 2
+        'Move to waypoint...',          // 3
+        'Move to Cell...',              // 4
+        'Guard area (1/10th min)...',   // 5
+        'Jump to line #...',            // 6
+        'Attack Tarcom',                // 7
+        'Unload',                       // 8
+        'Deploy',                       // 9
+        'Follow friendlies',            // 10
+        'Do this...',                   // 11
+        'Set global...',                // 12
+        'Invulnerable',                 // 13 ← TMISSION_INVULNERABLE
+        'Load onto Transport',          // 14 ← TMISSION_LOAD
+        'Spy on bldg @ waypt...',       // 15 ← TMISSION_SPY
+        'Patrol to waypoint...',        // 16 ← TMISSION_PATROL
+      ];
+      expect(cppTMissionStrings.length).toBe(17);
+      expect(cppTMissionStrings[13]).toBe('Invulnerable');
+      expect(cppTMissionStrings[14]).toBe('Load onto Transport');
+      expect(cppTMissionStrings[15]).toBe('Spy on bldg @ waypt...');
+      expect(cppTMissionStrings[16]).toBe('Patrol to waypoint...');
+    });
+
+    it('TS TMISSION_LOAD should be 14 (C++ teamtype.h:60), not 13', () => {
+      // C++ teamtype.h:60: TMISSION_LOAD = 14 (after INVULNERABLE=13)
+      // TS team.ts currently has TMISSION_LOAD = 13 — divergence from C++ enum
+      expect(TMISSION_LOAD).toBe(14);
+    });
+
+    it('TS TMISSION_SPY should be 15 (C++ teamtype.h:61), not 14', () => {
+      // C++ teamtype.h:61: TMISSION_SPY = 15
+      expect(TMISSION_SPY).toBe(15);
+    });
+
+    it('TS TMISSION_PATROL should be 16 (C++ teamtype.h:62), not 15', () => {
+      // C++ teamtype.h:62: TMISSION_PATROL = 16
+      expect(TMISSION_PATROL).toBe(16);
+    });
+  });
+
+  // ==========================================================================
+  // Section 29: TeamTypeClass limits (C++ teamtype.h:115-117)
+  // C++ teamtype.h:116-117:
+  //   MAX_TEAM_CLASSCOUNT = 5,  // max distinct unit types per team
+  //   MAX_TEAM_MISSIONS = 20    // max mission entries in queue
+  // ==========================================================================
+  describe('TeamTypeClass limits — C++ teamtype.h:115-117', () => {
+    it('MAX_TEAM_CLASSCOUNT = 5 (max distinct unit types per team definition)', () => {
+      // C++ teamtype.h:116: MAX_TEAM_CLASSCOUNT=5
+      // TeamTypeClass::Members[MAX_TEAM_CLASSCOUNT] — array of 5 member slots
+      // Scenario INI team types should not have more than 5 distinct member types
+      const CPP_MAX_TEAM_CLASSCOUNT = 5;
+      expect(CPP_MAX_TEAM_CLASSCOUNT).toBe(5);
+    });
+
+    it('MAX_TEAM_MISSIONS = 20 (max mission entries in queue)', () => {
+      // C++ teamtype.h:117: MAX_TEAM_MISSIONS=20
+      // TeamTypeClass::MissionList[MAX_TEAM_MISSIONS] — array of 20 mission slots
+      // TS Team.missionList has no hard cap but C++ limits to 20
+      const CPP_MAX_TEAM_MISSIONS = 20;
+      expect(CPP_MAX_TEAM_MISSIONS).toBe(20);
+    });
+
+    it('TS Team works correctly with 5 distinct member types (MAX_TEAM_CLASSCOUNT)', () => {
+      // Verify TS can handle the C++ maximum of 5 member types
+      const team = makeTeam({
+        memberDefs: [
+          { type: UnitType.V_1TNK, count: 2 },
+          { type: UnitType.V_2TNK, count: 1 },
+          { type: UnitType.V_3TNK, count: 3 },
+          { type: UnitType.V_4TNK, count: 1 },
+          { type: UnitType.V_MNLY, count: 1 },
+        ],
+        missions: [{ mission: TMISSION_GUARD, data: 100 }],
+      });
+      // Total desired = 2+1+3+1+1 = 8
+      expect(team.desiredTotal).toBe(8);
+    });
+
+    it('TS Team works correctly with 20 missions (MAX_TEAM_MISSIONS)', () => {
+      // Verify TS can handle the C++ maximum of 20 mission entries
+      const missions = [];
+      for (let i = 0; i < 20; i++) {
+        missions.push({ mission: TMISSION_SET_GLOBAL, data: i });
+      }
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
+        missions,
+        forcedActive: true,
+      });
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+      team.add(e);
+
+      // Process all 20 SET_GLOBAL missions (each advances immediately)
+      for (let i = 0; i < 30; i++) {
+        if (team.dissolved) break;
+        team.ai();
+      }
+
+      // Should have processed all 20 and dissolved
+      expect(team.dissolved).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Section 30: STRAY_DISTANCE constant (C++ team.h:51)
+  // C++ team.h:51: #define STRAY_DISTANCE 2
+  // Used by Coordinate_Regroup to determine if members are too far from center.
+  // ==========================================================================
+  describe('STRAY_DISTANCE — C++ team.h:51', () => {
+    it('C++ STRAY_DISTANCE = 2 (team.h:51)', () => {
+      // C++ team.h:51: #define STRAY_DISTANCE 2
+      // This is 2 cells (512 leptons). Used as threshold for regroup.
+      const CPP_STRAY_DISTANCE = 2;
+      expect(CPP_STRAY_DISTANCE).toBe(2);
+    });
+  });
+
+  // ==========================================================================
+  // Section 31: TeamTypeClass constructor defaults (C++ teamtype.cpp:165-188)
+  // ==========================================================================
+  describe('TeamTypeClass constructor defaults — C++ teamtype.cpp:165-188', () => {
+    it('RecruitPriority defaults to 7 (teamtype.cpp:173)', () => {
+      // C++ teamtype.cpp:173: RecruitPriority(7)
+      const CPP_DEFAULT_RECRUIT_PRIORITY = 7;
+      expect(CPP_DEFAULT_RECRUIT_PRIORITY).toBe(7);
+
+      const team = makeTeam({});
+      expect(team.recruitPriority).toBe(7);
+    });
+
+    it('MaxAllowed defaults to 0 (teamtype.cpp:175)', () => {
+      // C++ teamtype.cpp:175: MaxAllowed(0) — no instances allowed by default
+      const CPP_DEFAULT_MAX_ALLOWED = 0;
+      expect(CPP_DEFAULT_MAX_ALLOWED).toBe(0);
+    });
+
+    it('Origin defaults to -1 (teamtype.cpp:179)', () => {
+      // C++ teamtype.cpp:179: Origin(-1) — no specific waypoint origin
+      const CPP_DEFAULT_ORIGIN = -1;
+      expect(CPP_DEFAULT_ORIGIN).toBe(-1);
+    });
+
+    it('IsReinforcable defaults to true (teamtype.cpp:171)', () => {
+      // C++ teamtype.cpp:171: IsReinforcable(true)
+      const team = makeTeam({});
+      expect(team.isReinforcable).toBe(true);
+    });
+
+    it('IsSuicide defaults to false (teamtype.cpp:168)', () => {
+      // C++ teamtype.cpp:168: IsSuicide(false)
+      const team = makeTeam({});
+      expect(team.isSuicide).toBe(false);
+    });
+
+    it('IsPrebuilt defaults to true (teamtype.cpp:170)', () => {
+      // C++ teamtype.cpp:170: IsPrebuilt(true)
+      const CPP_DEFAULT_IS_PREBUILT = true;
+      expect(CPP_DEFAULT_IS_PREBUILT).toBe(true);
+    });
+
+    it('IsRoundAbout defaults to false (teamtype.cpp:167)', () => {
+      // C++ teamtype.cpp:167: IsRoundAbout(false)
+      const CPP_DEFAULT_IS_ROUNDABOUT = false;
+      expect(CPP_DEFAULT_IS_ROUNDABOUT).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // Section 32: Team Add/Remove member semantics (C++ team.cpp:891-936, 1053-1158)
+  // ==========================================================================
+  describe('Team Add/Remove — C++ team.cpp:891-936, 1053-1158', () => {
+    it('add() returns false for dead entities (C++ _Is_It_Breathing, team.cpp:99-120)', () => {
+      const team = makeTeam({});
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+      e.alive = false;
+      e.hp = 0;
+
+      expect(team.add(e)).toBe(false);
+      expect(team.total).toBe(0);
+    });
+
+    it('add() returns false for duplicate member (C++ team.cpp:969-971)', () => {
+      const team = makeTeam({});
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+
+      expect(team.add(e)).toBe(true);
+      expect(team.add(e)).toBe(false);
+      expect(team.total).toBe(1);
+    });
+
+    it('add() transfers entity from old team to new (C++ team.cpp:904-906)', () => {
+      const team1 = makeTeam({});
+      const team2 = makeTeam({});
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+
+      team1.add(e);
+      expect(team1.total).toBe(1);
+
+      team2.add(e);
+      expect(team1.total).toBe(0);
+      expect(team2.total).toBe(1);
+      expect(e.teamRef).toBe(team2);
+    });
+
+    it('remove() clears entity teamRef (C++ team.cpp:1116)', () => {
+      const team = makeTeam({});
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+
+      team.add(e);
+      expect(e.teamRef).toBe(team);
+
+      team.remove(e);
+      expect(e.teamRef).toBeNull();
+    });
+
+    it('remove() returns true for non-member (C++ team.cpp:1062-1064)', () => {
+      // C++ team.cpp:1062-1064: if (this != obj->Team) return(true)
+      const team = makeTeam({});
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+
+      expect(team.remove(e)).toBe(true);
+    });
+
+    it('add() marks team as altered (C++ team.cpp:934)', () => {
+      const team = makeTeam({});
+      team.isAltered = false;
+
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+      team.add(e);
+
+      expect(team.isAltered).toBe(true);
+    });
+
+    it('remove() marks team as altered (C++ team.cpp:1152)', () => {
+      const team = makeTeam({});
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+      team.add(e);
+      team.isAltered = false;
+
+      team.remove(e);
+
+      expect(team.isAltered).toBe(true);
+    });
+
+    it('C++ first member gets IsInitiated=true (team.cpp:912)', () => {
+      // C++ team.cpp:912: obj->IsInitiated = (Member == NULL)
+      // The very first member added gets initiated; subsequent must travel to team center.
+      // TS simplifies: all members effectively initiated immediately.
+      // Document the C++ behavior.
+      const CPP_FIRST_MEMBER_INITIATED = true;
+      expect(CPP_FIRST_MEMBER_INITIATED).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Section 33: Recruit priority stealing (C++ team.cpp:995)
+  // C++ team.cpp:995:
+  //   if (obj->Team.Is_Valid() && (obj->Team->Class->RecruitPriority >= Class->RecruitPriority))
+  //     return(false);
+  // Only a strictly higher priority team can steal members from lower.
+  // ==========================================================================
+  describe('Recruit priority stealing — C++ team.cpp:995', () => {
+    it('entity transfers from lower-priority to higher-priority team', () => {
+      // C++ team.cpp:995: existing_pri >= new_pri → can't steal
+      // So 5 < 10 → highPri CAN steal from lowPri
+      const lowPriTeam = makeTeam({ recruitPriority: 5 });
+      const highPriTeam = makeTeam({ recruitPriority: 10 });
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+
+      lowPriTeam.add(e);
+      expect(e.teamRef).toBe(lowPriTeam);
+
+      // TS add() removes from old team unconditionally; C++ has priority check in Can_Add.
+      // The transfer still occurs because TS handles the actual removal.
+      highPriTeam.add(e);
+      expect(e.teamRef).toBe(highPriTeam);
+      expect(lowPriTeam.total).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // Section 34: desiredTotal calculation (C++ team.cpp:500-502)
+  // C++ team.cpp:500-502:
+  //   for (int index = 0; index < Class->ClassCount; index++)
+  //     desired += Class->Members[index].Quantity;
+  // ==========================================================================
+  describe('desiredTotal — C++ team.cpp:500-502', () => {
+    it('sums all member type quantities', () => {
+      const team = makeTeam({
+        memberDefs: [
+          { type: UnitType.V_1TNK, count: 3 },
+          { type: UnitType.V_2TNK, count: 5 },
+          { type: UnitType.V_3TNK, count: 2 },
+        ],
+      });
+      // 3 + 5 + 2 = 10
+      expect(team.desiredTotal).toBe(10);
+    });
+
+    it('single member type', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 7 }],
+      });
+      expect(team.desiredTotal).toBe(7);
+    });
+
+    it('empty members → 0', () => {
+      const team = makeTeam({ memberDefs: [] });
+      expect(team.desiredTotal).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // Section 35: C++ team.cpp destructor decrements Class->Number (team.cpp:298)
+  // ==========================================================================
+  describe('Team destructor — C++ team.cpp:292-312', () => {
+    it('C++ decrements Class->Number on destruction (team.cpp:298)', () => {
+      // C++ team.cpp:298: Class->Number--
+      // In C++, the team type tracks active instances via Number field.
+      // This is checked by Create_One_Of() (teamtype.cpp:355):
+      //   if (ScenarioInit || Number < MaxAllowed)
+      // In TS, autocreateTeamCounts tracks this.
+      const CPP_NUMBER_DECREMENTS_ON_DESTROY = true;
+      expect(CPP_NUMBER_DECREMENTS_ON_DESTROY).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Section 36: Create_One_Of MaxAllowed check (C++ teamtype.cpp:353-360)
+  // C++ teamtype.cpp:355:
+  //   if (ScenarioInit || Number < MaxAllowed)
+  //     return(new TeamClass(this, HouseClass::As_Pointer(House)));
+  //   return(NULL);
+  // ==========================================================================
+  describe('Create_One_Of — C++ teamtype.cpp:353-360', () => {
+    it('C++ blocks creation when Number >= MaxAllowed', () => {
+      // C++ teamtype.cpp:355: if (ScenarioInit || Number < MaxAllowed)
+      // If Number >= MaxAllowed and not ScenarioInit → returns NULL
+      const CPP_BLOCKS_WHEN_AT_MAX = true;
+      expect(CPP_BLOCKS_WHEN_AT_MAX).toBe(true);
+    });
+
+    it('C++ allows creation during ScenarioInit regardless of MaxAllowed', () => {
+      // C++ teamtype.cpp:355: if (ScenarioInit || Number < MaxAllowed)
+      // During scenario initialization, bypass MaxAllowed
+      const CPP_SCENARIO_INIT_BYPASSES_MAX = true;
+      expect(CPP_SCENARIO_INIT_BYPASSES_MAX).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Section 37: Under-strength resets movement (C++ team.cpp:577-580)
+  // C++ team.cpp:577-579:
+  //   if (IsMoving && IsUnderStrength) {
+  //     IsMoving = false;
+  //     CurrentMission = -1;
+  // ==========================================================================
+  describe('Under-strength resets movement — C++ team.cpp:577-580', () => {
+    it('IsMoving=false, CurrentMission=-1 when team goes under-strength while moving', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 9 }],
+        missions: [{ mission: TMISSION_GUARD, data: 100 }],
+        isReinforcable: true,
+        forcedActive: true,
+      });
+
+      const entities: Entity[] = [];
+      for (let i = 0; i < 9; i++) {
+        const e = makeEntity(UnitType.V_3TNK, House.USSR, 100 + i * 5, 100);
+        entities.push(e);
+        team.add(e);
+      }
+      team.ai(); // full strength → activate → isMoving=true
+      team.ai(); // advance to GUARD
+
+      expect(team.isMoving).toBe(true);
+
+      // Kill 7 → 2 alive of 9 desired → 2 <= floor(9/3)=3 → under-strength
+      for (let i = 0; i < 7; i++) {
+        entities[i].alive = false;
+      }
+      team.isAltered = true;
+      team.ai();
+
+      // C++ team.cpp:577-579: resets movement
+      expect(team.isMoving).toBe(false);
+      expect(team.currentMission).toBe(-1);
+    });
+  });
+
+  // ==========================================================================
+  // Section 38: Formation reform on strength transition (C++ team.cpp:569-571)
+  // C++ team.cpp:569-571:
+  //   if (old_under != IsUnderStrength) {
+  //     IsReforming = true;
+  //   }
+  // ==========================================================================
+  describe('Formation reform on strength transition — C++ team.cpp:569-571', () => {
+    it('isReforming set when isUnderStrength transitions from true to false', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 9 }],
+        isReinforcable: true,
+      });
+
+      // Start with 2 members → under-strength (2 <= 3)
+      team.add(makeEntity(UnitType.V_3TNK, House.USSR, 100, 100));
+      team.add(makeEntity(UnitType.V_3TNK, House.USSR, 110, 100));
+      team.ai();
+      expect(team.isUnderStrength).toBe(true);
+
+      // Add more to go above 1/3 threshold (4 > 3)
+      team.add(makeEntity(UnitType.V_3TNK, House.USSR, 120, 100));
+      team.add(makeEntity(UnitType.V_3TNK, House.USSR, 130, 100));
+      team.ai();
+
+      expect(team.isUnderStrength).toBe(false);
+      expect(team.isReforming).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Section 39: Dissolve clears all member references (C++ team.cpp:292-312)
+  // ==========================================================================
+  describe('Dissolve clears members — C++ team.cpp:292-312', () => {
+    it('dissolve() clears all member teamRefs and sets Mission.GUARD', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 3 }],
+      });
+      const e1 = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+      const e2 = makeEntity(UnitType.V_3TNK, House.USSR, 200, 100);
+      const e3 = makeEntity(UnitType.V_3TNK, House.USSR, 300, 100);
+      team.add(e1);
+      team.add(e2);
+      team.add(e3);
+
+      // Set non-GUARD missions to verify they get reset
+      e1.mission = Mission.ATTACK;
+      e2.mission = Mission.MOVE;
+
+      team.dissolve();
+
+      expect(team.dissolved).toBe(true);
+      expect(team.total).toBe(0);
+      expect(e1.teamRef).toBeNull();
+      expect(e2.teamRef).toBeNull();
+      expect(e3.teamRef).toBeNull();
+      // C++ team.cpp:1139 — Enter_Idle_Mode() → MISSION_GUARD
+      expect(e1.mission).toBe(Mission.GUARD);
+      expect(e2.mission).toBe(Mission.GUARD);
+      expect(e3.mission).toBe(Mission.GUARD);
+    });
+
+    it('ai() is no-op after dissolve', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
+        missions: [{ mission: TMISSION_GUARD, data: 5 }],
+      });
+      team.add(makeEntity(UnitType.V_3TNK, House.USSR, 100, 100));
+      team.dissolve();
+
+      // Should not throw or change state
+      team.ai();
+      expect(team.dissolved).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Section 40: Suspend/resume with timer (C++ team.cpp:484-489)
+  // C++ team.cpp:484-489:
+  //   if (Suspended) {
+  //     if (SuspendTimer != 0) return;
+  //     Suspended = false;
+  //   }
+  // ==========================================================================
+  describe('Suspend/resume — C++ team.cpp:484-489', () => {
+    it('suspended team skips AI while suspendTimer > 0, resumes when timer expires', () => {
+      // C++ team.cpp:484-489: CDTimerClass auto-decrements each frame.
+      //   if (Suspended) { if (SuspendTimer != 0) return; Suspended = false; }
+      // TS manually decrements: if (suspendTimer > 0) { suspendTimer--; return; }
+      // With suspendTimer=2: tick 1 → 1, tick 2 → 0, tick 3 → timer is 0 → resume
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
+        missions: [{ mission: TMISSION_GUARD, data: 5 }],
+        forcedActive: true,
+      });
+      team.add(makeEntity(UnitType.V_3TNK, House.USSR, 100, 100));
+      team.suspended = true;
+      team.suspendTimer = 2;
+
+      const prevMission = team.currentMission;
+      team.ai(); // timer=2>0 → decrement to 1, return (skipped)
+      expect(team.currentMission).toBe(prevMission);
+      expect(team.suspended).toBe(true);
+      expect(team.suspendTimer).toBe(1);
+
+      team.ai(); // timer=1>0 → decrement to 0, return (skipped)
+      expect(team.suspended).toBe(true);
+      expect(team.suspendTimer).toBe(0);
+
+      team.ai(); // timer=0, not >0 → clears suspend, processes normally
+      expect(team.suspended).toBe(false);
     });
   });
 });

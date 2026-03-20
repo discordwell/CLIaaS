@@ -1020,7 +1020,7 @@ describe('SUPERWEAPON_DEFS parity', () => {
     expect(d.building).toBe(''); // spy-only — granted via spyInfiltrate() on SPEN
     expect(d.rechargeTicks).toBe(9000);
     expect(d.faction).toBe('both');
-    expect(d.requiresPower).toBe(true);
+    expect(d.requiresPower).toBe(false);  // C++ house.cpp:654 IsPowered=false
     expect(d.needsTarget).toBe(false);
     expect(d.targetMode).toBe('none');
   });
@@ -1030,7 +1030,7 @@ describe('SUPERWEAPON_DEFS parity', () => {
     expect(d.building).toBe('AFLD');
     expect(d.rechargeTicks).toBe(12600);
     expect(d.faction).toBe('soviet');
-    expect(d.requiresPower).toBe(true);
+    expect(d.requiresPower).toBe(false);  // C++ house.cpp:656 IsPowered=false
     expect(d.needsTarget).toBe(true);
     expect(d.targetMode).toBe('ground');
   });
@@ -1040,7 +1040,7 @@ describe('SUPERWEAPON_DEFS parity', () => {
     expect(d.building).toBe('AFLD');
     expect(d.rechargeTicks).toBe(6300);
     expect(d.faction).toBe('both');
-    expect(d.requiresPower).toBe(true);
+    expect(d.requiresPower).toBe(false);  // C++ house.cpp:657 IsPowered=false
     expect(d.needsTarget).toBe(true);
     expect(d.targetMode).toBe('ground');
   });

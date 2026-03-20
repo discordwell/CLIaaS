@@ -975,7 +975,7 @@ describe('Spy Plane — map reveal mechanics', () => {
     }
   });
 
-  it('uses circular reveal (dx*dx + dy*dy <= r2)', () => {
+  it('uses octagonal reveal (C++ coord.cpp:124-136 max*2+small <= r*2)', () => {
     const ctx = makeMockSuperweaponContext();
     const struct = makeStructure('AFLD', House.Spain, 5, 5);
     ctx.structures.push(struct);
@@ -983,18 +983,23 @@ describe('Spy Plane — map reveal mechanics', () => {
     ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SPY_PLANE}`, state);
     activateSuperweapon(ctx, SuperweaponType.SPY_PLANE, House.Spain, { x: 240, y: 240 });
     const visCells = (ctx as any)._visibilityCells;
-    // Verify it's NOT a square pattern — corner cells should be excluded
+    // C++ parity: octagonal distance, NOT euclidean circle (coord.cpp:124-136)
     const tc = { cx: Math.floor(240 / CELL_SIZE), cy: Math.floor(240 / CELL_SIZE) };
-    // Corner (10, 10) should NOT be revealed: 10*10 + 10*10 = 200 > 100
+    // Corner (10, 10) should NOT be revealed: max(10,10)*2+min(10,10) = 30 > 20
     const corner = visCells.find((c: any) =>
       c.cx === tc.cx + 10 && c.cy === tc.cy + 10
     );
     expect(corner).toBeUndefined();
-    // But (7, 7) should be: 49+49 = 98 <= 100
-    const midDiag = visCells.find((c: any) =>
+    // (7, 7) should NOT be revealed: max(7,7)*2+min(7,7) = 21 > 20
+    const farDiag = visCells.find((c: any) =>
       c.cx === tc.cx + 7 && c.cy === tc.cy + 7
     );
-    expect(midDiag).toBeDefined();
+    expect(farDiag).toBeUndefined();
+    // (6, 6) SHOULD be revealed: max(6,6)*2+min(6,6) = 18 <= 20
+    const nearDiag = visCells.find((c: any) =>
+      c.cx === tc.cx + 6 && c.cy === tc.cy + 6
+    );
+    expect(nearDiag).toBeDefined();
   });
 
   it('sets visibility to 2 (fully revealed)', () => {
@@ -1270,9 +1275,16 @@ describe('Superweapon cooldown and charging system', () => {
     expect((ctx as any)._evaMessages).toContain(`${def.name} ready`);
   });
 
-  it('all superweapons require power (requiresPower = true)', () => {
-    for (const def of Object.values(SUPERWEAPON_DEFS)) {
-      expect(def.requiresPower).toBe(true);
+  it('powered superweapons require power, unpowered do not (C++ house.cpp:653-660)', () => {
+    // C++ IsPowered=true: Nuke, Chronosphere, Iron Curtain, GPS
+    // C++ IsPowered=false: Sonar Pulse, Parabomb, Paratroopers, Spy Plane
+    const powered = [SuperweaponType.NUKE, SuperweaponType.CHRONOSPHERE, SuperweaponType.IRON_CURTAIN, SuperweaponType.GPS_SATELLITE];
+    const unpowered = [SuperweaponType.SONAR_PULSE, SuperweaponType.PARABOMB, SuperweaponType.PARAINFANTRY, SuperweaponType.SPY_PLANE];
+    for (const t of powered) {
+      expect(SUPERWEAPON_DEFS[t].requiresPower, `${t} should require power`).toBe(true);
+    }
+    for (const t of unpowered) {
+      expect(SUPERWEAPON_DEFS[t].requiresPower, `${t} should NOT require power`).toBe(false);
     }
   });
 

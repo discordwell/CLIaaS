@@ -260,7 +260,7 @@ describe('ParaBomb superweapon', () => {
     expect(def.name).toBe('Parabomb');
     expect(def.building).toBe('AFLD');
     expect(def.faction).toBe('soviet');
-    expect(def.requiresPower).toBe(true);
+    expect(def.requiresPower).toBe(false);  // C++ house.cpp:656 IsPowered=false
     expect(def.needsTarget).toBe(true);
     expect(def.targetMode).toBe('ground');
   });
@@ -315,7 +315,7 @@ describe('ParaInfantry superweapon', () => {
     expect(def.name).toBe('Paratroopers');
     expect(def.building).toBe('AFLD');
     expect(def.faction).toBe('both');  // C++ allows both factions
-    expect(def.requiresPower).toBe(true);
+    expect(def.requiresPower).toBe(false);  // C++ house.cpp:657 IsPowered=false
     expect(def.needsTarget).toBe(true);
     expect(def.targetMode).toBe('ground');
   });

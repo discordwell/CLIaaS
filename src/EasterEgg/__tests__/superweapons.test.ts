@@ -81,9 +81,16 @@ describe('Superweapon definitions', () => {
     expect(def.targetMode).toBe('none');
   });
 
-  it('all superweapons require power', () => {
-    for (const def of Object.values(SUPERWEAPON_DEFS)) {
-      expect(def.requiresPower).toBe(true);
+  it('powered superweapons require power, unpowered do not (C++ house.cpp:653-660)', () => {
+    // C++ IsPowered=true: Nuke, Chronosphere, Iron Curtain, GPS
+    // C++ IsPowered=false: Sonar Pulse, Parabomb, Paratroopers, Spy Plane
+    const powered = [SuperweaponType.NUKE, SuperweaponType.CHRONOSPHERE, SuperweaponType.IRON_CURTAIN, SuperweaponType.GPS_SATELLITE];
+    const unpowered = [SuperweaponType.SONAR_PULSE, SuperweaponType.PARABOMB, SuperweaponType.PARAINFANTRY, SuperweaponType.SPY_PLANE];
+    for (const t of powered) {
+      expect(SUPERWEAPON_DEFS[t].requiresPower, `${t} should require power`).toBe(true);
+    }
+    for (const t of unpowered) {
+      expect(SUPERWEAPON_DEFS[t].requiresPower, `${t} should NOT require power`).toBe(false);
     }
   });
 });
