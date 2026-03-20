@@ -626,18 +626,34 @@ export class OracleStrategy {
         ? state.coastalCells
         : this.resolveCoastalCells(conYard);
       if (isShipyard && coastalCells && coastalCells.length > 0) {
-        const coastal = coastalCells[this.placementAttempts % coastalCells.length];
+        // For each coastal cell, try a 5x5 spiral around it.
+        // The parser gives us approximate shoreline — the exact valid
+        // placement cell might be 1-2 cells off in any direction.
+        const spiralOffsets = [
+          [0,0], [1,0], [-1,0], [0,1], [0,-1],
+          [1,1], [-1,1], [1,-1], [-1,-1],
+          [2,0], [-2,0], [0,2], [0,-2],
+          [2,1], [-2,1], [2,-1], [-2,-1],
+          [1,2], [-1,2], [1,-2], [-1,-2],
+        ];
+        const baseIdx = Math.floor(this.placementAttempts / spiralOffsets.length);
+        const spiralIdx = this.placementAttempts % spiralOffsets.length;
+        const base = coastalCells[baseIdx % coastalCells.length];
+        const [sdx, sdy] = spiralOffsets[spiralIdx];
+        const placeCx = base.cx + sdx;
+        const placeCy = base.cy + sdy;
+
         commands.push({
           cmd: 'place',
           rtti: RTTI_BUILDINGTYPE,
-          cx: coastal.cx,
-          cy: coastal.cy,
+          cx: placeCx,
+          cy: placeCy,
         });
-        if (state.tick - this.lastPlacementTick > 60) {
+        if (state.tick - this.lastPlacementTick > 30) {
           this.placementAttempts++;
           this.lastPlacementTick = state.tick;
         }
-        reasons.push(`place ${buildingProduction.t} at coastal (${coastal.cx},${coastal.cy})`);
+        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy}) [shore ${base.cx},${base.cy}+${sdx},${sdy}]`);
       } else {
         // Sort placement offsets by priority:
         // 1. If shipyard is upcoming in build order, bias toward nearest water
