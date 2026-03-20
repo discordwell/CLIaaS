@@ -619,6 +619,137 @@ describe('SCG11EA naval strategy', () => {
     );
   });
 
+  it('keeps SCG11EA in sub-cleanup mode even if the shipyard is lost mid-fight', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      credits: 900,
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '2TNK', house: 'Greece', cx: 34, cy: 78, hp: 300, mhp: 300 }),
+        unit({ id: 3, t: '2TNK', house: 'Greece', cx: 36, cy: 78, hp: 300, mhp: 300 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 38, cy: 78, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 40, cy: 78, hp: 300, mhp: 300 }),
+        unit({ id: 10, t: 'DD', house: 'Greece', cx: 63, cy: 86, hp: 200, mhp: 200, m: 5 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 103, t: 'WEAP', ally: true, house: 'Greece', cx: 24, cy: 80 }),
+      ],
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+        unit({ id: 51, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 44, hp: 200, mhp: 200 }),
+      ],
+      buildable: {
+        structures: ['PROC', 'POWR'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1'],
+        vessels: [],
+      },
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 29 }),
+      ]),
+    );
+  });
+
+  it('does not rebuild PROC during SCG11EA sub cleanup while destroyers are already afloat', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      credits: 3000,
+      units: [
+        unit({ id: 1, t: '2TNK', house: 'Greece', cx: 34, cy: 78, hp: 300, mhp: 300 }),
+        unit({ id: 10, t: 'DD', house: 'Greece', cx: 63, cy: 86, hp: 200, mhp: 200, m: 5 }),
+        unit({ id: 11, t: 'DD', house: 'Greece', cx: 65, cy: 86, hp: 200, mhp: 200, m: 5 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 104, t: 'SYRD', ally: true, house: 'Greece', cx: 63, cy: 85 }),
+      ],
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+        unit({ id: 51, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 44, hp: 200, mhp: 200 }),
+      ],
+      buildable: {
+        structures: ['PROC', 'POWR'],
+        units: [],
+        infantry: [],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 12 }),
+      ]),
+    );
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 31 }),
+      ]),
+    );
+  });
+
+  it('rebuilds the shipyard before extra economy if SCG11EA naval tech is lost during sub cleanup', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+
+    strategy.decide(scg11eaState({
+      units: [
+        unit({ id: 1, t: '2TNK', house: 'Greece', cx: 60, cy: 89, hp: 300, mhp: 300 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 110, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 101, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 102, t: 'SYRD', ally: true, house: 'Greece', cx: 63, cy: 85 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'PROC', 'SYRD'],
+        units: [],
+        infantry: [],
+        vessels: ['DD'],
+      },
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+      ],
+    }));
+
+    const s = scg11eaState({
+      credits: 5000,
+      units: [
+        unit({ id: 1, t: '2TNK', house: 'Greece', cx: 60, cy: 89, hp: 300, mhp: 300 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 110, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 101, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'PROC', 'SYRD'],
+        units: [],
+        infantry: [],
+        vessels: ['DD'],
+      },
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+      ],
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 27 }),
+      ]),
+    );
+    expect(decision.reason).toContain('rebuild SYRD for sub hunt');
+  });
+
   it('starts the shipyard before a third refinery on SCG11EA once the coast is mapped', () => {
     const strategy = new OracleStrategy('SCG11EA');
     const s = scg11eaState({
@@ -670,7 +801,7 @@ describe('SCG11EA naval strategy', () => {
     );
   });
 
-  it('rebuilds WEAP on SCG11EA when the shipyard survives but tank production is offline', () => {
+  it('does not rebuild WEAP on SCG11EA while submarines remain and the shipyard survives', () => {
     const strategy = new OracleStrategy('SCG11EA');
     const s = scg11eaState({
       units: [
@@ -683,6 +814,47 @@ describe('SCG11EA naval strategy', () => {
         structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
         structure({ id: 104, t: 'SYRD', ally: true, house: 'Greece', cx: 64, cy: 87 }),
       ],
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+        unit({ id: 51, t: 'YAK', ally: false, house: 'USSR', cx: 28, cy: 82, hp: 60, mhp: 60 }),
+        unit({ id: 52, t: 'HIND', ally: false, house: 'USSR', cx: 30, cy: 84, hp: 90, mhp: 90 }),
+      ],
+      credits: 4000,
+      buildable: {
+        structures: ['WEAP', 'AGUN', 'PROC', 'POWR', 'APWR', 'SYRD'],
+        units: [],
+        infantry: ['E1'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 9 }),
+      ]),
+    );
+    expect(decision.commands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 2 }),
+      ]),
+    );
+  });
+
+  it('rebuilds WEAP on SCG11EA after the submarine screen is gone', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      units: [
+        unit({ id: 1, t: '2TNK', house: 'Greece', cx: 30, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 10, t: 'DD', house: 'Greece', cx: 64, cy: 86, hp: 200, mhp: 200, m: 5 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 104, t: 'SYRD', ally: true, house: 'Greece', cx: 64, cy: 87 }),
+      ],
+      enemies: [],
       credits: 4000,
       buildable: {
         structures: ['WEAP', 'PROC', 'POWR', 'APWR', 'SYRD'],
@@ -725,6 +897,33 @@ describe('SCG11EA naval strategy', () => {
         expect.objectContaining({ cmd: 'attack_move', ids: [10], cx: 70, cy: 60 }),
       ]),
     );
+  });
+
+  it('keeps a small SCG11EA destroyer group massed on the same submarine lane', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      units: [
+        unit({ id: 10, t: 'DD', house: 'Greece', cx: 63, cy: 86, hp: 200, mhp: 200, m: 5 }),
+        unit({ id: 11, t: 'DD', house: 'Greece', cx: 65, cy: 86, hp: 200, mhp: 200, m: 5 }),
+        unit({ id: 12, t: 'DD', house: 'Greece', cx: 67, cy: 86, hp: 200, mhp: 200, m: 5 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 104, t: 'SYRD', ally: true, house: 'Greece', cx: 63, cy: 85 }),
+      ],
+      enemies: [
+        unit({ id: 50, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 300, mhp: 300 }),
+        unit({ id: 51, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 44, hp: 300, mhp: 300 }),
+        unit({ id: 52, t: 'SS', ally: false, house: 'USSR', cx: 72, cy: 48, hp: 300, mhp: 300 }),
+      ],
+    });
+
+    const decision = strategy.decide(s);
+    const huntCommands = decision.commands.filter((c) => c.cmd === 'attack_move');
+    expect(huntCommands).toHaveLength(3);
+    const uniqueTargets = new Set(huntCommands.map((command) => `${command.cx},${command.cy}`));
+    expect(uniqueTargets.size).toBe(1);
+    expect(uniqueTargets.has('68,40') || uniqueTargets.has('70,44') || uniqueTargets.has('72,48')).toBe(true);
   });
 
   it('does not send SCG11EA land defenders to attack submarines near the east chain', () => {
@@ -838,6 +1037,7 @@ describe('SCG11EA naval strategy', () => {
 
     const decision = strategy.decide(s);
     expect(decision.reason).not.toContain('assault (');
+    expect(decision.reason).not.toContain('attack nearby');
     expect(decision.commands).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ cmd: 'attack_move', cx: 49, cy: 40 }),
@@ -880,6 +1080,57 @@ describe('SCG11EA naval strategy', () => {
         expect.objectContaining({ cmd: 'attack_move', cx: 49, cy: 40 }),
       ]),
     );
+  });
+
+  it('starts a limited land assault on SCG11EA once the fleet is stable and only a few submarines remain', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      credits: 5000,
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 38, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 8, t: '2TNK', house: 'Greece', cx: 40, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 9, t: 'ARTY', house: 'Greece', cx: 30, cy: 82, hp: 150, mhp: 150 }),
+        unit({ id: 20, t: 'DD', house: 'Greece', cx: 64, cy: 86, hp: 200, mhp: 200, m: 5 }),
+        unit({ id: 21, t: 'DD', house: 'Greece', cx: 66, cy: 86, hp: 200, mhp: 200, m: 5 }),
+        unit({ id: 22, t: 'DD', house: 'Greece', cx: 68, cy: 86, hp: 200, mhp: 200, m: 5 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 103, t: 'WEAP', ally: true, house: 'Greece', cx: 24, cy: 80 }),
+        structure({ id: 104, t: 'SYRD', ally: true, house: 'Greece', cx: 63, cy: 85 }),
+        structure({ id: 200, t: 'AFLD', ally: false, house: 'USSR', cx: 49, cy: 40 }),
+        structure({ id: 201, t: 'WEAP', ally: false, house: 'USSR', cx: 51, cy: 45 }),
+      ],
+      enemies: [
+        unit({ id: 60, t: 'SS', ally: false, house: 'USSR', cx: 68, cy: 40, hp: 200, mhp: 200 }),
+        unit({ id: 61, t: 'SS', ally: false, house: 'USSR', cx: 69, cy: 42, hp: 200, mhp: 200 }),
+        unit({ id: 62, t: 'SS', ally: false, house: 'USSR', cx: 70, cy: 44, hp: 200, mhp: 200 }),
+        unit({ id: 63, t: 'SS', ally: false, house: 'USSR', cx: 71, cy: 46, hp: 200, mhp: 200 }),
+      ],
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'attack_move', cx: 49, cy: 40, ids: expect.any(Array) }),
+      ]),
+    );
+    const assaultCommand = decision.commands.find((c) =>
+      c.cmd === 'attack_move' &&
+      c.cx === 49 &&
+      c.cy === 40 &&
+      Array.isArray(c.ids),
+    );
+    expect(assaultCommand).toBeDefined();
+    expect((assaultCommand!.ids as number[]).length).toBe(4);
   });
 
   it('does not peel SCG11EA armor west at the first 2-DD / 8-sub plateau', () => {
