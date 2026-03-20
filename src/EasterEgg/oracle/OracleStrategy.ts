@@ -1943,7 +1943,7 @@ export class OracleStrategy {
         { cx: 21, cy: 48 },
         { cx: 24, cy: 48 },   // through ROUGH terrain
         { cx: 28, cy: 48 },
-        { cx: 46, cy: 48 },   // slightly east of WEAP (44,50) to avoid dog near entrance
+        { cx: 48, cy: 48 },   // east of WEAP — patrol dogs left behind
       ];
 
       // Find current waypoint — advance by x-coordinate progression (not distance).
@@ -1960,13 +1960,20 @@ export class OracleStrategy {
       // The spy's 25 HP may not survive, but waiting means the timer runs out.
 
       if (targetWeap && (wpIdx >= spyWaypoints.length || this.distanceSq(spy, targetWeap) <= 36)) {
-        // Send infiltrate ONCE, then let spy run uninterrupted
-        if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
+        // Approach WEAP from west side (43,49) — away from static dogs at (49,52).
+        // First move to approach cell, then infiltrate at close range.
+        const approachPoint: Point = { cx: 43, cy: 49 };
+        const atApproach = this.distanceSq(spy, approachPoint) <= 4;
+        if (atApproach) {
+          // Close to WEAP — send infiltrate
           commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
           reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+        } else if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
+          // Move to approach point
+          commands.push({ cmd: 'move', ids: [spy.id], cx: approachPoint.cx, cy: approachPoint.cy });
+          reasons.push(`spy → approach (${approachPoint.cx},${approachPoint.cy})`);
         } else {
-          // Spy already moving to WEAP — DON'T interrupt (each re-command resets pathfinding)
-          reasons.push(`spy sprinting to WEAP (${spy.cx},${spy.cy})`);
+          reasons.push(`spy approaching WEAP (${spy.cx},${spy.cy})`);
         }
       } else if (wpIdx < spyWaypoints.length) {
         const wp = spyWaypoints[wpIdx];
