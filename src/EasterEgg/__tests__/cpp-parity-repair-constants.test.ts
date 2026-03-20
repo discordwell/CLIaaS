@@ -46,10 +46,9 @@ describe('C++ parity: repair constants (rules.cpp:228-229)', () => {
   });
 
   it('repair cost per step for War Factory (cost=2000, maxHp=400)', () => {
-    // stepsToFull = 400 / 5 = 80
-    // costPerStep = ceil(2000 * 0.25 / 80) = ceil(500 / 80) = ceil(6.25) = 7
+    // C++ fixed-point: trunc(2000/80)=25, ((64*25)+128)/256 = trunc(1728/256) = 6
     const cost = repairCostPerStep(2000, 400);
-    expect(cost).toBe(7);
+    expect(cost).toBe(6);
   });
 
   // -------------------------------------------------------------------
@@ -98,11 +97,12 @@ describe('C++ parity: repair constants (rules.cpp:228-229)', () => {
     const costPerStep = repairCostPerStep(buildCost, maxHp);
     const numSteps = maxHp / REPAIR_STEP; // 80
 
-    const totalCost = numSteps * costPerStep; // 80 * 7 = 560
+    const totalCost = numSteps * costPerStep; // 80 * 6 = 480
     const ratio = totalCost / buildCost;
 
-    // Should be close to REPAIR_PERCENT (0.25), slightly above due to ceil
-    expect(ratio).toBeGreaterThanOrEqual(REPAIR_PERCENT);
-    expect(ratio).toBeLessThan(REPAIR_PERCENT + 0.05); // allow small ceil overhead
+    // C++ fixed-point truncation makes ratio slightly below REPAIR_PERCENT (0.25)
+    // 480/2000 = 0.24
+    expect(ratio).toBeGreaterThanOrEqual(REPAIR_PERCENT - 0.02);
+    expect(ratio).toBeLessThanOrEqual(REPAIR_PERCENT);
   });
 });

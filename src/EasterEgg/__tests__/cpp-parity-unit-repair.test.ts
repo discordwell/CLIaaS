@@ -63,11 +63,10 @@ describe('C++ parity: URepairStep/URepairPercent for unit repair (rules.cpp:230-
     expect(cost).toBe(3);
   });
 
-  it('unitRepairCostPerStep matches C++ formula for MCV (cost=5000, maxHp=600)', () => {
-    // stepsToFull = 600 / 5 = 120
-    // costPerStep = ceil(5000 * 0.25 / 120) = ceil(1250 / 120) = ceil(10.4167) = 11
+  it('unitRepairCostPerStep matches C++ fixed-point for MCV (cost=5000, maxHp=600)', () => {
+    // C++ fixed-point: trunc(5000/120)=41, ((64*41)+128)/256 = trunc(2752/256) = 10
     const cost = unitRepairCostPerStep(5000, 600);
-    expect(cost).toBe(11);
+    expect(cost).toBe(10);
   });
 
   it('unitRepairCostPerStep for cheap unit (cost=300, maxHp=200)', () => {

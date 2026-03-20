@@ -44,18 +44,27 @@ export interface RepairSellContext {
 // ---------------------------------------------------------------------------
 
 /** Calculate repair cost per step for a structure type.
- *  Formula: ceil(buildCost * REPAIR_PERCENT / (maxHp / REPAIR_STEP))
- *  C++ techno.cpp:6144, rules.cpp:228-229 RepairStep, RepairPercent */
+ *  C++ techno.cpp:6144: (Raw_Cost() / (MaxStrength / Rule.RepairStep)) * Rule.RepairPercent
+ *  Uses integer division at each step, then 8.8 fixed-point multiply.
+ *  fixed(1,4).Raw = floor(1*256/4) = 64; int*fixed = ((64*val)+128)/256 */
 export function repairCostPerStep(buildCost: number, maxHp: number): number {
-  return Math.ceil((buildCost * REPAIR_PERCENT) / (maxHp / REPAIR_STEP));
+  const stepsToFull = Math.trunc(maxHp / REPAIR_STEP);        // C++ int / int
+  if (stepsToFull <= 0) return 1;                              // guard: maxHp < step is C++ UB
+  const costPerFullStep = Math.trunc(buildCost / stepsToFull); // C++ int / int
+  // C++ int * fixed(1,4): fixed(1,4).Raw = 64, result = ((64 * val) + 128) / 256
+  // C++ call site clamps: max(Repair_Cost(), 1) (techno.cpp:989)
+  return Math.max(1, Math.trunc((64 * costPerFullStep + 128) / 256));
 }
 
 /** Calculate repair cost per step for a unit (foot) at Service Depot.
- *  Formula: ceil(buildCost * UREPAIR_PERCENT / (maxHp / UREPAIR_STEP))
  *  C++ techno.cpp:6141-6142: (Raw_Cost()/(MaxStrength/Rule.URepairStep)) * Rule.URepairPercent
- *  rules.cpp:230-231 URepairStep=5, URepairPercent=fixed(1,4)=0.25 */
+ *  Same integer division + fixed-point formula as buildings. */
 export function unitRepairCostPerStep(buildCost: number, maxHp: number): number {
-  return Math.ceil((buildCost * UREPAIR_PERCENT) / (maxHp / UREPAIR_STEP));
+  const stepsToFull = Math.trunc(maxHp / UREPAIR_STEP);
+  if (stepsToFull <= 0) return 1;                              // guard: maxHp < step is C++ UB
+  const costPerFullStep = Math.trunc(buildCost / stepsToFull);
+  // C++ call site clamps: max(Repair_Cost(), 1) (techno.cpp:989)
+  return Math.max(1, Math.trunc((64 * costPerFullStep + 128) / 256));
 }
 
 /** Calculate sell refund for a structure — no health scaling.

@@ -505,12 +505,12 @@ describe('Power plant repair — power output restoration', () => {
     expect(powerOutput('APWR', 350, 700)).toBe(100);
   });
 
-  it('power calculation uses healthRatio in source', () => {
-    // Source: Math.round(100 * healthRatio) for POWR
+  it('power calculation uses fixedPowerOutput in source', () => {
+    // Source: _fixedPowerOutput(100, s.hp, s.maxHp) for POWR (C++ 8.8 fixed-point)
     const powerSection = indexSource.indexOf('Calculate power balance');
     expect(powerSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(powerSection, powerSection + 700);
-    expect(chunk).toContain('healthRatio');
+    expect(chunk).toContain('fixedPowerOutput');
     expect(chunk).toContain("'POWR'");
     expect(chunk).toContain("'APWR'");
   });

@@ -630,19 +630,18 @@ describe('Repair_Cost returns 0 for very cheap structures', () => {
 // Section 14: Edge cases — maxHp < REPAIR_STEP
 // ============================================================
 describe('edge cases: maxHp < REPAIR_STEP', () => {
-  it('maxHp=3: C++ integer division 3/5=0 causes divide-by-zero territory', () => {
+  it('maxHp=3: C++ integer division 3/5=0 is UB — TS guards with fallback 1', () => {
     // C++: 3/5=0 → divide by zero in next step (UB in C++)
     // Our cppRepairCost helper guards against this, returning 0
     expect(cppRepairCost(100, 3, 5)).toBe(0);
-    // TS: ceil(25/0.6) = ceil(41.667) = 42 (no UB, just uses floats)
-    expect(repairCostPerStep(100, 3)).toBe(42);
-    // Major divergence — C++ would be UB, TS gives 42
+    // TS guards: stepsToFull <= 0 returns 1 (safe fallback, matches call-site min-1 clamp)
+    expect(repairCostPerStep(100, 3)).toBe(1);
   });
 
-  it('maxHp=1: C++ 1/5=0 → divide by zero', () => {
+  it('maxHp=1: C++ 1/5=0 is UB — TS guards with fallback 1', () => {
     expect(cppRepairCost(100, 1, 5)).toBe(0);
-    // TS: ceil(25/0.2) = ceil(125) = 125
-    expect(repairCostPerStep(100, 1)).toBe(125);
+    // TS guards: stepsToFull <= 0 returns 1
+    expect(repairCostPerStep(100, 1)).toBe(1);
   });
 
   it('maxHp=5: exactly one step', () => {
