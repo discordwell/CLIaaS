@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-20T06:00Z — Session 160: SYRD Placement Fix — Vessel-Based Water Detection
+- **Root cause**: Hardcoded coastal cells for SCG11EA were wrong (pointed south at x=18-28, water is EAST at x=60-72). Also, Place_Object requires cells to be IsMapped (explored), so even correct water cells fail if unexplored.
+- **Fix**: Use enemy vessel positions (submarines at x=67-72) to dynamically locate water. Scan area between base and nearest vessel. Send scout tank to explore water cells before SYRD placement.
+- **Key C++ findings**: Place_Object does NOT check adjacency/proximity — only IsMapped + Legal_Placement. SYRD needs all 3x3 foundation cells to be water (SPEED_FLOAT) AND mapped. Completion() returns 54 for all done buildings (not a percentage).
+- **Water scouting**: Phase 3.4 sends an idle tank toward 70% of the distance from base to nearest enemy vessel. Tank explores cells along the way, mapping water for SYRD placement.
+- **Result**: SYRD successfully placed at (63,94), structs increments from 57 to 58. Ship production gated on credits (>800 threshold), not placement.
+- **Tests**: 3 new tests in base-building-oracle.test.ts — vessel-based placement, water scout dispatch, coastal cell fallback.
+
 ## 2026-03-17T12:00Z — Session 159: Oracle Micro + Mission Sweep
 - **Per-unit command cooldowns**: tanks 30 ticks, infantry 10 ticks. Lets tanks complete fire cycles while keeping Tanya responsive at 5-tick steps.
 - **Concentrated focus fire**: ALL anti-armor → one tank, ALL anti-infantry → one infantry. Dead enemies = 0 DPS. V2RLs priority-targeted.

@@ -335,21 +335,7 @@ async function runOracle(
 
     // 4. Act
     if (decision.commands.length > 0) {
-      const cmdResults = await adapter.command(decision.commands);
-      // Debug: log place command results
-      for (let ci = 0; ci < decision.commands.length; ci++) {
-        const c = decision.commands[ci];
-        const r = cmdResults[ci];
-        if (c.cmd === 'place') {
-          const prodInfo = state.production.find((p: any) => p.done);
-          if (prodInfo?.t === 'SYRD') {
-            // Also log submarine positions to find water cells
-            const subs = state.enemies.filter((e: any) => e.t === 'SS');
-            const subPos = subs.slice(0, 3).map((s: any) => `${s.cx},${s.cy}`).join(';');
-            console.log(`[Debug] SYRD place cx=${c.cx},cy=${c.cy} → ok=${r?.ok} subs=${subPos}`);
-          }
-        }
-      }
+      await adapter.command(decision.commands);
     }
     // 5-tick steps: idle-aware commands prevent stuttering at high frequency
     const stepTicks = 5;

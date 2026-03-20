@@ -958,13 +958,12 @@ export class OracleStrategy {
     }
 
     // --- Phase 3.4: WATER SCOUTING FOR SYRD ---
-    // Send a tank toward water to map cells for shipyard placement.
-    // Triggered when SYRD is in production or upcoming in build order.
-    const syrdInProd = buildingProduction?.t === 'SYRD' || buildingProduction?.t === 'SPEN';
-    const syrdUpcoming = this.baseBuildIndex < BUILD_ORDER.length &&
-      BUILD_ORDER.slice(this.baseBuildIndex).some((e) =>
-        e.names.includes('SYRD') || e.names.includes('SPEN'));
-    if ((syrdInProd || syrdUpcoming) && this.waterScoutId < 0) {
+    // Send a tank toward water ASAP to map cells for shipyard placement.
+    // Start as soon as enemy vessels are detected and we have combat units.
+    const hasNavalEnemies = state.enemies.some(
+      (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'MSUB',
+    );
+    if (hasNavalEnemies && this.waterScoutId < 0) {
       // Find enemy vessels to determine water direction
       const waterVessels = state.enemies.filter(
         (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'MSUB',
@@ -985,7 +984,8 @@ export class OracleStrategy {
         };
         // Find an idle tank to send as scout
         const tanks = playerUnits.filter(
-          (u) => (u.t === '2TNK' || u.t === '1TNK' || u.t === '3TNK') && u.m === 0,
+          (u) => (u.t === '2TNK' || u.t === '1TNK' || u.t === '3TNK') &&
+            (u.m === MISSION_GUARD || u.m === MISSION_GUARD_AREA),
         );
         if (tanks.length > 0) {
           this.waterScoutId = tanks[0].id;
@@ -1905,19 +1905,20 @@ export class OracleStrategy {
           this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 25,
       );
 
-      // Waypoint routing with dog-clear sprint through y=50.
-      // Rock formation at x=22-28, y=48-49 forces a dip south.
-      // Dogs patrol y=50-55, so only sprint when the path is clear.
-      // Rock formation at x=22-28, y=48-49. Route around via y=50.
+      // Safe route: go SOUTH past ALL dogs to y=62 (open terrain, zero
+      // patrol coverage), east for 30 cells, then north back to WEAP.
+      // Longer path but completely avoids the rock formation AND dog patrols.
+      // Route: east to get inland first (coast is full of impassable shore),
+      // then south past ALL dog zones to y=65, east across clear terrain,
+      // then north to the WEAP. Yes it's a long detour but it's the only
+      // path that avoids rocks at y=48-49 AND patrol dogs at y=50-58.
       const spyWaypoints: Point[] = [
-        { cx: 18, cy: 48 },   // north from peninsula
-        { cx: 21, cy: 48 },   // east along y=48 (last cell before rocks)
-        { cx: 21, cy: 49 },   // south one step
-        { cx: 22, cy: 50 },   // south-east to y=50 (below rocks)
-        { cx: 26, cy: 50 },   // east along clear y=50
-        { cx: 30, cy: 50 },   // continue east past rocks
-        { cx: 30, cy: 48 },   // back north after rock formation
-        { cx: 40, cy: 48 },   // east to WEAP approach
+        { cx: 20, cy: 50 },   // east from start to get off narrow coast
+        { cx: 22, cy: 55 },   // SE through passable terrain
+        { cx: 25, cy: 62 },   // south past dog zones
+        { cx: 35, cy: 65 },   // east in open terrain (no dogs)
+        { cx: 50, cy: 65 },   // east past enemy base x-range
+        { cx: 50, cy: 52 },   // north toward WEAP
       ];
 
       // Find current waypoint

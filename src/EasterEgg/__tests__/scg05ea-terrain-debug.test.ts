@@ -18,7 +18,7 @@ describe('SCG05EA terrain', () => {
     console.log(`Map bounds: X=${bounds.x} Y=${bounds.y} W=${bounds.w} H=${bounds.h}`);
 
     // Dump terrain along the spy's east path
-    for (let y = 48; y <= 56; y++) {
+    for (let y = 48; y <= 70; y++) {
       let row = `y=${y.toString().padStart(2)}: `;
       for (let x = 12; x <= 55; x++) {
         const cell = y * 128 + x;

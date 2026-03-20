@@ -403,3 +403,90 @@ describe('summarize', () => {
     expect(summary).toContain('TENT:54%*');
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// SYRD Placement — uses enemy vessels to find water
+// ═══════════════════════════════════════════════════════════
+
+describe('SYRD placement — vessel-based water detection', () => {
+  it('places SYRD near enemy submarine positions, not hardcoded coastal cells', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    // Subs are on the EAST side of the map at x=67-72
+    const state = makeState({
+      tick: 8000,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 26, 80),
+        makeStructure(101, 'POWR', 'Greece', 24, 80),
+      ],
+      production: [{ t: 'SYRD', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
+      buildable: { structures: ['SYRD'], units: [], infantry: [] },
+      enemies: [
+        makeEntity(200, 'SS', 'USSR', 67, 42, 100, 100, 5),
+        makeEntity(201, 'SS', 'USSR', 72, 97, 100, 100, 5),
+        makeEntity(202, 'SS', 'USSR', 68, 31, 100, 100, 5),
+      ],
+    });
+    // Mark enemies as non-ally
+    state.enemies.forEach((e) => { e.ally = false; });
+
+    const decision = strategy.decide(state);
+    const placeCmd = decision.commands.find(
+      (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
+    );
+    expect(placeCmd).toBeDefined();
+    // Placement should target the area between base (x=26) and subs (x=67-72),
+    // NOT the old hardcoded coastal cells at x=18-28, y=82-86
+    expect(placeCmd!.cx).toBeGreaterThan(35);
+  });
+
+  it('dispatches water scout when naval enemies detected', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const state = makeState({
+      tick: 500,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 26, 80),
+        makeStructure(101, 'POWR', 'Greece', 24, 80),
+        makeStructure(102, 'WEAP', 'Greece', 28, 80),
+      ],
+      units: [
+        makeEntity(10, '2TNK', 'Greece', 27, 79),
+      ],
+      enemies: [
+        makeEntity(200, 'SS', 'USSR', 67, 42, 100, 100, 5),
+      ],
+      buildable: { structures: [], units: ['2TNK'], infantry: [] },
+    });
+    state.enemies.forEach((e) => { e.ally = false; });
+
+    const decision = strategy.decide(state);
+    const moveCmd = decision.commands.find(
+      (c) => c.cmd === 'move' && c.ids?.includes(10),
+    );
+    // Should send the tank to scout toward the water (east, toward subs)
+    expect(moveCmd).toBeDefined();
+    expect(moveCmd!.cx).toBeGreaterThan(40); // heading east toward water
+  });
+
+  it('falls back to hardcoded coastal cells when no enemy vessels present', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const state = makeState({
+      tick: 8000,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 26, 80),
+      ],
+      production: [{ t: 'SYRD', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
+      buildable: { structures: ['SYRD'], units: [], infantry: [] },
+      enemies: [], // No vessels
+    });
+
+    const decision = strategy.decide(state);
+    const placeCmd = decision.commands.find(
+      (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
+    );
+    expect(placeCmd).toBeDefined();
+    // Without vessels, falls back to hardcoded coastal cells for SCG11EA
+    // which are around x=18-28, y=82-86
+    expect(placeCmd!.cx).toBeLessThan(35);
+    expect(placeCmd!.cy).toBeGreaterThan(78);
+  });
+});

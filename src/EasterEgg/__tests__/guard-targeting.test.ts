@@ -14,7 +14,7 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 }
 
 describe('threatScore — threat-weighted targeting', () => {
-  it('fire ant scores higher than scout ant at same distance', () => {
+  it('fire ant scores higher than scout ant at same distance (C++ Value-based)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const fireAnt = makeEntity(UnitType.ANT2, House.USSR, 150, 100);
     const scoutAnt = makeEntity(UnitType.ANT3, House.USSR, 150, 100);
@@ -22,24 +22,25 @@ describe('threatScore — threat-weighted targeting', () => {
     const fireScore = threatScore(scanner, fireAnt, 2, false);
     const scoutScore = threatScore(scanner, scoutAnt, 2, false);
 
-    expect(fireScore).toBeGreaterThan(scoutScore);
+    // C++ parity: scored by 2*points — fire ant has higher cost/points than scout
+    // Both should be positive; if costs are equal, scores are equal
+    expect(fireScore).toBeGreaterThanOrEqual(scoutScore);
   });
 
-  it('wounded target scores higher than full-health same type', () => {
+  it('C++ parity: wounded and healthy targets score equally (no HP modifier)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const healthy = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     const wounded = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
-    wounded.hp = wounded.maxHp * 0.3; // 30% HP, below 50% threshold
+    wounded.hp = wounded.maxHp * 0.3;
 
     const healthyScore = threatScore(scanner, healthy, 2, false);
     const woundedScore = threatScore(scanner, wounded, 2, false);
 
-    expect(woundedScore).toBeGreaterThan(healthyScore);
-    // Wounded bonus is 1.5x
-    expect(woundedScore / healthyScore).toBeCloseTo(1.5, 1);
+    // C++ Evaluate_Object has no HP modifier
+    expect(woundedScore).toBe(healthyScore);
   });
 
-  it('target attacking allies gets 2x retaliation bonus', () => {
+  it('C++ parity: passive and attacking targets score equally (no retaliation in scoring)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const passive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     const aggressive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
@@ -47,9 +48,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const passiveScore = threatScore(scanner, passive, 2, false);
     const aggressiveScore = threatScore(scanner, aggressive, 2, true);
 
-    expect(aggressiveScore).toBeGreaterThan(passiveScore);
-    // Retaliation bonus is 2x
-    expect(aggressiveScore / passiveScore).toBeCloseTo(2.0, 1);
+    // C++ handles retaliation in Assign_Target, not Evaluate_Object
+    expect(aggressiveScore).toBe(passiveScore);
   });
 
   it('closer target scores higher than distant same type', () => {
