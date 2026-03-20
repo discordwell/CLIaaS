@@ -575,16 +575,14 @@ export class OracleStrategy {
     };
 
     // Priority: static defense → production → power → everything else.
-    // Island Soviet base first (x=37-59), then eastern/mainland bases.
+    // Tanks will focus-fire enemy units (mammoths) before reaching structures.
+    // Island Soviet base first (x=35-60), then eastern/mainland bases.
     return pickPriorityTarget(
-      { minCx: 37, maxCx: 59, minCy: 38, maxCy: 55 },
+      { minCx: 35, maxCx: 60, minCy: 35, maxCy: 58 },
       ['TSLA', 'FTUR', 'SAM', 'AFLD', 'HPAD', 'WEAP', 'BARR', 'KENN', 'STEK', 'PROC', 'FACT', 'DOME', 'APWR', 'POWR'],
     ) ?? pickPriorityTarget(
-      { minCx: 60, maxCx: 82, minCy: 40, maxCy: 55 },
-      ['TSLA', 'FTUR', 'SAM', 'SPEN', 'FACT', 'PROC', 'APWR', 'POWR'],
-    ) ?? pickPriorityTarget(
-      { minCx: 68, maxCx: 105, minCy: 40, maxCy: 60 },
-      ['TSLA', 'FTUR', 'SAM', 'FCOM', 'FACT', 'PROC', 'APWR', 'POWR'],
+      { minCx: 60, maxCx: 105, minCy: 35, maxCy: 60 },
+      ['TSLA', 'FTUR', 'SAM', 'SPEN', 'FCOM', 'AFLD', 'WEAP', 'FACT', 'PROC', 'APWR', 'POWR'],
     );
   }
 
@@ -2607,6 +2605,15 @@ export class OracleStrategy {
       const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
       const infantryOnly = infantryInRange.filter((e) => INF_SET.has(e.t));
 
+      // Debug: find nearest infantry of any distance
+      const allInfantry = state.enemies.filter((e) => INF_SET.has(e.t) && e.hp > 0);
+      const nearestInf = allInfantry.length > 0
+        ? allInfantry.reduce((a, b) => this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
+        : null;
+      if (nearestInf && infantryOnly.length === 0) {
+        reasons.push(`nearest_inf=${nearestInf.t}(${nearestInf.cx},${nearestInf.cy})d=${Math.sqrt(this.distanceSq(tanya, nearestInf)).toFixed(1)}`);
+      }
+
       if (dogDist <= DOG_DANGER_SQ) {
         // PRIORITY 1: Flee dogs
         const dx = tanya.cx - nearestDog!.cx;
@@ -2910,49 +2917,57 @@ export class OracleStrategy {
       if (patrolShips.length > 0) reasons.push(`sweep river (${patrolShips.length} ships)`);
     }
 
-    // Only peel armor west once the fleet has done the dangerous part of the job.
-    // Earlier pushes bled the island hold line and starved DD production exactly
-    // when the river was closest to opening.
-    const fleetStableForAssault =
-      playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS &&
-      enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS;
-    const canSpareArmor = landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
-    const homeGuard = Math.max(3, Math.min(5, baseGroundThreats.length + 2));
-    const assaultReserve = landArmor
-      .slice()
-      .sort((a, b) => {
-        const aTank = a.t.includes('TNK') ? 0 : 1;
-        const bTank = b.t.includes('TNK') ? 0 : 1;
-        if (aTank !== bTank) return aTank - bTank;
-        return this.distanceSq(a, SCG11EA_PRIMARY_ASSAULT_POINT) - this.distanceSq(b, SCG11EA_PRIMARY_ASSAULT_POINT);
-      })
-      .slice(homeGuard);
-    const assaultGroup = enemySubs.length > 0
-      ? assaultReserve.slice(0, SCG11EA_EARLY_ASSAULT_CAP)
-      : assaultReserve;
-    if (fleetStableForAssault && canSpareArmor && baseGroundThreats.length <= 2 && assaultGroup.length >= 4) {
-      const assaultTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-      if (assaultTarget) {
-        const retargetDue = (state.tick % 40) < 5;
-        const mobileAssault = (retargetDue ? assaultGroup : assaultGroup.filter(
-          (u) =>
-            this.isIdle(u) ||
-            this.shouldMove(u, assaultTarget.cx, assaultTarget.cy) ||
-            this.distanceSq(u, assaultTarget) > 225,
-        )).filter(
-          (u) => this.distanceSq(u, assaultTarget) > 9 || this.isIdle(u),
+    // GROUND ASSAULT — all tanks focus-fire ONE target at a time.
+    // Priority: mammoths/tanks → static defense → production → other buildings.
+    // No home guard. No fleet prerequisite. Attack when 12+ armor available.
+    // human-requested: focus fire all units on same target, tanks>buildings>infantry.
+    if (landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
+      // 1. Find the single best target for ALL tanks to focus-fire
+      //    Check for enemy vehicles within 10 cells of any tank first
+      const nearbyVehicles = state.enemies.filter(
+        (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
+          (e.t.includes('TNK') || e.t === 'V2RL' || e.t === 'ARTY' || e.t === 'HARV') &&
+          landArmor.some((u) => this.distanceSq(u, e) <= 100),
+      );
+      let focusTarget: { cx: number; cy: number; id?: number } | null = null;
+      let focusCmd: string = 'attack_move';
+      if (nearbyVehicles.length > 0) {
+        // Focus-fire the biggest threat (mammoths > heavy > medium > V2RL)
+        nearbyVehicles.sort((a, b) => {
+          const threat = (t: string) =>
+            t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === '2TNK' ? 2 : t === 'V2RL' ? 3 : 4;
+          return threat(a.t) - threat(b.t);
+        });
+        focusTarget = nearbyVehicles[0];
+        focusCmd = 'attack';  // direct attack on the unit
+      } else {
+        // No nearby vehicles — target structures (defense → production → power)
+        focusTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
+        focusCmd = 'attack_move';  // attack-move toward structure
+      }
+      if (focusTarget) {
+        const retargetDue = (state.tick % 30) < 5;
+        const movers = retargetDue ? landArmor : landArmor.filter(
+          (u) => this.isIdle(u) || this.distanceSq(u, focusTarget!) > 225,
         );
-        if (mobileAssault.length > 0) {
-          commands.push({
-            cmd: 'attack_move',
-            ids: mobileAssault.map((u) => u.id),
-            cx: assaultTarget.cx,
-            cy: assaultTarget.cy,
-          });
-          for (const unit of mobileAssault) {
-            this.recordMove(unit.id, assaultTarget.cx, assaultTarget.cy);
+        if (movers.length > 0) {
+          if (focusCmd === 'attack' && 'id' in focusTarget && focusTarget.id != null) {
+            // Focus-fire: ALL tanks attack the same enemy unit
+            commands.push({
+              cmd: 'attack',
+              ids: movers.map((u) => u.id),
+              target: focusTarget.id,
+            });
+          } else {
+            commands.push({
+              cmd: 'attack_move',
+              ids: movers.map((u) => u.id),
+              cx: focusTarget.cx,
+              cy: focusTarget.cy,
+            });
           }
-          reasons.push(`assault (${mobileAssault.length} armor → ${assaultTarget.cx},${assaultTarget.cy})`);
+          for (const u of movers) this.recordMove(u.id, focusTarget!.cx, focusTarget!.cy);
+          reasons.push(`assault (${movers.length} → ${focusTarget.cx},${focusTarget.cy})`);
         }
       }
     }
