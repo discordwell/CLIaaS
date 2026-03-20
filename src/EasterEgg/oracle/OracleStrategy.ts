@@ -748,7 +748,7 @@ export class OracleStrategy {
             cx: cell.cx,
             cy: cell.cy,
           });
-          if (state.tick - this.lastPlacementTick > sec(2)) {
+          if (state.tick - this.lastPlacementTick > 30) {
             this.placementAttempts++;
             this.lastPlacementTick = state.tick;
           }
@@ -2009,21 +2009,18 @@ export class OracleStrategy {
         : null;
       const dogDistSq = nearestDog ? this.distanceSq(spy, nearestDog) : Infinity;
 
-      // y=48 corridor (proven safer) + dog dodge when needed
+      // South route: sprint south to y=62+ (below ALL dogs), then east.
+      // With spy guard fix, spy won't auto-infiltrate buildings.
       const spyWaypoints: Point[] = [
-        // Phase A: North to y=48, east through corridor
-        { cx: 16, cy: 48 },
-        { cx: 21, cy: 48 },
-        { cx: 24, cy: 48 },
-        { cx: 28, cy: 48 },
-        { cx: 34, cy: 48 },
-        { cx: 40, cy: 48 },
-        { cx: 48, cy: 48 },
-        { cx: 56, cy: 48 },
-        { cx: 62, cy: 48 },
-        { cx: 68, cy: 48 },   // far east, clear zone
+        // Phase A: Sprint south past ALL dog zones
+        { cx: 15, cy: 55 },
+        { cx: 15, cy: 60 },
+        { cx: 15, cy: 65 },   // stay west (x=15) past ALL patrols (dog5 at 27,64)
+        { cx: 15, cy: 67 },   // south of dog3 patrol too
+        { cx: 30, cy: 67 },   // NOW go east (well below all dogs)
+        { cx: 50, cy: 67 },
+        { cx: 68, cy: 67 },   // far east
         // Phase B: South through river gap to tny3
-        { cx: 68, cy: 60 },
         { cx: 68, cy: 65 },
         { cx: 55, cy: 65 },
         { cx: 40, cy: 68 },   // river gap (x=18-41 clear at y=68)
@@ -2032,13 +2029,12 @@ export class OracleStrategy {
         { cx: 24, cy: 95 },
         { cx: 24, cy: 105 },
         { cx: 24, cy: 107 },  // tny3! → global 18 → Tanya
-        // Phase C: North to WEAP via same route
+        // Phase C: North to WEAP
         { cx: 24, cy: 95 },
         { cx: 30, cy: 80 },
         { cx: 40, cy: 68 },
-        { cx: 68, cy: 55 },
-        { cx: 68, cy: 48 },
-        { cx: 50, cy: 48 },
+        { cx: 68, cy: 57 },
+        { cx: 50, cy: 48 },   // cut NW to WEAP approach
         { cx: 48, cy: 48 },
       ];
 

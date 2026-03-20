@@ -335,14 +335,7 @@ async function runOracle(
 
     // 4. Act
     if (decision.commands.length > 0) {
-      const results = await adapter.command(decision.commands);
-      // Log placement failures for debugging
-      for (let i = 0; i < results.length; i++) {
-        if (decision.commands[i].cmd === 'place' && !results[i].ok) {
-          const c = decision.commands[i];
-          console.log(`  [PLACE FAILED] ${c.cmd} rtti=${c.rtti} at (${c.cx},${c.cy})`);
-        }
-      }
+      await adapter.command(decision.commands);
     }
     // 5-tick steps: idle-aware commands prevent stuttering at high frequency
     const stepTicks = 5;
