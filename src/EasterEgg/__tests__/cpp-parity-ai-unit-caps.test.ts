@@ -46,9 +46,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   House, UnitType, CELL_SIZE,
   PRODUCTION_ITEMS,
-  Mission,
   buildDefaultAlliances,
-  type ProductionItem,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
@@ -60,11 +58,6 @@ import {
   updateAIProduction,
   updateAIConstruction,
   updateAIStrategicPlanner,
-  aiCountStructure,
-  spawnAIUnit,
-  getAIBuildOrder,
-  aiPlaceStructure,
-  spawnAIStructure,
 } from '../engine/ai';
 
 beforeEach(() => resetEntityIds());
@@ -799,11 +792,13 @@ describe('Per-house cap independence (C++ each HouseClass has own Control)', () 
     const ussrState = ctx.aiStates.get(House.USSR)!;
     ussrState.maxInfantry = 1;
 
-    // House Greece: maxInfantry=10 (generous cap)
-    const greeceFact = makeStructure('FACT', House.Greece, 55, 55);
-    const greeceTent = makeStructure('TENT', House.Greece, 59, 55);
-    ctx.structures.push(greeceFact, greeceTent);
-    for (const s of [greeceFact, greeceTent]) {
+    // House Ukraine: maxInfantry=10 (generous cap)
+    // Ukraine is allied with USSR (both enemies of player Spain),
+    // so AI production will run for both houses.
+    const ukraineFact = makeStructure('FACT', House.Ukraine, 55, 55);
+    const ukraineTent = makeStructure('TENT', House.Ukraine, 59, 55);
+    ctx.structures.push(ukraineFact, ukraineTent);
+    for (const s of [ukraineFact, ukraineTent]) {
       const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
       for (let dy = 0; dy < fh; dy++) {
         for (let dx = 0; dx < fw; dx++) {
@@ -811,8 +806,8 @@ describe('Per-house cap independence (C++ each HouseClass has own Control)', () 
         }
       }
     }
-    ctx.houseCredits.set(House.Greece, 50000);
-    const greeceState = addAIHouse(ctx, House.Greece, {
+    ctx.houseCredits.set(House.Ukraine, 50000);
+    const ukraineState = addAIHouse(ctx, House.Ukraine, {
       productionEnabled: true,
       iq: 3,
       maxInfantry: 10,
@@ -833,11 +828,11 @@ describe('Per-house cap independence (C++ each HouseClass has own Control)', () 
     ).length;
     expect(ussrInf).toBe(1);
 
-    // Greece should have produced infantry (separate cap)
-    const greeceInf = ctx.entities.filter(
-      e => e.alive && e.house === House.Greece && e.stats.isInfantry
+    // Ukraine should have produced infantry (separate cap, separate house)
+    const ukraineInf = ctx.entities.filter(
+      e => e.alive && e.house === House.Ukraine && e.stats.isInfantry
     ).length;
-    expect(greeceInf).toBeGreaterThan(0);
+    expect(ukraineInf).toBeGreaterThan(0);
   });
 });
 
