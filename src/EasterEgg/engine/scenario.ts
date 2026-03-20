@@ -1545,15 +1545,11 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     if (generalSection.has('WaterCrate')) crateOverrides.water = generalSection.get('WaterCrate')!.toLowerCase();
   }
 
-  // C++ parity (house.cpp:6239-6277): AI houses auto-populate empty helipads/airfields
-  // with aircraft at scenario start. C++ AI_Aircraft runs on the first game tick and
-  // spawns aircraft for every empty pad. We do it here during scenario load.
-  const playerHouseResolved = toHouse(data.playerHouse ?? 'Spain');
-  const playerAlliances = data.houseAllies.get(data.playerHouse ?? '') ?? [];
-  const playerAllySet = new Set([playerHouseResolved, ...playerAlliances.map(toHouse)]);
-
+  // C++ parity (house.cpp:6239-6277): auto-populate empty helipads with aircraft
+  // at scenario start. C++ AI_Aircraft runs on the first game tick and spawns
+  // aircraft for every empty pad, for ALL houses (including player).
   for (const s of structures) {
-    if (!s.alive || playerAllySet.has(s.house)) continue;
+    if (!s.alive) continue;
     const isSoviet = s.house === House.USSR || s.house === House.Ukraine || s.house === House.BadGuy;
 
     if (s.type === 'HPAD') {
@@ -1987,6 +1983,10 @@ export function checkTriggerEvent(
     case TEVENT_ALL_DESTROYED: {
       // All units/structures of the specified house destroyed (event.data = RA house index)
       // RA source: HouseClass::As_Pointer(Event.Data.House)->Is_All_Destroyed()
+      // C++ parity: don't fire during early game when the player may start with no units
+      // and receive reinforcements via triggers (e.g. SCG27EA). C++ ScenarioInit flag
+      // prevents triggers from firing during initialization.
+      if (state.gameTick < 100) return false;
       const houseIdx = event.data;
       return !(state.houseAlive.get(houseIdx) ?? false);
     }

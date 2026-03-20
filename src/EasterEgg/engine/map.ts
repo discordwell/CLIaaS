@@ -502,10 +502,11 @@ export class GameMap {
    *  C++ counts only TEMPLATE_BRIDGE1/1H/2/2H/1A/1B with TIcon==6 as the
    *  "bridge center" tile that represents an intact bridge section. */
   countBridgeCells(): number {
-    // C++ bridge template IDs (defines.h):
-    // TEMPLATE_BRIDGE1=236, TEMPLATE_BRIDGE1H=238, TEMPLATE_BRIDGE2=237,
-    // TEMPLATE_BRIDGE2H=239, TEMPLATE_BRIDGE_1A=241, TEMPLATE_BRIDGE_1B=242
-    const BRIDGE_TEMPLATES = new Set([236, 237, 238, 239, 241, 242]);
+    // C++ bridge template IDs (defines.h enum TemplateType, 0-based):
+    // TEMPLATE_BRIDGE1=131, TEMPLATE_BRIDGE2=133,
+    // TEMPLATE_BRIDGE_1A=235, TEMPLATE_BRIDGE_1B=236,
+    // TEMPLATE_BRIDGE1H=378, TEMPLATE_BRIDGE2H=379
+    const BRIDGE_TEMPLATES = new Set([131, 133, 235, 236, 378, 379]);
     let count = 0;
     for (let i = 0; i < MAP_CELLS * MAP_CELLS; i++) {
       if (BRIDGE_TEMPLATES.has(this.templateType[i]) && this.templateIcon[i] === 6) {
@@ -525,7 +526,8 @@ export class GameMap {
         if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
         const idx = ry * MAP_CELLS + rx;
         const tmpl = this.templateType[idx];
-        if (tmpl >= 235 && tmpl <= 252) {
+        // C++ bridge template IDs: 131,133 (main), 235,236 (extended), 378,379 (half-destroyed)
+        if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) {
           this.templateType[idx] = 1; // water template
           this.setTerrain(rx, ry, Terrain.WATER);
           count++;
