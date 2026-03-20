@@ -107,9 +107,9 @@ const SCG11EA_AA_DEFENSE_TARGET = 2;
 const SCG11EA_GROUND_DEFENSE_TARGET = 2;
 const SCG11EA_AA_DEFENSE_TRIGGER = 2;
 const SCG11EA_GROUND_DEFENSE_TRIGGER = 2;
-const SCG11EA_DEFENSE_CREDIT_RESERVE = 1200;
+const SCG11EA_DEFENSE_CREDIT_RESERVE = 800;
 const SCG11EA_ECON_REBUILD_FLOOR = 500;
-const SCG11EA_PROC_REBUILD_RESERVE = 2000;
+const SCG11EA_PROC_REBUILD_RESERVE = 1200;
 const SCG11EA_RIVER_SWEEP_POINTS: Point[] = [
   { cx: 67, cy: 91 },
   { cx: 71, cy: 72 },
@@ -601,6 +601,13 @@ export class OracleStrategy {
 
   private scg11eaNavalPhaseStarted(alliedStructures: RAStructure[]): boolean {
     return alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
+  }
+
+  private scg11eaDesiredShipCount(enemySubCount: number): number {
+    if (enemySubCount <= 0) return 0;
+    if (enemySubCount >= 10) return 1;
+    if (enemySubCount >= 5) return 2;
+    return 3;
   }
 
   decide(state: RAGameState): OracleDecision {
@@ -1168,6 +1175,17 @@ export class OracleStrategy {
       const shipyardExists = existingShipyard;
       const scg11eaShipyardReady =
         this.scenario === 'SCG11EA' && this.scg11eaShipyardReady(alliedStructures);
+      const scg11eaExistingFleet =
+        this.scenario === 'SCG11EA'
+          ? playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length
+          : 0;
+      const scg11eaDesiredShips =
+        this.scenario === 'SCG11EA'
+          ? this.scg11eaDesiredShipCount(scg11eaEnemySubCount)
+          : 0;
+      const scg11eaFleetShort =
+        this.scenario === 'SCG11EA' &&
+        scg11eaExistingFleet < scg11eaDesiredShips;
       if (this.scenario === 'SCG11EA' && shipyardExists) {
         this.scg11eaNavalUnlocked = true;
       }
@@ -1177,8 +1195,10 @@ export class OracleStrategy {
         this.scg11eaNavalUnlocked &&
         !shipyardExists &&
         scg11eaEnemySubCount > 0 &&
+        scg11eaFleetShort &&
         alliedStructures.filter((s) => s.t === 'PROC').length >= 2 &&
         scg11eaShipyardReady &&
+        (scg11eaExistingFleet === 0 || state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE) &&
         (buildable.structures.includes('SYRD') || buildable.structures.includes('SPEN'))
       ) {
         const shipyardTypeId = buildable.structures.includes('SYRD') ? 27 : 28;
@@ -1477,6 +1497,13 @@ export class OracleStrategy {
     const scg11eaFleetOnline =
       this.scenario === 'SCG11EA' &&
       navalCount >= SCG11EA_FLEET_ONLINE_SHIPS;
+    const scg11eaDesiredShips =
+      this.scenario === 'SCG11EA'
+        ? this.scg11eaDesiredShipCount(scg11eaEnemySubCount)
+        : 0;
+    const scg11eaFleetShort =
+      this.scenario === 'SCG11EA' &&
+      navalCount < scg11eaDesiredShips;
     const scg11eaArmorEmergency =
       this.scenario === 'SCG11EA' &&
       scg11eaSubHuntPhase &&
@@ -1571,13 +1598,22 @@ export class OracleStrategy {
     const enemyNaval = state.enemies.some(
       (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'LST',
     );
+    const scg11eaBasePressure =
+      this.scenario === 'SCG11EA' &&
+      (scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
+        scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER ||
+        tankCount < SCG11EA_ASSAULT_MIN_ARMOR);
     // SCG11EA: always produce ships (we know subs are there), lower credit threshold
     const shipCreditThreshold = this.scenario === 'SCG11EA'
       ? (scg11eaNavalEconomyFragile
         ? SCG11EA_PROC_REBUILD_RESERVE
-        : scg11eaSubHuntPhase ? 250 : 400)
+        : scg11eaSubHuntPhase
+          ? (scg11eaBasePressure ? SCG11EA_DEFENSE_CREDIT_RESERVE : 250)
+          : 400)
       : 800;
-    const shouldProduceShips = this.scenario === 'SCG11EA' || enemyNaval;
+    const shouldProduceShips = this.scenario === 'SCG11EA'
+      ? scg11eaFleetShort
+      : enemyNaval;
     if (
       hasShipyard &&
       !vesselProduction &&
@@ -3013,52 +3049,57 @@ export class OracleStrategy {
     }
 
     // GROUND ASSAULT — all tanks attack_move to enemy base. Ground-first strategy.
-    // No fleet gate. No sub threshold. Attack when we have enough tanks.
-    if (landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
-      // 1. Find the single best target for ALL tanks to focus-fire
-      //    Check for enemy vehicles within 10 cells of any tank first
+    // GROUND ASSAULT — two phases: march north, then attack_move into base.
+    // 'move' to staging point (y=65) bypasses dogs/infantry.
+    // 'attack_move' from staging into the base engages everything.
+    const scg11eaLandAssaultOpen =
+      shipyardOnline &&
+      enemySubs.length <= SCG11EA_POST_NAVAL_SUB_THRESHOLD;
+    if (scg11eaLandAssaultOpen && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
+      const armyCentroid = this.centroid(landArmor);
+      const stagingPoint: Point = { cx: 45, cy: 65 };
+      const atStaging = armyCentroid.cy <= 70;
       const nearbyVehicles = state.enemies.filter(
-        (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
-          (e.t.includes('TNK') || e.t === 'V2RL' || e.t === 'ARTY' || e.t === 'HARV') &&
+        (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
           landArmor.some((u) => this.distanceSq(u, e) <= 100),
       );
-      let focusTarget: { cx: number; cy: number; id?: number } | null = null;
-      let focusCmd: string = 'attack_move';
+      const retargetDue = (state.tick % 25) < 5;
       if (nearbyVehicles.length > 0) {
-        // Focus-fire the biggest threat (mammoths > heavy > medium > V2RL)
+        // Focus-fire blocking tanks
         nearbyVehicles.sort((a, b) => {
-          const threat = (t: string) =>
-            t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === '2TNK' ? 2 : t === 'V2RL' ? 3 : 4;
-          return threat(a.t) - threat(b.t);
+          const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
+          return p(a.t) - p(b.t);
         });
-        focusTarget = nearbyVehicles[0];
-        focusCmd = 'attack';  // direct attack on the unit
-      } else {
-        // No nearby vehicles — force-attack a structure directly.
-        // 'attack' with a target ID makes tanks head straight for the building,
-        // ignoring dogs and infantry en route (like ctrl-clicking in-game).
-        // attack on structure IDs doesn't make tanks pathfind — use attack_move
-        const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-        if (structTarget) {
-          focusTarget = structTarget;
-          focusCmd = 'attack_move';
-        }
-      }
-      if (focusTarget) {
-        const retargetDue = (state.tick % 25) < 5;
         const movers = retargetDue ? landArmor : landArmor.filter(
-          (u) => this.isIdle(u) || this.distanceSq(u, focusTarget!) > 225,
+          (u) => this.isIdle(u) || this.distanceSq(u, nearbyVehicles[0]) > 100,
         );
         if (movers.length > 0) {
-          if (focusCmd === 'attack' && 'id' in focusTarget && focusTarget.id != null) {
-            // Focus-fire enemy unit
-            commands.push({ cmd: 'attack', ids: movers.map((u) => u.id), target: focusTarget.id });
-          } else {
-            // attack_move to structure coordinates
-            commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: focusTarget.cx, cy: focusTarget.cy });
+          commands.push({ cmd: 'attack', ids: movers.map((u) => u.id), target: nearbyVehicles[0].id });
+          for (const u of movers) this.recordMove(u.id, nearbyVehicles[0].cx, nearbyVehicles[0].cy);
+          reasons.push(`assault focus ${nearbyVehicles[0].t} (${movers.length})`);
+        }
+      } else if (!atStaging) {
+        // Phase 1: march to staging — 'move' bypasses dogs
+        const movers = retargetDue ? landArmor : landArmor.filter(
+          (u) => this.isIdle(u) || this.distanceSq(u, stagingPoint) > 225,
+        );
+        if (movers.length > 0) {
+          commands.push({ cmd: 'move', ids: movers.map((u) => u.id), cx: stagingPoint.cx, cy: stagingPoint.cy });
+          for (const u of movers) this.recordMove(u.id, stagingPoint.cx, stagingPoint.cy);
+          reasons.push(`assault march (${movers.length} → y=${stagingPoint.cy})`);
+        }
+      } else {
+        // Phase 2: at staging — attack_move into the base
+        const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
+        if (structTarget) {
+          const movers = retargetDue ? landArmor : landArmor.filter(
+            (u) => this.isIdle(u) || this.distanceSq(u, structTarget) > 100,
+          );
+          if (movers.length > 0) {
+            commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+            for (const u of movers) this.recordMove(u.id, structTarget.cx, structTarget.cy);
+            reasons.push(`assault push ${structTarget.t} (${movers.length} → ${structTarget.cx},${structTarget.cy})`);
           }
-          for (const u of movers) this.recordMove(u.id, focusTarget!.cx, focusTarget!.cy);
-          reasons.push(`assault ${(focusTarget as any).t ?? ''} (${movers.length} → ${focusTarget.cx},${focusTarget.cy})`);
         }
       }
     }
