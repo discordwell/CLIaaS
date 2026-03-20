@@ -799,7 +799,7 @@ export interface ProductionItem {
   type: string;         // unit type or structure type code
   name: string;         // display name
   cost: number;         // credits cost
-  buildTime: number;    // ticks to build
+  buildTime: number;    // ticks to build (C++ parity: computed from cost if 0)
   prerequisite: string; // required building type (TENT/BARR→infantry, WEAP→vehicles, FACT→structures)
   techPrereq?: string;  // additional building required (e.g. DOME for Artillery)
   techLevel?: number;   // rules.ini TechLevel — items above player's level are hidden
@@ -885,6 +885,21 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'FENC', name: 'Wire Fence', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'soviet', isStructure: true, techLevel: 2 },  // rules.ini: FENC is barbed wire fence (line 1695)
   { type: 'BRIK', name: 'Concrete', cost: 100, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 8 },
 ];
+
+// C++ parity (techno.cpp:6077): Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
+// At 15 Hz: TICKS_PER_MINUTE = 900, BuildSpeedBias = 0.8 (rules.ini BuildSpeed=.8)
+// Scale to 20 Hz: multiply by 20/15 = 4/3
+// Formula: buildTime_20hz = Math.floor(Cost * 0.8 * 900 / 1000 * 4 / 3)
+// = Math.floor(Cost * 0.96)
+const CPP_BUILD_SPEED_BIAS = 0.8;
+const CPP_TICKS_PER_MINUTE = 900; // 15 Hz * 60
+const TS_TICK_SCALE = 20 / 15;    // 20 Hz / 15 Hz
+
+for (const item of PRODUCTION_ITEMS) {
+  item.buildTime = Math.floor(
+    item.cost * CPP_BUILD_SPEED_BIAS * CPP_TICKS_PER_MINUTE / 1000 * TS_TICK_SCALE
+  );
+}
 
 // === Sidebar Strip Categories (C++ parity: two production strips) ===
 export type StripType = 'left' | 'right';
