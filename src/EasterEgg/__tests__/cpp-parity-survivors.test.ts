@@ -83,7 +83,7 @@ function getTsBuildCost(type: string): number | undefined {
 /**
  * TS Raw_Cost for a building — mirrors C++ bdata.cpp:3672-3683.
  * Uses PRODUCTION_ITEMS cost, with C++ Raw_Cost adjustments:
- *   - FACT: not in PRODUCTION_ITEMS, hardcoded to 2000
+ *   - FACT: in PRODUCTION_ITEMS with cost=2500 (INI Cost=2500)
  *   - PROC: subtract harvester cost (1400)
  *   - HPAD: subtract hind cost (1200, C++ bug uses HIND twice)
  */
@@ -211,24 +211,23 @@ describe('TS survivor count formula (index.ts:1937-1938)', () => {
 });
 
 // ============================================================
-// Section 3: PARITY GAP — FACT not in PRODUCTION_ITEMS
+// Section 3: FACT in PRODUCTION_ITEMS with INI Cost=2500
 // C++ FACT Raw_Cost = 2000 → 5 survivors
-// TS falls back to 300 → 1 survivor
+// TS uses PRODUCTION_ITEMS cost=2500 → 5 survivors
 // ============================================================
-describe('PARITY GAP: FACT (Construction Yard) cost lookup', () => {
+describe('FACT (Construction Yard) cost lookup', () => {
 
-  it('FACT is NOT in PRODUCTION_ITEMS', () => {
-    // This documents the root cause: FACT is a pre-placed structure,
-    // not in the buildable production list, so prodItem?.cost is undefined.
+  it('FACT is in PRODUCTION_ITEMS with cost=2500 (INI Cost=2500)', () => {
+    // FACT is now in PRODUCTION_ITEMS with INI Cost=2500.
     const factItem = getTsBuildCost('FACT');
-    expect(factItem).toBeUndefined();
+    expect(factItem).toBe(2500);
   });
 
-  it('TS uses hardcoded FACT_COST=2000 when not in PRODUCTION_ITEMS', () => {
-    // TS: buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300)
-    // For FACT, prodItem is undefined, so buildCost = 2000
+  it('TS uses PRODUCTION_ITEMS cost=2500 for FACT', () => {
+    // FACT cost comes from PRODUCTION_ITEMS (2500).
+    // getTsRawCost returns prodItem.cost (2500) since FACT is now in the list.
     const tsRawCost = getTsRawCost('FACT');
-    expect(tsRawCost).toBe(2000);
+    expect(tsRawCost).toBe(2500);
     expect(tsHowManySurvivors(tsRawCost)).toBe(5);
   });
 
@@ -760,7 +759,7 @@ describe('complete parity matrix — TS vs C++ survivor counts', () => {
     ['IRON', 2800,      2800, 5, true],
     ['MSLO', 2500,      2500, 5, true],
     // These now match after Raw_Cost fix:
-    ['FACT', undefined, 2000, 5, true],  // FIXED: TS hardcodes FACT_COST=2000
+    ['FACT', 2500,      2000, 5, true],  // FACT now in PRODUCTION_ITEMS with INI Cost=2500
     ['PROC', 2000,      600,  2, true],  // FIXED: TS subtracts harvester cost (2000-1400=600)
     ['HPAD', 1500,      300,  1, true],  // FIXED: TS subtracts hind cost (1500-1200=300)
   ];

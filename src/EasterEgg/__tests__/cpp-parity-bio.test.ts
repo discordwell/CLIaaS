@@ -129,8 +129,8 @@ describe('BIO stats (rules.ini parity)', () => {
     expect(STRUCTURE_WEAPONS['BIO']).toBeUndefined();
   });
 
-  it('is not a power consumer (no entry in POWER_DRAIN)', () => {
-    expect(POWER_DRAIN['BIO']).toBeUndefined();
+  it('is a power consumer with drain of 40 (INI Power=-40)', () => {
+    expect(POWER_DRAIN['BIO']).toBe(40);
   });
 
   it('is not a powered structure (not affected by power deficit)', () => {
@@ -184,11 +184,11 @@ describe('BIO power grid non-participation (calculatePowerGrid)', () => {
     expect(powerOutput('BIO', 300, 600)).toBe(0);
   });
 
-  it('BIO alone yields 0 produced, 0 consumed in grid', () => {
+  it('BIO alone yields 0 produced, 40 consumed in grid (INI Power=-40)', () => {
     const bio = makeBIO(10, 10, 600, House.Spain);
     const grid = calculatePowerGrid([bio], House.Spain, isAllied);
     expect(grid.produced).toBe(0);
-    expect(grid.consumed).toBe(0);
+    expect(grid.consumed).toBe(40);
   });
 
   it('dead BIO has no power grid impact', () => {
@@ -199,12 +199,12 @@ describe('BIO power grid non-participation (calculatePowerGrid)', () => {
     expect(grid.consumed).toBe(0);
   });
 
-  it('BIO does not affect POWR output in shared grid', () => {
+  it('BIO adds 40W drain alongside POWR in shared grid', () => {
     const powr = makeBuilding('POWR', 10, 10, 400, House.Spain);
     const bio = makeBIO(14, 10, 600, House.Spain);
     const grid = calculatePowerGrid([powr, bio], House.Spain, isAllied);
     expect(grid.produced).toBe(100);
-    expect(grid.consumed).toBe(0);
+    expect(grid.consumed).toBe(40);
   });
 
   it('enemy BIO has no power grid impact on player', () => {

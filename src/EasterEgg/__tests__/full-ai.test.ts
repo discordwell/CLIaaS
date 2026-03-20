@@ -602,8 +602,9 @@ describe('AI integration', () => {
   it('AI initialization requires FACT structure', () => {
     // Only houses with a ConYard (FACT) get AIHouseState
     const factProd = PRODUCTION_ITEMS.find(p => p.type === 'FACT');
-    expect(factProd).toBeUndefined(); // FACT isn't in PRODUCTION_ITEMS (can't build second ConYard)
-    // But FACT exists in STRUCTURE_SIZE
+    expect(factProd).toBeDefined(); // FACT is in PRODUCTION_ITEMS with TechLevel=-1 (not player-buildable)
+    expect(factProd!.techLevel).toBe(-1);
+    // FACT exists in STRUCTURE_SIZE
     expect(STRUCTURE_SIZE.FACT).toEqual([3, 3]);
   });
 

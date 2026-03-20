@@ -19,6 +19,18 @@ export const GAP_RADIUS = 10;
 export const GAP_UPDATE_INTERVAL = 90;
 export const DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'SAM', 'PBOX', 'GAP', 'AGUN']);
 
+// Per-building sight ranges from rules.ini Sight= values.
+// C++ building.cpp uses Class->SightRange directly — no heuristic.
+export const STRUCTURE_SIGHT: Record<string, number> = {
+  FACT: 5,  POWR: 4,  APWR: 4,  PROC: 6,  SILO: 4,
+  TENT: 5,  BARR: 5,  WEAP: 4,  FIX: 5,   HPAD: 5,
+  AFLD: 7,  DOME: 10, ATEK: 10, STEK: 4,
+  PDOX: 10, IRON: 10, MSLO: 5,  KENN: 4,
+  SYRD: 4,  SPEN: 4,  GAP: 10,
+  PBOX: 5,  HBOX: 5,  GUN: 6,   SAM: 5,   AGUN: 6,
+  TSLA: 8,  FTUR: 6,  BIO: 4,   HOSP: 4,
+};
+
 // ---------------------------------------------------------------------------
 // Context interface — thin view into the Game class
 // ---------------------------------------------------------------------------
@@ -86,7 +98,7 @@ export function updateFogOfWar(ctx: FogContext): void {
     for (const s of ctx.structures) {
       if (s.alive && ctx.isAllied(s.house, ctx.playerHouse)) {
         // C++ building.cpp uses Class->SightRange directly — no health reduction.
-        const sight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
+        const sight = STRUCTURE_SIGHT[s.type] ?? 5;
         // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
         if (!sight || sight > 10) continue;
         const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;

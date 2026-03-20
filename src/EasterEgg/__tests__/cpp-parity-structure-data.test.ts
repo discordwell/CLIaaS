@@ -16,7 +16,7 @@
  *   1. STRUCTURE_MAX_HP vs INI Strength=
  *   2. POWER_DRAIN vs INI Power= (sign-inverted for consumers)
  *   3. Building armor per INI (TS hardcodes 'concrete' for all — gap)
- *   4. Building sight range per INI vs TS fog.ts heuristic
+ *   4. Building sight range per INI vs TS STRUCTURE_SIGHT (fog.ts)
  *   5. Building cost via PRODUCTION_ITEMS vs INI Cost=
  *   6. Building TechLevel via PRODUCTION_ITEMS vs INI TechLevel=
  *   7. Building Prerequisites via PRODUCTION_ITEMS vs INI Prerequisite=
@@ -32,6 +32,7 @@ import {
   STRUCTURE_SIZE,
   STRUCTURE_WEAPONS,
 } from '../engine/scenario';
+import { STRUCTURE_SIGHT } from '../engine/fog';
 
 // ---------------------------------------------------------------------------
 // INI parser + merge
@@ -259,21 +260,17 @@ describe('Building armor: INI Armor= values (TS uses concrete for all — parity
 });
 
 // ---------------------------------------------------------------------------
-// 4. Building sight range: INI Sight= vs TS fog.ts heuristic
-//    TS fog.ts line 89: const sight = DEFENSE_TYPES.has(s.type) ? 7 : 5;
-//    This is a simplified heuristic — C++ uses per-building SightRange from INI.
+// 4. Building sight range: INI Sight= vs TS STRUCTURE_SIGHT (fog.ts)
+//    TS fog.ts uses STRUCTURE_SIGHT[type] ?? 5 — per-building values from INI.
 // ---------------------------------------------------------------------------
-describe('Building sight: INI Sight= vs TS fog.ts heuristic (7 for defense, 5 for rest)', () => {
-  // TS defense types that get sight=7
-  const TS_DEFENSE_TYPES = new Set(['HBOX', 'GUN', 'TSLA', 'SAM', 'PBOX', 'GAP', 'AGUN']);
-
+describe('Building sight: INI Sight= vs TS STRUCTURE_SIGHT', () => {
   for (const type of MILITARY_BUILDINGS) {
     const iniSight = iniInt(type, 'Sight');
     if (iniSight === undefined) continue;
 
-    const tsSight = TS_DEFENSE_TYPES.has(type) ? 7 : 5;
+    const tsSight = STRUCTURE_SIGHT[type] ?? 5;
 
-    it(`${type}: INI Sight=${iniSight}, TS heuristic gives ${tsSight}`, () => {
+    it(`${type}: INI Sight=${iniSight}, TS STRUCTURE_SIGHT=${tsSight}`, () => {
       expect(tsSight).toBe(iniSight);
     });
   }

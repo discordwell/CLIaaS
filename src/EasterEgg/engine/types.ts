@@ -59,6 +59,8 @@ export const POWER_DRAIN: Record<string, number> = {
   KENN: 10,
   SYRD: 30,
   SPEN: 30,
+  BIO: 40,
+  HOSP: 20,
 };
 
 // === Directions ===
@@ -857,6 +859,7 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'MIG', name: 'MiG', cost: 1200, buildTime: 180, prerequisite: 'AFLD', faction: 'soviet', techLevel: 10 },
   { type: 'YAK', name: 'Yak', cost: 800, buildTime: 120, prerequisite: 'AFLD', faction: 'soviet', techLevel: 5 },
   // Structures — rules.ini Prerequisite=, Cost=, Owner=, TechLevel= values
+  { type: 'FACT', name: 'Constr. Yard', cost: 2500, buildTime: 0, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1 },  // rules.ini TechLevel=-1, not buildable (MCV deploys into it)
   { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 1 },
   { type: 'APWR', name: 'Adv. Power Plant', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 8 },
   { type: 'BARR', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1 },  // rules.ini Owner=soviet

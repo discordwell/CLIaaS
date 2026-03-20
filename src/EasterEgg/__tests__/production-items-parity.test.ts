@@ -69,6 +69,7 @@ const EXPECTED_ITEMS: {
   { type: 'MIG', cost: 1200, buildTime: cppBuildTime(1200), prerequisite: 'AFLD', faction: 'soviet', techLevel: 10 },
   { type: 'YAK', cost: 800, buildTime: cppBuildTime(800), prerequisite: 'AFLD', faction: 'soviet', techLevel: 5 },
   // Structures — base buildings
+  { type: 'FACT', cost: 2500, buildTime: cppBuildTime(2500), prerequisite: '', faction: 'both', techLevel: -1, isStructure: true },  // INI TechLevel=-1, not buildable (MCV deploys)
   { type: 'POWR', cost: 300, buildTime: cppBuildTime(300), prerequisite: 'FACT', faction: 'both', techLevel: 1, isStructure: true },
   { type: 'APWR', cost: 500, buildTime: cppBuildTime(500), prerequisite: 'POWR', faction: 'both', techLevel: 8, isStructure: true },
   { type: 'BARR', cost: 300, buildTime: cppBuildTime(300), prerequisite: 'POWR', faction: 'soviet', techLevel: 1, isStructure: true },

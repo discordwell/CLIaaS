@@ -784,7 +784,8 @@ describe('full GPS lifecycle: charge → fire → ATEK destroy → re-shroud →
     updateFogOfWar(fogCtx);
 
     expect(map.getVisibility(50, 50)).toBe(2); // unit's cell visible
-    expect(map.getVisibility(40, 40)).toBe(0); // far cell shrouded
+    // (59,59) is beyond both unit sight=5 and ATEK sight=10 (INI Sight=10)
+    expect(map.getVisibility(59, 59)).toBe(0); // far cell shrouded
 
     // Phase 2: GPS fires — everything revealed
     fogCtx.gpsActive = true;
@@ -805,11 +806,12 @@ describe('full GPS lifecycle: charge → fire → ATEK destroy → re-shroud →
     expect(map.getVisibility(50, 50)).toBe(0);
     expect(map.getVisibility(55, 55)).toBe(0);
 
-    // Phase 5: Normal fog re-reveals around units only
+    // Phase 5: Normal fog re-reveals around units + ATEK structure (still alive)
     updateFogOfWar(fogCtx);
 
     expect(map.getVisibility(50, 50)).toBe(2); // near unit
-    expect(map.getVisibility(40, 40)).toBe(0); // far from unit
+    // (59,59) is beyond both unit sight and ATEK sight
+    expect(map.getVisibility(59, 59)).toBe(0); // far from both
 
     // The previously jammed cell is still jammed (GAP still active)
     // but since GPS is off, it's just shrouded anyway

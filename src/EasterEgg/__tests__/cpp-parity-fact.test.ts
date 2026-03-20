@@ -216,9 +216,11 @@ describe('FACT is root of the build tree', () => {
     expect(brik!.prerequisite).toBe('FACT');
   });
 
-  it('FACT is not itself a buildable production item (pre-placed)', () => {
+  it('FACT is in PRODUCTION_ITEMS but not player-buildable (TechLevel=-1)', () => {
     const fact = PRODUCTION_ITEMS.find(p => p.type === 'FACT');
-    expect(fact).toBeUndefined();
+    expect(fact).toBeDefined();
+    expect(fact!.techLevel).toBe(-1);
+    expect(fact!.cost).toBe(2500);
   });
 
   it('all structures with prerequisite=FACT are the first tier of the build tree', () => {
@@ -240,6 +242,11 @@ describe('FACT is root of the build tree', () => {
     }
     // Every buildable structure should eventually reach FACT
     for (const s of structures) {
+      // FACT itself is the root — no prerequisite to trace
+      if (s.type === 'FACT') {
+        expect(s.prerequisite).toBe('');
+        continue;
+      }
       let current = s.prerequisite;
       const visited = new Set<string>();
       while (current !== 'FACT' && prereqOf[current] && !visited.has(current)) {

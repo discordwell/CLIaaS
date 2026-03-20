@@ -330,15 +330,13 @@ describe('Structure Repair — rate, cost, and tick intervals', () => {
     expect(powrCost).toBe(2);
   });
 
-  it('repair cost per step for FACT: cost=1000, maxHp=1000 (Spy tech)', () => {
-    // FACT not in PRODUCTION_ITEMS (it's the conyard, not buildable via normal queue)
-    // But scenario production items might have it. Let's check.
-    const factItem = PRODUCTION_ITEMS.find(p => p.type === 'FACT');
-    // FACT is not in PRODUCTION_ITEMS — the game lookup returns undefined, fallback cost = 1
-    if (!factItem) {
-      // Without a prodItem, repairCostPerStep = 1 (fallback in source)
-      expect(repairCostPerStep('FACT')).toBe(1);
-    }
+  it('repair cost per step for FACT: cost=2500, maxHp=1000', () => {
+    // FACT is in PRODUCTION_ITEMS with cost=2500 (INI Cost=2500).
+    // costPerStep = ceil(2500 * 0.20 / (1000 / 7)) = ceil(500 / 142.86) = ceil(3.5) = 4
+    const factCost = repairCostPerStep('FACT');
+    const expected = Math.ceil((2500 * REPAIR_PERCENT) / (1000 / REPAIR_STEP));
+    expect(factCost).toBe(expected);
+    expect(factCost).toBe(4);
   });
 
   it('repair cost per step for expensive structures (WEAP, PROC)', () => {

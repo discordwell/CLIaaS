@@ -125,8 +125,8 @@ describe('HOSP stats (rules.ini parity)', () => {
     expect(STRUCTURE_WEAPONS['HOSP']).toBeUndefined();
   });
 
-  it('is not a power consumer (no entry in POWER_DRAIN)', () => {
-    expect(POWER_DRAIN['HOSP']).toBeUndefined();
+  it('is a power consumer with drain of 20 (INI Power=-20)', () => {
+    expect(POWER_DRAIN['HOSP']).toBe(20);
   });
 
   it('is not a powered structure (no entry in STRUCTURE_POWERED)', () => {
@@ -136,11 +136,11 @@ describe('HOSP stats (rules.ini parity)', () => {
   it('is a scenario-only structure (Scenario=yes in rules.ini)', () => {
     // HOSP is not in the production items — it can only appear
     // when pre-placed in a scenario INI file.
-    // We verify indirectly: HOSP has no weapon, no power drain,
-    // and is not in the STRUCTURE_POWERED set — it exists purely
-    // as a map decoration / objective structure.
+    // We verify indirectly: HOSP has no weapon, and is not in the
+    // STRUCTURE_POWERED set — it exists purely as a map decoration /
+    // objective structure. It does consume 20W per INI Power=-20.
     expect(STRUCTURE_WEAPONS['HOSP']).toBeUndefined();
-    expect(POWER_DRAIN['HOSP']).toBeUndefined();
+    expect(POWER_DRAIN['HOSP']).toBe(20);
   });
 });
 
@@ -171,14 +171,14 @@ describe('HOSP in power grid (calculatePowerGrid)', () => {
   const alliances = buildDefaultAlliances();
   const isAllied = (a: House, b: House) => alliances.get(a)?.has(b) ?? false;
 
-  it('HOSP alone produces 0W and consumes 0W', () => {
+  it('HOSP alone produces 0W and consumes 20W (INI Power=-20)', () => {
     const hosp = makeHOSP(10, 10, 400, House.Spain);
     const grid = calculatePowerGrid([hosp], House.Spain, isAllied);
     expect(grid.produced).toBe(0);
-    expect(grid.consumed).toBe(0);
+    expect(grid.consumed).toBe(20);
   });
 
-  it('HOSP does not affect power when added alongside a POWR', () => {
+  it('HOSP adds 20W drain alongside POWR', () => {
     const powr = makeBuilding('POWR', 10, 10, 400, House.Spain);
     const gridWithoutHosp = calculatePowerGrid([powr], House.Spain, isAllied);
 
@@ -186,14 +186,14 @@ describe('HOSP in power grid (calculatePowerGrid)', () => {
     const gridWithHosp = calculatePowerGrid([powr, hosp], House.Spain, isAllied);
 
     expect(gridWithHosp.produced).toBe(gridWithoutHosp.produced);
-    expect(gridWithHosp.consumed).toBe(gridWithoutHosp.consumed);
+    expect(gridWithHosp.consumed).toBe(gridWithoutHosp.consumed + 20);
   });
 
-  it('damaged HOSP still contributes nothing to grid', () => {
+  it('damaged HOSP still consumes 20W', () => {
     const hosp = makeHOSP(10, 10, 100, House.Spain);
     const grid = calculatePowerGrid([hosp], House.Spain, isAllied);
     expect(grid.produced).toBe(0);
-    expect(grid.consumed).toBe(0);
+    expect(grid.consumed).toBe(20);
   });
 
   it('dead HOSP contributes nothing to grid', () => {
@@ -413,8 +413,8 @@ describe('HOSP civilian nature -- no active capabilities', () => {
     }
   });
 
-  it('consumes 0 power (absent from POWER_DRAIN)', () => {
-    expect(POWER_DRAIN['HOSP']).toBeUndefined();
+  it('consumes 20W power (INI Power=-20)', () => {
+    expect(POWER_DRAIN['HOSP']).toBe(20);
   });
 
   it('is not affected by low power (absent from STRUCTURE_POWERED)', () => {

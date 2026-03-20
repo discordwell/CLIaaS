@@ -840,7 +840,7 @@ describe('Structure sight', () => {
     expect(DEFENSE_TYPES.has('AGUN')).toBe(true);
   });
 
-  it('defense structures get sight=7, non-defense get sight=5', () => {
+  it('structures use per-building INI sight values (GUN=6, POWR=4)', () => {
     const map = createClearMap();
     // Place a defense structure (GUN) and non-defense structure (POWR) at known locations
     const gun = mockStructure('GUN', 30, 30, House.Greece);
@@ -854,14 +854,14 @@ describe('Structure sight', () => {
 
     updateFogOfWar(ctx);
 
-    // GUN (defense) should reveal with sight=7: check cell 7 away
-    expect(map.getVisibility(37, 30)).toBe(2); // 7 cells east
-    // But 8 cells east (beyond sight) should not be visible
-    // (unless LOS from POWR reaches it)
-    // POWR (non-defense) should reveal with sight=5: check cell 5 away
-    expect(map.getVisibility(65, 60)).toBe(2); // 5 cells east
-    // 6 cells east from POWR should NOT be visible
-    expect(map.getVisibility(66, 60)).toBe(0);
+    // GUN has INI Sight=6: check cell 6 away
+    expect(map.getVisibility(36, 30)).toBe(2); // 6 cells east
+    // 7 cells east (beyond sight=6) should not be visible
+    expect(map.getVisibility(37, 30)).toBe(0);
+    // POWR has INI Sight=4: check cell 4 away
+    expect(map.getVisibility(64, 60)).toBe(2); // 4 cells east
+    // 5 cells east from POWR should NOT be visible
+    expect(map.getVisibility(65, 60)).toBe(0);
   });
 
   it('structures contribute to fog of war alongside units', () => {
@@ -883,15 +883,15 @@ describe('Structure sight', () => {
     expect(map.getVisibility(80, 80)).toBe(2);
   });
 
-  it('GAP is in the DEFENSE_TYPES set (gets sight=7)', () => {
+  it('GAP is in the DEFENSE_TYPES set (INI Sight=10)', () => {
     expect(DEFENSE_TYPES.has('GAP')).toBe(true);
 
-    // Verify behaviorally: GAP structure reveals 7 cells
+    // Verify behaviorally: GAP structure reveals 10 cells (INI Sight=10)
     const map = createClearMap();
     const gap = mockStructure('GAP', 64, 64, House.Greece);
     const ctx = makeMockFogContext({ map, structures: [gap], entities: [] });
     updateFogOfWar(ctx);
-    expect(map.getVisibility(71, 64)).toBe(2); // 7 cells east
+    expect(map.getVisibility(74, 64)).toBe(2); // 10 cells east
   });
 });
 

@@ -104,8 +104,13 @@ describe('movementSpeed default fraction', () => {
 // ── Sidebar production gating ─────────────────────────────
 
 describe('sidebar production gating for no-base missions', () => {
-  it('PRODUCTION_ITEMS all require prerequisite buildings', () => {
+  it('PRODUCTION_ITEMS all require prerequisite buildings (except FACT)', () => {
     for (const item of PRODUCTION_ITEMS) {
+      // FACT has no prerequisite (TechLevel=-1, MCV deploys into it)
+      if (item.type === 'FACT') {
+        expect(item.prerequisite).toBe('');
+        continue;
+      }
       expect(item.prerequisite).toBeTruthy();
       expect(typeof item.prerequisite).toBe('string');
     }
@@ -128,8 +133,10 @@ describe('sidebar production gating for no-base missions', () => {
     // This means getAvailableItems returns [] — no production
     // We test the data assumption here
     const alliedStructures = PRODUCTION_ITEMS.filter(p => p.isStructure);
-    // All structures require FACT or another building as prerequisite
+    // All buildable structures require FACT or another building as prerequisite
+    // FACT itself has no prerequisite (TechLevel=-1, deployed from MCV)
     for (const s of alliedStructures) {
+      if (s.type === 'FACT') continue;
       expect(s.prerequisite).toBeTruthy();
     }
   });
