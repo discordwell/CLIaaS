@@ -364,7 +364,7 @@ export class OracleStrategy {
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg05eaSpyWpIdx = 0;          // current waypoint in south-first route
   private scg05eaSpyHoldTick = 0;        // tick when spy started holding for a dog
-  private scg05eaSpyLastDst: { cx: number; cy: number } | undefined;
+
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
   private currentTick = 0;
@@ -495,7 +495,9 @@ export class OracleStrategy {
     let best: Point | null = null;
     for (const pos of positions) {
       if (this.canPlaceBuilding(pos.cx, pos.cy, state, naval)) {
-        best = pos; // keep going — want the furthest east
+        if (!best || pos.cx > best.cx) {
+          best = pos;
+        }
       }
     }
     return best;
@@ -558,6 +560,28 @@ export class OracleStrategy {
       { cx: 63, cy: 85 }, { cx: 63, cy: 86 }, { cx: 64, cy: 88 }, { cx: 65, cy: 88 },
       { cx: 63, cy: 84 }, { cx: 63, cy: 87 }, { cx: 63, cy: 88 }, { cx: 63, cy: 89 },
       { cx: 64, cy: 89 }, { cx: 65, cy: 89 }, { cx: 63, cy: 90 },
+    ];
+  }
+
+  private getScg11eaShoreDefenseCandidates(buildingType: string): Point[] {
+    const eastShoreBand = [
+      { cx: 58, cy: 90 }, { cx: 58, cy: 88 }, { cx: 58, cy: 86 }, { cx: 58, cy: 84 },
+      { cx: 56, cy: 90 }, { cx: 56, cy: 88 }, { cx: 56, cy: 86 }, { cx: 56, cy: 84 },
+      { cx: 54, cy: 90 }, { cx: 54, cy: 88 }, { cx: 54, cy: 86 }, { cx: 54, cy: 84 },
+      { cx: 52, cy: 90 }, { cx: 52, cy: 88 }, { cx: 52, cy: 86 }, { cx: 52, cy: 84 },
+      { cx: 50, cy: 90 }, { cx: 50, cy: 88 }, { cx: 50, cy: 86 }, { cx: 50, cy: 84 },
+    ];
+
+    if (buildingType === 'AGUN') {
+      return eastShoreBand;
+    }
+
+    return [
+      { cx: 56, cy: 90 }, { cx: 56, cy: 88 }, { cx: 56, cy: 86 },
+      { cx: 54, cy: 90 }, { cx: 54, cy: 88 }, { cx: 54, cy: 86 },
+      { cx: 52, cy: 90 }, { cx: 52, cy: 88 }, { cx: 52, cy: 86 },
+      { cx: 58, cy: 90 }, { cx: 58, cy: 88 }, { cx: 58, cy: 86 },
+      { cx: 50, cy: 90 }, { cx: 50, cy: 88 }, { cx: 50, cy: 86 },
     ];
   }
 
@@ -1041,7 +1065,8 @@ export class OracleStrategy {
       } else {
         // Sort placement offsets by priority:
         // 1. SCG11EA refineries bias toward the ore field.
-        // 2. Other missions can bias toward the nearest coast.
+        // 2. SCG11EA east-shore defenses pin near the shipyard corridor.
+        // 3. Other missions can bias toward the nearest coast.
         // 3. Default offset order.
         const coastalCells2 = this.resolveCoastalCells(conYard);
         let placeRef = { cx: conYard.cx, cy: conYard.cy };
@@ -1074,6 +1099,13 @@ export class OracleStrategy {
 
         let offsets = [...PLACEMENT_OFFSETS];
         let scg11eaProcCandidates: Point[] = [];
+        const scg11eaShoreDefenseCandidates =
+          this.scenario === 'SCG11EA' &&
+            (buildingProduction.t === 'AGUN' ||
+              buildingProduction.t === 'GUN' ||
+              buildingProduction.t === 'FTUR')
+            ? this.getScg11eaShoreDefenseCandidates(buildingProduction.t)
+            : [];
         if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC') {
           offsets.sort((a, b) => {
             const aDist = (placeRef.cx + a.cx - SCG11EA_ORE_ANCHOR.cx) ** 2 +
@@ -1135,7 +1167,15 @@ export class OracleStrategy {
         let placeCx: number, placeCy: number;
         // Find first offset that passes terrain/fog/occupancy validation
         let foundValid = false;
-        if (this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC' && scg11eaProcCandidates.length > 0) {
+        if (scg11eaShoreDefenseCandidates.length > 0) {
+          const validDefenseCell = this.findBestChainPosition(scg11eaShoreDefenseCandidates, state, false);
+          if (validDefenseCell) {
+            placeCx = validDefenseCell.cx;
+            placeCy = validDefenseCell.cy;
+            foundValid = true;
+          }
+        }
+        if (!foundValid && this.scenario === 'SCG11EA' && buildingProduction.t === 'PROC' && scg11eaProcCandidates.length > 0) {
           const seenCandidates = new Set<string>();
           for (const pos of scg11eaProcCandidates) {
             const key = `${pos.cx},${pos.cy}`;
@@ -2658,11 +2698,10 @@ export class OracleStrategy {
       );
       const gapOpen = corridorDogs.length === 0; // no dogs in corridor
 
-      // Track last move destination to avoid re-sending the same command
-      // (resending resets the path and causes stutter-stepping)
-      const lastDst = this.scg05eaSpyLastDst;
+      // Always send move commands — engine-level dedup in agentHarness
+      // skips path reset when destination hasn't changed, so repeated
+      // sends are harmless (no stutter-stepping).
       const sendMove = (cx: number, cy: number, reason: string) => {
-        // Always send — dedup caused spy to never move on C++ engine
         commands.push({ cmd: 'move', ids: [spy.id], cx, cy });
         reasons.push(reason);
       };
@@ -2670,7 +2709,7 @@ export class OracleStrategy {
       if (targetWeap && spy.cx >= 23) {
         // Within 20 cells of WEAP — infiltrate (harness direct spyInfiltrate)
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-        this.scg05eaSpyLastDst = undefined;
+
         reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
       } else if (gapOpen) {
         // Gap is open — SPRINT east, no dodge, no stops (send once)
@@ -3071,14 +3110,43 @@ export class OracleStrategy {
       if (patrolShips.length > 0) reasons.push(`sweep river (${patrolShips.length} ships)`);
     }
 
+    // Detect if the island Soviet base is destroyed (no production buildings in x=35-60).
+    // Once destroyed: tanks mop up remaining structures, then transition to naval phase.
+    const islandProductionTypes = new Set(['WEAP', 'FACT', 'BARR', 'AFLD', 'HPAD', 'KENN', 'STEK']);
+    const islandProduction = enemyStructures.filter(
+      (s) => s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58 && islandProductionTypes.has(s.t),
+    );
+    const islandBaseDestroyed = islandProduction.length === 0 && state.tick > 5000;
+    if (islandBaseDestroyed) {
+      // Base destroyed — mop up remaining island structures, then tanks come home
+      const remainingIsland = enemyStructures.filter(
+        (s) => s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58,
+      );
+      if (remainingIsland.length > 0 && landArmor.length >= 3) {
+        // Mop up remaining buildings
+        const target = remainingIsland[0];
+        const movers = landArmor.filter((u) => this.isIdle(u) || this.distanceSq(u, target) > 100);
+        if (movers.length > 0) {
+          commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: target.cx, cy: target.cy });
+          for (const u of movers) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`mop up ${target.t} (${movers.length} → ${target.cx},${target.cy})`);
+        }
+      } else if (landArmor.length > 0) {
+        // Island fully cleared — continue to eastern structures or come home
+        const easternTarget = enemyStructures.filter((s) => s.cx > 60);
+        if (easternTarget.length > 0) {
+          const target = easternTarget[0];
+          commands.push({ cmd: 'attack_move', ids: landArmor.map((u) => u.id), cx: target.cx, cy: target.cy });
+          for (const u of landArmor) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`push east (${landArmor.length} → ${target.cx},${target.cy})`);
+        }
+      }
+      reasons.push('island base DESTROYED');
+    }
+
     // GROUND ASSAULT — two phases. No fleet gate.
-    // Phase 1: 'move' to staging y=65 (bypass dogs).
-    // Phase 2: at staging, priority:
-    //   1) Enemy units ACTIVELY ENGAGING (within 6 cells) → focus-fire
-    //   2) Production buildings (WEAP→FACT→BARR→AFLD→SPEN) → attack_move
-    //   3) Other buildings
-    // If enemies are nearby but not engaging, IGNORE them and hit buildings.
-    if (landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
+    // Only assault if the island base still has production buildings to destroy.
+    if (!islandBaseDestroyed && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
       const armyCentroid = this.centroid(landArmor);
       const stagingPoint: Point = { cx: 45, cy: 65 };
       const atStaging = armyCentroid.cy <= 70;

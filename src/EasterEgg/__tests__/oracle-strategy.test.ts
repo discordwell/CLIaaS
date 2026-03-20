@@ -1343,7 +1343,7 @@ describe('SCG11EA naval strategy', () => {
     const decision = strategy.decide(s);
     expect(decision.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ cmd: 'attack_move', cx: 49, cy: 40 }),
+        expect.objectContaining({ cmd: 'attack_move', cx: 51, cy: 45 }),
       ]),
     );
   });
@@ -1386,13 +1386,13 @@ describe('SCG11EA naval strategy', () => {
     const decision = strategy.decide(s);
     expect(decision.commands).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ cmd: 'attack_move', cx: 49, cy: 40, ids: expect.any(Array) }),
+        expect.objectContaining({ cmd: 'attack_move', cx: 51, cy: 45, ids: expect.any(Array) }),
       ]),
     );
     const assaultCommand = decision.commands.find((c) =>
       c.cmd === 'attack_move' &&
-      c.cx === 49 &&
-      c.cy === 40 &&
+      c.cx === 51 &&
+      c.cy === 45 &&
       Array.isArray(c.ids),
     );
     expect(assaultCommand).toBeDefined();
