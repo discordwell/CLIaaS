@@ -198,8 +198,8 @@ describe('FireballLauncher weapon stats (weapon.cpp / rules.ini)', () => {
     expect(weapon.projectileSpeed).toBe(0.8);
   });
 
-  it('projSpeed (raw) is 15', () => {
-    expect(weapon.projSpeed).toBe(15);
+  it('projSpeed (raw) is 12 (rules.ini [FireballLauncher] Speed=12)', () => {
+    expect(weapon.projSpeed).toBe(12);
   });
 });
 

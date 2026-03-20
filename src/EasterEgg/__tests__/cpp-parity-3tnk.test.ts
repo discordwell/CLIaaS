@@ -8,7 +8,7 @@
  *
  * References:
  *   - rules.ini [3TNK] — HP 400, armor heavy, speed 7, cost 950, soviet
- *   - rules.ini [105mm] — damage 40, ROF 70, range 4.75, warhead AP
+ *   - rules.ini [105mm] — damage 30, ROF 70, range 4.75, warhead AP
  *   - techno.cpp:2857 — IsSecondShot dual-weapon cadence
  *   - drive.cpp — stop-rotate-move for non-infantry
  *   - warhead.cpp — AP Verses: none=0.3, wood=0.75, light=0.75, heavy=1.0, concrete=0.5
@@ -131,8 +131,8 @@ describe('105mm weapon stats (rules.ini)', () => {
     expect(w).toBeDefined();
   });
 
-  it('damage = 40', () => {
-    expect(w.damage).toBe(40);
+  it('damage = 30 (rules.ini [105mm] Damage=30)', () => {
+    expect(w.damage).toBe(30);
   });
 
   it('ROF = 70', () => {
@@ -277,25 +277,25 @@ describe('AP warhead multipliers (WARHEAD_VS_ARMOR parity)', () => {
     expect(getWarheadMultiplier('AP', 'concrete')).toBe(0.5);
   });
 
-  it('105mm deals 40 damage to heavy armor (full AP multiplier)', () => {
+  it('105mm deals 30 damage to heavy armor (full AP multiplier)', () => {
     const w = WEAPON_STATS['105mm'];
     const mult = getWarheadMultiplier(w.warhead, 'heavy');
     const damage = Math.max(1, Math.round(w.damage * mult));
-    expect(damage).toBe(40);
+    expect(damage).toBe(30); // round(30 * 1.0) = 30
   });
 
-  it('105mm deals 12 damage to no-armor infantry (AP vs none = 0.3)', () => {
+  it('105mm deals 9 damage to no-armor infantry (AP vs none = 0.3)', () => {
     const w = WEAPON_STATS['105mm'];
     const mult = getWarheadMultiplier(w.warhead, 'none');
     const damage = Math.max(1, Math.round(w.damage * mult));
-    expect(damage).toBe(12); // round(40 * 0.3) = 12
+    expect(damage).toBe(9); // round(30 * 0.3) = 9
   });
 
-  it('105mm deals 30 damage to light armor (AP vs light = 0.75)', () => {
+  it('105mm deals 23 damage to light armor (AP vs light = 0.75)', () => {
     const w = WEAPON_STATS['105mm'];
     const mult = getWarheadMultiplier(w.warhead, 'light');
     const damage = Math.max(1, Math.round(w.damage * mult));
-    expect(damage).toBe(30); // round(40 * 0.75) = 30
+    expect(damage).toBe(23); // round(30 * 0.75) = 22.5 → 23
   });
 });
 
@@ -383,15 +383,15 @@ describe('3TNK slower but heavier than allied tanks', () => {
     expect(speed2).toBeLessThan(speed1);
   });
 
-  it('damage comparison: 105mm(40) > 90mm(30) > 75mm(25)', () => {
+  it('damage comparison: 105mm(30) = 90mm(30) > 75mm(25)', () => {
     const dmg3 = WEAPON_STATS['105mm'].damage;
     const dmg2 = WEAPON_STATS['90mm'].damage;
     const dmg1 = WEAPON_STATS['75mm'].damage;
 
-    expect(dmg3).toBe(40);
+    expect(dmg3).toBe(30);
     expect(dmg2).toBe(30);
     expect(dmg1).toBe(25);
-    expect(dmg3).toBeGreaterThan(dmg2);
+    expect(dmg3).toBeGreaterThanOrEqual(dmg2);
     expect(dmg2).toBeGreaterThan(dmg1);
   });
 

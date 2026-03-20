@@ -663,9 +663,9 @@ describe('WEAPON_STATS parity', () => {
     expect(w.warhead).toBe('AP');
   });
 
-  it('105mm — damage=40, rof=70, range=4.75, warhead=AP (C++ RULES.INI)', () => {
+  it('105mm — damage=30, rof=70, range=4.75, warhead=AP (rules.ini [105mm] Damage=30)', () => {
     const w = WEAPON_STATS['105mm'];
-    expect(w.damage).toBe(40);
+    expect(w.damage).toBe(30);
     expect(w.rof).toBe(70);
     expect(w.range).toBe(4.75);
     expect(w.warhead).toBe('AP');
@@ -886,8 +886,8 @@ describe('WARHEAD_META parity', () => {
     expect(WARHEAD_META.SA).toEqual({ spreadFactor: 3 });
   });
 
-  it('HE — spreadFactor=6, destroysWalls, destroysWood, destroysOre', () => {
-    expect(WARHEAD_META.HE).toEqual({ spreadFactor: 6, destroysWalls: true, destroysWood: true, destroysOre: true });
+  it('HE — spreadFactor=6, destroysWalls, destroysWood (no Ore=yes in INI)', () => {
+    expect(WARHEAD_META.HE).toEqual({ spreadFactor: 6, destroysWalls: true, destroysWood: true });
   });
 
   it('AP — spreadFactor=3, destroysWalls, destroysWood', () => {

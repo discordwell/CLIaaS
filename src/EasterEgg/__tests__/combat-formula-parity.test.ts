@@ -118,10 +118,10 @@ describe('WARHEAD_META spreadFactor — C++ Spread= values', () => {
 // Section 5: WARHEAD_META destruction flags
 // ============================================================
 describe('WARHEAD_META destruction flags', () => {
-  it('HE destroys walls, wood, and ore', () => {
+  it('HE destroys walls and wood but not ore (only Nuke has Ore=yes in INI)', () => {
     expect(WARHEAD_META.HE.destroysWalls).toBe(true);
     expect(WARHEAD_META.HE.destroysWood).toBe(true);
-    expect(WARHEAD_META.HE.destroysOre).toBe(true);
+    expect(WARHEAD_META.HE.destroysOre).toBeFalsy();
   });
 
   it('AP destroys walls and wood but not ore', () => {

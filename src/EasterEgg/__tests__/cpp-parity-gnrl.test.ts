@@ -104,8 +104,8 @@ describe('GNRL — Pistol weapon stats match C++ RULES.INI', () => {
     expect(pistolStats.warhead).toBe('SA');
   });
 
-  it('projSpeed = 40', () => {
-    expect(pistolStats.projSpeed).toBe(40);
+  it('projSpeed = 100 (rules.ini [Pistol] Speed=100)', () => {
+    expect(pistolStats.projSpeed).toBe(100);
   });
 });
 

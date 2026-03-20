@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-20T17:40Z — Parity Audit Phase 2: Weapon/Warhead/Projectile Data
+- **4 new parity test files** (529 tests): warhead-data, weapon-values, projectile-props, structure-weapons
+- **HE destroysOre removed**: rules.ini [HE] has no Ore=yes (only Nuke does)
+- **105mm damage fixed**: 40→30 (matching rules.ini Damage=30)
+- **30 projSpeed values corrected** to match rules.ini Speed= values (were arbitrary, now INI-accurate)
+- **TeslaZap**: documented as ant variant (WEAPON_STATS has ANT3 values, building version in STRUCTURE_WEAPONS)
+- **Projectile property gaps documented**: Stinger missing ROT/AA/High, DepthCharge missing Arcing/High, HeatSeeker weapons missing Inaccurate/Fueled, isDegenerate is engine-only (not in INI)
+- **Full suite**: 32,342 passing (6 pre-existing AppNavWrapper failures unrelated)
+
 ## 2026-03-20T10:00Z — Dual-Runtime Comparison + Full Campaign Parity
 - **Built dual-runtime comparison tool** running all 29 Allied missions on both TS and C++ WASM
 - **23+ engine bugs fixed** from comparison data: buildable field, reinforcement spawn, production rtti, Base section, build times, alliances (one-way, Neutral, GoodGuy, Multi houses), bridge templates, AI aircraft, damage falloff, FTUR sprite, helipad init, loss conditions, house mapping
@@ -10,9 +19,17 @@
 - **CLEAR1 tile extraction**: TMP parser now handles tileCount > slotCount (template variations). All theatres re-extracted with 15-234 additional tiles.
 - **Remaining**: fog-of-war dimming creates subtle seam between tileset tiles and procedural grass under buildings in enemy territory. Player area renders perfectly.
 
-## 2026-03-20T20:00Z — Session 162: M5 (SCG05EA) Spy Infiltration
-- **Team script**: Agent confirmed spy has NO movement script — player-controlled unit after UNLOAD
-- **Dog map**: Static at (12,48)x2, (49,52), (50,52), (24,54), (23,55). Patrol pair x=23-27 y=49→63
+## 2026-03-21T09:00Z — Session 162: M5 (SCG05EA) Full Trigger Chain Working
+- **Spy infiltration**: Patrol-gap sprint + 20-cell harness spyInfiltrate shortcut. Spy reaches x=23 consistently.
+- **Trigger chain COMPLETE**: SPYS→frc5(destroy los5 + create TRUCK)→set_global(18)→tnya→**Tanya spawns at (25,107)!** globals=[16,18,19]
+- **frc5 clarification**: action1=TACTION_DESTROY_TRIGGER(12) not REINFORCEMENTS(7). action2=CREATE_TEAM(TRUCK). BadGuy TRUCK drives south.
+- **Cell trigger C++ parity fix**: checkCellTriggers() now processes ALL units (foot.cpp:1409), not just player units
+- **Harness commands added**: set_global, warp_unit, spy infiltration shortcut (20-cell range), adjacent-cell pathfinding for attack_struct
+- **Tanya phase**: Warps to (22,105), walks toward SAMs, shoots infantry with Colt45 (range 5.75, 50dmg, ROF 5)
+- **Command dedup**: Track last target per unit → prevents stutter-stepping from repeated attack/move commands resetting entity path
+- **SAM blocker**: SAMs surrounded by structures — Tanya can't pathfind to adjacent cell. Need C4 on nearby buildings or find accessible SAMs
+- **Water map**: North bay x=10-14 y=47-52, south coast y=99+. NO connection. LST trapped. Used set_global workaround.
+- **Next**: Fix SAM accessibility → SAM destruction → chinook evac → win
 - **Terrain**: y<48 impassable. Passable band y=48-55. River gap x=18-41 at y=68
 - **Direct infiltration**: spyInfiltrate() shortcut in harness attack_struct — spy within 6 cells of enemy building triggers immediate infiltration (bypasses entity update race)
 - **3-tick micro-dodge**: Best approach. Sprint east + dodge ±1 cell when dog within 3.5 cells. Spy reaches x=28-36 (needs x=37 for infiltration range). Clamp y∈[49,51]

@@ -146,7 +146,7 @@ const EXEMPT_WEAPONS = new Set([
 
 // C++ compiled-in defaults that differ from INI file values (we follow the C++ source)
 const CPP_DAMAGE_OVERRIDES: Record<string, number> = {
-  '105mm': 40, // INI says 30, C++ RULES.INI compiled default is 40 (3TNK Heavy Tank)
+  // 105mm: INI says 30, which is correct (C++ reads from rules.ini at runtime)
 };
 
 describe('INI Parity: Weapon Stats', () => {

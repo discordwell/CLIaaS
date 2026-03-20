@@ -1,16 +1,25 @@
 /**
  * Projectile Speed Parity Tests — C++ BulletClass Speed verification.
  *
- * Documents the mapping between C++ Speed= (leptons/tick) and TS projSpeed
- * (cells/second). These use different unit systems:
- *   C++ Speed=  : leptons per game tick (1 cell = 256 leptons, 20 ticks/sec at default GameSpeed=3)
- *   TS projSpeed: cells per second
+ * Documents the mapping between C++ Speed= (leptons/tick) and TS projSpeed.
+ * After the Phase 2 weapon/projectile audit, projSpeed values match
+ * rules.ini/aftrmath.ini Speed= values directly (raw C++ integers).
  *
- * Conversion: projSpeed_cells_per_sec = (C++_Speed * GAME_TICKS_PER_SEC) / LEPTON_SIZE
- * Or: C++_Speed_leptons_per_tick = (projSpeed * LEPTON_SIZE) / GAME_TICKS_PER_SEC
- *
- * The TS engine uses projSpeed to calculate pixelsPerTick:
- *   pixelsPerTick = projSpeed × CELL_SIZE / GAME_TICKS_PER_SEC
+ * C++ Speed= values by projectile type:
+ *   Invisible: Speed=100 (hitscan weapons)
+ *   Cannon:    Speed=40  (tank shells, varies per weapon: 2Inch=25)
+ *   HeatSeeker: Speed varies (Dragon=25, Hellfire/Maverick/MammothTusk/APTusk=30)
+ *   LaserGuided: Speed=20 (Stinger)
+ *   AAMissile: Speed=50 (RedEye, Nike)
+ *   Lobbed:    Speed=5 (Grenade)
+ *   Ballistic: Speed varies (155mm=12, 8Inch=6)
+ *   Fireball:  Speed=12 (Flamer, FireballLauncher)
+ *   Bomblet:   Speed=5 (Napalm)
+ *   Catapult:  Speed=5 (DepthCharge)
+ *   FROG:      Speed=25 (SCUD)
+ *   Torpedo:   Speed=15 (TorpTube)
+ *   Parachute: Speed=5 (ParaBomb)
+ *   LeapDog:   Speed=20 (DogJaw)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -18,15 +27,12 @@ import {
   CELL_SIZE, LEPTON_SIZE, GAME_TICKS_PER_SEC,
   calcProjectileTravelFrames,
 } from '../engine/types';
-
-// Import the weapon definitions to verify projSpeed values
 import { WEAPON_STATS } from '../engine/types';
 
 // ============================================================
 // Section 1: Unit system conversion verification
 // ============================================================
 describe('unit system conversion: C++ leptons/tick ↔ TS cells/sec', () => {
-  // Conversion formula: projSpeed (cells/sec) = cppSpeed (leptons/tick) * 15 / 256
   function cppSpeedToTSProjSpeed(cppSpeed: number): number {
     return (cppSpeed * GAME_TICKS_PER_SEC) / LEPTON_SIZE;
   }
@@ -42,91 +48,120 @@ describe('unit system conversion: C++ leptons/tick ↔ TS cells/sec', () => {
   });
 
   it('C++ ROCKET speed (60 MPH) → ~4.69 cells/sec', () => {
-    // This is the speed constant, not the weapon Speed field
-    // 60 * 20 / 256 = 4.6875
     const result = cppSpeedToTSProjSpeed(60);
     expect(result).toBeCloseTo(4.6875, 3);
   });
 });
 
 // ============================================================
-// Section 2: Per-weapon projSpeed values documentation
+// Section 2: Per-weapon projSpeed values by projectile type
 // ============================================================
 describe('weapon projSpeed values — all defined weapons', () => {
-  // Document all weapons and their projSpeed values
-  // Grouped by speed tier for verification
-
-  // Tier: instant/hitscan (projSpeed=40 cells/sec → very fast visual)
-  const HITSCAN_WEAPONS = [
-    'M1Carbine', 'DogJaw', 'Heal', 'Sniper', 'M60mg',
-    'TeslaCannon', 'PortaTesla', 'GoodWrench', 'APTusk', 'TTankZap',
-    'Stinger', 'ChainGun', 'Colt45', 'Pistol', '2Inch',
-    'Mandible', 'TeslaZap', 'Democharge', 'Camera',
+  // Invisible projectile weapons (Speed=100)
+  const INVISIBLE_WEAPONS = [
+    'M1Carbine', 'Sniper', 'ChainGun', 'Pistol', 'Colt45',
+    'M60mg', 'Heal', 'Camera', 'PortaTesla', 'GoodWrench',
+    'TTankZap', 'Democharge', 'TeslaZap',
   ];
 
-  it('all hitscan weapons have projSpeed=40', () => {
-    for (const name of HITSCAN_WEAPONS) {
+  it('Invisible-projectile weapons have projSpeed=100', () => {
+    for (const name of INVISIBLE_WEAPONS) {
       const weapon = WEAPON_STATS[name];
       expect(weapon, `${name} not found in WEAPON_STATS`).toBeDefined();
-      expect(weapon.projSpeed, `${name} projSpeed`).toBe(40);
+      expect(weapon.projSpeed, `${name} projSpeed`).toBe(100);
     }
   });
 
-  // Tier: tank cannons (projSpeed=30 cells/sec)
-  const TANK_CANNON_WEAPONS = ['75mm', '90mm', '105mm', '120mm'];
-  it('tank cannon weapons have projSpeed=30', () => {
-    for (const name of TANK_CANNON_WEAPONS) {
-      expect(WEAPON_STATS[name]?.projSpeed, `${name} projSpeed`).toBe(30);
+  // Cannon projectile weapons (Speed=40)
+  const CANNON_40_WEAPONS = ['75mm', '90mm', '105mm', '120mm'];
+  it('Cannon-projectile weapons (tanks) have projSpeed=40', () => {
+    for (const name of CANNON_40_WEAPONS) {
+      expect(WEAPON_STATS[name]?.projSpeed, `${name} projSpeed`).toBe(40);
     }
   });
 
-  // Tier: missiles/rockets (projSpeed=15 cells/sec)
-  const MISSILE_WEAPONS = [
-    'Dragon', 'RedEye', 'MammothTusk', 'Maverick', 'Hellfire',
-    'TorpTube', 'Tomahawk', 'SeaSerpent', 'FireballLauncher',
-  ];
-  it('missile weapons have projSpeed=15', () => {
-    for (const name of MISSILE_WEAPONS) {
-      expect(WEAPON_STATS[name]?.projSpeed, `${name} projSpeed`).toBe(15);
-    }
+  // HeatSeeker projectile weapons (Speed varies: 25-30)
+  it('Dragon has projSpeed=25 (rules.ini Speed=25)', () => {
+    expect(WEAPON_STATS.Dragon?.projSpeed).toBe(25);
   });
 
-  // Tier: arcing/slow projectiles (projSpeed=12 cells/sec)
-  const ARCING_WEAPONS = ['155mm', 'DepthCharge', 'Napalm'];
-  it('arcing/slow weapons have projSpeed=12', () => {
-    for (const name of ARCING_WEAPONS) {
-      expect(WEAPON_STATS[name]?.projSpeed, `${name} projSpeed`).toBe(12);
-    }
+  it('Hellfire/Maverick/MammothTusk/APTusk have projSpeed=30', () => {
+    expect(WEAPON_STATS.Hellfire?.projSpeed).toBe(30);
+    expect(WEAPON_STATS.Maverick?.projSpeed).toBe(30);
+    expect(WEAPON_STATS.MammothTusk?.projSpeed).toBe(30);
+    expect(WEAPON_STATS.APTusk?.projSpeed).toBe(30);
   });
 
-  // Grenade: arcing but slower (C++ Speed=5, Lobbed)
-  it('Grenade has projSpeed=5', () => {
-    expect(WEAPON_STATS.Grenade?.projSpeed, 'Grenade projSpeed').toBe(5);
+  // LaserGuided (Stinger: Speed=20)
+  it('Stinger has projSpeed=20 (LaserGuided Speed=20)', () => {
+    expect(WEAPON_STATS.Stinger?.projSpeed).toBe(20);
   });
 
-  // Special: Flamer (projSpeed=20)
-  it('Flamer has projSpeed=20', () => {
-    expect(WEAPON_STATS.Flamer?.projSpeed).toBe(20);
+  // AAMissile (RedEye: Speed=50)
+  it('RedEye has projSpeed=50 (AAMissile Speed=50)', () => {
+    expect(WEAPON_STATS.RedEye?.projSpeed).toBe(50);
   });
 
-  // Special: SCUD (projSpeed=25)
-  it('SCUD has projSpeed=25', () => {
+  // Fireball (Speed=12)
+  it('Flamer and FireballLauncher have projSpeed=12 (Fireball Speed=12)', () => {
+    expect(WEAPON_STATS.Flamer?.projSpeed).toBe(12);
+    expect(WEAPON_STATS.FireballLauncher?.projSpeed).toBe(12);
+  });
+
+  // Lobbed (Grenade: Speed=5)
+  it('Grenade has projSpeed=5 (Lobbed Speed=5)', () => {
+    expect(WEAPON_STATS.Grenade?.projSpeed).toBe(5);
+  });
+
+  // Ballistic (155mm: Speed=12, 8Inch: Speed=6)
+  it('155mm has projSpeed=12 (Ballistic Speed=12)', () => {
+    expect(WEAPON_STATS['155mm']?.projSpeed).toBe(12);
+  });
+
+  it('8Inch has projSpeed=6 (Ballistic Speed=6)', () => {
+    expect(WEAPON_STATS['8Inch']?.projSpeed).toBe(6);
+  });
+
+  // Other specific weapons
+  it('2Inch has projSpeed=25 (Cannon Speed=25)', () => {
+    expect(WEAPON_STATS['2Inch']?.projSpeed).toBe(25);
+  });
+
+  it('DogJaw has projSpeed=20 (LeapDog Speed=20)', () => {
+    expect(WEAPON_STATS.DogJaw?.projSpeed).toBe(20);
+  });
+
+  it('DepthCharge has projSpeed=5 (Catapult Speed=5)', () => {
+    expect(WEAPON_STATS.DepthCharge?.projSpeed).toBe(5);
+  });
+
+  it('Napalm has projSpeed=5 (Bomblet Speed=5)', () => {
+    expect(WEAPON_STATS.Napalm?.projSpeed).toBe(5);
+  });
+
+  it('SCUD has projSpeed=25 (FROG Speed=25)', () => {
     expect(WEAPON_STATS.SCUD?.projSpeed).toBe(25);
   });
 
-  // Special: SubSCUD (projSpeed=20)
   it('SubSCUD has projSpeed=20', () => {
     expect(WEAPON_STATS.SubSCUD?.projSpeed).toBe(20);
   });
 
-  // Special: 8Inch cruiser gun (projSpeed=30)
-  it('8Inch has projSpeed=30', () => {
-    expect(WEAPON_STATS['8Inch']?.projSpeed).toBe(30);
+  it('TorpTube has projSpeed=15 (Torpedo Speed=15)', () => {
+    expect(WEAPON_STATS.TorpTube?.projSpeed).toBe(15);
   });
 
-  // Special: ParaBomb (projSpeed=5, slow dropping)
-  it('ParaBomb has projSpeed=5 (slow drop)', () => {
+  it('ParaBomb has projSpeed=5 (Parachute Speed=5)', () => {
     expect(WEAPON_STATS.ParaBomb?.projSpeed).toBe(5);
+  });
+
+  // Engine-custom weapons (not from rules.ini, values are engine-specific)
+  it('TeslaCannon has projSpeed=40 (engine custom)', () => {
+    expect(WEAPON_STATS.TeslaCannon?.projSpeed).toBe(40);
+  });
+
+  it('Mandible has projSpeed=40 (engine custom, ant melee)', () => {
+    expect(WEAPON_STATS.Mandible?.projSpeed).toBe(40);
   });
 });
 
@@ -138,23 +173,23 @@ describe('pixelsPerTick derivation from projSpeed', () => {
     return projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
   }
 
-  it('projSpeed=40 → 48 pixels/tick (instant-feel)', () => {
+  it('projSpeed=100 → 120 pixels/tick (hitscan instant)', () => {
+    expect(pixelsPerTick(100)).toBe(120);
+  });
+
+  it('projSpeed=40 → 48 pixels/tick (cannon shells)', () => {
     expect(pixelsPerTick(40)).toBe(48);
   });
 
-  it('projSpeed=30 → 36 pixels/tick (tank shells)', () => {
+  it('projSpeed=30 → 36 pixels/tick (missiles)', () => {
     expect(pixelsPerTick(30)).toBe(36);
   });
 
-  it('projSpeed=15 → 18 pixels/tick (missiles)', () => {
-    expect(pixelsPerTick(15)).toBe(18);
-  });
-
-  it('projSpeed=12 → 14.4 pixels/tick (arcing)', () => {
+  it('projSpeed=12 → 14.4 pixels/tick (arcing/fireball)', () => {
     expect(pixelsPerTick(12)).toBeCloseTo(14.4, 5);
   });
 
-  it('projSpeed=5 → 6 pixels/tick (parabombs)', () => {
+  it('projSpeed=5 → 6 pixels/tick (parabombs/grenades)', () => {
     expect(pixelsPerTick(5)).toBe(6);
   });
 });
@@ -163,32 +198,32 @@ describe('pixelsPerTick derivation from projSpeed', () => {
 // Section 4: Travel time examples at combat ranges
 // ============================================================
 describe('travel time at typical combat ranges', () => {
-  it('rifle at 3 cells: projSpeed=40 → 2 ticks (instant)', () => {
+  it('rifle at 3 cells: projSpeed=100 → 1 tick (instant)', () => {
     const dist = 3 * CELL_SIZE;
-    expect(calcProjectileTravelFrames(dist, 40)).toBe(2);
+    expect(calcProjectileTravelFrames(dist, 100)).toBe(1);
   });
 
-  it('tank cannon at 4.75 cells: projSpeed=30 → 3 ticks', () => {
+  it('tank cannon at 4.75 cells: projSpeed=40 → 3 ticks', () => {
     const dist = 4.75 * CELL_SIZE;
-    const pixPerTick = 30 * CELL_SIZE / GAME_TICKS_PER_SEC;
+    const pixPerTick = 40 * CELL_SIZE / GAME_TICKS_PER_SEC;
     const expected = Math.ceil(dist / pixPerTick);
-    expect(calcProjectileTravelFrames(dist, 30)).toBe(expected);
+    expect(calcProjectileTravelFrames(dist, 40)).toBe(expected);
   });
 
-  it('missile at 5 cells: projSpeed=15 → 7 ticks', () => {
+  it('missile at 5 cells: projSpeed=30 → 4 ticks', () => {
     const dist = 5 * CELL_SIZE;
-    // pixPerTick = 15*24/20 = 18, ceil(120/18) = 7
-    expect(calcProjectileTravelFrames(dist, 15)).toBe(7);
+    // pixPerTick = 30*24/20 = 36, ceil(120/36) = 4
+    expect(calcProjectileTravelFrames(dist, 30)).toBe(4);
   });
 
-  it('artillery at 6 cells: projSpeed=12 → 8 ticks', () => {
+  it('artillery at 6 cells: projSpeed=12 → 10 ticks', () => {
     const dist = 6 * CELL_SIZE;
     const pixPerTick = 12 * CELL_SIZE / GAME_TICKS_PER_SEC;
     const expected = Math.ceil(dist / pixPerTick);
     expect(calcProjectileTravelFrames(dist, 12)).toBe(expected);
   });
 
-  it('V2 rocket at 10 cells: projSpeed=25 → 6 ticks', () => {
+  it('V2 rocket at 10 cells: projSpeed=25 → 8 ticks', () => {
     const dist = 10 * CELL_SIZE;
     const pixPerTick = 25 * CELL_SIZE / GAME_TICKS_PER_SEC;
     const expected = Math.ceil(dist / pixPerTick);

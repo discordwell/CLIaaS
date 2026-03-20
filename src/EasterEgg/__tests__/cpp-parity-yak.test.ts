@@ -341,12 +341,12 @@ describe('ChainGun not homing -- no projectileROT (bullet.cpp)', () => {
     expect(maverick.projectileROT).toBe(5);
   });
 
-  it('ChainGun projSpeed is 40 (fast hitscan-like bullet)', () => {
-    expect(chainGun.projSpeed).toBe(40);
+  it('ChainGun projSpeed is 100 (rules.ini [ChainGun] Speed=100)', () => {
+    expect(chainGun.projSpeed).toBe(100);
   });
 
-  it('Maverick projSpeed is only 15 (slower guided missile)', () => {
-    expect(maverick.projSpeed).toBe(15);
+  it('Maverick projSpeed is 30 (rules.ini [Maverick] Speed=30)', () => {
+    expect(maverick.projSpeed).toBe(30);
   });
 
   it('ChainGun has no splash (single-target only)', () => {

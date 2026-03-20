@@ -13,8 +13,8 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
   describe('calcProjectileTravelFrames', () => {
     it('machine gun projectile arrives faster than rocket at the same distance', () => {
       const distPixels = 5 * CELL_SIZE; // 5 cells
-      const mgSpeed = WEAPON_STATS.M1Carbine.projSpeed!;   // 40 cells/sec
-      const rocketSpeed = WEAPON_STATS.Dragon.projSpeed!;   // 15 cells/sec
+      const mgSpeed = WEAPON_STATS.M1Carbine.projSpeed!;   // 100 (Invisible)
+      const rocketSpeed = WEAPON_STATS.Dragon.projSpeed!;   // 25 (HeatSeeker)
 
       const mgFrames = calcProjectileTravelFrames(distPixels, mgSpeed);
       const rocketFrames = calcProjectileTravelFrames(distPixels, rocketSpeed);
@@ -24,29 +24,29 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
 
     it('point-blank projectile arrives in 1 tick', () => {
       // Distance of 0 pixels => should be 1 tick (minimum)
-      const frames = calcProjectileTravelFrames(0, 40);
+      const frames = calcProjectileTravelFrames(0, 100);
       expect(frames).toBe(1);
 
       // Very short distance (adjacent cell)
-      const framesShort = calcProjectileTravelFrames(CELL_SIZE * 0.5, 40);
+      const framesShort = calcProjectileTravelFrames(CELL_SIZE * 0.5, 100);
       expect(framesShort).toBe(1);
     });
 
     it('long-range rocket takes multiple ticks to arrive', () => {
       // Rocket at max range (5 cells)
       const distPixels = 5 * CELL_SIZE;
-      const rocketSpeed = WEAPON_STATS.Dragon.projSpeed!; // 15 cells/sec
+      const rocketSpeed = WEAPON_STATS.Dragon.projSpeed!; // 25
       const frames = calcProjectileTravelFrames(distPixels, rocketSpeed);
 
       // 5 cells * 24 px/cell = 120 px
-      // pixels/tick = 15 * 24 / 20 = 18
-      // frames = ceil(120 / 18) = 7
-      expect(frames).toBe(7);
+      // pixels/tick = 25 * 24 / 20 = 30
+      // frames = ceil(120 / 30) = 4
+      expect(frames).toBe(4);
       expect(frames).toBeGreaterThan(1);
     });
 
     it('travel time scales linearly with distance', () => {
-      const speed = 15; // cells/sec (rocket speed)
+      const speed = 25; // cells/sec (Dragon rocket speed)
 
       const frames2 = calcProjectileTravelFrames(2 * CELL_SIZE, speed);
       const frames4 = calcProjectileTravelFrames(4 * CELL_SIZE, speed);
@@ -98,47 +98,46 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       }
     });
 
-    it('machine guns and chainguns have fast projSpeed (40)', () => {
-      expect(WEAPON_STATS.M1Carbine.projSpeed).toBe(40);
-      expect(WEAPON_STATS.M60mg.projSpeed).toBe(40);
-      expect(WEAPON_STATS.APTusk.projSpeed).toBe(40);
+    it('Invisible-projectile weapons have fastest projSpeed (100)', () => {
+      expect(WEAPON_STATS.M1Carbine.projSpeed).toBe(100);
+      expect(WEAPON_STATS.M60mg.projSpeed).toBe(100);
+      expect(WEAPON_STATS.Colt45.projSpeed).toBe(100);
     });
 
-    it('cannon shells have medium-fast projSpeed (30)', () => {
-      expect(WEAPON_STATS['75mm'].projSpeed).toBe(30);
-      expect(WEAPON_STATS['90mm'].projSpeed).toBe(30);
-      expect(WEAPON_STATS['105mm'].projSpeed).toBe(30);
-      expect(WEAPON_STATS['120mm'].projSpeed).toBe(30);
+    it('cannon shells have projSpeed=40 (rules.ini [Cannon] Speed=40)', () => {
+      expect(WEAPON_STATS['75mm'].projSpeed).toBe(40);
+      expect(WEAPON_STATS['90mm'].projSpeed).toBe(40);
+      expect(WEAPON_STATS['105mm'].projSpeed).toBe(40);
+      expect(WEAPON_STATS['120mm'].projSpeed).toBe(40);
     });
 
-    it('rockets and missiles have medium projSpeed (15)', () => {
-      expect(WEAPON_STATS.Dragon.projSpeed).toBe(15);
-      expect(WEAPON_STATS.RedEye.projSpeed).toBe(15);
-      expect(WEAPON_STATS.MammothTusk.projSpeed).toBe(15);
-      expect(WEAPON_STATS.FireballLauncher.projSpeed).toBe(15);
+    it('HeatSeeker missiles have projSpeed=25-30', () => {
+      expect(WEAPON_STATS.Dragon.projSpeed).toBe(25);
+      expect(WEAPON_STATS.MammothTusk.projSpeed).toBe(30);
+      expect(WEAPON_STATS.Hellfire.projSpeed).toBe(30);
+      expect(WEAPON_STATS.Maverick.projSpeed).toBe(30);
     });
 
-    it('tesla bolt has instant-feeling projSpeed (40)', () => {
-      expect(WEAPON_STATS.TeslaCannon.projSpeed).toBe(40);
-      expect(WEAPON_STATS.TeslaZap.projSpeed).toBe(40);
-      expect(WEAPON_STATS.TTankZap.projSpeed).toBe(40);
-      expect(WEAPON_STATS.PortaTesla.projSpeed).toBe(40);
+    it('tesla weapons have projSpeed=100 (Invisible projectile)', () => {
+      expect(WEAPON_STATS.TeslaZap.projSpeed).toBe(100);
+      expect(WEAPON_STATS.TTankZap.projSpeed).toBe(100);
+      expect(WEAPON_STATS.PortaTesla.projSpeed).toBe(100);
     });
 
     it('grenade has slow projSpeed (5)', () => {
       expect(WEAPON_STATS.Grenade.projSpeed).toBe(5);
     });
 
-    it('artillery (155mm) has slow projSpeed (12)', () => {
+    it('artillery (155mm) has projSpeed=12 (Ballistic Speed=12)', () => {
       expect(WEAPON_STATS['155mm'].projSpeed).toBe(12);
     });
 
-    it('ant mandible has melee-instant projSpeed (40)', () => {
+    it('ant mandible has melee-instant projSpeed (40, engine custom)', () => {
       expect(WEAPON_STATS.Mandible.projSpeed).toBe(40);
     });
 
-    it('sniper has instant-feeling projSpeed (40)', () => {
-      expect(WEAPON_STATS.Sniper.projSpeed).toBe(40);
+    it('sniper has instant projSpeed=100 (Invisible Speed=100)', () => {
+      expect(WEAPON_STATS.Sniper.projSpeed).toBe(100);
     });
   });
 
@@ -146,7 +145,7 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
     it('fast weapons arrive sooner than slow weapons at the same range', () => {
       const dist = 4 * CELL_SIZE; // 4 cells — typical engagement distance
 
-      // Machine gun (40) vs grenade (12) vs rocket (15)
+      // Machine gun (100) vs grenade (5) vs rocket (25) vs cannon (40)
       const mgFrames = calcProjectileTravelFrames(dist, WEAPON_STATS.M1Carbine.projSpeed);
       const grenadeFrames = calcProjectileTravelFrames(dist, WEAPON_STATS.Grenade.projSpeed);
       const rocketFrames = calcProjectileTravelFrames(dist, WEAPON_STATS.Dragon.projSpeed);
@@ -160,21 +159,21 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       // Shells should be faster than rockets
       expect(shellFrames).toBeLessThanOrEqual(rocketFrames);
 
-      // Grenade should be slowest or tied with rocket
+      // Grenade should be slowest
       expect(grenadeFrames).toBeGreaterThanOrEqual(rocketFrames);
     });
 
     it('projSpeed calculation uses correct formula', () => {
       // Manual verification: Dragon at 5 cells
-      const projSpeed = 15; // cells/sec
+      const projSpeed = 25; // cells/sec (Dragon HeatSeeker)
       const dist = 5 * CELL_SIZE; // 120 pixels
       const pixelsPerTick = projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
-      // 15 * 24 / 20 = 18 pixels/tick
-      expect(pixelsPerTick).toBe(18);
+      // 25 * 24 / 20 = 30 pixels/tick
+      expect(pixelsPerTick).toBe(30);
 
       const expected = Math.max(1, Math.ceil(dist / pixelsPerTick));
-      // ceil(120 / 18) = 7
-      expect(expected).toBe(7);
+      // ceil(120 / 30) = 4
+      expect(expected).toBe(4);
 
       const actual = calcProjectileTravelFrames(dist, projSpeed);
       expect(actual).toBe(expected);
