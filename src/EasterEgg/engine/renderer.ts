@@ -1165,9 +1165,10 @@ export class Renderer {
           case Terrain.WALL: {
             // Skip for wall-type structures — they render as sprites in structure pass
             if (map.getWallType(cx, cy)) break;
-            // C++ parity: buildings don't change the cell's template (cell.cpp:981-987).
-            // The cell retains its original ground tile. Draw using the cell's MapPack
-            // template/icon, falling back to CLEAR1 (template 255 in tileset).
+            // C++ parity (cell.cpp:981-987): buildings don't change a cell's visual template.
+            // Render building footprint cells identically to CLEAR terrain — use the same
+            // tileset/grass logic so the ground under structures matches the surrounding area.
+            // Structure sprites draw on top in the structure pass.
             if (this.theatre === 'INTERIOR') {
               const bright = 40 + (h % 6);
               ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
@@ -1175,14 +1176,11 @@ export class Renderer {
               ctx.strokeStyle = 'rgba(0,0,0,0.3)';
               ctx.lineWidth = 1;
               ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
-            } else if (useTileset) {
-              // Try the cell's original template first, then fall back to CLEAR1
-              if (!this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
-                if (!this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
-                  this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
-                }
-              }
             } else {
+              // Draw the same grass as surrounding CLEAR terrain.
+              // Don't use drawTileFromAtlas for CLEAR1 (template 255) — its extracted tile
+              // is darker than the surrounding grass tiles, creating visible boxes.
+              // Use procedural grass which matches the visual palette.
               this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
             }
             break;
