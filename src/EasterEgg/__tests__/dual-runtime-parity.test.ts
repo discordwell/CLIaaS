@@ -87,13 +87,16 @@ describe('Dual Runtime Parity', () => {
     });
   }, 300_000);
 
-  it('loads adjacent infantry into the APC in both runtimes', async () => {
+  it('does not instantly load adjacent infantry into the APC in both runtimes', async () => {
     await withDualScenario('SCG22EA', async (handle) => {
       const tsApc = singleTsUnit(handle.tsState, 'APC');
       const wasmApc = singleWasmUnit(handle.wasmState, 'APC');
       const tsSpy = singleTsUnit(handle.tsState, 'SPY');
       const wasmSpy = singleWasmUnit(handle.wasmState, 'SPY');
 
+      // C++ MISSION_ENTER is asynchronous — after issuing the enter command and
+      // stepping just 1 tick, the spy should NOT yet be loaded. Both runtimes
+      // must agree: cargo=0 and the spy still exists as a separate unit.
       const result = await stepBoth(
         handle,
         1,
@@ -101,23 +104,16 @@ describe('Dual Runtime Parity', () => {
         [{ cmd: 'enter', ids: [wasmSpy.id], target: wasmApc.id }],
       );
 
-      const tsLoadedApc = singleTsUnit(result.ts.state, 'APC');
-      const wasmLoadedApc = singleWasmUnit(result.wasm.state, 'APC');
+      const tsApcAfter = singleTsUnit(result.ts.state, 'APC');
+      const wasmApcAfter = singleWasmUnit(result.wasm.state, 'APC');
 
-      // DEBUG
-      console.log('TS enter results:', JSON.stringify(result.ts.results));
-      console.log('WASM enter results:', JSON.stringify(result.wasm.results));
-      console.log('TS APC cargo:', tsLoadedApc.cargo, 'WASM APC cargo:', wasmLoadedApc.cargo);
-      console.log('TS spy exists:', result.ts.state.units.some(u => u.t === 'SPY'));
-      console.log('WASM spy exists:', result.wasm.state.units.some(u => u.t === 'SPY'));
-      console.log('TS APC pos:', tsLoadedApc.cx, tsLoadedApc.cy);
-      console.log('WASM APC pos:', wasmLoadedApc.cx, wasmLoadedApc.cy);
+      // After 1 tick, loading has NOT completed — cargo is still 0
+      expect(tsApcAfter.cargo).toBe(0);
+      expect(wasmApcAfter.cargo).toBe(0);
 
-      expect(tsLoadedApc.cargo).toBe(1);
-      expect(wasmLoadedApc.cargo).toBe(1);
-
-      expect(result.ts.state.units.some((unit) => unit.t === 'SPY')).toBe(false);
-      expect(result.wasm.state.units.some((unit) => unit.t === 'SPY')).toBe(false);
+      // The spy still exists as a standalone unit (not yet inside the APC)
+      expect(result.ts.state.units.some((unit) => unit.t === 'SPY')).toBe(true);
+      expect(result.wasm.state.units.some((unit) => unit.t === 'SPY')).toBe(true);
     });
   }, 300_000);
 
@@ -126,22 +122,15 @@ describe('Dual Runtime Parity', () => {
       const tsMcv = singleTsUnit(handle.tsState, 'MCV');
       const wasmMcv = singleWasmUnit(handle.wasmState, 'MCV');
 
+      // C++ MCV deploy is asynchronous — MISSION_HUNT finds a clear spot, rotates
+      // to face NW, then plays the deploy animation. Both runtimes need enough
+      // ticks for the full deployment sequence to complete.
       const result = await stepBoth(
         handle,
-        30,
+        90,
         [{ cmd: 'deploy', unitId: tsMcv.id }],
         [{ cmd: 'deploy', ids: [wasmMcv.id] }],
       );
-
-      // DEBUG: check deploy command results
-      console.log('TS deploy results:', JSON.stringify(result.ts.results));
-      console.log('WASM deploy results:', JSON.stringify(result.wasm.results));
-      console.log('TS MCV position:', tsMcv.cx, tsMcv.cy);
-      console.log('WASM MCV position:', wasmMcv.cx, wasmMcv.cy);
-      console.log('TS units after deploy:', result.ts.state.units.map(u => `${u.t}@${u.cx},${u.cy}`));
-      console.log('WASM units after deploy:', result.wasm.state.units.map(u => `${u.t}@${u.cx},${u.cy}`));
-      console.log('TS structures:', result.ts.state.structures.map(s => `${s.t}@${s.cx},${s.cy} ally=${s.ally}`));
-      console.log('WASM structures:', result.wasm.state.structures.map(s => `${s.t}@${s.cx},${s.cy} ally=${s.ally}`));
 
       expect(result.ts.state.units.some((unit) => unit.t === 'MCV')).toBe(false);
       expect(result.wasm.state.units.some((unit) => unit.t === 'MCV')).toBe(false);
@@ -156,9 +145,10 @@ describe('Dual Runtime Parity', () => {
       const tsMcv = singleTsUnit(handle.tsState, 'MCV', (unit) => unit.h === handle.tsState.playerHouse);
       const wasmMcv = singleWasmUnit(handle.wasmState, 'MCV', (unit) => unit.house === handle.wasmState.playerHouse);
 
+      // C++ MCV deploy needs enough ticks for the full async sequence
       const deployed = await stepBoth(
         handle,
-        30,
+        90,
         [{ cmd: 'deploy', unitId: tsMcv.id }],
         [{ cmd: 'deploy', ids: [wasmMcv.id] }],
       );
@@ -173,21 +163,7 @@ describe('Dual Runtime Parity', () => {
         [{ cmd: 'produce', rtti: 6, type_id: 17 }],
       );
 
-      // DEBUG: check build command result and production state
-      console.log('TS build result:', JSON.stringify(started.ts.results));
-      console.log('WASM build result:', JSON.stringify(started.wasm.results));
-      console.log('TS production after build:', JSON.stringify(started.ts.state.production));
-      console.log('TS available:', JSON.stringify(started.ts.state.available));
-      console.log('TS credits after build:', started.ts.state.credits);
-      console.log('TS pending:', started.ts.state.pending);
-
       const completed = await stepBoth(handle, 220);
-
-      // DEBUG: check final state
-      console.log('TS production after 220:', JSON.stringify(completed.ts.state.production));
-      console.log('TS pending after 220:', completed.ts.state.pending);
-      console.log('TS credits after 220:', completed.ts.state.credits);
-      console.log('WASM production after 220:', JSON.stringify(completed.wasm.state.production));
 
       expect(completed.ts.state.credits).toBeLessThan(deployed.ts.state.credits);
       expect(completed.wasm.state.credits).toBeLessThan(deployed.wasm.state.credits);

@@ -3395,14 +3395,18 @@ export class Game {
     }
 
     // Auto-load into transport: infantry moving toward a friendly transport
+    // C++ parity: infantry must reach the transport's cell before loading.
+    // C++ cargo.cpp:97 — Add_Cargo fires only when the infantry enters the
+    // transport's occupy cell (same cell). Use 0.7 cell threshold (inside the
+    // same cell accounting for sub-cell offsets).
     if (entity.alive && entity.stats.isInfantry && entity.isPlayerUnit &&
         entity.mission === Mission.MOVE && entity.moveTarget) {
       for (const other of this.entities) {
         if (!other.alive || other.id === entity.id || !other.isTransport) continue;
         if (!other.isPlayerUnit || other.passengers.length >= other.maxPassengers) continue;
         const dist = worldDist(entity.pos, other.pos);
-        if (dist < 1.2) {
-          // Close enough — check if move target was the transport
+        if (dist < 0.7) {
+          // Same cell — check if move target was the transport
           const tgtDist = worldDist(entity.moveTarget, other.pos);
           if (tgtDist < 2) {
             other.passengers.push(entity);

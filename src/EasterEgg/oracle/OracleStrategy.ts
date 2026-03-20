@@ -286,6 +286,7 @@ export class OracleStrategy {
   private scg05eaSpyStopped = false;       // true after first spy intercept
   private scg05eaSpyStartTick = 0;         // tick when spy was first intercepted
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
+  private scg05eaSpyWpIdx = 0;          // current waypoint in south-first route
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
   private currentTick = 0;
@@ -1946,23 +1947,52 @@ export class OracleStrategy {
           this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 25,
       );
 
-      // North corridor with incremental waypoints (pathfinder needs small steps).
+      // South-first route: spy must trigger tny3 cell at (24,107) to set
+      // global 18 → Tanya spawns. Then north via y=48 corridor to WEAP.
       const spyWaypoints: Point[] = [
-        { cx: 18, cy: 48 },   // north from peninsula
+        // Phase A: South — 3-cell increments to prevent pathfinder detours
+        { cx: 20, cy: 55 },
+        { cx: 20, cy: 58 },
+        { cx: 20, cy: 61 },
+        { cx: 20, cy: 64 },
+        { cx: 20, cy: 67 },
+        { cx: 20, cy: 70 },
+        { cx: 20, cy: 73 },
+        { cx: 20, cy: 76 },
+        { cx: 20, cy: 79 },
+        { cx: 20, cy: 82 },
+        { cx: 20, cy: 85 },
+        { cx: 20, cy: 88 },
+        { cx: 20, cy: 91 },
+        { cx: 20, cy: 94 },
+        { cx: 20, cy: 97 },
+        { cx: 20, cy: 100 },
+        { cx: 20, cy: 103 },
+        { cx: 20, cy: 105 },  // cut east toward tny3
+        { cx: 24, cy: 107 },  // tny3 cell trigger! → global 18 → Tanya
+        // Phase B: North along west edge then y=48 corridor to WEAP
+        { cx: 20, cy: 97 },
+        { cx: 20, cy: 88 },
+        { cx: 20, cy: 78 },
+        { cx: 20, cy: 68 },
+        { cx: 20, cy: 58 },
+        { cx: 16, cy: 48 },   // north corridor entry
         { cx: 21, cy: 48 },
-        { cx: 24, cy: 48 },   // through ROUGH terrain
+        { cx: 24, cy: 48 },
         { cx: 28, cy: 48 },
-        { cx: 48, cy: 48 },   // east of WEAP — patrol dogs left behind
+        { cx: 34, cy: 48 },
+        { cx: 40, cy: 48 },
+        { cx: 48, cy: 48 },   // east of WEAP
       ];
 
-      // Find current waypoint — advance by x-coordinate progression (not distance).
-      // The spy may drift to y=49 but still be past a waypoint's x.
-      let wpIdx = 0;
-      for (let i = 0; i < spyWaypoints.length; i++) {
-        if (spy.cx >= spyWaypoints[i].cx && Math.abs(spy.cy - spyWaypoints[i].cy) <= 2) {
-          wpIdx = i + 1;
-        }
+      // Track waypoint index in instance state (not x-progression).
+      // Use distance check — spy is within 4 cells of current target.
+      if (!this.scg05eaSpyWpIdx) this.scg05eaSpyWpIdx = 0;
+      const wpTarget = spyWaypoints[this.scg05eaSpyWpIdx];
+      if (wpTarget && this.distanceSq(spy, wpTarget) <= 16) {
+        this.scg05eaSpyWpIdx++;
       }
+      let wpIdx = this.scg05eaSpyWpIdx;
 
       // At wp2 (sprint zone) — wait for dogs to clear before committing
       // No waiting — just sprint. Dogs patrol through every possible path.
