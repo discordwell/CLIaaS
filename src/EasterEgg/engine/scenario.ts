@@ -1545,6 +1545,37 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     if (generalSection.has('WaterCrate')) crateOverrides.water = generalSection.get('WaterCrate')!.toLowerCase();
   }
 
+  // C++ parity (house.cpp:6239-6277): AI houses auto-populate empty helipads/airfields
+  // with aircraft at scenario start. C++ AI_Aircraft runs on the first game tick and
+  // spawns aircraft for every empty pad. We do it here during scenario load.
+  const playerHouseResolved = toHouse(data.playerHouse ?? 'Spain');
+  const playerAlliances = data.houseAllies.get(data.playerHouse ?? '') ?? [];
+  const playerAllySet = new Set([playerHouseResolved, ...playerAlliances.map(toHouse)]);
+
+  for (const s of structures) {
+    if (!s.alive || playerAllySet.has(s.house)) continue;
+    const isSoviet = s.house === House.USSR || s.house === House.Ukraine || s.house === House.BadGuy;
+
+    if (s.type === 'HPAD') {
+      // Check if any aircraft already parked here
+      const padWorld = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+      const alreadyParked = entities.some(e =>
+        e.stats.isAircraft && Math.abs(e.pos.x - padWorld.x) < CELL_SIZE * 2 && Math.abs(e.pos.y - padWorld.y) < CELL_SIZE * 2
+      );
+      if (!alreadyParked) {
+        const heliType = isSoviet ? UnitType.V_HIND : UnitType.V_HELI;
+        const heli = new Entity(heliType, s.house, padWorld.x, padWorld.y);
+        heli.mission = Mission.GUARD;
+        heli.aircraftState = 'landed';
+        heli.flightAltitude = 0;
+        entities.push(heli);
+      }
+    }
+    // Note: AFLD (airfields) are NOT auto-populated at init time — C++ AI_Aircraft
+    // only creates helicopters for HPADs initially. Fixed-wing aircraft come later
+    // via the runtime AI production system.
+  }
+
   return {
     map,
     entities,
