@@ -324,22 +324,35 @@ export function findCoastalCells(
 
       const cell = cy * MAP_W + cx;
 
-      // Must NOT be water itself
-      if (isWaterCell(ttype, cell, bounds)) continue;
+      const cellIsWater = isWaterCell(ttype, cell, bounds);
 
-      // Check for water within 3 cells (shipyards have generous placement range)
-      let hasWater = false;
-      for (let wy = -3; wy <= 3 && !hasWater; wy++) {
-        for (let wx = -3; wx <= 3 && !hasWater; wx++) {
-          if (wx === 0 && wy === 0) continue;
-          const nc = (cy + wy) * MAP_W + (cx + wx);
-          if (nc >= 0 && nc < MAP_W * MAP_W && isWaterCell(ttype, nc, bounds)) {
-            hasWater = true;
+      if (!cellIsWater) {
+        // Land cell: check for water within 3 cells
+        let hasWater = false;
+        for (let wy = -3; wy <= 3 && !hasWater; wy++) {
+          for (let wx = -3; wx <= 3 && !hasWater; wx++) {
+            if (wx === 0 && wy === 0) continue;
+            const nc = (cy + wy) * MAP_W + (cx + wx);
+            if (nc >= 0 && nc < MAP_W * MAP_W && isWaterCell(ttype, nc, bounds)) {
+              hasWater = true;
+            }
           }
         }
+        if (hasWater) results.push({ cx, cy });
+      } else {
+        // Water cell: check for land within 2 cells (SYRD straddles land/water)
+        let hasLand = false;
+        for (let wy = -2; wy <= 2 && !hasLand; wy++) {
+          for (let wx = -2; wx <= 2 && !hasLand; wx++) {
+            if (wx === 0 && wy === 0) continue;
+            const nc = (cy + wy) * MAP_W + (cx + wx);
+            if (nc >= 0 && nc < MAP_W * MAP_W && !isWaterCell(ttype, nc, bounds)) {
+              hasLand = true;
+            }
+          }
+        }
+        if (hasLand) results.push({ cx, cy });
       }
-
-      if (hasWater) results.push({ cx, cy });
     }
   }
   return results;
