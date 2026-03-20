@@ -284,6 +284,7 @@ export class OracleStrategy {
   private mcvDeployAttempts = 0;      // how many times we've tried deploying
   private scg05eaSpyInfiltrated = false;  // true after spy enters WEAP
   private scg05eaSpyStopped = false;       // true after first spy intercept
+  private scg05eaSpyStartTick = 0;         // tick when spy was first intercepted
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -1914,12 +1915,20 @@ export class OracleStrategy {
       }
     }
 
-    // CRITICAL: Stop the spy on first sight to prevent team script from
-    // walking it into dog patrol zones. Only stop ONCE (on first sighting).
+    // CRITICAL: Stop the spy on first sight. Hold it for 200 ticks to
+    // shift timing relative to dog patrol cycles. This makes the spy
+    // enter the corridor at a different phase of the patrol pattern.
     if (spy && !this.scg05eaSpyInfiltrated && !this.scg05eaSpyStopped) {
       commands.push({ cmd: 'stop', ids: [spy.id] });
       this.scg05eaSpyStopped = true;
+      this.scg05eaSpyStartTick = state.tick;
       reasons.push('spy STOP (intercept team script)');
+      return { commands, reason: reasons.join('; ') };
+    }
+    // Hold spy for 200 ticks to shift patrol timing
+    if (spy && this.scg05eaSpyStopped && this.scg05eaSpyStartTick > 0 &&
+        state.tick - this.scg05eaSpyStartTick < 200) {
+      reasons.push(`spy holding (${200 - (state.tick - this.scg05eaSpyStartTick)} ticks)`);
       return { commands, reason: reasons.join('; ') };
     }
 
@@ -1939,9 +1948,14 @@ export class OracleStrategy {
         { cx: 18, cy: 48 },
         { cx: 20, cy: 48 },
         { cx: 22, cy: 48 },   // through ROUGH rock debris
-        { cx: 24, cy: 48 },   // last clear cell before cliffs
-        // After x=24, attack WEAP directly — spy pathfinds to (44,50) in one
-        // continuous move. No more waypoints needed — single sprint to target.
+        { cx: 24, cy: 48 },   // through ROUGH cliff formations
+        { cx: 26, cy: 48 },
+        { cx: 28, cy: 48 },
+        { cx: 30, cy: 48 },   // past the cliff zone
+        { cx: 33, cy: 48 },
+        { cx: 36, cy: 48 },
+        { cx: 39, cy: 48 },
+        { cx: 44, cy: 48 },   // directly above WEAP at (44,50)
       ];
 
       // Find current waypoint

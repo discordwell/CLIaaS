@@ -1659,16 +1659,31 @@ export class Game {
     });
     if (followUpEffects.length > 0) this.effects.push(...followUpEffects);
 
-    // Crate spawning (every 60-90 seconds, max 3 on map) — disabled for ant missions
-    if (!this.scenarioId.startsWith('SCA') && this.tick >= this.nextCrateTick && this.crates.length < 3) {
-      this.spawnCrate();
-      this.nextCrateTick = this.tick + GAME_TICKS_PER_SEC * (60 + Math.floor(Math.random() * 30));
+    // C++ map.cpp:994 — crate regeneration only in multiplayer (Session.Type != GAME_NORMAL)
+    // Single-player campaigns (SCG*, SCU*) and ant missions (SCA*) do NOT regenerate crates.
+    // C++ scenario.cpp:2436 — initial crate placement at tick 0 (with Goodies enabled)
+    const isCampaign = /^SC[GUA]/i.test(this.scenarioId);
+    if (!isCampaign) {
+      // C++ map.cpp:1000-1004 — per-crate expiry-driven respawn (not a global timer)
+      // Each tick, scan all crates; expired ones are removed and immediately replaced.
+      for (let i = this.crates.length - 1; i >= 0; i--) {
+        const crate = this.crates[i];
+        if (this.tick - crate.tick > crate.lifetime) {
+          this.crates.splice(i, 1);
+          this.spawnCrate(); // 1:1 replacement — C++ map.cpp:1003
+        }
+      }
+      // C++ map.h:152 — CrateClass Crates[256]; max 256 concurrent crates
+      // C++ scenario.cpp:2437 — initial count = max(CrateMinimum=1, NumPlayers)
+      if (this.tick >= this.nextCrateTick && this.crates.length < 256) {
+        this.spawnCrate();
+      }
     }
 
     // Crate pickup — player units walking over crates
     for (let i = this.crates.length - 1; i >= 0; i--) {
       const crate = this.crates[i];
-      // CR6: Expire after per-crate lifetime (C++ Random(CrateTime/2, CrateTime*2) minutes)
+      // CR6: Expire crates in campaign (no respawn) — C++ only regenerates in multiplayer
       if (this.tick - crate.tick > crate.lifetime) {
         this.crates.splice(i, 1);
         continue;

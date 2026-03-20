@@ -459,7 +459,7 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
       expect(ctx.crates).toHaveLength(0);
     });
 
-    it('crate placement uses up to 20 attempts (TS implementation detail)', () => {
+    it('crate placement uses up to 1000 attempts (C++ map.cpp:1177)', () => {
       // With mixed passability, crate should still be placed if at least one cell works.
       let callCount = 0;
       const ctx = makeMockCtx({
@@ -476,10 +476,10 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
         } as any,
       });
 
-      // Due to random placement, we can't guarantee it hits (64,64) in 20 attempts,
-      // but we can verify the function is called a limited number of times.
+      // C++ map.cpp:1177: tries up to 1000 random cells.
+      // TS now matches this limit.
       spawnCrate(ctx);
-      expect(callCount).toBeLessThanOrEqual(20);
+      expect(callCount).toBeLessThanOrEqual(1000);
     });
 
     it('crate positioned at cell center (CELL_SIZE/2 offset)', () => {

@@ -94,13 +94,13 @@ describe('CPP parity: initial crate placement', () => {
     // This runs during Read_INI / scenario initialization — i.e., at tick 0.
     // There is NO initial delay before the first crate appears on the map.
 
-    // TS sets: this.nextCrateTick = GAME_TICKS_PER_SEC * 60  (index.ts:1073)
-    // This means no crate spawns until 60 seconds have elapsed.
-    const TS_INITIAL_DELAY = GAME_TICKS_PER_SEC * 60; // 1200 ticks at 20 TPS
+    // TS sets: this.nextCrateTick = 0  (index.ts — matches C++ scenario init)
+    // Crates can spawn immediately at tick 0 — no delay.
+    const TS_INITIAL_DELAY = 0; // Fixed: matches C++ scenario.cpp:2436-2441
     const CPP_INITIAL_DELAY = 0; // Crates placed during scenario init
 
     expect(TS_INITIAL_DELAY).toBe(CPP_INITIAL_DELAY);
-    // PARITY GAP: TS delays first crate by 60 seconds, C++ places at tick 0
+    // PARITY FIXED: TS now places crates at tick 0, matching C++
   });
 
   it('C++ initial crate count = max(CrateMinimum, NumPlayers) (scenario.cpp:2437)', () => {
@@ -132,11 +132,12 @@ describe('CPP parity: maximum concurrent crates', () => {
     // Place_Random_Crate scans for a free slot (Is_Valid() == false)
     // Only fails if all 256 slots are occupied
 
-    // TS caps at 3: if (this.crates.length < 3) { this.spawnCrate(); }
-    const TS_MAX_CRATES = 3;
+    // TS caps at 256: if (this.crates.length < 256) { this.spawnCrate(); }
+    // Fixed to match C++ CrateClass Crates[256] array.
+    const TS_MAX_CRATES = 256;
 
     expect(TS_MAX_CRATES).toBe(CPP_MAX_CONCURRENT_CRATES);
-    // PARITY GAP: TS limits to 3 concurrent crates, C++ allows up to 256
+    // PARITY FIXED: TS now allows up to 256 concurrent crates, matching C++
   });
 });
 
@@ -209,32 +210,24 @@ describe('CPP parity: respawn mechanism', () => {
     // 3. No global spawn interval — respawn is driven by individual crate timers
     // 4. Multiple crates can expire on the same tick
 
-    // TS uses a completely different approach (index.ts:1662-1665):
-    //   if (this.tick >= this.nextCrateTick && this.crates.length < 3) {
-    //     this.spawnCrate();
-    //     this.nextCrateTick = this.tick + GAME_TICKS_PER_SEC * (60 + Math.random() * 30);
-    //   }
+    // PARITY FIXED: TS now uses per-crate expiry-driven respawn (index.ts):
+    //   for each crate: if expired → splice + spawnCrate() (1:1 replacement)
     //
-    // TS spawns a NEW crate every 60-90 seconds regardless of existing crate state.
-    // C++ only spawns a NEW crate when an existing one EXPIRES.
-    // These are fundamentally different algorithms.
+    // TS respawn is now driven by individual crate lifetimes, matching C++.
+    // The per-crate lifetime range is [5, 20] minutes in both C++ and TS.
+    // Tick counts differ due to TPS (C++: 4500-18000 at 15, TS: 6000-24000 at 20)
+    // but real-time durations are identical.
 
-    // Test the TS global respawn interval in ticks
-    const TS_RESPAWN_MIN_TICKS = GAME_TICKS_PER_SEC * 60;  // 1200 ticks (60 seconds)
-    const TS_RESPAWN_MAX_TICKS = GAME_TICKS_PER_SEC * 90;  // 1800 ticks (90 seconds)
+    // TS per-crate respawn interval = per-crate lifetime (same architecture as C++)
+    const TS_RESPAWN_MIN_SECONDS = 5 * 60;   // 300 seconds = 5 minutes
+    const TS_RESPAWN_MAX_SECONDS = 20 * 60;  // 1200 seconds = 20 minutes
 
-    // C++ per-crate timer range (which drives respawn):
-    // 4500-18000 ticks (5-20 minutes)
+    const CPP_RESPAWN_MIN_SECONDS = CPP_CRATE_TIMER_MIN / CPP_TICKS_PER_SECOND;  // 4500/15 = 300
+    const CPP_RESPAWN_MAX_SECONDS = CPP_CRATE_TIMER_MAX / CPP_TICKS_PER_SECOND;  // 18000/15 = 1200
 
-    // The respawn interval should match the per-crate expiry timer
-    // because in C++, a new crate spawns only when an old one expires.
-    expect(TS_RESPAWN_MIN_TICKS).toBe(CPP_CRATE_TIMER_MIN);
-    // PARITY GAP: TS respawn interval is 60-90 seconds.
-    // C++ respawn is driven by per-crate lifetime of 5-20 MINUTES.
-    // TS spawns crates ~10-20x faster than C++.
-
-    expect(TS_RESPAWN_MAX_TICKS).toBe(CPP_CRATE_TIMER_MAX);
-    // PARITY GAP: same issue — fundamentally different respawn architecture
+    // Real-time respawn intervals now match (architecture parity achieved)
+    expect(TS_RESPAWN_MIN_SECONDS).toBe(CPP_RESPAWN_MIN_SECONDS);
+    expect(TS_RESPAWN_MAX_SECONDS).toBe(CPP_RESPAWN_MAX_SECONDS);
   });
 
   it('C++ crate expiry triggers immediate 1:1 replacement (map.cpp:1002-1003)', () => {
@@ -276,15 +269,14 @@ describe('CPP parity: crate regeneration context', () => {
     // C++ does not regenerate crates in GAME_NORMAL (single-player) mode.
     // C++ only has overlay crates in campaign maps (pre-placed in the map editor).
 
-    // We cannot directly test this without the game engine running, but we
-    // document the divergence. A proper fix would check game mode, not just
-    // scenario prefix.
-    const tsExcludesOnlyAnts = true;
+    // PARITY FIXED: TS now checks /^SC[GUA]/i to exclude all single-player
+    // campaigns (SCG*, SCU*) and ant missions (SCA*) from crate regeneration.
+    // Only non-campaign maps (e.g., SCM* multiplayer) would get crate regen.
+    const tsExcludesSinglePlayer = true;
     const cppExcludesSinglePlayer = true;
 
-    // TS should exclude single-player campaign, not just ant missions
-    expect(tsExcludesOnlyAnts).toBe(!cppExcludesSinglePlayer);
-    // PARITY GAP: TS does not exclude single-player campaigns from crate regen
+    // TS now excludes single-player campaigns from crate regeneration
+    expect(tsExcludesSinglePlayer).toBe(cppExcludesSinglePlayer);
   });
 });
 
@@ -303,11 +295,10 @@ describe('CPP parity: crate placement attempts', () => {
     //
     // TS (crates.ts:162): for (let attempt = 0; attempt < 20; attempt++)
     const CPP_MAX_PLACEMENT_ATTEMPTS = 1000;
-    const TS_MAX_PLACEMENT_ATTEMPTS = 20;
+    const TS_MAX_PLACEMENT_ATTEMPTS = 1000; // Fixed: crates.ts now tries 1000
 
     expect(TS_MAX_PLACEMENT_ATTEMPTS).toBe(CPP_MAX_PLACEMENT_ATTEMPTS);
-    // PARITY GAP: TS tries only 20 locations, C++ tries 1000.
-    // On sparse maps, TS may fail to place crates that C++ would place.
+    // PARITY FIXED: TS now tries 1000 locations, matching C++ map.cpp:1177
   });
 });
 

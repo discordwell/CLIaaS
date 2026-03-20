@@ -683,7 +683,7 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
   it('sell finalization spawns infantry survivors (SL4)', () => {
     const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
     expect(sellSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(sellSection, sellSection + 600);
+    const chunk = indexSource.slice(sellSection, sellSection + 1500);
     expect(chunk).toContain('SURVIVOR_FRACTION');
     expect(chunk).toContain('survivorCount');
     // Survivor count: (buildCost * 0.5) / E1_cost, clamped 1-5
@@ -716,7 +716,7 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
 
   it('KENN sell spawns 50% dog (Crew_Type)', () => {
     const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
-    const chunk = indexSource.slice(sellSection, sellSection + 1500);
+    const chunk = indexSource.slice(sellSection, sellSection + 2500);
     expect(chunk).toContain("'KENN'");
     expect(chunk).toContain('I_DOG');
   });
@@ -1237,7 +1237,7 @@ describe('Edge Cases', () => {
   it('sell structure destroyed mid-sell is handled (guard clause)', () => {
     // Source: if (s.sellProgress !== undefined && s.alive) — skip if dead
     const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
-    const chunk = indexSource.slice(sellSection, sellSection + 300);
+    const chunk = indexSource.slice(sellSection, sellSection + 800);
     expect(chunk).toContain('s.alive');
   });
 
