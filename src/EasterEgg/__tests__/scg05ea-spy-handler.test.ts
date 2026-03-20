@@ -146,72 +146,59 @@ describe('SCG05EA — spy infiltration phase', () => {
 });
 
 describe('SCG05EA — Tanya SAM destruction phase', () => {
-  it('Tanya navigates safe route south toward SAM sites', () => {
+  it('Tanya attacks nearest SAM directly (she spawns at 25,107 near SAMs)', () => {
     const strategy = new OracleStrategy('SCG05EA');
     // Simulate spy already infiltrated
     strategy.decide(makeState({
       tick: 100,
-      globals: [1], // trigger fired = spy infiltrated
+      globals: [1],
     }));
 
+    // Tanya spawns near SAMs via reinforcement at (25, 107), team-moves to (23, 105)
     const state = makeState({
       tick: 1000,
       globals: [1],
-      units: [makeEntity(2, 'E7', 'Greece', 40, 52)], // Tanya freed
-      enemies: staticDogs(),
+      units: [makeEntity(2, 'E7', 'Greece', 23, 105)], // Tanya at team destination
+      enemies: [],
       structures: [
-        makeStructure(50, 'SAM', 'USSR', 17, 94, false),
-        makeStructure(51, 'SAM', 'USSR', 28, 94, false),
+        makeStructure(53, 'SAM', 'USSR', 28, 107, false), // nearest (3 cells)
         makeStructure(52, 'SAM', 'USSR', 16, 107, false),
-        makeStructure(53, 'SAM', 'USSR', 28, 107, false),
+        makeStructure(51, 'SAM', 'USSR', 28, 94, false),
+        makeStructure(50, 'SAM', 'USSR', 17, 94, false),
       ],
     });
 
     const decision = strategy.decide(state);
-    console.log('Tanya route:', decision.reason);
-    // Should be heading to first Tanya route waypoint (14, 55)
-    expect(decision.reason).toMatch(/Tanya → route/);
+    console.log('Tanya SAM attack:', decision.reason);
+    // Should directly attack nearest SAM — no route needed
+    expect(decision.reason).toMatch(/SAM 1\/4/);
+    const attackCmds = decision.commands.filter((c) => c.cmd === 'attack_struct');
+    expect(attackCmds.length).toBe(1);
+    expect(attackCmds[0].structId).toBe(53); // nearest SAM at (28, 107)
   });
 
-  it('Tanya attacks SAM when at SAM area', () => {
+  it('advances to next SAM when current one is destroyed', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    // Set up: spy infiltrated, Tanya route complete
     strategy.decide(makeState({ tick: 100, globals: [1] }));
 
-    // Force Tanya to SAM area by simulating she's already there
+    // First SAM destroyed, only 3 remain
     const state = makeState({
-      tick: 3000,
+      tick: 2000,
       globals: [1],
-      units: [makeEntity(2, 'E7', 'Greece', 16, 93)], // near first SAM
+      units: [makeEntity(2, 'E7', 'Greece', 28, 107)],
       enemies: [],
       structures: [
-        makeStructure(50, 'SAM', 'USSR', 17, 94, false),
+        // SAM at (28,107) is gone — first target destroyed
+        makeStructure(52, 'SAM', 'USSR', 16, 107, false), // next target
         makeStructure(51, 'SAM', 'USSR', 28, 94, false),
+        makeStructure(50, 'SAM', 'USSR', 17, 94, false),
       ],
     });
 
-    // Run multiple ticks to advance Tanya through route
-    for (let i = 0; i < 10; i++) {
-      strategy.decide(makeState({
-        tick: 1100 + i * 100,
-        globals: [1],
-        units: [makeEntity(2, 'E7', 'Greece', 14, 55 + i * 4)],
-        enemies: [],
-        structures: [makeStructure(50, 'SAM', 'USSR', 17, 94, false)],
-      }));
-    }
-
-    const finalState = makeState({
-      tick: 5000,
-      globals: [1],
-      units: [makeEntity(2, 'E7', 'Greece', 16, 93)],
-      enemies: [],
-      structures: [makeStructure(50, 'SAM', 'USSR', 17, 94, false)],
-    });
-
-    const decision = strategy.decide(finalState);
-    console.log('Tanya SAM attack:', decision.reason);
-    expect(decision.reason).toMatch(/SAM/);
+    const decision = strategy.decide(state);
+    console.log('SAM advance:', decision.reason);
+    // Should advance past destroyed SAM and target next one
+    expect(decision.reason).toMatch(/SAM.*advancing|SAM 2/);
   });
 
   it('Tanya evades dogs near SAM area', () => {
@@ -221,9 +208,9 @@ describe('SCG05EA — Tanya SAM destruction phase', () => {
     const state = makeState({
       tick: 2000,
       globals: [1],
-      units: [makeEntity(2, 'E7', 'Greece', 20, 80)],
+      units: [makeEntity(2, 'E7', 'Greece', 20, 95)],
       enemies: [
-        { ...makeEntity(200, 'DOG', 'USSR', 22, 81), ally: false }, // 3 cells away
+        { ...makeEntity(200, 'DOG', 'USSR', 22, 96), ally: false }, // 3 cells away
       ],
       structures: [makeStructure(50, 'SAM', 'USSR', 17, 94, false)],
     });

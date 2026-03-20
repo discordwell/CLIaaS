@@ -219,18 +219,14 @@ const SCG05EA_SPY_ROUTE: Point[] = [
   { cx: 30, cy: 46 },   // east along safe corridor
   { cx: 42, cy: 46 },   // approach WEAP from north
 ];
-// SAM sites Tanya must destroy (west pair first, then east)
+// SAM sites Tanya must destroy — ordered by proximity to her spawn at (25,107).
+// Tanya spawns via reinforcement at WP6=(25,107), team-moves to WP35=(23,105).
+// Nearest SAMs first to minimize travel through dog patrol zones.
 const SCG05EA_SAM_TARGETS: Point[] = [
-  { cx: 17, cy: 94 },
-  { cx: 16, cy: 107 },
-  { cx: 28, cy: 94 },
-  { cx: 28, cy: 107 },
-];
-// Tanya safe route: hug west edge to avoid dog patrols in mid-map
-const SCG05EA_TANYA_ROUTE: Point[] = [
-  { cx: 14, cy: 55 },   // west edge, below base
-  { cx: 14, cy: 75 },   // continue south along edge
-  { cx: 14, cy: 90 },   // approach first SAM area (dodge dog3 patrol at 14,92)
+  { cx: 28, cy: 107 },  // 3 cells from spawn
+  { cx: 16, cy: 107 },  // 9 cells
+  { cx: 28, cy: 94 },   // 13 cells
+  { cx: 17, cy: 94 },   // 15 cells
 ];
 
 // ── SCG09EA "Infiltration" — sneak infantry north, escape via transport ──────
@@ -287,8 +283,6 @@ export class OracleStrategy {
   private scg05eaSpyInfiltrated = false;  // true after spy enters WEAP
   private scg05eaSpyRouteIndex = 0;      // current waypoint in spy safe route
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
-  private scg05eaTanyaRouteIndex = 0;    // current waypoint in Tanya safe route
-  private scg05eaTanyaAtSams = false;    // true once Tanya reaches SAM area
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
   private currentTick = 0;
@@ -1763,6 +1757,7 @@ export class OracleStrategy {
         });
         reasons.push(`Tanya evade dog at (${nearestDog!.cx},${nearestDog!.cy})`);
       } else if (this.isIdle(tanya)) {
+        // Tanya spawns at (25,107) near the SAMs — no route needed, just attack
         const samTarget = state.structures.find(
           (s) => s.t === 'SAM' && !s.ally &&
             this.distanceSq(s, SCG05EA_SAM_TARGETS[this.scg05eaSamIndex]) <= 16,
@@ -1771,21 +1766,7 @@ export class OracleStrategy {
         if (!samTarget) {
           this.scg05eaSamIndex++;
           reasons.push(`SAM ${this.scg05eaSamIndex} destroyed, advancing`);
-        } else if (!this.scg05eaTanyaAtSams && this.scg05eaTanyaRouteIndex < SCG05EA_TANYA_ROUTE.length) {
-          const wp = SCG05EA_TANYA_ROUTE[this.scg05eaTanyaRouteIndex];
-          if (this.distanceSq(tanya, wp) <= 16) {
-            this.scg05eaTanyaRouteIndex++;
-          }
-          if (this.scg05eaTanyaRouteIndex >= SCG05EA_TANYA_ROUTE.length) {
-            this.scg05eaTanyaAtSams = true;
-          } else {
-            const next = SCG05EA_TANYA_ROUTE[this.scg05eaTanyaRouteIndex];
-            commands.push({ cmd: 'move', ids: [tanya.id], cx: next.cx, cy: next.cy });
-            reasons.push(`Tanya → route wp${this.scg05eaTanyaRouteIndex}`);
-          }
-        }
-
-        if (this.scg05eaTanyaAtSams && samTarget) {
+        } else {
           commands.push({ cmd: 'attack_struct', ids: [tanya.id], structId: samTarget.id });
           reasons.push(`Tanya → SAM ${this.scg05eaSamIndex + 1}/${SCG05EA_SAM_TARGETS.length}`);
         }
