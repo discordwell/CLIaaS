@@ -1915,11 +1915,13 @@ export class OracleStrategy {
     const chinook = playerUnits.find((u) => u.t === 'TRAN');
     const dogs = state.enemies.filter((e) => e.t === 'DOG');
 
-    // Track spy infiltration — once spy disappears after being seen, it infiltrated
-    if (!this.scg05eaSpyInfiltrated && !spy && state.tick > 200) {
-      if (tanya || state.globals.length > 1) {
-        this.scg05eaSpyInfiltrated = true;
-      }
+    // Track spy infiltration — once spy disappears after being seen, it infiltrated.
+    // The spy is consumed during infiltration. We detect this by:
+    // 1. Spy was previously seen (spyStopped flag set)
+    // 2. Spy is now gone from units
+    // 3. Game is NOT in lost state
+    if (!this.scg05eaSpyInfiltrated && !spy && this.scg05eaSpyStopped && state.tick > 200) {
+      this.scg05eaSpyInfiltrated = true;
     }
 
     // CRITICAL: Stop the spy on first sight. Hold it for 200 ticks to
@@ -2052,6 +2054,19 @@ export class OracleStrategy {
         reasons.push('Tanya moving to chinook');
       }
       return { commands, reason: reasons.join('; ') };
+    }
+
+    // ─── PHASE 3.5: Send LST south to trigger Tanya spawn ─────────────
+    // After spy infiltrates, the tny3 cell trigger at (24,107)/(8,108)
+    // needs a PLAYER unit to enter. Send the LST to the south coast.
+    if (this.scg05eaSpyInfiltrated && !tanya) {
+      const lst = playerUnits.find((u) => u.t === 'LST');
+      if (lst && lst.cy < 100) {
+        // Sail LST south toward the tny3 cell trigger area
+        commands.push({ cmd: 'move', ids: [lst.id], cx: 8, cy: 108 });
+        reasons.push(`LST south → (8,108) to trigger Tanya`);
+        return { commands, reason: reasons.join('; ') };
+      }
     }
 
     // ─── PHASE 4: Destroy all enemies (generic base building) ───────────

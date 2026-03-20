@@ -2201,13 +2201,11 @@ export function executeTriggerAction(
       const team = teamTypes[action.team];
       if (!team) break;
 
-      // Original RA falls back to the house edge when a team origin waypoint is undefined.
       const teamHouse = houseIdToHouse(team.house);
       const wp = resolveTeamOriginCell(team.origin, teamHouse, waypoints, houseEdges, mapBounds);
       if (!wp) break;
       const world = cellToWorld(wp.cx, wp.cy);
 
-      // Spawn team members using the actual house from TeamType data
       const house = teamHouse;
       const teamMissionScript = team.missions.length > 0 ? team.missions.map(m => ({
         mission: m.mission,

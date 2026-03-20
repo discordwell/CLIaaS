@@ -10,7 +10,7 @@ import type { AgentState } from '../engine/agentHarness.js';
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
 const STEP_TICKS = 15;
-const MAX_ITERATIONS = 800; // ~12000 ticks
+const MAX_ITERATIONS = 2000; // ~30000 ticks (full mission timer ~27000)
 const LOG_EVERY = 20;
 
 describe('SCG05EA live playthrough', () => {
