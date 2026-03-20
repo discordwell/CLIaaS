@@ -3,7 +3,7 @@ set -euo pipefail
 
 VPS_HOST="${VPS_HOST:-cliaas.com}"
 VPS_USER="${VPS_USER:-ubuntu}"
-VPS_PORT="${VPS_PORT:-22}"
+VPS_PORT="${VPS_PORT:-41022}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/cliaas}"
 REMOTE_APP_DIR="${REMOTE_DIR}/current"
 REMOTE_SHARED_DIR="${REMOTE_DIR}/shared"
@@ -18,6 +18,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VPS_SSH="${VPS_USER}@${VPS_HOST}"
 SUDO=""
+REBOOT_SCRIPT="${HOME}/Projects/shared/reboot-vps.sh"
+
+# SSH kicker: test connectivity, reboot via OVH API if unreachable
+ensure_ssh() {
+  if ssh -o ConnectTimeout=10 -o BatchMode=yes -p "$VPS_PORT" "$VPS_SSH" "true" 2>/dev/null; then
+    return 0
+  fi
+  echo "SSH unreachable — kicking server via OVH API..."
+  if [[ -x "$REBOOT_SCRIPT" ]]; then
+    "$REBOOT_SCRIPT" ovh2 --wait
+  else
+    echo "ERROR: reboot script not found: $REBOOT_SCRIPT" >&2
+    exit 1
+  fi
+}
 
 if [[ "$VPS_USER" != "root" ]]; then
   SUDO="sudo"
@@ -45,6 +60,7 @@ sed \
   "$PROJECT_ROOT/deploy/nginx.cliaas.com.conf" > "$TMP_NGINX"
 
 echo "=== CLIaaS Deploy ==="
+ensure_ssh
 echo "Host: $VPS_SSH"
 echo "Remote app dir: $REMOTE_APP_DIR"
 echo "Service: $SERVICE_NAME"
