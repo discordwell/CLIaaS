@@ -99,9 +99,10 @@ const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
 const SCG11EA_ASSAULT_MIN_ARMOR = 12;      // Need 12+ tanks to break through Mammoths + Teslas
+const SCG11EA_ASSAULT_RETREAT_FLOOR = 4;   // Stay on the island longer before abandoning the pressure
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
 const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 2;
-const SCG11EA_STATIC_DEFENSE_MAX_SUBS = 1;
+const SCG11EA_STATIC_DEFENSE_MAX_SUBS = 3;
 const SCG11EA_AA_DEFENSE_TARGET = 2;
 const SCG11EA_GROUND_DEFENSE_TARGET = 2;
 const SCG11EA_AA_DEFENSE_TRIGGER = 2;
@@ -2860,12 +2861,12 @@ export class OracleStrategy {
       // Sort: dangerous defenses first (MISS, FTUR, GUN, TSLA), then barrels, then nearest
         const DEFENSE_TYPES = new Set(['MISS', 'FTUR', 'GUN', 'TSLA', 'PBOX', 'HBOX']);
         const targetable = state.structures.filter((s) =>
-          !s.ally && s.hp > 0 && this.distanceSq(tanya, s) <= 225,
+          !s.ally && s.hp > 0 && this.distanceSq(tanya, s) <= 625, // 25 cells
         ).sort((a, b) => {
-          // Defenses that are shooting us: highest priority
-          const aDef = DEFENSE_TYPES.has(a.t) ? 0 : BARREL_TYPES.has(a.t) ? 1 : 2;
-          const bDef = DEFENSE_TYPES.has(b.t) ? 0 : BARREL_TYPES.has(b.t) ? 1 : 2;
-          if (aDef !== bDef) return aDef - bDef;
+          // Barrels first (chain explosions clear the area), then defenses, then rest
+          const aB = BARREL_TYPES.has(a.t) ? 0 : DEFENSE_TYPES.has(a.t) ? 1 : 2;
+          const bB = BARREL_TYPES.has(b.t) ? 0 : DEFENSE_TYPES.has(b.t) ? 1 : 2;
+          if (aB !== bB) return aB - bB;
           return this.distanceSq(tanya, a) - this.distanceSq(tanya, b);
         });
 
@@ -3209,7 +3210,10 @@ export class OracleStrategy {
     // No fleet gate. Stockpile then overwhelm — don't trickle reinforcements.
     const armyCentroid = this.centroid(landArmor);
     const armyIsNorth = armyCentroid.cy <= 75;
-    const shouldRetreat = armyIsNorth && landArmor.length < 6;
+    const retreatFloor = this.scenario === 'SCG11EA'
+      ? SCG11EA_ASSAULT_RETREAT_FLOOR
+      : 6;
+    const shouldRetreat = armyIsNorth && landArmor.length < retreatFloor;
     if (shouldRetreat) {
       const basePos = alliedStructures.length > 0
         ? this.centroid(alliedStructures as unknown as RAEntity[])
@@ -3218,7 +3222,7 @@ export class OracleStrategy {
       if (retreaters.length > 0) {
         commands.push({ cmd: 'move', ids: retreaters.map((u) => u.id), cx: basePos.cx, cy: basePos.cy });
         for (const u of retreaters) this.recordMove(u.id, basePos.cx, basePos.cy);
-        reasons.push(`retreat (${retreaters.length} < 6, restocking)`);
+        reasons.push(`retreat (${retreaters.length} < ${retreatFloor}, restocking)`);
       }
     }
     if (!islandBaseDestroyed && !shouldRetreat && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
