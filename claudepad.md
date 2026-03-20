@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-03-17T12:00Z — Session 159: Oracle Micro + Mission Sweep
+- **Per-unit command cooldowns**: tanks 30 ticks, infantry 10 ticks. Lets tanks complete fire cycles while keeping Tanya responsive at 5-tick steps.
+- **Concentrated focus fire**: ALL anti-armor → one tank, ALL anti-infantry → one infantry. Dead enemies = 0 DPS. V2RLs priority-targeted.
+- **Move deduplication**: track last move destination per unit, don't re-send same destination within 15 ticks.
+- **M8 custom strategy**: simplified to army-near-ATEK + generic defense. No force splitting.
+- **Production scaling**: 2 war factories, 3 refineries in build order.
+- **Critical threat retargeting**: override tank cooldown when critical structures under attack.
+- **Key lesson**: simpler always wins. Concentrated army > split forces. Generic defense > custom interception. Per-unit cooldowns > global step rate changes.
+- **Mission sweep results**:
+  - M1: victory (custom Tanya strategy)
+  - M8: survives 20k+ ticks, 30% early death rate from RNG
+  - SCU31EA: survived 50000 ticks (full base, generic strategy)
+  - SCU32EA: survived 37315 ticks (heavy tanks, attacking)
+  - SCU34-36: all survived 15k+ (building up)
+  - M4, M10: defeated (overwhelming enemy forces)
+
 ## 2026-03-17T06:15Z — Session 158: Map Terrain Parity Tests + 15 Bug Fixes
 - **New test file**: `cpp-parity-map.test.ts` — 259 tests covering the full GameMap class (map.ts, 599 lines): MoveResult enum, Terrain enum (9 types), passability rules (land/naval × 9 terrains), occupancy grid, wall tracking (4 types), tree tracking, bounds, speed multipliers (FOOT/WHEEL/WINGED/FLOAT × all terrains), Bresenham line of sight, fog of war (shroud/fog/visible + updateFogOfWar), ore/gem overlays (depletion/growth/spread), bridge system, gap generator (overlapping jams), decals (FIFO cap), shore detection, adjacent water cell finding, initDefault, cell triggers, smudges, grid layout verification.
 - **Fixed 15 pre-existing test failures across 8 files**: SHOK crushable=false (aftrmt.ini Crushable=no), MRJ icon HIRES upgrade (32x24→64x48), MISSION_UNLOAD constant (15→12), MCV deploying state detection, build order skip-unbuildable (break→continue), BARR before 2nd PROC in build order, harvester replacement gate, unit-proximity micro engagement, deployMCV house fix (entity.house for C++ parity), console.warn for unknown house edges.
