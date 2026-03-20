@@ -44,13 +44,13 @@ const HOUSE_MINIMAP_COLOR: Record<string, string> = {
   [House.USSR]:    '#FF3030', // red
   [House.Greece]:  '#4080FF', // blue
   [House.England]: '#40C040', // green
-  [House.France]:  '#60B0FF', // light blue
-  [House.Ukraine]: '#C060C0', // purple
+  [House.France]:  '#2040C0', // dark blue (C++ hdata.cpp:75 PCOLOR_BLUE)
+  [House.Ukraine]: '#E07020', // orange (C++ hdata.cpp:85 PCOLOR_ORANGE)
   [House.Germany]: '#A0A0A0', // gray
-  [House.Turkey]:  '#C8C864', // olive
-  [House.GoodGuy]: '#FFFF40', // yellow
+  [House.Turkey]:  '#A06830', // brown (C++ hdata.cpp:115 PCOLOR_BROWN)
+  [House.GoodGuy]: '#60B0FF', // light blue (C++ hdata.cpp:135 PCOLOR_LTBLUE)
   [House.BadGuy]:  '#FF4040', // red
-  [House.Neutral]: '#FFFFFF', // white
+  [House.Neutral]: '#FFD700', // gold (C++ hdata.cpp:155 PCOLOR_GOLD)
 };
 
 // TEMPERATE.PAL palette index ranges for terrain rendering
@@ -217,7 +217,8 @@ export class Renderer {
   hasRadar = false; // requires DOME building for minimap
   /** U6: Fullscreen radar toggle — enlarged minimap overlay */
   isRadarFullscreen = false;
-  radarStaticData: Uint8Array | null = null; // cached static noise for no-radar
+  isRadarJammed = false; // GAP generator radar jamming (C++ IsRadarJammed)
+  radarStaticData: Uint8Array | null = null; // cached static noise for radar jamming
   radarStaticCounter = 0;
   /** Pre-processed SHADOW.SHP: all pixels → semi-transparent black (shroud overlay) */
   private shadowOverlay: HTMLCanvasElement | null = null;
@@ -2711,8 +2712,9 @@ export class Renderer {
     ctx.lineWidth = 1;
     ctx.strokeRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
 
-    // No radar: show static noise instead of map (update every 10 render calls)
-    if (!this.hasRadar) {
+    // Radar jammed (GAP generator): show static/snow noise (C++ radar.cpp Radar_Anim,
+    // IsRadarJammed cycles frames near RADAR_ACTIVATED_FRAME — green-tinted TV static)
+    if (this.isRadarJammed && this.hasRadar) {
       this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
       if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
         const cells = Math.ceil(mmSize / 3);
@@ -2729,11 +2731,13 @@ export class Renderer {
         ctx.fillStyle = `rgb(${v},${v + 5},${v})`;
         ctx.fillRect(px, py, 3, 3);
       }
-      ctx.fillStyle = '#666';
-      ctx.font = '8px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('NO RADAR', mmX + mmSize / 2, mmY + mmSize / 2);
-      ctx.textAlign = 'left';
+      return;
+    }
+
+    // No radar: show faction logo (C++ radar.cpp Draw_It — natoradr.shp / ussrradr.shp
+    // final frame is the faction emblem displayed when radar is inactive)
+    if (!this.hasRadar) {
+      this.drawFactionRadarLogo(ctx, mmX, mmY, mmSize);
       return;
     }
 
@@ -2851,6 +2855,132 @@ export class Renderer {
       ctx.arc(ax, ay, 4, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  /**
+   * Draw faction emblem when radar is inactive (C++ radar.cpp Draw_It lines 370-381).
+   * Allied houses use natoradr.shp (NATO compass rose), Soviet houses use ussrradr.shp
+   * (Soviet star). The final frame of these SHP animations is the static emblem shown
+   * when no radar building exists or power is insufficient.
+   */
+  private drawFactionRadarLogo(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+    const isAllied = this.isPlayerAllied();
+    const cx = x + size / 2;
+    const cy = y + size / 2;
+    const r = size * 0.35; // emblem radius
+
+    // Dark faction-tinted background
+    ctx.fillStyle = isAllied ? '#0a1628' : '#1a0808';
+    ctx.fillRect(x, y, size, size);
+
+    // Subtle radial gradient behind emblem
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.5);
+    if (isAllied) {
+      grad.addColorStop(0, 'rgba(40,80,140,0.35)');
+      grad.addColorStop(1, 'rgba(10,22,40,0)');
+    } else {
+      grad.addColorStop(0, 'rgba(140,30,30,0.35)');
+      grad.addColorStop(1, 'rgba(26,8,8,0)');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, y, size, size);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    if (isAllied) {
+      // Allied: 4-pointed compass rose / NATO star (natoradr.shp)
+      this.drawAlliedEmblem(ctx, r);
+    } else {
+      // Soviet: 5-pointed star (ussrradr.shp)
+      this.drawSovietEmblem(ctx, r);
+    }
+
+    ctx.restore();
+  }
+
+  /** Allied compass rose — 4-pointed star with inner detail */
+  private drawAlliedEmblem(ctx: CanvasRenderingContext2D, r: number): void {
+    // Outer 4-pointed star
+    ctx.beginPath();
+    const points = 4;
+    const outerR = r;
+    const innerR = r * 0.3;
+    for (let i = 0; i < points * 2; i++) {
+      const angle = (i * Math.PI) / points - Math.PI / 2;
+      const rad = i % 2 === 0 ? outerR : innerR;
+      const px = Math.cos(angle) * rad;
+      const py = Math.sin(angle) * rad;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#c8a832'; // Gold
+    ctx.fill();
+    ctx.strokeStyle = '#8a7420';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Inner circle
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = '#2850a0';
+    ctx.fill();
+    ctx.strokeStyle = '#c8a832';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Small center dot
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.06, 0, Math.PI * 2);
+    ctx.fillStyle = '#c8a832';
+    ctx.fill();
+  }
+
+  /** Soviet 5-pointed star with hammer & sickle center */
+  private drawSovietEmblem(ctx: CanvasRenderingContext2D, r: number): void {
+    // 5-pointed star
+    ctx.beginPath();
+    const points = 5;
+    const outerR = r;
+    const innerR = r * 0.4;
+    for (let i = 0; i < points * 2; i++) {
+      const angle = (i * Math.PI) / points - Math.PI / 2;
+      const rad = i % 2 === 0 ? outerR : innerR;
+      const px = Math.cos(angle) * rad;
+      const py = Math.sin(angle) * rad;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#c03030'; // Soviet red
+    ctx.fill();
+    ctx.strokeStyle = '#801818';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Hammer & sickle simplified — sickle arc + hammer
+    const s = r * 0.25;
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = Math.max(1.5, r * 0.05);
+    ctx.lineCap = 'round';
+
+    // Sickle (arc curving right)
+    ctx.beginPath();
+    ctx.arc(s * 0.3, -s * 0.2, s * 0.7, -Math.PI * 0.8, Math.PI * 0.3);
+    ctx.stroke();
+
+    // Hammer handle (diagonal line)
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.1, s * 0.5);
+    ctx.lineTo(-s * 0.6, -s * 0.5);
+    ctx.stroke();
+
+    // Hammer head (short perpendicular line at top of handle)
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.9, -s * 0.3);
+    ctx.lineTo(-s * 0.3, -s * 0.7);
+    ctx.stroke();
   }
 
   // ─── Fullscreen Radar (U6) ──────────────────────────────
