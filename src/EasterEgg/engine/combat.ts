@@ -1219,7 +1219,8 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
 /** Structure auto-fire — pillboxes, guard towers, tesla coils, SAM/AGUN fire at nearby enemies.
  *  Extracted from Game.updateStructureCombat (index.ts). */
 export function updateStructureCombat(ctx: CombatContext): void {
-  const isLowPower = ctx.powerConsumed > ctx.powerProduced && ctx.powerProduced > 0;
+  // C++ house.cpp:4164: low power when Power < Drain (including Power=0 with Drain>0)
+  const isLowPower = ctx.powerConsumed > ctx.powerProduced;
   for (const s of ctx.structures) {
     if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) continue;
     // C++ parity PW1/PW3: powered defenses (TSLA, GUN, SAM, AGUN) cannot fire during any power deficit.
