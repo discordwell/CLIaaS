@@ -75,21 +75,25 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 //   1. Build a real land economy and enough tank production to hold the beachhead.
 //   2. Add the shipyard only after the land line can sustain the transition.
 //   3. Mass destroyers and clear the river screen before spending on static tech.
+// Ground-first: destroy the Soviet base with tanks, THEN build navy.
+// SYRD goes last — only after economy is strong and base is under control.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
-  { names: ['POWR'],         type_ids: [17] },              // Power for base
-  { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
-  { names: ['WEAP'],         type_ids: [2] },               // War factory — tanks ASAP
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund tank army
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory before the naval handoff
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard once the hold line is stable
-  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery — sustain DD + armor
-  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power as needed
+  { names: ['POWR'],         type_ids: [17] },              // Power
+  { names: ['PROC'],         type_ids: [12] },              // Economy
+  { names: ['WEAP'],         type_ids: [2] },               // Tanks ASAP
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // More economy
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Double tank output
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Sustain the assault
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Power for base
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Navy AFTER ground assault
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
-const SCG11EA_PRE_NAVAL_TANK_TARGET = 8;   // Enough armor to survive the island hold before the naval handoff
-const SCG11EA_SUB_HUNT_TANK_FLOOR = 6;     // Keep a real home-guard line while DDs clear the river
-const SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR = 5; // Refill a few tanks only if the island hold starts collapsing
-const SCG11EA_POST_NAVAL_TANK_TARGET = 8;  // Once the river is open, rebuild enough armor to push west
+const SCG11EA_PRE_NAVAL_TANK_TARGET = 20;  // Keep pumping tanks until base is destroyed
+const SCG11EA_SUB_HUNT_TANK_FLOOR = 6;     // Keep a real island hold while DDs clear the river
+const SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR = 4; // Panic rebuild only when the beachhead is collapsing
+const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Refill for the westward push once the river is effectively open
+const SCG11EA_POST_NAVAL_SUB_THRESHOLD = 1;
 const SCG11EA_FLEET_ONLINE_SHIPS = 3;
 const SCG11EA_HUNT_MIN_SHIPS = 3;
 const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
@@ -97,6 +101,8 @@ const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fl
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
 const SCG11EA_ASSAULT_MIN_ARMOR = 12;      // Need 12+ tanks to break through Mammoths + Teslas
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
+const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 1;
+const SCG11EA_STATIC_DEFENSE_MAX_SUBS = 12;
 const SCG11EA_AA_DEFENSE_TARGET = 2;
 const SCG11EA_GROUND_DEFENSE_TARGET = 2;
 const SCG11EA_AA_DEFENSE_TRIGGER = 2;
@@ -1171,7 +1177,7 @@ export class OracleStrategy {
         this.scg11eaNavalUnlocked &&
         !shipyardExists &&
         scg11eaEnemySubCount > 0 &&
-        alliedStructures.some((s) => s.t === 'PROC') &&
+        alliedStructures.filter((s) => s.t === 'PROC').length >= 2 &&
         scg11eaShipyardReady &&
         (buildable.structures.includes('SYRD') || buildable.structures.includes('SPEN'))
       ) {
@@ -1197,9 +1203,9 @@ export class OracleStrategy {
         const scg11eaEconomyCollapsed = procCount === 0;
         const scg11eaEconomyFragile = procCount < 2;
         const scg11eaStaticDefenseUnlocked =
-          shipCount >= SCG11EA_FLEET_ONLINE_SHIPS &&
-          scg11eaEnemySubCount <= SCG11EA_ASSAULT_MAX_SUBS &&
-          procCount >= 3;
+          shipCount >= SCG11EA_STATIC_DEFENSE_MIN_SHIPS &&
+          scg11eaEnemySubCount <= SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
+          procCount >= 2;
         if (
           scg11eaEconomyCollapsed &&
           buildable.structures.includes('PROC')
@@ -1237,7 +1243,7 @@ export class OracleStrategy {
         } else if (
           scg11eaSubHuntLive &&
           weapCount === 0 &&
-          survivingTanks < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
+          survivingTanks < SCG11EA_POST_NAVAL_TANK_TARGET &&
           scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
           buildable.structures.includes('WEAP')
         ) {
@@ -1479,7 +1485,7 @@ export class OracleStrategy {
     const scg11eaRiverOpen =
       this.scenario === 'SCG11EA' &&
       navalCount >= SCG11EA_FLEET_ONLINE_SHIPS &&
-      scg11eaEnemySubCount <= SCG11EA_ASSAULT_MAX_SUBS;
+      scg11eaEnemySubCount <= SCG11EA_POST_NAVAL_SUB_THRESHOLD;
     const scg11eaTankTarget =
       this.scenario === 'SCG11EA'
         ? (!scg11eaSubHuntPhase
@@ -2597,10 +2603,8 @@ export class OracleStrategy {
       // (resending resets the path and causes stutter-stepping)
       const lastDst = this.scg05eaSpyLastDst;
       const sendMove = (cx: number, cy: number, reason: string) => {
-        if (!lastDst || lastDst.cx !== cx || lastDst.cy !== cy) {
-          commands.push({ cmd: 'move', ids: [spy.id], cx, cy });
-          this.scg05eaSpyLastDst = { cx, cy };
-        }
+        // Always send — dedup caused spy to never move on C++ engine
+        commands.push({ cmd: 'move', ids: [spy.id], cx, cy });
         reasons.push(reason);
       };
 
@@ -3008,10 +3012,8 @@ export class OracleStrategy {
       if (patrolShips.length > 0) reasons.push(`sweep river (${patrolShips.length} ships)`);
     }
 
-    // GROUND ASSAULT — all tanks focus-fire ONE target at a time.
-    // Priority: mammoths/tanks → static defense → production → other buildings.
-    // No home guard. No fleet prerequisite. Attack when 12+ armor available.
-    // human-requested: focus fire all units on same target, tanks>buildings>infantry.
+    // GROUND ASSAULT — all tanks attack_move to enemy base. Ground-first strategy.
+    // No fleet gate. No sub threshold. Attack when we have enough tanks.
     if (landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
       // 1. Find the single best target for ALL tanks to focus-fire
       //    Check for enemy vehicles within 10 cells of any tank first
@@ -3035,26 +3037,28 @@ export class OracleStrategy {
         // No nearby vehicles — force-attack a structure directly.
         // 'attack' with a target ID makes tanks head straight for the building,
         // ignoring dogs and infantry en route (like ctrl-clicking in-game).
+        // attack on structure IDs doesn't make tanks pathfind — use attack_move
         const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
         if (structTarget) {
           focusTarget = structTarget;
-          focusCmd = 'attack';
+          focusCmd = 'attack_move';
         }
       }
-      if (focusTarget && 'id' in focusTarget && focusTarget.id != null) {
+      if (focusTarget) {
         const retargetDue = (state.tick % 25) < 5;
         const movers = retargetDue ? landArmor : landArmor.filter(
           (u) => this.isIdle(u) || this.distanceSq(u, focusTarget!) > 225,
         );
         if (movers.length > 0) {
-          // ALL tanks attack the same target — unit or structure
-          commands.push({
-            cmd: 'attack',
-            ids: movers.map((u) => u.id),
-            target: focusTarget.id,
-          });
+          if (focusCmd === 'attack' && 'id' in focusTarget && focusTarget.id != null) {
+            // Focus-fire enemy unit
+            commands.push({ cmd: 'attack', ids: movers.map((u) => u.id), target: focusTarget.id });
+          } else {
+            // attack_move to structure coordinates
+            commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: focusTarget.cx, cy: focusTarget.cy });
+          }
           for (const u of movers) this.recordMove(u.id, focusTarget!.cx, focusTarget!.cy);
-          reasons.push(`assault ${focusTarget.t ?? ''} (${movers.length} → ${focusTarget.cx},${focusTarget.cy})`);
+          reasons.push(`assault ${(focusTarget as any).t ?? ''} (${movers.length} → ${focusTarget.cx},${focusTarget.cy})`);
         }
       }
     }
