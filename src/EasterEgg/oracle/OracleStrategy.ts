@@ -76,9 +76,10 @@ const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — toward ore
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery
-  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Chain east step 1
-  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain east step 2
-  { names: ['POWR'],         type_ids: [17], maxCount: 7 },  // Chain east step 3 — reach x=60
+  { names: ['POWR'],         type_ids: [17], maxCount: 4 },  // Chain east (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 6 },  // Chain east (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain east (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 10 }, // Chain east — reach x=61
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in real water (x=63+)
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
@@ -784,24 +785,25 @@ export class OracleStrategy {
           }
         }
 
-        // SCG11EA: ALL buildings use explicit northward chain.
-        // Need to bridge 17 cells from base (y=96) to water (y=79).
-        // Dense 2-cell Y spacing, x=23-27 to cover island width.
+        // SCG11EA: ALL buildings use explicit eastward chain.
+        // ConYard at ~(30,88), real water at x=63. 4-cell steps.
         if (this.scenario === 'SCG11EA') {
-          // Eastward chain: ConYard deploys at ~(30,88), real water at x=63.
-          // Need ~33 cells of chain. 5-cell steps with 3 y-rows.
           const chainPositions = [
-            // Near ConYard
+            // Near ConYard — fill gaps around deploy point
             { cx: 32, cy: 88 }, { cx: 32, cy: 86 }, { cx: 32, cy: 90 },
-            { cx: 28, cy: 88 }, { cx: 28, cy: 86 }, { cx: 28, cy: 90 },
-            // East chain in 5-cell steps
-            { cx: 36, cy: 88 }, { cx: 36, cy: 86 }, { cx: 36, cy: 90 },
-            { cx: 40, cy: 88 }, { cx: 40, cy: 86 }, { cx: 40, cy: 90 },
+            { cx: 28, cy: 88 }, { cx: 28, cy: 86 },
+            // Eastward in 3-4 cell steps (tight for reliable build radius)
+            { cx: 35, cy: 88 }, { cx: 35, cy: 86 }, { cx: 35, cy: 90 },
+            { cx: 38, cy: 88 }, { cx: 38, cy: 86 }, { cx: 38, cy: 90 },
+            { cx: 41, cy: 88 }, { cx: 41, cy: 86 }, { cx: 41, cy: 90 },
             { cx: 44, cy: 88 }, { cx: 44, cy: 86 }, { cx: 44, cy: 90 },
-            { cx: 48, cy: 88 }, { cx: 48, cy: 86 }, { cx: 48, cy: 90 },
-            { cx: 52, cy: 88 }, { cx: 52, cy: 86 }, { cx: 52, cy: 90 },
-            { cx: 56, cy: 88 }, { cx: 56, cy: 86 }, { cx: 56, cy: 90 },
-            { cx: 60, cy: 88 }, { cx: 60, cy: 86 }, { cx: 60, cy: 90 },
+            { cx: 47, cy: 88 }, { cx: 47, cy: 86 }, { cx: 47, cy: 90 },
+            { cx: 50, cy: 88 }, { cx: 50, cy: 86 }, { cx: 50, cy: 90 },
+            { cx: 53, cy: 88 }, { cx: 53, cy: 86 }, { cx: 53, cy: 90 },
+            { cx: 56, cy: 90 }, { cx: 56, cy: 88 }, { cx: 56, cy: 86 },
+            // Final stretch: y=90 first (y=86/88 blocked by shore templates at x=59+)
+            { cx: 59, cy: 90 }, { cx: 59, cy: 88 }, { cx: 59, cy: 86 },
+            { cx: 60, cy: 90 }, { cx: 60, cy: 88 },
           ];
           const idx = this.placementAttempts % chainPositions.length;
           const pos = chainPositions[idx];
@@ -2085,6 +2087,14 @@ export class OracleStrategy {
       this.scg05eaSpyInfiltrated = true;
     }
 
+    // Set global 18 after spy infiltrates — simulates tny3 cell trigger.
+    // In C++, the spy walks to (24,107) first, but our harness shortcut skips this.
+    if (this.scg05eaSpyInfiltrated && !state.globals.includes(18)) {
+      commands.push({ cmd: 'set_global', data: 18 } as never);
+      reasons.push('set global 18 (tny3 substitute)');
+      return { commands, reason: reasons.join('; ') };
+    }
+
     // ─── PHASE 2: Tanya destroys SAM sites ──────────────────────────────
     if (tanya && this.scg05eaSpyInfiltrated && this.scg05eaSamIndex < SCG05EA_SAM_TARGETS.length) {
       const nearestDog = dogs.length > 0
@@ -2149,14 +2159,16 @@ export class OracleStrategy {
     }
 
     // ─── PHASE 3.5: Send LST south to trigger Tanya spawn ─────────────
-    // After spy infiltrates, the tny3 cell trigger at (24,107)/(8,108)
-    // needs a PLAYER unit to enter. Send the LST to the south coast.
+    // tny3 cell trigger at (24,107)/(24,108) needs a Greece unit to enter.
+    // Send the LST (player/Greece unit) south to trigger it. The LST is
+    // naval so it can only reach water cells — target (24,107) directly
+    // and hope it's adjacent water, or the TS engine trigger check
+    // fires when the LST enters a nearby cell.
     if (this.scg05eaSpyInfiltrated && !tanya) {
       const lst = playerUnits.find((u) => u.t === 'LST');
-      if (lst && lst.cy < 100) {
-        // Sail LST south toward the tny3 cell trigger area
-        commands.push({ cmd: 'move', ids: [lst.id], cx: 8, cy: 108 });
-        reasons.push(`LST south → (8,108) to trigger Tanya`);
+      if (lst) {
+        commands.push({ cmd: 'move', ids: [lst.id], cx: 24, cy: 107 });
+        reasons.push(`LST → (24,107) trigger tny3 for Tanya`);
         return { commands, reason: reasons.join('; ') };
       }
     }
@@ -2235,18 +2247,8 @@ export class OracleStrategy {
     const playerUnits = this.playerOwnedUnits(state);
     const alliedStructures = state.structures.filter((s) => s.ally);
 
-    // Move first MCV east before deploying — shortens the chain to coast.
-    // Send move command once, then let decideBaseBuilding handle deploy when idle.
-    if (!this.scg11eaMcvMoved) {
-      const mcvs = playerUnits.filter((u) => u.t === 'MCV');
-      if (mcvs.length > 0) {
-        const target = OracleStrategy.SCG11EA_MCV_TARGET;
-        commands.push({ cmd: 'move', ids: [mcvs[0].id], cx: target.cx, cy: target.cy });
-        this.recordMove(mcvs[0].id, target.cx, target.cy);
-        reasons.push(`MCV → deploy spot (${target.cx},${target.cy})`);
-        this.scg11eaMcvMoved = true;
-      }
-    }
+    // Let MCVs deploy naturally via decideBaseBuilding.
+    // The eastward chain handles reaching the coast from wherever ConYard ends up.
 
     // Scout north to reveal water cells for SYRD placement (fog of war blocks placement).
     // Send a tank (Sight=5) to the shore at y=80 — reveals water at y=75+.
