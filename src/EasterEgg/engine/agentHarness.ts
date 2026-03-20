@@ -465,13 +465,47 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             game.entityById.delete(inf.id);
             results.push({ cmd: 'enter', ok: true });
           } else {
-            // Move infantry toward transport — proximity auto-load handles boarding
+            // Move infantry toward transport — find shore cell if transport is naval
+            // C++ behavior: infantry walks to nearest shore, transport sails to pick up.
+            // Without this, infantry pathfinds to a water cell and drowns.
+            const transportCell = { cx: Math.floor(transport.pos.x / CELL_SIZE), cy: Math.floor(transport.pos.y / CELL_SIZE) };
+            let targetCell = transportCell;
+
+            if (transport.isNavalUnit && !inf.isNavalUnit) {
+              // Find nearest shore cell to the infantry (land cell adjacent to water)
+              let bestShore: { cx: number; cy: number } | null = null;
+              let bestDist = Infinity;
+              for (let dy = -5; dy <= 5; dy++) {
+                for (let dx = -5; dx <= 5; dx++) {
+                  const sx = inf.cell.cx + dx;
+                  const sy = inf.cell.cy + dy;
+                  if (game.map.isShoreCell(sx, sy)) {
+                    const dist = dx * dx + dy * dy;
+                    if (dist < bestDist) {
+                      bestDist = dist;
+                      bestShore = { cx: sx, cy: sy };
+                    }
+                  }
+                }
+              }
+              if (bestShore) {
+                targetCell = bestShore;
+                // Also move transport toward the shore cell
+                const shoreWorld = { x: bestShore.cx * CELL_SIZE + CELL_SIZE / 2, y: bestShore.cy * CELL_SIZE + CELL_SIZE / 2 };
+                transport.moveTarget = shoreWorld;
+                transport.path = findPath(game.map, transport.cell, bestShore, true, true, transport.stats.speedClass);
+                transport.pathIndex = 0;
+                transport.mission = Mission.MOVE;
+              }
+            }
+
             inf.mission = Mission.MOVE;
             inf.target = null;
-            inf.moveTarget = { ...transport.pos };
-            const tc = { cx: Math.floor(transport.pos.x / CELL_SIZE), cy: Math.floor(transport.pos.y / CELL_SIZE) };
-            inf.path = findPath(game.map, inf.cell, tc, true, inf.isNavalUnit, inf.stats.speedClass);
+            inf.moveTarget = { x: targetCell.cx * CELL_SIZE + CELL_SIZE / 2, y: targetCell.cy * CELL_SIZE + CELL_SIZE / 2 };
+            inf.path = findPath(game.map, inf.cell, targetCell, true, inf.isNavalUnit, inf.stats.speedClass);
             inf.pathIndex = 0;
+            // Store transport ref so proximity auto-load can trigger
+            inf.transportRef = transport;
             results.push({ cmd: 'enter', ok: true });
           }
           break;

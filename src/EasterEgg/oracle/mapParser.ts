@@ -316,8 +316,8 @@ export function findCoastalCells(
 ): Array<{ cx: number; cy: number }> {
   const results: Array<{ cx: number; cy: number }> = [];
 
-  for (let dy = -radius; dy <= radius && results.length < 10; dy++) {
-    for (let dx = -radius; dx <= radius && results.length < 10; dx++) {
+  for (let dy = -radius; dy <= radius && results.length < 30; dy++) {
+    for (let dx = -radius; dx <= radius && results.length < 30; dx++) {
       const cx = centerCx + dx;
       const cy = centerCy + dy;
       if (cx < 1 || cx >= MAP_W - 1 || cy < 1 || cy >= MAP_W - 1) continue;
@@ -327,12 +327,17 @@ export function findCoastalCells(
       // Must NOT be water itself
       if (isWaterCell(ttype, cell, bounds)) continue;
 
-      // Must have at least one water neighbor (cardinal directions)
-      const hasWater =
-        isWaterCell(ttype, cell - MAP_W, bounds) ||  // north
-        isWaterCell(ttype, cell + MAP_W, bounds) ||  // south
-        isWaterCell(ttype, cell - 1, bounds) ||      // west
-        isWaterCell(ttype, cell + 1, bounds);         // east
+      // Check for water within 3 cells (shipyards have generous placement range)
+      let hasWater = false;
+      for (let wy = -3; wy <= 3 && !hasWater; wy++) {
+        for (let wx = -3; wx <= 3 && !hasWater; wx++) {
+          if (wx === 0 && wy === 0) continue;
+          const nc = (cy + wy) * MAP_W + (cx + wx);
+          if (nc >= 0 && nc < MAP_W * MAP_W && isWaterCell(ttype, nc, bounds)) {
+            hasWater = true;
+          }
+        }
+      }
 
       if (hasWater) results.push({ cx, cy });
     }
@@ -364,11 +369,18 @@ export function getCoastalCellsFromINI(
 ): Array<{ cx: number; cy: number }> {
   let mapData = mapCache.get(iniPath);
   if (!mapData) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require('fs');
-    const iniText = fs.readFileSync(iniPath, 'utf-8');
-    mapData = parseMapPack(iniText);
-    mapCache.set(iniPath, mapData);
+    // In browser context, fs is unavailable — use getCoastalCellsFromText instead.
+    // Dynamic require hidden from bundler static analysis.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const _r = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__ : require;
+      const fs = _r('f' + 's');
+      const iniText = fs.readFileSync(iniPath, 'utf-8');
+      mapData = parseMapPack(iniText);
+      mapCache.set(iniPath, mapData);
+    } catch {
+      return []; // Browser context — caller should use getCoastalCellsFromText
+    }
   }
   return findCoastalCells(mapData.ttype, centerCx, centerCy, 20, mapData.bounds);
 }

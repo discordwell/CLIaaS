@@ -81,20 +81,25 @@ describe('SCG05EA spy debug', () => {
         { label: 'south to y=55', cx: 18, cy: 55 },
         { label: 'direct to WEAP', cx: 43, cy: 50 },
       ];
-      // Route: south past dogs (y≥57), east inland, north to WEAP
-      // Dogs at (24,54) and (23,55) — need y≥58 to clear them by >3 cells
-      const legs = [
-        { cx: 18, cy: 58, label: 'south past dogs' },
-        { cx: 30, cy: 58, label: 'east at y=58' },
-        { cx: 40, cy: 55, label: 'NE toward base' },
-        { cx: 43, cy: 50, label: 'WEAP' },
+      // Test: board spy onto LST (with the shore-finding fix)
+      const lst = state.units.find((u) => u.t === 'LST');
+      const legs = lst ? [
+        { cx: -1, cy: -1, label: `board LST (id=${lst.id})`, boardLst: true, lstId: lst.id },
+      ] : [
+        { cx: 20, cy: 50, label: 'no LST fallback' },
       ];
 
-      for (const leg of legs) {
-        console.log(`--- Leg: ${leg.label} → (${leg.cx},${leg.cy}) ---`);
-        await adapter.step(1, [
-          { cmd: 'move', unitIds: [spy.id], cx: leg.cx, cy: leg.cy },
-        ]);
+      for (const leg of legs as Array<{ cx: number; cy: number; label: string; boardLst?: boolean; lstId?: number }>) {
+        console.log(`--- Leg: ${leg.label} ---`);
+        if (leg.boardLst && leg.lstId != null) {
+          await adapter.step(1, [
+            { cmd: 'enter', unitId: spy.id, transportId: leg.lstId },
+          ]);
+        } else {
+          await adapter.step(1, [
+            { cmd: 'move', unitIds: [spy.id], cx: leg.cx, cy: leg.cy },
+          ]);
+        }
         let arrived = false;
         for (let j = 0; j < 40; j++) {
           const r = await adapter.step(15);
