@@ -554,11 +554,11 @@ export class OracleStrategy {
     ];
   }
 
-  private chooseScg11eaAssaultTarget(enemyStructures: RAStructure[]): Point | null {
+  private chooseScg11eaAssaultTarget(enemyStructures: RAStructure[]): RAStructure | null {
     const pickPriorityTarget = (
       bounds: { minCx: number; maxCx: number; minCy: number; maxCy: number },
       priority: string[],
-    ): Point | null => {
+    ): RAStructure | null => {
       const rank = new Map(priority.map((t, i) => [t, i]));
       const candidates = enemyStructures
         .filter(
@@ -577,8 +577,7 @@ export class OracleStrategy {
           if (a.cy !== b.cy) return b.cy - a.cy;
           return this.distanceSq(a, SCG11EA_PRIMARY_ASSAULT_POINT) - this.distanceSq(b, SCG11EA_PRIMARY_ASSAULT_POINT);
         });
-      if (candidates.length === 0) return null;
-      return { cx: candidates[0].cx, cy: candidates[0].cy };
+      return candidates[0] ?? null;
     };
 
     // Priority: static defense → production → power → everything else.
@@ -2959,33 +2958,29 @@ export class OracleStrategy {
         focusTarget = nearbyVehicles[0];
         focusCmd = 'attack';  // direct attack on the unit
       } else {
-        // No nearby vehicles — target structures (defense → production → power)
-        focusTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-        focusCmd = 'attack_move';  // attack-move toward structure
+        // No nearby vehicles — force-attack a structure directly.
+        // 'attack' with a target ID makes tanks head straight for the building,
+        // ignoring dogs and infantry en route (like ctrl-clicking in-game).
+        const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
+        if (structTarget) {
+          focusTarget = structTarget;
+          focusCmd = 'attack';
+        }
       }
-      if (focusTarget) {
-        const retargetDue = (state.tick % 30) < 5;
+      if (focusTarget && 'id' in focusTarget && focusTarget.id != null) {
+        const retargetDue = (state.tick % 25) < 5;
         const movers = retargetDue ? landArmor : landArmor.filter(
           (u) => this.isIdle(u) || this.distanceSq(u, focusTarget!) > 225,
         );
         if (movers.length > 0) {
-          if (focusCmd === 'attack' && 'id' in focusTarget && focusTarget.id != null) {
-            // Focus-fire: ALL tanks attack the same enemy unit
-            commands.push({
-              cmd: 'attack',
-              ids: movers.map((u) => u.id),
-              target: focusTarget.id,
-            });
-          } else {
-            commands.push({
-              cmd: 'attack_move',
-              ids: movers.map((u) => u.id),
-              cx: focusTarget.cx,
-              cy: focusTarget.cy,
-            });
-          }
+          // ALL tanks attack the same target — unit or structure
+          commands.push({
+            cmd: 'attack',
+            ids: movers.map((u) => u.id),
+            target: focusTarget.id,
+          });
           for (const u of movers) this.recordMove(u.id, focusTarget!.cx, focusTarget!.cy);
-          reasons.push(`assault (${movers.length} → ${focusTarget.cx},${focusTarget.cy})`);
+          reasons.push(`assault ${focusTarget.t ?? ''} (${movers.length} → ${focusTarget.cx},${focusTarget.cy})`);
         }
       }
     }
