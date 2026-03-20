@@ -956,10 +956,11 @@ export class Renderer {
           }
         }
 
-        // Clear template cells: draw tileset grass for CLEAR and TREE terrain
-        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE)) {
+        // Clear template cells: draw tileset grass for CLEAR, TREE, and WALL terrain
+        // WALL cells (building footprints) use template 255 (CLEAR1) from the MapPack
+        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE || terrain === Terrain.WALL)) {
           if (this.drawTileFromAtlas(ctx, 255, 0, screen.x, screen.y)) {
-            if (terrain === Terrain.CLEAR) continue;
+            if (terrain === Terrain.CLEAR || terrain === Terrain.WALL) continue;
             atlasDrawn = true; // TREE cells need overlay on top
           }
         }
@@ -1162,29 +1163,9 @@ export class Renderer {
             }
             break;
           }
-          case Terrain.WALL: {
-            // Skip for wall-type structures — they render as sprites in structure pass
-            if (map.getWallType(cx, cy)) break;
-            // C++ parity (cell.cpp:981-987): buildings don't change a cell's visual template.
-            // Render building footprint cells identically to CLEAR terrain — use the same
-            // tileset/grass logic so the ground under structures matches the surrounding area.
+          case Terrain.WALL:
+            // Fall through to CLEAR — render building footprints as normal ground.
             // Structure sprites draw on top in the structure pass.
-            if (this.theatre === 'INTERIOR') {
-              const bright = 40 + (h % 6);
-              ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
-              ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
-              ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-              ctx.lineWidth = 1;
-              ctx.strokeRect(screen.x + 0.5, screen.y + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
-            } else {
-              // Draw the same grass as surrounding CLEAR terrain.
-              // Don't use drawTileFromAtlas for CLEAR1 (template 255) — its extracted tile
-              // is darker than the surrounding grass tiles, creating visible boxes.
-              // Use procedural grass which matches the visual palette.
-              this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
-            }
-            break;
-          }
         }
       }
     }
