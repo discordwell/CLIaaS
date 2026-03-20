@@ -256,15 +256,15 @@ describe('Super distance falloff (spread=1)', () => {
 });
 
 describe('Organic distance falloff (spread=0, rapid falloff)', () => {
-  // spreadFactor=0: distFactor = floor(distPixels * 4)
+  // spreadFactor=0: distFactor = floor(distPixels * 5) — C++ PIXEL_LEPTON_W/4=10/4=2, pixel*10/2=pixel*5
   // Only does damage vs 'none' armor (mult=1.0); all others are 0
   const cases: [number, number, string][] = [
     [0, 100, 'distFactor=0 → 100'],
-    [1, 25,  'distFactor=4, 100/4=25, no MinDmg (4 NOT < 4) → 25'],
-    [2, 13,  'distFactor=8, 100/8=12.5 → 13'],
-    [3, 8,   'distFactor=12, 100/12=8.33 → 8'],
-    [4, 6,   'distFactor=16, 100/16=6.25 → 6'],
-    [5, 6,   'distFactor=20→clamp 16, 100/16=6.25 → 6'],
+    [1, 20,  'distFactor=5, 100/5=20'],
+    [2, 10,  'distFactor=10, 100/10=10'],
+    [3, 7,   'distFactor=15, 100/15=6.67 → 7'],
+    [4, 6,   'distFactor=20→clamp 16, 100/16=6.25 → 6'],
+    [5, 6,   'distFactor=25→clamp 16, 100/16=6.25 → 6'],
   ];
 
   for (const [dist, expected, note] of cases) {
@@ -304,12 +304,12 @@ describe('Mechanical distance falloff (spread=0)', () => {
     expect(modifyDamage(100, 'Mechanical', 'heavy', 0)).toBe(100);
   });
 
-  it('vs heavy dist=1 → 25 (distFactor=4)', () => {
-    expect(modifyDamage(100, 'Mechanical', 'heavy', 1)).toBe(25);
+  it('vs heavy dist=1 → 20 (distFactor=5)', () => {
+    expect(modifyDamage(100, 'Mechanical', 'heavy', 1)).toBe(20);
   });
 
-  it('vs concrete dist=2 → 13 (distFactor=8)', () => {
-    expect(modifyDamage(100, 'Mechanical', 'concrete', 2)).toBe(13);
+  it('vs concrete dist=2 → 10 (distFactor=10)', () => {
+    expect(modifyDamage(100, 'Mechanical', 'concrete', 2)).toBe(10);
   });
 });
 
@@ -518,9 +518,9 @@ describe('spreadFactorOverride parameter', () => {
   });
 
   it('spreadFactorOverride=0 uses rapid falloff path', () => {
-    // dist=2 with spread=0: distFactor=2*4=8, 100/8=12.5→13
+    // dist=2 with spread=0: distFactor=2*5=10, 100/10=10
     const result = modifyDamage(100, 'SA', 'none', 2, 1.0, undefined, 0);
-    expect(result).toBe(13);
+    expect(result).toBe(10);
   });
 
   it('spreadFactorOverride=1 gives fastest non-zero falloff', () => {
@@ -651,7 +651,7 @@ describe('cross-product spot checks — warhead x armor x distance', () => {
 
     // Mechanical — repair/heal warhead
     [100, 'Mechanical', 'heavy', 0, 1.0, 100, '1.0x vs all armor'],
-    [100, 'Mechanical', 'none', 1, 1.0, 25, 'spread=0: distFactor=4, 100/4=25'],
+    [100, 'Mechanical', 'none', 1, 1.0, 20, 'spread=0: distFactor=5, 100/5=20'],
 
     // With houseBias
     [100, 'HE', 'none', 0, 1.5, 135, '100*0.9*1.5=135'],

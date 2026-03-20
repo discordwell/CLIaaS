@@ -28,7 +28,9 @@ import { revealZoneFloodFill } from '../engine/fog';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-/** Create a small map with passable interior and rock borders */
+/** Create a small map with passable interior and rock borders.
+ *  C++ parity: isPassable extends 1 cell beyond map bounds, so we fill
+ *  the 1-cell border with ROCK to prevent flood fill from wrapping around. */
 function makeTestMap(boundsX = 0, boundsY = 0, boundsW = 30, boundsH = 30): GameMap {
   const map = new GameMap();
   map.setBounds(boundsX, boundsY, boundsW, boundsH);
@@ -37,6 +39,15 @@ function makeTestMap(boundsX = 0, boundsY = 0, boundsW = 30, boundsH = 30): Game
     for (let cx = boundsX; cx < boundsX + boundsW; cx++) {
       map.setTerrain(cx, cy, Terrain.CLEAR);
     }
+  }
+  // Fill the 1-cell extended border with ROCK to prevent bypass paths
+  for (let cx = boundsX - 1; cx <= boundsX + boundsW; cx++) {
+    if (boundsY - 1 >= 0) map.setTerrain(cx, boundsY - 1, Terrain.ROCK);
+    if (boundsY + boundsH < MAP_CELLS) map.setTerrain(cx, boundsY + boundsH, Terrain.ROCK);
+  }
+  for (let cy = boundsY - 1; cy <= boundsY + boundsH; cy++) {
+    if (boundsX - 1 >= 0) map.setTerrain(boundsX - 1, cy, Terrain.ROCK);
+    if (boundsX + boundsW < MAP_CELLS) map.setTerrain(boundsX + boundsW, cy, Terrain.ROCK);
   }
   return map;
 }
@@ -175,22 +186,20 @@ describe('TACTION_REVEAL_ZONE — zone flood fill (taction.cpp:445-456)', () => 
     }
   });
 
-  it('does NOT flood through TREE cells', () => {
+  it('floods through TREE cells (C++ parity: trees are TerrainClass on CLEAR ground)', () => {
     const map = makeTestMap(0, 0, 5, 3);
-    // Tree barrier at column 2
+    // Tree barrier at column 2 — but trees are passable in C++
     for (let cy = 0; cy < 3; cy++) {
       map.setTerrain(2, cy, Terrain.TREE);
     }
     revealZoneFloodFill(map, 0, 1);
-    // Left of trees should be revealed
+    // C++ parity: trees are placed on CLEAR ground, so flood fill goes through
     expect(isRevealed(map, 0, 0)).toBe(true);
     expect(isRevealed(map, 1, 1)).toBe(true);
-    // Tree column should NOT be revealed
-    expect(isRevealed(map, 2, 0)).toBe(false);
-    expect(isRevealed(map, 2, 1)).toBe(false);
-    // Right of trees should NOT be revealed
-    expect(isRevealed(map, 3, 1)).toBe(false);
-    expect(isRevealed(map, 4, 1)).toBe(false);
+    expect(isRevealed(map, 2, 0)).toBe(true);
+    expect(isRevealed(map, 2, 1)).toBe(true);
+    expect(isRevealed(map, 3, 1)).toBe(true);
+    expect(isRevealed(map, 4, 1)).toBe(true);
   });
 
   it('does NOT flood through WALL cells', () => {

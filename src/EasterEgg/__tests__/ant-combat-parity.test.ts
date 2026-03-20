@@ -152,12 +152,12 @@ describe('modifyDamage (C++ Modify_Damage parity)', () => {
   });
 
   it('SpreadFactor=0 (Organic) has extremely tight falloff', () => {
-    // Organic spreadFactor=0: distFactor = distPixels * 4
-    // At 1px: distFactor = 4, damage = 100/4 = 25
-    // At 2px: distFactor = 8, damage = 100/8 = 12.5 → 13
+    // Organic spreadFactor=0: distFactor = distPixels * 5 (C++ PIXEL_LEPTON_W/4=2)
+    // At 1px: distFactor = 5, damage = 100/5 = 20
+    // At 2px: distFactor = 10, damage = 100/10 = 10
     const d1 = modifyDamage(100, 'Organic', 'none', 1);
     const d2 = modifyDamage(100, 'Organic', 'none', 2);
-    expect(d1).toBe(25);
+    expect(d1).toBe(20);
     expect(d2).toBeLessThan(d1);
   });
 });

@@ -422,7 +422,6 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             // In C++ RA, spy infiltration happens during movement phase before
             // enemy scans. The TS engine processes all entities in one pass,
             // so dogs can kill the spy before it infiltrates.
-            console.log(`[HARNESS] attack_struct: unit=${e.type}(${e.id}) struct=${s.type} ally=${s.ally} dist check...`);
             if (e.type === 'SPY' && e.isPlayerUnit && !s.ally) {
               const sx = s.cx * CELL_SIZE + CELL_SIZE;
               const sy = s.cy * CELL_SIZE + CELL_SIZE;
@@ -439,7 +438,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;
-            e.moveTarget = structCenter;
+            e.moveTarget = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
             e.path = findPath(game.map, e.cell, { cx: s.cx, cy: s.cy }, true, e.isNavalUnit, e.stats.speedClass);
             e.pathIndex = 0;
           }

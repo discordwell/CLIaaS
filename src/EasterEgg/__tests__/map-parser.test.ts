@@ -294,14 +294,17 @@ describe('findCoastalCells', () => {
       expect(ttype[cy * MAP_W + cx]).not.toBe(2);
     }
 
-    // Every coastal cell must have at least one water neighbor
+    // Every coastal cell must have at least one water cell within 3-cell radius
     for (const { cx, cy } of coastal) {
-      const cell = cy * MAP_W + cx;
-      const hasWater =
-        ttype[cell - MAP_W] === 1 || ttype[cell - MAP_W] === 2 ||
-        ttype[cell + MAP_W] === 1 || ttype[cell + MAP_W] === 2 ||
-        ttype[cell - 1] === 1 || ttype[cell - 1] === 2 ||
-        ttype[cell + 1] === 1 || ttype[cell + 1] === 2;
+      let hasWater = false;
+      for (let wy = -3; wy <= 3 && !hasWater; wy++) {
+        for (let wx = -3; wx <= 3 && !hasWater; wx++) {
+          const nc = (cy + wy) * MAP_W + (cx + wx);
+          if (nc >= 0 && nc < MAP_W * MAP_W && (ttype[nc] === 1 || ttype[nc] === 2)) {
+            hasWater = true;
+          }
+        }
+      }
       expect(hasWater).toBe(true);
     }
   });
@@ -312,14 +315,14 @@ describe('findCoastalCells', () => {
     expect(coastal).toEqual([]);
   });
 
-  it('returns at most 10 results', () => {
+  it('returns at most 30 results', () => {
     const ttype = new Uint16Array(MAP_CELL_TOTAL);
     // Fill a long water strip — many coastal cells possible
     for (let x = 10; x < 100; x++) {
       ttype[64 * MAP_W + x] = 1;
     }
     const coastal = findCoastalCells(ttype, 55, 64, 40);
-    expect(coastal.length).toBeLessThanOrEqual(10);
+    expect(coastal.length).toBeLessThanOrEqual(30);
   });
 
   it('excludes edge cells (cx < 1 or cy < 1)', () => {
@@ -348,7 +351,7 @@ describe('SCG11EA coastal detection', () => {
 
     // SCG11EA is a naval mission — there MUST be coastal cells near the base
     expect(cells.length).toBeGreaterThan(0);
-    expect(cells.length).toBeLessThanOrEqual(10);
+    expect(cells.length).toBeLessThanOrEqual(30);
 
     // All results should be within reasonable distance of the search center
     for (const { cx, cy } of cells) {

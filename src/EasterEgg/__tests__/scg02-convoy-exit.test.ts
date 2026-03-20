@@ -31,7 +31,7 @@ beforeEach(() => resetEntityIds());
 
 // Helper: minimal TriggerGameState
 const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameState => ({
-  gameTick: 0,
+  gameTick: 200, // Must be >= 100 to pass C++ ScenarioInit guard for ALL_DESTROYED
   globals: new Set(),
   triggerStartTick: 0,
   triggerName: 'test',

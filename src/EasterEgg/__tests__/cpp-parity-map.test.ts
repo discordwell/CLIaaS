@@ -216,9 +216,9 @@ describe('isPassable — terrain + bounds check (C++ Is_Passable)', () => {
     expect(map.isPassable(15, 15)).toBe(false);
   });
 
-  it('TREE terrain is NOT passable', () => {
+  it('TREE terrain IS passable (C++ parity: trees are TerrainClass on CLEAR ground)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.isPassable(15, 15)).toBe(false);
+    expect(map.isPassable(15, 15)).toBe(true);
   });
 
   it('WALL terrain is NOT passable', () => {
@@ -236,13 +236,17 @@ describe('isPassable — terrain + bounds check (C++ Is_Passable)', () => {
     expect(map.isPassable(5, 5)).toBe(false);
   });
 
-  it('passability respects bounds boundary exactly', () => {
+  it('passability respects bounds boundary with 1-cell extension (C++ parity)', () => {
     // Just inside bounds
     map.setTerrain(10, 10, Terrain.CLEAR);
     expect(map.isPassable(10, 10)).toBe(true);
-    // Just outside bounds
+    // C++ parity: pathfinding extends 1 cell beyond map bounds,
+    // so (9, 10) is passable (boundsX-1 = 9)
     map.setTerrain(9, 10, Terrain.CLEAR);
-    expect(map.isPassable(9, 10)).toBe(false);
+    expect(map.isPassable(9, 10)).toBe(true);
+    // 2 cells outside bounds is NOT passable
+    map.setTerrain(8, 10, Terrain.CLEAR);
+    expect(map.isPassable(8, 10)).toBe(false);
   });
 });
 
@@ -281,9 +285,9 @@ describe('isTerrainPassable — terrain-only check, ignores bounds', () => {
     expect(map.isTerrainPassable(5, 5)).toBe(false);
   });
 
-  it('TREE is NOT terrain-passable', () => {
+  it('TREE IS terrain-passable (C++ parity: trees are TerrainClass on CLEAR ground)', () => {
     map.setTerrain(5, 5, Terrain.TREE);
-    expect(map.isTerrainPassable(5, 5)).toBe(false);
+    expect(map.isTerrainPassable(5, 5)).toBe(true);
   });
 
   it('WALL is NOT terrain-passable', () => {
@@ -372,9 +376,9 @@ describe('canEnterCell — C++ Can_Enter_Cell() for pathfinding (findpath.cpp)',
     expect(map.canEnterCell(15, 15)).toBe(MoveResult.IMPASSABLE);
   });
 
-  it('TREE cell → MoveResult.IMPASSABLE', () => {
+  it('TREE cell → MoveResult.OK (C++ parity: trees are TerrainClass on CLEAR ground)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.canEnterCell(15, 15)).toBe(MoveResult.IMPASSABLE);
+    expect(map.canEnterCell(15, 15)).toBe(MoveResult.OK);
   });
 
   it('WATER cell (land unit) → MoveResult.IMPASSABLE', () => {
@@ -1112,11 +1116,14 @@ describe('Bridge system — template-based bridges (map.cpp)', () => {
     expect(map.countBridgeCells()).toBe(0);
   });
 
-  it('bridge templates (235-252) are counted within bounds', () => {
+  it('bridge templates (131,133,235,236,378,379) with icon=6 are counted', () => {
     const cx = 15, cy = 15;
     map.templateType[cy * MAP_CELLS + cx] = 235;
-    map.templateType[cy * MAP_CELLS + cx + 1] = 240;
-    map.templateType[cy * MAP_CELLS + cx + 2] = 252;
+    map.templateIcon[cy * MAP_CELLS + cx] = 6;
+    map.templateType[cy * MAP_CELLS + cx + 1] = 131;
+    map.templateIcon[cy * MAP_CELLS + cx + 1] = 6;
+    map.templateType[cy * MAP_CELLS + cx + 2] = 379;
+    map.templateIcon[cy * MAP_CELLS + cx + 2] = 6;
     expect(map.countBridgeCells()).toBe(3);
   });
 
@@ -1138,7 +1145,7 @@ describe('Bridge system — template-based bridges (map.cpp)', () => {
 
   it('destroyBridge converts bridge cells to WATER', () => {
     const cx = 15, cy = 15;
-    map.templateType[cy * MAP_CELLS + cx] = 240;
+    map.templateType[cy * MAP_CELLS + cx] = 235; // valid bridge template
     map.setTerrain(cx, cy, Terrain.CLEAR);
     const destroyed = map.destroyBridge(cx, cy, 0);
     expect(destroyed).toBe(1);
@@ -1148,12 +1155,12 @@ describe('Bridge system — template-based bridges (map.cpp)', () => {
 
   it('destroyBridge radius covers multiple cells', () => {
     const cx = 15, cy = 15;
-    // Place bridge cells in a cross pattern
-    map.templateType[cy * MAP_CELLS + cx] = 240;
-    map.templateType[cy * MAP_CELLS + cx + 1] = 241;
-    map.templateType[cy * MAP_CELLS + cx - 1] = 242;
-    map.templateType[(cy + 1) * MAP_CELLS + cx] = 243;
-    map.templateType[(cy - 1) * MAP_CELLS + cx] = 244;
+    // Place valid bridge template IDs in a cross pattern
+    map.templateType[cy * MAP_CELLS + cx] = 131;
+    map.templateType[cy * MAP_CELLS + cx + 1] = 133;
+    map.templateType[cy * MAP_CELLS + cx - 1] = 235;
+    map.templateType[(cy + 1) * MAP_CELLS + cx] = 236;
+    map.templateType[(cy - 1) * MAP_CELLS + cx] = 378;
     const destroyed = map.destroyBridge(cx, cy, 1);
     expect(destroyed).toBe(5);
   });
@@ -1755,7 +1762,7 @@ describe('Passability matrix — all terrain types × land/naval (comprehensive)
     [Terrain.CLEAR,  'CLEAR',  true,  false],
     [Terrain.WATER,  'WATER',  false, true ],
     [Terrain.ROCK,   'ROCK',   false, false],
-    [Terrain.TREE,   'TREE',   false, false],
+    [Terrain.TREE,   'TREE',   true,  false],  // C++ parity: trees are TerrainClass on CLEAR ground
     [Terrain.WALL,   'WALL',   false, false],
     [Terrain.ORE,    'ORE',    true,  false],
     [Terrain.BEACH,  'BEACH',  true,  false],

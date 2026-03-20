@@ -67,11 +67,11 @@ describe('PASSABLE terrain set', () => {
     expect(map.isPassable(5, 5)).toBe(false);
   });
 
-  it('TREE terrain is NOT passable', () => {
+  it('TREE terrain IS passable (C++ parity: trees are TerrainClass on CLEAR ground)', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.TREE);
-    expect(map.isPassable(5, 5)).toBe(false);
+    expect(map.isPassable(5, 5)).toBe(true);
   });
 
   it('WALL terrain is NOT passable', () => {

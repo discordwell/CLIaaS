@@ -773,8 +773,8 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
 };
 
 // Superweapon gameplay constants
-export const IRON_CURTAIN_DURATION = 450;       // C++ rules.cpp:266: fixed(1,2) * TICKS_PER_MINUTE = 0.5 * 900 = 30 seconds
-export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 7; // C++ house.cpp:2753-2755: IronCurtainDuration * TICKS_PER_SECOND = 0.5 * 15
+export const IRON_CURTAIN_DURATION = 675;       // C++ rules.cpp:483 reads IronCurtain=.75 from rules.ini → 0.75 * 900 = 675 ticks (45 seconds)
+export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 11; // C++ house.cpp:2754: IronCurtainDuration * TICKS_PER_SECOND = fixed(3,4) * 15 = 11
 export const NUKE_DAMAGE = 1000;
 export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
 export const NUKE_FLIGHT_TICKS = 45;            // missile travel time
@@ -1215,16 +1215,9 @@ export function buildAlliancesFromINI(
       set.add(ally);
     }
   }
-<<<<<<< Updated upstream
   // C++ parity (house.cpp:7158): Make_Ally(HOUSE_NEUTRAL) for each house.
   // ONE-WAY: everyone considers Neutral an ally. Neutral's own alliances
   // come from INI. No GoodGuy auto-alliance (uses INI like any house).
-=======
-  // C++ parity (house.cpp:7158): every house calls Make_Ally(HOUSE_NEUTRAL).
-  // This is ONE-WAY: everyone considers Neutral an ally, but Neutral's own
-  // alliances come from its INI Allies= entry (e.g., Allies=Special).
-  // C++ has NO auto-alliance for GoodGuy — it uses INI Allies= like any other house.
->>>>>>> Stashed changes
   for (const h of Object.values(House)) {
     table.get(h)?.add(House.Neutral);
   }

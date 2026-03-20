@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-20T16:30Z — Session 161: C++ Score Screen Parity
+- **Score formula**: Replaced TS linear formula (kills*50 - losses*30 + timeBonus) with C++ formula from score.cpp:546-597 — pointTotal + difficulty bias (500/1500/3500), leadership rating (survival ratio), economy rating (money retention ratio). Uses C++ fixed-point math (fixedMul100).
+- **Engine tracking**: Added PointTotal (+cost on enemy kill, -cost on own death), HarvestedCredits, InitialCredits, StolenCredits, per-side casualty counts (alliedUnitsLost, sovietUnitsLost, alliedBuildingsLost, sovietBuildingsLost) to Game class and CombatContext.
+- **Score theme music**: Added playSpecific() to MusicPlayer for C++ THEME_SCORE. Score track excluded from gameplay shuffle via SPECIAL_TRACKS set. Plays 1.2s after mission end.
+- **Presentation rewrite**: renderEndScreen() now shows side-specific backgrounds (blue Allied, red Soviet), animated leadership/economy percentages, difficulty-biased point total, casualty bar graphs (Allied vs Soviet for units and buildings), time display in mm:ss capped at 9:59.
+- **Removed**: Letter grade system (S/A/B/C/D/F — not in C++), time bonus in score, structsLost penalty, score floor at 0 (C++ allows -9999).
+- **SFX**: Added score_beep (C++ Beepy6) and score_swoosh (C++ sfx4) synth sounds.
+- **Tests**: 36 parity tests pass. Former PARITY GAP sections now verify TS matches C++.
+- **Files**: combat.ts, index.ts, renderer.ts, audio.ts, cpp-parity-score-screen.test.ts
+
 ## 2026-03-20T06:00Z — Session 160: SYRD Placement Fix — Vessel-Based Water Detection
 - **Root cause**: Hardcoded coastal cells for SCG11EA were wrong (pointed south at x=18-28, water is EAST at x=60-72). Also, Place_Object requires cells to be IsMapped (explored), so even correct water cells fail if unexplored.
 - **Fix**: Use enemy vessel positions (submarines at x=67-72) to dynamically locate water. Scan area between base and nearest vessel. Send scout tank to explore water cells before SYRD placement.

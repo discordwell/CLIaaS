@@ -58,17 +58,20 @@ describe('MapPack uint16 template types', () => {
 
   it('bridge detection works with uint16 values in countBridgeCells', () => {
     setup();
-    // Set some bridge template cells (235-252)
-    map.templateType[50 * MAP_CELLS + 50] = 240;
-    map.templateType[50 * MAP_CELLS + 51] = 245;
-    map.templateType[50 * MAP_CELLS + 52] = 252;
+    // Set valid bridge template IDs (131,133,235,236,378,379) with icon=6
+    map.templateType[50 * MAP_CELLS + 50] = 235;
+    map.templateIcon[50 * MAP_CELLS + 50] = 6;
+    map.templateType[50 * MAP_CELLS + 51] = 131;
+    map.templateIcon[50 * MAP_CELLS + 51] = 6;
+    map.templateType[50 * MAP_CELLS + 52] = 379;
+    map.templateIcon[50 * MAP_CELLS + 52] = 6;
     expect(map.countBridgeCells()).toBe(3);
   });
 
   it('destroyBridge sets templateType to 1 (water) for bridge cells', () => {
     setup();
     const cx = 50, cy = 50;
-    map.templateType[cy * MAP_CELLS + cx] = 240; // bridge
+    map.templateType[cy * MAP_CELLS + cx] = 235; // valid bridge template
     const destroyed = map.destroyBridge(cx, cy, 0);
     expect(destroyed).toBe(1);
     expect(map.templateType[cy * MAP_CELLS + cx]).toBe(1);

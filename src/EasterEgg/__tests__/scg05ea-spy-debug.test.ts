@@ -48,6 +48,9 @@ describe('SCG05EA spy infiltration test', () => {
     // Find WEAP
     const weap = state.structures.find(s => s.t === 'WEAP' && !s.ally);
     console.log(`WEAP at (${weap!.cx},${weap!.cy}) idx=${weap!.idx}`);
+    // Show all enemy WEAPs
+    const allWeaps = state.structures.filter(s => s.t === 'WEAP' && !s.ally);
+    console.log(`All enemy WEAPs: ${allWeaps.map(w => `idx=${w.idx}(${w.cx},${w.cy},h=${w.h})`).join(', ')}`);
 
     // Send attack_struct DIRECTLY
     const result = await adapter.step(1, [
@@ -71,8 +74,9 @@ describe('SCG05EA spy infiltration test', () => {
         const tanya = state.units.find(u => u.t === 'E7');
         console.log(`Tanya: ${tanya ? `(${tanya.cx},${tanya.cy})` : 'not yet'}`);
         // Wait more for Tanya
-        for (let k = 0; k < 100; k++) {
+        for (let k = 0; k < 300; k++) {
           state = (await adapter.step(30)).state;
+          if (k % 50 === 0) console.log(`  waiting... t=${state.tick} state=${state.state} globals=[${state.globals.join(',')}] units=${state.units.length}`);
           const t = state.units.find(u => u.t === 'E7');
           if (t) {
             console.log(`TANYA SPAWNED at (${t.cx},${t.cy}) tick=${state.tick}!`);

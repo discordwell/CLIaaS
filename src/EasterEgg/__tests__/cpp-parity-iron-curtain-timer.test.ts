@@ -2,12 +2,14 @@
  * C++ Behavioral Parity: Iron Curtain timer mechanics
  *
  * C++ sources:
- *   - rules.cpp:266     — IronCurtainDuration(fixed(1, 2))  [= 0.5]
+ *   - rules.cpp:266     — IronCurtainDuration default = fixed(1, 2) = 0.5
+ *   - rules.cpp:483     — IronCurtainDuration = ini.Get_Fixed(GENERAL, "IronCurtain", ...)
+ *                         rules.ini [General] IronCurtain=.75 → runtime value = 0.75
  *   - house.cpp:2751    — IronCurtainCountDown = Rule.IronCurtainDuration * TICKS_PER_MINUTE
- *                         = 0.5 * 900 = 450 ticks (30 seconds at 15 ticks/sec)
+ *                         = 0.75 * 900 = 675 ticks (45 seconds at 15 ticks/sec)
  *   - house.cpp:2753-55 — FIXIT_CSII: Demo Truck special case:
  *                         IronCurtainCountDown = Rule.IronCurtainDuration * TICKS_PER_SECOND
- *                         = 0.5 * 15 = 7 ticks (integer truncation of 7.5)
+ *                         = 0.75 * 15 = 11 ticks (integer truncation of 11.25)
  *   - defines.h:3031-32 — TICKS_PER_SECOND = 15, TICKS_PER_MINUTE = 900
  *   - techno.cpp:612    — IronCurtainCountDown(0) initialized to zero
  *   - techno.cpp:3807   — if (IronCurtainCountDown == 0) { Take_Damage... }
@@ -55,11 +57,13 @@ beforeEach(() => resetEntityIds());
 // Derived directly from C++ source files, not from TS constants.
 const CPP_TICKS_PER_SECOND = 15;                           // defines.h:3031
 const CPP_TICKS_PER_MINUTE = CPP_TICKS_PER_SECOND * 60;    // defines.h:3032 = 900
-const CPP_IRON_CURTAIN_DURATION_FIXED = 0.5;                // rules.cpp:266 fixed(1,2) = 0.5
+// rules.cpp:266 default is fixed(1,2) = 0.5, but rules.cpp:483 reads rules.ini
+// IronCurtain=.75 which overrides to 0.75. Runtime C++ value = 0.75.
+const CPP_IRON_CURTAIN_DURATION_FIXED = 0.75;               // rules.ini [General] IronCurtain=.75
 const CPP_IRON_CURTAIN_TICKS =
-  Math.floor(CPP_IRON_CURTAIN_DURATION_FIXED * CPP_TICKS_PER_MINUTE); // 0.5 * 900 = 450
+  Math.floor(CPP_IRON_CURTAIN_DURATION_FIXED * CPP_TICKS_PER_MINUTE); // 0.75 * 900 = 675
 const CPP_DEMO_TRUCK_IC_TICKS =
-  Math.floor(CPP_IRON_CURTAIN_DURATION_FIXED * CPP_TICKS_PER_SECOND); // 0.5 * 15 = 7
+  Math.floor(CPP_IRON_CURTAIN_DURATION_FIXED * CPP_TICKS_PER_SECOND); // 0.75 * 15 = 11
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -221,17 +225,17 @@ function makeCombatCtx(
 
 describe('Iron Curtain duration constant (C++ rules.cpp:266, defines.h:3031-3032)', () => {
 
-  it('C++ duration is 450 ticks (30 seconds): IronCurtainDuration(1/2) * TICKS_PER_MINUTE(900)', () => {
-    // C++ rules.cpp:266 — IronCurtainDuration(fixed(1, 2)) = 0.5
-    // C++ house.cpp:2751 — IronCurtainCountDown = 0.5 * 900 = 450
-    expect(CPP_IRON_CURTAIN_TICKS).toBe(450);
+  it('C++ duration is 675 ticks (45 seconds): rules.ini IronCurtain=.75 * TICKS_PER_MINUTE(900)', () => {
+    // C++ rules.cpp:266 default is fixed(1,2) = 0.5, but rules.cpp:483 reads
+    // IronCurtain=.75 from rules.ini [General] section, overriding to 0.75.
+    // C++ house.cpp:2751 — IronCurtainCountDown = 0.75 * 900 = 675
+    expect(CPP_IRON_CURTAIN_TICKS).toBe(675);
   });
 
-  it('TS IRON_CURTAIN_DURATION should match C++ 450 ticks', () => {
-    // PARITY GAP: TS uses 675 (45 seconds), C++ uses 450 (30 seconds)
-    // TS comment says "0.75 min x 60 x 15 FPS = 45 seconds" but C++ uses fixed(1,2) = 0.5 min.
-    // C++ IronCurtainDuration = fixed(1,2) = 0.5, NOT 0.75.
-    expect(IRON_CURTAIN_DURATION).toBe(CPP_IRON_CURTAIN_TICKS); // PARITY GAP
+  it('TS IRON_CURTAIN_DURATION should match C++ 675 ticks', () => {
+    // C++ runtime loads rules.ini which sets IronCurtainDuration = 0.75 (IronCurtain=.75).
+    // 0.75 * 900 = 675 ticks = 45 seconds at 15 FPS.
+    expect(IRON_CURTAIN_DURATION).toBe(CPP_IRON_CURTAIN_TICKS);
   });
 
   it('TICKS_PER_SECOND = 15 (C++ defines.h:3031)', () => {
@@ -494,18 +498,18 @@ describe('Infantry cannot receive Iron Curtain (C++ house.cpp:2746-2763)', () =>
 
 describe('Demo Truck shortened Iron Curtain (C++ house.cpp:2753-2755 FIXIT_CSII)', () => {
 
-  it('C++ demo truck duration is TICKS_PER_SECOND not TICKS_PER_MINUTE = 7 ticks', () => {
+  it('C++ demo truck duration is TICKS_PER_SECOND not TICKS_PER_MINUTE = 11 ticks', () => {
     // C++ house.cpp:2753-2755 (FIXIT_CSII):
     //   if (tech->What_Am_I() == RTTI_UNIT && *(UnitClass *)tech == UNIT_DEMOTRUCK) {
     //     tech->IronCurtainCountDown = Rule.IronCurtainDuration * TICKS_PER_SECOND;
     //   }
-    // = 0.5 * 15 = 7.5, integer truncation → 7 ticks
-    expect(CPP_DEMO_TRUCK_IC_TICKS).toBe(7);
+    // With IronCurtainDuration=0.75 (from rules.ini): 0.75 * 15 = 11.25, truncation → 11 ticks
+    expect(CPP_DEMO_TRUCK_IC_TICKS).toBe(11);
   });
 
   it('TS should give Demo Truck shortened Iron Curtain duration', () => {
-    // PARITY GAP: TS uses IRON_CURTAIN_DURATION (675) for all units including Demo Truck.
-    // C++ overrides it to 7 ticks for Demo Truck.
+    // TS uses IRON_CURTAIN_DEMO_TRUCK_DURATION for Demo Truck, matching C++.
+    // C++ overrides it to 11 ticks for Demo Truck (IronCurtainDuration * TICKS_PER_SECOND).
     const demoTruck = new Entity(UnitType.V_DTRK, House.Spain, 6 * CELL_SIZE, 6 * CELL_SIZE);
     const swState = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { ready: true });
     const ctx = makeSuperweaponCtx({

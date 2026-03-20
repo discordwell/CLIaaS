@@ -393,7 +393,8 @@ describe('IRON curtain entity invulnerability', () => {
     expect(unit.isInvulnerable).toBe(true);
   });
 
-  it('IRON_CURTAIN_DURATION is 675 ticks (45 seconds at 15 FPS)', () => {
+  it('IRON_CURTAIN_DURATION is 675 ticks (45 seconds at 15 FPS) — C++ parity', () => {
+    // C++ rules.cpp:483 reads IronCurtain=.75 from rules.ini → 0.75 * 900 = 675
     expect(IRON_CURTAIN_DURATION).toBe(675);
   });
 

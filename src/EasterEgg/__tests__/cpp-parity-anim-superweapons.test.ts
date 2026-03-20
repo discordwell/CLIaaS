@@ -520,7 +520,7 @@ describe('Iron Curtain (INVUL_BOX) animation — C++ adata.cpp:1603-1625, house.
 
     // C++ house.cpp:2751 — IronCurtainCountDown = Rule.IronCurtainDuration * TICKS_PER_MINUTE
     expect(tank.ironCurtainTick).toBe(IRON_CURTAIN_DURATION);
-    expect(tank.ironCurtainTick).toBe(675);
+    expect(tank.ironCurtainTick).toBe(450); // C++ parity: 30 seconds at 15 FPS
   });
 
   it('Iron Curtain plays iron_curtain sound (C++ VOC_IRON1)', () => {

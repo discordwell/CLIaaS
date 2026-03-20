@@ -635,15 +635,16 @@ describe('canEnterCell — MoveResult classification', () => {
     expect(map.canEnterCell(20, 20)).toBe(MoveResult.IMPASSABLE);
   });
 
-  it('returns IMPASSABLE for rock/tree/wall terrain', () => {
+  it('returns IMPASSABLE for rock/wall terrain, OK for tree (C++ parity)', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
 
     map.setTerrain(5, 5, Terrain.ROCK);
     expect(map.canEnterCell(5, 5)).toBe(MoveResult.IMPASSABLE);
 
+    // C++ parity: trees are TerrainClass objects on CLEAR ground — passable terrain
     map.setTerrain(6, 5, Terrain.TREE);
-    expect(map.canEnterCell(6, 5)).toBe(MoveResult.IMPASSABLE);
+    expect(map.canEnterCell(6, 5)).toBe(MoveResult.OK);
 
     map.setTerrain(7, 5, Terrain.WALL);
     expect(map.canEnterCell(7, 5)).toBe(MoveResult.IMPASSABLE);

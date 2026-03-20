@@ -239,13 +239,13 @@ describe('modifyDamage — C++ Modify_Damage formula', () => {
     expect(modifyDamage(100, 'Organic', 'none', 0)).toBe(100);
   });
 
-  // Spread=0 special case: distFactor = distPixels * 4
-  it('spreadFactor=0: distFactor = distPixels * 4 (rapid falloff)', () => {
+  // Spread=0 special case: distFactor = distPixels * 5 (C++ PIXEL_LEPTON_W/4=10/4=2)
+  it('spreadFactor=0: distFactor = distPixels * 5 (rapid falloff)', () => {
     // Organic has spread=0. Use override since Organic vs anything but none is 0%.
     // Use spreadFactorOverride=0 to test the rapid-falloff distance formula path
     const result = modifyDamage(100, 'Organic', 'none', 2, 1.0, undefined, 0);
-    // spreadFactor=0: distFactor = 2*4 = 8, damage = 100/8 = 12.5 → 13
-    expect(result).toBe(13);
+    // spreadFactor=0: distFactor = 2*5 = 10, damage = 100/10 = 10
+    expect(result).toBe(10);
   });
 
   // House bias multiplier

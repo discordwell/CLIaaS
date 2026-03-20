@@ -24,7 +24,7 @@ import {
 /** Create a minimal TriggerGameState with all required fields */
 function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameState {
   return {
-    gameTick: 0,
+    gameTick: 200, // Must be >= 100 to pass C++ ScenarioInit guard
     globals: new Set(),
     triggerStartTick: 0,
     triggerName: 'test',

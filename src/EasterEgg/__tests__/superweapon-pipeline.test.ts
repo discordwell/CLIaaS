@@ -630,9 +630,10 @@ describe('Chronosphere — teleportation mechanics', () => {
 // ═══════════════════════════════════════════════════════════
 describe('Iron Curtain — invulnerability mechanics', () => {
 
-  it('Iron Curtain duration is 450 ticks (30 seconds at 15 FPS) — C++ parity', () => {
-    expect(IRON_CURTAIN_DURATION).toBe(450);
-    expect(IRON_CURTAIN_DURATION / 15).toBe(30);
+  it('Iron Curtain duration is 675 ticks (45 seconds at 15 FPS) — C++ parity', () => {
+    // C++ rules.cpp:483 reads IronCurtain=.75 from rules.ini → 0.75 * 900 = 675
+    expect(IRON_CURTAIN_DURATION).toBe(675);
+    expect(IRON_CURTAIN_DURATION / 15).toBe(45);
   });
 
   it('sets ironCurtainTick = IRON_CURTAIN_DURATION on target', () => {
