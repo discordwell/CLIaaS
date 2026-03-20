@@ -254,9 +254,9 @@ describe('Wall takes splash damage from projectile collision (combat.cpp:244-270
     // Place a sandbag wall in the projectile path
     ctx.map.setWallType(5, 5, 'SBAG');
 
-    // 155mm artillery: HE warhead with splash, isHigh=false
+    // 155mm artillery: HE warhead with splash, isHigh=false so it stops at the wall
     // HE warhead has destroysWalls=true (WARHEAD_META)
-    const weapon = { ...WEAPON_STATS['155mm'], projectileSpeed: 1.0, isArcing: false };
+    const weapon = { ...WEAPON_STATS['155mm'], projectileSpeed: 1.0, isArcing: false, isHigh: false };
     launchProjectile(ctx, attacker, target, weapon, 150, target.pos.x, target.pos.y, true);
 
     let ticks = 0;

@@ -21,6 +21,9 @@ vi.mock('@/components/AppNav', () => ({
 vi.mock('@/components/PublicNav', () => ({
   default: () => <div data-testid="public-nav">PublicNav</div>,
 }));
+vi.mock('@/components/CommandPalette', () => ({
+  default: () => null,
+}));
 
 import { usePathname } from 'next/navigation';
 import AppNavWrapper from '@/components/AppNavWrapper';
