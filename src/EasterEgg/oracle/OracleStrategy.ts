@@ -274,6 +274,8 @@ export class OracleStrategy {
   private placementAttempts = 0;
   private lastPlacementTick = 0;
   private syrdPlacementStart = -1;
+  private waterScoutId = -1;          // unit sent to scout water for SYRD
+  private waterScoutTarget: Point | null = null;  // where the scout is headed
   private syrdPlacementStart = -1;  // placementAttempts value when SYRD grid scan began
   private scg03eaBridgeIndex = 0;  // 0 = first bridge, 1 = second, 2 = done
   private mineWaypointIndex = 0;
@@ -614,24 +616,57 @@ export class OracleStrategy {
       const isShipyard = buildingProduction.t === 'SYRD' || buildingProduction.t === 'SPEN';
 
       if (isShipyard) {
-        // Place_Object doesn't check adjacency — only IsMapped + Legal_Placement.
-        // SYRD needs all 3x3 foundation cells to be water (SPEED_FLOAT) and mapped.
-        // Strategy: scan a wide band of water cells near hardcoded coastal positions,
-        // starting 2 cells into the water from each coastal point and extending further.
+        // SYRD needs water cells that are mapped (explored). Use enemy vessels
+        // (submarines, destroyers) to locate water, then scan the shore edge
+        // between our base and the water body.
         if (this.syrdPlacementStart < 0) {
           this.syrdPlacementStart = this.placementAttempts;
         }
-        const coastRef = OracleStrategy.COASTAL_CELLS[this.scenario]
-          ?? [{ cx: conYard.cx, cy: conYard.cy + 5 }];
-        // Build a list of candidate water cells: for each coastal point,
-        // try cells 2-8 rows further into the water (higher cy = south)
-        // and ±4 columns laterally. Also try northward (lower cy) in case
-        // water is to the north on some maps.
+
+        // Find water reference from enemy vessels
+        const vessels = state.enemies.filter(
+          (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'MSUB',
+        );
+        const baseCx = conYard.cx;
+        const baseCy = conYard.cy;
+
+        // Build placement candidates: scan a wide grid between base and water.
+        // Use vessel centroid to determine water direction, then scan the
+        // shoreline area (midpoint between base and vessels, ±15 cells).
         const candidates: Array<{ cx: number; cy: number }> = [];
-        for (const ref of coastRef) {
-          for (let dy = -3; dy <= 10; dy++) {
-            for (let dx = -4; dx <= 4; dx++) {
-              candidates.push({ cx: ref.cx + dx, cy: ref.cy + dy });
+        if (vessels.length > 0) {
+          // Find nearest vessel to base
+          let nearest = vessels[0];
+          let bestDist = Infinity;
+          for (const v of vessels) {
+            const d = (v.cx - baseCx) ** 2 + (v.cy - baseCy) ** 2;
+            if (d < bestDist) { bestDist = d; nearest = v; }
+          }
+          // Scan the area between base and nearest vessel, biased toward water.
+          // Start at 60% of the way from base to vessel (shore is roughly there)
+          // and extend ±10 cells in both axes.
+          const midCx = Math.round(baseCx + (nearest.cx - baseCx) * 0.6);
+          const midCy = Math.round(baseCy + (nearest.cy - baseCy) * 0.6);
+          for (let dy = -10; dy <= 10; dy++) {
+            for (let dx = -10; dx <= 10; dx++) {
+              candidates.push({ cx: midCx + dx, cy: midCy + dy });
+            }
+          }
+          // Also try directly around the nearest vessel (guaranteed water)
+          for (let dy = -5; dy <= 5; dy++) {
+            for (let dx = -5; dx <= 5; dx++) {
+              candidates.push({ cx: nearest.cx + dx, cy: nearest.cy + dy });
+            }
+          }
+        }
+        // Fallback: hardcoded coastal cells + wide scan
+        const coastRef = OracleStrategy.COASTAL_CELLS[this.scenario];
+        if (coastRef) {
+          for (const ref of coastRef) {
+            for (let dy = -3; dy <= 10; dy++) {
+              for (let dx = -4; dx <= 4; dx++) {
+                candidates.push({ cx: ref.cx + dx, cy: ref.cy + dy });
+              }
             }
           }
         }
@@ -644,22 +679,21 @@ export class OracleStrategy {
           return true;
         });
 
-        const localIdx = (this.placementAttempts - this.syrdPlacementStart) % uniqueCandidates.length;
-        const cell = uniqueCandidates[localIdx];
-        const placeCx = cell.cx;
-        const placeCy = cell.cy;
-
-        commands.push({
-          cmd: 'place',
-          rtti: RTTI_BUILDINGTYPE,
-          cx: placeCx,
-          cy: placeCy,
-        });
-        if (state.tick - this.lastPlacementTick > 30) {
-          this.placementAttempts++;
-          this.lastPlacementTick = state.tick;
+        if (uniqueCandidates.length > 0) {
+          const localIdx = (this.placementAttempts - this.syrdPlacementStart) % uniqueCandidates.length;
+          const cell = uniqueCandidates[localIdx];
+          commands.push({
+            cmd: 'place',
+            rtti: RTTI_BUILDINGTYPE,
+            cx: cell.cx,
+            cy: cell.cy,
+          });
+          if (state.tick - this.lastPlacementTick > 30) {
+            this.placementAttempts++;
+            this.lastPlacementTick = state.tick;
+          }
+          reasons.push(`place ${buildingProduction.t} at (${cell.cx},${cell.cy}) [water ${localIdx}/${uniqueCandidates.length}]`);
         }
-        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy}) [water scan ${localIdx}/${uniqueCandidates.length}]`);
       } else {
         // Sort placement offsets by priority:
         // 1. If shipyard is upcoming in build order, bias toward nearest water
@@ -921,6 +955,49 @@ export class OracleStrategy {
     if (vesselProduction?.done) {
       commands.push({ cmd: 'place', rtti: RTTI_VESSELTYPE });
       reasons.push(`launch ${vesselProduction.t}`);
+    }
+
+    // --- Phase 3.4: WATER SCOUTING FOR SYRD ---
+    // Send a tank toward water to map cells for shipyard placement.
+    // Triggered when SYRD is in production or upcoming in build order.
+    const syrdInProd = buildingProduction?.t === 'SYRD' || buildingProduction?.t === 'SPEN';
+    const syrdUpcoming = this.baseBuildIndex < BUILD_ORDER.length &&
+      BUILD_ORDER.slice(this.baseBuildIndex).some((e) =>
+        e.names.includes('SYRD') || e.names.includes('SPEN'));
+    if ((syrdInProd || syrdUpcoming) && this.waterScoutId < 0) {
+      // Find enemy vessels to determine water direction
+      const waterVessels = state.enemies.filter(
+        (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'MSUB',
+      );
+      if (waterVessels.length > 0) {
+        // Find nearest vessel to base
+        const base = conYard;
+        let nearest = waterVessels[0];
+        let bestDist = Infinity;
+        for (const v of waterVessels) {
+          const d = (v.cx - base.cx) ** 2 + (v.cy - base.cy) ** 2;
+          if (d < bestDist) { bestDist = d; nearest = v; }
+        }
+        // Scout target: 70% of way from base to nearest vessel (near shore)
+        this.waterScoutTarget = {
+          cx: Math.round(base.cx + (nearest.cx - base.cx) * 0.7),
+          cy: Math.round(base.cy + (nearest.cy - base.cy) * 0.7),
+        };
+        // Find an idle tank to send as scout
+        const tanks = playerUnits.filter(
+          (u) => (u.t === '2TNK' || u.t === '1TNK' || u.t === '3TNK') && u.m === 0,
+        );
+        if (tanks.length > 0) {
+          this.waterScoutId = tanks[0].id;
+          commands.push({
+            cmd: 'move',
+            ids: [this.waterScoutId],
+            cx: this.waterScoutTarget.cx,
+            cy: this.waterScoutTarget.cy,
+          });
+          reasons.push(`scout water at (${this.waterScoutTarget.cx},${this.waterScoutTarget.cy})`);
+        }
+      }
     }
 
     // --- Phase 3.5: TRANSPORT LOADING ---
@@ -1828,24 +1905,41 @@ export class OracleStrategy {
           this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 25,
       );
 
-      // Always re-command the spy — don't wait for idle.
-      // The spy can get stuck in ATTACK mission with no valid path, so we
-      // must override with move commands to guide it through waypoints.
-      if (targetWeap && this.distanceSq(spy, targetWeap) <= 36) {
-        // Close enough — infiltrate
+      // Waypoint routing with dog-clear sprint through y=50.
+      // Rock formation at x=22-28, y=48-49 forces a dip south.
+      // Dogs patrol y=50-55, so only sprint when the path is clear.
+      // Rock formation at x=22-28, y=48-49. Route around via y=50.
+      const spyWaypoints: Point[] = [
+        { cx: 18, cy: 48 },   // north from peninsula
+        { cx: 21, cy: 48 },   // east along y=48 (last cell before rocks)
+        { cx: 21, cy: 49 },   // south one step
+        { cx: 22, cy: 50 },   // south-east to y=50 (below rocks)
+        { cx: 26, cy: 50 },   // east along clear y=50
+        { cx: 30, cy: 50 },   // continue east past rocks
+        { cx: 30, cy: 48 },   // back north after rock formation
+        { cx: 40, cy: 48 },   // east to WEAP approach
+      ];
+
+      // Find current waypoint
+      let wpIdx = 0;
+      for (let i = 0; i < spyWaypoints.length; i++) {
+        if (this.distanceSq(spy, spyWaypoints[i]) <= 4) {
+          wpIdx = i + 1;
+        }
+      }
+
+      // At wp2 (sprint zone) — wait for dogs to clear before committing
+      // No waiting — just sprint. Dogs patrol through every possible path.
+      // The spy's 25 HP may not survive, but waiting means the timer runs out.
+
+      if (targetWeap && (wpIdx >= spyWaypoints.length || this.distanceSq(spy, targetWeap) <= 36)) {
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-        reasons.push(`spy infiltrate WEAP (${spy.cx},${spy.cy})`);
-      } else if (spy.cy > 48) {
-        // Go north to escape the patrol zone (y=48 is northmost passable row)
-        commands.push({ cmd: 'move', ids: [spy.id], cx: Math.min(spy.cx + 2, 40), cy: 48 });
-        reasons.push(`spy north → (${Math.min(spy.cx + 2, 40)},48)`);
-      } else if (spy.cx < 40) {
-        // At y=48, go east (patrol-free corridor)
-        const nextX = Math.min(spy.cx + 10, 40);
-        commands.push({ cmd: 'move', ids: [spy.id], cx: nextX, cy: 48 });
-        reasons.push(`spy east → (${nextX},48)`);
+        reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+      } else if (wpIdx < spyWaypoints.length) {
+        const wp = spyWaypoints[wpIdx];
+        commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
+        reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy})`);
       } else if (targetWeap) {
-        // At x≥40, y=48 — go to WEAP
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
         reasons.push(`spy → WEAP (${spy.cx},${spy.cy})`);
       } else {
