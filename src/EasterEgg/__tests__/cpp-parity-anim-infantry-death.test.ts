@@ -212,16 +212,16 @@ describe('die2 frame data matches C++ idata.cpp DO_EXPLOSION_DEATH', () => {
 // ─── 5. Alias infantry types use correct DoControls ─────────────────────────
 
 describe('Alias infantry types share correct animation data', () => {
-  it('SHOK uses same animation as E7 (C++ Shock Trooper = E7DoControls)', () => {
-    expect(INFANTRY_ANIMS.SHOK).toBe(INFANTRY_ANIMS.E7);
+  it('SHOK uses same animation as E4 (C++ Shock Trooper = E4DoControls — idata.cpp:852)', () => {
+    expect(INFANTRY_ANIMS.SHOK).toBe(INFANTRY_ANIMS.E4);
   });
 
   it('MEDI uses same animation as MECH (C++ MedicDoControls)', () => {
     expect(INFANTRY_ANIMS.MEDI).toBe(INFANTRY_ANIMS.MECH);
   });
 
-  it('SHOK die1 matches E7 die1', () => {
-    expect(INFANTRY_ANIMS.SHOK.die1.frame).toBe(262);
+  it('SHOK die1 matches E4 die1', () => {
+    expect(INFANTRY_ANIMS.SHOK.die1.frame).toBe(416); // E4: 510-94=416
     expect(INFANTRY_ANIMS.SHOK.die1.count).toBe(8);
   });
 

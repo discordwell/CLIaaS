@@ -25,7 +25,7 @@ describe('INFANTRY_SHAPE parity', () => {
 // ============================================================
 describe('INFANTRY_ANIMS parity', () => {
   it('has 11 keys (9 base + 2 aliases)', () => {
-    // E1, E2, E3, E4, E6, DOG, E7, SPY, MECH + SHOK(=E7), MEDI(=MECH)
+    // E1, E2, E3, E4, E6, DOG, E7, SPY, MECH + SHOK(=E4), MEDI(=MECH)
     expect(Object.keys(INFANTRY_ANIMS)).toHaveLength(11);
   });
 
@@ -207,8 +207,8 @@ describe('INFANTRY_ANIMS parity', () => {
 
   // --- Aliases ---
   describe('aliases', () => {
-    it('SHOK is same reference as E7', () => {
-      expect(INFANTRY_ANIMS.SHOK).toBe(INFANTRY_ANIMS.E7);
+    it('SHOK is same reference as E4 (C++ idata.cpp:852 — E4DoControls)', () => {
+      expect(INFANTRY_ANIMS.SHOK).toBe(INFANTRY_ANIMS.E4);
     });
 
     it('MEDI is same reference as MECH', () => {

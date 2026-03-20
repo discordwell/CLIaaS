@@ -321,7 +321,7 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     idle:      { frame: 216, count: 18, jump: 0 },
     walkRate: 2,
   },
-  E7: { // E7DoControls (idata.cpp:200) — Shock Trooper
+  E7: { // E7DoControls (idata.cpp:200) — Tanya (INFANTRY_TANYA, idata.cpp:530-531)
     ready:     { frame: 0,   count: 1,  jump: 1 },
     walk:      { frame: 8,   count: 6,  jump: 6 },
     fire:      { frame: 56,  count: 7,  jump: 7 },
@@ -363,8 +363,8 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     idle:      { frame: 178, count: 15, jump: 0 },
   },
 };
-// SHOK uses same sprite/animation as E7 (Shock Trooper = E7 unit type in C++)
-INFANTRY_ANIMS.SHOK = INFANTRY_ANIMS.E7;
+// SHOK uses E4DoControls (Flamethrower animations) — idata.cpp:852
+INFANTRY_ANIMS.SHOK = INFANTRY_ANIMS.E4;
 // MEDI uses same animation layout as MECH (MedicDoControls in idata.cpp:273)
 INFANTRY_ANIMS.MEDI = INFANTRY_ANIMS.MECH;
 
