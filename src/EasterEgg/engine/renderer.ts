@@ -2712,9 +2712,9 @@ export class Renderer {
     ctx.lineWidth = 1;
     ctx.strokeRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
 
-    // Radar jammed (GAP generator): show static/snow noise (C++ radar.cpp Radar_Anim,
-    // IsRadarJammed cycles frames near RADAR_ACTIVATED_FRAME — green-tinted TV static)
-    if (this.isRadarJammed && this.hasRadar) {
+    // Radar jammed (GAP generator): show static/snow noise (C++ radar.cpp:469 Radar_Anim,
+    // IsRadarJammed is checked BEFORE IsRadarActive — jamming takes priority regardless)
+    if (this.isRadarJammed) {
       this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
       if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
         const cells = Math.ceil(mmSize / 3);

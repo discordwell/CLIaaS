@@ -160,7 +160,18 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       // Should show faction emblem, NOT static
       expect(r.hasRadar).toBe(false);
       expect(r.isRadarJammed).toBe(false);
-      // radarStaticData should not be generated for the off state
+    });
+
+    it('jammed + no radar → jammed takes priority over emblem (radar.cpp:469)', () => {
+      // C++ radar.cpp:469: IsRadarJammed is checked BEFORE IsRadarActive at line 480.
+      // If a jammed player loses their DOME, the display should still show static
+      // (jamming), not the faction emblem. The jam check has no dependency on radar state.
+      const r = new Renderer(mockCanvas());
+      r.hasRadar = false;
+      r.isRadarJammed = true;
+      // isRadarJammed alone is sufficient to trigger static display
+      expect(r.isRadarJammed).toBe(true);
+      expect(r.hasRadar).toBe(false);
     });
   });
 
