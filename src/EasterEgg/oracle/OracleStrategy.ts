@@ -257,6 +257,7 @@ export class OracleStrategy {
   private minesLaid = 0;              // total mines laid so far
   private mcvSpawnTick = 0;           // tick when MCV first appeared
   private mcvDeployAttempts = 0;      // how many times we've tried deploying
+  private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
   private currentTick = 0;
   private lastUnitTargets = new Map<number, { targetId: number; cx: number; cy: number; tick: number }>();
@@ -301,6 +302,8 @@ export class OracleStrategy {
       result = this.decideScg03ea(state);
     } else if (this.scenario === 'SCG08EA') {
       result = this.decideScg08ea(state);
+    } else if (this.scenario === 'SCG09EA') {
+      result = this.decideTransportEscape(state);
     } else {
       result = this.decideGeneric(state);
     }
@@ -752,7 +755,11 @@ export class OracleStrategy {
       reasons.push(`launch ${vesselProduction.t}`);
     }
 
-    // --- Phase 3.5: MINELAYER DEFENSE ---
+    // --- Phase 3.5: TRANSPORT LOADING ---
+    // Load idle infantry into nearby transports (ferrying reinforcements to islands, etc.)
+    this.handleTransports(state, commands, reasons);
+
+    // --- Phase 3.6: MINELAYER DEFENSE ---
     this.dispatchMinelayers(playerUnits, conYard, commands, reasons);
 
     // --- Phase 3.75: M8 INTERCEPTION (mission-specific) ---
@@ -1820,6 +1827,196 @@ export class OracleStrategy {
     }
 
     return { commands, reason: reasons.join('; ') };
+  }
+
+  // ── Transport loading/unloading ────────────────────────────────────────────
+
+  /**
+   * Generic transport handler: find player-owned transports (LST, TRAN, APC),
+   * load nearby idle infantry into them, and unload at destinations.
+   * Returns commands + reasons to append to the caller's decision.
+   */
+  private handleTransports(
+    state: RAGameState,
+    commands: Array<Record<string, unknown>>,
+    reasons: string[],
+  ): void {
+    const playerUnits = this.playerOwnedUnits(state);
+    const transports = playerUnits.filter((u) => TRANSPORT_TYPES.has(u.t));
+    if (transports.length === 0) return;
+
+    // Find infantry not already in a transport and not assigned to critical tasks
+    const availableInfantry = playerUnits.filter(
+      (u) => isInfantryByType(u.t) && this.isIdle(u) &&
+        !NON_COMBAT_TYPES.has(u.t),
+    );
+
+    for (const transport of transports) {
+      const currentCargo = transport.cargo ?? 0;
+      if (currentCargo >= TRANSPORT_MAX_PASSENGERS) continue;
+
+      // Find infantry close enough to board
+      const nearbyInf = availableInfantry.filter(
+        (inf) => this.distanceSq(inf, transport) <= TRANSPORT_BOARD_DISTANCE_SQ,
+      );
+
+      const slotsAvailable = TRANSPORT_MAX_PASSENGERS - currentCargo;
+      const toBoard = nearbyInf.slice(0, slotsAvailable);
+
+      for (const inf of toBoard) {
+        commands.push({
+          cmd: 'enter',
+          ids: [inf.id],
+          target: transport.id,
+        });
+        reasons.push(`board ${inf.t} → ${transport.t}`);
+        // Remove from available pool so we don't double-assign
+        const idx = availableInfantry.indexOf(inf);
+        if (idx >= 0) availableInfantry.splice(idx, 1);
+      }
+    }
+  }
+
+  /**
+   * SCG09EA "Infiltration" transport escape mission.
+   *
+   * Mission flow:
+   * - Player starts with 2 E1 infantry in the south (~37,94)/(44,96).
+   * - Sneak north through enemy patrols toward the enemy base.
+   * - Trigger conditions cause a TRAN (chinook) to arrive for evacuation.
+   * - Load all units into the chinook, move it to the southern map edge.
+   * - Win condition fires when transport reaches the escape point.
+   *
+   * Before the transport arrives: carefully advance infantry northward,
+   * avoiding combat where possible. Once the transport appears: load
+   * everyone in and move to the escape point.
+   */
+  private decideTransportEscape(state: RAGameState): OracleDecision {
+    const commands: Array<Record<string, unknown>> = [];
+    const reasons: string[] = [];
+    const playerUnits = this.playerOwnedUnits(state);
+    const infantry = playerUnits.filter((u) => isInfantryByType(u.t));
+    const transport = playerUnits.find((u) => TRANSPORT_TYPES.has(u.t));
+
+    if (transport) {
+      this.scg09eaTransportSeen = true;
+    }
+
+    // --- Phase: Transport has arrived — load and escape ---
+    if (transport && this.scg09eaTransportSeen) {
+      const currentCargo = transport.cargo ?? 0;
+      const allLoaded = infantry.length === 0 || currentCargo >= infantry.length;
+
+      if (allLoaded) {
+        // Everyone aboard (or no infantry left) — move transport to escape point
+        if (this.distanceSq(transport, SCG09EA_ESCAPE_POINT) > 4) {
+          commands.push({
+            cmd: 'move',
+            ids: [transport.id],
+            cx: SCG09EA_ESCAPE_POINT.cx,
+            cy: SCG09EA_ESCAPE_POINT.cy,
+          });
+          reasons.push(`escape → (${SCG09EA_ESCAPE_POINT.cx},${SCG09EA_ESCAPE_POINT.cy})`);
+        } else {
+          reasons.push('transport at escape point — waiting for win');
+        }
+      } else {
+        // Load infantry into the transport
+        for (const inf of infantry) {
+          if (this.distanceSq(inf, transport) <= TRANSPORT_BOARD_DISTANCE_SQ) {
+            commands.push({
+              cmd: 'enter',
+              ids: [inf.id],
+              target: transport.id,
+            });
+            reasons.push(`board ${inf.t} → ${transport.t}`);
+          } else {
+            // Move infantry toward the transport
+            commands.push({
+              cmd: 'move',
+              ids: [inf.id],
+              cx: transport.cx,
+              cy: transport.cy,
+            });
+            reasons.push(`${inf.t} → transport`);
+          }
+        }
+
+        // Keep transport stationary while loading (unless under fire)
+        const nearbyThreats = state.enemies.filter(
+          (e) => this.distanceSq(e, transport) <= 144,
+        );
+        if (nearbyThreats.length > 0) {
+          // Under fire — move transport away from threats
+          const threat = nearbyThreats[0];
+          const dx = transport.cx - threat.cx;
+          const dy = transport.cy - threat.cy;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          commands.push({
+            cmd: 'move',
+            ids: [transport.id],
+            cx: Math.round(transport.cx + (dx / len) * 5),
+            cy: Math.round(transport.cy + (dy / len) * 5),
+          });
+          reasons.push('transport evades threat');
+        }
+      }
+
+      return {
+        commands: this.dedupeCommands(commands),
+        reason: reasons.join('; ') || 'transport escape — waiting',
+      };
+    }
+
+    // --- Phase: No transport yet — sneak infantry forward ---
+    // Advance infantry northward (lower cy values), avoiding enemies where possible
+    if (infantry.length > 0) {
+      const nearbyEnemies = state.enemies.filter(
+        (e) => infantry.some((inf) => this.distanceSq(inf, e) <= 144), // 12 cells
+      );
+
+      if (nearbyEnemies.length > 0) {
+        // Enemies nearby — evade: move perpendicular to threats
+        for (const inf of infantry) {
+          const nearestThreat = this.nearestEnemy(inf, nearbyEnemies);
+          const dx = inf.cx - nearestThreat.cx;
+          const dy = inf.cy - nearestThreat.cy;
+          // Flee perpendicular + slightly north
+          const perpX = inf.id % 2 === 0 ? -dy : dy;
+          const perpY = -Math.abs(dx); // bias northward
+          const len = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+          commands.push({
+            cmd: 'move',
+            ids: [inf.id],
+            cx: Math.max(0, Math.min(127, Math.round(inf.cx + (perpX / len) * 5))),
+            cy: Math.max(0, Math.min(127, Math.round(inf.cy + (perpY / len) * 5))),
+          });
+        }
+        reasons.push(`evade ${nearbyEnemies.length} enemies`);
+      } else if (this.isIdle(infantry[0])) {
+        // No enemies — advance north toward enemy base area
+        // Head toward the ent1 trigger cells around (48,36) to trigger events
+        const advanceTarget: Point = { cx: 48, cy: 36 };
+        for (const inf of infantry) {
+          commands.push({
+            cmd: 'move',
+            ids: [inf.id],
+            cx: advanceTarget.cx,
+            cy: advanceTarget.cy,
+          });
+        }
+        reasons.push(`advance → (${advanceTarget.cx},${advanceTarget.cy})`);
+      } else {
+        reasons.push('sneaking...');
+      }
+    } else {
+      reasons.push('no infantry — waiting for transport');
+    }
+
+    return {
+      commands: this.dedupeCommands(commands),
+      reason: reasons.join('; ') || 'infiltration — waiting',
+    };
   }
 
   private playerOwnedUnits(state: RAGameState): RAEntity[] {
