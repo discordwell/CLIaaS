@@ -560,6 +560,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     for (const other of ctx.entities) {
       if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
       if (!canTargetNaval(entity, other)) continue;
+      // C++ parity: spies are INVISIBLE to all non-dog units (techno.cpp:1554-1564)
+      if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
       // AA gate: ground units on hunt can't target airborne aircraft without AA weapons
       if (other.isAirUnit && other.flightAltitude > 0) {
         const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
@@ -764,6 +766,9 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     if (ctx.entitiesAllied(entity, other)) continue;
     // M8: Dogs ONLY target infantry (C++ techno.cpp:2017-2026 — THREAT_INFANTRY)
     if (isDog && !other.stats.isInfantry) continue;
+    // C++ parity: spies are INVISIBLE to all non-dog units (techno.cpp:1554-1564).
+    // Only dogs can evaluate a spy as a valid target. All others return false.
+    if (other.type === UnitType.I_SPY && !isDog) continue;
     // Naval combat target filtering
     if (!canTargetNaval(entity, other)) continue;
     // Air combat target filtering: ground units without AA weapons skip aircraft
@@ -821,6 +826,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   entity.lastGuardScan = ctx.tick;
 
   const origin = entity.guardOrigin ?? entity.pos;
+  const isDog = entity.type === UnitType.I_DOG;
   // A5: Scan from home position (C++ foot.cpp:967 — temporarily swaps coords)
   // Use origin position for distance checks so guards defend their post, not where they wandered
   const scanPos = origin;
@@ -838,6 +844,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
     // Check for enemies while returning
     for (const other of ctx.entities) {
       if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
+      // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
+      if (other.type === UnitType.I_SPY && !isDog) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist > entity.stats.sight) continue;
       const oc2 = other.cell;
@@ -875,6 +883,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   let bestScore = -Infinity;
   for (const other of ctx.entities) {
     if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
+    // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
+    if (other.type === UnitType.I_SPY && !isDog) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = worldDist(scanPos, other.pos);
     if (dist > scanRange) continue;
@@ -964,6 +974,8 @@ export function updateAmbush(ctx: MissionAIContext, entity: Entity): void {
   const ec = entity.cell;
   for (const other of ctx.entities) {
     if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
+    // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
+    if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
     if (worldDist(entity.pos, other.pos) > entity.stats.sight) continue;
     const oc = other.cell;
     if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;

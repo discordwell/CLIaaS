@@ -4136,6 +4136,8 @@ export class Game {
       let bestScore = -Infinity;
       for (const other of this.entities) {
         if (!other.alive || other.inLimbo || this.entitiesAllied(entity, other)) continue;
+        // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
+        if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
         const dist = worldDist(entity.pos, other.pos);
         if (dist > scanRange) continue;
         if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;

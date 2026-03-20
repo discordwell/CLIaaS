@@ -443,6 +443,39 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     // Cloaked sub should not be targeted (no anti-sub weapon on E1)
     expect(hunter.target).toBeNull();
   });
+
+  it('hunt infantry ignores enemy spy (C++ techno.cpp:1554-1564)', () => {
+    const hunter = makeEntity(UnitType.E1, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [hunter, spy],
+    });
+
+    hunter.mission = Mission.HUNT;
+    hunter.target = null;
+    updateHunt(ctx, hunter);
+
+    // Infantry on hunt MUST NOT target spies
+    expect(hunter.target).toBeNull();
+    expect(hunter.mission).toBe(Mission.GUARD); // falls to idle
+  });
+
+  it('hunt dog CAN target enemy spy (C++ techno.cpp:1558)', () => {
+    const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [dog, spy],
+    });
+
+    dog.mission = Mission.HUNT;
+    dog.target = null;
+    updateHunt(ctx, dog);
+
+    // Dogs CAN target spies in hunt mode
+    expect(dog.target).toBe(spy);
+  });
 });
 
 
@@ -573,6 +606,154 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     // Should target the structure
     expect(guard.targetStructure).not.toBeNull();
     expect(guard.mission).toBe(Mission.ATTACK);
+  });
+});
+
+
+// ============================================================
+// Section 3b: Spy Target Exclusion in Guard Scan — C++ techno.cpp:1554-1564
+// ============================================================
+describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () => {
+  /*
+   * C++ techno.cpp:1554-1564:
+   *   // Never consider a spy to be a valid target, unless you're a dog
+   *   if (otype == RTTI_INFANTRY && ((InfantryTypeClass const *)tclass)->Type == INFANTRY_SPY) {
+   *     if (What_Am_I() == RTTI_INFANTRY && ((InfantryClass *)this)->Class->IsDog) {
+   *       // continue executing...
+   *     } else {
+   *       return(false);
+   *     }
+   *   }
+   *
+   * This means infantry, tanks, V2 launchers — ALL non-dog units — cannot
+   * target a spy. Only dogs can evaluate a spy as a valid target.
+   */
+
+  it('infantry in guard mode ignores enemy spy (C++ techno.cpp:1557-1563)', () => {
+    const guard = makeEntity(UnitType.E1, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [guard, spy],
+      tick: 200,
+    });
+
+    guard.mission = Mission.GUARD;
+    guard.lastGuardScan = 0;
+    updateGuard(ctx, guard);
+
+    // Infantry MUST NOT target spies — only dogs can
+    expect(guard.target).toBeNull();
+    expect(guard.mission).toBe(Mission.GUARD);
+  });
+
+  it('tank in guard mode ignores enemy spy (C++ techno.cpp:1557-1563)', () => {
+    const tank = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [tank, spy],
+      tick: 200,
+    });
+
+    tank.mission = Mission.GUARD;
+    tank.lastGuardScan = 0;
+    updateGuard(ctx, tank);
+
+    // Tanks MUST NOT target spies
+    expect(tank.target).toBeNull();
+    expect(tank.mission).toBe(Mission.GUARD);
+  });
+
+  it('dog in guard mode DOES detect enemy spy within 3 cells (C++ techno.cpp:1558)', () => {
+    const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [dog, spy],
+      tick: 200,
+    });
+
+    dog.mission = Mission.GUARD;
+    dog.lastGuardScan = 0;
+    updateGuard(ctx, dog);
+
+    // Dogs CAN and MUST target spies
+    expect(dog.target).toBe(spy);
+    expect(dog.mission).toBe(Mission.ATTACK);
+  });
+
+  it('dog targets spy at 4 cells via normal guard scan (beyond 3-cell fast-detect, within sight=5)', () => {
+    const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 4 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [dog, spy],
+      tick: 200,
+    });
+
+    dog.mission = Mission.GUARD;
+    dog.lastGuardScan = 0;
+    updateGuard(ctx, dog);
+
+    // Dog can still target spy via normal Evaluate_Object path (sight=5 > 4 cells)
+    // C++ techno.cpp:1558: dogs pass the spy check, so they proceed to normal evaluation
+    expect(dog.target).toBe(spy);
+    expect(dog.mission).toBe(Mission.ATTACK);
+  });
+
+  it('dog ignores spy beyond sight range (C++ parity: dog sight=5)', () => {
+    const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 6 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [dog, spy],
+      tick: 200,
+    });
+
+    dog.mission = Mission.GUARD;
+    dog.lastGuardScan = 0;
+    updateGuard(ctx, dog);
+
+    // Beyond sight range — dog cannot detect
+    expect(dog.target).toBeNull();
+  });
+
+  it('infantry targets normal enemy but ignores spy when both present (C++ techno.cpp:1557)', () => {
+    const guard = makeEntity(UnitType.E1, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
+    const normalEnemy = makeEntity(UnitType.E1, House.Greece, 100 + 3 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [guard, spy, normalEnemy],
+      tick: 200,
+    });
+
+    guard.mission = Mission.GUARD;
+    guard.lastGuardScan = 0;
+    updateGuard(ctx, guard);
+
+    // Should target the normal enemy, NOT the spy
+    expect(guard.target).toBe(normalEnemy);
+    expect(guard.mission).toBe(Mission.ATTACK);
+  });
+
+  it('V2 rocket launcher ignores spy (C++ techno.cpp:1557-1563)', () => {
+    const v2 = makeEntity(UnitType.V_V2RL, House.USSR, 100, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 3 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({
+      entities: [v2, spy],
+      tick: 200,
+    });
+
+    v2.mission = Mission.GUARD;
+    v2.lastGuardScan = 0;
+    updateGuard(ctx, v2);
+
+    // V2 launchers MUST NOT target spies
+    expect(v2.target).toBeNull();
+    expect(v2.mission).toBe(Mission.GUARD);
   });
 });
 
