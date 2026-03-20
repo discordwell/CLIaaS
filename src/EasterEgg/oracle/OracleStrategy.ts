@@ -788,7 +788,7 @@ export class OracleStrategy {
 
         // In survival mode, ALL units defend — no surplus chasing.
         // In non-survival, surplus attacks nearby enemies within leash range.
-        const isTimedSurvival = state.missionTimerActive && state.missionTimer > 0;
+        const isTimedSurvival = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) && state.missionTimerActive && state.missionTimer > 0;
         if (isTimedSurvival) {
           // Survival: surplus also helps defend — everyone fights base threats
           if (surplus.length > 0) {
@@ -839,7 +839,7 @@ export class OracleStrategy {
         } else {
         // No base threats, no unit threats — decide: attack or turtle?
         // If there's a mission timer counting down, this is a survival mission — turtle.
-        const isTimedSurvival = state.missionTimerActive && state.missionTimer > 0;
+        const isTimedSurvival = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario) && state.missionTimerActive && state.missionTimer > 0;
         const tankCount = fighters.filter((u) => u.t.includes('TNK')).length;
         const friendlyStr = fighters.reduce(
           (s, u) => s + (u.t.includes('TNK') ? 3 : 1) * (u.hp / u.mhp), 0,
