@@ -516,7 +516,7 @@ describe('WEAPON_STATS parity', () => {
   it('120mm — has burst: 2', () => {
     const w = WEAPON_STATS['120mm'];
     expect(w.damage).toBe(40);
-    expect(w.burst).toBe(2);
+    expect(w.burst).toBe(2);  // rules.ini [120mm] Burst=2
   });
 
   it('TeslaCannon — damage=150, rof=120, range=8.5 (C++ RULES.INI TeslaZap)', () => {
