@@ -976,7 +976,11 @@ function toHouse(name: string): House {
     case 'badguy': return House.BadGuy;
     case 'special': return House.Neutral;
     case 'neutral': return House.Neutral;
-    default: return House.Neutral;
+    // C++ parity: Multi1-Multi8 are distinct houses with no default alliances.
+    // In single-player, they're scenario-specific holders (not Neutral, not allied).
+    // Mapping unknown houses to Neutral would make them allied to everyone
+    // (via Make_Ally(HOUSE_NEUTRAL)), so fall back to BadGuy instead.
+    default: return House.BadGuy;
   }
 }
 
