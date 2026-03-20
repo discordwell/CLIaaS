@@ -660,15 +660,15 @@ describe('AssetManager class behavior', () => {
     expect(mgr.getShadowSheet('nonexistent')).toBeNull();
   });
 
-  it('drawFrame silently returns when sheet not loaded (no throw)', () => {
+  it('drawFrame renders magenta placeholder when sheet not loaded (no throw)', () => {
     const mgr = new AssetManager();
-    // drawFrame should not throw when the sheet is missing
+    // drawFrame should not throw — draws magenta checkerboard placeholder
     expect(() => {
       mgr.drawFrame(null as any, 'missing_sheet', 0, 0, 0);
     }).not.toThrow();
   });
 
-  it('drawFrameFrom silently returns when sheet not loaded (no throw)', () => {
+  it('drawFrameFrom renders magenta placeholder when sheet not loaded (no throw)', () => {
     const mgr = new AssetManager();
     expect(() => {
       mgr.drawFrameFrom(null as any, null as any, 'missing_sheet', 0, 0, 0);

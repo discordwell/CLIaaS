@@ -256,7 +256,10 @@ export class AssetManager {
     options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
   ): void {
     const sheet = this.sheets.get(sheetName);
-    if (!sheet) return;
+    if (!sheet) {
+      this.drawMissingAsset(ctx, sheetName, x, y, options);
+      return;
+    }
     this.drawFrameInternal(ctx, sheet.image, sheet.meta, frameIndex, x, y, options);
   }
 
@@ -272,8 +275,51 @@ export class AssetManager {
     options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
   ): void {
     const sheet = this.sheets.get(sheetName);
-    if (!sheet) return;
+    if (!sheet) {
+      this.drawMissingAsset(ctx, sheetName, x, y, options);
+      return;
+    }
     this.drawFrameInternal(ctx, sourceCanvas, sheet.meta, frameIndex, x, y, options);
+  }
+
+  /** Draw a bright magenta/black checkerboard for missing assets — makes it impossible to miss.
+   *  Classic game dev "missing texture" pattern. Also logs a warning on first occurrence. */
+  private missingAssetWarned = new Set<string>();
+  private drawMissingAsset(
+    ctx: CanvasRenderingContext2D,
+    sheetName: string,
+    x: number,
+    y: number,
+    options?: { centerX?: boolean; centerY?: boolean; scale?: number },
+  ): void {
+    if (!ctx) return; // null context in tests — skip drawing
+    const size = 24; // CELL_SIZE — one cell square
+    const scale = options?.scale ?? 1;
+    const w = size * scale;
+    const h = size * scale;
+    const dx = options?.centerX ? x - w / 2 : x;
+    const dy = options?.centerY ? y - h / 2 : y;
+
+    // Magenta/black 4x4 checkerboard
+    const checkSize = w / 4;
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 4; col++) {
+        ctx.fillStyle = (row + col) % 2 === 0 ? '#FF00FF' : '#000000';
+        ctx.fillRect(dx + col * checkSize, dy + row * checkSize, checkSize, checkSize);
+      }
+    }
+
+    // Label with the missing asset name
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `${Math.max(7, Math.floor(w / 4))}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(sheetName, dx + w / 2, dy + h / 2 + 3);
+    ctx.textAlign = 'left'; // reset
+
+    if (!this.missingAssetWarned.has(sheetName)) {
+      this.missingAssetWarned.add(sheetName);
+      console.warn(`[AssetManager] MISSING ASSET: "${sheetName}" — rendering magenta placeholder`);
+    }
   }
 
   /** Check if a sprite sheet exists */
