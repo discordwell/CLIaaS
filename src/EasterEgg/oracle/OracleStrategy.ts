@@ -70,30 +70,28 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
 ];
 
-// SCG11EA "Aftermath / Naval Supremacy": Ground-first, then naval.
+// SCG11EA "Aftermath / Naval Supremacy": survive the island first, then open the river.
 // Strategy:
-//   1. Build the minimum land economy/armor needed to survive the island hold.
-//   2. Tech to DOME so AA guns can exist before the YAK/HIND snowball starts.
-//   3. Place the shipyard and mass destroyers to clear the river screen.
-//   4. Restore heavier land tech only after the naval lane is stable.
+//   1. Build a real land economy and enough tank production to hold the beachhead.
+//   2. Add the shipyard only after the land line can sustain the transition.
+//   3. Mass destroyers and clear the river screen before spending on static tech.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['WEAP'],         type_ids: [2] },               // War factory — tanks ASAP
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund tank army
-  { names: ['DOME'],         type_ids: [6] },               // Unlock AGUN before the air swarm escalates
-  { names: ['AGUN'],         type_ids: [9] },               // One AA gun before naval transition
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory before the naval handoff
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard once the hold line is stable
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory after naval is online
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery — sustain DD + armor
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power as needed
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
-const SCG11EA_PRE_NAVAL_TANK_TARGET = 15;  // Big army for island defense before naval tech
-const SCG11EA_SUB_HUNT_TANK_FLOOR = 0;     // Once DDs are working, stop refilling tanks and spend on the fleet
+const SCG11EA_PRE_NAVAL_TANK_TARGET = 8;   // Enough armor to survive the island hold before the naval handoff
+const SCG11EA_SUB_HUNT_TANK_FLOOR = 6;     // Keep a real home-guard line while DDs clear the river
 const SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR = 5; // Refill a few tanks only if the island hold starts collapsing
-const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Rebuild a real army after the river is open
+const SCG11EA_POST_NAVAL_TANK_TARGET = 8;  // Once the river is open, rebuild enough armor to push west
 const SCG11EA_FLEET_ONLINE_SHIPS = 3;
+const SCG11EA_HUNT_MIN_SHIPS = 3;
 const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
@@ -113,6 +111,16 @@ const SCG11EA_RIVER_SWEEP_POINTS: Point[] = [
   { cx: 68, cy: 38 },
   { cx: 69, cy: 24 },
 ];
+const SCG11EA_VESSEL_LAUNCH_POINTS: Point[] = [
+  // Wide spacing matters here. The harness unlimbos the vessel at the exact
+  // target cell, so clustered launch cells can deadlock when one DD idles nearby.
+  { cx: 67, cy: 91 },
+  { cx: 74, cy: 91 },
+  { cx: 67, cy: 84 },
+  { cx: 74, cy: 84 },
+  { cx: 70, cy: 77 },
+];
+const SCG11EA_FLEET_RALLY_POINT: Point = { cx: 70, cy: 88 };
 const SCG11EA_PRIMARY_ASSAULT_POINT: Point = { cx: 49, cy: 45 };
 const SCG11EA_BOTTLENECK_ASSAULT_POINT: Point = { cx: 73, cy: 47 };
 const SCG11EA_EASTERN_ASSAULT_POINT: Point = { cx: 97, cy: 53 };
@@ -536,14 +544,13 @@ export class OracleStrategy {
 
   private getScg11eaShipyardCandidates(): Point[] {
     return [
-      // SYRD/SPEN are WaterBound in the C++ data, so the 3x3 foundation must sit
-      // on water, not shoreline land. A live harness probe confirmed (63,86) as
-      // legal on SCG11EA after the east coast is mapped.
-      { cx: 63, cy: 86 }, { cx: 63, cy: 85 }, { cx: 63, cy: 87 }, { cx: 63, cy: 88 },
-      { cx: 63, cy: 84 }, { cx: 63, cy: 89 }, { cx: 63, cy: 90 }, { cx: 63, cy: 83 },
-      { cx: 64, cy: 86 }, { cx: 64, cy: 85 }, { cx: 64, cy: 87 }, { cx: 64, cy: 88 },
-      { cx: 64, cy: 84 }, { cx: 64, cy: 89 }, { cx: 64, cy: 90 }, { cx: 65, cy: 86 },
-      { cx: 65, cy: 85 }, { cx: 65, cy: 87 }, { cx: 65, cy: 88 },
+      // Prefer slightly deeper east-coast water than the shoreline-adjacent cells.
+      // The yard still places here reliably, and DD launches get more room.
+      { cx: 65, cy: 85 }, { cx: 65, cy: 86 }, { cx: 64, cy: 85 }, { cx: 64, cy: 86 },
+      { cx: 65, cy: 84 }, { cx: 65, cy: 87 }, { cx: 64, cy: 84 }, { cx: 64, cy: 87 },
+      { cx: 63, cy: 85 }, { cx: 63, cy: 86 }, { cx: 64, cy: 88 }, { cx: 65, cy: 88 },
+      { cx: 63, cy: 84 }, { cx: 63, cy: 87 }, { cx: 63, cy: 88 }, { cx: 63, cy: 89 },
+      { cx: 64, cy: 89 }, { cx: 65, cy: 89 }, { cx: 63, cy: 90 },
     ];
   }
 
@@ -1150,6 +1157,10 @@ export class OracleStrategy {
         const shipCount = playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length;
         const survivingTanks = playerUnits.filter((u) => u.t.includes('TNK')).length;
         const scg11eaSubHuntLive = scg11eaEnemySubCount > 0;
+        const scg11eaStaticDefenseUnlocked =
+          shipCount >= SCG11EA_FLEET_ONLINE_SHIPS &&
+          scg11eaEnemySubCount <= SCG11EA_ASSAULT_MAX_SUBS &&
+          procCount >= 3;
         if (
           procCount === 0 &&
           (!scg11eaSubHuntLive || shipCount === 0 || state.credits < SCG11EA_ECON_REBUILD_FLOOR) &&
@@ -1189,6 +1200,7 @@ export class OracleStrategy {
           });
           reasons.push('produce POWR (power deficit)');
         } else if (
+          scg11eaStaticDefenseUnlocked &&
           scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
           domeCount === 0 &&
           buildable.structures.includes('DOME') &&
@@ -1201,6 +1213,7 @@ export class OracleStrategy {
           });
           reasons.push(`produce DOME for AA (air=${scg11eaEnemyAirCount})`);
         } else if (
+          scg11eaStaticDefenseUnlocked &&
           scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
           aaCount < SCG11EA_AA_DEFENSE_TARGET &&
           buildable.structures.includes('AGUN') &&
@@ -1213,6 +1226,7 @@ export class OracleStrategy {
           });
           reasons.push(`produce AGUN (${aaCount + 1}/${SCG11EA_AA_DEFENSE_TARGET}, air=${scg11eaEnemyAirCount})`);
         } else if (
+          scg11eaStaticDefenseUnlocked &&
           scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
           gunCount < SCG11EA_GROUND_DEFENSE_TARGET &&
           state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE &&
@@ -1395,13 +1409,17 @@ export class OracleStrategy {
       scg11eaSubHuntPhase &&
       tankCount < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
       scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER;
+    const scg11eaRiverOpen =
+      this.scenario === 'SCG11EA' &&
+      navalCount >= SCG11EA_FLEET_ONLINE_SHIPS &&
+      scg11eaEnemySubCount <= SCG11EA_ASSAULT_MAX_SUBS;
     const scg11eaTankTarget =
       this.scenario === 'SCG11EA'
-        ? (scg11eaSubHuntPhase
-          ? SCG11EA_SUB_HUNT_TANK_FLOOR
-          : scg11eaFleetOnline
+        ? (!scg11eaSubHuntPhase
+          ? SCG11EA_PRE_NAVAL_TANK_TARGET
+          : scg11eaRiverOpen
           ? SCG11EA_POST_NAVAL_TANK_TARGET
-          : SCG11EA_PRE_NAVAL_TANK_TARGET)
+          : SCG11EA_SUB_HUNT_TANK_FLOOR)
         : 0;
     const skipTankProduction = this.scenario === 'SCG11EA'
       ? (scg11eaSubHuntPhase ? !scg11eaArmorEmergency : tankCount >= scg11eaTankTarget)
