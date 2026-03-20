@@ -725,12 +725,14 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
-  // Gap #4: Dog spy detection — dogs auto-target enemy spies within 3 cells
+  // Gap #4: Dog spy detection — dogs auto-target enemy spies within 3 cells.
+  // Note: the guardScanDelay check at line 671 already limits this to running
+  // every scanDelay ticks, so no additional delay needed here.
   if (entity.type === 'DOG' && entity.alive) {
     for (const other of ctx.entities) {
       if (!other.alive || other.type !== UnitType.I_SPY) continue;
       if (ctx.entitiesAllied(entity, other)) continue;
-      if (worldDist(entity.pos, other.pos) <= 3) { // worldDist returns cells
+      if (worldDist(entity.pos, other.pos) <= 3) {
         entity.target = other;
         entity.mission = Mission.ATTACK;
         return;
