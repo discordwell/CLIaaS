@@ -714,6 +714,12 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   // Harvesters have no weapon — don't auto-engage (would chase forever)
   if (entity.type === UnitType.V_HARV) return;
 
+  // C++ parity: spies don't auto-engage in guard mode. They only infiltrate
+  // when given an explicit attack command by the player. Without this, the
+  // spy auto-infiltrates the nearest enemy building on disembark, consuming
+  // itself before the player/oracle can direct it.
+  if (entity.type === UnitType.I_SPY && entity.isPlayerUnit) return;
+
   // Gap #4: Auto-disguise spies near enemies
   if (entity.type === UnitType.I_SPY && entity.alive && !entity.disguisedAs && entity.isPlayerUnit) {
     for (const other of ctx.entities) {
