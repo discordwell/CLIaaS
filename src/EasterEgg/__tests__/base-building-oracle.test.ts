@@ -534,4 +534,92 @@ describe('SYRD placement — vessel-based water detection', () => {
     expect(placeCmd!.cx).toBeGreaterThan(44);
     expect(placeCmd!.cy).toBeGreaterThan(44);
   });
+
+  it('keeps SCG11EA refineries biased toward the ore field instead of the east chain', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const state = makeState({
+      tick: 8000,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 30, 80),
+        makeStructure(101, 'POWR', 'Greece', 28, 80),
+      ],
+      production: [{ t: 'PROC', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
+      buildable: { structures: ['PROC', 'POWR', 'WEAP', 'SYRD'], units: [], infantry: [] },
+    });
+
+    const decision = strategy.decide(state);
+    const placeCmd = decision.commands.find(
+      (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
+    );
+    expect(placeCmd).toBeDefined();
+    expect(placeCmd!.cy).toBeLessThan(80);
+    expect(placeCmd!.cx).toBeLessThan(40);
+  });
+
+  it('keeps the SCG11EA bootstrap power local, then starts the east chain from the first slot', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+
+    const bootstrapDecision = strategy.decide(makeState({
+      tick: 400,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 30, 80),
+      ],
+      production: [{ t: 'POWR', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
+      buildable: { structures: ['POWR', 'PROC'], units: [], infantry: [] },
+    }));
+
+    const bootstrapPlace = bootstrapDecision.commands.find(
+      (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
+    );
+    expect(bootstrapPlace).toBeDefined();
+    expect(bootstrapPlace!.cx).toBeGreaterThanOrEqual(25);
+    expect(bootstrapPlace!.cx).toBeLessThanOrEqual(35);
+    expect(bootstrapPlace!.cy).toBeGreaterThanOrEqual(75);
+    expect(bootstrapPlace!.cy).toBeLessThanOrEqual(83);
+
+    const chainDecision = strategy.decide(makeState({
+      tick: 8000,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 30, 80),
+        makeStructure(101, 'POWR', 'Greece', 33, 80),
+        makeStructure(102, 'PROC', 'Greece', 26, 80),
+        makeStructure(103, 'WEAP', 'Greece', 32, 76),
+      ],
+      production: [{ t: 'POWR', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
+      buildable: { structures: ['POWR', 'SYRD'], units: [], infantry: [] },
+    }));
+
+    const chainPlace = chainDecision.commands.find(
+      (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
+    );
+    expect(chainPlace).toBeDefined();
+    expect(chainPlace!.cx).toBe(32);
+    expect(chainPlace!.cy).toBe(88);
+  });
+
+  it('pins SCG11EA shipyard placement to the east-coast real-water band', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const state = makeState({
+      tick: 8000,
+      structures: [
+        makeStructure(100, 'FACT', 'Greece', 30, 80),
+        makeStructure(101, 'POWR', 'Greece', 58, 90),
+      ],
+      production: [{ t: 'SYRD', prog: 54, rtti: RTTI_BUILDINGTYPE, done: true }],
+      buildable: { structures: ['SYRD'], units: [], infantry: [] },
+      enemies: [
+        makeEntity(200, 'SS', 'USSR', 70, 42, 100, 100, 5),
+      ],
+    });
+    state.enemies.forEach((e) => { e.ally = false; });
+
+    const decision = strategy.decide(state);
+    const placeCmd = decision.commands.find(
+      (c) => c.cmd === 'place' && c.rtti === RTTI_BUILDINGTYPE,
+    );
+    expect(placeCmd).toBeDefined();
+    expect(placeCmd!.cx).toBe(63);
+    expect(placeCmd!.cy).toBeGreaterThanOrEqual(84);
+    expect(placeCmd!.cy).toBeLessThanOrEqual(96);
+  });
 });

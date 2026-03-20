@@ -678,7 +678,7 @@ export function detonateNuke(ctx: SuperweaponContext, target: WorldPos): void {
   ctx.screenFlash = 30;
   ctx.screenShake = 30;
 
-  // Apply nuke damage in blast radius using Super warhead
+  // Apply nuke damage in blast radius using Nuke warhead (C++ building.cpp:4191: WARHEAD_NUKE)
   const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS;
 
   // Damage entities in splash radius
@@ -687,9 +687,9 @@ export function detonateNuke(ctx: SuperweaponContext, target: WorldPos): void {
     const dist = worldDist(e.pos, target);
     if (dist > blastRadius) continue;
     const falloff = Math.max(NUKE_MIN_FALLOFF, 1 - dist / blastRadius);
-    const mult = ctx.getWarheadMult('Super', e.stats.armor);
+    const mult = ctx.getWarheadMult('Nuke', e.stats.armor);
     const dmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff));
-    const killed = ctx.damageEntity(e, dmg, 'Super');
+    const killed = ctx.damageEntity(e, dmg, 'Nuke');
     if (killed) {
       if (e.isPlayerUnit) ctx.lossCount++;
       else ctx.killCount++;

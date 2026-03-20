@@ -301,7 +301,7 @@ describe('SCG11EA naval strategy', () => {
     const strategy = new OracleStrategy('SCG11EA');
     const s = scg11eaState({
       buildable: {
-        structures: ['POWR', 'PROC', 'WEAP', 'SYRD'],
+        structures: ['POWR', 'PROC', 'WEAP'],
         units: ['3TNK', '2TNK', '1TNK', 'HARV'],
         infantry: ['E1', 'E3'],
         vessels: ['DD'],
@@ -328,9 +328,8 @@ describe('SCG11EA naval strategy', () => {
     );
   });
 
-  it('caps tank production at 5 on SCG11EA', () => {
+  it('keeps producing tanks on SCG11EA until the defensive floor is met', () => {
     const strategy = new OracleStrategy('SCG11EA');
-    // With 5 tanks already, should NOT produce more
     const s = scg11eaState({
       structures: [
         structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
@@ -349,11 +348,204 @@ describe('SCG11EA naval strategy', () => {
 
     const decision = strategy.decide(s);
 
-    // 5 tanks in scg11eaState default — at cap, should NOT produce
+    const unitProduceCommands = decision.commands.filter(
+      (c) => c.cmd === 'produce' && c.rtti === 29,
+    );
+    expect(unitProduceCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 29 }),
+      ]),
+    );
+  });
+
+  it('stops tank production on SCG11EA once the defensive floor is met', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 38, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 8, t: '2TNK', house: 'Greece', cx: 40, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 9, t: '2TNK', house: 'Greece', cx: 42, cy: 80, hp: 300, mhp: 300 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 103, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 80 }),
+        structure({ id: 104, t: 'WEAP', ally: true, house: 'Greece', cx: 32, cy: 76 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'SYRD'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1', 'E3'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
     const unitProduceCommands = decision.commands.filter(
       (c) => c.cmd === 'produce' && c.rtti === 29,
     );
     expect(unitProduceCommands).toHaveLength(0);
+  });
+
+  it('keeps producing tanks during SYRD placement until the hold line is restored', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 103, t: 'WEAP', ally: true, house: 'Greece', cx: 32, cy: 76 }),
+      ],
+      production: [{ t: 'SYRD', prog: 45, rtti: 6, done: false }],
+      buildable: {
+        structures: ['POWR', 'SYRD'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1', 'E3'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 29 }),
+      ]),
+    );
+  });
+
+  it('holds for shipyard instead of falling through to a third refinery on SCG11EA', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 38, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 8, t: '2TNK', house: 'Greece', cx: 40, cy: 80, hp: 300, mhp: 300 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 26, cy: 80 }),
+        structure({ id: 103, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 80 }),
+        structure({ id: 104, t: 'WEAP', ally: true, house: 'Greece', cx: 32, cy: 76 }),
+        structure({ id: 105, t: 'POWR', ally: true, house: 'Greece', cx: 32, cy: 88 }),
+        structure({ id: 106, t: 'POWR', ally: true, house: 'Greece', cx: 34, cy: 88 }),
+        structure({ id: 107, t: 'POWR', ally: true, house: 'Greece', cx: 36, cy: 88 }),
+        structure({ id: 108, t: 'POWR', ally: true, house: 'Greece', cx: 38, cy: 88 }),
+        structure({ id: 109, t: 'POWR', ally: true, house: 'Greece', cx: 40, cy: 88 }),
+        structure({ id: 110, t: 'POWR', ally: true, house: 'Greece', cx: 42, cy: 88 }),
+        structure({ id: 111, t: 'POWR', ally: true, house: 'Greece', cx: 44, cy: 88 }),
+        structure({ id: 112, t: 'POWR', ally: true, house: 'Greece', cx: 46, cy: 88 }),
+        structure({ id: 113, t: 'POWR', ally: true, house: 'Greece', cx: 48, cy: 88 }),
+        structure({ id: 114, t: 'POWR', ally: true, house: 'Greece', cx: 50, cy: 88 }),
+        structure({ id: 115, t: 'POWR', ally: true, house: 'Greece', cx: 52, cy: 88 }),
+        structure({ id: 116, t: 'POWR', ally: true, house: 'Greece', cx: 54, cy: 88 }),
+        structure({ id: 117, t: 'POWR', ally: true, house: 'Greece', cx: 56, cy: 88 }),
+        structure({ id: 118, t: 'POWR', ally: true, house: 'Greece', cx: 60, cy: 88 }),
+      ],
+      buildable: {
+        structures: ['PROC', 'POWR'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1', 'E3'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+    const buildingProduceCommands = decision.commands.filter(
+      (c) => c.cmd === 'produce' && c.rtti === 6,
+    );
+    expect(buildingProduceCommands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type_id: 12 }),
+      ]),
+    );
+    expect(decision.reason).toContain('hold for shipyard');
+  });
+
+  it('prioritizes SYRD over rebuilding more POWR once the shipyard is buildable', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      units: [
+        unit({ id: 1, t: '3TNK', house: 'Greece', cx: 32, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 2, t: '3TNK', house: 'Greece', cx: 34, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 3, t: '3TNK', house: 'Greece', cx: 36, cy: 78, hp: 400, mhp: 400 }),
+        unit({ id: 4, t: '2TNK', house: 'Greece', cx: 32, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 5, t: '2TNK', house: 'Greece', cx: 34, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 6, t: '2TNK', house: 'Greece', cx: 36, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 7, t: '2TNK', house: 'Greece', cx: 38, cy: 80, hp: 300, mhp: 300 }),
+        unit({ id: 8, t: '2TNK', house: 'Greece', cx: 40, cy: 80, hp: 300, mhp: 300 }),
+      ],
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 71 }),
+        structure({ id: 103, t: 'WEAP', ally: true, house: 'Greece', cx: 19, cy: 80 }),
+        structure({ id: 104, t: 'POWR', ally: true, house: 'Greece', cx: 58, cy: 88 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'SYRD'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1', 'E3'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 27 }),
+      ]),
+    );
+  });
+
+  it('keeps extending the east chain instead of producing SYRD before coast reach', () => {
+    const strategy = new OracleStrategy('SCG11EA');
+    const s = scg11eaState({
+      structures: [
+        structure({ id: 100, t: 'FACT', ally: true, house: 'Greece', cx: 30, cy: 80 }),
+        structure({ id: 101, t: 'POWR', ally: true, house: 'Greece', cx: 28, cy: 80 }),
+        structure({ id: 102, t: 'PROC', ally: true, house: 'Greece', cx: 24, cy: 71 }),
+        structure({ id: 103, t: 'WEAP', ally: true, house: 'Greece', cx: 19, cy: 80 }),
+      ],
+      buildable: {
+        structures: ['POWR', 'SYRD'],
+        units: ['3TNK', '2TNK', '1TNK', 'HARV'],
+        infantry: ['E1', 'E3'],
+        vessels: ['DD'],
+      },
+    });
+
+    const decision = strategy.decide(s);
+    expect(decision.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 17 }),
+      ]),
+    );
+    expect(decision.commands).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ cmd: 'produce', rtti: 6, type_id: 27 }),
+      ]),
+    );
   });
 
   it('produces destroyers when shipyard exists on SCG11EA', () => {

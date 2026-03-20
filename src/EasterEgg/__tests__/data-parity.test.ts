@@ -519,9 +519,9 @@ describe('WEAPON_STATS parity', () => {
     expect(w.burst).toBe(2);
   });
 
-  it('TeslaCannon — damage=100, rof=120, range=8.5', () => {
+  it('TeslaCannon — damage=150, rof=120, range=8.5 (C++ RULES.INI TeslaZap)', () => {
     const w = WEAPON_STATS.TeslaCannon;
-    expect(w.damage).toBe(100);
+    expect(w.damage).toBe(150);
     expect(w.rof).toBe(120);
     expect(w.range).toBe(8.5);
     expect(w.warhead).toBe('Super');
@@ -1050,8 +1050,8 @@ describe('SUPERWEAPON_DEFS parity', () => {
     expect(IRON_CURTAIN_DURATION).toBe(675);
   });
 
-  it('NUKE_DAMAGE = 1000', () => {
-    expect(NUKE_DAMAGE).toBe(1000);
+  it('NUKE_DAMAGE = 200 (C++ building.cpp:4191)', () => {
+    expect(NUKE_DAMAGE).toBe(200);
   });
 
   it('NUKE_BLAST_CELLS = 10', () => {
@@ -1287,9 +1287,9 @@ describe('STRUCTURE_WEAPONS parity', () => {
     expect(w.projSpeed).toBe(40);
   });
 
-  it('TSLA — damage=100, range=8.5, rof=120, warhead=Super, splash=1, projSpeed=100', () => {
+  it('TSLA — damage=150, range=8.5, rof=120, warhead=Super, splash=1, projSpeed=100 (C++ RULES.INI TeslaZap)', () => {
     const w = STRUCTURE_WEAPONS.TSLA;
-    expect(w.damage).toBe(100);
+    expect(w.damage).toBe(150);
     expect(w.range).toBe(8.5);
     expect(w.rof).toBe(120);
     expect(w.warhead).toBe('Super');

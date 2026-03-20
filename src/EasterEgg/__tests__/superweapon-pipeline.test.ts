@@ -257,16 +257,16 @@ describe('Nuclear Strike — detonateNuke mechanics', () => {
     expect(typeof detonateNuke).toBe('function');
   });
 
-  it('uses NUKE_DAMAGE (1000) and Super warhead', () => {
-    expect(NUKE_DAMAGE).toBe(1000);
-    // Behavioral check: detonateNuke damages entities with Super warhead
+  it('uses NUKE_DAMAGE (200) and Nuke warhead (C++ building.cpp:4191)', () => {
+    expect(NUKE_DAMAGE).toBe(200);
+    // Behavioral check: detonateNuke damages entities with Nuke warhead
     const ctx = makeMockSuperweaponContext();
     const tank = makeEntity(UnitType.V_2TNK, House.USSR, 200, 200);
     ctx.entities.push(tank);
     detonateNuke(ctx, { x: 200, y: 200 });
     const damaged = (ctx as any)._damagedEntities;
     expect(damaged.length).toBeGreaterThan(0);
-    expect(damaged[0].warhead).toBe('Super');
+    expect(damaged[0].warhead).toBe('Nuke');
   });
 
   it('Super warhead has 1.0 multiplier against all armor types', () => {
@@ -315,56 +315,61 @@ describe('Nuclear Strike — detonateNuke mechanics', () => {
     expect(NUKE_MIN_FALLOFF).toBe(0.1);
   });
 
-  it('nuke damage at ground zero: 1000 * 1.0 * 1.0 = 1000 for unarmored', () => {
-    const mult = getWarheadMultiplier('Super', 'none');
+  it('nuke damage at ground zero: 200 * 0.9 * 1.0 = 180 for unarmored (Nuke warhead)', () => {
+    const mult = getWarheadMultiplier('Nuke', 'none'); // 0.9
     const falloff = 1.0; // ground zero
     const dmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff));
-    expect(dmg).toBe(1000);
+    expect(dmg).toBe(180);
   });
 
-  it('nuke damage at half-radius: 1000 * 1.0 * 0.5 = 500 for unarmored', () => {
-    const mult = getWarheadMultiplier('Super', 'none');
+  it('nuke damage at half-radius: 200 * 0.9 * 0.5 = 90 for unarmored', () => {
+    const mult = getWarheadMultiplier('Nuke', 'none');
     const falloff = 0.5;
     const dmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff));
-    expect(dmg).toBe(500);
+    expect(dmg).toBe(90);
   });
 
-  it('nuke damage at edge: 1000 * 1.0 * 0.1 = 100 minimum', () => {
-    const mult = getWarheadMultiplier('Super', 'none');
+  it('nuke damage at edge: 200 * 0.9 * 0.1 = 18 minimum for unarmored', () => {
+    const mult = getWarheadMultiplier('Nuke', 'none');
     const falloff = NUKE_MIN_FALLOFF;
     const dmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * falloff));
-    expect(dmg).toBe(100);
+    expect(dmg).toBe(18);
   });
 
-  it('nuke kills infantry at ground zero', () => {
+  it('nuke kills infantry at ground zero (C++ damage=200, Nuke warhead)', () => {
     const inf = makeEntity(UnitType.I_E1, House.USSR);
-    const killed = inf.takeDamage(1000, 'Super');
+    // Nuke vs none = 0.9, so 200*0.9 = 180 damage, kills infantry (HP ~50)
+    const killed = inf.takeDamage(180, 'Nuke');
     expect(killed).toBe(true);
     expect(inf.alive).toBe(false);
   });
 
-  it('nuke kills light tank at ground zero', () => {
+  it('nuke damages light tank at ground zero (C++ damage=200, Nuke warhead)', () => {
     const tank = makeEntity(UnitType.V_1TNK, House.USSR);
-    expect(tank.hp).toBeLessThanOrEqual(1000); // 400 HP
-    const killed = tank.takeDamage(1000, 'Super');
-    expect(killed).toBe(true);
+    // Nuke vs heavy = 0.25, so 200*0.25 = 50 damage — not lethal to 400 HP tank
+    const mult = getWarheadMultiplier('Nuke', tank.stats.armor);
+    const dmg = Math.round(NUKE_DAMAGE * mult * 1.0);
+    const killed = tank.takeDamage(dmg, 'Nuke');
+    expect(tank.hp).toBe(tank.maxHp - dmg);
+    // With C++ parity values, nuke does NOT one-shot heavy tanks
   });
 
-  it('nuke kills Mammoth tank at ground zero (1000 >= 4TNK maxHp)', () => {
+  it('nuke does NOT kill Mammoth tank at ground zero (200 < 4TNK maxHp)', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.USSR);
-    // 4TNK has 600 HP (rules.ini)
-    expect(mammoth.maxHp).toBeLessThanOrEqual(1000);
-    const killed = mammoth.takeDamage(1000, 'Super');
-    expect(killed).toBe(true);
-  });
-
-  it('nuke edge damage (100) does NOT kill a Mammoth tank', () => {
-    const mammoth = makeEntity(UnitType.V_4TNK, House.USSR);
-    const edgeDmg = Math.max(1, Math.round(NUKE_DAMAGE * 1.0 * NUKE_MIN_FALLOFF));
-    expect(edgeDmg).toBe(100);
-    const killed = mammoth.takeDamage(edgeDmg, 'Super');
+    // Nuke vs heavy = 0.25, so 200*0.25 = 50 damage — not lethal to 600 HP mammoth
+    const mult = getWarheadMultiplier('Nuke', mammoth.stats.armor);
+    const dmg = Math.round(NUKE_DAMAGE * mult * 1.0);
+    const killed = mammoth.takeDamage(dmg, 'Nuke');
     expect(killed).toBe(false);
-    expect(mammoth.hp).toBe(mammoth.maxHp - edgeDmg);
+    expect(mammoth.hp).toBe(mammoth.maxHp - dmg);
+  });
+
+  it('nuke edge damage does NOT kill a Mammoth tank', () => {
+    const mammoth = makeEntity(UnitType.V_4TNK, House.USSR);
+    const mult = getWarheadMultiplier('Nuke', mammoth.stats.armor);
+    const edgeDmg = Math.max(1, Math.round(NUKE_DAMAGE * mult * NUKE_MIN_FALLOFF));
+    const killed = mammoth.takeDamage(edgeDmg, 'Nuke');
+    expect(killed).toBe(false);
   });
 
   it('detonateNuke credits kills (lossCount/killCount)', () => {
@@ -1675,11 +1680,11 @@ describe('Nuke damage vs armor types (Super warhead)', () => {
     const tank = makeEntity(UnitType.V_2TNK, House.USSR, 200, 200);
     ctx.entities.push(tank);
     detonateNuke(ctx, { x: 200, y: 200 });
-    // At ground zero, damage = max(1, round(1000 * 1.0 * 1.0)) = 1000
+    // At ground zero with Nuke warhead vs heavy armor (0.25): damage = max(1, round(200 * 0.25 * 1.0)) = 50
     const damaged = (ctx as any)._damagedEntities;
     expect(damaged.length).toBeGreaterThan(0);
-    expect(damaged[0].amount).toBe(1000);
-    expect(damaged[0].warhead).toBe('Super');
+    expect(damaged[0].amount).toBe(50); // 200 * 0.25 (Nuke vs heavy)
+    expect(damaged[0].warhead).toBe('Nuke');
   });
 
   it('nuke minimum damage is always at least 1 (max(1, ...))', () => {
@@ -1699,10 +1704,10 @@ describe('Nuke damage vs armor types (Super warhead)', () => {
     const sy = struct.cy * CELL_SIZE + CELL_SIZE;
     detonateNuke(ctx, { x: sx, y: sy });
     // Structure should take damage = max(1, round(NUKE_DAMAGE * falloff))
-    // At ground zero, falloff = 1.0, so damage = 1000
-    // struct.hp should be 256 - 1000 = negative, clamped to 0 (dead)
-    expect(struct.hp).toBeLessThanOrEqual(0);
-    expect(struct.alive).toBe(false);
+    // At ground zero, falloff = 1.0, so damage = 200 (C++ parity)
+    // struct.hp should be 256 - 200 = 56 (damaged but alive)
+    expect(struct.hp).toBe(256 - NUKE_DAMAGE);
+    expect(struct.alive).toBe(true);
   });
 });
 

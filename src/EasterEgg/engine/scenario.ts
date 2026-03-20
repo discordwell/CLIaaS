@@ -1158,7 +1158,7 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
   HBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Camo Pillbox)
   PBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Pillbox)
   GUN:   { damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40 },  // TurretGun
-  TSLA:  { damage: 100, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100 }, // TeslaZap
+  TSLA:  { damage: 150, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100 }, // TeslaZap (C++ RULES.INI Damage=150)
   SAM:   { damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, isAntiAir: true }, // Nike
   AGUN:  { damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isAntiAir: true },  // ZSU-23
   FTUR:  { damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },            // FireballLauncher

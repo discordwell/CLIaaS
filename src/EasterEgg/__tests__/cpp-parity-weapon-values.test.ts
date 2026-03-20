@@ -232,10 +232,10 @@ describe('C++ Parity: Weapon Values vs rules.ini/aftrmath.ini', () => {
 
 describe('C++ Parity: INI-only weapons (STRUCTURE_WEAPONS, not in WEAPON_STATS)', () => {
   for (const { name, note } of STRUCTURE_ONLY_WEAPONS) {
-    it.skip(`${name} (${note}) — exists in INI but handled by STRUCTURE_WEAPONS`, () => {
+    it(`${name} (${note}) — exists in INI but handled by STRUCTURE_WEAPONS`, () => {
       // Document that these INI weapon sections exist
       expect(ini[name]).toBeDefined();
-      // And they are intentionally NOT in WEAPON_STATS
+      // And they are intentionally NOT in WEAPON_STATS (handled via STRUCTURE_WEAPONS)
       expect(WEAPON_STATS[name]).toBeUndefined();
     });
   }

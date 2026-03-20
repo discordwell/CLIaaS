@@ -673,7 +673,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, burst: 2, isDegenerate: true },
   MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 30, isHigh: true },
   '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true },
-  TeslaCannon:      { name: 'TeslaCannon',       damage: 100, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
+  TeslaCannon:      { name: 'TeslaCannon',       damage: 150, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
   PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 100 }, // Shock Trooper
   GoodWrench:       { name: 'GoodWrench',        damage: -100, rof: 80, range: 1.83, warhead: 'Mechanical', projSpeed: 100 },        // Mechanic (heals vehicles)
@@ -775,7 +775,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
 // Superweapon gameplay constants
 export const IRON_CURTAIN_DURATION = 675;       // rules.ini IronCurtain=.75 → 0.75 * 60 * 15 = 675 ticks (C++ default=fixed(1,2)=0.5, overridden by rules.ini)
 export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 11; // C++ house.cpp:2753-2755: IronCurtainDuration * TICKS_PER_SECOND = 0.75 * 15
-export const NUKE_DAMAGE = 1000;
+export const NUKE_DAMAGE = 200;  // C++ building.cpp:4191: damage=200, warhead=WARHEAD_NUKE
 export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
 export const NUKE_FLIGHT_TICKS = 45;            // missile travel time
 export const NUKE_MIN_FALLOFF = 0.1;            // minimum damage fraction at edge

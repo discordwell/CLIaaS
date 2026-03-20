@@ -728,12 +728,9 @@ describe('Tesla charging requires power (C++ building.cpp:5385)', () => {
     expect(POWER_DRAIN['TSLA']).toBe(150);
   });
 
-  it('TSLA damage is high (100) to compensate for power requirement', () => {
-    // C++ weapons.cpp defines TeslaZap Attack=150 (from rules.ini [TeslaZap] Damage=150).
-    // TS scenario.ts:1141 uses 100. This may be an intentional balance change.
-    // PARITY GAP: C++ TeslaZap damage=150, TS TSLA damage=100.
+  it('TSLA damage is 150 (C++ RULES.INI TeslaZap Damage=150)', () => {
     const weapon = STRUCTURE_WEAPONS['TSLA'];
-    expect(weapon.damage).toBe(100); // TS value — C++ would be 150
+    expect(weapon.damage).toBe(150);
   });
 });
 
