@@ -6685,6 +6685,10 @@ export class Game {
     }
 
     // Track spy infiltration for TEVENT_SPIED
+    // DEBUG: log infiltration for troubleshooting
+    if (typeof console !== 'undefined') {
+      console.log(`[SPY_INFILTRATE] type=${structure.type} house=${structure.house} trigger="${structure.triggerName ?? 'NONE'}" at (${structure.cx},${structure.cy})`);
+    }
     if (structure.triggerName) this.spiedBuildingTriggers.add(structure.triggerName);
 
     // Spy is consumed on infiltration

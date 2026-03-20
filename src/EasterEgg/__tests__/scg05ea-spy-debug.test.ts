@@ -49,11 +49,18 @@ describe('SCG05EA spy infiltration test', () => {
     const weap = state.structures.find(s => s.t === 'WEAP' && !s.ally);
     console.log(`WEAP at (${weap!.cx},${weap!.cy}) idx=${weap!.idx}`);
 
-    // Send attack_struct DIRECTLY (not through oracle bridge)
+    // Send attack_struct DIRECTLY
     const result = await adapter.step(1, [
       { cmd: 'attack_struct', unitIds: [spyNow.id], structIdx: weap!.idx },
     ]);
     console.log(`attack_struct result: ${result.results.map(r => `${r.cmd}:${r.ok}:${r.error ?? 'ok'}`).join(', ')}`);
+    // Read browser console for debug logs
+    const logs = adapter.getLogs();
+    for (const log of logs) {
+      if (log.includes('HARNESS') || log.includes('SPY_INFILTRATE')) {
+        console.log(`  BROWSER: ${log}`);
+      }
+    }
 
     // Wait for infiltration
     for (let i = 0; i < 30; i++) {

@@ -127,7 +127,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'ATEK');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(1500);
-    expect(item!.buildTime).toBe(200);
+    expect(item!.buildTime).toBe(Math.floor(1500 * 0.96)); // C++ parity: floor(cost * 0.96)
     expect(item!.prerequisite).toBe('WEAP');
     expect(item!.faction).toBe('allied');
     expect(item!.isStructure).toBe(true);
@@ -137,7 +137,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'STEK');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(1500);
-    expect(item!.buildTime).toBe(200);
+    expect(item!.buildTime).toBe(Math.floor(1500 * 0.96)); // C++ parity: floor(cost * 0.96)
     expect(item!.prerequisite).toBe('WEAP');
     expect(item!.faction).toBe('soviet');
     expect(item!.isStructure).toBe(true);
@@ -147,7 +147,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'PDOX');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(2800);
-    expect(item!.buildTime).toBe(300);
+    expect(item!.buildTime).toBe(Math.floor(2800 * 0.96)); // C++ parity: floor(cost * 0.96)
     expect(item!.prerequisite).toBe('ATEK');
     expect(item!.faction).toBe('allied');
   });
@@ -156,7 +156,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'IRON');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(2800);
-    expect(item!.buildTime).toBe(300);
+    expect(item!.buildTime).toBe(Math.floor(2800 * 0.96)); // C++ parity: floor(cost * 0.96)
     expect(item!.prerequisite).toBe('STEK');
     expect(item!.faction).toBe('soviet');
   });
@@ -165,7 +165,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MSLO');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(2500);
-    expect(item!.buildTime).toBe(280);
+    expect(item!.buildTime).toBe(Math.floor(2500 * 0.96)); // C++ parity: floor(cost * 0.96)
     expect(item!.prerequisite).toBe('STEK');
     expect(item!.faction).toBe('both');
   });

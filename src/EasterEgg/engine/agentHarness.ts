@@ -414,10 +414,32 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
             clearTeamScripts(e);
+            // Spy immediate infiltration: if spy is within range, trigger infiltration
+            // on this tick rather than waiting for next (dog might kill spy first).
+            // Spy immediate infiltration: call spyInfiltrate directly from
+            // the harness when in range. This prevents the game loop from
+            // letting a dog kill the spy before the infiltration processes.
+            // In C++ RA, spy infiltration happens during movement phase before
+            // enemy scans. The TS engine processes all entities in one pass,
+            // so dogs can kill the spy before it infiltrates.
+            console.log(`[HARNESS] attack_struct: unit=${e.type}(${e.id}) struct=${s.type} ally=${s.ally} dist check...`);
+            if (e.type === 'SPY' && e.isPlayerUnit && !s.ally) {
+              const sx = s.cx * CELL_SIZE + CELL_SIZE;
+              const sy = s.cy * CELL_SIZE + CELL_SIZE;
+              const dx = e.pos.x - sx;
+              const dy = e.pos.y - sy;
+              const dist = Math.sqrt(dx * dx + dy * dy) / CELL_SIZE;
+              if (dist <= 4) {
+                // Direct infiltration — bypass game loop
+                (game as any).spyInfiltrate(e, s);
+                results.push({ cmd: 'attack_struct', ok: true });
+                continue;
+              }
+            }
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;
-            e.moveTarget = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+            e.moveTarget = structCenter;
             e.path = findPath(game.map, e.cell, { cx: s.cx, cy: s.cy }, true, e.isNavalUnit, e.stats.speedClass);
             e.pathIndex = 0;
           }

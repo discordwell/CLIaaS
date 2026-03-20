@@ -52,13 +52,15 @@ describe('Alliance table — C++ parity', () => {
     expect(table.get(House.Greece)!.has(House.GoodGuy)).toBe(true);
   });
 
-  it('Neutral is mutually allied with ALL houses (C++ house.cpp:7156-7158)', () => {
+  it('every house considers Neutral an ally (one-way, house.cpp:7158)', () => {
     const table = buildAlliancesFromINI(new Map(), House.Greece);
-    // Every house should be allied with Neutral
+    // Every house has Neutral in its alliance set (Make_Ally(HOUSE_NEUTRAL))
     expect(table.get(House.Greece)!.has(House.Neutral)).toBe(true);
-    expect(table.get(House.Neutral)!.has(House.Greece)).toBe(true);
     expect(table.get(House.USSR)!.has(House.Neutral)).toBe(true);
-    expect(table.get(House.Neutral)!.has(House.USSR)).toBe(true);
+    // But Neutral does NOT auto-ally everyone — its alliances come from INI
+    // With no Allies= specified, Neutral only allies itself
+    expect(table.get(House.Neutral)!.has(House.Greece)).toBe(false);
+    expect(table.get(House.Neutral)!.has(House.USSR)).toBe(false);
   });
 
   it('SCG08EA: Germany DOME should not be allied to player Greece', () => {

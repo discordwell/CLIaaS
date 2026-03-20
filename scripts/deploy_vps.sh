@@ -79,39 +79,37 @@ else
 fi
 CMDS
 
-echo "[2/6] Syncing source..."
+echo "[2/6] Building locally (Turbopack needs >12GB RAM)..."
+cd "$PROJECT_ROOT"
+pnpm install --frozen-lockfile
+pnpm build
+
+echo "[3/6] Syncing source + build output to VPS..."
 rsync -az --delete -e "$RSYNC_SSH" \
   --exclude '.git' \
-  --exclude '.next' \
   --exclude 'node_modules' \
   --exclude '.env' \
   --exclude '.env.local' \
   --exclude 'test-results' \
   --exclude '.claude' \
   --exclude 'build-wasm' \
+  --exclude '.next/cache' \
+  --exclude '*.nft.json' \
   "$PROJECT_ROOT/" "$VPS_SSH:$REMOTE_APP_DIR/"
 
-echo "[3/6] Installing dependencies + build on remote host..."
+echo "[3.1/6] Installing dependencies on remote..."
 "${SSH_CMD[@]}" bash -s -- "$REMOTE_APP_DIR" "$REMOTE_SHARED_DIR" <<'CMDS'
 set -euo pipefail
 APP_DIR="$1"
 SHARED_DIR="$2"
 cd "$APP_DIR"
 
-# Ensure swap is available for Turbopack builds (~6.5GB peak)
-if ! swapon --show | grep -q .; then
-  echo "WARNING: No swap detected. Turbopack build may OOM on <8GB free RAM."
-fi
-
 if command -v pnpm >/dev/null 2>&1; then
   CI=true pnpm install --frozen-lockfile
-  pnpm build
 elif command -v corepack >/dev/null 2>&1; then
   CI=true corepack pnpm install --frozen-lockfile
-  corepack pnpm build
 elif command -v npm >/dev/null 2>&1; then
   npm install
-  npm run build
 else
   echo "ERROR: no supported package manager found (pnpm/corepack/npm)."
   exit 1

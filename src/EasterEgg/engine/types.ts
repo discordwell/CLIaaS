@@ -1215,9 +1215,16 @@ export function buildAlliancesFromINI(
       set.add(ally);
     }
   }
+<<<<<<< Updated upstream
   // C++ parity (house.cpp:7158): Make_Ally(HOUSE_NEUTRAL) for each house.
   // ONE-WAY: everyone considers Neutral an ally. Neutral's own alliances
   // come from INI. No GoodGuy auto-alliance (uses INI like any house).
+=======
+  // C++ parity (house.cpp:7158): every house calls Make_Ally(HOUSE_NEUTRAL).
+  // This is ONE-WAY: everyone considers Neutral an ally, but Neutral's own
+  // alliances come from its INI Allies= entry (e.g., Allies=Special).
+  // C++ has NO auto-alliance for GoodGuy — it uses INI Allies= like any other house.
+>>>>>>> Stashed changes
   for (const h of Object.values(House)) {
     table.get(h)?.add(House.Neutral);
   }

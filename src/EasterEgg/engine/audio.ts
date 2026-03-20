@@ -602,6 +602,8 @@ export class AudioManager {
       case 'iron_curtain': this.synthIronCurtain(t, out); break;
       case 'nuke_launch': this.synthNukeLaunch(t, out); break;
       case 'nuke_explode': this.synthNukeExplode(t, out); break;
+      case 'score_beep': this.synthScoreBeep(t, out); break;
+      case 'score_swoosh': this.synthScoreSwoosh(t, out); break;
     }
   }
 
@@ -1488,5 +1490,27 @@ export class AudioManager {
     g.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
     o.connect(g).connect(out);
     o.start(t); o.stop(t + 2.0);
+  }
+
+  /** C++ Beepy6 — short tick during score count-up (score.cpp:612) */
+  private synthScoreBeep(t: number, out: AudioNode): void {
+    const o = this.osc('square', 880);
+    const g = this.gain(0.04);
+    g.gain.setValueAtTime(0.04, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.04);
+  }
+
+  /** C++ sfx4 — section transition swoosh (score.cpp:521,646) */
+  private synthScoreSwoosh(t: number, out: AudioNode): void {
+    const o = this.osc('sawtooth', 200);
+    const g = this.gain(0.06);
+    const f = this.filter('lowpass', 1500, 2);
+    o.frequency.exponentialRampToValueAtTime(800, t + 0.15);
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    o.connect(f).connect(g).connect(out);
+    o.start(t); o.stop(t + 0.25);
   }
 }
