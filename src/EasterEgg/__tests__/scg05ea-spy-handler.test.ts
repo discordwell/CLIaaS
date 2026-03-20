@@ -82,18 +82,19 @@ describe('SCG05EA — spy infiltration phase', () => {
 
   it('spy advances along safe route waypoints', () => {
     const strategy = new OracleStrategy('SCG05EA');
-    // Simulate: spy already at first waypoint
+    // Simulate: spy first seen — sets spyStopped and starts hold timer
     const state1 = makeState({
-      tick: 400,
+      tick: 100,
       units: [makeEntity(1, 'SPY', 'Greece', 16, 46)],
       enemies: staticDogs(),
       structures: [TARGET_WEAP],
     });
-    strategy.decide(state1); // arrives at wp0, advances to wp1
+    strategy.decide(state1); // spy STOP — starts 15-second (225 tick) hold
 
+    // Spy hold expires at tick 325 (100 + 225). Use tick > 325.
     const state2 = makeState({
-      tick: 500,
-      units: [makeEntity(1, 'SPY', 'Greece', 16, 46)], // idle at wp0
+      tick: 400,
+      units: [makeEntity(1, 'SPY', 'Greece', 16, 46)], // idle, hold expired
       enemies: staticDogs(),
       structures: [TARGET_WEAP],
     });

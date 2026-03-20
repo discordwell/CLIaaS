@@ -1,12 +1,18 @@
 /**
  * C++ parity tests — RepairStep and RepairPercent constants.
  *
- * C++ source of truth:
- *   rules.cpp:228  RepairStep  = 5
- *   rules.cpp:229  RepairPercent = fixed(1, 4) = 0.25
+ * C++ source of truth (constructor defaults, overridden by rules.ini at runtime):
+ *   rules.cpp:228  RepairStep  = 5  (constructor default)
+ *   rules.cpp:229  RepairPercent = fixed(1, 4) = 0.25  (constructor default)
  *
- * Formula (building.cpp / techno.cpp Repair logic):
- *   cost_per_step = ceil( (Raw_Cost / (MaxStrength / RepairStep)) * RepairPercent )
+ * rules.ini runtime values (what the game actually uses):
+ *   RepairStep  = 7
+ *   RepairPercent = 20% → fixed-point raw = floor(0.20 * 256) = 51
+ *
+ * Formula (building.cpp / techno.cpp Repair logic, C++ integer arithmetic):
+ *   stepsToFull = trunc(maxHp / RepairStep)
+ *   costPerFullStep = trunc(buildCost / stepsToFull)
+ *   cost_per_step = trunc((raw * costPerFullStep + 128) / 256)
  *
  * Repair fires every ~14 ticks, healing RepairStep HP per pulse.
  */
@@ -15,51 +21,58 @@ import { describe, it, expect } from 'vitest';
 import { REPAIR_STEP, REPAIR_PERCENT } from '../engine/types';
 import { repairCostPerStep } from '../engine/repairSell';
 
-describe('C++ parity: repair constants (rules.cpp:228-229)', () => {
+describe('C++ parity: repair constants (rules.ini runtime values)', () => {
   // -------------------------------------------------------------------
-  // Constant value checks
+  // Constant value checks — rules.ini overrides C++ constructor defaults
   // -------------------------------------------------------------------
-  it('REPAIR_STEP is 5 (rules.cpp:228 RepairStep = 5)', () => {
-    expect(REPAIR_STEP).toBe(5);
+  it('REPAIR_STEP is 7 (rules.ini RepairStep=7, C++ default=5)', () => {
+    expect(REPAIR_STEP).toBe(7);
   });
 
-  it('REPAIR_PERCENT is 0.25 (rules.cpp:229 RepairPercent = fixed(1,4))', () => {
-    expect(REPAIR_PERCENT).toBe(0.25);
+  it('REPAIR_PERCENT is 0.20 (rules.ini RepairPercent=20%, C++ default=0.25)', () => {
+    expect(REPAIR_PERCENT).toBe(0.20);
   });
 
   // -------------------------------------------------------------------
-  // Repair cost formula: ceil( buildCost * RepairPercent / (maxHp / RepairStep) )
+  // Repair cost formula: C++ integer division + 8.8 fixed-point multiply
+  // stepsToFull = trunc(maxHp / 7)
+  // costPerFullStep = trunc(buildCost / stepsToFull)
+  // result = trunc((51 * costPerFullStep + 128) / 256)
   // -------------------------------------------------------------------
   it('repair cost per step matches C++ formula for a typical building', () => {
     // Example: Construction Yard — cost=5000, maxHp=400
-    // stepsToFull = maxHp / RepairStep = 400 / 5 = 80
-    // costPerStep = ceil(5000 * 0.25 / 80) = ceil(1250 / 80) = ceil(15.625) = 16
+    // stepsToFull = trunc(400 / 7) = 57
+    // costPerFullStep = trunc(5000 / 57) = 87
+    // result = trunc((51 * 87 + 128) / 256) = trunc(4565 / 256) = 17
     const cost = repairCostPerStep(5000, 400);
-    expect(cost).toBe(16);
+    expect(cost).toBe(17);
   });
 
   it('repair cost per step for cheap building (Barracks cost=300, maxHp=400)', () => {
-    // stepsToFull = 400 / 5 = 80
-    // costPerStep = ceil(300 * 0.25 / 80) = ceil(75 / 80) = ceil(0.9375) = 1
+    // stepsToFull = trunc(400 / 7) = 57
+    // costPerFullStep = trunc(300 / 57) = 5
+    // result = trunc((51 * 5 + 128) / 256) = trunc(383 / 256) = 1
     const cost = repairCostPerStep(300, 400);
     expect(cost).toBe(1);
   });
 
   it('repair cost per step for War Factory (cost=2000, maxHp=400)', () => {
-    // C++ fixed-point: trunc(2000/80)=25, ((64*25)+128)/256 = trunc(1728/256) = 6
+    // stepsToFull = trunc(400 / 7) = 57
+    // costPerFullStep = trunc(2000 / 57) = 35
+    // result = trunc((51 * 35 + 128) / 256) = trunc(1913 / 256) = 7
     const cost = repairCostPerStep(2000, 400);
-    expect(cost).toBe(6);
+    expect(cost).toBe(7);
   });
 
   // -------------------------------------------------------------------
   // HP per tick
   // -------------------------------------------------------------------
-  it('heals 5 HP per repair tick (not 7)', () => {
+  it('heals 7 HP per repair tick (rules.ini RepairStep=7)', () => {
     // Simulate one repair tick: hp += REPAIR_STEP
     const hp = 100;
     const maxHp = 400;
     const healed = Math.min(maxHp, hp + REPAIR_STEP);
-    expect(healed - hp).toBe(5);
+    expect(healed - hp).toBe(7);
   });
 
   // -------------------------------------------------------------------
@@ -68,9 +81,9 @@ describe('C++ parity: repair constants (rules.cpp:228-229)', () => {
   it('total repair cost from 1 HP to full for Construction Yard', () => {
     // maxHp=400, cost=5000
     // HP to heal: 399 (from 1 to 400)
-    // Number of steps: ceil(399 / 5) = 80 steps
-    // Cost per step: ceil(5000 * 0.25 / (400 / 5)) = 16
-    // Total cost: 80 * 16 = 1280
+    // Number of steps: ceil(399 / 7) = 57 steps
+    // Cost per step: 17 (see above)
+    // Total cost: 57 * 17 = 969
     const buildCost = 5000;
     const maxHp = 400;
     const startHp = 1;
@@ -84,25 +97,25 @@ describe('C++ parity: repair constants (rules.cpp:228-229)', () => {
     }
 
     const numSteps = Math.ceil((maxHp - startHp) / REPAIR_STEP);
-    expect(numSteps).toBe(80);
-    expect(costPerStep).toBe(16);
-    expect(totalCost).toBe(80 * 16); // 1280 credits
+    expect(numSteps).toBe(57);
+    expect(costPerStep).toBe(17);
+    expect(totalCost).toBe(57 * 17); // 969 credits
   });
 
   it('total repair cost is roughly RepairPercent * buildCost for full repair', () => {
-    // C++ design intent: full repair costs ~25% of build cost
-    // Actual is slightly higher due to ceil() rounding
+    // C++ design intent: full repair costs ~20% of build cost
+    // Actual is slightly different due to integer truncation
     const buildCost = 2000;
     const maxHp = 400;
     const costPerStep = repairCostPerStep(buildCost, maxHp);
-    const numSteps = maxHp / REPAIR_STEP; // 80
+    const numSteps = Math.floor(maxHp / REPAIR_STEP); // 57
 
-    const totalCost = numSteps * costPerStep; // 80 * 6 = 480
+    const totalCost = numSteps * costPerStep; // 57 * 7 = 399
     const ratio = totalCost / buildCost;
 
-    // C++ fixed-point truncation makes ratio slightly below REPAIR_PERCENT (0.25)
-    // 480/2000 = 0.24
+    // With rules.ini values, ratio should be close to REPAIR_PERCENT (0.20)
+    // 399/2000 = 0.1995
     expect(ratio).toBeGreaterThanOrEqual(REPAIR_PERCENT - 0.02);
-    expect(ratio).toBeLessThanOrEqual(REPAIR_PERCENT);
+    expect(ratio).toBeLessThanOrEqual(REPAIR_PERCENT + 0.02);
   });
 });

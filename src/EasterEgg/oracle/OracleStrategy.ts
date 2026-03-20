@@ -435,12 +435,10 @@ export class OracleStrategy {
   private static readonly COASTAL_CELLS: Record<string, Point[]> = {
     'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
     'SCG11EA': [
-      // Shoreline from MapPack analysis. Water is NORTH (y<80), east shore x=27-28.
-      // SYRD is 3x3 — needs space. Scan widely around shore, including east shore
-      // which is closer to base (25,96) and may have more build radius coverage.
-      { cx: 28, cy: 86 }, { cx: 28, cy: 88 }, { cx: 28, cy: 90 },
-      { cx: 27, cy: 86 }, { cx: 27, cy: 91 }, { cx: 27, cy: 93 },
-      { cx: 25, cy: 80 }, { cx: 22, cy: 80 }, { cx: 30, cy: 78 },
+      // North shore at y=80 (land cells). Used for building chain bias.
+      // SYRD water candidates are generated with -3 offset into water.
+      { cx: 25, cy: 80 }, { cx: 24, cy: 80 }, { cx: 26, cy: 80 },
+      { cx: 23, cy: 80 }, { cx: 27, cy: 80 }, { cx: 22, cy: 80 },
     ],
     'SCG11EB': [
       { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
@@ -668,7 +666,18 @@ export class OracleStrategy {
         // Build placement candidates: hardcoded coastal cells first (most reliable),
         // then vessel-based scan as fallback.
         const candidates: Array<{ cx: number; cy: number }> = [];
-        // Priority 1: Hardcoded coastal cells — manually verified shore positions
+        // Priority 0: SCG11EA-specific water cells for SYRD (3x3 all-water zones).
+        // SYRD goes entirely in water. These are the closest valid spots to base.
+        if (this.scenario === 'SCG11EA') {
+          const waterSpots = [
+            { cx: 25, cy: 77 }, { cx: 24, cy: 77 }, { cx: 26, cy: 77 },
+            { cx: 23, cy: 77 }, { cx: 22, cy: 77 }, { cx: 30, cy: 79 },
+            { cx: 25, cy: 76 }, { cx: 24, cy: 76 }, { cx: 26, cy: 76 },
+            { cx: 23, cy: 76 }, { cx: 21, cy: 77 }, { cx: 27, cy: 77 },
+          ];
+          candidates.push(...waterSpots);
+        }
+        // Priority 1: Hardcoded coastal cells — scan grid around shore positions
         const coastRef = OracleStrategy.COASTAL_CELLS[this.scenario];
         if (coastRef) {
           for (const ref of coastRef) {
@@ -1982,93 +1991,78 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // Hold spy for 300 ticks (15 seconds) to shift patrol dog timing.
-    // The spy's entry into the corridor at different phases of the
-    // dog patrol cycle determines if it survives.
-    if (spy && this.scg05eaSpyStopped && this.scg05eaSpyStartTick > 0 &&
-        state.tick - this.scg05eaSpyStartTick < sec(15)) {
-      reasons.push(`spy hold (${Math.round(sec(15) - (state.tick - this.scg05eaSpyStartTick))})`);
-      return { commands, reason: reasons.join('; ') };
-    }
-
-    // ─── PHASE 1: Spy infiltration (waypoint-guided north corridor) ─────
-    // Spy disembarks at ~(15,50). Shore fix makes y=48 passable BEACH.
-    // Route: north to y=48 (avoids patrol dogs at y=50-55), east along
-    // y=48 to x≈40 (clear corridor), then south to infiltrate WEAP at (43,50).
+    // ─── PHASE 1: Spy route — east at y=50, dodge dogs, south, then WEAP ──
+    // With spy guard fix, spy won't auto-infiltrate buildings. Only dogs
+    // are a threat. Route east along y=50 (direct path), dodge north to
+    // y=48 when a dog approaches, then continue east. After passing base,
+    // go south through river gap to tny3, then back north to WEAP.
     if (spy && !this.scg05eaSpyInfiltrated) {
       const targetWeap = state.structures.find(
         (s) => s.t === 'WEAP' && !s.ally &&
           this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 25,
       );
 
-      // South-first route: spy must trigger tny3 cell at (24,107) to set
-      // global 18 → Tanya spawns. Then north via y=48 corridor to WEAP.
+      // Check for nearby dogs — dodge if within 5 cells
+      const nearestDog = dogs.length > 0
+        ? dogs.reduce((a, b) =>
+          this.distanceSq(spy, a) < this.distanceSq(spy, b) ? a : b)
+        : null;
+      const dogDistSq = nearestDog ? this.distanceSq(spy, nearestDog) : Infinity;
+
+      // y=48 corridor (proven safer) + dog dodge when needed
       const spyWaypoints: Point[] = [
-        // Phase A: East along y=48 to x=40, then south past ALL dog zones
-        { cx: 16, cy: 48 },   // north to safe corridor
+        // Phase A: North to y=48, east through corridor
+        { cx: 16, cy: 48 },
         { cx: 21, cy: 48 },
         { cx: 24, cy: 48 },
         { cx: 28, cy: 48 },
         { cx: 34, cy: 48 },
         { cx: 40, cy: 48 },
-        { cx: 48, cy: 48 },   // east past base + dogs
+        { cx: 48, cy: 48 },
         { cx: 56, cy: 48 },
-        { cx: 62, cy: 48 },   // far east of all patrols
-        { cx: 68, cy: 48 },   // map edge — guaranteed clear
-        { cx: 68, cy: 55 },   // south in clear zone
+        { cx: 62, cy: 48 },
+        { cx: 68, cy: 48 },   // far east, clear zone
+        // Phase B: South through river gap to tny3
+        { cx: 68, cy: 60 },
         { cx: 68, cy: 65 },
-        { cx: 55, cy: 65 },   // SW toward river gap
-        { cx: 40, cy: 68 },   // west through river gap
+        { cx: 55, cy: 65 },
+        { cx: 40, cy: 68 },   // river gap (x=18-41 clear at y=68)
         { cx: 30, cy: 75 },
         { cx: 25, cy: 85 },
         { cx: 24, cy: 95 },
         { cx: 24, cy: 105 },
-        { cx: 24, cy: 107 },  // tny3 trigger! → global 18 → Tanya
-        // Phase B: North through gap then WEAP
+        { cx: 24, cy: 107 },  // tny3! → global 18 → Tanya
+        // Phase C: North to WEAP via same route
         { cx: 24, cy: 95 },
         { cx: 30, cy: 80 },
-        { cx: 40, cy: 68 },   // river gap
-        { cx: 48, cy: 55 },
-        { cx: 16, cy: 48 },   // north corridor entry
-        { cx: 21, cy: 48 },
-        { cx: 24, cy: 48 },
-        { cx: 28, cy: 48 },
-        { cx: 34, cy: 48 },
-        { cx: 40, cy: 48 },
-        { cx: 48, cy: 48 },   // east of WEAP
+        { cx: 40, cy: 68 },
+        { cx: 68, cy: 55 },
+        { cx: 68, cy: 48 },
+        { cx: 50, cy: 48 },
+        { cx: 48, cy: 48 },
       ];
 
-      // Track waypoint index in instance state (not x-progression).
-      // Use distance check — spy is within 4 cells of current target.
       if (!this.scg05eaSpyWpIdx) this.scg05eaSpyWpIdx = 0;
       const wpTarget = spyWaypoints[this.scg05eaSpyWpIdx];
-      if (wpTarget && this.distanceSq(spy, wpTarget) <= 4) { // within 2 cells
+      if (wpTarget && this.distanceSq(spy, wpTarget) <= 9) {
         this.scg05eaSpyWpIdx++;
       }
-      let wpIdx = this.scg05eaSpyWpIdx;
-
-      // At wp2 (sprint zone) — wait for dogs to clear before committing
-      // No waiting — just sprint. Dogs patrol through every possible path.
-      // The spy's 25 HP may not survive, but waiting means the timer runs out.
+      const wpIdx = this.scg05eaSpyWpIdx;
 
       if (targetWeap && wpIdx >= spyWaypoints.length) {
-        // Only infiltrate AFTER all waypoints completed (south route + north return)
-        // Always re-send attack command when within 6 cells of WEAP.
-        // The harness has immediate infiltration for spies within 4 cells,
-        // bypassing the game loop's entity update order issue.
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-        reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy}) d=${Math.sqrt(this.distanceSq(spy, targetWeap)).toFixed(1)}`);
+        reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+      } else if (dogDistSq <= 16 && nearestDog) {
+        // Dog within 4 cells — emergency dodge east
+        // Don't change y (stay at y=48) — just sprint east faster
+        const dodgeCx = Math.min(spy.cx + 6, 70);
+        commands.push({ cmd: 'move', ids: [spy.id], cx: dodgeCx, cy: 48 }); // always stay at y=48
+        reasons.push(`spy SPRINT dog(${nearestDog.cx},${nearestDog.cy}) → (${dodgeCx},${spy.cy})`);
+        if (wpTarget && spy.cx >= wpTarget.cx - 2) this.scg05eaSpyWpIdx++;
       } else if (wpIdx < spyWaypoints.length) {
         const wp = spyWaypoints[wpIdx];
         commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
         reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy})`);
-      } else if (targetWeap) {
-        if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
-          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-          reasons.push(`spy → WEAP (${spy.cx},${spy.cy})`);
-        } else {
-          reasons.push(`spy sprinting (${spy.cx},${spy.cy})`);
-        }
       } else {
         commands.push({ cmd: 'move', ids: [spy.id], cx: SCG05EA_WEAP_TARGET.cx, cy: SCG05EA_WEAP_TARGET.cy });
         reasons.push('spy → WEAP area');
@@ -2219,16 +2213,38 @@ export class OracleStrategy {
     const commands: Array<Record<string, unknown>> = [];
     const reasons: string[] = [];
 
+    const playerUnits = this.playerOwnedUnits(state);
+
+    // Scout north to reveal water cells for SYRD placement (fog of war blocks placement).
+    // Send one infantry unit north toward (25, 77) — the water zone.
+    if (this.waterScoutId >= 0 && !playerUnits.some((u) => u.id === this.waterScoutId)) {
+      this.waterScoutId = -1; // scout died, reset
+    }
+    if (this.waterScoutId < 0) {
+      const scouts = playerUnits.filter(
+        (u) => (u.t === 'E1' || u.t === 'ARTY') &&
+          (u.m === MISSION_GUARD || u.m === MISSION_GUARD_AREA),
+      );
+      if (scouts.length > 0) {
+        this.waterScoutId = scouts[0].id;
+        commands.push({
+          cmd: 'move',
+          ids: [this.waterScoutId],
+          cx: 25, cy: 77,  // water zone for SYRD
+        });
+        this.recordMove(this.waterScoutId, 25, 77);
+        reasons.push('scout north to reveal water');
+      }
+    }
+
     // Delegate economy, building, and defense to base-building (uses SCG11EA_BUILD_ORDER,
     // skips tank production, lowers ship credit threshold — all handled via scenario checks).
     const basePlan = this.decideBaseBuilding(state);
     commands.push(...basePlan.commands);
     reasons.push(basePlan.reason);
 
-    // Send completed destroyers to hunt submarines east of the island.
-    // Enemy subs are at x=67-72, y=31-97. Spread destroyers along the sub line.
+    // Send completed destroyers to hunt submarines.
     const NAVAL_TYPES = new Set(['DD', 'CA', 'PT']);
-    const playerUnits = this.playerOwnedUnits(state);
     const playerShips = playerUnits.filter((u) => NAVAL_TYPES.has(u.t));
     const enemySubs = state.enemies.filter((e) => e.t === 'SS' || e.t === 'MSUB');
 
