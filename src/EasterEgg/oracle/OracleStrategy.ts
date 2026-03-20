@@ -435,12 +435,12 @@ export class OracleStrategy {
   private static readonly COASTAL_CELLS: Record<string, Point[]> = {
     'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
     'SCG11EA': [
-      // Actual shoreline from MapPack terrain analysis. Water is NORTH (y<80).
-      // Base at (25,96). North shore y=80, east shore x=27-28.
-      // Best SYRD spots: north shore (close to water) + east shore (close to base).
-      { cx: 27, cy: 80 }, { cx: 26, cy: 80 }, { cx: 25, cy: 80 },
-      { cx: 24, cy: 80 }, { cx: 23, cy: 80 }, { cx: 22, cy: 80 },
-      { cx: 27, cy: 86 }, { cx: 28, cy: 86 }, { cx: 28, cy: 88 },
+      // Shoreline from MapPack analysis. Water is NORTH (y<80), east shore x=27-28.
+      // SYRD is 3x3 — needs space. Scan widely around shore, including east shore
+      // which is closer to base (25,96) and may have more build radius coverage.
+      { cx: 28, cy: 86 }, { cx: 28, cy: 88 }, { cx: 28, cy: 90 },
+      { cx: 27, cy: 86 }, { cx: 27, cy: 91 }, { cx: 27, cy: 93 },
+      { cx: 25, cy: 80 }, { cx: 22, cy: 80 }, { cx: 30, cy: 78 },
     ],
     'SCG11EB': [
       { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
@@ -1982,6 +1982,14 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
+    // Hold spy for 300 ticks (15 seconds) to shift patrol dog timing.
+    // The spy's entry into the corridor at different phases of the
+    // dog patrol cycle determines if it survives.
+    if (spy && this.scg05eaSpyStopped && this.scg05eaSpyStartTick > 0 &&
+        state.tick - this.scg05eaSpyStartTick < sec(15)) {
+      reasons.push(`spy hold (${Math.round(sec(15) - (state.tick - this.scg05eaSpyStartTick))})`);
+      return { commands, reason: reasons.join('; ') };
+    }
 
     // ─── PHASE 1: Spy infiltration (waypoint-guided north corridor) ─────
     // Spy disembarks at ~(15,50). Shore fix makes y=48 passable BEACH.
