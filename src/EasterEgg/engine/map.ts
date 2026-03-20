@@ -196,10 +196,12 @@ export class GameMap {
     }
   }
 
-  /** Check if a cell is passable (terrain + occupancy) */
+  /** Check if a cell is passable (terrain + occupancy).
+   *  C++ parity: pathfinding extends 1 cell beyond map bounds.
+   *  Map bounds define the visible area, not the pathfinding boundary. */
   isPassable(cx: number, cy: number): boolean {
-    if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
-        cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
+    if (cx < this.boundsX - 1 || cx >= this.boundsX + this.boundsW + 1 ||
+        cy < this.boundsY - 1 || cy >= this.boundsY + this.boundsH + 1) {
       return false;
     }
     return PASSABLE.has(this.getTerrain(cx, cy));
@@ -738,8 +740,9 @@ export class GameMap {
    *  @param isMoving Optional callback: given occupant entity ID, returns true if that entity is currently moving
    *  @param isInfantry If true, cell is passable if sub-cells are available (C++ infantry sub-cell system) */
   canEnterCell(cx: number, cy: number, naval = false, isMoving?: (entityId: number) => boolean, isInfantry = false): MoveResult {
-    if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
-        cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
+    // C++ parity: pathfinding extends 1 cell beyond map bounds.
+    if (cx < this.boundsX - 1 || cx >= this.boundsX + this.boundsW + 1 ||
+        cy < this.boundsY - 1 || cy >= this.boundsY + this.boundsH + 1) {
       return MoveResult.IMPASSABLE;
     }
     const passable = naval ? this.getTerrain(cx, cy) === Terrain.WATER : PASSABLE.has(this.getTerrain(cx, cy));
