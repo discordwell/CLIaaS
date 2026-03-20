@@ -83,6 +83,30 @@ interface PixelDiffResult {
   diffImagePath: string | null;
 }
 
+// ── Screenshot helpers ───────────────────────────────────────────────────────
+
+/**
+ * Capture game canvas screenshot from both adapters.
+ * Uses gameScreenshot() (canvas.toDataURL) instead of screenshot() (page viewport)
+ * because the WASM Emscripten canvas doesn't render to the Playwright viewport.
+ */
+async function captureGameScreenshots(
+  ts: DualRuntimeHandle['ts'],
+  wasm: DualRuntimeHandle['wasm'],
+): Promise<[Buffer, Buffer]> {
+  const [tsDataUrl, wasmDataUrl] = await Promise.all([
+    ts.gameScreenshot(),
+    wasm.gameScreenshot(),
+  ]);
+  return [dataUrlToBuffer(tsDataUrl), dataUrlToBuffer(wasmDataUrl)];
+}
+
+function dataUrlToBuffer(dataUrl: string): Buffer {
+  const match = dataUrl.match(/^data:[^;]+;base64,(.+)$/);
+  if (!match) return Buffer.alloc(0);
+  return Buffer.from(match[1], 'base64');
+}
+
 // ── Unit extraction helpers ──────────────────────────────────────────────────
 
 interface UnitInfo {
@@ -624,10 +648,7 @@ describe('M8 Dual-Runtime Comparison', () => {
       let prevWasmState = handle.wasmState;
 
       // Take initial snapshot at tick 0
-      const [tsScreenshot0, wasmScreenshot0] = await Promise.all([
-        handle.ts.screenshot(),
-        handle.wasm.screenshot(),
-      ]);
+      const [tsScreenshot0, wasmScreenshot0] = await captureGameScreenshots(handle.ts, handle.wasm);
       const diffPath0 = path.join(SCREENSHOT_DIR, `diff-0.png`);
       const pixelDiff0 = await computePixelDiff(tsScreenshot0, wasmScreenshot0, diffPath0);
 
@@ -674,10 +695,7 @@ describe('M8 Dual-Runtime Comparison', () => {
 
           // Snapshot every SNAPSHOT_INTERVAL ticks
           if (currentTick % SNAPSHOT_INTERVAL === 0) {
-            const [tsScreenshot, wasmScreenshot] = await Promise.all([
-              handle.ts.screenshot(),
-              handle.wasm.screenshot(),
-            ]);
+            const [tsScreenshot, wasmScreenshot] = await captureGameScreenshots(handle.ts, handle.wasm);
 
             const diffPath = path.join(SCREENSHOT_DIR, `diff-${currentTick}.png`);
             const pixelDiff = await computePixelDiff(tsScreenshot, wasmScreenshot, diffPath);
@@ -710,10 +728,7 @@ describe('M8 Dual-Runtime Comparison', () => {
           if (tsOutcome !== 'playing' || wasmOutcome !== 'playing') {
             // Take a final snapshot on completion
             if (currentTick % SNAPSHOT_INTERVAL !== 0) {
-              const [tsScreenshot, wasmScreenshot] = await Promise.all([
-                handle.ts.screenshot(),
-                handle.wasm.screenshot(),
-              ]);
+              const [tsScreenshot, wasmScreenshot] = await captureGameScreenshots(handle.ts, handle.wasm);
 
               const diffPath = path.join(SCREENSHOT_DIR, `diff-${currentTick}.png`);
               const pixelDiff = await computePixelDiff(tsScreenshot, wasmScreenshot, diffPath);
