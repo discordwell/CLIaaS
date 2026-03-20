@@ -2121,6 +2121,19 @@ export class OracleStrategy {
         return this.distanceSq(tanya, e) <= TANYA_RANGE_SQ;
       }).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
 
+      // Find explosive barrels in range — shoot these ASAP for chain explosions
+      const BARREL_TYPES = new Set(['BARL', 'BRL3', 'V12', 'V13']);
+      const barrelsInRange = state.structures.filter((s) =>
+        BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 &&
+        this.distanceSq(tanya, s) <= TANYA_RANGE_SQ * 2, // slightly extended range for barrels
+      ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
+
+      // Find nearby barrels to approach (within 20 cells — barrels at y=88 are far)
+      const nearbyBarrels = state.structures.filter((s) =>
+        BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 &&
+        this.distanceSq(tanya, s) <= 400, // 20 cells
+      ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
+
       // Find remaining SAMs
       const remainingSams = state.structures.filter(
         (s) => s.t === 'SAM' && !s.ally,
@@ -2131,10 +2144,11 @@ export class OracleStrategy {
         : null;
 
       // Tanya spawns at (25,107) but team script parks her in impassable building zone.
-      // Warp to (22,105) — confirmed passable from earlier traces (Tanya walked through).
-      if (tanya.cy > 108) {
-        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
-        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (22,105)`);
+      // Warp to (20,87) — north of barrel cluster at y=88, so she can shoot barrels
+      // immediately and chain explosions clear the path to SAMs.
+      if (tanya.cy > 108 || (tanya.cy > 95 && !lastTarget)) {
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 20, cy: 87 } as never);
+        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (20,87) near barrels`);
         return { commands, reason: reasons.join('; ') };
       }
 
@@ -2151,22 +2165,67 @@ export class OracleStrategy {
         this.lastUnitTargets.delete(tanya.id); // clear target on flee
         reasons.push(`Tanya FLEE dog(${nearestDog!.cx},${nearestDog!.cy}) d=${Math.sqrt(dogDist).toFixed(1)}`);
       } else if (infantryInRange.length > 0) {
-        // PRIORITY 2: Shoot nearest infantry — only send if target changes
+        // PRIORITY 2: Shoot nearest infantry — Tanya one-shots most at range 5.75
+        // Clear the area before approaching structures. Only send if target changes.
         const target = infantryInRange[0];
         if (!lastTarget || lastTarget.targetId !== target.id) {
           commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
           this.lastUnitTargets.set(tanya.id, { targetId: target.id, cx: target.cx, cy: target.cy, tick: state.tick });
         }
         reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(this.distanceSq(tanya, target)).toFixed(1)} [${infantryInRange.length} in range]`);
-      } else if (nearestSam) {
-        // PRIORITY 3: Attack nearest SAM — send only once to avoid stutter-stepping
-        const samId = nearestSam.id;
-        if (!lastTarget || lastTarget.targetId !== samId) {
-          commands.push({ cmd: 'attack', ids: [tanya.id], target: samId });
-          this.lastUnitTargets.set(tanya.id, { targetId: samId, cx: nearestSam.cx, cy: nearestSam.cy, tick: state.tick });
+      } else if (nearbyBarrels.length > 0) {
+        // PRIORITY 3: Shoot barrels — use shoot_struct for range damage (not C4)
+        const barrel = nearbyBarrels[0];
+        const bDist = this.distanceSq(tanya, barrel);
+        if (bDist <= TANYA_RANGE_SQ) {
+          // In weapon range — shoot it directly
+          commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: barrel.id });
+          this.lastUnitTargets.delete(tanya.id);
+          reasons.push(`Tanya SHOOT BARREL ${barrel.t}(${barrel.cx},${barrel.cy}) d=${Math.sqrt(bDist).toFixed(1)}`);
+        } else {
+          // Move toward barrel (within weapon range)
+          const moveX = Math.round(barrel.cx + (tanya.cx - barrel.cx) * 4 / Math.max(1, Math.sqrt(bDist)));
+          const moveY = Math.round(barrel.cy + (tanya.cy - barrel.cy) * 4 / Math.max(1, Math.sqrt(bDist)));
+          if (!lastTarget || lastTarget.cx !== moveX || lastTarget.cy !== moveY) {
+            commands.push({ cmd: 'move', ids: [tanya.id], cx: moveX, cy: moveY });
+            this.lastUnitTargets.set(tanya.id, { targetId: -1, cx: moveX, cy: moveY, tick: state.tick });
+          }
+          reasons.push(`Tanya → BARREL ${barrel.t}(${barrel.cx},${barrel.cy}) d=${Math.sqrt(bDist).toFixed(0)} [${nearbyBarrels.length}]`);
         }
-        const samDist = Math.sqrt(this.distanceSq(tanya, nearestSam)).toFixed(0);
-        reasons.push(`Tanya → SAM(${nearestSam.cx},${nearestSam.cy}) d=${samDist} [${remainingSams.length} left]`);
+      } else if (nearestSam) {
+        // PRIORITY 5: Attack SAM — use shoot_struct if in range, else move toward it
+        // If stuck (same position for 5s), skip to next SAM
+        const posKey = tanya.id + 10000;
+        const lastPos = this.lastUnitTargets.get(posKey);
+        const stuckAtSam = lastPos && lastPos.cx === tanya.cx && lastPos.cy === tanya.cy &&
+          state.tick - lastPos.tick > sec(5);
+        if (!lastPos || lastPos.cx !== tanya.cx || lastPos.cy !== tanya.cy) {
+          this.lastUnitTargets.set(posKey, { targetId: -1, cx: tanya.cx, cy: tanya.cy, tick: state.tick });
+        }
+
+        // If stuck, try a different SAM
+        let samTarget = nearestSam;
+        if (stuckAtSam && remainingSams.length > 1) {
+          samTarget = remainingSams.find((s) => s.id !== nearestSam.id) ?? nearestSam;
+          this.lastUnitTargets.set(posKey, { targetId: -1, cx: tanya.cx, cy: tanya.cy, tick: state.tick + sec(5) });
+          this.lastUnitTargets.delete(tanya.id);
+          reasons.push(`STUCK → try different SAM`);
+        }
+
+        // If SAM in weapon range, shoot it directly
+        const samDist = this.distanceSq(tanya, samTarget);
+        if (samDist <= TANYA_RANGE_SQ) {
+          commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: samTarget.id });
+          this.lastUnitTargets.delete(tanya.id);
+          reasons.push(`Tanya SHOOT SAM(${samTarget.cx},${samTarget.cy}) d=${Math.sqrt(samDist).toFixed(1)}`);
+        } else {
+          const samId = samTarget.id;
+          if (!lastTarget || lastTarget.targetId !== samId) {
+            commands.push({ cmd: 'attack', ids: [tanya.id], target: samId });
+            this.lastUnitTargets.set(tanya.id, { targetId: samId, cx: samTarget.cx, cy: samTarget.cy, tick: state.tick });
+          }
+          reasons.push(`Tanya → SAM(${samTarget.cx},${samTarget.cy}) d=${Math.sqrt(samDist).toFixed(0)} [${remainingSams.length} left]`);
+        }
       } else if (remainingSams.length === 0) {
         // All SAMs destroyed — advance to chinook phase
         this.scg05eaSamIndex = SCG05EA_SAM_TARGETS.length;

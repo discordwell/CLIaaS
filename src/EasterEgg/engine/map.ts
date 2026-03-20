@@ -610,6 +610,11 @@ export class GameMap {
             if (this.overlay[nidx] !== 0xFF) continue;
             if (!BUILDABLE.has(this.cells[nidx])) continue;
             if (this.wallType[nidx] !== '') continue;
+            // C++ cell.cpp:3000 — reject bridge cells for germination
+            const tmpl = this.templateType[nidx];
+            if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) continue;
+            // C++ cell.cpp:3007-3008 — reject cells with visible buildings (vehicle/building occupancy)
+            if (this.vehicleOccupancy.has(nidx)) continue;
             // Gold always spreads as gold (minimum density)
             this.overlay[nidx] = 0x03;
             break; // C++: spread to first valid cell only

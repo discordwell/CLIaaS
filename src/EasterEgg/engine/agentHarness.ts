@@ -431,10 +431,48 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             e.target = null;
             e.targetStructure = s;
             e.moveTarget = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-            e.path = findPath(game.map, e.cell, { cx: s.cx, cy: s.cy }, true, e.isNavalUnit, e.stats.speedClass);
+            // Pathfind to adjacent cell of structure (structure cell itself is WALL)
+            let bestPath: ReturnType<typeof findPath> = [];
+            for (const [ddx, ddy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]) {
+              const ax = s.cx + ddx, ay = s.cy + ddy;
+              const p = findPath(game.map, e.cell, { cx: ax, cy: ay }, true, e.isNavalUnit, e.stats.speedClass);
+              if (p.length > 0 && (bestPath.length === 0 || p.length < bestPath.length)) {
+                bestPath = p;
+                e.moveTarget = { x: ax * CELL_SIZE + CELL_SIZE / 2, y: ay * CELL_SIZE + CELL_SIZE / 2 };
+              }
+            }
+            e.path = bestPath;
             e.pathIndex = 0;
           }
           results.push({ cmd: 'attack_struct', ok: errs.length === 0, error: errs.length ? errs.join('; ') : undefined });
+          break;
+        }
+
+        case 'shoot_struct': {
+          // Direct weapon damage against a structure (C++ parity: infantry CAN fire
+          // weapons at structures from range, not just C4). Used for barrels etc.
+          const ss = game.structures[c.structIdx];
+          if (!ss?.alive) {
+            results.push({ cmd: 'shoot_struct', ok: false, error: 'structure not alive' });
+            break;
+          }
+          const shooter = game.entityById.get(c.unitIds?.[0]);
+          if (!shooter?.alive || !shooter.isPlayerUnit || !shooter.weapon) {
+            results.push({ cmd: 'shoot_struct', ok: false, error: 'invalid shooter' });
+            break;
+          }
+          // Apply weapon damage directly
+          const dmg = shooter.weapon.damage ?? 50;
+          ss.hp -= dmg;
+          if (ss.hp <= 0) {
+            ss.alive = false;
+            ss.hp = 0;
+            // Trigger explosion for barrels
+            if (typeof (game as unknown as { damageStructure?: (s: typeof ss, d: number) => void }).damageStructure === 'function') {
+              (game as unknown as { damageStructure: (s: typeof ss, d: number) => void }).damageStructure(ss, dmg);
+            }
+          }
+          results.push({ cmd: 'shoot_struct', ok: true });
           break;
         }
 

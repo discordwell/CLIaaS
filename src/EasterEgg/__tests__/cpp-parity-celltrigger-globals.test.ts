@@ -59,6 +59,7 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     triggerStartTick: 0,
     triggerName: 'test',
     playerEntered: false,
+    playerEnteredHouse: 0,
     objectDiscovered: false,
     houseDiscovered: new Map(),
     enteredZone: false,
@@ -109,6 +110,7 @@ function createTrigger(overrides: Partial<ScenarioTrigger> = {}): ScenarioTrigge
     fired: false,
     timerTick: 0,
     playerEntered: false,
+    playerEnteredHouse: -1,
     objectDiscovered: false,
     enteredZone: false,
     crossedHorizontal: false,
@@ -269,15 +271,14 @@ describe('Global variable cascading (Set_Global_To) — C++ parity', () => {
    *
    * This is a potential divergence: C++ only cascades on actual change, TS always cascades.
    */
-  it('SET_GLOBAL always returns globalChanged even when already set', () => {
+  it('SET_GLOBAL does NOT report globalChanged when global was already set', () => {
     // C++ scenario.cpp:268: if (previous != value) — only cascades on real change
-    // TS: always sets globalChanged
+    // TS now matches: no cascade when value unchanged
     const globals = new Set<number>([5]);
     const action: TriggerAction = { action: TACTION_SET_GLOBAL, team: -1, trigger: -1, data: 5 };
     const result = executeAction(action, globals);
-    // TS always returns globalChanged — C++ would NOT cascade because previous == value
-    // This is acceptable because the cascade is idempotent (re-evaluating triggers is safe)
-    expect(result.globalChanged).toBe(5);
+    // C++ and TS: no cascade because previous == value
+    expect(result.globalChanged).toBeUndefined();
   });
 });
 
@@ -854,7 +855,7 @@ describe('PLAYER_ENTERED ownership check — C++ parity', () => {
    * In single-player RA missions this rarely matters because the trigger's Data.House
    * matches the player's house. But it's technically incorrect.
    */
-  it.skip('PLAYER_ENTERED should check event.data house against entering unit owner', () => {
+  it('PLAYER_ENTERED should check event.data house against entering unit owner', () => {
     // PARITY GAP: TS checkTriggerEvent ignores event.data for PLAYER_ENTERED.
     // In C++, the trigger event's Data.House must match the entering unit's owner.
     // This test documents the gap — it would need checkTriggerEvent to receive
@@ -889,7 +890,7 @@ describe('Set_Global_To idempotency — C++ parity', () => {
    * PARITY GAP: TS always reports globalChanged even when the value didn't change.
    * This is functionally benign (the cascade is idempotent) but differs from C++.
    */
-  it.skip('SET_GLOBAL should NOT report globalChanged when global was already set', () => {
+  it('SET_GLOBAL should NOT report globalChanged when global was already set', () => {
     // PARITY GAP: TS always returns globalChanged
     const globals = new Set<number>([5]); // global 5 already set
     const action: TriggerAction = { action: TACTION_SET_GLOBAL, team: -1, trigger: -1, data: 5 };
@@ -899,7 +900,7 @@ describe('Set_Global_To idempotency — C++ parity', () => {
     expect(result.globalChanged).toBeUndefined(); // This FAILS in TS — PARITY GAP
   });
 
-  it.skip('CLEAR_GLOBAL should NOT report globalChanged when global was already clear', () => {
+  it('CLEAR_GLOBAL should NOT report globalChanged when global was already clear', () => {
     // PARITY GAP: TS always returns globalChanged
     const globals = new Set<number>(); // global 5 already clear
     const action: TriggerAction = { action: TACTION_CLEAR_GLOBAL, team: -1, trigger: -1, data: 5 };

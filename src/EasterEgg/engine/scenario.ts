@@ -181,6 +181,7 @@ export interface ScenarioTrigger {
   fired: boolean;         // has this trigger fired?
   timerTick: number;      // game tick when timer started (for TIME events)
   playerEntered: boolean; // has a player unit entered a cell with this trigger?
+  playerEnteredHouse: number; // C++ parity: house index of the unit that entered (tevent.cpp:290-291)
   objectDiscovered: boolean; // C++ parity: attached object was discovered by enemy (TEVENT_DISCOVERED)
   enteredZone: boolean; // C++ parity: a matching-house unit entered the trigger's zone (TEVENT_ENTERS_ZONE)
   crossedHorizontal: boolean; // C++ parity: a matching-house unit crossed the trigger cell's Y row (TEVENT_CROSS_HORIZONTAL)
@@ -798,6 +799,7 @@ export function parseScenarioINI(text: string): ScenarioData {
         fired: false,
         timerTick: 0,
         playerEntered: false,
+        playerEnteredHouse: -1,
         objectDiscovered: false,
         enteredZone: false,
         crossedHorizontal: false,
@@ -1020,6 +1022,24 @@ export function houseIdToHouse(id: number): House {
     case 18: return House.Multi7;
     case 19: return House.Multi8;
     default: return House.Neutral;
+  }
+}
+
+/** Reverse mapping: House enum → RA house ID number */
+export function houseToId(house: House): number {
+  switch (house) {
+    case House.Spain:   return 0;
+    case House.Greece:  return 1;
+    case House.USSR:    return 2;
+    case House.England: return 3;
+    case House.Ukraine: return 4;
+    case House.Germany: return 5;
+    case House.France:  return 6;
+    case House.Turkey:  return 7;
+    case House.GoodGuy: return 8;
+    case House.BadGuy:  return 9;
+    case House.Neutral: return 10;
+    default: return 10; // Neutral
   }
 }
 
@@ -1946,6 +1966,7 @@ export interface TriggerGameState {
   triggerStartTick: number;
   triggerName: string;
   playerEntered: boolean;
+  playerEnteredHouse?: number; // C++ parity: house index of the entering unit (tevent.cpp:290-291)
   // C++ parity (#21): differentiated trigger event state
   objectDiscovered: boolean;  // per-trigger: attached object was discovered by enemy (TEVENT_DISCOVERED)
   houseDiscovered: Map<number, boolean>; // per-house: any unit of this house has been seen by player (TEVENT_HOUSE_DISCOVERED)
@@ -2007,7 +2028,12 @@ export function checkTriggerEvent(
     case TEVENT_GLOBAL_CLEAR:
       return !state.globals.has(event.data);
     case TEVENT_PLAYER_ENTERED:
-      return state.playerEntered;
+      // C++ tevent.cpp:290-291 — object->Owner() must match Data.House
+      if (!state.playerEntered) return false;
+      if (state.playerEnteredHouse !== undefined) {
+        return state.playerEnteredHouse === event.data;
+      }
+      return true;
     case TEVENT_ALL_DESTROYED: {
       // All units/structures of the specified house destroyed (event.data = RA house index)
       // RA source: HouseClass::As_Pointer(Event.Data.House)->Is_All_Destroyed()
@@ -2321,13 +2347,19 @@ export function executeTriggerAction(
     }
 
     case TACTION_SET_GLOBAL:
-      globals.add(action.data);
-      result.globalChanged = action.data; // C++ parity (#38): immediate spring
+      // C++ scenario.cpp:268 — only cascade when previous != value
+      if (!globals.has(action.data)) {
+        globals.add(action.data);
+        result.globalChanged = action.data; // C++ parity (#38): immediate spring
+      }
       break;
 
     case TACTION_CLEAR_GLOBAL:
-      globals.delete(action.data);
-      result.globalChanged = action.data; // C++ parity (#38): immediate spring
+      // C++ scenario.cpp:268 — only cascade when previous != value
+      if (globals.has(action.data)) {
+        globals.delete(action.data);
+        result.globalChanged = action.data; // C++ parity (#38): immediate spring
+      }
       break;
 
     case TACTION_START_TIMER:

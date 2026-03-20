@@ -253,6 +253,14 @@ export function translateOracleDecisionToTs(
       continue;
     }
 
+    if (kind === 'shoot_struct' && typeof command.target === 'number' && ids.length >= 1) {
+      const sIdx = bridge.structureIndexById.get(command.target);
+      if (sIdx !== undefined) {
+        commands.push({ cmd: 'shoot_struct', unitIds: ids, structIdx: sIdx } as never);
+      }
+      continue;
+    }
+
     if (kind === 'enter' && typeof command.target === 'number' && ids.length === 1) {
       commands.push({ cmd: 'enter', unitId: ids[0], transportId: command.target });
       continue;

@@ -1267,8 +1267,20 @@ describe('Spread → germination integration', () => {
    *
    * Test skipped as TS lacks bridge cell tracking in the germination path.
    */
-  it.skip('C++ rejects bridge cells for germination — TS lacks bridge check', () => {
-    // Would need bridge cell detection in TS
+  it('C++ rejects bridge cells for germination — TS lacks bridge check', () => {
+    // C++ cell.cpp:3000 — bridge cells cannot receive spread ore
+    // TS now checks templateType against bridge template IDs (131, 133, 235, 236, 378, 379)
+    setOverlay(map, 50, 50, 0x0C);
+    // Set north cell to a bridge template but keep terrain as CLEAR
+    const nidx = 49 * MAP_CELLS + 50;
+    map.templateType[nidx] = 131; // TEMPLATE_BRIDGE1
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.6)  // density: skip
+      .mockReturnValueOnce(0.1)  // spread: trigger
+      .mockReturnValueOnce(0.0); // direction: north (bridge cell)
+    map.growOre(1821);
+    // Bridge cell should NOT receive ore
+    expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
   /**
@@ -1282,8 +1294,19 @@ describe('Spread → germination integration', () => {
    * PARITY GAP: TS does not check for buildings during germination.
    * Ore can spread onto cells occupied by buildings in TS.
    */
-  it.skip('C++ rejects cells with visible buildings — TS lacks building check', () => {
-    // Would need building occupancy tracking in germination path
+  it('C++ rejects cells with visible buildings — TS lacks building check', () => {
+    // C++ cell.cpp:3007-3008 — cells with visible buildings cannot receive spread ore
+    // TS now checks vehicleOccupancy (building footprint cells are marked as vehicle-occupied)
+    setOverlay(map, 50, 50, 0x0C);
+    // Mark north cell as occupied by a building (vehicle occupancy)
+    map.setVehicleOccupancy(50, 49, 999); // entity ID 999 = a building
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.6)  // density: skip
+      .mockReturnValueOnce(0.1)  // spread: trigger
+      .mockReturnValueOnce(0.0); // direction: north (building cell)
+    map.growOre(1821);
+    // Building-occupied cell should NOT receive ore
+    expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
 
   it('all 8 directions can receive spread when valid', () => {

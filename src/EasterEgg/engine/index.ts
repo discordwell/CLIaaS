@@ -39,7 +39,7 @@ import {
   loadScenario, applyScenarioOverrides,
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
-  checkTriggerEvent, executeTriggerAction, houseIdToHouse, consumeSemiPersistentAttachment,
+  checkTriggerEvent, executeTriggerAction, houseIdToHouse, houseToId, consumeSemiPersistentAttachment,
   STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells,
   saveCarryover, TIME_UNIT_TICKS,
   TEVENT_GLOBAL_SET, TEVENT_GLOBAL_CLEAR,
@@ -5025,6 +5025,7 @@ export class Game {
       for (const trigger of this.triggers) {
         if (trigger.name === trigName) {
           trigger.playerEntered = true;
+          trigger.playerEnteredHouse = houseToId(entity.house); // C++ tevent.cpp:290-291: record entering unit's house
           trigger.triggeringEntityIds.push(entity.id); // C++ parity: track entities that triggered (for DESTROY_OBJECT)
           // For persistent triggers that have fired, reset so they can re-evaluate
           if (trigger.persistence === 2 && trigger.fired) {
@@ -5233,6 +5234,7 @@ export class Game {
       triggerStartTick: trigger.timerTick,
       triggerName: trigger.name,
       playerEntered: trigger.playerEntered,
+      playerEnteredHouse: trigger.playerEnteredHouse,
       // C++ parity (#21): differentiated trigger event state
       objectDiscovered: trigger.objectDiscovered,
       houseDiscovered: this.houseDiscovered,
