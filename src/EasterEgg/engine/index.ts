@@ -5350,6 +5350,7 @@ export class Game {
         this.state = 'lost';
         this.audio.music.stop();
         this.audio.play('defeat_sting');
+        this.startScoreMusic();
         this.onStateChange?.('lost');
       } else if (hasCaptured) {
         if (this.toCarryOver) saveCarryover(this.entities);
@@ -5357,6 +5358,7 @@ export class Game {
         this.audio.music.stop();
         this.audio.play('victory_fanfare');
         this.audio.play('eva_mission_accomplished');
+        this.startScoreMusic();
         this.onStateChange?.('won');
       }
     }
@@ -5974,6 +5976,7 @@ export class Game {
       this.audio.music.stop();
       this.audio.play('victory_fanfare');
       this.audio.play('eva_mission_accomplished');
+      this.startScoreMusic();
       this.onStateChange?.('won');
       return;
     }
@@ -5992,6 +5995,7 @@ export class Game {
         this.audio.music.stop();
         this.audio.play('victory_fanfare');
         this.audio.play('eva_mission_accomplished');
+        this.startScoreMusic();
         this.onStateChange?.('won');
       }
     }

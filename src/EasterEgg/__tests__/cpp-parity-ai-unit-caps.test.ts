@@ -678,11 +678,9 @@ describe('Dynamic cap increase (C++ house.cpp:4726-4740)', () => {
     // Example: Soviet has MaxUnit=20, player has 50 units
     //   enemyAvg = 50
     //   Since 20 < 50+10=60, Soviet.MaxUnit becomes 60
-    //
-    // PARITY GAP: TS does not modify caps at runtime.
 
-    const prodTick = getProductionTick();
-    const ctx = makeMockAIContext({ tick: prodTick });
+    // Tick must be divisible by 150 for updateAIStrategicPlanner to run
+    const ctx = makeMockAIContext({ tick: 150 });
     const state = setupProductionBase(ctx, House.USSR, 50000);
     state.maxUnit = 5;
 
