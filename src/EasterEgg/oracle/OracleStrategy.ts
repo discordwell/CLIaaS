@@ -283,6 +283,7 @@ export class OracleStrategy {
   private mcvSpawnTick = 0;           // tick when MCV first appeared
   private mcvDeployAttempts = 0;      // how many times we've tried deploying
   private scg05eaSpyInfiltrated = false;  // true after spy enters WEAP
+  private scg05eaSpyStopped = false;       // true after first spy intercept
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -1908,9 +1909,18 @@ export class OracleStrategy {
 
     // Track spy infiltration — once spy disappears after being seen, it infiltrated
     if (!this.scg05eaSpyInfiltrated && !spy && state.tick > 200) {
-      if (tanya || state.globals.length > 0) {
+      if (tanya || state.globals.length > 1) {
         this.scg05eaSpyInfiltrated = true;
       }
+    }
+
+    // CRITICAL: Stop the spy on first sight to prevent team script from
+    // walking it into dog patrol zones. Only stop ONCE (on first sighting).
+    if (spy && !this.scg05eaSpyInfiltrated && !this.scg05eaSpyStopped) {
+      commands.push({ cmd: 'stop', ids: [spy.id] });
+      this.scg05eaSpyStopped = true;
+      reasons.push('spy STOP (intercept team script)');
+      return { commands, reason: reasons.join('; ') };
     }
 
     // ─── PHASE 1: Spy infiltration (waypoint-guided north corridor) ─────
@@ -1930,13 +1940,8 @@ export class OracleStrategy {
         { cx: 20, cy: 48 },
         { cx: 22, cy: 48 },   // through ROUGH rock debris
         { cx: 24, cy: 48 },   // last clear cell before cliffs
-        { cx: 24, cy: 49 },   // south one step
-        { cx: 24, cy: 50 },   // south to y=50 (clear row)
-        { cx: 27, cy: 50 },   // east past cliffs
-        { cx: 30, cy: 50 },   // continue east
-        { cx: 30, cy: 48 },   // back north
-        { cx: 35, cy: 48 },
-        { cx: 40, cy: 48 },   // WEAP approach
+        // After x=24, attack WEAP directly — spy pathfinds to (44,50) in one
+        // continuous move. No more waypoints needed — single sprint to target.
       ];
 
       // Find current waypoint
@@ -1952,15 +1957,25 @@ export class OracleStrategy {
       // The spy's 25 HP may not survive, but waiting means the timer runs out.
 
       if (targetWeap && (wpIdx >= spyWaypoints.length || this.distanceSq(spy, targetWeap) <= 36)) {
-        commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-        reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+        // Send infiltrate ONCE, then let spy run uninterrupted
+        if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
+          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+          reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+        } else {
+          // Spy already moving to WEAP — DON'T interrupt (each re-command resets pathfinding)
+          reasons.push(`spy sprinting to WEAP (${spy.cx},${spy.cy})`);
+        }
       } else if (wpIdx < spyWaypoints.length) {
         const wp = spyWaypoints[wpIdx];
         commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
         reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy})`);
       } else if (targetWeap) {
-        commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-        reasons.push(`spy → WEAP (${spy.cx},${spy.cy})`);
+        if (this.isIdle(spy) || spy.m === MISSION_GUARD_AREA) {
+          commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+          reasons.push(`spy → WEAP (${spy.cx},${spy.cy})`);
+        } else {
+          reasons.push(`spy sprinting (${spy.cx},${spy.cy})`);
+        }
       } else {
         commands.push({ cmd: 'move', ids: [spy.id], cx: SCG05EA_WEAP_TARGET.cx, cy: SCG05EA_WEAP_TARGET.cy });
         reasons.push('spy → WEAP area');

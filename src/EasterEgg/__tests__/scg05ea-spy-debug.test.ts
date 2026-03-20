@@ -3,7 +3,7 @@ import { TsAgentAdapter } from '../oracle/TsAgentAdapter.js';
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
 
-describe('SCG05EA sprint attempt', () => {
+describe('SCG05EA pathfind debug', () => {
   let adapter: TsAgentAdapter;
 
   beforeAll(async () => {
@@ -15,7 +15,7 @@ describe('SCG05EA sprint attempt', () => {
     await adapter.disconnect();
   }, 20_000);
 
-  it('sends spy through y=50 sprint and tracks dog positions', async () => {
+  it('probes passability cell by cell from (20,48) eastward', async () => {
     await adapter.loadScenario('SCG05EA');
 
     // Wait for spy
@@ -25,58 +25,58 @@ describe('SCG05EA sprint attempt', () => {
       if (state.units.find(u => u.t === 'SPY')) break;
     }
     const spy = state.units.find(u => u.t === 'SPY')!;
-    console.log(`SPY at (${spy.cx},${spy.cy})`);
 
-    // Move spy to staging point (21,48) via waypoints
-    const setup = [
-      { cx: 18, cy: 48 },
-      { cx: 21, cy: 48 },
-    ];
-    for (const wp of setup) {
-      await adapter.step(1, [{ cmd: 'move', unitIds: [spy.id], cx: wp.cx, cy: wp.cy }]);
-      for (let i = 0; i < 30; i++) {
-        state = (await adapter.step(15)).state;
-        const s = state.units.find(u => u.t === 'SPY');
-        if (!s) { console.log('SPY DIED during setup'); return; }
-        if (Math.abs(s.cx - wp.cx) <= 1 && Math.abs(s.cy - wp.cy) <= 1) break;
-      }
-    }
-
-    const spyNow = state.units.find(u => u.t === 'SPY')!;
-    console.log(`\nSPY at staging: (${spyNow.cx},${spyNow.cy})`);
-
-    // Log ALL dogs near the sprint corridor before sprinting
-    const allDogs = state.enemies.filter(u => u.t === 'DOG');
-    console.log(`\nAll dogs (${allDogs.length}):`);
-    for (const d of allDogs) {
-      const dist = Math.sqrt((d.cx - 26) ** 2 + (d.cy - 50) ** 2);
-      if (dist < 15) {
-        console.log(`  DOG(${d.cx},${d.cy}) h=${d.h} d_to_corridor=${dist.toFixed(1)}`);
-      }
-    }
-
-    // NOW SPRINT: move spy south to y=50 then east
-    console.log('\n=== SPRINTING ===');
-    await adapter.step(1, [{ cmd: 'move', unitIds: [spyNow.id], cx: 30, cy: 50 }]);
-
-    let lastCx = spyNow.cx, lastCy = spyNow.cy;
-    for (let i = 0; i < 100; i++) {
-      const r = await adapter.step(10);
-      state = r.state;
+    // Move spy to (20,48) via north corridor
+    await adapter.step(1, [{ cmd: 'move', unitIds: [spy.id], cx: 18, cy: 48 }]);
+    for (let i = 0; i < 30; i++) {
+      state = (await adapter.step(15)).state;
       const s = state.units.find(u => u.t === 'SPY');
-      if (!s) {
-        console.log(`\n!!! SPY DIED tick=${state.tick} (was at ${lastCx},${lastCy})`);
-        const nearDogs = state.enemies.filter(e => e.t === 'DOG' &&
-          (e.cx - lastCx) ** 2 + (e.cy - lastCy) ** 2 <= 25);
-        console.log(`Dogs near death: ${nearDogs.map(d => `(${d.cx},${d.cy})`).join(', ')}`);
+      if (!s) { console.log('SPY DIED'); return; }
+      if (s.cx >= 18 && s.cy === 48) break;
+    }
+
+    await adapter.step(1, [{ cmd: 'move', unitIds: [spy.id], cx: 20, cy: 48 }]);
+    for (let i = 0; i < 30; i++) {
+      state = (await adapter.step(15)).state;
+      const s = state.units.find(u => u.t === 'SPY');
+      if (!s) { console.log('SPY DIED'); return; }
+      if (s.cx >= 20 && s.cy === 48) break;
+    }
+
+    let spyNow = state.units.find(u => u.t === 'SPY')!;
+    console.log(`Spy at (${spyNow.cx},${spyNow.cy})`);
+
+    // Now try moving 1 cell at a time eastward
+    for (let targetX = spyNow.cx + 1; targetX <= 35; targetX++) {
+      const result = await adapter.step(120, [
+        { cmd: 'move', unitIds: [spyNow.id], cx: targetX, cy: 48 },
+      ]);
+      state = result.state;
+      const s = state.units.find(u => u.t === 'SPY');
+      if (!s) { console.log(`  → (${targetX},48): SPY DIED`); break; }
+      const moved = s.cx === targetX && s.cy === 48;
+      const cmdOk = result.results.map(r => `${r.cmd}:${r.ok}`).join(',');
+      console.log(`  → (${targetX},48): ${moved ? 'OK' : `STUCK at (${s.cx},${s.cy})`} cmd=${cmdOk} m="${s.m}" hp=${s.hp}`);
+      if (!moved) {
+        // Also try y=49 as alternative
+        const alt = await adapter.step(120, [
+          { cmd: 'move', unitIds: [s.id], cx: targetX, cy: 49 },
+        ]);
+        const s2 = alt.state.units.find(u => u.t === 'SPY');
+        if (s2) {
+          console.log(`    alt (${targetX},49): ${s2.cx === targetX ? 'OK' : `STUCK at (${s2.cx},${s2.cy})`}`);
+        }
+        // Try y=50
+        const alt2 = await adapter.step(120, [
+          { cmd: 'move', unitIds: [s.id], cx: targetX, cy: 50 },
+        ]);
+        const s3 = alt2.state.units.find(u => u.t === 'SPY');
+        if (s3) {
+          console.log(`    alt (${targetX},50): ${s3.cx === targetX ? 'OK' : `STUCK at (${s3.cx},${s3.cy})`}`);
+        }
         break;
       }
-      if (s.cx !== lastCx || s.cy !== lastCy) {
-        const nearDogs = state.enemies.filter(e => e.t === 'DOG' &&
-          (e.cx - s.cx) ** 2 + (e.cy - s.cy) ** 2 <= 36);
-        console.log(`  t=${state.tick} spy(${s.cx},${s.cy}) hp=${s.hp} dogs6=[${nearDogs.map(d => `(${d.cx},${d.cy})`).join(',')}]`);
-        lastCx = s.cx; lastCy = s.cy;
-      }
+      spyNow = s;
     }
 
     expect(true).toBe(true);
