@@ -46,10 +46,10 @@ describe('KENN structure stats (rules.ini parity)', () => {
     expect(kenn!.isStructure).toBe(true);
   });
 
-  it('prerequisite is TENT (Soviet Barracks)', () => {
+  it('prerequisite is BARR (Soviet Barracks, rules.ini Prerequisite=barr)', () => {
     const kenn = PRODUCTION_ITEMS.find(i => i.type === 'KENN');
     expect(kenn).toBeDefined();
-    expect(kenn!.prerequisite).toBe('TENT');
+    expect(kenn!.prerequisite).toBe('BARR');
   });
 });
 

@@ -18,12 +18,12 @@ describe('AI base intelligence constants', () => {
     expect(CONDITION_RED).toBe(0.25);
   });
 
-  it('REPAIR_STEP is 5 (HP healed per repair tick, C++ rules.cpp:228 RepairStep=5)', () => {
-    expect(REPAIR_STEP).toBe(5);
+  it('REPAIR_STEP is 7 (HP healed per repair tick, rules.ini RepairStep=7)', () => {
+    expect(REPAIR_STEP).toBe(7);
   });
 
-  it('REPAIR_PERCENT is 0.25 (25% of build cost = total repair cost, C++ rules.cpp:229 fixed(1,4))', () => {
-    expect(REPAIR_PERCENT).toBe(0.25);
+  it('REPAIR_PERCENT is 0.20 (20% of build cost = total repair cost, rules.ini RepairPercent=20%)', () => {
+    expect(REPAIR_PERCENT).toBe(0.20);
   });
 });
 
@@ -143,12 +143,12 @@ describe('AI repair cost calculation (C++ parity)', () => {
     expect(repairCostPerStep).toBeLessThan(weapItem!.cost); // repair step cost < total cost
   });
 
-  it('total repair cost is 25% of build cost', () => {
+  it('total repair cost is 20% of build cost (rules.ini RepairPercent=20%)', () => {
     // For any structure, total repair = cost * REPAIR_PERCENT
     const tentItem = PRODUCTION_ITEMS.find(p => p.type === 'TENT' && p.isStructure);
     expect(tentItem).toBeDefined();
     const totalRepairCost = tentItem!.cost * REPAIR_PERCENT;
-    expect(totalRepairCost).toBe(tentItem!.cost * 0.25);
+    expect(totalRepairCost).toBe(tentItem!.cost * 0.20);
   });
 });
 

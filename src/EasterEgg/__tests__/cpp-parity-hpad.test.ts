@@ -266,9 +266,9 @@ describe('HPAD economic functions (rules.ini Cost=1500)', () => {
     expect(sellRefund(HPAD_COST)).toBe(750);
   });
 
-  it('repair cost per step: C++ fixed-point (64*9+128)/256 = 2', () => {
-    // C++ fixed-point: stepsToFull=800/5=160, costPerStep=1500/160=9, (64*9+128)/256=2
-    expect(repairCostPerStep(HPAD_COST, HPAD_MAX_HP)).toBe(2);
+  it('repair cost per step: C++ fixed-point (51*13+128)/256 = 3', () => {
+    // C++ fixed-point: stepsToFull=800/7=114, costPerStep=1500/114=13, (51*13+128)/256=3
+    expect(repairCostPerStep(HPAD_COST, HPAD_MAX_HP)).toBe(3);
   });
 });
 

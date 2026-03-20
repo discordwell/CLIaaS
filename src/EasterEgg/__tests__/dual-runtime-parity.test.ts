@@ -94,9 +94,6 @@ describe('Dual Runtime Parity', () => {
       const tsSpy = singleTsUnit(handle.tsState, 'SPY');
       const wasmSpy = singleWasmUnit(handle.wasmState, 'SPY');
 
-      // C++ MISSION_ENTER is asynchronous — after issuing the enter command and
-      // stepping just 1 tick, the spy should NOT yet be loaded. Both runtimes
-      // must agree: cargo=0 and the spy still exists as a separate unit.
       const result = await stepBoth(
         handle,
         1,
@@ -104,14 +101,12 @@ describe('Dual Runtime Parity', () => {
         [{ cmd: 'enter', ids: [wasmSpy.id], target: wasmApc.id }],
       );
 
-      const tsApcAfter = singleTsUnit(result.ts.state, 'APC');
-      const wasmApcAfter = singleWasmUnit(result.wasm.state, 'APC');
+      const tsLoadedApc = singleTsUnit(result.ts.state, 'APC');
+      const wasmLoadedApc = singleWasmUnit(result.wasm.state, 'APC');
 
-      // After 1 tick, loading has NOT completed — cargo is still 0
-      expect(tsApcAfter.cargo).toBe(0);
-      expect(wasmApcAfter.cargo).toBe(0);
+      expect(tsLoadedApc.cargo).toBe(0);
+      expect(wasmLoadedApc.cargo).toBe(0);
 
-      // The spy still exists as a standalone unit (not yet inside the APC)
       expect(result.ts.state.units.some((unit) => unit.t === 'SPY')).toBe(true);
       expect(result.wasm.state.units.some((unit) => unit.t === 'SPY')).toBe(true);
     });
@@ -122,12 +117,9 @@ describe('Dual Runtime Parity', () => {
       const tsMcv = singleTsUnit(handle.tsState, 'MCV');
       const wasmMcv = singleWasmUnit(handle.wasmState, 'MCV');
 
-      // C++ MCV deploy is asynchronous — MISSION_HUNT finds a clear spot, rotates
-      // to face NW, then plays the deploy animation. Both runtimes need enough
-      // ticks for the full deployment sequence to complete.
       const result = await stepBoth(
         handle,
-        90,
+        30,
         [{ cmd: 'deploy', unitId: tsMcv.id }],
         [{ cmd: 'deploy', ids: [wasmMcv.id] }],
       );
@@ -145,10 +137,9 @@ describe('Dual Runtime Parity', () => {
       const tsMcv = singleTsUnit(handle.tsState, 'MCV', (unit) => unit.h === handle.tsState.playerHouse);
       const wasmMcv = singleWasmUnit(handle.wasmState, 'MCV', (unit) => unit.house === handle.wasmState.playerHouse);
 
-      // C++ MCV deploy needs enough ticks for the full async sequence
       const deployed = await stepBoth(
         handle,
-        90,
+        30,
         [{ cmd: 'deploy', unitId: tsMcv.id }],
         [{ cmd: 'deploy', ids: [wasmMcv.id] }],
       );

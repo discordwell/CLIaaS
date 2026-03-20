@@ -1582,8 +1582,8 @@ describe('repairCostPerStep formula edge cases', () => {
   });
 
   it('expensive structure with low HP gives high per-step cost', () => {
-    // cost=2800 (PDOX), maxHp=400: ceil(2800*0.25 / (400/5)) = ceil(700/80) = ceil(8.75) = 9
-    expect(repairCostPerStep(2800, 400)).toBe(9);
+    // cost=2800 (PDOX), maxHp=400: stepsToFull=400/7=57, costPerStep=2800/57=49, (51*49+128)/256=10
+    expect(repairCostPerStep(2800, 400)).toBe(10);
   });
 });
 

@@ -1,10 +1,10 @@
 /**
- * C++ Behavioral Parity: BARR (Allied Barracks) & TENT (Soviet Barracks)
+ * C++ Behavioral Parity: BARR (Soviet Barracks) & TENT (Allied Barracks)
  *
  * Tests verify barracks behavior matches C++ RA source code.
  * BARR and TENT are functionally identical except for faction ownership:
- *   - BARR: Owner=allies (Allied Barracks)
- *   - TENT: Owner=soviet (Soviet Barracks)
+ *   - BARR: Owner=soviet (Soviet Barracks) — rules.ini Owner=soviet
+ *   - TENT: Owner=allies (Allied Barracks) — rules.ini Owner=allies
  *
  * Both share: HP 800, 2x2 footprint, cost 300, no weapon, power drain 20W,
  * and serve as the infantry production prerequisite.
@@ -41,7 +41,7 @@ function makeBarracks(
   hp = 800,
   house?: House,
 ): MapStructure {
-  const defaultHouse = type === 'BARR' ? House.Spain : House.USSR;
+  const defaultHouse = type === 'BARR' ? House.USSR : House.Spain;
   return {
     type, image: type.toLowerCase(), house: house ?? defaultHouse,
     cx, cy, hp, maxHp: 800, alive: true, rubble: false,
@@ -116,8 +116,8 @@ function makeCombatCtx(
 // -- Test both BARR and TENT with shared describe blocks ----------------------
 
 const BARRACKS_TYPES: Array<{ type: 'BARR' | 'TENT'; faction: string; house: House }> = [
-  { type: 'BARR', faction: 'allied', house: House.Spain },
-  { type: 'TENT', faction: 'soviet', house: House.USSR },
+  { type: 'BARR', faction: 'soviet', house: House.USSR },
+  { type: 'TENT', faction: 'allied', house: House.Spain },
 ];
 
 // -- Stats (rules.ini / building.cpp) -----------------------------------------
@@ -179,14 +179,14 @@ for (const { type, faction, house } of BARRACKS_TYPES) {
 
 describe('Faction ownership parity (rules.ini Owner=)', () => {
 
-  it('BARR is faction=allied', () => {
+  it('BARR is faction=soviet (rules.ini Owner=soviet)', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'BARR');
-    expect(prodItem!.faction).toBe('allied');
+    expect(prodItem!.faction).toBe('soviet');
   });
 
-  it('TENT is faction=soviet', () => {
+  it('TENT is faction=allied (rules.ini Owner=allies)', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'TENT');
-    expect(prodItem!.faction).toBe('soviet');
+    expect(prodItem!.faction).toBe('allied');
   });
 
   it('BARR can be placed for an allied house', () => {
@@ -226,20 +226,20 @@ describe('Infantry production prerequisite role', () => {
     expect(e1!.faction).toBe('both');
   });
 
-  it('allied defenses require BARR as prerequisite', () => {
+  it('allied defenses require TENT as prerequisite (rules.ini Prerequisite=tent)', () => {
     const pbox = PRODUCTION_ITEMS.find(p => p.type === 'PBOX');
     const hbox = PRODUCTION_ITEMS.find(p => p.type === 'HBOX');
     const gun = PRODUCTION_ITEMS.find(p => p.type === 'GUN');
-    expect(pbox!.prerequisite).toBe('BARR');
-    expect(hbox!.prerequisite).toBe('BARR');
-    expect(gun!.prerequisite).toBe('BARR');
+    expect(pbox!.prerequisite).toBe('TENT');
+    expect(hbox!.prerequisite).toBe('TENT');
+    expect(gun!.prerequisite).toBe('TENT');
   });
 
-  it('soviet defenses require TENT as prerequisite', () => {
+  it('soviet defenses require BARR as prerequisite (rules.ini Prerequisite=barr)', () => {
     const ftur = PRODUCTION_ITEMS.find(p => p.type === 'FTUR');
     const kenn = PRODUCTION_ITEMS.find(p => p.type === 'KENN');
-    expect(ftur!.prerequisite).toBe('TENT');
-    expect(kenn!.prerequisite).toBe('TENT');
+    expect(ftur!.prerequisite).toBe('BARR');
+    expect(kenn!.prerequisite).toBe('BARR');
   });
 });
 
@@ -511,8 +511,8 @@ describe('BARR vs TENT cross-faction symmetry', () => {
   it('different factions', () => {
     const barr = PRODUCTION_ITEMS.find(p => p.type === 'BARR')!;
     const tent = PRODUCTION_ITEMS.find(p => p.type === 'TENT')!;
-    expect(barr.faction).toBe('allied');
-    expect(tent.faction).toBe('soviet');
+    expect(barr.faction).toBe('soviet');
+    expect(tent.faction).toBe('allied');
     expect(barr.faction).not.toBe(tent.faction);
   });
 });

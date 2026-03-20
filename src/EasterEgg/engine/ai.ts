@@ -139,8 +139,8 @@ const CPP_DEFAULT_MAX_INFANTRY = Math.floor(RULE_INFANTRY_MAX / 6);  // 83
 const CPP_DEFAULT_MAX_VESSEL   = Math.floor(RULE_VESSEL_MAX / 6);    // 16
 const CPP_DEFAULT_MAX_AIRCRAFT = Math.floor(RULE_UNIT_MAX / 6);      // 83 (C++ quirk: uses UnitMax!)
 
-/** C++ RepairStep=5, RepairPercent=0.20 (from rules.cpp:228-229) */
-const REPAIR_STEP = 5;
+/** C++ rules.ini RepairStep=7, RepairPercent=20% (rules.cpp defaults overridden by rules.ini) */
+const REPAIR_STEP = 7;
 const REPAIR_PERCENT = 0.20;
 const CONDITION_RED = 0.25;
 

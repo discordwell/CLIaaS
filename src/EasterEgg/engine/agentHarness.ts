@@ -208,13 +208,9 @@ export function serializeState(game: Game): AgentState {
   const isAlliedFn = (game as unknown as {
     isAllied?: (house: House, playerHouse: House) => boolean;
   }).isAllied;
-  // C++ parity: Is_Ally checks from the PLAYER's perspective.
-  // PlayerPtr->Is_Ally(otherHouse) checks if the player considers otherHouse an ally.
-  // isAllied(a, b) checks if a's alliance set contains b.
-  // So we check isAllied(playerHouse, otherHouse).
   const isAlliedHouse = (house: House) => (
     typeof isAlliedFn === 'function'
-      ? isAlliedFn.call(game, game.playerHouse, house)
+      ? isAlliedFn.call(game, house, game.playerHouse)
       : house === game.playerHouse
   );
   const alliedHouses = Object.values(House).filter((house) => {
@@ -234,10 +230,8 @@ export function serializeState(game: Game): AgentState {
   for (let i = 0; i < game.structures.length; i++) {
     const s = game.structures[i];
     if (!s.alive) continue;
-    // C++ parity: Neutral structures are NOT allied to the player.
-    // They're neutral — barrels, civilian buildings, etc.
     const isAlly = isAlliedHouse(s.house);
-    const reportAsAlly = isAlly;
+    const reportAsAlly = isAlly || s.house === House.Neutral;
     structures.push(serializeStructure(s, i, reportAsAlly, game.isStructureRepairing(i)));
   }
 
@@ -414,32 +408,10 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
             clearTeamScripts(e);
-            // Spy immediate infiltration: if spy is within range, trigger infiltration
-            // on this tick rather than waiting for next (dog might kill spy first).
-            // Spy immediate infiltration: call spyInfiltrate directly from
-            // the harness when in range. This prevents the game loop from
-            // letting a dog kill the spy before the infiltration processes.
-            // In C++ RA, spy infiltration happens during movement phase before
-            // enemy scans. The TS engine processes all entities in one pass,
-            // so dogs can kill the spy before it infiltrates.
-            console.log(`[HARNESS] attack_struct: unit=${e.type}(${e.id}) struct=${s.type} ally=${s.ally} dist check...`);
-            if (e.type === 'SPY' && e.isPlayerUnit && !s.ally) {
-              const sx = s.cx * CELL_SIZE + CELL_SIZE;
-              const sy = s.cy * CELL_SIZE + CELL_SIZE;
-              const dx = e.pos.x - sx;
-              const dy = e.pos.y - sy;
-              const dist = Math.sqrt(dx * dx + dy * dy) / CELL_SIZE;
-              if (dist <= 4) {
-                // Direct infiltration — bypass game loop
-                (game as any).spyInfiltrate(e, s);
-                results.push({ cmd: 'attack_struct', ok: true });
-                continue;
-              }
-            }
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;
-            e.moveTarget = structCenter;
+            e.moveTarget = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
             e.path = findPath(game.map, e.cell, { cx: s.cx, cy: s.cy }, true, e.isNavalUnit, e.stats.speedClass);
             e.pathIndex = 0;
           }
@@ -478,64 +450,16 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             break;
           }
           clearTeamScripts(inf);
-          // If close enough, load directly (generous threshold for agent use)
-          const loadDist = worldDist(inf.pos, transport.pos);
-          if (loadDist < 2.0) {
-            transport.passengers.push(inf);
-            inf.transportRef = transport;
-            inf.mission = Mission.SLEEP;
-            inf.selected = false;
-            // Clear cell occupancy (mirrors engine auto-load at index.ts:2528)
-            game.map.setOccupancy(inf.cell.cx, inf.cell.cy, 0);
-            if (inf.stats.isInfantry) game.map.vacateSubCell(inf.cell.cx, inf.cell.cy, inf.id);
-            // Remove from world (will be re-added on unload)
-            game.entities = game.entities.filter((e: Entity) => e.id !== inf.id);
-            game.entityById.delete(inf.id);
-            results.push({ cmd: 'enter', ok: true });
-          } else {
-            // Move infantry toward transport — find shore cell if transport is naval
-            // C++ behavior: infantry walks to nearest shore, transport sails to pick up.
-            // Without this, infantry pathfinds to a water cell and drowns.
-            const transportCell = { cx: Math.floor(transport.pos.x / CELL_SIZE), cy: Math.floor(transport.pos.y / CELL_SIZE) };
-            let targetCell = transportCell;
-
-            if (transport.isNavalUnit && !inf.isNavalUnit) {
-              // Find nearest shore cell to the infantry (land cell adjacent to water)
-              let bestShore: { cx: number; cy: number } | null = null;
-              let bestDist = Infinity;
-              for (let dy = -5; dy <= 5; dy++) {
-                for (let dx = -5; dx <= 5; dx++) {
-                  const sx = inf.cell.cx + dx;
-                  const sy = inf.cell.cy + dy;
-                  if (game.map.isShoreCell(sx, sy)) {
-                    const dist = dx * dx + dy * dy;
-                    if (dist < bestDist) {
-                      bestDist = dist;
-                      bestShore = { cx: sx, cy: sy };
-                    }
-                  }
-                }
-              }
-              if (bestShore) {
-                targetCell = bestShore;
-                // Also move transport toward the shore cell
-                const shoreWorld = { x: bestShore.cx * CELL_SIZE + CELL_SIZE / 2, y: bestShore.cy * CELL_SIZE + CELL_SIZE / 2 };
-                transport.moveTarget = shoreWorld;
-                transport.path = findPath(game.map, transport.cell, bestShore, true, true, transport.stats.speedClass);
-                transport.pathIndex = 0;
-                transport.mission = Mission.MOVE;
-              }
-            }
-
-            inf.mission = Mission.MOVE;
-            inf.target = null;
-            inf.moveTarget = { x: targetCell.cx * CELL_SIZE + CELL_SIZE / 2, y: targetCell.cy * CELL_SIZE + CELL_SIZE / 2 };
-            inf.path = findPath(game.map, inf.cell, targetCell, true, inf.isNavalUnit, inf.stats.speedClass);
-            inf.pathIndex = 0;
-            // Store transport ref so proximity auto-load can trigger
-            inf.transportRef = transport;
-            results.push({ cmd: 'enter', ok: true });
-          }
+          // Match C++ harness semantics for now: issue an ENTER order and avoid the
+          // TS-only instant/auto-load shortcuts. We can restore the shortcut later
+          // if we decide to deliberately mirror that behavior in C++ too.
+          inf.mission = Mission.ENTER;
+          inf.target = null;
+          inf.moveTarget = { ...transport.pos };
+          const tc = { cx: Math.floor(transport.pos.x / CELL_SIZE), cy: Math.floor(transport.pos.y / CELL_SIZE) };
+          inf.path = findPath(game.map, inf.cell, tc, true, inf.isNavalUnit, inf.stats.speedClass);
+          inf.pathIndex = 0;
+          results.push({ cmd: 'enter', ok: true });
           break;
         }
 
@@ -590,40 +514,6 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             results.push({ cmd: 'deploy', ok, error: ok ? undefined : 'cannot deploy here' });
           } else if (e.type === 'QTNK') {
             game.deployMADTank(e);
-            results.push({ cmd: 'deploy', ok: true });
-          } else if (e.isTransport && e.passengers.length > 0) {
-            // Unload transport passengers onto nearby passable terrain
-            const ec = e.cell;
-            // For naval transports, find shore cells; for others, use nearby passable cells
-            const unloadCells: Array<{ x: number; y: number }> = [];
-            for (let dy = -3; dy <= 3; dy++) {
-              for (let dx = -3; dx <= 3; dx++) {
-                const cx = ec.cx + dx;
-                const cy = ec.cy + dy;
-                if (game.map.isPassable(cx, cy) && (!e.isNavalUnit || game.map.isShoreCell(cx, cy))) {
-                  unloadCells.push({ x: cx * CELL_SIZE + CELL_SIZE / 2, y: cy * CELL_SIZE + CELL_SIZE / 2 });
-                }
-              }
-            }
-            if (unloadCells.length === 0) {
-              results.push({ cmd: 'deploy', ok: false, error: 'no passable cells nearby for unload' });
-              break;
-            }
-            let cellIdx = 0;
-            for (const p of e.passengers) {
-              const dest = unloadCells[cellIdx % unloadCells.length];
-              p.alive = true;
-              p.hp = p.hp > 0 ? p.hp : 1;
-              p.transportRef = null;
-              p.pos = { x: dest.x + (Math.random() - 0.5) * CELL_SIZE * 0.5, y: dest.y + (Math.random() - 0.5) * CELL_SIZE * 0.5 };
-              p.cell = worldToCell(p.pos.x, p.pos.y);
-              p.mission = Mission.GUARD;
-              p.deathTick = 0;
-              game.entities.push(p);
-              game.entityById.set(p.id, p);
-              cellIdx++;
-            }
-            e.passengers = [];
             results.push({ cmd: 'deploy', ok: true });
           } else {
             results.push({ cmd: 'deploy', ok: false, error: `unit type ${e.type} cannot deploy` });

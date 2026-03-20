@@ -255,8 +255,8 @@ describe('PDOX economic functions (rules.ini Cost=2800)', () => {
     expect(sellRefund(PDOX_COST)).toBe(1400);
   });
 
-  it('repair cost per step: ceil(2800 * 0.25 / (400 / 5)) = ceil(700 / 80) = 9', () => {
-    expect(repairCostPerStep(PDOX_COST, PDOX_MAX_HP)).toBe(9);
+  it('repair cost per step: stepsToFull=400/7=57, costPerStep=2800/57=49, (51*49+128)/256=10', () => {
+    expect(repairCostPerStep(PDOX_COST, PDOX_MAX_HP)).toBe(10);
   });
 });
 
@@ -457,8 +457,8 @@ describe('IRON economic functions (rules.ini Cost=2800)', () => {
     expect(sellRefund(IRON_COST)).toBe(1400);
   });
 
-  it('repair cost per step: ceil(2800 * 0.25 / (400 / 5)) = ceil(700 / 80) = 9', () => {
-    expect(repairCostPerStep(IRON_COST, IRON_MAX_HP)).toBe(9);
+  it('repair cost per step: stepsToFull=400/7=57, costPerStep=2800/57=49, (51*49+128)/256=10', () => {
+    expect(repairCostPerStep(IRON_COST, IRON_MAX_HP)).toBe(10);
   });
 });
 
@@ -631,8 +631,8 @@ describe('MSLO economic functions (rules.ini Cost=2500)', () => {
     expect(sellRefund(MSLO_COST)).toBe(1250);
   });
 
-  it('repair cost per step: ceil(2500 * 0.25 / (400 / 5)) = ceil(625 / 80) = 8', () => {
-    expect(repairCostPerStep(MSLO_COST, MSLO_MAX_HP)).toBe(8);
+  it('repair cost per step: stepsToFull=400/7=57, costPerStep=2500/57=43, (51*43+128)/256=9', () => {
+    expect(repairCostPerStep(MSLO_COST, MSLO_MAX_HP)).toBe(9);
   });
 });
 

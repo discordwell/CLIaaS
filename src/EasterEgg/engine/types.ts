@@ -774,7 +774,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
 
 // Superweapon gameplay constants
 export const IRON_CURTAIN_DURATION = 675;       // rules.ini IronCurtain=.75 → 0.75 * 60 * 15 = 675 ticks (C++ default=fixed(1,2)=0.5, overridden by rules.ini)
-export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 7; // C++ house.cpp:2753-2755: IronCurtainDuration * TICKS_PER_SECOND = 0.5 * 15
+export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 11; // C++ house.cpp:2753-2755: IronCurtainDuration * TICKS_PER_SECOND = 0.75 * 15
 export const NUKE_DAMAGE = 1000;
 export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
 export const NUKE_FLIGHT_TICKS = 45;            // missile travel time

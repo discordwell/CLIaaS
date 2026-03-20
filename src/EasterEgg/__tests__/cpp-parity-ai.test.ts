@@ -1924,8 +1924,8 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
 
 // ── 11. Repair and sell (rules.cpp constants) ───────────────────────────────────
 
-describe('updateAIRepair (rules.cpp REPAIR_STEP=5, REPAIR_PERCENT=0.20)', () => {
-  it('repairs structure by REPAIR_STEP (5 hp) per tick', () => {
+describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => {
+  it('repairs structure by REPAIR_STEP (7 hp) per tick', () => {
     const state = makeAIState({ house: House.USSR, iq: 3 });
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
@@ -1937,7 +1937,7 @@ describe('updateAIRepair (rules.cpp REPAIR_STEP=5, REPAIR_PERCENT=0.20)', () => 
     });
     const hpBefore = s.hp;
     updateAIRepair(ctx);
-    expect(s.hp).toBe(hpBefore + 5);
+    expect(s.hp).toBe(hpBefore + 7);
   });
 
   it('deducts repair cost from credits', () => {

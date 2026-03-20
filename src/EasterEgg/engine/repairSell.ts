@@ -43,17 +43,24 @@ export interface RepairSellContext {
 // Pure exported functions — formalize inline calculations
 // ---------------------------------------------------------------------------
 
+// C++ fixed-point 8.8 raw values derived from rules.ini percentages.
+// fixed(n,d).Raw = floor(n * 256 / d)
+// RepairPercent=20% → floor(0.20 * 256) = 51
+// URepairPercent=20% → floor(0.20 * 256) = 51
+const REPAIR_PERCENT_RAW = Math.floor(REPAIR_PERCENT * 256);   // 51 for 20%
+const UREPAIR_PERCENT_RAW = Math.floor(UREPAIR_PERCENT * 256); // 51 for 20%
+
 /** Calculate repair cost per step for a structure type.
  *  C++ techno.cpp:6144: (Raw_Cost() / (MaxStrength / Rule.RepairStep)) * Rule.RepairPercent
  *  Uses integer division at each step, then 8.8 fixed-point multiply.
- *  fixed(1,4).Raw = floor(1*256/4) = 64; int*fixed = ((64*val)+128)/256 */
+ *  RepairPercent raw = floor(0.20*256) = 51; int*fixed = ((51*val)+128)/256 */
 export function repairCostPerStep(buildCost: number, maxHp: number): number {
   const stepsToFull = Math.trunc(maxHp / REPAIR_STEP);        // C++ int / int
   if (stepsToFull <= 0) return 1;                              // guard: maxHp < step is C++ UB
   const costPerFullStep = Math.trunc(buildCost / stepsToFull); // C++ int / int
-  // C++ int * fixed(1,4): fixed(1,4).Raw = 64, result = ((64 * val) + 128) / 256
+  // C++ int * fixed: result = ((raw * intVal) + 128) / 256
   // C++ call site clamps: max(Repair_Cost(), 1) (techno.cpp:989)
-  return Math.max(1, Math.trunc((64 * costPerFullStep + 128) / 256));
+  return Math.max(1, Math.trunc((REPAIR_PERCENT_RAW * costPerFullStep + 128) / 256));
 }
 
 /** Calculate repair cost per step for a unit (foot) at Service Depot.
@@ -64,7 +71,7 @@ export function unitRepairCostPerStep(buildCost: number, maxHp: number): number 
   if (stepsToFull <= 0) return 1;                              // guard: maxHp < step is C++ UB
   const costPerFullStep = Math.trunc(buildCost / stepsToFull);
   // C++ call site clamps: max(Repair_Cost(), 1) (techno.cpp:989)
-  return Math.max(1, Math.trunc((64 * costPerFullStep + 128) / 256));
+  return Math.max(1, Math.trunc((UREPAIR_PERCENT_RAW * costPerFullStep + 128) / 256));
 }
 
 /** Calculate sell refund for a structure — no health scaling.

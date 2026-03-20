@@ -69,14 +69,17 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 ];
 
 // SCG11EA "Aftermath": Naval-focused build order — skip war factory, double refinery, rush shipyard.
-// Starting army (5 tanks, 2 artillery) is sufficient for island defense.
+// Starting army (3 medium + 2 light tanks, 2 artillery) is sufficient for defense.
+// Coast is 20 cells north at y=76 — need POWR chain to extend build radius.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund the navy
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard — destroyers ASAP
-  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Extra power
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Chain north toward coast (step 1)
+  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain north toward coast (step 2)
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard on north coast
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
 
 // Tank preference order (best to worst — covers both Allied and Soviet)
@@ -432,10 +435,12 @@ export class OracleStrategy {
   private static readonly COASTAL_CELLS: Record<string, Point[]> = {
     'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
     'SCG11EA': [
-      // Island perimeter — base at (25,96), island spans ~(22-28, 94-99)
-      { cx: 25, cy: 94 }, { cx: 25, cy: 99 }, { cx: 22, cy: 96 },
-      { cx: 28, cy: 96 }, { cx: 23, cy: 94 }, { cx: 27, cy: 94 },
-      { cx: 23, cy: 99 }, { cx: 27, cy: 99 }, { cx: 25, cy: 100 },
+      // Actual shoreline from MapPack terrain analysis. Water is NORTH (y<80).
+      // Base at (25,96). North shore y=80, east shore x=27-28.
+      // Best SYRD spots: north shore (close to water) + east shore (close to base).
+      { cx: 27, cy: 80 }, { cx: 26, cy: 80 }, { cx: 25, cy: 80 },
+      { cx: 24, cy: 80 }, { cx: 23, cy: 80 }, { cx: 22, cy: 80 },
+      { cx: 27, cy: 86 }, { cx: 28, cy: 86 }, { cx: 28, cy: 88 },
     ],
     'SCG11EB': [
       { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
@@ -660,10 +665,21 @@ export class OracleStrategy {
         const baseCx = conYard.cx;
         const baseCy = conYard.cy;
 
-        // Build placement candidates: scan a wide grid between base and water.
-        // Use vessel centroid to determine water direction, then scan the
-        // shoreline area (60% midpoint between base and vessels, ±10 cells).
+        // Build placement candidates: hardcoded coastal cells first (most reliable),
+        // then vessel-based scan as fallback.
         const candidates: Array<{ cx: number; cy: number }> = [];
+        // Priority 1: Hardcoded coastal cells — manually verified shore positions
+        const coastRef = OracleStrategy.COASTAL_CELLS[this.scenario];
+        if (coastRef) {
+          for (const ref of coastRef) {
+            for (let dy = -3; dy <= 10; dy++) {
+              for (let dx = -4; dx <= 4; dx++) {
+                candidates.push({ cx: ref.cx + dx, cy: ref.cy + dy });
+              }
+            }
+          }
+        }
+        // Priority 2: Vessel-based scan
         if (vessels.length > 0) {
           // Find nearest vessel to base
           let nearest = vessels[0];
@@ -689,17 +705,7 @@ export class OracleStrategy {
             }
           }
         }
-        // Fallback: hardcoded coastal cells + wide scan
-        const coastRef = OracleStrategy.COASTAL_CELLS[this.scenario];
-        if (coastRef) {
-          for (const ref of coastRef) {
-            for (let dy = -3; dy <= 10; dy++) {
-              for (let dx = -4; dx <= 4; dx++) {
-                candidates.push({ cx: ref.cx + dx, cy: ref.cy + dy });
-              }
-            }
-          }
-        }
+        // (Hardcoded coastal cells already added above as Priority 1)
         // Deduplicate
         const seen = new Set<string>();
         const uniqueCandidates = candidates.filter((c) => {
@@ -898,9 +904,13 @@ export class OracleStrategy {
       (p) => p.rtti === RTTI_INFANTRYTYPE,
     );
 
-    // Check if we're still saving for a building (don't drain credits)
+    // Check if we're still saving for a building (don't drain credits).
+    // SCG11EA skips WEAP — use SYRD as the "core production ready" marker instead.
+    const coreProductionReady = this.scenario === 'SCG11EA'
+      ? alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN')
+      : hasWarFactory;
     const savingForBuilding = buildingProduction != null ||
-      (this.baseBuildIndex < this.getBuildOrder().length && !hasWarFactory);
+      (this.baseBuildIndex < this.getBuildOrder().length && !coreProductionReady);
     const minCreditsForInfantry = savingForBuilding ? 1500 : 300;
 
     // Produce units from War Factory — priority: harvesters > tanks
@@ -1018,8 +1028,8 @@ export class OracleStrategy {
     if (this.waterScoutId >= 0 && !playerUnits.some((u) => u.id === this.waterScoutId)) {
       this.waterScoutId = -1;
     }
-    if (hasNavalEnemies && this.waterScoutId < 0) {
-      // Find enemy vessels to determine water direction
+    if (hasNavalEnemies && this.waterScoutId < 0 && this.scenario !== 'SCG11EA') {
+      // Find enemy vessels to determine water direction (skip SCG11EA — hardcoded coast)
       const waterVessels = state.enemies.filter(
         (e) => e.t === 'SS' || e.t === 'DD' || e.t === 'CA' || e.t === 'PT' || e.t === 'MSUB',
       );
@@ -1222,7 +1232,9 @@ export class OracleStrategy {
       } else {
         // No base threats — check for unit-proximity engagement first
         // Units should engage enemies near them regardless of full attack threshold
-        const unitThreats = state.enemies.filter(
+        // Skip for defense-only missions — don't chase enemies, let them come to base
+        const defenseOnlyMission = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
+        const unitThreats = defenseOnlyMission ? [] : state.enemies.filter(
           (e) => fighters.some((u) => this.distanceSq(u, e) <= 225), // 15 cells
         );
         if (unitThreats.length > 0 && fighters.length >= 3) {
@@ -1992,10 +2004,11 @@ export class OracleStrategy {
         { cx: 34, cy: 48 },
         { cx: 40, cy: 48 },
         { cx: 48, cy: 48 },   // east past base + dogs
-        { cx: 56, cy: 48 },   // well east of all buildings
-        { cx: 60, cy: 48 },   // further east to avoid all dogs
-        { cx: 60, cy: 55 },   // south (no dogs at x=60)
-        { cx: 60, cy: 63 },   // continue south
+        { cx: 56, cy: 48 },
+        { cx: 62, cy: 48 },   // far east of all patrols
+        { cx: 68, cy: 48 },   // map edge — guaranteed clear
+        { cx: 68, cy: 55 },   // south in clear zone
+        { cx: 68, cy: 65 },
         { cx: 55, cy: 65 },   // SW toward river gap
         { cx: 40, cy: 68 },   // west through river gap
         { cx: 30, cy: 75 },
