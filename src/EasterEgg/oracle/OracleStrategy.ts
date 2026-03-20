@@ -68,19 +68,17 @@ const BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery
 ];
 
-// SCG11EA "Aftermath": Naval-focused build order — skip war factory, double refinery, rush shipyard.
-// Starting army (3 medium + 2 light tanks, 2 artillery) is sufficient for defense.
-// Water is 17 cells north (y=79) of base (y=96). Need heavy POWR chain to extend
-// build radius northward — buildings scatter, so we need 8+ to statistically bridge the gap.
-// East chain: base at x=20, real water at x=63. Need ~8 POWRs to bridge 43 cells.
+// SCG11EA "Aftermath": Naval-focused build order — skip war factory, rush shipyard.
+// MCV moves east to (35,82) before deploying — cuts chain distance to coast in half.
+// Ore at (26-31, 59-61), real water at x=63. Chain east ~28 cells from ConYard.
+// Ore at (26-31, 59-61) — refineries placed toward ore via coastal bias.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
-  { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund the navy
-  { names: ['POWR'],         type_ids: [17], maxCount: 4 },  // Chain east (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 6 },  // Chain east (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain east (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 10 }, // Chain east — should reach x=60
+  { names: ['PROC'],         type_ids: [12] },              // First refinery — toward ore
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Chain east step 1
+  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain east step 2
+  { names: ['POWR'],         type_ids: [17], maxCount: 7 },  // Chain east step 3 — reach x=60
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in real water (x=63+)
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
@@ -790,22 +788,19 @@ export class OracleStrategy {
         // Need to bridge 17 cells from base (y=96) to water (y=79).
         // Dense 2-cell Y spacing, x=23-27 to cover island width.
         if (this.scenario === 'SCG11EA') {
-          // Eastward chain: base at ~x=20, real water at x=63.
-          // Build radius ~5 cells from structure edge. POWR is 2x2.
-          // Effective reach per step: 2 (width) + 5 (radius) = 7 cells.
-          // Space chain at 5-cell intervals for reliability.
+          // Eastward chain: ConYard deploys at ~(30,88), real water at x=63.
+          // Need ~33 cells of chain. 5-cell steps with 3 y-rows.
           const chainPositions = [
-            // Near base
-            { cx: 25, cy: 88 }, { cx: 25, cy: 86 }, { cx: 25, cy: 90 },
-            // East in 5-cell steps
-            { cx: 29, cy: 88 }, { cx: 29, cy: 86 }, { cx: 29, cy: 90 },
-            { cx: 33, cy: 88 }, { cx: 33, cy: 86 }, { cx: 33, cy: 90 },
-            { cx: 37, cy: 88 }, { cx: 37, cy: 86 }, { cx: 37, cy: 90 },
-            { cx: 41, cy: 88 }, { cx: 41, cy: 86 }, { cx: 41, cy: 90 },
-            { cx: 45, cy: 88 }, { cx: 45, cy: 86 }, { cx: 45, cy: 90 },
-            { cx: 49, cy: 88 }, { cx: 49, cy: 86 }, { cx: 49, cy: 90 },
-            { cx: 53, cy: 88 }, { cx: 53, cy: 86 }, { cx: 53, cy: 90 },
-            { cx: 57, cy: 88 }, { cx: 57, cy: 86 }, { cx: 57, cy: 90 },
+            // Near ConYard
+            { cx: 32, cy: 88 }, { cx: 32, cy: 86 }, { cx: 32, cy: 90 },
+            { cx: 28, cy: 88 }, { cx: 28, cy: 86 }, { cx: 28, cy: 90 },
+            // East chain in 5-cell steps
+            { cx: 36, cy: 88 }, { cx: 36, cy: 86 }, { cx: 36, cy: 90 },
+            { cx: 40, cy: 88 }, { cx: 40, cy: 86 }, { cx: 40, cy: 90 },
+            { cx: 44, cy: 88 }, { cx: 44, cy: 86 }, { cx: 44, cy: 90 },
+            { cx: 48, cy: 88 }, { cx: 48, cy: 86 }, { cx: 48, cy: 90 },
+            { cx: 52, cy: 88 }, { cx: 52, cy: 86 }, { cx: 52, cy: 90 },
+            { cx: 56, cy: 88 }, { cx: 56, cy: 86 }, { cx: 56, cy: 90 },
             { cx: 60, cy: 88 }, { cx: 60, cy: 86 }, { cx: 60, cy: 90 },
           ];
           const idx = this.placementAttempts % chainPositions.length;
@@ -2228,11 +2223,30 @@ export class OracleStrategy {
    * Strategy: don't waste credits on tanks — deploy MCV, double refineries, rush shipyard,
    * mass destroyers to hunt the subs. Defense-only land posture (DEFENSE_ONLY_MISSIONS).
    */
+  // SCG11EA target deploy position — east of start, shortens chain to coast.
+  // Not too far (MCV is slow). (30,88) is ~10 cells east, reachable quickly.
+  private static readonly SCG11EA_MCV_TARGET: Point = { cx: 30, cy: 88 };
+  private scg11eaMcvMoved = false;
+
   private decideScg11ea(state: RAGameState): OracleDecision {
     const commands: Array<Record<string, unknown>> = [];
     const reasons: string[] = [];
 
     const playerUnits = this.playerOwnedUnits(state);
+    const alliedStructures = state.structures.filter((s) => s.ally);
+
+    // Move first MCV east before deploying — shortens the chain to coast.
+    // Send move command once, then let decideBaseBuilding handle deploy when idle.
+    if (!this.scg11eaMcvMoved) {
+      const mcvs = playerUnits.filter((u) => u.t === 'MCV');
+      if (mcvs.length > 0) {
+        const target = OracleStrategy.SCG11EA_MCV_TARGET;
+        commands.push({ cmd: 'move', ids: [mcvs[0].id], cx: target.cx, cy: target.cy });
+        this.recordMove(mcvs[0].id, target.cx, target.cy);
+        reasons.push(`MCV → deploy spot (${target.cx},${target.cy})`);
+        this.scg11eaMcvMoved = true;
+      }
+    }
 
     // Scout north to reveal water cells for SYRD placement (fog of war blocks placement).
     // Send a tank (Sight=5) to the shore at y=80 — reveals water at y=75+.
