@@ -266,7 +266,7 @@ export class Team {
       this._members = this._members.filter(m => m.alive);
 
       if (alive > 0) {
-        this.isFullStrength = (alive >= desired);
+        this.isFullStrength = (alive === desired);
         if (this.isFullStrength) {
           this.isHasBeen = true;
         }
@@ -304,7 +304,7 @@ export class Team {
     }
 
     // ── Regroup when under strength (C++ team.cpp:577-621) ──
-    if (this.isMoving && this.isUnderStrength && !this.isSuicide) {
+    if (this.isMoving && this.isUnderStrength) {
       this.isMoving = false;
       this.currentMission = -1;
 

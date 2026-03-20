@@ -1930,10 +1930,17 @@ export class Game {
           // SL4: Spawn infantry survivors (C++ building.cpp How_Many_Survivors + Crew_Type)
           // C++ parity: no survivors when ConYard reverts to MCV
           if (!mcvSpawned) {
-            // Count: (buildingCost * SurvivorFraction) / E1_cost, clamped 1-5
+            // Count: (buildingRawCost * SurvivorFraction) / E1_cost, clamped 1-5
             const E1_COST = 100;
             const SURVIVOR_FRACTION = 0.5; // rules.cpp:177 SurvivorFraction(fixed(1,2))
-            const buildCost = prodItem?.cost ?? 300;
+            // C++ bdata.cpp:3672-3683 Raw_Cost(): subtract free unit cost for buildings that come with one
+            const FACT_COST = 2000;        // Construction Yard — not in PRODUCTION_ITEMS (pre-placed)
+            const HARVESTER_COST = 1400;   // UnitTypeClass::As_Reference(UNIT_HARVESTER).Cost
+            const HIND_COST = 1200;        // AircraftTypeClass::As_Reference(AIRCRAFT_HIND).Cost
+            let buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300);
+            // C++ Raw_Cost subtracts free unit costs for survivor calculation
+            if (s.type === 'PROC') buildCost -= HARVESTER_COST;           // bdata.cpp:3679-3681
+            if (s.type === 'HPAD') buildCost -= (HIND_COST + HIND_COST) / 2; // bdata.cpp:3676-3677 (C++ bug: HIND twice)
             const survivorCount = Math.min(5, Math.max(1,
               Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
             for (let si = 0; si < survivorCount; si++) {

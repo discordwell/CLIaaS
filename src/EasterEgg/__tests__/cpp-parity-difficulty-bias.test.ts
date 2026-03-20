@@ -542,42 +542,10 @@ describe('Bias symmetry around normal=1.0 (C++ difficulty design)', () => {
 // Test with actual TS weapon stats to verify formula matches
 // ============================================================
 
-describe('ROFBias applied to specific TS unit weapon ROFs', () => {
-  // Get actual weapon ROFs from TS UNIT_STATS
-  const UNITS_WITH_WEAPONS: { type: UnitType; name: string }[] = [
-    { type: UnitType.HTNK, name: 'Heavy Tank' },
-    { type: UnitType.MTNK, name: 'Medium Tank' },
-    { type: UnitType.LTNK, name: 'Light Tank' },
-    { type: UnitType.ARTY, name: 'Artillery' },
-    { type: UnitType.V2RL, name: 'V2 Rocket' },
-    { type: UnitType.E1,   name: 'Rifle Infantry' },
-    { type: UnitType.E3,   name: 'Rocket Soldier' },
-  ];
-
-  for (const { type, name } of UNITS_WITH_WEAPONS) {
-    const stats = UNIT_STATS[type];
-    if (!stats?.weapon) continue;
-    const baseRof = stats.weapon.rof;
-
-    for (const diff of ['easy', 'normal', 'hard'] as Difficulty[]) {
-      const bias = AI_DIFFICULTY_MODS[diff].rofBias;
-      const expectedRearm = Math.max(1, Math.round(baseRof * bias));
-
-      it(`${name} (rof=${baseRof}) on ${diff} (bias=${bias}): rearm = ${expectedRearm}`, () => {
-        const result = Math.max(1, Math.round(baseRof * bias));
-        expect(result).toBe(expectedRearm);
-        // Verify the bias applies correctly
-        if (diff === 'easy') {
-          expect(result).toBeGreaterThan(baseRof); // slower fire
-        } else if (diff === 'hard') {
-          expect(result).toBeLessThan(baseRof); // faster fire
-        } else {
-          expect(result).toBe(baseRof); // unchanged
-        }
-      });
-    }
-  }
-});
+// Section 12: ROFBias per-unit tests removed — stats.weapon field doesn't exist
+// on UNIT_STATS (weapons are in WEAPON_STATS keyed by weapon name, not unit type).
+// The ROFBias formula is already verified in Section 5 (rearm delay formula)
+// with explicit ROF values across all 3 difficulty levels.
 
 // ============================================================
 // Section 13: Country bonus completeness

@@ -596,7 +596,7 @@ export class GameMap {
             if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
             const nidx = ny * MAP_CELLS + nx;
             if (this.overlay[nidx] !== 0xFF) continue;
-            if (this.cells[nidx] !== Terrain.CLEAR) continue;
+            if (!BUILDABLE.has(this.cells[nidx])) continue;
             if (this.wallType[nidx] !== '') continue;
             // Gold always spreads as gold (minimum density)
             this.overlay[nidx] = 0x03;

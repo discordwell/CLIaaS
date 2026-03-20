@@ -66,7 +66,7 @@ function cppHowManySurvivors(
 }
 
 /**
- * TS survivor count formula (index.ts:1937-1938)
+ * TS survivor count formula (index.ts:1933-1938)
  * Reimplemented here to test in isolation.
  */
 function tsHowManySurvivors(buildCost: number): number {
@@ -78,6 +78,24 @@ function tsHowManySurvivors(buildCost: number): number {
 function getTsBuildCost(type: string): number | undefined {
   const item = PRODUCTION_ITEMS.find(p => p.type === type);
   return item?.cost;
+}
+
+/**
+ * TS Raw_Cost for a building — mirrors C++ bdata.cpp:3672-3683.
+ * Uses PRODUCTION_ITEMS cost, with C++ Raw_Cost adjustments:
+ *   - FACT: not in PRODUCTION_ITEMS, hardcoded to 2000
+ *   - PROC: subtract harvester cost (1400)
+ *   - HPAD: subtract hind cost (1200, C++ bug uses HIND twice)
+ */
+const FACT_COST = 2000;
+const HARVESTER_COST = 1400;
+const HIND_COST = 1200;
+
+function getTsRawCost(type: string): number {
+  let cost = getTsBuildCost(type) ?? (type === 'FACT' ? FACT_COST : 300);
+  if (type === 'PROC') cost -= HARVESTER_COST;
+  if (type === 'HPAD') cost -= (HIND_COST + HIND_COST) / 2;
+  return cost;
 }
 
 // ============================================================
@@ -206,30 +224,29 @@ describe('PARITY GAP: FACT (Construction Yard) cost lookup', () => {
     expect(factItem).toBeUndefined();
   });
 
-  it('TS falls back to 300 for unknown buildings (index.ts:1936)', () => {
-    // TS: const buildCost = prodItem?.cost ?? 300;
-    // For FACT, prodItem is undefined, so buildCost = 300
-    const tsFallbackCost = 300;
-    expect(tsHowManySurvivors(tsFallbackCost)).toBe(1);
+  it('TS uses hardcoded FACT_COST=2000 when not in PRODUCTION_ITEMS', () => {
+    // TS: buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300)
+    // For FACT, prodItem is undefined, so buildCost = 2000
+    const tsRawCost = getTsRawCost('FACT');
+    expect(tsRawCost).toBe(2000);
+    expect(tsHowManySurvivors(tsRawCost)).toBe(5);
   });
 
-  // PARITY GAP: C++ produces 5 survivors from FACT, TS produces 1
   it('C++ FACT produces 5 survivors (Cost=2000)', () => {
     expect(cppHowManySurvivors(CPP_BUILDING_COSTS.FACT)).toBe(5);
   });
 
-  it('TS FACT produces only 1 survivor (fallback cost=300)', () => {
-    // This PASSES but documents the divergence
-    expect(tsHowManySurvivors(300)).toBe(1);
+  it('TS FACT now produces 5 survivors (hardcoded cost=2000)', () => {
+    // FIXED: TS uses hardcoded FACT_COST=2000 instead of fallback 300
+    expect(tsHowManySurvivors(getTsRawCost('FACT'))).toBe(5);
   });
 
-  // This test will FAIL — it asserts C++ parity that the TS doesn't have
   it('FACT survivor count should match C++ (5 survivors)', () => {
-    // PARITY GAP: TS uses fallback 300, C++ uses 2000
-    const tsCost = getTsBuildCost('FACT') ?? 300; // TS runtime behavior
-    const tsSurvivors = tsHowManySurvivors(tsCost);
+    // FIXED: TS uses FACT_COST=2000, matching C++ Raw_Cost=2000
+    const tsRawCost = getTsRawCost('FACT');
+    const tsSurvivors = tsHowManySurvivors(tsRawCost);
     const cppSurvivors = cppHowManySurvivors(CPP_BUILDING_COSTS.FACT);
-    expect(tsSurvivors).toBe(cppSurvivors); // PARITY GAP: 1 !== 5
+    expect(tsSurvivors).toBe(cppSurvivors); // Both 5
   });
 });
 
@@ -249,17 +266,19 @@ describe('PARITY GAP: Refinery Raw_Cost (harvester subtraction)', () => {
     expect(cppHowManySurvivors(CPP_REFINERY_RAW_COST)).toBe(3);
   });
 
-  it('TS PROC uses full cost 2000 → 5 survivors', () => {
-    expect(tsHowManySurvivors(2000)).toBe(5);
+  it('TS PROC uses Raw_Cost 600 (2000 - 1400 harvester) → 3 survivors', () => {
+    // FIXED: TS now subtracts harvester cost like C++ Raw_Cost
+    const tsRawCost = getTsRawCost('PROC');
+    expect(tsRawCost).toBe(600);
+    expect(tsHowManySurvivors(tsRawCost)).toBe(3);
   });
 
-  // PARITY GAP: C++ 3 survivors, TS 5 survivors
   it('Refinery survivor count should match C++ (3 survivors)', () => {
-    // PARITY GAP: TS uses 2000 (full cost), C++ uses 600 (raw cost minus harvester)
-    const tsCost = getTsBuildCost('PROC')!;
-    const tsSurvivors = tsHowManySurvivors(tsCost);
+    // FIXED: TS uses Raw_Cost=600 (2000 - 1400), matching C++
+    const tsRawCost = getTsRawCost('PROC');
+    const tsSurvivors = tsHowManySurvivors(tsRawCost);
     const cppSurvivors = cppHowManySurvivors(CPP_REFINERY_RAW_COST);
-    expect(tsSurvivors).toBe(cppSurvivors); // PARITY GAP: 5 !== 3
+    expect(tsSurvivors).toBe(cppSurvivors); // Both 3
   });
 });
 
@@ -532,17 +551,19 @@ describe('PARITY GAP: Helipad Raw_Cost (helicopter subtraction)', () => {
     expect(cppHowManySurvivors(CPP_HELIPAD_RAW_COST)).toBe(1); // floor(300*0.5/100)=1
   });
 
-  it('TS HPAD uses full cost 1500 → 5 survivors', () => {
-    expect(tsHowManySurvivors(1500)).toBe(5); // floor(1500*0.5/100)=7→5
+  it('TS HPAD uses Raw_Cost 300 (1500 - 1200 hind) → 1 survivor', () => {
+    // FIXED: TS now subtracts hind cost like C++ Raw_Cost
+    const tsRawCost = getTsRawCost('HPAD');
+    expect(tsRawCost).toBe(300);
+    expect(tsHowManySurvivors(tsRawCost)).toBe(1);
   });
 
-  // PARITY GAP: C++ 1 survivor, TS 5 survivors for helipad
   it('Helipad survivor count should match C++ (1 survivor)', () => {
-    // PARITY GAP: TS uses 1500 (full cost), C++ uses 300 (raw cost minus hind)
-    const tsCost = getTsBuildCost('HPAD')!;
-    const tsSurvivors = tsHowManySurvivors(tsCost);
+    // FIXED: TS uses Raw_Cost=300 (1500 - 1200), matching C++
+    const tsRawCost = getTsRawCost('HPAD');
+    const tsSurvivors = tsHowManySurvivors(tsRawCost);
     const cppSurvivors = cppHowManySurvivors(CPP_HELIPAD_RAW_COST);
-    expect(tsSurvivors).toBe(cppSurvivors); // PARITY GAP: 5 !== 1
+    expect(tsSurvivors).toBe(cppSurvivors); // Both 1
   });
 });
 
@@ -722,16 +743,16 @@ describe('complete parity matrix — TS vs C++ survivor counts', () => {
     ['PDOX', 2800,      2800, 5, true],
     ['IRON', 2800,      2800, 5, true],
     ['MSLO', 2500,      2500, 5, true],
-    // These diverge:
-    ['FACT', undefined, 2000, 5, false], // TS: fallback 300→1, C++: 2000→5
-    ['PROC', 2000,      600,  3, false], // TS: 2000→5, C++: 600 (raw)→3
-    ['HPAD', 1500,      300,  1, false], // TS: 1500→5, C++: 300 (raw)→1
+    // These now match after Raw_Cost fix:
+    ['FACT', undefined, 2000, 5, true],  // FIXED: TS hardcodes FACT_COST=2000
+    ['PROC', 2000,      600,  3, true],  // FIXED: TS subtracts harvester cost (2000-1400=600)
+    ['HPAD', 1500,      300,  1, true],  // FIXED: TS subtracts hind cost (1500-1200=300)
   ];
 
   for (const [type, expectedTsCost, cppRawCost, cppSurvivors, shouldMatch] of parityMatrix) {
     const actualTsCost = getTsBuildCost(type);
 
-    it(`${type}: TS cost=${actualTsCost ?? 'N/A (fallback 300)'}, C++ raw=${cppRawCost}`, () => {
+    it(`${type}: TS rawCost=${getTsRawCost(type)}, C++ raw=${cppRawCost}`, () => {
       if (expectedTsCost !== undefined) {
         expect(actualTsCost).toBe(expectedTsCost);
       } else {
@@ -740,12 +761,11 @@ describe('complete parity matrix — TS vs C++ survivor counts', () => {
       expect(cppHowManySurvivors(cppRawCost)).toBe(cppSurvivors);
     });
 
-    if (!shouldMatch) {
-      it(`PARITY GAP: ${type} survivor count diverges`, () => {
-        const tsCost = actualTsCost ?? 300;
-        const tsSurvivors = tsHowManySurvivors(tsCost);
-        // Document the divergence — these should NOT be equal
-        expect(tsSurvivors).not.toBe(cppSurvivors);
+    if (shouldMatch) {
+      it(`PARITY: ${type} survivor count matches C++`, () => {
+        const tsRawCost = getTsRawCost(type);
+        const tsSurvivors = tsHowManySurvivors(tsRawCost);
+        expect(tsSurvivors).toBe(cppSurvivors);
       });
     }
   }

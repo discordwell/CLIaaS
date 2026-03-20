@@ -327,7 +327,20 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       expect(team.currentMission).toBe(-1);
     });
 
-    it('suicide teams do NOT regroup (C++ team.cpp:577 checks !IsSuicide)', () => {
+    it('suicide+reinforceable team DOES regroup (C++ team.cpp:577 has NO IsSuicide check)', () => {
+      /**
+       * C++ team.cpp:577:
+       *   if (IsMoving && IsUnderStrength) {  // no IsSuicide check
+       *
+       * A suicide+reinforceable team (default isReinforcable=true) that becomes
+       * under-strength will regroup just like any other team. C++ does not
+       * exempt suicide teams from the retreat block.
+       *
+       * Note: suicide teams are *typically* non-reinforceable in practice,
+       * which means IsUnderStrength = !IsHasBeen = false after activation,
+       * so they never hit this code path. But with isReinforcable=true
+       * (the default), the under-strength threshold applies normally.
+       */
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 6 }],
         missions: [
@@ -350,7 +363,7 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       team.ai(waypoints);
       expect(team.isMoving).toBe(true);
 
-      // Kill 4 — should NOT regroup because suicide
+      // Kill 4 — under 1/3 threshold (2 <= 6/3=2)
       entities[0].alive = false;
       entities[1].alive = false;
       entities[2].alive = false;
@@ -358,8 +371,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       team.isAltered = true;
       team.ai(waypoints);
 
-      // Suicide team stays active
-      expect(team.isMoving).toBe(true);
+      // C++ has no IsSuicide guard — suicide+reinforceable team retreats
+      expect(team.isMoving).toBe(false);
     });
   });
 

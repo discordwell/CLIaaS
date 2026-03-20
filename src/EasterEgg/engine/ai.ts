@@ -71,7 +71,10 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
  *  firepowerBias: outgoing damage multiplier (>1 = more damage)
  *  armorBias: damage resistance multiplier (>1 = less damage taken)
  *  rofBias: rate-of-fire multiplier applied to attackCooldown (<1 = fires faster)
- *  groundspeedBias: ground movement speed multiplier (>1 = faster) */
+ *  groundspeedBias: ground movement speed multiplier (>1 = faster)
+ *  airspeedBias: aircraft speed multiplier — C++ rules.h:49 (separate from groundspeed)
+ *  costBias: production cost multiplier — C++ rules.h:52 (1.0 in vanilla RA)
+ *  buildSpeedBias: build time multiplier — C++ rules.h:53 (1.0 in vanilla RA) */
 export const AI_DIFFICULTY_MODS: Record<Difficulty, {
   incomeMult: number;
   buildSpeedMult: number;
@@ -88,10 +91,16 @@ export const AI_DIFFICULTY_MODS: Record<Difficulty, {
   rofBias: number;
   /** C++ Rule.Diff[handicap].GroundspeedBias (house.cpp:290,300) */
   groundspeedBias: number;
+  /** C++ Rule.Diff[handicap].AirspeedBias (house.cpp:291,301) — separate from groundspeed */
+  airspeedBias: number;
+  /** C++ Rule.Diff[handicap].CostBias (house.cpp:294,304) — production cost multiplier */
+  costBias: number;
+  /** C++ Rule.Diff[handicap].BuildSpeedBias (house.cpp:297,307) — build time multiplier */
+  buildSpeedBias: number;
 }> = {
-  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30, firepowerBias: 0.8, armorBias: 0.8, rofBias: 1.2, groundspeedBias: 0.8 },
-  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25, firepowerBias: 1.0, armorBias: 1.0, rofBias: 1.0, groundspeedBias: 1.0 },
-  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15, firepowerBias: 1.2, armorBias: 1.2, rofBias: 0.8, groundspeedBias: 1.2 },
+  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30, firepowerBias: 0.8, armorBias: 0.8, rofBias: 1.2, groundspeedBias: 0.8, airspeedBias: 0.8, costBias: 1.0, buildSpeedBias: 1.0 },
+  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25, firepowerBias: 1.0, armorBias: 1.0, rofBias: 1.0, groundspeedBias: 1.0, airspeedBias: 1.0, costBias: 1.0, buildSpeedBias: 1.0 },
+  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15, firepowerBias: 1.2, armorBias: 1.2, rofBias: 0.8, groundspeedBias: 1.2, airspeedBias: 1.2, costBias: 1.0, buildSpeedBias: 1.0 },
 };
 
 /** Structure type -> sprite image name mapping (shared by base rebuild and AI construction) */
