@@ -830,7 +830,12 @@ export default function AntGame({ onExit }: AntGameProps) {
       const scenarioId = params.get('scenario') || 'SCA01EA';
       const diff = (params.get('difficulty') || 'normal') as Difficulty;
 
-      game.start(scenarioId, diff).catch((err) => {
+      game.start(scenarioId, diff).then(() => {
+        // Install debug overlay for in-browser inspection
+        import('./engine/debugOverlay').then(({ installDebugOverlay }) => {
+          installDebugOverlay(game);
+        });
+      }).catch((err) => {
         console.error('Play mode: game start failed', err);
         setError(String(err));
       });
