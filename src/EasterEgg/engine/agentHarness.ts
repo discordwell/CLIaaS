@@ -545,7 +545,12 @@ export function installHarness(game: Game): void {
   w.__agentCommand = (commands: AgentCommand[]) => processCommands(game, commands);
 
   w.__agentStep = (n = 15, commands?: AgentCommand[]) => {
-    const clamped = Math.max(0, Math.min(n, 900)); // cap at 1 minute of game time
+    // Scale incoming tick count by 20/15 so TS processes equivalent real game
+    // time as C++ WASM (C++ runs at GameSpeed 3 = 20 tps; TS step() expects
+    // 15-tick frames by convention, so n ticks from the test harness represent
+    // n * 20/15 TS engine ticks).
+    const scaled = Math.round(n * 20 / 15);
+    const clamped = Math.max(0, Math.min(scaled, 1200)); // cap at ~1 minute of game time
     const results = commands && Array.isArray(commands) ? processCommands(game, commands) : [];
     game.step(clamped);
     return { results, state: serializeState(game) } satisfies StepResult;

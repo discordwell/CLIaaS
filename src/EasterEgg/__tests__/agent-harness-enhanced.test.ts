@@ -57,7 +57,10 @@ function makeGame(overrides: Record<string, unknown> = {}) {
     _repairing: new Set<number>(),
     getAvailableItems: () => [] as ProductionItem[],
     isAllied: (a: House, b: House) =>
-      a === b || (a === House.Spain && (b === House.Greece || b === House.Neutral)),
+      a === b ||
+      (a === House.Spain && (b === House.Greece || b === House.Neutral)) ||
+      (a === House.Greece && b === House.Spain) ||
+      (a === House.Neutral && b === House.Spain),
     startProduction: vi.fn(),
     cancelProduction: vi.fn(),
     placeStructure: vi.fn().mockReturnValue(true),
@@ -502,7 +505,10 @@ describe('backward compatibility', () => {
     const game = makeGame({
       playerHouse: House.England,
       isAllied: (a: House, b: House) =>
-        a === b || (a === House.England && (b === House.France || b === House.Germany)),
+        a === b ||
+        (a === House.England && (b === House.France || b === House.Germany)) ||
+        (a === House.France && b === House.England) ||
+        (a === House.Germany && b === House.England),
     });
 
     const s = serializeState(castGame(game));

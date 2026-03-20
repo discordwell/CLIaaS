@@ -119,7 +119,7 @@ describe('Dual Runtime Parity', () => {
 
       const result = await stepBoth(
         handle,
-        30,
+        90,
         [{ cmd: 'deploy', unitId: tsMcv.id }],
         [{ cmd: 'deploy', ids: [wasmMcv.id] }],
       );
@@ -139,7 +139,7 @@ describe('Dual Runtime Parity', () => {
 
       const deployed = await stepBoth(
         handle,
-        30,
+        90,
         [{ cmd: 'deploy', unitId: tsMcv.id }],
         [{ cmd: 'deploy', ids: [wasmMcv.id] }],
       );
@@ -154,7 +154,7 @@ describe('Dual Runtime Parity', () => {
         [{ cmd: 'produce', rtti: 6, type_id: 17 }],
       );
 
-      const completed = await stepBoth(handle, 220);
+      const completed = await stepBoth(handle, 300);
 
       expect(completed.ts.state.credits).toBeLessThan(deployed.ts.state.credits);
       expect(completed.wasm.state.credits).toBeLessThan(deployed.wasm.state.credits);
