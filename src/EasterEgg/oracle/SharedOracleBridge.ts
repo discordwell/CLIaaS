@@ -17,6 +17,46 @@ import type {
 
 const TS_STRUCTURE_ID_OFFSET = 1_000_000_000;
 
+const RTTI_BUILDINGTYPE = 6;
+const RTTI_UNITTYPE = 29;
+const RTTI_INFANTRYTYPE = 14;
+const RTTI_VESSELTYPE = 33;
+
+// Reverse mappings: type_id -> type name (from C++ defines.h StructType enum)
+const BUILDING_ID_TO_NAME: Record<number, string> = {
+  0: 'ATEK', 1: 'IRON', 2: 'WEAP', 3: 'PDOX', 4: 'PBOX', 5: 'HBOX',
+  6: 'DOME', 7: 'GAP',  8: 'GUN',  9: 'AGUN', 10: 'FTUR', 11: 'FACT',
+  12: 'PROC', 13: 'SILO', 14: 'HPAD', 15: 'SAM', 16: 'AFLD', 17: 'POWR',
+  18: 'APWR', 19: 'STEK', 20: 'HOSP', 21: 'BARR', 22: 'TENT', 23: 'KENN',
+  24: 'FIX',  25: 'BIO',  26: 'MISS', 27: 'SYRD', 28: 'SPEN', 29: 'MSLO',
+  30: 'FCOM', 31: 'TSLA',
+};
+
+const UNIT_ID_TO_NAME: Record<number, string> = {
+  0: '4TNK', 1: '3TNK', 2: '2TNK', 3: '1TNK', 4: 'APC', 5: 'MNLY',
+  6: 'JEEP', 7: 'HARV', 8: 'ARTY', 9: 'MRJ', 10: 'MGG', 11: 'MCV',
+  12: 'V2RL', 13: 'TRUK',
+};
+
+const INFANTRY_ID_TO_NAME: Record<number, string> = {
+  0: 'E1', 1: 'E2', 2: 'E3', 3: 'E4', 4: 'E6', 5: 'E7',
+  6: 'SPY', 7: 'THF', 8: 'MEDI', 9: 'GNRL', 10: 'DOG',
+};
+
+const VESSEL_ID_TO_NAME: Record<number, string> = {
+  0: 'SS', 1: 'DD', 2: 'CA', 3: 'LST', 4: 'PT', 5: 'MSUB',
+};
+
+function rttiToName(rtti: number, typeId: number): string | undefined {
+  switch (rtti) {
+    case RTTI_BUILDINGTYPE: return BUILDING_ID_TO_NAME[typeId];
+    case RTTI_UNITTYPE: return UNIT_ID_TO_NAME[typeId];
+    case RTTI_INFANTRYTYPE: return INFANTRY_ID_TO_NAME[typeId];
+    case RTTI_VESSELTYPE: return VESSEL_ID_TO_NAME[typeId];
+    default: return undefined;
+  }
+}
+
 const TS_MISSION_CODES: Record<string, number> = {
   SLEEP: 0,
   GUARD: 5,
@@ -163,6 +203,43 @@ export function translateOracleDecisionToTs(
 
     if (kind === 'deploy' && ids.length === 1) {
       commands.push({ cmd: 'deploy', unitId: ids[0] });
+      continue;
+    }
+
+    if (kind === 'produce' && typeof command.rtti === 'number' && typeof command.type_id === 'number') {
+      const typeName = rttiToName(command.rtti, command.type_id);
+      if (typeName) {
+        commands.push({ cmd: 'build', type: typeName });
+      } else {
+        warnings.push(`Unknown produce rtti=${command.rtti} type_id=${command.type_id}`);
+      }
+      continue;
+    }
+
+    if (kind === 'place') {
+      if (typeof command.cx === 'number' && typeof command.cy === 'number') {
+        commands.push({ cmd: 'place', cx: command.cx, cy: command.cy });
+      }
+      continue;
+    }
+
+    if (kind === 'sell' && typeof command.target === 'number') {
+      const structureIndex = bridge.structureIndexById.get(command.target);
+      if (structureIndex !== undefined) {
+        commands.push({ cmd: 'sell', structIdx: structureIndex });
+      } else {
+        warnings.push(`sell: structure id ${command.target} not found`);
+      }
+      continue;
+    }
+
+    if (kind === 'repair' && typeof command.target === 'number') {
+      const structureIndex = bridge.structureIndexById.get(command.target);
+      if (structureIndex !== undefined) {
+        commands.push({ cmd: 'repair', structIdx: structureIndex });
+      } else {
+        warnings.push(`repair: structure id ${command.target} not found`);
+      }
       continue;
     }
 
