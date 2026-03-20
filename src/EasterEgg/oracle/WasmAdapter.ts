@@ -32,6 +32,7 @@ export interface RAGameState {
   structures: RAStructure[];
   production: RAProduction[];
   buildable?: RABuildable;
+  coastalCells?: Array<{ cx: number; cy: number }>;
   error?: string;
 }
 

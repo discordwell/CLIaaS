@@ -557,7 +557,67 @@ char* agent_get_state(void)
 			buf_cat("\"%s\"", vtype.Name());
 		}
 	}
-	buf_cat("]}}");
+	buf_cat("]}},");
+
+	/* --- Coastal cells (land cells adjacent to water, near player base) --- */
+	buf_cat("\"coastalCells\":[");
+
+	/* Find base center: ConYard position or centroid of allied structures */
+	int base_cx = 64, base_cy = 64;
+	int struct_count = 0;
+	long sum_cx = 0, sum_cy = 0;
+	for (int i = 0; i < Buildings.Count(); i++) {
+		BuildingClass* b = Buildings.Ptr(i);
+		if (!b || b->IsInLimbo || b->Strength <= 0) continue;
+		if (!PlayerPtr->Is_Ally(b)) continue;
+		COORDINATE coord = b->Center_Coord();
+		CELL cell = Coord_Cell(coord);
+		sum_cx += Cell_X(cell);
+		sum_cy += Cell_Y(cell);
+		struct_count++;
+		/* Prefer ConYard as center */
+		if (b->Class->Type == STRUCT_CONST) {
+			base_cx = Cell_X(cell);
+			base_cy = Cell_Y(cell);
+		}
+	}
+	if (struct_count > 0 && base_cx == 64 && base_cy == 64) {
+		/* No ConYard found — use centroid */
+		base_cx = (int)(sum_cx / struct_count);
+		base_cy = (int)(sum_cy / struct_count);
+	}
+
+	int coastal_count = 0;
+	first = true;
+	for (int dy = -20; dy <= 20 && coastal_count < 10; dy++) {
+		for (int dx = -20; dx <= 20 && coastal_count < 10; dx++) {
+			int cx = base_cx + dx;
+			int cy = base_cy + dy;
+			if (cx < 1 || cx >= MAP_CELL_W - 1 || cy < 1 || cy >= MAP_CELL_H - 1) continue;
+			CELL cell = XY_Cell(cx, cy);
+			/* Must be buildable land (not water itself) */
+			if (Map[cell].Land_Type() == LAND_WATER) continue;
+			if (Map[cell].Land_Type() == LAND_ROCK) continue;
+			/* Check 4 cardinal neighbors for water */
+			bool has_water = false;
+			CELL north = XY_Cell(cx, cy - 1);
+			CELL south = XY_Cell(cx, cy + 1);
+			CELL west  = XY_Cell(cx - 1, cy);
+			CELL east  = XY_Cell(cx + 1, cy);
+			if (Map[north].Land_Type() == LAND_WATER) has_water = true;
+			if (Map[south].Land_Type() == LAND_WATER) has_water = true;
+			if (Map[west].Land_Type()  == LAND_WATER) has_water = true;
+			if (Map[east].Land_Type()  == LAND_WATER) has_water = true;
+			if (!has_water) continue;
+
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("{\"cx\":%d,\"cy\":%d}", cx, cy);
+			coastal_count++;
+		}
+	}
+
+	buf_cat("]}");
 
 	return s_state_buf;
 }

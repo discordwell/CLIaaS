@@ -25,7 +25,7 @@ const MISSION_GUARD_AREA = 10;
 // HP threshold for retreat (fraction of max HP)
 const RETREAT_HP_FRACTION = 0.3;
 
-const NON_COMBAT_TYPES = new Set(['C7', 'C8', 'EINSTEIN', 'TRAN']);
+const NON_COMBAT_TYPES = new Set(['C7', 'C8', 'EINSTEIN', 'TRAN', 'LST']);
 
 // RTTIType enum values from C++ defines.h (used for produce/place commands)
 const RTTI_BUILDINGTYPE = 6;
@@ -205,6 +205,20 @@ const SCG03EA_BRIDGE_V04: Point = { cx: 54, cy: 52 };  // cell 6710 = western br
 const SCG03EA_BRIDGE_V07: Point = { cx: 53, cy: 57 };  // cell 7349 = central bridge
 const SCG03EA_FALLBACK: Point = { cx: 62, cy: 49 };    // cell 6334 = starting area
 const SCG03EA_ARTY_POS: Point = { cx: 54, cy: 55 };    // cell 7094 = central fire support
+
+// ── SCG09EA "Infiltration" — sneak infantry north, escape via transport ──────
+// Map: X=21 Y=35 W=84 H=70 (so map extends roughly (21,35) to (105,105))
+// Player starts at ~(37,94)/(44,96) with 2 E1 infantry.
+// Win: APCESCPE — a TRAN (chinook) arrives after triggers fire, player boards → win.
+// Escape point: waypoint 0 = cell 13352 = southern map edge.
+const SCG09EA_ESCAPE_POINT: Point = { cx: 40, cy: 104 };  // southern map edge
+// Transport maximum passengers (LST=5, TRAN=5, APC=5)
+const TRANSPORT_MAX_PASSENGERS = 5;
+// Distance within which infantry should try to board a transport
+const TRANSPORT_BOARD_DISTANCE_SQ = 100;  // 10 cells
+
+// Transport types that can carry infantry
+const TRANSPORT_TYPES = new Set(['LST', 'TRAN', 'APC']);
 
 // Exploration waypoints — spiral pattern covering 64x64 cell map
 const EXPLORE_WAYPOINTS = [
@@ -501,31 +515,49 @@ export class OracleStrategy {
 
     // Place completed buildings
     if (buildingProduction?.done) {
-      // Place refineries away from known enemies to protect harvesters
-      let offsets = PLACEMENT_OFFSETS;
-      if (buildingProduction.t === 'PROC' && this.lastKnownEnemyCentroid) {
-        const ec = this.lastKnownEnemyCentroid;
-        offsets = [...PLACEMENT_OFFSETS].sort((a, b) => {
-          const aDist = (conYard.cx + a.cx - ec.cx) ** 2 + (conYard.cy + a.cy - ec.cy) ** 2;
-          const bDist = (conYard.cx + b.cx - ec.cx) ** 2 + (conYard.cy + b.cy - ec.cy) ** 2;
-          return bDist - aDist; // furthest from enemy first
+      const isShipyard = buildingProduction.t === 'SYRD' || buildingProduction.t === 'SPEN';
+
+      // Shipyards must be placed on coastal cells (land adjacent to water)
+      if (isShipyard && state.coastalCells && state.coastalCells.length > 0) {
+        const coastal = state.coastalCells[this.placementAttempts % state.coastalCells.length];
+        commands.push({
+          cmd: 'place',
+          rtti: RTTI_BUILDINGTYPE,
+          cx: coastal.cx,
+          cy: coastal.cy,
         });
+        if (state.tick - this.lastPlacementTick > 60) {
+          this.placementAttempts++;
+          this.lastPlacementTick = state.tick;
+        }
+        reasons.push(`place ${buildingProduction.t} at coastal (${coastal.cx},${coastal.cy})`);
+      } else {
+        // Place refineries away from known enemies to protect harvesters
+        let offsets = PLACEMENT_OFFSETS;
+        if (buildingProduction.t === 'PROC' && this.lastKnownEnemyCentroid) {
+          const ec = this.lastKnownEnemyCentroid;
+          offsets = [...PLACEMENT_OFFSETS].sort((a, b) => {
+            const aDist = (conYard.cx + a.cx - ec.cx) ** 2 + (conYard.cy + a.cy - ec.cy) ** 2;
+            const bDist = (conYard.cx + b.cx - ec.cx) ** 2 + (conYard.cy + b.cy - ec.cy) ** 2;
+            return bDist - aDist; // furthest from enemy first
+          });
+        }
+        const offset = offsets[this.placementAttempts % offsets.length];
+        const placeCx = conYard.cx + offset.cx;
+        const placeCy = conYard.cy + offset.cy;
+        commands.push({
+          cmd: 'place',
+          rtti: RTTI_BUILDINGTYPE,
+          cx: placeCx,
+          cy: placeCy,
+        });
+        // Cycle through placement offsets on repeated attempts
+        if (state.tick - this.lastPlacementTick > 60) {
+          this.placementAttempts++;
+          this.lastPlacementTick = state.tick;
+        }
+        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
       }
-      const offset = offsets[this.placementAttempts % offsets.length];
-      const placeCx = conYard.cx + offset.cx;
-      const placeCy = conYard.cy + offset.cy;
-      commands.push({
-        cmd: 'place',
-        rtti: RTTI_BUILDINGTYPE,
-        cx: placeCx,
-        cy: placeCy,
-      });
-      // Cycle through placement offsets on repeated attempts
-      if (state.tick - this.lastPlacementTick > 60) {
-        this.placementAttempts++;
-        this.lastPlacementTick = state.tick;
-      }
-      reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
     } else if (!buildingProduction && buildable) {
       // Nothing building — find next item in build order
       // Don't reset placementAttempts — keep advancing through offsets
