@@ -276,7 +276,6 @@ export class OracleStrategy {
   private syrdPlacementStart = -1;
   private waterScoutId = -1;          // unit sent to scout water for SYRD
   private waterScoutTarget: Point | null = null;  // where the scout is headed
-  private syrdPlacementStart = -1;  // placementAttempts value when SYRD grid scan began
   private scg03eaBridgeIndex = 0;  // 0 = first bridge, 1 = second, 2 = done
   private mineWaypointIndex = 0;
   private mineDeployPending = false;  // true when minelayer has arrived and should deploy
