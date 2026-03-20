@@ -1303,6 +1303,13 @@ export class OracleStrategy {
           state.power.produced > 0 &&
           powerDeficit > 0 &&
           powerDeficit < SCG11EA_POWER_REBUILD_EMERGENCY_DEFICIT;
+        const scg11eaProcRebuildDeferred =
+          scg11eaSubHuntLive &&
+          !scg11eaEconomyCollapsed &&
+          scg11eaEconomyFragile &&
+          scg11eaFleetShort &&
+          shipCount > 0 &&
+          scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS;
         const scg11eaStaticDefenseUnlocked =
           !scg11eaFleetShort &&
           shipCount >= SCG11EA_STATIC_DEFENSE_MIN_SHIPS &&
@@ -1332,7 +1339,9 @@ export class OracleStrategy {
           scg11eaEconomyFragile &&
           buildable.structures.includes('PROC')
         ) {
-          if (state.credits >= SCG11EA_PROC_REBUILD_RESERVE) {
+          if (scg11eaProcRebuildDeferred) {
+            reasons.push(`defer PROC for fleet (${shipCount}/${scg11eaDesiredShips} DD, ${procCount}/2 PROC)`);
+          } else if (state.credits >= SCG11EA_PROC_REBUILD_RESERVE) {
             commands.push({
               cmd: 'produce',
               rtti: RTTI_BUILDINGTYPE,
@@ -1577,7 +1586,7 @@ export class OracleStrategy {
     const scg11eaNavalEconomyFragile =
       this.scenario === 'SCG11EA' &&
       scg11eaSubHuntPhase &&
-      refCount < 2 &&
+      refCount === 0 &&
       buildable?.structures.includes('PROC') === true;
     const scg11eaFleetOnline =
       this.scenario === 'SCG11EA' &&
