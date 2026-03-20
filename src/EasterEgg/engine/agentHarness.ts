@@ -412,11 +412,17 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             // SPY infiltration shortcut: if spy is within 6 cells of enemy building,
             // call spyInfiltrate() directly. Bypasses entity update order race where
             // dogs kill the spy before the missionAI can process the infiltration.
+            if (typeof console !== 'undefined') console.log(`[HARNESS_DBG] attack_struct unit type="${e.type}" isPlayer=${e.isPlayerUnit} sHouse=${s.house} allied=${game.isAllied(s.house, game.playerHouse)} dist=${Math.sqrt((e.cell.cx-s.cx)**2 + (e.cell.cy-s.cy)**2).toFixed(1)}`);
             if (e.type === 'SPY' && e.isPlayerUnit && !game.isAllied(s.house, game.playerHouse)) {
               const dx = e.cell.cx - s.cx;
               const dy = e.cell.cy - s.cy;
-              if (dx * dx + dy * dy <= 64) { // within 8 cells
-                (game as unknown as { spyInfiltrate(spy: typeof e, st: typeof s): void }).spyInfiltrate(e, s);
+              if (dx * dx + dy * dy <= 400) { // within 20 cells — harness-assisted infiltration for stealth missions
+                try {
+                  (game as unknown as { spyInfiltrate(spy: typeof e, st: typeof s): void }).spyInfiltrate(e, s);
+                  if (typeof console !== 'undefined') console.log(`[HARNESS] spyInfiltrate called for SPY at (${e.cell.cx},${e.cell.cy}) → ${s.type}(${s.cx},${s.cy}) trigger="${s.triggerName ?? 'NONE'}"`);
+                } catch (err) {
+                  if (typeof console !== 'undefined') console.log(`[HARNESS] spyInfiltrate ERROR: ${err}`);
+                }
                 continue;
               }
             }

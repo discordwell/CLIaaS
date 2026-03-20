@@ -199,7 +199,7 @@ describe('getAIProductionPick — faction filtering (C++ house.cpp faction owner
     const ctx = makeMockAIContext({
       scenarioProductionItems: makeMinimalItems(
         { type: 'E1', prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-        { type: 'E2', prerequisite: 'TENT', faction: 'soviet', techLevel: 1 },
+        { type: 'E2', prerequisite: 'BARR', faction: 'soviet', techLevel: 1 },
         { type: 'E3', prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
       ),
     });
@@ -224,7 +224,7 @@ describe('getAIProductionPick — faction filtering (C++ house.cpp faction owner
     const ctx = makeMockAIContext({
       scenarioProductionItems: makeMinimalItems(
         { type: 'E1', prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-        { type: 'E2', prerequisite: 'TENT', faction: 'soviet', techLevel: 1 },
+        { type: 'E2', prerequisite: 'BARR', faction: 'soviet', techLevel: 1 },
         { type: 'E3', prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
       ),
     });
@@ -248,7 +248,7 @@ describe('getAIProductionPick — faction filtering (C++ house.cpp faction owner
     const ctx = makeMockAIContext({
       scenarioProductionItems: makeMinimalItems(
         { type: 'E1', prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-        { type: 'E2', prerequisite: 'TENT', faction: 'soviet', techLevel: 1 },
+        { type: 'E2', prerequisite: 'BARR', faction: 'soviet', techLevel: 1 },
         { type: 'E3', prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
       ),
     });

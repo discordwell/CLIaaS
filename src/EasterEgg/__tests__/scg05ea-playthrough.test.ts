@@ -9,9 +9,9 @@ import type { AgentState } from '../engine/agentHarness.js';
  */
 
 const BASE_URL = process.env.RA_PARITY_BASE_URL ?? 'http://localhost:3001';
-const STEP_TICKS = 3;  // Fine-grained for spy dog evasion
-const MAX_ITERATIONS = 10000; // More iterations to compensate for smaller steps
-const LOG_EVERY = 10;
+const STEP_TICKS = 15;
+const MAX_ITERATIONS = 2000;
+const LOG_EVERY = 5;
 
 describe('SCG05EA live playthrough', () => {
   let adapter: TsAgentAdapter;
@@ -59,7 +59,16 @@ describe('SCG05EA live playthrough', () => {
         }
       }
 
+      // Log infiltrate commands
+      const hasAttack = decision.commands.some((c: { cmd: string }) => c.cmd === 'attack' || c.cmd === 'attack_struct');
+      if (hasAttack) {
+        console.log(`  CMD: ${JSON.stringify(decision.commands)}`);
+      }
       const stepResult = await adapter.step(STEP_TICKS, decision.commands);
+      // After step, check if globals changed (indicates trigger fired)
+      if (hasAttack && stepResult.state.globals.length > 1) {
+        console.log(`  GLOBALS CHANGED: [${stepResult.state.globals.join(',')}]`);
+      }
       lastState = stepResult.state;
 
       // Check for command errors

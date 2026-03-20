@@ -810,9 +810,9 @@ export interface ProductionItem {
 export const PRODUCTION_ITEMS: ProductionItem[] = [
   // Infantry (from TENT/BARR) — faction + techLevel from rules.ini
   { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'TENT', faction: 'soviet', techLevel: 1 },
+  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'BARR', faction: 'soviet', techLevel: 1 },
   { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },  // rules.ini Owner=allies (line 829)
-  { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'soviet', techPrereq: 'STEK', techLevel: 6 },  // rules.ini Prerequisite=stek (line 836)
+  { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'BARR', faction: 'soviet', techPrereq: 'STEK', techLevel: 6 },  // rules.ini Prerequisite=stek (line 836)
   { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both', techLevel: 5 },
   { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'KENN', faction: 'soviet', techLevel: 3 },  // rules.ini Prerequisite=kenn (line 781)
   { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
@@ -826,7 +826,7 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'TENT', techLevel: 5 },  // rules.ini Prerequisite=weap,tent (line 658)
   { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'PROC', techLevel: 1 },
   // Counterstrike/Aftermath expansion units — techLevel=99 for units not in base rules.ini
-  { type: 'SHOK', name: 'Shock Trpr', cost: 900, buildTime: 80, prerequisite: 'TENT', faction: 'soviet', techPrereq: 'TSLA', techLevel: 7 },  // TSLA prereq (expansion, Tesla Coil gate)
+  { type: 'SHOK', name: 'Shock Trpr', cost: 900, buildTime: 80, prerequisite: 'BARR', faction: 'soviet', techPrereq: 'TSLA', techLevel: 7 },  // TSLA prereq (expansion, Tesla Coil gate)
   { type: 'MECH', name: 'Mechanic', cost: 950, buildTime: 70, prerequisite: 'TENT', faction: 'allied', techPrereq: 'FIX', techLevel: 7 },
   { type: 'STNK', name: 'Phase Trns', cost: 800, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'ATEK', techLevel: -1 },
   { type: 'CTNK', name: 'Chrono Tank', cost: 2400, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 12 },

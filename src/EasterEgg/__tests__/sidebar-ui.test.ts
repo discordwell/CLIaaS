@@ -75,7 +75,7 @@ describe('Dual Production Strips', () => {
 
   it('getStripSide() puts infantry on right strip', () => {
     expect(getStripSide({ type: 'E1', prerequisite: 'TENT', isStructure: false } as ProductionItem)).toBe('right');
-    expect(getStripSide({ type: 'E2', prerequisite: 'TENT', isStructure: false } as ProductionItem)).toBe('right');
+    expect(getStripSide({ type: 'E2', prerequisite: 'BARR', isStructure: false } as ProductionItem)).toBe('right');
     expect(getStripSide({ type: 'MEDI', prerequisite: 'TENT', isStructure: false } as ProductionItem)).toBe('right');
   });
 

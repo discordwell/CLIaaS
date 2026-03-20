@@ -260,7 +260,8 @@ export function aiPowerConsumed(ctx: AIContext, house: House): number {
 
 /** Check if AI house has a prerequisite structure */
 export function aiHasPrereq(ctx: AIContext, house: House, prereq: string): boolean {
-  if (prereq === 'TENT') {
+  // TENT and BARR are faction barracks — either satisfies an infantry barracks prerequisite
+  if (prereq === 'TENT' || prereq === 'BARR') {
     return ctx.structures.some(s => s.alive && s.house === house && (s.type === 'TENT' || s.type === 'BARR'));
   }
   return ctx.structures.some(s => s.alive && s.house === house && s.type === prereq);

@@ -51,7 +51,7 @@ beforeEach(() => resetEntityIds());
 /** Minimal production items for testing */
 const TEST_PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'TENT', faction: 'soviet', techLevel: 1 },
+  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'BARR', faction: 'soviet', techLevel: 1 },
   { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
   { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both', techLevel: 5 },
   { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },

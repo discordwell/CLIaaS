@@ -25,9 +25,9 @@ const EXPECTED_ITEMS: {
 }[] = [
   // Infantry (from TENT/BARR)
   { type: 'E1', cost: 100, buildTime: cppBuildTime(100), prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-  { type: 'E2', cost: 160, buildTime: cppBuildTime(160), prerequisite: 'TENT', faction: 'soviet', techLevel: 1 },
+  { type: 'E2', cost: 160, buildTime: cppBuildTime(160), prerequisite: 'BARR', faction: 'soviet', techLevel: 1 },
   { type: 'E3', cost: 300, buildTime: cppBuildTime(300), prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
-  { type: 'E4', cost: 300, buildTime: cppBuildTime(300), prerequisite: 'TENT', faction: 'soviet', techLevel: 6, techPrereq: 'STEK' },
+  { type: 'E4', cost: 300, buildTime: cppBuildTime(300), prerequisite: 'BARR', faction: 'soviet', techLevel: 6, techPrereq: 'STEK' },
   { type: 'E6', cost: 500, buildTime: cppBuildTime(500), prerequisite: 'TENT', faction: 'both', techLevel: 5 },
   { type: 'DOG', cost: 200, buildTime: cppBuildTime(200), prerequisite: 'KENN', faction: 'soviet', techLevel: 3 },
   { type: 'MEDI', cost: 800, buildTime: cppBuildTime(800), prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
@@ -41,7 +41,7 @@ const EXPECTED_ITEMS: {
   { type: 'APC', cost: 800, buildTime: cppBuildTime(800), prerequisite: 'WEAP', faction: 'allied', techLevel: 5, techPrereq: 'TENT' },
   { type: 'HARV', cost: 1400, buildTime: cppBuildTime(1400), prerequisite: 'WEAP', faction: 'both', techLevel: 1, techPrereq: 'PROC' },
   // Expansion units
-  { type: 'SHOK', cost: 900, buildTime: cppBuildTime(900), prerequisite: 'TENT', faction: 'soviet', techLevel: 7, techPrereq: 'TSLA' },
+  { type: 'SHOK', cost: 900, buildTime: cppBuildTime(900), prerequisite: 'BARR', faction: 'soviet', techLevel: 7, techPrereq: 'TSLA' },
   { type: 'MECH', cost: 950, buildTime: cppBuildTime(950), prerequisite: 'TENT', faction: 'allied', techLevel: 7, techPrereq: 'FIX' },
   { type: 'STNK', cost: 800, buildTime: cppBuildTime(800), prerequisite: 'WEAP', faction: 'both', techLevel: -1, techPrereq: 'ATEK' },
   { type: 'CTNK', cost: 2400, buildTime: cppBuildTime(2400), prerequisite: 'WEAP', faction: 'allied', techLevel: 12, techPrereq: 'ATEK' },
