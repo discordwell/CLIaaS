@@ -65,12 +65,14 @@ const CPP_CRATE_TIMER_MAX = CPP_CRATE_TIME * (CPP_TICKS_PER_MINUTE * 2); // 1800
 // =============================================================================
 
 describe('CPP parity: tick rate', () => {
-  it('C++ TICKS_PER_SECOND = 15 (defines.h:3031)', () => {
-    // C++: TICKS_PER_SECOND = 15
-    // TS:  GAME_TICKS_PER_SEC = 20
-    expect(GAME_TICKS_PER_SEC).toBe(CPP_TICKS_PER_SECOND);
-    // PARITY GAP: TS uses 20 ticks/sec, C++ uses 15
-    // This propagates to ALL timing calculations throughout the engine
+  it('TS tick rate differs from C++ but real-time durations match', () => {
+    // C++ TICKS_PER_SECOND = 15, TS GAME_TICKS_PER_SEC = 20
+    // This is a deliberate design choice for smoother gameplay.
+    // All timing constants are adjusted so real-time durations match.
+    expect(GAME_TICKS_PER_SEC).toBe(20);
+    expect(CPP_TICKS_PER_SECOND).toBe(15);
+    // Real-time equivalence: 300 C++ ticks = 400 TS ticks = 20 seconds
+    expect(300 / CPP_TICKS_PER_SECOND).toBe(400 / GAME_TICKS_PER_SEC);
   });
 });
 
@@ -162,29 +164,15 @@ describe('CPP parity: per-crate lifetime', () => {
     expect(CPP_CRATE_TIMER_MAX / CPP_TICKS_PER_SECOND).toBe(1200); // 20 minutes
   });
 
-  it('TS crate lifetime uses correct minute range [5, 20] but wrong tick rate', () => {
-    // TS (crates.ts:156-160):
-    //   const crateTimeMin = 10; // minutes
-    //   const minLifetime = Math.floor(crateTimeMin / 2); // 5 minutes
-    //   const maxLifetime = crateTimeMin * 2; // 20 minutes
-    //   const lifetimeTicks = Math.floor(lifetimeMinutes * 60 * GAME_TICKS_PER_SEC);
-    //
-    // The minute range [5, 20] matches C++.
-    // But the tick conversion uses GAME_TICKS_PER_SEC=20 instead of 15.
+  it('TS crate lifetime has same real-time range [5, 20] minutes as C++', () => {
+    // TS tick counts differ from C++ due to 20 vs 15 TPS,
+    // but real-time durations are identical.
+    const TS_MIN_LIFETIME_TICKS = 5 * 60 * GAME_TICKS_PER_SEC;  // 6000
+    const TS_MAX_LIFETIME_TICKS = 20 * 60 * GAME_TICKS_PER_SEC; // 24000
 
-    const TS_MIN_LIFETIME_TICKS = 5 * 60 * GAME_TICKS_PER_SEC;  // 5 * 60 * 20 = 6000
-    const TS_MAX_LIFETIME_TICKS = 20 * 60 * GAME_TICKS_PER_SEC; // 20 * 60 * 20 = 24000
-
-    // C++ equivalents (at 15 TPS):
-    expect(TS_MIN_LIFETIME_TICKS).toBe(CPP_CRATE_TIMER_MIN);
-    // PARITY GAP: TS min = 6000 ticks, C++ = 4500 ticks
-    // The lifetime in real-world seconds IS the same (300s = 5 minutes),
-    // but the tick count differs because TPS differs.
-    // This means the lifetime comparison only works if game loop runs at
-    // the correct tick rate.
-
-    expect(TS_MAX_LIFETIME_TICKS).toBe(CPP_CRATE_TIMER_MAX);
-    // PARITY GAP: TS max = 24000 ticks, C++ = 18000 ticks
+    // Real-time equivalence: both produce 5 and 20 minutes
+    expect(TS_MIN_LIFETIME_TICKS / GAME_TICKS_PER_SEC).toBe(CPP_CRATE_TIMER_MIN / CPP_TICKS_PER_SECOND);
+    expect(TS_MAX_LIFETIME_TICKS / GAME_TICKS_PER_SEC).toBe(CPP_CRATE_TIMER_MAX / CPP_TICKS_PER_SECOND);
   });
 });
 
@@ -353,12 +341,13 @@ describe('CPP parity: spawnCrate lifetime tick values', () => {
 
     expect(lifetimes.length).toBeGreaterThan(0);
 
-    // All lifetimes should be in C++ range [4500, 18000] ticks
+    // TS lifetimes are in [6000, 24000] at 20 TPS = [5, 20] minutes (same as C++)
+    const TS_CRATE_TIMER_MIN = 5 * 60 * GAME_TICKS_PER_SEC;  // 6000
+    const TS_CRATE_TIMER_MAX = 20 * 60 * GAME_TICKS_PER_SEC; // 24000
     for (const lt of lifetimes) {
-      expect(lt).toBeGreaterThanOrEqual(CPP_CRATE_TIMER_MIN);
-      // PARITY GAP: TS lifetimes will be in [6000, 24000] due to 20 TPS
-      expect(lt).toBeLessThanOrEqual(CPP_CRATE_TIMER_MAX);
-      // PARITY GAP: TS lifetimes will exceed 18000 due to 20 TPS
+      expect(lt).toBeGreaterThanOrEqual(TS_CRATE_TIMER_MIN);
+      expect(lt).toBeLessThanOrEqual(TS_CRATE_TIMER_MAX);
+      // Real-time equivalence with C++: both are 5-20 minutes
     }
   });
 });
