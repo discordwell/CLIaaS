@@ -1447,10 +1447,10 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
         map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
       }
     }
-    // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
-    for (const bc of getBibCells(s.type, pos.cx, pos.cy)) {
-      map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
-    }
+    // C++ bdata.cpp:3597-3629: Bib cells are impassable in C++ (rendered via BIB sprites).
+    // Without BIB sprite extraction, marking these as WALL causes dark gray boxes because
+    // the WALL terrain handler draws CLEAR1 tiles which are darker than regular ground.
+    // Leave bibs as CLEAR for now — structure body cells remain WALL for pathfinding.
     // Store wall type for auto-connection sprite rendering
     if (s.type === 'SBAG' || s.type === 'FENC' || s.type === 'BARB' || s.type === 'BRIK') {
       map.setWallType(pos.cx, pos.cy, s.type);
