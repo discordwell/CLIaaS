@@ -1126,8 +1126,9 @@ export interface MapStructure {
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
   sellHpAtStart?: number;    // HP when sell was initiated (for health-scaled refund)
   deployedFromMCV?: boolean; // C++ ArchiveTarget parity: ConYard was created by MCV deploy
-  turretDir?: number;        // 0-7 facing for turreted structures (GUN/SAM)
-  desiredTurretDir?: number; // target turret facing (rotates toward this)
+  turretDir?: number;        // 0-31 facing for turreted structures (GUN/SAM/AGUN) — 32-step C++ parity
+  desiredTurretDir?: number; // target turret facing in 8-dir (rotates toward this * 4 in 32-step)
+  turretRotAccum?: number;   // C++ FacingClass ROT accumulator for smooth rotation (building.cpp:5347)
   firingFlash?: number;      // ticks remaining for muzzle flash frame
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
 }
@@ -2179,7 +2180,9 @@ export interface TriggerActionResult {
   winLose?: boolean;              // C++ parity (#39): mark attached object — win if captured, lose if destroyed
 }
 
-/** Execute a trigger action — returns result with entities and side effects */
+/** Execute a trigger action — returns result with entities and side effects.
+ *  @param playerHouseId  C++ PlayerPtr->Class->House ID — used by TACTION_WIN/LOSE to check Data.House
+ *                        (taction.cpp:604-610,616-622). Optional for backward compat; defaults to -1 (no check). */
 export function executeTriggerAction(
   action: TriggerAction,
   teamTypes: TeamType[],
@@ -2189,6 +2192,7 @@ export function executeTriggerAction(
   triggerHouse?: number,
   houseEdges?: Map<House, string>,
   mapBounds?: { x: number; y: number; w: number; h: number },
+  playerHouseId?: number,
 ): TriggerActionResult {
   const result: TriggerActionResult = { spawned: [] };
 
@@ -2358,11 +2362,31 @@ export function executeTriggerAction(
     }
 
     case TACTION_WIN:
-      result.win = true;
+      // C++ taction.cpp:604-610: if (Data.House == PlayerPtr->Class->House) Flag_To_Win else Flag_To_Lose
+      // If the action's house matches the player, player wins. If enemy house, player LOSES.
+      if (playerHouseId !== undefined && playerHouseId >= 0 && action.data >= 0) {
+        if (action.data === playerHouseId) {
+          result.win = true;
+        } else {
+          result.lose = true;
+        }
+      } else {
+        result.win = true; // fallback when no player house context available
+      }
       break;
 
     case TACTION_LOSE:
-      result.lose = true;
+      // C++ taction.cpp:616-622: if (Data.House != PlayerPtr->Class->House) Flag_To_Win else Flag_To_Lose
+      // If the action's house is the enemy, player WINS. If player house, player loses.
+      if (playerHouseId !== undefined && playerHouseId >= 0 && action.data >= 0) {
+        if (action.data !== playerHouseId) {
+          result.win = true;
+        } else {
+          result.lose = true;
+        }
+      } else {
+        result.lose = true; // fallback when no player house context available
+      }
       break;
 
     case TACTION_ALLOWWIN:

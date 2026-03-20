@@ -2764,6 +2764,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             height: 'min(100vh, calc(100vw * 400 / 640))',
             imageRendering: 'pixelated',
             outline: 'none',
+            background: '#000',
           }}
         />
       </div>
