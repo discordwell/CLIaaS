@@ -413,7 +413,10 @@ describe('AA targeting', () => {
     expect(WEAPON_STATS['75mm'].isAntiAir).toBeUndefined();
     expect(WEAPON_STATS.M60mg.isAntiAir).toBeUndefined();
     expect(WEAPON_STATS.M1Carbine.isAntiAir).toBeUndefined();
-    expect(WEAPON_STATS.Maverick.isAntiAir).toBeUndefined();
+  });
+
+  it('Maverick has isAntiAir (HeatSeeker projectile, AA=yes)', () => {
+    expect(WEAPON_STATS.Maverick.isAntiAir).toBe(true);
   });
 });
 

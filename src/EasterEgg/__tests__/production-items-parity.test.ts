@@ -16,7 +16,7 @@ function cppBuildTime(cost: number): number {
   return Math.floor(cost * 0.8 * 900 / 1000 * 20 / 15);
 }
 
-// Expected data for all 65 production items, derived from types.ts PRODUCTION_ITEMS
+// Expected data for all 70 production items, derived from types.ts PRODUCTION_ITEMS
 // which mirrors RULES.INI Cost=, Speed= (buildTime), Prerequisite=, TechLevel=, Owner= values.
 // buildTime values use the C++ formula: floor(cost * 0.96)
 const EXPECTED_ITEMS: {
@@ -31,6 +31,7 @@ const EXPECTED_ITEMS: {
   { type: 'E6', cost: 500, buildTime: cppBuildTime(500), prerequisite: 'TENT', faction: 'both', techLevel: 5 },
   { type: 'DOG', cost: 200, buildTime: cppBuildTime(200), prerequisite: 'KENN', faction: 'soviet', techLevel: 3 },
   { type: 'MEDI', cost: 800, buildTime: cppBuildTime(800), prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
+  { type: 'SPY', cost: 500, buildTime: cppBuildTime(500), prerequisite: 'TENT', faction: 'allied', techLevel: 6, techPrereq: 'DOME' },
   // Vehicles (from WEAP)
   { type: 'JEEP', cost: 600, buildTime: cppBuildTime(600), prerequisite: 'WEAP', faction: 'allied', techLevel: 3 },
   { type: '1TNK', cost: 700, buildTime: cppBuildTime(700), prerequisite: 'WEAP', faction: 'allied', techLevel: 4 },
@@ -46,6 +47,10 @@ const EXPECTED_ITEMS: {
   { type: 'STNK', cost: 800, buildTime: cppBuildTime(800), prerequisite: 'WEAP', faction: 'both', techLevel: -1, techPrereq: 'ATEK' },
   { type: 'CTNK', cost: 2400, buildTime: cppBuildTime(2400), prerequisite: 'WEAP', faction: 'allied', techLevel: 12, techPrereq: 'ATEK' },
   { type: 'TTNK', cost: 1500, buildTime: cppBuildTime(1500), prerequisite: 'WEAP', faction: 'soviet', techLevel: 8, techPrereq: 'TSLA' },
+  { type: 'QTNK', cost: 2300, buildTime: cppBuildTime(2300), prerequisite: 'WEAP', faction: 'soviet', techLevel: 10, techPrereq: 'STEK' },
+  { type: 'DTRK', cost: 2400, buildTime: cppBuildTime(2400), prerequisite: 'MSLO', faction: 'both', techLevel: 13 },
+  { type: 'MRJ', cost: 600, buildTime: cppBuildTime(600), prerequisite: 'WEAP', faction: 'allied', techLevel: 12, techPrereq: 'DOME' },
+  { type: 'MGG', cost: 600, buildTime: cppBuildTime(600), prerequisite: 'WEAP', faction: 'allied', techLevel: 11, techPrereq: 'ATEK' },
   { type: 'E7', cost: 1200, buildTime: cppBuildTime(1200), prerequisite: 'TENT', faction: 'both', techLevel: 11, techPrereq: 'ATEK' },
   { type: 'THF', cost: 500, buildTime: cppBuildTime(500), prerequisite: 'TENT', faction: 'allied', techLevel: 11, techPrereq: 'ATEK' },
   { type: 'V2RL', cost: 700, buildTime: cppBuildTime(700), prerequisite: 'WEAP', faction: 'soviet', techLevel: 4, techPrereq: 'DOME' },

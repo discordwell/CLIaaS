@@ -101,10 +101,23 @@ export const AI_DIFFICULTY_MODS: Record<Difficulty, {
   costBias: number;
   /** C++ Rule.Diff[handicap].BuildSpeedBias (house.cpp:297,307) — build time multiplier */
   buildSpeedBias: number;
+  /** C++ DifficultyClass.RepairDelay — minutes delay before AI initiates repairs */
+  repairDelay: number;
+  /** C++ DifficultyClass.BuildDelay — minutes delay before AI initiates construction */
+  buildDelay: number;
+  /** C++ DifficultyClass.IsBuildSlowdown — whether construction slows with multiple factories */
+  isBuildSlowdown: boolean;
+  /** C++ DifficultyClass.IsWallDestroyer — whether AI targets walls */
+  isWallDestroyer: boolean;
+  /** C++ DifficultyClass.IsContentScan — whether AI analyzes transport contents */
+  isContentScan: boolean;
 }> = {
-  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30, firepowerBias: 0.8, armorBias: 0.8, rofBias: 1.2, groundspeedBias: 0.8, airspeedBias: 0.8, costBias: 1.0, buildSpeedBias: 1.0 },
-  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25, firepowerBias: 1.0, armorBias: 1.0, rofBias: 1.0, groundspeedBias: 1.0, airspeedBias: 1.0, costBias: 1.0, buildSpeedBias: 1.0 },
-  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15, firepowerBias: 1.2, armorBias: 1.2, rofBias: 0.8, groundspeedBias: 1.2, airspeedBias: 1.2, costBias: 1.0, buildSpeedBias: 1.0 },
+  // Computer on easy gets [Difficult] INI values (C++ reversal: Easy<->Difficult for computer)
+  easy:   { incomeMult: 0.7, buildSpeedMult: 1.5, attackThreshold: 8,  attackCooldown: 900,  productionInterval: 90, aggressionMult: 0.6, retreatHpPercent: 0.30, firepowerBias: 0.8, armorBias: 0.8, rofBias: 1.2, groundspeedBias: 0.8, airspeedBias: 0.8, costBias: 1.0, buildSpeedBias: 1.0, repairDelay: 0.05, buildDelay: 0.1, isBuildSlowdown: true, isWallDestroyer: false, isContentScan: false },
+  // Computer on normal gets [Normal] INI values
+  normal: { incomeMult: 1.0, buildSpeedMult: 1.0, attackThreshold: 6,  attackCooldown: 600,  productionInterval: 60, aggressionMult: 1.0, retreatHpPercent: 0.25, firepowerBias: 1.0, armorBias: 1.0, rofBias: 1.0, groundspeedBias: 1.0, airspeedBias: 1.0, costBias: 1.0, buildSpeedBias: 1.0, repairDelay: 0.02, buildDelay: 0.03, isBuildSlowdown: true, isWallDestroyer: true, isContentScan: true },
+  // Computer on hard gets [Easy] INI values (C++ reversal: computer gets player bonuses)
+  hard:   { incomeMult: 1.5, buildSpeedMult: 0.7, attackThreshold: 4,  attackCooldown: 400,  productionInterval: 42, aggressionMult: 1.4, retreatHpPercent: 0.15, firepowerBias: 1.2, armorBias: 1.2, rofBias: 0.8, groundspeedBias: 1.2, airspeedBias: 1.2, costBias: 0.8, buildSpeedBias: 0.8, repairDelay: 0.001, buildDelay: 0.001, isBuildSlowdown: false, isWallDestroyer: true, isContentScan: true },
 };
 
 /** Structure type -> sprite image name mapping (shared by base rebuild and AI construction) */
@@ -415,6 +428,50 @@ export const AI_BUILD_RULES = {
   airstripLimit:  5,
   powerSurplus:   50,
   baseSizeAdd:    3,
+
+  // C++ [AI] section timing/production constants (rules.ini lines 223-254)
+  /** C++ Rule.AttackInterval — minutes between computer attacks (rules.ini AttackInterval=3) */
+  attackInterval: 3,
+  /** C++ Rule.AttackDelay — minutes before first attack (rules.ini AttackDelay=5) */
+  attackDelay:    5,
+  /** C++ Rule.CreditReserve — minimum credits before repair (rules.ini CreditReserve=100) */
+  creditReserve:  100,
+  /** C++ Rule.InfantryReserve — credits threshold for always-build-infantry (rules.ini InfantryReserve=3000) */
+  infantryReserve: 3000,
+  /** C++ Rule.InfantryBaseMult — building count multiplier for infantry quantity (rules.ini InfantryBaseMult=1) */
+  infantryBaseMult: 1,
+  /** C++ Rule.AutocreateTime — minutes between autocreate teams (rules.ini AutocreateTime=5) */
+  autocreateTime: 5,
+  /** C++ Rule.OreNearScan — cells for single-patch ore scan (rules.ini OreNearScan=6) */
+  oreNearScan:    6,
+  /** C++ Rule.OreFarScan — cells for new ore patch scan (rules.ini OreFarScan=48) */
+  oreFarScan:     48,
+  /** C++ Rule.PatrolScan — minutes between patrol scans (rules.ini PatrolScan=.016) */
+  patrolScan:     0.016,
+  /** C++ Rule.PowerEmergencyFraction — sell threshold for power as fraction (rules.ini PowerEmergency=75%) */
+  powerEmergency: 0.75,
+
+  // C++ [IQ] section thresholds — gate AI abilities by IQ level (rules.ini lines 269-280)
+  /** C++ Rule.IQSuperWeapons — IQ level for auto-firing super weapons (rules.ini SuperWeapons=4) */
+  iqSuperWeapons: 4,
+  /** C++ Rule.IQProduction — IQ level for auto production (rules.ini Production=5) */
+  iqProduction:   5,
+  /** C++ Rule.IQGuardArea — IQ level for guard area mode on new units (rules.ini GuardArea=4) */
+  iqGuardArea:    4,
+  /** C++ Rule.IQRepairSell — IQ level for repair/sell decisions (rules.ini RepairSell=1) */
+  iqRepairSell:   1,
+  /** C++ Rule.IQAutoCrush — IQ level for auto-crush (rules.ini AutoCrush=2) */
+  iqAutoCrush:    2,
+  /** C++ Rule.IQScatter — IQ level for scatter from threats (rules.ini Scatter=3) */
+  iqScatter:      3,
+  /** C++ Rule.IQContentScan — IQ level for transport content analysis (rules.ini ContentScan=4) */
+  iqContentScan:  4,
+  /** C++ Rule.IQAircraft — IQ level for auto aircraft replacement (rules.ini Aircraft=4) */
+  iqAircraft:     4,
+  /** C++ Rule.IQHarvester — IQ level for auto harvester replacement (rules.ini Harvester=2) */
+  iqHarvester:    2,
+  /** C++ Rule.IQSellBack — IQ level for selling buildings (rules.ini SellBack=2) */
+  iqSellBack:     2,
 };
 
 /** Count alive enemy aircraft across all non-allied houses (C++ house.cpp:5620-5633) */

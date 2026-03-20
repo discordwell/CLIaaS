@@ -135,10 +135,15 @@ describe('weapon flags (C++ RULES.INI)', () => {
   });
 
   it('non-AA weapons are not flagged isAntiAir', () => {
-    const nonAA = ['M1Carbine', '75mm', '90mm', '105mm', 'Dragon', 'Stinger', 'TorpTube'];
+    const nonAA = ['M1Carbine', '75mm', '90mm', '105mm', 'TorpTube'];
     for (const name of nonAA) {
       expect(WEAPON_STATS[name].isAntiAir, `${name} should not be isAntiAir`).toBeFalsy();
     }
+  });
+
+  it('HeatSeeker weapons have isAntiAir (C++ AA=yes)', () => {
+    expect(WEAPON_STATS.Dragon.isAntiAir).toBe(true);
+    expect(WEAPON_STATS.Stinger.isAntiAir).toBe(true);
   });
 
   it('non-torpedo weapons are not flagged isSubSurface', () => {
@@ -202,23 +207,23 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
 
     const ctx = makeCombatCtx([attacker, target]);
 
-    // Create non-AA projectile (Dragon — not isAntiAir)
+    // Create non-AA projectile (90mm — not isAntiAir)
     const proj = makeProjectile(
-      attacker.id, target.id, WEAPON_STATS.Dragon,
+      attacker.id, target.id, WEAPON_STATS['90mm'],
       attacker.pos.x, attacker.pos.y,
       target.pos.x, target.pos.y,
       20,
     );
     ctx.inflightProjectiles.push(proj);
 
-    // Run for 18 frames — should still be in flight (Dragon has homing so impact tracks target,
-    // but it should NOT proximity-detonate since it's not isAntiAir)
+    // Run for 18 frames — should still be in flight (90mm is a tank cannon,
+    // it should NOT proximity-detonate since it's not isAntiAir)
     for (let i = 0; i < 18; i++) {
       updateInflightProjectiles(ctx);
     }
 
     // After 18 frames, projectile should still be inflight (currentFrame=18 < travelFrames=20)
-    // unless homing moved it close enough — but Dragon is NOT isAntiAir, so no proximity detonation
+    // 90mm is NOT isAntiAir, so no proximity detonation
     // The projectile only arrives at frame 20 via the normal landing check
     expect(proj.currentFrame).toBe(18);
   });

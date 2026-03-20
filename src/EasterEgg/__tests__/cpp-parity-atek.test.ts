@@ -217,9 +217,9 @@ describe('ATEK tech gating — units/structures requiring ATEK', () => {
     expect(gap!.prerequisite).toBe('ATEK');
   });
 
-  it('exactly 5 production items have ATEK as techPrereq', () => {
+  it('exactly 6 production items have ATEK as techPrereq', () => {
     const gated = PRODUCTION_ITEMS.filter(p => p.techPrereq === 'ATEK');
-    expect(gated.map(p => p.type).sort()).toEqual(['CA', 'CTNK', 'E7', 'STNK', 'THF']);
+    expect(gated.map(p => p.type).sort()).toEqual(['CA', 'CTNK', 'E7', 'MGG', 'STNK', 'THF']);
   });
 
   it('exactly 2 production items have ATEK as prerequisite', () => {

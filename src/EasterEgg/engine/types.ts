@@ -113,21 +113,23 @@ export interface CountryBonus {
   armorMult: number;         // damage resistance multiplier (> 1.0 = tougher)
   groundspeedMult: number;   // ground unit speed multiplier (rules.ini Groundspeed=)
   rofMult: number;           // rate of fire multiplier (> 1.0 = slower ROF, rules.ini ROF=)
+  airspeedMult: number;      // aircraft speed multiplier (rules.ini Airspeed=)
+  buildTimeMult: number;     // build time multiplier (rules.ini BuildTime=)
 }
 
 // Country bonuses from rules.ini [CountryName] sections
 export const COUNTRY_BONUSES: Record<string, CountryBonus> = {
-  Spain:   { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Greece:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  England: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.1, groundspeedMult: 1.0, rofMult: 1.0 },  // 10% tougher armor
-  France:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.1 },  // 10% faster ROF
-  Germany: { costMult: 1.0, firepowerMult: 1.1, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },  // 10% more firepower
-  Turkey:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  USSR:    { costMult: 0.9, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },  // 10% cheaper
-  Ukraine: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.1, rofMult: 1.0 },  // 10% faster ground
-  GoodGuy: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  BadGuy:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
-  Neutral: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0 },
+  Spain:   { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },
+  Greece:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },
+  England: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.1, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },  // 10% tougher armor
+  France:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.1, airspeedMult: 1.0, buildTimeMult: 1.0 },  // 10% faster ROF
+  Germany: { costMult: 1.0, firepowerMult: 1.1, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },  // 10% more firepower
+  Turkey:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },
+  USSR:    { costMult: 0.9, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },  // 10% cheaper
+  Ukraine: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.1, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },  // 10% faster ground
+  GoodGuy: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },
+  BadGuy:  { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },
+  Neutral: { costMult: 1.0, firepowerMult: 1.0, armorMult: 1.0, groundspeedMult: 1.0, rofMult: 1.0, airspeedMult: 1.0, buildTimeMult: 1.0 },
 };
 
 // House firepower bias — derived from COUNTRY_BONUSES (C++ House->FirepowerBias)
@@ -658,12 +660,12 @@ export const UNIT_STATS: Record<string, UnitStats> = {
 export const WEAPON_STATS: Record<string, WeaponStats> = {
   // Infantry weapons
   M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 100, isInvisible: true, isDegenerate: true },
-  Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 5 }, // C++ Speed=5 (Lobbed)
-  Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 25, isHigh: true },
-  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 5, projSpeed: 50, isAntiAir: true, isHigh: true },
+  Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 5, isHigh: true, isInaccurate: true }, // C++ Speed=5 (Lobbed)
+  Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projSpeed: 25, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },
+  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 20, projSpeed: 50, isAntiAir: true, isHigh: true, isFueled: true },
   Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 12, isFlameEquipped: true },  // C++ bbdata.cpp: Animates=yes — flame trail
-  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projectileSpeed: 0.5, projSpeed: 20, isInvisible: true, isDegenerate: true }, // C++ bullet.cpp:96-175 — dog rides bullet (projectileSpeed enables limbo/unlimbo travel)
-  Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 100 },
+  DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projectileSpeed: 0.5, projSpeed: 20, isInvisible: true, isDegenerate: true, projectileROT: 20 }, // C++ bullet.cpp:96-175 — dog rides bullet (projectileSpeed enables limbo/unlimbo travel)
+  Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 100, isInvisible: true },
   Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 100, isInvisible: true, isDegenerate: true },
   // Vehicle weapons
   M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 100, isInvisible: true, isDegenerate: true },
@@ -671,39 +673,39 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, isDegenerate: true },
   '105mm':          { name: '105mm',             damage: 30,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, isDegenerate: true },
   '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, burst: 2, isDegenerate: true },
-  MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 30, isHigh: true },
-  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true },
+  MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 30, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },
+  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true, isHigh: true },
   TeslaCannon:      { name: 'TeslaCannon',       damage: 150, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
-  PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 100 }, // Shock Trooper
-  GoodWrench:       { name: 'GoodWrench',        damage: -100, rof: 80, range: 1.83, warhead: 'Mechanical', projSpeed: 100 },        // Mechanic (heals vehicles)
-  APTusk:           { name: 'APTusk',             damage: 75,  rof: 80, range: 5.0,  warhead: 'AP', projSpeed: 30, burst: 2, isHigh: true },       // Chrono Tank missile
-  TTankZap:         { name: 'TTankZap',           damage: 100, rof: 120, range: 7.0,  warhead: 'Super', splash: 1.0, projSpeed: 100 }, // Tesla Tank
+  PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 100, isInvisible: true }, // Shock Trooper
+  GoodWrench:       { name: 'GoodWrench',        damage: -100, rof: 80, range: 1.83, warhead: 'Mechanical', projSpeed: 100, isInvisible: true },        // Mechanic (heals vehicles)
+  APTusk:           { name: 'APTusk',             damage: 75,  rof: 80, range: 5.0,  warhead: 'AP', projSpeed: 30, burst: 2, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true, projectileROT: 5 },       // Chrono Tank missile
+  TTankZap:         { name: 'TTankZap',           damage: 100, rof: 120, range: 7.0,  warhead: 'Super', splash: 1.0, projSpeed: 100, isInvisible: true }, // Tesla Tank
   // Naval weapons (C++ RULES.INI — vessel.cpp)
-  Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 20, burst: 2, isDegenerate: true },                                 // DD primary naval gun
+  Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 20, burst: 2, isDegenerate: true, isAntiAir: true, isHigh: true, isFueled: true, projectileROT: 20 },                                 // DD primary naval gun
   TorpTube:         { name: 'TorpTube',         damage: 90,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 1.0, isSubSurface: true }, // SS torpedo, underwater travel
-  DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 5, isAntiSub: true },                          // DD secondary, hits submerged subs
+  DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 5, isAntiSub: true, isArcing: true, isHigh: true, isInaccurate: true },                          // DD secondary, hits submerged subs
   Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // CA cruise missile
   SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // MSUB missiles
-  SubSCUD:          { name: 'SubSCUD',          damage: 400, rof: 120, range: 14.0, warhead: 'HE', projSpeed: 20, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // Aftermath missile sub missile
-  Democharge:       { name: 'Democharge',       damage: 500, rof: 80, range: 1.75, warhead: 'Nuke', projSpeed: 100 }, // Demo truck self-destruct charge
+  SubSCUD:          { name: 'SubSCUD',          damage: 400, rof: 120, range: 14.0, warhead: 'HE', projSpeed: 20, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true }, // Aftermath missile sub missile
+  Democharge:       { name: 'Democharge',       damage: 500, rof: 80, range: 1.75, warhead: 'Nuke', projSpeed: 100, isInvisible: true }, // Demo truck self-destruct charge
   // Aircraft weapons (C++ RULES.INI — aircraft.cpp)
-  Maverick:         { name: 'Maverick',          damage: 50,  rof: 3,  range: 6.0,  warhead: 'AP', projSpeed: 30, projectileSpeed: 2.0, projectileROT: 5, isHigh: true },  // Air-to-ground missile (MIG)
-  Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 30, projectileSpeed: 2.0, projectileROT: 5, isHigh: true },  // Helicopter missile (HELI)
-  ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 100, isDegenerate: true },  // Rapid-fire hitscan (HIND/YAK)
+  Maverick:         { name: 'Maverick',          damage: 50,  rof: 3,  range: 6.0,  warhead: 'AP', projSpeed: 30, projectileSpeed: 2.0, projectileROT: 5, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },  // Air-to-ground missile (MIG)
+  Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 30, projectileSpeed: 2.0, projectileROT: 5, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },  // Helicopter missile (HELI)
+  ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 100, isDegenerate: true, isInvisible: true },  // Rapid-fire hitscan (HIND/YAK)
   // New parity weapons
-  '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 6, isArcing: true, inaccuracy: 1.0 },   // Cruiser main gun
+  '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 6, isArcing: true, inaccuracy: 1.0, isHigh: true, isInaccurate: true },   // Cruiser main gun
   '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 25, isDegenerate: true },  // Gunboat weapon
   Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 100, isInvisible: true, isDegenerate: true },  // Tanya's dual pistols
-  Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 100, isDegenerate: true },  // Stavros/civilian
-  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5, isGigundo: true, isFueled: true, isHigh: true },  // V2 Rocket (C++ FROG: speed=25, High=yes, Proximity=yes, Gigundo=yes, Fueled=yes)
+  Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 100, isDegenerate: true, isInvisible: true },  // Stavros/civilian
+  SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, splash: 2.0, inaccuracy: 1.5, isGigundo: true, isFueled: true, isHigh: true, isInaccurate: true },  // V2 Rocket (C++ FROG: speed=25, High=yes, Proximity=yes, Gigundo=yes, Fueled=yes)
   // Ant weapons (from SCA scenario INI files + C++ udata.cpp comments)
   Mandible:         { name: 'Mandible',          damage: 50,  rof: 15, range: 1.5,  warhead: 'Super', projSpeed: 40 }, // C++: Warhead=Super (combat.cpp confirms)
-  TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 100 },  // ANT3 variant (building TeslaZap is in STRUCTURE_WEAPONS)
+  TeslaZap:         { name: 'TeslaZap',          damage: 60,  rof: 25, range: 1.75, warhead: 'Super', projSpeed: 100, isInvisible: true },  // ANT3 variant (building TeslaZap is in STRUCTURE_WEAPONS)
   FireballLauncher: { name: 'FireballLauncher',   damage: 125, rof: 50, range: 4.0,  warhead: 'Fire', splash: 1.5, projectileSpeed: 0.8, projSpeed: 12, isFlameEquipped: true },  // C++ bbdata.cpp: Animates=yes — flame trail
-  Napalm:           { name: 'Napalm',            damage: 100, rof: 20, range: 4.5,  warhead: 'Fire', projSpeed: 5 },
-  Camera:           { name: 'Camera',            damage: 0,   rof: 10, range: 2.75, warhead: 'Super', projSpeed: 100 },  // Spy plane reveal (C++ RULES.INI [Camera])
-  ParaBomb:         { name: 'ParaBomb',          damage: 300, rof: 4,  range: 4.5,  warhead: 'HE', projSpeed: 5, isDropping: true, isParachuted: true },  // C++ RULES.INI [ParaBomb]: Badger bomber payload
+  Napalm:           { name: 'Napalm',            damage: 100, rof: 20, range: 4.5,  warhead: 'Fire', projSpeed: 5, isHigh: true, isDropping: true },
+  Camera:           { name: 'Camera',            damage: 0,   rof: 10, range: 2.75, warhead: 'Super', projSpeed: 100, isInvisible: true },  // Spy plane reveal (C++ RULES.INI [Camera])
+  ParaBomb:         { name: 'ParaBomb',          damage: 300, rof: 4,  range: 4.5,  warhead: 'HE', projSpeed: 5, isDropping: true, isParachuted: true, isHigh: true },  // C++ RULES.INI [ParaBomb]: Badger bomber payload
 };
 
 // === Superweapon System ===
@@ -816,6 +818,7 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both', techLevel: 5 },
   { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'KENN', faction: 'soviet', techLevel: 3 },  // rules.ini Prerequisite=kenn (line 781)
   { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
+  { type: 'SPY', name: 'Spy', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'DOME', techLevel: 6 },  // rules.ini Prerequisite=dome, Owner=allies
   // Vehicles (from WEAP) — faction + techLevel from rules.ini
   { type: 'JEEP', name: 'Ranger', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techLevel: 3 },
   { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 4 },
@@ -831,6 +834,10 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'STNK', name: 'Phase Trns', cost: 800, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'ATEK', techLevel: -1 },
   { type: 'CTNK', name: 'Chrono Tank', cost: 2400, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 12 },
   { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'TSLA', techLevel: 8 },
+  { type: 'QTNK', name: 'M.A.D. Tank', cost: 2300, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK', techLevel: 10 },  // aftrmath.ini Prerequisite=stek, Owner=soviet, Cost=2300
+  { type: 'DTRK', name: 'Demo Truck', cost: 2400, buildTime: 200, prerequisite: 'MSLO', faction: 'both', techLevel: 13 },  // aftrmath.ini Prerequisite=mslo, Owner=allies,soviet, Cost=2400
+  { type: 'MRJ', name: 'Radar Jammer', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME', techLevel: 12 },  // rules.ini Prerequisite=weap,dome, Owner=allies
+  { type: 'MGG', name: 'Mobile Gap Gen', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 11 },  // rules.ini Prerequisite=weap,atek, Owner=allies
   { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'both', techPrereq: 'ATEK', techLevel: 11 },
   { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK', techLevel: 11 },
   { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'DOME', techLevel: 4 },  // rules.ini Prerequisite=weap,dome (line 482)

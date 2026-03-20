@@ -112,9 +112,9 @@ describe('Aftermath production gating', () => {
     }
   });
 
-  it('DTRK and QTNK are not buildable (scenario-only kamikaze units)', () => {
-    expect(PRODUCTION_ITEMS.find(p => p.type === 'DTRK')).toBeUndefined();
-    expect(PRODUCTION_ITEMS.find(p => p.type === 'QTNK')).toBeUndefined();
+  it('DTRK and QTNK are in PRODUCTION_ITEMS (Aftermath buildable units)', () => {
+    expect(PRODUCTION_ITEMS.find(p => p.type === 'DTRK')).toBeDefined();
+    expect(PRODUCTION_ITEMS.find(p => p.type === 'QTNK')).toBeDefined();
   });
 
   it('MRLS does not exist (Tiberian Dawn unit, not in RA)', () => {

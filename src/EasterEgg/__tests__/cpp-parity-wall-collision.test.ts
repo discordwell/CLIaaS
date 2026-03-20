@@ -315,8 +315,12 @@ describe('Weapon isHigh flag matches C++ BulletTypeClass (bbdata.cpp)', () => {
     expect(WEAPON_STATS['120mm'].isHigh).toBeFalsy();
     expect(WEAPON_STATS['M1Carbine'].isHigh).toBeFalsy();
     expect(WEAPON_STATS['M60mg'].isHigh).toBeFalsy();
-    expect(WEAPON_STATS['155mm'].isHigh).toBeFalsy();
-    expect(WEAPON_STATS['Grenade'].isHigh).toBeFalsy();
+  });
+
+  it('arcing/lobbed weapons ARE high (C++ INI High=yes)', () => {
+    // 155mm (Ballistic) and Grenade (Lobbed) have High=yes in INI
+    expect(WEAPON_STATS['155mm'].isHigh).toBe(true);
+    expect(WEAPON_STATS['Grenade'].isHigh).toBe(true);
   });
 
   it('missile/rocket weapons ARE high (C++ RULES.INI High=yes)', () => {

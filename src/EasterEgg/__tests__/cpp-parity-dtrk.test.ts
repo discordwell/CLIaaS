@@ -434,18 +434,15 @@ describe('DTRK vehicle movement — stop-rotate-move (drive.cpp)', () => {
   });
 });
 
-// ── Not in PRODUCTION_ITEMS (rules.ini) ──────────────────────────────────────
-// DTRK is not a standard buildable unit in the base game production table
+// ── PRODUCTION_ITEMS (aftrmath.ini) ──────────────────────────────────────────
+// DTRK is buildable in Aftermath expansion (requires MSLO prerequisite)
 
-describe('DTRK production (rules.ini)', () => {
-  it('DTRK is NOT in PRODUCTION_ITEMS (not normally buildable)', () => {
+describe('DTRK production (aftrmath.ini)', () => {
+  it('DTRK is in PRODUCTION_ITEMS (Aftermath buildable unit)', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'DTRK');
-    expect(prodItem).toBeUndefined();
-  });
-
-  it('DTRK stats do not have a cost field', () => {
-    // DTRK cost varies by scenario context; not set in base stats
-    expect(UNIT_STATS.DTRK.cost).toBeUndefined();
+    expect(prodItem).toBeDefined();
+    expect(prodItem!.cost).toBe(2400);
+    expect(prodItem!.prerequisite).toBe('MSLO');
   });
 });
 

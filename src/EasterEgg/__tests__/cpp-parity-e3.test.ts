@@ -176,8 +176,8 @@ describe('RedEye weapon stats (rules.ini)', () => {
     expect(weapon.isAntiAir).toBe(true);
   });
 
-  it('projectileROT is 5 (homing missile)', () => {
-    expect(weapon.projectileROT).toBe(5);
+  it('projectileROT is 20 (C++ AAMissile ROT=20)', () => {
+    expect(weapon.projectileROT).toBe(20);
   });
 
   it('ROF is 50', () => {
@@ -207,8 +207,8 @@ describe('Dragon weapon stats (rules.ini)', () => {
     expect(weapon.projectileROT).toBe(5);
   });
 
-  it('isAntiAir is NOT set on Dragon (ground weapon only)', () => {
-    expect(weapon.isAntiAir).toBeFalsy();
+  it('isAntiAir is set on Dragon (C++ HeatSeeker AA=yes)', () => {
+    expect(weapon.isAntiAir).toBe(true);
   });
 
   it('ROF is 50', () => {
@@ -225,9 +225,9 @@ describe('E3 AA capability (techno.cpp)', () => {
     expect(e3.weapon!.isAntiAir).toBe(true);
   });
 
-  it('E3 secondary weapon (Dragon) does NOT have isAntiAir', () => {
+  it('E3 secondary weapon (Dragon) has isAntiAir (C++ HeatSeeker AA=yes)', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
-    expect(e3.weapon2!.isAntiAir).toBeFalsy();
+    expect(e3.weapon2!.isAntiAir).toBe(true);
   });
 
   it('at least one weapon on E3 has isAntiAir (can engage aircraft)', () => {

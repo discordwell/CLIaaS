@@ -227,7 +227,7 @@ describe('DOME tech gate — prerequisite for advanced structures/units', () => 
   it('all items requiring DOME as techPrereq are accounted for', () => {
     const domeTechPrereq = PRODUCTION_ITEMS.filter(p => p.techPrereq === 'DOME');
     const types = domeTechPrereq.map(p => p.type).sort();
-    expect(types).toEqual(['ATEK', 'STEK', 'V2RL']);
+    expect(types).toEqual(['ATEK', 'MRJ', 'SPY', 'STEK', 'V2RL']);
   });
 });
 

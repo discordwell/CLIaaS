@@ -107,59 +107,8 @@ describe('C++ Parity: Projectile boolean/numeric flags from INI', () => {
   // These are expected failures documented in the test spec. Each entry lists
   // the weapon name and the TS flag that is missing but should be present per INI.
   const KNOWN_MISSING_FLAGS: Record<string, Set<string>> = {
-    // Stinger: INI Projectile=LaserGuided (AA=yes, High=yes, Ranged=yes, ROT=20)
-    // TS has none of these — treats Stinger as a simple cannon-like weapon
-    Stinger: new Set(['isAntiAir', 'isHigh', 'isFueled']),
-
-    // DepthCharge: INI Projectile=Catapult (High=yes, Arcing=yes, Inaccurate=yes)
-    // TS only has isAntiSub, missing the arc/high/inaccurate properties
-    DepthCharge: new Set(['isArcing', 'isHigh', 'isInaccurate']),
-
-    // HeatSeeker weapons: INI has Inaccurate=yes, Ranged=yes, AA=yes but TS omits some/all
-    Dragon: new Set(['isInaccurate', 'isFueled', 'isAntiAir']),
-    Hellfire: new Set(['isInaccurate', 'isFueled', 'isAntiAir']),
-    Maverick: new Set(['isInaccurate', 'isFueled', 'isAntiAir']),
-    MammothTusk: new Set(['isInaccurate', 'isFueled', 'isAntiAir']),
-    SubSCUD: new Set(['isInaccurate', 'isAntiAir', 'isFueled']),
-    APTusk: new Set(['isInaccurate', 'isAntiAir', 'isFueled']),
-
-    // DogJaw: LeapDog has ROT=20 but TS has no projectileROT
-    // (handled separately in ROT test below)
-
-    // RedEye: AAMissile has Ranged=yes but TS omits isFueled
-    RedEye: new Set(['isFueled']),
-
-    // Grenade: Lobbed has High=yes, Inaccurate=yes — TS has isArcing but missing these
-    Grenade: new Set(['isHigh', 'isInaccurate']),
-
-    // 155mm: Ballistic has High=yes — TS has isArcing, isInaccurate but missing isHigh
-    '155mm': new Set(['isHigh']),
-
-    // 8Inch: Ballistic has High=yes, Inaccurate=yes — TS has isArcing but missing isHigh, isInaccurate
-    '8Inch': new Set(['isHigh', 'isInaccurate']),
-
-    // SCUD: FROG has Inaccurate=yes — TS has isFueled, isHigh but missing isInaccurate
-    SCUD: new Set(['isInaccurate']),
-
-    // ParaBomb: Parachute has High=yes — TS has isDropping, isParachuted but missing isHigh
-    ParaBomb: new Set(['isHigh']),
-
-    // Napalm: Bomblet has High=yes — TS missing isHigh and isDropping
-    Napalm: new Set(['isHigh', 'isDropping']),
-
-    // Invisible-projectile weapons missing isInvisible in TS:
-    // These use Projectile=Invisible (Inviso=yes) but TS doesn't set isInvisible.
-    // They rely on projSpeed=40 for instant-hit behavior instead.
-    Heal: new Set(['isInvisible']),
-    PortaTesla: new Set(['isInvisible']),
-    GoodWrench: new Set(['isInvisible']),
-    TTankZap: new Set(['isInvisible']),
-    TeslaZap: new Set(['isInvisible']),
-    Camera: new Set(['isInvisible']),
-    Democharge: new Set(['isInvisible']),
+    // TorpTube: INI Projectile has ASW=yes but TS uses isSubSurface instead of isAntiSub
     TorpTube: new Set(['isAntiSub']),
-    ChainGun: new Set(['isInvisible']),
-    Pistol: new Set(['isInvisible']),
   };
 
   // TS engine additions: flags set in TS WEAPON_STATS that have no basis in INI.
@@ -234,16 +183,13 @@ describe('C++ Parity: Projectile boolean/numeric flags from INI', () => {
 
   describe('projectileROT: INI ROT values match TS projectileROT', () => {
     // Weapons where ROT is present in INI projectile but missing in TS
-    const KNOWN_MISSING_ROT = new Set([
-      'Stinger',  // LaserGuided ROT=20, TS has no projectileROT
-      'DogJaw',   // LeapDog ROT=20, TS has no projectileROT
-      'APTusk',   // HeatSeeker ROT=5, TS has no projectileROT (projSpeed=40 instant-hit)
+    const KNOWN_MISSING_ROT = new Set<string>([
+      // All previously missing ROT values have been added
     ]);
 
     // Weapons where TS projectileROT differs from INI ROT (intentional overrides)
-    // RedEye: AAMissile has ROT=20 but TS uses projectileROT=5 (shared with Dragon/HeatSeeker)
     const KNOWN_ROT_OVERRIDES: Record<string, { ini: number; ts: number }> = {
-      RedEye: { ini: 20, ts: 5 },
+      // All previously overridden ROT values now match INI
     };
 
     for (const wName of weaponNames) {
