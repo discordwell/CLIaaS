@@ -71,33 +71,33 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 ];
 
 // SCG11EA "Aftermath / Naval Supremacy": Ground-first, then naval.
-// Strategy from walkthrough:
-//   1. Deploy MCV1, save MCV2 for river crossing
-//   2. Build up ground forces (tanks), multiple harvesters
-//   3. Build enough armor and economy to hold the island
-//   4. Build shipyard, produce destroyers, clear subs from river
-//   5. Add the third refinery after naval is online
-//   6. Destroyers + armor clear river defenses (Teslas, SAMs)
-//   7. England fleet passes through → victory
+// Strategy:
+//   1. Build the minimum land economy/armor needed to survive the island hold.
+//   2. Tech to DOME so AA guns can exist before the YAK/HIND snowball starts.
+//   3. Place the shipyard and mass destroyers to clear the river screen.
+//   4. Restore heavier land tech only after the naval lane is stable.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['WEAP'],         type_ids: [2] },               // War factory — tanks ASAP
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund tank army
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory — faster tank production
+  { names: ['DOME'],         type_ids: [6] },               // Unlock AGUN before the air swarm escalates
+  { names: ['AGUN'],         type_ids: [9] },               // One AA gun before naval transition
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard once the hold line is stable
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Second war factory after naval is online
   { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Third refinery — sustain DD + armor
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power as needed
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
 const SCG11EA_PRE_NAVAL_TANK_TARGET = 15;  // Big army for island defense before naval tech
 const SCG11EA_SUB_HUNT_TANK_FLOOR = 0;     // Once DDs are working, stop refilling tanks and spend on the fleet
+const SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR = 5; // Refill a few tanks only if the island hold starts collapsing
 const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Rebuild a real army after the river is open
 const SCG11EA_FLEET_ONLINE_SHIPS = 3;
 const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
-const SCG11EA_ASSAULT_MIN_ARMOR = 8;       // Keep a larger home guard while the fleet works
+const SCG11EA_ASSAULT_MIN_ARMOR = 12;      // Need 12+ tanks to break through Mammoths + Teslas
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
 const SCG11EA_AA_DEFENSE_TARGET = 2;
 const SCG11EA_GROUND_DEFENSE_TARGET = 2;
@@ -1136,6 +1136,7 @@ export class OracleStrategy {
       } else if (this.scenario === 'SCG11EA' && shipyardExists) {
         const powerDeficit = state.power.consumed - state.power.produced;
         const aaCount = alliedStructures.filter((s) => s.t === 'AGUN').length;
+        const domeCount = alliedStructures.filter((s) => s.t === 'DOME').length;
         const gunCount = alliedStructures.filter(
           (s) => s.t === 'GUN' || s.t === 'FTUR',
         ).length;
@@ -1155,6 +1156,19 @@ export class OracleStrategy {
             type_id: 12,
           });
           reasons.push('rebuild PROC');
+        } else if (
+          scg11eaSubHuntLive &&
+          weapCount === 0 &&
+          survivingTanks < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
+          scg11eaBaseThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
+          buildable.structures.includes('WEAP')
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 2,
+          });
+          reasons.push(`emergency rebuild WEAP (${survivingTanks} tanks, threats=${scg11eaBaseThreatCount})`);
         } else if (powerDeficit > 0 && buildable.structures.includes('APWR')) {
           commands.push({
             cmd: 'produce',
@@ -1169,6 +1183,18 @@ export class OracleStrategy {
             type_id: 17,
           });
           reasons.push('produce POWR (power deficit)');
+        } else if (
+          scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
+          domeCount === 0 &&
+          buildable.structures.includes('DOME') &&
+          state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 6,
+          });
+          reasons.push(`produce DOME for AA (air=${scg11eaEnemyAirCount})`);
         } else if (
           scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
           aaCount < SCG11EA_AA_DEFENSE_TARGET &&
@@ -1359,6 +1385,12 @@ export class OracleStrategy {
     const scg11eaFleetOnline =
       this.scenario === 'SCG11EA' &&
       navalCount >= SCG11EA_FLEET_ONLINE_SHIPS;
+    const scg11eaArmorEmergency =
+      this.scenario === 'SCG11EA' &&
+      scg11eaSubHuntPhase &&
+      tankCount < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
+      (scg11eaBaseThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
+        scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER);
     const scg11eaTankTarget =
       this.scenario === 'SCG11EA'
         ? (scg11eaSubHuntPhase
@@ -1368,7 +1400,7 @@ export class OracleStrategy {
           : SCG11EA_PRE_NAVAL_TANK_TARGET)
         : 0;
     const skipTankProduction = this.scenario === 'SCG11EA'
-      ? (scg11eaSubHuntPhase || tankCount >= scg11eaTankTarget)
+      ? (scg11eaSubHuntPhase ? !scg11eaArmorEmergency : tankCount >= scg11eaTankTarget)
       : false;
     if (hasWarFactory && !unitProduction && buildable && !skipTankProduction) {
       if (needHarvester && (harvCount === 0 || state.credits > 1200)) {
@@ -1385,7 +1417,9 @@ export class OracleStrategy {
       } else if (!needHarvester || state.credits > 600) {
         // Tank production — SCG11EA spends harder on armor until the fleet is ready.
         const tankCreditThreshold = this.scenario === 'SCG11EA'
-          ? (tankCount < scg11eaTankTarget ? 500 : 900)
+          ? (scg11eaSubHuntPhase
+            ? SCG11EA_DEFENSE_CREDIT_RESERVE
+            : tankCount < scg11eaTankTarget ? 500 : 900)
           : (tankCount < 3 ? 400 : 700);
         if (state.credits > tankCreditThreshold) {
           const tank = TANK_PREFERENCE.find((t) => buildable.units.includes(t));
@@ -2872,13 +2906,15 @@ export class OracleStrategy {
     // No home guard, no fleet prerequisite. The walkthrough says: build tanks,
     // smash their base, THEN go naval. Tanks prioritize tanks/buildings over infantry.
     if (landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
-      // Find nearby enemy units — tanks engage these first
+      // Structure target is the default — head for the Soviet base
+      const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
+      // Only divert for enemy vehicles VERY close (100 = 10 cells) and ON the assault path
       const nearbyEnemyUnits = state.enemies.filter(
         (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
-          !isInfantryByType(e.t) && // tanks focus vehicles/buildings, not infantry
-          landArmor.some((u) => this.distanceSq(u, e) <= 400),
+          !isInfantryByType(e.t) &&
+          landArmor.some((u) => this.distanceSq(u, e) <= 100),
       );
-      let assaultTarget: Point | null = null;
+      let assaultTarget: Point | null = structTarget;
       if (nearbyEnemyUnits.length > 0) {
         // Priority: tanks > V2RL > other vehicles
         nearbyEnemyUnits.sort((a, b) => {
@@ -2887,10 +2923,8 @@ export class OracleStrategy {
           return aP !== bP ? aP - bP : this.distanceSq(a, landArmor[0]) - this.distanceSq(b, landArmor[0]);
         });
         assaultTarget = { cx: nearbyEnemyUnits[0].cx, cy: nearbyEnemyUnits[0].cy };
-      } else {
-        // No nearby enemy units — target structures (defense → production → power)
-        assaultTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
       }
+      // If no nearby units, assaultTarget is already structTarget
       if (assaultTarget) {
         const retargetDue = (state.tick % 30) < 5;
         const movers = retargetDue ? landArmor : landArmor.filter(
