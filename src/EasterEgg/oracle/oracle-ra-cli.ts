@@ -377,6 +377,7 @@ async function runOracle(
 
   const finalState = await adapter.observe();
   await saveOracleSnapshot(adapter, artifactsDir, 'oracle-ra-final', finalState);
+
   console.log(`\nArtifacts: ${artifactsDir}`);
   console.log(`[Oracle] Result: ${result} | ${iteration} iterations, ${totalGameTicks} game ticks`);
 

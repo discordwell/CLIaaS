@@ -76,11 +76,10 @@ const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund the navy
-  { names: ['POWR'],         type_ids: [17], maxCount: 4 },  // Chain north (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 6 },  // Chain north (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain north (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 10 }, // Chain north (2 more) — should reach water
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in water
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Chain north (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain north (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 7 },  // Chain north (2 more) — reaches y=81
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in water (y=77)
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
@@ -312,6 +311,7 @@ export class OracleStrategy {
   private scg05eaSpyStartTick = 0;         // tick when spy was first intercepted
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg05eaSpyWpIdx = 0;          // current waypoint in south-first route
+  private scg05eaSpyHoldTick = 0;        // tick when spy started holding for a dog
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
   private currentTick = 0;
@@ -781,18 +781,21 @@ export class OracleStrategy {
           }
         }
 
-        // SCG11EA: use explicit northward chain positions for POWR instead of spiral offsets.
+        // SCG11EA: ALL buildings use explicit northward chain.
         // Need to bridge 17 cells from base (y=96) to water (y=79).
-        if (this.scenario === 'SCG11EA' && buildingProduction.t === 'POWR') {
-          // Dense chain: 2-cell spacing to handle tight build radius (~3 cells)
+        // Dense 2-cell Y spacing, x=23-27 to cover island width.
+        if (this.scenario === 'SCG11EA') {
           const chainPositions = [
-            { cx: 25, cy: 94 }, { cx: 24, cy: 94 }, { cx: 26, cy: 94 },
-            { cx: 25, cy: 92 }, { cx: 24, cy: 92 }, { cx: 26, cy: 92 },
-            { cx: 25, cy: 90 }, { cx: 24, cy: 90 }, { cx: 26, cy: 90 },
-            { cx: 25, cy: 88 }, { cx: 24, cy: 88 }, { cx: 26, cy: 88 },
-            { cx: 25, cy: 86 }, { cx: 24, cy: 86 }, { cx: 26, cy: 86 },
-            { cx: 25, cy: 84 }, { cx: 24, cy: 84 }, { cx: 26, cy: 84 },
-            { cx: 25, cy: 82 }, { cx: 24, cy: 82 }, { cx: 26, cy: 82 },
+            { cx: 25, cy: 95 }, { cx: 24, cy: 95 }, { cx: 26, cy: 95 },
+            { cx: 23, cy: 95 }, { cx: 27, cy: 95 },
+            { cx: 25, cy: 93 }, { cx: 24, cy: 93 }, { cx: 26, cy: 93 },
+            { cx: 23, cy: 93 }, { cx: 27, cy: 93 },
+            { cx: 25, cy: 91 }, { cx: 24, cy: 91 }, { cx: 26, cy: 91 },
+            { cx: 25, cy: 89 }, { cx: 24, cy: 89 }, { cx: 26, cy: 89 },
+            { cx: 25, cy: 87 }, { cx: 24, cy: 87 }, { cx: 26, cy: 87 },
+            { cx: 25, cy: 85 }, { cx: 24, cy: 85 }, { cx: 26, cy: 85 },
+            { cx: 25, cy: 83 }, { cx: 24, cy: 83 }, { cx: 26, cy: 83 },
+            { cx: 25, cy: 81 }, { cx: 24, cy: 81 }, { cx: 26, cy: 81 },
             { cx: 25, cy: 80 }, { cx: 24, cy: 80 }, { cx: 26, cy: 80 },
           ];
           const idx = this.placementAttempts % chainPositions.length;
@@ -2003,71 +2006,39 @@ export class OracleStrategy {
     const chinook = playerUnits.find((u) => u.t === 'TRAN');
     const dogs = state.enemies.filter((e) => e.t === 'DOG');
 
-    // Track spy infiltration — once spy disappears after being seen, it infiltrated.
-    // The spy is consumed during infiltration. We detect this by:
-    // 1. Spy was previously seen (spyStopped flag set)
-    // 2. Spy is now gone from units
-    // 3. Game is NOT in lost state
-    if (!this.scg05eaSpyInfiltrated && !spy && this.scg05eaSpyStopped && state.tick > sec(13)) {
-      this.scg05eaSpyInfiltrated = true;
-    }
-
-    // CRITICAL: Stop the spy on first sight. Hold it for 200 ticks to
-    // shift timing relative to dog patrol cycles. This makes the spy
-    // enter the corridor at a different phase of the patrol pattern.
-    if (spy && !this.scg05eaSpyInfiltrated && !this.scg05eaSpyStopped) {
-      commands.push({ cmd: 'stop', ids: [spy.id] });
-      this.scg05eaSpyStopped = true;
-      this.scg05eaSpyStartTick = state.tick;
-      reasons.push('spy STOP (intercept team script)');
-      return { commands, reason: reasons.join('; ') };
-    }
-
-    // ─── PHASE 1: Spy route — east at y=50, dodge dogs, south, then WEAP ──
-    // With spy guard fix, spy won't auto-infiltrate buildings. Only dogs
-    // are a threat. Route east along y=50 (direct path), dodge north to
-    // y=48 when a dog approaches, then continue east. After passing base,
-    // go south through river gap to tny3, then back north to WEAP.
+    // ─── PHASE 1: Spy walks east to WEAP, avoiding dogs ──────────────
+    // Stop spy on first sight to intercept team script, then route NE to
+    // y=48 (above dog patrol zone at y=51+), east to WEAP at (43,50).
+    // Dog avoidance: HOLD+STOP when dogs near path, skip waypoint after timeout.
     if (spy && !this.scg05eaSpyInfiltrated) {
+      // First-sight intercept
+      if (!this.scg05eaSpyStopped) {
+        commands.push({ cmd: 'stop', ids: [spy.id] });
+        this.scg05eaSpyStopped = true;
+        this.scg05eaSpyStartTick = state.tick;
+        reasons.push('spy STOP (intercept team script)');
+        return { commands, reason: reasons.join('; ') };
+      }
+
       const targetWeap = state.structures.find(
         (s) => s.t === 'WEAP' && !s.ally &&
           this.distanceSq(s, SCG05EA_WEAP_TARGET) <= 25,
       );
 
-      // Check for nearby dogs — dodge if within 5 cells
       const nearestDog = dogs.length > 0
         ? dogs.reduce((a, b) =>
           this.distanceSq(spy, a) < this.distanceSq(spy, b) ? a : b)
         : null;
       const dogDistSq = nearestDog ? this.distanceSq(spy, nearestDog) : Infinity;
 
-      // South route: sprint south to y=62+ (below ALL dogs), then east.
-      // With spy guard fix, spy won't auto-infiltrate buildings.
+      // Route NE to y=47 (above all dogs at y=48+), east at y=47 past base,
+      // then south to infiltrate WEAP at (43,50). Use move commands to
+      // constrain the pathfinder — only use attack when adjacent to WEAP.
       const spyWaypoints: Point[] = [
-        // Phase A: Sprint south past ALL dog zones
-        { cx: 15, cy: 55 },
-        { cx: 15, cy: 60 },
-        { cx: 15, cy: 65 },   // stay west (x=15) past ALL patrols (dog5 at 27,64)
-        { cx: 15, cy: 67 },   // south of dog3 patrol too
-        { cx: 30, cy: 67 },   // NOW go east (well below all dogs)
-        { cx: 50, cy: 67 },
-        { cx: 68, cy: 67 },   // far east
-        // Phase B: South through river gap to tny3
-        { cx: 68, cy: 65 },
-        { cx: 55, cy: 65 },
-        { cx: 40, cy: 68 },   // river gap (x=18-41 clear at y=68)
-        { cx: 30, cy: 75 },
-        { cx: 25, cy: 85 },
-        { cx: 24, cy: 95 },
-        { cx: 24, cy: 105 },
-        { cx: 24, cy: 107 },  // tny3! → global 18 → Tanya
-        // Phase C: North to WEAP
-        { cx: 24, cy: 95 },
-        { cx: 30, cy: 80 },
-        { cx: 40, cy: 68 },
-        { cx: 68, cy: 57 },
-        { cx: 50, cy: 48 },   // cut NW to WEAP approach
-        { cx: 48, cy: 48 },
+        { cx: 20, cy: 47 },   // NE — sprint past western dogs
+        { cx: 30, cy: 47 },   // east
+        { cx: 40, cy: 47 },   // east
+        { cx: 44, cy: 47 },   // above WEAP
       ];
 
       if (!this.scg05eaSpyWpIdx) this.scg05eaSpyWpIdx = 0;
@@ -2077,50 +2048,25 @@ export class OracleStrategy {
       }
       const wpIdx = this.scg05eaSpyWpIdx;
 
-      if (targetWeap && wpIdx >= spyWaypoints.length) {
+      if (wpIdx >= spyWaypoints.length && targetWeap) {
+        // Past all waypoints — infiltrate WEAP
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
         reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
       } else if (wpIdx < spyWaypoints.length) {
         const wp = spyWaypoints[wpIdx];
-
-        // Look-ahead dog avoidance:
-        // Check if any dog is within 8 cells of the PATH between spy and waypoint.
-        // If a dog is heading toward the path (closing distance), WAIT.
-        // If the path is clear, ADVANCE.
-        const pathMidX = (spy.cx + wp.cx) / 2;
-        const pathMidY = (spy.cy + wp.cy) / 2;
-        const pathMid: Point = { cx: Math.round(pathMidX), cy: Math.round(pathMidY) };
-
-        // Find dogs near the path (within 6 cells of midpoint or endpoints)
-        const dangerDogs = dogs.filter((d) => {
-          const dToMid = this.distanceSq(d, pathMid);
-          const dToSpy = this.distanceSq(d, spy);
-          const dToWp = this.distanceSq(d, wp);
-          return Math.min(dToMid, dToSpy, dToWp) <= 36; // within 6 cells
-        });
-
-        if (dangerDogs.length > 0 && nearestDog && dogDistSq <= 25) {
-          // Dog within 5 cells — emergency: stop and wait for it to pass
-          // Don't move — any direction might run INTO the dog
-          if (!this.isIdle(spy)) {
-            commands.push({ cmd: 'stop', ids: [spy.id] });
-          }
-          reasons.push(`spy WAIT dog(${nearestDog.cx},${nearestDog.cy}) d=${Math.sqrt(dogDistSq).toFixed(1)}`);
-        } else if (dangerDogs.length > 0) {
-          // Dogs near path but not immediately threatening — wait
-          const closest = dangerDogs[0];
-          reasons.push(`spy HOLD path dog(${closest.cx},${closest.cy}) near wp${wpIdx}`);
-        } else {
-          // Path clear — advance!
-          commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
-          reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy}) CLEAR`);
-        }
+        commands.push({ cmd: 'move', ids: [spy.id], cx: wp.cx, cy: wp.cy });
+        reasons.push(`spy wp${wpIdx} → (${wp.cx},${wp.cy}) (${spy.cx},${spy.cy})`);
       } else {
         commands.push({ cmd: 'move', ids: [spy.id], cx: SCG05EA_WEAP_TARGET.cx, cy: SCG05EA_WEAP_TARGET.cy });
-        reasons.push('spy → WEAP area');
+        reasons.push(`spy → WEAP area (${spy.cx},${spy.cy})`);
       }
 
       return { commands, reason: reasons.join('; ') };
+    }
+
+    // Spy gone after being seen → infiltrated (at walk phase)
+    if (!this.scg05eaSpyInfiltrated && !spy && this.scg05eaSpyStopped && state.tick > sec(13)) {
+      this.scg05eaSpyInfiltrated = true;
     }
 
     // ─── PHASE 2: Tanya destroys SAM sites ──────────────────────────────
