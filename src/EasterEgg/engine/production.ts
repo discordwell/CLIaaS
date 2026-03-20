@@ -275,11 +275,13 @@ export function spawnProducedUnit(ctx: ProductionContext, item: ProductionItem):
     entity.harvesterState = 'idle';
   }
 
-  // Auto-move to rally point if set
+  // C++ building.cpp:2038: rally-pointed units get MISSION_GUARD_AREA (patrol zone)
+  // not MISSION_MOVE (one-shot), so they return to rally area if displaced
   const rally = ctx.rallyPoints.get(factoryType);
   if (rally && unitType !== UnitType.V_HARV) {
-    entity.mission = Mission.MOVE;
+    entity.mission = Mission.AREA_GUARD;
     entity.moveTarget = { x: rally.x, y: rally.y };
+    entity.guardOrigin = { x: rally.x, y: rally.y };
     entity.path = findPath(ctx.map, entity.cell, worldToCell(rally.x, rally.y), true, entity.isNavalUnit, entity.stats.speedClass);
     entity.pathIndex = 0;
   }
