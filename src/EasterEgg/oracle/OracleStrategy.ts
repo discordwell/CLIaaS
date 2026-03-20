@@ -638,28 +638,60 @@ export class OracleStrategy {
         }
         reasons.push(`place ${buildingProduction.t} at coastal (${coastal.cx},${coastal.cy})`);
       } else {
-        // Place refineries away from known enemies to protect harvesters
-        let offsets = PLACEMENT_OFFSETS;
-        if (buildingProduction.t === 'PROC' && this.lastKnownEnemyCentroid) {
+        // Sort placement offsets by priority:
+        // 1. If shipyard is upcoming in build order, bias toward nearest water
+        //    (chains build radius toward coast for eventual shipyard placement)
+        // 2. Place refineries away from enemies
+        // 3. Default offset order
+        // For building placement, use the NEAREST allied structure to
+        // the water as the reference point (not just ConYard).
+        // This chains buildings toward the coast for shipyard placement.
+        const coastalCells2 = this.resolveCoastalCells(conYard);
+        let placeRef = { cx: conYard.cx, cy: conYard.cy };
+        if (coastalCells2 && coastalCells2.length > 0) {
+          // Find the allied structure closest to water
+          const waterTarget = coastalCells2[0];
+          let bestDist = Infinity;
+          for (const s of alliedStructures) {
+            const d = (s.cx - waterTarget.cx) ** 2 + (s.cy - waterTarget.cy) ** 2;
+            if (d < bestDist) {
+              bestDist = d;
+              placeRef = { cx: s.cx, cy: s.cy };
+            }
+          }
+        }
+
+        let offsets = [...PLACEMENT_OFFSETS];
+        if (coastalCells2 && coastalCells2.length > 0) {
+          // Sort offsets toward water from the reference building
+          const wt = coastalCells2[0];
+          offsets.sort((a, b) => {
+            const aDist = (placeRef.cx + a.cx - wt.cx) ** 2 + (placeRef.cy + a.cy - wt.cy) ** 2;
+            const bDist = (placeRef.cx + b.cx - wt.cx) ** 2 + (placeRef.cy + b.cy - wt.cy) ** 2;
+            return aDist - bDist;
+          });
+        } else if (buildingProduction.t === 'PROC' && this.lastKnownEnemyCentroid) {
           const ec = this.lastKnownEnemyCentroid;
-          offsets = [...PLACEMENT_OFFSETS].sort((a, b) => {
-            const aDist = (conYard.cx + a.cx - ec.cx) ** 2 + (conYard.cy + a.cy - ec.cy) ** 2;
-            const bDist = (conYard.cx + b.cx - ec.cx) ** 2 + (conYard.cy + b.cy - ec.cy) ** 2;
-            return bDist - aDist; // furthest from enemy first
+          offsets.sort((a, b) => {
+            const aDist = (placeRef.cx + a.cx - ec.cx) ** 2 + (placeRef.cy + a.cy - ec.cy) ** 2;
+            const bDist = (placeRef.cx + b.cx - ec.cx) ** 2 + (placeRef.cy + b.cy - ec.cy) ** 2;
+            return bDist - aDist;
           });
         }
+
         let placeCx: number, placeCy: number;
         if (this.placementAttempts < offsets.length) {
-          // First pass: try predefined offsets
           const offset = offsets[this.placementAttempts % offsets.length];
-          placeCx = conYard.cx + offset.cx;
-          placeCy = conYard.cy + offset.cy;
+          placeCx = placeRef.cx + offset.cx;
+          placeCy = placeRef.cy + offset.cy;
         } else {
-          // Exhausted offsets — try random positions in wider radius
-          const angle = (this.placementAttempts * 137.5) * Math.PI / 180; // golden angle
+          // Exhausted offsets — extend toward water
+          const wt = coastalCells2?.[0] ?? { cx: placeRef.cx, cy: placeRef.cy - 10 };
+          const angle = Math.atan2(wt.cy - placeRef.cy, wt.cx - placeRef.cx)
+            + ((this.placementAttempts % 5) - 2) * 0.3;
           const dist = 8 + (this.placementAttempts % 10);
-          placeCx = Math.round(conYard.cx + Math.cos(angle) * dist);
-          placeCy = Math.round(conYard.cy + Math.sin(angle) * dist);
+          placeCx = Math.round(placeRef.cx + Math.cos(angle) * dist);
+          placeCy = Math.round(placeRef.cy + Math.sin(angle) * dist);
         }
         commands.push({
           cmd: 'place',
