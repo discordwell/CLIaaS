@@ -72,13 +72,16 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 // Starting army (3 medium + 2 light tanks, 2 artillery) is sufficient for defense.
 // Water is 17 cells north (y=79) of base (y=96). Need heavy POWR chain to extend
 // build radius northward — buildings scatter, so we need 8+ to statistically bridge the gap.
+// East chain: base at x=20, real water at x=63. Need ~8 POWRs to bridge 43 cells.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // Power for base
   { names: ['PROC'],         type_ids: [12] },              // First refinery — economy
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery — fund the navy
-  { names: ['POWR'],         type_ids: [17], maxCount: 3 },  // Chain north (2 more)
-  { names: ['POWR'],         type_ids: [17], maxCount: 5 },  // Chain north — reaches y=81 (shore)
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in water (y≤79)
+  { names: ['POWR'],         type_ids: [17], maxCount: 4 },  // Chain east (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 6 },  // Chain east (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 8 },  // Chain east (2 more)
+  { names: ['POWR'],         type_ids: [17], maxCount: 10 }, // Chain east — should reach x=60
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Shipyard in real water (x=63+)
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },  // Third refinery — sustain DD production
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
@@ -311,6 +314,7 @@ export class OracleStrategy {
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg05eaSpyWpIdx = 0;          // current waypoint in south-first route
   private scg05eaSpyHoldTick = 0;        // tick when spy started holding for a dog
+  private scg05eaSpyLastDst: { cx: number; cy: number } | undefined;
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
   private currentTick = 0;
@@ -437,10 +441,10 @@ export class OracleStrategy {
   private static readonly COASTAL_CELLS: Record<string, Point[]> = {
     'SCG07EA': [{ cx: 52, cy: 50 }, { cx: 50, cy: 48 }, { cx: 54, cy: 52 }],
     'SCG11EA': [
-      // North shore at y=80 (land cells). Used for building chain bias.
-      // SYRD water candidates are generated with -3 offset into water.
-      { cx: 25, cy: 80 }, { cx: 24, cy: 80 }, { cx: 26, cy: 80 },
-      { cx: 23, cy: 80 }, { cx: 27, cy: 80 }, { cx: 22, cy: 80 },
+      // East coast — real water (template 1-2) starts at x=63.
+      // Chain buildings east to reach it. SYRD valid at (63,85)-(63,93).
+      { cx: 60, cy: 88 }, { cx: 60, cy: 86 }, { cx: 60, cy: 90 },
+      { cx: 58, cy: 88 }, { cx: 62, cy: 88 }, { cx: 60, cy: 85 },
     ],
     'SCG11EB': [
       { cx: 22, cy: 85 }, { cx: 24, cy: 84 }, { cx: 20, cy: 86 },
@@ -668,14 +672,16 @@ export class OracleStrategy {
         // Build placement candidates: hardcoded coastal cells first (most reliable),
         // then vessel-based scan as fallback.
         const candidates: Array<{ cx: number; cy: number }> = [];
-        // Priority 0: SCG11EA-specific water cells for SYRD (3x3 all-water zones).
-        // SYRD goes entirely in water. These are the closest valid spots to base.
+        // Priority 0: SCG11EA-specific real-water cells for SYRD.
+        // SYRD needs ALL foundation cells on real water templates (1-2).
+        // TEMPLATE_NONE (0xFFFF/ice) is LAND_CLEAR in C++ — Float=0%.
+        // Real water starts at x=63. Valid SYRD spots: (63,85)-(63,96).
         if (this.scenario === 'SCG11EA') {
           const waterSpots = [
-            { cx: 25, cy: 77 }, { cx: 24, cy: 77 }, { cx: 26, cy: 77 },
-            { cx: 23, cy: 77 }, { cx: 22, cy: 77 }, { cx: 30, cy: 79 },
-            { cx: 25, cy: 76 }, { cx: 24, cy: 76 }, { cx: 26, cy: 76 },
-            { cx: 23, cy: 76 }, { cx: 21, cy: 77 }, { cx: 27, cy: 77 },
+            { cx: 63, cy: 85 }, { cx: 63, cy: 86 }, { cx: 63, cy: 84 },
+            { cx: 63, cy: 87 }, { cx: 63, cy: 88 }, { cx: 63, cy: 83 },
+            { cx: 63, cy: 93 }, { cx: 63, cy: 94 }, { cx: 63, cy: 95 },
+            { cx: 62, cy: 97 }, { cx: 62, cy: 98 }, { cx: 62, cy: 80 },
           ];
           candidates.push(...waterSpots);
         }
@@ -784,18 +790,23 @@ export class OracleStrategy {
         // Need to bridge 17 cells from base (y=96) to water (y=79).
         // Dense 2-cell Y spacing, x=23-27 to cover island width.
         if (this.scenario === 'SCG11EA') {
+          // Eastward chain: base at ~x=20, real water at x=63.
+          // Build radius ~5 cells from structure edge. POWR is 2x2.
+          // Effective reach per step: 2 (width) + 5 (radius) = 7 cells.
+          // Space chain at 5-cell intervals for reliability.
           const chainPositions = [
-            { cx: 25, cy: 95 }, { cx: 24, cy: 95 }, { cx: 26, cy: 95 },
-            { cx: 23, cy: 95 }, { cx: 27, cy: 95 },
-            { cx: 25, cy: 93 }, { cx: 24, cy: 93 }, { cx: 26, cy: 93 },
-            { cx: 23, cy: 93 }, { cx: 27, cy: 93 },
-            { cx: 25, cy: 91 }, { cx: 24, cy: 91 }, { cx: 26, cy: 91 },
-            { cx: 25, cy: 89 }, { cx: 24, cy: 89 }, { cx: 26, cy: 89 },
-            { cx: 25, cy: 87 }, { cx: 24, cy: 87 }, { cx: 26, cy: 87 },
-            { cx: 25, cy: 85 }, { cx: 24, cy: 85 }, { cx: 26, cy: 85 },
-            { cx: 25, cy: 83 }, { cx: 24, cy: 83 }, { cx: 26, cy: 83 },
-            { cx: 25, cy: 81 }, { cx: 24, cy: 81 }, { cx: 26, cy: 81 },
-            { cx: 25, cy: 80 }, { cx: 24, cy: 80 }, { cx: 26, cy: 80 },
+            // Near base
+            { cx: 25, cy: 88 }, { cx: 25, cy: 86 }, { cx: 25, cy: 90 },
+            // East in 5-cell steps
+            { cx: 29, cy: 88 }, { cx: 29, cy: 86 }, { cx: 29, cy: 90 },
+            { cx: 33, cy: 88 }, { cx: 33, cy: 86 }, { cx: 33, cy: 90 },
+            { cx: 37, cy: 88 }, { cx: 37, cy: 86 }, { cx: 37, cy: 90 },
+            { cx: 41, cy: 88 }, { cx: 41, cy: 86 }, { cx: 41, cy: 90 },
+            { cx: 45, cy: 88 }, { cx: 45, cy: 86 }, { cx: 45, cy: 90 },
+            { cx: 49, cy: 88 }, { cx: 49, cy: 86 }, { cx: 49, cy: 90 },
+            { cx: 53, cy: 88 }, { cx: 53, cy: 86 }, { cx: 53, cy: 90 },
+            { cx: 57, cy: 88 }, { cx: 57, cy: 86 }, { cx: 57, cy: 90 },
+            { cx: 60, cy: 88 }, { cx: 60, cy: 86 }, { cx: 60, cy: 90 },
           ];
           const idx = this.placementAttempts % chainPositions.length;
           const pos = chainPositions[idx];
@@ -2036,40 +2047,39 @@ export class OracleStrategy {
       // Phase 1: Wait west of x=20 until patrol dogs go south.
       // Phase 2: Sprint east through the gap at y=49.
       // Phase 3: At x=35+, attack WEAP (8-cell direct infiltration in harness).
-      const patrolDogs = dogs.filter((d) =>
-        d.cx >= 20 && d.cx <= 30 && d.cy >= 48 && d.cy <= 65,
+      // Track patrol dogs in the DANGER corridor (y=48-53, x=20-30).
+      // Static dogs at (24,54)/(23,55) are south of corridor — ignore them.
+      const corridorDogs = dogs.filter((d) =>
+        d.cx >= 20 && d.cx <= 30 && d.cy >= 48 && d.cy <= 53,
       );
-      const patrolSouthMost = patrolDogs.length > 0
-        ? Math.max(...patrolDogs.map((d) => d.cy))
-        : 99;
-      const gapOpen = patrolSouthMost >= 55; // patrol dogs far south
+      const gapOpen = corridorDogs.length === 0; // no dogs in corridor
 
-      if (targetWeap && spy.cx >= 35) {
-        // Close enough — infiltrate WEAP (8-cell range in harness)
-        commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
-        reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
-      } else if (gapOpen || spy.cx >= 26) {
-        // Gap is open OR we're already past the patrol column — SPRINT east!
-        commands.push({ cmd: 'move', ids: [spy.id], cx: 43, cy: 50 });
-        reasons.push(`spy SPRINT east (${spy.cx},${spy.cy}) patrol@y=${patrolSouthMost}`);
-      } else if (nearestDog && dogDistSq <= 12) {
-        // Dog within 3.5 cells — micro-dodge east
-        const dy = spy.cy - nearestDog.cy;
-        const evadeX = spy.cx + 2;
-        let evadeY = spy.cy + (dy >= 0 ? 1 : -1);
-        evadeY = Math.max(49, Math.min(51, evadeY));
-        commands.push({ cmd: 'move', ids: [spy.id], cx: evadeX, cy: evadeY });
-        reasons.push(`spy DODGE dog(${nearestDog.cx},${nearestDog.cy}) d=${Math.sqrt(dogDistSq).toFixed(1)} → (${evadeX},${evadeY})`);
-      } else if (spy.cx < 20) {
-        // Move east to staging position x=19
-        commands.push({ cmd: 'move', ids: [spy.id], cx: 19, cy: 50 });
-        reasons.push(`spy → staging (${spy.cx},${spy.cy}) patrol@y=${patrolSouthMost}`);
-      } else {
-        // At staging (x=19-25), wait for gap to open
-        if (!this.isIdle(spy)) {
-          commands.push({ cmd: 'stop', ids: [spy.id] });
+      // Track last move destination to avoid re-sending the same command
+      // (resending resets the path and causes stutter-stepping)
+      const lastDst = this.scg05eaSpyLastDst;
+      const sendMove = (cx: number, cy: number, reason: string) => {
+        if (!lastDst || lastDst.cx !== cx || lastDst.cy !== cy) {
+          commands.push({ cmd: 'move', ids: [spy.id], cx, cy });
+          this.scg05eaSpyLastDst = { cx, cy };
         }
-        reasons.push(`spy WAIT gap (${spy.cx},${spy.cy}) patrol@y=${patrolSouthMost}`);
+        reasons.push(reason);
+      };
+
+      if (targetWeap && spy.cx >= 23) {
+        // Within 20 cells of WEAP — infiltrate (harness direct spyInfiltrate)
+        commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
+        this.scg05eaSpyLastDst = undefined;
+        reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+      } else if (gapOpen) {
+        // Gap is open — SPRINT east, no dodge, no stops (send once)
+        sendMove(43, 50, `spy SPRINT east (${spy.cx},${spy.cy}) gap=OPEN`);
+      } else if (spy.cx < 20) {
+        // Move to staging x=19, wait for gap
+        sendMove(19, 50, `spy → staging (${spy.cx},${spy.cy}) corridor=${corridorDogs.length}dogs`);
+      } else {
+        // At x=20+, corridor blocked. Keep sprinting — don't stop.
+        // Stopping means the gap will close before we cross. Sprint and hope.
+        sendMove(43, 50, `spy SPRINT east (${spy.cx},${spy.cy}) corridor=${corridorDogs.length}dogs YOLO`);
       }
 
       return { commands, reason: reasons.join('; ') };
@@ -2245,10 +2255,10 @@ export class OracleStrategy {
         commands.push({
           cmd: 'move',
           ids: [this.waterScoutId],
-          cx: 25, cy: 80,  // shore — tank sight=5 reveals y=75-85
+          cx: 63, cy: 88,  // east coast — real water starts at x=63
         });
-        this.recordMove(this.waterScoutId, 25, 80);
-        reasons.push(`scout north (${scouts[0].t}) to reveal water`);
+        this.recordMove(this.waterScoutId, 63, 88);
+        reasons.push(`scout east (${scouts[0].t}) to reveal water`);
       }
     }
 
