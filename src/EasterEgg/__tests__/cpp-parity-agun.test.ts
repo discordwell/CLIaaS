@@ -7,7 +7,7 @@
  * AGUN key stats (rules.ini / building.cpp):
  *   HP 400, Size 1x1, Cost 600, Allied faction
  *   Weapon: AP warhead, 25 damage, range 6, ROF 10 (rapid fire), isAntiAir=true
- *   Power-dependent: listed in STRUCTURE_POWERED (disabled during power deficit)
+ *   NOT power-dependent: fires regardless of power state (C++ bdata.cpp:2836 IsPowered=false)
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -122,8 +122,8 @@ describe('AGUN structure stats (rules.ini)', () => {
     expect(STRUCTURE_SIZE['AGUN']).toEqual([1, 1]);
   });
 
-  it('is in STRUCTURE_POWERED set (power-dependent)', () => {
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
+  it('is NOT in STRUCTURE_POWERED set (fires regardless of power)', () => {
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
   });
 });
 
@@ -243,9 +243,10 @@ describe('AGUN range enforcement (range=6 cells)', () => {
   });
 });
 
-// ── Power Dependency (building.cpp PW1/PW3) ─────────────────────────────────
+// ── Power Independence (C++ bdata.cpp:2836 IsPowered=false) ─────────────────
+// AGUN is NOT power-dependent. It fires regardless of power state.
 
-describe('AGUN power dependency (building.cpp PW1/PW3)', () => {
+describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () => {
   it('fires when power is sufficient (produced >= consumed)', () => {
     const agun = makeAGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
@@ -257,7 +258,7 @@ describe('AGUN power dependency (building.cpp PW1/PW3)', () => {
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
-  it('does NOT fire during power deficit (consumed > produced > 0)', () => {
+  it('fires even during power deficit (AGUN is unpowered)', () => {
     const agun = makeAGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [enemy], {
@@ -265,10 +266,10 @@ describe('AGUN power dependency (building.cpp PW1/PW3)', () => {
       powerConsumed: 100,
     });
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(enemy.maxHp);
+    expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
-  it('does NOT fire AA during power deficit', () => {
+  it('fires AA even during power deficit (AGUN is unpowered)', () => {
     const agun = makeAGUN(10, 10);
     const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [heli], {
@@ -276,13 +277,12 @@ describe('AGUN power dependency (building.cpp PW1/PW3)', () => {
       powerConsumed: 100,
     });
     updateStructureCombat(ctx);
-    expect(heli.hp).toBe(heli.maxHp);
+    expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
-  it('fires normally when powerProduced=0 (no power buildings — not a deficit)', () => {
+  it('fires normally when powerProduced=0 (no power buildings)', () => {
     const agun = makeAGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    // powerProduced=0 means isLowPower=false (the check is consumed > produced && produced > 0)
     const ctx = makeCombatCtx([agun], [enemy], {
       powerProduced: 0,
       powerConsumed: 0,

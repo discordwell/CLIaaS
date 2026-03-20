@@ -1423,7 +1423,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     expect(unit.mission).toBe(Mission.GUARD);
   });
 
-  it('spawnProducedUnit auto-moves to rally point if set', () => {
+  it('spawnProducedUnit assigns AREA_GUARD to rally point (C++ building.cpp:2038)', () => {
     const e1 = findItem('E1'); // prerequisite=TENT
     const rallyPoints = new Map<string, WorldPos>();
     rallyPoints.set('TENT', { x: 500, y: 500 });
@@ -1438,7 +1438,8 @@ describe('Behavioral verification — production.ts exported functions', () => {
     spawnProducedUnit(ctx, e1);
     expect(ctx.entities.length).toBe(1);
     const unit = ctx.entities[0];
-    expect(unit.mission).toBe(Mission.MOVE);
+    // C++ uses MISSION_GUARD_AREA (not MISSION_MOVE) so units patrol rally zone
+    expect(unit.mission).toBe(Mission.AREA_GUARD);
     expect(unit.moveTarget).toBeDefined();
     expect(unit.moveTarget!.x).toBe(500);
     expect(unit.moveTarget!.y).toBe(500);

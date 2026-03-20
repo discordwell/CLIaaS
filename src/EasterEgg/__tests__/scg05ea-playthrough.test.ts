@@ -47,6 +47,7 @@ describe('SCG05EA live playthrough', () => {
           `units=${lastState.units.length} enemies=${lastState.structures.filter(s => !s.ally).length}s ` +
           `spy=${spy ? `(${spy.cx},${spy.cy})` : 'none'} ` +
           `tanya=${tanya ? `(${tanya.cx},${tanya.cy})` : 'none'} ` +
+          `lst=${lastState.units.find((u: {t:string}) => u.t === 'LST') ? `(${lastState.units.find((u: {t:string}) => u.t === 'LST')!.cx},${lastState.units.find((u: {t:string}) => u.t === 'LST')!.cy})` : ''} ` +
           `dogs=${dogs.length}` +
           (spy ? ` near=[${dogs.filter((d: { cx: number; cy: number }) => {
             const dx = d.cx - spy.cx, dy = d.cy - spy.cy;
@@ -65,9 +66,30 @@ describe('SCG05EA live playthrough', () => {
         console.log(`  CMD: ${JSON.stringify(decision.commands)}`);
       }
       const stepResult = await adapter.step(STEP_TICKS, decision.commands);
-      // After step, check if globals changed (indicates trigger fired)
-      if (hasAttack && stepResult.state.globals.length > 1) {
-        console.log(`  GLOBALS CHANGED: [${stepResult.state.globals.join(',')}]`);
+      // After infiltrate command, dump browser console and enable trigger debug
+      if (hasAttack) {
+        const logs = adapter.getLogs();
+        const harnessLogs = logs.filter(l => l.includes('HARNESS') || l.includes('SPY') || l.includes('infiltrat'));
+        if (harnessLogs.length > 0) {
+          for (const l of harnessLogs) console.log(`  BROWSER: ${l}`);
+          // Dump trigger 42 and nearby triggers to verify indexing
+          const allTrigs = (stepResult.state as unknown as { triggers?: Array<{ name: string; fired: boolean }> }).triggers ?? [];
+          console.log(`  Total triggers: ${allTrigs.length}`);
+          if (allTrigs.length > 42) {
+            console.log(`  Trigger[42]: ${JSON.stringify(allTrigs[42])}`);
+            console.log(`  Trigger[41]: ${JSON.stringify(allTrigs[41])}`);
+            console.log(`  Trigger[43]: ${JSON.stringify(allTrigs[43])}`);
+          }
+          // Also find spy2 by name
+          const spy2ByName = allTrigs.findIndex(t => t.name === 'spy2');
+          console.log(`  spy2 index by name: ${spy2ByName}`);
+          // Check SPYS action1 trigger field
+          const spysTrig = allTrigs.find(t => t.name === 'SPYS') as { a1: number; a1d: number } | undefined;
+          console.log(`  SPYS.a1=${spysTrig?.a1} (force-fires trigger idx: from INI field)`);
+        }
+        if (stepResult.state.globals.length > 1) {
+          console.log(`  GLOBALS CHANGED: [${stepResult.state.globals.join(',')}]`);
+        }
       }
       lastState = stepResult.state;
 

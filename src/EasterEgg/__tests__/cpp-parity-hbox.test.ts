@@ -300,9 +300,10 @@ describe('HBOX fires during power outage (PW2: not in STRUCTURE_POWERED)', () =>
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
-  it('contrast: GUN (powered) does NOT fire during power deficit', () => {
-    // Verify STRUCTURE_POWERED contains GUN as a control test
-    expect(STRUCTURE_POWERED.has('GUN')).toBe(true);
+  it('contrast: GUN (also unpowered) fires during power deficit too', () => {
+    // Neither GUN nor HBOX are in STRUCTURE_POWERED — both fire during deficit
+    // C++ bdata.cpp:2836 — GUN has IsPowered=false (default)
+    expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
     expect(STRUCTURE_POWERED.has('HBOX')).toBe(false);
   });
 });

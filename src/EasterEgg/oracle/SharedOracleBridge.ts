@@ -243,6 +243,11 @@ export function translateOracleDecisionToTs(
       continue;
     }
 
+    if (kind === 'set_global' && typeof (command as { data?: number }).data === 'number') {
+      commands.push({ cmd: 'set_global', data: (command as { data: number }).data } as never);
+      continue;
+    }
+
     if (kind === 'enter' && typeof command.target === 'number' && ids.length === 1) {
       commands.push({ cmd: 'enter', unitId: ids[0], transportId: command.target });
       continue;

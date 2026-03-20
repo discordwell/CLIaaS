@@ -4959,7 +4959,9 @@ export class Game {
   private checkCellTriggers(): void {
     if (this.map.cellTriggers.size === 0) return;
     for (const entity of this.entities) {
-      if (!entity.alive || !entity.isPlayerUnit) continue;
+      if (!entity.alive) continue;
+      // C++ parity: foot.cpp:1409-1412 — ALL non-cloaked units trigger cell triggers,
+      // not just player units. Enemy units trigger brrl (barrel explosions), etc.
       const cellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
       const trigName = this.map.cellTriggers.get(cellIdx);
       if (!trigName) continue;

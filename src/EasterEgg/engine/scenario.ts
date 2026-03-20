@@ -1676,7 +1676,7 @@ export function applyScenarioOverrides(
 //   [uint16_le compressed_size][uint16_le decompressed_size][format80 LCW data]
 //   repeated until dest is filled or input exhausted.
 
-function decompressRASections(bytes: Uint8Array, start: number, dest: Uint8Array, destSize: number): number {
+export function decompressRASections(bytes: Uint8Array, start: number, dest: Uint8Array, destSize: number): number {
   let sp = start;
   let dp = 0;
   while (dp < destSize && sp + 4 <= bytes.length) {

@@ -161,22 +161,15 @@ describe('1. Turreted building identification (C++ bdata.cpp)', () => {
     expect(CPP_TURRETED_BUILDINGS).toEqual(['GUN', 'SAM', 'AGUN']);
   });
 
-  // PARITY GAP: TS TURRETED_STRUCTURES only includes GUN and SAM, missing AGUN
-  // combat.ts:30 — const TURRETED_STRUCTURES = new Set(['GUN', 'SAM']);
+  // combat.ts:32 — const TURRETED_STRUCTURES = new Set(['GUN', 'SAM', 'AGUN']);
   // C++ bdata.cpp:621 — ClassAAGun has IsTurretEquipped=true
-  it('TS TURRETED_STRUCTURES should include AGUN (C++ bdata.cpp:621)', () => {
-    // We can't directly import the private const, but we can verify AGUN has a turretDir
-    // in the renderer (renderer.ts:1411-1415 does render AGUN turret).
-    // The gap is that combat.ts rotation logic skips AGUN.
-    // This test documents the expected behavior — AGUN should be turreted.
-
+  it('TS TURRETED_STRUCTURES includes AGUN (C++ bdata.cpp:621)', () => {
     // AGUN has a weapon defined (can fire)
     expect(STRUCTURE_WEAPONS['AGUN']).toBeDefined();
-    // AGUN is powered (affected by power like GUN/SAM)
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
-    // In C++, AGUN has IsTurretEquipped=true, so it should be in the turreted set.
-    // TS combat.ts:30 only has ['GUN', 'SAM'] — this is a PARITY GAP.
-    // We expect this test to PASS (documenting the C++ truth) while the TS is incorrect.
+    // AGUN is NOT powered (C++ bdata.cpp:2836 IsPowered=false default)
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+    // In C++, AGUN has IsTurretEquipped=true — now included in TS TURRETED_STRUCTURES.
+    expect(CPP_TURRETED_BUILDINGS).toContain('AGUN');
   });
 });
 
@@ -407,38 +400,32 @@ describe('4. PARITY GAP: rotation resolution and speed', () => {
 // 5. Power-down blocks turret rotation (C++ building.cpp:5349-5352)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('5. Power-down blocks turret rotation', () => {
+describe('5. Power-down blocks turret rotation for powered structures only', () => {
   // C++ Rotation_AI checks: (!Class->IsPowered || House->Power_Fraction() >= 1)
-  // If building is powered (GUN/SAM/AGUN all are) AND power < 100%,
-  // turret rotation is completely suppressed.
+  // Only buildings with IsPowered=true have rotation blocked during low power.
+  // GUN and AGUN have IsPowered=false (bdata.cpp:2836 default), so they always rotate.
+  // SAM has IsPowered=true, so its rotation IS blocked during low power.
 
-  it('GUN is a powered structure (C++ bdata.cpp IsPowered)', () => {
-    expect(STRUCTURE_POWERED.has('GUN')).toBe(true);
+  it('GUN is NOT a powered structure (C++ bdata.cpp:2836 IsPowered=false)', () => {
+    expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
   });
 
   it('SAM is a powered structure', () => {
     expect(STRUCTURE_POWERED.has('SAM')).toBe(true);
   });
 
-  it('AGUN is a powered structure', () => {
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
+  it('AGUN is NOT a powered structure (C++ bdata.cpp:2836 IsPowered=false)', () => {
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
   });
 
-  // PARITY GAP: In C++, Rotation_AI independently blocks turret rotation during low power.
-  // In TS, the entire defense tick is skipped for powered structures during low power
-  // (combat.ts:1171-1172). This means the turret rotation code at lines 1179-1187
-  // is never reached for GUN/SAM during low power — effectively matching the C++ behavior
-  // that turrets don't rotate when unpowered. However, the mechanism is different:
-  //   C++: Rotation_AI blocks rotation; firing is separately blocked in Can_Fire
-  //   TS:  Entire defense loop iteration is skipped, blocking both rotation AND targeting
-  // The observable result is the same (turret frozen), but C++ would still allow the
-  // building to enter the targeting/threat-scan code path even during low power.
-  it('TS blocks entire defense tick during low power (includes turret rotation)', () => {
-    // This is mechanically different from C++ but functionally equivalent for rotation.
-    // C++ would allow threat scanning (Greatest_Threat) even during power down,
-    // but Can_Fire would return FIRE_BUSY and the turret wouldn't rotate.
-    // TS skips everything — acceptable approximation.
-    expect(true).toBe(true); // Documents the mechanism difference
+  // For powered structures (SAM), TS blocks the entire defense tick during low power
+  // (combat.ts:1171-1172). This means turret rotation is never reached for SAM during
+  // low power — effectively matching C++ Rotation_AI behavior.
+  // GUN and AGUN are NOT powered, so they continue to rotate and fire during low power.
+  it('TS blocks entire defense tick during low power for powered structures only', () => {
+    // SAM: powered, rotation blocked during low power (matches C++)
+    // GUN/AGUN: not powered, rotation continues during low power (matches C++)
+    expect(true).toBe(true); // Documents the mechanism
   });
 });
 
@@ -536,13 +523,10 @@ describe('7. Construction/deconstruction blocks rotation', () => {
 // 8. PARITY GAP: AGUN turret rotation missing in TS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('8. PARITY GAP: AGUN missing from TURRETED_STRUCTURES', () => {
+describe('8. AGUN included in TURRETED_STRUCTURES (resolved parity gap)', () => {
   // C++ bdata.cpp:621 — ClassAAGun has IsTurretEquipped=true
-  // TS combat.ts:30 — TURRETED_STRUCTURES = new Set(['GUN', 'SAM'])
-  // AGUN is missing, meaning:
-  //   1. AGUN turret facing is never set from target direction
-  //   2. AGUN turret never rotates toward targets
-  //   3. AGUN always fires from its initial facing
+  // TS combat.ts:32 — TURRETED_STRUCTURES = new Set(['GUN', 'SAM', 'AGUN'])
+  // AGUN is now included, matching C++ behavior.
 
   it('AGUN has a weapon defined', () => {
     expect(STRUCTURE_WEAPONS['AGUN']).toBeDefined();
@@ -551,23 +535,15 @@ describe('8. PARITY GAP: AGUN missing from TURRETED_STRUCTURES', () => {
   });
 
   it('AGUN has renderer turret support (renderer.ts:1411-1415)', () => {
-    // renderer.ts renders AGUN with turretDir — so the visual system supports it.
-    // The gap is only in the game logic (combat.ts doesn't rotate it).
+    // renderer.ts renders AGUN with turretDir — visual system supports it.
+    // combat.ts now also rotates it, matching C++ Rotation_AI.
     expect(true).toBe(true); // Verified by code inspection
   });
 
-  // PARITY GAP: This test documents that AGUN should rotate its turret
-  // toward targets, just like GUN and SAM do in C++.
-  it('AGUN should be in TURRETED_STRUCTURES for C++ parity', () => {
+  it('AGUN is in TURRETED_STRUCTURES for C++ parity', () => {
     // C++ building.cpp Rotation_AI applies to ALL buildings with IsTurretEquipped=true.
     // AGUN (STRUCT_AAGUN) has IsTurretEquipped=true in bdata.cpp:621.
-    // Therefore AGUN turret should rotate to face targets.
-    //
-    // Current TS behavior: AGUN turretDir is never updated by combat logic,
-    // meaning it stays at its initial value and never tracks targets.
-    // The renderer draws the turret at whatever turretDir is set to.
-    //
-    // To fix: add 'AGUN' to TURRETED_STRUCTURES in combat.ts
+    // TS combat.ts:32 now includes AGUN in TURRETED_STRUCTURES.
     expect(CPP_TURRETED_BUILDINGS).toContain('AGUN');
   });
 });

@@ -540,6 +540,18 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           break;
         }
 
+        case 'set_global': {
+          // Debug/harness command: directly set a global (simulates cell trigger activation)
+          const globals = (game as unknown as { globals: Set<number> }).globals;
+          if (globals && typeof c.data === 'number') {
+            globals.add(c.data);
+            results.push({ cmd: 'set_global', ok: true });
+          } else {
+            results.push({ cmd: 'set_global', ok: false, error: 'invalid global data' });
+          }
+          break;
+        }
+
         default:
           results.push({ cmd: (c as { cmd: string }).cmd, ok: false, error: 'unknown command' });
       }

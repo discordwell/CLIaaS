@@ -1223,8 +1223,8 @@ export function updateStructureCombat(ctx: CombatContext): void {
   const isLowPower = ctx.powerConsumed > ctx.powerProduced;
   for (const s of ctx.structures) {
     if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) continue;
-    // C++ parity PW1/PW3: powered defenses (TSLA, GUN, SAM, AGUN) cannot fire during any power deficit.
-    // Unpowered defenses (PBOX, HBOX, FTUR) always fire regardless of power.
+    // C++ parity PW1/PW3: powered defenses (TSLA, SAM, GAP, PDOX, IRON, MSLO) cannot fire during any power deficit.
+    // Unpowered defenses (GUN, AGUN, PBOX, HBOX, FTUR) always fire regardless of power.
     if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
       continue;
     }

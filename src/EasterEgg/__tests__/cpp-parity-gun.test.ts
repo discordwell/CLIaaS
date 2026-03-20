@@ -8,7 +8,7 @@
  *   HP 400, 1x1, cost 600, Allied faction
  *   Weapon: TurretGun — AP warhead, 40 damage, range 6, ROF 50, splash 0.5
  *   TURRETED: turretDir rotates toward target (building.cpp)
- *   POWER-DEPENDENT: does NOT fire during power outage (PW1/PW3)
+ *   NOT power-dependent: fires regardless of power state (C++ bdata.cpp:2836 IsPowered=false)
  *   NO anti-air capability
  */
 
@@ -132,8 +132,8 @@ describe('GUN structure stats (RULES.INI)', () => {
     expect(w.splash).toBe(0.5);
   });
 
-  it('is in STRUCTURE_POWERED (requires power to fire)', () => {
-    expect(STRUCTURE_POWERED.has('GUN')).toBe(true);
+  it('is NOT in STRUCTURE_POWERED (fires regardless of power state)', () => {
+    expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
   });
 
   it('has no anti-air capability', () => {
@@ -142,9 +142,10 @@ describe('GUN structure stats (RULES.INI)', () => {
   });
 });
 
-// -- Power Dependency (building.cpp PW1/PW3) -----------------------------------
+// -- Power Independence (C++ bdata.cpp:2836 IsPowered=false) --------------------
+// GUN is NOT power-dependent. It fires regardless of power state.
 
-describe('GUN power dependency (building.cpp PW1/PW3)', () => {
+describe('GUN fires regardless of power state (not in STRUCTURE_POWERED)', () => {
 
   it('fires at enemy when power is sufficient', () => {
     const gun = makeGUN(10, 10);
@@ -157,7 +158,7 @@ describe('GUN power dependency (building.cpp PW1/PW3)', () => {
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
-  it('does NOT fire when power consumed > power produced (low power)', () => {
+  it('fires even when power consumed > power produced (GUN is unpowered)', () => {
     const gun = makeGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
@@ -165,10 +166,10 @@ describe('GUN power dependency (building.cpp PW1/PW3)', () => {
       powerConsumed: 150, powerProduced: 100, // deficit
     });
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(hpBefore);
+    expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
-  it('does NOT fire when power consumed equals power produced + 1 (any deficit)', () => {
+  it('fires even during severe power deficit (GUN is unpowered)', () => {
     const gun = makeGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
@@ -176,26 +177,18 @@ describe('GUN power dependency (building.cpp PW1/PW3)', () => {
       powerConsumed: 101, powerProduced: 100,
     });
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(hpBefore);
+    expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
-  it('resumes firing when power is restored', () => {
+  it('fires when powerProduced is 0 (no power buildings)', () => {
     const gun = makeGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-
-    // Phase 1: no power, no firing
-    const ctx1 = makeCombatCtx([gun], [enemy], {
-      powerConsumed: 200, powerProduced: 100,
+    const hpBefore = enemy.hp;
+    const ctx = makeCombatCtx([gun], [enemy], {
+      powerConsumed: 0, powerProduced: 0,
     });
-    updateStructureCombat(ctx1);
-    const hpAfterOutage = enemy.hp;
-
-    // Phase 2: power restored
-    const ctx2 = makeCombatCtx([gun], [enemy], {
-      powerConsumed: 50, powerProduced: 100,
-    });
-    updateStructureCombat(ctx2);
-    expect(enemy.hp).toBeLessThan(hpAfterOutage);
+    updateStructureCombat(ctx);
+    expect(enemy.hp).toBeLessThan(hpBefore);
   });
 });
 

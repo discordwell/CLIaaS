@@ -46,6 +46,15 @@ describe('SCG05EA dog position mapping', () => {
       console.log(`  ${s.t} (${s.cx}, ${s.cy})`);
     }
 
+    // Terrain probe via page evaluate — check water along west coast
+    console.log('\n=== TERRAIN: West coast water map ===');
+    const page = (adapter as unknown as { page: { evaluate: (fn: string) => Promise<unknown> } }).page;
+    const terrain = await page.evaluate('(() => { const r = []; for (let y = 45; y <= 115; y += 2) { let row = "y=" + String(y).padStart(3," ") + ": "; for (let x = 0; x <= 35; x++) { const t = window.__agentStep ? 0 : 0; row += "."; } r.push(row); } return "probe ran"; })()') as string;
+    console.log('probe:', terrain);
+    // Alternative: use the step result's map bounds
+    const s2 = (await adapter.step(1)).state;
+    console.log('Map bounds: ' + JSON.stringify((s2 as unknown as { mapBounds?: unknown }).mapBounds));
+
     expect(true).toBe(true);
   }, 120_000);
 });

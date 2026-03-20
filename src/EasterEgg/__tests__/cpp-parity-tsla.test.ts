@@ -344,16 +344,29 @@ describe('TSLA cannot fire during power outage (building.cpp: PW1/PW3)', () => {
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
-  it('fires when powerProduced is 0 (isLowPower requires powerProduced > 0)', () => {
+  it('does NOT fire when powerProduced is 0 and powerConsumed > 0 (still low power)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
-    const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([tsla], [enemy], {
       powerConsumed: 100,
       powerProduced: 0,
     });
     updateStructureCombat(ctx);
-    // isLowPower = consumed > produced && produced > 0 => false when produced=0
+    // C++ house.cpp:4164: isLowPower = consumed > produced (100 > 0 = true)
+    // TSLA is powered, so it does NOT fire during low power
+    expect(enemy.hp).toBe(enemy.maxHp);
+  });
+
+  it('fires when both powerProduced and powerConsumed are 0 (no power buildings)', () => {
+    const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
+    const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
+    const hpBefore = enemy.hp;
+    const ctx = makeCombatCtx([tsla], [enemy], {
+      powerConsumed: 0,
+      powerProduced: 0,
+    });
+    updateStructureCombat(ctx);
+    // isLowPower = consumed > produced (0 > 0 = false) — not low power
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
