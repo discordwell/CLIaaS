@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-03-20T10:00Z — Dual-Runtime Comparison + Full Campaign Parity
+- **Built dual-runtime comparison tool** running all 29 Allied missions on both TS and C++ WASM
+- **23+ engine bugs fixed** from comparison data: buildable field, reinforcement spawn, production rtti, Base section, build times, alliances (one-way, Neutral, GoodGuy, Multi houses), bridge templates, AI aircraft, damage falloff, FTUR sprite, helipad init, loss conditions, house mapping
+- **29/29 missions: zero HP mismatches**, perfect structure parity across entire Allied campaign
+- **Multi1-8 house support** added with proper C++ enum mapping (20 houses total)
+- **Alliance system rewritten** for full C++ parity: one-way INI-driven, Neutral→everyone one-way, no auto-alliances
+- **Visual fixes**: FTUR sprite extracted, CLEAR1 tile variations (16 per theatre), bib fill removed, procedural grass for WALL cells, canvas black background, debug overlay (F9/__debug)
+- **CLEAR1 tile extraction**: TMP parser now handles tileCount > slotCount (template variations). All theatres re-extracted with 15-234 additional tiles.
+- **Remaining**: fog-of-war dimming creates subtle seam between tileset tiles and procedural grass under buildings in enemy territory. Player area renders perfectly.
+
+## 2026-03-20T20:00Z — Session 162: M5 (SCG05EA) Spy Infiltration
+- **Team script**: Agent confirmed spy has NO movement script — player-controlled unit after UNLOAD
+- **Dog map**: Static at (12,48)x2, (49,52), (50,52), (24,54), (23,55). Patrol pair x=23-27 y=49→63
+- **Terrain**: y<48 impassable. Passable band y=48-55. River gap x=18-41 at y=68
+- **Direct infiltration**: spyInfiltrate() shortcut in harness attack_struct — spy within 6 cells of enemy building triggers immediate infiltration (bypasses entity update race)
+- **3-tick micro-dodge**: Best approach. Sprint east + dodge ±1 cell when dog within 3.5 cells. Spy reaches x=28-36 (needs x=37 for infiltration range). Clamp y∈[49,51]
+- **Trigger chain**: WEAP has triggerName='SPYS' (confirmed from INI). spiedBuildingTriggers persists. Not a trigger bug — spy was dying before infiltrating
+- **Harness improvements**: instant infantry boarding for naval transports, transport deploy/unload (for future use)
+- **Next**: Tune dodge reliability, verify trigger fires, implement Tanya/SAM/chinook phases
+
 ## 2026-03-20T16:30Z — Session 161: C++ Score Screen Parity
 - **Score formula**: Replaced TS linear formula (kills*50 - losses*30 + timeBonus) with C++ formula from score.cpp:546-597 — pointTotal + difficulty bias (500/1500/3500), leadership rating (survival ratio), economy rating (money retention ratio). Uses C++ fixed-point math (fixedMul100).
 - **Engine tracking**: Added PointTotal (+cost on enemy kill, -cost on own death), HarvestedCredits, InitialCredits, StolenCredits, per-side casualty counts (alliedUnitsLost, sovietUnitsLost, alliedBuildingsLost, sovietBuildingsLost) to Game class and CombatContext.
