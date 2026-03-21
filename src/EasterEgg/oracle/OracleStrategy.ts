@@ -3921,17 +3921,44 @@ export class OracleStrategy {
       const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 225); // 15 cells
       const readyToRaze = atRally.length >= 8;
 
-      if (readyToRaze && structTarget) {
-        // RAZE: concentrated force at rally — attack_move into the base
-        commands.push({ cmd: 'attack_move', ids: atRally.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
-        for (const u of atRally) this.recordMove(u.id, structTarget.cx, structTarget.cy);
-        // Also send stragglers to rally
+      if (readyToRaze) {
+        // RAZE: 'attack' the nearest enemy TANK or production BUILDING by ID.
+        // This makes tanks pathfind to a SPECIFIC target, ignoring dogs/infantry.
+        // Priority: enemy tanks near our group → production buildings.
+        const groupCenter = this.centroid(atRally);
+        const nearbyTanks = state.enemies.filter(
+          (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
+            this.distanceSq(e, groupCenter) <= 900, // 30 cells
+        ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
+
+        let targetId: number | null = null;
+        let targetDesc = '';
+        let targetPos: Point = { cx: 0, cy: 0 };
+
+        if (nearbyTanks.length > 0) {
+          // Focus-fire nearest enemy tank
+          targetId = nearbyTanks[0].id;
+          targetDesc = nearbyTanks[0].t;
+          targetPos = nearbyTanks[0];
+        } else if (structTarget) {
+          // No enemy tanks nearby — attack production building directly
+          targetId = structTarget.id;
+          targetDesc = structTarget.t;
+          targetPos = structTarget;
+        }
+
+        if (targetId != null) {
+          commands.push({ cmd: 'attack', ids: atRally.map((u) => u.id), target: targetId });
+          for (const u of atRally) this.recordMove(u.id, targetPos.cx, targetPos.cy);
+          reasons.push(`assault KILL ${targetDesc} (${atRally.length} → ${targetPos.cx},${targetPos.cy})`);
+        }
+
+        // Stragglers move to rally
         const stragglers = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 225);
         if (stragglers.length > 0) {
           commands.push({ cmd: 'move', ids: stragglers.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
           for (const u of stragglers) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
         }
-        reasons.push(`assault RAZE ${structTarget.t} (${atRally.length}+${stragglers.length} → ${structTarget.cx},${structTarget.cy})`);
       } else {
         // CHARGE: move all tanks to rally point — group up before attacking
         commands.push({ cmd: 'move', ids: assaultArmor.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
