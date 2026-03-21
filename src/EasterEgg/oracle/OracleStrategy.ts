@@ -96,6 +96,7 @@ const SCG11EA_POST_NAVAL_SUB_THRESHOLD = 1;
 const SCG11EA_FLEET_ONLINE_SHIPS = 3;
 const SCG11EA_HUNT_MIN_SHIPS = 3;
 const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
+const SCG11EA_FORWARD_MCV_TARGET: Point = { cx: 56, cy: 88 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
 const SCG11EA_ASSAULT_MIN_ARMOR = 10;      // Achievable with 2 WEAP + 3 HARV economy
@@ -110,6 +111,8 @@ const SCG11EA_GROUND_DEFENSE_TRIGGER = 2;
 const SCG11EA_DEFENSE_CREDIT_RESERVE = 800;
 const SCG11EA_ECON_REBUILD_FLOOR = 500;
 const SCG11EA_PROC_REBUILD_RESERVE = 1200;
+const SCG11EA_BUILD_RADIUS = 5;
+const SCG11EA_COAST_LINK_MIN_RIGHT_EDGE = 59;
 const SCG11EA_CRITICAL_FLEET_SHIP_CREDIT = 25;
 const SCG11EA_FLEET_RECOVERY_SHIP_CREDIT = 100;
 const SCG11EA_POWER_REBUILD_EMERGENCY_DEFICIT = 40;
@@ -556,9 +559,68 @@ export class OracleStrategy {
   }
 
   private scg11eaShipyardReady(alliedStructures: RAStructure[]): boolean {
-    return this.scg11eaCoastRevealed || alliedStructures.some(
+    return alliedStructures.some(
       (s) => s.ally && (s.t === 'SYRD' || s.t === 'SPEN'),
-    );
+    ) || (this.scg11eaCoastRevealed && this.scg11eaCoastLinkReady(alliedStructures));
+  }
+
+  private scg11eaBootstrapReady(alliedStructures: RAStructure[]): boolean {
+    const powerCount = alliedStructures.filter((s) => s.t === 'POWR' || s.t === 'APWR').length;
+    const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+    const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
+    return powerCount >= 2 && procCount >= 2 && weapCount >= 1;
+  }
+
+  private scg11eaCoastLinkReady(alliedStructures: RAStructure[]): boolean {
+    return alliedStructures.some((s) => {
+      if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') return false;
+      const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
+      const right = s.cx + width - 1;
+      const top = s.cy;
+      const bottom = s.cy + 1;
+      return right >= SCG11EA_COAST_LINK_MIN_RIGHT_EDGE && bottom >= 84 && top <= 92;
+    });
+  }
+
+  private getScg11eaPowerChainCandidates(): Point[] {
+    const xs = [26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 59, 60];
+    const candidates: Point[] = [];
+    for (const cx of xs) {
+      candidates.push({ cx, cy: 90 }, { cx, cy: 88 }, { cx, cy: 86 });
+    }
+    return candidates;
+  }
+
+  private scg11eaChainReachable(pos: Point, alliedStructures: RAStructure[]): boolean {
+    return alliedStructures.some((s) => {
+      if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') return false;
+      const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
+      const left = s.cx - SCG11EA_BUILD_RADIUS;
+      const right = s.cx + width - 1 + SCG11EA_BUILD_RADIUS;
+      const top = s.cy - SCG11EA_BUILD_RADIUS;
+      const bottom = s.cy + 1 + SCG11EA_BUILD_RADIUS;
+      const candidateLeft = pos.cx;
+      const candidateRight = pos.cx + 1;
+      const candidateTop = pos.cy;
+      const candidateBottom = pos.cy + 1;
+      return !(candidateRight < left || candidateLeft > right || candidateBottom < top || candidateTop > bottom);
+    });
+  }
+
+  private scg11eaChainOccupied(pos: Point, alliedStructures: RAStructure[]): boolean {
+    return alliedStructures.some((s) => {
+      if (!s.ally) return false;
+      const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
+      const left = s.cx;
+      const right = s.cx + width - 1;
+      const top = s.cy;
+      const bottom = s.cy + 1;
+      const candidateLeft = pos.cx;
+      const candidateRight = pos.cx + 1;
+      const candidateTop = pos.cy;
+      const candidateBottom = pos.cy + 1;
+      return !(candidateRight < left || candidateLeft > right || candidateBottom < top || candidateTop > bottom);
+    });
   }
 
   private getScg11eaShipyardCandidates(): Point[] {
@@ -1117,6 +1179,19 @@ export class OracleStrategy {
 
         let offsets = [...PLACEMENT_OFFSETS];
         let scg11eaProcCandidates: Point[] = [];
+        const scg11eaShipyardExists = alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
+        const scg11eaBootstrapReady =
+          this.scenario === 'SCG11EA' && this.scg11eaBootstrapReady(alliedStructures);
+        const scg11eaExtendCoastChain =
+          this.scenario === 'SCG11EA' &&
+          (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR') &&
+          scg11eaBootstrapReady &&
+          !scg11eaShipyardExists &&
+          !this.scg11eaCoastLinkReady(alliedStructures);
+        const scg11eaPowerChainCandidates =
+          scg11eaExtendCoastChain
+            ? this.getScg11eaPowerChainCandidates()
+            : [];
         const scg11eaShoreDefenseCandidates =
           this.scenario === 'SCG11EA' &&
             (buildingProduction.t === 'AGUN' ||
@@ -1185,7 +1260,22 @@ export class OracleStrategy {
         let placeCx: number, placeCy: number;
         // Find first offset that passes terrain/fog/occupancy validation
         let foundValid = false;
-        if (scg11eaShoreDefenseCandidates.length > 0) {
+        if (scg11eaPowerChainCandidates.length > 0) {
+          const reachableChain = scg11eaPowerChainCandidates.filter((pos) =>
+            this.scg11eaChainReachable(pos, alliedStructures));
+          if (reachableChain.length > 0) {
+            const validChain = reachableChain.filter((pos) =>
+              this.canPlaceBuilding(pos.cx, pos.cy, state, false));
+            const unoccupiedReachable = reachableChain.filter((pos) =>
+              !this.scg11eaChainOccupied(pos, alliedStructures));
+            const chainTarget = validChain[validChain.length - 1] ??
+              unoccupiedReachable[unoccupiedReachable.length - 1] ??
+              reachableChain[0];
+            placeCx = chainTarget.cx;
+            placeCy = chainTarget.cy;
+            foundValid = true;
+          }
+        } else if (scg11eaShoreDefenseCandidates.length > 0) {
           const validDefenseCell = this.findBestChainPosition(scg11eaShoreDefenseCandidates, state, false);
           if (validDefenseCell) {
             placeCx = validDefenseCell.cx;
@@ -1235,18 +1325,48 @@ export class OracleStrategy {
             placeCy = Math.round(placeRef.cy + Math.sin(angle) * dist);
           }
         }
-        commands.push({
-          cmd: 'place',
-          rtti: RTTI_BUILDINGTYPE,
-          cx: placeCx,
-          cy: placeCy,
-        });
-        // Cycle through placement offsets on repeated attempts
-        if (state.tick - this.lastPlacementTick > sec(4)) {
-          this.placementAttempts++;
-          this.lastPlacementTick = state.tick;
+        const scg11eaLandChainPlacement =
+          this.scenario === 'SCG11EA' &&
+          (scg11eaPowerChainCandidates.length > 0 || scg11eaShoreDefenseCandidates.length > 0);
+        const scg11eaPlacementBlockers = scg11eaLandChainPlacement
+          ? playerUnits.filter((u) =>
+            !NAVAL_COMBAT_TYPES.has(u.t) &&
+            !AIRCRAFT_TYPES.has(u.t) &&
+            u.t !== 'MCV' &&
+            u.cx >= placeCx - 1 && u.cx <= placeCx + 2 &&
+            u.cy >= placeCy - 1 && u.cy <= placeCy + 2)
+          : [];
+
+        if (scg11eaPlacementBlockers.length > 0) {
+          const clearTarget = scg11eaPowerChainCandidates.length > 0
+            ? { cx: Math.max(0, placeCx - 5), cy: Math.min(127, placeCy + 6) }
+            : { cx: 50, cy: 88 };
+          const movers = scg11eaPlacementBlockers.filter((u) =>
+            this.shouldMove(u, clearTarget.cx, clearTarget.cy));
+          if (movers.length > 0) {
+            commands.push({
+              cmd: 'move',
+              ids: movers.map((u) => u.id),
+              cx: clearTarget.cx,
+              cy: clearTarget.cy,
+            });
+            for (const unit of movers) this.recordMove(unit.id, clearTarget.cx, clearTarget.cy);
+          }
+          reasons.push(`clear ${buildingProduction.t} footprint (${scg11eaPlacementBlockers.length})`);
+        } else {
+          commands.push({
+            cmd: 'place',
+            rtti: RTTI_BUILDINGTYPE,
+            cx: placeCx,
+            cy: placeCy,
+          });
+          // Cycle through placement offsets on repeated attempts
+          if (state.tick - this.lastPlacementTick > sec(4)) {
+            this.placementAttempts++;
+            this.lastPlacementTick = state.tick;
+          }
+          reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
         }
-        reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
       }
     } else if ((!buildingProduction || suppressScg11eaLeftoverBuild) && buildable) {
       // Nothing building — find next item in build order
@@ -1256,6 +1376,8 @@ export class OracleStrategy {
       const shipyardExists = existingShipyard;
       const scg11eaShipyardReady =
         this.scenario === 'SCG11EA' && this.scg11eaShipyardReady(alliedStructures);
+      const scg11eaBootstrapReady =
+        this.scenario === 'SCG11EA' && this.scg11eaBootstrapReady(alliedStructures);
       const scg11eaExistingFleet =
         this.scenario === 'SCG11EA'
           ? playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length
@@ -1276,6 +1398,19 @@ export class OracleStrategy {
       }
 
       if (
+        this.scenario === 'SCG11EA' &&
+        !shipyardExists &&
+        scg11eaBootstrapReady &&
+        !scg11eaShipyardReady &&
+        (buildable.structures.includes('POWR') || buildable.structures.includes('APWR'))
+      ) {
+        commands.push({
+          cmd: 'produce',
+          rtti: RTTI_BUILDINGTYPE,
+          type_id: buildable.structures.includes('POWR') ? 17 : 18,
+        });
+        reasons.push('extend east coast chain');
+      } else if (
         this.scenario === 'SCG11EA' &&
         this.scg11eaNavalUnlocked &&
         !shipyardExists &&
@@ -1916,6 +2051,11 @@ export class OracleStrategy {
     }
 
     // --- Phase 4: COMBAT (defend-first, attack with surplus) ---
+    // SCG11EA: skip base defense when assault is active — decideScg11ea handles tanks.
+    // This prevents tanks oscillating between defend-base and assault-north.
+    if (this.scenario === 'SCG11EA' && this.scg11eaAssaultStarted) {
+      return { commands: this.dedupeCommands(commands), reason: reasons.join('; ') || 'base building — assault active' };
+    }
     const combatUnits = playerUnits.filter(
       (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
         !(this.scenario === 'SCG11EA' && NAVAL_COMBAT_TYPES.has(u.t)),
@@ -2783,140 +2923,66 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // ─── PHASE 2: Tanya destroys SAM sites with intensive micro ────────
-    // Priority: 1) evade dogs (instant kill), 2) shoot nearby infantry,
-    // 3) advance to nearest SAM, 4) C4 the SAM.
-    // Tanya has Colt45 range=5.75, 50 dmg, ROF=5. One-shots most infantry.
+    // ─── PHASE 2: Tanya destroys 4 SAM sites near her prison ──────────
+    // Mission: destroy SAMs → chinook arrives → evacuate Tanya.
+    // SAMs at (16,107), (28,107), (17,94), (28,94). Tanya spawns at (22,105).
+    // South SAMs are within shoot range from spawn. North SAMs require walking
+    // WEST then NORTH (tanks are all at x=28+, western corridor is safe).
     if (tanya && this.scg05eaSpyInfiltrated) {
-      const TANYA_RANGE_SQ = 33; // 5.75^2 ≈ 33 — weapon range
-      const DOG_DANGER_SQ = 36;  // 6 cells — flee from dogs
-      // Track last target to avoid resending the same command (stutter-stepping)
-      const lastTarget = this.lastUnitTargets.get(tanya.id);
-
-      // Find nearest dog
-      const nearestDog = dogs.length > 0
-        ? dogs.reduce((a, b) =>
-          this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
-        : null;
-      const dogDist = nearestDog ? this.distanceSq(tanya, nearestDog) : Infinity;
-
-      // Find infantry in weapon range (prioritize closest)
-      const infantryInRange = state.enemies.filter((e) => {
-        if (e.t === 'DOG') return false; // dogs handled separately
-        if (!e.hp || e.hp <= 0) return false;
-        return this.distanceSq(tanya, e) <= TANYA_RANGE_SQ;
-      }).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
-
-      // Find explosive barrels in range — shoot these ASAP for chain explosions
+      const TANYA_RANGE_SQ = 33; // 5.75² — Colt45 weapon range
       const BARREL_TYPES = new Set(['BARL', 'BRL3', 'V12', 'V13']);
-      const barrelsInRange = state.structures.filter((s) =>
-        BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 &&
-        this.distanceSq(tanya, s) <= TANYA_RANGE_SQ * 2, // slightly extended range for barrels
-      ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
+      const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
 
-      // Find nearby barrels to approach (within 8 cells — close enough to reach)
-      const nearbyBarrels = state.structures.filter((s) =>
-        BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 &&
-        this.distanceSq(tanya, s) <= 64, // 8 cells
-      ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
-
-      // Find remaining SAMs
-      const remainingSams = state.structures.filter(
-        (s) => s.t === 'SAM' && !s.ally,
-      );
-      const nearestSam = remainingSams.length > 0
-        ? remainingSams.reduce((a, b) =>
-          this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
-        : null;
-
-      // Tanya spawns at (25,107) but team script parks her in impassable building zone.
-      // Only warp to escape the team script's impassable building zone (y>108).
-      // Otherwise let Tanya fight naturally — she has C4 for buildings.
+      // Unstick from team script's impassable zone
       if (tanya.cy > 108) {
         commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
-        reasons.push(`Tanya WARP (${tanya.cx},${tanya.cy}) → (22,105) passable`);
+        reasons.push(`Tanya WARP → (22,105)`);
         return { commands, reason: reasons.join('; ') };
       }
 
-      // Only target infantry — never waste shots on vehicles/tanks
-      const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
-      const infantryOnly = infantryInRange.filter((e) => INF_SET.has(e.t));
+      // Find remaining SAMs
+      const remainingSams = state.structures.filter((s) => s.t === 'SAM' && !s.ally);
 
-      // Debug: find nearest infantry of any distance
-      const allInfantry = state.enemies.filter((e) => INF_SET.has(e.t) && e.hp > 0);
-      const nearestInf = allInfantry.length > 0
-        ? allInfantry.reduce((a, b) => this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
+      // Find nearest dog
+      const nearestDog = dogs.length > 0
+        ? dogs.reduce((a, b) => this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b)
         : null;
-      if (nearestInf && infantryOnly.length === 0) {
-        reasons.push(`nearest_inf=${nearestInf.t}(${nearestInf.cx},${nearestInf.cy})d=${Math.sqrt(this.distanceSq(tanya, nearestInf)).toFixed(1)}`);
-      }
+      const dogDist = nearestDog ? this.distanceSq(tanya, nearestDog) : Infinity;
 
-      if (dogDist <= DOG_DANGER_SQ) {
-        // PRIORITY 1: Flee dogs
+      // Find infantry + barrels + SAMs in shoot range (7 cells = distSq 49)
+      const infantryInRange = state.enemies.filter((e) =>
+        INF_SET.has(e.t) && e.hp > 0 && this.distanceSq(tanya, e) <= TANYA_RANGE_SQ,
+      ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
+
+      const shootableBarrel = state.structures.find((s) =>
+        BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 && this.distanceSq(tanya, s) <= TANYA_RANGE_SQ,
+      );
+
+      // Priority: flee dogs > shoot infantry > shoot barrels > C4 nearest SAM
+      if (dogDist <= 36) {
         const dx = tanya.cx - nearestDog!.cx;
         const dy = tanya.cy - nearestDog!.cy;
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        commands.push({
-          cmd: 'move', ids: [tanya.id],
+        commands.push({ cmd: 'move', ids: [tanya.id],
           cx: Math.round(tanya.cx + (dx / len) * 6),
-          cy: Math.round(tanya.cy + (dy / len) * 6),
-        });
-        this.lastUnitTargets.delete(tanya.id);
-        reasons.push(`Tanya FLEE dog(${nearestDog!.cx},${nearestDog!.cy}) d=${Math.sqrt(dogDist).toFixed(1)}`);
-      } else if (infantryOnly.length > 0) {
-        // PRIORITY 2: Shoot infantry — ALWAYS retarget, no dedup. One-shot kills.
-        const target = infantryOnly[0];
-        commands.push({ cmd: 'attack', ids: [tanya.id], target: target.id });
-        reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(this.distanceSq(tanya, target)).toFixed(1)} [${infantryOnly.length}]`);
-      } else {
-        // PRIORITY 3: Shoot any barrel in gun range (instant chain explosion)
-        const shootableBarrel = state.structures.find((s) =>
-          BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 &&
-          this.distanceSq(tanya, s) <= TANYA_RANGE_SQ,
-        );
-        if (shootableBarrel) {
-          commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: shootableBarrel.id });
-          this.lastUnitTargets.delete(tanya.id);
-          reasons.push(`Tanya BOOM ${shootableBarrel.t}(${shootableBarrel.cx},${shootableBarrel.cy}) d=${Math.sqrt(this.distanceSq(tanya, shootableBarrel)).toFixed(1)}`);
-        } else {
-          // PRIORITY 4: C4 nearest structure — SAMs first (that's the objective),
-          // then defenses, then barrels we need to walk to, then anything else.
-          const DEFENSE_TYPES = new Set(['MISS', 'FTUR', 'GUN', 'TSLA', 'PBOX', 'HBOX']);
-          const targetable = state.structures.filter((s) =>
-            !s.ally && s.hp > 0 && this.distanceSq(tanya, s) <= 625,
-          ).sort((a, b) => {
-            // SAMs first (objective), then defenses, then barrels, then rest
-            const aPri = a.t === 'SAM' ? 0 : DEFENSE_TYPES.has(a.t) ? 1 : BARREL_TYPES.has(a.t) ? 2 : 3;
-            const bPri = b.t === 'SAM' ? 0 : DEFENSE_TYPES.has(b.t) ? 1 : BARREL_TYPES.has(b.t) ? 2 : 3;
-            if (aPri !== bPri) return aPri - bPri;
-            return this.distanceSq(tanya, a) - this.distanceSq(tanya, b);
-          });
-
-          const target = targetable[0] ?? null;
-          if (target) {
-            const tId = target.id;
-            const tDist = this.distanceSq(tanya, target);
-            if (tDist <= 49) {
-              // Within 7 cells — shoot it directly
-              commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: tId });
-              this.lastUnitTargets.delete(tanya.id);
-              reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(1)}`);
-            } else {
-              // Move toward target using short hops. Go horizontal first
-              // to stay in safer corridors (tanks are all at x=28+).
-              const dx = target.cx - tanya.cx;
-              const dy = target.cy - tanya.cy;
-              let moveX = tanya.cx, moveY = tanya.cy;
-              if (Math.abs(dx) > 2) {
-                moveX = tanya.cx + Math.sign(dx) * Math.min(3, Math.abs(dx));
-              } else {
-                moveY = tanya.cy + Math.sign(dy) * Math.min(3, Math.abs(dy));
-              }
-              commands.push({ cmd: 'move', ids: [tanya.id], cx: moveX, cy: moveY });
-              reasons.push(`Tanya → ${target.t}(${target.cx},${target.cy}) via (${moveX},${moveY})`);
-            }
-          }
+          cy: Math.round(tanya.cy + (dy / len) * 6) });
+        reasons.push(`FLEE dog(${nearestDog!.cx},${nearestDog!.cy})`);
+      } else if (infantryInRange.length > 0) {
+        commands.push({ cmd: 'attack', ids: [tanya.id], target: infantryInRange[0].id });
+        reasons.push(`SHOOT ${infantryInRange[0].t}(${infantryInRange[0].cx},${infantryInRange[0].cy}) [${infantryInRange.length}]`);
+      } else if (shootableBarrel) {
+        commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: shootableBarrel.id });
+        reasons.push(`BOOM ${shootableBarrel.t}(${shootableBarrel.cx},${shootableBarrel.cy})`);
+      } else if (remainingSams.length > 0) {
+        // C4 nearest SAM — proper Tanya bomb placement
+        const sam = remainingSams.reduce((a, b) =>
+          this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b);
+        const lastTgt = this.lastUnitTargets.get(tanya.id);
+        if (!lastTgt || lastTgt.targetId !== sam.id) {
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: sam.id });
+          this.lastUnitTargets.set(tanya.id, { targetId: sam.id, cx: sam.cx, cy: sam.cy, tick: state.tick });
         }
+        reasons.push(`C4 SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(this.distanceSq(tanya, sam)).toFixed(0)} [${remainingSams.length} left]`);
       }
 
       if (remainingSams.length === 0) {
@@ -3009,21 +3075,33 @@ export class OracleStrategy {
     const playerUnits = this.playerOwnedUnits(state);
     const alliedStructures = state.structures.filter((s) => s.ally);
 
-    // Save MCV2 — deploy only MCV1, hold the other for river crossing.
-    // decideBaseBuilding will deploy the first MCV it finds. We prevent
-    // deploying the second by moving it away when there's already a ConYard.
+    // Save MCV2 for a forward east-shore deploy. Once the home base is online,
+    // a second FACT near x=56 gives the shipyard a stable build radius without
+    // relying on a fragile full-width power chain.
     const mcvs = playerUnits.filter((u) => u.t === 'MCV');
     const conYard = alliedStructures.find((s) => s.t === 'FACT');
-    if (conYard && mcvs.length > 0 && !this.scg11eaMcvMoved) {
-      // ConYard exists — keep the spare MCV safe near base
+    const forwardConYard = alliedStructures.find(
+      (s) => s.t === 'FACT' && s.cx >= 52 && s.cy >= 84 && s.cy <= 92,
+    );
+    const landArmorCount = playerUnits.filter((u) =>
+      (u.t.includes('TNK') || u.t === 'ARTY') && u.hp > 0).length;
+    if (conYard && !forwardConYard && mcvs.length > 0) {
       const spareMcv = mcvs[0];
       const safeSpot: Point = { cx: conYard.cx, cy: conYard.cy + 3 };
-      if (this.distanceSq(spareMcv, safeSpot) > 9) {
-        commands.push({ cmd: 'move', ids: [spareMcv.id], cx: safeSpot.cx, cy: safeSpot.cy });
-        this.recordMove(spareMcv.id, safeSpot.cx, safeSpot.cy);
-        reasons.push('MCV2 safe near base');
+      const shouldForwardDeploy =
+        this.scg11eaBootstrapReady(alliedStructures) &&
+        (landArmorCount >= SCG11EA_SHIPYARD_TANK_FLOOR || state.tick >= sec(250));
+      const mcvTarget = shouldForwardDeploy ? SCG11EA_FORWARD_MCV_TARGET : safeSpot;
+      if (this.distanceSq(spareMcv, mcvTarget) <= 9) {
+        if (shouldForwardDeploy && this.isIdle(spareMcv) && spareMcv.m !== MISSION_UNLOAD) {
+          commands.push({ cmd: 'deploy', ids: [spareMcv.id] });
+          reasons.push(`deploy MCV2 east (${mcvTarget.cx},${mcvTarget.cy})`);
+        }
+      } else if (this.shouldMove(spareMcv, mcvTarget.cx, mcvTarget.cy)) {
+        commands.push({ cmd: 'move', ids: [spareMcv.id], cx: mcvTarget.cx, cy: mcvTarget.cy });
+        this.recordMove(spareMcv.id, mcvTarget.cx, mcvTarget.cy);
+        reasons.push(shouldForwardDeploy ? 'MCV2 east shore' : 'MCV2 safe near base');
       }
-      this.scg11eaMcvMoved = true;
     }
     const coastScoutTarget = SCG11EA_SHIPYARD_SCOUT_TARGET;
     const coastMappedNow = playerUnits.some(
@@ -3131,10 +3209,8 @@ export class OracleStrategy {
     const armorByBaseDistance = landArmor.slice().sort(
       (a, b) => this.distanceSq(a, baseAnchor) - this.distanceSq(b, baseAnchor),
     );
-    const homeArmor = baseThreats.length > 0
-      ? armorByBaseDistance
-      : armorByBaseDistance.slice(0, scg11eaHomeReserve);
-    // ALL tanks go to assault. No home guard. Attack is the defense.
+    // ALL tanks assault. No home guard. Attack is the defense. /* human-requested */
+    const homeArmor: RAEntity[] = [];
     const assaultArmor = landArmor;
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
@@ -3272,51 +3348,21 @@ export class OracleStrategy {
       reasons.push('island base DESTROYED');
     }
 
-    // GROUND ASSAULT — mass 12 tanks, attack in waves, retreat if below 6.
-    // No fleet gate. Stockpile then overwhelm — don't trickle reinforcements.
-    // No retreat — tanks fight to the death. Accept losses, kill buildings.
-    // Once the first wave launches (10+ tanks), ALL subsequent tanks join immediately.
-    // Continuous pressure: every new tank from WEAP marches north to join the fight.
+    // GROUND ASSAULT — attack_move straight to enemy WEAP. No staging, no phases.
+    // With 10+ tanks they plow through dogs/infantry to reach the building.
     const assaultActive = this.scg11eaAssaultStarted || assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
     if (assaultActive) this.scg11eaAssaultStarted = true;
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
-      const armyCentroid = this.centroid(assaultArmor);
-      const stagingPoint: Point = { cx: 45, cy: 65 };
-      const atStaging = armyCentroid.cy <= 70;
-      const retargetDue = (state.tick % 25) < 5;
-
-      if (!atStaging) {
-        // Phase 1: march north — 'move' bypasses dogs/infantry
+      const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
+      if (structTarget) {
+        const retargetDue = (state.tick % 25) < 5;
         const movers = retargetDue ? assaultArmor : assaultArmor.filter(
-          (u) => this.isIdle(u) || this.distanceSq(u, stagingPoint) > 225,
+          (u) => this.isIdle(u) || this.distanceSq(u, structTarget) > 100,
         );
         if (movers.length > 0) {
-          commands.push({ cmd: 'move', ids: movers.map((u) => u.id), cx: stagingPoint.cx, cy: stagingPoint.cy });
-          for (const u of movers) this.recordMove(u.id, stagingPoint.cx, stagingPoint.cy);
-          reasons.push(`assault march (${movers.length} → y=${stagingPoint.cy})`);
-        }
-      } else {
-        // Phase 2: at staging — kill the base
-        // Only focus-fire enemy units ACTIVELY ENGAGING (within 6 cells of our tanks)
-        const engaging = state.enemies.filter(
-          (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-            assaultArmor.some((u) => this.distanceSq(u, e) <= 36), // 6 cells
-        );
-        // Always attack_move to the building. Don't stop to focus-fire units.
-        // attack_move auto-engages en route but keeps heading for the structure.
-        // This prevents getting bogged down killing garrison tanks endlessly.
-        {
-          const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-          if (structTarget) {
-            const movers = retargetDue ? assaultArmor : assaultArmor.filter(
-              (u) => this.isIdle(u) || this.distanceSq(u, structTarget) > 100,
-            );
-            if (movers.length > 0) {
-              commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
-              for (const u of movers) this.recordMove(u.id, structTarget.cx, structTarget.cy);
-              reasons.push(`assault raze ${structTarget.t} (${movers.length} → ${structTarget.cx},${structTarget.cy})`);
-            }
-          }
+          commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+          for (const u of movers) this.recordMove(u.id, structTarget.cx, structTarget.cy);
+          reasons.push(`assault ${structTarget.t} (${movers.length} → ${structTarget.cx},${structTarget.cy})`);
         }
       }
     }
