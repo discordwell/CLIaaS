@@ -639,6 +639,22 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           break;
         }
 
+        case 'debug_terrain': {
+          // Dump terrain info for specific cells
+          const cells: string[] = [];
+          for (let dy = -2; dy <= 2; dy++) {
+            for (let dx = -2; dx <= 2; dx++) {
+              const px = c.cx + dx, py = c.cy + dy;
+              const t = game.map.getTerrain(px, py);
+              const p = game.map.isPassable(px, py);
+              cells.push(`(${px},${py})=${t}${p ? 'P' : 'X'}`);
+            }
+          }
+          const path = findPath(game.map, { cx: c.cx, cy: c.cy + 1 }, { cx: c.cx, cy: c.cy - 1 }, true, false, 1);
+          results.push({ cmd: 'debug_terrain', ok: true, error: cells.join(' ') + ' path_len=' + path.length } as never);
+          break;
+        }
+
         default:
           results.push({ cmd: (c as { cmd: string }).cmd, ok: false, error: 'unknown command' });
       }

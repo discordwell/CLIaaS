@@ -3427,7 +3427,9 @@ export class OracleStrategy {
             { cx: 18, cy: 94 },  // SAM area
           ];
           // Pick the FIRST waypoint we haven't reached yet (distSq > 1)
-          const wp = waypoints.find(w => this.distanceSq(tanya, w) > 1) ?? waypoints[waypoints.length - 1];
+          // Find next waypoint: first one that's north of us AND we're not already at
+          const wp = waypoints.find(w => w.cy < tanya.cy - 1)
+            ?? { cx: sam.cx, cy: sam.cy }; // fallback: go directly to SAM
           commands.push({ cmd: 'move', ids: [tanya.id], cx: wp.cx, cy: wp.cy });
           reasons.push(`→ SAM(${sam.cx},${sam.cy}) via (${wp.cx},${wp.cy}) [${remainingSams.length} left]`);
         }

@@ -84,6 +84,19 @@ describe('SCG05EA live playthrough', () => {
         console.log(`  CMD ERRORS: ${JSON.stringify(errors)}`);
       }
 
+      // One-shot terrain debug when Tanya reaches y=102
+      const tanyaDbg = lastState.units.find((u: { t: string }) => u.t === 'E7');
+      if (tanyaDbg && tanyaDbg.cy <= 103 && !(globalThis as unknown as Record<string, boolean>).__tp) {
+        (globalThis as unknown as Record<string, boolean>).__tp = true;
+        const dbgResult = await adapter.step(1, [
+          { cmd: 'debug_terrain', cx: tanyaDbg.cx, cy: tanyaDbg.cy } as never,
+        ]);
+        console.log('TERRAIN DEBUG at (' + tanyaDbg.cx + ',' + tanyaDbg.cy + '):');
+        for (const r of dbgResult.results) {
+          console.log('  ' + (r as { error?: string }).error);
+        }
+      }
+
       if (lastState.state === 'won') {
         outcome = 'won';
         console.log(`[WIN] tick=${lastState.tick} iteration=${i}`);
