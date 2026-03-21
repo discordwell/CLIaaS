@@ -347,6 +347,7 @@ export class OracleStrategy {
   private scg11eaCoastRevealed = false;
   private scg11eaNavalUnlocked = false;
   private scg11eaMcvMoved = false;
+  private scg11eaAssaultStarted = false;
   private scg02eaAssaultIndex = 0;
   private baseBuildIndex = 0;
   private placementAttempts = 0;
@@ -448,10 +449,15 @@ export class OracleStrategy {
     // Compute revealed cells from friendly structures + units
     const revealed = new Set<string>();
     const addSight = (x: number, y: number, sight: number) => {
-      const s2 = sight * sight;
+      // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
+      const threshold = sight * 2;
       for (let dy = -sight; dy <= sight; dy++) {
         for (let dx = -sight; dx <= sight; dx++) {
-          if (dx * dx + dy * dy <= s2) {
+          const adx = Math.abs(dx);
+          const ady = Math.abs(dy);
+          const big = adx > ady ? adx : ady;
+          const small = adx > ady ? ady : adx;
+          if (big * 2 + small <= threshold) {
             revealed.add(`${x + dx},${y + dy}`);
           }
         }
@@ -1254,6 +1260,10 @@ export class OracleStrategy {
         this.scenario === 'SCG11EA'
           ? playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length
           : 0;
+      const scg11eaProcCount =
+        this.scenario === 'SCG11EA'
+          ? alliedStructures.filter((s) => s.t === 'PROC').length
+          : 0;
       const scg11eaDesiredShips =
         this.scenario === 'SCG11EA'
           ? this.scg11eaDesiredShipCount(scg11eaEnemySubCount)
@@ -1271,7 +1281,7 @@ export class OracleStrategy {
         !shipyardExists &&
         scg11eaEnemySubCount > 0 &&
         scg11eaFleetShort &&
-        alliedStructures.filter((s) => s.t === 'PROC').length >= 2 &&
+        scg11eaProcCount >= (scg11eaExistingFleet > 0 ? 1 : 2) &&
         scg11eaShipyardReady &&
         (scg11eaExistingFleet === 0 || state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE) &&
         (buildable.structures.includes('SYRD') || buildable.structures.includes('SPEN'))
@@ -1605,8 +1615,9 @@ export class OracleStrategy {
     const scg11eaArmorEmergency =
       this.scenario === 'SCG11EA' &&
       scg11eaSubHuntPhase &&
-      tankCount < SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR &&
-      scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER;
+      ((tankCount <= 1 && scg11eaGroundThreatCount >= 1) ||
+        (tankCount <= 2 && scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER + 1) ||
+        (tankCount <= 3 && scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER + 3));
     const scg11eaRiverOpen =
       this.scenario === 'SCG11EA' &&
       navalCount >= SCG11EA_FLEET_ONLINE_SHIPS &&
@@ -1634,6 +1645,13 @@ export class OracleStrategy {
       scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
       navalCount > 0 &&
       tankCount >= SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR;
+    const scg11eaFleetRecoveryHold =
+      this.scenario === 'SCG11EA' &&
+      scg11eaSubHuntPhase &&
+      scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
+      navalCount >= Math.max(2, SCG11EA_HUNT_MIN_SHIPS - 1) &&
+      tankCount >= SCG11EA_GROUND_DEFENSE_TRIGGER + 1 &&
+      scg11eaGroundThreatCount <= SCG11EA_GROUND_DEFENSE_TRIGGER + 1;
     const scg11eaShipyardPriority =
       this.scenario === 'SCG11EA' &&
       scg11eaShipyardInProgress &&
@@ -1641,6 +1659,7 @@ export class OracleStrategy {
     const skipTankProduction = this.scenario === 'SCG11EA'
       ? ((tankCount >= scg11eaTankTarget && !scg11eaArmorEmergency) ||
         (scg11eaVesselPriority && !scg11eaArmorEmergency) ||
+        (scg11eaFleetRecoveryHold && !scg11eaArmorEmergency) ||
         (scg11eaNavalEconomyFragile && !scg11eaArmorEmergency) ||
         (scg11eaShipyardPriority && !scg11eaArmorEmergency) ||
         (scg11eaFleetPriority && !scg11eaArmorEmergency))
@@ -2130,7 +2149,7 @@ export class OracleStrategy {
     const controlled = playerUnits.filter((u) => this.isCombatUnit(u));
 
     const injured = controlled.filter(
-      (u) => u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
+      (u) => !NAVAL_COMBAT_TYPES.has(u.t) && u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
     );
     if (injured.length > 0 && alliedStructures.length > 0) {
       const base = this.findBase(alliedStructures);
@@ -2144,25 +2163,27 @@ export class OracleStrategy {
     }
 
     const healthy = controlled.filter((u) => u.hp / u.mhp >= RETREAT_HP_FRACTION);
+    const landHealthy = healthy.filter((u) => !NAVAL_COMBAT_TYPES.has(u.t));
+    const landEnemies = state.enemies.filter((e) => !NAVAL_COMBAT_TYPES.has(e.t));
 
-    if (state.enemies.length > 0 && healthy.length > 0) {
+    if (landEnemies.length > 0 && landHealthy.length > 0) {
       // Estimate force ratio before committing to an attack
-      const friendlyStr = combatStrength(healthy);
-      const enemyStr = combatStrength(state.enemies);
+      const friendlyStr = combatStrength(landHealthy);
+      const enemyStr = combatStrength(landEnemies);
 
       const defenseOnly = OracleStrategy.DEFENSE_ONLY_MISSIONS.has(this.scenario);
       if (!defenseOnly && friendlyStr > enemyStr * 1.5) {
         // Strong enough — attack with micro-management
         const rallyPoint = alliedStructures.length > 0
           ? this.findBase(alliedStructures) as Point
-          : this.centroid(healthy);
-        const micro = this.microManage(healthy, state.enemies, rallyPoint);
+          : this.centroid(landHealthy);
+        const micro = this.microManage(landHealthy, landEnemies, rallyPoint);
         commands.push(...micro.commands);
-        reasons.push(`attack ${healthy.length} (${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)})`);
+        reasons.push(`attack ${landHealthy.length} (${friendlyStr.toFixed(0)} vs ${enemyStr.toFixed(0)})`);
         reasons.push(...micro.reasons);
       } else {
         // Outgunned — send one scout, keep rest defensive
-        const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[healthy.length - 1];
+        const scout = landHealthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? landHealthy[landHealthy.length - 1];
         if (scout && (this.ticksSinceLastEnemy > sec(8) || this.isIdle(scout))) {
           const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
           commands.push({
@@ -2177,10 +2198,10 @@ export class OracleStrategy {
       }
     }
 
-    if (state.enemies.length === 0 && healthy.length > 0) {
-      if (this.ticksSinceLastEnemy > sec(6) || healthy.some((u) => this.isIdle(u))) {
+    if (landEnemies.length === 0 && landHealthy.length > 0) {
+      if (this.ticksSinceLastEnemy > sec(6) || landHealthy.some((u) => this.isIdle(u))) {
         // Send one scout, not the whole army
-        const scout = healthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? healthy[0];
+        const scout = landHealthy.find((u) => u.t === 'E1' || u.t === 'E3') ?? landHealthy[0];
         if (scout) {
           const wp = EXPLORE_WAYPOINTS[this.exploreIndex % EXPLORE_WAYPOINTS.length];
           commands.push({
@@ -2914,17 +2935,23 @@ export class OracleStrategy {
             const tId = target.id;
             const tDist = this.distanceSq(tanya, target);
             if (tDist <= 49) {
-              // Within 7 cells — shoot it directly with Colt45/C4
+              // Within 7 cells — shoot it directly
               commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: tId });
               this.lastUnitTargets.delete(tanya.id);
               reasons.push(`Tanya SHOOT ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(1)}`);
-            } else if (!lastTarget || lastTarget.targetId !== tId) {
-              // Far away — walk toward it (C4 when adjacent)
-              commands.push({ cmd: 'attack', ids: [tanya.id], target: tId });
-              this.lastUnitTargets.set(tanya.id, { targetId: tId, cx: target.cx, cy: target.cy, tick: state.tick });
-              reasons.push(`Tanya → C4 ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)}`);
             } else {
-              reasons.push(`Tanya → ${target.t}(${target.cx},${target.cy}) d=${Math.sqrt(tDist).toFixed(0)} en route`);
+              // Move toward target using short hops. Go horizontal first
+              // to stay in safer corridors (tanks are all at x=28+).
+              const dx = target.cx - tanya.cx;
+              const dy = target.cy - tanya.cy;
+              let moveX = tanya.cx, moveY = tanya.cy;
+              if (Math.abs(dx) > 2) {
+                moveX = tanya.cx + Math.sign(dx) * Math.min(3, Math.abs(dx));
+              } else {
+                moveY = tanya.cy + Math.sign(dy) * Math.min(3, Math.abs(dy));
+              }
+              commands.push({ cmd: 'move', ids: [tanya.id], cx: moveX, cy: moveY });
+              reasons.push(`Tanya → ${target.t}(${target.cx},${target.cy}) via (${moveX},${moveY})`);
             }
           }
         }
@@ -3130,6 +3157,19 @@ export class OracleStrategy {
     );
     const baseGroundThreats = baseThreats.filter((e) => !AIRCRAFT_TYPES.has(e.t) && !NAVAL_COMBAT_TYPES.has(e.t));
     const enemyStructures = state.structures.filter((s) => !s.ally);
+    const baseAnchor = alliedStructures.length > 0
+      ? this.centroid(alliedStructures as unknown as RAEntity[])
+      : { cx: 25, cy: 90 };
+    const scg11eaHomeReserve =
+      Math.max(
+        shipyardOnline || enemySubs.length > SCG11EA_STATIC_DEFENSE_MAX_SUBS
+          ? SCG11EA_SUB_HUNT_TANK_FLOOR
+          : SCG11EA_ASSAULT_RETREAT_FLOOR,
+        Math.min(landArmor.length, baseGroundThreats.length + 2),
+      );
+    const assaultArmor = landArmor.slice()
+      .sort((a, b) => this.distanceSq(b, baseAnchor) - this.distanceSq(a, baseAnchor))
+      .slice(0, Math.max(0, landArmor.length - scg11eaHomeReserve));
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
       const huntPackSize =
@@ -3221,28 +3261,31 @@ export class OracleStrategy {
       (s) => s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58 && islandProductionTypes.has(s.t),
     );
     const islandBaseDestroyed = islandProduction.length === 0 && state.tick > 5000;
-    if (islandBaseDestroyed) {
+    const holdArmorForBase = baseThreats.length > 0;
+    if (holdArmorForBase) {
+      reasons.push(`hold armor (${baseThreats.length} base threats)`);
+    } else if (islandBaseDestroyed) {
       // Base destroyed — mop up remaining island structures, then tanks come home
       const remainingIsland = enemyStructures.filter(
         (s) => s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58,
       );
-      if (remainingIsland.length > 0 && landArmor.length >= 3) {
+      if (remainingIsland.length > 0 && assaultArmor.length >= 3) {
         // Mop up remaining buildings
         const target = remainingIsland[0];
-        const movers = landArmor.filter((u) => this.isIdle(u) || this.distanceSq(u, target) > 100);
+        const movers = assaultArmor.filter((u) => this.isIdle(u) || this.distanceSq(u, target) > 100);
         if (movers.length > 0) {
           commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: target.cx, cy: target.cy });
           for (const u of movers) this.recordMove(u.id, target.cx, target.cy);
           reasons.push(`mop up ${target.t} (${movers.length} → ${target.cx},${target.cy})`);
         }
-      } else if (landArmor.length > 0) {
+      } else if (assaultArmor.length > 0) {
         // Island fully cleared — continue to eastern structures or come home
         const easternTarget = enemyStructures.filter((s) => s.cx > 60);
         if (easternTarget.length > 0) {
           const target = easternTarget[0];
-          commands.push({ cmd: 'attack_move', ids: landArmor.map((u) => u.id), cx: target.cx, cy: target.cy });
-          for (const u of landArmor) this.recordMove(u.id, target.cx, target.cy);
-          reasons.push(`push east (${landArmor.length} → ${target.cx},${target.cy})`);
+          commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: target.cx, cy: target.cy });
+          for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`push east (${assaultArmor.length} → ${target.cx},${target.cy})`);
         }
       }
       reasons.push('island base DESTROYED');
@@ -3250,32 +3293,20 @@ export class OracleStrategy {
 
     // GROUND ASSAULT — mass 12 tanks, attack in waves, retreat if below 6.
     // No fleet gate. Stockpile then overwhelm — don't trickle reinforcements.
-    const armyCentroid = this.centroid(landArmor);
-    const armyIsNorth = armyCentroid.cy <= 75;
-    const retreatFloor = this.scenario === 'SCG11EA'
-      ? SCG11EA_ASSAULT_RETREAT_FLOOR
-      : 6;
-    const shouldRetreat = armyIsNorth && landArmor.length < retreatFloor;
-    if (shouldRetreat) {
-      const basePos = alliedStructures.length > 0
-        ? this.centroid(alliedStructures as unknown as RAEntity[])
-        : { cx: 25, cy: 90 };
-      const retreaters = landArmor.filter((u) => this.shouldMove(u, basePos.cx, basePos.cy));
-      if (retreaters.length > 0) {
-        commands.push({ cmd: 'move', ids: retreaters.map((u) => u.id), cx: basePos.cx, cy: basePos.cy });
-        for (const u of retreaters) this.recordMove(u.id, basePos.cx, basePos.cy);
-        reasons.push(`retreat (${retreaters.length} < ${retreatFloor}, restocking)`);
-      }
-    }
-    if (!islandBaseDestroyed && !shouldRetreat && landArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR) {
-      const armyCentroid = this.centroid(landArmor);
+    // No retreat — tanks fight to the death. Accept losses, kill buildings.
+    // Once the first wave launches (10+ tanks), ALL subsequent tanks join immediately.
+    // Continuous pressure: every new tank from WEAP marches north to join the fight.
+    const assaultActive = this.scg11eaAssaultStarted || assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
+    if (assaultActive) this.scg11eaAssaultStarted = true;
+    if (!holdArmorForBase && !islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
+      const armyCentroid = this.centroid(assaultArmor);
       const stagingPoint: Point = { cx: 45, cy: 65 };
       const atStaging = armyCentroid.cy <= 70;
       const retargetDue = (state.tick % 25) < 5;
 
       if (!atStaging) {
         // Phase 1: march north — 'move' bypasses dogs/infantry
-        const movers = retargetDue ? landArmor : landArmor.filter(
+        const movers = retargetDue ? assaultArmor : assaultArmor.filter(
           (u) => this.isIdle(u) || this.distanceSq(u, stagingPoint) > 225,
         );
         if (movers.length > 0) {
@@ -3288,7 +3319,7 @@ export class OracleStrategy {
         // Only focus-fire enemy units ACTIVELY ENGAGING (within 6 cells of our tanks)
         const engaging = state.enemies.filter(
           (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-            landArmor.some((u) => this.distanceSq(u, e) <= 36), // 6 cells
+            assaultArmor.some((u) => this.distanceSq(u, e) <= 36), // 6 cells
         );
         if (engaging.length > 0) {
           // Focus-fire the engaging threat
@@ -3296,7 +3327,7 @@ export class OracleStrategy {
             const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
             return p(a.t) - p(b.t);
           });
-          const movers = retargetDue ? landArmor : landArmor.filter(
+          const movers = retargetDue ? assaultArmor : assaultArmor.filter(
             (u) => this.isIdle(u) || this.distanceSq(u, engaging[0]) > 36,
           );
           if (movers.length > 0) {
@@ -3308,7 +3339,7 @@ export class OracleStrategy {
           // No engaging enemies — hit production buildings
           const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
           if (structTarget) {
-            const movers = retargetDue ? landArmor : landArmor.filter(
+            const movers = retargetDue ? assaultArmor : assaultArmor.filter(
               (u) => this.isIdle(u) || this.distanceSq(u, structTarget) > 100,
             );
             if (movers.length > 0) {
