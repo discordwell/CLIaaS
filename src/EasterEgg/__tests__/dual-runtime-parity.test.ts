@@ -64,9 +64,11 @@ describe.skipIf(!serverUp)('Dual Runtime Parity', () => {
       const tsJeep = singleTsUnit(handle.tsState, 'JEEP');
       const wasmJeep = singleWasmUnit(handle.wasmState, 'JEEP');
 
+      // 180 ticks gives the jeep enough time to reliably reach the target cell;
+      // 120 was borderline and caused flaky failures (jeep 2 cells short).
       const moved = await stepBoth(
         handle,
-        120,
+        180,
         [{ cmd: 'move', unitIds: [tsJeep.id], cx: 45, cy: 84 }],
         [{ cmd: 'move', ids: [wasmJeep.id], cx: 45, cy: 84 }],
       );

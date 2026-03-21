@@ -178,12 +178,24 @@ function getFirstSupportedTransportCapacity(team: TeamType): number {
   return 0;
 }
 
-function countSupportedInfantry(team: TeamType): number {
+/**
+ * Count non-transport, non-aircraft members — i.e. cargo candidates.
+ * C++ reinf.cpp:217-254: ALL non-transport ground units are loaded into the
+ * first transport, not just infantry.
+ */
+function countSupportedCargo(team: TeamType): number {
   let total = 0;
+  let foundTransport = false;
   for (const member of team.members) {
     const stats = UNIT_STATS[member.type];
-    if (stats?.isInfantry) {
-      total += member.count;
+    if (!stats) continue;
+    for (let i = 0; i < member.count; i++) {
+      const isTransport = (stats.passengers ?? 0) > 0;
+      if (isTransport && !foundTransport) {
+        foundTransport = true; // first transport is the carrier
+      } else if (!stats.isAircraft) {
+        total += 1;
+      }
     }
   }
   return total;
@@ -343,7 +355,7 @@ function auditSpawnCheck(
   }
 
   const expectedTransportCapacity = getFirstSupportedTransportCapacity(team);
-  const expectedLoadedPassengers = Math.min(countSupportedInfantry(team), expectedTransportCapacity);
+  const expectedLoadedPassengers = Math.min(countSupportedCargo(team), expectedTransportCapacity);
   if (loadedPassengers !== expectedLoadedPassengers) {
     issues.push({
       severity: 'error',

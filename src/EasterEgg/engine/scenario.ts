@@ -2372,7 +2372,9 @@ export function executeTriggerAction(
           // LSTs carry ALL unit types (infantry, tanks, MCVs), not just infantry.
           if (entity.isTransport && !transport) {
             transport = entity;
-          } else if (!stats.isAircraft) {
+          } else if (!stats.isAircraft && !entity.isTransport) {
+            // Additional transports beyond the first are NOT cargo — C++ reinf.cpp
+            // only loads non-transport ground units as passengers.
             cargo.push(entity);
           }
           result.spawned.push(entity);
