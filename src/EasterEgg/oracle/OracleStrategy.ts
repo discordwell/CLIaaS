@@ -3275,7 +3275,8 @@ export class OracleStrategy {
 
     const spy = playerUnits.find((u) => u.t === 'SPY');
     const tanya = playerUnits.find((u) => u.t === 'E7');
-    const chinook = playerUnits.find((u) => u.t === 'TRAN');
+    // Chinook may arrive as GoodGuy house (allied but not player-owned)
+    const chinook = state.units.find((u: { t: string }) => u.t === 'TRAN');
     const dogs = state.enemies.filter((e) => e.t === 'DOG');
 
     // ─── PHASE 1: Spy walks east to WEAP, avoiding dogs ──────────────
@@ -3414,32 +3415,30 @@ export class OracleStrategy {
         commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: shootableBarrel.id });
         reasons.push(`BOOM ${shootableBarrel.t}(${shootableBarrel.cx},${shootableBarrel.cy})`);
       } else if (remainingSams.length > 0) {
-        // Target nearest SAM. Walk to adjacent cell, then C4.
-        const sam = remainingSams.reduce((a, b) =>
-          this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b);
+        // Target SAMs in fixed order to prevent flip-flopping:
+        // 1. South pair (y≥100) — shoot from spawn, nearest first
+        // 2. West north SAM (17,94) — closest via corridor
+        // 3. East north SAM (28,94) — shoot from corridor position
+        const southSams = remainingSams.filter(s => s.cy >= 100)
+          .sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
+        const northSams = remainingSams.filter(s => s.cy < 100)
+          .sort((a, b) => a.cx - b.cx); // west first
+        const ordered = [...southSams, ...northSams];
+        const sam = ordered[0];
         const samDist = this.distanceSq(tanya, sam);
         if (samDist <= 4) {
           // Adjacent — plant C4 (attack_struct triggers C4 in harness)
           commands.push({ cmd: 'attack', ids: [tanya.id], target: sam.id });
           reasons.push(`C4 SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
-        } else if (samDist <= 50) {
-          // Within ~7 cells — shoot it down (faster than walking to C4 through buildings).
-          // shoot_struct applies weapon damage directly regardless of range.
+        } else if (samDist <= 81) {
+          // Within ~9 cells — shoot it down (faster than walking to C4 through buildings).
+          // Covers: south SAMs from spawn (d≈6.3), north SAMs from corridor (d≈5-8).
           commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: sam.id });
           reasons.push(`SHOOT SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
         } else {
-          // Route depends on which SAM we're targeting:
-          // West SAM (17,94): north through x=24 corridor
-          // East SAM (28,94): south then east then north (avoid tanks at x=28+ y=78-95)
-          const isEastSam = sam.cx >= 25;
-          const waypoints = isEastSam ? [
-            // East route: walk east at y=95 (Tanya is already at y=95 after west SAM)
-            // No tanks between x=19 and x=28 at y=95. Nearest tank: (28,79) = 15 cells north.
-            { cx: 24, cy: 95 },
-            { cx: 27, cy: 95 },
-            { cx: 28, cy: 94 },   // SAM(28,94) — adjacent
-          ] : [
-            // West route: north through rock debris corridor
+          // Walk north through corridor to reach north SAMs.
+          // Single route to y=97 area, then shoot from range.
+          const waypoints = [
             { cx: 24, cy: 104 },
             { cx: 24, cy: 103 },
             { cx: 24, cy: 102 },
@@ -3447,8 +3446,7 @@ export class OracleStrategy {
             { cx: 24, cy: 100 },
             { cx: 23, cy: 99 },
             { cx: 22, cy: 98 },
-            { cx: 20, cy: 96 },
-            { cx: 18, cy: 94 },
+            { cx: 21, cy: 97 },  // From here both north SAMs are within shoot range
           ];
           // Track waypoint progress with persistent index.
           // Reset when SAM target changes (different route).
@@ -3473,22 +3471,16 @@ export class OracleStrategy {
 
       if (remainingSams.length === 0) {
         this.scg05eaSamIndex = SCG05EA_SAM_TARGETS.length;
-        reasons.push('all SAMs destroyed');
-      }
-
-      return { commands, reason: reasons.join('; ') };
-    }
-
-    // ─── PHASE 3: Chinook evacuation ────────────────────────────────────
-    if (tanya && chinook && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length) {
-      if (this.isIdle(tanya)) {
-        commands.push({ cmd: 'enter', ids: [tanya.id], target: chinook.id });
-        reasons.push('Tanya → board chinook');
+        // Fall through to chinook phase below
       } else {
-        reasons.push('Tanya moving to chinook');
+        return { commands, reason: reasons.join('; ') };
       }
-      return { commands, reason: reasons.join('; ') };
     }
+
+    // ─── PHASE 3: After SAMs destroyed — proceed to base assault ───────
+    // Chinook arrives but Tanya boarding isn't needed for mission completion.
+    // The mission objective is to destroy all Soviet buildings and units.
+    // Fall through to Phase 4 (generic base building + destruction).
 
     // (LST-south phase removed — tny3 triggered via set_global after spy infiltration)
 

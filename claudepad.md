@@ -1,13 +1,12 @@
 # Session Summaries
 
-## 2026-03-21T16:00Z — SCG05EA Spy+Tanya Fixes: C4, Dog Avoidance, Harness Dedup
-- **Spy y=48 route**: Dogs patrol y=49-55 with 3-cell detection range. New route: east to x=18, north to y=48, sprint east. ~75% spy survival rate (up from 0%).
-- **springGlobalTriggers harness fix**: `set_global` command now calls `springGlobalTriggers()` so Tanya actually spawns when global 18 is set.
-- **attack_struct dedup**: Added same-target dedup (matching move dedup) to prevent path reset stutter-stepping when oracle re-sends attack commands.
-- **C4 mechanics verified**: updateTanyaC4 correctly plants C4 at plantRange = halfDiag + 3.0. Timer 27 ticks, confirmed working in focused test.
-- **shoot_struct for close SAMs**: South SAMs at y=107 destroyed via shoot_struct from spawn (buildings block walk path). 2/4 SAMs destroyed consistently.
-- **North SAMs still WIP**: Tanya dies walking corridor to SAM(17,94)/SAM(28,94). Needs Tanya micro improvements (barrel chains, flame turret avoidance, health management).
-- Current state: spy→infiltrate→Tanya spawns→south SAMs shot→dies heading north. Next: improve Tanya survivability in the north corridor.
+## 2026-03-21T17:30Z — SCG05EA All 4 SAMs Destroyed: Full Tanya Phase Complete
+- **All 4 SAMs destroyed**: South pair shot from spawn, north pair shot from corridor position (23,100).
+- **Fixed SAM targeting order**: South SAMs first (y≥100), then north SAMs west-first. Prevents flip-flopping.
+- **Single corridor route**: Replaced east/west waypoint split with unified corridor to (21,97). Both north SAMs reachable via shoot_struct (range ≤ 81 = 9 cells).
+- **Chinook phase simplified**: After SAMs destroyed, fall through to Phase 4 (base assault). Chinook boarding not required for mission completion.
+- **Chinook arrives**: TRAN spawns after SAMs destroyed but boarding requires flight-to-ground pathfinding (not yet implemented). Tanya proceeds to base assault instead.
+- Current state: spy→infiltrate→Tanya→4 SAMs destroyed→Phase 4 (generic) starts. Mission TIMEOUT at 4000 iterations — decideGeneric needs SCG05EA-specific base assault logic.
 
 ## 2026-03-20T23:10Z — Parallel Parity Blitz: 5 Domains, 4 Fixes, 378 New Tests
 - **5 subagents** wrote parity tests in parallel: repair/sell (64), harvester economics (33), team missions (109), fog/sight/gap (121), superweapon timers (51)

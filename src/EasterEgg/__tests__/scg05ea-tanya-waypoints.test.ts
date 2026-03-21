@@ -63,8 +63,8 @@ function tanyaSamState(
   });
 }
 
-// West route waypoints from the production code
-const WEST_WAYPOINTS = [
+// Corridor waypoints from the production code (single route for all north SAMs)
+const CORRIDOR_WAYPOINTS = [
   { cx: 24, cy: 104 },
   { cx: 24, cy: 103 },
   { cx: 24, cy: 102 },
@@ -72,8 +72,7 @@ const WEST_WAYPOINTS = [
   { cx: 24, cy: 100 },
   { cx: 23, cy: 99 },
   { cx: 22, cy: 98 },
-  { cx: 20, cy: 96 },
-  { cx: 18, cy: 94 },
+  { cx: 21, cy: 97 },
 ];
 
 describe('SCG05EA Tanya waypoint navigation', () => {
@@ -138,29 +137,24 @@ describe('SCG05EA Tanya waypoint navigation', () => {
     expect((strategy as any).scg05eaTanyaWpIdx).toBeGreaterThanOrEqual(5);
   });
 
-  it('falls back to SAM when all waypoints are exhausted', () => {
+  it('shoots SAM from corridor endpoint when in range', () => {
     const strategy = new OracleStrategy('SCG05EA');
     (strategy as any).scg05eaSpyInfiltrated = true;
 
-    // Walk Tanya through ALL west waypoints sequentially
+    // Walk Tanya through ALL corridor waypoints sequentially
     const allPositions = [
       { cx: 22, cy: 105 }, // start
-      ...WEST_WAYPOINTS,
+      ...CORRIDOR_WAYPOINTS,
     ];
 
     for (const pos of allPositions) {
-      // Use a far SAM to avoid the shoot branch (distSq > 49)
-      strategy.decide(tanyaSamState(pos.cx, pos.cy, 900, 10, 85));
+      strategy.decide(tanyaSamState(pos.cx, pos.cy, 900, 17, 94));
     }
 
-    // All waypoints exhausted, index should be past the end
-    expect((strategy as any).scg05eaTanyaWpIdx).toBe(WEST_WAYPOINTS.length);
-
-    // Next call should target SAM directly at (10,85)
-    const d = strategy.decide(tanyaSamState(18, 94, 900, 10, 85));
-    const move = d.commands[0] as { cx: number; cy: number };
-    expect(move.cx).toBe(10);
-    expect(move.cy).toBe(85);
+    // SAM comes into shoot range before all waypoints are exhausted.
+    // From wp6 (22,98), SAM(17,94) is distSq=41 ≤ 64 → shoot_struct triggers.
+    const d = strategy.decide(tanyaSamState(22, 98, 900, 17, 94));
+    expect(d.reason).toContain('SHOOT SAM');
   });
 
   it('resets waypoint index when SAM target changes', () => {
@@ -190,7 +184,7 @@ describe('SCG05EA Tanya waypoint navigation', () => {
     // Start from spawn, then visit each waypoint.
     const positions = [
       { cx: 22, cy: 105 }, // start
-      ...WEST_WAYPOINTS,
+      ...CORRIDOR_WAYPOINTS,
     ];
 
     const targets: Array<{ cx: number; cy: number }> = [];
@@ -216,8 +210,8 @@ describe('SCG05EA Tanya waypoint navigation', () => {
     }
   });
 
-  it('uses east route for east SAMs and west route for west SAMs', () => {
-    // West SAM (cx < 25): first waypoint should be (24,104) — north corridor
+  it('uses single corridor route for all north SAMs', () => {
+    // Both north SAMs use the same corridor waypoints starting at (24,104)
     const strategy1 = new OracleStrategy('SCG05EA');
     (strategy1 as any).scg05eaSpyInfiltrated = true;
     const dWest = strategy1.decide(tanyaSamState(22, 105, 900, 17, 94));
@@ -225,15 +219,12 @@ describe('SCG05EA Tanya waypoint navigation', () => {
     expect(moveWest.cx).toBe(24);
     expect(moveWest.cy).toBe(104);
 
-    // East SAM (cx >= 25): east route starts at (24,95) — east corridor
     const strategy2 = new OracleStrategy('SCG05EA');
     (strategy2 as any).scg05eaSpyInfiltrated = true;
     const dEast = strategy2.decide(tanyaSamState(22, 105, 901, 28, 94));
     const moveEast = dEast.commands[0] as { cx: number; cy: number };
-    // East route wp0 is (24,95) — different from west route wp0 (24,104)
+    // Same corridor route for both north SAMs
     expect(moveEast.cx).toBe(24);
-    expect(moveEast.cy).toBe(95);
-    // Confirms routes diverge based on SAM position
-    expect(moveEast.cy).not.toBe(moveWest.cy);
+    expect(moveEast.cy).toBe(104);
   });
 });
