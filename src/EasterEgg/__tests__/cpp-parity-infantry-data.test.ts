@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { UNIT_STATS, SUB_CELL_OFFSETS, type UnitStats } from '../engine/types';
+import { UNIT_STATS, SUB_CELL_OFFSETS, WEAPON_STATS, type UnitStats } from '../engine/types';
 
 // ============================================================================
 // Helper: verify a single infantry stat field
@@ -85,11 +85,9 @@ describe('cpp-parity: infantry stats vs rules.ini', () => {
     });
     it('RedEye is AA-only (isAntiGround=false in WEAPON_STATS)', () => {
       // If this fails, E3 would fire the AA missile at ground targets
-      const { WEAPON_STATS } = require('../engine/types');
       expect(WEAPON_STATS.RedEye.isAntiGround).toBe(false);
     });
     it('Dragon can target ground (no isAntiGround=false restriction)', () => {
-      const { WEAPON_STATS } = require('../engine/types');
       // Dragon should be able to hit ground targets (default isAntiGround is undefined/true)
       expect(WEAPON_STATS.Dragon.isAntiGround).not.toBe(false);
     });

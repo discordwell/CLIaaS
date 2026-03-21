@@ -290,7 +290,7 @@ describe('UNIT_STATS parity', () => {
       expect(u.crusher).toBe(true);
     });
 
-    it('MCV — strength=600, light armor, no weapon, crusher', () => {
+    it('MCV — strength=600, light armor, no weapon, NOT a crusher', () => {
       const u = UNIT_STATS.MCV;
       expect(u).toBeDefined();
       expect(u.strength).toBe(600);
@@ -299,7 +299,7 @@ describe('UNIT_STATS parity', () => {
       expect(u.sight).toBe(4);
       expect(u.rot).toBe(5);
       expect(u.primaryWeapon).toBeNull();
-      expect(u.crusher).toBe(true);
+      expect(u.crusher).toBeFalsy();
     });
 
     it('V2RL (V2 Rocket) — new entry', () => {

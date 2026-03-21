@@ -58,10 +58,10 @@ describe('Tanya C4 placement', () => {
 
   it('C4 timer on structure ticks down and destroys building', () => {
     const structure = makeStructure('WEAP', House.USSR);
-    structure.c4Timer = 45;
+    structure.c4Timer = 27; // C++ rules.ini C4Delay=0.03 min = 27 ticks
 
-    // Simulate 44 ticks — should still be alive
-    for (let i = 0; i < 44; i++) {
+    // Simulate 26 ticks — should still be alive
+    for (let i = 0; i < 26; i++) {
       if (structure.c4Timer && structure.c4Timer > 0) {
         structure.c4Timer--;
       }

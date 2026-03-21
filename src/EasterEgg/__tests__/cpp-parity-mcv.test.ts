@@ -109,8 +109,8 @@ describe('MCV stats verification (udata.cpp / rules.ini)', () => {
     expect(stats.isInfantry).toBe(false);
   });
 
-  it('crusher is true (can crush infantry despite being non-combat)', () => {
-    expect(stats.crusher).toBe(true);
+  it('crusher is falsy (MCV has no Tracked=yes in rules.ini)', () => {
+    expect(stats.crusher).toBeFalsy();
   });
 
   it('rot is 5 (ROT=5, standard vehicle rotation)', () => {
@@ -215,15 +215,15 @@ describe('MCV light armor vulnerability (combat.cpp warhead tables)', () => {
 });
 
 // ── Crusher (drive.cpp:Ok_To_Move) ────────────────────────────────────────────
-// C++ drive.cpp — MCV can crush infantry despite being unarmed
+// rules.ini [MCV] has no Tracked=yes — MCV is wheeled, cannot crush infantry
 
-describe('MCV crusher (drive.cpp:Ok_To_Move)', () => {
-  it('MCV kills enemy infantry when entering their cell', () => {
+describe('MCV non-crusher (rules.ini: no Tracked=yes)', () => {
+  it('MCV does NOT crush enemy infantry (no crusher flag)', () => {
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const mcv = entityAtCell(UnitType.V_MCV, House.Spain, 10, 10);
     const ctx = makeCombatCtx([infantry, mcv]);
     checkVehicleCrush(ctx, mcv);
-    expect(infantry.alive).toBe(false);
+    expect(infantry.alive).toBe(true);
   });
 
   it('MCV does NOT crush allied infantry', () => {
@@ -235,22 +235,14 @@ describe('MCV crusher (drive.cpp:Ok_To_Move)', () => {
     expect(infantry.hp).toBe(infantry.maxHp);
   });
 
-  it('MCV does NOT crush cross-allied infantry (Greece allied with Spain)', () => {
-    const infantry = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
-    const mcv = entityAtCell(UnitType.V_MCV, House.Greece, 10, 10);
-    const ctx = makeCombatCtx([infantry, mcv]);
-    checkVehicleCrush(ctx, mcv);
-    expect(infantry.alive).toBe(true);
-  });
-
-  it('MCV can crush multiple infantry in the same cell', () => {
+  it('MCV does NOT crush enemy infantry even when co-located', () => {
     const e1a = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const e1b = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const mcv = entityAtCell(UnitType.V_MCV, House.Spain, 10, 10);
     const ctx = makeCombatCtx([e1a, e1b, mcv]);
     checkVehicleCrush(ctx, mcv);
-    expect(e1a.alive).toBe(false);
-    expect(e1b.alive).toBe(false);
+    expect(e1a.alive).toBe(true);
+    expect(e1b.alive).toBe(true);
   });
 });
 
@@ -497,8 +489,8 @@ describe('MCV vs Harvester — same HP, different armor (rules.ini contrast)', (
     expect(UNIT_STATS.HARV.armor).toBe('heavy');
   });
 
-  it('both are crushers', () => {
-    expect(UNIT_STATS.MCV.crusher).toBe(true);
+  it('Harvester is a crusher but MCV is not (rules.ini parity)', () => {
+    expect(UNIT_STATS.MCV.crusher).toBeFalsy();
     expect(UNIT_STATS.HARV.crusher).toBe(true);
   });
 

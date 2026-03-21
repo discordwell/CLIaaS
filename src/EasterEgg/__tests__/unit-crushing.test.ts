@@ -21,9 +21,9 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 // === 1. Crusher stats are correctly set for heavy tracked vehicles ===
 describe('crusher flag on UNIT_STATS', () => {
   // C++ INI: Tracked=yes → crusher. APC/ARTY/V2RL/MNLY are tracked per rules.ini
-  const expectedCrushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'HARV', 'MCV', 'CTNK', 'TTNK', 'QTNK', 'APC', 'ARTY', 'V2RL', 'MNLY'];
+  const expectedCrushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'HARV', 'CTNK', 'TTNK', 'QTNK', 'APC', 'ARTY', 'V2RL', 'MNLY'];
   const expectedCrushersExpansion = ['STNK']; // Phase Transport has crusher per C++ parity
-  const expectedNonCrushers = ['JEEP', 'TRUK', 'DTRK', 'TRAN', 'LST'];
+  const expectedNonCrushers = ['JEEP', 'TRUK', 'DTRK', 'TRAN', 'LST', 'MCV'];
 
   it.each(expectedCrushers)('%s has crusher=true', (unitKey) => {
     expect(UNIT_STATS[unitKey].crusher).toBe(true);
@@ -293,14 +293,14 @@ describe('expansion vehicle crusher flags', () => {
   });
 });
 
-// === 12. Harvester and MCV are crushers (heavy tracked) ===
-describe('non-combat heavy vehicles are crushers', () => {
-  it('Harvester (HARV) is a crusher', () => {
+// === 12. Harvester is a crusher, MCV is not (rules.ini parity) ===
+describe('heavy vehicle crusher status', () => {
+  it('Harvester (HARV) is a crusher (Tracked=yes in rules.ini)', () => {
     expect(UNIT_STATS.HARV.crusher).toBe(true);
   });
 
-  it('MCV is a crusher', () => {
-    expect(UNIT_STATS.MCV.crusher).toBe(true);
+  it('MCV is NOT a crusher (no Tracked=yes in rules.ini)', () => {
+    expect(UNIT_STATS.MCV.crusher).toBeFalsy();
   });
 });
 

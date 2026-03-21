@@ -416,7 +416,7 @@ describe('Crusher mechanics — C++ drive.cpp Ok_To_Move', () => {
    */
 
   const expectedCrushers = [
-    '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV', 'MCV',
+    '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV',
     'V2RL', 'MNLY', 'MRJ',
   ];
 
@@ -428,8 +428,8 @@ describe('Crusher mechanics — C++ drive.cpp Ok_To_Move', () => {
     });
   }
 
-  // Non-tracked vehicles should NOT be crushers
-  const nonCrushers = ['JEEP', 'TRUK'];
+  // Non-tracked vehicles should NOT be crushers (no Tracked=yes in rules.ini)
+  const nonCrushers = ['JEEP', 'TRUK', 'MCV'];
   for (const unit of nonCrushers) {
     it(`${unit} should NOT be a crusher (not tracked)`, () => {
       const stats = UNIT_STATS[unit];

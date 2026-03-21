@@ -425,7 +425,7 @@ describe('Tanya (E7) — C4 placement state machine', () => {
     expect((struct as any).c4Timer).toBeUndefined();
   });
 
-  it('updateTanyaC4 plants C4 with 45-tick timer when adjacent', () => {
+  it('updateTanyaC4 plants C4 with 27-tick timer when adjacent', () => {
     const tanya = makeEntity(UnitType.I_TANYA, House.Spain);
     const struct = makeMockStructure('WEAP', House.USSR, 4, 4);
     // Place tanya at center of structure
@@ -435,7 +435,7 @@ describe('Tanya (E7) — C4 placement state machine', () => {
     tanya.targetStructure = struct;
     const ctx = makeMockSpecialUnitsContext();
     updateTanyaC4(ctx, tanya);
-    expect((struct as any).c4Timer).toBe(45);
+    expect((struct as any).c4Timer).toBe(27);
   });
 
   it('updateTanyaC4 sets attack animation when planting', () => {
@@ -1657,10 +1657,10 @@ describe('C4 Timer System — tickC4Timers', () => {
     expect((struct as any).c4Timer).toBe(5); // unchanged
   });
 
-  it('C4 timer countdown: 45 ticks -> 0 -> kaboom', () => {
-    // Simulate the c4Timer countdown
-    let c4Timer = 45;
-    for (let i = 0; i < 45; i++) {
+  it('C4 timer countdown: 27 ticks -> 0 -> kaboom', () => {
+    // Simulate the c4Timer countdown (C++ rules.ini C4Delay=0.03 min = 27 ticks)
+    let c4Timer = 27;
+    for (let i = 0; i < 27; i++) {
       c4Timer--;
     }
     expect(c4Timer).toBe(0);
@@ -1801,7 +1801,7 @@ describe('Game tick loop — special unit update integration', () => {
     tanya.targetStructure = struct;
     const ctx = makeMockSpecialUnitsContext();
     updateTanyaC4(ctx, tanya);
-    expect((struct as any).c4Timer).toBe(45);
+    expect((struct as any).c4Timer).toBe(27);
   });
 
   it('updateThief intercepts structure attack for thief', () => {

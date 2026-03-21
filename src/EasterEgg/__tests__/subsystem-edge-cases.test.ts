@@ -797,8 +797,8 @@ describe('sellStructureByIndex on walls vs non-walls', () => {
 
     sellStructureByIndex(ctx, 0);
 
-    // SBAG costs 25, 50% = 12 (floor)
-    expect(ctx.credits).toBe(1012);
+    // SBAG costs 25, C++ fixed-point 50% = (128*25+128)/256 = 13 (rounds half-up)
+    expect(ctx.credits).toBe(1013);
     expect(wall.alive).toBe(false);
   });
 

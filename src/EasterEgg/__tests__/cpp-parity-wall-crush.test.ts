@@ -218,7 +218,7 @@ describe('Crusher vehicle destroys crushable walls (unit.cpp:1859)', () => {
     expect(wall.alive).toBe(false);
   });
 
-  it('MCV (crusher=true) crushes BARB wall', () => {
+  it('MCV (no Tracked=yes in rules.ini) does NOT crush BARB wall', () => {
     const wall = makeWall('BARB', 10, 10);
     const mcv = entityAtCell(UnitType.V_MCV, House.Spain, 10, 10);
     const ctx = makeCombatCtx([wall], [mcv]);
@@ -226,8 +226,9 @@ describe('Crusher vehicle destroys crushable walls (unit.cpp:1859)', () => {
 
     checkWallCrush(ctx, mcv);
 
-    expect(ctx.map.getWallType(10, 10)).toBe('');
-    expect(wall.alive).toBe(false);
+    // MCV is wheeled (no crusher flag) — wall survives
+    expect(ctx.map.getWallType(10, 10)).toBe('BARB');
+    expect(wall.alive).toBe(true);
   });
 
   it('Harvester (crusher=true) crushes FENC wall', () => {

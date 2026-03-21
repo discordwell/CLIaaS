@@ -90,9 +90,9 @@ describe('CostBias interaction (techno.cpp:5747)', () => {
 
 // ============================================================
 // Section 2: C++ integer truncation — fixed(1,2) multiplication
-// In C++, `int * fixed` uses integer arithmetic.
-// fixed(1,2) = 0.5, so int * 0.5 truncates (floors).
-// TS uses Math.floor(cost * 0.5) which should match.
+// In C++, `int * fixed` uses: ((raw * intVal) + 128) / 256
+// fixed(1,2) raw = 128, so: ((128 * cost) + 128) / 256 — rounds half-up.
+// TS uses Math.trunc((128 * cost + 128) / 256) to match C++.
 // ============================================================
 describe('integer truncation parity — C++ int * fixed(1,2) (techno.cpp:5758)', () => {
   it('even cost: 300 * 0.5 = 150 (exact)', () => {
@@ -103,28 +103,28 @@ describe('integer truncation parity — C++ int * fixed(1,2) (techno.cpp:5758)',
     expect(sellRefund(2000, true)).toBe(1000);
   });
 
-  it('odd cost: 25 * 0.5 = 12 (C++ truncates 12.5 → 12)', () => {
-    expect(sellRefund(25, true)).toBe(12);
+  it('odd cost: 25 → C++ fixed-point rounds half-up: (128*25+128)/256 = 13', () => {
+    expect(sellRefund(25, true)).toBe(13);
   });
 
-  it('odd cost: 1 * 0.5 = 0 (C++ truncates 0.5 → 0)', () => {
-    expect(sellRefund(1, true)).toBe(0);
+  it('odd cost: 1 → C++ fixed-point rounds half-up: (128*1+128)/256 = 1', () => {
+    expect(sellRefund(1, true)).toBe(1);
   });
 
-  it('odd cost: 3 * 0.5 = 1 (C++ truncates 1.5 → 1)', () => {
-    expect(sellRefund(3, true)).toBe(1);
+  it('odd cost: 3 → C++ fixed-point rounds half-up: (128*3+128)/256 = 2', () => {
+    expect(sellRefund(3, true)).toBe(2);
   });
 
-  it('odd cost: 99 * 0.5 = 49 (C++ truncates 49.5 → 49)', () => {
-    expect(sellRefund(99, true)).toBe(49);
+  it('odd cost: 99 → C++ fixed-point rounds half-up: (128*99+128)/256 = 50', () => {
+    expect(sellRefund(99, true)).toBe(50);
   });
 
-  it('odd cost: 151 * 0.5 = 75 (C++ truncates 75.5 → 75)', () => {
-    expect(sellRefund(151, true)).toBe(75);
+  it('odd cost: 151 → C++ fixed-point rounds half-up: (128*151+128)/256 = 76', () => {
+    expect(sellRefund(151, true)).toBe(76);
   });
 
-  it('very large cost: 99999 * 0.5 = 49999 (C++ truncates 49999.5 → 49999)', () => {
-    expect(sellRefund(99999, true)).toBe(49999);
+  it('very large cost: 99999 → C++ fixed-point: (128*99999+128)/256 = 50000', () => {
+    expect(sellRefund(99999, true)).toBe(50000);
   });
 });
 
@@ -341,9 +341,9 @@ describe('structural invariants (techno.cpp:5743-5761)', () => {
     }
   });
 
-  it('human refund equals floor(cost/2) for all costs', () => {
+  it('human refund equals C++ fixed-point (128*cost+128)/256 for all costs', () => {
     for (let cost = 0; cost <= 5000; cost += 13) {
-      expect(sellRefund(cost, true), `cost=${cost}`).toBe(Math.floor(cost / 2));
+      expect(sellRefund(cost, true), `cost=${cost}`).toBe(Math.trunc((128 * cost + 128) / 256));
     }
   });
 
@@ -379,7 +379,7 @@ describe('RefundPercent = fixed(1,2) = 0.5 (rules.cpp:265)', () => {
   it('human refund ratio approaches 0.5 for large odd costs', () => {
     const cost = 99999;
     const refund = sellRefund(cost, true);
-    // floor(99999 * 0.5) = 49999, ratio = 49999/99999 ≈ 0.49999...
+    // C++ fixed-point: (128*99999+128)/256 = 50000, ratio = 50000/99999 ≈ 0.50000...
     expect(refund / cost).toBeCloseTo(0.5, 4);
   });
 });
@@ -392,8 +392,8 @@ describe('default isHuman parameter (backward compat)', () => {
   it('sellRefund(cost) without isHuman defaults to true (human = 50%)', () => {
     expect(sellRefund(2000)).toBe(1000);
     expect(sellRefund(300)).toBe(150);
-    expect(sellRefund(25)).toBe(12);
-    expect(sellRefund(1)).toBe(0);
+    expect(sellRefund(25)).toBe(13);  // C++ fixed-point rounds half-up for odd
+    expect(sellRefund(1)).toBe(1);    // C++ fixed-point: (128+128)/256 = 1
     expect(sellRefund(0)).toBe(0);
   });
 
@@ -413,8 +413,8 @@ describe('zero and boundary costs', () => {
     expect(sellRefund(0, false)).toBe(0);
   });
 
-  it('cost=1: human gets 0 (floor(0.5)=0), AI gets 1', () => {
-    expect(sellRefund(1, true)).toBe(0);
+  it('cost=1: human gets 1 (C++ fixed-point rounds half-up), AI gets 1', () => {
+    expect(sellRefund(1, true)).toBe(1);
     expect(sellRefund(1, false)).toBe(1);
   });
 

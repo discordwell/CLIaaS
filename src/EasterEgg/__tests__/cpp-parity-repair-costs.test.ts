@@ -296,10 +296,11 @@ describe('sellRefund — C++ parity (techno.cpp:5743-5761)', () => {
     expect(sellRefund(300, false)).toBe(300);
   });
 
-  it('odd cost: human gets floor of half', () => {
-    // cost=301: 301*0.5 = 150.5 → floor = 150
-    expect(sellRefund(301, true)).toBe(150);
-    expect(sellRefund(1, true)).toBe(0);
+  it('odd cost: human gets half rounded up (C++ fixed-point)', () => {
+    // cost=301: (128*301+128)/256 = 151
+    expect(sellRefund(301, true)).toBe(151);
+    // cost=1: (128*1+128)/256 = 1
+    expect(sellRefund(1, true)).toBe(1);
   });
 });
 

@@ -1057,7 +1057,8 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
         return;
       }
       // Enemy capture/damage (existing logic below)
-      if (s.hp / s.maxHp <= CONDITION_RED) {
+      // C++ uses fixed-point: fixed(hp, maxHp) <= fixed(ConditionRed)
+      if (Math.floor(s.hp * 256 / s.maxHp) <= Math.floor(CONDITION_RED * 256)) {
         // Capture: building at red health — convert to engineer's house
         // C++ building.cpp:2936: Captured() changes ownership but does NOT restore HP
         s.house = entity.house;

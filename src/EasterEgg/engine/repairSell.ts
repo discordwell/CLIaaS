@@ -77,7 +77,8 @@ export function unitRepairCostPerStep(buildCost: number, maxHp: number): number 
 /** Calculate sell refund for a structure — no health scaling.
  *  C++ techno.cpp:5743-5761 Refund_Amount: AI gets 100% refund, human gets Rule.RefundPercent (50%). */
 export function sellRefund(buildCost: number, isHuman = true): number {
-  return isHuman ? Math.floor(buildCost * 0.5) : buildCost;
+  // C++ fixed-point multiply: ((128 * cost) + 128) / 256 — rounds half-up
+  return isHuman ? Math.trunc((128 * buildCost + 128) / 256) : buildCost;
 }
 
 /** Emulate C++ 8.8 fixed-point power output: fixed(hp, maxHp) * ratedPower.

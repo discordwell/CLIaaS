@@ -597,9 +597,8 @@ describe('Engineer capture mechanics (infantry.cpp:598-637)', () => {
   });
 
   it('Engineer (E6) cost=500 (rules.ini Cost=500)', () => {
-    // Cost is in PRODUCTION_ITEMS, not directly in UNIT_STATS
-    // but some units have cost in stats
-    expect(UNIT_STATS.E6.cost).toBeUndefined(); // cost is in PRODUCTION_ITEMS
+    // Cost is now tracked directly on UNIT_STATS per C++ parity (rules.ini Cost=500)
+    expect(UNIT_STATS.E6.cost).toBe(500);
   });
 
   /**

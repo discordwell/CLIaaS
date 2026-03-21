@@ -460,6 +460,10 @@ export interface UnitStats {
   cost?: number;             // base credit cost (also in PRODUCTION_ITEMS)
   canSwim?: boolean;         // Agent 9: Tanya can traverse water tiles (C++ amphibious flag)
   isFraidyCat?: boolean;     // C++ idata.cpp IsFraidyCat — civilians/unarmed scatter more readily (rules.ini Fraidycat=yes)
+  hasC4?: boolean;           // C++ infantry.h IsC4 — can plant C4 charges on buildings (rules.ini C4=yes)
+  isInfiltrate?: boolean;    // C++ infantry.h IsInfiltrate — can enter/infiltrate enemy buildings (rules.ini Infiltrate=yes)
+  isCanine?: boolean;        // C++ infantry.h IsCanine — dog unit (rules.ini IsCanine=yes)
+  explodesOnDeath?: boolean; // C++ infantry.h Explodes — explodes on death (rules.ini Explodes=yes)
 }
 
 // Warhead types from RA RULES.INI
@@ -598,17 +602,17 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   APC:    { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'M60mg', passengers: 5, crusher: true },
   ARTY:   { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 5, rot: 2, isInfantry: false, primaryWeapon: '155mm', noMovingFire: true, scanDelay: 20, crusher: true },
   HARV:   { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
-  MCV:    { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
+  MCV:    { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null },
   TRUK:   { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 1 },
   // Infantry (C++ idata.cpp MPH values) — all infantry are crushable
-  E1:   { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'M1Carbine', crushable: true },
-  E2:   { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Grenade', crushable: true, owner: 'soviet' },
-  E3:   { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'RedEye', secondaryWeapon: 'Dragon', scanDelay: 20, crushable: true, owner: 'allied' },
-  E4:   { type: UnitType.I_E4, name: 'Flamethrower', image: 'e4', strength: 40, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Flamer', crushable: true },
-  E6:   { type: UnitType.I_E6, name: 'Engineer', image: 'e6', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  DOG:  { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 12, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw', scanDelay: 8, crushable: true },
-  SPY:  { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
-  MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Heal', crushable: true },
+  E1:   { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'M1Carbine', crushable: true, owner: 'both', cost: 100 },
+  E2:   { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Grenade', crushable: true, owner: 'soviet', cost: 160, explodesOnDeath: true },
+  E3:   { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'RedEye', secondaryWeapon: 'Dragon', scanDelay: 20, crushable: true, owner: 'allied', cost: 300 },
+  E4:   { type: UnitType.I_E4, name: 'Flamethrower', image: 'e4', strength: 40, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Flamer', crushable: true, owner: 'soviet', cost: 300, explodesOnDeath: true },
+  E6:   { type: UnitType.I_E6, name: 'Engineer', image: 'e6', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, owner: 'both', cost: 500, isInfiltrate: true },
+  DOG:  { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 12, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw', scanDelay: 8, crushable: true, owner: 'soviet', cost: 200, isCanine: true, guardRange: 7 },
+  SPY:  { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true },
+  MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Heal', crushable: true, owner: 'allied', cost: 800 },
   GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true },
   CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true },
   // Civilians — crushable, IsFraidyCat=true (C++ idata.cpp / rules.ini Fraidycat=yes)
@@ -624,8 +628,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   C10: { type: UnitType.I_C10, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, isFraidyCat: true },
   EINSTEIN: { type: UnitType.I_EINSTEIN, name: 'Prof. Einstein', image: 'einstein', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, isFraidyCat: true },
   // Counterstrike/Aftermath expansion infantry — SHOK is NOT crushable (C++ aftrmath.ini Crushable=no)
-  SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: false, noMovingFire: true },
-  MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true },
+  SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: false, noMovingFire: true, owner: 'soviet', cost: 900 },
+  MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true, owner: 'allied', cost: 950 },
   // Counterstrike/Aftermath expansion vehicles — crusher for tank variants
   STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true },
   CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true },
@@ -651,8 +655,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6 },
   HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 12 },
   // Tanya & Thief (new infantry)
-  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true },
-  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isFraidyCat: true },
+  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true },
+  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isFraidyCat: true, isInfiltrate: true },
   // Expansion vehicles (V2 Rocket, Minelayer)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true },
   MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800, maxAmmo: 5, crusher: true },

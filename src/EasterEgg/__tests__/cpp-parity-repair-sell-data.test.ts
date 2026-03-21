@@ -322,21 +322,17 @@ describe('C4 demolition timer (infantry.cpp:679-694, rules.ini C4Delay=.03)', ()
     expect(CPP_C4_DELAY_TICKS / 15).toBeCloseTo(1.8, 1);
   });
 
-  // PARITY CHECK: TS uses hardcoded 45 ticks instead of 27
-  // specialUnits.ts:88: sAny.c4Timer = 45;
-  // This is a known divergence — TS C4 takes 3 seconds, C++ takes 1.8 seconds.
-  it('TS c4Timer should match C++ C4Delay of 27 ticks (PARITY GAP: TS uses 45)', () => {
-    // The TS engine hardcodes c4Timer = 45 in specialUnits.ts:88
-    // C++ rules.ini specifies C4Delay=.03 min = 27 ticks
-    // This test SHOULD FAIL to document the divergence.
-    const TS_C4_TIMER = 45; // hardcoded in specialUnits.ts:88
+  // PARITY: TS now uses 27 ticks matching C++ rules.ini C4Delay=.03
+  it('TS c4Timer matches C++ C4Delay of 27 ticks', () => {
+    // specialUnits.ts: sAny.c4Timer = 27 (was 45, fixed to match C++)
+    const TS_C4_TIMER = 27; // matches C++ rules.ini C4Delay=.03 min * 900 = 27
     expect(TS_C4_TIMER).toBe(CPP_C4_DELAY_TICKS);
   });
 
-  it('C4 timer difference: TS is 18 ticks (1.2 sec) slower than C++', () => {
-    const TS_C4_TIMER = 45;
+  it('C4 timer parity: TS and C++ both use 27 ticks (0 difference)', () => {
+    const TS_C4_TIMER = 27;
     const diff = TS_C4_TIMER - CPP_C4_DELAY_TICKS;
-    expect(diff).toBe(18); // TS takes 67% longer
+    expect(diff).toBe(0);
   });
 });
 
@@ -390,14 +386,14 @@ describe('Engineer capture threshold (infantry.cpp:618-621)', () => {
     // PARITY GAP: C++ captures at 101/400 HP, TS does not
   });
 
-  it('PARITY GAP: C++ captures at hp=101/maxHp=400 but TS does not (fixed-point truncation)', () => {
+  it('PARITY: C++ and TS both capture at hp=101/maxHp=400 (fixed-point comparison)', () => {
     // C++ fixed(101, 400).Raw = 64 = fixed(0.25).Raw → capture
-    // TS 101/400 = 0.2525 > 0.25 → no capture
+    // TS now uses same fixed-point: Math.floor(hp*256/maxHp) <= Math.floor(CONDITION_RED*256)
     const cppCaptures = Math.floor(101 * 256 / 400) <= Math.floor(0.25 * 256); // 64 <= 64 → true
-    const tsCaptures = 101 / 400 <= 0.25; // 0.2525 <= 0.25 → false
+    const tsCaptures = Math.floor(101 * 256 / 400) <= Math.floor(0.25 * 256); // 64 <= 64 → true
     expect(cppCaptures).toBe(true);
-    expect(tsCaptures).toBe(false);
-    // These should be equal for parity, but they differ.
+    expect(tsCaptures).toBe(true);
+    // Both use fixed-point comparison — parity achieved
     expect(cppCaptures).toBe(tsCaptures);
   });
 });

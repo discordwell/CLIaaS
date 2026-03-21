@@ -450,6 +450,13 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
               }
             }
 
+            // Skip path reset if already attacking this same structure with a
+            // valid path — prevents stutter-stepping (same fix as move dedup).
+            if (e.mission === Mission.ATTACK && e.targetStructure === s
+                && e.path && e.path.length > 0) {
+              continue;
+            }
+
             e.mission = Mission.ATTACK;
             e.target = null;
             e.targetStructure = s;
@@ -632,6 +639,12 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           const globals = (game as unknown as { globals: Set<number> }).globals;
           if (globals && typeof c.data === 'number') {
             globals.add(c.data);
+            // C++ parity: setting a global must immediately spring dependent triggers
+            // (e.g., global 18 triggers tnya which spawns Tanya)
+            const springFn = (game as unknown as { springGlobalTriggers(idx: number): void }).springGlobalTriggers;
+            if (typeof springFn === 'function') {
+              springFn.call(game, c.data);
+            }
             results.push({ cmd: 'set_global', ok: true });
           } else {
             results.push({ cmd: 'set_global', ok: false, error: 'invalid global data' });

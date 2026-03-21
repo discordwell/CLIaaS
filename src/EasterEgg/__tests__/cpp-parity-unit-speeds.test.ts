@@ -403,18 +403,19 @@ describe('cpp-parity: aircraft speeds — high-speed units', () => {
     });
   }
 
-  it('all aircraft are faster than all ground vehicles', () => {
+  it('all aircraft are faster than all standard ground vehicles (excluding ants)', () => {
+    const ants = new Set(['ANT1', 'ANT2', 'ANT3']); // scenario-only units with abnormal speed
     const aircraftSpeeds = Object.values(UNIT_STATS)
       .filter(s => s.isAircraft)
       .map(s => s.speed);
-    const groundSpeeds = Object.values(UNIT_STATS)
-      .filter(s => !s.isAircraft && !s.isVessel && !s.isInfantry)
-      .map(s => s.speed);
+    const groundSpeeds = Object.entries(UNIT_STATS)
+      .filter(([k, s]) => !s.isAircraft && !s.isVessel && !s.isInfantry && !ants.has(k))
+      .map(([_, s]) => s.speed);
 
     const minAircraft = Math.min(...aircraftSpeeds);
     const maxGround = Math.max(...groundSpeeds);
 
-    // HIND/TRAN at 12 should be >= fastest ground unit (JEEP/APC/STNK at 10)
+    // HIND/TRAN at 12 should be >= fastest standard ground unit (JEEP/APC/STNK at 10)
     expect(minAircraft).toBeGreaterThanOrEqual(maxGround);
   });
 });

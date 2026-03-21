@@ -84,10 +84,12 @@ export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
   }
   entity.animState = AnimState.ATTACK;
   const sAny = s as MapStructure & { c4Timer?: number };
+  if (typeof console !== 'undefined') console.log(`[C4_DBG] tick=${ctx.tick} dist=${dist.toFixed(2)} plantRange=${plantRange.toFixed(2)} c4Timer=${sAny.c4Timer} struct=${s.type}(${s.cx},${s.cy}) hp=${s.hp}`);
   if (sAny.c4Timer === undefined || sAny.c4Timer <= 0) {
-    sAny.c4Timer = 45;
+    sAny.c4Timer = 27; // C++ rules.ini C4Delay=0.03 min * 900 ticks/min = 27 ticks
     ctx.playSoundAt('building_explode', scx, scy);
     ctx.evaMessages.push({ text: 'C4 PLANTED', tick: ctx.tick });
+    if (typeof console !== 'undefined') console.log(`[C4_DBG] PLANTED! timer=27`);
   }
   entity.targetStructure = null;
   entity.target = null;
@@ -103,6 +105,7 @@ export function tickC4Timers(ctx: SpecialUnitsContext): void {
     const sAny = s as MapStructure & { c4Timer?: number };
     if (sAny.c4Timer && sAny.c4Timer > 0) {
       sAny.c4Timer--;
+      if (typeof console !== 'undefined' && sAny.c4Timer <= 3) console.log(`[C4_TICK] tick=${ctx.tick} ${s.type}(${s.cx},${s.cy}) c4Timer=${sAny.c4Timer} hp=${s.hp}`);
       if (sAny.c4Timer <= 0) ctx.damageStructure(s, 9999);
     }
   }

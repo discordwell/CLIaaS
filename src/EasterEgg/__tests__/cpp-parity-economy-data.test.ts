@@ -238,9 +238,9 @@ describe('Sell refund — rules.ini RefundPercent=50%', () => {
     expect(sellRefund(1500, true)).toBe(750);
   });
 
-  it('refund rounds down (floor) for odd costs', () => {
-    // C++ integer multiplication: 2001 * 0.5 = 1000.5 → floor to 1000
-    expect(sellRefund(2001, true)).toBe(1000);
+  it('refund rounds half-up for odd costs (C++ fixed-point)', () => {
+    // C++ fixed-point: (128*2001+128)/256 = 1001
+    expect(sellRefund(2001, true)).toBe(1001);
   });
 });
 

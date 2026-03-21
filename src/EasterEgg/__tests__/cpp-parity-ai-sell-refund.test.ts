@@ -41,8 +41,8 @@ describe('C++ parity: AI sell refund (techno.cpp:5743-5761)', () => {
 
   describe('human player gets 50% refund (Rule.RefundPercent)', () => {
     for (const { type, cost } of STRUCTURES) {
-      it(`${type} (cost=${cost}): human refund = ${Math.floor(cost * 0.5)}`, () => {
-        expect(sellRefund(cost, true)).toBe(Math.floor(cost * 0.5));
+      it(`${type} (cost=${cost}): human refund = ${Math.trunc((128 * cost + 128) / 256)}`, () => {
+        expect(sellRefund(cost, true)).toBe(Math.trunc((128 * cost + 128) / 256));
       });
     }
   });
@@ -61,8 +61,8 @@ describe('C++ parity: AI sell refund (techno.cpp:5743-5761)', () => {
       expect(sellRefund(0, false)).toBe(0);
     });
 
-    it('odd cost (e.g. 25 for walls): human gets floor(25*0.5) = 12', () => {
-      expect(sellRefund(25, true)).toBe(12);
+    it('odd cost (e.g. 25 for walls): human gets (128*25+128)/256 = 13 (C++ rounds half-up)', () => {
+      expect(sellRefund(25, true)).toBe(13);
       expect(sellRefund(25, false)).toBe(25);
     });
 

@@ -702,9 +702,9 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
     expect(dog.mission).toBe(Mission.ATTACK);
   });
 
-  it('dog ignores spy beyond sight range (C++ parity: dog sight=5)', () => {
+  it('dog ignores spy beyond guard range (C++ parity: dog guardRange=7)', () => {
     const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
-    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 6 * CELL_SIZE, 100);
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 8 * CELL_SIZE, 100);
 
     const ctx = makeCtx({
       entities: [dog, spy],
@@ -715,7 +715,7 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
     dog.lastGuardScan = 0;
     updateGuard(ctx, dog);
 
-    // Beyond sight range — dog cannot detect
+    // Beyond guard range (7 cells) — dog cannot detect at 8 cells
     expect(dog.target).toBeNull();
   });
 

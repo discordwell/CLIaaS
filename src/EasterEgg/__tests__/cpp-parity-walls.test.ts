@@ -482,12 +482,12 @@ describe('Wall destruction blast — radial HE (non-barrel)', () => {
 
 describe('Wall sell refunds (50% of build cost)', () => {
 
-  it('SBAG sell refund = floor(25 * 0.5) = 12', () => {
-    expect(sellRefund(25)).toBe(12);
+  it('SBAG sell refund = (128*25+128)/256 = 13 (C++ fixed-point rounds half-up)', () => {
+    expect(sellRefund(25)).toBe(13);
   });
 
-  it('FENC sell refund = floor(25 * 0.5) = 12', () => {
-    expect(sellRefund(25)).toBe(12);
+  it('FENC sell refund = (128*25+128)/256 = 13 (C++ fixed-point rounds half-up)', () => {
+    expect(sellRefund(25)).toBe(13);
   });
 
   it('BRIK sell refund = floor(100 * 0.5) = 50', () => {

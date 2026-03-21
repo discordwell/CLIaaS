@@ -207,10 +207,10 @@ describe('sell refund uses Refund_Money — silo-bypass (building.cpp:3571)', ()
     expect(sellRefund(1500, false)).toBe(1500);
   });
 
-  it('sellRefund: odd cost rounds down for human', () => {
-    // C++ uses fixed-point multiplication which truncates
-    expect(sellRefund(101, true)).toBe(50); // floor(101*0.5) = 50
-    expect(sellRefund(1, true)).toBe(0);    // floor(1*0.5) = 0
+  it('sellRefund: odd cost rounds half-up for human (C++ fixed-point)', () => {
+    // C++ uses ((128 * cost + 128) / 256) which rounds half-up
+    expect(sellRefund(101, true)).toBe(51); // (128*101+128)/256 = 51
+    expect(sellRefund(1, true)).toBe(1);    // (128*1+128)/256 = 1
   });
 
   it('C++ sell refund bypasses silo cap — money preserved even at full capacity', () => {
