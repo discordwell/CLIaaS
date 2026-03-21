@@ -73,15 +73,15 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 
 // SCG11EA "Aftermath / Naval Supremacy": bootstrap the island, then hand off to navy fast.
 // Strategy:
-//   1. Get a stable local base: POWR + PROC + WEAP + second POWR.
+//   1. Get a stable local base: POWR + PROC + WEAP.
 //   2. Rush the east-coast shipyard as soon as that core is online.
 //   3. Keep enough tanks alive to hold the island while destroyers clear the river.
-//   4. Add the second refinery after the naval handoff instead of gating on it.
+//   4. Let the coast-chain POWRs provide the extra power instead of stalling on a local second POWR.
+//   5. Add the second refinery after the naval handoff instead of gating on it.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // First power
   { names: ['PROC'],         type_ids: [12] },              // First refinery
   { names: ['WEAP'],         type_ids: [2] },               // Tank line online
-  { names: ['POWR'],         type_ids: [17], maxCount: 2 }, // Power for SYRD + DDs
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Rush navy once the coast is mapped
   { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery after shipyard
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
@@ -96,8 +96,10 @@ const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Refill for the westward push once 
 const SCG11EA_POST_NAVAL_SUB_THRESHOLD = 1;
 const SCG11EA_FLEET_ONLINE_SHIPS = 3;
 const SCG11EA_HUNT_MIN_SHIPS = 3;
-const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 60, cy: 89 };
-const SCG11EA_FORWARD_MCV_TARGET: Point = { cx: 56, cy: 88 };
+const SCG11EA_SHIPYARD_SCOUT_TARGET: Point = { cx: 63, cy: 89 };
+const SCG11EA_HOME_MCV_TARGET: Point = { cx: 28, cy: 98 };
+const SCG11EA_FORWARD_MCV_TARGET: Point = { cx: 36, cy: 96 };
+const SCG11EA_FORWARD_FACT_TARGET: Point = { cx: 52, cy: 90 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
 const SCG11EA_ASSAULT_MIN_ARMOR = 10;      // Achievable with 2 WEAP + 3 HARV economy
@@ -348,7 +350,6 @@ export class OracleStrategy {
   private sawTanya = false;
   private sawRescue = false;
   private sawScg02eaConvoy = false;
-  private scg11eaCoastRevealed = false;
   private scg11eaNavalUnlocked = false;
   private scg11eaMcvMoved = false;
   private scg11eaAssaultStarted = false;
@@ -442,7 +443,7 @@ export class OracleStrategy {
         cells.push([cx + dx, cy + dy]);
       }
     }
-    for (const bib of getBibCells(structureType, cx, cy)) {
+    for (const bib of this.getOracleBibCells(structureType, cx, cy)) {
       cells.push([bib.cx, bib.cy]);
     }
 
@@ -456,48 +457,23 @@ export class OracleStrategy {
           occupied.add(`${s.cx + dx},${s.cy + dy}`);
         }
       }
-      for (const bib of getBibCells(s.t, s.cx, s.cy)) {
+      for (const bib of this.getOracleBibCells(s.t, s.cx, s.cy)) {
         occupied.add(`${bib.cx},${bib.cy}`);
       }
     }
 
-    // Compute revealed cells from friendly structures + units
-    const revealed = new Set<string>();
-    const addSight = (x: number, y: number, sight: number) => {
-      // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
-      const threshold = sight * 2;
-      for (let dy = -sight; dy <= sight; dy++) {
-        for (let dx = -sight; dx <= sight; dx++) {
-          const adx = Math.abs(dx);
-          const ady = Math.abs(dy);
-          const big = adx > ady ? adx : ady;
-          const small = adx > ady ? ady : adx;
-          if (big * 2 + small <= threshold) {
-            revealed.add(`${x + dx},${y + dy}`);
-          }
-        }
-      }
-    };
-    for (const s of state.structures) {
-      if (!s.ally) continue;
-      const sight = OracleStrategy.SIGHT[s.t] ?? 3;
-      const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
-      for (let dy = 0; dy < sh; dy++) {
-        for (let dx = 0; dx < sw; dx++) {
-          addSight(s.cx + dx, s.cy + dy, sight);
-        }
-      }
-    }
-    for (const u of state.units) {
-      if (!u.ally) continue;
-      const sight = OracleStrategy.SIGHT[u.t] ?? 3;
-      addSight(u.cx, u.cy, sight);
-    }
+    const revealed = this.getRevealedCells(state);
+
+    const requireReveal = !(
+      naval &&
+      this.scenario === 'SCG11EA' &&
+      (structureType === 'SYRD' || structureType === 'SPEN')
+    );
 
     for (const [x, y] of cells) {
       if (x < 0 || x >= 128 || y < 0 || y >= 128) return false;
       if (occupied.has(`${x},${y}`)) return false;
-      if (!revealed.has(`${x},${y}`)) return false;
+      if (requireReveal && !revealed.has(`${x},${y}`)) return false;
 
       const tt = terrain[y * 128 + x];
       if (naval) {
@@ -509,14 +485,15 @@ export class OracleStrategy {
       }
     }
 
+    const buildRadius = this.scenario === 'SCG11EA' ? SCG11EA_BUILD_RADIUS : 2;
     let adjacent = false;
     for (const s of state.structures) {
       if (!s.ally) continue;
       const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
-      const exL = s.cx - 2;
-      const exT = s.cy - 2;
-      const exR = s.cx + sw + 2;
-      const exB = s.cy + sh + 2;
+      const exL = s.cx - buildRadius;
+      const exT = s.cy - buildRadius;
+      const exR = s.cx + sw + buildRadius;
+      const exB = s.cy + sh + buildRadius;
       const nL = cx;
       const nT = cy;
       const nR = cx + fw;
@@ -594,17 +571,26 @@ export class OracleStrategy {
     return undefined;
   }
 
-  private scg11eaShipyardReady(alliedStructures: RAStructure[]): boolean {
+  private scg11eaLiveShipyardCell(state: RAGameState): Point | null {
+    return this.findBestChainPosition(
+      this.getScg11eaShipyardCandidates(),
+      state,
+      true,
+      'SYRD',
+    );
+  }
+
+  private scg11eaShipyardReady(state: RAGameState, alliedStructures: RAStructure[]): boolean {
     return alliedStructures.some(
       (s) => s.ally && (s.t === 'SYRD' || s.t === 'SPEN'),
-    ) || (this.scg11eaCoastRevealed && this.scg11eaCoastLinkReady(alliedStructures));
+    ) || this.scg11eaLiveShipyardCell(state) != null;
   }
 
   private scg11eaBootstrapReady(alliedStructures: RAStructure[]): boolean {
     const powerCount = alliedStructures.filter((s) => s.t === 'POWR' || s.t === 'APWR').length;
     const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
     const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
-    return powerCount >= 2 && procCount >= 1 && weapCount >= 1;
+    return powerCount >= 1 && procCount >= 1 && weapCount >= 1;
   }
 
   private scg11eaCoastLinkReady(alliedStructures: RAStructure[]): boolean {
@@ -612,7 +598,23 @@ export class OracleStrategy {
       this.scg11eaChainReachable(pos, alliedStructures, 'SYRD'));
   }
 
-  private getScg11eaBootstrapCandidates(buildingType: string, alliedStructures: RAStructure[]): Point[] {
+  private getScg11eaForwardConYard(alliedStructures: RAStructure[]): RAStructure | undefined {
+    return alliedStructures.find(
+      (s) => s.t === 'FACT' && s.cx >= 52 && s.cy >= 84 && s.cy <= 92,
+    );
+  }
+
+  private getScg11eaHomeConYard(alliedStructures: RAStructure[]): RAStructure | undefined {
+    return alliedStructures
+      .filter((s) => s.t === 'FACT')
+      .sort((a, b) => this.distanceSq(a, SCG11EA_HOME_MCV_TARGET) - this.distanceSq(b, SCG11EA_HOME_MCV_TARGET))[0];
+  }
+
+  private getScg11eaBootstrapCandidates(
+    buildingType: string,
+    alliedStructures: RAStructure[],
+    playerUnits: RAEntity[],
+  ): Point[] {
     const shipyardExists = alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
     if (shipyardExists) return [];
 
@@ -620,34 +622,42 @@ export class OracleStrategy {
     const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
     const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
     const normalizedType = buildingType === 'APWR' ? 'POWR' : buildingType;
+    const homeConYard = this.getScg11eaHomeConYard(alliedStructures);
+    const hx = homeConYard?.cx ?? SCG11EA_HOME_MCV_TARGET.cx;
+    const hy = homeConYard?.cy ?? (SCG11EA_HOME_MCV_TARGET.cy - 1);
+    const localGroundUnits = playerUnits.filter((u) =>
+      u.ally &&
+      !NAVAL_COMBAT_TYPES.has(u.t) &&
+      !AIRCRAFT_TYPES.has(u.t));
+    const terrain = this.getTerrain();
 
     let anchors: Point[] = [];
     if (normalizedType === 'POWR' && powerCount === 0) {
       anchors = [
-        { cx: 25, cy: 98 }, { cx: 25, cy: 96 }, { cx: 28, cy: 98 },
-        { cx: 28, cy: 96 }, { cx: 25, cy: 94 }, { cx: 22, cy: 98 },
+        { cx: hx - 3, cy: hy + 1 }, { cx: hx - 3, cy: hy - 1 }, { cx: hx - 4, cy: hy + 1 },
+        { cx: hx - 3, cy: hy + 3 }, { cx: hx + 3, cy: hy + 1 }, { cx: hx + 2, cy: hy + 3 },
       ];
     } else if (normalizedType === 'PROC' && procCount === 0) {
       anchors = [
-        { cx: 31, cy: 102 }, { cx: 32, cy: 102 }, { cx: 32, cy: 101 },
-        { cx: 31, cy: 101 }, { cx: 30, cy: 100 }, { cx: 29, cy: 100 },
-        { cx: 29, cy: 96 }, { cx: 28, cy: 96 },
+        { cx: hx + 3, cy: hy + 3 }, { cx: hx + 2, cy: hy + 4 }, { cx: hx + 1, cy: hy + 4 },
+        { cx: hx + 3, cy: hy + 2 }, { cx: hx, cy: hy + 4 }, { cx: hx - 1, cy: hy + 4 },
+        { cx: hx + 1, cy: hy - 3 }, { cx: hx, cy: hy - 3 }, { cx: hx - 1, cy: hy - 3 },
+        { cx: hx - 4, cy: hy - 2 }, { cx: hx - 4, cy: hy - 1 },
       ];
     } else if (normalizedType === 'WEAP' && weapCount === 0) {
       anchors = [
-        { cx: 25, cy: 92 }, { cx: 28, cy: 92 }, { cx: 25, cy: 94 },
-        { cx: 28, cy: 94 }, { cx: 24, cy: 92 }, { cx: 27, cy: 90 },
+        { cx: hx - 7, cy: hy - 4 }, { cx: hx - 6, cy: hy - 4 }, { cx: hx - 5, cy: hy - 4 },
+        { cx: hx - 4, cy: hy - 4 }, { cx: hx - 7, cy: hy + 3 }, { cx: hx - 6, cy: hy + 3 },
+        { cx: hx - 7, cy: hy + 4 }, { cx: hx - 6, cy: hy + 4 },
+        { cx: hx + 1, cy: hy - 3 }, { cx: hx, cy: hy - 3 }, { cx: hx - 1, cy: hy - 3 },
+        { cx: hx - 4, cy: hy - 2 }, { cx: hx - 4, cy: hy - 1 }, { cx: hx - 3, cy: hy - 3 },
+        { cx: hx + 3, cy: hy + 3 }, { cx: hx + 2, cy: hy + 4 },
       ];
     } else if (normalizedType === 'PROC' && procCount === 1) {
       anchors = [
-        { cx: 29, cy: 96 }, { cx: 30, cy: 96 }, { cx: 28, cy: 96 },
-        { cx: 31, cy: 96 }, { cx: 30, cy: 98 }, { cx: 31, cy: 98 },
-        { cx: 32, cy: 100 }, { cx: 32, cy: 101 },
-      ];
-    } else if (normalizedType === 'POWR' && powerCount === 1 && weapCount >= 1) {
-      anchors = [
-        { cx: 25, cy: 98 }, { cx: 25, cy: 92 }, { cx: 25, cy: 94 },
-        { cx: 28, cy: 94 }, { cx: 22, cy: 98 }, { cx: 22, cy: 94 },
+        { cx: hx + 4, cy: hy - 6 }, { cx: hx + 3, cy: hy - 6 }, { cx: hx + 5, cy: hy - 5 },
+        { cx: hx + 2, cy: hy - 6 }, { cx: hx + 4, cy: hy - 4 }, { cx: hx + 5, cy: hy - 4 },
+        { cx: hx + 4, cy: hy + 4 }, { cx: hx + 3, cy: hy + 4 },
       ];
     }
 
@@ -662,20 +672,97 @@ export class OracleStrategy {
       seen.add(key);
       candidates.push(anchor);
     }
-    return candidates;
+    const crowdPenalty = (pos: Point): number => localGroundUnits.reduce((penalty, unit) => {
+      const dist = this.distanceSq(unit, pos);
+      if (dist > 64) return penalty;
+      if (unit.t === 'MCV') return penalty + (dist <= 16 ? 800 : 120);
+      if (dist <= 4) return penalty + 500;
+      if (dist <= 16) return penalty + 60;
+      return penalty + 8;
+    }, 0);
+    const orePenalty = (pos: Point): number => {
+      if (normalizedType !== 'PROC' || procCount === 0) return 0;
+      return this.distanceSq(pos, SCG11EA_ORE_ANCHOR) / 8;
+    };
+    const sidePenalty = (pos: Point): number => {
+      if (!homeConYard) return 0;
+      if (normalizedType === 'PROC') {
+        return procCount === 0
+          ? (pos.cy < hy ? 1000 : 0)
+          : (pos.cy < hy ? 240 : 0);
+      }
+      if (normalizedType === 'WEAP') {
+        return pos.cy > hy ? 600 : 0;
+      }
+      return 0;
+    };
+    const templatePenalty = (pos: Point): number => {
+      if (!terrain) return 0;
+      let penalty = 0;
+      for (const cell of this.getPlacementCells(normalizedType, pos.cx, pos.cy)) {
+        if (cell.cx < 0 || cell.cx >= 128 || cell.cy < 0 || cell.cy >= 128) return 5000;
+        const tt = terrain[cell.cy * 128 + cell.cx];
+        if (tt === 0xFFFF) {
+          penalty += normalizedType === 'WEAP' || normalizedType === 'PROC' ? 350 : 40;
+        }
+      }
+      return penalty;
+    };
+    return candidates.sort((a, b) => {
+      const aScore = crowdPenalty(a) + orePenalty(a) + sidePenalty(a) + templatePenalty(a);
+      const bScore = crowdPenalty(b) + orePenalty(b) + sidePenalty(b) + templatePenalty(b);
+      if (aScore !== bScore) return aScore - bScore;
+      if (a.cy !== b.cy) return a.cy - b.cy;
+      return a.cx - b.cx;
+    });
   }
 
-  private getScg11eaPowerChainCandidates(): Point[] {
-    const xs: number[] = [];
-    for (let cx = 28; cx <= 60; cx++) xs.push(cx);
-    const candidates: Point[] = [];
-    for (const cx of xs) {
+  private getScg11eaPowerChainCandidates(alliedStructures: RAStructure[]): Point[] {
+    const forwardConYard = this.getScg11eaForwardConYard(alliedStructures);
+    if (forwardConYard) {
+      const firstStepX = Math.min(59, forwardConYard.cx + 4);
+      const firstStepCandidates = [
+        { cx: firstStepX, cy: 90 }, { cx: firstStepX, cy: 88 }, { cx: firstStepX, cy: 86 },
+        { cx: Math.min(60, firstStepX + 1), cy: 90 }, { cx: Math.min(60, firstStepX + 1), cy: 88 },
+      ];
+      return [
+        ...firstStepCandidates,
+        { cx: 59, cy: 90 }, { cx: 59, cy: 88 }, { cx: 58, cy: 90 }, { cx: 58, cy: 88 },
+        { cx: 60, cy: 90 }, { cx: 60, cy: 88 }, { cx: 59, cy: 86 }, { cx: 58, cy: 86 },
+        { cx: 57, cy: 90 }, { cx: 57, cy: 88 }, { cx: 56, cy: 90 },
+      ];
+    }
+
+    const candidates: Point[] = [
+      { cx: 30, cy: 94 },
+      { cx: 29, cy: 94 },
+      { cx: 28, cy: 94 },
+      { cx: 31, cy: 91 },
+      { cx: 30, cy: 91 },
+      { cx: 29, cy: 91 },
+      { cx: 28, cy: 91 },
+      { cx: 33, cy: 88 },
+      { cx: 32, cy: 88 },
+      { cx: 31, cy: 88 },
+      { cx: 34, cy: 88 },
+      { cx: 34, cy: 85 },
+      { cx: 33, cy: 85 },
+      { cx: 32, cy: 85 },
+      { cx: 34, cy: 82 },
+      { cx: 33, cy: 82 },
+      { cx: 32, cy: 82 },
+      { cx: 35, cy: 80 },
+      { cx: 36, cy: 80 },
+      { cx: 37, cy: 80 },
+    ];
+    for (let cx = 35; cx <= 60; cx++) {
       candidates.push(
-        { cx, cy: 92 },
-        { cx, cy: 90 },
-        { cx, cy: 94 },
-        { cx, cy: 88 },
+        { cx, cy: 82 },
+        { cx, cy: 84 },
         { cx, cy: 86 },
+        { cx, cy: 88 },
+        { cx, cy: 90 },
+        { cx, cy: 80 },
       );
     }
     return candidates;
@@ -689,10 +776,59 @@ export class OracleStrategy {
         cells.push({ cx: cx + dx, cy: cy + dy });
       }
     }
-    for (const bib of getBibCells(structureType, cx, cy)) {
+    for (const bib of this.getOracleBibCells(structureType, cx, cy)) {
       cells.push({ cx: bib.cx, cy: bib.cy });
     }
     return cells;
+  }
+
+  private getOracleBibCells(type: string, cx: number, cy: number): Point[] {
+    // SYRD/SPEN live on water. Treating them as bibbed makes the oracle reject
+    // valid east-coast shipyard cells because the fake bib row lands on shore.
+    if (type === 'SYRD' || type === 'SPEN') return [];
+    return getBibCells(type, cx, cy);
+  }
+
+  private getRevealedCells(state: RAGameState): Set<string> {
+    const revealed = new Set<string>();
+    const addSight = (x: number, y: number, sight: number) => {
+      // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
+      const threshold = sight * 2;
+      for (let dy = -sight; dy <= sight; dy++) {
+        for (let dx = -sight; dx <= sight; dx++) {
+          const adx = Math.abs(dx);
+          const ady = Math.abs(dy);
+          const big = adx > ady ? adx : ady;
+          const small = adx > ady ? ady : adx;
+          if (big * 2 + small <= threshold) {
+            revealed.add(`${x + dx},${y + dy}`);
+          }
+        }
+      }
+    };
+    for (const s of state.structures) {
+      if (!s.ally) continue;
+      const sight = OracleStrategy.SIGHT[s.t] ?? 3;
+      const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
+      for (let dy = 0; dy < sh; dy++) {
+        for (let dx = 0; dx < sw; dx++) {
+          addSight(s.cx + dx, s.cy + dy, sight);
+        }
+      }
+    }
+    for (const u of state.units) {
+      if (!u.ally) continue;
+      const sight = OracleStrategy.SIGHT[u.t] ?? 3;
+      addSight(u.cx, u.cy, sight);
+    }
+    return revealed;
+  }
+
+  private scg11eaShipyardFootprintRevealed(state: RAGameState): boolean {
+    const revealed = this.getRevealedCells(state);
+    return this.getScg11eaShipyardCandidates().some((pos) =>
+      this.getPlacementCells('SYRD', pos.cx, pos.cy).every((cell) =>
+        revealed.has(`${cell.cx},${cell.cy}`)));
   }
 
   private scg11eaChainFrontierX(alliedStructures: RAStructure[]): number {
@@ -702,7 +838,7 @@ export class OracleStrategy {
       const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
       const top = s.cy;
       const bottom = s.cy + 1;
-      if (bottom < 84 || top > 96) continue;
+      if (bottom < 78 || top > 96) continue;
       frontier = Math.max(frontier, s.cx + width - 1);
     }
     return frontier;
@@ -714,13 +850,14 @@ export class OracleStrategy {
     structureType = 'POWR',
   ): boolean {
     const [fw, fh] = STRUCTURE_SIZE[structureType] ?? [2, 2];
+    const buildRadius = SCG11EA_BUILD_RADIUS;
     return alliedStructures.some((s) => {
       if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') return false;
       const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
-      const exL = s.cx - 2;
-      const exT = s.cy - 2;
-      const exR = s.cx + sw + 2;
-      const exB = s.cy + sh + 2;
+      const exL = s.cx - buildRadius;
+      const exT = s.cy - buildRadius;
+      const exR = s.cx + sw + buildRadius;
+      const exB = s.cy + sh + buildRadius;
       const nL = pos.cx;
       const nT = pos.cy;
       const nR = pos.cx + fw;
@@ -818,7 +955,7 @@ export class OracleStrategy {
   }
 
   private scg11eaNavalPhaseStarted(alliedStructures: RAStructure[]): boolean {
-    return alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
+    return this.scg11eaNavalUnlocked || alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
   }
 
   private scg11eaDesiredShipCount(enemySubCount: number): number {
@@ -986,7 +1123,8 @@ export class OracleStrategy {
       const commands: Array<Record<string, unknown>> = [];
       const reasons: string[] = [];
       const combat = playerUnits.filter(
-        (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
+        (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
+          !this.isReservedScg11eaScout(u, alliedStructures),
       );
       const nearbyEnemies = state.enemies.filter(
         (e) => combat.some((u) => this.distanceSq(u, e) <= 225),
@@ -1044,7 +1182,8 @@ export class OracleStrategy {
       }
 
       const combatEscorts = playerUnits.filter(
-        (u) => u.id !== mcv.id && this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t),
+        (u) => u.id !== mcv.id && this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
+          !this.isReservedScg11eaScout(u, alliedStructures),
       );
 
       if (alliedStructures.length > 0) {
@@ -1312,11 +1451,11 @@ export class OracleStrategy {
           !this.scg11eaCoastLinkReady(alliedStructures);
         const scg11eaPowerChainCandidates =
           scg11eaExtendCoastChain
-            ? this.getScg11eaPowerChainCandidates()
+            ? this.getScg11eaPowerChainCandidates(alliedStructures)
             : [];
         const scg11eaBootstrapCandidates =
           this.scenario === 'SCG11EA'
-            ? this.getScg11eaBootstrapCandidates(buildingProduction.t, alliedStructures)
+            ? this.getScg11eaBootstrapCandidates(buildingProduction.t, alliedStructures, playerUnits)
             : [];
         const scg11eaShoreDefenseCandidates =
           this.scenario === 'SCG11EA' &&
@@ -1383,24 +1522,21 @@ export class OracleStrategy {
           });
         }
 
-        let placeCx: number, placeCy: number;
+        let placeCx = placeRef.cx;
+        let placeCy = placeRef.cy;
         // Find first offset that passes terrain/fog/occupancy validation
         let foundValid = false;
         if (scg11eaBootstrapCandidates.length > 0) {
-          let bootstrapTarget: Point | null = null;
           for (let i = 0; i < scg11eaBootstrapCandidates.length; i++) {
             const idx = (this.placementAttempts + i) % scg11eaBootstrapCandidates.length;
             const candidate = scg11eaBootstrapCandidates[idx];
             if (this.canPlaceBuilding(candidate.cx, candidate.cy, state, false, buildingProduction.t)) {
-              bootstrapTarget = candidate;
+              placeCx = candidate.cx;
+              placeCy = candidate.cy;
+              foundValid = true;
               break;
             }
           }
-          bootstrapTarget ??=
-            scg11eaBootstrapCandidates[this.placementAttempts % scg11eaBootstrapCandidates.length];
-          placeCx = bootstrapTarget.cx;
-          placeCy = bootstrapTarget.cy;
-          foundValid = true;
         } else if (scg11eaPowerChainCandidates.length > 0) {
           const reachableChain = scg11eaPowerChainCandidates.filter((pos) =>
             this.scg11eaChainReachable(pos, alliedStructures));
@@ -1408,17 +1544,43 @@ export class OracleStrategy {
             const frontierX = this.scg11eaChainFrontierX(alliedStructures);
             const unoccupiedReachable = reachableChain.filter((pos) =>
               !this.scg11eaChainOccupied(pos, alliedStructures));
-            const forwardReachable = unoccupiedReachable.filter((pos) =>
-              frontierX < 0 || pos.cx > frontierX);
-            const validChain = forwardReachable.filter((pos) =>
+            const chainOrder = new Map(
+              scg11eaPowerChainCandidates.map((pos, idx) => [`${pos.cx},${pos.cy}`, idx]),
+            );
+            const eastmostRightEdge = alliedStructures.reduce((best, s) => {
+              if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') return best;
+              const [sw] = STRUCTURE_SIZE[s.t] ?? [2, 2];
+              return Math.max(best, s.cx + sw - 1);
+            }, -1);
+            const staircaseEstablished =
+              eastmostRightEdge >= 38 ||
+              alliedStructures.filter((s) => s.ally && (s.t === 'POWR' || s.t === 'APWR')).length >= 6;
+            const frontierBandReachable = staircaseEstablished
+              ? unoccupiedReachable.filter((pos) => pos.cx >= eastmostRightEdge - 1)
+              : unoccupiedReachable;
+            const preferredReachable = frontierBandReachable.length > 0
+              ? frontierBandReachable
+              : unoccupiedReachable;
+            const chainProgress = (pos: Point) => {
+              const eastScore = pos.cx * 1000;
+              const shoreBias = staircaseEstablished
+                ? (200 - Math.abs(pos.cy - 80) * 40)
+                : (120 - Math.abs(pos.cy - 88) * 20);
+              const forwardBias = frontierX >= 0 && pos.cx > frontierX ? 50 : 0;
+              return eastScore + shoreBias + forwardBias;
+            };
+            const orderedReachable = preferredReachable.sort((a, b) => {
+              const progressDelta = chainProgress(b) - chainProgress(a);
+              if (progressDelta !== 0) return progressDelta;
+              return (chainOrder.get(`${a.cx},${a.cy}`) ?? 9999) - (chainOrder.get(`${b.cx},${b.cy}`) ?? 9999);
+            });
+            const validChain = orderedReachable.filter((pos) =>
               this.canPlaceBuilding(pos.cx, pos.cy, state, false, buildingProduction.t));
-            const chainTarget = validChain[0] ??
-              forwardReachable[0] ??
-              unoccupiedReachable[0] ??
-              reachableChain[0];
-            placeCx = chainTarget.cx;
-            placeCy = chainTarget.cy;
-            foundValid = true;
+            if (validChain.length > 0) {
+              placeCx = validChain[0].cx;
+              placeCy = validChain[0].cy;
+              foundValid = true;
+            }
           }
         } else if (scg11eaShoreDefenseCandidates.length > 0) {
           const validDefenseCell = this.findBestChainPosition(scg11eaShoreDefenseCandidates, state, false, buildingProduction.t);
@@ -1442,7 +1604,9 @@ export class OracleStrategy {
             }
           }
         }
-        if (!foundValid) {
+        const scg11eaStrictChainHold =
+          this.scenario === 'SCG11EA' && scg11eaPowerChainCandidates.length > 0;
+        if (!foundValid && !scg11eaStrictChainHold) {
           for (let i = 0; i < offsets.length; i++) {
             const idx = (this.placementAttempts + i) % offsets.length;
             const cx = placeRef.cx + offsets[idx].cx;
@@ -1455,7 +1619,7 @@ export class OracleStrategy {
             }
           }
         }
-        if (!foundValid) {
+        if (!foundValid && !scg11eaStrictChainHold) {
           if (this.placementAttempts < offsets.length) {
             const offset = offsets[this.placementAttempts % offsets.length];
             placeCx = placeRef.cx + offset.cx;
@@ -1470,57 +1634,61 @@ export class OracleStrategy {
             placeCy = Math.round(placeRef.cy + Math.sin(angle) * dist);
           }
         }
-        const scg11eaLandChainPlacement =
-          this.scenario === 'SCG11EA' &&
-          (
-            scg11eaBootstrapCandidates.length > 0 ||
-            scg11eaPowerChainCandidates.length > 0 ||
-            scg11eaShoreDefenseCandidates.length > 0
-          );
-        const scg11eaPlacementCells = scg11eaLandChainPlacement
-          ? this.getPlacementCells(buildingProduction.t, placeCx, placeCy)
-          : [];
-        const scg11eaPlacementCellSet = new Set(
-          scg11eaPlacementCells.map((cell) => `${cell.cx},${cell.cy}`),
-        );
-        const scg11eaPlacementBlockers = scg11eaLandChainPlacement
-          ? playerUnits.filter((u) =>
-            !NAVAL_COMBAT_TYPES.has(u.t) &&
-            !AIRCRAFT_TYPES.has(u.t) &&
-            scg11eaPlacementCellSet.has(`${u.cx},${u.cy}`))
-          : [];
-
-        if (scg11eaPlacementBlockers.length > 0) {
-          const clearTarget = scg11eaPowerChainCandidates.length > 0
-            ? { cx: Math.max(0, placeCx - 5), cy: Math.min(127, placeCy + 6) }
-            : scg11eaBootstrapCandidates.length > 0
-            ? { cx: Math.max(0, placeCx - 6), cy: Math.min(127, placeCy + 6) }
-            : { cx: 50, cy: 88 };
-          const movers = scg11eaPlacementBlockers.filter((u) =>
-            this.shouldMove(u, clearTarget.cx, clearTarget.cy));
-          if (movers.length > 0) {
-            commands.push({
-              cmd: 'move',
-              ids: movers.map((u) => u.id),
-              cx: clearTarget.cx,
-              cy: clearTarget.cy,
-            });
-            for (const unit of movers) this.recordMove(unit.id, clearTarget.cx, clearTarget.cy);
-          }
-          reasons.push(`clear ${buildingProduction.t} footprint (${scg11eaPlacementBlockers.length})`);
+        const holdScg11eaPlacement = !foundValid && scg11eaStrictChainHold;
+        if (holdScg11eaPlacement) {
+          reasons.push(`hold ${buildingProduction.t} for east coast link`);
         } else {
-          commands.push({
-            cmd: 'place',
-            rtti: RTTI_BUILDINGTYPE,
-            cx: placeCx,
-            cy: placeCy,
-          });
-          // Cycle through placement offsets on repeated attempts
-          if (state.tick - this.lastPlacementTick > sec(4)) {
-            this.placementAttempts++;
-            this.lastPlacementTick = state.tick;
+          const scg11eaLandChainPlacement =
+            this.scenario === 'SCG11EA' &&
+            (
+              scg11eaBootstrapCandidates.length > 0 ||
+              scg11eaPowerChainCandidates.length > 0 ||
+              scg11eaShoreDefenseCandidates.length > 0
+            );
+          const scg11eaPlacementCells = scg11eaLandChainPlacement
+            ? this.getPlacementCells(buildingProduction.t, placeCx, placeCy)
+            : [];
+          const scg11eaPlacementCellSet = new Set(
+            scg11eaPlacementCells.map((cell) => `${cell.cx},${cell.cy}`),
+          );
+          const scg11eaPlacementBlockers = scg11eaLandChainPlacement
+            ? playerUnits.filter((u) =>
+              !NAVAL_COMBAT_TYPES.has(u.t) &&
+              !AIRCRAFT_TYPES.has(u.t) &&
+              scg11eaPlacementCellSet.has(`${u.cx},${u.cy}`))
+            : [];
+
+          if (scg11eaPlacementBlockers.length > 0) {
+            const clearTarget = scg11eaPowerChainCandidates.length > 0
+              ? { cx: Math.max(0, placeCx - 8), cy: Math.min(127, placeCy + 10) }
+              : scg11eaBootstrapCandidates.length > 0
+              ? { cx: Math.max(0, placeCx - 6), cy: Math.min(127, placeCy + 6) }
+              : { cx: 50, cy: 88 };
+            const movers = scg11eaPlacementBlockers;
+            if (movers.length > 0) {
+              commands.push({
+                cmd: 'move',
+                ids: movers.map((u) => u.id),
+                cx: clearTarget.cx,
+                cy: clearTarget.cy,
+              });
+              for (const unit of movers) this.recordMove(unit.id, clearTarget.cx, clearTarget.cy);
+            }
+            reasons.push(`clear ${buildingProduction.t} footprint (${scg11eaPlacementBlockers.length})`);
+          } else {
+            commands.push({
+              cmd: 'place',
+              rtti: RTTI_BUILDINGTYPE,
+              cx: placeCx,
+              cy: placeCy,
+            });
+            // Cycle through placement offsets on repeated attempts
+            if (state.tick - this.lastPlacementTick > sec(4)) {
+              this.placementAttempts++;
+              this.lastPlacementTick = state.tick;
+            }
+            reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
           }
-          reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
         }
       }
     } else if ((!buildingProduction || suppressScg11eaLeftoverBuild) && buildable) {
@@ -1530,7 +1698,7 @@ export class OracleStrategy {
 
       const shipyardExists = existingShipyard;
       const scg11eaShipyardReady =
-        this.scenario === 'SCG11EA' && this.scg11eaShipyardReady(alliedStructures);
+        this.scenario === 'SCG11EA' && this.scg11eaShipyardReady(state, alliedStructures);
       const scg11eaBootstrapReady =
         this.scenario === 'SCG11EA' && this.scg11eaBootstrapReady(alliedStructures);
       const scg11eaExistingFleet =
@@ -2213,7 +2381,8 @@ export class OracleStrategy {
     }
     const combatUnits = playerUnits.filter(
       (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
-        !(this.scenario === 'SCG11EA' && NAVAL_COMBAT_TYPES.has(u.t)),
+        !(this.scenario === 'SCG11EA' && NAVAL_COMBAT_TYPES.has(u.t)) &&
+        !this.isReservedScg11eaScout(u, alliedStructures),
     );
     const scg11eaNavalPhase = this.scenario === 'SCG11EA' && this.scg11eaNavalPhaseStarted(alliedStructures);
     const scg11eaHoldIsland =
@@ -2403,7 +2572,8 @@ export class OracleStrategy {
   ): OracleDecision {
     const commands: Array<Record<string, unknown>> = [];
     const reasons: string[] = [];
-    const controlled = playerUnits.filter((u) => this.isCombatUnit(u));
+    const controlled = playerUnits.filter((u) =>
+      this.isCombatUnit(u) && !this.isReservedScg11eaScout(u, alliedStructures));
 
     const injured = controlled.filter(
       (u) => !NAVAL_COMBAT_TYPES.has(u.t) && u.hp / u.mhp < RETREAT_HP_FRACTION && u.hp > 0,
@@ -3142,13 +3312,20 @@ export class OracleStrategy {
           // Template map: x=23-24 has ROCK_DEBRIS (passable) at y=102-104,
           // then CLEAR cells at y=100-97. Water (59-96) blocks x=19-22.
           // Route: east to x=24, north through clear corridor, then west to SAM.
+          // 1-cell hops through verified passable terrain (template-by-template)
           const waypoints = [
-            { cx: 24, cy: 104 }, // east through rock debris gap
-            { cx: 23, cy: 100 }, // north through clear cells
-            { cx: 22, cy: 97 },  // continue north
-            { cx: 18, cy: 94 },  // west to SAM area
+            { cx: 24, cy: 104 }, // template 97=ROCK_DEBRIS
+            { cx: 24, cy: 103 }, // template 104=ROCK_DEBRIS
+            { cx: 24, cy: 102 }, // template 255=CLEAR
+            { cx: 24, cy: 101 }, // template 255=CLEAR
+            { cx: 24, cy: 100 }, // template 255=CLEAR
+            { cx: 23, cy: 99 },  // template 255=CLEAR
+            { cx: 22, cy: 98 },
+            { cx: 20, cy: 96 },
+            { cx: 18, cy: 94 },  // SAM area
           ];
-          const wp = waypoints.find(w => this.distanceSq(tanya, w) > 4) ?? waypoints[waypoints.length - 1];
+          // Pick the FIRST waypoint we haven't reached yet (distSq > 1)
+          const wp = waypoints.find(w => this.distanceSq(tanya, w) > 1) ?? waypoints[waypoints.length - 1];
           commands.push({ cmd: 'move', ids: [tanya.id], cx: wp.cx, cy: wp.cy });
           reasons.push(`→ SAM(${sam.cx},${sam.cy}) via (${wp.cx},${wp.cy}) [${remainingSams.length} left]`);
         }
@@ -3243,52 +3420,64 @@ export class OracleStrategy {
 
     const playerUnits = this.playerOwnedUnits(state);
     const alliedStructures = state.structures.filter((s) => s.ally);
+    const currentFleet = playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t));
+    if (currentFleet.length > 0) this.scg11eaNavalUnlocked = true;
+    const establishedBase =
+      alliedStructures.length >= 3 ||
+      alliedStructures.some((s) => s.t === 'WEAP' || s.t === 'PROC');
 
-    // Save MCV2 for a forward east-shore deploy. Once the home base is online,
-    // a second FACT near x=56 gives the shipyard a stable build radius without
-    // relying on a fragile full-width power chain.
-    const mcvs = playerUnits.filter((u) => u.t === 'MCV');
-    const conYard = alliedStructures.find((s) => s.t === 'FACT');
-    const forwardConYard = alliedStructures.find(
-      (s) => s.t === 'FACT' && s.cx >= 52 && s.cy >= 84 && s.cy <= 92,
-    );
-    const landArmorCount = playerUnits.filter((u) =>
-      (u.t.includes('TNK') || u.t === 'ARTY') && u.hp > 0).length;
-    if (conYard && !forwardConYard && mcvs.length > 0) {
-      const spareMcv = mcvs[0];
-      const safeSpot: Point = { cx: conYard.cx, cy: conYard.cy + 3 };
-      const shouldForwardDeploy =
-        this.scg11eaBootstrapReady(alliedStructures) &&
-        (landArmorCount >= SCG11EA_SHIPYARD_TANK_FLOOR || state.tick >= sec(250));
-      const mcvTarget = shouldForwardDeploy ? SCG11EA_FORWARD_MCV_TARGET : safeSpot;
-      if (this.distanceSq(spareMcv, mcvTarget) <= 9) {
-        if (shouldForwardDeploy && this.isIdle(spareMcv) && spareMcv.m !== MISSION_UNLOAD) {
-          commands.push({ cmd: 'deploy', ids: [spareMcv.id] });
-          reasons.push(`deploy MCV2 east (${mcvTarget.cx},${mcvTarget.cy})`);
+    // Stabilize the opening: always use the eastern MCV for the home FACT.
+    // Letting the generic base builder deploy whichever MCV idles first creates
+    // wildly different home-base locations and breaks the bootstrap anchors.
+    const openingConYard = alliedStructures.find((s) => s.t === 'FACT');
+    if (!openingConYard) {
+      const openingMcvs = playerUnits
+        .filter((u) => u.t === 'MCV')
+        .sort((a, b) => {
+          if (a.cx !== b.cx) return b.cx - a.cx;
+          return a.cy - b.cy;
+        });
+      const homeMcv = openingMcvs[0];
+      if (homeMcv) {
+        const recoveryMode = establishedBase;
+        const deployTarget = recoveryMode ? SCG11EA_FORWARD_MCV_TARGET : SCG11EA_HOME_MCV_TARGET;
+        const deployThreshold = recoveryMode ? 16 : 4;
+        if (this.distanceSq(homeMcv, deployTarget) <= deployThreshold) {
+          if (homeMcv.m === MISSION_UNLOAD) {
+            reasons.push(recoveryMode ? 'recovery MCV deploying' : 'home MCV deploying');
+          } else {
+            commands.push({ cmd: 'deploy', ids: [homeMcv.id] });
+            reasons.push(
+              recoveryMode
+                ? `deploy recovery MCV (${deployTarget.cx},${deployTarget.cy})`
+                : `deploy home MCV (${deployTarget.cx},${deployTarget.cy})`,
+            );
+          }
+        } else if (this.shouldMove(homeMcv, deployTarget.cx, deployTarget.cy)) {
+          commands.push({ cmd: 'move', ids: [homeMcv.id], cx: deployTarget.cx, cy: deployTarget.cy });
+          this.recordMove(homeMcv.id, deployTarget.cx, deployTarget.cy);
+          reasons.push(
+            recoveryMode
+              ? `recovery MCV → (${deployTarget.cx},${deployTarget.cy})`
+              : `home MCV → (${deployTarget.cx},${deployTarget.cy})`,
+          );
+        } else {
+          reasons.push(recoveryMode ? 'recovery MCV staging' : 'home MCV staging');
         }
-      } else if (this.shouldMove(spareMcv, mcvTarget.cx, mcvTarget.cy)) {
-        commands.push({ cmd: 'move', ids: [spareMcv.id], cx: mcvTarget.cx, cy: mcvTarget.cy });
-        this.recordMove(spareMcv.id, mcvTarget.cx, mcvTarget.cy);
-        reasons.push(shouldForwardDeploy ? 'MCV2 east shore' : 'MCV2 safe near base');
+      }
+      if (!establishedBase && !this.scg11eaNavalPhaseStarted(alliedStructures)) {
+        return { commands, reason: reasons.join('; ') || 'home MCV staging' };
       }
     }
+
     const coastScoutTarget = SCG11EA_SHIPYARD_SCOUT_TARGET;
-    const coastMappedNow = playerUnits.some(
-      (u) =>
-        !NAVAL_COMBAT_TYPES.has(u.t) &&
-        u.t !== 'HARV' &&
-        u.t !== 'MCV' &&
-        this.distanceSq(u, coastScoutTarget) <= 36,
-    );
-    if (coastMappedNow) {
-      this.scg11eaCoastRevealed = true;
-    }
+    const coastMappedNow = this.scg11eaShipyardFootprintRevealed(state);
 
     // Scout east to reveal the precise shoreline anchors for SYRD placement.
     if (this.waterScoutId >= 0 && !playerUnits.some((u) => u.id === this.waterScoutId)) {
       this.waterScoutId = -1;
     }
-    if (!this.scg11eaCoastRevealed) {
+    if (!coastMappedNow) {
       let scout = this.waterScoutId >= 0
         ? playerUnits.find((u) => u.id === this.waterScoutId)
         : undefined;
@@ -3305,10 +3494,7 @@ export class OracleStrategy {
         if (scout) this.waterScoutId = scout.id;
       }
       if (scout) {
-        if (this.distanceSq(scout, coastScoutTarget) <= 36) {
-          this.scg11eaCoastRevealed = true;
-          reasons.push(`east shore mapped (${scout.t})`);
-        } else if (this.shouldMove(scout, coastScoutTarget.cx, coastScoutTarget.cy)) {
+        if (this.shouldMove(scout, coastScoutTarget.cx, coastScoutTarget.cy)) {
           commands.push({
             cmd: 'move',
             ids: [scout.id],
@@ -3317,6 +3503,46 @@ export class OracleStrategy {
           });
           this.recordMove(scout.id, coastScoutTarget.cx, coastScoutTarget.cy);
           reasons.push(`scout east (${scout.t}) to (${coastScoutTarget.cx},${coastScoutTarget.cy})`);
+        } else if (this.distanceSq(scout, coastScoutTarget) <= 16) {
+          reasons.push(`hold east scout (${scout.t})`);
+        }
+      }
+    }
+
+    const spareMcvs = playerUnits.filter((u) => u.t === 'MCV');
+    const forwardConYard = this.getScg11eaForwardConYard(alliedStructures);
+    const shipyardExists = alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
+    const forwardArmor = playerUnits.filter((u) =>
+      (u.t.includes('TNK') || u.t === 'ARTY') && u.hp > 0,
+    ).length;
+    if (
+      !shipyardExists &&
+      !forwardConYard &&
+      spareMcvs.length > 0 &&
+      this.scg11eaBootstrapReady(alliedStructures) &&
+      forwardArmor >= SCG11EA_SHIPYARD_TANK_FLOOR
+    ) {
+      const forwardMcv = spareMcvs
+        .slice()
+        .sort((a, b) =>
+          this.distanceSq(a, SCG11EA_FORWARD_FACT_TARGET) - this.distanceSq(b, SCG11EA_FORWARD_FACT_TARGET))[0];
+      if (forwardMcv) {
+        if (this.distanceSq(forwardMcv, SCG11EA_FORWARD_FACT_TARGET) <= 16) {
+          if (forwardMcv.m === MISSION_UNLOAD) {
+            reasons.push('forward MCV deploying');
+          } else if (this.isIdle(forwardMcv)) {
+            commands.push({ cmd: 'deploy', ids: [forwardMcv.id] });
+            reasons.push(`deploy forward MCV (${SCG11EA_FORWARD_FACT_TARGET.cx},${SCG11EA_FORWARD_FACT_TARGET.cy})`);
+          }
+        } else if (this.shouldMove(forwardMcv, SCG11EA_FORWARD_FACT_TARGET.cx, SCG11EA_FORWARD_FACT_TARGET.cy)) {
+          commands.push({
+            cmd: 'move',
+            ids: [forwardMcv.id],
+            cx: SCG11EA_FORWARD_FACT_TARGET.cx,
+            cy: SCG11EA_FORWARD_FACT_TARGET.cy,
+          });
+          this.recordMove(forwardMcv.id, SCG11EA_FORWARD_FACT_TARGET.cx, SCG11EA_FORWARD_FACT_TARGET.cy);
+          reasons.push(`forward MCV → (${SCG11EA_FORWARD_FACT_TARGET.cx},${SCG11EA_FORWARD_FACT_TARGET.cy})`);
         }
       }
     }
@@ -3337,6 +3563,7 @@ export class OracleStrategy {
         (u) =>
           !NAVAL_COMBAT_TYPES.has(u.t) &&
           u.t !== 'HARV' &&
+          !this.isReservedScg11eaScout(u, alliedStructures) &&
           u.cx >= 56 && u.cy >= 82 && u.cy <= 98 &&
           this.shouldMove(u, 50, 88),
       );
@@ -3353,12 +3580,15 @@ export class OracleStrategy {
     }
 
     // Send completed destroyers to hunt submarines.
-    const playerShips = playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t));
+    const playerShips = currentFleet;
     const enemySubs = state.enemies.filter((e) => e.t === 'SS' || e.t === 'MSUB');
+    const vesselProduction = state.production.find((p) => p.rtti === RTTI_VESSELTYPE);
     const landArmor = playerUnits.filter(
-      (u) => (u.t.includes('TNK') || u.t === 'ARTY') && u.hp > 0,
+      (u) => (u.t.includes('TNK') || u.t === 'ARTY') && u.hp > 0 &&
+        !this.isReservedScg11eaScout(u, alliedStructures),
     );
-    const shipyardOnline = this.scg11eaNavalPhaseStarted(alliedStructures);
+    const shipyardOnline = alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
+    const navalPhaseStarted = this.scg11eaNavalPhaseStarted(alliedStructures);
     const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
     const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
     const baseThreats = state.enemies.filter(
@@ -3369,9 +3599,24 @@ export class OracleStrategy {
     const baseAnchor = alliedStructures.length > 0
       ? this.centroid(alliedStructures as unknown as RAEntity[])
       : { cx: 25, cy: 90 };
+    const homeConYard = this.getScg11eaHomeConYard(alliedStructures);
+    const scg11eaBootstrapAnchor =
+      this.scenario === 'SCG11EA' &&
+      homeConYard &&
+      !this.scg11eaBootstrapReady(alliedStructures)
+        ? { cx: Math.min(127, homeConYard.cx + 8), cy: Math.max(0, homeConYard.cy - 2) }
+        : null;
+    const scg11eaChainAnchor =
+      this.scenario === 'SCG11EA' &&
+      homeConYard &&
+      !navalPhaseStarted &&
+      !this.scg11eaCoastLinkReady(alliedStructures)
+        ? { cx: Math.max(0, homeConYard.cx - 4), cy: Math.min(127, homeConYard.cy + 6) }
+        : null;
+    const defenseAnchor = scg11eaBootstrapAnchor ?? scg11eaChainAnchor ?? baseAnchor;
     const scg11eaHomeReserve = Math.min(
       landArmor.length,
-      shipyardOnline || enemySubs.length > SCG11EA_STATIC_DEFENSE_MAX_SUBS
+      navalPhaseStarted || enemySubs.length > SCG11EA_STATIC_DEFENSE_MAX_SUBS
         ? SCG11EA_SUB_HUNT_TANK_FLOOR
         : SCG11EA_ASSAULT_RETREAT_FLOOR,
     );
@@ -3386,15 +3631,21 @@ export class OracleStrategy {
     const assaultArmor = armorByBaseDistance.slice(homeArmor.length);
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
+      const fleetCanRecoverSoon =
+        shipyardOnline ||
+        vesselProduction != null ||
+        (state.power.produced > 0 && alliedStructures.some((s) => s.t === 'PROC' || s.t === 'WEAP'));
       const huntPackSize =
         this.scenario === 'SCG11EA'
-          ? enemySubs.length >= 7
+          ? ((!fleetCanRecoverSoon || playerShips.length <= 2)
+            ? Math.max(1, playerShips.length)
+            : enemySubs.length >= 7
             ? 3
             : enemySubs.length >= 4
             ? 3
             : enemySubs.length >= 2
             ? 2
-            : 1
+            : 1)
           : 1;
       if (this.scenario === 'SCG11EA' && playerShips.length < huntPackSize) {
         let rallying = 0;
@@ -3470,16 +3721,16 @@ export class OracleStrategy {
 
     if (homeArmor.length > 0) {
       const holders = homeArmor.filter(
-        (u) => this.isIdle(u) || this.distanceSq(u, baseAnchor) > 144,
+        (u) => this.isIdle(u) || this.distanceSq(u, defenseAnchor) > 144,
       );
       if (holders.length > 0) {
         commands.push({
           cmd: 'move',
           ids: holders.map((u) => u.id),
-          cx: baseAnchor.cx,
-          cy: baseAnchor.cy,
+          cx: defenseAnchor.cx,
+          cy: defenseAnchor.cy,
         });
-        for (const u of holders) this.recordMove(u.id, baseAnchor.cx, baseAnchor.cy);
+        for (const u of holders) this.recordMove(u.id, defenseAnchor.cx, defenseAnchor.cy);
       }
       if (baseThreats.length > 0) {
         reasons.push(`hold armor (${baseThreats.length} base threats)`);
@@ -3521,7 +3772,7 @@ export class OracleStrategy {
     }
 
     const assaultUnlocked =
-      shipyardOnline &&
+      navalPhaseStarted &&
       playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS &&
       enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS &&
       assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
@@ -3529,16 +3780,16 @@ export class OracleStrategy {
     if (assaultUnlocked) this.scg11eaAssaultStarted = true;
     if (!assaultActive && assaultArmor.length > 0) {
       const stageArmor = assaultArmor.filter(
-        (u) => this.isIdle(u) || this.distanceSq(u, baseAnchor) > 196,
+        (u) => this.isIdle(u) || this.distanceSq(u, defenseAnchor) > 196,
       );
       if (stageArmor.length > 0) {
         commands.push({
           cmd: 'move',
           ids: stageArmor.map((u) => u.id),
-          cx: baseAnchor.cx,
-          cy: baseAnchor.cy,
+          cx: defenseAnchor.cx,
+          cy: defenseAnchor.cy,
         });
-        for (const u of stageArmor) this.recordMove(u.id, baseAnchor.cx, baseAnchor.cy);
+        for (const u of stageArmor) this.recordMove(u.id, defenseAnchor.cx, defenseAnchor.cy);
         reasons.push(`stage armor (${stageArmor.length})`);
       }
     }
@@ -4176,6 +4427,13 @@ export class OracleStrategy {
     const dx = to.cx - from.cx;
     const dy = to.cy - from.cy;
     return dx * dx + dy * dy;
+  }
+
+  private isReservedScg11eaScout(unit: RAEntity, alliedStructures: RAStructure[] = []): boolean {
+    if (this.scenario !== 'SCG11EA' || this.waterScoutId < 0 || unit.id !== this.waterScoutId) {
+      return false;
+    }
+    return !alliedStructures.some((s) => s.ally && (s.t === 'SYRD' || s.t === 'SPEN'));
   }
 
   private dedupeCommands(commands: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
