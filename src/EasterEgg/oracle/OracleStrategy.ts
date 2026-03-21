@@ -3716,21 +3716,9 @@ export class OracleStrategy {
         ? { cx: Math.max(0, homeConYard.cx - 4), cy: Math.min(127, homeConYard.cy + 6) }
         : null;
     const defenseAnchor = scg11eaBootstrapAnchor ?? scg11eaChainAnchor ?? baseAnchor;
-    const scg11eaHomeReserve = Math.min(
-      landArmor.length,
-      navalPhaseStarted || enemySubs.length > SCG11EA_STATIC_DEFENSE_MAX_SUBS
-        ? SCG11EA_SUB_HUNT_TANK_FLOOR
-        : SCG11EA_ASSAULT_RETREAT_FLOOR,
-    );
-    const armorByBaseDistance = landArmor.slice().sort(
-      (a, b) => this.distanceSq(a, baseAnchor) - this.distanceSq(b, baseAnchor),
-    );
-    const scg11eaExtraHomeReserve = Math.min(
-      Math.max(0, landArmor.length - scg11eaHomeReserve),
-      baseGroundThreats.length > 0 ? Math.min(3, baseGroundThreats.length + 1) : 0,
-    );
-    const homeArmor = armorByBaseDistance.slice(0, scg11eaHomeReserve + scg11eaExtraHomeReserve);
-    const assaultArmor = armorByBaseDistance.slice(homeArmor.length);
+    /* human-requested: ALL tanks assault. Zero home reserve. Attack IS the defense. */
+    const homeArmor: RAEntity[] = []; /* empty — no tanks stay home */
+    const assaultArmor = landArmor; /* every tank charges the enemy base */
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
       const fleetCanRecoverSoon =
@@ -3873,11 +3861,8 @@ export class OracleStrategy {
       reasons.push('island base DESTROYED');
     }
 
-    const assaultUnlocked =
-      navalPhaseStarted &&
-      playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS &&
-      enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS &&
-      assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
+    /* human-requested: NO fleet gate. Attack when 10+ tanks. Ground first. */
+    const assaultUnlocked = assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
     const assaultActive = this.scg11eaAssaultStarted || assaultUnlocked;
     if (assaultUnlocked) this.scg11eaAssaultStarted = true;
     if (!assaultActive && assaultArmor.length > 0) {
@@ -3895,18 +3880,18 @@ export class OracleStrategy {
         reasons.push(`stage armor (${stageArmor.length})`);
       }
     }
+    // 'move' to get past the infantry gauntlet, 'attack_move' at the base.
+    // Tanks on 'move' don't fire but reach the target. Once near the base (y<=55),
+    // switch to attack_move so they engage buildings and garrison.
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
       const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
       if (structTarget) {
-        const retargetDue = (state.tick % 25) < 5;
-        const movers = retargetDue ? assaultArmor : assaultArmor.filter(
-          (u) => this.isIdle(u) || this.distanceSq(u, structTarget) > 100,
-        );
-        if (movers.length > 0) {
-          commands.push({ cmd: 'attack_move', ids: movers.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
-          for (const u of movers) this.recordMove(u.id, structTarget.cx, structTarget.cy);
-          reasons.push(`assault ${structTarget.t} (${movers.length} → ${structTarget.cx},${structTarget.cy})`);
-        }
+        const centroid = this.centroid(assaultArmor);
+        const nearBase = centroid.cy <= 60;
+        const cmd = nearBase ? 'attack_move' : 'move';
+        commands.push({ cmd, ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+        for (const u of assaultArmor) this.recordMove(u.id, structTarget.cx, structTarget.cy);
+        reasons.push(`assault ${nearBase ? 'RAZE' : 'CHARGE'} ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
       }
     }
 
