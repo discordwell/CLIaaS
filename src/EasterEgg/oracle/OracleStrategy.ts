@@ -102,7 +102,7 @@ const SCG11EA_FORWARD_MCV_TARGET: Point = { cx: 36, cy: 96 };
 const SCG11EA_FORWARD_FACT_TARGET: Point = { cx: 52, cy: 90 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
-const SCG11EA_ASSAULT_MIN_ARMOR = 10;      // Achievable with 2 WEAP + 3 HARV economy
+const SCG11EA_ASSAULT_MIN_ARMOR = 10;      // Max achievable with current economy
 const SCG11EA_ASSAULT_RETREAT_FLOOR = 4;   // Stay on the island longer before abandoning the pressure
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
 const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 2;
@@ -3910,18 +3910,33 @@ export class OracleStrategy {
         reasons.push(`stage armor (${stageArmor.length})`);
       }
     }
-    // 'move' to get past the infantry gauntlet, 'attack_move' at the base.
-    // Tanks on 'move' don't fire but reach the target. Once near the base (y<=55),
-    // switch to attack_move so they engage buildings and garrison.
+    // Phase 1 (CHARGE): 'move' all tanks to a rally point NEAR the base (45,60).
+    //   This groups them up before the attack — no scattered arrivals.
+    // Phase 2 (RAZE): once 8+ tanks are within 15 cells of the rally, attack_move
+    //   to the WEAP. Concentrated force, not scattered trickle.
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
+      const rallyPoint: Point = { cx: 45, cy: 60 };
       const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-      if (structTarget) {
-        const centroid = this.centroid(assaultArmor);
-        const nearBase = centroid.cy <= 60;
-        const cmd = nearBase ? 'attack_move' : 'move';
-        commands.push({ cmd, ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
-        for (const u of assaultArmor) this.recordMove(u.id, structTarget.cx, structTarget.cy);
-        reasons.push(`assault ${nearBase ? 'RAZE' : 'CHARGE'} ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
+      // Count how many tanks are near the rally point
+      const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 225); // 15 cells
+      const readyToRaze = atRally.length >= 8;
+
+      if (readyToRaze && structTarget) {
+        // RAZE: concentrated force at rally — attack_move into the base
+        commands.push({ cmd: 'attack_move', ids: atRally.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+        for (const u of atRally) this.recordMove(u.id, structTarget.cx, structTarget.cy);
+        // Also send stragglers to rally
+        const stragglers = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 225);
+        if (stragglers.length > 0) {
+          commands.push({ cmd: 'move', ids: stragglers.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
+          for (const u of stragglers) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
+        }
+        reasons.push(`assault RAZE ${structTarget.t} (${atRally.length}+${stragglers.length} → ${structTarget.cx},${structTarget.cy})`);
+      } else {
+        // CHARGE: move all tanks to rally point — group up before attacking
+        commands.push({ cmd: 'move', ids: assaultArmor.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
+        for (const u of assaultArmor) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
+        reasons.push(`assault CHARGE rally (${assaultArmor.length}, ${atRally.length}/8 at rally)`);
       }
     }
 
