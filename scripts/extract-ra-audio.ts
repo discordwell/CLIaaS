@@ -198,8 +198,10 @@ const AUDIO_SOURCES: AudioSource[] = [
   { outputName: 'move_ack_dog', sources: [{ from: 'sounds', audFile: 'DOGW6.AUD' }] },
 
   // === Explosions ===
+  // C++ audio.cpp: VOC_GUN_5=GUN5, VOC_KABOOM1=KABOOM1, VOC_KABOOM22=KABOOM22, VOC_KABOOM25=KABOOM25
+  // NOTE: TANK01.AUD is VOX_MADTANK_DEPLOYED speech ("M.A.D. Tank Deployed"), NOT an explosion.
   { outputName: 'explode_sm', sources: [{ from: 'sounds', audFile: 'GUN13.AUD' }] },
-  { outputName: 'explode_lg', sources: [{ from: 'aftermath', audFile: 'TANK01.AUD' }] },
+  { outputName: 'explode_lg', sources: [{ from: 'sounds', audFile: 'KABOOM22.AUD' }] },
   { outputName: 'building_explode', sources: [{ from: 'sounds', audFile: 'IRONCUR9.AUD' }] },
 
   // === Flamethrower ===
