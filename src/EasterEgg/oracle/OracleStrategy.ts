@@ -1976,70 +1976,39 @@ export class OracleStrategy {
     );
 
     if (fighters.length > 0) {
-      // DEFEND FIRST: if base is threatened, send units to deal with threats
-      if (baseThreats.length > 0) {
-        // How many defenders do we need? Match the threat + buffer
-        const threatStr = combatStrength(baseThreats);
-        const defendersNeeded = Math.min(fighters.length, Math.ceil(threatStr * 1.5));
-        const defenders = fighters.slice(0, defendersNeeded);
-        const surplus = fighters.slice(defendersNeeded);
+      // Significant base threat = tanks/V2RLs or 3+ enemies near structures.
+      // Token threats (1-2 infantry) are handled by nearby idle units only.
+      const significantBaseThreat = baseThreats.length >= 3 ||
+        baseThreats.some((e) => e.t.includes('TNK') || e.t === 'V2RL');
 
-        // Defenders engage base threats. shouldRecommand handles idle units,
-        // dead targets, and stale-command timeouts. Force ALL defenders on
-        // critical threats (ATEK/PDOX in M8) or periodic retarget ticks.
-        const recommandable = defenders.filter((u) => this.shouldRecommand(u, baseThreats));
-        const hasCriticalThreats = defenseOnlyMission &&
-          baseThreats.some((e) => e.t.includes('TNK') || e.t === 'V2RL');
-        const retargetDue = hasCriticalThreats || (state.tick % 30) < 5;
-        const toCommand = retargetDue ? defenders : recommandable;
+      if (significantBaseThreat) {
+        // Significant threat — ALL fighters engage (no defender/surplus split)
+        const recommandable = fighters.filter((u) => this.shouldRecommand(u, baseThreats));
+        const retargetDue = (state.tick % 30) < 5;
+        const toCommand = retargetDue ? fighters : recommandable;
         if (toCommand.length > 0) {
           const micro = this.microManage(toCommand, baseThreats, baseCenter);
           commands.push(...micro.commands);
           reasons.push(...micro.reasons);
         }
-        reasons.push(`defend base (${baseThreats.length} threats, ${defenders.length} def, ${recommandable.length} ready)`);
-
-        // In survival mode, ALL units defend — no surplus chasing.
-        // In non-survival, surplus attacks nearby enemies within leash range.
-        const isTimedSurvival = defenseOnlyMission && state.missionTimerActive && state.missionTimer > 0;
-        if (isTimedSurvival) {
-          // Survival: surplus also helps defend — everyone fights base threats
-          if (surplus.length > 0) {
-            const surplusMicro = this.microManage(surplus, baseThreats, baseCenter);
-            commands.push(...surplusMicro.commands);
-            reasons.push(`all defend (survival, ${surplus.length} surplus)`);
-          }
-        } else {
-          const leashSq = 900; // 30 cells
-          const nearbyEnemies = state.enemies.filter(
-            (e) => this.distanceSq(e, baseCenter) <= leashSq,
-          );
-          if (surplus.length > 0 && nearbyEnemies.length > 0) {
-            const atkMicro = this.microManage(surplus, nearbyEnemies, baseCenter);
-            commands.push(...atkMicro.commands);
-            reasons.push(`attack nearby ${surplus.length}`);
-          } else if (surplus.length > 0) {
-            const stray = surplus.filter(
-              (u) => this.distanceSq(u, baseCenter) > 225 &&
-                this.shouldMove(u, baseCenter.cx, baseCenter.cy),
-            );
-            if (stray.length > 0) {
-              commands.push({
-                cmd: 'move',
-                ids: stray.map((u) => u.id),
-                cx: baseCenter.cx,
-                cy: baseCenter.cy,
-              });
-              for (const u of stray) this.recordMove(u.id, baseCenter.cx, baseCenter.cy);
-              reasons.push(`patrol ${stray.length} to base`);
-            }
-          }
+        reasons.push(`defend base all-in (${baseThreats.length} threats, ${fighters.length} fighters)`);
+      } else if (baseThreats.length > 0) {
+        // Token threat — only nearby idle units respond
+        const nearbyIdle = fighters.filter(
+          (u) => this.isIdle(u) &&
+            baseThreats.some((e) => this.distanceSq(u, e) <= 225),
+        );
+        if (nearbyIdle.length > 0) {
+          const micro = this.microManage(nearbyIdle, baseThreats, baseCenter);
+          commands.push(...micro.commands);
+          reasons.push(...micro.reasons);
         }
-      } else {
-        // No base threats — check for unit-proximity engagement first
-        // Units should engage enemies near them regardless of full attack threshold
-        // Skip for defense-only missions — don't chase enemies, let them come to base
-        const unitThreats = defenseOnlyMission ? [] : state.enemies.filter(
+        reasons.push(`token threat (${baseThreats.length} enemies, ${nearbyIdle.length} nearby respond)`);
+      }
+
+      // Engage enemies near units (proximity engagement)
+      if (!defenseOnlyMission) {
+        const unitThreats = state.enemies.filter(
           (e) => fighters.some((u) => this.distanceSq(u, e) <= 225), // 15 cells
         );
         if (unitThreats.length > 0 && fighters.length >= 3) {
@@ -2049,10 +2018,12 @@ export class OracleStrategy {
             commands.push(...micro.commands);
             reasons.push(...micro.reasons);
           }
-          reasons.push(`defend units (${unitThreats.length} threats, ${idleHealthy.length} idle)`);
-        } else {
-        // No base threats, no unit threats — decide: attack or turtle?
-        // If there's a mission timer counting down, this is a survival mission — turtle.
+          reasons.push(`engage nearby (${unitThreats.length} threats, ${idleHealthy.length} idle)`);
+        }
+      }
+
+      // Attack or turtle decision — all fighters commit together
+      if (!significantBaseThreat) {
         const isTimedSurvival = defenseOnlyMission && state.missionTimerActive && state.missionTimer > 0;
         const tankCount = fighters.filter((u) => u.t.includes('TNK')).length;
         const friendlyStr = combatStrength(fighters);
@@ -2061,41 +2032,11 @@ export class OracleStrategy {
         const shouldAttack = !isTimedSurvival && !defenseOnly && tankCount >= 6 && friendlyStr > enemyStr * 1.5;
 
         if (shouldAttack && state.enemies.length > 0) {
-          const defenderCount = Math.max(3, Math.floor(fighters.length / 2));
-          const defenders = fighters.slice(0, defenderCount);
-          const attackers = fighters.slice(defenderCount);
-          const leashSq2 = 900; // 30 cells from base
-
-          // Defenders patrol near base (only re-command idle ones)
-          const strayDefenders = defenders.filter(
-            (u) => this.isIdle(u) && this.distanceSq(u, baseCenter) > 225,
-          );
-          if (strayDefenders.length > 0) {
-            commands.push({
-              cmd: 'move',
-              ids: strayDefenders.map((u) => u.id),
-              cx: baseCenter.cx,
-              cy: baseCenter.cy,
-            });
-            reasons.push(`${strayDefenders.length} defend base`);
-          }
-
-          // Attackers only engage enemies within leash range
-          const leashEnemies = state.enemies.filter(
-            (e) => this.distanceSq(e, baseCenter) <= leashSq2,
-          );
-          if (attackers.length > 0 && leashEnemies.length > 0) {
-            const micro = this.microManage(attackers, leashEnemies, baseCenter);
-            commands.push(...micro.commands);
-            reasons.push(`attack ${attackers.length} (${tankCount} tanks, leashed)`);
-            reasons.push(...micro.reasons);
-          } else if (attackers.length > 0) {
-            // No enemies in range — all-out push
-            const micro = this.microManage(attackers, state.enemies, baseCenter);
-            commands.push(...micro.commands);
-            reasons.push(`attack ${attackers.length} (${tankCount} tanks)`);
-            reasons.push(...micro.reasons);
-          }
+          // All fighters attack together — no reserve
+          const micro = this.microManage(fighters, state.enemies, baseCenter);
+          commands.push(...micro.commands);
+          reasons.push(`attack ${fighters.length} (${tankCount} tanks)`);
+          reasons.push(...micro.reasons);
         } else if (isTimedSurvival) {
           // TURTLE MODE — survival mission, keep idle units near base
           const stray = healthy.filter(
@@ -2148,7 +2089,6 @@ export class OracleStrategy {
             }
           }
         }
-        } // close unit-proximity else
       }
     }
 
@@ -3182,16 +3122,20 @@ export class OracleStrategy {
     const baseAnchor = alliedStructures.length > 0
       ? this.centroid(alliedStructures as unknown as RAEntity[])
       : { cx: 25, cy: 90 };
-    const scg11eaHomeReserve =
-      Math.max(
-        shipyardOnline || enemySubs.length > SCG11EA_STATIC_DEFENSE_MAX_SUBS
-          ? SCG11EA_SUB_HUNT_TANK_FLOOR
-          : SCG11EA_ASSAULT_RETREAT_FLOOR,
-        Math.min(landArmor.length, baseGroundThreats.length + 2),
-      );
-    const assaultArmor = landArmor.slice()
-      .sort((a, b) => this.distanceSq(b, baseAnchor) - this.distanceSq(a, baseAnchor))
-      .slice(0, Math.max(0, landArmor.length - scg11eaHomeReserve));
+    const scg11eaHomeReserve = Math.min(
+      landArmor.length,
+      shipyardOnline || enemySubs.length > SCG11EA_STATIC_DEFENSE_MAX_SUBS
+        ? SCG11EA_SUB_HUNT_TANK_FLOOR
+        : SCG11EA_ASSAULT_RETREAT_FLOOR,
+    );
+    const armorByBaseDistance = landArmor.slice().sort(
+      (a, b) => this.distanceSq(a, baseAnchor) - this.distanceSq(b, baseAnchor),
+    );
+    const homeArmor = baseThreats.length > 0
+      ? armorByBaseDistance
+      : armorByBaseDistance.slice(0, scg11eaHomeReserve);
+    // ALL tanks go to assault. No home guard. Attack is the defense.
+    const assaultArmor = landArmor;
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
       const huntPackSize =
@@ -3276,6 +3220,24 @@ export class OracleStrategy {
       if (patrolShips.length > 0) reasons.push(`sweep river (${patrolShips.length} ships)`);
     }
 
+    if (homeArmor.length > 0) {
+      const holders = homeArmor.filter(
+        (u) => this.isIdle(u) || this.distanceSq(u, baseAnchor) > 144,
+      );
+      if (holders.length > 0) {
+        commands.push({
+          cmd: 'move',
+          ids: holders.map((u) => u.id),
+          cx: baseAnchor.cx,
+          cy: baseAnchor.cy,
+        });
+        for (const u of holders) this.recordMove(u.id, baseAnchor.cx, baseAnchor.cy);
+      }
+      if (baseThreats.length > 0) {
+        reasons.push(`hold armor (${baseThreats.length} base threats)`);
+      }
+    }
+
     // Detect if the island Soviet base is destroyed (no production buildings in x=35-60).
     // Once destroyed: tanks mop up remaining structures, then transition to naval phase.
     const islandProductionTypes = new Set(['WEAP', 'FACT', 'BARR', 'AFLD', 'HPAD', 'KENN', 'STEK']);
@@ -3283,7 +3245,6 @@ export class OracleStrategy {
       (s) => s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58 && islandProductionTypes.has(s.t),
     );
     const islandBaseDestroyed = islandProduction.length === 0 && state.tick > 5000;
-    // Never hold armor — attacking enemy production IS the defense.
     if (islandBaseDestroyed) {
       // Base destroyed — mop up remaining island structures, then tanks come home
       const remainingIsland = enemyStructures.filter(
@@ -3341,22 +3302,10 @@ export class OracleStrategy {
           (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
             assaultArmor.some((u) => this.distanceSq(u, e) <= 36), // 6 cells
         );
-        if (engaging.length > 0) {
-          // Focus-fire the engaging threat
-          engaging.sort((a, b) => {
-            const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
-            return p(a.t) - p(b.t);
-          });
-          const movers = retargetDue ? assaultArmor : assaultArmor.filter(
-            (u) => this.isIdle(u) || this.distanceSq(u, engaging[0]) > 36,
-          );
-          if (movers.length > 0) {
-            commands.push({ cmd: 'attack', ids: movers.map((u) => u.id), target: engaging[0].id });
-            for (const u of movers) this.recordMove(u.id, engaging[0].cx, engaging[0].cy);
-            reasons.push(`assault kill ${engaging[0].t} (${movers.length})`);
-          }
-        } else {
-          // No engaging enemies — hit production buildings
+        // Always attack_move to the building. Don't stop to focus-fire units.
+        // attack_move auto-engages en route but keeps heading for the structure.
+        // This prevents getting bogged down killing garrison tanks endlessly.
+        {
           const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
           if (structTarget) {
             const movers = retargetDue ? assaultArmor : assaultArmor.filter(
