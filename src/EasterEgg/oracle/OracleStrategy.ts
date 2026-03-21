@@ -374,6 +374,8 @@ export class OracleStrategy {
   private scg05eaSamIndex = 0;           // current SAM target for Tanya
   private scg05eaSpyWpIdx = 0;          // current waypoint in south-first route
   private scg05eaSpyHoldTick = 0;        // tick when spy started holding for a dog
+  private scg05eaTanyaWpIdx = 0;         // current waypoint for Tanya SAM corridor
+  private scg05eaTanyaLastSamId = -1;    // last SAM id targeted (reset wp index on change)
 
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -3410,28 +3412,46 @@ export class OracleStrategy {
           commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: sam.id });
           reasons.push(`SHOOT SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
         } else {
-          // Walk via waypoints through passable terrain gaps.
-          // Template map: x=23-24 has ROCK_DEBRIS (passable) at y=102-104,
-          // then CLEAR cells at y=100-97. Water (59-96) blocks x=19-22.
-          // Route: east to x=24, north through clear corridor, then west to SAM.
-          // 1-cell hops through verified passable terrain (template-by-template)
-          const waypoints = [
-            { cx: 24, cy: 104 }, // template 97=ROCK_DEBRIS
-            { cx: 24, cy: 103 }, // template 104=ROCK_DEBRIS
-            { cx: 24, cy: 102 }, // template 255=CLEAR
-            { cx: 24, cy: 101 }, // template 255=CLEAR
-            { cx: 24, cy: 100 }, // template 255=CLEAR
-            { cx: 23, cy: 99 },  // template 255=CLEAR
+          // Route depends on which SAM we're targeting:
+          // West SAM (17,94): north through x=24 corridor
+          // East SAM (28,94): south then east then north (avoid tanks at x=28+ y=78-95)
+          const isEastSam = sam.cx >= 25;
+          const waypoints = isEastSam ? [
+            // East route: walk east at y=95 (Tanya is already at y=95 after west SAM)
+            // No tanks between x=19 and x=28 at y=95. Nearest tank: (28,79) = 15 cells north.
+            { cx: 24, cy: 95 },
+            { cx: 27, cy: 95 },
+            { cx: 28, cy: 94 },   // SAM(28,94) — adjacent
+          ] : [
+            // West route: north through rock debris corridor
+            { cx: 24, cy: 104 },
+            { cx: 24, cy: 103 },
+            { cx: 24, cy: 102 },
+            { cx: 24, cy: 101 },
+            { cx: 24, cy: 100 },
+            { cx: 23, cy: 99 },
             { cx: 22, cy: 98 },
             { cx: 20, cy: 96 },
-            { cx: 18, cy: 94 },  // SAM area
+            { cx: 18, cy: 94 },
           ];
-          // Pick the FIRST waypoint we haven't reached yet (distSq > 1)
-          // Find next waypoint: first one that's north of us AND we're not already at
-          const wp = waypoints.find(w => w.cy < tanya.cy - 1)
-            ?? { cx: sam.cx, cy: sam.cy }; // fallback: go directly to SAM
+          // Track waypoint progress with persistent index.
+          // Reset when SAM target changes (different route).
+          if (sam.id !== this.scg05eaTanyaLastSamId) {
+            this.scg05eaTanyaWpIdx = 0;
+            this.scg05eaTanyaLastSamId = sam.id;
+          }
+          // Advance past any waypoints Tanya is within 2 cells of
+          while (
+            this.scg05eaTanyaWpIdx < waypoints.length &&
+            this.distanceSq(tanya, waypoints[this.scg05eaTanyaWpIdx]) <= 4
+          ) {
+            this.scg05eaTanyaWpIdx++;
+          }
+          const wp = this.scg05eaTanyaWpIdx < waypoints.length
+            ? waypoints[this.scg05eaTanyaWpIdx]
+            : { cx: sam.cx, cy: sam.cy }; // all waypoints exhausted — go directly to SAM
           commands.push({ cmd: 'move', ids: [tanya.id], cx: wp.cx, cy: wp.cy });
-          reasons.push(`→ SAM(${sam.cx},${sam.cy}) via (${wp.cx},${wp.cy}) [${remainingSams.length} left]`);
+          reasons.push(`→ SAM(${sam.cx},${sam.cy}) via wp${this.scg05eaTanyaWpIdx}(${wp.cx},${wp.cy}) [${remainingSams.length} left]`);
         }
       }
 
