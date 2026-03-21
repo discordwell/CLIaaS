@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-21T16:00Z — SCG05EA Spy+Tanya Fixes: C4, Dog Avoidance, Harness Dedup
+- **Spy y=48 route**: Dogs patrol y=49-55 with 3-cell detection range. New route: east to x=18, north to y=48, sprint east. ~75% spy survival rate (up from 0%).
+- **springGlobalTriggers harness fix**: `set_global` command now calls `springGlobalTriggers()` so Tanya actually spawns when global 18 is set.
+- **attack_struct dedup**: Added same-target dedup (matching move dedup) to prevent path reset stutter-stepping when oracle re-sends attack commands.
+- **C4 mechanics verified**: updateTanyaC4 correctly plants C4 at plantRange = halfDiag + 3.0. Timer 27 ticks, confirmed working in focused test.
+- **shoot_struct for close SAMs**: South SAMs at y=107 destroyed via shoot_struct from spawn (buildings block walk path). 2/4 SAMs destroyed consistently.
+- **North SAMs still WIP**: Tanya dies walking corridor to SAM(17,94)/SAM(28,94). Needs Tanya micro improvements (barrel chains, flame turret avoidance, health management).
+- Current state: spy→infiltrate→Tanya spawns→south SAMs shot→dies heading north. Next: improve Tanya survivability in the north corridor.
+
 ## 2026-03-20T23:10Z — Parallel Parity Blitz: 5 Domains, 4 Fixes, 378 New Tests
 - **5 subagents** wrote parity tests in parallel: repair/sell (64), harvester economics (33), team missions (109), fog/sight/gap (121), superweapon timers (51)
 - **TMISSION_INVULNERABLE gap fixed**: team.ts was missing enum value 13, shifting LOAD/SPY/PATROL by -1. Also renamed TMISSION_IDLE→TMISSION_INVULNERABLE in index.ts for consistency.

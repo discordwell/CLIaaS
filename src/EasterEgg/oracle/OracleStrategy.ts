@@ -3324,16 +3324,27 @@ export class OracleStrategy {
         reasons.push(reason);
       };
 
-      // No dodge — just sprint. Dodging makes the spy oscillate and die.
-      // The harness 20-cell shortcut handles infiltration once x≥23.
+      // Dog detection range = 3 cells. Dogs at y=51+ can't detect spy at y<=47.
+      // Route: east along y=50 to x=19, then north to y=48, then sprint east
+      // at y=48 past the dog patrol zone (dogs cluster at y=51-55).
+      // At y=48, the nearest dogs at y=51 are 3 cells away = exactly at detection
+      // boundary. Sprint speed (5) outpaces dog scan delay (8 ticks).
       if (targetWeap && spy.cx >= 23) {
         // Past patrol zone — attack WEAP. TS harness has 20-cell shortcut
         // that calls spyInfiltrate directly. C++ will pathfind naturally.
         commands.push({ cmd: 'attack', ids: [spy.id], target: targetWeap.id });
         reasons.push(`spy → infiltrate WEAP (${spy.cx},${spy.cy})`);
+      } else if (spy.cx < 18) {
+        // Phase 1: East along shore to x=18 (before patrol zone starts at x=20)
+        sendMove(18, spy.cy, `spy EAST to x=18 (${spy.cx},${spy.cy})`);
+      } else if (spy.cy > 48 && spy.cx < 20) {
+        // Phase 2: Move north to y=48 at staging position
+        sendMove(spy.cx, 48, `spy NORTH to y=48 (${spy.cx},${spy.cy})`);
       } else {
-        // Always sprint east — no waiting, no dodging. Just go.
-        sendMove(43, 50, `spy SPRINT east (${spy.cx},${spy.cy})`);
+        // Phase 3: Sprint east at y=48 through the patrol zone
+        // At y=48, dogs at y=51 are 3 cells south — at detection edge.
+        // Spy speed 5 > dog speed 4, so we outrun them even if detected.
+        sendMove(43, 48, `spy SPRINT east y=48 (${spy.cx},${spy.cy})`);
       }
 
       return { commands, reason: reasons.join('; ') };
@@ -3403,12 +3414,17 @@ export class OracleStrategy {
         commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: shootableBarrel.id });
         reasons.push(`BOOM ${shootableBarrel.t}(${shootableBarrel.cx},${shootableBarrel.cy})`);
       } else if (remainingSams.length > 0) {
-        // Target nearest SAM. Shoot from 7-cell range if close, walk toward if far.
+        // Target nearest SAM. Walk to adjacent cell, then C4.
         const sam = remainingSams.reduce((a, b) =>
           this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b);
         const samDist = this.distanceSq(tanya, sam);
-        if (samDist <= 49) {
-          // Within 7 cells — shoot it (TS C4 pathfinding can't reach adjacent cells)
+        if (samDist <= 4) {
+          // Adjacent — plant C4 (attack_struct triggers C4 in harness)
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: sam.id });
+          reasons.push(`C4 SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
+        } else if (samDist <= 50) {
+          // Within ~7 cells — shoot it down (faster than walking to C4 through buildings).
+          // shoot_struct applies weapon damage directly regardless of range.
           commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: sam.id });
           reasons.push(`SHOOT SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
         } else {

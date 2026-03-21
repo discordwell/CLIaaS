@@ -435,7 +435,6 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             // SPY infiltration shortcut: if spy is within 6 cells of enemy building,
             // call spyInfiltrate() directly. Bypasses entity update order race where
             // dogs kill the spy before the missionAI can process the infiltration.
-            if (typeof console !== 'undefined') console.log(`[HARNESS_DBG] attack_struct unit type="${e.type}" isPlayer=${e.isPlayerUnit} sHouse=${s.house} allied=${game.isAllied(s.house, game.playerHouse)} dist=${Math.sqrt((e.cell.cx-s.cx)**2 + (e.cell.cy-s.cy)**2).toFixed(1)}`);
             if (e.type === 'SPY' && e.isPlayerUnit && !game.isAllied(s.house, game.playerHouse)) {
               const dx = e.cell.cx - s.cx;
               const dy = e.cell.cy - s.cy;
