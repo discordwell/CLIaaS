@@ -1028,6 +1028,7 @@ export class Game {
   async start(scenarioId = 'SCA01EA', difficulty: Difficulty = 'normal'): Promise<void> {
     this.state = 'loading';
     this.stopped = false;
+    this.tick = 0;
     this.scenarioId = scenarioId;
     this.difficulty = difficulty;
     this.onStateChange?.('loading');
