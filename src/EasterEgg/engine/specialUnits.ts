@@ -73,8 +73,10 @@ export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
   // C4 plant range: for small buildings (1x1) use 1.5 from center.
   // For larger buildings, Tanya can't enter the footprint — extend range
   // by half the building diagonal so she can plant from an adjacent cell.
+  // C++ Tanya walks INTO the building cell. TS pathfinder won't route to
+  // WALL cells, so extend range by halfDiag + 1.5 to plant from outside.
   const halfDiag = Math.sqrt(sw * sw + sh * sh) / 2;
-  const plantRange = Math.max(1.5, halfDiag + 0.5);
+  const plantRange = Math.max(1.5, halfDiag + 3.0);
   if (dist > plantRange) {
     entity.animState = AnimState.WALK;
     entity.moveToward({ x: scx, y: scy }, ctx.movementSpeed(entity));

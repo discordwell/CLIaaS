@@ -575,11 +575,75 @@ export class OracleStrategy {
     return alliedStructures.some((s) => {
       if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') return false;
       const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
-      const right = s.cx + width - 1;
-      const top = s.cy;
-      const bottom = s.cy + 1;
-      return right >= SCG11EA_COAST_LINK_MIN_RIGHT_EDGE && bottom >= 84 && top <= 92;
+      const right = s.cx + width - 1 + SCG11EA_BUILD_RADIUS;
+      const top = s.cy - SCG11EA_BUILD_RADIUS;
+      const bottom = s.cy + 1 + SCG11EA_BUILD_RADIUS;
+      return right >= 63 && bottom >= 84 && top <= 92;
     });
+  }
+
+  private getScg11eaBootstrapCandidates(buildingType: string, alliedStructures: RAStructure[]): Point[] {
+    const shipyardExists = alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
+    if (shipyardExists) return [];
+
+    const powerCount = alliedStructures.filter((s) => s.t === 'POWR' || s.t === 'APWR').length;
+    const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+    const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
+    const normalizedType = buildingType === 'APWR' ? 'POWR' : buildingType;
+
+    let anchors: Point[] = [];
+    if (normalizedType === 'POWR' && powerCount === 0) {
+      anchors = [
+        { cx: 25, cy: 98 }, { cx: 25, cy: 96 }, { cx: 28, cy: 98 },
+        { cx: 28, cy: 96 }, { cx: 25, cy: 94 }, { cx: 22, cy: 98 },
+      ];
+    } else if (normalizedType === 'PROC' && procCount === 0) {
+      anchors = [
+        { cx: 31, cy: 102 }, { cx: 32, cy: 102 }, { cx: 32, cy: 101 },
+        { cx: 31, cy: 101 }, { cx: 30, cy: 100 }, { cx: 29, cy: 100 },
+        { cx: 29, cy: 96 }, { cx: 28, cy: 96 },
+      ];
+    } else if (normalizedType === 'WEAP' && weapCount === 0) {
+      anchors = [
+        { cx: 25, cy: 92 }, { cx: 28, cy: 92 }, { cx: 25, cy: 94 },
+        { cx: 28, cy: 94 }, { cx: 24, cy: 92 }, { cx: 27, cy: 90 },
+      ];
+    } else if (normalizedType === 'PROC' && procCount === 1) {
+      anchors = [
+        { cx: 29, cy: 96 }, { cx: 30, cy: 96 }, { cx: 28, cy: 96 },
+        { cx: 31, cy: 96 }, { cx: 30, cy: 98 }, { cx: 31, cy: 98 },
+        { cx: 32, cy: 100 }, { cx: 32, cy: 101 },
+      ];
+    } else if (normalizedType === 'POWR' && powerCount === 1 && weapCount >= 1) {
+      anchors = [
+        { cx: 25, cy: 98 }, { cx: 25, cy: 94 }, { cx: 28, cy: 98 },
+        { cx: 28, cy: 94 }, { cx: 22, cy: 98 }, { cx: 22, cy: 94 },
+      ];
+    }
+
+    if (anchors.length === 0) return [];
+
+    const offsets = [
+      { cx: 0, cy: 0 },
+      { cx: 1, cy: 0 }, { cx: -1, cy: 0 },
+      { cx: 0, cy: 1 }, { cx: 0, cy: -1 },
+      { cx: 1, cy: 1 }, { cx: -1, cy: 1 },
+      { cx: 1, cy: -1 }, { cx: -1, cy: -1 },
+      { cx: 2, cy: 0 }, { cx: 0, cy: 2 }, { cx: 0, cy: -2 },
+    ];
+    const seen = new Set<string>();
+    const candidates: Point[] = [];
+    for (const anchor of anchors) {
+      for (const offset of offsets) {
+        const candidate = { cx: anchor.cx + offset.cx, cy: anchor.cy + offset.cy };
+        if (candidate.cx < 0 || candidate.cx >= 128 || candidate.cy < 0 || candidate.cy >= 128) continue;
+        const key = `${candidate.cx},${candidate.cy}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push(candidate);
+      }
+    }
+    return candidates;
   }
 
   private getScg11eaPowerChainCandidates(): Point[] {
@@ -1192,6 +1256,10 @@ export class OracleStrategy {
           scg11eaExtendCoastChain
             ? this.getScg11eaPowerChainCandidates()
             : [];
+        const scg11eaBootstrapCandidates =
+          this.scenario === 'SCG11EA'
+            ? this.getScg11eaBootstrapCandidates(buildingProduction.t, alliedStructures)
+            : [];
         const scg11eaShoreDefenseCandidates =
           this.scenario === 'SCG11EA' &&
             (buildingProduction.t === 'AGUN' ||
@@ -1260,7 +1328,14 @@ export class OracleStrategy {
         let placeCx: number, placeCy: number;
         // Find first offset that passes terrain/fog/occupancy validation
         let foundValid = false;
-        if (scg11eaPowerChainCandidates.length > 0) {
+        if (scg11eaBootstrapCandidates.length > 0) {
+          const validBootstrapCell = this.findBestChainPosition(scg11eaBootstrapCandidates, state, false);
+          if (validBootstrapCell) {
+            placeCx = validBootstrapCell.cx;
+            placeCy = validBootstrapCell.cy;
+            foundValid = true;
+          }
+        } else if (scg11eaPowerChainCandidates.length > 0) {
           const reachableChain = scg11eaPowerChainCandidates.filter((pos) =>
             this.scg11eaChainReachable(pos, alliedStructures));
           if (reachableChain.length > 0) {
@@ -1327,7 +1402,11 @@ export class OracleStrategy {
         }
         const scg11eaLandChainPlacement =
           this.scenario === 'SCG11EA' &&
-          (scg11eaPowerChainCandidates.length > 0 || scg11eaShoreDefenseCandidates.length > 0);
+          (
+            scg11eaBootstrapCandidates.length > 0 ||
+            scg11eaPowerChainCandidates.length > 0 ||
+            scg11eaShoreDefenseCandidates.length > 0
+          );
         const scg11eaPlacementBlockers = scg11eaLandChainPlacement
           ? playerUnits.filter((u) =>
             !NAVAL_COMBAT_TYPES.has(u.t) &&
@@ -1340,6 +1419,8 @@ export class OracleStrategy {
         if (scg11eaPlacementBlockers.length > 0) {
           const clearTarget = scg11eaPowerChainCandidates.length > 0
             ? { cx: Math.max(0, placeCx - 5), cy: Math.min(127, placeCy + 6) }
+            : scg11eaBootstrapCandidates.length > 0
+            ? { cx: Math.max(0, placeCx - 6), cy: Math.min(127, placeCy + 6) }
             : { cx: 50, cy: 88 };
           const movers = scg11eaPlacementBlockers.filter((u) =>
             this.shouldMove(u, clearTarget.cx, clearTarget.cy));
@@ -2974,15 +3055,20 @@ export class OracleStrategy {
         commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: shootableBarrel.id });
         reasons.push(`BOOM ${shootableBarrel.t}(${shootableBarrel.cx},${shootableBarrel.cy})`);
       } else if (remainingSams.length > 0) {
-        // C4 nearest SAM — proper Tanya bomb placement
+        // Target nearest SAM. Shoot from 7-cell range if close, walk toward if far.
         const sam = remainingSams.reduce((a, b) =>
           this.distanceSq(tanya, a) < this.distanceSq(tanya, b) ? a : b);
-        const lastTgt = this.lastUnitTargets.get(tanya.id);
-        if (!lastTgt || lastTgt.targetId !== sam.id) {
-          commands.push({ cmd: 'attack', ids: [tanya.id], target: sam.id });
-          this.lastUnitTargets.set(tanya.id, { targetId: sam.id, cx: sam.cx, cy: sam.cy, tick: state.tick });
+        const samDist = this.distanceSq(tanya, sam);
+        if (samDist <= 49) {
+          // Within 7 cells — shoot it (TS C4 pathfinding can't reach adjacent cells)
+          commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: sam.id });
+          reasons.push(`SHOOT SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
+        } else {
+          // Walk toward SAM — try direct path first, if stuck try going via (15,100)
+          // which is the western coast area likely to be clear terrain
+          commands.push({ cmd: 'move', ids: [tanya.id], cx: sam.cx, cy: sam.cy });
+          reasons.push(`→ SAM(${sam.cx},${sam.cy}) via (${mx},${my}) [${remainingSams.length} left]`);
         }
-        reasons.push(`C4 SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(this.distanceSq(tanya, sam)).toFixed(0)} [${remainingSams.length} left]`);
       }
 
       if (remainingSams.length === 0) {
@@ -3209,9 +3295,12 @@ export class OracleStrategy {
     const armorByBaseDistance = landArmor.slice().sort(
       (a, b) => this.distanceSq(a, baseAnchor) - this.distanceSq(b, baseAnchor),
     );
-    // ALL tanks assault. No home guard. Attack is the defense. /* human-requested */
-    const homeArmor: RAEntity[] = [];
-    const assaultArmor = landArmor;
+    const scg11eaExtraHomeReserve = Math.min(
+      Math.max(0, landArmor.length - scg11eaHomeReserve),
+      baseGroundThreats.length > 0 ? Math.min(3, baseGroundThreats.length + 1) : 0,
+    );
+    const homeArmor = armorByBaseDistance.slice(0, scg11eaHomeReserve + scg11eaExtraHomeReserve);
+    const assaultArmor = armorByBaseDistance.slice(homeArmor.length);
 
     if (playerShips.length > 0 && enemySubs.length > 0) {
       const huntPackSize =
@@ -3348,10 +3437,28 @@ export class OracleStrategy {
       reasons.push('island base DESTROYED');
     }
 
-    // GROUND ASSAULT — attack_move straight to enemy WEAP. No staging, no phases.
-    // With 10+ tanks they plow through dogs/infantry to reach the building.
-    const assaultActive = this.scg11eaAssaultStarted || assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
-    if (assaultActive) this.scg11eaAssaultStarted = true;
+    const assaultUnlocked =
+      shipyardOnline &&
+      playerShips.length >= SCG11EA_ASSAULT_MIN_SHIPS &&
+      enemySubs.length <= SCG11EA_ASSAULT_MAX_SUBS &&
+      assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
+    const assaultActive = this.scg11eaAssaultStarted || assaultUnlocked;
+    if (assaultUnlocked) this.scg11eaAssaultStarted = true;
+    if (!assaultActive && assaultArmor.length > 0) {
+      const stageArmor = assaultArmor.filter(
+        (u) => this.isIdle(u) || this.distanceSq(u, baseAnchor) > 196,
+      );
+      if (stageArmor.length > 0) {
+        commands.push({
+          cmd: 'move',
+          ids: stageArmor.map((u) => u.id),
+          cx: baseAnchor.cx,
+          cy: baseAnchor.cy,
+        });
+        for (const u of stageArmor) this.recordMove(u.id, baseAnchor.cx, baseAnchor.cy);
+        reasons.push(`stage armor (${stageArmor.length})`);
+      }
+    }
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
       const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
       if (structTarget) {
